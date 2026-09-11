@@ -4,6 +4,7 @@ last_reviewed: 2026-09-11
 decision_refs:
   - D-0001
   - D-0002
+  - D-0003
 ---
 
 # Cubarium decision ledger
@@ -34,3 +35,15 @@ Only decisions already authorized in the owner's request are accepted below.
 - **Consequences:** Default presentation is the world without analytical overlays. The briefs may select and explain preferred mechanisms, but specific algorithms, bottom-edge behavior, runtime choices, numerical budgets, and milestone gates remain proposals.
 - **Supersedes:** None
 - **Canonical sources:** [Owner's brief](../brief.md)
+
+## D-0003 — Install the approved repository agent instructions
+
+- **Date:** 2026-09-11
+- **Status:** Accepted
+- **Scope:** Repository agent working rules and their installation
+- **Decided by:** Wrysk, replying "go ahead" to the explicit request to install the reviewed rules as `AGENTS.md`
+- **Decision:** Install the exact reviewed working rules in root `AGENTS.md`, making the vault's authority conventions and the existing display-shim boundary available to agents working in this repository.
+- **Rationale:** Keep design provenance and project constraints available during ordinary work without requiring the vault-setup skill to be invoked again.
+- **Consequences:** The approved rules are installed. This approval does not promote the proposed simulation architecture or authorize starting implementation.
+- **Supersedes:** None
+- **Canonical sources:** [Repository working rules](../../AGENTS.md)

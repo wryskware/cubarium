@@ -64,8 +64,8 @@ an arbitrary teleport. This is a revisable assumption, not a new requirement.
   risks, and concrete next work.
 - [Local contract evidence](7_Research/local-contracts.md): what exists in Lore
   and the shim, checked on disk.
-- [Agent instructions proposal](agent-instructions-proposal.md): the exact
-  proposed repository working rules, awaiting agreement before installation.
+- [Agent instructions approval](agent-instructions-proposal.md): the approved
+  installation record for the root [working rules](../AGENTS.md).
 
 ## Deliberate limits
 

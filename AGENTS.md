@@ -1,21 +1,3 @@
----
-design_status: decided
-last_reviewed: 2026-09-11
-decision_refs:
-  - D-0003
----
-
-# Agent instructions — approved installation record
-
-Wrysk approved installation on 2026-09-11 in response to the request to install
-these rules as root `AGENTS.md`. The exact approved contents were installed;
-[D-0003](0_Canon/DECISIONS.md) records the authorization. Current working rules
-live in [AGENTS.md](../AGENTS.md); the block below preserves the approved snapshot.
-No duplicate `CLAUDE.md` was created.
-
-Approved contents:
-
-```markdown
 # Cubarium working rules
 
 Cubarium is a persistent ambient ecosystem for five connected 64×64 cube faces.
@@ -40,4 +22,3 @@ relevant entries in design/0_Canon/DECISIONS.md.
   mapping. Consult its current contract and reuse its geometry helpers.
 - Keep the normal display free of analytical UI. Development diagnostics belong
   in explicit tools, captures, or logs.
-```

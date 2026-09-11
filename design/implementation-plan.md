@@ -16,8 +16,8 @@ not estimates or claims of completed implementation.
 Completed in the planning phase: Git repository initialization, root README and
 ignore rules, `lore-v1` authority configuration, a canon constitution and ledger,
 the accepted owner brief, and linked proposals for topology, ecology, evolution,
-visuals, runtime, inputs, and this delivery plan. Agent working rules are a
-reviewable proposal; they are not installed without agreement.
+visuals, runtime, inputs, and this delivery plan. Wrysk subsequently approved the
+agent working rules; they are installed in root `AGENTS.md` under D-0003.
 
 There is no application, manifest, dependency lock, simulation test suite,
 service, or live display session yet. Planning verification checks source
