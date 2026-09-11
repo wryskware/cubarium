@@ -5,6 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 description = "Cubarium host: clock, scenes, preview, shim output, captures"
 
+[lib]
+name = "cubarium"
+path = "src/lib.rs"
+
 [[bin]]
 name = "cubarium"
 path = "src/main.rs"
