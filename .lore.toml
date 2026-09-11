@@ -1,0 +1,7 @@
+# Repository-owned Lore authority configuration.
+[project]
+name = "cubarium"
+
+[authority]
+profile = "lore-v1"
+behavior = "annotate"
