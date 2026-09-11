@@ -172,6 +172,88 @@ pub const fn face_frame(face: Face) -> FaceFrame {
 /// same chart. If it is on `edge`, the answer is `cross_seam(face, edge, t)` with `t` the
 /// pixel's along-edge index, or `None` for a side face's `Edge::Bottom`.
 pub fn pixel_neighbor(face: Face, x: u8, y: u8, edge: Edge) -> Option<(Face, u8, u8)> {
-    let _ = (face, x, y, edge);
-    todo!("pixel_neighbor")
+    assert!(x < 64 && y < 64, "pixel ({x}, {y}) out of range");
+    let on_edge = match edge {
+        Edge::Top => y == 0,
+        Edge::Right => x == 63,
+        Edge::Bottom => y == 63,
+        Edge::Left => x == 0,
+    };
+    if !on_edge {
+        return Some(match edge {
+            Edge::Top => (face, x, y - 1),
+            Edge::Right => (face, x + 1, y),
+            Edge::Bottom => (face, x, y + 1),
+            Edge::Left => (face, x - 1, y),
+        });
+    }
+    let t = match edge {
+        Edge::Top | Edge::Bottom => x,
+        Edge::Right | Edge::Left => y,
+    };
+    let (f, nx, ny, _) = crate::cross_seam(face, edge, t)?;
+    Some((f, nx, ny))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cross_seam;
+
+    #[test]
+    fn interior_neighbors_stay_in_chart() {
+        assert_eq!(pixel_neighbor(Face::Front, 10, 10, Edge::Top), Some((Face::Front, 10, 9)));
+        assert_eq!(pixel_neighbor(Face::Front, 10, 10, Edge::Right), Some((Face::Front, 11, 10)));
+        assert_eq!(pixel_neighbor(Face::Front, 10, 10, Edge::Bottom), Some((Face::Front, 10, 11)));
+        assert_eq!(pixel_neighbor(Face::Front, 10, 10, Edge::Left), Some((Face::Front, 9, 10)));
+        // On an edge, but asked for a direction that does not leave the chart.
+        assert_eq!(pixel_neighbor(Face::Front, 0, 0, Edge::Bottom), Some((Face::Front, 0, 1)));
+        assert_eq!(pixel_neighbor(Face::Front, 0, 0, Edge::Right), Some((Face::Front, 1, 0)));
+    }
+
+    #[test]
+    fn edge_neighbors_agree_with_cross_seam() {
+        for face in Face::ALL {
+            for edge in Edge::ALL {
+                for t in 0..64u8 {
+                    let (x, y) = edge.pixel(t);
+                    let got = pixel_neighbor(face, x, y, edge);
+                    let want = cross_seam(face, edge, t).map(|(f, nx, ny, _)| (f, nx, ny));
+                    assert_eq!(got, want, "{face:?} {edge:?} t={t}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn open_rim_has_no_neighbor() {
+        for face in [Face::Front, Face::Right, Face::Back, Face::Left] {
+            for x in 0..64u8 {
+                assert_eq!(pixel_neighbor(face, x, 63, Edge::Bottom), None);
+            }
+        }
+        // Top has no open edge.
+        for edge in Edge::ALL {
+            for t in 0..64u8 {
+                let (x, y) = edge.pixel(t);
+                assert!(pixel_neighbor(Face::Top, x, y, edge).is_some());
+            }
+        }
+    }
+
+    #[test]
+    fn embedding_matches_pixel_direction() {
+        for face in Face::ALL {
+            for y in 0..64u8 {
+                for x in 0..64u8 {
+                    let p = SurfacePoint::pixel_center(face, x, y);
+                    let want = cube_proto::geometry::pixel_direction(face, x, y);
+                    let got = p.embed();
+                    for k in 0..3 {
+                        assert!((got[k] - want[k]).abs() < 1e-12, "{face:?} ({x},{y}) axis {k}");
+                    }
+                }
+            }
+        }
+    }
 }
