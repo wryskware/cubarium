@@ -1,0 +1,9 @@
+[package]
+name = "cubarium-surface-oracle"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Slow independent 3D reference for local surface queries; test support only"
+
+[dependencies]
+cube-proto = { workspace = true }

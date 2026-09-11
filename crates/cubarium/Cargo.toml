@@ -1,0 +1,19 @@
+[package]
+name = "cubarium"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Cubarium host: clock, scenes, preview, shim output, captures"
+
+[[bin]]
+name = "cubarium"
+path = "src/main.rs"
+
+[dependencies]
+cube-proto = { workspace = true }
+cubarium-surface = { workspace = true }
+cubarium-render = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+minifb = { workspace = true }
+png = { workspace = true }

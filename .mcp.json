@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "lore": {
+      "type": "stdio",
+      "command": "/home/wrysk/.cargo/bin/lore-mcp",
+      "args": []
+    }
+  }
+}

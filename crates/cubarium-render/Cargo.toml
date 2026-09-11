@@ -1,0 +1,10 @@
+[package]
+name = "cubarium-render"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Linear-light canvas, seam-aware body/trail/field rasterization, output encoding"
+
+[dependencies]
+cube-proto = { workspace = true }
+cubarium-surface = { workspace = true }

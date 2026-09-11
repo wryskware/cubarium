@@ -1,0 +1,13 @@
+[package]
+name = "cubarium-surface"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Continuous five-face cube surface: seam transport, local unfolding, fields, pixel ownership"
+
+[dependencies]
+cube-proto = { workspace = true }
+
+[dev-dependencies]
+cubarium-surface-oracle = { workspace = true }
+proptest = { workspace = true }

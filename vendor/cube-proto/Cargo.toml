@@ -1,0 +1,14 @@
+[package]
+name = "cube-proto"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+# Vendored from the display shim; see ../README.md for the source revision.
+
+[dependencies]
+serde = { version = "1", features = ["derive"], optional = true }
+
+[features]
+default = []
+# Derives Serialize/Deserialize on `Face` so downstream crates can persist layouts.
+serde = ["dep:serde"]

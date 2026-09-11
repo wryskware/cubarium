@@ -1,0 +1,27 @@
+//! cubarium-render — a linear-light canvas and seam-aware rasterization.
+//!
+//! The renderer reads immutable state and writes pixels; it never touches simulation
+//! state or randomness. All spatial work goes through `cubarium-surface`: bodies are
+//! stamped through [`cubarium_surface::unfold_pixels`], trails are the actual transported
+//! [`cubarium_surface::PathSegment`]s, and field filtering uses pixel seam neighbors.
+//! Neither the preview nor the physical output gets its own geometry.
+//!
+//! Output transfer convention (M1 decision, to be verified on the cube): the canvas holds
+//! linear light in `[0, 1]`; [`Canvas::encode`] clamps and applies the sRGB transfer
+//! function to 8-bit, exactly as an ordinary image would be encoded. The shim's default
+//! color correction is identity (`gamma = 1.0`), and its own test patterns and clients
+//! send ordinary image bytes, so the LED chain is treated as consuming sRGB-encoded
+//! values. The desktop preview shows the same bytes natively, so preview and cube agree
+//! by construction.
+
+#![forbid(unsafe_code)]
+
+mod body;
+mod canvas;
+mod field;
+mod trail;
+
+pub use body::{BodyShape, Lobe, stamp_body};
+pub use canvas::{Canvas, srgb_decode, srgb_encode};
+pub use field::draw_field;
+pub use trail::{Trail, TrailSegment, draw_trail};
