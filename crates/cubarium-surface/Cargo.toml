@@ -7,6 +7,12 @@ description = "Continuous five-face cube surface: seam transport, local unfoldin
 
 [dependencies]
 cube-proto = { workspace = true }
+serde = { version = "1", features = ["derive"], optional = true }
+
+[features]
+default = []
+# Derives Serialize/Deserialize on SurfacePoint, Vec2, TangentMap, and CellId.
+serde = ["dep:serde", "cube-proto/serde"]
 
 [dev-dependencies]
 cubarium-surface-oracle = { workspace = true }

@@ -7,6 +7,7 @@ use crate::{Edge, Face, FACE_EXTENT, Vec2};
 /// Canonical points satisfy `0 <= u < 64` and `0 <= v < 64` (finite). Transient points
 /// produced during a sweep may sit exactly on a boundary (`u == 64` or `v == 64`).
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SurfacePoint {
     pub face: Face,
     pub u: f64,

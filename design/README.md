@@ -69,6 +69,8 @@ avoidance term is useful. This remains a revisable topology policy.
   that future sensor systems can feed.
 - [Implementation plan](implementation-plan.md): vertical slices, verification,
   risks, and concrete next work.
+- [M2 world specification](m2-world-spec.md): units, conversion table, tick
+  order, controller, randomness, and persistence for the first living world.
 - [First experiments](experiments.md): E1–E9 protocols, controls, and progression gates.
 - [Local contract evidence](7_Research/local-contracts.md): what exists in Lore
   and the shim, checked on disk.

@@ -99,3 +99,50 @@ All scenes are deterministic given `--seed`; wall time never enters scene state.
   `face_frame` embeddings for pixel centers of every face.
 - `cubarium demo --scene all --sink png --seconds 20` produces captures with
   nonzero pixels on more than one face; the orchestrator reviews them visually.
+
+## M2 addition — `run`
+
+```
+cubarium run [--config world.toml] [--state state/] [--sink preview|shim|png|none]
+             [--speed N] [--seconds N] [--seed N] [--fresh] [--telemetry FILE]
+             [--addr ..] [--out ..] [--every N] [--scale N]
+```
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--config` | built-in defaults | TOML `WorldConfig` (missing fields take defaults; unknown fields are errors) |
+| `--state` | `state` | Directory for snapshots and the journal |
+| `--sink` | `preview` | As for `demo`; `none` runs headless |
+| `--speed` | `1` | Simulated seconds per wall second; `0` means as fast as possible (headless only) |
+| `--seconds` | `0` | Stop after this much *simulated* time (0 = until closed) |
+| `--seed` | from config | Overrides `config.seed` when creating a fresh world |
+| `--fresh` | off | Ignore existing snapshots and create a new world |
+| `--telemetry` | `<state>/telemetry.jsonl` | JSON-lines telemetry file (appended) |
+
+Startup: unless `--fresh`, load the newest valid snapshot in `--state` (trying
+older ones on failure, logging each reason); otherwise create a new world from
+the config. The loaded world's config wins over `--config` except for
+`capacity` and `weather.moving`, which are operational and may change.
+
+Loop: the same clock as `demo`, with `World::step` per tick and `render_view`
+→ canvas per frame. `--speed N > 1` runs N ticks per wall tick; `--speed 0`
+loops without sleeping and without rendering. Every `checkpoint_seconds` of
+simulated time and on clean shutdown, a snapshot is written by a worker thread
+(atomic temp-file + rename + directory fsync, keep the newest 8, never remove
+the newest valid one, disk errors logged without stopping the world). Telemetry
+samples are appended every `telemetry_seconds`. Ctrl-C triggers a clean
+shutdown with a final snapshot.
+
+Presentation (`design/m2-world-spec.md` "Presentation"): producer substrate
+with the seam-aware filter, detritus flecks, bodies from the view's lobes with
+hue mapped to a low-saturation warm-to-cool ramp, brightness by mode and
+feeding, juvenile bodies scaled by the view flag, short trails (12 segments,
+3 s). Nothing else on the ambient image.
+
+Required verification: a headless `run --sink none --speed 0 --seconds 600`
+completes with nonzero population and a mass residual below `1e-6`; two runs
+with the same seed produce identical telemetry hashes; a run interrupted by
+`--seconds 120`, then resumed from its snapshot for 120 more seconds, matches
+an uninterrupted 240-second run's state hash exactly; a corrupted newest
+snapshot (flipped byte) is skipped and the previous one loads; the PNG sink
+shows substrate and bodies.

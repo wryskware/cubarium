@@ -104,6 +104,13 @@ crossing count and an inward numerical nudge smaller than visible resolution;
 record any fallback. Tests must exercise ties and near-ties to expose directional
 bias and repeated zero-distance crossings. A fallback may not silently tunnel.
 
+Observed in the M1 implementation (2026-09-11): a sweep aimed exactly at a top
+vertex, resolved by the lowest-edge rule, circulates through the incident charts
+with zero-length crossings and leaves along its incoming direction with a
+rotated tangent map. It is deterministic, counted in `ties`, never triggers
+the fallback, and has measure zero; sweeps skewed by 0.02 pixels do not tie.
+This outcome is accepted for now rather than replaced by a smoother convention.
+
 Parallel transport across a seam preserves speed and angles. Returning across
 that seam is identity. Transport around a loop enclosing a cube vertex can
 rotate a heading; demanding identity for every closed loop would incorrectly

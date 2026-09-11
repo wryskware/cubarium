@@ -24,10 +24,14 @@ the accepted owner brief, and linked proposals for topology, ecology, evolution,
 visuals, runtime, inputs, and this delivery plan. Wrysk subsequently approved the
 agent working rules; they are installed in root `AGENTS.md` under D-0003.
 
-There is no application, manifest, dependency lock, simulation test suite,
-service, or live display session yet. Planning verification checks source
-contracts, local links, authority metadata, and Lore indexing. Ecological,
-performance, visual, and durability results remain to be produced.
+Status 2026-09-11: M1 code exists and passes its automated checks (surface
+crate with oracle-backed tests including E1, renderer, host with preview, shim
+sink, and PNG captures; `cube-proto` vendored at shim revision 7a21b5f because
+the shim has no published remote). Frames were sent to the running shim daemon
+without errors. Pending M1 evidence: physical-cube observation of seam
+continuity, the vertex-ownership fixture, and E8 reflection. M2 has a written
+specification and an interface skeleton; ecological, performance, and
+durability results remain to be produced.
 
 ## M1 — prove the surface and presentation path
 
@@ -59,6 +63,9 @@ Top correction remains its layout concern; do not compensate for it in Cubarium.
 here blocks ecological features that would otherwise hide geometric defects.
 
 ## M2 — a persistent feeding world
+
+The [M2 world specification](m2-world-spec.md) gives the concrete units,
+conversion table, tick order, and persistence format for this milestone.
 
 Implement material/energy accounting, one producer pool `P0`, grazing and
 scavenging from `D`, recycling, a gentle height gradient and horizontal habitat

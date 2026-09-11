@@ -1,0 +1,16 @@
+[package]
+name = "cubarium-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Deterministic fixed-step world: fields, organisms, controller, persistence"
+
+[dependencies]
+cube-proto = { workspace = true }
+cubarium-surface = { workspace = true, features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+postcard = { version = "1", features = ["use-std"] }
+crc32fast = "1"
+
+[dev-dependencies]
+proptest = { workspace = true }

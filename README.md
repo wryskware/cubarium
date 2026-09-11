@@ -5,8 +5,15 @@ A persistent artificial ecosystem living on the five visible surfaces of a
 alter their surroundings, leave descendants, and sometimes disappear. The world
 continues between glances.
 
-**Current state:** repository and design vault initialized; no simulation or
-renderer has been implemented. The current task is planning, not a runnable demo.
+**Current state (2026-09-11):** M1 is implemented under task authorization:
+a Rust workspace with the continuous surface substrate (`cubarium-surface`, with
+an independent 3D oracle and test suite), a linear-light renderer, and a host
+that shows geometry fixtures in a desktop preview, sends them to the shim, or
+captures PNGs (`cargo run -p cubarium -- demo --help`). The physical-cube
+review (seam continuity, E8 reflection) is still pending Wrysk's observation.
+M2, the first living world, is specified in `design/m2-world-spec.md` and its
+`cubarium-core` interface skeleton exists; no ecology runs yet. Implementation
+does not make the architecture canon; see the decision ledger.
 
 Start with the [design overview](design/README.md), then the
 [implementation plan](design/implementation-plan.md). The

@@ -5,6 +5,7 @@ use std::ops::{Add, AddAssign, Mul, Neg, Sub, SubAssign};
 /// A vector in a face chart's tangent plane, in pixel units: `x` along `+u` (image-right),
 /// `y` along `+v` (image-down).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Vec2 {
     pub x: f64,
     pub y: f64,
@@ -120,6 +121,7 @@ impl Neg for Vec2 {
 /// steering vectors, local directional memory); scalars and body-relative values
 /// are untouched.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TangentMap {
     pub m: [[i8; 2]; 2],
 }

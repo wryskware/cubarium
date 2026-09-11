@@ -11,6 +11,7 @@ pub const CELL_COUNT: usize = 5 * CELLS_PER_FACE_EDGE * CELLS_PER_FACE_EDGE;
 
 /// A field cell: `face.index() * 256 + cy * 16 + cx`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CellId(pub u16);
 
 impl CellId {

@@ -5,6 +5,7 @@ members = [
     "crates/cubarium-surface",
     "crates/cubarium-surface-oracle",
     "crates/cubarium-render",
+    "crates/cubarium-core",
     "crates/cubarium",
 ]
 
