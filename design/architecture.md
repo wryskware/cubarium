@@ -48,20 +48,22 @@ on surface types and lightweight `cube-proto` geometry, never KMS or shim layout
 
 ## Time and transaction order
 
-Starting cadence: fixed **20 Hz** world steps, controllers at **10 Hz**, slower
-sensing and field reactions at **5 Hz**, and rendering/output at **30 Hz**.
-Stagger expensive observations using stable ID phases, while preserving a
-defined pre-step observation state. Motion, contact, and bookkeeping run each
-world tick. Actual rates are tunable configuration with schema/version tracking.
+Start with one fixed **20 Hz** simulation rate for sensing, behavioral drives,
+motion, interactions, and field reactions. Rendering/output runs independently
+at **30 Hz**. Diffusion may use stability-required substeps inside a tick.
+Introduce slower schedules or stable-ID staggering only when profiling shows
+the need and replay/ordering tests cover the change. All rates and numerical
+substeps belong to the versioned configuration.
 
 One tick:
 
 1. Admit due normalized events in stable `(target_tick, source_id, sequence)` order.
-2. Advance bounded weather/stimulus envelopes; on scheduled field steps perform
+2. Advance bounded weather/stimulus envelopes; perform
    diffusion and producer/decomposer reactions from double-buffered fields.
-3. Sample observations and update scheduled controllers from a consistent world
+3. Sample observations and update behavioral drives/memory from a consistent world
    view; calculate bounded action requests and reserve action energy.
-4. Integrate swept movement and retain seam-crossing paths; rebuild/update bins.
+4. Integrate swept movement and retain this tick's seam-crossing paths; update
+   embedded positions for chord-based pair rejection.
 5. Collect contact/feeding/attack requests from post-move positions. Settle shared
    resources and damage once, independent of container iteration order.
 6. Apply maintenance, growth, gestation, death, dormant decay, and recruitment.
@@ -86,12 +88,12 @@ Initial capacity proposals:
 
 | Resource | Starting bound/policy |
 | --- | --- |
-| Active organisms | 512 maximum; seed about 72, tune visible occupancy through ecology |
-| Dormant propagules | 512; paid deposits, decay, no silent duplication |
-| Historical genomes | 128 sampled records; no unlimited ancestry retained in memory |
+| Active organisms | 512 maximum; seed about 72; evaluate 100–200 as a tuning range, never a live quota |
+| Dormant propagules | When enabled: 512; paid deposits, decay, no silent duplication |
+| Historical genomes | Observer-only archive of 128; never used for recruitment |
 | Field cells | 1,280 with a fixed number of channels and reciprocal edges |
-| Local query radius | At most 12 pixels; broad phase and fixed-capacity result storage |
-| Trail history | At most 24 segments per creature; timed decay |
+| Local query radius | Sensing at most 12 pixels; chord-filtered all-pairs with exact local surface checks |
+| Trail history | Renderer-only, at most 24 segments per creature; timed decay |
 | Decorative particles | At most 1,024; replace oldest presentation-only effects |
 | Pending stimuli | 256, with source quotas and explicit merge/rejection |
 | Output/observer queues | Latest-frame mailbox; bounded event batches |
@@ -100,9 +102,12 @@ Entity caps are safety limits, not ecological population targets. A full world
 rejects conception before reserving offspring resources; do not randomly kill
 organisms to make room. Track cap occupancy and rejection counts. Persistent
 pressure against the cap means resource budgets or reproduction need tuning.
-Query overflow must be deterministic and visible to diagnostics; hard contact
-resolution must still process all possible contacts, using bounded all-pairs
-fallback if necessary, rather than silently giving crowded prey immunity.
+At the cap, each pair pass considers at most 130,816 unordered pairs. Stream
+pair checks and bound action storage by the declared maximum requests per pair;
+one pair may generate requests in both directions. Process all hard contacts. Sensing
+may use deterministic nearest-K selection if declared in the phenotype; resource
+or contact requests may not be silently truncated. Profile exact-unfolding cost
+after chord rejection before introducing spatial bins.
 
 Avoid per-pixel heap allocations and per-tick entity allocation churn. Reuse
 buffers, store fields contiguously, precompute topology, and compute controller
@@ -124,11 +129,18 @@ Profile first and change rates or representations with evidence.
 
 Checkpoint every 60 simulated seconds and on clean shutdown. Capture schema and
 build identifiers, configuration, world tick, all random stream states, all
-fields and weather phases, organisms/genomes/controller memory, gestation
-escrows, propagules, historical library, pending normalized events, source
-sequence state, intervention cooldowns, and bounded ecological histories.
-Rebuild spatial caches on load. Preserve trails or fade presentation back in;
-do not let visual reconstruction consume simulation randomness.
+fields and weather phases, organisms/genomes/behavioral memory, gestation
+escrows, enabled propagules, pending normalized events, source sequence and
+budget state, extinction-reseed trigger/cooldown, and bounded ecological histories.
+Rebuild spatial caches on load. The genome archive is observer-side metadata
+and not required for exact ecological replay.
+
+Trail history is renderer-only, derived from a short history of tick-stamped
+positions and actual seam-crossing segments in render views. A dropped view
+breaks the trail rather than inventing a path across an unknown gap. Restart
+fades trails back in; no trail or visual reconstruction consumes simulation
+randomness or affects physiology. Later sensed chemical trails are real fields
+and, unlike these visual histories, must be checkpointed when enabled.
 
 Write a bounded immutable snapshot through a worker: temporary file on the same
 filesystem, checksum and length, flush, atomic rename, then flush the containing

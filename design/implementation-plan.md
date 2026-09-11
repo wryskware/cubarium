@@ -11,6 +11,11 @@ arrives with the first living world, and more traits follow evidence that the
 existing ones produce observable consequences. Milestones below are proposed,
 not estimates or claims of completed implementation.
 
+Revised after the [Fable review](7_Research/plan-review-2026-09-11.md).
+[Review dispositions](7_Research/plan-review-response-2026-09-11.md) record
+reasoning and qualifications; the [experiment plan](experiments.md) gives E1–E9
+protocols. These revisions remain `leaning`; no experiment has been run.
+
 ## Current deliverable — repository and vault
 
 Completed in the planning phase: Git repository initialization, root README and
@@ -27,7 +32,7 @@ performance, visual, and durability results remain to be produced.
 ## M1 — prove the surface and presentation path
 
 Create the minimal Rust workspace, pin/reuse `cube-proto` from the existing shim,
-and add continuous surface travel, rim policy, field adjacency, and local
+and add continuous surface travel, pure rim reflection, field adjacency, and local
 unfolding queries. A local path override is useful during development, but the
 committed build must not depend on one person's home directory; select a
 reproducible dependency revision when creating the manifest.
@@ -38,72 +43,129 @@ a top vertex, and a scalar patch diffusing over several faces. These are geometr
 fixtures, not the promised ecosystem.
 
 **Exit evidence:** the full [topology checks](surface-topology.md) pass;
-independent distance/reference checks pass; field mass/constant-state invariants
+independent 3D-unfolding checks and E1 occupancy/equivariance checks pass;
+field mass/constant-state invariants
 hold; the same motion looks continuous in preview and on the physical cube.
 Verify actual shim face mapping with its existing diagnostics if needed. The
 physical check remains pending if the cube is unavailable; do not claim it from
 a desktop preview.
+
+Include shortest-path ownership of body pixels at top vertices and a step that
+reflects off the lower rim while crossing a side seam. E8 is a ten-minute
+physical observation of pure reflection with no rim sensor. The shim's physical
+Top correction remains its layout concern; do not compensate for it in Cubarium.
 
 **Deliverable:** a reusable surface substrate and a real output path. Failure
 here blocks ecological features that would otherwise hide geometric defects.
 
 ## M2 — a persistent feeding world
 
-Implement material/energy accounting, local producer growth, nutrient/detritus
-recycling, light/moisture patches, and one mobile grazer phenotype with paid
-movement, maintenance, budding, and death. Add state serialization, atomic
-checkpointing, resume, bounded queues, and a headless observer now. Use fixed
-founder genomes; mutation comes after the feedback loop is sound.
+Implement material/energy accounting, one producer pool `P0`, grazing and
+scavenging from `D`, recycling, a gentle height gradient and horizontal habitat
+patches, paid movement, maintenance, budding, and death. Start with one fixed
+grazer/scavenger genotype. Establish the recycling loop under static conditions,
+then add slow light/moisture forcing and compare the same seeds. No photosynthetic
+organisms, mutation, predation, dormancy, or rescue are enabled yet.
 
-**Exit evidence:** a population can feed and reproduce through several local
-patch depletions; bodies and resources cross seams correctly; paid births and
-deaths conserve material; closed-energy tests cannot generate energy; exact
-snapshot/replay matches on the supported build; output disconnection does not
-halt the world. Watch at least 30 minutes in real time and run accelerated
-hours over multiple seeds. A world kept alive only by reseeding does not pass.
+Add state serialization, atomic checkpoints, resume, bounded queues, and a
+headless observer now. Use one 20 Hz simulation cadence and chord-filtered
+all-pairs queries before adding scheduling or spatial-index optimizations.
+Tune fixed productivity/costs toward a tentative 100–200 cube-wide population,
+while measuring actual occupancy and keeping the 512 safety cap inactive.
+
+**Exit evidence:** E2 distinguishes local succession from synchronized whole-world
+depletion; E3 measures reproductive intervals and lineage depth. A population
+feeds, scavenges, and reproduces through several patch depletions. Material/energy
+and shared-transfer tests pass, snapshot/replay matches, and disconnected output
+does not halt the world. Watch at least 30 real-time minutes and run accelerated
+hours over multiple seeds. Repeated cap-to-extinction cycles halt progression
+until habitat/cost changes are tested; reseeding cannot make this milestone pass.
 
 **Deliverable:** a simple living installation that can resume its history.
 
-## M3 — visibly inherited differences
+## M3a — test the inheritance and visual representations
 
-Introduce the bounded body grammar, decoded physiology, recurrent controller,
-lineage recording, local mutable budding, and a small set of diverse founder
-genomes. Build the visual gallery from actual phenotype code. Add the immutable
-render views and motion-path interpolation if the first slice used simpler
-rendering. Establish versioned genome/sensory channels and mutation bounds.
+Create a versioned reflex-parameter genome with two leaky memories, small local
+mutations, and lineage records. Keep the body grammar to lobe count, length/aspect,
+and one head/tail appendage, plus hue accent and gait. Perform E5 on the candidate
+controller and E6 on twelve native-size cube samples before expanding either.
+A dense recurrent network is a deferred comparison, not required scaffolding.
 
-**Exit evidence:** founder strategies feed and reproduce before mutation is
-enabled; ancestor/descendant samples demonstrate inherited changes in shape,
-movement, or environmental response. Mutated populations remain viable without
-development replacing unsuccessful genomes. Frozen/mutable comparisons reveal
-what mutation changes. Long runs contain births in independent lineages and
-measurable phenotype differences, not just shifting colors.
+Separately, run E4
+with only size, metabolism, sensing, and reserve genes mutable. This diagnostic
+uses simple bodies and fixed behavior, no predation or recovery. It can be built
+on M2 before the full grammar. If every tested habitat pushes all these traits
+to their lower bounds, revise the costs/opportunities before proceeding.
 
-**Deliverable:** the first evolutionary world, with readable inherited habits.
+**Exit evidence:** E1/E2/E4/E5 reports exist with reproducible seeds and limitations;
+E6 identifies shapes/gaits that actually read on the cube. Legal genomes are not
+declared viable without feeding and budding. Size variation under grazing alone
+is tested explicitly; enduring stable polymorphism in every seed is not promised
+or forced by quotas. Any failed tradeoff requires a recorded design response.
 
-## M4 — food webs, succession, and ecological memory
+## M3b — visibly inherited habits
 
-Add the second producer pool, scavenging and predation allocations, defense and
-stress, local signals, asynchronous slow forcing, paid dormant propagules, and
-bounded historical recovery. Add shared patch improvement only when its physical
-cost/benefit can be measured. Introduce one mechanism at a time so its effects
-remain attributable.
+Enable the tested body and behavioral mutations in a small diverse founder
+population. Preserve paid local budding and real energetic failure. Produce
+matched ancestor/descendant captures and frozen/mutable controls; quantify gait,
+pause, turning, patch preference, and shape, rather than relying on hue drift.
 
-**Exit evidence:** evaluate 12 fixed seeds for 24 simulated hours; extend at
-least three representative seeds to seven simulated days. Record dominance,
-collapse, recovery, cap pressure, trait/diet occupancy, lineage survival, and
-intervention counts. Review clips at real speed and compare static-weather,
-no-mutation, no-predation, and no-recovery controls on selected seeds.
+**Exit evidence:** independent lineages have reproducing descendants with
+observable inherited differences, without a viability filter replacing mutants.
+Measured generation/lineage times support the claimed time scale. If reflex
+variation proves too narrow, name the missing behavior and test a bounded
+controller extension before adopting it.
 
-The evaluation need not keep every founder alive or maintain a species quota.
-It should demonstrate multiple periods of local occupation and turnover,
-observable differences in viable strategies, and recovery that usually comes
-from ordinary processes. A lineage dominating temporarily is acceptable. If
-almost all change disappears with scripted weather disabled, or most runs need
-repeated immigrants, revise the mechanisms before declaring this milestone done.
+## M3c — facultative predation
 
-**Deliverable:** evidence for an evolving ecology rather than a continuously
-redecorated movement simulation.
+Add paid flesh digestion, attack effort, and escape response as allocations
+available to every genotype. First test a fixed hunter in the stable grazer
+world (E7), then permit mutation and mixed diets. Defense starts with measured
+structural/contact costs; extra armor organs remain optional.
+
+**Exit evidence:** predation conserves resources and does not erase the active
+ecology in every seed. Document specialist extinction times and mixed-diet
+descendants. Episodic hunters are acceptable; do not seed a protected predator
+guild or require permanent specialist survival.
+
+**M3 deliverable:** a small evolving food web with readable inherited habits.
+
+## M4 — ecological memory and optional extensions
+
+M4a tests paid dormant propagules independently from one explicit extinction
+reseed policy (E9). Historical genomes are observer-only; remove all archive
+recruitment and low-population rescue. Log every external cohort and its costs.
+
+M4b considers optional experiments **one at a time**, each with a prediction,
+matched disabled control, and a keep/remove result:
+
+| Addition | Prediction to test before keeping it |
+| --- | --- |
+| Second producer pool `P1` | Distinct suitability/recovery supports different diets after total productivity is matched |
+| Waste `W` | Local metabolic history changes patch abandonment beyond what depletion/detritus already explain |
+| One costly signal channel | Cue-driven aggregation or following has a measurable resource/behavioral consequence |
+| Organism photosynthesis | Paid edible fans add a niche without replacing mobile activity with a static carpet |
+| Shared patch improvement | Paid environmental changes benefit nearby organisms; no abstract cooperation reward |
+
+These additions are not a checklist for completion. Waste must precede waste
+clearance, and a useful cue/interaction must precede extra signal channels.
+Keep disabled mechanisms absent from the starting controller and visual grammar.
+
+M4c evaluates the selected combination: 12 seeds for 24 simulated hours, then
+at least three representative seeds for seven simulated days, including weak
+runs rather than only attractive successes. Compare static weather, frozen
+genomes, no predation, and the dormancy/reseed controls on selected seeds. Report
+local occupation, trait/diet distributions, lineage history, cap pressure,
+synchrony, extinction, and reset counts alongside real-time clips.
+
+**Exit evidence:** multiple periods of viable local occupation and turnover,
+observable strategy differences, and continuity usually supplied by ordinary
+processes. Temporary dominance and extinction are allowed. Weather-only variety,
+repeated exogenous resets, or visual inactivity across most runs require another
+design iteration. Expensive optional mechanisms with no demonstrated benefit
+are removed rather than accumulated.
+
+**Deliverable:** a measured ecological design ready for an unattended soak.
 
 ## M5 — perturbations and unattended installation
 
@@ -131,7 +193,7 @@ adapters and additional biology follow observed needs, not a prerequisite list.
 | --- | --- | --- |
 | Geometry | Exhaustive seams, randomized transport, exact-corner fixtures, independent distance reference | Errors here infect every system |
 | Accounting | Closed-box mass tolerance, nonnegative pools, no-light energy depletion, simultaneous feeding/attack | Prevents immortal exploiters and accidental resource creation |
-| Evolution | Decode bounds, paid birth, mutation inheritance, ancestor/descendant comparison, controls | Separates real inherited change from cosmetics |
+| Evolution | Decode bounds, paid birth, sparse mutation, E3–E6, ancestor/descendant comparison | Separates inherited change from cosmetics and claims based on parameter count |
 | Determinism/storage | Same-build tick hashes, save/reload continuation, corrupt/old schema handling, injected I/O failures | A persistent world needs trustworthy continuity |
 | Runtime | Dense-corner contacts, cap rejection, dt stalls, output backpressure, bounded histories | Prevents slow degradation over days |
 | Inputs | Invalid event rejection, source timeout, bounded energy/material, seam footprint equality, replay | Sensors cannot overwhelm or bypass ecology |
@@ -148,25 +210,28 @@ fitness function or appear in the normal display.
 
 | Risk | First evidence to seek | Preferred response |
 | --- | --- | --- |
-| One strategy consumes every niche | Resource productivity and diet budgets, static-weather control | Rebalance real costs/productivity; avoid species quotas |
-| Predators cannot persist | Capture success, handling cost, offspring reserve | Tune encounter/energy budgets before adding smarter brains |
-| Controller mutations erase viability | Founder and offspring survival under matched conditions | Reduce dimensions, mutate gently, expose structured biases |
+| Minimal grazer erases body/sensing variety | E4 lower-bound occupancy and lineage distribution across habitats | Revise mouth/reserve costs and patch opportunities before predation |
+| Sessile autotroph carpets the world | Matched photosynthesis-enabled trial, edible area, mobility and grazer survival | Keep photosynthesis absent until its niche is demonstrated |
+| Synchronous boom-bust wipes out the food web | E2 spatial lag/correlation, generation/depletion intervals, cap contact | Reduce coupling and test gradients; no live density regulator |
+| Predators cannot persist | E7 capture success, extinction time, offspring reserve | Allow facultative diets and episodic hunting; no protected guild |
+| Controller mutations erase viability | E5 matched founder/mutant trials and visible habit measures | Sparse named-drive mutation before a network extension |
 | Everything becomes a flashing dot | Native-size clips and real-cube observation | Strengthen silhouettes/gaits and lower effect intensity |
 | Corners create duplicate food or bites | Seam/corner conservation and deduplicated neighbor tests | Fix shared topology/transaction layer before tuning ecology |
 | Cap becomes the main selection pressure | Time at cap, rejected births, crowded-query fallback count | Reduce ecological productivity or cost footprint with evidence |
-| Recovery hides stagnation | Assisted versus unassisted survival and intervention cadence | Repair ecological feedback; keep intervention provenance |
+| Recovery hides stagnation | E9 separates dormancy and reseeding; reset frequency and no-assistance controls | Repair feedback; observer archive never recruits |
 | Simulation survives but feels repetitive | Hours-apart footage and inherited behavior samples | Add one missing interaction, not undirected visual noise |
 
 ## Next implementation action
 
 Begin M1 by confirming the shim dependency revision and creating a minimal
-surface crate with continuous transport and the seam fixtures. The preferred
+surface crate with continuous transport, pure rim reflection, the 3D oracle,
+and seam/vertex fixtures. Then execute E1 and E8 before M2. The preferred
 five-face/no-flux-rim policy, Rust runtime, and initial numerical budgets are
 ready to review but remain `leaning`. Finalize an accepted architecture entry
 only when specifically authorized; ordinary implementation can still proceed
 under explicit task authorization without pretending the whole plan is canon.
 
 Later questions to settle with evidence: host performance headroom, real viewing
-distance/brightness, controller channel packing, useful genotype diversity
-measures, dependency distribution, and how often historical recovery is actually
-needed. None prevents the current repository and planning deliverable.
+distance/brightness, named-drive parameter packing, useful genotype diversity
+measures, dependency distribution, and whether the extinction fallback is needed
+often enough to reveal a design failure. None prevents this planning revision.

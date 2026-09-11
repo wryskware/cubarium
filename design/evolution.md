@@ -7,13 +7,18 @@ decision_refs: []
 # Inherited bodies and habits
 
 Use a compact, bounded genotype with three parts: physiological allocations,
-a small procedural body grammar, and a fixed-size recurrent controller. Every
+a small procedural body grammar, and named behavioral drives with short memory. Every
 offspring receives a mutated copy. No evaluation run, elite population,
 generation barrier, or scalar fitness function exists in the live world.
 
 The genotype limits the search space deliberately. Novelty means new viable
 combinations and interactions within that space; unrestricted invention of
 new organs or programs is not part of the first system.
+
+This revision follows F1, F2, and F9 of the
+[plan review](7_Research/plan-review-2026-09-11.md). The
+[response](7_Research/plan-review-response-2026-09-11.md) distinguishes adopted
+recommendations from claims still requiring experiments.
 
 ## Physiology and appearance share a phenotype
 
@@ -23,18 +28,26 @@ sliders that can all reach maximum. Baseline maintenance depends on body mass,
 maximum capabilities, and sensor/controller activity. Cheap inactivity must not
 make expensive unused organs free.
 
-| Inherited traits | Tradeoff or consequence | Readable expression |
+| M3 inherited traits | Tradeoff or consequence | Readable expression |
 | --- | --- | --- |
-| Structural size and aspect, 1–4 linked lobes | Capacity, construction cost, turning drag | Dot, bead-chain, broad pod, hooked body |
-| Fan area and pigment investment | Photosynthesis versus movement drag/exposure | Frill or thin fan; stable pigment hue |
-| Mouth and digestion allocation | Grazing/scavenging/flesh access versus other organs | Blunt pad, split mouth, forward spike |
-| Limb/tail investment and gait | Speed/turning/adhesion versus maintenance | Skitter, glide, pulse-step, curl-and-release |
-| Armor and waste tolerance | Damage resistance versus growth and upkeep | Rim pixels, thick shell, slower cadence |
-| Sensing radius and angular spread | Better information versus energetic cost | Antennae or directional feelers |
-| Preferred light/moisture and metabolic rate | Habitat-dependent efficiency | Resting rhythm and migration response |
-| Reproduction reserve, offspring size, dormancy | Many fragile young versus fewer provisioned young | Visible budding and size progression |
-| Senescence onset and repair allocation | Longer life versus maintenance/reproduction | Gradual narrowing of bright core and slower recovery |
-| Signal emission/response and chemical tag | Costly coordination, eavesdropping, exploitation | Rare pulse, short trail, inherited hue accent |
+| Structural size/aspect and 1–4 linked lobes | Capacity, construction cost, turning drag | Dot, pod, bead-chain |
+| One head or tail appendage form/extent | Mouth handling or propulsion, with paid structure | Directional accent and turning style |
+| Mouth and grazing/scavenging allocation | Maximum intake and contested-resource share versus upkeep | Feeding persistence and patch choice |
+| Sensing range and metabolic rate | Information/speed versus energetic cost | Directed movement, search cadence, pauses |
+| Reserve capacity, offspring provision, repair | Lean-period survival versus construction and reproduction | Growth, budding, resting cadence |
+| Light/moisture preferences and behavioral gains | Local habitat efficiency and action costs | Migration, pursuit, escape, stop/start habits |
+| Small inherited hue accent | Primarily cosmetic lineage resemblance | Stable accent, not a new color per birth |
+
+M3 starts with three geometric controls: lobe count, body length/aspect, and one
+head-or-tail appendage choice. Hue is a separate inherited accent; gait carries
+much of the remaining variation. E6 tests twelve samples on the cube before
+expanding the grammar. Functional anatomy still affects physiology, but every
+parameter need not have a separate one-pixel ornament.
+
+Light harvesting, fans, armor ornament, chemical tags, waste tolerance, signals,
+and dormancy traits are later, independently tested extensions. No photosynthesis
+exists in M3 organisms. Do not add a fake photosynthetic fan for appearance; a
+decorative shape must be identified as such and cannot claim a missing function.
 
 Initial body bounds: most adults cover roughly 3–7 pixels end-to-end, with an
 absolute 9-pixel extent and small juvenile forms. Structural length, mass, food
@@ -43,45 +56,48 @@ decoded body. A cosmetic appendage must not claim a functional benefit that
 does not exist. Decorative hue variation is allowed as a small inherited accent.
 
 Use a bounded family of connected shapes, not a fixed catalog of species
-sprites. Limb count, lobe offset, aspect, symmetry, and gait parameters can
-combine. Mutations should preserve connected silhouettes. The core/mouth
+sprites. Start with the limited controls above; additional asymmetry or limb
+rules need visual evidence. Mutations should preserve connected silhouettes. The core/mouth
 direction stays readable even when a body is asymmetric or folded over an edge.
 
 ## Controller proposal
 
-Start with approximately 24 normalized observations, 8 leaky recurrent units,
-and 8 output channels. This is a working complexity budget, to benchmark before
-freezing a schema. The dense controller has 320 weights plus biases and time
-constants, followed by separate sensory/body genes, not an expanding neural genome.
+Start with roughly 12–20 named drives/thresholds, plus two memory time constants.
+Use food-gradient attraction, light/moisture preference, approach/avoidance by
+relative body size, hunger-dependent search effort, rest threshold, feeding
+persistence, flee-on-damage gain, turn persistence, gait period/amplitude, pause
+duration, and budding threshold. Version the exact parameter map during M3a;
+inactive mechanisms have no hidden controller inputs. Rim sensing, waste, and
+signals are absent until their individual experiments justify them.
 
-Observation groups:
+Observations are local scalar values and body-relative probes/bearings with
+inherited sensing range. An organism cannot inspect another genome, lineage
+label, or exact energy store. Start without sensor noise. Exploration can use
+bounded persistent turns from a dedicated reproducible organism random stream.
 
-- Own reserve, age/repair state, recent damage, local crowding, and gait phase.
-- Body-relative left/front/right food and suitability probes; estimates are
-  filtered by inherited sensing range and food-detection investments.
-- Relative bearing/approach of nearby visible bodies, weighted by size and
-  chemical recognition; no perfect knowledge of another genome or energy store.
-- Local light, moisture, waste, rim proximity, and signal gradients.
+Two leaky memories summarize recent hunger and damage. For normalized input x,
+update `m += (1 - exp(-dt/tau)) * (x-m)` with inherited bounded positive tau.
+These state variables permit delayed feeding/search transitions and prolonged
+alarm. Combine weighted named steering drives, then limit turn rate and effort;
+thresholds and hysteresis choose feeding, rest, and reproduction investment.
+An oscillator supplies gait phase. Individual parameter effects are inspectable,
+but combined trajectories need not be monotone or reducible to one drive.
 
-Exact channel packing is an M3 interface task. Keep a stable versioned channel
-map in the eventual genome schema so mutations and checkpoints retain meaning.
-Recurrent state supplies short memory, hysteresis, and oscillations. Sensor
-noise, if present, uses a reproducible organism stream; it is never draw-frame
-noise. Intrinsic phase and turn/throttle outputs drive embodied gaits.
+Outputs request movement, feeding, rest, budding, and, when enabled in M3c,
+attack effort. They pass through physiological limits and a finite energy
+allocation step. Empty effort still costs energy. Physiology rejects impossible
+actions, range gates contact, starvation eventually kills, and reflection keeps
+organisms on the surface. A valid parameter set is not a viable organism: it
+must still find food and reproduce. Founder parameter lists are hand-authored
+starting points; the drives remain mutable, with no protected species scripts.
 
-Outputs request turn, movement effort, feeding effort, attack effort, defensive
-posture, signal effort, reproductive investment, and dormancy/rest investment.
-They pass through physiological limits and one explicit energy allocation step.
-Conflicting requests share a finite budget. Empty feeding, attacking, and
-signaling still incur bounded effort costs. A controller cannot command energy,
-teleport, name another organism, bypass a seam, or create a child directly.
-
-Retain small invariant protections: physiology rejects impossible actions;
-starvation consumes reserve and eventually kills; range gates contact; numerical
-rim reflection prevents leaving the surface. Founder controllers may have
-hand-designed weights for viable feeding and movement. Those weights are
-mutable and do not establish permanent behavioral classes. No within-lifetime
-learning is proposed initially; inherited controller changes provide evolution.
+The earlier 24-input/8-unit/8-output dense recurrent network (320 weights before
+biases and time constants) is a deferred candidate. E5 first measures how viable
+and behaviorally varied sparse reflex mutations are. If a specific missing
+behavior warrants a network, compare a bounded residual modulator under the
+same mutation and resource budgets; do not add hundreds of dimensions merely
+because reflexes are simpler. Neither representation guarantees readable
+evolution. No within-lifetime learning is proposed initially.
 
 ## Birth, mutation, and lineage
 
@@ -97,12 +113,13 @@ placement uses the same seam-aware geometry as movement. The parent remains
 alive and pays the cost. Senescence reduces repair efficiency after an inherited
 age; lifespans are not synchronized timers shared by a species.
 
-Mutate mostly with small perturbations to physiology and controller weights.
-Use rare bounded structural edits (add/remove a lobe or appendage, adjust
-symmetry), plus occasional larger weight changes. Keep all genome magnitudes,
-organ counts, controller time constants, and mutation rates bounded. Mutation
-may reflect environmental stress modestly, but retain a baseline and a narrow
-range; zero mutation and catastrophic mutation cascades are avoidable traps.
+Use sparse mutations: a configurable probability of mutation per birth, then
+change a small bounded number of loci (initially 1–3), usually by a small step.
+Many children may be exact copies. Rare structural edits alter one of the
+enabled morphology controls. Mutations in normalized allocations can affect
+several decoded traits; record those consequences, not just the raw changed locus.
+Keep parameters and memory constants bounded. Fix the mutation policy per run;
+stress-modulated or evolved mutation rates are deferred to preserve attribution.
 
 Development projects allocations into valid budgets and clamps physical ranges.
 It does not silently replace an unviable child with a viable template. Physiological
@@ -111,7 +128,7 @@ gate filters offspring. Invalid numeric data is an implementation error and is
 handled separately from a valid but unsuccessful mutation.
 
 Maintain IDs, parent IDs, birth tick, genome digest, mutation summary, and origin
-(descendant, dormant, recovered, founder). Full genealogies stream to bounded
+(descendant, dormant, extinction-reseed, founder). Full genealogies stream to bounded
 archives rather than accumulating in RAM. Diagnostic species/strategy clusters
 are descriptive and may change with the analysis method. The simulation does
 not use their labels to assign food, mates, protection, or quotas.
@@ -131,7 +148,10 @@ birth/death rates, and recovery counts without collapsing them into a fitness
 number. Several colorful founder types surviving unchanged is not evidence of
 evolution. Rapid color drift without changes in body or habits is also insufficient.
 
-The largest risk is a controller that is technically evolvable but either too
-fragile to reproduce or too opaque for changes to read at this resolution. If
-that happens, reduce its dimensions or introduce structured sensory-to-action
-biases before increasing network size. Preserve locality and mutable behavior.
+Run E4 before predation: mutate size, metabolism, sensing, and reserve capacity
+under grazing/scavenging alone. Consistent collapse to all lower bounds is a
+failure of the proposed tradeoffs, not a reason to protect large lineages by
+quota. Measure time to first reproduction, parent age at each birth, and ancestry
+depth (E3); births per hour alone is not a generation-time estimate. E5 measures
+mutant viability and behavioral differences under matched habitats before M3b.
+Experiments and stopping rules are in the [experiment plan](experiments.md).

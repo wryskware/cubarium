@@ -20,19 +20,25 @@ StimulusV1 {
     location: Global | SurfacePoint,
     radius_pixels,                 // local footprint along the surface
     attack_ticks, hold_ticks, release_ticks,
-    effect: Light | Moisture | Nutrient | Stress | Flow | Signal,
+    effect: Light | Moisture | Nutrient | Flow,
     amount,                        // effect-specific units; finite and bounded
     direction: optional TangentVector
 }
 ```
 
 `Light` adds irradiance integrated through the normal photosynthesis budget;
-`Nutrient` deposits material with an explicit accounting source. `Moisture` and
-`Stress` shift bounded environmental suitability. `Flow` perturbs local drift or
-locomotion load; it is not a direct position update. `Signal` adds to one named
-signal channel. Global flow requires a spatial vector-field definition, so the
-first API accepts flow only with a local tangent frame. Source-specific raw
+`Nutrient` deposits material with an explicit accounting source. `Moisture`
+shifts bounded environmental suitability. `Flow` perturbs local drift or
+locomotion load; it is not a direct position update. Global flow requires a
+spatial vector-field definition, so the first API accepts flow only with a local
+tangent frame. Source-specific raw
 audio amplitudes and frequencies never enter the core schema.
+
+Stress and chemical Signal effects are future schema/capability extensions,
+available only if their ecological mechanisms are implemented and enabled.
+Reject unsupported effects explicitly; do not allocate unused fields or silently
+accept a signal into a world that cannot respond. Log admitted schema/capability
+versions for replay. The sensor contract does not force optional M4 mechanisms.
 
 Define units and normalization per effect before implementation. For example,
 a nutrient event's `amount` is total deposited material, independent of footprint

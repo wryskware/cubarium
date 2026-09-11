@@ -40,6 +40,9 @@ continuous environmental functions by position so neighboring faces share the
 same limit at a seam. Do not use separate per-face noise seeds or normals that
 make a nominally smooth weather field jump at edges. The embedding is not a
 distance metric for interactions: straight chords can pass through the cube.
+It is a valid lower bound on surface length. Convert embedding distances to
+pixel units (multiply by 32); reject a candidate when its squared chord exceeds
+the squared interaction radius, with a numerical margin at the threshold.
 
 ## Seam transport
 
@@ -84,11 +87,14 @@ IDs or lerping unrelated chart coordinates.
 ## The open bottom and exact corners
 
 Preferred policy: no sixth face. The four lower edges form one surface boundary.
-Fields have no flux through it. Organisms sense a narrow rim and steer away or
-along it; swept motion reflects the outward component as a numerical fallback.
+Fields have no flux through it. Start with swept specular reflection of the
+outward velocity/displacement component, without a rim sensor or avoidance drive.
 Body pixels outside the surface are clipped, not mirrored into a second body.
-Rim avoidance costs movement like any other steering and may evolve in strength.
-It is not a kill zone or a teleport to Top.
+E8 observes this policy on the cube. Add a local, heritable avoidance gain only
+if reflection looks wrong or produces persistent piling; zero must remain allowed.
+There is no default exclusion strip, kill zone, or teleport to Top. At a lower
+side corner the unfolded boundary is straight; test a step that both crosses
+a vertical seam and reflects, including an exact tie.
 
 Top vertices are curvature singularities: an exactly vertex-directed straight
 path has no uniquely defined continuation. Use a documented deterministic
@@ -113,15 +119,21 @@ No-flux bottom edges add no exchange. Three faces meet at a top vertex; this
 does not create an extra zero-length diagonal diffusion edge.
 
 Keep nonnegative scalar concentrations with a conservative outgoing-flux limiter
-or proven stable substeps. Rendering uses seam-aware interpolation of the graph
-samples. Deposition kernels and localized input kernels use surface distance,
+or proven stable substeps. Start rendering with nearest-cell samples followed
+by an optional normalized, seam-aware one-pixel filter; it changes presentation
+only. Upgrade interpolation if M1/E6 reveals distracting block boundaries.
+Deposition kernels and localized input kernels use surface distance,
 normalize over cells actually present, and account for cell area so the same
 event deposits the same total near a seam or rim. Scalar diffusion requires no
 rotation; vector transport does. Initial weather flow can steer agents without
 adding a full fluid solver.
 
-Use coarse bins for agent broad-phase queries, including neighboring chart
-images. For sensing, contact, predation, and social steering, unfold candidate
+Start with all unordered agent pairs and the squared 3D chord rejection above:
+512 organisms yield 130,816 pairs per pass. Measure cost; this is a work count,
+not a performance result. Use the sum of body extents plus reach for contact
+broad-phase bounds, not the sensing radius or a centroid-only bite radius.
+Introduce bins only when profiling justifies them and the reference verifies
+no cross-seam candidate is lost. For sensing, contact, predation, and social steering, unfold candidate
 faces into the observer's tangent chart, then choose the shortest valid surface
 path. Reject straight segments whose actual edge sequence does not match the
 unfolding. Deduplicate by organism ID; a creature near a corner can appear in
@@ -135,14 +147,29 @@ reference rather than assuming only direct neighbor faces matter. Use graph
 distance for large environmental footprints where cell-scale approximation is
 acceptable; do not substitute it for precise bite/contact distance.
 
+The independent slow reference embeds faces in 3D and unfolds each candidate
+face path by rigid rotations about its actual shared cube edges. Measure the
+straight segment in the resulting common plane, validate its edge intersections
+and chart interiors in sequence, and minimize over valid paths. Derive those
+rotations from normals/edge endpoints, not the production 2D transition table.
+Enumerate all simple face paths for the bounded local query fixtures and include
+near-vertex ties. This is a local-query oracle, not an unproved general geodesic
+solver for arbitrary paths. Use it for motion, distance, and broad-phase checks.
+
 ## Rendering uses the same surface
 
 Build each body in its own local frame. Rasterize destination pixels through
 valid unfolded chart images, clipping to the actual surface and choosing one
 contribution per primitive/pixel. Rotate directional features at folds. A tail
 can remain on one face while the head is on another; a centroid changing face
-must not make the whole sprite pop across. At a vertex, deterministic ownership
-prevents duplicate brightness from overlapping chart images.
+must not make the whole sprite pop across. At a top vertex, a flat rigid stamp
+cannot preserve its shape everywhere: the surface has a 90-degree angular deficit.
+For each destination pixel, choose the valid unfolding with shortest surface
+path from the anchor; break equal-length ties by lexicographic face/edge path.
+Evaluate the body mask in that chosen chart, with one contribution per primitive.
+Accept a localized shape discontinuity where chart ownership changes rather than
+double brightness. Put this exact fixture in M1 for visual review; do not
+promise a perfectly rigid, seamless body around a curvature singularity.
 
 History trails retain actual transported surface segments. Renderer-side pulses
 and rings propagate using the same surface graph or valid local unfoldings.
@@ -162,6 +189,14 @@ Neither the preview nor the physical output gets its own geometry implementation
   gain energy, brightness, neighbors, or interaction range.
 - Compare unfolded distances against an independent slow reference on random
   local pairs. Check heading alignment across the twisted Top seams.
+- E1 checks area-weighted long-run occupancy with isotropic, noninteracting
+  walkers and pure reflection, using sampling tolerances and correlated-sample
+  estimates. The field random walk chooses one of four directions and stays
+  put at an open edge; choosing only existing neighbors would bias rim occupancy.
+- Check diffusion equivariance under cube rotations that preserve the open
+  bottom. A single vertex-adjacent source is not itself three-way symmetric;
+  compare rotated source runs, or equal deposits on all three incident cells
+  within a local symmetric neighborhood before the lower boundary influences it.
 - Review a seam-spanning asymmetric organism, a thick trail, and a diffusing
   patch on both a cube preview and the physical cube. Diagnostic patterns are
   explicit development modes and never part of ambient presentation.
