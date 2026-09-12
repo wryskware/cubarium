@@ -14,8 +14,9 @@ review (seam continuity, E8 reflection) is still pending Wrysk's observation.
 M2, the first living world, is implemented in `cubarium-core` per
 `design/m2-world-spec.md` with exact material and energy audits, checkpoint
 resume, and telemetry (`cargo run --release -p cubarium -- run --help`); the E2
-succession experiment runs through `scripts/e2-run.sh`, and its first batch is
-the current evidence step. Implementation does not make the architecture
+succession experiment (`scripts/e2-run.sh`, results in `design/7_Research/`)
+found a regime with local depletion and recovery that survives a simulated
+day, now the default tuning. What remains for M2 is viewing on the cube. Implementation does not make the architecture
 canon; see the decision ledger.
 
 Start with the [design overview](design/README.md), then the

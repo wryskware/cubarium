@@ -32,8 +32,15 @@ without errors. Pending M1 evidence: physical-cube observation of seam
 continuity, the vertex-ownership fixture, and E8 reflection. M2's world,
 persistence, telemetry, and ambient presentation are implemented and pass an
 independent spec-derived suite (closed-box material to ~1e-11, per-tick energy
-audit, exact snapshot replay). Ecological evidence (E2/E3) is being produced
-with the [E2 harness](experiments-e2-harness.md); durability (M5) is untested.
+audit, exact snapshot replay). E2 ran through four batches and a 24-hour
+confirmation (see the `7_Research/e2-*` notes): nutrient limitation, saturating
+intake, and above all slow movement (0.3 px/s) were needed before any local
+succession appeared; the adopted defaults sustain population cycles with a
+patchy, repeatedly recovering producer field for a day in eleven of twelve
+seeds, with one extinction from an ordinary trough. E3 measures are being
+taken from the life-event log. Still pending for M2's exit: 30 minutes of
+real-time viewing and the cube itself. Durability (M5) is untested. M3a is
+specified in [m3a-spec.md](m3a-spec.md).
 
 ## M1 — prove the surface and presentation path
 
