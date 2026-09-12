@@ -24,3 +24,4 @@ minifb = { workspace = true }
 png = { workspace = true }
 toml = "0.8"
 serde_json = "1"
+ctrlc = "3"

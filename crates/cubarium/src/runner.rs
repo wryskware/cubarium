@@ -5,16 +5,18 @@
 //! each published [`RenderView`] into one `Canvas::encode` per rendered frame. Wall time
 //! enters only through [`crate::clock::Clock`].
 //!
-//! Stopping. A clean stop — the simulated `--seconds` limit, or the preview window being
-//! closed — always writes a final snapshot before the process exits. This iteration
-//! installs no SIGINT handler (that would need a signal crate, and the host's dependency
-//! set is fixed), so Ctrl-C terminates the process immediately and the world resumes
-//! from the last checkpoint instead: `capacity.checkpoint_seconds` is the recovery bound
-//! for an unclean stop, and nothing else is lost, because every snapshot is written
-//! atomically.
+//! Stopping. A clean stop — the simulated `--seconds` limit, the preview window being
+//! closed, or the shared stop flag being set — always writes a final snapshot before the
+//! process exits. The binary sets that flag from a SIGINT handler (see [`crate::run`]),
+//! so Ctrl-C leaves the loop between ticks and takes the ordinary shutdown path. The
+//! flag is only ever read here, once per loop iteration; the loop never blocks for long
+//! enough to make the latency visible. A stop that is *not* clean (a second Ctrl-C,
+//! `SIGKILL`, power loss) still loses at most `capacity.checkpoint_seconds` of simulated
+//! time, because every snapshot is written atomically.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -205,6 +207,12 @@ fn open_sink(run: &Run) -> Result<Option<Box<dyn FrameSink>>> {
 /// config, a window that will not open) are returned; disk errors inside the checkpoint
 /// worker and telemetry are logged and the world continues.
 pub fn run_world(run: &Run) -> Result<RunOutcome> {
+    run_world_until(run, &AtomicBool::new(false))
+}
+
+/// [`run_world`], plus a stop flag any other thread may set to ask for a clean stop.
+/// The binary hands this the flag its SIGINT handler sets; tests set it directly.
+pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
     run.validate()?;
 
     std::fs::create_dir_all(&run.state)
@@ -268,7 +276,7 @@ pub fn run_world(run: &Run) -> Result<RunOutcome> {
 
     match pace {
         Pace::Unlimited => {
-            while !reached(ticks_done) {
+            while !reached(ticks_done) && !stop.load(Ordering::Relaxed) {
                 advance(
                     &mut world,
                     &mut presenter,
@@ -283,7 +291,7 @@ pub fn run_world(run: &Run) -> Result<RunOutcome> {
             let mut clock = Clock::new(Instant::now());
             let mut wall_ticks = 0u64;
             loop {
-                if reached(ticks_done) {
+                if reached(ticks_done) || stop.load(Ordering::Relaxed) {
                     break;
                 }
                 if let Some(s) = sink.as_mut()

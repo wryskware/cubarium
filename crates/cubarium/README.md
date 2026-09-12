@@ -114,7 +114,7 @@ cubarium run [--config world.toml] [--state state/] [--sink preview|shim|png|non
 | `--state` | `state` | Directory for snapshots and the journal |
 | `--sink` | `preview` | As for `demo`; `none` runs headless |
 | `--speed` | `1` | Simulated seconds per wall second; `0` means as fast as possible (headless only) |
-| `--seconds` | `0` | Stop after this much *simulated* time (0 = until closed) |
+| `--seconds` | `0` | Stop after this much *simulated* time (0 = until closed; required for `png`) |
 | `--seed` | from config | Overrides `config.seed` when creating a fresh world |
 | `--fresh` | off | Ignore existing snapshots and create a new world |
 | `--telemetry` | `<state>/telemetry.jsonl` | JSON-lines telemetry file (appended) |

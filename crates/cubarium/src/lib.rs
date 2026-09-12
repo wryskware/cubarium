@@ -24,4 +24,4 @@ pub mod state;
 mod run;
 
 pub use run::run;
-pub use runner::{RunOutcome, run_world};
+pub use runner::{RunOutcome, run_world, run_world_until};

@@ -148,6 +148,10 @@ impl Run {
             self.speed > 0.0 || !self.sink.is_visual(),
             "--speed 0 is headless only; use --sink none"
         );
+        // Same rule as `demo`: a capture run that never ends writes captures forever.
+        if self.sink == RunSinkArg::Png {
+            anyhow::ensure!(self.seconds > 0.0, "--seconds is required with --sink png");
+        }
         anyhow::ensure!(self.every >= 1, "--every must be at least 1");
         anyhow::ensure!(self.scale >= 1, "--scale must be at least 1");
         Ok(())
@@ -268,6 +272,14 @@ mod tests {
         assert_eq!(r.every, 5);
         assert_eq!(r.scale, 2);
         r.validate().unwrap();
+    }
+
+    #[test]
+    fn run_png_requires_a_duration_like_demo_does() {
+        let r = parse_run(["cubarium", "run", "--sink", "png"]);
+        let err = r.validate().unwrap_err().to_string();
+        assert!(err.contains("--seconds is required"), "{err}");
+        parse_run(["cubarium", "run", "--sink", "png", "--seconds", "1"]).validate().unwrap();
     }
 
     #[test]

@@ -1,6 +1,13 @@
 //! The `demo` loop: one clock, one scene set, one `Canvas::encode` per rendered frame,
 //! and whichever sink is active. The persistent `run` loop lives in [`crate::runner`].
+//!
+//! This module also owns the process-wide SIGINT handler. [`run`] installs it once,
+//! before either loop starts, and both loops read the flag it sets once per iteration:
+//! the first Ctrl-C is a clean stop (the `run` loop's final snapshot, the sinks'
+//! `finish`), a second one exits immediately with the shell's 128+SIGINT status.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -13,18 +20,44 @@ use crate::cli::{Command, Demo, SinkArg};
 use crate::scene::{SceneKind, Scenes, render};
 use crate::sink::{FrameSink, PngSink, PreviewSink, ShimSink};
 
+/// The status a shell reports for a process killed by SIGINT.
+const SIGINT_EXIT: i32 = 130;
+
+/// Install the SIGINT handler and return the flag it sets. A failure to install one is
+/// reported and the command runs anyway: losing the clean stop is not worth losing the
+/// run. Calling this twice in one process is what `ctrlc` refuses, so [`run`] is the
+/// only caller.
+fn install_interrupt_handler() -> Arc<AtomicBool> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&stop);
+    // `ctrlc` runs this on its own thread, not in the signal handler itself, so the
+    // message and the exit are both safe here.
+    let installed = ctrlc::set_handler(move || {
+        if flag.swap(true, Ordering::SeqCst) {
+            eprintln!("cubarium: interrupted again; exiting without a final snapshot");
+            std::process::exit(SIGINT_EXIT);
+        }
+        eprintln!("cubarium: interrupted; stopping cleanly (Ctrl-C again to exit now)");
+    });
+    if let Err(e) = installed {
+        eprintln!("cubarium: no Ctrl-C handler ({e}); an interrupt will not stop cleanly");
+    }
+    stop
+}
+
 /// Run a parsed command.
 pub fn run(command: Command) -> Result<()> {
+    let stop = install_interrupt_handler();
     match command {
         Command::Demo(demo) => {
             demo.validate()?;
-            run_demo(&demo)
+            run_demo(&demo, &stop)
         }
-        Command::Run(world) => crate::runner::run_world(&world).map(|_| ()),
+        Command::Run(world) => crate::runner::run_world_until(&world, &stop).map(|_| ()),
     }
 }
 
-fn run_demo(demo: &Demo) -> Result<()> {
+fn run_demo(demo: &Demo, stop: &AtomicBool) -> Result<()> {
     let kind: SceneKind = demo.scene.into();
     let mut scenes = Scenes::new(kind, demo.seed);
 
@@ -36,7 +69,7 @@ fn run_demo(demo: &Demo) -> Result<()> {
 
     let limit =
         (demo.seconds > 0.0).then(|| Duration::from_secs_f64(demo.seconds));
-    let stats = drive(&mut scenes, sink.as_mut(), limit)?;
+    let stats = drive(&mut scenes, sink.as_mut(), limit, stop)?;
     sink.finish()?;
 
     eprintln!(
@@ -59,11 +92,13 @@ pub struct RunStats {
     pub elapsed: Duration,
 }
 
-/// Drive scenes into a sink until the time limit or the sink asks to stop.
+/// Drive scenes into a sink until the time limit, the sink asking to stop, or `stop`
+/// being set from another thread (the SIGINT handler, or a test).
 pub fn drive(
     scenes: &mut Scenes,
     sink: &mut dyn FrameSink,
     limit: Option<Duration>,
+    stop: &AtomicBool,
 ) -> Result<RunStats> {
     let mut canvas = Canvas::new();
     let mut scratch: Vec<PixelImage> = Vec::new();
@@ -79,7 +114,7 @@ pub fn drive(
         {
             break;
         }
-        if sink.should_quit() {
+        if sink.should_quit() || stop.load(Ordering::Relaxed) {
             break;
         }
 
@@ -138,7 +173,8 @@ mod tests {
     fn a_short_run_ticks_renders_and_lights_more_than_one_face() {
         let mut scenes = Scenes::new(SceneKind::All, 1);
         let mut rec = Recorder::default();
-        let stats = drive(&mut scenes, &mut rec, Some(Duration::from_millis(600))).unwrap();
+        let stop = AtomicBool::new(false);
+        let stats = drive(&mut scenes, &mut rec, Some(Duration::from_millis(600)), &stop).unwrap();
         assert!(stats.ticks >= 8, "ticks {}", stats.ticks);
         assert!(stats.frames >= 12, "frames {}", stats.frames);
         assert_eq!(rec.frames.len() as u64, stats.frames);
@@ -167,7 +203,35 @@ mod tests {
         }
         let mut scenes = Scenes::new(SceneKind::Body, 1);
         let mut sink = Once(0);
-        let stats = drive(&mut scenes, &mut sink, None).unwrap();
+        let stats = drive(&mut scenes, &mut sink, None, &AtomicBool::new(false)).unwrap();
         assert_eq!(stats.frames, 3);
+    }
+
+    #[test]
+    fn a_stop_flag_set_from_another_thread_ends_the_demo_loop() {
+        struct Counter(u64);
+        impl FrameSink for Counter {
+            fn submit(&mut self, _f: &Frame) -> Result<()> {
+                self.0 += 1;
+                Ok(())
+            }
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&stop);
+        let setter = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            flag.store(true, Ordering::SeqCst);
+        });
+        let mut scenes = Scenes::new(SceneKind::Body, 1);
+        let mut sink = Counter(0);
+        // No time limit: only the flag can end this loop.
+        let stats = drive(&mut scenes, &mut sink, None, &stop).unwrap();
+        setter.join().unwrap();
+        assert!(stats.frames > 0, "the loop must have rendered before it stopped");
+        assert!(
+            stats.elapsed < Duration::from_secs(5),
+            "the loop must stop promptly: {:?}",
+            stats.elapsed
+        );
     }
 }
