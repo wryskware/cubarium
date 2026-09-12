@@ -234,6 +234,15 @@ with 1,280-element arrays (fields rounded to four decimals, organisms as
 per-cell counts), on the same absolute-tick cadence rule as telemetry.
 Telemetry samples also carry `producer_by_face` and `detritus_by_face` sums.
 
+Life events: when `capacity.event_log` is true, the host appends one JSON line
+per birth and death to `events.jsonl` beside the telemetry file:
+`{"kind":"birth","tick","id","parent","parent_age_ticks","parent_births","genome":digest,"origin"}`
+and `{"kind":"death","tick","id","age_ticks","cause","births","genome":digest}`
+(`id` and `parent` as `slot:generation`). These records are what E3 needs
+(parent age at birth, time to first reproduction, ancestry depth, reproductive
+skew); the world exposes them as `World::drain_events()` after each tick and
+never reads them back.
+
 Headless telemetry as JSON lines every 5 simulated seconds: tick, population,
 births, deaths by cause, escrows, cap rejections, `Σ N/P/D`, organism material,
 total energy, light in, heat out, per-face population, occupied cells, fallbacks
