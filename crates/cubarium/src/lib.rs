@@ -10,8 +10,9 @@
 
 #![forbid(unsafe_code)]
 
-pub mod clock;
+pub mod art;
 pub mod cli;
+pub mod clock;
 pub mod net;
 pub mod present;
 pub mod raycast;

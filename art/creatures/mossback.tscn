@@ -1,0 +1,589 @@
+[gd_scene load_steps=11 format=3]
+
+[ext_resource type="Texture2D" path="res://parts/foot.svg" id="1"]
+
+[ext_resource type="Texture2D" path="res://parts/mossback_crown.svg" id="2"]
+
+[ext_resource type="Texture2D" path="res://parts/mossback_body.svg" id="3"]
+
+[ext_resource type="Texture2D" path="res://parts/bud.svg" id="4"]
+
+[sub_resource type="Animation" id="Animation_RESET"]
+resource_name = "RESET"
+length = 0.001
+loop_mode = 0
+
+tracks/0/type = "value"
+tracks/0/path = NodePath("LeftFoot:rotation")
+tracks/0/interp = 1
+tracks/0/enabled = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [0.0]
+}
+
+tracks/1/type = "value"
+tracks/1/path = NodePath("RightFoot:rotation")
+tracks/1/interp = 1
+tracks/1/enabled = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [0.0]
+}
+
+tracks/2/type = "value"
+tracks/2/path = NodePath("Crown:rotation")
+tracks/2/interp = 1
+tracks/2/enabled = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [0.0]
+}
+
+tracks/3/type = "value"
+tracks/3/path = NodePath("Body:rotation")
+tracks/3/interp = 1
+tracks/3/enabled = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [0.0]
+}
+
+tracks/4/type = "value"
+tracks/4/path = NodePath("Bud:rotation")
+tracks/4/interp = 1
+tracks/4/enabled = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [0.0]
+}
+
+tracks/5/type = "value"
+tracks/5/path = NodePath("Body:scale")
+tracks/5/interp = 1
+tracks/5/enabled = true
+tracks/5/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(1, 1)]
+}
+
+tracks/6/type = "value"
+tracks/6/path = NodePath("Body:position")
+tracks/6/interp = 1
+tracks/6/enabled = true
+tracks/6/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(0, 0)]
+}
+
+tracks/7/type = "value"
+tracks/7/path = NodePath("Bud:scale")
+tracks/7/interp = 1
+tracks/7/enabled = true
+tracks/7/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(0.01, 0.01)]
+}
+
+tracks/8/type = "value"
+tracks/8/path = NodePath("Bud:visible")
+tracks/8/interp = 1
+tracks/8/enabled = true
+tracks/8/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+[sub_resource type="Animation" id="Animation_rest"]
+resource_name = "rest"
+length = 4.0
+loop_mode = 1
+
+tracks/0/type = "value"
+tracks/0/path = NodePath("LeftFoot:rotation")
+tracks/0/interp = 1
+tracks/0/enabled = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0.0, 1.0, 2.0, 3.0, 4.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [0.0, 0.0, 0.0, 0.0, 0.0]
+}
+
+tracks/1/type = "value"
+tracks/1/path = NodePath("RightFoot:rotation")
+tracks/1/interp = 1
+tracks/1/enabled = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0.0, 1.0, 2.0, 3.0, 4.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [0.0, 0.0, 0.0, 0.0, 0.0]
+}
+
+tracks/2/type = "value"
+tracks/2/path = NodePath("Crown:rotation")
+tracks/2/interp = 1
+tracks/2/enabled = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0.0, 1.0, 2.0, 3.0, 4.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [0.0, 0.0, 0.0, 0.0, 0.0]
+}
+
+tracks/3/type = "value"
+tracks/3/path = NodePath("Body:rotation")
+tracks/3/interp = 1
+tracks/3/enabled = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0.0, 1.0, 2.0, 3.0, 4.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [0.0, 0.0, 0.0, 0.0, 0.0]
+}
+
+tracks/4/type = "value"
+tracks/4/path = NodePath("Bud:rotation")
+tracks/4/interp = 1
+tracks/4/enabled = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0.0, 1.0, 2.0, 3.0, 4.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [0.0, 0.0, 0.0, 0.0, 0.0]
+}
+
+tracks/5/type = "value"
+tracks/5/path = NodePath("Body:scale")
+tracks/5/interp = 1
+tracks/5/enabled = true
+tracks/5/keys = {
+"times": PackedFloat32Array(0.0, 1.0, 2.0, 3.0, 4.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(1, 1), Vector2(1, 1), Vector2(1, 1), Vector2(1, 1), Vector2(1, 1)]
+}
+
+tracks/6/type = "value"
+tracks/6/path = NodePath("Body:position")
+tracks/6/interp = 1
+tracks/6/enabled = true
+tracks/6/keys = {
+"times": PackedFloat32Array(0.0, 1.0, 2.0, 3.0, 4.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0, 0), Vector2(0, 0), Vector2(0, 0), Vector2(0, 0), Vector2(0, 0)]
+}
+
+tracks/7/type = "value"
+tracks/7/path = NodePath("Bud:scale")
+tracks/7/interp = 1
+tracks/7/enabled = true
+tracks/7/keys = {
+"times": PackedFloat32Array(0.0, 1.0, 2.0, 3.0, 4.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0.01, 0.01), Vector2(0.01, 0.01), Vector2(0.01, 0.01), Vector2(0.01, 0.01), Vector2(0.01, 0.01)]
+}
+
+tracks/8/type = "value"
+tracks/8/path = NodePath("Bud:visible")
+tracks/8/interp = 1
+tracks/8/enabled = true
+tracks/8/keys = {
+"times": PackedFloat32Array(0.0, 1.0, 2.0, 3.0, 4.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 1,
+"values": [false, false, false, false, false]
+}
+
+[sub_resource type="Animation" id="Animation_move"]
+resource_name = "move"
+length = 1.6
+loop_mode = 1
+
+tracks/0/type = "value"
+tracks/0/path = NodePath("LeftFoot:rotation")
+tracks/0/interp = 1
+tracks/0/enabled = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0.0, 0.4, 0.8, 1.2000000000000002, 1.6),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [-0.35, 0.35, -0.35, 0.35, -0.35]
+}
+
+tracks/1/type = "value"
+tracks/1/path = NodePath("RightFoot:rotation")
+tracks/1/interp = 1
+tracks/1/enabled = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0.0, 0.4, 0.8, 1.2000000000000002, 1.6),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [0.35, -0.35, 0.35, -0.35, 0.35]
+}
+
+tracks/2/type = "value"
+tracks/2/path = NodePath("Crown:rotation")
+tracks/2/interp = 1
+tracks/2/enabled = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0.0, 0.4, 0.8, 1.2000000000000002, 1.6),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [0.0, 0.0, 0.0, 0.0, 0.0]
+}
+
+tracks/3/type = "value"
+tracks/3/path = NodePath("Body:rotation")
+tracks/3/interp = 1
+tracks/3/enabled = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0.0, 0.4, 0.8, 1.2000000000000002, 1.6),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [0.0, 0.0, 0.0, 0.0, 0.0]
+}
+
+tracks/4/type = "value"
+tracks/4/path = NodePath("Bud:rotation")
+tracks/4/interp = 1
+tracks/4/enabled = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0.0, 0.4, 0.8, 1.2000000000000002, 1.6),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [0.0, 0.0, 0.0, 0.0, 0.0]
+}
+
+tracks/5/type = "value"
+tracks/5/path = NodePath("Body:scale")
+tracks/5/interp = 1
+tracks/5/enabled = true
+tracks/5/keys = {
+"times": PackedFloat32Array(0.0, 0.4, 0.8, 1.2000000000000002, 1.6),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(1, 1), Vector2(1, 1), Vector2(1, 1), Vector2(1, 1), Vector2(1, 1)]
+}
+
+tracks/6/type = "value"
+tracks/6/path = NodePath("Body:position")
+tracks/6/interp = 1
+tracks/6/enabled = true
+tracks/6/keys = {
+"times": PackedFloat32Array(0.0, 0.4, 0.8, 1.2000000000000002, 1.6),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0, 0), Vector2(0.25, -0.2), Vector2(0, 0), Vector2(-0.25, 0.2), Vector2(0, 0)]
+}
+
+tracks/7/type = "value"
+tracks/7/path = NodePath("Bud:scale")
+tracks/7/interp = 1
+tracks/7/enabled = true
+tracks/7/keys = {
+"times": PackedFloat32Array(0.0, 0.4, 0.8, 1.2000000000000002, 1.6),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0.01, 0.01), Vector2(0.01, 0.01), Vector2(0.01, 0.01), Vector2(0.01, 0.01), Vector2(0.01, 0.01)]
+}
+
+tracks/8/type = "value"
+tracks/8/path = NodePath("Bud:visible")
+tracks/8/interp = 1
+tracks/8/enabled = true
+tracks/8/keys = {
+"times": PackedFloat32Array(0.0, 0.4, 0.8, 1.2000000000000002, 1.6),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 1,
+"values": [false, false, false, false, false]
+}
+
+[sub_resource type="Animation" id="Animation_feed"]
+resource_name = "feed"
+length = 2.0
+loop_mode = 1
+
+tracks/0/type = "value"
+tracks/0/path = NodePath("LeftFoot:rotation")
+tracks/0/interp = 1
+tracks/0/enabled = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0.0, 0.5, 1.0, 1.5, 2.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [0.0, 0.0, 0.0, 0.0, 0.0]
+}
+
+tracks/1/type = "value"
+tracks/1/path = NodePath("RightFoot:rotation")
+tracks/1/interp = 1
+tracks/1/enabled = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0.0, 0.5, 1.0, 1.5, 2.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [0.0, 0.0, 0.0, 0.0, 0.0]
+}
+
+tracks/2/type = "value"
+tracks/2/path = NodePath("Crown:rotation")
+tracks/2/interp = 1
+tracks/2/enabled = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0.0, 0.5, 1.0, 1.5, 2.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [-0.1, 0.15, -0.1, 0.15, -0.1]
+}
+
+tracks/3/type = "value"
+tracks/3/path = NodePath("Body:rotation")
+tracks/3/interp = 1
+tracks/3/enabled = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0.0, 0.5, 1.0, 1.5, 2.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [0.0, 0.0, 0.0, 0.0, 0.0]
+}
+
+tracks/4/type = "value"
+tracks/4/path = NodePath("Bud:rotation")
+tracks/4/interp = 1
+tracks/4/enabled = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0.0, 0.5, 1.0, 1.5, 2.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [0.0, 0.0, 0.0, 0.0, 0.0]
+}
+
+tracks/5/type = "value"
+tracks/5/path = NodePath("Body:scale")
+tracks/5/interp = 1
+tracks/5/enabled = true
+tracks/5/keys = {
+"times": PackedFloat32Array(0.0, 0.5, 1.0, 1.5, 2.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(1, 1), Vector2(1.08, 0.94), Vector2(1, 1), Vector2(1.08, 0.94), Vector2(1, 1)]
+}
+
+tracks/6/type = "value"
+tracks/6/path = NodePath("Body:position")
+tracks/6/interp = 1
+tracks/6/enabled = true
+tracks/6/keys = {
+"times": PackedFloat32Array(0.0, 0.5, 1.0, 1.5, 2.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0, 0), Vector2(0, 0), Vector2(0, 0), Vector2(0, 0), Vector2(0, 0)]
+}
+
+tracks/7/type = "value"
+tracks/7/path = NodePath("Bud:scale")
+tracks/7/interp = 1
+tracks/7/enabled = true
+tracks/7/keys = {
+"times": PackedFloat32Array(0.0, 0.5, 1.0, 1.5, 2.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0.01, 0.01), Vector2(0.01, 0.01), Vector2(0.01, 0.01), Vector2(0.01, 0.01), Vector2(0.01, 0.01)]
+}
+
+tracks/8/type = "value"
+tracks/8/path = NodePath("Bud:visible")
+tracks/8/interp = 1
+tracks/8/enabled = true
+tracks/8/keys = {
+"times": PackedFloat32Array(0.0, 0.5, 1.0, 1.5, 2.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 1,
+"values": [false, false, false, false, false]
+}
+
+[sub_resource type="Animation" id="Animation_bud"]
+resource_name = "bud"
+length = 5.0
+loop_mode = 0
+
+tracks/0/type = "value"
+tracks/0/path = NodePath("LeftFoot:rotation")
+tracks/0/interp = 1
+tracks/0/enabled = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0.0, 1.25, 2.5, 3.75, 5.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [0.0, 0.0, 0.0, 0.0, 0.0]
+}
+
+tracks/1/type = "value"
+tracks/1/path = NodePath("RightFoot:rotation")
+tracks/1/interp = 1
+tracks/1/enabled = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0.0, 1.25, 2.5, 3.75, 5.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [0.0, 0.0, 0.0, 0.0, 0.0]
+}
+
+tracks/2/type = "value"
+tracks/2/path = NodePath("Crown:rotation")
+tracks/2/interp = 1
+tracks/2/enabled = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0.0, 1.25, 2.5, 3.75, 5.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [0.0, 0.0, 0.0, 0.0, 0.0]
+}
+
+tracks/3/type = "value"
+tracks/3/path = NodePath("Body:rotation")
+tracks/3/interp = 1
+tracks/3/enabled = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0.0, 1.25, 2.5, 3.75, 5.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [0.0, 0.0, 0.0, 0.0, 0.0]
+}
+
+tracks/4/type = "value"
+tracks/4/path = NodePath("Bud:rotation")
+tracks/4/interp = 1
+tracks/4/enabled = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0.0, 1.25, 2.5, 3.75, 5.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [0.0, 0.0, 0.0, 0.0, 0.0]
+}
+
+tracks/5/type = "value"
+tracks/5/path = NodePath("Body:scale")
+tracks/5/interp = 1
+tracks/5/enabled = true
+tracks/5/keys = {
+"times": PackedFloat32Array(0.0, 1.25, 2.5, 3.75, 5.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(1, 1), Vector2(1, 1), Vector2(1, 1), Vector2(1, 1), Vector2(1, 1)]
+}
+
+tracks/6/type = "value"
+tracks/6/path = NodePath("Body:position")
+tracks/6/interp = 1
+tracks/6/enabled = true
+tracks/6/keys = {
+"times": PackedFloat32Array(0.0, 1.25, 2.5, 3.75, 5.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0, 0), Vector2(0, 0), Vector2(0, 0), Vector2(0, 0), Vector2(0, 0)]
+}
+
+tracks/7/type = "value"
+tracks/7/path = NodePath("Bud:scale")
+tracks/7/interp = 1
+tracks/7/enabled = true
+tracks/7/keys = {
+"times": PackedFloat32Array(0.0, 1.25, 2.5, 3.75, 5.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0.1, 0.1), Vector2(0.35, 0.35), Vector2(0.55, 0.55), Vector2(0.8, 0.8), Vector2(1, 1)]
+}
+
+tracks/8/type = "value"
+tracks/8/path = NodePath("Bud:visible")
+tracks/8/interp = 1
+tracks/8/enabled = true
+tracks/8/keys = {
+"times": PackedFloat32Array(0.0, 1.25, 2.5, 3.75, 5.0),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 1,
+"values": [true, true, true, true, true]
+}
+
+[sub_resource type="AnimationLibrary" id="Library"]
+_data = {
+&"RESET": SubResource("Animation_RESET"),
+&"rest": SubResource("Animation_rest"),
+&"move": SubResource("Animation_move"),
+&"feed": SubResource("Animation_feed"),
+&"bud": SubResource("Animation_bud")
+}
+
+[node name="Mossback" type="Node2D"]
+texture_filter = 1
+
+[node name="LeftFoot" type="Node2D" parent="."]
+position = Vector2(-1, -2)
+
+[node name="Sprite" type="Sprite2D" parent="LeftFoot"]
+position = Vector2(1, -1)
+texture = ExtResource("1")
+flip_v = true
+
+[node name="RightFoot" type="Node2D" parent="."]
+position = Vector2(-1, 2)
+
+[node name="Sprite" type="Sprite2D" parent="RightFoot"]
+position = Vector2(1, 1)
+texture = ExtResource("1")
+flip_v = false
+
+[node name="Crown" type="Node2D" parent="."]
+position = Vector2(-1, -2)
+
+[node name="Sprite" type="Sprite2D" parent="Crown"]
+position = Vector2(-0.5, -1.5)
+texture = ExtResource("2")
+flip_v = false
+
+[node name="Body" type="Node2D" parent="."]
+position = Vector2(0, 0)
+
+[node name="Sprite" type="Sprite2D" parent="Body"]
+position = Vector2(0, 0)
+texture = ExtResource("3")
+flip_v = false
+
+[node name="Bud" type="Node2D" parent="."]
+position = Vector2(-3, 2)
+visible = false
+scale = Vector2(0.01, 0.01)
+
+[node name="Sprite" type="Sprite2D" parent="Bud"]
+position = Vector2(0, 0)
+texture = ExtResource("4")
+flip_v = false
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="."]
+libraries = {
+&"": SubResource("Library")
+}
+autoplay = "rest"

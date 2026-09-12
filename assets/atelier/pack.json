@@ -1,0 +1,103 @@
+{
+	"clips": [
+		{
+			"loop": true,
+			"name": "lantern",
+			"row": 0,
+			"seconds": 4.0,
+			"state": "rest"
+		},
+		{
+			"loop": true,
+			"name": "lantern",
+			"row": 1,
+			"seconds": 1.60000002384186,
+			"state": "move"
+		},
+		{
+			"loop": true,
+			"name": "lantern",
+			"row": 2,
+			"seconds": 2.0,
+			"state": "feed"
+		},
+		{
+			"loop": false,
+			"name": "lantern",
+			"row": 3,
+			"seconds": 5.0,
+			"state": "bud"
+		},
+		{
+			"loop": true,
+			"name": "sail",
+			"row": 4,
+			"seconds": 4.0,
+			"state": "rest"
+		},
+		{
+			"loop": true,
+			"name": "sail",
+			"row": 5,
+			"seconds": 2.40000009536743,
+			"state": "move"
+		},
+		{
+			"loop": true,
+			"name": "sail",
+			"row": 6,
+			"seconds": 2.0,
+			"state": "feed"
+		},
+		{
+			"loop": false,
+			"name": "sail",
+			"row": 7,
+			"seconds": 5.0,
+			"state": "bud"
+		},
+		{
+			"loop": true,
+			"name": "mossback",
+			"row": 8,
+			"seconds": 4.0,
+			"state": "rest"
+		},
+		{
+			"loop": true,
+			"name": "mossback",
+			"row": 9,
+			"seconds": 1.60000002384186,
+			"state": "move"
+		},
+		{
+			"loop": true,
+			"name": "mossback",
+			"row": 10,
+			"seconds": 2.0,
+			"state": "feed"
+		},
+		{
+			"loop": false,
+			"name": "mossback",
+			"row": 11,
+			"seconds": 5.0,
+			"state": "bud"
+		}
+	],
+	"creatures": "creatures.png",
+	"facing": "+x",
+	"frames": 8,
+	"habitat": "habitat.png",
+	"habitat_names": [
+		"rosette",
+		"fern",
+		"lichen"
+	],
+	"pivot": [
+		8,
+		8
+	],
+	"tile": 16,
+	"version": 1
+}

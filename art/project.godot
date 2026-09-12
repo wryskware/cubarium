@@ -1,0 +1,22 @@
+; Cubarium creature atelier. Native sprite units are cube pixels.
+config_version=5
+
+[application]
+config/name="Cubarium · Creature Atelier"
+run/main_scene="res://atelier.tscn"
+config/features=PackedStringArray("4.6", "GL Compatibility")
+
+[display]
+window/size/viewport_width=900
+window/size/viewport_height=540
+window/stretch/mode="canvas_items"
+
+[editor_plugins]
+enabled=PackedStringArray("res://addons/cubarium_bake/plugin.cfg")
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/default_filters/use_nearest_mipmap_filter=false
+textures/canvas_textures/default_texture_filter=0
+environment/defaults/default_clear_color=Color(0.025, 0.019, 0.072, 1)

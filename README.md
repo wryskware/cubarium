@@ -5,7 +5,7 @@ A persistent artificial ecosystem living on the five visible surfaces of a
 alter their surroundings, leave descendants, and sometimes disappear. The world
 continues between glances.
 
-**Current state (2026-09-11):** M1 is implemented under task authorization:
+**Current state (2026-09-12):** M1 is implemented under task authorization:
 a Rust workspace with the continuous surface substrate (`cubarium-surface`, with
 an independent 3D oracle and test suite), a linear-light renderer, and a host
 that shows geometry fixtures in a desktop preview, sends them to the shim, or
@@ -18,6 +18,14 @@ succession experiment (`scripts/e2-run.sh`, results in `design/7_Research/`)
 found a regime with local depletion and recovery that survives a simulated
 day, now the default tuning. What remains for M2 is viewing on the cube. Implementation does not make the architecture
 canon; see the decision ledger.
+
+A [Godot creature-art project](art/README.md) now provides editable sprite parts,
+pivot rigs, rest/move/feed/bud animation timelines and habitat art. Its baked
+sprites run on the shared cube geometry and output sinks in an explicit art
+study: `./scripts/art-study.sh` serves the cube/net viewer on port 7394 at normal
+speed. `./scripts/godot.sh --editor` opens the art project. This is a working
+authoring and presentation study; these forms are not yet integrated with M2's
+ecology or inheritance. See the [workflow and next slice](design/game-art-workflow.md).
 
 Start with the [design overview](design/README.md), then the
 [implementation plan](design/implementation-plan.md). The

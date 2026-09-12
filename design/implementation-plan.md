@@ -14,7 +14,8 @@ not estimates or claims of completed implementation.
 Revised after the [Fable review](7_Research/plan-review-2026-09-11.md).
 [Review dispositions](7_Research/plan-review-response-2026-09-11.md) record
 reasoning and qualifications; the [experiment plan](experiments.md) gives E1–E9
-protocols. These revisions remain `leaning`; no experiment has been run.
+protocols. These revisions remain `leaning`; completed experiments are recorded
+in the current-status paragraph and the linked research reports below.
 
 ## Current deliverable — repository and vault
 
@@ -42,6 +43,17 @@ apart, but one founder lineage per seed survives the first cycle, so effective
 population is tiny; M3 must track lineage survival. Still pending for M2's exit: 30 minutes of
 real-time viewing and the cube itself. Durability (M5) is untested. M3a is
 specified in [m3a-spec.md](m3a-spec.md).
+
+Status 2026-09-12: Wrysk reviewed the current presentation as too uniform and
+infestation-like, requested a game-development approach with sprites, rigging
+and animation, allowed an engine port, and identified creature/habitat art as
+their preferred contribution. The resulting [Godot art workflow](game-art-workflow.md)
+is implemented as an authoring project and explicit cube art study. Three
+cutout rigs, twelve clips, and three habitat motifs bake into the existing
+surface renderer. It is scripted visual evidence, not M3 evolution or a full
+runtime port. The proposed next slice is to select readable artwork and connect
+its actions/growth to actual world state. M3a's narrow lobe grammar remains
+revisable in light of this feedback; the art study does not satisfy E4/E5/E6.
 
 ## M1 — prove the surface and presentation path
 

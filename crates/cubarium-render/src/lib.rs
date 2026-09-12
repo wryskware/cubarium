@@ -19,9 +19,11 @@
 mod body;
 mod canvas;
 mod field;
+mod sprite;
 mod trail;
 
 pub use body::{BodyShape, Lobe, stamp_body};
 pub use canvas::{Canvas, srgb_decode, srgb_encode};
 pub use field::draw_field;
+pub use sprite::{Sprite, stamp_sprite};
 pub use trail::{Trail, TrailSegment, draw_trail};

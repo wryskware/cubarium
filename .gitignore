@@ -1,6 +1,7 @@
 # Local builds and installation output.
 /target/
 /dist/
+/.tools/
 
 # Runtime worlds, telemetry, and rendered captures are not source material.
 /state/
