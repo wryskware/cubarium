@@ -242,8 +242,8 @@ without a sink for E2/E3, and fixed-seed replay hash of the state each 60 s.
 ## Presentation
 
 Substrate: `P` rendered dim green (`[0.10, 0.40, 0.16] · min(P/P_max, 1)`, seam-aware
-filter on), `D` as sparse warm flecks (`[0.30, 0.18, 0.08] · min(D/1, 1)` at cell level, nearest,
-only when `D > 0.05`). Bodies: hue accent from the genome mapped to a warm-to-cool
+filter on), `D` as sparse dim warm flecks (`[0.16, 0.10, 0.05] · min(D/1.5, 1)` at cell level,
+nearest, only when `D > 0.05`; dimmed after the first captures read as bright blocks). Bodies: hue accent from the genome mapped to a warm-to-cool
 low-saturation palette, brightness 0.55 resting, 0.8 seeking, core lobe
 brightness 1.0 while feeding; a short trail (12 segments, 3 s) at 0.25
 brightness. No overlays.

@@ -19,11 +19,11 @@ use cubarium_surface::{PixelImage, ScalarField, Travel, Vec2};
 /// Producer substrate, dim green, drawn with the seam-aware filter.
 pub const SUBSTRATE_COLOR: [f32; 3] = [0.10, 0.40, 0.16];
 /// Detritus flecks, warm brown, at cell level with no filter.
-pub const DETRITUS_COLOR: [f32; 3] = [0.30, 0.18, 0.08];
+pub const DETRITUS_COLOR: [f32; 3] = [0.16, 0.10, 0.05];
 /// Detritus below this (m per cell) shows nothing at all: flecks, not a wash.
 pub const DETRITUS_THRESHOLD: f64 = 0.05;
 /// Detritus saturates at 1 m per cell.
-pub const DETRITUS_SCALE: f64 = 1.0;
+pub const DETRITUS_SCALE: f64 = 1.5;
 /// Genome hue 0: warm, low saturation.
 pub const HUE_WARM: [f32; 3] = [0.95, 0.70, 0.45];
 /// Genome hue 1: cool, low saturation.
@@ -295,7 +295,8 @@ mod tests {
 
         view.detritus[cell] = 0.5;
         p.draw(&view, &mut canvas);
-        // Exactly the 4x4 pixels of that cell, at half the fleck color, and nothing else.
+        // Exactly the 4x4 pixels of that cell, at 0.5 / DETRITUS_SCALE of the fleck color,
+        // and nothing else.
         let mut lit = 0;
         for face in Face::ALL {
             for y in 0..64u8 {
@@ -305,7 +306,8 @@ mod tests {
                         assert_eq!(face, Face::Front);
                         assert_eq!(cell_of(&SurfacePoint::pixel_center(face, x, y)).index(), cell);
                         let p = canvas.get(face, x, y);
-                        assert!((p[0] - DETRITUS_COLOR[0] * 0.5).abs() < 1e-6, "{p:?}");
+                        let want = DETRITUS_COLOR[0] * (0.5 / DETRITUS_SCALE) as f32;
+                        assert!((p[0] - want).abs() < 1e-6, "{p:?}");
                     }
                 }
             }
