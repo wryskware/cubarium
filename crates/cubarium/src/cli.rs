@@ -156,6 +156,10 @@ pub struct Run {
     /// Port for the `web` sink (a viewer page at http://127.0.0.1:<port>/).
     #[arg(long, default_value_t = 7393)]
     pub web_port: u16,
+    /// Draw the world with the baked sprite art in this directory (`assets/atelier`)
+    /// instead of the procedural bodies. Omit it and the image is unchanged.
+    #[arg(long)]
+    pub art: Option<PathBuf>,
 }
 
 /// `--fps` outside [`crate::clock::MIN_FPS`]..=[`crate::clock::MAX_FPS`] is a typo, not a
@@ -305,6 +309,7 @@ mod tests {
         assert_eq!(r.every, 30);
         assert_eq!(r.scale, 4);
         assert_eq!(r.fps, 60);
+        assert_eq!(r.art, None, "the art image is opt-in");
         r.validate().unwrap();
     }
 
@@ -315,7 +320,7 @@ mod tests {
             "--speed", "0", "--seconds", "600", "--seed", "7", "--fresh", "--telemetry",
             "/tmp/t.jsonl", "--fields", "/tmp/f.jsonl", "--events", "/tmp/e.jsonl",
             "--addr", "10.0.0.4:1", "--out", "/tmp/c", "--every", "5", "--scale", "2",
-            "--fps", "120",
+            "--fps", "120", "--art", "assets/atelier",
         ]);
         assert_eq!(r.config, Some(PathBuf::from("w.toml")));
         assert_eq!(r.state, PathBuf::from("/tmp/s"));
@@ -332,6 +337,7 @@ mod tests {
         assert_eq!(r.every, 5);
         assert_eq!(r.scale, 2);
         assert_eq!(r.fps, 120);
+        assert_eq!(r.art, Some(PathBuf::from("assets/atelier")));
         r.validate().unwrap();
     }
 

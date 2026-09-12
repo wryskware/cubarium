@@ -26,6 +26,8 @@ use cubarium_core::view::{FieldDump, RenderView};
 use cubarium_core::{LifeEvent, Telemetry, World, WorldConfig, encode_snapshot};
 use cubarium_render::Canvas;
 
+use crate::art::ArtPack;
+use crate::art_present::ArtPresenter;
 use crate::cli::{Run, RunSinkArg};
 use crate::clock::{Clock, Step, TICK_HZ};
 use crate::present::Presenter;
@@ -392,8 +394,58 @@ fn open_sink(run: &Run) -> Result<Option<Box<dyn FrameSink>>> {
         RunSinkArg::Preview => Some(Box::new(PreviewSink::new(run.scale, &run.out)?)),
         RunSinkArg::Shim => Some(Box::new(ShimSink::new(run.addr.clone()))),
         RunSinkArg::Png => Some(Box::new(PngSink::new(&run.out, run.every)?)),
-        RunSinkArg::Web => Some(Box::new(WebSink::new(run.web_port)?)),
+        RunSinkArg::Web => Some(Box::new(WebSink::with_note(run.web_port, speed_note(run.speed))?)),
     })
+}
+
+/// The viewer's HUD note for a `--speed`. `f64`'s own `Display` is the shortest decimal
+/// that reads back as the same number, so this is `1× time`, `8× time`, `0.5× time`,
+/// `2.5× time` — never `1.0×`. Without it a reviewer cannot tell a 1× world from an 8×
+/// one by looking at it.
+fn speed_note(speed: f64) -> String {
+    format!("{speed}× time")
+}
+
+/// The presentation the run is using. The two presenters have the same two-method
+/// contract, so the loop calls them at the same two sites and neither knows about the
+/// other; `--art` is the only thing that chooses.
+enum Show {
+    /// The decided M2 image: procedural bodies, trails, feeding flash.
+    Plain(Presenter),
+    /// The authored sprite image, from a baked art pack.
+    Art(Box<ArtPresenter>),
+}
+
+impl Show {
+    /// Once per completed tick.
+    fn observe(&mut self, view: &RenderView) {
+        match self {
+            Show::Plain(p) => p.observe(view),
+            Show::Art(p) => p.observe(view),
+        }
+    }
+
+    /// Once per rendered frame.
+    fn draw(&mut self, view: &RenderView, f: f64, canvas: &mut Canvas) {
+        match self {
+            Show::Plain(p) => p.draw(view, f, canvas),
+            Show::Art(p) => p.draw(view, f, canvas),
+        }
+    }
+}
+
+/// `--art <dir>` loads the baked pack; without it the image is the decided M2 one,
+/// pixel for pixel. A pack that will not load is fatal: a run that silently fell back
+/// to discs would be a review of the wrong image.
+fn open_show(run: &Run) -> Result<Show> {
+    match &run.art {
+        None => Ok(Show::Plain(Presenter::new())),
+        Some(dir) => {
+            let pack = ArtPack::load(dir)
+                .with_context(|| format!("loading the art pack {}", dir.display()))?;
+            Ok(Show::Art(Box::new(ArtPresenter::new(pack))))
+        }
+    }
 }
 
 /// Run the persistent world. Fatal errors (an unwritable state directory, an invalid
@@ -452,7 +504,7 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
     }
     let tick_limit = (run.seconds > 0.0).then(|| (run.seconds * f64::from(TICK_HZ)).round() as u64);
 
-    let mut presenter = Presenter::new();
+    let mut presenter = open_show(run)?;
     let mut canvas = Canvas::new();
     let mut frame = Frame::black();
     let mut view: Option<RenderView> = None;
@@ -462,7 +514,7 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
     // Advance the world one tick and do everything that hangs off a completed tick.
     let mut ticks_done = 0u64;
     let advance = |world: &mut World,
-                       presenter: &mut Presenter,
+                       presenter: &mut Show,
                        view: &mut Option<RenderView>,
                        telemetry: &mut TelemetryLog,
                        fields: &mut Option<FieldLog>,
@@ -630,6 +682,31 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn the_viewer_note_prints_the_speed_without_trailing_zeros() {
+        assert_eq!(speed_note(1.0), "1× time");
+        assert_eq!(speed_note(8.0), "8× time");
+        assert_eq!(speed_note(0.5), "0.5× time");
+        assert_eq!(speed_note(2.5), "2.5× time");
+        assert_eq!(speed_note(20.0), "20× time");
+    }
+
+    #[test]
+    fn an_art_directory_that_will_not_load_is_fatal_and_names_itself() {
+        let mut run = Run::parse_from(["cubarium"]);
+        assert!(matches!(open_show(&run), Ok(Show::Plain(_))), "no --art is the M2 image");
+        run.art = Some(PathBuf::from("/nonexistent/atelier"));
+        let err = match open_show(&run) {
+            Err(e) => e,
+            Ok(_) => panic!("a missing pack must not fall back to discs"),
+        };
+        assert!(
+            format!("{err:#}").contains("/nonexistent/atelier"),
+            "the error must name the directory: {err:#}"
+        );
+    }
 
     #[test]
     fn pacing_follows_the_documented_rounding() {

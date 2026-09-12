@@ -103,7 +103,7 @@ fn main() -> Result<()> {
     let art = ArtPack::load(&args.art)?;
     let mut sink: Box<dyn FrameSink> = match args.sink {
         Sink::Web => {
-            let web = WebSink::new(args.web_port)?;
+            let web = WebSink::with_note(args.web_port, "1× time · art study")?;
             eprintln!(
                 "Cubarium art study: {} · scripted gallery · 1× time",
                 web.url()

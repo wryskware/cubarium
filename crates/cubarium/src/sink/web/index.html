@@ -362,12 +362,28 @@ function poll() {
 const hud = document.getElementById("hud");
 let frames = 0, fps = 0, fpsMark = performance.now(), lastT = performance.now();
 
+// A short line the host serves once at /note, such as "8\u00D7 time". It is how a
+// reviewer tells a 1\u00D7 world from an 8\u00D7 one without reading the terminal, so it
+// sits in the live label next to the tick and the frame rate. A host that serves an
+// empty note (or none at all) leaves the HUD exactly as it was.
+let note = "";
+
+function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+fetch("/note", { cache: "no-store" })
+  .then(function (r) { return r.ok ? r.text() : ""; })
+  .then(function (text) { note = text.trim(); showHud(); })
+  .catch(function () { /* an older host has no /note; the HUD is unchanged */ });
+
 // Driven both by the fps window and by a live/self-test flip, so the label is never
 // left reading "self-test" after the host has answered.
 function showHud() {
   const rate = fps > 0 ? fps.toFixed(0) + " fps" : "-- fps";
+  const tail = note ? (" &middot; " + escapeHtml(note)) : "";
   hud.innerHTML = live
-    ? ("tick " + tick + " &middot; " + rate)
+    ? ("tick " + tick + " &middot; " + rate + tail)
     : ('<span class="warn">self-test</span> &middot; ' + rate);
 }
 

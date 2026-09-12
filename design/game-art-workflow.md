@@ -57,6 +57,26 @@ full-texture Sprite2D cutouts and native property tracks, rather than every
 Godot drawing feature. Its supported settings and limits are documented for
 the artist.
 
+**Live integration (later on 2026-09-12):** `cubarium run --art assets/atelier`
+draws the persistent M2 world with the baked clips, chosen by each organism's
+actual state: `rest` while resting, `move` while seeking, `feed` while feeding,
+and `bud` while an escrow is held, with the bud clip advanced by real gestation
+progress (a new `gestation` field on the render view). The rig is the inherited
+cosmetic hue's tercile, so a lineage keeps its rig; this is a presentation rule,
+not a species. Looping clips run on simulated time, so `--speed` and pauses stay
+honest. Habitat motifs are stamped per field cell where producer density exceeds
+a threshold, fading in with density; the decided floor, producer ramp and
+detritus flecks are drawn unchanged beneath them, and without `--art` the image
+is pixel-identical to before. The web viewer's HUD now shows the speed
+multiplier. Verified by unit tests, an independent integration-test pass, a
+worst-case draw cost of about 5 ms per frame, and browser captures of a fresh
+world at 8×. Observed: in a young default world the motifs sit at partial
+opacity over roughly two fifths of the surface and read as a green-teal
+mottling rather than as recognizable growth; the motif SVGs are greener than
+the decided indigo/cyan family. Both are art and tuning questions for Wrysk
+(`MOTIF_THRESHOLD`, `MOTIF_FULL`, `MOTIF_OPACITY` in `art_present.rs`, and the
+habitat SVGs), not simulation questions.
+
 **Proposed next slice:** choose or revise silhouettes from actual-size and
 physical-cube observation. Connect selected clips to actual rest, displacement,
 feeding and gestation progress, and habitat coverage to producer biomass.

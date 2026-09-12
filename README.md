@@ -23,9 +23,11 @@ A [Godot creature-art project](art/README.md) now provides editable sprite parts
 pivot rigs, rest/move/feed/bud animation timelines and habitat art. Its baked
 sprites run on the shared cube geometry and output sinks in an explicit art
 study: `./scripts/art-study.sh` serves the cube/net viewer on port 7394 at normal
-speed. `./scripts/godot.sh --editor` opens the art project. This is a working
-authoring and presentation study; these forms are not yet integrated with M2's
-ecology or inheritance. See the [workflow and next slice](design/game-art-workflow.md).
+speed. `./scripts/godot.sh --editor` opens the art project. `cubarium run --art
+assets/atelier --sink web` draws the live world with the authored sprites, each
+organism's clip driven by its real rest/seek/feed/gestation state and the habitat
+motifs by producer biomass; without `--art` the image is unchanged. The rigs are
+a cosmetic hue tercile, so nothing about the ecology or inheritance changed. See the [workflow and next slice](design/game-art-workflow.md).
 
 Start with the [design overview](design/README.md), then the
 [implementation plan](design/implementation-plan.md). The

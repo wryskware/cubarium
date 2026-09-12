@@ -7,7 +7,7 @@
 //! never waits on a browser. A viewer that polls slower than the host renders simply
 //! sees fewer, newer frames; a viewer that polls faster re-reads the same tick.
 //!
-//! `std::net` only — no HTTP crate. The surface is three routes and `Connection: close`
+//! `std::net` only — no HTTP crate. The surface is four routes and `Connection: close`
 //! per request, which is all a `fetch` loop from one page on the loopback needs.
 
 use std::io::{ErrorKind, Read, Write};
@@ -49,6 +49,9 @@ struct Shared {
     ticks: AtomicU64,
     /// Requests answered on `/frame`.
     served: AtomicU64,
+    /// A short line the viewer's HUD appends, fixed for the life of the sink. The host
+    /// puts the simulation speed here so a reviewer can tell 1× from 8× on sight.
+    note: String,
 }
 
 impl Shared {
@@ -68,6 +71,13 @@ impl WebSink {
     /// Bind `127.0.0.1:port` and start the server thread. Port 0 binds an ephemeral port;
     /// read the real one back from [`WebSink::port`].
     pub fn new(port: u16) -> Result<WebSink> {
+        WebSink::with_note(port, String::new())
+    }
+
+    /// [`WebSink::new`] with a HUD note served at `GET /note`. An empty note leaves the
+    /// HUD exactly as it is; a non-empty one is appended to the live label.
+    pub fn with_note(port: u16, note: impl Into<String>) -> Result<WebSink> {
+        let note = note.into();
         let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port)))
             .with_context(|| format!("binding the web viewer to 127.0.0.1:{port}"))?;
         let addr = listener.local_addr().context("reading the web viewer's local address")?;
@@ -80,6 +90,7 @@ impl WebSink {
             stop: AtomicBool::new(false),
             ticks: AtomicU64::new(0),
             served: AtomicU64::new(0),
+            note,
         });
         let server = {
             let shared = Arc::clone(&shared);
@@ -114,6 +125,11 @@ impl WebSink {
     /// `/frame` requests answered with a frame.
     pub fn served(&self) -> u64 {
         self.shared.served.load(Ordering::Relaxed)
+    }
+
+    /// The HUD note this sink serves at `/note` (empty when there is none).
+    pub fn note(&self) -> &str {
+        &self.shared.note
     }
 
     /// The newest frame in the mailbox and its tick, if one has been submitted.
@@ -208,6 +224,13 @@ fn handle(shared: &Shared, mut stream: TcpStream) {
                 &body,
             )
         }
+        Some(("GET", "/note")) => respond(
+            &mut stream,
+            "200 OK",
+            "text/plain; charset=utf-8",
+            "Cache-Control: no-store\r\n",
+            shared.note.as_bytes(),
+        ),
         _ => respond(&mut stream, "404 Not Found", "text/plain; charset=utf-8", "", b"not found\n"),
     };
     let _ = stream.shutdown(std::net::Shutdown::Both);
@@ -379,6 +402,28 @@ mod tests {
             sink.submit(&frame).unwrap();
         }
         assert!(t0.elapsed() < Duration::from_millis(500), "submit blocked on I/O");
+    }
+
+    #[test]
+    fn the_note_route_serves_the_hosts_note_and_is_empty_by_default() {
+        let plain = WebSink::new(0).expect("binding an ephemeral port");
+        let (status, head, body) = get(plain.addr(), "/note");
+        assert_eq!(status, "HTTP/1.1 200 OK");
+        assert!(head.contains("Content-Type: text/plain; charset=utf-8"), "{head}");
+        assert!(body.is_empty(), "`new` serves no note: {body:?}");
+        assert_eq!(plain.note(), "");
+
+        let noted = WebSink::with_note(0, "8× time").expect("binding an ephemeral port");
+        let (status, _, body) = get(noted.addr(), "/note");
+        assert_eq!(status, "HTTP/1.1 200 OK");
+        assert_eq!(String::from_utf8(body).unwrap(), "8× time");
+        assert_eq!(noted.note(), "8× time");
+    }
+
+    /// The page must actually ask for the note, or the HUD can never show it.
+    #[test]
+    fn the_page_fetches_the_note_route() {
+        assert!(INDEX_HTML.contains("fetch(\"/note\""), "the page never fetches /note");
     }
 
     #[test]

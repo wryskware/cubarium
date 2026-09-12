@@ -858,6 +858,10 @@ impl World {
     }
 
     pub fn render_view(&self) -> RenderView {
+        // The same derivation the tick uses for the escrow's due date, so what a renderer
+        // shows as "nearly born" is the tick the world will actually commit the birth on.
+        let gestation_ticks = ticks_from_seconds(self.state.config.organism.gestation_seconds, DT);
+        let tick = self.state.tick;
         let organisms = self
             .state
             .organisms
@@ -871,6 +875,16 @@ impl World {
                 mode: o.mode,
                 fed: o.fed_this_tick,
                 juvenile: o.structure < 0.7 * o.phenotype.structure_adult,
+                gestation: o.escrow.as_ref().map(|e| {
+                    // A zero-tick gestation (a config that rounds below one tick) is due
+                    // the moment it starts, so it reads as complete rather than as NaN.
+                    if gestation_ticks == 0 {
+                        1.0
+                    } else {
+                        (tick.saturating_sub(e.started_tick) as f64 / gestation_ticks as f64)
+                            .clamp(0.0, 1.0) as f32
+                    }
+                }),
                 moved: self.moved.get(id.slot as usize).cloned().unwrap_or_default(),
             })
             .collect();
@@ -1165,6 +1179,46 @@ mod tests {
         for (_, o) in world.state.organisms.iter() {
             assert!(o.fed_this_tick);
         }
+    }
+
+    #[test]
+    fn the_render_view_reports_gestation_only_while_an_escrow_is_held() {
+        let mut cfg = config();
+        cfg.founders.count = 1;
+        let gestation_ticks = ticks_from_seconds(cfg.organism.gestation_seconds, DT);
+        assert!(gestation_ticks > 1, "this test needs a multi-tick gestation");
+        let mut world = World::new(cfg).expect("valid");
+        let id = world.state.organisms.iter().map(|(id, _)| id).next().expect("one founder");
+
+        // No escrow: nothing to show.
+        assert_eq!(world.render_view().organisms[0].gestation, None);
+
+        // Started this tick: no progress yet.
+        world.state.tick = 100;
+        let genome = world.state.organisms.get(id).expect("alive").genome.clone();
+        world.state.organisms.get_mut(id).expect("alive").escrow = Some(Escrow {
+            structure: 0.4,
+            reserve: 0.2,
+            energy: 0.5,
+            started_tick: 100,
+            genome,
+        });
+        assert_eq!(world.render_view().organisms[0].gestation, Some(0.0));
+
+        // Halfway through, to within a tick of rounding.
+        world.state.tick = 100 + gestation_ticks / 2;
+        let half = world.render_view().organisms[0].gestation.expect("gestating");
+        assert!((half - 0.5).abs() < 1.0 / gestation_ticks as f32, "{half}");
+
+        // Exactly due, and then well past it: clamped at 1, never above.
+        world.state.tick = 100 + gestation_ticks;
+        assert_eq!(world.render_view().organisms[0].gestation, Some(1.0));
+        world.state.tick = 100 + gestation_ticks * 9;
+        assert_eq!(world.render_view().organisms[0].gestation, Some(1.0));
+
+        // And it goes away with the escrow.
+        world.state.organisms.get_mut(id).expect("alive").escrow = None;
+        assert_eq!(world.render_view().organisms[0].gestation, None);
     }
 
     #[test]

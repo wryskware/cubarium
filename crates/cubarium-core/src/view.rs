@@ -18,6 +18,12 @@ pub struct OrganismView {
     pub mode: Mode,
     pub fed: bool,
     pub juvenile: bool,
+    /// Gestation progress in `[0, 1]` while an escrow is held, `None` otherwise.
+    ///
+    /// `(tick - escrow.started_tick) / gestation_ticks`, with `gestation_ticks` derived
+    /// exactly as the world derives it (`round(organism.gestation_seconds / DT)`), so a
+    /// renderer can show a birth coming without reading the world's escrow.
+    pub gestation: Option<f32>,
     /// The segments traveled this tick (for renderer-side trails).
     pub moved: Vec<PathSegment>,
 }

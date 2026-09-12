@@ -100,3 +100,32 @@ lets Wrysk change the visual vocabulary directly while the source rigs keep
 its poses editable. The next runtime slice should connect selected art to
 real feeding/rest/gestation and producer growth, then evaluate inheritance
 and ecological diversity separately from these scripted demonstrations.
+
+## Live world
+
+```sh
+cubarium run --art assets/atelier --sink web
+```
+
+This is the persistent M2 world, not a study: every organism is drawn with a
+baked clip chosen by the state the world actually put it in — `rest` while
+resting, `move` while seeking, `feed` while feeding, and `bud` while an escrow
+is gestating, that clip advanced by the real gestation progress so its last
+frame lands on the birth. Looping clips run on simulated time, so `--speed 8`
+animates eight times faster and a paused world holds its pose.
+
+Which rig an organism uses is its inherited `hue` gene's tercile —
+`min(2, floor(hue × 3))`, so lantern/sail/mossback are hue 0–⅓, ⅓–⅔ and ⅔–1.
+That is **cosmetic only**. `hue` is copied exactly at birth, which is why a
+lineage keeps its look, but it is not a species, a diet, or a capability, and
+the simulation does not know the rigs exist.
+
+The habitat motifs are stamped per field cell wherever producer biomass passes
+`MOTIF_THRESHOLD`, fading up to full opacity at `MOTIF_FULL`
+(`crates/cubarium/src/art_present.rs`, both review-tunable). They are scenery
+that follows the producer field: they are not organisms, nothing in the world
+knows about them, they never move and they are never eaten.
+
+Without `--art` the image is the decided M2 one, pixel for pixel. The web
+viewer's HUD carries the simulation speed (`tick N · 60 fps · 8× time`), so a
+fast run is never mistaken for a live-speed one.

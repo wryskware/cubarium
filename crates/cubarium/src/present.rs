@@ -393,7 +393,7 @@ impl Presenter {
 }
 
 /// Copy a per-cell vector into a `ScalarField` (cell order is the field's own index order).
-fn copy_field(out: &mut ScalarField, values: &[f64]) {
+pub(crate) fn copy_field(out: &mut ScalarField, values: &[f64]) {
     let n = out.values.len().min(values.len());
     out.values[..n].copy_from_slice(&values[..n]);
     for v in out.values[n..].iter_mut() {
@@ -402,7 +402,7 @@ fn copy_field(out: &mut ScalarField, values: &[f64]) {
 }
 
 /// Copy with everything at or below `threshold` zeroed, so `draw_field` paints flecks.
-fn threshold_field(out: &mut ScalarField, values: &[f64], threshold: f64) {
+pub(crate) fn threshold_field(out: &mut ScalarField, values: &[f64], threshold: f64) {
     for (i, slot) in out.values.iter_mut().enumerate() {
         let v = values.get(i).copied().unwrap_or(0.0);
         *slot = if v > threshold { v } else { 0.0 };
@@ -424,6 +424,7 @@ mod tests {
             mode,
             fed: false,
             juvenile: false,
+            gestation: None,
             moved: Vec::new(),
         }
     }

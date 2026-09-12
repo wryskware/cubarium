@@ -54,6 +54,11 @@ surface renderer. It is scripted visual evidence, not M3 evolution or a full
 runtime port. The proposed next slice is to select readable artwork and connect
 its actions/growth to actual world state. M3a's narrow lobe grammar remains
 revisable in light of this feedback; the art study does not satisfy E4/E5/E6.
+Later the same day the live integration landed: `run --art` draws the M2 world
+with the clips driven by real rest/seek/feed/gestation state and motifs by
+producer biomass, leaving the default image untouched (see the workflow note).
+Still open: mode-dependent turning/noise in the controller, which needs matched
+ecological runs before it changes the E2 regime.
 
 ## M1 — prove the surface and presentation path
 

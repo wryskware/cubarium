@@ -11,6 +11,7 @@
 #![forbid(unsafe_code)]
 
 pub mod art;
+pub mod art_present;
 pub mod cli;
 pub mod clock;
 pub mod net;
