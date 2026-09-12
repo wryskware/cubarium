@@ -118,6 +118,7 @@ cubarium run [--config world.toml] [--state state/] [--sink preview|shim|png|non
 | `--seed` | from config | Overrides `config.seed` when creating a fresh world |
 | `--fresh` | off | Ignore existing snapshots and create a new world |
 | `--telemetry` | `<state>/telemetry.jsonl` | JSON-lines telemetry file (appended) |
+| `--fields` | `<state>/fields.jsonl` | Field dump file, written only when `capacity.field_dump_seconds > 0` |
 
 Startup: unless `--fresh`, load the newest valid snapshot in `--state` (trying
 older ones on failure, logging each reason); otherwise create a new world from
