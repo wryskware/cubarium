@@ -36,6 +36,23 @@ Procedural gaits make subpixel continuous motion visible as intentional steps,
 glides, pauses, or contractions. Interpolate using the actual transported motion
 path; naïvely rounding independent positions can make slow creatures shimmer.
 
+## Palette (leaning, 2026-09-11)
+
+Wrysk's room and desktop lean Outrun: deep indigo and violet with electric
+blue-cyan light, magenta, and one warm orange accent. The M2 presentation
+uses that family (sRGB, converted to linear light in the renderer):
+
+| Role | Color | Use |
+| --- | --- | --- |
+| Floor | `#12093A` at 0.12 brightness | Uniform night floor under everything; "empty" reads as dark, not off |
+| Producer | `#1E2798` → `#42C5F8` by density | Substrate glow; rich patches turn cyan |
+| Detritus | `#510B6D` | Dim violet flecks |
+| Body hue ramp | `#FF2AFC` (hue 0) → `#42C6FF` (hue 1) | Inherited accent; brightness by mode |
+| Feeding flash | `#FF9B50` | Core lobe while intake is nonzero; the only warm color |
+| Trails | body color × 0.25 | Short renderer-only history |
+
+Judged on the cube; adjust by looking, not by theory.
+
 ## Pixel treatment and seams
 
 Draw at native face resolution. Use sparse coverage and stable fractional

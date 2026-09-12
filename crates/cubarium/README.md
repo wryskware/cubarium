@@ -16,13 +16,15 @@ cubarium demo [--scene body|vertex|patch|all] [--sink preview|shim|png]
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--scene` | `all` | Which fixture(s) to run |
-| `--sink` | `preview` | Where frames go |
+| `--sink` | `preview` | Where frames go (`preview`, `shim`, `png`, `web`) |
 | `--seconds` | `0` (until closed) | Stop after this much wall time; required for `png` |
 | `--seed` | `1` | Seed for the fixture's own deterministic PRNG (SplitMix64) |
 | `--addr` | `127.0.0.1:7392` | Shim daemon address for `--sink shim` |
 | `--out` | `captures` | Directory for PNG captures |
 | `--every` | `30` | With `png`, save one capture every N rendered frames |
 | `--scale` | `4` | Preview window pixel scale |
+| `--fps` | `60` | Render and output rate (the simulation stays at 20 Hz) |
+| `--web-port` | `7393` | Port for the `web` sink |
 
 Exit code 0 on clean stop, nonzero with a message on a fatal error (window
 creation failure, unwritable capture directory). Losing the shim is not fatal.
@@ -30,12 +32,15 @@ creation failure, unwritable capture directory). Losing the shim is not fatal.
 ## Clock
 
 Simulation ticks at a fixed 20 Hz (`dt = 0.05 s`, integer tick counter);
-rendering at 30 Hz. Real time drives both from one monotonic clock. If the host
+rendering at `--fps` (default 60). Between ticks the presenter interpolates
+each organism along the path it traveled in the last tick (its `moved`
+segments, which already carry faces), so 60 fps output shows continuous motion
+from a 20 Hz world; fields are not interpolated. Real time drives both from one monotonic clock. If the host
 stalls, run at most four catch-up ticks, then drop render work and log the lag
 once per second at most. Sleeping between frames must not busy-wait. Ticks are
 never fast-forwarded after a suspend: on resume the clock re-bases and reports
-the pause. Rendering shows the state of the last completed tick (no interpolation
-in M1; render views are cloned snapshots of scene state, never a live reference).
+the pause. Rendering shows the state of the last completed tick (render views are
+cloned snapshots of scene state, never a live reference).
 
 ## Sinks
 
@@ -58,6 +63,13 @@ in M1; render views are cloned snapshots of scene state, never a live reference)
   frame and never blocks on the socket. On send error: log once, back off
   100 ms doubling to 5 s, reconnect, keep the newest frame. The simulation loop
   never waits on this thread.
+- `web`: a local HTTP server on `127.0.0.1:<web-port>` serving a viewer page
+  at `/` and the newest encoded frame at `/frame` (8-byte little-endian tick
+  followed by the 61,440 frame bytes, `Cache-Control: no-store`). The page
+  maps the five faces onto a rotatable cube (bottom black) using exactly the
+  `face_frame` orientation table, shows the flat net beside it, and polls
+  `/frame` every animation frame. It exists so the world can be watched and
+  screenshotted without the cube. Same newest-frame mailbox as the shim sink.
 - `png`: writes `frame_NNNNNN.png` of the net layout at scale 1 (Top above
   Front; Left, Front, Right, Back in a row; black elsewhere), every `--every`
   frames, plus `final.png` on exit.
