@@ -1,0 +1,399 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cubarium viewer</title>
+<style>
+  :root {
+    --bg: #0B0525;
+    --panel: #140A34;
+    --edge: #2A1A5E;
+    --ink: #C9BCF2;
+    --ink-dim: #7C6BB4;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  body { padding: 12px; }
+  .wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-start;
+    max-width: 1360px;
+    margin: 0 auto;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--edge);
+    border-radius: 6px;
+    padding: 8px;
+    position: relative;
+    min-width: 0;
+  }
+  #cubePanel { flex: 1 1 420px; max-width: 620px; }
+  #netPanel  { flex: 1 1 480px; max-width: 792px; }
+  #cubeBox { width: 100%; aspect-ratio: 1 / 1; }
+  #cubeBox canvas { display: block; width: 100% !important; height: 100% !important; border-radius: 4px; }
+  #net { display: block; width: 100%; height: auto; image-rendering: pixelated; border-radius: 4px; }
+  .cap { color: var(--ink-dim); letter-spacing: .09em; text-transform: uppercase; margin: 0 0 6px 2px; }
+  #hud {
+    position: absolute; right: 12px; bottom: 12px;
+    background: rgba(11, 5, 37, .78);
+    border: 1px solid var(--edge);
+    border-radius: 4px;
+    padding: 3px 7px;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  #hud .warn { color: #FF7AA2; }
+  @media (max-width: 520px) { body { padding: 8px; } .cap { font-size: 10px; } }
+</style>
+
+<div class="wrap">
+  <div class="panel" id="cubePanel">
+    <p class="cap">cube &mdash; drag to orbit, wheel to zoom</p>
+    <div id="cubeBox"></div>
+    <div id="hud">tick &mdash; &middot; -- fps</div>
+  </div>
+  <div class="panel" id="netPanel">
+    <p class="cap">net &mdash; top above front; left front right back</p>
+    <canvas id="net" width="768" height="384"></canvas>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+"use strict";
+
+// ---------------------------------------------------------------------------
+// Face embedding table.
+//
+// This is `cubarium_surface::face_frame` verbatim; the Rust unit test in
+// `sink/web.rs` parses this constant out of this file and compares every
+// center/tangent_u/tangent_v/normal against the Rust table, so the two cannot
+// drift apart. Do not edit one without the other.
+//
+// Chart coordinates: u runs image-right, v runs image-down, both 0..64 from the
+// image's top-left corner. A chart point sits on the unit cube [-1,1]^3 at
+//   P = center + (u/32 - 1) * tangent_u + (v/32 - 1) * tangent_v
+//
+// | Face (frame index) | Cube side | +u        | +v        |
+// | Front (0)          | +Z        | +X        | -Y        |
+// | Right (1)          | +X        | -Z        | -Y        |
+// | Back  (2)          | -Z        | -X        | -Y        |
+// | Left  (3)          | -X        | +Z        | -Y        |
+// | Top   (4)          | +Y        | +X        | +Z        |
+//
+// Self-test corners. The built-in test pattern marks chart (0,0) white,
+// (63,0) red and (0,63) green on every face. Evaluating P at those pixels
+// (a, b -> -1 or +1) puts them on these cube corners:
+//
+// | Face  | (0,0) white   | (63,0) red    | (0,63) green  |
+// | Front | (-1, +1, +1)  | (+1, +1, +1)  | (-1, -1, +1)  |
+// | Right | (+1, +1, +1)  | (+1, +1, -1)  | (+1, -1, +1)  |
+// | Back  | (+1, +1, -1)  | (-1, +1, -1)  | (+1, -1, -1)  |
+// | Left  | (-1, +1, -1)  | (-1, +1, +1)  | (-1, -1, -1)  |
+// | Top   | (-1, +1, -1)  | (+1, +1, -1)  | (-1, +1, +1)  |
+//
+// Read it as: the white markers of Front, Left and Top all meet at the single
+// cube corner (-1, +1, +1) -- the top corner shared by the Front and Left faces.
+// Every side face's white/red markers sit on the cube's *top* rim and its green
+// marker on the bottom (open) rim, because +v is -Y for all four sides. Top's
+// three markers are all on +Y, with white and red along the -Z (Back) edge:
+// the Top chart is seen looking down with Back at the top of the image.
+// ---------------------------------------------------------------------------
+const FACE_FRAMES = [
+  { face: 0, name: "Front", center: [0, 0, 1],  u: [1, 0, 0],  v: [0, -1, 0], n: [0, 0, 1] },
+  { face: 1, name: "Right", center: [1, 0, 0],  u: [0, 0, -1], v: [0, -1, 0], n: [1, 0, 0] },
+  { face: 2, name: "Back",  center: [0, 0, -1], u: [-1, 0, 0], v: [0, -1, 0], n: [0, 0, -1] },
+  { face: 3, name: "Left",  center: [-1, 0, 0], u: [0, 0, 1],  v: [0, -1, 0], n: [-1, 0, 0] },
+  { face: 4, name: "Top",   center: [0, 1, 0],  u: [1, 0, 0],  v: [0, 0, 1],  n: [0, 1, 0] }
+];
+
+const FACE_SIZE = 64;
+const FACE_BYTES = FACE_SIZE * FACE_SIZE * 3;
+const NUM_FACES = 5;
+const FRAME_BYTES = NUM_FACES * FACE_BYTES;
+
+// The net grid cell (column, row) each face occupies: Top above Front, then
+// Left, Front, Right, Back in a row. Mirrors `cubarium::net::net_cell`.
+const NET_CELL = [[1, 1], [2, 1], [3, 1], [0, 1], [1, 0]];
+const NET_COLS = 4, NET_ROWS = 2, NET_SCALE = 3;
+
+function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+
+// ---------------------------------------------------------------------------
+// Frame bytes. One persistent buffer: the textures hold subarray views of it,
+// so a poll only copies bytes in and flags the textures dirty.
+// ---------------------------------------------------------------------------
+const frameBytes = new Uint8Array(FRAME_BYTES);
+let tick = 0;
+let live = false;          // true once /frame has answered at least once
+
+// Distinct dim base color per face, plus a faint ramp: red grows with +u,
+// green grows with +v, so the chart axes are readable at a glance.
+const TEST_BASE = [
+  [58, 10, 14],   // Front  red
+  [10, 58, 18],   // Right  green
+  [14, 18, 66],   // Back   blue
+  [58, 48, 10],   // Left   amber
+  [50, 12, 58]    // Top    violet
+];
+
+function mark(bytes, face, x0, y0, rgb) {
+  // A 3x3 block anchored at the named chart corner, so the marker is visible on
+  // the cube while the documented corner pixel itself is lit.
+  const o = face * FACE_BYTES;
+  for (let dy = 0; dy < 3; dy++) {
+    for (let dx = 0; dx < 3; dx++) {
+      const x = x0 === 0 ? dx : x0 - dx;
+      const y = y0 === 0 ? dy : y0 - dy;
+      const i = o + (y * FACE_SIZE + x) * 3;
+      bytes[i] = rgb[0]; bytes[i + 1] = rgb[1]; bytes[i + 2] = rgb[2];
+    }
+  }
+}
+
+function fillSelfTest(bytes) {
+  for (let f = 0; f < NUM_FACES; f++) {
+    const base = TEST_BASE[f], o = f * FACE_BYTES;
+    for (let y = 0; y < FACE_SIZE; y++) {
+      for (let x = 0; x < FACE_SIZE; x++) {
+        const i = o + (y * FACE_SIZE + x) * 3;
+        bytes[i] = Math.min(255, base[0] + x);
+        bytes[i + 1] = Math.min(255, base[1] + y);
+        bytes[i + 2] = base[2];
+      }
+    }
+    mark(bytes, f, 0, 0, [255, 255, 255]);   // chart top-left
+    mark(bytes, f, 63, 0, [255, 40, 40]);    // chart top-right
+    mark(bytes, f, 0, 63, [40, 255, 90]);    // chart bottom-left
+  }
+}
+fillSelfTest(frameBytes);
+
+// ---------------------------------------------------------------------------
+// Three.js scene.
+// ---------------------------------------------------------------------------
+const box = document.getElementById("cubeBox");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setClearColor(0x0B0525, 1);
+box.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+
+const textures = FACE_FRAMES.map(function (f) {
+  const view = frameBytes.subarray(f.face * FACE_BYTES, (f.face + 1) * FACE_BYTES);
+  const t = new THREE.DataTexture(view, FACE_SIZE, FACE_SIZE, THREE.RGBFormat);
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.NearestFilter;
+  t.generateMipmaps = false;
+  // DataTexture row 0 is the chart's top row (v = 0); with flipY = false the
+  // texture's t coordinate grows with the row index, so t == v/64 directly.
+  t.flipY = false;
+  t.unpackAlignment = 1;
+  t.needsUpdate = true;
+  return t;
+});
+
+// BoxGeometry(2,2,2) so vertex positions are exactly the unit cube [-1,1]^3 of
+// `cubarium_surface` -- no scaling between the table above and the geometry.
+//
+// The UVs are built here rather than trusted from BoxGeometry's defaults: for
+// every vertex, the face is identified by its normal and the chart coordinates
+// come straight out of the embedding, inverted. P = C + a*Tu + b*Tv with Tu, Tv
+// orthonormal gives a = P . Tu and b = P . Tv in [-1,1], and (a+1)/2, (b+1)/2
+// are the normalized chart coordinates. The -Y side has no chart; it is black.
+const geometry = new THREE.BoxGeometry(2, 2, 2);
+(function buildUVs() {
+  const pos = geometry.attributes.position;
+  const nor = geometry.attributes.normal;
+  const uv = geometry.attributes.uv;
+  for (let i = 0; i < pos.count; i++) {
+    const p = [pos.getX(i), pos.getY(i), pos.getZ(i)];
+    const n = [nor.getX(i), nor.getY(i), nor.getZ(i)];
+    const f = FACE_FRAMES.find(function (ff) { return dot(ff.n, n) > 0.5; });
+    if (!f) { uv.setXY(i, 0, 0); continue; }   // the open bottom (-Y)
+    uv.setXY(i, (dot(p, f.u) + 1) / 2, (dot(p, f.v) + 1) / 2);
+  }
+  uv.needsUpdate = true;
+})();
+
+// BoxGeometry material groups are ordered +X, -X, +Y, -Y, +Z, -Z.
+const SIDE_NORMALS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+const materials = SIDE_NORMALS.map(function (n) {
+  const f = FACE_FRAMES.find(function (ff) { return dot(ff.n, n) > 0.5; });
+  return f
+    ? new THREE.MeshBasicMaterial({ map: textures[f.face] })
+    : new THREE.MeshBasicMaterial({ color: 0x000000 });   // bottom, open side
+});
+scene.add(new THREE.Mesh(geometry, materials));
+
+// ---------------------------------------------------------------------------
+// Orbit control. yaw 0 puts the camera on +Z looking at Front; +yaw swings
+// toward +X. The initial view matches the preview window: slightly above the
+// Front/Right corner.
+// ---------------------------------------------------------------------------
+const MAX_PITCH = 85 * Math.PI / 180;
+const view = { yaw: Math.PI / 4, pitch: 22 * Math.PI / 180, dist: 5 };
+let autoRotate = true;
+let dragging = false, lastX = 0, lastY = 0;
+
+function placeCamera() {
+  const cp = Math.cos(view.pitch), sp = Math.sin(view.pitch);
+  camera.position.set(view.dist * cp * Math.sin(view.yaw), view.dist * sp, view.dist * cp * Math.cos(view.yaw));
+  camera.up.set(0, 1, 0);
+  camera.lookAt(0, 0, 0);
+}
+
+const surface = renderer.domElement;
+surface.style.touchAction = "none";
+surface.style.cursor = "grab";
+surface.addEventListener("pointerdown", function (e) {
+  dragging = true; autoRotate = false; lastX = e.clientX; lastY = e.clientY;
+  surface.style.cursor = "grabbing";
+  surface.setPointerCapture(e.pointerId);
+});
+surface.addEventListener("pointermove", function (e) {
+  if (!dragging) return;
+  const k = 2 * Math.PI / Math.max(surface.clientWidth, 1);
+  view.yaw += (e.clientX - lastX) * k;
+  view.pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, view.pitch + (e.clientY - lastY) * k));
+  lastX = e.clientX; lastY = e.clientY;
+});
+function endDrag(e) {
+  if (!dragging) return;
+  dragging = false;
+  surface.style.cursor = "grab";
+  if (e && e.pointerId !== undefined && surface.hasPointerCapture(e.pointerId)) {
+    surface.releasePointerCapture(e.pointerId);
+  }
+}
+surface.addEventListener("pointerup", endDrag);
+surface.addEventListener("pointercancel", endDrag);
+surface.addEventListener("wheel", function (e) {
+  e.preventDefault();
+  view.dist = Math.max(2.6, Math.min(14, view.dist * Math.exp(e.deltaY * 0.0012)));
+}, { passive: false });
+
+function resize() {
+  const w = Math.max(box.clientWidth | 0, 1);
+  const h = Math.max(box.clientHeight | 0, w);
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener("resize", resize);
+// The panels reflow on their own when the flex row wraps at phone width, which is not
+// always a window resize; follow the box itself.
+if (window.ResizeObserver) new ResizeObserver(resize).observe(box);
+resize();
+
+// ---------------------------------------------------------------------------
+// The flat net, drawn from the same bytes at 3x with nearest-neighbour.
+// ---------------------------------------------------------------------------
+const netCanvas = document.getElementById("net");
+netCanvas.width = NET_COLS * FACE_SIZE * NET_SCALE;
+netCanvas.height = NET_ROWS * FACE_SIZE * NET_SCALE;
+const netCtx = netCanvas.getContext("2d");
+netCtx.imageSmoothingEnabled = false;
+
+const netSrc = document.createElement("canvas");
+netSrc.width = NET_COLS * FACE_SIZE;
+netSrc.height = NET_ROWS * FACE_SIZE;
+const netSrcCtx = netSrc.getContext("2d");
+const netImage = netSrcCtx.createImageData(netSrc.width, netSrc.height);
+for (let i = 3; i < netImage.data.length; i += 4) netImage.data[i] = 255;
+
+function drawNet() {
+  const px = netImage.data;
+  for (let f = 0; f < NUM_FACES; f++) {
+    const ox = NET_CELL[f][0] * FACE_SIZE, oy = NET_CELL[f][1] * FACE_SIZE;
+    const o = f * FACE_BYTES;
+    for (let y = 0; y < FACE_SIZE; y++) {
+      let s = o + y * FACE_SIZE * 3;
+      let d = ((oy + y) * netSrc.width + ox) * 4;
+      for (let x = 0; x < FACE_SIZE; x++) {
+        px[d] = frameBytes[s]; px[d + 1] = frameBytes[s + 1]; px[d + 2] = frameBytes[s + 2];
+        s += 3; d += 4;
+      }
+    }
+  }
+  netSrcCtx.putImageData(netImage, 0, 0);
+  netCtx.imageSmoothingEnabled = false;
+  netCtx.clearRect(0, 0, netCanvas.width, netCanvas.height);
+  netCtx.drawImage(netSrc, 0, 0, netCanvas.width, netCanvas.height);
+}
+
+// ---------------------------------------------------------------------------
+// Polling. One fetch in flight at a time; a failure falls back to the built-in
+// self-test pattern so the mapping stays verifiable with no host running.
+// ---------------------------------------------------------------------------
+let inFlight = false;
+let dirty = true;
+
+function poll() {
+  if (inFlight) return;
+  inFlight = true;
+  fetch("/frame", { cache: "no-store" })
+    .then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.arrayBuffer();
+    })
+    .then(function (buf) {
+      if (buf.byteLength !== 8 + FRAME_BYTES) throw new Error("short frame: " + buf.byteLength);
+      const dv = new DataView(buf);
+      tick = Number(dv.getBigUint64(0, true));
+      frameBytes.set(new Uint8Array(buf, 8, FRAME_BYTES));
+      if (!live) { live = true; showHud(); }
+      dirty = true;
+    })
+    .catch(function () {
+      if (live) { live = false; fillSelfTest(frameBytes); dirty = true; showHud(); }
+    })
+    .finally(function () { inFlight = false; });
+}
+
+const hud = document.getElementById("hud");
+let frames = 0, fps = 0, fpsMark = performance.now(), lastT = performance.now();
+
+// Driven both by the fps window and by a live/self-test flip, so the label is never
+// left reading "self-test" after the host has answered.
+function showHud() {
+  const rate = fps > 0 ? fps.toFixed(0) + " fps" : "-- fps";
+  hud.innerHTML = live
+    ? ("tick " + tick + " &middot; " + rate)
+    : ('<span class="warn">self-test</span> &middot; ' + rate);
+}
+
+function loop(now) {
+  requestAnimationFrame(loop);
+  const dt = Math.min((now - lastT) / 1000, 0.25);
+  lastT = now;
+
+  poll();
+
+  if (dirty) {
+    for (let i = 0; i < NUM_FACES; i++) textures[i].needsUpdate = true;
+    drawNet();
+    dirty = false;
+  }
+
+  if (autoRotate) view.yaw += 0.12 * dt;
+  placeCamera();
+  renderer.render(scene, camera);
+
+  frames++;
+  if (now - fpsMark >= 500) {
+    fps = frames * 1000 / (now - fpsMark);
+    frames = 0; fpsMark = now;
+    showHud();
+  }
+}
+requestAnimationFrame(loop);
+</script>

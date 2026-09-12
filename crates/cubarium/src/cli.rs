@@ -48,6 +48,12 @@ pub struct Demo {
     /// Preview window pixel scale.
     #[arg(long, default_value_t = 4)]
     pub scale: usize,
+    /// Render and output rate in frames per second; the simulation stays at 20 Hz.
+    #[arg(long, default_value_t = crate::clock::RENDER_HZ)]
+    pub fps: u32,
+    /// Port for the `web` sink (a viewer page at http://127.0.0.1:<port>/).
+    #[arg(long, default_value_t = 7393)]
+    pub web_port: u16,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,6 +80,8 @@ pub enum SinkArg {
     Preview,
     Shim,
     Png,
+    /// Local HTTP viewer mapping the frame onto a rotatable cube.
+    Web,
 }
 
 /// `run` adds a headless sink to the three `demo` sinks.
@@ -82,6 +90,8 @@ pub enum RunSinkArg {
     Preview,
     Shim,
     Png,
+    /// Local HTTP viewer mapping the frame onto a rotatable cube.
+    Web,
     /// Headless: no canvas, no encode, no frames.
     None,
 }
@@ -140,6 +150,24 @@ pub struct Run {
     /// Preview window pixel scale.
     #[arg(long, default_value_t = 4)]
     pub scale: usize,
+    /// Render and output rate in frames per second; the simulation stays at 20 Hz.
+    #[arg(long, default_value_t = crate::clock::RENDER_HZ)]
+    pub fps: u32,
+    /// Port for the `web` sink (a viewer page at http://127.0.0.1:<port>/).
+    #[arg(long, default_value_t = 7393)]
+    pub web_port: u16,
+}
+
+/// `--fps` outside [`crate::clock::MIN_FPS`]..=[`crate::clock::MAX_FPS`] is a typo, not a
+/// request: refuse it rather than silently clamping.
+fn check_fps(fps: u32) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        (crate::clock::MIN_FPS..=crate::clock::MAX_FPS).contains(&fps),
+        "--fps must be between {} and {}",
+        crate::clock::MIN_FPS,
+        crate::clock::MAX_FPS
+    );
+    Ok(())
 }
 
 impl Run {
@@ -174,6 +202,7 @@ impl Run {
         }
         anyhow::ensure!(self.every >= 1, "--every must be at least 1");
         anyhow::ensure!(self.scale >= 1, "--scale must be at least 1");
+        check_fps(self.fps)?;
         Ok(())
     }
 }
@@ -187,6 +216,7 @@ impl Demo {
         }
         anyhow::ensure!(self.every >= 1, "--every must be at least 1");
         anyhow::ensure!(self.scale >= 1, "--scale must be at least 1");
+        check_fps(self.fps)?;
         Ok(())
     }
 }
@@ -224,6 +254,7 @@ mod tests {
         assert_eq!(d.out, PathBuf::from("captures"));
         assert_eq!(d.every, 30);
         assert_eq!(d.scale, 4);
+        assert_eq!(d.fps, 60);
     }
 
     #[test]
@@ -231,7 +262,7 @@ mod tests {
         let d = demo([
             "cubarium", "demo", "--scene", "vertex", "--sink", "shim", "--seconds", "20",
             "--seed", "9", "--addr", "10.0.0.4:1234", "--out", "/tmp/c", "--every", "5",
-            "--scale", "2",
+            "--scale", "2", "--fps", "24",
         ]);
         assert_eq!(d.scene, SceneArg::Vertex);
         assert_eq!(d.sink, SinkArg::Shim);
@@ -241,6 +272,7 @@ mod tests {
         assert_eq!(d.out, PathBuf::from("/tmp/c"));
         assert_eq!(d.every, 5);
         assert_eq!(d.scale, 2);
+        assert_eq!(d.fps, 24);
         d.validate().unwrap();
     }
 
@@ -272,6 +304,7 @@ mod tests {
         assert_eq!(r.out, PathBuf::from("captures"));
         assert_eq!(r.every, 30);
         assert_eq!(r.scale, 4);
+        assert_eq!(r.fps, 60);
         r.validate().unwrap();
     }
 
@@ -282,6 +315,7 @@ mod tests {
             "--speed", "0", "--seconds", "600", "--seed", "7", "--fresh", "--telemetry",
             "/tmp/t.jsonl", "--fields", "/tmp/f.jsonl", "--events", "/tmp/e.jsonl",
             "--addr", "10.0.0.4:1", "--out", "/tmp/c", "--every", "5", "--scale", "2",
+            "--fps", "120",
         ]);
         assert_eq!(r.config, Some(PathBuf::from("w.toml")));
         assert_eq!(r.state, PathBuf::from("/tmp/s"));
@@ -297,6 +331,7 @@ mod tests {
         assert_eq!(r.out, PathBuf::from("/tmp/c"));
         assert_eq!(r.every, 5);
         assert_eq!(r.scale, 2);
+        assert_eq!(r.fps, 120);
         r.validate().unwrap();
     }
 
@@ -327,6 +362,20 @@ mod tests {
         assert!(parse_run(["cubarium", "run", "--speed=nan"]).validate().is_err());
         assert!(parse_run(["cubarium", "run", "--every", "0"]).validate().is_err());
         assert!(parse_run(["cubarium", "run", "--scale", "0"]).validate().is_err());
+    }
+
+    #[test]
+    fn the_frame_rate_must_be_inside_the_documented_range() {
+        for fps in ["0", "241", "10000"] {
+            let err = parse_run(["cubarium", "run", "--fps", fps]).validate().unwrap_err();
+            assert!(err.to_string().contains("--fps must be"), "{fps}: {err}");
+            let err = demo(["cubarium", "demo", "--fps", fps]).validate().unwrap_err();
+            assert!(err.to_string().contains("--fps must be"), "{fps}: {err}");
+        }
+        for fps in ["1", "30", "60", "144", "240"] {
+            parse_run(["cubarium", "run", "--fps", fps]).validate().unwrap();
+            demo(["cubarium", "demo", "--fps", fps]).validate().unwrap();
+        }
     }
 
     #[test]

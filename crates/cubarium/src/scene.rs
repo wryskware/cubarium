@@ -5,12 +5,14 @@
 //! tick. Every spatial step goes through `cubarium-surface`.
 
 use cube_proto::Face;
-use cubarium_render::{BodyShape, Canvas, Lobe, Trail, draw_field, draw_trail, stamp_body};
+use cubarium_render::{BodyShape, Canvas, Lobe, Trail, draw_trail, stamp_body};
 use cubarium_surface::{
-    FieldGraph, PixelImage, ScalarField, SurfacePoint, Vec2, deposit, diffuse, travel_into,
+    FieldGraph, PathSegment, PixelImage, ScalarField, SurfacePoint, Vec2, deposit, diffuse,
+    travel_into,
 };
 
 use crate::clock::DT;
+use crate::present::{PALETTE, TRAIL_BRIGHTNESS, draw_floor, draw_ramp_field, interpolate};
 use crate::rng::SplitMix64;
 
 /// Which fixture(s) to run.
@@ -23,18 +25,30 @@ pub enum SceneKind {
 }
 
 // --- Appearance constants from `crates/cubarium/README.md` -------------------------
+//
+// The fixtures share the M2 palette (`design/appearance.md` "Palette", decoded in
+// [`crate::present`]) so that what a capture teaches about color holds for the world
+// too: the same night floor, the same indigo-to-cyan substrate ramp, bodies at the
+// magenta end of the hue ramp, and trails at the body color times
+// [`TRAIL_BRIGHTNESS`].
 
-/// Warm white for the fixture bodies.
-pub const BODY_COLOR: [f32; 3] = [0.9, 0.7, 0.4];
-/// Dim blue-green for the history trail.
-pub const TRAIL_COLOR: [f32; 3] = [0.1, 0.35, 0.3];
+/// The fixture bodies sit at hue 0 of the M2 body ramp: magenta.
+pub fn body_color() -> [f32; 3] {
+    PALETTE.hue_magenta
+}
+
+/// The history trail is the body color at the M2 trail brightness.
+pub fn trail_color() -> [f32; 3] {
+    let c = body_color();
+    [c[0] * TRAIL_BRIGHTNESS, c[1] * TRAIL_BRIGHTNESS, c[2] * TRAIL_BRIGHTNESS]
+}
+
 /// At most 160 trail segments.
 pub const TRAIL_MAX_SEGMENTS: usize = 160;
 /// Eight seconds of trail at 20 Hz.
 pub const TRAIL_MAX_AGE_TICKS: u64 = 8 * crate::clock::TICK_HZ as u64;
-/// Substrate rendering parameters.
+/// The patch field saturates the substrate ramp at this value per cell.
 pub const FIELD_SCALE: f64 = 6.0;
-pub const FIELD_COLOR: [f32; 3] = [0.12, 0.5, 0.2];
 
 /// The asymmetric fixture body: core, head, and one side lobe.
 pub fn fixture_body() -> BodyShape {
@@ -60,10 +74,15 @@ fn rotate_screen_ccw(v: Vec2, a: f64) -> Vec2 {
 /// One body as the renderer sees it.
 #[derive(Clone, Debug)]
 pub struct BodyView {
+    /// Where the last completed tick left the body.
     pub anchor: SurfacePoint,
     pub heading: Vec2,
     pub shape: BodyShape,
     pub color: [f32; 3],
+    /// The path traveled *during* that tick, split per chart. Empty for a body that does
+    /// not move; the renderer interpolates along it between frames exactly as the M2
+    /// presenter does (see [`crate::present::interpolate`]).
+    pub moved: Vec<PathSegment>,
 }
 
 /// A cloned snapshot of the last completed tick. Never a live reference into a scene.
@@ -75,17 +94,28 @@ pub struct SceneView {
     pub bodies: Vec<BodyView>,
 }
 
-/// Draw a snapshot: substrate, then the body trail, then the bodies.
-pub fn render(view: &SceneView, canvas: &mut Canvas, scratch: &mut Vec<PixelImage>) {
+/// Draw a snapshot: floor, substrate, then the body trail, then the bodies. `f` is the
+/// clock's interpolation fraction for this frame; bodies are drawn that fraction along
+/// the path they traveled during the last tick (0 draws the tick's own start).
+pub fn render(view: &SceneView, f: f64, canvas: &mut Canvas, scratch: &mut Vec<PixelImage>) {
     canvas.clear();
+    draw_floor(canvas);
     if let Some(field) = &view.field {
-        draw_field(canvas, field, FIELD_SCALE, FIELD_COLOR, true);
+        draw_ramp_field(
+            canvas,
+            field,
+            FIELD_SCALE,
+            PALETTE.producer_low,
+            PALETTE.producer_high,
+            true,
+        );
     }
     if let Some(trail) = &view.trail {
-        draw_trail(canvas, trail, view.tick, TRAIL_MAX_AGE_TICKS, TRAIL_COLOR);
+        draw_trail(canvas, trail, view.tick, TRAIL_MAX_AGE_TICKS, trail_color());
     }
     for b in &view.bodies {
-        stamp_body(canvas, b.anchor, b.heading, &b.shape, b.color, scratch);
+        let (anchor, heading) = interpolate(&b.moved, b.anchor, b.heading, f);
+        stamp_body(canvas, anchor, heading, &b.shape, b.color, scratch);
     }
 }
 
@@ -151,7 +181,10 @@ impl BodyScene {
             anchor: self.pos,
             heading: self.heading,
             shape: self.shape.clone(),
-            color: BODY_COLOR,
+            color: body_color(),
+            // `travel_buf` still holds the last tick's sweep: the same segments the
+            // trail was fed, which is exactly the path to interpolate along.
+            moved: self.travel_buf.segments.clone(),
         }
     }
 
@@ -199,7 +232,9 @@ impl VertexScene {
                 anchor: SurfacePoint::new(Face::Top, u, p),
                 heading,
                 shape: self.shape.clone(),
-                color: BODY_COLOR,
+                color: body_color(),
+                // The vertex fixture's bodies never move: nothing to interpolate.
+                moved: Vec::new(),
             })
             .collect();
         // The seam straddler holds a fixed heading straight across the Front/Right seam.
@@ -207,7 +242,8 @@ impl VertexScene {
             anchor: SurfacePoint::new(Face::Front, SEAM_ANCHOR.0, SEAM_ANCHOR.1),
             heading: Vec2::new(1.0, 0.0),
             shape: self.shape.clone(),
-            color: BODY_COLOR,
+            color: body_color(),
+            moved: Vec::new(),
         });
         v
     }
@@ -345,12 +381,14 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
+    /// Faces carrying anything above the uniform night floor.
     fn lit_faces(canvas: &Canvas) -> HashSet<Face> {
         let mut f = HashSet::new();
         for face in Face::ALL {
             for y in 0..64u8 {
                 for x in 0..64u8 {
-                    if canvas.get(face, x, y) != [0.0; 3] {
+                    let px = canvas.get(face, x, y);
+                    if (0..3).any(|i| px[i] - PALETTE.floor[i] > 1e-9) {
                         f.insert(face);
                     }
                 }
@@ -432,7 +470,7 @@ mod tests {
         for kind in [SceneKind::Body, SceneKind::Vertex, SceneKind::Patch, SceneKind::All] {
             // 20 s of simulation, the capture length the contract asks for.
             let s = run(kind, 1, 400);
-            render(&s.view(), &mut canvas, &mut scratch);
+            render(&s.view(), 0.0, &mut canvas, &mut scratch);
             let faces = lit_faces(&canvas);
             assert!(faces.len() > 1, "{kind:?} lit only {faces:?}");
         }
@@ -450,10 +488,48 @@ mod tests {
 
         let mut canvas = Canvas::new();
         let mut scratch = Vec::new();
-        render(&v, &mut canvas, &mut scratch);
+        render(&v, 0.0, &mut canvas, &mut scratch);
         let faces = lit_faces(&canvas);
         // The Top vertices reach the four side faces and the seam body reaches Right.
         assert!(faces.contains(&Face::Top) && faces.contains(&Face::Right), "{faces:?}");
+    }
+
+    /// The fixture body carries its last tick's path, so the demo interpolates between
+    /// ticks exactly as the world does: the stamp at `f = 0` sits where the tick began
+    /// and the stamp at `f → 1` sits where it ended.
+    #[test]
+    fn the_demo_body_is_interpolated_along_its_travel() {
+        let s = run(SceneKind::Body, 11, 100);
+        let v = s.view();
+        let body = &v.bodies[0];
+        assert!(!body.moved.is_empty(), "the wandering body travels every tick");
+
+        let (start, _) = interpolate(&body.moved, body.anchor, body.heading, 0.0);
+        let first = body.moved.first().unwrap();
+        assert_eq!(start.face, first.face);
+        assert!((start.u - first.from.x).abs() < 1e-9 && (start.v - first.from.y).abs() < 1e-9);
+
+        let (end, _) = interpolate(&body.moved, body.anchor, body.heading, 1.0f64.next_down());
+        assert_eq!(end.face, body.anchor.face);
+        assert!((end.u - body.anchor.u).abs() < 1e-9 && (end.v - body.anchor.v).abs() < 1e-9);
+
+        // A whole tick of motion is 4 px/s * 0.05 s = 0.2 px, so the two stamps differ
+        // by a fraction of a pixel: compare the images, not just the anchors.
+        let mut canvas = Canvas::new();
+        let mut scratch = Vec::new();
+        render(&v, 0.0, &mut canvas, &mut scratch);
+        let at_zero: Vec<f32> = Face::ALL
+            .into_iter()
+            .flat_map(|f| (0..64u8).flat_map(move |y| (0..64u8).map(move |x| (f, x, y))))
+            .map(|(f, x, y)| canvas.get(f, x, y)[0])
+            .collect();
+        render(&v, 1.0f64.next_down(), &mut canvas, &mut scratch);
+        let at_one: Vec<f32> = Face::ALL
+            .into_iter()
+            .flat_map(|f| (0..64u8).flat_map(move |y| (0..64u8).map(move |x| (f, x, y))))
+            .map(|(f, x, y)| canvas.get(f, x, y)[0])
+            .collect();
+        assert_ne!(at_zero, at_one, "the interpolated body must move within the tick");
     }
 
     #[test]

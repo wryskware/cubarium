@@ -4,6 +4,7 @@
 pub mod png;
 pub mod preview;
 pub mod shim;
+pub mod web;
 
 use anyhow::Result;
 use cube_proto::Frame;
@@ -11,6 +12,7 @@ use cube_proto::Frame;
 pub use png::PngSink;
 pub use preview::PreviewSink;
 pub use shim::ShimSink;
+pub use web::WebSink;
 
 /// Where rendered frames go.
 pub trait FrameSink {

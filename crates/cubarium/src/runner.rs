@@ -29,7 +29,7 @@ use cubarium_render::Canvas;
 use crate::cli::{Run, RunSinkArg};
 use crate::clock::{Clock, Step, TICK_HZ};
 use crate::present::Presenter;
-use crate::sink::{FrameSink, PngSink, PreviewSink, ShimSink};
+use crate::sink::{FrameSink, PngSink, PreviewSink, ShimSink, WebSink};
 use crate::state::{self, Checkpointer};
 
 /// What one `run` produced. Returned so tests can drive the host through the library
@@ -392,6 +392,7 @@ fn open_sink(run: &Run) -> Result<Option<Box<dyn FrameSink>>> {
         RunSinkArg::Preview => Some(Box::new(PreviewSink::new(run.scale, &run.out)?)),
         RunSinkArg::Shim => Some(Box::new(ShimSink::new(run.addr.clone()))),
         RunSinkArg::Png => Some(Box::new(PngSink::new(&run.out, run.every)?)),
+        RunSinkArg::Web => Some(Box::new(WebSink::new(run.web_port)?)),
     })
 }
 
@@ -522,7 +523,7 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
             }
         }
         _ => {
-            let mut clock = Clock::new(Instant::now());
+            let mut clock = Clock::with_fps(Instant::now(), run.fps);
             let mut wall_ticks = 0u64;
             loop {
                 if reached(ticks_done) || stop.load(Ordering::Relaxed) {
@@ -557,9 +558,11 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
                             );
                         }
                     }
-                    Step::Render => {
+                    Step::Render { f } => {
                         if let (Some(s), Some(v)) = (sink.as_mut(), view.as_ref()) {
-                            presenter.draw(v, &mut canvas);
+                            // `f` walks each body along the path of the last completed
+                            // tick, so a 20 Hz world reads as continuous at `--fps`.
+                            presenter.draw(v, f, &mut canvas);
                             // Exactly one encode per rendered frame; the identical bytes
                             // reach whichever sink is active.
                             canvas.encode(&mut frame);

@@ -5,6 +5,7 @@ mod support;
 
 use cube_proto::{FACE_SIZE, Face};
 use cubarium::net::{PNG_HEIGHT, PNG_WIDTH, net_origin};
+use cubarium_render::srgb_encode;
 use support::{Scratch, run};
 
 /// Decode one of the sink's captures into a tightly packed RGB8 net image.
@@ -20,8 +21,22 @@ fn read_net(path: &std::path::Path) -> Vec<u8> {
     buf
 }
 
-/// Per-face counts of lit pixels and of pixels brighter than the dim substrate.
+/// The encoded night floor: `#12093A` at 0.12 brightness, which every pixel carries.
+fn floor_bytes() -> [u8; 3] {
+    let f = cubarium::present::PALETTE.floor;
+    [srgb_encode(f[0]), srgb_encode(f[1]), srgb_encode(f[2])]
+}
+
+/// Per-face counts of pixels above the bare floor and of pixels brighter than the
+/// substrate can reach.
+///
+/// The producer substrate ramps `#1E2798` → `#42C5F8` scaled by `min(P/P_max, 1)`, and a
+/// settled world keeps `P` under about half of `P_max`, so the substrate's brightest
+/// channel encodes to roughly 150. Bodies are drawn at 0.55–0.8 of a full-scale hue and
+/// clear 200 in their dominant channel at either end of the magenta-to-cyan ramp, so
+/// 170 separates them without assuming a hue.
 fn face_stats(net: &[u8]) -> Vec<(Face, usize, usize)> {
+    let floor = floor_bytes();
     Face::ALL
         .into_iter()
         .map(|face| {
@@ -31,12 +46,10 @@ fn face_stats(net: &[u8]) -> Vec<(Face, usize, usize)> {
                 for x in 0..FACE_SIZE {
                     let o = ((oy + y) * PNG_WIDTH + ox + x) * 3;
                     let px = [net[o], net[o + 1], net[o + 2]];
-                    if px != [0, 0, 0] {
+                    if px != floor {
                         lit += 1;
                     }
-                    // The substrate never exceeds `[0.10, 0.40, 0.16]` in linear light;
-                    // anything far above that green is a body, a fleck, or a trail.
-                    if px[0] > 120 || px[2] > 120 {
+                    if px.iter().any(|&c| c > 170) {
                         bright += 1;
                     }
                 }
@@ -90,11 +103,26 @@ fn the_png_sink_captures_substrate_and_bodies_on_several_faces() {
     let total_lit: usize = stats.iter().map(|(_, l, _)| l).sum();
     let total_bright: usize = stats.iter().map(|(_, _, b)| b).sum();
     assert!(total_bright > 0 && total_bright * 4 < total_lit, "{total_bright} of {total_lit}");
+
+    // The floor is under every pixel of every face, including the faces the world has
+    // not reached: nothing inside a face image is black.
+    for face in Face::ALL {
+        let (ox, oy) = net_origin(face, 1, 0);
+        for y in 0..FACE_SIZE {
+            for x in 0..FACE_SIZE {
+                let o = ((oy + y) * PNG_WIDTH + ox + x) * 3;
+                assert!(
+                    net[o + 2] >= floor_bytes()[2],
+                    "{face:?} {x},{y} is below the night floor"
+                );
+            }
+        }
+    }
 }
 
 #[test]
 fn the_presenter_paints_only_what_the_spec_lists() {
-    use cubarium::present::{Presenter, SUBSTRATE_COLOR};
+    use cubarium::present::{PALETTE, Presenter};
     use cubarium_core::{World, WorldConfig};
     use cubarium_render::Canvas;
 
@@ -106,11 +134,17 @@ fn the_presenter_paints_only_what_the_spec_lists() {
     let mut presenter = Presenter::new();
     presenter.observe(&view);
     let mut canvas = Canvas::new();
-    presenter.draw(&view, &mut canvas);
+    presenter.draw(&view, 0.0, &mut canvas);
 
-    // Every pixel is either the substrate/fleck wash or a body/trail: nothing is white,
-    // and nothing exceeds the canvas range.
-    let mut any_body = false;
+    // The same fields with the organisms taken out: whatever the two images differ by is
+    // exactly the bodies and their trails, whatever hue those bodies happen to carry.
+    let mut fields_only = view.clone();
+    fields_only.organisms.clear();
+    let mut substrate = Canvas::new();
+    let mut blank = Presenter::new();
+    blank.draw(&fields_only, 0.0, &mut substrate);
+
+    let mut body_faces = std::collections::HashSet::new();
     for face in Face::ALL {
         for y in 0..64u8 {
             for x in 0..64u8 {
@@ -118,25 +152,29 @@ fn the_presenter_paints_only_what_the_spec_lists() {
                 for c in px {
                     assert!(c.is_finite() && c >= 0.0, "{face:?} {x},{y}: {px:?}");
                 }
-                if px[2] > SUBSTRATE_COLOR[2] * 2.0 {
-                    any_body = true;
+                let under = substrate.get(face, x, y);
+                // Bodies and trails only ever add light.
+                for i in 0..3 {
+                    assert!(px[i] >= under[i] - 1e-6, "{face:?} {x},{y}: {px:?} vs {under:?}");
+                }
+                if (0..3).any(|i| px[i] - under[i] > 1e-4) {
+                    body_faces.insert(face);
                 }
             }
         }
     }
-    assert!(any_body, "bodies must be visible above the substrate");
+    assert!(body_faces.len() > 1, "bodies must be visible on several faces: {body_faces:?}");
 
-    // With no organisms and no fields there is nothing at all on the image.
-    let mut empty = view.clone();
-    empty.organisms.clear();
+    // With no organisms and no fields there is the night floor and nothing else.
+    let mut empty = fields_only;
     empty.producer.iter_mut().for_each(|v| *v = 0.0);
     empty.detritus.iter_mut().for_each(|v| *v = 0.0);
     let mut blank = Presenter::new();
-    blank.draw(&empty, &mut canvas);
+    blank.draw(&empty, 0.0, &mut canvas);
     for face in Face::ALL {
         for y in 0..64u8 {
             for x in 0..64u8 {
-                assert_eq!(canvas.get(face, x, y), [0.0; 3], "{face:?} {x},{y}");
+                assert_eq!(canvas.get(face, x, y), PALETTE.floor, "{face:?} {x},{y}");
             }
         }
     }

@@ -8,9 +8,9 @@ fixtures are explicit development modes.
 ## Command
 
 ```
-cubarium demo [--scene body|vertex|patch|all] [--sink preview|shim|png]
+cubarium demo [--scene body|vertex|patch|all] [--sink preview|shim|png|web]
               [--seconds N] [--seed N] [--addr 127.0.0.1:7392]
-              [--out captures/] [--every N] [--scale N]
+              [--out captures/] [--every N] [--scale N] [--fps N]
 ```
 
 | Option | Default | Meaning |
@@ -23,7 +23,7 @@ cubarium demo [--scene body|vertex|patch|all] [--sink preview|shim|png]
 | `--out` | `captures` | Directory for PNG captures |
 | `--every` | `30` | With `png`, save one capture every N rendered frames |
 | `--scale` | `4` | Preview window pixel scale |
-| `--fps` | `60` | Render and output rate (the simulation stays at 20 Hz) |
+| `--fps` | `60` | Render and output rate, 1–240 (the simulation stays at 20 Hz) |
 | `--web-port` | `7393` | Port for the `web` sink |
 
 Exit code 0 on clean stop, nonzero with a message on a fatal error (window
@@ -40,7 +40,12 @@ stalls, run at most four catch-up ticks, then drop render work and log the lag
 once per second at most. Sleeping between frames must not busy-wait. Ticks are
 never fast-forwarded after a suspend: on resume the clock re-bases and reports
 the pause. Rendering shows the state of the last completed tick (render views are
-cloned snapshots of scene state, never a live reference).
+cloned snapshots of scene state, never a live reference). Each rendered frame
+carries the interpolation fraction `f = (time since the last completed tick) /
+dt`, clamped into `[0, 1)`; the presenter draws each body that fraction along
+the last tick's path by arc length, so `f = 0` is where the tick began and
+`f → 1` approaches where it ended. The image therefore lags the simulation by
+one tick and never extrapolates.
 
 ## Sinks
 
@@ -85,9 +90,10 @@ All scenes are deterministic given `--seed`; wall time never enters scene state.
   radius 1.0 at `(+2.4, 0)`, side lobe radius 0.9 at `(-1.4, +1.3)`) moving at
   4 px/s with heading that turns by a slowly varying rate (Ornstein–Uhlenbeck on
   turn rate, from the seeded PRNG) so that over minutes it crosses every seam and
-  reflects off the rim. Color warm white `[0.9, 0.7, 0.4]`. A trail of at most
-  160 segments, 8 s maximum age, dim blue-green `[0.1, 0.35, 0.3]`. The heading
-  is transported by `Travel::map` every tick.
+  reflects off the rim. Color: hue 0 of the M2 body ramp (`#FF2AFC`). A trail of
+  at most 160 segments, 8 s maximum age, at the body color × 0.25. The heading
+  is transported by `Travel::map` every tick, and the body is interpolated along
+  that tick's `Travel::segments` between frames.
 - `vertex`: four static copies of the same body anchored 2.5 px diagonally
   inside each top vertex on the Top face (`(2.5, 2.5)`, `(61.5, 2.5)`,
   `(61.5, 61.5)`, `(2.5, 61.5)`), headings rotating at 0.25 turn/min, and one
@@ -97,8 +103,13 @@ All scenes are deterministic given `--seed`; wall time never enters scene state.
   and a deposit of amount 40, radius 10 every 12 s cycling through four centers:
   Front `(60, 32)` (Front/Right seam), Right `(50, 3)` (Right/Top twisted seam),
   Back `(61, 3)` (Back/Top/Left vertex region), Front `(20, 61)` (rim clipping).
-  Rendered with `draw_field(scale 6, color [0.12, 0.5, 0.2], filter on)`.
+  Rendered with the M2 substrate ramp at scale 6 (`#1E2798` → `#42C5F8` by
+  `min(value/6, 1)`, filter on), over the same uniform floor as `run`.
 - `all`: patch, then body trail, then bodies, in that draw order.
+
+Every fixture draws over the M2 night floor (`#12093A` at 0.12 brightness on
+every pixel) and uses the palette of `design/appearance.md` "Palette", so a
+fixture capture and the world share one look.
 
 ## Verification the host must ship
 
@@ -117,7 +128,7 @@ All scenes are deterministic given `--seed`; wall time never enters scene state.
 ```
 cubarium run [--config world.toml] [--state state/] [--sink preview|shim|png|none]
              [--speed N] [--seconds N] [--seed N] [--fresh] [--telemetry FILE]
-             [--addr ..] [--out ..] [--every N] [--scale N]
+             [--addr ..] [--out ..] [--every N] [--scale N] [--fps N]
 ```
 
 | Option | Default | Meaning |
@@ -132,6 +143,7 @@ cubarium run [--config world.toml] [--state state/] [--sink preview|shim|png|non
 | `--telemetry` | `<state>/telemetry.jsonl` | JSON-lines telemetry file (appended) |
 | `--fields` | `<state>/fields.jsonl` | Field dump file, written only when `capacity.field_dump_seconds > 0` |
 | `--events` | `<state>/events.jsonl` | Life-event log (births, deaths), written only when `capacity.event_log` is true |
+| `--fps` | `60` | Render and output rate, 1–240, as for `demo` |
 
 Startup: unless `--fresh`, load the newest valid snapshot in `--state` (trying
 older ones on failure, logging each reason); otherwise create a new world from
@@ -147,11 +159,16 @@ the newest valid one, disk errors logged without stopping the world). Telemetry
 samples are appended every `telemetry_seconds`. Ctrl-C triggers a clean
 shutdown with a final snapshot.
 
-Presentation (`design/m2-world-spec.md` "Presentation"): producer substrate
-with the seam-aware filter, detritus flecks, bodies from the view's lobes with
-hue mapped to a low-saturation warm-to-cool ramp, brightness by mode and
-feeding, juvenile bodies scaled by the view flag, short trails (12 segments,
-3 s). Nothing else on the ambient image.
+Presentation (`design/m2-world-spec.md` "Presentation", colored by
+`design/appearance.md` "Palette"): a uniform floor of `#12093A` at 0.12
+brightness added to every pixel; the producer substrate over it, ramped
+`#1E2798` → `#42C5F8` by `min(P/P_max, 1)` in linear light and scaled by the
+same fraction, with the seam-aware filter; detritus flecks in `#510B6D`; bodies
+from the view's lobes with hue mapped to the `#FF2AFC` → `#42C6FF` ramp,
+brightness by mode, a `#FF9B50` flash on the core lobe while feeding, juvenile
+bodies scaled by the view flag, short trails (12 segments, 3 s) at the body
+color × 0.25. Between ticks each body is interpolated along its `moved` path.
+Nothing else on the ambient image.
 
 Required verification: a headless `run --sink none --speed 0 --seconds 600`
 completes with nonzero population and a mass residual below `1e-6`; two runs

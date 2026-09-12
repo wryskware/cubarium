@@ -251,9 +251,17 @@ without a sink for E2/E3, and fixed-seed replay hash of the state each 60 s.
 
 ## Presentation
 
-Substrate: `P` rendered dim green (`[0.10, 0.40, 0.16] · min(P/P_max, 1)`, seam-aware
-filter on), `D` as sparse dim warm flecks (`[0.16, 0.10, 0.05] · min(D/1.5, 1)` at cell level,
-nearest, only when `D > 0.05`; dimmed after the first captures read as bright blocks). Bodies: hue accent from the genome mapped to a warm-to-cool
-low-saturation palette, brightness 0.55 resting, 0.8 seeking, core lobe
-brightness 1.0 while feeding; a short trail (12 segments, 3 s) at 0.25
-brightness. No overlays.
+Colors follow [appearance](appearance.md) "Palette" (sRGB, decoded to linear light in
+the host). A uniform floor of `#12093A · 0.12` is added to every pixel first, so empty
+surface reads as night rather than as an off panel. Substrate: `P` ramped
+`#1E2798` → `#42C5F8` by `t = min(P/P_max, 1)` and scaled by the same `t` (seam-aware
+filter on), `D` as sparse violet flecks (`#510B6D · min(D/1.5, 1)` at cell level,
+nearest, only when `D > 0.05`). Bodies: hue accent from the genome mapped to the
+`#FF2AFC` → `#42C6FF` ramp, brightness 0.55 resting, 0.8 seeking, the core lobe
+flashing `#FF9B50` at brightness 1.0 while feeding; a short trail (12 segments, 3 s) at
+0.25 of the body color. No overlays.
+
+Between simulation ticks the presenter interpolates each body along `moved`, the path it
+traveled during the last completed tick, by arc length: at fraction 0 it sits where that
+tick began and approaches `pos` as the fraction approaches 1. Fields and trails are not
+interpolated.

@@ -18,7 +18,7 @@ use cubarium_surface::PixelImage;
 use crate::clock::{Clock, Step};
 use crate::cli::{Command, Demo, SinkArg};
 use crate::scene::{SceneKind, Scenes, render};
-use crate::sink::{FrameSink, PngSink, PreviewSink, ShimSink};
+use crate::sink::{FrameSink, PngSink, PreviewSink, ShimSink, WebSink};
 
 /// The status a shell reports for a process killed by SIGINT.
 const SIGINT_EXIT: i32 = 130;
@@ -65,11 +65,12 @@ fn run_demo(demo: &Demo, stop: &AtomicBool) -> Result<()> {
         SinkArg::Preview => Box::new(PreviewSink::new(demo.scale, &demo.out)?),
         SinkArg::Shim => Box::new(ShimSink::new(demo.addr.clone())),
         SinkArg::Png => Box::new(PngSink::new(&demo.out, demo.every)?),
+        SinkArg::Web => Box::new(WebSink::new(demo.web_port)?),
     };
 
     let limit =
         (demo.seconds > 0.0).then(|| Duration::from_secs_f64(demo.seconds));
-    let stats = drive(&mut scenes, sink.as_mut(), limit, stop)?;
+    let stats = drive(&mut scenes, sink.as_mut(), limit, demo.fps, stop)?;
     sink.finish()?;
 
     eprintln!(
@@ -92,19 +93,22 @@ pub struct RunStats {
     pub elapsed: Duration,
 }
 
-/// Drive scenes into a sink until the time limit, the sink asking to stop, or `stop`
-/// being set from another thread (the SIGINT handler, or a test).
+/// Drive scenes into a sink at `fps` until the time limit, the sink asking to stop, or
+/// `stop` being set from another thread (the SIGINT handler, or a test). The simulation
+/// runs at 20 Hz whatever `fps` is; each frame is drawn at the clock's interpolation
+/// fraction of the tick in progress.
 pub fn drive(
     scenes: &mut Scenes,
     sink: &mut dyn FrameSink,
     limit: Option<Duration>,
+    fps: u32,
     stop: &AtomicBool,
 ) -> Result<RunStats> {
     let mut canvas = Canvas::new();
     let mut scratch: Vec<PixelImage> = Vec::new();
     let mut frame = Frame::black();
     let start = Instant::now();
-    let mut clock = Clock::new(start);
+    let mut clock = Clock::with_fps(start, fps);
     let mut stats = RunStats::default();
 
     loop {
@@ -123,10 +127,11 @@ pub fn drive(
                 scenes.tick();
                 stats.ticks += 1;
             }
-            Step::Render => {
-                // The render view is a cloned snapshot of the last completed tick.
+            Step::Render { f } => {
+                // The render view is a cloned snapshot of the last completed tick; `f`
+                // interpolates each body along the path it traveled during that tick.
                 let view = scenes.view();
-                render(&view, &mut canvas, &mut scratch);
+                render(&view, f, &mut canvas, &mut scratch);
                 // Exactly one encode per rendered frame; the identical bytes go to the
                 // active sink.
                 canvas.encode(&mut frame);
@@ -174,7 +179,8 @@ mod tests {
         let mut scenes = Scenes::new(SceneKind::All, 1);
         let mut rec = Recorder::default();
         let stop = AtomicBool::new(false);
-        let stats = drive(&mut scenes, &mut rec, Some(Duration::from_millis(600)), &stop).unwrap();
+        let stats =
+            drive(&mut scenes, &mut rec, Some(Duration::from_millis(600)), 60, &stop).unwrap();
         assert!(stats.ticks >= 8, "ticks {}", stats.ticks);
         assert!(stats.frames >= 12, "frames {}", stats.frames);
         assert_eq!(rec.frames.len() as u64, stats.frames);
@@ -203,7 +209,7 @@ mod tests {
         }
         let mut scenes = Scenes::new(SceneKind::Body, 1);
         let mut sink = Once(0);
-        let stats = drive(&mut scenes, &mut sink, None, &AtomicBool::new(false)).unwrap();
+        let stats = drive(&mut scenes, &mut sink, None, 60, &AtomicBool::new(false)).unwrap();
         assert_eq!(stats.frames, 3);
     }
 
@@ -225,7 +231,7 @@ mod tests {
         let mut scenes = Scenes::new(SceneKind::Body, 1);
         let mut sink = Counter(0);
         // No time limit: only the flag can end this loop.
-        let stats = drive(&mut scenes, &mut sink, None, &stop).unwrap();
+        let stats = drive(&mut scenes, &mut sink, None, 60, &stop).unwrap();
         setter.join().unwrap();
         assert!(stats.frames > 0, "the loop must have rendered before it stopped");
         assert!(
