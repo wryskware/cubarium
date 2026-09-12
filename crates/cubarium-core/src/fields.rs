@@ -70,13 +70,15 @@ impl Fields {
     }
 
     /// One tick of reactions, all from pre-tick values, per cell:
-    /// 1. growth `Δ = min(g · L · W_eff · P · (1 − P/P_max) · N/(N + K_N) · drown · dt,
+    /// 1. growth `Δ = min(g · L_eff · W_eff · P · (1 − P/P_max) · N/(N + K_N) · drown · dt,
     ///    f_max · N · dt, N)` (Δ ≥ 0): `N −= Δ`, `P += Δ`, `light_in += e_p · Δ`. The Monod
     ///    factor `N/(N + K_N)` makes scarce nutrient limit uptake instead of only capping it;
     ///    `K_N = 0` restores the unsaturated law. Water (`design/water.md`) enters only here:
     ///    `W_eff = clamp(W + wet_gain · min(w, 1), W_min, 1)` and
-    ///    `drown = max(0, 1 − (w − flood)/flood)` for `w > flood`, else 1. Both only scale
-    ///    Δ, so conservation is unaffected.
+    ///    `drown = max(0, 1 − (w − flood)/flood)` for `w > flood`, else 1, and the algae
+    ///    light floor `L_eff = max(L, algae_light · min(w / algae_depth, 1))` ([`algae_light`]):
+    ///    standing water grows its own mat even in the dark. All three only scale Δ, so
+    ///    conservation is unaffected; ripening (step 4) still uses the sky's `L`.
     /// 2. mortality `Δ = m_p · P · dt`: `P −= Δ`, `D += Δ`, `De += e_p · Δ`, then if
     ///    `De > e_d_max · D` the excess goes to `heat_out` and `De` is clamped.
     /// 3. decomposition `Δ = k_d · D · dt`: `D −= Δ`, `N += Δ`, `De` reduced by the same
@@ -120,8 +122,9 @@ impl Fields {
             //    by the per-second uptake fraction, and by what the cell actually holds.
             let monod = if n0 > 0.0 { n0 / (n0 + nc.half_saturation) } else { 0.0 };
             let (wet, drown) = water_factors(self.w[i], moisture[i], cfg);
+            let lit = algae_light(self.w[i], light[i], cfg);
             let logistic =
-                pc.growth * light[i] * wet * p0 * (1.0 - p0 / pc.max) * monod * drown * DT;
+                pc.growth * lit * wet * p0 * (1.0 - p0 / pc.max) * monod * drown * DT;
             let grow = logistic.min(pc.uptake_max * n0 * DT).min(n0).max(0.0);
 
             // 2. Mortality: producers fall to detritus, carrying their energy with them.
@@ -224,6 +227,19 @@ impl Fields {
     }
 }
 
+/// The light producer growth sees in a cell holding depth `w` of water (`design/water.md`
+/// "Algae"): `max(L, algae_light · min(w / algae_depth, 1))`. Dry cells see the sky's `L`
+/// exactly; a pool at or beyond `algae_depth` is lit at least to `algae_light` however dark
+/// the floor is, which is what lets a shallow pool grow a mat.
+pub fn algae_light(w: f64, light: f64, cfg: &WorldConfig) -> f64 {
+    if !(w.is_finite() && w > 0.0) {
+        return light;
+    }
+    let wc = &cfg.water;
+    let depth = if wc.algae_depth > 0.0 { (w / wc.algae_depth).min(1.0) } else { 1.0 };
+    light.max(wc.algae_light * depth)
+}
+
 /// The two water factors on producer growth (`design/water.md`): the effective moisture
 /// `W_eff = clamp(W + wet_gain · min(w, 1), W_min, 1)` and the drowning multiplier
 /// `max(0, 1 − (w − flood)/flood)` above `flood`. A dry cell returns `(W, 1)` exactly.
@@ -275,6 +291,49 @@ mod tests {
     fn stored_energy(f: &Fields, e_p: f64) -> f64 {
         let e_f = WorldConfig::default().fruit.energy_density;
         f.p.iter().map(|&p| e_p * p).sum::<f64>() + f.f.iter().map(|&x| e_f * x).sum::<f64>() + f.de.iter().sum::<f64>()
+    }
+
+    #[test]
+    fn standing_water_lights_its_own_producers() {
+        let cfg = WorldConfig::default();
+        // The floor: dry cells see the sky exactly, a pool is lit to `algae_light` in
+        // proportion to its depth up to `algae_depth`, and a brighter sky still wins.
+        assert_eq!(algae_light(0.0, 0.1, &cfg), 0.1);
+        assert_eq!(algae_light(f64::NAN, 0.1, &cfg), 0.1);
+        let full = cfg.water.algae_light;
+        assert!((algae_light(0.15, 0.0, &cfg) - 0.5 * full).abs() < 1e-12);
+        assert!((algae_light(0.3, 0.0, &cfg) - full).abs() < 1e-12);
+        assert!((algae_light(5.0, 0.0, &cfg) - full).abs() < 1e-12);
+        assert_eq!(algae_light(1.0, 0.9, &cfg), 0.9);
+
+        // A dark cell grows nothing dry and something wet; a flooded dark cell drowns.
+        let mut h = Harness::new(cfg);
+        h.cfg.producer.mortality = 0.0;
+        h.cfg.detritus.decomposition = 0.0;
+        h.cfg.nutrient.diffusion = 0.0;
+        h.cfg.detritus.fall = 0.0;
+        h.cfg.fruit.ripen = 0.0;
+        let cell = 5;
+        h.light[cell] = 0.0;
+        let mut dry = h.fields();
+        dry.p[cell] = 0.3;
+        dry.n[cell] = 0.5;
+        let mut wet = dry.clone();
+        wet.w[cell] = 0.3;
+        let mut flooded = dry.clone();
+        flooded.w[cell] = 10.0 * h.cfg.water.flood;
+        h.react(&mut dry);
+        h.react(&mut wet);
+        h.react(&mut flooded);
+        assert_eq!(dry.p[cell], 0.3, "a dark dry cell grows nothing");
+        assert!(wet.p[cell] > 0.3, "a dark pool grows a mat: {}", wet.p[cell]);
+        assert_eq!(flooded.p[cell], 0.3, "deep water still drowns growth");
+        // No algae light: the pool is as dark as the sky.
+        h.cfg.water.algae_light = 0.0;
+        let mut unlit = wet.clone();
+        unlit.p[cell] = 0.3;
+        h.react(&mut unlit);
+        assert_eq!(unlit.p[cell], 0.3);
     }
 
     #[test]

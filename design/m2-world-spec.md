@@ -58,7 +58,7 @@ reserve energy than the food supplied.
 
 | Process | Material | Energy | Rate (initial values) |
 | --- | --- | --- | --- |
-| Producer growth | `N → P` | `+e_p` per m from light (source) | `g · L · W · P · (1 − P/P_max) · N/(N + K_N)`, capped by `N` and by `f_max · N`; `g = 0.008/s`, `P_max = 1.5 m`, `K_N = 0.25 m`, `f_max = 0.5/s`, `e_p = 2 e/m` |
+| Producer growth | `N → P` | `+e_p` per m from light (source) | `g · L_eff · W_eff · P · (1 − P/P_max) · N/(N + K_N) · drown` with `L_eff = max(L, algae_light · min(w/algae_depth, 1))` (`design/water.md` "Algae"), capped by `N` and by `f_max · N`; `g = 0.008/s`, `P_max = 1.5 m`, `K_N = 0.25 m`, `f_max = 0.5/s`, `e_p = 2 e/m` |
 | Producer mortality | `P → D` | `De += e_p · ΔP`, then clamp to `e_d_max · D` (excess is heat) | `m_p = 0.001/s` (0.0005 until fauna v2: the soil's scavengers live on what falls from above), `e_d_max = 2 e/m` (= `e_r`; 1 e/m until fauna v2, 2026-09-12) |
 | Decomposition | `D → N` | `De` shrinks by the fraction of detritus removed; that energy is heat | `k_d = 0.002/s` |
 | Detritus fall | D → D of the downhill neighbor, De in the same proportion | none (transfer) | fall = 0.02 /s; downhill = the graph neighbor with the lowest embedded y if strictly lower; none on the top face or the bottom row |

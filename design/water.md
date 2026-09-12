@@ -35,6 +35,7 @@ the first runs). Surface level `s = z + depth_gain · w` with `depth_gain = 0.4`
 | Wet growth | producer growth uses `W_eff = clamp(W + wet_gain · min(w, 1), W_min, 1)` | `wet_gain = 0.5` |
 | Drowning | producer growth is multiplied by `max(0, 1 − (w − flood) / flood)` when `w > flood`, so a standing pool is bare water, not lawn | `flood = 1.5 d` |
 | Wading | an organism's movement speed is divided by `1 + w` of its cell | none |
+| Algae | producer growth sees `L_eff = max(L, algae_light · min(w / algae_depth, 1))`: standing water lights its own mat, so shallow pools on the dark floor grow food (drowning still bares deep water). The pool's light is a modeling choice booked as ordinary `light_in`; it is what gives the skimmer a food of its own | `algae_light = 0.5` (0.35 left the skimmer niche too thin), `algae_depth = 0.3 d` |
 
 On a side face vertically adjacent cells differ by 0.125 in `z`, so a shower
 runs down in roughly a second per cell and reads as streams; along the bottom

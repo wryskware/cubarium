@@ -173,7 +173,9 @@ pub const SOIL_HIGH_SRGB: u32 = 0x007A_3B8F;
 pub const SOIL_MIN_BRIGHTNESS: f32 = 0.10;
 /// Brightness of the soil ground at [`SOIL_SCALE`]. The ramp between the two is linear,
 /// not squared like the producer ramp: soil should read as ground even when it is poor.
-pub const SOIL_MAX_BRIGHTNESS: f32 = 0.55;
+/// 0.55 made the fully charged starting litter (D ≈ 1.2 on the floor) a bright mauve
+/// carpet in the viewer; 0.32 keeps it dark ground that richer litter warms.
+pub const SOIL_MAX_BRIGHTNESS: f32 = 0.32;
 
 /// The embedded height of a cell's center: `CellId::center().embed()[1]`, Top = 1 exactly
 /// and the open rim = −0.984375 (the center of the bottom cell row).
@@ -675,6 +677,22 @@ pub const WATER_SHIMMER: f32 = 0.08;
 pub const WATER_SHIMMER_SECONDS: f64 = 2.5;
 /// Seeds the per-pixel shimmer phase.
 const WATER_SEED: u64 = 0x7761_7465_7200_0001;
+/// Algae in a pool: the water color leans toward this mint where the wet cell holds
+/// producers (`design/water.md` "Algae"). Review-tunable within the flora family.
+pub const ALGAE_SRGB: u32 = 0x007B_EBC9;
+/// How far a fully grown mat pulls the water color toward [`ALGAE_SRGB`]. Review-tunable.
+pub const ALGAE_TINT: f32 = 0.6;
+
+/// The water color over a cell whose producer density (fraction of the ramp saturation)
+/// is `p_t`: `mix(water_color(w), algae, min(p_t, 1) · ALGAE_TINT)`. The soil ground itself
+/// still draws no lawn; the mat shows only as a tint on the pool.
+pub fn algae_water_color(w: f64, p_t: f64) -> [f32; 3] {
+    let base = water_color(w);
+    let t = if p_t.is_nan() { 0.0 } else { p_t.clamp(0.0, 1.0) as f32 * ALGAE_TINT };
+    present::mix(base, *ALGAE_COLOR, t)
+}
+
+static ALGAE_COLOR: LazyLock<[f32; 3]> = LazyLock::new(|| present::srgb_linear(ALGAE_SRGB));
 
 /// The coverage of the water layer at depth `w`: `1 − exp(−w / WATER_FILM)`, 0 for a dry
 /// or nonsense depth.
@@ -741,8 +759,10 @@ fn filtered_at(field: &ScalarField, face: Face, x: u8, y: u8) -> f64 {
 }
 
 /// The water layer: for every pixel with filtered depth `w > 0`, `px = color(w) · b · a +
-/// px · (1 − a)` with `a = `[`water_coverage`]`(w)` and `b = `[`water_brightness`].
-fn draw_water(canvas: &mut Canvas, water: &ScalarField, tick: u64) {
+/// px · (1 − a)` with `a = `[`water_coverage`]`(w)` and `b = `[`water_brightness`]; the
+/// color is [`algae_water_color`] with the pixel's own cell's producer density over
+/// `saturation`, so a pool with a mat reads mint rather than pure blue.
+fn draw_water(canvas: &mut Canvas, water: &ScalarField, producer: &ScalarField, saturation: f64, tick: u64) {
     for face in Face::ALL {
         for y in 0..FACE_SIZE as u8 {
             for x in 0..FACE_SIZE as u8 {
@@ -751,7 +771,12 @@ fn draw_water(canvas: &mut Canvas, water: &ScalarField, tick: u64) {
                 if a <= 0.0 {
                     continue;
                 }
-                let c = water_color(w);
+                let p_t = if saturation.is_finite() && saturation > 0.0 {
+                    producer.get(cell_of(&SurfacePoint::pixel_center(face, x, y))) / saturation
+                } else {
+                    0.0
+                };
+                let c = algae_water_color(w, p_t);
                 let b = water_brightness(tick, water_phase(face, x, y));
                 let under = canvas.get(face, x, y);
                 canvas.set(
@@ -1335,7 +1360,8 @@ impl ArtPresenter {
         // Water: pools and streams source-over the ground, under the plants.
         if !view.water.is_empty() {
             present::copy_field(&mut self.water, &view.water);
-            draw_water(canvas, &self.water, view.tick);
+            let saturation = view.producer_max * PRODUCER_SATURATION;
+            draw_water(canvas, &self.water, &self.producer, saturation, view.tick);
         }
 
         // Plants: scenery that follows the fields. These are not organisms — nothing in

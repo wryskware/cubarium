@@ -2084,15 +2084,15 @@ mod tests {
     }
 
     #[test]
-    fn the_default_kinds_place_twenty_one_founders_with_the_tables_genomes() {
+    fn the_default_kinds_place_twenty_four_founders_with_the_tables_genomes() {
         let world = World::new(WorldConfig::default()).expect("valid");
-        assert_eq!(world.population(), 21, "4 + 8 + 6 + 3 founders");
+        assert_eq!(world.population(), 24, "4 + 10 + 5 + 5 founders");
         let mut by_form = [0usize; 8];
         for (_, o) in world.state.organisms.iter() {
             by_form[o.phenotype.form as usize] += 1;
             assert_eq!(o.genome.version, Genome::VERSION);
         }
-        assert_eq!(by_form[..4], [8, 6, 4, 3], "lantern 0 = grazer, sail 1 = glider, mossback 2 = burrower, skimmer 3");
+        assert_eq!(by_form[..4], [10, 5, 4, 5], "lantern 0 = grazer, sail 1 = glider, mossback 2 = burrower, skimmer 3");
         let Ok([burrower, grazer, glider, skimmer]) = <[Organism; 4]>::try_from(one_of_each_kind(&world)) else {
             panic!("four kinds");
         };
@@ -2100,7 +2100,7 @@ mod tests {
         assert_eq!(g(&burrower), (0.10, 0.10, 0.6, 1.0, 0.0, 0.15));
         assert_eq!(g(&grazer), (0.85, 0.55, 1.0, 1.0, 0.0, 0.50));
         assert_eq!(g(&glider), (0.90, 1.00, 1.0, 0.8, 0.0, 0.85));
-        assert_eq!(g(&skimmer), (0.20, 0.10, 0.9, 0.9, 1.0, 0.65));
+        assert_eq!(g(&skimmer), (0.60, 0.10, 0.9, 0.9, 1.0, 0.65));
         // Unnamed loci keep the v1 founder values, and the phenotype carries the kind.
         assert_eq!((burrower.genome.metabolism, burrower.genome.mouth, burrower.genome.reserve), (0.7, 1.0, 1.0), "the burrower kind fixes metabolism; the rest stay v1");
         assert_eq!(grazer.genome.metabolism, 1.0);
@@ -2485,7 +2485,7 @@ mod tests {
         world.step();
         let sample = world.telemetry();
         assert_eq!(sample.population_by_form.iter().sum::<u32>(), sample.population);
-        assert_eq!(sample.population_by_form[..4], [8, 6, 4, 3]);
+        assert_eq!(sample.population_by_form[..4], [10, 5, 4, 5]);
         for form in 0..4 {
             let expected: f64 = world.state.organisms.iter().filter(|(_, o)| o.phenotype.form == form as u8).map(|(_, o)| o.pos.embed()[1]).sum::<f64>() / f64::from(sample.population_by_form[form]);
             assert!((sample.mean_height_by_form[form] - expected).abs() < 1e-12);

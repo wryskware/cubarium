@@ -20,7 +20,7 @@ use cubarium::clock::DT;
 use cubarium::present::PRODUCER_SATURATION;
 use cubarium_core::view::RenderView;
 use cubarium_render::{Canvas, stamp_sprite};
-use cubarium::art_present::{band_opacity, next_stage, placement_of, plant_density, plant_phase_of, rank_cap_of, species_of, stage_opacity};
+use cubarium::art_present::{algae_water_color, water_color, band_opacity, next_stage, placement_of, plant_density, plant_phase_of, rank_cap_of, species_of, stage_opacity};
 use cubarium_surface::{CELL_COUNT, CELLS_PER_FACE_EDGE, CellId, PixelImage, SurfacePoint, Vec2, cell_of};
 
 const PRODUCER_MAX: f64 = 10.0;
@@ -593,4 +593,31 @@ fn everything_on_draw_cost() {
     let ms = start.elapsed().as_secs_f64() * 1e3 / frames as f64;
     println!("ArtPresenter::draw everything on: {ms:.3} ms/frame (all wet, raining, rich, all columns tall, 200 organisms) = {:.0}% of a 60 fps budget", ms / (1000.0 / 60.0) * 100.0);
     assert!(ms < 1000.0 / 60.0, "{ms} ms/frame exceeds the 60 fps budget");
+}
+
+#[test]
+fn a_pool_with_a_mat_leans_mint_and_a_bare_pool_stays_blue() {
+    // The pure rule: algae pull the water color toward mint by up to ALGAE_TINT.
+    let bare = algae_water_color(1.0, 0.0);
+    assert_eq!(bare, water_color(1.0));
+    let mat = algae_water_color(1.0, 1.0);
+    assert!(mat[1] > bare[1], "green rises with a mat: {mat:?} vs {bare:?}");
+    assert!(mat[2] / mat[1] < bare[2] / bare[1], "blue falls relative to green");
+    assert_eq!(algae_water_color(1.0, 7.0), algae_water_color(1.0, 1.0), "density clamps at 1");
+
+    // Drawn: a wet soil cell with producers is greener than the same cell bare.
+    let cell = CellId::new(Face::Front, 8, 13);
+    let mut water = flat(0.0);
+    water[cell.index()] = 1.0;
+    let bare_view = view(3, flat(0.0), flat(0.0), water.clone(), vec![0.0; CELL_COUNT]);
+    let mut producer = flat(0.0);
+    producer[cell.index()] = 0.5 * PRODUCER_MAX * PRODUCER_SATURATION;
+    let mat_view = view(3, producer, flat(0.0), water, vec![0.0; CELL_COUNT]);
+    let a = draw(&bare_view);
+    let b = draw(&mat_view);
+    let (x, y) = (cell.cx() * 4 + 1, cell.cy() * 4 + 1);
+    let bare_px = a.get(Face::Front, x, y);
+    let mat_px = b.get(Face::Front, x, y);
+    assert!(mat_px[1] > bare_px[1], "greener with algae: {mat_px:?} vs {bare_px:?}");
+    assert!(mat_px[2] / mat_px[1] < bare_px[2] / bare_px[1], "relatively less blue");
 }

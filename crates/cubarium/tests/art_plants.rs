@@ -17,7 +17,7 @@ use cubarium::art_present::{
     plant_cap, rank_cap_of, slot_of, soil_weight, species_of, stage_opacity, stage_thresholds,
     stalk_heading, up_of, column_density, ground_frame, ground_opacity, ground_phase_of,
     ground_points, ground_weight, tall_anchor, tall_columns, tall_heading,
-    tall_phase_of, tall_target, water_brightness, water_color, water_coverage, water_phase,
+    tall_phase_of, tall_target, algae_water_color, water_brightness, water_coverage, water_phase,
     TALL_PLANTS, VINE_PLANT,
 };
 use cubarium::clock::DT;
@@ -194,7 +194,11 @@ fn expected_ground(v: &RenderView) -> Canvas {
         if a <= 0.0 {
             continue;
         }
-        let c = water_color(w);
+        // Algae: the pool leans mint by its own cell's producer density over saturation.
+        let saturation = v.producer_max * PRODUCER_SATURATION;
+        let cell = cell_of(&SurfacePoint::pixel_center(face, x, y));
+        let p_t = if saturation > 0.0 { v.producer[cell.index()] / saturation } else { 0.0 };
+        let c = algae_water_color(w, p_t);
         let b = water_brightness(v.tick, water_phase(face, x, y));
         let under = canvas.get(face, x, y);
         canvas.set(face, x, y, [

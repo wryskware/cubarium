@@ -172,6 +172,12 @@ pub struct WaterConfig {
     pub wet_gain: f64,
     /// Depth above which producer growth is scaled by `max(0, 1 − (w − flood) / flood)`.
     pub flood: f64,
+    /// Algae (`design/water.md`): standing water lights its own producers. Growth sees
+    /// `L_eff = max(L, algae_light · min(w / algae_depth, 1))`, so a shallow pool on the
+    /// dark floor grows a mat while drowning still bares deep water. A fraction in `[0, 1]`.
+    pub algae_light: f64,
+    /// Depth (d) at which the algae light floor reaches its full `algae_light`.
+    pub algae_depth: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -355,6 +361,8 @@ impl Default for WaterConfig {
             depth_gain: 0.4,
             wet_gain: 0.5,
             flood: 1.5,
+            algae_light: 0.5,
+            algae_depth: 0.3,
         }
     }
 }
@@ -373,7 +381,7 @@ impl Default for MutationConfig {
 
 impl FounderKind {
     /// The four default kinds of `design/fauna-v2.md`: burrower (soil, 4), grazer (foliage,
-    /// 8), glider (canopy, 6), skimmer (the wet floor, 3). `form` indices follow the pack's creature
+    /// 10), glider (canopy, 5), skimmer (the wet floor, 5). `form` indices follow the pack's creature
     /// order lantern 0, sail 1, mossback 2, skimmer 3. The design table gives the glider
     /// `speed` 1.2, above the genome's `speed` range (0.3–1); it is placed at the range's
     /// top, 1.0, and is still the fastest kind through its small `size` (`v_max ∝
@@ -396,11 +404,12 @@ impl FounderKind {
         let burrower = FounderKind { metabolism: Some(0.7), ..kind("burrower", 4, 0.10, 0.10, 0.6, 1.0, 0.0, 0.15, 2) };
         vec![
             burrower,
-            kind("grazer", 8, 0.85, 0.55, 1.0, 1.0, 0.0, 0.50, 0),
-            kind("glider", 6, 0.90, 1.00, 1.0, 0.8, 0.0, 0.85, 1),
-            // The skimmer runs cool too: on the same floor litter it otherwise boomed to
-            // thirty-five and starved back to none within the hour.
-            FounderKind { metabolism: Some(0.7), ..kind("skimmer", 3, 0.20, 0.10, 0.9, 0.9, 1.0, 0.65, 3) },
+            kind("grazer", 10, 0.85, 0.55, 1.0, 1.0, 0.0, 0.50, 0),
+            kind("glider", 5, 0.90, 1.00, 1.0, 0.8, 0.0, 0.85, 1),
+            // The skimmer runs cool too, and grazes: its food is the algae that standing
+            // water grows on the floor (`water.algae_light`), which the wading burrowers
+            // reach slowly. As a pure scavenger it boomed on the shared litter and starved.
+            FounderKind { metabolism: Some(0.7), ..kind("skimmer", 5, 0.60, 0.10, 0.9, 0.9, 1.0, 0.65, 3) },
         ]
     }
 }
@@ -606,7 +615,9 @@ impl WorldConfig {
             ("water.wet_gain", wa.wet_gain),
         ])?;
         positive("water.flood", wa.flood)?;
+        positive("water.algae_depth", wa.algae_depth)?;
         fraction("water.evap_floor", wa.evap_floor)?;
+        fraction("water.algae_light", wa.algae_light)?;
         // Evaporation is a per-tick fraction of the depth; above one it would over-drain.
         if wa.evap * crate::DT > 1.0 {
             return Err(format!(
@@ -845,6 +856,8 @@ mod tests {
             ("water.flood", |c| c.water.flood = 0.0),
             ("water.evap", |c| c.water.evap = 20.0001),
             ("water.evap_floor", |c| c.water.evap_floor = 1.5),
+            ("water.algae_light", |c| c.water.algae_light = 1.2),
+            ("water.algae_depth", |c| c.water.algae_depth = 0.0),
             ("habitat.moisture_min", |c| c.habitat.moisture_min = 2.0),
             ("habitat.noise_wavelength[0]", |c| c.habitat.noise_wavelength[0] = 0.0),
             ("habitat.noise_wavelength", |c| c.habitat.noise_wavelength = [1.4, 0.6]),
@@ -942,7 +955,7 @@ capacity.telemetry_seconds = 5.0
         assert_eq!(cfg.drives.w_depth, 1.0);
         let kinds = &cfg.founders.kinds;
         assert_eq!(kinds.iter().map(|k| k.name.as_str()).collect::<Vec<_>>(), ["burrower", "grazer", "glider", "skimmer"]);
-        assert_eq!(kinds.iter().map(|k| k.count).collect::<Vec<_>>(), [4, 8, 6, 3]);
+        assert_eq!(kinds.iter().map(|k| k.count).collect::<Vec<_>>(), [4, 10, 5, 5]);
         assert_eq!(kinds.iter().map(|k| k.form).collect::<Vec<_>>(), [Some(2), Some(0), Some(1), Some(3)]);
         assert_eq!(kinds[3].swim, Some(1.0));
         cfg.validate().unwrap();
@@ -974,6 +987,8 @@ capacity.telemetry_seconds = 5.0
         assert_eq!(cfg.water.depth_gain, 0.4);
         assert_eq!(cfg.water.wet_gain, 0.5);
         assert_eq!(cfg.water.flood, 1.5);
+        assert_eq!(cfg.water.algae_light, 0.5);
+        assert_eq!(cfg.water.algae_depth, 0.3);
         assert_eq!(cfg.habitat.basin_gain, 0.15);
         cfg.validate().unwrap();
         let dry: WorldConfig = toml::from_str("water.rain_rate = 0.0\nhabitat.basin_gain = 0.0\n").unwrap();
