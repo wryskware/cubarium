@@ -1,9 +1,10 @@
 //! `cubarium run`: the persistent world loop.
 //!
 //! The loop owns nothing the world needs: it advances `World::step`, hands encoded
-//! snapshots to the checkpoint worker, appends telemetry, and — unless headless — turns
-//! each published [`RenderView`] into one `Canvas::encode` per rendered frame. Wall time
-//! enters only through [`crate::clock::Clock`].
+//! snapshots to the checkpoint worker, appends telemetry and (when
+//! `capacity.field_dump_seconds` asks for them) field dumps, and — unless headless —
+//! turns each published [`RenderView`] into one `Canvas::encode` per rendered frame.
+//! Wall time enters only through [`crate::clock::Clock`].
 //!
 //! Stopping. A clean stop — the simulated `--seconds` limit, the preview window being
 //! closed, or the shared stop flag being set — always writes a final snapshot before the
@@ -21,7 +22,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use cube_proto::Frame;
-use cubarium_core::view::RenderView;
+use cubarium_core::view::{FieldDump, RenderView};
 use cubarium_core::{Telemetry, World, WorldConfig, encode_snapshot};
 use cubarium_render::Canvas;
 
@@ -148,6 +149,91 @@ impl TelemetryLog {
     }
 }
 
+/// Four decimals, the precision `design/m2-world-spec.md` "Observer" asks field dumps
+/// for. Non-finite values become JSON `null` rather than a lie a reader cannot detect.
+fn rounded(values: &[f64]) -> Vec<serde_json::Value> {
+    values
+        .iter()
+        .map(|x| {
+            serde_json::Number::from_f64((x * 1e4).round() / 1e4)
+                .map_or(serde_json::Value::Null, serde_json::Value::Number)
+        })
+        .collect()
+}
+
+/// One field array as a JSON array of numbers. Written by hand rather than through a
+/// map so the keys keep the spec's order (`tick, n, p, d, de, organisms`); `serde_json`
+/// maps would sort them and put `tick` last, where nobody tailing the file expects it.
+fn field_array(values: &[f64]) -> String {
+    serde_json::Value::Array(rounded(values)).to_string()
+}
+
+/// `fields.jsonl`: a header naming each cell's graph neighbors, then one line per dump
+/// on the telemetry cadence rule. Append-only like the telemetry log, and equally
+/// non-fatal: a dump that cannot be written is reported and the world goes on.
+struct FieldLog {
+    path: PathBuf,
+    file: std::fs::File,
+    /// True when this process created (or found empty) the file, so it owes a header.
+    fresh: bool,
+    lines: u64,
+}
+
+impl FieldLog {
+    fn open(path: &Path) -> Result<FieldLog> {
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating the field dump directory {}", parent.display()))?;
+        }
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .with_context(|| format!("opening the field dump file {}", path.display()))?;
+        // An existing file already carries its header; only a new or empty one is owed
+        // one, because the neighbor graph never changes within a world.
+        let fresh = file.metadata().map(|m| m.len() == 0).unwrap_or(true);
+        Ok(FieldLog { path: path.to_path_buf(), file, fresh, lines: 0 })
+    }
+
+    fn append(&mut self, line: &str) {
+        if let Err(e) = writeln!(self.file, "{line}").and_then(|()| self.file.flush()) {
+            eprintln!("cubarium: cannot append to {}: {e}", self.path.display());
+            return;
+        }
+        self.lines += 1;
+    }
+
+    /// `{"cells": [[n0, n1, n2, n3], …]}` in `Edge` order, `null` at the rim.
+    fn write_header(&mut self, neighbors: &[[Option<u16>; 4]]) {
+        let cells: Vec<serde_json::Value> = neighbors
+            .iter()
+            .map(|cell| {
+                serde_json::Value::Array(
+                    cell.iter()
+                        .map(|n| n.map_or(serde_json::Value::Null, serde_json::Value::from))
+                        .collect(),
+                )
+            })
+            .collect();
+        self.append(&serde_json::json!({ "cells": cells }).to_string());
+    }
+
+    fn write(&mut self, dump: &FieldDump) {
+        let organisms = serde_json::Value::from(dump.organisms.as_slice()).to_string();
+        self.append(&format!(
+            r#"{{"tick":{},"n":{},"p":{},"d":{},"de":{},"organisms":{organisms}}}"#,
+            dump.tick,
+            field_array(&dump.n),
+            field_array(&dump.p),
+            field_array(&dump.d),
+            field_array(&dump.de),
+        ));
+    }
+}
+
 /// The one-line stderr digest headless runs get for every sample, so a `--sink none` run
 /// is observable without opening the telemetry file.
 fn headless_line(sample: &Telemetry) -> String {
@@ -224,6 +310,13 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
     let telemetry_ticks = ticks_of(config.capacity.telemetry_seconds);
 
     let mut telemetry = TelemetryLog::open(&run.telemetry_path())?;
+    // `capacity.field_dump_seconds == 0` turns field dumps off entirely: no file is
+    // created, and the world never pays for a dump it does not write.
+    let field_ticks = ticks_of(config.capacity.field_dump_seconds);
+    let mut fields = match config.capacity.field_dump_seconds > 0.0 {
+        true => Some(FieldLog::open(&run.fields_path())?),
+        false => None,
+    };
     let mut checkpoints = Checkpointer::spawn(&run.state);
     let build_id = state::build_id();
 
@@ -232,6 +325,18 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
     let pace = Pace::of(run.speed);
 
     let start_tick = world.tick();
+    if let Some(log) = fields.as_mut()
+        && log.fresh
+    {
+        log.write_header(&world.cell_neighbors());
+        // The loop only ever dumps a tick it has just completed, so the world's opening
+        // state would be missing from a file this run started. It is written here when
+        // that tick is on the cadence — for a new world, tick 0. A run appending to an
+        // existing dump file skips this, so a resumed world never repeats a tick.
+        if start_tick.is_multiple_of(field_ticks) {
+            log.write(&world.field_dump());
+        }
+    }
     let tick_limit = (run.seconds > 0.0).then(|| (run.seconds * f64::from(TICK_HZ)).round() as u64);
 
     let mut presenter = Presenter::new();
@@ -247,6 +352,7 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
                        presenter: &mut Presenter,
                        view: &mut Option<RenderView>,
                        telemetry: &mut TelemetryLog,
+                       fields: &mut Option<FieldLog>,
                        checkpoints: &mut Checkpointer,
                        ticks_done: &mut u64| {
         world.step();
@@ -267,6 +373,11 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
             }
             telemetry.write(&sample);
         }
+        if let Some(log) = fields.as_mut()
+            && tick.is_multiple_of(field_ticks)
+        {
+            log.write(&world.field_dump());
+        }
         if tick.is_multiple_of(checkpoint_ticks) {
             checkpoints.queue(tick, encode_snapshot(&world.state, &build_id));
         }
@@ -282,6 +393,7 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
                     &mut presenter,
                     &mut view,
                     &mut telemetry,
+                    &mut fields,
                     &mut checkpoints,
                     &mut ticks_done,
                 );
@@ -316,6 +428,7 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
                                 &mut presenter,
                                 &mut view,
                                 &mut telemetry,
+                                &mut fields,
                                 &mut checkpoints,
                                 &mut ticks_done,
                             );
@@ -450,6 +563,19 @@ mod tests {
         std::fs::write(&path, "[capacity]\nmax_organisms = 0\n").unwrap();
         assert!(load_config(&path).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn field_values_are_four_decimals_and_non_finite_values_are_null() {
+        let v = rounded(&[0.0, 1.0 / 3.0, 0.123_449, 0.123_45, -2.5, f64::NAN, f64::INFINITY]);
+        let n = |i: usize| v[i].as_f64();
+        assert_eq!(n(0), Some(0.0));
+        assert_eq!(n(1), Some(0.3333));
+        assert_eq!(n(2), Some(0.1234));
+        assert_eq!(n(3), Some(0.1235));
+        assert_eq!(n(4), Some(-2.5));
+        assert!(v[5].is_null(), "NaN must not be written as a number: {:?}", v[5]);
+        assert!(v[6].is_null(), "an infinity must not be written as a number: {:?}", v[6]);
     }
 
     #[test]
