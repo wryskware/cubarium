@@ -2099,7 +2099,7 @@ mod tests {
         let g = |o: &Organism| (o.genome.diet, o.genome.depth, o.genome.speed, o.genome.size, o.genome.swim, o.genome.hue);
         assert_eq!(g(&burrower), (0.10, 0.10, 0.6, 1.0, 0.0, 0.15));
         assert_eq!(g(&grazer), (0.85, 0.55, 1.0, 1.0, 0.0, 0.50));
-        assert_eq!(g(&glider), (0.90, 1.00, 1.0, 0.8, 0.0, 0.85));
+        assert_eq!(g(&glider), (0.90, 1.00, 1.0, 1.0, 0.0, 0.85));
         assert_eq!(g(&skimmer), (0.60, 0.10, 0.9, 0.9, 1.0, 0.65));
         // Unnamed loci keep the v1 founder values, and the phenotype carries the kind.
         assert_eq!((burrower.genome.metabolism, burrower.genome.mouth, burrower.genome.reserve), (0.7, 1.0, 1.0), "the burrower kind fixes metabolism; the rest stay v1");

@@ -405,7 +405,7 @@ impl FounderKind {
         vec![
             burrower,
             kind("grazer", 10, 0.85, 0.55, 1.0, 1.0, 0.0, 0.50, 0),
-            kind("glider", 5, 0.90, 1.00, 1.0, 0.8, 0.0, 0.85, 1),
+            kind("glider", 5, 0.90, 1.00, 1.0, 1.0, 0.0, 0.85, 1),
             // The skimmer runs cool too, and grazes: its food is the algae that standing
             // water grows on the floor (`water.algae_light`), which the wading burrowers
             // reach slowly. As a pure scavenger it boomed on the shared litter and starved.
