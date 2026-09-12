@@ -17,7 +17,10 @@ path = "src/main.rs"
 cube-proto = { workspace = true }
 cubarium-surface = { workspace = true }
 cubarium-render = { workspace = true }
+cubarium-core = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 minifb = { workspace = true }
 png = { workspace = true }
+toml = "0.8"
+serde_json = "1"

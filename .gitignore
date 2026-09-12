@@ -4,6 +4,7 @@
 
 # Runtime worlds, telemetry, and rendered captures are not source material.
 /state/
+/runs/
 /captures/
 /logs/
 

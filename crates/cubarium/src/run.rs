@@ -1,5 +1,5 @@
-//! The host loop: one clock, one scene set, one `Canvas::encode` per rendered frame,
-//! and whichever sink is active.
+//! The `demo` loop: one clock, one scene set, one `Canvas::encode` per rendered frame,
+//! and whichever sink is active. The persistent `run` loop lives in [`crate::runner`].
 
 use std::time::{Duration, Instant};
 
@@ -15,9 +15,13 @@ use crate::sink::{FrameSink, PngSink, PreviewSink, ShimSink};
 
 /// Run a parsed command.
 pub fn run(command: Command) -> Result<()> {
-    let Command::Demo(demo) = command;
-    demo.validate()?;
-    run_demo(&demo)
+    match command {
+        Command::Demo(demo) => {
+            demo.validate()?;
+            run_demo(&demo)
+        }
+        Command::Run(world) => crate::runner::run_world(&world).map(|_| ()),
+    }
 }
 
 fn run_demo(demo: &Demo) -> Result<()> {

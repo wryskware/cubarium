@@ -114,7 +114,7 @@ Phenotype decode (once at birth):
 
 Drives (M2 fixed values in parentheses): `w_food` (1.0), `w_detritus` (0.4),
 `w_persist` (0.3), `w_crowd` (0.6), `seek_on` (0.3), `seek_off` (0.1),
-`feed_min` (0.05 m per cell), `rest_effort` (0.05), `bud_reserve` (0.7),
+`feed_min` (0.2 m per cell, leaving a regrowth refuge of a tenth of `P_max`), `rest_effort` (0.05), `bud_reserve` (0.7),
 `bud_energy` (0.3), `bud_min_age` (120 s), `tau_hunger` (10 s),
 `turn_rate_max` (90°/s), `turn_noise` (0.6 rad/√s).
 
@@ -122,14 +122,19 @@ Drives (M2 fixed values in parentheses): `w_food` (1.0), `w_detritus` (0.4),
 
 Observation each tick, all in the organism's chart via `unfold` to the five
 cell centers (own cell and its four graph neighbors; a rim cell simply lacks
-one): `P` and `D` gradients as `Σ (value_i − value_0) · dir_i`, normalized;
+one): `P` and edible-detritus gradients as `Σ (value_i − value_0) · dir_i`,
+normalized. Edible detritus is `D_eff = D · min(1, ρ / e_r)` with `ρ = De / D`
+(zero when `D = 0`): detritus that cannot fuel reserve storage is not food,
+so `d_here`, the detritus gradient, and the Feeding threshold all use `D_eff`.
+Organisms therefore leave an energy-poor detritus carpet instead of grazing it
+forever at near-zero yield;
 neighbor organisms within `r_sense` from the pair pass (positions in own chart,
 IDs deduplicated). Hunger `h = 1 − R/R_max`; hunger memory
 `m_h += (1 − exp(−dt/τ)) (h − m_h)`.
 
 Mode with hysteresis: `Seeking` when `m_h > seek_on`, back to `Resting` when
 `m_h < seek_off`. `Feeding` when Seeking and the own cell holds `P ≥ feed_min`
-(or `D ≥ feed_min` with the scavenging channel).
+(or `D_eff ≥ feed_min` with the scavenging channel).
 
 Steering vector `s = w_food · h · ∇P + w_detritus · h · ∇D + w_crowd · repulsion +
 w_persist · ou`, where `ou` is the organism's Ornstein–Uhlenbeck turn noise

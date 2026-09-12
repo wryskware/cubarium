@@ -279,7 +279,7 @@ impl Default for DriveConfig {
             w_crowd: 0.6,
             seek_on: 0.3,
             seek_off: 0.1,
-            feed_min: 0.05,
+            feed_min: 0.2,
             rest_effort: 0.05,
             feed_effort: 0.2,
             bud_reserve: 0.7,

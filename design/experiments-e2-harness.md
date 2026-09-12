@@ -1,0 +1,64 @@
+---
+design_status: leaning
+last_reviewed: 2026-09-11
+decision_refs: []
+---
+
+# E2 harness — local succession versus global crash cycles
+
+Tooling contract for running [E2](experiments.md) (and the E3 timing records)
+against the M2 world. The harness is a development tool; it never touches the
+ambient display.
+
+## Runner
+
+`scripts/e2-run.sh <batch-name> <matrix.toml>` runs one headless world per
+matrix row: `cubarium run --sink none --speed 0 --fresh --seconds <T> --config
+<row.toml> --state runs/<batch>/<row>/state --telemetry runs/<batch>/<row>/telemetry.jsonl`,
+recording the build id, the row's full config, seeds, and wall time in
+`runs/<batch>/<row>/manifest.json`. Rows are generated from `matrix.toml`:
+a base config plus named axes, expanded as a full factorial over the listed
+values and the listed seeds. `runs/` is git-ignored; a selected summary is
+copied into `design/7_Research/` by hand.
+
+The telemetry cadence for experiments is `capacity.telemetry_seconds = 5`.
+
+## Analyzer
+
+`scripts/e2-analyze.py runs/<batch>` reads every `telemetry.jsonl` and writes
+`runs/<batch>/summary.csv` plus `summary.md` with, per row and seed:
+
+| Metric | Definition |
+| --- | --- |
+| `pop_min`, `pop_max`, `pop_final`, `pop_cv` | Population over the run after a 10-minute burn-in; CV = std/mean |
+| `extinct_at` | First sample with population 0, else empty |
+| `time_at_cap` | Fraction of samples with `population ≥ 0.95 · max_organisms` |
+| `births_per_hour`, `deaths_per_hour` | From cumulative counters |
+| `producer_mean`, `producer_min_frac` | `Σ P` mean and minimum as a fraction of `1280 · P_max` |
+| `detritus_mean_frac` | `Σ D / (Σ N + Σ P + Σ D)` mean |
+| `occupied_cells_mean` | Mean of `occupied_cells` |
+| `face_sync` | Mean pairwise zero-lag correlation of the five per-face population series (detrended by a 30-minute moving average) |
+| `face_lag_max` | Largest |lag| (in samples) at which any face pair's cross-correlation peaks, within ±30 minutes |
+| `crash_cycles` | Count of population drops of more than 50 % from a local maximum within 30 minutes |
+| `residual_max` | Max |mass residual| |
+
+`summary.md` also embeds one ASCII sparkline per row for population and
+`Σ P` so raw trajectories are visible without plotting, per the E2 protocol's
+"show raw trajectories". No metric is combined into a score.
+
+## First batch (`e2-first`)
+
+Seeds 1–4, `T = 6 h` simulated. Axes over the M2 defaults:
+
+| Axis | Values |
+| --- | --- |
+| `producer.growth` | 0.004, 0.008, 0.016 |
+| `nutrient.diffusion` | 0.02, 0.05, 0.2 |
+| `organism.speed_max` | 0.75, 1.5 |
+| `weather.moving` | false, true |
+
+That is 36 rows × 4 seeds = 144 runs of 6 simulated hours; at ~200× real time
+each run is about two minutes, so the batch is a few hours of one core or under
+an hour across several. The gate is stated in `experiments.md`: repeated local
+feeding and detritus succession before the whole cube empties, in several
+configurations; persistent cap-to-crash synchrony blocks added complexity.

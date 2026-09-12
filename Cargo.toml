@@ -19,6 +19,7 @@ cube-proto = { path = "vendor/cube-proto" }
 cubarium-surface = { path = "crates/cubarium-surface" }
 cubarium-surface-oracle = { path = "crates/cubarium-surface-oracle" }
 cubarium-render = { path = "crates/cubarium-render" }
+cubarium-core = { path = "crates/cubarium-core" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 minifb = "0.28"
