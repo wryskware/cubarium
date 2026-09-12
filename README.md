@@ -11,9 +11,12 @@ an independent 3D oracle and test suite), a linear-light renderer, and a host
 that shows geometry fixtures in a desktop preview, sends them to the shim, or
 captures PNGs (`cargo run -p cubarium -- demo --help`). The physical-cube
 review (seam continuity, E8 reflection) is still pending Wrysk's observation.
-M2, the first living world, is specified in `design/m2-world-spec.md` and its
-`cubarium-core` interface skeleton exists; no ecology runs yet. Implementation
-does not make the architecture canon; see the decision ledger.
+M2, the first living world, is implemented in `cubarium-core` per
+`design/m2-world-spec.md` with exact material and energy audits, checkpoint
+resume, and telemetry (`cargo run --release -p cubarium -- run --help`); the E2
+succession experiment runs through `scripts/e2-run.sh`, and its first batch is
+the current evidence step. Implementation does not make the architecture
+canon; see the decision ledger.
 
 Start with the [design overview](design/README.md), then the
 [implementation plan](design/implementation-plan.md). The

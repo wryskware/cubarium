@@ -29,9 +29,11 @@ crate with oracle-backed tests including E1, renderer, host with preview, shim
 sink, and PNG captures; `cube-proto` vendored at shim revision 7a21b5f because
 the shim has no published remote). Frames were sent to the running shim daemon
 without errors. Pending M1 evidence: physical-cube observation of seam
-continuity, the vertex-ownership fixture, and E8 reflection. M2 has a written
-specification and an interface skeleton; ecological, performance, and
-durability results remain to be produced.
+continuity, the vertex-ownership fixture, and E8 reflection. M2's world,
+persistence, telemetry, and ambient presentation are implemented and pass an
+independent spec-derived suite (closed-box material to ~1e-11, per-tick energy
+audit, exact snapshot replay). Ecological evidence (E2/E3) is being produced
+with the [E2 harness](experiments-e2-harness.md); durability (M5) is untested.
 
 ## M1 — prove the surface and presentation path
 
