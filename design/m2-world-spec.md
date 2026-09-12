@@ -219,7 +219,7 @@ changes as JSON lines with tick and sequence; empty in M2 but wired.
 ## Observer
 
 Field dumps: when `capacity.field_dump_seconds > 0`, the host writes
-`fields.jsonl` beside the telemetry file. Its first line is a header
+`fields.jsonl` in the state directory (or the `--fields` path). Its first line is a header
 `{"cells": [[n0, n1, n2, n3], …]}` giving each cell's graph neighbors in `Edge`
 order (`null` at the rim) so analyzers can compute graph distances without the
 Rust crate; each later line is `{"tick", "n", "p", "d", "de", "organisms"}`

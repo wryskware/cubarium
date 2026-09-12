@@ -17,6 +17,8 @@ Conventions
 * Burn-in. BURN_IN_SECONDS = 600 (the contract's 10-minute burn-in). The analysis
   window is every sample at simulated time >= 600 s. Every metric below is computed
   on that window except `extinct_at` and `residual_max`, which scan the whole run.
+* Precision. summary.csv carries full float precision (it is the machine-readable
+  artifact); summary.md rounds to four significant digits for reading.
 * Empty cells. A metric that is undefined for a run (no window samples, a zero
   denominator, a constant series where a correlation would divide by zero) is left
   empty rather than reported as 0.
@@ -80,6 +82,70 @@ residual_max
     max |mass_residual| over the whole run, burn-in included: it is a correctness
     check on the world, not an ecological measurement.
 
+Spatial metrics (design/experiments-e2-harness.md, "Spatial metrics from
+`fields.jsonl`")
+------------------------------------------------------------------------------
+
+These are computed only when the run has a field dump; every one of them is left
+empty when it does not, and the columns are still present. The dump is looked for
+at `<row>/fields.jsonl` (beside the telemetry file, which is where
+design/m2-world-spec.md "Observer" puts it, and where this harness's `--telemetry`
+path lands) and, failing that, at `<row>/state/fields.jsonl`.
+
+The dump's first line is a header `{"cells": [[n0, n1, n2, n3], ...]}` giving each
+cell's graph neighbours in Edge order with null at the rim; each later line is
+`{"tick", "n", "p", "d", "de", "organisms"}` with one array element per cell. Only
+`tick` and `p` are read. `P_max` is the row config's `producer.max`, default 1.5
+(design/m2-world-spec.md after the nutrient-limitation revision); the analyzer
+warns on stderr when it falls back to that default, because the normalized
+fractions are meaningless if the world used a different P_max.
+
+The analysis window is the same 600 s burn-in as above, applied to the field
+sample times.
+
+p_corr_length
+    Ring sets are built once per distinct adjacency header by breadth-first search
+    from every cell out to k = 8, giving for each k the set of ordered cell pairs
+    exactly k apart. For each field sample in the *second half* of the window, and
+    for each k, r_k is the Pearson correlation between P at the first and P at the
+    second member of those pairs (the ring pair set is symmetric, so both sides
+    have the same mean and variance; those are accumulated from precomputed
+    per-cell ring degrees, and only the cross term needs the pair list). With
+    r_0 = 1 by definition, the sample's correlation length is the first k whose
+    r_k < 1/e, linearly interpolated between k-1 and k:
+    k - 1 + (r_{k-1} - 1/e) / (r_{k-1} - r_k). p_corr_length is the mean of those
+    lengths. Samples whose correlation never drops below 1/e by k = 8 are excluded
+    from the mean (the length is right-censored beyond the measured range); if no
+    sample crosses, the metric is empty.
+p_spatial_cv
+    Mean over window samples of the coefficient of variation of P across cells:
+    the population standard deviation over the cells divided by the mean over the
+    cells. Samples whose mean P is 0 are skipped.
+cells_depleted_frac, cells_rich_frac
+    Mean over window samples of the fraction of cells with P <= 0.25 * P_max and
+    with P >= 0.5 * P_max respectively. The two bands overlap only when P_max is
+    0, and a cell between the thresholds counts in neither.
+depletions_per_cell_hour
+    A cell is "armed" once a sample puts it at P >= 0.5 * P_max. A depletion is an
+    armed cell reaching P <= 0.25 * P_max; it disarms the cell, which must become
+    rich again before it can deplete again, so a cell oscillating inside one band
+    is not counted repeatedly. Samples between the thresholds change nothing.
+    The metric is the total number of such transitions over the window, divided by
+    the window duration in simulated hours and by the number of cells. A cell that
+    is already depleted at the start of the window is not armed and contributes no
+    event until it has recovered once.
+recovery_lag_median, recoveries_censored
+    Each depletion counted above opens an episode at that sample's simulated time;
+    it closes at the first later sample with P >= 0.5 * P_max, contributing a lag
+    in simulated seconds. recovery_lag_median is the median of the closed lags.
+    Episodes still open at the end of the window are right-censored: excluded from
+    the median and counted in recoveries_censored.
+face_p_sync
+    Comes from telemetry, not the field dump: the five `producer_by_face` series
+    are detrended by the same 30-minute centered moving average as `face_sync` and
+    face_p_sync is the mean of the ten pairwise zero-lag Pearson correlations.
+    Empty when telemetry has no `producer_by_face` field.
+
 summary.md additionally embeds, per row, a 32-character ASCII sparkline of
 `population` and of Sigma P over the whole run (burn-in included, so the raw
 trajectory is visible as the E2 protocol asks). The series is split into 32
@@ -95,6 +161,7 @@ import csv
 import json
 import math
 import sys
+from operator import mul
 import tomllib
 from pathlib import Path
 
@@ -107,7 +174,11 @@ CRASH_FRACTION = 0.5
 CAP_FRACTION = 0.95
 CELL_COUNT = 1280  # five faces x 16 x 16 field cells
 DEFAULT_MAX_ORGANISMS = 512
-DEFAULT_PRODUCER_MAX = 2.0
+DEFAULT_PRODUCER_MAX = 1.5  # design/m2-world-spec.md after the nutrient-limitation revision
+DEPLETED_FRACTION = 0.25
+RICH_FRACTION = 0.5
+CORR_MAX_K = 8
+INV_E = 1.0 / math.e
 SPARK_WIDTH = 32
 BLOCKS = "▁▂▃▄▅▆▇█"
 
@@ -129,6 +200,35 @@ METRICS = [
     "crash_cycles",
     "residual_max",
 ]
+
+# From fields.jsonl (plus face_p_sync from telemetry); empty when the dump is absent.
+SPATIAL_METRICS = [
+    "p_corr_length",
+    "p_spatial_cv",
+    "cells_depleted_frac",
+    "cells_rich_frac",
+    "depletions_per_cell_hour",
+    "recovery_lag_median",
+    "recoveries_censored",
+    "face_p_sync",
+]
+
+ALL_METRICS = METRICS + SPATIAL_METRICS
+
+
+_WARNED_PRODUCER_MAX = False
+
+
+def warn_producer_max(row_name: str):
+    """`producer.max` decides every P_max-normalized metric; say so once if assumed."""
+    global _WARNED_PRODUCER_MAX
+    if not _WARNED_PRODUCER_MAX:
+        _WARNED_PRODUCER_MAX = True
+        print(
+            f"e2-analyze: no `producer.max` in {row_name}/config.toml; assuming "
+            f"P_max = {DEFAULT_PRODUCER_MAX} for every P_max-normalized metric",
+            file=sys.stderr,
+        )
 
 
 # --------------------------------------------------------------------------- io
@@ -246,6 +346,185 @@ def sparkline(xs, width=SPARK_WIDTH):
     return "".join(BLOCKS[min(7, int((b - lo) / (hi - lo) * 8))] for b in buckets)
 
 
+# ----------------------------------------------------------------- field dumps
+
+
+def find_fields(row_dir: Path):
+    """The run's field dump, beside the telemetry file or under state/."""
+    for candidate in (row_dir / "fields.jsonl", row_dir / "state" / "fields.jsonl"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def read_fields(path: Path):
+    """(neighbour lists, [(simulated seconds, P list), ...]) from a field dump."""
+    header = None
+    samples = []
+    with path.open() as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            record = json.loads(line)
+            if header is None:
+                if "cells" not in record:
+                    raise ValueError(f"{path}: first line is not a `cells` header")
+                header = record["cells"]
+                continue
+            samples.append((record["tick"] * DT, record["p"]))
+    if header is None:
+        return None, []
+    samples.sort(key=lambda s: s[0])
+    return header, samples
+
+
+_RING_CACHE: dict = {}
+
+
+def ring_pairs(neighbors, max_k=CORR_MAX_K):
+    """Ordered cell pairs exactly k apart, plus each cell's ring degree, for k = 1..max_k.
+
+    One breadth-first search per cell over the dump's own adjacency header, so the
+    analyzer needs no geometry crate. Cached because every row of a batch shares
+    one adjacency.
+    """
+    key = (hash(tuple(tuple(row) for row in neighbors)), max_k)
+    cached = _RING_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    n = len(neighbors)
+    adjacency = [[j for j in row if j is not None] for row in neighbors]
+    pairs = {k: ([], []) for k in range(1, max_k + 1)}
+    degrees = {k: [0] * n for k in range(1, max_k + 1)}
+
+    for start in range(n):
+        seen = {start}
+        frontier = [start]
+        for k in range(1, max_k + 1):
+            nxt = []
+            for cell in frontier:
+                for j in adjacency[cell]:
+                    if j not in seen:
+                        seen.add(j)
+                        nxt.append(j)
+            if not nxt:
+                break
+            left, right = pairs[k]
+            left.extend([start] * len(nxt))
+            right.extend(nxt)
+            degrees[k][start] = len(nxt)
+            frontier = nxt
+
+    result = (pairs, degrees)
+    _RING_CACHE[key] = result
+    return result
+
+
+def correlation_length(p_values, pairs, degrees, max_k=CORR_MAX_K):
+    """First graph distance whose ring correlation drops below 1/e, interpolated.
+
+    Returns None when the correlation has not crossed 1/e by max_k (right-censored)
+    or when P is spatially constant.
+    """
+    squares = [v * v for v in p_values]
+    previous_r = 1.0  # r at distance 0
+    for k in range(1, max_k + 1):
+        left, right = pairs[k]
+        if not left:
+            break
+        deg = degrees[k]
+        count = len(left)
+        # The ring pair set is symmetric, so both sides share these moments.
+        total = sum(map(mul, deg, p_values))
+        total_sq = sum(map(mul, deg, squares))
+        cross = sum(map(mul, map(p_values.__getitem__, left), map(p_values.__getitem__, right)))
+        m = total / count
+        var = total_sq / count - m * m
+        if var <= 0.0:
+            return None
+        r = (cross / count - m * m) / var
+        if r < INV_E:
+            span = previous_r - r
+            if span <= 0.0:
+                return float(k - 1)
+            return (k - 1) + (previous_r - INV_E) / span
+        previous_r = r
+    return None
+
+
+def spatial_metrics(fields_path: Path, producer_max: float) -> dict:
+    """The six fields.jsonl metrics of the harness contract.
+
+    `face_p_sync` is deliberately absent: it comes from telemetry, and returning a
+    None for it here would overwrite the computed value at the call site.
+    """
+    out = {name: None for name in SPATIAL_METRICS if name != "face_p_sync"}
+    neighbors, samples = read_fields(fields_path)
+    if not neighbors or not samples:
+        return out
+
+    window = [(t, p) for t, p in samples if t >= BURN_IN_SECONDS]
+    if not window:
+        return out
+    n_cells = len(neighbors)
+
+    # Patchiness and the two occupancy bands.
+    cvs = []
+    depleted_fracs = []
+    rich_fracs = []
+    low = DEPLETED_FRACTION * producer_max
+    high = RICH_FRACTION * producer_max
+    for _, values in window:
+        m = sum(values) / n_cells
+        if m > 0:
+            var = sum((v - m) ** 2 for v in values) / n_cells
+            cvs.append(math.sqrt(var) / m)
+        depleted_fracs.append(sum(1 for v in values if v <= low) / n_cells)
+        rich_fracs.append(sum(1 for v in values if v >= high) / n_cells)
+    out["p_spatial_cv"] = mean(cvs)
+    out["cells_depleted_frac"] = mean(depleted_fracs)
+    out["cells_rich_frac"] = mean(rich_fracs)
+
+    # Depletion / recovery cycles, one state machine per cell.
+    armed = [False] * n_cells
+    depleted_at = [None] * n_cells
+    depletions = 0
+    lags = []
+    for t, values in window:
+        for i in range(n_cells):
+            v = values[i]
+            if v >= high:
+                start = depleted_at[i]
+                if start is not None:
+                    lags.append(t - start)
+                    depleted_at[i] = None
+                armed[i] = True
+            elif v <= low and armed[i]:
+                depletions += 1
+                depleted_at[i] = t
+                armed[i] = False
+    censored = sum(1 for start in depleted_at if start is not None)
+
+    hours = (window[-1][0] - window[0][0]) / 3600.0
+    if hours > 0:
+        out["depletions_per_cell_hour"] = depletions / hours / n_cells
+    out["recovery_lag_median"] = median(lags) if lags else None
+    out["recoveries_censored"] = censored
+
+    # Correlation length over the second half of the window.
+    pairs, degrees = ring_pairs(neighbors)
+    lengths = []
+    for _, values in window[len(window) // 2 :]:
+        length = correlation_length(values, pairs, degrees)
+        if length is not None:
+            lengths.append(length)
+    out["p_corr_length"] = mean(lengths)
+
+    return out
+
+
 # --------------------------------------------------------------------- metrics
 
 
@@ -270,7 +549,11 @@ def analyze_row(row_dir: Path) -> dict | None:
         interval = 5.0
 
     max_organisms = float(config.get("capacity.max_organisms", DEFAULT_MAX_ORGANISMS))
-    producer_max = float(config.get("producer.max", DEFAULT_PRODUCER_MAX))
+    if "producer.max" in config:
+        producer_max = float(config["producer.max"])
+    else:
+        producer_max = DEFAULT_PRODUCER_MAX
+        warn_producer_max(row_dir.name)
 
     result = {
         "row": row_dir.name,
@@ -285,7 +568,7 @@ def analyze_row(row_dir: Path) -> dict | None:
         "spark_population": sparkline([float(s["population"]) for s in samples]),
         "spark_producer": sparkline([float(s["producer"]) for s in samples]),
     }
-    for name in METRICS:
+    for name in ALL_METRICS:
         result[name] = None
 
     # residual_max and extinct_at scan the whole run, burn-in included.
@@ -391,10 +674,47 @@ def analyze_row(row_dir: Path) -> dict | None:
             running_max_time = t
     result["crash_cycles"] = crashes
 
+    # face_p_sync: the same construction as face_sync on the per-face Sigma P series,
+    # which only exists once the host emits `producer_by_face`.
+    if all("producer_by_face" in s for s in ws):
+        producer_faces = [
+            detrend([float(s["producer_by_face"][f]) for s in ws], ma_window)
+            for f in range(5)
+        ]
+        rs = [pearson(producer_faces[a], producer_faces[b]) for a, b in pairs]
+        defined_p = [r for r in rs if r is not None]
+        result["face_p_sync"] = mean(defined_p) if defined_p else None
+
+    fields_path = find_fields(row_dir)
+    if fields_path is not None:
+        result["fields"] = str(fields_path.relative_to(row_dir))
+        try:
+            result.update(spatial_metrics(fields_path, producer_max))
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            # One unreadable dump leaves its spatial columns empty rather than
+            # aborting the whole batch.
+            print(
+                f"e2-analyze: {row_dir.name}: cannot read {fields_path.name}: {exc}",
+                file=sys.stderr,
+            )
+
     return result
 
 
 # ----------------------------------------------------------------- formatting
+
+
+def fmt_full(value):
+    """Full-precision rendering for summary.csv; summary.md uses fmt() instead."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float):
+        if value == int(value) and abs(value) < 1e15:
+            return str(int(value))
+        return repr(value)
+    return str(value)
 
 
 def fmt(value, digits=4):
@@ -416,23 +736,27 @@ def write_csv(path: Path, rows, axis_keys):
         ["row", "seed"]
         + axis_keys
         + ["samples", "window_samples", "sim_seconds", "interval"]
-        + METRICS
+        + ALL_METRICS
         + ["exit_code", "wall_seconds", "build_id"]
     )
     with path.open("w", newline="") as fh:
         writer = csv.writer(fh)
         writer.writerow(header)
         for r in rows:
-            line = [r["row"], fmt(r["seed"])]
-            line += [fmt(r["axes"].get(k)) for k in axis_keys]
+            line = [r["row"], fmt_full(r["seed"])]
+            line += [fmt_full(r["axes"].get(k)) for k in axis_keys]
             line += [
-                fmt(r["samples"]),
-                fmt(r.get("window_samples")),
-                fmt(r["sim_seconds"]),
-                fmt(r["interval"]),
+                fmt_full(r["samples"]),
+                fmt_full(r.get("window_samples")),
+                fmt_full(r["sim_seconds"]),
+                fmt_full(r["interval"]),
             ]
-            line += [fmt(r[m], 6) for m in METRICS]
-            line += [fmt(r["exit_code"]), fmt(r["wall_seconds"]), r.get("build_id") or ""]
+            line += [fmt_full(r[m]) for m in ALL_METRICS]
+            line += [
+                fmt_full(r["exit_code"]),
+                fmt_full(r["wall_seconds"]),
+                r.get("build_id") or "",
+            ]
             writer.writerow(line)
 
 
@@ -474,6 +798,7 @@ def write_md(path: Path, batch_dir: Path, rows, axis_keys, meta):
     ]
 
     header = ["row", "seed"] + axis_keys + METRICS
+    spatial_header = ["row", "seed"] + SPATIAL_METRICS
     body = []
     for r in rows:
         cells = [r["row"], fmt(r["seed"])]
@@ -481,6 +806,24 @@ def write_md(path: Path, batch_dir: Path, rows, axis_keys, meta):
         cells += [fmt(r[m]) for m in METRICS]
         body.append(cells)
     lines += md_table(header, body)
+
+    lines += ["", "## Spatial metrics", ""]
+    if any(r.get("fields") for r in rows):
+        lines += [
+            "From each run's `fields.jsonl`; `face_p_sync` from the telemetry's",
+            "`producer_by_face`. Empty where the dump or the field is absent.",
+            "",
+        ]
+        spatial_body = []
+        for r in rows:
+            spatial_body.append(
+                [r["row"], fmt(r["seed"])] + [fmt(r[m]) for m in SPATIAL_METRICS]
+            )
+        lines += md_table(spatial_header, spatial_body)
+    else:
+        lines.append("No run in this batch has a `fields.jsonl` dump; the spatial")
+        lines.append("columns of `summary.csv` are empty. Set `capacity.field_dump_seconds`")
+        lines.append("in the matrix's `[base]` to collect them.")
 
     lines += [
         "",

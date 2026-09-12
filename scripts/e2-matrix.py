@@ -58,6 +58,7 @@ from pathlib import Path
 KNOWN_ABBREV = {
     "producer.growth": "g",
     "nutrient.diffusion": "d",
+    "nutrient.initial": "n",
     "organism.speed_max": "v",
     "weather.moving": "w",
     "habitat.noise_wavelength": "p",
