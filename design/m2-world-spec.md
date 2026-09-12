@@ -94,7 +94,9 @@ centers drifting on the sphere with periods 20, 33 and 47 minutes plus a slow
 random walk from the `Weather` stream (one draw per blob per minute). Static
 mode freezes the blob centers. `L = clamp(L₀ + Σ light blobs, 0, 1)`, likewise `W`.
 
-Initial fields: `N = 0.5 m` per cell, `P = 0.3 · L₀ · W₀ · P_max`, `D = 0`.
+Initial fields: `N = 0.5 m` per cell, `P = 0.6 · L₀ · W₀ · P_max`, `D = 0` (the
+founding stock must exceed `feed_min` in ordinary cells, or the world starts
+in famine).
 
 The first E2 batch (2026-09-11, `runs/e2-first`) showed that with `N = 1.0`
 and no saturation term nutrient never limited growth: nutrient diffusion had

@@ -45,8 +45,10 @@ impl Fields {
     }
 
     /// One tick of reactions, all from pre-tick values, per cell:
-    /// 1. growth `Δ = min(g · L · W · P · (1 − P/P_max) · dt, f_max · N · dt, N)` (Δ ≥ 0):
-    ///    `N −= Δ`, `P += Δ`, `light_in += e_p · Δ`.
+    /// 1. growth `Δ = min(g · L · W · P · (1 − P/P_max) · N/(N + K_N) · dt, f_max · N · dt, N)`
+    ///    (Δ ≥ 0): `N −= Δ`, `P += Δ`, `light_in += e_p · Δ`. The Monod factor `N/(N + K_N)`
+    ///    makes scarce nutrient limit uptake instead of only capping it; `K_N = 0` restores
+    ///    the unsaturated law. It only scales Δ, so conservation is unaffected.
     /// 2. mortality `Δ = m_p · P · dt`: `P −= Δ`, `D += Δ`, `De += e_p · Δ`, then if
     ///    `De > e_d_max · D` the excess goes to `heat_out` and `De` is clamped.
     /// 3. decomposition `Δ = k_d · D · dt`: `D −= Δ`, `N += Δ`, `De` reduced by the same
@@ -59,6 +61,7 @@ impl Fields {
         let mut ledger = FieldLedger::default();
         let pc = &cfg.producer;
         let dc = &cfg.detritus;
+        let nc = &cfg.nutrient;
 
         for i in 0..CELL_COUNT {
             // Every delta below is a function of the pre-tick values only.
@@ -73,7 +76,8 @@ impl Fields {
 
             // 1. Growth: light-driven uptake of free nutrient, capped by the logistic term,
             //    by the per-second uptake fraction, and by what the cell actually holds.
-            let logistic = pc.growth * light[i] * moisture[i] * p0 * (1.0 - p0 / pc.max) * DT;
+            let monod = if n0 > 0.0 { n0 / (n0 + nc.half_saturation) } else { 0.0 };
+            let logistic = pc.growth * light[i] * moisture[i] * p0 * (1.0 - p0 / pc.max) * monod * DT;
             let grow = logistic.min(pc.uptake_max * n0 * DT).min(n0).max(0.0);
 
             // 2. Mortality: producers fall to detritus, carrying their energy with them.
@@ -187,12 +191,49 @@ mod tests {
         assert_eq!(f.n.len(), CELL_COUNT);
         for i in 0..CELL_COUNT {
             assert_eq!(f.n[i], h.cfg.nutrient.initial);
-            let want = 0.3 * 2.0 * h.light[i] * h.moisture[i];
+            let want = h.cfg.producer.initial_fraction * h.cfg.producer.max * h.light[i] * h.moisture[i];
             assert_eq!(f.p[i], want);
             assert_eq!(f.d[i], 0.0);
             assert_eq!(f.de[i], 0.0);
         }
         f.check(h.cfg.detritus.energy_cap).unwrap();
+    }
+
+    #[test]
+    fn the_monod_term_limits_growth_by_nutrient() {
+        // Growth scales as N/(N + K_N) when nothing else binds.
+        fn harness(half_saturation: f64) -> Harness {
+            let mut cfg = WorldConfig::default();
+            cfg.producer.mortality = 0.0;
+            cfg.detritus.decomposition = 0.0;
+            cfg.nutrient.diffusion = 0.0;
+            // Large enough that the uptake cap never binds before the Monod factor.
+            cfg.producer.uptake_max = 1e9;
+            cfg.nutrient.half_saturation = half_saturation;
+            Harness::new(cfg)
+        }
+        // `light_in` is `e_p` times the tick's total growth.
+        fn growth(h: &mut Harness, nutrient: f64) -> f64 {
+            let mut f = h.fields();
+            f.n.iter_mut().for_each(|n| *n = nutrient);
+            h.react(&mut f).light_in
+        }
+
+        let k = WorldConfig::default().nutrient.half_saturation;
+        let mut saturating = harness(k);
+        let at_k = growth(&mut saturating, k);
+        let at_3k = growth(&mut saturating, 3.0 * k);
+        assert!(at_k > 0.0);
+        // N = K_N gives half the saturated rate, N = 3·K_N three quarters: a ratio of 1.5.
+        assert!((at_3k / at_k - 1.5).abs() < 1e-9, "ratio {}", at_3k / at_k);
+
+        // K_N = 0 restores the unsaturated law, which is twice the rate at N = K_N.
+        let mut unsaturated = harness(0.0);
+        let plain = growth(&mut unsaturated, k);
+        assert!((plain / at_k - 2.0).abs() < 1e-9, "ratio {}", plain / at_k);
+
+        // An empty cell grows nothing however much light it gets.
+        assert_eq!(growth(&mut saturating, 0.0), 0.0);
     }
 
     #[test]

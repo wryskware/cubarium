@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever a field's meaning changes; stored in snapshots.
-pub const CONFIG_VERSION: u32 = 1;
+pub const CONFIG_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -61,6 +61,9 @@ pub struct NutrientConfig {
     pub initial: f64,
     /// Diffusion exchange coefficient per second per edge (dimensionless per tick after `· DT`).
     pub diffusion: f64,
+    /// `K_N`: half-saturation constant of the Monod uptake term `N / (N + K_N)` (m).
+    /// Zero makes uptake nutrient-independent again.
+    pub half_saturation: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -161,6 +164,9 @@ pub struct CapacityConfig {
     pub max_neighbors: u32,
     pub checkpoint_seconds: f64,
     pub telemetry_seconds: f64,
+    /// Seconds between observer field dumps; zero disables them. Carried by the core,
+    /// consumed by the host.
+    pub field_dump_seconds: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -193,7 +199,7 @@ impl Default for WorldConfig {
 
 impl Default for ProducerConfig {
     fn default() -> Self {
-        ProducerConfig { growth: 0.008, max: 2.0, uptake_max: 0.5, energy_density: 2.0, mortality: 0.0005, initial_fraction: 0.3 }
+        ProducerConfig { growth: 0.008, max: 1.5, uptake_max: 0.5, energy_density: 2.0, mortality: 0.0005, initial_fraction: 0.6 }
     }
 }
 
@@ -205,7 +211,7 @@ impl Default for DetritusConfig {
 
 impl Default for NutrientConfig {
     fn default() -> Self {
-        NutrientConfig { initial: 1.0, diffusion: 0.05 }
+        NutrientConfig { initial: 0.5, diffusion: 0.05, half_saturation: 0.25 }
     }
 }
 
@@ -301,7 +307,13 @@ impl Default for FounderConfig {
 
 impl Default for CapacityConfig {
     fn default() -> Self {
-        CapacityConfig { max_organisms: 512, max_neighbors: 16, checkpoint_seconds: 60.0, telemetry_seconds: 5.0 }
+        CapacityConfig {
+            max_organisms: 512,
+            max_neighbors: 16,
+            checkpoint_seconds: 60.0,
+            telemetry_seconds: 5.0,
+            field_dump_seconds: 0.0,
+        }
     }
 }
 
@@ -341,7 +353,11 @@ impl WorldConfig {
         ])?;
 
         let n = &self.nutrient;
-        finite_nonnegative(&[("nutrient.initial", n.initial), ("nutrient.diffusion", n.diffusion)])?;
+        finite_nonnegative(&[
+            ("nutrient.initial", n.initial),
+            ("nutrient.diffusion", n.diffusion),
+            ("nutrient.half_saturation", n.half_saturation),
+        ])?;
 
         let h = &self.habitat;
         // Height and noise gains are signed (moisture falls with height), so they are only
@@ -485,6 +501,7 @@ impl WorldConfig {
         if c.max_neighbors == 0 {
             return Err("capacity.max_neighbors is zero".into());
         }
+        finite_nonnegative(&[("capacity.field_dump_seconds", c.field_dump_seconds)])?;
         positive("capacity.checkpoint_seconds", c.checkpoint_seconds)?;
         positive("capacity.telemetry_seconds", c.telemetry_seconds)?;
         if f.count > c.max_organisms {

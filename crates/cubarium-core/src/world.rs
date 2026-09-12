@@ -5,8 +5,8 @@ use std::f64::consts::TAU;
 use serde::{Deserialize, Serialize};
 
 use cubarium_surface::{
-    CELL_COUNT, ChartImage, FACE_EXTENT, Face, FieldGraph, MAX_SEAMS, ScalarField, SurfacePoint, Travel, Vec2, cell_of,
-    chart_images, travel_into, unfold_with,
+    CELL_COUNT, CellId, ChartImage, FACE_EXTENT, Face, FieldGraph, MAX_SEAMS, ScalarField, SurfacePoint, Travel,
+    Vec2, cell_of, chart_images, travel_into, unfold_with,
 };
 
 use crate::config::WorldConfig;
@@ -19,7 +19,7 @@ use crate::organism::{DeathCause, Escrow, Mode, Organism, Origin};
 use crate::pairs::{Body, NeighborLists};
 use crate::rng::{Counter, Stream, normal, unit};
 use crate::telemetry::Telemetry;
-use crate::view::{OrganismView, RenderView};
+use crate::view::{FieldDump, OrganismView, RenderView};
 use crate::{DT, pairs, snapshot};
 
 /// Everything a checkpoint must capture. Transient caches are rebuilt on load.
@@ -845,6 +845,36 @@ impl World {
         }
     }
 
+    /// Every cell's material fields plus its live organism count, for the observer's
+    /// field dump. Cells are in `CellId` index order, 1,280 entries each.
+    pub fn field_dump(&self) -> FieldDump {
+        let mut organisms = vec![0u16; CELL_COUNT];
+        for (_, o) in self.state.organisms.iter() {
+            organisms[cell_of(&o.pos).index()] += 1;
+        }
+        let fields = &self.state.fields;
+        FieldDump {
+            tick: self.state.tick,
+            n: fields.n.clone(),
+            p: fields.p.clone(),
+            d: fields.d.clone(),
+            de: fields.de.clone(),
+            organisms,
+        }
+    }
+
+    /// Each cell's four graph neighbors in `Edge` order (`Top, Right, Bottom, Left`), as raw
+    /// cell indices with `None` at the open rim. Static for the life of the world: an
+    /// analyzer reads it once and computes graph distances without this crate.
+    pub fn cell_neighbors(&self) -> Vec<[Option<u16>; 4]> {
+        CellId::all()
+            .map(|cell| {
+                let n = self.graph.neighbors(cell);
+                std::array::from_fn(|e| n[e].map(|c| c.0))
+            })
+            .collect()
+    }
+
     /// Produce a telemetry sample and reset the per-sample counters.
     pub fn telemetry(&mut self) -> Telemetry {
         let mass_residual = self.mass_residual();
@@ -873,6 +903,13 @@ impl World {
             }
         }
         let fields = &self.state.fields;
+        let mut producer_by_face = [0.0f64; 5];
+        let mut detritus_by_face = [0.0f64; 5];
+        for cell in CellId::all() {
+            let face = cell.face().index();
+            producer_by_face[face] += fields.p[cell.index()];
+            detritus_by_face[face] += fields.d[cell.index()];
+        }
         let sample = Telemetry {
             tick: self.state.tick,
             population: self.state.organisms.len() as u32,
@@ -892,6 +929,8 @@ impl World {
             heat_out: self.counters.heat_out,
             mass_residual,
             population_by_face,
+            producer_by_face,
+            detritus_by_face,
             occupied_cells,
             travel_fallbacks: self.counters.travel_fallbacks,
             travel_ties: self.counters.travel_ties,
@@ -1173,6 +1212,9 @@ mod tests {
         let sample = world.telemetry();
         assert_eq!(sample.population, world.population() as u32);
         assert_eq!(sample.population_by_face.iter().sum::<u32>(), sample.population);
+        assert!((sample.producer_by_face.iter().sum::<f64>() - sample.producer).abs() < 1e-9);
+        assert!((sample.detritus_by_face.iter().sum::<f64>() - sample.detritus).abs() < 1e-9);
+        assert!(sample.producer_by_face.iter().all(|&p| p > 0.0));
         assert_eq!(sample.mode_resting + sample.mode_seeking + sample.mode_feeding, sample.population);
         assert!(sample.pairs_considered > 0);
         // The sample resets the per-sample counters.
@@ -1338,6 +1380,38 @@ mod tests {
         assert!(world.mass_residual().abs() < 1e-9);
         let booked = world.state.light_in_total - world.state.heat_out_total;
         assert!(((stored_energy(&world.state) - opening) - booked).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_field_dump_and_cell_graph_describe_every_cell() {
+        let mut world = World::new(config()).expect("valid");
+        world.step();
+        let dump = world.field_dump();
+        assert_eq!(dump.tick, 1);
+        assert_eq!(dump.n, world.state.fields.n);
+        assert_eq!(dump.p, world.state.fields.p);
+        assert_eq!(dump.d, world.state.fields.d);
+        assert_eq!(dump.de, world.state.fields.de);
+        assert_eq!(dump.organisms.len(), CELL_COUNT);
+        let counted: u32 = dump.organisms.iter().map(|&c| u32::from(c)).sum();
+        assert_eq!(counted, world.population() as u32, "every organism is counted once");
+        for (_, o) in world.state.organisms.iter() {
+            assert!(dump.organisms[cell_of(&o.pos).index()] > 0);
+        }
+
+        let neighbors = world.cell_neighbors();
+        assert_eq!(neighbors.len(), CELL_COUNT);
+        // The open rim leaves 64 cells with three neighbors; everyone else has four.
+        let rim = neighbors.iter().filter(|n| n.iter().any(Option::is_none)).count();
+        assert_eq!(rim, 64);
+        for (i, n) in neighbors.iter().enumerate() {
+            for &there in n.iter().flatten() {
+                assert!(
+                    neighbors[usize::from(there)].iter().flatten().any(|&back| usize::from(back) == i),
+                    "cell {i} -> {there} is not reciprocal"
+                );
+            }
+        }
     }
 
     #[test]

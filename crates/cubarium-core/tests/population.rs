@@ -92,10 +92,11 @@ fn twenty_minutes_of_default_world_keeps_its_books() {
 }
 
 /// Spec, "Capacity and IDs": "conception is refused at the cap before escrow". With the cap
-/// equal to the founder count the world is full from tick zero, so nothing is ever born and
-/// the population can only fall.
+/// equal to the founder count the world is full from tick zero: a birth can only ever
+/// refill a slot that a death has freed, so births never exceed deaths and the population
+/// never exceeds the cap.
 #[test]
-fn a_world_that_starts_full_never_gives_birth() {
+fn a_world_that_starts_full_only_refills_freed_slots() {
     let mut config = WorldConfig::default();
     config.founders.count = 8;
     config.capacity.max_organisms = 8;
@@ -125,15 +126,16 @@ fn a_world_that_starts_full_never_gives_birth() {
         world.population()
     );
 
-    assert_eq!(
-        world.state.births_total, 0,
-        "a world at its cap from the first tick recorded {} births",
+    assert!(
+        world.state.births_total <= deaths,
+        "a world at its cap from the first tick recorded {} births but only {deaths} deaths",
         world.state.births_total
     );
     assert_eq!(
-        founders - deaths,
+        founders + world.state.births_total - deaths,
         world.population() as u64,
-        "founders {founders} − deaths {deaths} does not equal the population {}",
+        "founders {founders} + births {} − deaths {deaths} does not equal the population {}",
+        world.state.births_total,
         world.population()
     );
     check_organisms(&world, TWENTY_MINUTES);

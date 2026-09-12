@@ -23,6 +23,9 @@ pub struct Telemetry {
     pub heat_out: f64,
     pub mass_residual: f64,
     pub population_by_face: [u32; 5],
+    /// `Σ P` and `Σ D` over each face's 256 cells, in `Face` order.
+    pub producer_by_face: [f64; 5],
+    pub detritus_by_face: [f64; 5],
     pub occupied_cells: u32,
     pub travel_fallbacks: u32,
     pub travel_ties: u32,
