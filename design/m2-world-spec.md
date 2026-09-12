@@ -56,7 +56,7 @@ reserve energy than the food supplied.
 
 | Process | Material | Energy | Rate (initial values) |
 | --- | --- | --- | --- |
-| Producer growth | `N → P` | `+e_p` per m from light (source) | `g · L · W · P · (1 − P/P_max)`, capped by `N` and by `f_max · N`; `g = 0.008/s`, `P_max = 2 m`, `f_max = 0.5/s`, `e_p = 2 e/m` |
+| Producer growth | `N → P` | `+e_p` per m from light (source) | `g · L · W · P · (1 − P/P_max) · N/(N + K_N)`, capped by `N` and by `f_max · N`; `g = 0.008/s`, `P_max = 1.5 m`, `K_N = 0.25 m`, `f_max = 0.5/s`, `e_p = 2 e/m` |
 | Producer mortality | `P → D` | `De += e_p · ΔP`, then clamp to `e_d_max · D` (excess is heat) | `m_p = 0.0005/s`, `e_d_max = 1 e/m` |
 | Decomposition | `D → N` | `De` shrinks by the fraction of detritus removed; that energy is heat | `k_d = 0.002/s` |
 | Grazing intake | `P → R` (η_m) and `P → D` (1 − η_m) in the cell; feces carry no energy | food energy `e_p · q`; reserve stores `e_r · η_m · q`; `E += η_e · (e_p − e_r · η_m) · q`; the rest is heat | `q = min(k_mouth · effort · dt, R_max − R)`, `k_mouth = 0.05 m/s`, `η_m = 0.6`, `η_e = 0.5` |
@@ -94,7 +94,14 @@ centers drifting on the sphere with periods 20, 33 and 47 minutes plus a slow
 random walk from the `Weather` stream (one draw per blob per minute). Static
 mode freezes the blob centers. `L = clamp(L₀ + Σ light blobs, 0, 1)`, likewise `W`.
 
-Initial fields: `N = 1.0 m` per cell, `P = 0.3 · L₀ · W₀ · 2 m`, `D = 0`.
+Initial fields: `N = 0.5 m` per cell, `P = 0.3 · L₀ · W₀ · P_max`, `D = 0`.
+
+The first E2 batch (2026-09-11, `runs/e2-first`) showed that with `N = 1.0`
+and no saturation term nutrient never limited growth: nutrient diffusion had
+no ecological effect and every viable configuration settled at the `feed_min`
+producer floor everywhere with a flat population. The Monod term and the
+scarcer initial nutrient make local recovery depend on recycling through
+detritus, which is the feedback the ecology proposal relies on.
 
 ## Organism representation
 
@@ -208,6 +215,15 @@ The journal (`state/journal-<n>.log`) records admitted stimuli and config
 changes as JSON lines with tick and sequence; empty in M2 but wired.
 
 ## Observer
+
+Field dumps: when `capacity.field_dump_seconds > 0`, the host writes
+`fields.jsonl` beside the telemetry file. Its first line is a header
+`{"cells": [[n0, n1, n2, n3], …]}` giving each cell's graph neighbors in `Edge`
+order (`null` at the rim) so analyzers can compute graph distances without the
+Rust crate; each later line is `{"tick", "n", "p", "d", "de", "organisms"}`
+with 1,280-element arrays (fields rounded to four decimals, organisms as
+per-cell counts), on the same absolute-tick cadence rule as telemetry.
+Telemetry samples also carry `producer_by_face` and `detritus_by_face` sums.
 
 Headless telemetry as JSON lines every 5 simulated seconds: tick, population,
 births, deaths by cause, escrows, cap rejections, `Σ N/P/D`, organism material,

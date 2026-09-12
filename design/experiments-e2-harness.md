@@ -21,7 +21,8 @@ a base config plus named axes, expanded as a full factorial over the listed
 values and the listed seeds. `runs/` is git-ignored; a selected summary is
 copied into `design/7_Research/` by hand.
 
-The telemetry cadence for experiments is `capacity.telemetry_seconds = 5`.
+The telemetry cadence for experiments is `capacity.telemetry_seconds = 5` and
+the field dump cadence `capacity.field_dump_seconds = 60`.
 
 ## Analyzer
 
@@ -41,6 +42,17 @@ The telemetry cadence for experiments is `capacity.telemetry_seconds = 5`.
 | `face_lag_max` | Largest |lag| (in samples) at which any face pair's cross-correlation peaks, within ±30 minutes |
 | `crash_cycles` | Count of population drops of more than 50 % from a local maximum within 30 minutes |
 | `residual_max` | Max |mass residual| |
+
+Spatial metrics from `fields.jsonl` (empty when the dump is absent):
+
+| Metric | Definition |
+| --- | --- |
+| `p_corr_length` | Producer spatial correlation length in cells: over the second half of the window, the mean over samples of the graph distance `k` at which the Pearson correlation between `P` at cells and `P` at their distance-`k` neighbors (BFS over the header adjacency, `k = 1..8`) first falls below `1/e`, linearly interpolated |
+| `p_spatial_cv` | Mean over samples of the coefficient of variation of `P` across cells (patchiness) |
+| `cells_depleted_frac`, `cells_rich_frac` | Mean fraction of cells with `P ≤ 0.25 · P_max` and with `P ≥ 0.5 · P_max` |
+| `depletions_per_cell_hour` | Per-cell transitions from `P ≥ 0.5 · P_max` to `P ≤ 0.25 · P_max`, summed over cells, per simulated hour, per cell |
+| `recovery_lag_median` | Median simulated seconds from a depletion (`≤ 0.25 · P_max`) to the next recovery (`≥ 0.5 · P_max`) in the same cell; right-censored lags excluded but counted in `recoveries_censored` |
+| `face_p_sync` | Mean pairwise zero-lag correlation of the five per-face `Σ P` series from telemetry, detrended like `face_sync` |
 
 `summary.md` also embeds one ASCII sparkline per row for population and
 `Σ P` so raw trajectories are visible without plotting, per the E2 protocol's
@@ -62,3 +74,20 @@ each run is about two minutes, so the batch is a few hours of one core or under
 an hour across several. The gate is stated in `experiments.md`: repeated local
 feeding and detritus succession before the whole cube empties, in several
 configurations; persistent cap-to-crash synchrony blocks added complexity.
+
+## Second batch (`e2-second`)
+
+After the nutrient-limitation revision. Seeds 1–4, `T = 6 h`, field dumps on.
+
+| Axis | Values |
+| --- | --- |
+| `producer.growth` | 0.008, 0.016 |
+| `nutrient.initial` | 0.35, 0.7 |
+| `nutrient.diffusion` | 0.02, 0.2 |
+| `organism.speed_max` | 0.75, 1.5 |
+| `weather.moving` | false, true |
+
+32 rows × 4 seeds = 128 runs. The question is whether nutrient recycling now
+produces local depletion/recovery (nonzero `depletions_per_cell_hour`, a
+`p_corr_length` well below the face width, `face_p_sync` near zero) without
+whole-cube crashes, and whether diffusion now has a measurable effect.
