@@ -1,0 +1,20 @@
+# E2 first batch — design/experiments-e2-harness.md "First batch (`e2-first`)".
+#
+# Seeds 1-4, T = 6 h simulated, full factorial over the four declared axes:
+# 3 x 3 x 2 x 2 = 36 combinations x 4 seeds = 144 runs.
+#
+#   scripts/e2-run.sh e2-first experiments/e2-first.toml -j 8
+#   scripts/e2-analyze.py runs/e2-first
+
+seconds = 21600
+seeds = [1, 2, 3, 4]
+
+[base]
+# The experiment telemetry cadence from the harness contract.
+capacity.telemetry_seconds = 5.0
+
+[axes]
+producer.growth = [0.004, 0.008, 0.016]
+nutrient.diffusion = [0.02, 0.05, 0.2]
+organism.speed_max = [0.75, 1.5]
+weather.moving = [false, true]

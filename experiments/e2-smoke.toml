@@ -1,0 +1,15 @@
+# A one-row smoke batch: does the harness run, sample, and analyze end to end?
+# One seed, 30 simulated minutes, the M2 default growth rate as the single axis
+# value, so the row is the M2 defaults at the experiment telemetry cadence.
+#
+#   scripts/e2-run.sh e2-smoke experiments/e2-smoke.toml
+#   scripts/e2-analyze.py runs/e2-smoke
+
+seconds = 1800
+seeds = [1]
+
+[base]
+capacity.telemetry_seconds = 5.0
+
+[axes]
+producer.growth = [0.008]
