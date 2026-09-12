@@ -40,26 +40,35 @@ M = Σ_cells (N + P + D) + Σ_organisms (S + R) + Σ_escrow (S_child + R_child)
 
 `M` is constant to rounding except for named external material sources
 (none in M2 besides the initial seed). Energy is not conserved; it is
-audited: `ΔE_total = light_in − heat_out` per tick, with both sides logged.
+audited exactly. Reserve material carries chemical energy at density `e_r`,
+structure carries none (construction energy is heat), so the stored total is
+
+```
+E_total = Σ_cells (e_p · P + De) + Σ_organisms (E + e_r · R)
+        + Σ_escrow (e_r · (S_child + R_child) + E_child)
+```
+
+and every tick `ΔE_total = light_in − heat_out` to rounding. Both sides are
+logged. Validation requires `e_p ≥ e_r · η_m` so grazing never needs more
+reserve energy than the food supplied.
 
 ## Conversion table
 
 | Process | Material | Energy | Rate (initial values) |
 | --- | --- | --- | --- |
-| Producer growth | `N → P` | `+e_p` per m from light (source) | `g · L · W · P · (1 − P/P_max)`, capped by `N` and by `f_max · N`; `g = 0.005/s`, `P_max = 2 m`, `f_max = 0.5/s`, `e_p = 2 e/m` |
+| Producer growth | `N → P` | `+e_p` per m from light (source) | `g · L · W · P · (1 − P/P_max)`, capped by `N` and by `f_max · N`; `g = 0.008/s`, `P_max = 2 m`, `f_max = 0.5/s`, `e_p = 2 e/m` |
 | Producer mortality | `P → D` | `De += e_p · ΔP`, then clamp to `e_d_max · D` (excess is heat) | `m_p = 0.0005/s`, `e_d_max = 1 e/m` |
-| Decomposition | `D → N` | `De` shrinks proportionally; the removed energy is heat | `k_d = 0.002/s` |
-| Grazing intake | `P → R` (η_m) and `P → D` (1 − η_m) in the cell | `E += e_p · q · η_e`; the rest is heat | `q = min(k_mouth · effort · dt, R_max − R)`, `k_mouth = 0.05 m/s`, `η_m = 0.6`, `η_e = 0.5` |
-| Scavenging intake | `D → R` (η_m) and `D → D` remainder stays | `E += (De/D) · q · η_e` | same `q` law with its own effort; `De` reduced proportionally |
-| Maintenance | none | `E −= c_maint · S` | `c_maint = 0.005 e/s per m` |
-| Movement | none | `E −= c_move · S · v` | `c_move = 0.01 e/s per m per px/s`; `v ≤ v_max = 1.5 px/s` |
-| Sensing | none | `E −= c_sense · r_sense` | `c_sense = 0.0005 e/s per px`; `r_sense = 8 px` |
-| Reserve oxidation | `R → N` in the organism's cell | `E += e_r · η_ox · ΔR`; the rest is heat | when `E < 0.2 · E_max` and `R > 0`: `ΔR = 0.02 m/s`, `e_r = 2 e/m`, `η_ox = 0.8` |
-| Growth | `R → S` | `E −= c_build · ΔS` | while `S < S_adult` and `R > 0.3 · R_max`: `ΔS = 0.01 m/s`, `c_build = 0.5 e/m` |
-| Budding escrow | `R → escrow` (`S_child + R_child`) | `E −= c_build · S_child + E_child` | at conception; see controller |
-| Birth | `escrow → child (S, R)` | child `E = E_child` | after `t_gest = 30 s` |
-| Failed gestation | `escrow → D` in the parent's cell | `De += min(E_child, e_d_max · escrow)`; rest heat | parent death during gestation |
-| Death | `S + R → D` in the cell | `De += min(E, e_d_max · (S + R))`; rest heat | `E ≤ 0 && R ≤ 0`, or age ≥ `t_max = 2 h`, or `S < 0.1 m` |
+| Decomposition | `D → N` | `De` shrinks by the fraction of detritus removed; that energy is heat | `k_d = 0.002/s` |
+| Grazing intake | `P → R` (η_m) and `P → D` (1 − η_m) in the cell; feces carry no energy | food energy `e_p · q`; reserve stores `e_r · η_m · q`; `E += η_e · (e_p − e_r · η_m) · q`; the rest is heat | `q = min(k_mouth · effort · dt, R_max − R)`, `k_mouth = 0.05 m/s`, `η_m = 0.6`, `η_e = 0.5` |
+| Scavenging intake | `D → R` with effective `η = η_m · min(1, ρ/e_r)`, `ρ = De/D`; the un-assimilated `(1 − η) · q` stays in `D` energy-free | food energy `ρ · q` leaves `De`; reserve stores `e_r · η · q`; `E += η_e · (ρ · q − e_r · η · q)`; the rest is heat | same `q` law with its own effort; its headroom is `R_max − R − q_graze` (grazing settles first) |
+| Maintenance, movement, sensing | none | `paid = min(cost · dt, E)`; `E −= paid`; heat `paid` (so `E ≥ 0` always) | `c_maint = 0.005 e/s per m`, `c_move = 0.006 e/s per m per px/s`, `c_sense = 0.0002 e/s per px`; `v ≤ v_max = 1.5 px/s`, `r_sense = 8 px` |
+| Reserve oxidation | `R → N` in the organism's cell | `E += η_ox · e_r · ΔR`; heat `(1 − η_ox) · e_r · ΔR` | when `E < 0.5 · E_max` and `R > 0`: `ΔR = 0.01 m/s`, `e_r = 2 e/m`, `η_ox = 0.8` |
+| Growth | `R → S` | heat `e_r · ΔS` (reserve energy released) plus `E −= c_build · ΔS` (heat) | while `S < S_adult` and `R > 0.3 · R_max`: `ΔS = 0.01 m/s`, `c_build = 0.5 e/m` |
+| Budding escrow | `R → escrow` (`S_child + R_child`) | escrow holds `e_r · (S_child + R_child) + E_child`; `E −= c_build · S_child + E_child` (`c_build` part is heat) | at conception; see controller |
+| Birth | `escrow → child (S, R)` | child `E = E_child`, child reserve carries `e_r · R_child`; heat `e_r · S_child` | after `t_gest = 30 s` |
+| Cap-rejected birth | `escrow → parent R` | `E += E_child` (unclamped; exact refund) | at commit when the world is full |
+| Failed gestation | `escrow → D` in the parent's cell | `De += min(escrow energy, e_d_max · escrow material)`; rest heat | parent death during gestation |
+| Death | `S + R → D` in the cell | `De += min(E + e_r · R, e_d_max · (S + R))`; rest heat | `E ≤ 0 && R ≤ 0`, or age ≥ `t_max = 2 h`, or `S < 0.1 m` |
 
 Proportional allocation: when the intake requests on a cell sum above the
 available `P` (or `D`), each consumer receives `Q · q_i / Σq`. Requests are
@@ -106,7 +115,7 @@ Phenotype decode (once at birth):
 Drives (M2 fixed values in parentheses): `w_food` (1.0), `w_detritus` (0.4),
 `w_persist` (0.3), `w_crowd` (0.6), `seek_on` (0.3), `seek_off` (0.1),
 `feed_min` (0.05 m per cell), `rest_effort` (0.05), `bud_reserve` (0.7),
-`bud_energy` (0.6), `bud_min_age` (120 s), `tau_hunger` (10 s),
+`bud_energy` (0.3), `bud_min_age` (120 s), `tau_hunger` (10 s),
 `turn_rate_max` (90°/s), `turn_noise` (0.6 rad/√s).
 
 ## Controller (named drives, two memories)
@@ -134,7 +143,7 @@ the OU vector are transported by `Travel::map`.
 Budding: when `R ≥ bud_reserve · R_max`, `E ≥ bud_energy · E_max`,
 `age ≥ bud_min_age`, not gestating, and the population is below the cap
 (checked before escrow): escrow `S_child = 0.4 · S_adult`, `R_child = 0.2 ·
-R_max`, pay `c_build · S_child + E_child` with `E_child = 0.25 · E_max`.
+R_max`, pay `c_build · S_child + E_child` with `E_child = 0.15 · E_max`.
 After `t_gest` the child is placed 2.5 px away in a direction from the
 `Birth(id)` stream via `travel` (reflection included), heading random,
 origin `Descendant`, genome copied (M2) or mutated (M3a).
