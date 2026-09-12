@@ -1,0 +1,18 @@
+# E2 fourth batch — design/experiments-e2-harness.md "Fourth batch (`e2-fourth`)".
+seconds = 21600
+seeds = [1, 2, 3, 4]
+
+[base]
+capacity.telemetry_seconds = 5.0
+capacity.field_dump_seconds = 60.0
+nutrient.initial = 0.5
+
+[axes]
+producer.growth = [0.004, 0.008]
+organism.speed_max = [0.3, 0.6, 1.2]
+organism.sense_radius = [3.0, 6.0]
+drives.turn_noise = [0.6, 1.5]
+
+[abbrev]
+"organism.sense_radius" = "r"
+"drives.turn_noise" = "t"

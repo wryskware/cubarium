@@ -110,3 +110,18 @@ file's `[pairs]` table). The question is which of these, alone or together,
 first produces cells that recover to half of `P_max` after being grazed, a
 producer correlation length of several cells, and repeated depletions per
 cell-hour, without synchronized crashes.
+
+## Fourth batch (`e2-fourth`)
+
+Locality. Seeds 1–4, `T = 6 h`, field dumps on, `nutrient.initial = 0.5`.
+
+| Axis | Values |
+| --- | --- |
+| `producer.growth` | 0.004, 0.008 |
+| `organism.speed_max` | 0.3, 0.6, 1.2 |
+| `organism.sense_radius` | 3, 6 |
+| `drives.turn_noise` | 0.6, 1.5 |
+
+24 rows × 4 seeds = 96 runs. The hypothesis is that consumers must
+redistribute more slowly than producers recover for any patch structure to
+exist; the metrics to watch are the same as before.

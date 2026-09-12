@@ -247,7 +247,10 @@ impl World {
             let heading = Vec2::from_screen_angle(unit(seed, Stream::Founders, index, 3) * TAU);
             let hue = unit(seed, Stream::Founders, index, 4) as f32;
 
-            let genome = Genome::founder(hue, &config.drives);
+            let mut genome = Genome::founder(hue, &config.drives);
+            // Founders sense at the configured radius; the genome bounds still apply.
+            genome.sense = config.organism.sense_radius as f32;
+            genome.clamp();
             let phenotype = decode(&genome, &config.organism);
             let structure = phenotype.structure_adult;
             let reserve = config.founders.initial_reserve_fraction * phenotype.reserve_max;

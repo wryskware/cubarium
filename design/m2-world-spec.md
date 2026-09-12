@@ -120,8 +120,9 @@ Phenotype decode (once at birth):
 
 - `S_adult = size · 1 m`, `R_max = reserve · size · 1 m`, `E_max = 2 e · size`
 - `v_max = speed · 1.5 px/s · size^(−0.25)`
-- `k_mouth = mouth · 0.05 m/s · size^0.75`, `r_sense = sense` (founder `sense = 6`,
-  was 8 through the second E2 batch)
+- `k_mouth = mouth · 0.05 m/s · size^0.75`, `r_sense = sense` (founders take `sense` from
+  `organism.sense_radius`, default 6; the third E2 batch's sensing axis was
+  inert because founders ignored the config)
 - maintenance multiplier `metabolism`; `c_move`, `c_sense` fixed
 - body: two lobes (core radius `0.9 + 0.5·size`, head radius `0.6 + 0.3·size`
   at `+1.6·size` forward), plus a tail lobe at `−1.4·size` when `speed > 0.6`.
