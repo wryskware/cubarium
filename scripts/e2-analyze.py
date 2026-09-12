@@ -17,6 +17,11 @@ Conventions
 * Burn-in. BURN_IN_SECONDS = 600 (the contract's 10-minute burn-in). The analysis
   window is every sample at simulated time >= 600 s. Every metric below is computed
   on that window except `extinct_at` and `residual_max`, which scan the whole run.
+* Paired axes. A matrix `[pairs.<name>]` moves several config keys together as one
+  axis. Each pair gets one column named after the pair, next to the axis columns,
+  holding that row's level as its comma-joined values (`0.1,0.2`); the level's
+  keys and index are in the row's manifest.json. Grouping rows by the column
+  groups them by level.
 * Precision. summary.csv carries full float precision (it is the machine-readable
   artifact); summary.md rounds to four significant digits for reading.
 * Empty cells. A metric that is undefined for a run (no window samples, a zero
@@ -562,6 +567,7 @@ def analyze_row(row_dir: Path) -> dict | None:
         "wall_seconds": manifest.get("wall_seconds"),
         "build_id": manifest.get("build_id"),
         "axes": manifest.get("axes", {}),
+        "pairs": manifest.get("pairs", {}),
         "samples": len(samples),
         "sim_seconds": times[-1],
         "interval": interval,
@@ -704,6 +710,13 @@ def analyze_row(row_dir: Path) -> dict | None:
 # ----------------------------------------------------------------- formatting
 
 
+def fmt_pair(level):
+    """A paired axis's level as its comma-joined values, e.g. `0.1,0.2`."""
+    if not level:
+        return ""
+    return ",".join(fmt_full(v) for v in level.get("values", []))
+
+
 def fmt_full(value):
     """Full-precision rendering for summary.csv; summary.md uses fmt() instead."""
     if value is None:
@@ -731,10 +744,11 @@ def fmt(value, digits=4):
     return str(value)
 
 
-def write_csv(path: Path, rows, axis_keys):
+def write_csv(path: Path, rows, axis_keys, pair_names):
     header = (
         ["row", "seed"]
         + axis_keys
+        + pair_names
         + ["samples", "window_samples", "sim_seconds", "interval"]
         + ALL_METRICS
         + ["exit_code", "wall_seconds", "build_id"]
@@ -745,6 +759,7 @@ def write_csv(path: Path, rows, axis_keys):
         for r in rows:
             line = [r["row"], fmt_full(r["seed"])]
             line += [fmt_full(r["axes"].get(k)) for k in axis_keys]
+            line += [fmt_pair(r["pairs"].get(n)) for n in pair_names]
             line += [
                 fmt_full(r["samples"]),
                 fmt_full(r.get("window_samples")),
@@ -772,7 +787,7 @@ def md_table(header, rows):
     return out
 
 
-def write_md(path: Path, batch_dir: Path, rows, axis_keys, meta):
+def write_md(path: Path, batch_dir: Path, rows, axis_keys, pair_names, meta):
     lines = [f"# E2 batch `{batch_dir.name}`", ""]
     if meta:
         lines.append(f"- matrix: `{meta.get('matrix', '')}`")
@@ -797,12 +812,13 @@ def write_md(path: Path, batch_dir: Path, rows, axis_keys, meta):
         "",
     ]
 
-    header = ["row", "seed"] + axis_keys + METRICS
+    header = ["row", "seed"] + axis_keys + pair_names + METRICS
     spatial_header = ["row", "seed"] + SPATIAL_METRICS
     body = []
     for r in rows:
         cells = [r["row"], fmt(r["seed"])]
         cells += [fmt(r["axes"].get(k)) for k in axis_keys]
+        cells += [fmt_pair(r["pairs"].get(n)) for n in pair_names]
         cells += [fmt(r[m]) for m in METRICS]
         body.append(cells)
     lines += md_table(header, body)
@@ -906,8 +922,17 @@ def main(argv):
                     seen.append(k)
         axis_keys = seen
 
-    write_csv(batch_dir / "summary.csv", rows, axis_keys)
-    write_md(batch_dir / "summary.md", batch_dir, rows, axis_keys, meta)
+    pair_names = list(meta.get("pairs", {}))
+    if not pair_names:
+        seen = []
+        for r in rows:
+            for n in r["pairs"]:
+                if n not in seen:
+                    seen.append(n)
+        pair_names = seen
+
+    write_csv(batch_dir / "summary.csv", rows, axis_keys, pair_names)
+    write_md(batch_dir / "summary.md", batch_dir, rows, axis_keys, pair_names, meta)
     print(f"e2-analyze: {len(rows)} rows -> {batch_dir / 'summary.csv'}, {batch_dir / 'summary.md'}")
     return 0
 
