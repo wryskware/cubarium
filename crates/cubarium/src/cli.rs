@@ -124,6 +124,10 @@ pub struct Run {
     /// `capacity.field_dump_seconds > 0`. Defaults to `<state>/fields.jsonl`.
     #[arg(long)]
     pub fields: Option<PathBuf>,
+    /// JSON-lines birth and death log (appended), written only when
+    /// `capacity.event_log` is true. Defaults to `<state>/events.jsonl`.
+    #[arg(long)]
+    pub events: Option<PathBuf>,
     /// Shim daemon address.
     #[arg(long, default_value = "127.0.0.1:7392")]
     pub addr: String,
@@ -148,6 +152,12 @@ impl Run {
     /// the world's `capacity.field_dump_seconds` is nonzero.
     pub fn fields_path(&self) -> PathBuf {
         self.fields.clone().unwrap_or_else(|| self.state.join("fields.jsonl"))
+    }
+
+    /// The life event log path after the documented default is applied. Only consulted
+    /// when the world's `capacity.event_log` is true.
+    pub fn events_path(&self) -> PathBuf {
+        self.events.clone().unwrap_or_else(|| self.state.join("events.jsonl"))
     }
 
     /// Reject combinations the contract forbids.
@@ -256,6 +266,8 @@ mod tests {
         assert_eq!(r.telemetry_path(), PathBuf::from("state/telemetry.jsonl"));
         assert_eq!(r.fields, None);
         assert_eq!(r.fields_path(), PathBuf::from("state/fields.jsonl"));
+        assert_eq!(r.events, None);
+        assert_eq!(r.events_path(), PathBuf::from("state/events.jsonl"));
         assert_eq!(r.addr, "127.0.0.1:7392");
         assert_eq!(r.out, PathBuf::from("captures"));
         assert_eq!(r.every, 30);
@@ -268,8 +280,8 @@ mod tests {
         let r = parse_run([
             "cubarium", "run", "--config", "w.toml", "--state", "/tmp/s", "--sink", "none",
             "--speed", "0", "--seconds", "600", "--seed", "7", "--fresh", "--telemetry",
-            "/tmp/t.jsonl", "--fields", "/tmp/f.jsonl", "--addr", "10.0.0.4:1", "--out",
-            "/tmp/c", "--every", "5", "--scale", "2",
+            "/tmp/t.jsonl", "--fields", "/tmp/f.jsonl", "--events", "/tmp/e.jsonl",
+            "--addr", "10.0.0.4:1", "--out", "/tmp/c", "--every", "5", "--scale", "2",
         ]);
         assert_eq!(r.config, Some(PathBuf::from("w.toml")));
         assert_eq!(r.state, PathBuf::from("/tmp/s"));
@@ -280,6 +292,7 @@ mod tests {
         assert!(r.fresh);
         assert_eq!(r.telemetry_path(), PathBuf::from("/tmp/t.jsonl"));
         assert_eq!(r.fields_path(), PathBuf::from("/tmp/f.jsonl"));
+        assert_eq!(r.events_path(), PathBuf::from("/tmp/e.jsonl"));
         assert_eq!(r.addr, "10.0.0.4:1");
         assert_eq!(r.out, PathBuf::from("/tmp/c"));
         assert_eq!(r.every, 5);

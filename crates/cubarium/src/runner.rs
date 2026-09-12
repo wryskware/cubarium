@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use cube_proto::Frame;
 use cubarium_core::view::{FieldDump, RenderView};
-use cubarium_core::{Telemetry, World, WorldConfig, encode_snapshot};
+use cubarium_core::{LifeEvent, Telemetry, World, WorldConfig, encode_snapshot};
 use cubarium_render::Canvas;
 
 use crate::cli::{Run, RunSinkArg};
@@ -234,6 +234,112 @@ impl FieldLog {
     }
 }
 
+/// The key order `design/m2-world-spec.md` "Observer" prints a birth record in. Keys the
+/// world adds later are not dropped: they are appended after these.
+const BIRTH_KEYS: [&str; 8] =
+    ["kind", "tick", "id", "parent", "parent_age_ticks", "parent_births", "genome", "origin"];
+/// The same for a death record.
+const DEATH_KEYS: [&str; 7] = ["kind", "tick", "id", "age_ticks", "cause", "births", "genome"];
+
+/// `slot:generation` for an `OrganismId` the world serialized as `{slot, generation}`.
+/// Anything else (a string the world already renders itself, a missing field) is left
+/// exactly as it came, so this can never invent an id.
+fn organism_id(value: &serde_json::Value) -> Option<serde_json::Value> {
+    let (slot, generation) = (value.get("slot")?, value.get("generation")?);
+    Some(serde_json::Value::from(format!("{slot}:{generation}")))
+}
+
+/// One life event as the spec's line: ids as `slot:generation`, `origin` and `cause`
+/// lowercase, and the spec's key order so a reader sees `kind` and `tick` first.
+fn event_line(event: &LifeEvent) -> Result<String> {
+    let value = serde_json::to_value(event).context("encoding a life event")?;
+    let mut fields = match value {
+        serde_json::Value::Object(map) => map,
+        other => anyhow::bail!("a life event is not a JSON object: {other}"),
+    };
+    for key in ["id", "parent"] {
+        if let Some(rendered) = fields.get(key).and_then(organism_id) {
+            fields.insert(key.to_string(), rendered);
+        }
+    }
+    for key in ["origin", "cause"] {
+        if let Some(name) = fields.get(key).and_then(|v| v.as_str()).map(str::to_lowercase) {
+            fields.insert(key.to_string(), serde_json::Value::from(name));
+        }
+    }
+    let spec_order: &[&str] = match fields.get("kind").and_then(|v| v.as_str()) {
+        Some("death") => &DEATH_KEYS,
+        _ => &BIRTH_KEYS,
+    };
+    // Assembled as text: a `serde_json` map is sorted, which would bury `kind` and
+    // `tick` in the middle of the line.
+    let pair = |key: &str, value: &serde_json::Value| {
+        format!("{}:{value}", serde_json::Value::from(key))
+    };
+    let mut parts = Vec::with_capacity(fields.len());
+    for key in spec_order {
+        if let Some(value) = fields.remove(*key) {
+            parts.push(pair(key, &value));
+        }
+    }
+    // Whatever the world grew since this list was written goes on the end, in key order,
+    // rather than being silently lost.
+    parts.extend(fields.iter().map(|(key, value)| pair(key, value)));
+    Ok(format!("{{{}}}", parts.join(",")))
+}
+
+/// `events.jsonl`: one line per birth and death, appended in the order the world
+/// reported them. Non-fatal like the other observer files.
+struct EventLog {
+    path: PathBuf,
+    file: std::fs::File,
+    lines: u64,
+}
+
+impl EventLog {
+    fn open(path: &Path) -> Result<EventLog> {
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating the event log directory {}", parent.display()))?;
+        }
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .with_context(|| format!("opening the event log {}", path.display()))?;
+        Ok(EventLog { path: path.to_path_buf(), file, lines: 0 })
+    }
+
+    /// Write one tick's events and flush once. A tick with no events touches no disk.
+    fn write_tick(&mut self, events: &[LifeEvent]) {
+        if events.is_empty() {
+            return;
+        }
+        let mut written = 0u64;
+        for event in events {
+            let line = match event_line(event) {
+                Ok(line) => line,
+                Err(e) => {
+                    eprintln!("cubarium: cannot encode a life event: {e:#}");
+                    continue;
+                }
+            };
+            if let Err(e) = writeln!(self.file, "{line}") {
+                eprintln!("cubarium: cannot append to {}: {e}", self.path.display());
+                return;
+            }
+            written += 1;
+        }
+        if let Err(e) = self.file.flush() {
+            eprintln!("cubarium: cannot flush {}: {e}", self.path.display());
+            return;
+        }
+        self.lines += written;
+    }
+}
+
 /// The one-line stderr digest headless runs get for every sample, so a `--sink none` run
 /// is observable without opening the telemetry file.
 fn headless_line(sample: &Telemetry) -> String {
@@ -317,6 +423,12 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
         true => Some(FieldLog::open(&run.fields_path())?),
         false => None,
     };
+    // `capacity.event_log` off means no file and no lines; the world's event buffer is
+    // drained and dropped either way (see the loop).
+    let mut events = match config.capacity.event_log {
+        true => Some(EventLog::open(&run.events_path())?),
+        false => None,
+    };
     let mut checkpoints = Checkpointer::spawn(&run.state);
     let build_id = state::build_id();
 
@@ -353,11 +465,20 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
                        view: &mut Option<RenderView>,
                        telemetry: &mut TelemetryLog,
                        fields: &mut Option<FieldLog>,
+                       events: &mut Option<EventLog>,
                        checkpoints: &mut Checkpointer,
                        ticks_done: &mut u64| {
         world.step();
         *ticks_done += 1;
         let tick = world.tick();
+        // Drained every tick even when nothing logs them: `World` records births and
+        // deaths whatever `capacity.event_log` says, and a buffer the host never takes
+        // grows without bound for the life of the process. Written in the order the
+        // world committed them.
+        let committed = world.drain_events();
+        if let Some(log) = events.as_mut() {
+            log.write_tick(&committed);
+        }
         if !headless {
             // Trails are simulated history: they are fed per tick, not per frame.
             let published = world.render_view();
@@ -394,6 +515,7 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
                     &mut view,
                     &mut telemetry,
                     &mut fields,
+                    &mut events,
                     &mut checkpoints,
                     &mut ticks_done,
                 );
@@ -429,6 +551,7 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
                                 &mut view,
                                 &mut telemetry,
                                 &mut fields,
+                                &mut events,
                                 &mut checkpoints,
                                 &mut ticks_done,
                             );

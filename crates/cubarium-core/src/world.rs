@@ -11,6 +11,7 @@ use cubarium_surface::{
 
 use crate::config::WorldConfig;
 use crate::controller::{Decision, Observation, decide};
+use crate::events::LifeEvent;
 use crate::fields::Fields;
 use crate::genome::{Genome, decode};
 use crate::habitat::{Habitat, Weather};
@@ -215,6 +216,9 @@ pub struct World {
     travel_buf: Travel,
     /// This tick's traveled segments per slot, for the render view.
     moved: Vec<Vec<cubarium_surface::PathSegment>>,
+    /// Births and deaths committed since the observer last drained them. Transient: never
+    /// checkpointed, never hashed, never read back by the tick.
+    events: Vec<LifeEvent>,
     counters: TickCounters,
     initial_material: f64,
 }
@@ -333,6 +337,7 @@ impl World {
             neighbors: NeighborLists::default(),
             travel_buf: Travel::default(),
             moved: Vec::new(),
+            events: Vec::new(),
             counters: TickCounters::default(),
             initial_material,
         };
@@ -367,6 +372,7 @@ impl World {
                 neighbors,
                 travel_buf,
                 moved,
+                events,
                 counters,
                 initial_material: _,
             } = &mut *self;
@@ -699,6 +705,14 @@ impl World {
                 };
                 counters.deaths[slot] += 1;
                 deaths_total[slot] += 1;
+                events.push(LifeEvent::Death {
+                    tick: now + 1,
+                    id: *id,
+                    age_ticks: o.age_ticks(now + 1),
+                    cause: *cause,
+                    births: o.births,
+                    genome: o.genome.digest(),
+                });
             }
 
             for parent_id in &births {
@@ -719,9 +733,9 @@ impl World {
                     let key = u64::from(parent_id.slot);
                     let direction = Vec2::from_screen_angle(unit(seed, Stream::Birth, key, index * 2) * TAU);
                     let heading = Vec2::from_screen_angle(unit(seed, Stream::Birth, key, index * 2 + 1) * TAU);
-                    (parent.pos, direction, heading, escrow)
+                    (parent.pos, direction, heading, escrow, parent.age_ticks(now + 1), parent.births)
                 };
-                let (from, direction, heading, escrow) = placement;
+                let (from, direction, heading, escrow, parent_age_ticks, parent_births) = placement;
                 travel_into(from, direction * cfg.drives.birth_offset_px, travel_buf);
                 counters.travel_ties += travel_buf.ties;
                 counters.travel_fallbacks += u32::from(travel_buf.fallback);
@@ -749,7 +763,18 @@ impl World {
                     turn_counter: Counter::default(),
                     fed_this_tick: false,
                 };
+                let genome_digest = child.genome.digest();
+                let origin = child.origin;
                 let child_id = organisms.insert(child);
+                events.push(LifeEvent::Birth {
+                    tick: now + 1,
+                    id: child_id,
+                    parent: *parent_id,
+                    parent_age_ticks,
+                    parent_births,
+                    genome: genome_digest,
+                    origin,
+                });
                 let slot = child_id.slot as usize;
                 if moved.len() <= slot {
                     moved.resize_with(slot + 1, Vec::new);
@@ -856,6 +881,13 @@ impl World {
             producer_max: self.state.config.producer.max,
             organisms,
         }
+    }
+
+    /// Take the births and deaths committed since the last drain, in commit order (a tick's
+    /// deaths before its births, each in slot order). The buffer is transient: nothing in the
+    /// world reads it back, and a host that never drains it simply lets it grow.
+    pub fn drain_events(&mut self) -> Vec<LifeEvent> {
+        std::mem::take(&mut self.events)
     }
 
     /// Every cell's material fields plus its live organism count, for the observer's
@@ -1031,6 +1063,8 @@ mod tests {
     use super::*;
 
     use cubarium_surface::CellId;
+
+    use crate::events::LifeEvent;
 
     fn config() -> WorldConfig {
         WorldConfig::default()
@@ -1462,6 +1496,58 @@ mod tests {
         let drift = (closing - opening) - booked;
         println!("starvation audit: opening {opening:e} closing {closing:e} booked {booked:e} drift {drift:e}");
         assert!(drift.abs() < 1e-9 * opening.max(1.0), "drift {drift:e}");
+    }
+
+    #[test]
+    fn life_events_account_for_every_birth_and_death() {
+        let cfg = config();
+        // Budding needs the age gate, then a full gestation, before a child appears.
+        let earliest_parent_age =
+            ((cfg.drives.bud_min_age_seconds + cfg.organism.gestation_seconds) / DT).floor() as u64;
+        let mut world = World::new(cfg).expect("valid");
+
+        let mut births = 0u64;
+        let mut deaths = 0u64;
+        let mut seen: Vec<OrganismId> = Vec::new();
+        for _ in 0..12_000 {
+            world.step();
+            for event in world.drain_events() {
+                assert_eq!(event.tick(), world.tick(), "an event is dated off its commit tick");
+                match event {
+                    LifeEvent::Birth { id, parent, parent_age_ticks, parent_births, origin, genome, .. } => {
+                        assert_ne!(id, parent);
+                        assert_eq!(origin, Origin::Descendant, "founders emit no birth event");
+                        assert!(parent_births >= 1, "the parent's own birth is counted");
+                        assert!(
+                            parent_age_ticks >= earliest_parent_age,
+                            "parent aged {parent_age_ticks} ticks cannot have gestated yet"
+                        );
+                        assert_ne!(genome, 0);
+                        assert_eq!(world.state.organisms.get(id).map(|o| o.parent), Some(Some(parent)));
+                        assert!(!seen.contains(&id), "organism id {id:?} was born twice");
+                        seen.push(id);
+                        births += 1;
+                    }
+                    LifeEvent::Death { id, age_ticks, births: had, .. } => {
+                        assert!(age_ticks > 0);
+                        assert!(world.state.organisms.get(id).is_none(), "a dead organism is gone");
+                        let _ = had;
+                        deaths += 1;
+                    }
+                }
+            }
+            // A second drain in the same tick yields nothing.
+            assert!(world.drain_events().is_empty());
+        }
+
+        assert!(births > 0 && deaths > 0, "the run produced {births} births and {deaths} deaths");
+        assert_eq!(births, world.state.births_total, "birth events do not match births_total");
+        assert_eq!(
+            deaths,
+            world.state.deaths_total.iter().sum::<u64>(),
+            "death events do not match deaths_total"
+        );
+        assert!(world.drain_events().is_empty());
     }
 
     #[test]

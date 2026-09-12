@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever a field's meaning changes; stored in snapshots.
-pub const CONFIG_VERSION: u32 = 3;
+pub const CONFIG_VERSION: u32 = 4;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -170,6 +170,9 @@ pub struct CapacityConfig {
     /// Seconds between observer field dumps; zero disables them. Carried by the core,
     /// consumed by the host.
     pub field_dump_seconds: f64,
+    /// Whether the host writes the per-birth/per-death event log. The world always records
+    /// the events; this only says whether anyone writes them down.
+    pub event_log: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -317,6 +320,7 @@ impl Default for CapacityConfig {
             checkpoint_seconds: 60.0,
             telemetry_seconds: 5.0,
             field_dump_seconds: 0.0,
+            event_log: false,
         }
     }
 }

@@ -15,6 +15,7 @@
 //! - [`fields`]: `N`, `P`, `D`, `De` and their reactions.
 //! - [`organism`]: organism state, modes, escrow.
 //! - [`controller`]: observation → decision (pure).
+//! - [`events`]: transient birth/death records for the observer.
 //! - [`pairs`]: chord-filtered all-pairs neighbor lists.
 //! - [`world`]: the tick, invariants, births/deaths, telemetry.
 //! - [`snapshot`]: header + postcard encoding, validation.
@@ -24,6 +25,7 @@
 
 pub mod config;
 pub mod controller;
+pub mod events;
 pub mod fields;
 pub mod genome;
 pub mod habitat;
@@ -37,6 +39,7 @@ pub mod view;
 pub mod world;
 
 pub use config::WorldConfig;
+pub use events::LifeEvent;
 pub use ids::OrganismId;
 pub use snapshot::{SCHEMA_VERSION, SnapshotError, decode_snapshot, encode_snapshot};
 pub use telemetry::Telemetry;

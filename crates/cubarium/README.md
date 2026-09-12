@@ -119,6 +119,7 @@ cubarium run [--config world.toml] [--state state/] [--sink preview|shim|png|non
 | `--fresh` | off | Ignore existing snapshots and create a new world |
 | `--telemetry` | `<state>/telemetry.jsonl` | JSON-lines telemetry file (appended) |
 | `--fields` | `<state>/fields.jsonl` | Field dump file, written only when `capacity.field_dump_seconds > 0` |
+| `--events` | `<state>/events.jsonl` | Life-event log (births, deaths), written only when `capacity.event_log` is true |
 
 Startup: unless `--fresh`, load the newest valid snapshot in `--state` (trying
 older ones on failure, logging each reason); otherwise create a new world from
