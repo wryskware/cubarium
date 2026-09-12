@@ -41,7 +41,7 @@ default list, one kind per band plus the water's edge:
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | burrower | soil | 0.10 | 0.10 | 0.6 | 1.0 (`metabolism` 0.7) | 0.0 | mossback | 0.15 |
 | grazer | foliage | 0.85 | 0.55 | 1.0 | 1.0 | 0.0 | lantern | 0.50 |
-| glider | canopy | 0.90 | 1.00 | 1.2 | 0.8 | 0.0 | sail | 0.85 |
+| glider | canopy | 0.90 | 1.00 | 1.0 (the genome range caps speed at 1; it is still the fastest kind through its small size) | 0.8 | 0.0 | sail | 0.85 |
 | skimmer | the wet floor | 0.60 | 0.10 | 0.9 | 0.9 (`metabolism` 0.7) | 1.0 | skimmer (new rig) | 0.65 |
 
 Counts default to 4, 10, 5, 5: the burrower colony overshoots its litter less from four; skimmers fizzled from three founders on two seeds in three, so five; grazers lost to gliders at six hours on the mid-wall crop twice, so the balance tilts toward them. Both floor kinds run cool at `metabolism` 0.7. Founders are placed uniformly by area as
