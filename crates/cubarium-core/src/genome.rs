@@ -328,7 +328,7 @@ mod tests {
         assert_eq!(p.structure_adult, 1.0);
         assert_eq!(p.reserve_max, 1.0);
         assert_eq!(p.energy_max, 2.0);
-        assert_eq!(p.speed_max, 1.5);
+        assert_eq!(p.speed_max, cfg.speed_max);
         assert_eq!(p.mouth_rate, 0.05);
         assert_eq!(p.sense_radius, 6.0);
         assert_eq!(p.maintenance, 0.005);
@@ -355,7 +355,7 @@ mod tests {
         assert_eq!(p.structure_adult, 2.0);
         assert_eq!(p.reserve_max, 3.0);
         assert_eq!(p.energy_max, 4.0);
-        assert!((p.speed_max - 0.5 * 1.5 * 2.0f64.powf(-0.25)).abs() < 1e-15);
+        assert!((p.speed_max - 0.5 * cfg.speed_max * 2.0f64.powf(-0.25)).abs() < 1e-15);
         assert!((p.mouth_rate - 0.5 * 0.05 * 2.0f64.powf(0.75)).abs() < 1e-15);
         assert_eq!(p.maintenance, 0.01);
         assert_eq!(p.lobes.len(), 2);

@@ -59,6 +59,10 @@ pub fn harsh_config() -> WorldConfig {
     let mut cfg = WorldConfig::default();
     cfg.producer.growth = 0.0;
     cfg.producer.initial_fraction = 0.02;
+    // Founders start nearly empty so that starvation lands inside the test window even
+    // for slow, frugal movers; the death path, not the tuning, is what this fixture tests.
+    cfg.founders.initial_reserve_fraction = 0.05;
+    cfg.founders.initial_energy_fraction = 0.1;
     cfg
 }
 

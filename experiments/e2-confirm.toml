@@ -1,0 +1,11 @@
+# E2 confirmation batch — design/experiments-e2-harness.md "Confirmation batch".
+seconds = 86400
+seeds = [1, 2, 3]
+
+[base]
+capacity.telemetry_seconds = 5.0
+capacity.field_dump_seconds = 60.0
+
+[axes]
+organism.speed_max = [0.3, 0.4]
+weather.moving = [false, true]

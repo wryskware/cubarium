@@ -125,3 +125,11 @@ Locality. Seeds 1–4, `T = 6 h`, field dumps on, `nutrient.initial = 0.5`.
 24 rows × 4 seeds = 96 runs. The hypothesis is that consumers must
 redistribute more slowly than producers recover for any patch structure to
 exist; the metrics to watch are the same as before.
+
+## Confirmation batch (`e2-confirm`)
+
+The adopted defaults over 24 simulated hours, seeds 1–3, with the
+static-weather control and the two candidate speeds: `organism.speed_max`
+∈ {0.3, 0.4} × `weather.moving` ∈ {false, true}, 12 runs. The gate is the
+E2 gate over the longer horizon: no extinction, repeated local depletion and
+recovery, and no persistent whole-cube crash synchrony.
