@@ -1,0 +1,26 @@
+# E2 third batch — design/experiments-e2-harness.md "Third batch (`e2-third`)".
+#   scripts/e2-run.sh e2-third experiments/e2-third.toml -j 16
+seconds = 21600
+seeds = [1, 2, 3, 4]
+
+[base]
+capacity.telemetry_seconds = 5.0
+capacity.field_dump_seconds = 60.0
+producer.growth = 0.016
+nutrient.initial = 0.5
+
+[axes]
+organism.intake_half_saturation = [0.0, 0.45]
+weather.amplitude = [0.15, 0.3]
+organism.sense_radius = [4.0, 6.0]
+organism.speed_max = [0.75, 1.5]
+
+# Axes whose values move together: each entry lists the keys and the value tuples.
+[pairs.contrast]
+keys = ["habitat.light_noise_gain", "habitat.moisture_noise_gain"]
+values = [[0.1, 0.2], [0.3, 0.4]]
+
+[abbrev]
+"organism.intake_half_saturation" = "k"
+"weather.amplitude" = "a"
+"organism.sense_radius" = "r"

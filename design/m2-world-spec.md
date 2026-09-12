@@ -59,8 +59,8 @@ reserve energy than the food supplied.
 | Producer growth | `N → P` | `+e_p` per m from light (source) | `g · L · W · P · (1 − P/P_max) · N/(N + K_N)`, capped by `N` and by `f_max · N`; `g = 0.008/s`, `P_max = 1.5 m`, `K_N = 0.25 m`, `f_max = 0.5/s`, `e_p = 2 e/m` |
 | Producer mortality | `P → D` | `De += e_p · ΔP`, then clamp to `e_d_max · D` (excess is heat) | `m_p = 0.0005/s`, `e_d_max = 1 e/m` |
 | Decomposition | `D → N` | `De` shrinks by the fraction of detritus removed; that energy is heat | `k_d = 0.002/s` |
-| Grazing intake | `P → R` (η_m) and `P → D` (1 − η_m) in the cell; feces carry no energy | food energy `e_p · q`; reserve stores `e_r · η_m · q`; `E += η_e · (e_p − e_r · η_m) · q`; the rest is heat | `q = min(k_mouth · effort · dt, R_max − R)`, `k_mouth = 0.05 m/s`, `η_m = 0.6`, `η_e = 0.5` |
-| Scavenging intake | `D → R` with effective `η = η_m · min(1, ρ/e_r)`, `ρ = De/D`; the un-assimilated `(1 − η) · q` stays in `D` energy-free | food energy `ρ · q` leaves `De`; reserve stores `e_r · η · q`; `E += η_e · (ρ · q − e_r · η · q)`; the rest is heat | same `q` law with its own effort; its headroom is `R_max − R − q_graze` (grazing settles first) |
+| Grazing intake | `P → R` (η_m) and `P → D` (1 − η_m) in the cell; feces carry no energy | food energy `e_p · q`; reserve stores `e_r · η_m · q`; `E += η_e · (e_p − e_r · η_m) · q`; the rest is heat | `q = min(k_mouth · effort · dt · P/(P + K_P), R_max − R)` requested against the cell's pre-settlement `P`; `k_mouth = 0.05 m/s`, `K_P = 0.45 m` (a saturating, type-II intake: a poor cell is poor food), `η_m = 0.6`, `η_e = 0.5` |
+| Scavenging intake | `D → R` with effective `η = η_m · min(1, ρ/e_r)`, `ρ = De/D`; the un-assimilated `(1 − η) · q` stays in `D` energy-free | food energy `ρ · q` leaves `De`; reserve stores `e_r · η · q`; `E += η_e · (ρ · q − e_r · η · q)`; the rest is heat | same `q` law with its own effort and `D_eff/(D_eff + K_P)` as the saturation term; its headroom is `R_max − R − q_graze` (grazing settles first) |
 | Maintenance, movement, sensing | none | `paid = min(cost · dt, E)`; `E −= paid`; heat `paid` (so `E ≥ 0` always) | `c_maint = 0.005 e/s per m`, `c_move = 0.006 e/s per m per px/s`, `c_sense = 0.0002 e/s per px`; `v ≤ v_max = 1.5 px/s`, `r_sense = 8 px` |
 | Reserve oxidation | `R → N` in the organism's cell | `E += η_ox · e_r · ΔR`; heat `(1 − η_ox) · e_r · ΔR` | when `E < 0.5 · E_max` and `R > 0`: `ΔR = 0.01 m/s`, `e_r = 2 e/m`, `η_ox = 0.8` |
 | Growth | `R → S` | heat `e_r · ΔS` (reserve energy released) plus `E −= c_build · ΔS` (heat) | while `S < S_adult` and `R > 0.3 · R_max`: `ΔS = 0.01 m/s`, `c_build = 0.5 e/m` |
@@ -85,11 +85,16 @@ Static habitat is a smooth function of the embedded position `p ∈ [−1,1]³`:
 - patch noise `n(p) ∈ [−1,1]`: a fixed sum of six 3D cosine waves with
   irrational-ratio frequencies (wavelength 0.6–1.4 cube units) and phases from
   the habitat seed. No per-face noise seeds.
-- base light `L₀ = clamp(0.55 + 0.35·h + 0.1·n, 0, 1)`.
-- base moisture `W₀ = clamp(0.8 − 0.3·h + 0.2·n(p + shift), 0.1, 1)`.
+- base light `L₀ = clamp(0.55 + 0.35·h + 0.3·n, 0, 1)`.
+- base moisture `W₀ = clamp(0.8 − 0.3·h + 0.4·n(p + shift), 0.1, 1)`.
+
+The noise gains were 0.1 and 0.2 through the second E2 batch; the third batch
+tests the stronger contrast because a nearly uniform habitat gave a uniform
+lawn.
 
 Weather adds three broad moving blobs for light and three for moisture, each a
-raised-cosine cap on the unit sphere (angular radius 55°) with amplitude 0.15,
+raised-cosine cap on the unit sphere (angular radius 55°) with amplitude 0.3
+(0.15 through the second E2 batch),
 centers drifting on the sphere with periods 20, 33 and 47 minutes plus a slow
 random walk from the `Weather` stream (one draw per blob per minute). Static
 mode freezes the blob centers. `L = clamp(L₀ + Σ light blobs, 0, 1)`, likewise `W`.
@@ -115,7 +120,8 @@ Phenotype decode (once at birth):
 
 - `S_adult = size · 1 m`, `R_max = reserve · size · 1 m`, `E_max = 2 e · size`
 - `v_max = speed · 1.5 px/s · size^(−0.25)`
-- `k_mouth = mouth · 0.05 m/s · size^0.75`, `r_sense = sense`
+- `k_mouth = mouth · 0.05 m/s · size^0.75`, `r_sense = sense` (founder `sense = 6`,
+  was 8 through the second E2 batch)
 - maintenance multiplier `metabolism`; `c_move`, `c_sense` fixed
 - body: two lobes (core radius `0.9 + 0.5·size`, head radius `0.6 + 0.3·size`
   at `+1.6·size` forward), plus a tail lobe at `−1.4·size` when `speed > 0.6`.

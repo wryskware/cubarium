@@ -91,3 +91,22 @@ After the nutrient-limitation revision. Seeds 1–4, `T = 6 h`, field dumps on.
 produces local depletion/recovery (nonzero `depletions_per_cell_hour`, a
 `p_corr_length` well below the face width, `face_p_sync` near zero) without
 whole-cube crashes, and whether diffusion now has a measurable effect.
+
+## Third batch (`e2-third`)
+
+After the saturating-intake revision. Seeds 1–4, `T = 6 h`, field dumps on,
+`producer.growth = 0.016`, `nutrient.initial = 0.5`.
+
+| Axis | Values |
+| --- | --- |
+| `organism.intake_half_saturation` | 0 (linear), 0.45 |
+| habitat contrast (`habitat.light_noise_gain`, `habitat.moisture_noise_gain`) | (0.1, 0.2), (0.3, 0.4) |
+| `weather.amplitude` | 0.15, 0.3 |
+| `organism.sense_radius` | 4, 6 |
+| `organism.speed_max` | 0.75, 1.5 |
+
+32 rows × 4 seeds = 128 runs. Paired axes are expanded together (the matrix
+file's `[pairs]` table). The question is which of these, alone or together,
+first produces cells that recover to half of `P_max` after being grazed, a
+producer correlation length of several cells, and repeated depletions per
+cell-hour, without synchronized crashes.
