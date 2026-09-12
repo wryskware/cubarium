@@ -8,11 +8,14 @@ use crate::organism::{Mode, Organism};
 /// What an organism senses this tick, all in its own chart.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Observation {
-    /// `P` and `D` in the organism's own cell.
+    /// `P` and edible detritus in the organism's own cell. Edible detritus is
+    /// `D_eff = D · min(1, ρ / e_r)` with `ρ = De / D`: detritus too energy-poor to fuel
+    /// reserve storage is not food, so `d_here` carries `D_eff`, never raw `D`.
     pub p_here: f64,
     pub d_here: f64,
     /// Normalized gradients `Σ (value_i − value_0) · dir_i` over the graph neighbors of the
     /// own cell, with `dir_i` the unit vector toward neighbor i's center via `unfold`.
+    /// `grad_d` is the gradient of edible detritus, matching `d_here`.
     pub grad_p: Vec2,
     pub grad_d: Vec2,
     /// Crowding repulsion: `Σ (own − other)/|own − other|² · (extent_sum)` over neighbors
@@ -43,8 +46,8 @@ pub struct Decision {
 /// Normative rules (`design/m2-world-spec.md` "Controller"):
 /// - `h = hunger()`, `m_h += (1 − exp(−dt/τ)) (h − m_h)`.
 /// - mode: Resting→Seeking when `m_h > seek_on`; Seeking/Feeding→Resting when `m_h < seek_off`;
-///   Seeking→Feeding when `p_here ≥ feed_min` (grazing on) or `d_here ≥ feed_min` (scavenging on);
-///   Feeding→Seeking when neither holds.
+///   Seeking→Feeding when `p_here ≥ feed_min` (grazing on) or `d_here ≥ feed_min` (scavenging
+///   on, with `d_here` the edible detritus `D_eff`); Feeding→Seeking when neither holds.
 /// - OU: `ou' = ou · (1 − dt/τ_ou) + noise · turn_noise · sqrt(dt)`, with `τ_ou = 2 s`.
 /// - steering `s = w_food · h · grad_p + w_detritus · h · grad_d + w_crowd · repulsion + w_persist · ou'`;
 ///   if `|s| < 1e-9` keep the heading; else rotate the heading toward `s` by at most
@@ -258,7 +261,7 @@ mod tests {
     #[test]
     fn feeding_requires_food_in_the_own_cell_and_its_mechanism() {
         let org = organism(Mode::Seeking, 0.0, 2.0, 1.0);
-        let hungry = Observation { p_here: 0.2, ..Observation::default() };
+        let hungry = Observation { p_here: 1.0, ..Observation::default() };
         let d = decide(&org, &hungry, 0, DT, true, true);
         assert_eq!(d.mode, Mode::Feeding);
         assert_eq!((d.graze_effort, d.scavenge_effort), (1.0, 0.0));
@@ -268,8 +271,8 @@ mod tests {
         assert_eq!(d.mode, Mode::Seeking);
         assert_eq!((d.graze_effort, d.scavenge_effort), (0.0, 0.0));
 
-        // Both channels can request at once.
-        let both = Observation { p_here: 0.2, d_here: 0.2, ..Observation::default() };
+        // Both channels can request at once (`d_here` is edible detritus, not raw D).
+        let both = Observation { p_here: 1.0, d_here: 1.0, ..Observation::default() };
         let d = decide(&org, &both, 0, DT, true, true);
         assert_eq!((d.graze_effort, d.scavenge_effort), (1.0, 1.0));
 

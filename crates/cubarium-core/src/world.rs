@@ -382,6 +382,7 @@ impl World {
             } = state;
             let cfg: &WorldConfig = config;
             let org_cfg = &cfg.organism;
+            let e_r = org_cfg.reserve_energy_density;
             let now = *tick;
             let seed = cfg.seed;
             let mut heat = |amount: f64| {
@@ -414,7 +415,11 @@ impl World {
                 let cell = cell_of(&o.pos);
                 let here = cell.index();
                 let chart = o.pos.chart();
-                let mut obs = Observation { p_here: fields.p[here], d_here: fields.d[here], ..Observation::default() };
+                let mut obs = Observation {
+                    p_here: fields.p[here],
+                    d_here: edible_detritus(fields.d[here], fields.de[here], e_r),
+                    ..Observation::default()
+                };
                 for neighbor in graph.neighbors(cell).iter().flatten() {
                     let center = neighbor.center();
                     let Some(view) = unfold_with(&images[o.pos.face.index()], o.pos, center, CELL_UNFOLD_RADIUS) else {
@@ -424,8 +429,9 @@ impl World {
                         continue;
                     };
                     let there = neighbor.index();
+                    let edible = edible_detritus(fields.d[there], fields.de[there], e_r);
                     obs.grad_p += dir * (fields.p[there] - obs.p_here);
-                    obs.grad_d += dir * (fields.d[there] - obs.d_here);
+                    obs.grad_d += dir * (edible - obs.d_here);
                 }
                 obs.grad_p = normalize_or_zero(obs.grad_p);
                 obs.grad_d = normalize_or_zero(obs.grad_d);
@@ -529,7 +535,6 @@ impl World {
             let eta_m = org_cfg.assimilation_material;
             let eta_e = org_cfg.assimilation_energy;
             let e_p = cfg.producer.energy_density;
-            let e_r = org_cfg.reserve_energy_density;
             for &(cell, id, g, s) in &requests {
                 let Some(o) = organisms.get_mut(id) else { continue };
                 let mut eaten = 0.0;
@@ -942,6 +947,18 @@ fn stored_energy(state: &WorldState) -> f64 {
     cells + organisms
 }
 
+/// Edible detritus `D_eff = D · min(1, ρ / e_r)` with `ρ = De / D` (zero when `D == 0`),
+/// from `design/m2-world-spec.md` "Controller". Detritus too energy-poor to pay for its own
+/// reserve storage is not food: this is the same `min(1, ρ / e_r)` factor that scales
+/// scavenging assimilation, so what an organism sees and what it can digest agree.
+fn edible_detritus(detritus: f64, energy: f64, e_r: f64) -> f64 {
+    if detritus <= 0.0 {
+        return 0.0;
+    }
+    let rho = energy / detritus;
+    if e_r > 0.0 { detritus * (rho / e_r).min(1.0) } else { detritus }
+}
+
 /// Unit gradient, or zero when the gradient carries no direction.
 fn normalize_or_zero(v: Vec2) -> Vec2 {
     if v.length() > GRADIENT_EPS { v.normalized().unwrap_or(Vec2::ZERO) } else { Vec2::ZERO }
@@ -1200,6 +1217,8 @@ mod tests {
         // Two cells with the same detritus but energy densities of e_r/8 and e_r/2.
         let cells = [CellId::new(Face::Front, 0, 0), CellId::new(Face::Front, 4, 4)];
         let densities = [e_r / 8.0, e_r / 2.0];
+        // Enough detritus that even the poor cell's edible share clears `feed_min`.
+        let detritus = 2.0;
         for (k, id) in ids.iter().enumerate() {
             let o = world.state.organisms.get_mut(*id).expect("alive");
             o.pos = cells[k].center();
@@ -1208,8 +1227,8 @@ mod tests {
             o.mode = Mode::Seeking;
             let c = cells[k].index();
             world.state.fields.p[c] = 0.0;
-            world.state.fields.d[c] = 0.5;
-            world.state.fields.de[c] = densities[k] * 0.5;
+            world.state.fields.d[c] = detritus;
+            world.state.fields.de[c] = densities[k] * detritus;
         }
         let before = stored_energy(&world.state);
         let (light, heat) = (world.state.light_in_total, world.state.heat_out_total);
@@ -1224,10 +1243,46 @@ mod tests {
             let o = world.state.organisms.get(*id).expect("alive");
             let c = cells[k].index();
             assert!(world.state.fields.de[c] >= 0.0);
-            assert!(o.reserve * e_r <= densities[k] * 0.5 + 1e-12);
+            assert!(o.reserve * e_r <= densities[k] * detritus + 1e-12);
         }
         let booked = (world.state.light_in_total - light) - (world.state.heat_out_total - heat);
         assert!(((stored_energy(&world.state) - before) - booked).abs() < 1e-9);
+    }
+
+    #[test]
+    fn energy_free_detritus_is_not_food() {
+        let mut cfg = config();
+        cfg.founders.count = 2;
+        cfg.mechanisms.grazing = false;
+        // `De = 2.0` on `D = 1.0` needs a cap that admits it; the point is `ρ ≥ e_r`.
+        cfg.detritus.energy_cap = 2.0;
+        let mut world = World::new(cfg).expect("valid");
+        let ids: Vec<OrganismId> = world.state.organisms.iter().map(|(id, _)| id).collect();
+        let cells = [CellId::new(Face::Front, 0, 0), CellId::new(Face::Front, 8, 8)];
+        // Same detritus, no energy versus fully charged.
+        let energies = [0.0, 2.0];
+        for (k, id) in ids.iter().enumerate() {
+            let o = world.state.organisms.get_mut(*id).expect("alive");
+            o.pos = cells[k].center();
+            o.reserve = 0.0;
+            o.hunger_memory = 1.0;
+            o.mode = Mode::Seeking;
+            let c = cells[k].index();
+            world.state.fields.p[c] = 0.0;
+            world.state.fields.d[c] = 1.0;
+            world.state.fields.de[c] = energies[k];
+        }
+        world.step();
+
+        let spent = world.state.organisms.get(ids[0]).expect("alive");
+        assert_eq!(spent.mode, Mode::Seeking, "energy-free detritus must not read as food");
+        assert_eq!(spent.reserve, 0.0);
+        assert!(!spent.fed_this_tick);
+
+        let rich = world.state.organisms.get(ids[1]).expect("alive");
+        assert_eq!(rich.mode, Mode::Feeding, "charged detritus is food");
+        assert!(rich.reserve > 0.0);
+        assert!(rich.fed_this_tick);
     }
 
     #[test]

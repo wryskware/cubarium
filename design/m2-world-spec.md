@@ -127,7 +127,9 @@ normalized. Edible detritus is `D_eff = D · min(1, ρ / e_r)` with `ρ = De / D
 (zero when `D = 0`): detritus that cannot fuel reserve storage is not food,
 so `d_here`, the detritus gradient, and the Feeding threshold all use `D_eff`.
 Organisms therefore leave an energy-poor detritus carpet instead of grazing it
-forever at near-zero yield;
+forever at near-zero yield. With `e_d_max = 1 e/m` and `e_r = 2 e/m`, detritus is
+at most half edible, so scavenging is deliberately the lower-yield channel;
+E2 may revisit that ratio;
 neighbor organisms within `r_sense` from the pair pass (positions in own chart,
 IDs deduplicated). Hunger `h = 1 − R/R_max`; hunger memory
 `m_h += (1 − exp(−dt/τ)) (h − m_h)`.
