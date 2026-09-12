@@ -1,0 +1,10 @@
+# E3 reproductive timing — design/experiments-e2-harness.md "E3 run".
+seconds = 86400
+seeds = [1, 2, 3]
+
+[base]
+capacity.telemetry_seconds = 5.0
+capacity.event_log = true
+
+[axes]
+organism.speed_max = [0.3]

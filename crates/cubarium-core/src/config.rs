@@ -256,7 +256,7 @@ impl Default for OrganismConfig {
             structure_adult: 1.0,
             reserve_max: 1.0,
             energy_max: 2.0,
-            speed_max: 0.4,
+            speed_max: 0.3,
             mouth_rate: 0.05,
             intake_half_saturation: 0.45,
             sense_radius: 6.0,

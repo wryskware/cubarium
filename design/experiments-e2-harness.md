@@ -133,3 +133,11 @@ static-weather control and the two candidate speeds: `organism.speed_max`
 ∈ {0.3, 0.4} × `weather.moving` ∈ {false, true}, 12 runs. The gate is the
 E2 gate over the longer horizon: no extinction, repeated local depletion and
 recovery, and no persistent whole-cube crash synchrony.
+
+## E3 run (`e3-default`)
+
+The adopted defaults with the life-event log on, seeds 1–3, 24 simulated
+hours, for the E3 reproductive-opportunity measures computed by
+`scripts/e3-analyze.py` (parent age at birth, time to first reproduction,
+births per organism and reproductive skew, ancestry depth over time from
+parent links, founder-lineage survival).

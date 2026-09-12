@@ -61,7 +61,7 @@ reserve energy than the food supplied.
 | Decomposition | `D → N` | `De` shrinks by the fraction of detritus removed; that energy is heat | `k_d = 0.002/s` |
 | Grazing intake | `P → R` (η_m) and `P → D` (1 − η_m) in the cell; feces carry no energy | food energy `e_p · q`; reserve stores `e_r · η_m · q`; `E += η_e · (e_p − e_r · η_m) · q`; the rest is heat | `q = min(k_mouth · effort · dt · P/(P + K_P), R_max − R)` requested against the cell's pre-settlement `P`; `k_mouth = 0.05 m/s`, `K_P = 0.45 m` (a saturating, type-II intake: a poor cell is poor food), `η_m = 0.6`, `η_e = 0.5` |
 | Scavenging intake | `D → R` with effective `η = η_m · min(1, ρ/e_r)`, `ρ = De/D`; the un-assimilated `(1 − η) · q` stays in `D` energy-free | food energy `ρ · q` leaves `De`; reserve stores `e_r · η · q`; `E += η_e · (ρ · q − e_r · η · q)`; the rest is heat | same `q` law with its own effort and `D_eff/(D_eff + K_P)` as the saturation term; its headroom is `R_max − R − q_graze` (grazing settles first) |
-| Maintenance, movement, sensing | none | `paid = min(cost · dt, E)`; `E −= paid`; heat `paid` (so `E ≥ 0` always) | `c_maint = 0.005 e/s per m`, `c_move = 0.006 e/s per m per px/s`, `c_sense = 0.0002 e/s per px`; `v ≤ v_max = 0.4 px/s` (1.5 until the fourth E2 batch showed that fast movers erase all patch structure), `r_sense = 6 px` |
+| Maintenance, movement, sensing | none | `paid = min(cost · dt, E)`; `E −= paid`; heat `paid` (so `E ≥ 0` always) | `c_maint = 0.005 e/s per m`, `c_move = 0.006 e/s per m per px/s`, `c_sense = 0.0002 e/s per px`; `v ≤ v_max = 0.3 px/s` (1.5 until the fourth E2 batch showed that fast movers erase all patch structure; 0.3 survived every 24-hour confirmation seed), `r_sense = 6 px` |
 | Reserve oxidation | `R → N` in the organism's cell | `E += η_ox · e_r · ΔR`; heat `(1 − η_ox) · e_r · ΔR` | when `E < 0.5 · E_max` and `R > 0`: `ΔR = 0.01 m/s`, `e_r = 2 e/m`, `η_ox = 0.8` |
 | Growth | `R → S` | heat `e_r · ΔS` (reserve energy released) plus `E −= c_build · ΔS` (heat) | while `S < S_adult` and `R > 0.3 · R_max`: `ΔS = 0.01 m/s`, `c_build = 0.5 e/m` |
 | Budding escrow | `R → escrow` (`S_child + R_child`) | escrow holds `e_r · (S_child + R_child) + E_child`; `E −= c_build · S_child + E_child` (`c_build` part is heat) | at conception; see controller |
@@ -119,7 +119,7 @@ M3a adds mutation without restructuring. Genome v1 fields (all `f32`, bounded):
 Phenotype decode (once at birth):
 
 - `S_adult = size · 1 m`, `R_max = reserve · size · 1 m`, `E_max = 2 e · size`
-- `v_max = speed · 0.4 px/s · size^(−0.25)`
+- `v_max = speed · 0.3 px/s · size^(−0.25)`
 - `k_mouth = mouth · 0.05 m/s · size^0.75`, `r_sense = sense` (founders take `sense` from
   `organism.sense_radius`, default 6; the third E2 batch's sensing axis was
   inert because founders ignored the config)
