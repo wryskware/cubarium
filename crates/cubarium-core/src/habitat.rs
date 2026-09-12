@@ -17,6 +17,9 @@ const WEATHER_INIT_COUNTER: u64 = u64::MAX - 8;
 /// The offset applied to the sample position for the moisture noise field.
 const MOISTURE_NOISE_SHIFT: [f64; 3] = [0.37, 0.11, 0.23];
 
+/// The offset applied to the sample position for the terrain basin noise (`design/water.md`).
+const BASIN_NOISE_SHIFT: [f64; 3] = [0.53, 0.29, 0.71];
+
 /// Per-cell static base light and moisture, computed once from the seed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Habitat {
@@ -24,6 +27,10 @@ pub struct Habitat {
     pub moisture_base: Box<[f64; CELL_COUNT]>,
     /// Cell-center unit-cube positions, cached for weather sampling.
     pub positions: Box<[[f64; 3]; CELL_COUNT]>,
+    /// Terrain height for standing water: `z = h + basin_gain · n_b(p + (0.53, 0.29, 0.71))`
+    /// with `h = p.y` (Top = 1, rim = −1). Hollows a fraction of a cell deep, so the level
+    /// top face and the bottom row of the sides have places for pools (`design/water.md`).
+    pub terrain: Box<[f64; CELL_COUNT]>,
 }
 
 /// One cosine wave of the patch noise.
@@ -37,7 +44,8 @@ impl Habitat {
     /// Patch noise `n(p) = (1/k) Σ_i cos(2π p·d_i / λ_i + φ_i)` with `k` waves whose
     /// directions `d_i` (uniform on the sphere), wavelengths `λ_i` (uniform in the configured
     /// range), and phases `φ_i` come from `Stream::Habitat` draws (key = i, counters 0..4).
-    /// Moisture uses the same waves evaluated at `p + (0.37, 0.11, 0.23)`.
+    /// Moisture uses the same waves evaluated at `p + (0.37, 0.11, 0.23)`, the terrain
+    /// basins at `p + (0.53, 0.29, 0.71)`.
     /// `L₀ = clamp(light_base + light_height_gain · y + light_noise_gain · n, 0, 1)`,
     /// `W₀ = clamp(moisture_base + moisture_height_gain · y + moisture_noise_gain · n', moisture_min, 1)`.
     pub fn new(cfg: &HabitatConfig, seed: u64) -> Habitat {
@@ -70,12 +78,18 @@ impl Habitat {
         let mut light_base = Box::new([0.0f64; CELL_COUNT]);
         let mut moisture_base = Box::new([0.0f64; CELL_COUNT]);
         let mut positions = Box::new([[0.0f64; 3]; CELL_COUNT]);
+        let mut terrain = Box::new([0.0f64; CELL_COUNT]);
         for cell in CellId::all() {
             let p = cell.center().embed();
             let shifted = [
                 p[0] + MOISTURE_NOISE_SHIFT[0],
                 p[1] + MOISTURE_NOISE_SHIFT[1],
                 p[2] + MOISTURE_NOISE_SHIFT[2],
+            ];
+            let basin = [
+                p[0] + BASIN_NOISE_SHIFT[0],
+                p[1] + BASIN_NOISE_SHIFT[1],
+                p[2] + BASIN_NOISE_SHIFT[2],
             ];
             let y = p[1];
             let l = cfg.light_base + cfg.light_height_gain * y + cfg.light_noise_gain * noise(p);
@@ -86,8 +100,10 @@ impl Habitat {
             light_base[i] = l.clamp(0.0, 1.0);
             moisture_base[i] = w.clamp(cfg.moisture_min, 1.0);
             positions[i] = p;
+            // `basin_gain = 0` must give exactly `y`: skip the noise term rather than add 0·n.
+            terrain[i] = if cfg.basin_gain != 0.0 { y + cfg.basin_gain * noise(basin) } else { y };
         }
-        Habitat { light_base, moisture_base, positions }
+        Habitat { light_base, moisture_base, positions, terrain }
     }
 }
 
@@ -181,17 +197,29 @@ impl Weather {
 
     /// Fill `light[c] = clamp(L₀ + Σ amp · cap(angle(center, p_c)), 0, 1)` and likewise
     /// moisture with its own minimum, where `cap(θ) = 0.5 (1 + cos(π θ / radius))` for
-    /// `θ ≤ radius` else 0.
-    pub fn sample(&self, cfg: &WeatherConfig, habitat: &Habitat, light: &mut [f64; CELL_COUNT], moisture: &mut [f64; CELL_COUNT], moisture_min: f64) {
+    /// `θ ≤ radius` else 0. `rain_source[c]` receives the bare moisture blob sum
+    /// `B_c = Σ amp · cap(…)` over the moisture blobs, before the static habitat is added
+    /// and before clamping: rain (`design/water.md`) is driven by the moving showers, not
+    /// by how wet the ground already is.
+    pub fn sample(
+        &self,
+        cfg: &WeatherConfig,
+        habitat: &Habitat,
+        light: &mut [f64; CELL_COUNT],
+        moisture: &mut [f64; CELL_COUNT],
+        rain_source: &mut [f64; CELL_COUNT],
+        moisture_min: f64,
+    ) {
         let radius = cfg.blob_radius_deg.to_radians();
         for i in 0..CELL_COUNT {
             let dir = normalize_or(habitat.positions[i], [0.0, 1.0, 0.0]);
             let sum = |blobs: &[Blob]| -> f64 {
                 blobs.iter().map(|b| cfg.amplitude * cap(dot(b.center, dir), radius)).sum()
             };
+            let wet = sum(&self.moisture);
             light[i] = (habitat.light_base[i] + sum(&self.light)).clamp(0.0, 1.0);
-            moisture[i] =
-                (habitat.moisture_base[i] + sum(&self.moisture)).clamp(moisture_min, 1.0);
+            moisture[i] = (habitat.moisture_base[i] + wet).clamp(moisture_min, 1.0);
+            rain_source[i] = wet;
         }
     }
 }
@@ -423,19 +451,32 @@ mod tests {
         let weather = Weather::new(&world.weather, 5);
         let mut light = Box::new([0.0f64; CELL_COUNT]);
         let mut moisture = Box::new([0.0f64; CELL_COUNT]);
+        let mut source = Box::new([0.0f64; CELL_COUNT]);
 
         let flat = WeatherConfig { amplitude: 0.0, ..world.weather.clone() };
-        weather.sample(&flat, &habitat, &mut light, &mut moisture, world.habitat.moisture_min);
+        weather.sample(&flat, &habitat, &mut light, &mut moisture, &mut source, world.habitat.moisture_min);
         assert_eq!(&light[..], &habitat.light_base[..]);
         assert_eq!(&moisture[..], &habitat.moisture_base[..]);
+        assert!(source.iter().all(|&b| b == 0.0), "no amplitude, no rain source");
 
         weather.sample(
             &world.weather,
             &habitat,
             &mut light,
             &mut moisture,
+            &mut source,
             world.habitat.moisture_min,
         );
+        // The rain source is the bare blob sum: nonnegative, never above the sum of the
+        // amplitudes, and equal to the lift of moisture wherever the clamp did not bite.
+        let ceiling = world.weather.amplitude * f64::from(world.weather.blobs_per_channel);
+        for i in 0..CELL_COUNT {
+            assert!(source[i] >= 0.0 && source[i] <= ceiling + 1e-12, "source {}", source[i]);
+            let lifted = habitat.moisture_base[i] + source[i];
+            if lifted <= 1.0 && lifted >= world.habitat.moisture_min {
+                assert!((moisture[i] - lifted).abs() < 1e-12);
+            }
+        }
         let mut lifted = 0;
         for i in 0..CELL_COUNT {
             assert!((0.0..=1.0).contains(&light[i]), "light {}", light[i]);
@@ -461,5 +502,42 @@ mod tests {
         assert_eq!(cap((r + 0.1).cos(), r), 0.0);
         // Half way out, the raised cosine is one half.
         assert!((cap((r / 2.0).cos(), r) - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn terrain_is_the_height_with_shallow_basins() {
+        use cube_proto::Face;
+        let cfg = WorldConfig::default().habitat;
+        let h = Habitat::new(&cfg, 9);
+        assert!(cfg.basin_gain > 0.0, "the default has basins");
+        let mut hollows = 0;
+        for cell in CellId::all() {
+            let i = cell.index();
+            let y = h.positions[i][1];
+            let z = h.terrain[i];
+            assert!((z - y).abs() <= cfg.basin_gain + 1e-12, "terrain {z} vs y {y}");
+            if cell.face() == Face::Top {
+                assert!((z - 1.0).abs() <= cfg.basin_gain + 1e-12);
+                if z < 1.0 {
+                    hollows += 1;
+                }
+            }
+        }
+        assert!(hollows > 0, "the level top face must have places for pools");
+        // Down a side face the terrain falls on average: rows are 0.125 apart and the
+        // basin noise is at most 0.06 either way.
+        for face in [Face::Front, Face::Right, Face::Back, Face::Left] {
+            let row_mean = |cy: u8| -> f64 {
+                (0..16u8).map(|cx| h.terrain[CellId::new(face, cx, cy).index()]).sum::<f64>() / 16.0
+            };
+            for cy in 0..15u8 {
+                assert!(row_mean(cy) > row_mean(cy + 1), "{face:?} row {cy} does not fall");
+            }
+        }
+        // No basins: the terrain is the embedded height exactly.
+        let flat = Habitat::new(&HabitatConfig { basin_gain: 0.0, ..cfg }, 9);
+        for i in 0..CELL_COUNT {
+            assert_eq!(flat.terrain[i], flat.positions[i][1]);
+        }
     }
 }

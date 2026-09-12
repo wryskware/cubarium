@@ -14,3 +14,5 @@ crc32fast = "1"
 
 [dev-dependencies]
 proptest = { workspace = true }
+# Only for the config-compatibility tests: the host reads worlds from TOML.
+toml = "0.8"

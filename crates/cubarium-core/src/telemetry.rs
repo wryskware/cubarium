@@ -17,6 +17,8 @@ pub struct Telemetry {
     pub producer: f64,
     pub detritus: f64,
     pub detritus_energy: f64,
+    /// `Σ F` over all cells (`design/fauna-v2.md` "Fruit").
+    pub fruit: f64,
     pub organism_material: f64,
     pub organism_energy: f64,
     pub light_in: f64,
@@ -26,6 +28,12 @@ pub struct Telemetry {
     /// `Σ P` and `Σ D` over each face's 256 cells, in `Face` order.
     pub producer_by_face: [f64; 5],
     pub detritus_by_face: [f64; 5],
+    /// `Σ w` over all cells and per face (`design/water.md`), and this sample's rain and
+    /// evaporation totals; `Δ water == rain_in − evap_out` between samples to rounding.
+    pub water: f64,
+    pub water_by_face: [f64; 5],
+    pub rain_in: f64,
+    pub evap_out: f64,
     pub occupied_cells: u32,
     pub travel_fallbacks: u32,
     pub travel_ties: u32,
@@ -35,6 +43,11 @@ pub struct Telemetry {
     pub mode_resting: u32,
     pub mode_seeking: u32,
     pub mode_feeding: u32,
+    /// Live organisms per heritable `form` (rig index), `design/fauna-v2.md`.
+    pub population_by_form: [u32; 8],
+    /// Mean embedded height (Top = 1, rim = −1) of the live organisms of each form; zero
+    /// for a form with none.
+    pub mean_height_by_form: [f64; 8],
     /// FNV-1a over the postcard encoding of the state, for same-build replay checks.
     pub state_hash: u64,
 }

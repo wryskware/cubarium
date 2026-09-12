@@ -42,9 +42,11 @@ fn check_organisms(world: &World, tick: u64) {
 #[test]
 fn twenty_minutes_of_default_world_keeps_its_books() {
     let config = WorldConfig::default();
-    let founders = u64::from(config.founders.count);
     let cap = config.capacity.max_organisms as usize;
     let mut world = World::new(config).expect("defaults are a valid world");
+    // The founders admitted at creation: the kinds' counts (`design/fauna-v2.md`), or
+    // `founders.count` on the v1 path. Reading the live population at tick 0 covers both.
+    let founders = world.population() as u64;
 
     let mut min_population = world.population();
     let mut max_population = world.population();

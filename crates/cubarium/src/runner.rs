@@ -226,12 +226,14 @@ impl FieldLog {
     fn write(&mut self, dump: &FieldDump) {
         let organisms = serde_json::Value::from(dump.organisms.as_slice()).to_string();
         self.append(&format!(
-            r#"{{"tick":{},"n":{},"p":{},"d":{},"de":{},"organisms":{organisms}}}"#,
+            r#"{{"tick":{},"n":{},"p":{},"d":{},"de":{},"f":{},"w":{},"organisms":{organisms}}}"#,
             dump.tick,
             field_array(&dump.n),
             field_array(&dump.p),
             field_array(&dump.d),
             field_array(&dump.de),
+            field_array(&dump.f),
+            field_array(&dump.w),
         ));
     }
 }
@@ -345,12 +347,27 @@ impl EventLog {
 /// The one-line stderr digest headless runs get for every sample, so a `--sink none` run
 /// is observable without opening the telemetry file.
 fn headless_line(sample: &Telemetry) -> String {
+    // Forms are listed up to the last one alive, so a four-kind world prints four numbers
+    // and a v1 world (all hue terciles) three, without eight trailing zeros.
+    let last_form = sample
+        .population_by_form
+        .iter()
+        .rposition(|&n| n > 0)
+        .map_or(0, |i| i + 1);
+    let forms = sample.population_by_form[..last_form]
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join("/");
     format!(
-        "cubarium: tick {} pop {} births {} deaths {} residual {:.3e} hash {:016x}",
+        "cubarium: tick {} pop {} births {} deaths {} forms {} fruit {:.2} water {:.1} residual {:.3e} hash {:016x}",
         sample.tick,
         sample.population,
         sample.births,
         sample.deaths_starvation + sample.deaths_age + sample.deaths_collapse,
+        if forms.is_empty() { "-".to_string() } else { forms },
+        sample.fruit,
+        sample.water,
         sample.mass_residual,
         sample.state_hash,
     )

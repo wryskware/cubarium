@@ -267,6 +267,7 @@ dependencies = [
  "postcard",
  "proptest",
  "serde",
+ "toml",
 ]
 
 [[package]]

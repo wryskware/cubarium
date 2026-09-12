@@ -36,6 +36,8 @@ fn only_food_in_the_arena(world: &mut World, producer: f64) {
 fn contested_producer_is_split_in_equal_proportion() {
     let mut config = WorldConfig::default();
     config.founders.count = 3;
+    // The v1 founder path: one omnivore genotype, so the two channels below both request.
+    config.founders.kinds.clear();
     // Defaults set `feed_min = 0.05 m`, which is far above the three organisms' combined
     // per-tick request of `3 · k_mouth · dt = 0.0075 m`; contention is unreachable without
     // lowering the threshold below the standing crop under test.
@@ -121,9 +123,13 @@ fn contested_producer_is_split_in_equal_proportion() {
 fn a_full_organism_requests_nothing() {
     let mut config = WorldConfig::default();
     config.founders.count = 1;
-    // Freeze the producer field so any change to `P` can only come from intake.
+    config.founders.kinds.clear();
+    // Freeze the producer field so any change to `P` can only come from intake: growth,
+    // mortality and ripening (`design/fauna-v2.md` "Fruit", which takes `P` above
+    // `fruit_min · P_max`) all off.
     config.producer.growth = 0.0;
     config.producer.mortality = 0.0;
+    config.fruit.ripen = 0.0;
     let mut world = World::new(config).expect("one founder is a valid world");
 
     for (_, o) in world.state.organisms.iter_mut() {

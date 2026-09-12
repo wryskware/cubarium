@@ -425,6 +425,7 @@ mod tests {
             fed: false,
             juvenile: false,
             gestation: None,
+            form: u8::MAX,
             moved: Vec::new(),
         }
     }
@@ -434,6 +435,9 @@ mod tests {
             tick: 0,
             producer: vec![0.0; cubarium_surface::CELL_COUNT],
             detritus: vec![0.0; cubarium_surface::CELL_COUNT],
+            fruit: vec![0.0; cubarium_surface::CELL_COUNT],
+            water: vec![0.0; cubarium_surface::CELL_COUNT],
+            rain: vec![0.0; cubarium_surface::CELL_COUNT],
             producer_max: 2.0,
             organisms: Vec::new(),
         }

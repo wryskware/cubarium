@@ -7,6 +7,7 @@
 
 use serde::Serialize;
 
+use crate::genome::Mutation;
 use crate::ids::OrganismId;
 use crate::organism::{DeathCause, Origin};
 
@@ -30,6 +31,9 @@ pub enum LifeEvent {
         parent_births: u32,
         genome: u64,
         origin: Origin,
+        /// The loci where the child differs from its parent (`design/fauna-v2.md`
+        /// "Mutation"); empty for an exact copy. Recorded here and nowhere else.
+        mutations: Vec<Mutation>,
     },
     Death {
         tick: u64,

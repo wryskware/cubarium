@@ -11,7 +11,8 @@ use std::time::Duration;
 use cube_proto::{FACE_SIZE, Face};
 use cubarium::art::{ArtPack, Clip, STATES};
 use cubarium::art_present::{
-    ArtPresenter, MOTIF_FULL, MOTIF_THRESHOLD, clip_time, form_of, phase_of, state_of,
+    ArtPresenter, CANOPY_STAGES, FOLIAGE_STAGES, SOIL_SCALE, SOIL_STAGES, clip_time, form_of,
+    phase_of, soil_weight, state_of,
 };
 use cubarium::clock::DT;
 use cubarium::present::{JUVENILE_SCALE, PRODUCER_SATURATION, Presenter, interpolate};
@@ -51,19 +52,38 @@ fn producer_for_density(d: f64) -> f64 {
 fn view(tick: u64, producer: Vec<f64>, detritus: Vec<f64>, organisms: Vec<OrganismView>) -> RenderView {
     assert_eq!(producer.len(), CELL_COUNT);
     assert_eq!(detritus.len(), CELL_COUNT);
-    RenderView { tick, producer, detritus, producer_max: PRODUCER_MAX, organisms }
+    RenderView {
+        tick,
+        producer,
+        detritus,
+        fruit: vec![0.0; CELL_COUNT],
+        water: vec![0.0; CELL_COUNT],
+        rain: vec![0.0; CELL_COUNT],
+        producer_max: PRODUCER_MAX,
+        organisms,
+    }
 }
 
-/// A varied producer field whose every cell stays under [`MOTIF_THRESHOLD`], so no motif
-/// may be stamped anywhere while the ramp still has real structure in it.
+/// A varied producer field whose every cell stays under the lowest plant threshold on
+/// the cube — the canopy's first stage, which is lower than the foliage's — so no plant
+/// may grow anywhere while the ramp still has real structure in it.
 fn quiet_producer() -> Vec<f64> {
-    let ceiling = producer_for_density(MOTIF_THRESHOLD);
+    let ceiling = producer_for_density(CANOPY_STAGES[0]);
     (0..CELL_COUNT).map(|i| ceiling * (i % 20) as f64 / 20.0).collect()
 }
 
-/// A detritus field with cells above and below the fleck threshold.
+/// A detritus field with cells above and below the fleck threshold, and every cell below
+/// the soil's own first stage threshold so the soil band grows no plant either.
 fn mixed_detritus() -> Vec<f64> {
-    (0..CELL_COUNT).map(|i| (i % 13) as f64 * 0.15).collect()
+    let ceiling = SOIL_SCALE * SOIL_STAGES[0];
+    (0..CELL_COUNT).map(|i| ceiling * (i % 13) as f64 / 13.0).collect()
+}
+
+/// Pixels of `after` that differ from `before` and are wholly above the horizon. The
+/// decided M2 image says nothing about the soil band, so comparisons against it are only
+/// meaningful where there is no soil.
+fn differing_above_horizon(a: &Canvas, b: &Canvas) -> Vec<(Face, u8, u8)> {
+    differing(a, b).into_iter().filter(|&(f, x, y)| soil_weight(f, x, y) == 0.0).collect()
 }
 
 fn flat(value: f64) -> Vec<f64> {
@@ -81,6 +101,8 @@ fn organism(id: OrganismId, hue: f32, mode: Mode, pos: SurfacePoint) -> Organism
         fed: false,
         juvenile: false,
         gestation: None,
+        // These tests were written to the hue-tercile rule; no `form` keeps them on it.
+        form: u8::MAX,
         moved: Vec::new(),
     }
 }
@@ -502,12 +524,12 @@ fn a_feeding_body_repeats_on_its_own_period_and_not_before() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn an_empty_quiet_world_draws_exactly_the_m2_image() {
+fn an_empty_quiet_world_draws_exactly_the_m2_image_above_the_horizon() {
     let v = view(77, quiet_producer(), mixed_detritus(), Vec::new());
-    let ceiling = producer_for_density(MOTIF_THRESHOLD);
+    let ceiling = producer_for_density(CANOPY_STAGES[0]);
     assert!(
         v.producer.iter().all(|&p| p < ceiling),
-        "the fixture must keep every cell under the motif threshold"
+        "the fixture must keep every cell under every plant threshold"
     );
 
     let mut art = presenter();
@@ -518,20 +540,28 @@ fn an_empty_quiet_world_draws_exactly_the_m2_image() {
     old.observe(&v);
     old.draw(&v, 0.5, &mut old_canvas);
 
-    assert_same_canvas(
-        &art_canvas,
-        &old_canvas,
-        "with no organisms and no eligible cell, the art image must be the M2 image",
+    let diff = differing_above_horizon(&art_canvas, &old_canvas);
+    assert!(
+        diff.is_empty(),
+        "with no organisms and no eligible cell, the art image above the horizon must be \
+         the M2 image: {} pixels differ, first at {:?}",
+        diff.len(),
+        diff[0],
     );
     assert!(total_light(&art_canvas) > 0.0, "the fixture must actually draw something");
+    // Non-vacuity: the soil band is a different image, which is the point of the bands.
+    assert!(
+        !differing(&art_canvas, &old_canvas).is_empty(),
+        "the soil band drew nothing of its own"
+    );
 }
 
 #[test]
-fn a_rich_cell_adds_a_motif_and_nothing_else() {
+fn a_rich_cell_adds_a_plant_and_nothing_else() {
     let cell = CellId::new(Face::Front, 8, 8);
     let center = cell.center();
     let mut producer = quiet_producer();
-    producer[cell.index()] = producer_for_density((MOTIF_FULL + 1.0) / 2.0);
+    producer[cell.index()] = producer_for_density((FOLIAGE_STAGES[2] + 1.0) / 2.0);
     let v = view(9, producer, mixed_detritus(), Vec::new());
 
     let mut art = presenter();
@@ -542,22 +572,25 @@ fn a_rich_cell_adds_a_motif_and_nothing_else() {
     old.observe(&v);
     old.draw(&v, 0.0, &mut old_canvas);
 
-    let diff = differing(&art_canvas, &old_canvas);
-    assert!(!diff.is_empty(), "a cell above MOTIF_FULL must grow a visible motif");
+    // Above the horizon the only thing the art image adds to the M2 image is the motif:
+    // the soil band is a different ground and is excluded here, not from the drawing.
+    let diff = differing_above_horizon(&art_canvas, &old_canvas);
+    assert!(!diff.is_empty(), "a cell above the last stage threshold must grow a visible plant");
 
-    // The motif is one sprite stamped at the cell centre with at most +-1 px of jitter
-    // per axis, so everything it touches stays local to the cell. (Measured worst case on
-    // the current pack: 7.38 px.)
+    // The plant is one sprite stamped at the cell centre with at most +-1 px of jitter
+    // per axis, and a plant tile's extent is under the 9 px budget, so everything it
+    // touches stays within about 11 px of the cell centre (the bilinear support adds
+    // under a pixel).
     let mut worst = 0.0f64;
     for &(face, x, y) in &diff {
-        assert_eq!(face, Face::Front, "the motif escaped its face at ({x}, {y})");
+        assert_eq!(face, Face::Front, "the plant escaped its face at ({x}, {y})");
         let dx = f64::from(x) + 0.5 - center.u;
         let dy = f64::from(y) + 0.5 - center.v;
         worst = worst.max(dx.hypot(dy));
     }
     assert!(
-        worst <= 10.0,
-        "a pixel {worst:.2} px from the cell centre changed; the motif is not local"
+        worst <= 11.5,
+        "a pixel {worst:.2} px from the cell centre changed; the plant is not local"
     );
 }
 

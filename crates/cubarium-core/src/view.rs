@@ -24,6 +24,9 @@ pub struct OrganismView {
     /// exactly as the world derives it (`round(organism.gestation_seconds / DT)`), so a
     /// renderer can show a birth coming without reading the world's escrow.
     pub gestation: Option<f32>,
+    /// The heritable rig index (`design/fauna-v2.md`): the presenter draws this rig, falling
+    /// back to the hue tercile for a form beyond its pack.
+    pub form: u8,
     /// The segments traveled this tick (for renderer-side trails).
     pub moved: Vec<PathSegment>,
 }
@@ -34,6 +37,12 @@ pub struct RenderView {
     pub tick: u64,
     pub producer: Vec<f64>,
     pub detritus: Vec<f64>,
+    /// Fruit `F` per cell (m), `design/fauna-v2.md` "Fruit".
+    pub fruit: Vec<f64>,
+    /// Surface water depth per cell (d), `design/water.md`.
+    pub water: Vec<f64>,
+    /// This tick's rain rate per cell (d/s); zero outside the showers.
+    pub rain: Vec<f32>,
     pub producer_max: f64,
     pub organisms: Vec<OrganismView>,
 }
@@ -49,5 +58,9 @@ pub struct FieldDump {
     pub p: Vec<f64>,
     pub d: Vec<f64>,
     pub de: Vec<f64>,
+    /// Surface water depth per cell (d).
+    pub w: Vec<f64>,
+    /// Fruit `F` per cell (m).
+    pub f: Vec<f64>,
     pub organisms: Vec<u16>,
 }

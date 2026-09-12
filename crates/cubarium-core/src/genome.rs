@@ -1,11 +1,15 @@
-//! Genome v1 and phenotype decode.
+//! Genome v2 and phenotype decode, plus the sparse mutation of `design/fauna-v2.md`.
+//!
+//! Version 2 adds `diet`, `depth`, `swim` and `form` (and the drive `w_depth`) to v1. A v1
+//! genome decodes with the documented defaults and [`Genome::upgrade`] stamps it version 2
+//! in place, so worlds written before fauna v2 keep their organisms.
 
 use serde::{Deserialize, Serialize};
 
 use crate::config::{DriveConfig, OrganismConfig};
 
-/// Bounded heritable parameters. M2 uses one fixed genotype (`Genome::founder`); M3a adds
-/// sparse mutation. Every field has a documented closed range enforced by `clamp`.
+/// Bounded heritable parameters. Every field has a documented closed range enforced by
+/// `clamp`. The v2 fields carry serde defaults so a v1 encoding still decodes.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Genome {
     pub version: u32,
@@ -23,8 +27,52 @@ pub struct Genome {
     pub speed: f32,
     /// 0–1 cosmetic hue accent.
     pub hue: f32,
-    /// Named drives; M2 copies the config defaults, M3a mutates within bounds.
+    /// 0–1: grazing rate `mouth_rate · diet`, scavenging rate `mouth_rate · (1 − diet)`; the
+    /// steering weight on `∇P` (and `∇F`) scales with `diet`, on `∇D_eff` with `1 − diet`.
+    /// Grazing needs `diet ≥ 0.05`, scavenging `diet ≤ 0.95`, fruit `diet ≥ 0.5`.
+    #[serde(default = "default_diet")]
+    pub diet: f32,
+    /// 0–1: preferred height `h_pref = −1 + 2 · depth` (Top = 1, rim = −1).
+    #[serde(default = "default_depth")]
+    pub depth: f32,
+    /// 0–1: wading penalty `speed / (1 + w · (1 − swim))`; a swimmer ignores pools.
+    #[serde(default)]
+    pub swim: f32,
+    /// Which authored rig draws the body, `0..MAX_FORMS`. Heritable, copied exactly, never
+    /// mutated. [`FORM_UNSET`] marks a v1 genome awaiting [`Genome::upgrade`], which takes
+    /// the hue tercile.
+    #[serde(default = "default_form")]
+    pub form: u8,
+    /// Named drives; founders copy the config defaults, mutation moves them within bounds.
     pub drives: Drives,
+}
+
+/// One more than the largest legal `form`; the presenter falls back to the hue tercile for
+/// a form beyond its pack.
+pub const MAX_FORMS: u8 = 8;
+/// `form` value of a genome decoded from a v1 encoding, replaced by [`Genome::upgrade`].
+pub const FORM_UNSET: u8 = u8::MAX;
+
+fn default_diet() -> f32 {
+    0.7
+}
+fn default_depth() -> f32 {
+    0.5
+}
+fn default_form() -> u8 {
+    FORM_UNSET
+}
+fn default_w_depth() -> f32 {
+    1.0
+}
+
+/// The hue tercile as a rig: `min(2, floor(hue × 3))`, NaN → 0. The rule the presenter used
+/// before `form` existed, kept so an upgraded v1 organism keeps its look.
+pub fn form_of_hue(hue: f32) -> u8 {
+    if hue.is_nan() {
+        return 0;
+    }
+    ((hue * 3.0).floor() as i64).clamp(0, 2) as u8
 }
 
 /// Heritable behavioral gains and thresholds. Ranges: weights 0–2, thresholds 0–1 with
@@ -48,13 +96,117 @@ pub struct Drives {
     pub tau_hunger_seconds: f32,
     pub turn_rate_max_deg: f32,
     pub turn_noise: f32,
+    /// 0–2: gain of the depth term `w_depth · (h_pref − h) · up` in the steering.
+    #[serde(default = "default_w_depth")]
+    pub w_depth: f32,
 }
 
+/// One locus changed by mutation, as recorded in the birth event and nowhere else.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Mutation {
+    pub locus: &'static str,
+    pub from: f32,
+    pub to: f32,
+}
+
+/// The loci sparse mutation may touch (`design/fauna-v2.md` "Mutation"), in the order a
+/// uniform draw indexes them. `form` is never here: the look is the lineage's badge.
+pub const MUTABLE_LOCI: [&str; 10] =
+    ["size", "speed", "sense", "reserve", "mouth", "hue", "diet", "depth", "swim", "w_depth"];
+
+/// Closed range of a mutable locus, in `MUTABLE_LOCI` order.
+const LOCUS_RANGES: [(f32, f32); 10] = [
+    (0.5, 2.0),
+    (0.3, 1.0),
+    (2.0, 12.0),
+    (0.5, 2.0),
+    (0.2, 1.0),
+    (0.0, 1.0),
+    (0.0, 1.0),
+    (0.0, 1.0),
+    (0.0, 1.0),
+    (0.0, 2.0),
+];
+
 impl Genome {
-    pub const VERSION: u32 = 1;
+    pub const VERSION: u32 = 2;
+
+    /// Mutable access to a locus by its `MUTABLE_LOCI` index.
+    fn locus_mut(&mut self, index: usize) -> &mut f32 {
+        match index {
+            0 => &mut self.size,
+            1 => &mut self.speed,
+            2 => &mut self.sense,
+            3 => &mut self.reserve,
+            4 => &mut self.mouth,
+            5 => &mut self.hue,
+            6 => &mut self.diet,
+            7 => &mut self.depth,
+            8 => &mut self.swim,
+            _ => &mut self.drives.w_depth,
+        }
+    }
+
+    /// Bring a decoded genome to the current version in place. A v1 genome (or any genome
+    /// with `form == FORM_UNSET`) takes `form` from its hue tercile and the serde defaults
+    /// for the other v2 loci, and is stamped version 2. Returns true if anything changed.
+    pub fn upgrade(&mut self) -> bool {
+        let mut changed = false;
+        if self.form == FORM_UNSET {
+            self.form = form_of_hue(self.hue);
+            changed = true;
+        }
+        if self.version == 1 {
+            self.version = Genome::VERSION;
+            changed = true;
+        }
+        changed
+    }
+
+    /// Sparse mutation (`design/fauna-v2.md`): with probability `probability` the genome
+    /// changes at one or two loci (equally likely) drawn without replacement from
+    /// [`MUTABLE_LOCI`], each by a Gaussian step of `step` of the locus range, clamped to
+    /// the range. `form` never changes. `unit` supplies uniform `[0, 1)` draws in a fixed
+    /// order (6 draws at most: gate, count, first locus, second locus, then two per step),
+    /// so the caller's counter-based stream makes the result reproducible. Returns the
+    /// changes made, in the order they were applied; empty when the copy is exact. A step
+    /// that clamps back onto the parent's own value (a locus already at a range boundary,
+    /// pushed further out) is not a change and records nothing, so at the boundaries a child
+    /// differs less often than `probability`.
+    pub fn mutate(&mut self, probability: f64, step: f64, mut unit: impl FnMut() -> f64) -> Vec<Mutation> {
+        let mut out = Vec::new();
+        if probability <= 0.0 || probability.is_nan() || unit() >= probability {
+            return out;
+        }
+        let count = if unit() < 0.5 { 1 } else { 2 };
+        let n = MUTABLE_LOCI.len();
+        let first = ((unit() * n as f64).floor() as usize).min(n - 1);
+        let mut loci = vec![first];
+        if count == 2 {
+            let pick = ((unit() * (n - 1) as f64).floor() as usize).min(n - 2);
+            loci.push(if pick >= first { pick + 1 } else { pick });
+        }
+        for locus in loci {
+            let (lo, hi) = LOCUS_RANGES[locus];
+            let u1 = unit();
+            let u2 = unit();
+            let u1 = if u1 == 0.0 { 1.0 } else { u1 };
+            let gaussian = (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
+            let delta = (gaussian * step * f64::from(hi - lo)) as f32;
+            let slot = self.locus_mut(locus);
+            let from = *slot;
+            let to = (from + delta).clamp(lo, hi);
+            if to != from {
+                *slot = to;
+                out.push(Mutation { locus: MUTABLE_LOCI[locus], from, to });
+            }
+        }
+        out
+    }
 
     /// The M2 founder genotype: all multipliers 1 (mouth 1, speed 1, sense 6), hue from the
-    /// argument, drives copied from `DriveConfig`.
+    /// argument, the v2 defaults (`diet` 0.7, `depth` 0.5, `swim` 0, `form` = hue tercile),
+    /// drives copied from `DriveConfig`.
     pub fn founder(hue: f32, drives: &DriveConfig) -> Genome {
         Genome {
             version: Genome::VERSION,
@@ -65,6 +217,10 @@ impl Genome {
             mouth: 1.0,
             speed: 1.0,
             hue,
+            diet: default_diet(),
+            depth: default_depth(),
+            swim: 0.0,
+            form: form_of_hue(hue),
             drives: Drives {
                 w_food: drives.w_food as f32,
                 w_detritus: drives.w_detritus as f32,
@@ -81,6 +237,7 @@ impl Genome {
                 tau_hunger_seconds: drives.tau_hunger_seconds as f32,
                 turn_rate_max_deg: drives.turn_rate_max_deg as f32,
                 turn_noise: drives.turn_noise as f32,
+                w_depth: drives.w_depth as f32,
             },
         }
     }
@@ -88,6 +245,10 @@ impl Genome {
     /// Clamp every field into its documented range (in place). Returns true if anything changed.
     pub fn clamp(&mut self) -> bool {
         let mut changed = false;
+        if self.form != FORM_UNSET && self.form >= MAX_FORMS {
+            self.form = MAX_FORMS - 1;
+            changed = true;
+        }
         let mut fix = |v: &mut f32, lo: f32, hi: f32| {
             let c = if v.is_nan() { lo } else { v.clamp(lo, hi) };
             if c != *v {
@@ -102,8 +263,11 @@ impl Genome {
         fix(&mut self.mouth, 0.2, 1.0);
         fix(&mut self.speed, 0.3, 1.0);
         fix(&mut self.hue, 0.0, 1.0);
+        fix(&mut self.diet, 0.0, 1.0);
+        fix(&mut self.depth, 0.0, 1.0);
+        fix(&mut self.swim, 0.0, 1.0);
         let d = &mut self.drives;
-        for w in [&mut d.w_food, &mut d.w_detritus, &mut d.w_persist, &mut d.w_crowd] {
+        for w in [&mut d.w_food, &mut d.w_detritus, &mut d.w_persist, &mut d.w_crowd, &mut d.w_depth] {
             fix(w, 0.0, 2.0);
         }
         for t in [
@@ -137,6 +301,7 @@ impl Genome {
             }
         };
         eat(&self.version.to_le_bytes());
+        eat(&[self.form]);
         let d = &self.drives;
         for f in [
             self.size,
@@ -146,6 +311,10 @@ impl Genome {
             self.mouth,
             self.speed,
             self.hue,
+            self.diet,
+            self.depth,
+            self.swim,
+            d.w_depth,
             d.w_food,
             d.w_detritus,
             d.w_persist,
@@ -182,6 +351,18 @@ pub struct Phenotype {
     pub lobes: Vec<(f64, f64, f64)>,
     pub extent: f64,
     pub hue: f32,
+    /// `mouth_rate · diet`: the intake rate on producer and fruit.
+    pub graze_rate: f64,
+    /// `mouth_rate · (1 − diet)`: the intake rate on edible detritus.
+    pub scavenge_rate: f64,
+    /// The genome's `diet`, widened, for the steering weights and the intake gates.
+    pub diet: f64,
+    /// Preferred embedded height `−1 + 2 · depth`.
+    pub h_pref: f64,
+    /// The genome's `swim`, widened.
+    pub swim: f64,
+    /// The rig index.
+    pub form: u8,
     pub drives: Drives,
 }
 
@@ -189,7 +370,9 @@ pub struct Phenotype {
 /// `S_adult = size · structure_adult`, `R_max = reserve · size · reserve_max`,
 /// `E_max = energy_max · size`, `v_max = speed · speed_max · size^(−0.25)`,
 /// `mouth_rate = mouth · mouth_rate · size^0.75`, `sense_radius = sense`,
-/// `maintenance = metabolism · maintenance`; lobes: core `(0, 0, 0.9 + 0.5·size)`, head
+/// `maintenance = metabolism · maintenance`, `graze_rate = mouth_rate · diet`,
+/// `scavenge_rate = mouth_rate · (1 − diet)`, `h_pref = −1 + 2 · depth`
+/// (`design/fauna-v2.md`); lobes: core `(0, 0, 0.9 + 0.5·size)`, head
 /// `(1.6·size, 0, 0.6 + 0.3·size)`, and tail `(−1.4·size, 0, 0.5 + 0.2·size)` when
 /// `speed > 0.6`; the extent is then clamped by scaling offsets down if it exceeds
 /// `body_extent_max` (record nothing; the clamp is a decode rule).
@@ -220,17 +403,25 @@ pub fn decode(genome: &Genome, cfg: &OrganismConfig) -> Phenotype {
         drives.seek_off = drives.seek_on;
     }
 
+    let mouth_rate = f64::from(genome.mouth) * cfg.mouth_rate * size.powf(0.75);
+    let diet = f64::from(genome.diet.clamp(0.0, 1.0));
     Phenotype {
         structure_adult: size * cfg.structure_adult,
         reserve_max: f64::from(genome.reserve) * size * cfg.reserve_max,
         energy_max: cfg.energy_max * size,
         speed_max: f64::from(genome.speed) * cfg.speed_max * size.powf(-0.25),
-        mouth_rate: f64::from(genome.mouth) * cfg.mouth_rate * size.powf(0.75),
+        mouth_rate,
         sense_radius: f64::from(genome.sense),
         maintenance: f64::from(genome.metabolism) * cfg.maintenance,
         lobes,
         extent,
         hue: genome.hue,
+        graze_rate: mouth_rate * diet,
+        scavenge_rate: mouth_rate * (1.0 - diet),
+        diet,
+        h_pref: -1.0 + 2.0 * f64::from(genome.depth.clamp(0.0, 1.0)),
+        swim: f64::from(genome.swim.clamp(0.0, 1.0)),
+        form: if genome.form == FORM_UNSET { form_of_hue(genome.hue) } else { genome.form },
         drives,
     }
 }
@@ -252,6 +443,10 @@ mod tests {
             ("mouth", 0.2, 1.0, |g| &mut g.mouth),
             ("speed", 0.3, 1.0, |g| &mut g.speed),
             ("hue", 0.0, 1.0, |g| &mut g.hue),
+            ("diet", 0.0, 1.0, |g| &mut g.diet),
+            ("depth", 0.0, 1.0, |g| &mut g.depth),
+            ("swim", 0.0, 1.0, |g| &mut g.swim),
+            ("w_depth", 0.0, 2.0, |g| &mut g.drives.w_depth),
             ("w_food", 0.0, 2.0, |g| &mut g.drives.w_food),
             ("w_detritus", 0.0, 2.0, |g| &mut g.drives.w_detritus),
             ("w_persist", 0.0, 2.0, |g| &mut g.drives.w_persist),
@@ -281,6 +476,8 @@ mod tests {
         assert_eq!((g.size, g.metabolism, g.reserve, g.mouth, g.speed), (1.0, 1.0, 1.0, 1.0, 1.0));
         assert_eq!(g.sense, 6.0);
         assert_eq!(g.hue, 0.5);
+        assert_eq!((g.diet, g.depth, g.swim, g.form), (0.7, 0.5, 0.0, 1), "v2 founder defaults; hue 0.5 is tercile 1");
+        assert_eq!(g.drives.w_depth, 1.0);
         assert!(!g.clamp(), "founder genome should already be in range");
         assert_eq!(g, founder());
     }
@@ -404,5 +601,149 @@ mod tests {
         let p = decode(&g, &cfg);
         assert_eq!(p.drives.seek_off, 0.2);
         assert_eq!(p.drives.seek_on, 0.2);
+    }
+
+    // --- Genome v2 (`design/fauna-v2.md`) ------------------------------------------------
+
+    #[test]
+    fn a_v1_encoding_decodes_with_the_defaults_and_upgrades_in_place() {
+        // Serialize a founder, strip the v2 keys, and read it back as a v1 genome would be.
+        let mut v1 = founder();
+        v1.version = 1;
+        let text = toml::to_string(&v1).expect("a genome serializes");
+        let stripped: String = text
+            .lines()
+            .filter(|l| !(l.starts_with("diet") || l.starts_with("depth") || l.starts_with("swim") || l.starts_with("form") || l.starts_with("w_depth")))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        assert!(!stripped.contains("diet"), "the v2 keys were stripped: {stripped}");
+        let mut g: Genome = toml::from_str(&stripped).expect("a v1 genome still decodes");
+        assert_eq!(g.version, 1);
+        assert_eq!((g.diet, g.depth, g.swim), (0.7, 0.5, 0.0), "the design's v1 defaults");
+        assert_eq!(g.form, FORM_UNSET);
+        assert_eq!(g.drives.w_depth, 1.0);
+        assert!(g.upgrade(), "an upgrade changes a v1 genome");
+        assert_eq!(g.version, Genome::VERSION);
+        assert_eq!(g.form, form_of_hue(g.hue));
+        assert_eq!(g.form, 1, "hue 0.5 is the middle tercile");
+        assert!(!g.upgrade(), "a second upgrade is a no-op");
+        // A current genome is untouched.
+        let mut current = founder();
+        assert!(!current.upgrade());
+        assert_eq!(current, founder());
+    }
+
+    #[test]
+    fn the_form_tercile_and_clamp_cover_the_new_loci() {
+        assert_eq!((form_of_hue(0.0), form_of_hue(0.33), form_of_hue(0.34), form_of_hue(0.99), form_of_hue(1.0)), (0, 0, 1, 2, 2));
+        assert_eq!(form_of_hue(f32::NAN), 0);
+        let mut g = founder();
+        g.form = MAX_FORMS + 3;
+        assert!(g.clamp());
+        assert_eq!(g.form, MAX_FORMS - 1);
+        let mut unset = founder();
+        unset.form = FORM_UNSET;
+        unset.clamp();
+        assert_eq!(unset.form, FORM_UNSET, "clamp leaves the upgrade marker for `upgrade`");
+    }
+
+    #[test]
+    fn the_digest_sees_form_and_the_phenotype_carries_the_kind() {
+        let base = founder().digest();
+        let mut g = founder();
+        g.form = 3;
+        assert_ne!(g.digest(), base, "form: digest did not change");
+        let cfg = WorldConfig::default().organism;
+        let mut g = founder();
+        g.diet = 0.25;
+        g.depth = 1.0;
+        g.swim = 0.5;
+        g.form = 3;
+        let p = decode(&g, &cfg);
+        assert!((p.diet - f64::from(0.25f32)).abs() < 1e-12);
+        assert!((p.graze_rate - p.mouth_rate * f64::from(0.25f32)).abs() < 1e-15);
+        assert!((p.scavenge_rate - p.mouth_rate * (1.0 - f64::from(0.25f32))).abs() < 1e-15);
+        assert!((p.graze_rate + p.scavenge_rate - p.mouth_rate).abs() < 1e-15, "specialization is a trade");
+        assert_eq!(p.h_pref, 1.0);
+        assert_eq!(p.swim, 0.5);
+        assert_eq!(p.form, 3);
+        // An un-upgraded genome still decodes to a usable rig.
+        g.form = FORM_UNSET;
+        assert_eq!(decode(&g, &cfg).form, form_of_hue(g.hue));
+    }
+
+    /// A counter-based unit source like the world's `Stream::Birth` draws.
+    fn unit_stream(seed: u64) -> impl FnMut() -> f64 {
+        let mut counter = 0u64;
+        move || {
+            let u = crate::rng::unit(seed, crate::rng::Stream::Birth, 7, counter);
+            counter += 1;
+            u
+        }
+    }
+
+    #[test]
+    fn mutation_is_sparse_bounded_recorded_and_never_touches_form() {
+        let (mut mutated, mut one, mut two) = (0u32, 0u32, 0u32);
+        let mut touched = std::collections::HashMap::<&str, u32>::new();
+        // Every locus mid-range, so no step can clamp back onto the parent and the recorded
+        // rate is the gate's own (`speed`, `mouth` and `swim` sit on a boundary in the
+        // founder genome).
+        let parent = {
+            let mut g = founder();
+            g.form = 5;
+            g.speed = 0.65;
+            g.mouth = 0.6;
+            g.swim = 0.5;
+            g
+        };
+        const N: u64 = 4000;
+        for seed in 0..N {
+            let mut g = parent.clone();
+            let before = g.clone();
+            let changes = g.mutate(0.3, 0.08, unit_stream(seed));
+            assert_eq!(g.form, 5, "form never mutates");
+            assert_eq!(g.version, before.version);
+            assert!(!g.clone().clamp(), "a mutated genome is always in range: {g:?}");
+            match changes.len() {
+                0 => assert_eq!(g, before, "no record, no change"),
+                1 => one += 1,
+                2 => two += 1,
+                n => panic!("{n} loci changed in one birth"),
+            }
+            if !changes.is_empty() {
+                mutated += 1;
+            }
+            for m in &changes {
+                assert!(MUTABLE_LOCI.contains(&m.locus));
+                assert_ne!(m.from, m.to);
+                *touched.entry(m.locus).or_default() += 1;
+            }
+            // The record is exact: applying it to the parent gives the child.
+            let mut replay = before.clone();
+            for m in &changes {
+                let i = MUTABLE_LOCI.iter().position(|l| *l == m.locus).expect("a mutable locus");
+                assert_eq!(*replay.locus_mut(i), m.from, "{}: `from` is the parent's value", m.locus);
+                *replay.locus_mut(i) = m.to;
+            }
+            assert_eq!(replay, g);
+        }
+        let rate = f64::from(mutated) / N as f64;
+        assert!((rate - 0.3).abs() < 0.03, "mutation rate {rate} vs p_mut 0.3");
+        assert!(one > 0 && two > 0, "both one- and two-locus births occur ({one}, {two})");
+        assert!((f64::from(one) / f64::from(one + two) - 0.5).abs() < 0.06, "one vs two loci are equally likely");
+        assert_eq!(touched.len(), MUTABLE_LOCI.len(), "every mutable locus was touched: {touched:?}");
+        assert!(!touched.contains_key("form"));
+
+        // Probability zero and a zero step are exact copies; a step is bounded by the range.
+        let mut g = founder();
+        assert!(g.mutate(0.0, 0.08, unit_stream(1)).is_empty());
+        assert_eq!(g, founder());
+        let mut g = founder();
+        assert!(g.mutate(1.0, 0.0, unit_stream(1)).is_empty(), "a zero step changes nothing");
+        assert_eq!(g, founder());
+        let mut g = founder();
+        g.mutate(1.0, 100.0, unit_stream(3));
+        assert!(!g.clone().clamp(), "even a huge step is clamped into range");
     }
 }

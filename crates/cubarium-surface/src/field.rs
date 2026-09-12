@@ -1,6 +1,12 @@
 //! The scalar field graph: 16×16 cells per face with reciprocal seam edges.
 
-use crate::{ChartImage, Edge, Face, MAX_SEAMS, SurfacePoint, chart_images, cross_seam, unfold_with};
+use crate::{
+    ChartImage, Edge, Face, MAX_SEAMS, SurfacePoint, chart_images, cross_seam, face_frame,
+    unfold_with,
+};
+
+/// Height differences below this are treated as level (see [`FieldGraph::downhill`]).
+const DOWNHILL_EPS: f64 = 1e-9;
 
 /// Cells along one face edge.
 pub const CELLS_PER_FACE_EDGE: usize = 16;
@@ -77,6 +83,7 @@ pub fn cell_of(p: &SurfacePoint) -> CellId {
 pub struct FieldGraph {
     neighbors: Box<[[Option<CellId>; 4]; CELL_COUNT]>,
     edges: Vec<(CellId, CellId)>,
+    downhill: Box<[Option<CellId>; CELL_COUNT]>,
 }
 
 impl FieldGraph {
@@ -122,7 +129,29 @@ impl FieldGraph {
         edges.sort_unstable();
         edges.dedup();
 
-        let graph = FieldGraph { neighbors, edges };
+        let mut downhill: Box<[Option<CellId>; CELL_COUNT]> =
+            vec![None; CELL_COUNT].into_boxed_slice().try_into().expect("CELL_COUNT cells");
+        for cell in CellId::all() {
+            // Gravity is `(0, -1, 0)`; only its component in the face's tangent plane can
+            // move material along the surface. That component is
+            // `|g| · sqrt(1 - n_y²)` for the outward unit normal `n`, so it vanishes
+            // exactly on the level Top face and is full strength on the four side faces.
+            let n = face_frame(cell.face()).normal;
+            if 1.0 - n[1] * n[1] <= DOWNHILL_EPS {
+                continue;
+            }
+            let y = cell.center().embed()[1];
+            let mut best: Option<(CellId, f64)> = None;
+            for m in neighbors[cell.index()].iter().flatten() {
+                let ny = m.center().embed()[1];
+                if ny < y - DOWNHILL_EPS && best.is_none_or(|(_, by)| ny < by) {
+                    best = Some((*m, ny));
+                }
+            }
+            downhill[cell.index()] = best.map(|(c, _)| c);
+        }
+
+        let graph = FieldGraph { neighbors, edges, downhill };
         debug_assert!(graph.is_reciprocal(), "cell adjacency is not reciprocal");
         debug_assert_eq!(graph.edges.len(), 2528, "expected 2,400 in-chart + 128 seam edges");
         graph
@@ -148,6 +177,34 @@ impl FieldGraph {
     #[inline]
     pub fn neighbors(&self, cell: CellId) -> &[Option<CellId>; 4] {
         &self.neighbors[cell.index()]
+    }
+
+    /// The cell one step downhill, or `None` where nothing can slide.
+    ///
+    /// Normative rule, precomputed once per graph. Write `y(c)` for the embedded height
+    /// of a cell center (`c.center().embed()[1]`) and `n` for the outward unit normal of
+    /// the cell's face.
+    ///
+    /// 1. Gravity `(0, −1, 0)` only moves surface material through its component in the
+    ///    face's tangent plane, whose magnitude is `sqrt(1 − n_y²)`. On the Top face that
+    ///    is zero — the canopy is level — so **every Top-face cell has no downhill
+    ///    neighbor**, including the ones that border a side face across a seam. On the
+    ///    four side faces it is one, so the rule below applies.
+    /// 2. Otherwise the downhill neighbor is the graph neighbor with the lowest `y`,
+    ///    and only if that `y` is lower than the cell's own by more than `1e-9`.
+    ///    Ties (never reachable on the cube, where the unique lowest neighbor of a side
+    ///    cell is the one below it) go to the earliest [`Edge`] in `Edge::ALL` order.
+    /// 3. The bottom row of a side face (`cy == 15`) has no neighbor below it — the rim
+    ///    is open — and its in-face and cross-seam neighbors are level with it, so it
+    ///    has no downhill neighbor either. Material there stays put.
+    ///
+    /// Consequences a consumer may rely on: the relation is acyclic, every side cell
+    /// outside the bottom row has exactly one downhill step, that step lands on a cell of
+    /// the same face (side faces are axis-aligned, so a step down never crosses a seam),
+    /// and no downhill step ever points at the Top face.
+    #[inline]
+    pub fn downhill(&self, cell: CellId) -> Option<CellId> {
+        self.downhill[cell.index()]
     }
 
     pub fn degree(&self, cell: CellId) -> usize {
@@ -432,6 +489,65 @@ mod tests {
             let d = crate::surface_distance(a.center(), b.center(), 8.0);
             let d = d.unwrap_or_else(|| panic!("{a:?} and {b:?} are not within 8 pixels"));
             assert!((d - 4.0).abs() < 1e-9, "{a:?} {b:?}: {d}");
+        }
+    }
+
+    /// The downhill table of [`FieldGraph::downhill`], clause by clause.
+    #[test]
+    fn downhill_points_one_step_down_the_side_faces_only() {
+        let g = graph();
+        let y = |c: CellId| c.center().embed()[1];
+        let sides = [Face::Front, Face::Right, Face::Back, Face::Left];
+
+        // Clause 1: the canopy is level, so no Top-face cell slides, seam-adjacent or not.
+        for cx in 0..16u8 {
+            for cy in 0..16u8 {
+                let c = CellId::new(Face::Top, cx, cy);
+                assert_eq!(g.downhill(c), None, "{c:?} on the level top face");
+                assert_eq!(y(c), 1.0, "top-face centers all sit at y = 1");
+            }
+        }
+
+        for face in sides {
+            for cx in 0..16u8 {
+                // Clause 3: the bottom row has nothing below it.
+                let rim = CellId::new(face, cx, 15);
+                assert_eq!(g.downhill(rim), None, "{rim:?} is on the open rim");
+
+                // Clause 2: everything above it steps down exactly one row.
+                for cy in 0..15u8 {
+                    let c = CellId::new(face, cx, cy);
+                    let d = g.downhill(c).unwrap_or_else(|| panic!("{c:?} has no downhill"));
+                    assert!(y(d) < y(c) - 1e-9, "{c:?} -> {d:?}: {} !< {}", y(d), y(c));
+                    assert!(
+                        g.neighbors(c).iter().flatten().all(|m| y(*m) >= y(d)),
+                        "{c:?} -> {d:?} is not the lowest neighbour"
+                    );
+                    assert_ne!(d.face(), Face::Top, "{c:?} must never drain onto the canopy");
+                    assert_eq!(
+                        (d.face(), d.cx(), d.cy()),
+                        (face, cx, cy + 1),
+                        "{c:?} should step to the cell directly below it"
+                    );
+                }
+            }
+        }
+
+        // The relation is acyclic and terminates in the bottom row: follow it to the end.
+        for cell in CellId::all() {
+            let mut c = cell;
+            let mut steps = 0;
+            while let Some(next) = g.downhill(c) {
+                c = next;
+                steps += 1;
+                assert!(steps <= 16, "{cell:?} did not reach the rim in 16 steps");
+            }
+            if cell.face() == Face::Top {
+                assert_eq!(steps, 0);
+            } else {
+                assert_eq!(steps, 15 - usize::from(cell.cy()), "{cell:?}");
+                assert_eq!((c.face(), c.cy()), (cell.face(), 15), "{cell:?} ended at {c:?}");
+            }
         }
     }
 

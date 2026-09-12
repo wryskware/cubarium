@@ -2,7 +2,7 @@
 
 This is the first game-art workflow for Cubarium: editable cutout sprite rigs,
 Godot animation timelines, habitat artwork, and a bake into the actual cube
-renderer. Start here to draw or animate. Godot 4.6.3 was used for verification.
+renderer. Start here to draw or animate. Godot 4.7.2 is the reference baker (4.6.3 was used for the first verification).
 
 ```sh
 ./scripts/godot.sh --editor
@@ -10,7 +10,7 @@ renderer. Start here to draw or animate. Godot 4.6.3 was used for verification.
 
 The launcher uses `GODOT_BIN`, an installed `godot`/`godot4`, or the optional
 ignored `.tools/godot/godot` executable. Download the standard editor from the
-[official archive](https://godotengine.org/download/archive/4.6.3-stable/) if
+[official archive](https://godotengine.org/download/archive/4.7.2-stable/) if
 needed. A workspace-local editor was placed under `.tools/godot/` during this
 implementation; that installation is not part of Git.
 
@@ -24,6 +24,7 @@ gallery described below is the check at the final display resolution.
 | `creatures/lantern.tscn` | Broad shell, little feet and a probing feeler. |
 | `creatures/sail.tscn` | Angular body and two independently pivoting fins. |
 | `creatures/mossback.tscn` | Compact body, asymmetric crown and walking feet. |
+| `creatures/skimmer.tscn` | Long low hull, paddle fins on pivots, forked tail and two feelers. |
 | `habitat/*.svg` | Rosette, fern and lichen artwork. |
 | Each rig's `AnimationPlayer` | Native editable `rest`, `move`, `feed`, `bud` tracks and `RESET` pose. |
 
@@ -61,7 +62,7 @@ It runs at normal time. The pre-existing M2 world on port 7393 is separate.
 Restart the study after a bake to load the new artwork. Ctrl-C closes it.
 
 ```sh
-# Twelve poses per face: columns lantern/sail/mossback;
+# Sixteen poses per face: columns lantern/sail/mossback/skimmer;
 # rows rest/move/feed/bud. No scenery obscures the silhouettes.
 ./scripts/art-study.sh --scene gallery
 
@@ -120,12 +121,83 @@ That is **cosmetic only**. `hue` is copied exactly at birth, which is why a
 lineage keeps its look, but it is not a species, a diet, or a capability, and
 the simulation does not know the rigs exist.
 
-The habitat motifs are stamped per field cell wherever producer biomass passes
-`MOTIF_THRESHOLD`, fading up to full opacity at `MOTIF_FULL`
-(`crates/cubarium/src/art_present.rs`, both review-tunable). They are scenery
-that follows the producer field: they are not organisms, nothing in the world
-knows about them, they never move and they are never eaten.
+The plants of `PLANTS.md` grow from the fields, one slot per field cell at a
+hashed placement. A slot's species is picked by its band (soil: glowcap or
+rootveil; foliage: lanternstalk or tendrilfan; canopy: umbrellafrond or
+bloomcrown; any cell deeper than `REED_DEPTH` of water: reedspire). The plant
+climbs through its three authored stages as its field passes the band's
+`*_STAGES` thresholds, with hysteresis (`STAGE_HYST`) so an oscillating field
+does not flicker, and a hashed rank caps how far each slot may grow
+(`RANK_FULL`, `RANK_MID`) so a rich patch is a few full plants, more mid ones
+and many sprouts. Stalks stand up toward the canopy on the side faces; on the
+top face plants face freely. A full-grown plant with a `fruit` clip plays it
+where the cell holds fruit above `FRUIT_SHOW`, once the world publishes fruit.
+All of these live in `crates/cubarium/src/art_present.rs` as review-tunable
+constants. Plants are scenery that follows the fields: they are not organisms,
+nothing in the world knows about them, they never move and they are never
+eaten. The legacy rosette/fern/lichen tiles stay in the pack but are no longer
+drawn.
+
+### Bands
+
+The art mode draws the cube as three places rather than one top-down field, by
+the embedded height `h` of a point (top face 1, open rim −1). **Soil** is the
+bottom five of the sixteen cell rows of each side face, `h < SOIL_TOP`: no
+producer lawn and no detritus flecks there, only a ramp of the detritus field
+from dark plum to violet-mauve, with dim glowcaps and rootveils where detritus
+is deep. **Foliage** is the rest of the side faces and keeps the decided
+producer ramp and its flecks, with lanternstalks and tendrilfans by producer
+density. **Canopy** is the top face, which keeps the producer ramp and grows
+umbrellafronds and bloomcrowns at lower thresholds, so a healthy top reads as
+covered.
+
+The horizon between soil and foliage is a soft blend evaluated at every
+pixel's own height, not its cell's, so it is one horizontal line all the way
+round the cube rather than a staircase of cell edges.
+
+`SOIL_TOP`, the horizon half-width `HORIZON`, the soil palette
+(`SOIL_LOW_SRGB`, `SOIL_HIGH_SRGB`, and their brightnesses) and the per-band
+plant stage thresholds all live in `crates/cubarium/src/art_present.rs` as
+review-tunable constants; the soil colors are meant to move only within the
+Outrun family of `design/appearance.md` "Palette". **The simulation does not
+know about bands.** Nothing in the world reads `SOIL_TOP`; the world publishes
+the same producer and detritus fields it always did, and the bands are a
+consequence of how light falls with depth and where detritus ends up
+(`design/stratified-world.md`).
 
 Without `--art` the image is the decided M2 one, pixel for pixel. The web
 viewer's HUD carries the simulation speed (`tick N · 60 fps · 8× time`), so a
 fast run is never mistaken for a live-speed one.
+
+### Water
+
+Pools and streams are drawn from the world's per-cell depth, source-over the ground and
+under the plants: `mix(#1E9BF2, #42C5F8)` by depth, coverage `1 − exp(−w / WATER_FILM)`
+(0.6), brightness `WATER_BRIGHT` (0.55) with a `WATER_SHIMMER` (8 %) glint on a 2.5 s
+simulated cycle, seam-filtered like the ramps. Rain is this tick's per-cell rate: up to
+`RAIN_MAX_STREAKS` one-by-two streaks of `#B8F0FF` per cell (`RAIN_DENSITY` per unit of
+rate), falling down the side faces at `RAIN_SPEED` (20 px/s) and wrapping every
+`RAIN_PERIOD` (0.4 s), sparkling on the level top face. Reeds stand only in pools deeper
+than `REED_STAGES[0]` (0.6) and only in the slots whose rank may grow beyond a sprout, so a
+flooded floor row is clumps of reeds with open water between them, not a fence. All of
+these are `pub const`s in `crates/cubarium/src/art_present.rs`.
+
+### Tall plants
+
+The foliage band is eleven cells tall and a 16-pixel plant cannot fill it, so tall plants
+grow in columns: a hash selects `TALL_COLUMN_P` (22 %) of the side-face cell columns for a
+`spiretree` or `glasscane`, and `TALL_VINE_P` (40 %) of those also carry a `vinecoil` on
+every second trunk. A column shows a base at the horizon cell, `round((t_col − t₀) /
+TALL_STEP)` trunk segments 4 px apart (`TALL_STEP` 0.08 above the foliage's first stage
+threshold `t₀`, up to `TALL_MAX_SEGMENTS` = 9) and a crown, where `t_col` is the mean
+producer density of the column's foliage cells; the height lags downward by `TALL_HYST`.
+A full column's crown sits on the rim cell's center and the shared surface carries it onto
+the top face: the tree tops are the canopy. Bodies draw in front of trunks.
+
+### Ground
+
+Between the plants each band lays its tileable 8×8 texture (`grit`, `mossweave`,
+`frondmat`) on an 8-pixel lattice, breathing on its own clip, at `GROUND_OPACITY` (0.30)
+times how far the band's density sits above its first stage threshold, cross-faded
+through the horizon like the ground under it. Drop `GROUND_OPACITY` first if the lattice
+reads as a grid on the cube.

@@ -36,6 +36,7 @@ pub mod rng;
 pub mod snapshot;
 pub mod telemetry;
 pub mod view;
+pub mod water;
 pub mod world;
 
 pub use config::WorldConfig;

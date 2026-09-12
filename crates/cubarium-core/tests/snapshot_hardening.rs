@@ -19,11 +19,13 @@ fn stepped_world(ticks: u64) -> World {
 /// Spec: the schema version is stored in the header. Every config shape change bumps it,
 /// because `postcard` is not self-describing and an older payload would misdecode: version 2
 /// added the Monod `K_N` and `capacity.field_dump_seconds`, version 3 the intake
-/// half-saturation `K_P`, version 4 `capacity.event_log`. Older payloads are rejected
-/// outright.
+/// half-saturation `K_P`, version 4 `capacity.event_log`, version 5 `detritus.fall`,
+/// version 6 the water field, config and budget totals, version 7 fauna v2 (genome v2,
+/// founder kinds, the fruit field and config, mutation config). Older payloads are
+/// rejected outright.
 #[test]
-fn the_schema_version_is_four() {
-    assert_eq!(SCHEMA_VERSION, 4);
+fn the_schema_version_is_seven() {
+    assert_eq!(SCHEMA_VERSION, 7);
     assert_eq!(MAGIC, *b"CUBW");
 }
 
@@ -109,6 +111,20 @@ fn a_foreign_schema_is_rejected_with_its_version() {
     let mut older = encode_snapshot(&world.state, BUILD);
     older[4..8].copy_from_slice(&0u32.to_le_bytes());
     assert_eq!(decode_snapshot(&older), Err(SnapshotError::UnsupportedSchema(0)));
+
+    // The pre-water schema in particular: postcard is not self-describing, so a version-5
+    // payload cannot be read as "dry"; it is refused and the host starts fresh
+    // (`design/water.md`: a serialized state without water loads dry applies to
+    // self-describing configs, not to binary snapshots).
+    let mut pre_water = encode_snapshot(&world.state, BUILD);
+    pre_water[4..8].copy_from_slice(&5u32.to_le_bytes());
+    assert_eq!(decode_snapshot(&pre_water), Err(SnapshotError::UnsupportedSchema(5)));
+
+    // Likewise the pre-fauna-v2 schema (version 6): genome v2 loci, founder kinds and the
+    // fruit field all changed the encoding, so it is refused rather than misread.
+    let mut pre_fauna = encode_snapshot(&world.state, BUILD);
+    pre_fauna[4..8].copy_from_slice(&6u32.to_le_bytes());
+    assert_eq!(decode_snapshot(&pre_fauna), Err(SnapshotError::UnsupportedSchema(6)));
 }
 
 /// Spec: "Load validates magic, version, length, CRC, then value ranges". A header that is
@@ -159,6 +175,8 @@ fn a_well_formed_header_over_an_out_of_range_state_is_rejected() {
 #[test]
 fn a_full_world_round_trips() {
     let mut config = WorldConfig::default();
+    // The v1 founder path fills the cap exactly; the default kinds place 24.
+    config.founders.kinds.clear();
     config.founders.count = 512;
     assert_eq!(config.capacity.max_organisms, 512, "the default cap is the spec's 512");
     let mut world = World::new(config).expect("a world at its cap is valid");

@@ -101,6 +101,10 @@ fn main() -> Result<()> {
         "PNG capture requires --seconds"
     );
     let art = ArtPack::load(&args.art)?;
+    let rigs = art.creature_count();
+    // Gallery columns for up to four rigs at u = 8, 24, 40, 56; more rigs wrap onto
+    // extra faces' worth of rows below, which the garden layout does not need.
+    let column_u = |form: usize| 8.0 + (form % 4) as f64 * 16.0;
     let mut sink: Box<dyn FrameSink> = match args.sink {
         Sink::Web => {
             let web = WebSink::with_note(args.web_port, "1× time · art study")?;
@@ -140,13 +144,11 @@ fn main() -> Result<()> {
             let heading = Vec2::from_screen_angle(rng.range(-0.5, 0.5));
             plants.push((p, kind, heading, rng.range(0.65, 1.0)));
         }
-        let count = if args.scene == Scene::Gallery { 12 } else { 5 };
+        let count = if args.scene == Scene::Gallery { 4 * rigs } else { 5 };
         for index in 0..count {
             let (u, v) = if args.scene == Scene::Gallery {
-                (
-                    11.0 + (index % 3) as f64 * 21.0,
-                    9.0 + (index / 3) as f64 * 15.0,
-                )
+                // Columns are rigs, rows are rest/move/feed/bud.
+                (column_u(index % rigs), 9.0 + (index / rigs) as f64 * 15.0)
             } else {
                 (
                     (index % 3) as f64 * 21.0 + rng.range(4.0, 16.0),
@@ -159,7 +161,7 @@ fn main() -> Result<()> {
                 rng.range(0.0, 36.0)
             };
             let (state, clip_time) = if args.scene == Scene::Gallery {
-                (index / 3, 0.0)
+                (index / rigs, 0.0)
             } else {
                 action(offset)
             };
@@ -167,7 +169,7 @@ fn main() -> Result<()> {
                 anchor: SurfacePoint::new(face, u, v),
                 heading: Vec2::new(1.0, 0.0),
                 moved: vec![],
-                form: index % 3,
+                form: (index + face as usize) % rigs,
                 offset,
                 state,
                 clip_time,
@@ -213,7 +215,8 @@ fn main() -> Result<()> {
                     }
                     specimen.moved.clear();
                     if specimen.state == 1 && args.scene == Scene::Garden {
-                        let speed = [1.1, 1.8, 0.7][specimen.form];
+                        // Travel pace per rig; rigs beyond the authored four reuse the cycle.
+                        let speed = [1.1, 1.8, 0.7, 1.4][specimen.form % 4];
                         let bend = 0.025 * (t * 0.17 + specimen.offset).sin() * DT;
                         let a = specimen.heading.screen_angle() + bend;
                         specimen.heading = Vec2::from_screen_angle(a);

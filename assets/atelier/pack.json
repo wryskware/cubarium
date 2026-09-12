@@ -11,7 +11,7 @@
 			"loop": true,
 			"name": "lantern",
 			"row": 1,
-			"seconds": 1.60000002384186,
+			"seconds": 1.6,
 			"state": "move"
 		},
 		{
@@ -39,7 +39,7 @@
 			"loop": true,
 			"name": "sail",
 			"row": 5,
-			"seconds": 2.40000009536743,
+			"seconds": 2.4,
 			"state": "move"
 		},
 		{
@@ -67,7 +67,7 @@
 			"loop": true,
 			"name": "mossback",
 			"row": 9,
-			"seconds": 1.60000002384186,
+			"seconds": 1.6,
 			"state": "move"
 		},
 		{
@@ -83,11 +83,71 @@
 			"row": 11,
 			"seconds": 5.0,
 			"state": "bud"
+		},
+		{
+			"loop": true,
+			"name": "skimmer",
+			"row": 12,
+			"seconds": 4.0,
+			"state": "rest"
+		},
+		{
+			"loop": true,
+			"name": "skimmer",
+			"row": 13,
+			"seconds": 1.6,
+			"state": "move"
+		},
+		{
+			"loop": true,
+			"name": "skimmer",
+			"row": 14,
+			"seconds": 2.0,
+			"state": "feed"
+		},
+		{
+			"loop": false,
+			"name": "skimmer",
+			"row": 15,
+			"seconds": 5.0,
+			"state": "bud"
 		}
+	],
+	"creature_names": [
+		"lantern",
+		"sail",
+		"mossback",
+		"skimmer"
 	],
 	"creatures": "creatures.png",
 	"facing": "+x",
 	"frames": 8,
+	"ground": [
+		{
+			"band": "soil",
+			"frames": 4,
+			"name": "grit",
+			"row": 0,
+			"seconds": 6.0
+		},
+		{
+			"band": "foliage",
+			"frames": 4,
+			"name": "mossweave",
+			"row": 1,
+			"seconds": 6.0
+		},
+		{
+			"band": "canopy",
+			"frames": 4,
+			"name": "frondmat",
+			"row": 2,
+			"seconds": 6.0
+		}
+	],
+	"ground_atlas": "ground.png",
+	"ground_frames": 4,
+	"ground_tile": 8,
 	"habitat": "habitat.png",
 	"habitat_names": [
 		"rosette",
@@ -98,6 +158,254 @@
 		8,
 		8
 	],
+	"plant_atlas": "plants.png",
+	"plant_frames": 4,
+	"plants": [
+		{
+			"band": "soil",
+			"frames": 4,
+			"name": "glowcap",
+			"row": 0,
+			"seconds": 3.0,
+			"stage": 0
+		},
+		{
+			"band": "soil",
+			"frames": 4,
+			"name": "glowcap",
+			"row": 1,
+			"seconds": 3.0,
+			"stage": 1
+		},
+		{
+			"band": "soil",
+			"frames": 4,
+			"name": "glowcap",
+			"row": 2,
+			"seconds": 3.0,
+			"stage": 2
+		},
+		{
+			"band": "soil",
+			"frames": 4,
+			"name": "rootveil",
+			"row": 3,
+			"seconds": 3.0,
+			"stage": 0
+		},
+		{
+			"band": "soil",
+			"frames": 4,
+			"name": "rootveil",
+			"row": 4,
+			"seconds": 3.0,
+			"stage": 1
+		},
+		{
+			"band": "soil",
+			"frames": 4,
+			"name": "rootveil",
+			"row": 5,
+			"seconds": 3.0,
+			"stage": 2
+		},
+		{
+			"band": "foliage",
+			"frames": 4,
+			"name": "lanternstalk",
+			"row": 6,
+			"seconds": 3.0,
+			"stage": 0
+		},
+		{
+			"band": "foliage",
+			"frames": 4,
+			"name": "lanternstalk",
+			"row": 7,
+			"seconds": 3.0,
+			"stage": 1
+		},
+		{
+			"band": "foliage",
+			"frames": 4,
+			"name": "lanternstalk",
+			"row": 8,
+			"seconds": 3.0,
+			"stage": 2
+		},
+		{
+			"band": "foliage",
+			"frames": 4,
+			"name": "lanternstalk",
+			"row": 9,
+			"seconds": 3.0,
+			"stage": "fruit"
+		},
+		{
+			"band": "foliage",
+			"frames": 4,
+			"name": "tendrilfan",
+			"row": 10,
+			"seconds": 3.0,
+			"stage": 0
+		},
+		{
+			"band": "foliage",
+			"frames": 4,
+			"name": "tendrilfan",
+			"row": 11,
+			"seconds": 3.0,
+			"stage": 1
+		},
+		{
+			"band": "foliage",
+			"frames": 4,
+			"name": "tendrilfan",
+			"row": 12,
+			"seconds": 3.0,
+			"stage": 2
+		},
+		{
+			"band": "foliage",
+			"frames": 4,
+			"name": "tendrilfan",
+			"row": 13,
+			"seconds": 3.0,
+			"stage": "fruit"
+		},
+		{
+			"band": "canopy",
+			"frames": 4,
+			"name": "umbrellafrond",
+			"row": 14,
+			"seconds": 3.0,
+			"stage": 0
+		},
+		{
+			"band": "canopy",
+			"frames": 4,
+			"name": "umbrellafrond",
+			"row": 15,
+			"seconds": 3.0,
+			"stage": 1
+		},
+		{
+			"band": "canopy",
+			"frames": 4,
+			"name": "umbrellafrond",
+			"row": 16,
+			"seconds": 3.0,
+			"stage": 2
+		},
+		{
+			"band": "canopy",
+			"frames": 4,
+			"name": "bloomcrown",
+			"row": 17,
+			"seconds": 3.0,
+			"stage": 0
+		},
+		{
+			"band": "canopy",
+			"frames": 4,
+			"name": "bloomcrown",
+			"row": 18,
+			"seconds": 3.0,
+			"stage": 1
+		},
+		{
+			"band": "canopy",
+			"frames": 4,
+			"name": "bloomcrown",
+			"row": 19,
+			"seconds": 3.0,
+			"stage": 2
+		},
+		{
+			"band": "canopy",
+			"frames": 4,
+			"name": "bloomcrown",
+			"row": 20,
+			"seconds": 3.0,
+			"stage": "fruit"
+		},
+		{
+			"band": "water",
+			"frames": 4,
+			"name": "reedspire",
+			"row": 21,
+			"seconds": 3.0,
+			"stage": 0
+		},
+		{
+			"band": "water",
+			"frames": 4,
+			"name": "reedspire",
+			"row": 22,
+			"seconds": 3.0,
+			"stage": 1
+		},
+		{
+			"band": "water",
+			"frames": 4,
+			"name": "reedspire",
+			"row": 23,
+			"seconds": 3.0,
+			"stage": 2
+		}
+	],
+	"tall": [
+		{
+			"frames": 4,
+			"name": "spiretree",
+			"part": "base",
+			"row": 0,
+			"seconds": 3.0
+		},
+		{
+			"frames": 4,
+			"name": "spiretree",
+			"part": "trunk",
+			"row": 1,
+			"seconds": 3.0
+		},
+		{
+			"frames": 4,
+			"name": "spiretree",
+			"part": "crown",
+			"row": 2,
+			"seconds": 3.0
+		},
+		{
+			"frames": 4,
+			"name": "glasscane",
+			"part": "base",
+			"row": 3,
+			"seconds": 3.0
+		},
+		{
+			"frames": 4,
+			"name": "glasscane",
+			"part": "trunk",
+			"row": 4,
+			"seconds": 3.0
+		},
+		{
+			"frames": 4,
+			"name": "glasscane",
+			"part": "crown",
+			"row": 5,
+			"seconds": 3.0
+		},
+		{
+			"frames": 4,
+			"name": "vinecoil",
+			"part": "trunk",
+			"row": 6,
+			"seconds": 3.0
+		}
+	],
+	"tall_atlas": "tall.png",
 	"tile": 16,
-	"version": 1
+	"version": 3
 }

@@ -14,12 +14,12 @@ func label_at(words: String, point: Vector2, size: int, color := Color("a7adc5")
 	return label
 
 func _ready() -> void:
-	rigs = [$Lantern, $Sail, $Mossback]
+	rigs = [$Lantern, $Sail, $Mossback, $Skimmer]
 	label_at("CUBARIUM  /  CREATURE ATELIER", Vector2(36, 28), 24, Color("d6dfd1"))
-	label_at("Three shape studies · editable sprite parts and animation timelines", Vector2(36, 66), 16)
-	for index in range(3):
-		label_at(["LANTERN", "SAIL", "MOSSBACK"][index], Vector2(100 + index * 285, 350), 20, Color("d6dfd1"))
-		label_at(["A deliberate little walker", "A quiet, folding silhouette", "A compact, uneven crown"][index], Vector2(65 + index * 285, 382), 14)
+	label_at("Four shape studies · editable sprite parts and animation timelines", Vector2(36, 66), 16)
+	for index in range(4):
+		label_at(["LANTERN", "SAIL", "MOSSBACK", "SKIMMER"][index], Vector2(70 + index * 215, 350), 20, Color("d6dfd1"))
+		label_at(["A deliberate little walker", "A quiet, folding silhouette", "A compact, uneven crown", "A long, low paddler"][index], Vector2(40 + index * 215, 382), 14)
 	for index in range(MODES.size()):
 		var button := Button.new()
 		button.text = str(index + 1) + " · " + MODES[index].capitalize()

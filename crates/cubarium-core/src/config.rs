@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever a field's meaning changes; stored in snapshots.
-pub const CONFIG_VERSION: u32 = 4;
+pub const CONFIG_VERSION: u32 = 7;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -21,11 +21,61 @@ pub struct WorldConfig {
     pub nutrient: NutrientConfig,
     pub habitat: HabitatConfig,
     pub weather: WeatherConfig,
+    pub water: WaterConfig,
+    pub fruit: FruitConfig,
     pub organism: OrganismConfig,
     pub drives: DriveConfig,
     pub founders: FounderConfig,
+    pub mutation: MutationConfig,
     pub capacity: CapacityConfig,
     pub mechanisms: MechanismToggles,
+}
+
+/// The fruit pool `F` of `design/fauna-v2.md` "Fruit": a fifth conserved per-cell material
+/// that rich producers ripen into, that drops back to detritus, and that grazers with
+/// `diet ≥ 0.5` eat first.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct FruitConfig {
+    /// Ripening `P → F` per second: `ripen · P · (P/P_max − fruit_min)⁺ · L`.
+    pub ripen: f64,
+    /// Fraction of `P_max` a cell must exceed before it fruits.
+    pub fruit_min: f64,
+    /// Drop `F → D` per second.
+    pub drop: f64,
+    /// `e_f`: energy per material unit of fruit (e/m); must be at least the producer's,
+    /// since ripening spends light to add the difference.
+    pub energy_density: f64,
+}
+
+/// Sparse mutation at birth (`design/fauna-v2.md` "Mutation"), active when
+/// `mechanisms.mutation` is on.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MutationConfig {
+    /// `p_mut`: probability that a child differs from its parent at all.
+    pub probability: f64,
+    /// Gaussian step as a fraction of each locus range.
+    pub step: f64,
+}
+
+/// One founder kind (`design/fauna-v2.md` "Founders come in kinds"): how many, and which
+/// genome fields it fixes. An unset field takes the v1 founder value (or, for `hue`, the
+/// founder's own draw).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct FounderKind {
+    pub name: String,
+    pub count: u32,
+    pub diet: Option<f32>,
+    pub depth: Option<f32>,
+    pub speed: Option<f32>,
+    pub size: Option<f32>,
+    /// Genome range 0.5–2; multiplies maintenance.
+    pub metabolism: Option<f32>,
+    pub swim: Option<f32>,
+    pub hue: Option<f32>,
+    pub form: Option<u8>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -50,8 +100,19 @@ pub struct ProducerConfig {
 pub struct DetritusConfig {
     /// `k_d`: decomposition per second (`D → N`).
     pub decomposition: f64,
-    /// `e_d_max`: maximum retained energy per material unit (e/m).
+    /// `e_d_max`: maximum retained energy per material unit (e/m). Equal to `e_r` since
+    /// fauna v2 (2026-09-12), so fresh detritus is fully edible and a soil scavenger can
+    /// live on litter; `De ≤ e_d_max · D` holds everywhere.
     pub energy_cap: f64,
+    /// Fraction of a cell's `D` (and of its `De`, in the same proportion) that slides to
+    /// its downhill neighbour per second. A pure transfer: nothing is created or
+    /// destroyed. Must satisfy `fall · DT ≤ 1` so a cell can never over-drain.
+    pub fall: f64,
+    /// Initial litter (m): a new world starts with `D = initial_dark · (1 − L₀)` and
+    /// `De = e_d_max · D` (fully charged) per cell, the layer a world that has been shedding for a
+    /// while would hold, so the dark soil is littered and the lit canopy clean
+    /// (`design/stratified-world.md`). Initial material, booked with the producer seed.
+    pub initial_dark: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -80,6 +141,37 @@ pub struct HabitatConfig {
     pub noise_waves: u32,
     /// Wavelength bounds in cube units.
     pub noise_wavelength: [f64; 2],
+    /// Terrain hollows for standing water: `z = h + basin_gain · n_b(p)` with the patch
+    /// noise sampled at a third offset (`design/water.md`). Zero makes the terrain the
+    /// bare embedded height, so nothing pools on the level top face.
+    pub basin_gain: f64,
+}
+
+/// Rain, flow, pools and evaporation (`design/water.md`). Water is an open, audited
+/// quantity, not material: rain adds it, evaporation removes it, every tick
+/// `Δ Σw = rain_in − evap_out`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WaterConfig {
+    /// Depth added per second per unit of moisture blob sum above `rain_threshold` (d/s).
+    pub rain_rate: f64,
+    /// Moisture *weather blob sum* a cell needs before it rains there; showers are the
+    /// cores of the moving blobs, never the static habitat.
+    pub rain_threshold: f64,
+    /// Flow coefficient per second: per edge, `q = flow · dt · (s_a − s_b)` from the higher
+    /// surface level to the lower, capped at a quarter of the source depth per substep.
+    pub flow: f64,
+    /// Evaporation per second per unit light: `evap · max(L, evap_floor) · w`.
+    pub evap: f64,
+    /// The light evaporation never falls below, so unlit soil still dries slowly and a moat
+    /// cannot fill without bound. A fraction in `[0, 1]`.
+    pub evap_floor: f64,
+    /// Surface level per unit depth: `s = z + depth_gain · w`.
+    pub depth_gain: f64,
+    /// Producer growth sees `W_eff = clamp(W + wet_gain · min(w, 1), W_min, 1)`.
+    pub wet_gain: f64,
+    /// Depth above which producer growth is scaled by `max(0, 1 − (w − flood) / flood)`.
+    pub flood: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -128,6 +220,11 @@ pub struct OrganismConfig {
     pub max_age_seconds: f64,
     pub min_structure: f64,
     pub body_extent_max: f64,
+    /// `k` while Resting: the fraction of `turn_rate_max` and of the turn-noise injection a
+    /// resting body is allowed. Zero holds the heading while the noise decays.
+    pub rest_turn_fraction: f64,
+    /// `k` while Feeding. Both fractions at 1 restore the ungated behaviour of the E2 batches.
+    pub feed_turn_fraction: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -149,15 +246,21 @@ pub struct DriveConfig {
     pub turn_rate_max_deg: f64,
     pub turn_noise: f64,
     pub birth_offset_px: f64,
+    /// Gain of the depth term `w_depth · (h_pref − h) · up` (`design/fauna-v2.md`).
+    pub w_depth: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct FounderConfig {
-    /// Founders placed at world creation, uniformly by area over the surface.
+    /// Founders placed at world creation, uniformly by area over the surface, when `kinds`
+    /// is empty: the v1 path, one genotype with drawn hues.
     pub count: u32,
     pub initial_reserve_fraction: f64,
     pub initial_energy_fraction: f64,
+    /// The founder kinds; when non-empty, `count` is ignored and each kind places its own
+    /// founders (`design/fauna-v2.md`).
+    pub kinds: Vec<FounderKind>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -180,7 +283,7 @@ pub struct CapacityConfig {
 pub struct MechanismToggles {
     pub grazing: bool,
     pub scavenging: bool,
-    /// M3a and later; M2 keeps it false and the copy is exact.
+    /// Sparse mutation at birth (`design/fauna-v2.md`); off, every copy is exact.
     pub mutation: bool,
 }
 
@@ -194,9 +297,12 @@ impl Default for WorldConfig {
             nutrient: NutrientConfig::default(),
             habitat: HabitatConfig::default(),
             weather: WeatherConfig::default(),
+            water: WaterConfig::default(),
+            fruit: FruitConfig::default(),
             organism: OrganismConfig::default(),
             drives: DriveConfig::default(),
             founders: FounderConfig::default(),
+            mutation: MutationConfig::default(),
             capacity: CapacityConfig::default(),
             mechanisms: MechanismToggles::default(),
         }
@@ -205,13 +311,13 @@ impl Default for WorldConfig {
 
 impl Default for ProducerConfig {
     fn default() -> Self {
-        ProducerConfig { growth: 0.008, max: 1.5, uptake_max: 0.5, energy_density: 2.0, mortality: 0.0005, initial_fraction: 0.6 }
+        ProducerConfig { growth: 0.008, max: 1.5, uptake_max: 0.5, energy_density: 2.0, mortality: 0.001, initial_fraction: 0.4 }
     }
 }
 
 impl Default for DetritusConfig {
     fn default() -> Self {
-        DetritusConfig { decomposition: 0.002, energy_cap: 1.0 }
+        DetritusConfig { decomposition: 0.002, energy_cap: 2.0, fall: 0.02, initial_dark: 1.2 }
     }
 }
 
@@ -224,8 +330,8 @@ impl Default for NutrientConfig {
 impl Default for HabitatConfig {
     fn default() -> Self {
         HabitatConfig {
-            light_base: 0.55,
-            light_height_gain: 0.35,
+            light_base: 0.45,
+            light_height_gain: 0.55,
             light_noise_gain: 0.3,
             moisture_base: 0.8,
             moisture_height_gain: -0.3,
@@ -233,7 +339,69 @@ impl Default for HabitatConfig {
             moisture_min: 0.1,
             noise_waves: 6,
             noise_wavelength: [0.6, 1.4],
+            basin_gain: 0.15,
         }
+    }
+}
+
+impl Default for WaterConfig {
+    fn default() -> Self {
+        WaterConfig {
+            rain_rate: 0.6,
+            rain_threshold: 0.35,
+            flow: 3.0,
+            evap: 0.008,
+            evap_floor: 0.5,
+            depth_gain: 0.4,
+            wet_gain: 0.5,
+            flood: 1.5,
+        }
+    }
+}
+
+impl Default for FruitConfig {
+    fn default() -> Self {
+        FruitConfig { ripen: 0.02, fruit_min: 0.3, drop: 0.004, energy_density: 3.0 }
+    }
+}
+
+impl Default for MutationConfig {
+    fn default() -> Self {
+        MutationConfig { probability: 0.3, step: 0.08 }
+    }
+}
+
+impl FounderKind {
+    /// The four default kinds of `design/fauna-v2.md`: burrower (soil, 4), grazer (foliage,
+    /// 8), glider (canopy, 6), skimmer (the wet floor, 3). `form` indices follow the pack's creature
+    /// order lantern 0, sail 1, mossback 2, skimmer 3. The design table gives the glider
+    /// `speed` 1.2, above the genome's `speed` range (0.3–1); it is placed at the range's
+    /// top, 1.0, and is still the fastest kind through its small `size` (`v_max ∝
+    /// size^−0.25`).
+    pub fn defaults() -> Vec<FounderKind> {
+        let kind = |name: &str, count, diet, depth, speed, size, swim, hue, form| FounderKind {
+            name: name.to_string(),
+            count,
+            diet: Some(diet),
+            depth: Some(depth),
+            speed: Some(speed),
+            size: Some(size),
+            metabolism: None,
+            swim: Some(swim),
+            hue: Some(hue),
+            form: Some(form),
+        };
+        // The burrower runs cool (`metabolism` 0.7, `size` 1.0): a scavenger's income from
+        // litter is thin, and its upkeep has to fit it.
+        let burrower = FounderKind { metabolism: Some(0.7), ..kind("burrower", 4, 0.10, 0.10, 0.6, 1.0, 0.0, 0.15, 2) };
+        vec![
+            burrower,
+            kind("grazer", 8, 0.85, 0.55, 1.0, 1.0, 0.0, 0.50, 0),
+            kind("glider", 6, 0.90, 1.00, 1.0, 0.8, 0.0, 0.85, 1),
+            // The skimmer runs cool too: on the same floor litter it otherwise boomed to
+            // thirty-five and starved back to none within the hour.
+            FounderKind { metabolism: Some(0.7), ..kind("skimmer", 3, 0.20, 0.10, 0.9, 0.9, 1.0, 0.65, 3) },
+        ]
     }
 }
 
@@ -279,6 +447,8 @@ impl Default for OrganismConfig {
             max_age_seconds: 7200.0,
             min_structure: 0.1,
             body_extent_max: 9.0,
+            rest_turn_fraction: 0.0,
+            feed_turn_fraction: 0.1,
         }
     }
 }
@@ -302,13 +472,19 @@ impl Default for DriveConfig {
             turn_rate_max_deg: 90.0,
             turn_noise: 0.6,
             birth_offset_px: 2.5,
+            w_depth: 1.0,
         }
     }
 }
 
 impl Default for FounderConfig {
     fn default() -> Self {
-        FounderConfig { count: 72, initial_reserve_fraction: 0.6, initial_energy_fraction: 0.7 }
+        FounderConfig {
+            count: 72,
+            initial_reserve_fraction: 0.6,
+            initial_energy_fraction: 0.7,
+            kinds: FounderKind::defaults(),
+        }
     }
 }
 
@@ -327,7 +503,7 @@ impl Default for CapacityConfig {
 
 impl Default for MechanismToggles {
     fn default() -> Self {
-        MechanismToggles { grazing: true, scavenging: true, mutation: false }
+        MechanismToggles { grazing: true, scavenging: true, mutation: true }
     }
 }
 
@@ -358,7 +534,17 @@ impl WorldConfig {
         finite_nonnegative(&[
             ("detritus.decomposition", d.decomposition),
             ("detritus.energy_cap", d.energy_cap),
+            ("detritus.fall", d.fall),
+            ("detritus.initial_dark", d.initial_dark),
         ])?;
+        // A per-tick fraction above one would drain a cell past zero.
+        if d.fall * crate::DT > 1.0 {
+            return Err(format!(
+                "detritus.fall {} per second exceeds one per tick (DT = {})",
+                d.fall,
+                crate::DT
+            ));
+        }
 
         let n = &self.nutrient;
         finite_nonnegative(&[
@@ -377,6 +563,7 @@ impl WorldConfig {
             ("habitat.moisture_base", h.moisture_base),
             ("habitat.moisture_height_gain", h.moisture_height_gain),
             ("habitat.moisture_noise_gain", h.moisture_noise_gain),
+            ("habitat.basin_gain", h.basin_gain),
         ])?;
         fraction("habitat.moisture_min", h.moisture_min)?;
         positive("habitat.noise_wavelength[0]", h.noise_wavelength[0])?;
@@ -409,6 +596,49 @@ impl WorldConfig {
             }
         }
 
+        let wa = &self.water;
+        finite_nonnegative(&[
+            ("water.rain_rate", wa.rain_rate),
+            ("water.rain_threshold", wa.rain_threshold),
+            ("water.flow", wa.flow),
+            ("water.evap", wa.evap),
+            ("water.depth_gain", wa.depth_gain),
+            ("water.wet_gain", wa.wet_gain),
+        ])?;
+        positive("water.flood", wa.flood)?;
+        fraction("water.evap_floor", wa.evap_floor)?;
+        // Evaporation is a per-tick fraction of the depth; above one it would over-drain.
+        if wa.evap * crate::DT > 1.0 {
+            return Err(format!(
+                "water.evap {} per second exceeds one per tick (DT = {})",
+                wa.evap,
+                crate::DT
+            ));
+        }
+
+        let fr = &self.fruit;
+        finite_nonnegative(&[
+            ("fruit.ripen", fr.ripen),
+            ("fruit.drop", fr.drop),
+            ("fruit.energy_density", fr.energy_density),
+        ])?;
+        fraction("fruit.fruit_min", fr.fruit_min)?;
+        if fr.drop * crate::DT > 1.0 {
+            return Err(format!("fruit.drop {} per second exceeds one per tick (DT = {})", fr.drop, crate::DT));
+        }
+        // Ripening adds `e_f − e_p` per unit from light; a fruit poorer than leaf would need
+        // energy to vanish.
+        if fr.energy_density < self.producer.energy_density {
+            return Err(format!(
+                "fruit.energy_density {} is below producer.energy_density {}",
+                fr.energy_density, self.producer.energy_density
+            ));
+        }
+
+        let mu = &self.mutation;
+        fraction("mutation.probability", mu.probability)?;
+        finite_nonnegative(&[("mutation.step", mu.step)])?;
+
         let o = &self.organism;
         finite_nonnegative(&[
             ("organism.speed_max", o.speed_max),
@@ -437,6 +667,8 @@ impl WorldConfig {
         fraction("organism.child_structure_fraction", o.child_structure_fraction)?;
         fraction("organism.child_reserve_fraction", o.child_reserve_fraction)?;
         fraction("organism.child_energy_fraction", o.child_energy_fraction)?;
+        fraction("organism.rest_turn_fraction", o.rest_turn_fraction)?;
+        fraction("organism.feed_turn_fraction", o.feed_turn_fraction)?;
         positive("organism.body_extent_max", o.body_extent_max)?;
         if o.body_extent_max > cubarium_surface::MAX_LOCAL_RADIUS {
             return Err(format!(
@@ -472,6 +704,7 @@ impl WorldConfig {
             ("drives.w_detritus", dr.w_detritus),
             ("drives.w_persist", dr.w_persist),
             ("drives.w_crowd", dr.w_crowd),
+            ("drives.w_depth", dr.w_depth),
             ("drives.feed_min", dr.feed_min),
             ("drives.bud_min_age_seconds", dr.bud_min_age_seconds),
             ("drives.turn_rate_max_deg", dr.turn_rate_max_deg),
@@ -502,6 +735,29 @@ impl WorldConfig {
         let f = &self.founders;
         fraction("founders.initial_reserve_fraction", f.initial_reserve_fraction)?;
         fraction("founders.initial_energy_fraction", f.initial_energy_fraction)?;
+        for (i, k) in f.kinds.iter().enumerate() {
+            let who = |field: &str| format!("founders.kinds[{i}] ({}).{field}", k.name);
+            let in_range = |field: &str, v: Option<f32>, lo: f32, hi: f32| -> Result<(), String> {
+                match v {
+                    Some(x) if !x.is_finite() || x < lo || x > hi => {
+                        Err(format!("{} = {x}, expected [{lo}, {hi}]", who(field)))
+                    }
+                    _ => Ok(()),
+                }
+            };
+            in_range("diet", k.diet, 0.0, 1.0)?;
+            in_range("depth", k.depth, 0.0, 1.0)?;
+            in_range("swim", k.swim, 0.0, 1.0)?;
+            in_range("hue", k.hue, 0.0, 1.0)?;
+            in_range("speed", k.speed, 0.3, 1.0)?;
+            in_range("size", k.size, 0.5, 2.0)?;
+            in_range("metabolism", k.metabolism, 0.5, 2.0)?;
+            if let Some(form) = k.form
+                && form >= crate::genome::MAX_FORMS
+            {
+                return Err(format!("{} = {form}, expected below {}", who("form"), crate::genome::MAX_FORMS));
+            }
+        }
 
         let c = &self.capacity;
         if c.max_organisms == 0 {
@@ -579,7 +835,16 @@ mod tests {
             ("producer.max", |c| c.producer.max = 0.0),
             ("producer.initial_fraction", |c| c.producer.initial_fraction = 1.5),
             ("detritus.decomposition", |c| c.detritus.decomposition = f64::INFINITY),
+            ("detritus.fall", |c| c.detritus.fall = -0.01),
+            ("detritus.fall", |c| c.detritus.fall = f64::NAN),
+            // `fall · DT` must stay at or below one: DT = 0.05, so 20/s is the ceiling.
+            ("detritus.fall", |c| c.detritus.fall = 20.0001),
             ("nutrient.diffusion", |c| c.nutrient.diffusion = -0.1),
+            ("water.rain_rate", |c| c.water.rain_rate = -1.0),
+            ("water.flow", |c| c.water.flow = f64::NAN),
+            ("water.flood", |c| c.water.flood = 0.0),
+            ("water.evap", |c| c.water.evap = 20.0001),
+            ("water.evap_floor", |c| c.water.evap_floor = 1.5),
             ("habitat.moisture_min", |c| c.habitat.moisture_min = 2.0),
             ("habitat.noise_wavelength[0]", |c| c.habitat.noise_wavelength[0] = 0.0),
             ("habitat.noise_wavelength", |c| c.habitat.noise_wavelength = [1.4, 0.6]),
@@ -595,6 +860,17 @@ mod tests {
             ("organism.body_extent_max", |c| c.organism.body_extent_max = 64.0),
             ("child material", |c| c.organism.child_reserve_fraction = 0.9),
             ("drives.seek_off", |c| c.drives.seek_off = c.drives.seek_on),
+            ("organism.rest_turn_fraction", |c| c.organism.rest_turn_fraction = 1.5),
+            ("organism.feed_turn_fraction", |c| c.organism.feed_turn_fraction = f64::NAN),
+            ("fruit.energy_density", |c| c.fruit.energy_density = 1.0),
+            ("fruit.fruit_min", |c| c.fruit.fruit_min = 1.5),
+            ("fruit.drop", |c| c.fruit.drop = 30.0),
+            ("mutation.probability", |c| c.mutation.probability = 1.2),
+            ("founders.kinds[0] (burrower).diet", |c| c.founders.kinds[0].diet = Some(1.5)),
+            ("founders.kinds[1] (grazer).form", |c| c.founders.kinds[1].form = Some(9)),
+            ("founders.kinds[2] (glider).speed", |c| c.founders.kinds[2].speed = Some(0.1)),
+            ("detritus.initial_dark", |c| c.detritus.initial_dark = -0.5),
+            ("founders.kinds[0] (burrower).metabolism", |c| c.founders.kinds[0].metabolism = Some(0.1)),
             ("drives.seek_off", |c| c.drives.seek_off = 0.9),
             ("drives.tau_hunger_seconds", |c| c.drives.tau_hunger_seconds = 0.0),
             ("drives.w_food", |c| c.drives.w_food = -1.0),
@@ -623,6 +899,87 @@ mod tests {
         cfg.weather.blobs_per_channel = 0;
         cfg.weather.periods_min.clear();
         cfg.validate().unwrap();
+    }
+
+    /// The host reads worlds from TOML with `#[serde(default, deny_unknown_fields)]`, so a
+    /// config written before `detritus.fall` existed must still load, taking the default.
+    #[test]
+    fn a_config_toml_without_the_fall_rate_takes_the_default() {
+        // Exactly the shape `scripts/e2-matrix.py` writes: dotted keys, no `version`.
+        let text = "\
+seed = 7
+producer.growth = 0.008
+detritus.decomposition = 0.002
+detritus.energy_cap = 1.0
+capacity.telemetry_seconds = 5.0
+";
+        let cfg: WorldConfig = toml::from_str(text).expect("an older config must still load");
+        assert_eq!(cfg.seed, 7);
+        assert_eq!(cfg.detritus.decomposition, 0.002);
+        assert_eq!(cfg.detritus.fall, DetritusConfig::default().fall);
+        assert_eq!(cfg.detritus.fall, 0.02);
+        // The omitted `version` takes the current one, so validation passes.
+        assert_eq!(cfg.version, CONFIG_VERSION);
+        cfg.validate().unwrap();
+
+        // And an explicit rate is honoured, including zero (the fall step then never runs).
+        let off: WorldConfig = toml::from_str("detritus.fall = 0.0\n").unwrap();
+        assert_eq!(off.detritus.fall, 0.0);
+        off.validate().unwrap();
+    }
+
+    /// `design/fauna-v2.md`: the fauna v2 fields default from the design, and a config written
+    /// before them loads with the default kinds, fruit and mutation settings.
+    #[test]
+    fn a_config_toml_without_fauna_v2_takes_the_design_defaults() {
+        let cfg: WorldConfig = toml::from_str("seed = 3\nproducer.growth = 0.008\n").unwrap();
+        assert_eq!(cfg.fruit, FruitConfig::default());
+        assert_eq!((cfg.fruit.ripen, cfg.fruit.fruit_min, cfg.fruit.drop, cfg.fruit.energy_density), (0.02, 0.3, 0.004, 3.0));
+        assert_eq!((cfg.mutation.probability, cfg.mutation.step), (0.3, 0.08));
+        assert!(cfg.mechanisms.mutation, "mutation is on by default in fauna v2");
+        assert_eq!(cfg.organism.rest_turn_fraction, 0.0);
+        assert_eq!(cfg.organism.feed_turn_fraction, 0.1);
+        assert_eq!(cfg.drives.w_depth, 1.0);
+        let kinds = &cfg.founders.kinds;
+        assert_eq!(kinds.iter().map(|k| k.name.as_str()).collect::<Vec<_>>(), ["burrower", "grazer", "glider", "skimmer"]);
+        assert_eq!(kinds.iter().map(|k| k.count).collect::<Vec<_>>(), [4, 8, 6, 3]);
+        assert_eq!(kinds.iter().map(|k| k.form).collect::<Vec<_>>(), [Some(2), Some(0), Some(1), Some(3)]);
+        assert_eq!(kinds[3].swim, Some(1.0));
+        cfg.validate().unwrap();
+
+        // An explicit empty list is the v1 path; kinds may also be written in full.
+        let v1: WorldConfig = toml::from_str("founders.kinds = []\nfounders.count = 12\n").unwrap();
+        assert!(v1.founders.kinds.is_empty());
+        assert_eq!(v1.founders.count, 12);
+        v1.validate().unwrap();
+        let one: WorldConfig = toml::from_str(
+            "[[founders.kinds]]\nname = \"tester\"\ncount = 3\ndiet = 0.2\nform = 1\n",
+        )
+        .unwrap();
+        assert_eq!(one.founders.kinds.len(), 1);
+        assert_eq!(one.founders.kinds[0].diet, Some(0.2));
+        assert_eq!(one.founders.kinds[0].depth, None);
+        one.validate().unwrap();
+    }
+
+    #[test]
+    fn a_config_toml_without_water_or_basins_takes_the_defaults() {
+        let cfg: WorldConfig = toml::from_str("seed = 3\nproducer.growth = 0.008\n").unwrap();
+        assert_eq!(cfg.water, WaterConfig::default());
+        assert_eq!(cfg.water.rain_rate, 0.6);
+        assert_eq!(cfg.water.rain_threshold, 0.35);
+        assert_eq!(cfg.water.flow, 3.0);
+        assert_eq!(cfg.water.evap, 0.008);
+        assert_eq!(cfg.water.evap_floor, 0.5);
+        assert_eq!(cfg.water.depth_gain, 0.4);
+        assert_eq!(cfg.water.wet_gain, 0.5);
+        assert_eq!(cfg.water.flood, 1.5);
+        assert_eq!(cfg.habitat.basin_gain, 0.15);
+        cfg.validate().unwrap();
+        let dry: WorldConfig = toml::from_str("water.rain_rate = 0.0\nhabitat.basin_gain = 0.0\n").unwrap();
+        assert_eq!(dry.water.rain_rate, 0.0);
+        assert_eq!(dry.habitat.basin_gain, 0.0);
+        dry.validate().unwrap();
     }
 
     #[test]
