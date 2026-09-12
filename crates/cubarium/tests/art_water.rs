@@ -188,7 +188,8 @@ fn reeds_leave_half_of_a_pool_open() {
             }
         }
         for band in [Band::Soil, Band::Foliage, Band::Canopy] {
-            assert_eq!(plant_cap(band, cell), Some(rank_cap_of(cell)));
+            let expected = match rank_cap_of(cell) { 0 => None, cap => Some(cap) };
+            assert_eq!(plant_cap(band, cell), expected, "{band:?} {cell:?}");
         }
     }
     let share = bare as f64 / CELL_COUNT as f64;

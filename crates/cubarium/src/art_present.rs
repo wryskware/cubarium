@@ -355,17 +355,16 @@ pub fn rank_cap_of(cell: CellId) -> u8 {
 
 /// The cap a slot has in a band, `None` for a slot that grows nothing there.
 ///
-/// **Normative**: every band uses [`rank_cap_of`] as is, except water: a flooded floor
-/// row is one to two units deep after a shower, so every wet cell would pass the reed
-/// thresholds and a sprout in every slot read as a cyan fence along the whole floor.
-/// In [`Band::Water`] the sprout-only slots (rank cap 0, about half of all cells) grow
-/// nothing, so reeds stand in clumps with open water between them. Review-tunable by
-/// changing this rule.
-pub fn plant_cap(band: Band, cell: CellId) -> Option<u8> {
-    let cap = rank_cap_of(cell);
-    match band {
-        Band::Water if cap == 0 => None,
-        _ => Some(cap),
+/// **Normative**: a sprout-only slot (rank cap 0, about half of all cells) grows nothing
+/// in any band. Drawing a stage-0 sprout in every such slot turned the foliage into a
+/// field of magenta speckles that swallowed the rain and the creatures, and lined a
+/// flooded floor with a cyan fence of reeds; leaving those slots bare gives the wall
+/// breathing room and lets ground cover carry the fill. Slots with cap 1 or 2 keep their
+/// cap. Review-tunable by changing this rule.
+pub fn plant_cap(_band: Band, cell: CellId) -> Option<u8> {
+    match rank_cap_of(cell) {
+        0 => None,
+        cap => Some(cap),
     }
 }
 

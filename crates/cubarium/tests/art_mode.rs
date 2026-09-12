@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use cube_proto::{FACE_SIZE, Face};
 use cubarium::art::{ArtPack, Clip, STATES};
-use cubarium::art_present::{
+use cubarium::art_present::{rank_cap_of, 
     ArtPresenter, CANOPY_STAGES, FOLIAGE_STAGES, SOIL_SCALE, SOIL_STAGES, clip_time, form_of,
     phase_of, soil_weight, state_of,
 };
@@ -558,7 +558,10 @@ fn an_empty_quiet_world_draws_exactly_the_m2_image_above_the_horizon() {
 
 #[test]
 fn a_rich_cell_adds_a_plant_and_nothing_else() {
-    let cell = CellId::new(Face::Front, 8, 8);
+    // A foliage cell that can grow at all: sprout-only slots (rank cap 0) stay bare by rule.
+    let cell = CellId::all()
+        .find(|&c| c.face() == Face::Front && c.cy() >= 5 && c.cy() <= 8 && c.cx() >= 6 && c.cx() <= 10 && rank_cap_of(c) >= 1)
+        .expect("a growable foliage cell near the middle of Front");
     let center = cell.center();
     let mut producer = quiet_producer();
     producer[cell.index()] = producer_for_density((FOLIAGE_STAGES[2] + 1.0) / 2.0);

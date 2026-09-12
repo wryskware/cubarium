@@ -563,11 +563,16 @@ fn every_band_at_once_is_the_rule_as_written() {
     }
     assert!(pond_cells.iter().any(|&c| p.stage_of(c).is_some()), "no reed in the pond");
     assert!(pond_cells.iter().any(|&c| p.stage_of(c).is_none()), "the pond is a reed fence");
-    let soil = CellId::new(Face::Left, 7, 14);
+    let soil = CellId::all()
+        .find(|&c| c.face() == Face::Left && c.cy() == 14 && rank_cap_of(c) >= 1)
+        .expect("a growable soil cell on Left");
     assert_eq!(p.band_at(soil), Band::Soil);
     assert!(p.stage_of(soil).is_some(), "rich soil grows");
+    // Sprout-only slots stay bare by rule, so a saturated world grows in roughly the
+    // `RANK_MID` share of cells and leaves the rest as breathing room.
     let grown = CellId::all().filter(|&c| p.stage_of(c).is_some()).count();
-    assert!(grown > CELL_COUNT * 8 / 10, "only {grown} cells grew in a saturated world");
+    let share = grown as f64 / CELL_COUNT as f64;
+    assert!((share - RANK_MID).abs() < 0.06, "{grown} cells grew in a saturated world (share {share:.2})");
 }
 
 #[test]
