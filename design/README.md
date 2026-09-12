@@ -72,6 +72,8 @@ avoidance term is useful. This remains a revisable topology policy.
 - [M2 world specification](m2-world-spec.md): units, conversion table, tick
   order, controller, randomness, and persistence for the first living world.
 - [First experiments](experiments.md): E1–E9 protocols, controls, and progression gates.
+- [M3a specification](m3a-spec.md): genome v2, sparse mutation, lineage
+  records, body grammar and gait, and the E4/E5/E6 harness contracts.
 - [E2 harness](experiments-e2-harness.md): the headless runner, matrix, and
   analyzer that produce E2/E3 evidence from the M2 world.
 - [Local contract evidence](7_Research/local-contracts.md): what exists in Lore
