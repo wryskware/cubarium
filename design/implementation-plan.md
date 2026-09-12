@@ -60,6 +60,18 @@ producer biomass, leaving the default image untouched (see the workflow note).
 Still open: mode-dependent turning/noise in the controller, which needs matched
 ecological runs before it changes the E2 regime.
 
+Status 2026-09-13: Wrysk rejected turning as the priority and redirected the
+work to the ecosystem itself. Overnight the world was stratified into soil,
+foliage and canopy bands, given water (rain, flow, pools, evaporation), alien
+plants with fruit, tall plants, ground cover, and fauna v2 (genome v2 with
+diet/depth/swim/form, four founder kinds, fruit pool, controller v2, sparse
+mutation); see the three design notes and commit `a18398c`. The controller's
+turn gate landed as part of controller v2. Validation was short runs (two to
+six simulated hours) and captures, by Wrysk's instruction; the E2 regime's
+long-run properties are unmeasured for this world and M3's experiments must
+be rerun against it. Genome and config versions are 2 and 7; older
+snapshots are refused and start fresh.
+
 ## M1 — prove the surface and presentation path
 
 Create the minimal Rust workspace, pin/reuse `cube-proto` from the existing shim,

@@ -5,29 +5,27 @@ A persistent artificial ecosystem living on the five visible surfaces of a
 alter their surroundings, leave descendants, and sometimes disappear. The world
 continues between glances.
 
-**Current state (2026-09-12):** M1 is implemented under task authorization:
-a Rust workspace with the continuous surface substrate (`cubarium-surface`, with
-an independent 3D oracle and test suite), a linear-light renderer, and a host
-that shows geometry fixtures in a desktop preview, sends them to the shim, or
-captures PNGs (`cargo run -p cubarium -- demo --help`). The physical-cube
-review (seam continuity, E8 reflection) is still pending Wrysk's observation.
-M2, the first living world, is implemented in `cubarium-core` per
-`design/m2-world-spec.md` with exact material and energy audits, checkpoint
-resume, and telemetry (`cargo run --release -p cubarium -- run --help`); the E2
-succession experiment (`scripts/e2-run.sh`, results in `design/7_Research/`)
-found a regime with local depletion and recovery that survives a simulated
-day, now the default tuning. What remains for M2 is viewing on the cube. Implementation does not make the architecture
-canon; see the decision ledger.
+**Current state (2026-09-13):** The world is stratified. The four side faces
+are soil below a horizon and foliage above it; the top face is canopy. Light
+falls with depth, litter falls to the soil floor, rain sweeps the cube and
+runs down the walls into puddles, and producers ripen fruit where they are
+rich. Four founder kinds (burrower, grazer, glider, skimmer) carry heritable
+diet, preferred height, swimming and a rig, sense food two cells out, hold
+still while resting, and mutate sparsely at birth. All of it keeps the closed
+material accounting and the exact energy and water budgets, on the same
+continuous five-face surface and shim transport as before. The design is
+recorded in [stratified-world](design/stratified-world.md),
+[water](design/water.md) and [fauna-v2](design/fauna-v2.md); the normative
+rules live in the [M2 world spec](design/m2-world-spec.md).
 
-A [Godot creature-art project](art/README.md) now provides editable sprite parts,
-pivot rigs, rest/move/feed/bud animation timelines and habitat art. Its baked
-sprites run on the shared cube geometry and output sinks in an explicit art
-study: `./scripts/art-study.sh` serves the cube/net viewer on port 7394 at normal
-speed. `./scripts/godot.sh --editor` opens the art project. `cubarium run --art
-assets/atelier --sink web` draws the live world with the authored sprites, each
-organism's clip driven by its real rest/seek/feed/gestation state and the habitat
-motifs by producer biomass; without `--art` the image is unchanged. The rigs are
-a cosmetic hue tercile, so nothing about the ecology or inheritance changed. See the [workflow and next slice](design/game-art-workflow.md).
+`cubarium run --art assets/atelier --sink web` shows it: seven alien plants
+with growth stages and fruit, spire trees and glass canes whose crowns cross
+onto the canopy, ground cover, pools with shimmer and rain, and the four rigs.
+The art is a [Godot 4.7 project](art/README.md) baked headlessly into
+`assets/atelier`; see [art/PLANTS.md](art/PLANTS.md) for the plant contract.
+Without `--art` the older disc image is drawn unchanged. Known open items:
+the skimmer kind does not yet hold its numbers, population margins are thin,
+and no run longer than six simulated hours has been measured.
 
 Start with the [design overview](design/README.md), then the
 [implementation plan](design/implementation-plan.md). The
