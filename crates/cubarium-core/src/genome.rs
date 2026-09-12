@@ -53,14 +53,14 @@ pub struct Drives {
 impl Genome {
     pub const VERSION: u32 = 1;
 
-    /// The M2 founder genotype: all multipliers 1 (mouth 1, speed 1, sense 8), hue from the
+    /// The M2 founder genotype: all multipliers 1 (mouth 1, speed 1, sense 6), hue from the
     /// argument, drives copied from `DriveConfig`.
     pub fn founder(hue: f32, drives: &DriveConfig) -> Genome {
         Genome {
             version: Genome::VERSION,
             size: 1.0,
             metabolism: 1.0,
-            sense: 8.0,
+            sense: 6.0,
             reserve: 1.0,
             mouth: 1.0,
             speed: 1.0,
@@ -279,7 +279,7 @@ mod tests {
         let mut g = founder();
         assert_eq!(g.version, Genome::VERSION);
         assert_eq!((g.size, g.metabolism, g.reserve, g.mouth, g.speed), (1.0, 1.0, 1.0, 1.0, 1.0));
-        assert_eq!(g.sense, 8.0);
+        assert_eq!(g.sense, 6.0);
         assert_eq!(g.hue, 0.5);
         assert!(!g.clamp(), "founder genome should already be in range");
         assert_eq!(g, founder());
@@ -330,7 +330,7 @@ mod tests {
         assert_eq!(p.energy_max, 2.0);
         assert_eq!(p.speed_max, 1.5);
         assert_eq!(p.mouth_rate, 0.05);
-        assert_eq!(p.sense_radius, 8.0);
+        assert_eq!(p.sense_radius, 6.0);
         assert_eq!(p.maintenance, 0.005);
         // Core, head, and (speed 1.0 > 0.6) tail.
         let want = [(0.0, 0.0, 1.4), (1.6, 0.0, 0.9), (-1.4, 0.0, 0.7)];

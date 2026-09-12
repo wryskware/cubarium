@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::world::WorldState;
 
 /// Bumped whenever `WorldState` or any nested type changes shape.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 pub const MAGIC: [u8; 4] = *b"CUBW";
 /// Fixed header length: magic 4, schema 4, build-id length 2, then the build id bytes,
 /// then payload length 8 and CRC32 4 (all little-endian).

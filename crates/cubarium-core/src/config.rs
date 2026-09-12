@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever a field's meaning changes; stored in snapshots.
-pub const CONFIG_VERSION: u32 = 2;
+pub const CONFIG_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -105,6 +105,9 @@ pub struct OrganismConfig {
     pub energy_max: f64,
     pub speed_max: f64,
     pub mouth_rate: f64,
+    /// `K_P`: half-saturation of the type-II intake term `X/(X + K_P)` on the food a cell
+    /// holds (`P` for grazing, `D_eff` for scavenging). Zero restores a linear request.
+    pub intake_half_saturation: f64,
     pub sense_radius: f64,
     pub assimilation_material: f64,
     pub assimilation_energy: f64,
@@ -220,10 +223,10 @@ impl Default for HabitatConfig {
         HabitatConfig {
             light_base: 0.55,
             light_height_gain: 0.35,
-            light_noise_gain: 0.1,
+            light_noise_gain: 0.3,
             moisture_base: 0.8,
             moisture_height_gain: -0.3,
-            moisture_noise_gain: 0.2,
+            moisture_noise_gain: 0.4,
             moisture_min: 0.1,
             noise_waves: 6,
             noise_wavelength: [0.6, 1.4],
@@ -237,7 +240,7 @@ impl Default for WeatherConfig {
             moving: true,
             blobs_per_channel: 3,
             blob_radius_deg: 55.0,
-            amplitude: 0.15,
+            amplitude: 0.3,
             periods_min: vec![20.0, 33.0, 47.0],
             walk_deg_per_min: 2.0,
         }
@@ -252,7 +255,8 @@ impl Default for OrganismConfig {
             energy_max: 2.0,
             speed_max: 1.5,
             mouth_rate: 0.05,
-            sense_radius: 8.0,
+            intake_half_saturation: 0.45,
+            sense_radius: 6.0,
             assimilation_material: 0.6,
             assimilation_energy: 0.5,
             maintenance: 0.005,
@@ -405,6 +409,7 @@ impl WorldConfig {
         finite_nonnegative(&[
             ("organism.speed_max", o.speed_max),
             ("organism.mouth_rate", o.mouth_rate),
+            ("organism.intake_half_saturation", o.intake_half_saturation),
             ("organism.sense_radius", o.sense_radius),
             ("organism.maintenance", o.maintenance),
             ("organism.move_cost", o.move_cost),

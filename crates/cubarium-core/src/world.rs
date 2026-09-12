@@ -383,6 +383,7 @@ impl World {
             let cfg: &WorldConfig = config;
             let org_cfg = &cfg.organism;
             let e_r = org_cfg.reserve_energy_density;
+            let k_p = org_cfg.intake_half_saturation;
             let now = *tick;
             let seed = cfg.seed;
             let mut heat = |amount: f64| {
@@ -506,13 +507,22 @@ impl World {
                 let Some(o) = organisms.get(*id) else { continue };
                 let cell = cell_of(&o.pos).index();
                 let headroom = (o.phenotype.reserve_max - o.reserve).max(0.0);
-                let bite = |effort: f64, room: f64| {
-                    if effort > 0.0 { (o.phenotype.mouth_rate * effort * dt).clamp(0.0, room.max(0.0)) } else { 0.0 }
+                // Type-II intake: what a mouth can take falls off as the cell empties, so a
+                // poor cell is poor food even to an organism standing in it. `K_P = 0` gives
+                // back the linear law exactly.
+                let bite = |effort: f64, room: f64, food: f64| {
+                    if effort <= 0.0 {
+                        return 0.0;
+                    }
+                    let total = food + k_p;
+                    let saturation = if total > 0.0 { food / total } else { 0.0 };
+                    (o.phenotype.mouth_rate * effort * dt * saturation).clamp(0.0, room.max(0.0))
                 };
                 // Grazing settles first and takes its headroom; scavenging gets the rest,
-                // so intake alone can never push the reserve past `R_max`.
-                let g = bite(d.graze_effort, headroom);
-                let s = bite(d.scavenge_effort, headroom - g);
+                // so intake alone can never push the reserve past `R_max`. Both read the
+                // cell's pre-settlement stock.
+                let g = bite(d.graze_effort, headroom, fields.p[cell]);
+                let s = bite(d.scavenge_effort, headroom - g, edible_detritus(fields.d[cell], fields.de[cell], e_r));
                 if g <= 0.0 && s <= 0.0 {
                     continue;
                 }
@@ -1090,6 +1100,10 @@ mod tests {
         cfg.founders.count = 3;
         // Low enough that three full mouthfuls (3 x 0.0025 m) cannot all be served.
         cfg.drives.feed_min = 0.001;
+        // Linear requests: the spec's proportional allocation is unchanged by the intake
+        // saturation, and a saturating mouth on a cell this poor asks for far too little to
+        // contest it (three organisms would need `K_P` near zero or a crowd of ~180).
+        cfg.organism.intake_half_saturation = 0.0;
         let mut world = World::new(cfg).expect("valid");
         let cell = CellId::new(Face::Front, 0, 0);
         let ids = crowd_onto_cell(&mut world, cell, 0.004);
@@ -1249,10 +1263,63 @@ mod tests {
     }
 
     #[test]
+    fn the_intake_request_saturates_at_half_at_k_p() {
+        // One organism alone on a frozen cell: its reserve gain is exactly `η_m · q`.
+        fn gain(half_saturation: f64, producer: f64) -> f64 {
+            let mut cfg = config();
+            cfg.founders.count = 1;
+            cfg.mechanisms.scavenging = false;
+            cfg.producer.growth = 0.0;
+            cfg.producer.mortality = 0.0;
+            cfg.detritus.decomposition = 0.0;
+            cfg.nutrient.diffusion = 0.0;
+            cfg.organism.intake_half_saturation = half_saturation;
+            let mut world = World::new(cfg).expect("valid");
+            let id = world.state.organisms.iter().map(|(id, _)| id).next().expect("one founder");
+            let cell = CellId::new(Face::Front, 0, 0);
+            {
+                let o = world.state.organisms.get_mut(id).expect("alive");
+                o.pos = cell.center();
+                o.reserve = 0.0;
+                o.hunger_memory = 1.0;
+                o.mode = Mode::Seeking;
+            }
+            world.state.fields.p[cell.index()] = producer;
+            world.step();
+            world.state.organisms.get(id).expect("alive").reserve
+        }
+
+        let org = config().organism;
+        let k_p = org.intake_half_saturation;
+        assert!(k_p > 0.0, "the default is a saturating mouth");
+
+        // `K_P = 0` is the linear law: a full mouthful of `k_mouth · dt`, assimilated at η_m
+        // (to rounding: the world multiplies the same factors in its own order).
+        let linear = gain(0.0, k_p);
+        let mouthful = org.assimilation_material * org.mouth_rate * DT;
+        assert!((linear - mouthful).abs() < 1e-15 * mouthful, "{linear} vs {mouthful}");
+
+        // At `P = K_P` the type-II term is exactly one half.
+        let saturating = gain(k_p, k_p);
+        assert_eq!(saturating, 0.5 * linear);
+
+        // And it is monotone in the cell's stock: more food, bigger bite, never more than one.
+        let richer = gain(k_p, 3.0 * k_p);
+        assert!(saturating < richer && richer < linear);
+        assert!((richer - 0.75 * linear).abs() < 1e-15 * linear, "{richer} vs {}", 0.75 * linear);
+    }
+
+    #[test]
     fn poor_detritus_assimilates_less_and_still_closes() {
         let mut cfg = config();
         cfg.founders.count = 2;
         cfg.mechanisms.grazing = false;
+        // Freeze the fields so the detritus the organisms bite into is exactly what is set
+        // here: the type-II request reads the cell's pre-settlement stock.
+        cfg.producer.growth = 0.0;
+        cfg.producer.mortality = 0.0;
+        cfg.detritus.decomposition = 0.0;
+        cfg.nutrient.diffusion = 0.0;
         let e_r = cfg.organism.reserve_energy_density;
         let mut world = World::new(cfg).expect("valid");
         let ids: Vec<OrganismId> = world.state.organisms.iter().map(|(id, _)| id).collect();
@@ -1278,8 +1345,14 @@ mod tests {
 
         let gains: Vec<f64> = ids.iter().map(|id| world.state.organisms.get(*id).expect("alive").reserve).collect();
         assert!(gains[0] > 0.0 && gains[1] > 0.0, "{gains:?}");
-        // η scales with ρ/e_r, so a four-times richer detritus assimilates four times more.
-        assert!((gains[1] / gains[0] - 4.0).abs() < 1e-6, "ratio {}", gains[1] / gains[0]);
+        // Poor detritus loses twice: `η` scales with `ρ/e_r` (a factor of four here) and the
+        // type-II request scales with `D_eff/(D_eff + K_P)` on top of it.
+        let k_p = world.config().organism.intake_half_saturation;
+        let edible: Vec<f64> = densities.iter().map(|rho| detritus * (rho / e_r).min(1.0)).collect();
+        let bite = |food: f64| food / (food + k_p);
+        let expected = 4.0 * bite(edible[1]) / bite(edible[0]);
+        assert!(expected > 4.0, "the saturating request must widen the gap, not close it");
+        assert!((gains[1] / gains[0] - expected).abs() < 1e-6, "ratio {} vs {expected}", gains[1] / gains[0]);
         // The poor detritus never credits more reserve energy than the food carried.
         for (k, id) in ids.iter().enumerate() {
             let o = world.state.organisms.get(*id).expect("alive");
@@ -1353,8 +1426,11 @@ mod tests {
         let o = world.state.organisms.get(id).expect("alive");
         assert!(o.reserve <= reserve_max, "reserve {} exceeds {reserve_max}", o.reserve);
         assert!(o.reserve - before <= headroom + 1e-12);
-        // Grazing alone could add at most η_m · 0.0025; more than that proves both channels ran.
-        let grazing_only = world.config().organism.assimilation_material * 0.0025;
+        // Grazing alone could add at most η_m times its saturated request; more than that
+        // proves the scavenging channel ran too.
+        let org = &world.config().organism;
+        let k_p = org.intake_half_saturation;
+        let grazing_only = org.assimilation_material * 0.0025 * (1.0 / (1.0 + k_p));
         assert!(o.reserve - before > grazing_only, "{} vs {grazing_only}", o.reserve - before);
         assert!(o.fed_this_tick);
     }
@@ -1378,8 +1454,11 @@ mod tests {
         assert_eq!(world.population(), 0, "a foodless world must empty out");
         assert!(world.state.deaths_total[0] > 0, "starvation is the cause: {:?}", world.state.deaths_total);
         assert!(world.mass_residual().abs() < 1e-9);
+        let closing = stored_energy(&world.state);
         let booked = world.state.light_in_total - world.state.heat_out_total;
-        assert!(((stored_energy(&world.state) - opening) - booked).abs() < 1e-9);
+        let drift = (closing - opening) - booked;
+        println!("starvation audit: opening {opening:e} closing {closing:e} booked {booked:e} drift {drift:e}");
+        assert!(drift.abs() < 1e-9 * opening.max(1.0), "drift {drift:e}");
     }
 
     #[test]

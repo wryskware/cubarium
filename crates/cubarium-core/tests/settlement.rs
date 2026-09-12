@@ -40,6 +40,10 @@ fn contested_producer_is_split_in_equal_proportion() {
     // per-tick request of `3 · k_mouth · dt = 0.0075 m`; contention is unreachable without
     // lowering the threshold below the standing crop under test.
     config.drives.feed_min = 0.001;
+    // Allocation is tested under the linear intake law: saturation scales requests but
+    // never changes proportional settlement, and with K_P > 0 three mouths cannot
+    // contest a 0.004 m cell at all.
+    config.organism.intake_half_saturation = 0.0;
     let mut world = World::new(config).expect("three founders are a valid world");
 
     let center = arena().center();

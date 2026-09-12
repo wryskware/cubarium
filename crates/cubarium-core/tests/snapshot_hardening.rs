@@ -16,12 +16,13 @@ fn stepped_world(ticks: u64) -> World {
     world
 }
 
-/// Spec: the schema version is stored in the header. Version 2 added the Monod nutrient
-/// term's `K_N` and `capacity.field_dump_seconds` to the config, so version 1 payloads
-/// would misdecode under `postcard` and are rejected outright.
+/// Spec: the schema version is stored in the header. Every config shape change bumps it,
+/// because `postcard` is not self-describing and an older payload would misdecode: version 2
+/// added the Monod `K_N` and `capacity.field_dump_seconds`, version 3 the intake
+/// half-saturation `K_P`. Older payloads are rejected outright.
 #[test]
-fn the_schema_version_is_two() {
-    assert_eq!(SCHEMA_VERSION, 2);
+fn the_schema_version_is_three() {
+    assert_eq!(SCHEMA_VERSION, 3);
     assert_eq!(MAGIC, *b"CUBW");
 }
 
