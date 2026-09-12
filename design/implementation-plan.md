@@ -37,8 +37,9 @@ confirmation (see the `7_Research/e2-*` notes): nutrient limitation, saturating
 intake, and above all slow movement (0.3 px/s) were needed before any local
 succession appeared; the adopted defaults sustain population cycles with a
 patchy, repeatedly recovering producer field for a day in eleven of twelve
-seeds, with one extinction from an ordinary trough. E3 measures are being
-taken from the life-event log. Still pending for M2's exit: 30 minutes of
+seeds, with one extinction from an ordinary trough. E3 (`7_Research/e3-default-2026-09-11.md`): generations are minutes
+apart, but one founder lineage per seed survives the first cycle, so effective
+population is tiny; M3 must track lineage survival. Still pending for M2's exit: 30 minutes of
 real-time viewing and the cube itself. Durability (M5) is untested. M3a is
 specified in [m3a-spec.md](m3a-spec.md).
 
