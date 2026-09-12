@@ -43,6 +43,12 @@ pub const FLOOR_SRGB: u32 = 0x0012_093A;
 pub const FLOOR_BRIGHTNESS: f32 = 0.12;
 /// Producer substrate at zero density: deep indigo.
 pub const PRODUCER_LOW_SRGB: u32 = 0x001E_2798;
+/// The ramp saturates at this fraction of `P_max`: the measured standing crop peaks near
+/// 0.3-0.5 of capacity, so the logistic ceiling itself is never a useful white point.
+pub const PRODUCER_SATURATION: f64 = 0.6;
+/// Brightness multipliers of the ramp color at zero and full density.
+pub const RAMP_MIN_BRIGHTNESS: f32 = 0.06;
+pub const RAMP_MAX_BRIGHTNESS: f32 = 0.55;
 /// Producer substrate at `P_max`: electric blue-cyan. Rich patches turn cyan.
 pub const PRODUCER_HIGH_SRGB: u32 = 0x0042_C5F8;
 /// Detritus flecks: dim violet.
@@ -182,8 +188,11 @@ pub fn draw_ramp_field(
                 let t = (value / scale_to).min(1.0);
                 if t != 0.0 {
                     let t = t as f32;
+                    // Hue follows density linearly; brightness follows its square so the
+                    // ordinary standing crop stays a dim floor and only rich patches glow.
                     let c = mix(low, high, t);
-                    canvas.add(face, x, y, [c[0] * t, c[1] * t, c[2] * t]);
+                    let b = RAMP_MIN_BRIGHTNESS + (RAMP_MAX_BRIGHTNESS - RAMP_MIN_BRIGHTNESS) * t * t;
+                    canvas.add(face, x, y, [c[0] * b, c[1] * b, c[2] * b]);
                 }
             }
         }
@@ -331,7 +340,7 @@ impl Presenter {
         draw_ramp_field(
             canvas,
             &self.producer,
-            view.producer_max,
+            view.producer_max * PRODUCER_SATURATION,
             PALETTE.producer_low,
             PALETTE.producer_high,
             true,
@@ -553,29 +562,32 @@ mod tests {
         let mut p = Presenter::new();
         let mut canvas = Canvas::new();
         p.draw(&view, 0.0, &mut canvas);
-        // A saturated field paints the full cyan end everywhere, over the floor.
+        // A saturated field paints the cyan end at the ramp's maximum brightness everywhere,
+        // over the floor.
         for face in Face::ALL {
             for y in 0..64u8 {
                 for x in 0..64u8 {
                     let px = above_floor(&canvas, face, x, y);
                     assert!(
-                        (px[1] - PALETTE.producer_high[1]).abs() < 1e-6,
+                        (px[1] - PALETTE.producer_high[1] * RAMP_MAX_BRIGHTNESS).abs() < 1e-6,
                         "{face:?} {x},{y}: {px:?}"
                     );
                 }
             }
         }
 
-        // Half the carrying capacity is halfway along the ramp, at half intensity: a
-        // dimmer, bluer substrate, never the cyan end at reduced brightness.
+        // Half the saturation point is halfway along the hue ramp, at the squared
+        // brightness: a dimmer, bluer substrate, never the cyan end at reduced brightness.
+        let t = 0.5f32;
         for v in view.producer.iter_mut() {
-            *v = view.producer_max / 2.0;
+            *v = view.producer_max * PRODUCER_SATURATION * f64::from(t);
         }
         p.draw(&view, 0.0, &mut canvas);
         let px = above_floor(&canvas, Face::Front, 32, 32);
-        let want = mix(PALETTE.producer_low, PALETTE.producer_high, 0.5);
+        let want = mix(PALETTE.producer_low, PALETTE.producer_high, t);
+        let b = RAMP_MIN_BRIGHTNESS + (RAMP_MAX_BRIGHTNESS - RAMP_MIN_BRIGHTNESS) * t * t;
         for i in 0..3 {
-            assert!((px[i] - want[i] * 0.5).abs() < 1e-6, "{px:?} vs {want:?}");
+            assert!((px[i] - want[i] * b).abs() < 1e-6, "{px:?} vs {want:?}");
         }
         assert!(px[2] > px[1], "at half density the substrate is still blue: {px:?}");
     }

@@ -45,7 +45,7 @@ uses that family (sRGB, converted to linear light in the renderer):
 | Role | Color | Use |
 | --- | --- | --- |
 | Floor | `#12093A` at 0.12 brightness | Uniform night floor under everything; "empty" reads as dark, not off |
-| Producer | `#1E2798` → `#42C5F8` by density | Substrate glow; rich patches turn cyan |
+| Producer | `#1E2798` → `#42C5F8` by density, saturating at 0.6 of `P_max`; brightness 0.06 + 0.49 · t² | Substrate glow; the ordinary standing crop stays a dim floor and only rich patches turn cyan (the linear ramp made the whole cube a blue slab in the web viewer) |
 | Detritus | `#510B6D` | Dim violet flecks |
 | Body hue ramp | `#FF2AFC` (hue 0) → `#42C6FF` (hue 1) | Inherited accent; brightness by mode |
 | Feeding flash | `#FF9B50` | Core lobe while intake is nonzero; the only warm color |
