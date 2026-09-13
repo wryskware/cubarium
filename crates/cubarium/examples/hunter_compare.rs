@@ -74,6 +74,53 @@ impl ProfileVariant {
     }
 }
 
+/// How many ticks the in-run observer-neutrality probe advances each arm's opening, twice.
+///
+/// Bounded on purpose: it costs about 1.4% of an arm's horizon and answers "does switching the
+/// ledger on move this world" on this arm's own opening. Whether it moves the world over a
+/// whole two hours is answered at full scale by comparing this run against the earlier pilot,
+/// which ran without the ledger.
+const NEUTRALITY_PROBE_TICKS: u64 = 2000;
+
+/// Step one opening twice, differing only in whether the flow ledger records, and report
+/// whether the world and both event streams came out identical.
+fn neutrality_probe(opening: &WorldState, ticks: u64) -> Result<Value> {
+    let mut hashes = Vec::new();
+    let mut streams = Vec::new();
+    for record in [false, true] {
+        let mut world = World::from_state(opening.clone()).map_err(|e| anyhow!(e))?;
+        if record {
+            world.enable_flow_ledger();
+        }
+        let mut stream = String::new();
+        for _ in 0..ticks {
+            world.step();
+            let life = world.drain_events();
+            let hunter = world.drain_hunter_events();
+            if !life.is_empty() || !hunter.is_empty() {
+                stream.push_str(&format!("{} {life:?} {hunter:?}\n", world.tick()));
+            }
+        }
+        hashes.push(cubarium_core::snapshot::state_hash(&world.state).to_string());
+        streams.push(stream);
+    }
+    let state_equal = hashes[0] == hashes[1];
+    let events_equal = streams[0] == streams[1];
+    ensure!(
+        state_equal && events_equal,
+        "the flow ledger moved this arm's world within {ticks} ticks (state_equal={state_equal}, events_equal={events_equal})"
+    );
+    Ok(json!({
+        "ticks": ticks,
+        "state_hash_without_ledger": hashes[0],
+        "state_hash_with_ledger": hashes[1],
+        "state_equal": state_equal,
+        "event_records_equal": events_equal,
+        "event_record_bytes": streams[0].len(),
+        "basis": "this arm's own post-initialization opening, stepped twice, differing only in enable_flow_ledger()",
+    }))
+}
+
 fn profile_for(
     config: &cubarium_core::WorldConfig,
     index: usize,
@@ -275,6 +322,11 @@ struct Arm {
     whole_recovery: recovery::WholeRecovery,
     capture_audit: spatial::CaptureAudit,
     eligibility: eligibility::Eligibility,
+    /// This arm's bounded observer-neutrality probe, taken before the ledger was switched on.
+    neutrality: Value,
+    /// Every member this arm ever held, including ones that died: the flow ledger must carry a
+    /// record for each, or the run fails.
+    member_ids: BTreeSet<OrganismId>,
     events: BufWriter<File>,
     census: BufWriter<File>,
 }
@@ -418,6 +470,13 @@ impl Arm {
         };
         let snapshot = encode_snapshot(&world.state, BUILD);
         write_new(&dir.join("post-initialization.cubw"), &snapshot)?;
+        // The flow ledger is an observer, so before it is switched on for the real run this
+        // arm's own opening is stepped twice — once without it and once with it — and the two
+        // must agree on the state and on every event record. It is a bounded prefix, not the
+        // whole horizon: the full-scale statement is the paired comparison against the earlier
+        // pilot, which ran the identical recipe with no ledger compiled into the loop at all.
+        let neutrality = neutrality_probe(&world.state, NEUTRALITY_PROBE_TICKS)?;
+        world.enable_flow_ledger();
         json_new(
             &dir.join("opening.json"),
             &json!({"arm":NAMES[index], "target":target,"profile_recipe":variant,
@@ -481,6 +540,8 @@ impl Arm {
                 .map_err(|e| anyhow!(e))?,
             capture_audit,
             eligibility: eligibility::Eligibility::default(),
+            neutrality,
+            member_ids: founder.into_iter().collect(),
             events: stream(&dir.join("events.jsonl"))?,
             census: stream(&dir.join("census.jsonl"))?,
         })
@@ -489,6 +550,11 @@ impl Arm {
     fn step(&mut self, index: usize, elapsed: u64, window: u64) -> Result<Vec<recovery::Capture>> {
         let counters = self.world.step();
         let flows = (counters.light_in, counters.heat_out);
+        // Every member this arm ever held, so `finish` can demand a flow record for each of
+        // them rather than accepting whatever the ledger happens to contain.
+        for m in &self.world.state.hunters.members {
+            self.member_ids.insert(m.id);
+        }
         self.world.check_invariants().map_err(|e| anyhow!(e))?;
         self.audit.observe(&self.world.state, flows.0, flows.1)?;
         let life = self.world.drain_events();
@@ -680,6 +746,53 @@ impl Arm {
         Ok(captures)
     }
 
+    /// The bounded mutation-site flow record for this arm.
+    ///
+    /// One record per member for the whole run, not a per-tick dump of the world: the ledger's
+    /// members survive their own death, so a member that died mid-run is here with its removal
+    /// -site closing stocks, and a member alive at the horizon is here right-censored. What it
+    /// carries is what the growth question needs — source-specific intake, the actual
+    /// post-oxidation gate as a range with the threshold and size at the first growth, the
+    /// binding cap of each step, and the reserve, battery and heat each increment paid.
+    ///
+    /// The run fails here rather than emitting an unusable record: a missing member, a
+    /// malformed amount, a payment that does not reconcile within the ledger's own frozen
+    /// tolerance, or structure built without reserve spent all stop the arm.
+    fn write_flow(&mut self, dir: &Path, reason: &Option<String>, planned: u64) -> Result<()> {
+        let ledger = self
+            .world
+            .flow_ledger()
+            .context("the flow ledger was not recording for this arm")?;
+        let expected: Vec<OrganismId> = self.member_ids.iter().copied().collect();
+        ledger
+            .validate(&expected)
+            .map_err(|e| anyhow!("flow ledger: {e}"))?;
+        let elapsed = self.world.tick().saturating_sub(ledger.opened_tick);
+        let complete = reason.is_none() && elapsed == planned;
+        json_new(
+            &dir.join("flow.json"),
+            &json!({
+                "kind":"per-member-mutation-site-flow",
+                "arm":dir.file_name().and_then(|n|n.to_str()),
+                "opened_tick":ledger.opened_tick,
+                "closing_tick":self.world.tick(),
+                "planned_ticks":planned,
+                "elapsed_ticks":elapsed,
+                "complete_horizon":complete,
+                "incomplete_reason":reason,
+                "expected_members":expected.len(),
+                "recorded_members":ledger.members.len(),
+                "residual_tolerance":cubarium_core::flow::RESIDUAL_TOLERANCE,
+                "bin_ticks":cubarium_core::flow::BIN_TICKS,
+                "observer_neutrality_probe":self.neutrality,
+                "scope":"one record per member for the whole run, plus fixed-width time bins. Never a per-tick world dump. A member that died is retained with its removal-site stocks; one alive at the horizon is right-censored.",
+                "gate_note":"gate_reserve_last is the most recent observation of a threshold that moves with the body under a size-aware profile, not a constant lifetime requirement; gate_reserve_min/max bound the observed range and gate_reserve_at_first_growth is the one actually crossed.",
+                "ledger":ledger,
+            }),
+        )?;
+        Ok(())
+    }
+
     fn finish(&mut self, dir: &Path, reason: &Option<String>, planned: u64) -> Result<Value> {
         self.audit.close_window(&self.world.telemetry());
         if reason.is_none() {
@@ -691,6 +804,7 @@ impl Arm {
         self.census.get_ref().sync_all()?;
         let bytes = encode_snapshot(&self.world.state, BUILD);
         write_new(&dir.join("closing.cubw"), &bytes)?;
+        self.write_flow(dir, reason, planned)?;
         let cohorts: BTreeSet<_> = self
             .live
             .values()

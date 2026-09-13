@@ -786,6 +786,95 @@ impl FlowLedger {
             .sum::<u64>()
             + self.unregistered_records
     }
+
+    /// Everything a caller must be able to assert before treating these records as evidence.
+    ///
+    /// Payment reconciliation is judged against [`RESIDUAL_TOLERANCE`], this module's own frozen
+    /// constant — never a looser one supplied by whoever reads the output. `expected` names the
+    /// members the caller already knows must be present; a missing record is a failure rather
+    /// than a shorter list, because an unrecorded member is exactly the evidence gap this
+    /// ledger exists to close.
+    pub fn validate(&self, expected: &[OrganismId]) -> Result<(), String> {
+        if self.unregistered_records != 0 {
+            return Err(format!(
+                "{} flow records for members the ledger never registered",
+                self.unregistered_records
+            ));
+        }
+        for id in expected {
+            if !self.members.contains_key(id) {
+                return Err(format!(
+                    "no flow record for member {}:{}",
+                    id.slot, id.generation
+                ));
+            }
+        }
+        for (id, m) in &self.members {
+            let who = format!("{}:{}", id.slot, id.generation);
+            if m.residual.violations != 0 {
+                return Err(format!(
+                    "member {who}: {} payment reconciliation violations, first at tick {:?}",
+                    m.residual.violations, m.residual.first_violation_tick
+                ));
+            }
+            for (name, value) in [
+                ("structure", m.residual.max_structure),
+                ("reserve", m.residual.max_reserve),
+                ("energy", m.residual.max_energy),
+            ] {
+                if !value.is_finite() || value < 0.0 {
+                    return Err(format!("member {who}: {name} residual is {value}"));
+                }
+                if value > RESIDUAL_TOLERANCE {
+                    return Err(format!(
+                        "member {who}: {name} residual {value:e} exceeds the frozen tolerance {RESIDUAL_TOLERANCE:e}"
+                    ));
+                }
+            }
+            // Every recorded amount must be finite and nonnegative. A source total that is NaN
+            // or negative is a malformed record, not a small anomaly to average over.
+            for (name, value) in [
+                ("digestion.to_reserve", m.digestion.to_reserve),
+                ("frugivory.to_reserve", m.frugivory.to_reserve),
+                ("grazing.to_reserve", m.grazing.to_reserve),
+                ("scavenging.to_reserve", m.scavenging.to_reserve),
+                ("oxidation.reserve_burned", m.oxidation.reserve_burned),
+                ("growth.reserve_spent", m.growth.reserve_spent),
+                ("growth.structure_gained", m.growth.structure_gained),
+                ("growth.energy_cost", m.growth.energy_cost),
+                ("growth.heat", m.growth.heat),
+                ("upkeep.paid", m.upkeep.paid),
+                ("strike.paid", m.strike.paid),
+                ("handling.paid", m.handling.paid),
+                ("funding.reserve_debit", m.funding.reserve_debit),
+            ] {
+                if !value.is_finite() || value < 0.0 {
+                    return Err(format!("member {who}: {name} is {value}"));
+                }
+            }
+            // Growth is the site under test: what it built, it paid for out of reserve, one for
+            // one. The two sides are accumulated separately at the mutation site, so checking
+            // them here means a run cannot emit a record that silently built unpaid structure.
+            let built = m.growth.structure_gained;
+            if (built - m.growth.reserve_spent).abs() > RESIDUAL_TOLERANCE {
+                return Err(format!(
+                    "member {who}: built {built:e} structure but spent {:e} reserve",
+                    m.growth.reserve_spent
+                ));
+            }
+            if built > 0.0 && m.gate.first_growth_tick.is_none() {
+                return Err(format!(
+                    "member {who}: grew {built:e} with no recorded first growth"
+                ));
+            }
+            if built == 0.0 && m.gate.first_growth_tick.is_some() {
+                return Err(format!(
+                    "member {who}: recorded a first growth having gained nothing"
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 fn members_as_list<S: Serializer>(
@@ -1021,6 +1110,61 @@ mod tests {
         // Far beyond the retained span, the last bin absorbs the tail rather than growing.
         l.probe(id(1), 100 + 5000 * BIN_TICKS, 0.8, 0.5, 0.5);
         assert_eq!(l.members[&id(1)].bins.len(), MAX_BINS);
+    }
+
+    #[test]
+    fn validate_accepts_a_sound_ledger_and_names_every_way_it_can_fail() {
+        let sound = || {
+            let mut l = ledger();
+            l.record_growth_gate(id(1), 101, 0.8, 2.0, 0.6, 0.48, 1.2, 0.6);
+            l.record_growth(id(1), 101, 0.0001, 0.00005, 0.00025, 0.0001, 1.2, 0.6, Some(1.2));
+            // The member opened at S=0.8, R=0.8, E=0.6; one rate-limited step moves all three.
+            l.probe(id(1), 101, 0.8 + 0.0001, 0.8 - 0.0001, 0.6 - 0.00005);
+            l
+        };
+        sound().validate(&[id(1)]).expect("a sound ledger validates");
+
+        // A member the caller knows must be there and is not.
+        let missing = sound().validate(&[id(1), id(7)]).expect_err("a missing member must fail");
+        assert!(missing.contains("no flow record for member 7:1"), "{missing}");
+
+        // A record for a member that was never registered.
+        let mut stray = sound();
+        stray.record_oxidation(id(9), 101, 0.1, 0.1, 0.0, false);
+        assert!(stray.validate(&[id(1)]).unwrap_err().contains("never registered"));
+
+        // Payment reconciliation, judged against the frozen tolerance and not a looser one.
+        let mut violated = sound();
+        violated.members.get_mut(&id(1)).unwrap().residual.violations = 1;
+        assert!(violated.validate(&[id(1)]).unwrap_err().contains("reconciliation violations"));
+        let mut wide = sound();
+        wide.members.get_mut(&id(1)).unwrap().residual.max_reserve = 1e-6;
+        assert!(wide.validate(&[id(1)]).unwrap_err().contains("exceeds the frozen tolerance"));
+
+        // Malformed amounts.
+        for mutate in [
+            |m: &mut MemberFlow| m.digestion.to_reserve = f64::NAN,
+            |m: &mut MemberFlow| m.scavenging.to_reserve = -1.0,
+            |m: &mut MemberFlow| m.upkeep.paid = f64::INFINITY,
+            |m: &mut MemberFlow| m.residual.max_energy = -1.0,
+        ] {
+            let mut bad = sound();
+            mutate(bad.members.get_mut(&id(1)).unwrap());
+            assert!(bad.validate(&[id(1)]).is_err(), "a malformed amount must fail");
+        }
+
+        // Structure built without reserve spent for it, one for one.
+        let mut unpaid = sound();
+        unpaid.members.get_mut(&id(1)).unwrap().growth.reserve_spent = 0.0;
+        assert!(unpaid.validate(&[id(1)]).unwrap_err().contains("but spent"));
+
+        // A first-growth boundary that disagrees with whether anything was built.
+        let mut phantom = ledger();
+        phantom.members.get_mut(&id(1)).unwrap().gate.first_growth_tick = Some(5);
+        assert!(phantom.validate(&[id(1)]).unwrap_err().contains("having gained nothing"));
+        let mut silent = sound();
+        silent.members.get_mut(&id(1)).unwrap().gate.first_growth_tick = None;
+        assert!(silent.validate(&[id(1)]).unwrap_err().contains("no recorded first growth"));
     }
 
     #[test]
