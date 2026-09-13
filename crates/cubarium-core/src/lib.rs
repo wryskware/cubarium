@@ -55,7 +55,7 @@ pub use events::LifeEvent;
 pub use hunter::{
     AttemptOutcome, EscrowKey, FixedHunterProfile, FundingBlocked, HunterControlReceipt,
     HunterEvent, HunterFounderReceipt, HunterMember, HunterPhase, HunterRole, HunterState,
-    HunterTarget, HunterView, Reproduction,
+    HunterTarget, HunterView, OxidationPolicy, Reproduction,
 };
 pub use ids::OrganismId;
 pub use snapshot::{
@@ -65,7 +65,7 @@ pub use snapshot::{
 };
 pub use telemetry::Telemetry;
 pub use view::RenderView;
-pub use world::{World, WorldState};
+pub use world::{ChargingDiagnostics, World, WorldState};
 
 /// Simulation ticks per second.
 pub const TICK_HZ: u32 = 20;

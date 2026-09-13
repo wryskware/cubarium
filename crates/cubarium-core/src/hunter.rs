@@ -25,13 +25,15 @@ use cubarium_surface::{
     ChartImage, FACE_EXTENT, Face, MAX_LOCAL_RADIUS, SurfacePoint, Vec2, travel, unfold_with,
 };
 
-use crate::config::WorldConfig;
+use crate::config::{OrganismConfig, WorldConfig};
 use crate::genome::Genome;
 use crate::ids::{OrganismId, Slots};
 use crate::organism::{DeathCause, Organism};
 
-/// Wire version of [`FixedHunterProfile`]. A saved profile with any other version is
-/// rejected rather than reinterpreted — including one whose *shape* still matches.
+/// Wire version of [`FixedHunterProfile`] the **default constructor** writes, and the version
+/// every existing trial carries. A saved profile whose version is not in
+/// [`SUPPORTED_PROFILE_VERSIONS`] is rejected rather than reinterpreted — including one whose
+/// *shape* still matches.
 ///
 /// - **1** (schema 10): a single forward `jaw_offset_px` placeholder.
 /// - **2**: replaced it with the measured two-component capture effector, a separate ingestion
@@ -45,7 +47,78 @@ use crate::organism::{DeathCause, Organism};
 ///   unchanged, but a frozen experimental constant moved, so the version moves with it: a
 ///   saved version 2 trial is refused by name rather than quietly re-measured. Schema 11 was
 ///   never deployed, so no live world carries one.
+/// - **4**: [`PROFILE_VERSION_CHARGE80`], the paid-charging experiment. Every field, including
+///   all geometry, means exactly what version 3 means; the *only* difference is the
+///   [`OxidationPolicy`] a member carrying it runs under
+///   (`design/7_Research/astra-hunter-paid-charging-proposal-2026-09-13.md`). It is **not**
+///   the default: version 3 remains what [`FixedHunterProfile::lanternjaw_trial`] writes, so
+///   every saved baseline trial is still read as itself.
 pub const PROFILE_VERSION: u32 = 3;
+
+/// The semantic version of the one fixed paid-charging policy, [`OxidationPolicy::Fixed`] at
+/// [`CHARGE80_OXIDATION_THRESHOLD`].
+///
+/// It shares version 3's serialized shape exactly, which is why it is a *semantic* version and
+/// not a schema change: an old reader decodes the bytes and then refuses them at
+/// [`FixedHunterProfile::validate`], rather than resuming a version 4 experiment as though it
+/// were version 3. That refusal is the whole safety argument for reusing the shape, so it is
+/// verified against an actual frozen pre-change executable, not asserted.
+///
+/// This scheme suits **one frozen experimental constant**. An extensible matrix of tunable
+/// policies would need an explicitly persisted field and an honest frozen old-shape migration,
+/// not more combinations encoded in version numbers.
+pub const PROFILE_VERSION_CHARGE80: u32 = 4;
+
+/// Every profile version this build will load. Anything else is refused by name.
+pub const SUPPORTED_PROFILE_VERSIONS: [u32; 2] = [PROFILE_VERSION, PROFILE_VERSION_CHARGE80];
+
+/// The fixed oxidation activation threshold, as a fraction of `E_max`, that version 4 carries.
+///
+/// A trial constant, not a balanced or accepted value: the proposal picked 0.80 because it
+/// leaves a 0.20-energy margin above this trial's 3.0 battery reproduction gate. It is not a
+/// guarantee against future expenditure and says nothing about lineage viability.
+pub const CHARGE80_OXIDATION_THRESHOLD: f64 = 0.80;
+
+/// When an **authoritative hunter member** converts reserve material into battery charge.
+///
+/// This is the single policy the paid-charging family varies, and it varies nothing else: the
+/// conversion block itself — burn ceiling, reserve-to-`N` return, `e_r` release, efficiency,
+/// headroom cap and conversion heat — is identical under both, and so is every cost, gate,
+/// target, geometry and intake. Only the *condition under which that block runs* differs.
+///
+/// Ordinary organisms are never subject to this. They are not members, and the world's
+/// configured threshold is theirs whatever any hunter profile says.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum OxidationPolicy {
+    /// Version 3: the world's own `organism.oxidation_threshold`, exactly as every creature in
+    /// the world uses it. A member under this policy is arithmetically indistinguishable from
+    /// the pre-policy build.
+    Configured,
+    /// Version 4: this fixed fraction of `E_max`, at **every age and phase**, descendants
+    /// included. No age switch, reserve floor, hysteresis, reproduction condition or phase
+    /// exception — those would be additional interventions, not this one.
+    Fixed(f64),
+}
+
+impl OxidationPolicy {
+    /// The activation threshold as a fraction of `E_max`, resolved against the world whose
+    /// config it will be applied in.
+    pub fn threshold(self, config: &OrganismConfig) -> f64 {
+        match self {
+            OxidationPolicy::Configured => config.oxidation_threshold,
+            OxidationPolicy::Fixed(fraction) => fraction,
+        }
+    }
+
+    /// A stable label for a manifest, so a recorded experiment states its policy in words as
+    /// well as in a number.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            OxidationPolicy::Configured => "configured-world-threshold",
+            OxidationPolicy::Fixed(_) => "fixed-member-threshold",
+        }
+    }
+}
 
 /// The **capture effector**: Fable's authored `Lanternjaw::effectors(1.0).near_claw`, the near
 /// raptorial claw's painted centre at full extension, in adult body pixels.
@@ -330,12 +403,51 @@ impl FixedHunterProfile {
         self
     }
 
+    /// The paid-charging candidate: this profile, **field for field**, under semantic version
+    /// [`PROFILE_VERSION_CHARGE80`].
+    ///
+    /// The only thing that changes is [`FixedHunterProfile::oxidation_policy`]. Geometry,
+    /// genome, costs, gates, reserve targets, founder stocks and every other number are the
+    /// ones this profile already carried, which is what makes the resulting experiment a
+    /// single-family one.
+    pub fn charge80(mut self) -> FixedHunterProfile {
+        self.version = PROFILE_VERSION_CHARGE80;
+        self
+    }
+
+    /// When a member carrying this profile converts reserve into battery charge.
+    ///
+    /// Version 3 defers to the world; version 4 is the fixed [`CHARGE80_OXIDATION_THRESHOLD`].
+    /// A version outside [`SUPPORTED_PROFILE_VERSIONS`] cannot reach here: every path that
+    /// installs a profile validates it first (`HunterState::validate`, which
+    /// `WorldState::validate` and therefore `decode_snapshot`, `World::new` and
+    /// `World::from_state` all run). The fallback is the configured threshold regardless, so an
+    /// unvalidated profile could only ever behave like the world's own creatures.
+    pub fn oxidation_policy(&self) -> OxidationPolicy {
+        match self.version {
+            PROFILE_VERSION_CHARGE80 => OxidationPolicy::Fixed(CHARGE80_OXIDATION_THRESHOLD),
+            _ => OxidationPolicy::Configured,
+        }
+    }
+
+    /// [`FixedHunterProfile::oxidation_policy`] resolved against a world's organism config.
+    pub fn oxidation_threshold(&self, config: &OrganismConfig) -> f64 {
+        self.oxidation_policy().threshold(config)
+    }
+
     /// Internal consistency: version, finite numbers, ranges, ordered thresholds, and a
     /// genome inside the bounds `crate::genome` documents. Config-dependent limits are
     /// checked by the initializer, which can see the world.
     pub fn validate(&self) -> Result<(), String> {
-        if self.version != PROFILE_VERSION {
-            return Err(format!("hunter profile version {} is not {PROFILE_VERSION}", self.version));
+        // Versions 3 and 4 share a shape *and* every field meaning; they differ only in
+        // `oxidation_policy`. Any other version is refused by name rather than reinterpreted —
+        // which is exactly what makes an old reader safe against a version 4 payload it can
+        // decode but must not resume.
+        if !SUPPORTED_PROFILE_VERSIONS.contains(&self.version) {
+            return Err(format!(
+                "hunter profile version {} is not one of {SUPPORTED_PROFILE_VERSIONS:?}",
+                self.version
+            ));
         }
         for (name, v) in self.positive_numbers() {
             if !v.is_finite() || v <= 0.0 {
@@ -1614,7 +1726,7 @@ mod tests {
         let mut old = p.clone();
         old.version = 2;
         let err = old.validate().expect_err("a version 2 trial must be refused");
-        assert!(err.contains("version 2 is not 3"), "{err}");
+        assert!(err.contains("version 2 is not one of [3, 4]"), "{err}");
     }
 
     /// The smallest admitted scale and a below-art-minimum juvenile both produce a coherent,

@@ -1,0 +1,105 @@
+//! Writes the genuine pre-change fixtures the paid-charging policy is tested against. Run only
+//! from an isolated copy of the tree **before** the policy exists; the snapshots it writes are
+//! what that build actually produced, not a struct relabelled as old.
+//!
+//! One world, the default config and its own seed, with an actual Lanternjaw trial founded at
+//! tick 50. Three checkpoints:
+//!
+//! * `hunter-v3-charge-window`: the founder's energy is inside the open interval
+//!   (0.50, 0.80) of `E_max` — the band where the configured threshold does **not** activate
+//!   oxidation and the candidate policy would. The divergence fixture.
+//! * `hunter-v3-charge-active` and its `-plus600` continuation: the founder is at or below the
+//!   configured 0.50 threshold and is actually oxidizing, so the version 3 continuation
+//!   exercises the branch rather than merely sitting beside it.
+
+use std::path::PathBuf;
+
+use cubarium_core::hunter::{FixedHunterProfile, HunterTarget, PROFILE_VERSION};
+use cubarium_core::ids::OrganismId;
+use cubarium_core::{SCHEMA_VERSION, World, WorldConfig, encode_snapshot};
+
+const BUILD: &str = "pre-charge-fixture";
+
+fn write(dir: &PathBuf, name: &str, world: &World, founder: OrganismId) {
+    let bytes = encode_snapshot(&world.state, BUILD);
+    std::fs::write(dir.join(name), &bytes).expect("write the fixture");
+    let o = world.state.organisms.get(founder).expect("the founder is alive");
+    println!(
+        "  wrote {name}: schema {SCHEMA_VERSION}, tick {}, {} bytes, population {}, hash {}\n    \
+         founder R {} of {} ({:.6}), E {} of {} ({:.6})",
+        world.tick(),
+        bytes.len(),
+        world.population(),
+        cubarium_core::snapshot::state_hash(&world.state),
+        o.reserve,
+        o.phenotype.reserve_max,
+        o.reserve / o.phenotype.reserve_max,
+        o.energy,
+        o.phenotype.energy_max,
+        o.energy / o.phenotype.energy_max,
+    );
+}
+
+fn main() {
+    let dir = PathBuf::from(std::env::args().nth(1).expect("an output directory"));
+    std::fs::create_dir_all(&dir).expect("the output directory");
+    assert_eq!(SCHEMA_VERSION, 12, "this generator writes the pre-change schema");
+    assert_eq!(PROFILE_VERSION, 3, "this generator writes the pre-change profile version");
+
+    let mut world = World::new(WorldConfig::default()).expect("defaults are valid");
+    while world.tick() < 50 {
+        world.step();
+    }
+    let profile = FixedHunterProfile::lanternjaw_trial(world.config());
+    assert_eq!(profile.version, 3);
+    let receipt = world
+        .start_hunter_trial(profile, HunterTarget { face: 4, u: 32.0, v: 32.0 })
+        .expect("the trial starts");
+    let founder = receipt.id;
+    println!("  founder {founder:?}, imported {} m / {} e", receipt.material_in, receipt.energy_in);
+
+    let threshold = world.config().organism.oxidation_threshold;
+    let fraction = |w: &World| {
+        w.state
+            .organisms
+            .get(founder)
+            .map(|o| o.energy / o.phenotype.energy_max)
+    };
+
+    // (a) Inside the divergence band.
+    while world.tick() < 1400 {
+        world.step();
+    }
+    let f = fraction(&world).expect("alive at 1400");
+    assert!(f > threshold && f < 0.80, "the window fixture needs {threshold} < {f} < 0.80");
+    write(&dir, "hunter-v3-charge-window.cubw", &world, founder);
+
+    // (b) Below the configured threshold, with the branch actually taken.
+    let mut below_ticks = 0u64;
+    let mut burned_reserve = 0.0f64;
+    loop {
+        let before = world.state.organisms.get(founder).map(|o| o.reserve);
+        world.step();
+        let Some(o) = world.state.organisms.get(founder) else {
+            panic!("the founder died at tick {} before oxidizing", world.tick());
+        };
+        if o.energy < threshold * o.phenotype.energy_max {
+            below_ticks += 1;
+            burned_reserve += before.unwrap_or(0.0) - o.reserve;
+        }
+        if below_ticks >= 200 {
+            break;
+        }
+        assert!(world.tick() < 200_000, "the founder never dropped below the threshold");
+    }
+    println!("  {below_ticks} ticks below the threshold, {burned_reserve} reserve burned");
+    assert!(burned_reserve > 0.0, "the fixture must exercise the oxidation branch");
+    write(&dir, "hunter-v3-charge-active.cubw", &world, founder);
+
+    let at = world.tick();
+    while world.tick() < at + 600 {
+        world.step();
+    }
+    write(&dir, "hunter-v3-charge-active-plus600.cubw", &world, founder);
+    println!("  active checkpoint tick {at}, continuation tick {}", world.tick());
+}

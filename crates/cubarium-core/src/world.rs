@@ -325,6 +325,39 @@ pub struct TickCounters {
     pub deaths_predation: u32,
 }
 
+/// Read-only diagnostics for the paid-charging experiment: what the member oxidation policy
+/// did that the world's own configured threshold would **not** have done
+/// (`design/7_Research/astra-hunter-paid-charging-proposal-2026-09-13.md`).
+///
+/// **Scope.** A transaction is counted here when, and only when, an authoritative hunter
+/// member's oxidation ran at a resolved threshold *above* the world's configured one **and**
+/// its energy was at or above the configured threshold — that is, the exact transactions a
+/// [`crate::hunter::OxidationPolicy::Configured`] member would not have performed in the same
+/// world at the same instant. Oxidation below the configured threshold is ordinary physiology
+/// and is not counted, by either policy. Ordinary organisms are never counted.
+///
+/// **Time.** Totals run from the moment this `World` value was constructed — by
+/// [`World::new`] or [`World::from_state`] — to now. They are **transient**: never persisted,
+/// never hashed, never read back by the tick. A reloaded world starts them at zero, so a
+/// reader must treat them as a property of one process's run, not of the world's history.
+///
+/// **Cost.** Four running scalars and a counter, written only inside a branch the step already
+/// takes. No per-tick history is accumulated, no RNG is consumed and no world state is read or
+/// written that the step did not already read or write, so recording this cannot move the
+/// simulation.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ChargingDiagnostics {
+    /// Oxidation transactions performed only because the member's threshold was raised.
+    pub extra_transactions: u64,
+    /// Reserve material burned in those transactions (m). It went to the local `N` cell, as
+    /// every other oxidation's does.
+    pub extra_reserve_burned: f64,
+    /// Battery charge gained in them (e), after efficiency and the headroom cap.
+    pub extra_energy_gained: f64,
+    /// Conversion heat released by them (e): `e_r · burned − gained`, as always.
+    pub extra_heat: f64,
+}
+
 pub struct World {
     pub state: WorldState,
     graph: FieldGraph,
@@ -358,6 +391,10 @@ pub struct World {
     /// Transient in exactly the same sense (`crate::hunter::HunterEvent`).
     hunter_events: Vec<HunterEvent>,
     counters: TickCounters,
+    /// Bounded read-only totals for the paid-charging policy. Transient in exactly the sense
+    /// [`ChargingDiagnostics`] documents: never checkpointed, never hashed, never read by the
+    /// tick.
+    charging: ChargingDiagnostics,
     initial_material: f64,
 }
 
@@ -534,6 +571,7 @@ impl World {
             events: Vec::new(),
             hunter_events: Vec::new(),
             counters: TickCounters::default(),
+            charging: ChargingDiagnostics::default(),
             initial_material,
         };
         // Make the derived light/moisture readable before the first tick advances weather.
@@ -592,6 +630,7 @@ impl World {
                 events,
                 hunter_events,
                 counters,
+                charging,
                 initial_material: _,
             } = &mut *self;
             let WorldState {
@@ -1401,7 +1440,22 @@ impl World {
                 // Membership, not `genome.form`, is what makes a predator.
                 let member = hunters.index_of(*id);
 
-                if o.energy < org_cfg.oxidation_threshold * o.phenotype.energy_max && o.reserve > 0.0 {
+                // *When* reserve is converted into battery charge is a **member policy**; what
+                // that conversion does is not. An authoritative member carrying semantic
+                // profile version 4 activates below a fixed fraction of `E_max` at every age
+                // and phase; everything else — ordinary organisms, and members carrying
+                // version 3 — uses the world's configured threshold, resolved through the same
+                // accessor so the two cannot drift apart (`crate::hunter::OxidationPolicy`).
+                let reference = org_cfg.oxidation_threshold;
+                let threshold = match (member, hunters.profile.as_ref()) {
+                    (Some(_), Some(profile)) => profile.oxidation_threshold(org_cfg),
+                    _ => reference,
+                };
+                if o.energy < threshold * o.phenotype.energy_max && o.reserve > 0.0 {
+                    // Decided *before* the transaction changes anything, so the test is the
+                    // one a configured-threshold member would actually have failed — not a
+                    // subtraction reconstructed afterwards from rounded values.
+                    let above_reference = o.energy >= reference * o.phenotype.energy_max;
                     let burned = (org_cfg.oxidation_rate * dt).min(o.reserve);
                     o.reserve -= burned;
                     fields.n[cell_of(&o.pos).index()] += burned;
@@ -1411,6 +1465,16 @@ impl World {
                     let gained = (released * org_cfg.oxidation_efficiency).min(room);
                     o.energy += gained;
                     heat(released - gained);
+                    // Bounded diagnostics, after the transaction and out of its way: this is
+                    // the branch a member under the configured threshold would not have taken.
+                    // Reads nothing new, writes no world state, consumes no draw
+                    // (`ChargingDiagnostics`).
+                    if above_reference {
+                        charging.extra_transactions += 1;
+                        charging.extra_reserve_burned += burned;
+                        charging.extra_energy_gained += gained;
+                        charging.extra_heat += released - gained;
+                    }
                 }
 
                 if o.structure < o.phenotype.structure_adult
@@ -1905,6 +1969,25 @@ impl World {
     }
 
     // ------------------------------------------------------------------ hunters
+
+    /// What the member oxidation policy did that this world's configured threshold would not
+    /// have done, since this `World` value was built. Read-only, transient and process-scoped;
+    /// see [`ChargingDiagnostics`] for the exact transaction scope and time window.
+    pub fn charging_diagnostics(&self) -> ChargingDiagnostics {
+        self.charging
+    }
+
+    /// The oxidation activation threshold, as a fraction of `E_max`, that an **authoritative
+    /// member** of this world runs under — the world's configured one when there is no
+    /// profile, or no raised policy on it. Published so a recorded experiment can state the
+    /// resolved number it actually ran, rather than a reader inferring it from a version.
+    pub fn member_oxidation_threshold(&self) -> f64 {
+        let org = &self.state.config.organism;
+        match self.state.hunters.profile.as_ref() {
+            Some(profile) => profile.oxidation_threshold(org),
+            None => org.oxidation_threshold,
+        }
+    }
 
     /// The hunter extension: profile, members, guts, imports and counters (`crate::hunter`).
     pub fn hunters(&self) -> &HunterState {
