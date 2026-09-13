@@ -158,3 +158,89 @@ per-cell floating-point additions in the source ledger.
 These are contract corrections needed before trusting the requested crash/replay
 and exclusive-owner guarantees. Visual care effects can proceed independently
 while the host adopts the corrected admission and recovery protocol.
+
+## Revision 2 follow-up: abort recovery remains incomplete
+
+Reviewed `care-contract-2026-09-12.md` revision 2 at commit `6b92feb`. Held-boundary
+admission, the OS ownership lock, and the total rain dose resolve the earlier
+central issues. The newly introduced abort-and-resume path still has two concrete
+crash-consistency holes.
+
+**Partial accepted line followed by abort.** An append error can leave a prefix
+of an accepted JSON line without its newline. Appending an abort then produces one
+malformed concatenated line. Successful fsync of that append does not make it a
+valid durable abort. The runner could void the command and advance, but restart
+would reject the resulting interior corruption. Repairing a torn tail only when
+opening the journal, as currently specified, does not cover this same-process
+error path.
+
+**Missing accepted record in a reserved batch.** Suppose the runner reserves
+sequences 20 and 21 at B. Only accepted 20 reaches the file; the next write fails.
+The proposed recovery writes aborts 20 and 21, then voids both in memory and
+continues. Crash before checkpoint. Replay groups only accepted records, so it
+finds 20 but never 21; moreover `{"rec":"abort","seq":21}` does not identify B.
+The live cursor reached 21, but recovered cursor reaches only 20. The next accepted
+command 22 cannot apply contiguously. A complete accepted record is therefore not
+a valid prerequisite for recovering an abort.
+
+### Recommended narrow correction
+
+For this slice, remove abort-and-resume after an uncertain write. Hold at B with
+care failed and permit clean stop at B. On restart recover the valid journal
+prefix, discard only a torn final suffix, and apply whatever scheduled records
+survived at B. Client acceptance can be uncertain, but ecology never progressed
+beyond the disputed boundary, so this does not rewrite executed ecological
+history. Reserved sequences absent from the surviving journal were never applied;
+the restarted process has a new client epoch and can allocate after the surviving
+maximum. Do not durably consume sequence numbers for missing records.
+
+This is simpler than adding another transactional record type while implementing
+the first care feature. It is an explicit availability tradeoff: a disk failure
+can pause the world until recovery or restart.
+
+If abort-and-resume is retained, it needs all of the following as one protocol:
+
+- A single journal owner must inspect and repair the ambiguous write suffix before
+  further append. Preserve every complete valid record, truncate only the torn
+  final suffix, and establish successful repair. An interior malformed record or
+  failed repair keeps the world held. Never blindly append abort to unknown bytes.
+- Each abort is self-contained, at least `{seq, apply_after_tick:B}`; a batch abort
+  may instead name B and an explicit contiguous sequence range. Persist aborts for
+  every reserved sequence before acknowledging that the whole batch is voidable.
+- Replay builds the union of accepted records and aborts, not merely accepted
+  records with an abort filter. An abort with no accepted counterpart still voids
+  its sequence at B. Both records for a sequence must agree on B. Identical abort
+  retries are idempotent; conflicting boundaries or accepted payloads are fatal.
+- A crash during abort retry can leave any complete prefix. That prefix must be
+  replayable without missing sequences: surviving accepted records without aborts
+  apply, surviving aborts void, and no ecology has advanced past B before the full
+  abort acknowledgement. This outcome uncertainty must be reported honestly.
+
+### Other small recovery clarifications required
+
+Validate the complete pending replay schedule before stepping: sequence continuity
+after the snapshot cursor, nondecreasing boundaries in sequence order, and no
+unadmitted boundary before the snapshot tick. Sorting malformed input by boundary
+does not establish these properties. An unexpected core sequence/boundary rejection
+is a recovery error; never silently skip it and resume stepping.
+
+While replay still has future historical commands, new HTTP care must not allocate
+from only the snapshot's admitted cursor. Those sequences are already reserved in
+the journal. The simple first implementation refuses new care as “replaying” until
+the recovered schedule is exhausted, then allocates after the journal maximum.
+
+Require a successfully durable opening/resume checkpoint before enabling care in
+a newly created world. Otherwise a crash before the first periodic checkpoint
+leaves accepted commands but no persisted original config or initial world to
+replay them against. A journal-only directory must not silently create a world
+from today's defaults or changed CLI configuration.
+
+The crash test phrased “before accepted fsync: no application” needs to allow a
+complete accepted record that survives a crash before fsync returns. The guarantee
+is no application before durable acknowledgement in the original process; recovery
+may apply a surviving valid record at B even if the client never saw acceptance.
+
+Add injected short writes (mid-JSON and between two batch records), a crash after
+only some aborts if retaining them, duplicate abort retries, and a new HTTP request
+during replay. These target the actual uncertainty windows above rather than only
+clean successful journal writes.
