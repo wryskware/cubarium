@@ -20,6 +20,7 @@ pub mod cli;
 pub mod clock;
 pub mod hunter_present;
 pub mod lanternjaw;
+pub mod meal_present;
 pub mod net;
 pub mod present;
 pub mod raycast;

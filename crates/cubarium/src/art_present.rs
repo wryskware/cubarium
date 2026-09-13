@@ -78,6 +78,7 @@ pub use crate::art::Band;
 use crate::art::{ArtPack, Clip, GroundTile, Plant, TallPlant};
 use crate::clock::DT;
 use crate::hunter_present::{HunterFrame, HunterMemory, validate_profile, validate_view};
+use crate::meal_present::{MealMemory, Meals};
 use crate::lanternjaw::{Lanternjaw, Part};
 use crate::present::{
     self, DETRITUS_SCALE, DETRITUS_THRESHOLD, JUVENILE_SCALE, PALETTE, PRODUCER_SATURATION,
@@ -2356,6 +2357,12 @@ pub struct ArtPresenter {
     hunters: std::collections::BTreeMap<OrganismId, HunterMemory>,
     /// Scratch for the rig's parts, reused across frames.
     hunter_parts: Vec<Part>,
+    /// The meal memory of every ordinary organism ([`crate::meal_present`]): where the feed
+    /// clip is read from once an actual intake bout has begun.
+    meals: Meals,
+    /// Whether the meal onset is drawn at all; off, a body is drawn exactly as before the
+    /// meal memory existed (a review switch for paired captures and tests, not a setting).
+    meal_onset: bool,
 }
 
 impl ArtPresenter {
@@ -2397,7 +2404,27 @@ impl ArtPresenter {
             lanternjaw: Lanternjaw::new(),
             hunters: std::collections::BTreeMap::new(),
             hunter_parts: Vec::new(),
+            meals: Meals::new(),
+            meal_onset: true,
         }
+    }
+
+    /// This presenter with the meal onset ([`crate::meal_present`]) switched off, so ordinary
+    /// bodies are drawn exactly as they were before it: the "before" half of a paired
+    /// capture. Observation still tracks meals, so the switch can be compared frame for frame.
+    pub fn without_meal_onset(mut self) -> ArtPresenter {
+        self.meal_onset = false;
+        self
+    }
+
+    /// The meal memory of an ordinary organism, if it is tracked.
+    pub fn meal_of(&self, id: OrganismId) -> Option<MealMemory> {
+        self.meals.memory_of(id)
+    }
+
+    /// How many organisms the meal memory tracks (bounded by the living population).
+    pub fn meals_tracked(&self) -> usize {
+        self.meals.len()
     }
 
     /// Whether this presenter can draw hunters of `profile`: [`validate_profile`], the
@@ -2479,6 +2506,9 @@ impl ArtPresenter {
             }
         }
         self.hunters.retain(|id, _| listed.contains(id));
+        for id in listed {
+            self.meals.forget(id);
+        }
         for event in events {
             if let HunterEvent::Capture { tick, hunter, prey, evidence, .. } = event
                 && *tick == view.tick
@@ -2651,6 +2681,9 @@ impl ArtPresenter {
             }
         }
         self.observe_bodies(view, snap);
+        // Meals: the hunter adapter's members are its own; every other body is tracked.
+        let hunters = &self.hunters;
+        self.meals.observe(view, snap, &|id| hunters.contains_key(&id));
         self.last_tick = Some(view.tick);
     }
 
@@ -3014,7 +3047,8 @@ impl ArtPresenter {
             if self.hunters.contains_key(&o.id) {
                 continue;
             }
-            stamp_creature(&self.pack, &mut self.scratch, o, self.bodies.get(&o.id), seconds, f, canvas);
+            let meal = if self.meal_onset { self.meals.bout(o.id, seconds, f) } else { None };
+            stamp_creature(&self.pack, &mut self.scratch, o, self.bodies.get(&o.id), meal, seconds, f, canvas);
         }
 
         // A prey the world removed at this tick's boundary while its hunter entered
@@ -3032,7 +3066,7 @@ impl ArtPresenter {
                         moved: Vec::new(),
                         ..prey.clone()
                     };
-                    stamp_creature(&self.pack, &mut self.scratch, &held, None, seconds, 1.0, canvas);
+                    stamp_creature(&self.pack, &mut self.scratch, &held, None, None, seconds, 1.0, canvas);
                 }
             }
         }
@@ -3061,12 +3095,19 @@ impl ArtPresenter {
 
 /// One ordinary creature at fraction `f` of its tick: exactly the stamp the body loop has
 /// always made, with `memory` supplying the cross-fade and the turn (none for a body with
-/// no memory).
+/// no memory) and `meal` the bout-time reading of the feed clip ([`Meals::bout`]: seconds
+/// into the bout and its weight `w`). With a meal, the mode-driven layers (the state and its
+/// cross-fade, exactly as without one) are scaled by `1 − w` and the feed clip read at bout
+/// time is added at `w`, so a bout holds the feed loop through the one-tick `Seeking` gaps
+/// between nibbles and hands back to the mode's own clip as `w` falls; the path, heading,
+/// turn and scale are untouched. Gestation immediately fades out any outgoing meal;
+/// no new meal starts while an organism holds an escrow.
 fn stamp_creature(
     pack: &ArtPack,
     scratch: &mut Vec<PixelImage>,
     o: &OrganismView,
     memory: Option<&BodyMemory>,
+    meal: Option<(f64, f32)>,
     seconds: f64,
     f: f64,
     canvas: &mut Canvas,
@@ -3088,9 +3129,25 @@ fn stamp_creature(
         Some(memory) if memory.fade_at(seconds) < 1.0 => memory.layers_at(seconds),
         _ => vec![(state, 1.0)],
     };
-    let layers: Vec<(Pose<'_>, f32)> = states.iter().map(|&(st, w)| (pose_of(st), w)).collect();
+    let mut layers: Vec<(Pose<'_>, f32)> = Vec::with_capacity(states.len() + 1);
+    let meal = match meal {
+        Some((bout, mw)) if mw > 0.0 => Some((bout, mw.min(1.0))),
+        _ => None,
+    };
+    let mode_weight = meal.map_or(1.0, |(_, mw)| 1.0 - mw);
+    if mode_weight > 0.0 {
+        for &(st, w) in &states {
+            layers.push((pose_of(st), w * mode_weight));
+        }
+    }
+    if let Some((bout, mw)) = meal {
+        layers.push((pack.clips[form * 4 + FEED_STATE].sample(bout), mw));
+    }
     stamp_layers(canvas, anchor, heading, &layers, scale, 1.0, Mask::None, scratch);
 }
+
+/// The clip index [`state_of`] gives a `Feeding` organism: the authored `feed` loop.
+pub const FEED_STATE: usize = 2;
 
 /// Add one ground layer to the image, each pixel scaled by `1 − `[`w_soil`].
 ///
