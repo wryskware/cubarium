@@ -85,6 +85,10 @@ use crate::present::{
 };
 use crate::rng::SplitMix64;
 
+#[cfg(test)]
+#[path = "vine_strips_present_tests.rs"]
+mod vine_strips_present_tests;
+
 // --- Plant constants ---------------------------------------------------------------
 //
 // Every constant here is review-tunable from a viewing session: they set how much of a
@@ -1115,9 +1119,10 @@ pub fn plant_bend_budget(plant: &Plant) -> f64 {
 /// lower one: [`Bend::profile`] is monotone non-decreasing in `H`, and raising `base` raises
 /// every texel's `H` by the same amount, so each texel's share of the amplitude can only grow
 /// with `base` and its headroom can only shrink. Measuring the top placement therefore admits
-/// every tile below it. A climber (a family with no base and no crown) is measured as a
-/// trunk. One number per family, measured once: every part of a column bends by the same
-/// amplitude, so they must all be inside the same budget.
+/// every tile below it. An opted-in vine is measured from its derived trunk at tile 9 and
+/// endpoint at tile 10, instead of its unrendered original trunk. An unflagged climber
+/// retains its original trunk budget. One number per family, measured once: every part
+/// of a column bends by the same amplitude, so they must all be inside the same budget.
 pub fn tall_bend_budget(plant: &TallPlant) -> f64 {
     let worst = |clip: &Clip, i: f64| {
         clip.frames
@@ -1126,6 +1131,11 @@ pub fn tall_bend_budget(plant: &TallPlant) -> f64 {
             .fold(f64::INFINITY, f64::min)
     };
     let top = f64::from(TALL_MAX_SEGMENTS);
+    if let Some(vine) = &plant.vine_strips {
+        // The original authored trunk is not drawn on this path and must not continue
+        // to impose its old narrow endpoint budget on the derived, recentered pieces.
+        return worst(&vine.trunk, top).min(worst(&vine.endpoint, top + 1.0));
+    }
     let mut budget = worst(&plant.trunk, top);
     if let Some(base) = &plant.base {
         budget = budget.min(worst(base, 0.0));
@@ -2009,7 +2019,11 @@ pub fn tall_grown_px(height: f64) -> f64 {
 /// - the cap ([`TallPlant::cap`], never `crown`) glides at [`tall_anchor_at`]`(height + 1)`
 ///   at `TALL_OPACITY · fade`; at rest on a whole cell it sits where the crown used to;
 /// - vine tiles at odd `i` own rows [`TALL_VINE_FLOOR`]`..`[`TALL_VINE_TOP`] (the topmost
-///   possible tile up to 16) with the same cut, at `TALL_OPACITY · fade`.
+///   possible tile up to 16) with the same cut, at `TALL_OPACITY · fade`. An explicitly
+///   opted-in vine uses its derived trunk through tile9 with top12, then its separately
+///   cached endpoint at tile10 for global heights40..44. That patch retains tile9's
+///   owning chart, tile10's support center and an Axial grown ceiling; its transparent
+///   source rows supply the lower boundary without a second strip-start envelope.
 ///
 /// Because no row is painted twice, the image is continuous in `height`: at `height → 0`
 /// everything fades to nothing, and at a whole `height = k` the tile `k + 1` enters with
@@ -2080,18 +2094,46 @@ fn draw_column(
         stamp(cap, height + 1.0, Mask::None, TALL_OPACITY * fade);
     }
     if let (true, Some(vine)) = (column.vine, vine) {
+        let strips = vine.vine_strips.as_ref();
+        let trunk = strips.map_or(&vine.trunk, |v| &v.trunk);
         for i in (1..=TALL_MAX_SEGMENTS).step_by(2) {
-            let top = if i + 2 > TALL_MAX_SEGMENTS { TILE_ROWS } else { TALL_VINE_TOP };
+            let top = if i + 2 > TALL_MAX_SEGMENTS && strips.is_none() { TILE_ROWS } else { TALL_VINE_TOP };
             let reveal = local(i).min(top);
             if reveal <= TALL_VINE_FLOOR {
                 break;
             }
             stamp(
-                &vine.trunk,
+                trunk,
                 f64::from(i),
                 Mask::Strip { floor: TALL_VINE_FLOOR, reveal },
                 TALL_OPACITY * fade,
             );
+        }
+        if let Some(strips) = strips {
+            let i = f64::from(TALL_MAX_SEGMENTS) + 1.0;
+            let clip = &strips.endpoint;
+            let reveal = grown - tall_bend_base(i);
+            // Endpoint pixels own global heights40..44. Skip the empty patch below its
+            // first bilinear support without adding a new Strip start envelope at40.
+            if reveal > 7.0 {
+                let pose = clip.sample(seconds + tall_phase_of(column.face, column.cx, clip.seconds));
+                cubarium_render::stamp_pose_in_chart(
+                    canvas,
+                    tall_anchor(column.face, column.cx, TALL_MAX_SEGMENTS),
+                    tall_anchor_at(column.face, column.cx, i),
+                    heading,
+                    pose,
+                    TALL_OPACITY * fade,
+                    Mask::Axial { reveal },
+                    Bend {
+                        amplitude,
+                        base: tall_bend_base(i),
+                        root: TALL_BEND_ROOT,
+                        length: TALL_BEND_LENGTH,
+                    },
+                    scratch,
+                );
+            }
         }
     }
 }

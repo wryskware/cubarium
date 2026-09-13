@@ -556,7 +556,8 @@
 			"name": "vinecoil",
 			"part": "trunk",
 			"row": 6,
-			"seconds": 3.0
+			"seconds": 3.0,
+			"vine_strips": "period4_endpoint_v1"
 		}
 	],
 	"tall_atlas": "tall.png",

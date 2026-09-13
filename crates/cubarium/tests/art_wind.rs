@@ -616,7 +616,11 @@ fn every_measured_budget_matches_an_independent_sweep_of_bend_headroom() {
     assert_eq!(tall_bend_base(0.0), -8.0, "a base tile's bottom edge is 8 px below the horizon");
     assert_eq!(trunk_base, 4.0 * f64::from(TALL_MAX_SEGMENTS) - 8.0);
     for plant in &art.tall {
-        let mut want = column_over(&plant.trunk, trunk_base);
+        // Opted-in vines render a derived pair, not the original authored trunk.
+        // Retain the independent raw-clip check too by explicitly testing legacy mode.
+        let mut want = if let Some(vine) = &plant.vine_strips {
+            column_over(&vine.trunk, trunk_base).min(column_over(&vine.endpoint, cap_base))
+        } else { column_over(&plant.trunk, trunk_base) };
         if let Some(base) = &plant.base {
             want = want.min(column_over(base, tall_bend_base(0.0)));
         }
@@ -626,12 +630,16 @@ fn every_measured_budget_matches_an_independent_sweep_of_bend_headroom() {
         assert_eq!(
             tall_bend_budget(plant),
             want,
-            "{}'s column budget is not the smallest headroom of base, trunk and cap",
+            "{}'s column budget is not the smallest headroom of its rendered parts",
             plant.name
         );
         assert_eq!(presenter.bend_budget(&plant.name), want, "{} is not in the table", plant.name);
         assert!(want > 0.0, "{} cannot move at all", plant.name);
     }
+    let mut legacy = pack();
+    let vine = legacy.tall.iter_mut().find(|p| p.name == VINE_PLANT).unwrap();
+    assert!(vine.vine_strips.take().is_some());
+    assert_eq!(tall_bend_budget(vine), column_over(&vine.trunk, trunk_base));
 
     // The table covers the whole pack and nothing else, and an unmeasured name stands still.
     assert_eq!(presenter.bend_budgets().len(), art.plants.len() + art.tall.len());
@@ -730,7 +738,19 @@ fn every_shipped_plant_and_column_frame_draws_completely_at_its_own_budget() {
         if let Some(base) = &plant.base {
             sweep(&plant.name, base, budget, TALL_BEND_ROOT, TALL_BEND_LENGTH, tall_bend_base(0.0));
         }
-        sweep(&plant.name, &plant.trunk, budget, TALL_BEND_ROOT, TALL_BEND_LENGTH, trunk_base);
+        if let Some(vine) = &plant.vine_strips {
+            sweep(&plant.name, &vine.trunk, budget, TALL_BEND_ROOT, TALL_BEND_LENGTH, trunk_base);
+            sweep(&plant.name, &vine.endpoint, budget, TALL_BEND_ROOT, TALL_BEND_LENGTH,
+                tall_bend_base(f64::from(TALL_MAX_SEGMENTS) + 1.0));
+            // Also preserve the legacy raw-image footprint check at its own admission;
+            // the opt-in intentionally no longer tries to bend this unrendered image.
+            let raw_budget = plant.trunk.frames.iter()
+                .map(|f| f.bend_headroom(TALL_BEND_ROOT, TALL_BEND_LENGTH, trunk_base))
+                .fold(f64::INFINITY, f64::min);
+            sweep(&plant.name, &plant.trunk, raw_budget, TALL_BEND_ROOT, TALL_BEND_LENGTH, trunk_base);
+        } else {
+            sweep(&plant.name, &plant.trunk, budget, TALL_BEND_ROOT, TALL_BEND_LENGTH, trunk_base);
+        }
         if let Some(cap) = &plant.cap {
             sweep(
                 &plant.name,
@@ -937,6 +957,7 @@ fn striped_tall() -> TallPlant {
         crown: None,
         cap: Some(one_frame(striped_tile(0..4, TRUNK_COLUMN, STRIPE_WIDTH))),
         tail_row: 16,
+        vine_strips: None,
     }
 }
 
