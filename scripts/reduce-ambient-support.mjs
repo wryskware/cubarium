@@ -1,4 +1,4 @@
-// Read-only, pinned reduction of the 3e9bc2f two-hour ambient rainfall experiment.
+// Read-only, pinned reduction of the 3e9bc2f ambient rainfall experiment.
 // No simulation, artifact writes, semantic snapshot decoding or biological acceptance.
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -12,6 +12,11 @@ import {inspectSnapshot} from './prepare-hunter-worlds.mjs';
 export const CONTRACT = Object.freeze({build:'0.1.0+3e9bc2f',
   sha:'17b624087fb51874f6abe523860abec5cbfb47854ff917a0ca23804c6fc91af0',
   opening:144000,ticks:144000,cadence:200,start:60,period:2400});
+const HORIZONS = Object.freeze({'two-hour':144000,'twenty-four-hour':1728000,'seventy-two-hour':5184000});
+export function contractFor(horizon='two-hour') {
+  assert(Object.hasOwn(HORIZONS,horizon),'unsupported explicit horizon');
+  return horizon==='two-hour'?CONTRACT:Object.freeze({...CONTRACT,ticks:HORIZONS[horizon]});
+}
 export const ARMS = ['rain100_none','rain100_standard','rain100_generous','rain90_none','rain90_standard','rain90_generous'];
 export const TARGETS = [{face:0,u:32,v:48},{face:0,u:63.5,v:48},{face:1,u:32,v:63.5}];
 const CELLS = [25,25,16];
@@ -31,10 +36,11 @@ export function verifySeeds(rows) {
   assert.equal(rows?.length,12,'all twelve seeds required');
   assert.deepEqual(rows.map(x=>x.seed).sort((a,b)=>a-b),Array.from({length:12},(_,i)=>i+1),'seed identity');
 }
-export function verifyManifest(m) {
+export function verifyManifest(m,horizon='two-hour') {
+  const contract=contractFor(horizon);
   assert.equal(m.kind,'six-arm-ambient-rainfall-comparison');
   assert.equal(m.build,CONTRACT.build);assert.equal(m.executable_sha256,CONTRACT.sha);
-  assert.equal(m.horizon,'two-hour');assert.equal(m.ticks,CONTRACT.ticks);assert.equal(m.sample_every,200);
+  assert.equal(m.horizon,horizon);assert.equal(m.ticks,contract.ticks);assert.equal(m.sample_every,200);
   assert.deepEqual(m.arms,ARMS);
   assert.equal(m.factors.support.field,'config.water.rain_rate');
   assert.equal(m.factors.support.candidate_fraction,.9);
@@ -73,10 +79,12 @@ export function verifyOpening(o,reference,index,base,source) {
   } else assert.notEqual(o.state_hash_before_change,o.state_hash_after_change);
   assert.match(o.config_sha256,/^[a-f0-9]{64}$/);
 }
-export function verifySummary(a,o,base,source) {
+export function verifySummary(a,o,base,source,horizon='two-hour') {
+  const contract=contractFor(horizon);
   for(const flag of ['technical_complete','complete_experiment_measurement','audit_passed']) assert.equal(a[flag],true,flag);
-  assert.equal(a.arm,o.arm);assert.equal(a.horizon,'two-hour');assert.equal(a.termination,'planned_horizon');
-  assert.equal(a.planned_ticks,144000);assert.equal(a.elapsed_ticks,144000);assert.equal(a.closing_tick,288000);
+  assert.equal(a.arm,o.arm);assert.equal(a.horizon,horizon);assert.equal(a.termination,'planned_horizon');
+  assert.equal(a.planned_ticks,contract.ticks);assert.equal(a.elapsed_ticks,contract.ticks);
+  assert.equal(a.closing_tick,contract.opening+contract.ticks);
   assert.deepEqual(a.pre_intervention_baseline,base);verifyBaseline(base);assert.equal(a.rain_rate,o.arm_rain_rate);
   for(const [v,limit] of [[a.max_absolute_drift.material,base.limits.material],
     [a.max_absolute_drift.water,base.limits.water],[a.corrected_energy_drift,base.limits.energy],
@@ -91,7 +99,7 @@ export function verifySummary(a,o,base,source) {
   assert(a.population_min<=a.closing_population&&a.closing_population<=a.population_max);
   assert(a.surviving_opening_cohorts<=Math.min(source.population,a.closing_population));
   if(a.first_extinction_tick!==null) {
-    count(a.first_extinction_tick);assert(a.first_extinction_tick>=144000&&a.first_extinction_tick<=288000);
+    count(a.first_extinction_tick);assert(a.first_extinction_tick>=contract.opening&&a.first_extinction_tick<=contract.opening+contract.ticks);
     assert.equal(a.population_min,0);assert.equal(a.closing_population,0);
   } else assert(a.population_min>0);
   hash64(a.closing_state_hash);hash64(a.closing_ecology_hash);
@@ -101,9 +109,13 @@ export function verifySummary(a,o,base,source) {
   close(w.closing_sampled-base.water,w.total_rain_in-w.evap_out,base.limits.water,'closing water budget');
 }
 export class Receipts {
-  constructor(dose) {this.dose=dose;this.rows=[];this.depth=0;this.outcomes={applied:0,rejected:0};this.reasons={};}
+  constructor(dose,horizon='two-hour') {
+    this.contract=contractFor(horizon);
+    this.expected=Math.ceil((this.contract.ticks-this.contract.start)/this.contract.period);
+    this.dose=dose;this.rows=[];this.depth=0;this.outcomes={applied:0,rejected:0};this.reasons={};
+  }
   add(r) {
-    assert.notEqual(this.dose,null,'no-input arm received care');assert(this.rows.length<60,'excess receipts');
+    assert.notEqual(this.dose,null,'no-input arm received care');assert(this.rows.length<this.expected,'excess receipts');
     const n=this.rows.length,elapsed=60+2400*n,target=n%3;
     assert.equal(r.elapsed,elapsed);assert.equal(r.tick,144000+elapsed);assert.equal(r.kind,'rain');
     assert.equal(r.target_index,target);assert.deepEqual(r.target,TARGETS[target]);assert.equal(r.dose_permille,this.dose);
@@ -123,7 +135,7 @@ export class Receipts {
     this.depth+=depth;this.rows.push({elapsed,depth,cumulative:this.depth});
   }
   finish(a,limit) {
-    assert.equal(this.rows.length,this.dose===null?0:60,'missing receipts');
+    assert.equal(this.rows.length,this.dose===null?0:this.expected,'missing receipts');
     assert.equal(a.care.dose_permille,this.dose);assert.equal(a.care.attempts,this.rows.length);
     assert.equal(a.care.applied,this.outcomes.applied);assert.equal(a.care.rejected,this.outcomes.rejected);assert.equal(a.care.partial,0);
     const l=a.care.ledgers;assert.equal(l.admitted_seq,this.rows.length);assert.deepEqual(l.showers,[]);
@@ -149,14 +161,16 @@ export function verifyLocal(l,prior,elapsed,flood,water) {
   assert(l.global_drowned_cell_ticks<=l.global_flooded_cell_ticks);assert(l.global_drowned_cells_now<=l.global_flooded_cells_now);
 }
 export class Samples {
-  constructor(source,o,a,receipts) {
+  constructor(source,o,a,receipts,horizon='two-hour') {
+    this.contract=contractFor(horizon);this.expected=this.contract.ticks/this.contract.cadence;
+    assert.deepEqual(receipts.contract,this.contract,'receipt/sample horizon mismatch');
     Object.assign(this,{source,o,a,receipts,n:0,previous:null,births:0,capRejections:0,deaths:{starvation:0,age:0,collapse:0},
       sums:{population:0,occupied_cells:0,producer:0,fruit:0},forms:Array(8).fill(0),
       waterFaces:Array(5).fill(0),localSums:Array.from({length:3},()=>({producer:0,fruit:0})),
       minima:source.population_by_form.slice(),firstZero:source.population_by_form.map(n=>n===0?144000:null),rain:0,evap:0});
   }
   add(s) {
-    assert(this.n<720,'extra sample');const elapsed=(this.n+1)*200,prior=this.previous,limit=this.a.pre_intervention_baseline.limits.water;
+    assert(this.n<this.expected,'extra sample');const elapsed=(this.n+1)*200,prior=this.previous,limit=this.a.pre_intervention_baseline.limits.water;
     assert.equal(s.elapsed,elapsed);assert.equal(s.tick,144000+elapsed);
     count(s.population);vector(s.population_by_form,8,count);vector(s.population_by_face,5,count);
     assert.equal(total(s.population_by_form),s.population);assert.equal(total(s.population_by_face),s.population);
@@ -190,7 +204,7 @@ export class Samples {
     this.previous=s;this.n++;
   }
   finish() {
-    assert.equal(this.n,720,'missing samples');const s=this.previous,a=this.a,limit=a.pre_intervention_baseline.limits.water;
+    assert.equal(this.n,this.expected,'missing samples');const s=this.previous,a=this.a,limit=a.pre_intervention_baseline.limits.water;
     assert.equal(s.state_hash,a.closing_state_hash);assert.equal(s.ecology_hash,a.closing_ecology_hash);
     assert.equal(s.population,a.closing_population);assert.equal(s.surviving_opening_cohorts,a.surviving_opening_cohorts);
     assert.equal(s.maximum_descendant_depth,a.maximum_descendant_depth);assert.deepEqual(s.local,a.local);
@@ -201,16 +215,16 @@ export class Samples {
       population_min:a.population_min,population_max:a.population_max,first_extinction_tick:a.first_extinction_tick,
       births:this.births,deaths:this.deaths,cap_rejections:this.capRejections,
       closing_state_hash:a.closing_state_hash,closing_snapshot_sha256:a.closing_snapshot_sha256,
-      sampled_means:Object.fromEntries(Object.entries(this.sums).map(([k,v])=>[k,v/720])),
+      sampled_means:Object.fromEntries(Object.entries(this.sums).map(([k,v])=>[k,v/this.expected])),
       forms:this.forms.map((sum,i)=>({form:i,opening:this.source.population_by_form[i],closing:s.population_by_form[i],
-        sampled_mean:sum/720,sampled_min:this.minima[i],first_sampled_zero:this.firstZero[i],
+        sampled_mean:sum/this.expected,sampled_min:this.minima[i],first_sampled_zero:this.firstZero[i],
         newly_sampled_zero:this.source.population_by_form[i]>0&&this.firstZero[i]!==null})),
       surviving_opening_cohorts:a.surviving_opening_cohorts,maximum_descendant_depth:a.maximum_descendant_depth,
-      water:a.water,mean_water_over_ticks:a.local.global_water_tick_integral/144000,
-      mean_sampled_water_by_face:this.waterFaces.map(v=>v/720),
+      water:a.water,mean_water_over_ticks:a.local.global_water_tick_integral/this.contract.ticks,
+      mean_sampled_water_by_face:this.waterFaces.map(v=>v/this.expected),
       global_flooded_cell_ticks:a.local.global_flooded_cell_ticks,global_drowned_cell_ticks:a.local.global_drowned_cell_ticks,
-      local:a.local.targets.map((r,i)=>({...r,mean_water_over_ticks:r.water_tick_integral/144000,
-        mean_sampled_producer:this.localSums[i].producer/720,mean_sampled_fruit:this.localSums[i].fruit/720})),
+      local:a.local.targets.map((r,i)=>({...r,mean_water_over_ticks:r.water_tick_integral/this.contract.ticks,
+        mean_sampled_producer:this.localSums[i].producer/this.expected,mean_sampled_fruit:this.localSums[i].fruit/this.expected})),
       receipts:{attempts:this.receipts.rows.length,...this.receipts.outcomes,reasons:this.receipts.reasons,scheduled_depth:this.receipts.depth},
       audits:{legacy_passed:a.legacy_audit_passed,raw_energy:a.max_absolute_drift.energy,
         material:a.max_absolute_drift.material,water:a.max_absolute_drift.water,corrected_energy:a.corrected_energy_drift,
@@ -235,15 +249,15 @@ export function contrasts(arms) {
   return {support,care,interaction:[1,2].map(i=>({dose:DOSES[i],sampled_population:
     (arms[i+3].sampled_means.population-arms[3].sampled_means.population)-(arms[i].sampled_means.population-arms[0].sampled_means.population)}))};
 }
-export async function reduceAmbient(directory) {
+export async function reduceAmbient(directory,horizon='two-hour') {
   const root=resolve(directory), failures=[], seeds=[];
   const refusal=()=>({kind:'ambient-support-reduction',artifact_checks_passed:false,biological_acceptance:false,failures,seeds});
-  let manifest,aggregate;
-  try {manifest=await json(join(root,'manifest.json'));verifyManifest(manifest);
+  let manifest,aggregate,contract;
+  try {contract=contractFor(horizon);manifest=await json(join(root,'manifest.json'));verifyManifest(manifest,horizon);
     assert.equal(sha(await readFile(join(root,'ambient_compare.frozen'))),CONTRACT.sha);
     aggregate=await json(join(root,'summary.json'));verifySeeds(aggregate.seeds);
     for(const k of ['technical_complete','complete_experiment_measurement','audit_passed'])assert.equal(aggregate[k],true,`aggregate ${k}`);
-    assert.equal(aggregate.horizon,'two-hour');assert.equal(aggregate.ticks,144000);
+    assert.equal(aggregate.horizon,horizon);assert.equal(aggregate.ticks,contract.ticks);
   } catch(e) {
     failures.push({scope:'run',error:e.message});
     for(let seed=1;seed<=12;seed++) {try{const r=await json(join(root,`seed-${seed}/result.json`));seeds.push({seed,available:true,technical_complete:r.technical_complete,failure:r.failure,
@@ -267,11 +281,11 @@ export async function reduceAmbient(directory) {
         try {
           const path=join(dir,name),o=openings[i],a=await json(join(path,'summary.json'));
           verifyOpening(o,openings[0],i,result.pre_intervention_baseline,source);assert.deepEqual(a,result.arms[i]);
-          verifySummary(a,o,result.pre_intervention_baseline,source);
+          verifySummary(a,o,result.pre_intervention_baseline,source,horizon);
           const snap=inspectSnapshot(await readFile(join(path,'closing.cubw')),12);
           assert.equal(snap.sha256,a.closing_snapshot_sha256);assert.equal(snap.state_hash,a.closing_state_hash);assert.equal(snap.build,CONTRACT.build);
-          const receipts=new Receipts(DOSES[i]);await lines(join(path,'receipts.jsonl'),r=>receipts.add(r));receipts.finish(a,result.pre_intervention_baseline.limits.water);
-          const samples=new Samples(source,o,a,receipts);await lines(join(path,'samples.jsonl'),s=>samples.add(s));arms.push({arm:name,verified:true,...samples.finish()});
+          const receipts=new Receipts(DOSES[i],horizon);await lines(join(path,'receipts.jsonl'),r=>receipts.add(r));receipts.finish(a,result.pre_intervention_baseline.limits.water);
+          const samples=new Samples(source,o,a,receipts,horizon);await lines(join(path,'samples.jsonl'),s=>samples.add(s));arms.push({arm:name,verified:true,...samples.finish()});
         } catch(e) {failures.push({seed,arm:name,error:e.message});arms.push({arm:name,verified:false,error:e.message});}
       }
       if(arms.every(a=>a.verified)) {
@@ -289,10 +303,14 @@ export async function reduceAmbient(directory) {
     } catch(e) {failures.push({seed,error:e.message});seeds.push({seed,verified:false,arms});}
   }
   if(failures.length)return refusal();
-  return {kind:'ambient-support-reduction',artifact_checks_passed:true,biological_acceptance:false,contract:CONTRACT,
+  return {kind:'ambient-support-reduction',artifact_checks_passed:true,biological_acceptance:false,contract,
     limits:'Recorded strict audits and snapshot envelopes checked, not semantic snapshot decoding or independent material/energy transaction replay. Biology means/minima/form losses are 200-tick sampled, not per-tick trajectories. Water integrals are actual per-tick depth-time. Ancestry means descendants of organisms alive at opening, not original founder lineage. No claim of unattended viability or required care.',seeds};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href) {
-  if(process.argv.length!==3) {console.error('Usage: node scripts/reduce-ambient-support.mjs RUN_DIRECTORY');process.exitCode=1;}
-  else {const result=await reduceAmbient(process.argv[2]);console.log(JSON.stringify(result,null,2));if(!result.artifact_checks_passed)process.exitCode=1;}
+  if(process.argv.length!==3&&(process.argv.length!==5||process.argv[3]!=='--horizon')) {
+    console.error('Usage: node scripts/reduce-ambient-support.mjs RUN_DIRECTORY [--horizon two-hour|twenty-four-hour|seventy-two-hour]');process.exitCode=1;
+  } else {
+    const result=await reduceAmbient(process.argv[2],process.argv[4]??'two-hour');
+    console.log(JSON.stringify(result,null,2));if(!result.artifact_checks_passed)process.exitCode=1;
+  }
 }

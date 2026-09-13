@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {CONTRACT,ARMS,TARGETS,verifySeeds,verifyManifest,verifyBaseline,verifyOpening,verifySummary,
+import {CONTRACT,contractFor,ARMS,TARGETS,verifySeeds,verifyManifest,verifyBaseline,verifyOpening,verifySummary,
   Receipts,Samples,verifyLocal,contrasts,reduceAmbient} from './reduce-ambient-support.mjs';
 
 const clone=structuredClone;
@@ -135,3 +135,54 @@ test('missing run refuses full pass and retains twelve missing seed cases',async
     assert.equal(failed.seeds[5].arms[0].error,'retained fault');assert.equal(failed.seeds.length,12);
   }finally{await rm(dir,{recursive:true});}
 });
+
+test('long horizons require an explicit pinned selection, never inferred or relabelled',()=>{
+  for(const [horizon,ticks] of [['twenty-four-hour',1728000],['seventy-two-hour',5184000]]) {
+    assert.deepEqual(contractFor(horizon),{...CONTRACT,ticks});
+    const m=manifest();Object.assign(m,{horizon,ticks});
+    verifyManifest(m,horizon);assert.throws(()=>verifyManifest(m));
+    assert.throws(()=>verifyManifest(manifest(),horizon));
+    for(const mutate of [x=>x.ticks--,x=>x.horizon='two-hour',x=>x.sample_every=2400,
+      x=>x.build='other',x=>x.factors.dose.schedule.period_ticks=4800]) {
+      const bad=clone(m);mutate(bad);assert.throws(()=>verifyManifest(bad,horizon));
+    }
+    const a=summary();Object.assign(a,{horizon,planned_ticks:ticks,elapsed_ticks:ticks,closing_tick:144000+ticks});
+    verifySummary(a,opening(),baseline(),source,horizon);
+    assert.throws(()=>verifySummary(a,opening(),baseline(),source));
+    for(const mutate of [x=>x.elapsed_ticks=144000,x=>x.planned_ticks=144000,x=>x.closing_tick=288000,
+      x=>x.pre_intervention_baseline.limits.water*=12,x=>x.corrected_energy_drift=2e-6]) {
+      const bad=clone(a);mutate(bad);assert.throws(()=>verifySummary(bad,opening(),baseline(),source,horizon));
+    }
+    Object.assign(a,{population_min:0,closing_population:0,surviving_opening_cohorts:0,first_extinction_tick:a.closing_tick});
+    verifySummary(a,opening(),baseline(),source,horizon);
+    a.first_extinction_tick++;assert.throws(()=>verifySummary(a,opening(),baseline(),source,horizon));
+  }
+  for(const h of ['auto','24h','ten-minute','constructor','__proto__',1728000])assert.throws(()=>contractFor(h));
+});
+
+for(const [horizon,ticks,attempts] of [['twenty-four-hour',1728000,720],['seventy-two-hour',5184000,2160]]) {
+  test(`${horizon}: exact receipt count, last shower and paid dose totals`,()=>{
+    const r=new Receipts(1500,horizon);
+    for(let i=0;i<attempts-1;i++)r.add(receipt(i,1500));
+    assert.throws(()=>r.finish(summary(),1e-7));
+    const last=receipt(attempts-1,1500);assert(last.receipt.outcome.Applied.ends_tick<144000+ticks);r.add(last);
+    const a=summary();Object.assign(a.care,{dose_permille:1500,attempts,applied:attempts});
+    Object.assign(a.care.ledgers,{admitted_seq:attempts,rain_depth_in:attempts*6});
+    a.water.manual_attributed=attempts*6;r.finish(a,1e-7);
+    assert.throws(()=>r.add(receipt(attempts,1500)));
+    const no=new Receipts(null,horizon);no.finish(summary(),1e-7);assert.throws(()=>no.add(receipt()));
+  });
+  test(`${horizon}: complete streaming census, correct means, no short-prefix completion`,()=>{
+    const a=summary();Object.assign(a,{horizon,planned_ticks:ticks,elapsed_ticks:ticks,closing_tick:144000+ticks,local:local(ticks)});
+    const r=new Samples(source,opening(),a,new Receipts(null,horizon),horizon);
+    for(let i=1;i<=ticks/200;i++) {
+      r.add(sample(i*200));if(i===720)assert.throws(()=>r.finish());
+    }
+    const out=r.finish();assert.equal(out.sampled_means.population,2);assert.equal(out.forms[0].sampled_mean,1);
+    assert.equal(out.mean_water_over_ticks,10);assert.deepEqual(out.mean_sampled_water_by_face,[10,0,0,0,0]);
+    assert.equal(out.forms[4].newly_sampled_zero,false);assert.equal(out.local[0].mean_sampled_producer,0);
+    assert.throws(()=>r.add(sample(ticks+200)));
+    r.a.local=local(144000);assert.throws(()=>r.finish());
+    assert.throws(()=>new Samples(source,opening(),a,new Receipts(null),horizon));
+  });
+}
