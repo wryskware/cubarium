@@ -310,8 +310,14 @@ node scripts/fauna-development-flow.mjs \
   captures/fauna-development-flow-pilots-2026-09-13/seed-2.json
 ```
 
-23 reducer tests, Astra's 4 independent probes run unchanged, and the reduction
-of both real pilots all passed on 2026-09-13.
+Root's follow-up found one remaining coverage gap: a nonempty, final-only census
+could still pass. The reducer now requires exactly1440 samples at the retained
+100-tick cadence, with nonnegative safe-integer totals and all eight form counts.
+The synthetic valid fixture now carries every scheduled sample, reconstructed
+from its members' birth/death boundaries, rather than only the final census.
+25 reducer tests, Astra's4 independent probes run unchanged, and the reduction
+of both real pilots all passed on2026-09-13. This changes only artifact validation,
+not biology or the executable used for the replays.
 
 ## Outputs are reserved before anything is read
 

@@ -20,6 +20,7 @@ export const SNAPSHOT_SCHEMA = 9;
 export const BASE_REVISION = '1d7b386';
 export const BUILD_LABEL = '0.1.0+1d7b386';
 export const HORIZON_TICKS = 144000;
+export const CENSUS_EVERY = 100;
 export const RESIDUAL_TOLERANCE = 1e-12;
 export const FORM_SLOTS = 8;
 /// Forms 0-3 are the ordinary fauna of the pre-hunter baseline. 4-7 never exist there; they
@@ -50,7 +51,7 @@ const refuse = (m) => {
 };
 
 const isFiniteNumber = (v) => typeof v === 'number' && Number.isFinite(v);
-const isCount = (v) => Number.isInteger(v) && v >= 0;
+const isCount = (v) => Number.isSafeInteger(v) && v >= 0;
 /// The three stocks are a closed set. A residual that silently omits one would read as a
 /// clean reconciliation for a stock nothing ever checked, so the keys are pinned exactly
 /// rather than iterated over whatever happens to be present.
@@ -169,15 +170,21 @@ function checkGates(a) {
   if (!Array.isArray(series) || series.length === 0) refuse('census cross-check carries no reconstructed series');
   if (series.length !== census.samples_compared)
     refuse(`census claims ${census.samples_compared} samples but carries ${series.length}`);
+  if (series.length !== HORIZON_TICKS / CENSUS_EVERY)
+    refuse(`census carries ${series.length} samples; complete coverage requires ${HORIZON_TICKS / CENSUS_EVERY} at ${CENSUS_EVERY}-tick cadence`);
   let previousTick = -1;
-  for (const sample of series) {
+  for (const [index, sample] of series.entries()) {
     if (!Array.isArray(sample) || sample.length !== 3)
       refuse('each census sample must be [tick, population_by_form, population]');
     const [tick, byForm, population] = sample;
     if (!isCount(tick) || tick <= previousTick) refuse(`census sample tick ${tick} is not strictly increasing`);
     previousTick = tick;
+    if (tick !== (index + 1) * CENSUS_EVERY)
+      refuse(`census sample ${index} tick ${tick} breaks the ${CENSUS_EVERY}-tick cadence`);
     if (!Array.isArray(byForm) || byForm.length !== FORM_SLOTS)
       refuse(`census sample at tick ${tick} drops form slots; all ${FORM_SLOTS} are kept`);
+    if (!isCount(population) || !byForm.every(isCount))
+      refuse(`census sample at tick ${tick} has counts that are not nonnegative safe integers`);
     if (byForm.reduce((s, n) => s + n, 0) !== population)
       refuse(`census sample at tick ${tick} has a form census that does not sum to its population`);
   }

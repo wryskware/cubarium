@@ -229,10 +229,16 @@ function goodArtifact(members = [member(), descendant(1, 1, { slot: 0, generatio
       census_cross_check: {
         passed: true,
         label: 'census cross-check',
-        samples_compared: 1,
+        samples_compared: HORIZON_TICKS / 100,
         // The series IS the evidence behind samples_compared; the reducer refuses a count
         // that carries no series, or one that stops short of the horizon.
-        reconstructed_series: [[HORIZON_TICKS, byForm, alive]],
+        reconstructed_series: Array.from({ length: HORIZON_TICKS / 100 }, (_, index) => {
+          const tick = (index + 1) * 100;
+          const counts = new Array(FORM_SLOTS).fill(0);
+          for (const m of members)
+            if (m.born_tick <= tick && (!m.death || m.death.event_tick > tick)) counts[m.form]++;
+          return [tick, counts, counts.reduce((sum, n) => sum + n, 0)];
+        }),
         reconstructed_series_note: '[tick, population_by_form (8 slots), population]',
         first_disagreeing_sample: null,
         closing: {
@@ -415,7 +421,7 @@ test('the closing census must reconstruct from the members themselves', () => {
     g.closing.retained_population = 1;
     g.closing.reconstructed_by_form = [...byForm];
     g.closing.retained_by_form = [...byForm];
-    g.reconstructed_series = [[HORIZON_TICKS, byForm, 1]];
+    g.reconstructed_series[g.reconstructed_series.length - 1] = [HORIZON_TICKS, byForm, 1];
   }, /censored at the horizon but the closing census reconstructs/);
 });
 
@@ -425,16 +431,37 @@ test('a sample count is only as good as the series behind it', () => {
     a.gates.census_cross_check.samples_compared = 1440;
     a.gates.census_cross_check.reconstructed_series = [];
   }, /carries no reconstructed series/);
-  refuses((a) => { a.gates.census_cross_check.samples_compared = 1440; }, /claims 1440 samples but carries 1/);
+  refuses((a) => { a.gates.census_cross_check.samples_compared = 1; }, /claims 1 samples but carries 1440/);
   refuses((a) => { delete a.gates.census_cross_check.reconstructed_series; }, /carries no reconstructed series/);
-  refuses((a) => { a.gates.census_cross_check.reconstructed_series[0][0] = 1000; }, /short of the horizon/);
+  refuses((a) => { a.gates.census_cross_check.reconstructed_series[0][0] = 1000; }, /breaks the 100-tick cadence/);
   refuses((a) => { a.gates.census_cross_check.reconstructed_series[0][1].pop(); }, /drops form slots/);
   refuses((a) => { a.gates.census_cross_check.reconstructed_series[0][2] = 7; }, /does not sum to its population/);
   refuses((a) => {
     const g = a.gates.census_cross_check;
-    g.reconstructed_series = [g.reconstructed_series[0], g.reconstructed_series[0]];
-    g.samples_compared = 2;
+    g.reconstructed_series[1] = g.reconstructed_series[0];
   }, /not strictly increasing/);
+});
+
+test('complete coverage requires every scheduled census, not just a valid final sample', () => {
+  refuses((a) => {
+    const g = a.gates.census_cross_check;
+    g.reconstructed_series = [g.reconstructed_series.at(-1)];
+    g.samples_compared = 1;
+  }, /complete coverage requires 1440 at 100-tick cadence/);
+  // Preserve the count, ordering and final horizon while moving an interior sample.
+  refuses((a) => { a.gates.census_cross_check.reconstructed_series[99][0]++; }, /breaks the 100-tick cadence/);
+  refuses((a) => { a.gates.census_cross_check.reconstructed_series.at(-1)[0]--; }, /breaks the 100-tick cadence/);
+});
+
+test('census counts cannot hide negative, fractional or unsafe form counts in a valid total', () => {
+  for (const n of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN]) {
+    refuses((a) => {
+      const row = a.gates.census_cross_check.reconstructed_series[0];
+      row[1][0] = n;
+      row[1][1] = -n;
+    }, /not nonnegative safe integers/);
+  }
+  refuses((a) => { a.gates.census_cross_check.reconstructed_series[0][2] = -1; }, /not nonnegative safe integers/);
 });
 
 test('a form summary must be derivable from the members it summarises', () => {
