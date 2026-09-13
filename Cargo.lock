@@ -254,6 +254,7 @@ dependencies = [
  "libc",
  "minifb",
  "png",
+ "serde",
  "serde_json",
  "toml",
 ]
