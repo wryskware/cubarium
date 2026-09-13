@@ -11,7 +11,8 @@ the unchanged strict comparator passes, and an independent transaction/census
 reduction reconciles with every arm's own audit. **That is a technical result, not
 a lineage-viability result.** Charging again bought real, fully paid offspring —
 18 of them, in complete arms this time — and again bought no adult: not one paid
-descendant, in any seed or arm, ever left its birth structure of 0.8. The
+descendant reached adult structure in any seed or arm, and none was ever observed
+above its birth structure of 0.8. The
 [earlier failed study](astra-hunter-charging-results-2026-09-13.md) and its
 invalid artifacts remain untouched and are still the record of what happened at
 `3b06596`. No ecology parameter, live world, renderer or canonical decision
@@ -117,11 +118,15 @@ censoring, not a measured death.
 
 Charging is not a survival improvement, it is a redistribution. Specialist
 founders live longer in 7 seeds and shorter in 5; facultative founders live
-longer in 5 and shorter in 7. Restricted mean lifetime (censored survivors
-counted at 120 min, which flatters the candidate) moves 35.31→38.37 minutes
-specialist and **50.73→49.16 facultative** — the facultative arm's mean falls
-even though it gained two horizon survivors. Seeds 3, 5, 7 and 10 lose from
-half an hour to over an hour of facultative founder life.
+longer in 5 and shorter in 7. The **120-minute restricted mean founder lifetime**
+— each founder's observed life truncated at the shared 120-minute horizon, so a
+survivor contributes exactly 120 and its actual lifetime is unknown and at least
+120 — moves 35.31→38.37 minutes specialist and **50.73→49.16 facultative**. This
+is a horizon-limited quantity, comparable across these arms only because they
+share one horizon; it is not an estimate of mean lifetime, and a censored founder
+is a founder still alive at 288000, not one that lived forever. The facultative
+arm's restricted mean falls despite gaining two horizon survivors. Seeds 3, 5, 7
+and 10 lose from half an hour to over an hour of facultative founder life.
 
 Three founders survive to the horizon under charging (seed-1 S, seed-1 F,
 seed-2 F) against **zero** in the entire background cohort. That is the one
@@ -248,23 +253,50 @@ All 18 children, by full ID, with their whole recorded lives. 17 starved; one
 
 \* right-censored alive. C = Captured, M = Missed, OoR = OutOfReach.
 
-**Growth never ran, and that is not a sampled inference.** Across 806 census
-boundaries covering all 18 children, the set of distinct structure values
+**Growth produced nothing through each child's last observed census.** Across 806
+census boundaries covering all 18 children, the set of distinct structure values
 observed is exactly `{0.8}`. In the frozen source, `world.rs:1694`
 (`o.structure += grown`) is the *only* site that raises an organism's structure,
-and no site lowers it, so structure is monotone; a constant 0.8 at every boundary
-of every child means the growth branch produced nothing at any tick, not merely
-that the census missed a spike. The previous report's "sampled child reserve
-maxima never exceed 1.02943" was correctly hedged; the structure record settles
-it independently of the reserve threshold, so the reserve threshold does not have
-to carry the conclusion.
+and no site lowers it, so structure is monotone. Monotonicity plus a constant 0.8
+at every boundary therefore rules out a growth spike that the census merely
+missed *between* boundaries — but only over the span the boundaries bracket.
+
+It does **not** cover the terminal suffix between each child's last census and
+its death, which no observation reaches:
+
+| | ticks | seconds |
+| --- | ---: | ---: |
+| Total unobserved terminal suffix, 18 children | 1646 | 82.30 |
+| Longest single suffix (seed-6 facultative `74:5`) | 198 | 9.90 |
+| Share of the children's 161636 observed life-ticks | 1.02% | |
+
+Two separate things are known about that suffix and they should not be merged.
+The tickwise `adult_occupancy` audit is a whole-run quantity, so **no child became
+an adult** in the suffix either; and the growth branch is rate-capped at
+`juvenile_growth_rate × DT`, so any unobserved gain is bounded above by 0.0199
+structure in the longest suffix, against the 1.2 a child needs. What is *not*
+known is whether the branch ran at all in those final ticks, or how much reserve
+it would have found. Both are magnitude bounds and an absence-of-adults result,
+not evidence that growth was zero. That question stays open until the
+mutation-site ledger measures it directly; the diagnostic recommended below is
+required to include the last-census-to-death suffix in its growth totals for
+exactly this reason.
+
+The previous report's "sampled child reserve maxima never exceed 1.02943" was
+correctly hedged, and the structure record above narrows the same conclusion
+without leaning on the reserve threshold — over the bracketed span only.
 
 **Where the evidence points, by stage:**
 
-- *Encounter*: not the limiting stage. The three children that never attempted an
-  attack held a target for most of their lives: 24 of 35 boundaries in `Stalking`
-  (seed-1 `27:11`, both hunting arms) and 31 of 44 (seed-5 facultative `108:1`),
-  the rest `Perched`. Targets are acquired.
+- *Encounter and approach*: **not excluded as limiting.** The three children that
+  never attempted an attack held a target for most of their lives: 24 of 35
+  boundaries in `Stalking` (seed-1 `27:11`, both hunting arms) and 31 of 44
+  (seed-5 facultative `108:1`), the rest `Perched`. That establishes only that
+  targets are *acquired* — acquisition is not successful intercept. A member that
+  stalks for hundreds of seconds and never once reaches windup range is equally
+  consistent with approach being the stage that fails, and nothing here
+  distinguishes acquisition-then-failed-closure from a shortage of reachable
+  encounters. No stage is ruled out by this observation.
 - *Capture*: partly limiting. 7 of 18 children never captured anything;
   `OutOfReach` and `Missed` dominate their attempt records. A juvenile is at
   `body_scale = (0.8/2.0)^0.5 ≈ 0.632`, so its capture effector closes far nearer
@@ -324,8 +356,11 @@ candidate arms that actually produced children — `specialist_on` seeds 1, 5, 7
 `post-initialization.cubw` under the frozen `512ee52` core, in the same pattern
 the earlier failure replay used. Per member per tick it records the four reserve
 flows separately: oxidation burn, digestion `to_reserve`, growth spend, and
-maintenance; plus the growth predicate's two sides. Its correctness gate is that
-each replayed arm reproduces its recorded closing state hash exactly, so the
+maintenance; plus the growth predicate's two sides, read *before* the growth
+branch rather than reconstructed from a post-step delta. Its growth totals must
+run to each child's actual death tick, closing the 1646-tick terminal suffix this
+report cannot observe. Its correctness gate is that each replayed arm reproduces
+its recorded post-initialization input and closing state hash exactly, so the
 observer is proven to have changed nothing.
 
 This is the isolated diagnostic, and it is deliberately not an experiment: no
