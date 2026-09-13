@@ -134,7 +134,7 @@ by construction; the loader test checks the wrap step against the interior.
 species-major order with parts in base, trunk, crown order. `ground_atlas: "ground.png"`
 is 32 × (8 × rows) with `ground_tile: 8`, `ground_frames: 4` and
 `ground: [{name, band, row, frames: 4, seconds}]`. The Rust side exposes
-`ArtPack::tall` (`TallPlant { name, base, trunk, crown, cap, tail_row }`),
+`ArtPack::tall` (`TallPlant { name, base, trunk, crown, cap, tail_row, vine_strips }`),
 `ArtPack::tall_plant(name)`, `ArtPack::ground` (`GroundTile { name, band, frames,
 seconds }`) and `ArtPack::ground_for(band)`. Godot 4.7.2 is the reference baker.
 
@@ -155,6 +155,33 @@ the crown, at the column's continuous height, over trunk rows each painted exact
 once. For that pairing the loader requires a plant's crown and trunk clips to share one
 sample count and duration, and rejects a tail that would start above row 4 (the top
 segment reaches four rows into the crown's tile).
+
+### Optional vine-strip derivation
+
+The current baker adds `"vine_strips": "period4_endpoint_v1"` to the **vinecoil
+trunk row only**, without changing pack version5, atlas/source pixels or clip timing.
+Missing metadata means the exact legacy path; older readers ignore this additive
+field and still see the complete original trunk. Unknown/malformed selectors,
+wrong plant/part, or opted-in vines with a base/crown are errors in the new loader.
+
+Before clearing anything, the loader checks every original frame: 16×16,
+pivot(8,8), exact premultiplied four-row periodicity across all16 rows, and a finite
+positive looping clock with a valid sample count. Tall clips loop by the existing
+pack contract; an explicit contradictory `loop` value is rejected on opted-in rows.
+`TallPlant.trunk` remains the original. The separate optional
+`VineStrips { trunk, endpoint }` caches a derived trunk with rows0/15 cleared and an
+endpoint containing only rows4..7, inheriting the original sample count and clock.
+This is not a crown and does not use `cap`.
+
+Odd vine tiles now use their usual local heights4..12 through tile9; the endpoint
+at tile10 covers global material40..44 with the original grown ceiling. Its stamp
+keeps tile9's owning chart and tile10's support center, preserving quiet/vertex
+pixels while retaining the nine-pixel footprint. All pieces share the host's
+single bend. The vine budget is measured from the derived trunk at tile9 and
+endpoint at tile10, **not also from the unrendered original trunk**. With the current
+pack this releases a vined spire's existing0.9px response; it changes neither the
+global breeze nor glasscane's own narrower budget. See the
+[integration report](../design/7_Research/vine-wind-integration-2026-09-13.md).
 
 ## Pack v5: growth transitions
 

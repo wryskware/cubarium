@@ -235,20 +235,32 @@ over its vine's. `ArtPresenter::bend_budget` exposes the table. The admitted amp
 `min(desired, budget / (1 + WIND_SLOT_VARIATION))`, so even the windiest slot at full wind
 stays inside the measured room. On the shipped pack the budgets are lanternstalk 3.23,
 tendrilfan 0.31, reedspire 4.38, glowcap 2.40, rootveil 5.43, umbrellafrond 0.33,
-bloomcrown 2.07, spiretree 1.31 (0.30 until 2026-09-13), glasscane 0.47, vinecoil 0.47 — so
-tendrilfan moves 0.29 rather than 0.55, a bare spiretree column its whole 0.9, and a
-spiretree carrying a vine 0.42 (the vine's own room). Widening those is an *art* change (a
-narrower tip or leaf), never a larger footprint. The spiretree earned its room two ways
+bloomcrown 2.07, spiretree 1.31 (0.30 until 2026-09-13), glasscane 0.47, and opted-in
+vinecoil 3.54 (unflagged legacy vine 0.47). Thus tendrilfan moves 0.29 rather than 0.55,
+and both bare and opted-in vined spiretrees may use their existing desired 0.9 px response;
+glasscane is still limited by its own art. Widening those limits requires changing art
+or how its material is divided into bounded pieces, never enlarging the footprint.
+The spiretree earned its room two ways
 (`art/plants/author_spire_wind.py`): its dome is drawn centred on the pivot (it was one
 pixel right of the trunk, so its far edge bound the cap to 0.30), and its trunk tile leaves
 its top and bottom rows unpainted — those rows sit 7.5 px from the pivot, where the
 footprint circle is only ±1.96 px wide, and a 4-wide trunk painting them is bound to 0.47.
 A trunk that leaves its row 0 clear is stacked on strips one row lower
 (`art_present::trunk_strip`: tile rows 1–4 instead of 0–3, the last segment still cut at
-the tile top under its cap), which paints the same column; glasscane and the vine paint
-their row 0 and keep the original strips, so their images are unchanged. A quiet interval,
-a zero amplitude or a nonsense wind takes the renderer's identity path, which draws the
-windless image bit for bit and costs exactly what it cost before the wind existed.
+the tile top under its cap), which paints the same column; glasscane keeps the original
+strips. Vinecoil now has an explicit additive `vine_strips: "period4_endpoint_v1"`
+trunk-row selector. Its authored atlas stays completely intact: the loader validates
+the original four-row period across all 16 rows and caches a clear-ended trunk plus
+the same clip's four-row endpoint. That endpoint preserves the original tile9 owning
+chart with a tile10 support center, so it neither loses the top row nor changes vertex
+ownership. Both derived pieces replace the original trunk in the vine's budget;
+the host, root, phase and shared wind stay unchanged. Unflagged old/custom packs retain
+the exact legacy path; a malformed explicit opt-in is rejected, not silently ignored.
+See [the pack contract](PLANTS.md#optional-vine-strip-derivation).
+
+A quiet interval, zero amplitude or nonsense wind still draws the windless image
+bit for bit. The retiled vine adds one bounded endpoint query when that material is
+visible; quiet identity is an image guarantee, not a claim of unchanged rendering cost.
 
 ### Bands
 

@@ -5,6 +5,10 @@ use cubarium_render::{Pose, Sprite};
 use cubarium_surface::Vec2;
 use std::path::Path;
 
+#[cfg(test)]
+#[path = "vine_strips_loader_tests.rs"]
+mod vine_strips_loader_tests;
+
 /// Clip states in atlas order; every creature has exactly these four rows.
 pub const STATES: [&str; 4] = ["rest", "move", "feed", "bud"];
 
@@ -151,6 +155,60 @@ pub struct TallPlant {
     /// pixels at load, not assumed, so a dome pixel that happens to share the trunk's
     /// color above the tail is never mistaken for trunk. 16 for a plant with no crown.
     pub tail_row: usize,
+    /// Explicitly opted-in, validated rendering pieces for a periodic vine. The authored
+    /// `trunk` stays intact for legacy rendering and inspection; this derived pair replaces
+    /// it only in the vine draw path and its wind budget. Never interpreted as a crown.
+    pub vine_strips: Option<VineStrips>,
+}
+
+/// Versioned optional selector on a vine's trunk metadata row. Older pack readers ignore
+/// this field and still render the complete, unchanged authored trunk.
+pub const VINE_STRIPS_V1: &str = "period4_endpoint_v1";
+
+/// Cached pieces of one exact four-row-periodic, 16×16/pivot(8,8) vine clip.
+/// Both inherit its clock: `trunk` clears rows 0/15; `endpoint` keeps only rows 4..7.
+pub struct VineStrips {
+    pub trunk: Clip,
+    pub endpoint: Clip,
+}
+
+fn derive_vine_strips(original: &Clip) -> Result<VineStrips> {
+    ensure!(
+        original.looping
+            && original.seconds.is_finite()
+            && original.seconds > 0.0
+            && (MIN_FRAMES..=MAX_FRAMES).contains(&original.frames.len()),
+        "vine_strips requires a finite positive looping clip with 2..=32 samples"
+    );
+    for (i, frame) in original.frames.iter().enumerate() {
+        ensure!(
+            frame.width() == 16 && frame.height() == 16 && frame.pivot() == Vec2::new(8.0, 8.0),
+            "vine_strips frame {i} must be 16x16 with pivot(8,8)"
+        );
+        // Validate ORIGINAL endpoints too, before clearing. Transparent RGB is already
+        // normalized by premultiplication; every visible channel must match exactly.
+        for y in 4..16 {
+            for x in 0..16 {
+                ensure!(
+                    frame.texel(x, y) == frame.texel(x, y % 4),
+                    "vine_strips frame {i} is not exactly four-row periodic at ({x},{y})"
+                );
+            }
+        }
+    }
+    let piece = |endpoint: bool| -> Result<Clip> {
+        let frames = original.frames.iter().map(|frame| {
+            let pixels = (0..16).flat_map(|y| {
+                (0..16).map(move |x| {
+                    let keep = if endpoint { (4..8).contains(&y) } else { (1..15).contains(&y) };
+                    if keep { frame.texel(x, y) } else { [0.0; 4] }
+                })
+            }).collect();
+            Sprite::from_premultiplied(16, 16, frame.pivot(), pixels).map_err(anyhow::Error::msg)
+        }).collect::<Result<Vec<_>>>()?;
+        Ok(Clip { frames, seconds: original.seconds, looping: original.looping })
+    };
+    Ok(VineStrips { trunk: piece(false)?, endpoint: piece(true)? })
 }
 
 /// The lowest tail row the loader accepts: the top trunk segment reaches four rows into
@@ -477,8 +535,8 @@ fn load_plants(
 
 /// Pack v3: `tall.png` is `plant_frames` tiles wide, one row per (tall plant, part) in
 /// plant-major order with parts in `base`, `trunk`, `crown` order, whichever the plant has.
-/// A tall plant being assembled from its rows: name, then base, trunk, crown.
-type PendingTall = Option<(String, Option<Clip>, Option<Clip>, Option<Clip>)>;
+/// A tall plant being assembled: name, base, trunk, crown, explicit vine-strip opt-in.
+type PendingTall = Option<(String, Option<Clip>, Option<Clip>, Option<Clip>, bool)>;
 
 fn load_tall(directory: &Path, meta: &serde_json::Value, plant_frames: usize) -> Result<Vec<TallPlant>> {
     ensure!(meta["tall_atlas"] == "tall.png", "unsupported tall atlas layout");
@@ -503,9 +561,13 @@ fn load_tall(directory: &Path, meta: &serde_json::Value, plant_frames: usize) ->
     let mut pending: PendingTall = None;
     let close = |pending: &mut PendingTall, out: &mut Vec<TallPlant>|
      -> Result<()> {
-        if let Some((name, base, trunk, crown)) = pending.take() {
+        if let Some((name, base, trunk, crown, vine_opt_in)) = pending.take() {
             let trunk = trunk.with_context(|| format!("tall plant {name} has no trunk"))?;
             ensure!(out.iter().all(|p| p.name != name), "duplicate tall plant {name}");
+            let vine_strips = if vine_opt_in {
+                ensure!(base.is_none() && crown.is_none(), "vine_strips requires a trunk-only vinecoil (no base or crown)");
+                Some(derive_vine_strips(&trunk).with_context(|| format!("tall plant {name}"))?)
+            } else { None };
             let mut tail_row = 16;
             let cap = match &crown {
                 Some(crown) => {
@@ -537,20 +599,27 @@ fn load_tall(directory: &Path, meta: &serde_json::Value, plant_frames: usize) ->
                 }
                 None => None,
             };
-            out.push(TallPlant { name, base, trunk, crown, cap, tail_row });
+            out.push(TallPlant { name, base, trunk, crown, cap, tail_row, vine_strips });
         }
         Ok(())
     };
     for (row, entry) in rows.iter().enumerate() {
         ensure!(entry["row"].as_u64() == Some(row as u64), "tall rows must be sequential");
         let name = entry["name"].as_str().context("tall row needs a name")?;
+        let vine_opt_in = if let Some(selector) = entry.get("vine_strips") {
+            ensure!(selector.as_str() == Some(VINE_STRIPS_V1), "unsupported vine_strips selector at tall row {row}");
+            ensure!(name == "vinecoil" && entry["part"] == "trunk", "vine_strips is supported only on the vinecoil trunk row");
+            ensure!(entry.get("loop").is_none_or(|v| v.as_bool() == Some(true)), "vine_strips must loop");
+            true
+        } else { false };
         let seconds = entry["seconds"].as_f64().context("tall row needs seconds")?;
         ensure!(entry["frames"] == plant_frames as u64, "tall rows carry {plant_frames} frames");
         if pending.as_ref().is_none_or(|(n, ..)| n != name) {
             close(&mut pending, &mut out)?;
-            pending = Some((name.to_string(), None, None, None));
+            pending = Some((name.to_string(), None, None, None, false));
         }
         let slot = pending.as_mut().unwrap();
+        slot.4 |= vine_opt_in;
         let clip = clip_at(row, seconds)?;
         // Parts arrive in base, trunk, crown order; each at most once.
         match entry["part"].as_str() {

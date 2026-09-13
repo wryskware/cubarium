@@ -277,7 +277,11 @@ func bake() -> void:
 				player.play(part_name)
 				player.seek(float(frame) / PLANT_FRAMES * animation.length, true)
 				tall_tiles.append(raster(rig))
-			tall_rows.append({"name": tall_name, "part": part_name, "row": tall_rows.size(), "frames": PLANT_FRAMES, "seconds": animation.length})
+			var tall_row := {"name": tall_name, "part": part_name, "row": tall_rows.size(), "frames": PLANT_FRAMES, "seconds": animation.length}
+			# Additive opt-in only: keep every authored atlas pixel intact for old readers.
+			if tall_name == "vinecoil" and part_name == "trunk":
+				tall_row["vine_strips"] = "period4_endpoint_v1"
+			tall_rows.append(tall_row)
 		rig.queue_free()
 	var tall_atlas := Image.create(TILE * PLANT_FRAMES, TILE * maxi(tall_rows.size(), 1), false, Image.FORMAT_RGBA8)
 	tall_atlas.fill(Color.TRANSPARENT)
