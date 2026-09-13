@@ -19,21 +19,22 @@ in the current-status paragraph and the linked research reports below.
 
 ## Current release status
 
-Updated2026-09-13. Live build **`0.1.0+9cf0e1d`** resumes the same persistent world
+Updated2026-09-13. Live build **`0.1.0+3147775`** resumes the same persistent world
 and drives the cube and shared viewer on7393. It includes independent care doses,
 all seven plants' authored growth clips, spiretree wind, and actual-intake meal
-continuity, plus the stable sail swimming body;1102 workspace tests and59.9 distinct
-viewer fps are recorded in the [rollout](7_Research/sail-live-update-2026-09-13.md). Neither hunters nor modified
+continuity, plus the stable sail swimming body and vine-covered spire sway;
+1115 workspace tests and copied/live cadence measurements are recorded in the
+[rollout](7_Research/vine-live-update-2026-09-13.md). Neither hunters nor modified
 ambient support nor a new rest policy is live.
 
 | Work | Verified state | Next gate |
 | --- | --- | --- |
-| Residual animation flicker | [Stable sail body with original crisp fins](7_Research/astra-sail-stable-body-2026-09-13.md),02f83c9 art, deployed in9cf0e1d after Fable/root review and copied-world checks | Rest/feed fin twinkle and constrained glasscane/vine sway remain open; fin-only coverage was not selected |
-| Local care responses | [108-case screen](7_Research/astra-care-response-results-2026-09-13.md): Feed usually increases local feeding, rain mixed, Clean usually reduces feeding; meal continuity deployed | Further readable responses must reflect actual events; no global wakeup or invented satiation |
-| Quiet habits | [Affordable post-birth candidate](7_Research/quiet-post-birth-pause-handoff-2026-09-13.md) committed0980eab; endpoint and decoder-tail defects fixed,348 core tests pass after828205e | Initial harness has retained [certification](7_Research/root-quiet-harness-gate-review-2026-09-13.md) and [observer-boundary](7_Research/astra-quiet-observer-review-2026-09-13.md) failures; corrections precede behavior/viability screens. Off stays default; schema13 not deployed |
-| Ambient support | [Complete two-hour results](7_Research/astra-ambient-support-results-2026-09-13.md): all72 arms pass recorded audits;90% no-care loses skimmers in two additional seeds | Unchanged frozen24h collection running; [explicit longer-horizon reducer](7_Research/ambient-explicit-horizon-reducer-2026-09-13.md) has15 passing tests and byte-identical two-hour output. Live default unchanged; manual dose separate |
-| Rare Lanternjaw lineage | [Corrected512ee52 results](7_Research/hunter-charge-rerun-results-2026-09-13.md): all twelve seeds complete,18 paid offspring, no adult descendants; some juveniles capture repeatedly without maturing | [Two isolated mutation-site replays](7_Research/hunter-juvenile-flow-diagnostic-2026-09-13.md) are under independent review before the remaining nine birth-producing arms or any retune; no hunter24/72h gate or live introduction; original failure retained |
-| Fragile fauna/diversity | [Early-life census](7_Research/fauna-development-followup-2026-09-13.md) locates eight skimmer losses after initial population growth, about71–120 simulated minutes | All twelve tick-zero histories need individual growth/intake/allocation evidence through2h before tuning |
+| Residual animation flicker | [Stable sail body](7_Research/astra-sail-stable-body-2026-09-13.md) and [intact-atlas vine wind](7_Research/vine-wind-integration-2026-09-13.md) are deployed after review and copied-world checks | Rest/feed fin twinkle, constrained glasscane sway and the pre-existing moving-crown corner pop remain open; blanket fin coverage was not selected |
+| Local care responses | [108-case screen](7_Research/astra-care-response-results-2026-09-13.md): Feed usually increases local feeding, rain mixed, Clean usually reduces feeding; meal continuity deployed | Fable's [local rain response](7_Research/fable-rain-response-2026-09-13.md) remains a study pending temporal/drizzle/restart review; actual rain drives it, not a global wakeup |
+| Quiet habits | [Affordable post-birth candidate](7_Research/quiet-post-birth-pause-handoff-2026-09-13.md) and corrected harness2fbd092 exist; actual uninterrupted-vs-reload proof now reviewed | [Independent follow-up](7_Research/astra-quiet-observer-review-2026-09-13.md) retains first-held-death, B+40 snapshot, raw-energy re-gating and child-linkage defects; fixes precede the48-arm screen. Off stays default; schema13 not deployed |
+| Ambient support | [Complete two-hour results](7_Research/astra-ambient-support-results-2026-09-13.md): all72 arms pass recorded audits;90% no-care loses skimmers in two additional seeds | Unchanged frozen24h collection running; [explicit horizon reducer](7_Research/ambient-explicit-horizon-reducer-2026-09-13.md) plus independent review has19 passing tests and byte-identical two-hour output. Live default unchanged; manual dose separate |
+| Rare Lanternjaw lineage | [All11 birth-producing mutation-site replays](7_Research/hunter-juvenile-flow-cohort-2026-09-13.md) cover18 paid offspring with zero growth; corrected intake facts and complete-cohort checks pass [independent review](7_Research/juvenile-cohort-correction-independent-review-2026-09-13.md) | Select a matched paid-development experiment from the corrected evidence; no hunter24/72h gate or live introduction. No fixed-intake arithmetic presented as a counterfactual |
+| Fragile fauna/diversity | [Early-life census](7_Research/fauna-development-followup-2026-09-13.md) locates eight skimmer losses after initial population growth, about71–120 simulated minutes | Isolated ordinary-fauna flow diagnostic now in development; all twelve tick-zero histories need growth/intake/allocation evidence through2h before tuning |
 | Later ideas | Persistent plant age/senescence/regrowth, tiny foliage details and possible LCD presentation remain recorded in the [animation roadmap](animation-roadmap.md) | Lower priority; not an authorized hardware migration |
 
 Ship verified visible slices without waiting for unrelated long experiments.

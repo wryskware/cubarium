@@ -68,11 +68,11 @@ and improved viewer delivery in build `0.1.0+a44dc98`. That rollout preserved
 the exact running world and all five existing care inputs; 854 tests passed,
 and the live mirror measured about 60 distinct frames/s in isolated Chromium.
 See the [schema 9 rollout and rollback record](design/7_Research/presentation-v9-rollout-2026-09-13.md).
-Current live build **`0.1.0+d55d8af`** includes adjustable care amounts, authored
+The earlier meal release **`0.1.0+d55d8af`** included adjustable care amounts, authored
 canopy growth, readable spiretree wind and continuous actual-intake meal gestures.
 It resumed the same world at tick560883;1098 workspace tests passed and the live
 shared viewer measured59.9 distinct frames/s. See the
-[current update record](design/7_Research/meal-live-update-2026-09-13.md).
+[meal update record](design/7_Research/meal-live-update-2026-09-13.md).
 An isolated [local care screen](design/7_Research/local-care-observation-2026-09-13.md)
 now measures existing biological responses across all twelve mature worlds and
 three fixed targets. Feed increased local feeding in 27 of 36 patches; cleanup
@@ -142,15 +142,24 @@ pass artifact/accounting checks but show additional skimmer losses at90% natural
 rain without care. The unchanged24-hour collection is running; the live default
 is not reduced. Both canopy plants' opening clips are
 also live; missing clips in older/custom packs still use the reveal fallback.
-Spiretree wind and actual-intake meal continuity are now live;
-glasscane/vine headroom remains limited. The
+Spiretree wind and actual-intake meal continuity are now live.
+The new vine strip path admits the spire's authored sway when a vine is attached;
+glasscane remains limited by its own art headroom. The
 [AA comparison](design/7_Research/astra-aa-comparison-2026-09-13.md) retains the
 current renderer default: blanket coverage baking steadied wings but softened
 small bodies too much. The [selected sail revision](design/7_Research/astra-sail-stable-body-2026-09-13.md)
 removes an over-quantized swimming-body squash while preserving the original crisp
-fins after a bounded comparison. It is [live in9cf0e1d](design/7_Research/sail-live-update-2026-09-13.md):
+fins after a bounded comparison. Its [9cf0e1d rollout](design/7_Research/sail-live-update-2026-09-13.md)
+preceded the current vine update:
 1102 workspace tests passed; the same world resumed at tick633208, and the shared
-viewer measured59.9 distinct fps. Experimental quiet and hunter changes remain isolated.
+viewer measured59.9 distinct fps.
+
+Current live build **`0.1.0+3147775`** adds the reviewed vine wind integration,
+with unchanged atlas pixels and ecology. It resumed the same world at tick707292
+after1115 workspace tests passed. The copied viewer measured59.9 distinct fps;
+live samples measured58.9 then59.95, with the first sample's delivery stalls
+retained in the [rollout record](design/7_Research/vine-live-update-2026-09-13.md).
+Experimental quiet and hunter changes remain isolated.
 
 The [current release backlog](design/implementation-plan.md#current-release-status)
 is the concise source for remaining work; dated rollout reports preserve history.

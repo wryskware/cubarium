@@ -247,6 +247,15 @@ diagnostic.
 
 ## Verification and retained failures
 
+Subsequent independent correction review **b1f1d65** repairs the JSON-only test
+fixture by copying the actual retained snapshots into its temporary arm directories.
+The original independent suite now passes **14/14**, including a byte-verified
+positive control and intended-reason assertions on every CLI refusal. The native
+18-test suite and fresh actual11-arm reduction also pass. See the
+[follow-up review](juvenile-cohort-correction-independent-review-2026-09-13.md).
+The13/1 result below records the earlier run, before that fixture repair; missing
+snapshots still fail and no validation tolerance was weakened.
+
 - `node --test scripts/reduce-juvenile-flow-cohort.test.mjs` — **18 passed, 0
   failed** (was 10; the new ones cover per-source intake, the zero-digestion
   scavenger, reserve above escrow, all-member gate coverage, byte-level snapshot
