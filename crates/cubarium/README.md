@@ -134,9 +134,9 @@ fixture capture and the world share one look.
 
 ```
 cubarium run [--config world.toml] [--state state/] [--sink preview|shim|png|web|none]
-             [--speed N] [--seconds N] [--seed N] [--fresh] [--telemetry FILE]
-             [--addr ..] [--out ..] [--every N] [--scale N] [--fps N]
-             [--web-port N] [--mirror-web]
+             [--speed N] [--seconds N] [--seed N] [--fresh] [--require-resume]
+             [--telemetry FILE] [--addr ..] [--out ..] [--every N] [--scale N]
+             [--fps N] [--web-port N] [--mirror-web] [--care]
 ```
 
 | Option | Default | Meaning |
@@ -147,13 +147,15 @@ cubarium run [--config world.toml] [--state state/] [--sink preview|shim|png|web
 | `--speed` | `1` | Simulated seconds per wall second; `0` means as fast as possible (headless only) |
 | `--seconds` | `0` | Stop after this much *simulated* time (0 = until closed; required for `png`) |
 | `--seed` | from config | Overrides `config.seed` when creating a fresh world |
-| `--fresh` | off | Ignore existing snapshots and create a new world |
+| `--fresh` | off | Create a new world. Refused when `--state` already holds snapshots, an interrupted snapshot write, or a non-empty `care.jsonl` |
+| `--require-resume` | off | Refuse to start unless an existing snapshot loads |
 | `--telemetry` | `<state>/telemetry.jsonl` | JSON-lines telemetry file (appended) |
 | `--fields` | `<state>/fields.jsonl` | Field dump file, written only when `capacity.field_dump_seconds > 0` |
 | `--events` | `<state>/events.jsonl` | Life-event log (births, deaths), written only when `capacity.event_log` is true |
 | `--fps` | `60` | Render and output rate, 1–240, as for `demo` |
 | `--web-port` | `7393` | Port for the `web` sink and for `--mirror-web` |
 | `--mirror-web` | off | Also serve the loopback viewer on `--web-port` while `--sink` keeps running |
+| `--care` | off | Offer the optional feed / rain / clean interaction on the viewer. Needs `--sink web` or `--mirror-web` |
 
 `--mirror-web` is one world watched twice, not two worlds: the loop still steps
 one `World`, observes it once, draws once and calls `Canvas::encode` once per
@@ -166,10 +168,67 @@ viewer's `/status` names the world's tick and the host behind it (pid, state
 directory, build id, sink, resumed snapshot, start tick, speed), which is how a
 reviewer with several tabs open tells which world a tab is showing.
 
-Startup: unless `--fresh`, load the newest valid snapshot in `--state` (trying
-older ones on failure, logging each reason); otherwise create a new world from
-the config. The loaded world's config wins over `--config` except for
-`capacity` and `weather.moving`, which are operational and may change.
+Startup: acquire an exclusive OS advisory lock on `<state>/.lock` (`flock(2)`,
+held for the whole run, released only after the checkpoint worker has stopped,
+never unlinked or replaced) — a second launcher into the same directory gets a
+refusal naming it. Then, unless `--fresh`, load the newest valid snapshot in
+`--state`, trying older ones on failure and logging each reason. A directory
+holding snapshot files none of which load is an **error**, not a silent new
+world; only an empty directory becomes one. `--fresh` is refused outright in a
+directory that already holds a world, because the snapshot pruner ranks by tick
+with no notion of world identity and would delete the new world's checkpoints in
+favour of an older world's higher ticks. The loaded world's config wins over
+`--config` except for `capacity` and `weather.moving`, which are operational and
+may change.
+
+## Care (optional)
+
+`--care` adds three bounded gestures to the viewer — scatter food, shower, clean
+up litter — behind a `<details>` panel that is closed by default. The ambient
+image is unchanged: the target marker is drawn on an overlay canvas, never into
+the frame bytes, and every acknowledgement the page shows comes from the world's
+own receipt rather than from looking at the picture. With no input at all the
+world executes exactly the operations it always did, in the same order, with no
+new RNG draws.
+
+What makes it safe to interrupt a persistent world:
+
+- **Admission commits at a held boundary.** A request is validated on the HTTP
+  thread and queued; the simulation owner drains that queue at a boundary with
+  exactly `B` completed ticks, assigns a contiguous sequence number and
+  `apply_after_tick = B`, and **stops advancing** until the record is `fsync`ed
+  into `<state>/care.jsonl`. Only then is it applied, and only then does the
+  client get its `202`. Rendering, `/frame`, `/status` and `/care/status` keep
+  serving throughout; `/care/status` reports `holding_at`. A slow disk stalls the
+  world for a moment instead of moving the command to a tick no replay could
+  reconstruct.
+- **A failed write is never read as "it did not happen".** After an uncertain
+  append or `fsync` the world holds at that boundary, care is refused, nothing
+  further is appended, and the only way out is a clean stop — which writes the
+  final snapshot at exactly that tick. Restarting replays whatever survived, at
+  its own boundary.
+- **Recovery does not depend on the flag.** An existing `care.jsonl` is verified
+  and replayed whether or not `--care` is given; the flag only decides whether
+  anything *new* may be accepted.
+- **Everything is bounded.** Four outstanding commands, eight deep intake, 64
+  client identities, 64 retained receipts, a 4 KiB request body, per-kind
+  cooldowns in simulated time (feed 30 s, rain 60 s, clean 30 s), and a hard
+  4 MiB journal. At the journal's bound care is refused with `503` and autonomous
+  life carries on.
+- **Loopback only, and not by accident.** `POST /care/register` and `POST /care`
+  require `X-Cubarium-Care: 1` (which a cross-origin page cannot send without a
+  preflight this server never answers), `Content-Type: application/json`, a
+  loopback `Host` naming the bound port, and an exactly matching `http` `Origin`
+  when one is sent. No CORS header is ever returned, and any mutation through
+  `GET` is `405`. Identities are issued by the server and embed the run's epoch,
+  so a restart retires every earlier one.
+
+A shared run with the cube, the browser and care, resuming the existing world:
+
+```
+cubarium run --art assets/atelier --sink shim --mirror-web --web-port 7393 \
+             --state state --speed 1 --fps 60 --care
+```
 
 Loop: the same clock as `demo`, with `World::step` per tick and `render_view`
 → canvas per frame. `--speed N > 1` runs N ticks per wall tick; `--speed 0`

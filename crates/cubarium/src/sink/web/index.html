@@ -49,6 +49,39 @@
     white-space: nowrap;
   }
   #hud .warn { color: #FF7AA2; }
+  /* Care. Closed by default and outside both images: the ambient display stays ambient,
+     and nothing here ever draws into the frame bytes. */
+  #carePanel { flex: 1 1 100%; max-width: 1360px; padding: 0; }
+  #carePanel > summary {
+    cursor: pointer; list-style: none; padding: 8px;
+    color: var(--ink-dim); letter-spacing: .09em; text-transform: uppercase;
+  }
+  #carePanel > summary::-webkit-details-marker { display: none; }
+  #carePanel > summary::before { content: "▸ "; }
+  #carePanel[open] > summary::before { content: "▾ "; }
+  #careBody { padding: 0 8px 8px; display: flex; flex-wrap: wrap; gap: 10px; }
+  #careBody > * { min-width: 0; }
+  #careAim { flex: 0 0 auto; }
+  #careActs { flex: 1 1 260px; display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; }
+  #careActs button {
+    font: inherit; color: var(--ink); background: #1C1046;
+    border: 1px solid var(--edge); border-radius: 4px; padding: 5px 10px; cursor: pointer;
+  }
+  #careActs button:hover:not(:disabled) { background: #26155E; }
+  #careActs button:disabled { opacity: .4; cursor: default; }
+  #careNote { flex: 1 1 100%; color: var(--ink-dim); }
+  #careNote.warn { color: #FF7AA2; }
+  #careRows { flex: 1 1 100%; max-height: 160px; overflow-y: auto; }
+  #careRows div { padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .st-queued   { color: var(--ink-dim); }
+  .st-accepted { color: #42C6FF; }
+  .st-applied  { color: #7CE8A8; }
+  .st-partial  { color: #FFD36E; }
+  .st-rejected, .st-failed { color: #FF7AA2; }
+  /* The marker lives on its own canvas above the net image, never in the frame. */
+  #netWrap { position: relative; }
+  #netMark { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
+  #net { cursor: crosshair; }
   /* The source line only appears once /status answers; an older host leaves it empty
      and the HUD is exactly one line, as before. */
   #hudSrc:not(:empty) { display: block; margin-top: 2px; color: var(--ink-dim); }
@@ -63,8 +96,24 @@
   </div>
   <div class="panel" id="netPanel">
     <p class="cap">net &mdash; top above front; left front right back</p>
-    <canvas id="net" width="768" height="384"></canvas>
+    <div id="netWrap">
+      <canvas id="net" width="768" height="384"></canvas>
+      <canvas id="netMark" width="768" height="384"></canvas>
+    </div>
   </div>
+  <details class="panel" id="carePanel">
+    <summary>Care (optional)</summary>
+    <div id="careBody">
+      <div id="careAim">target &mdash; <span id="careTarget">click the net</span></div>
+      <div id="careActs">
+        <button id="careFeed" disabled>Scatter food</button>
+        <button id="careRain" disabled>Shower</button>
+        <button id="careClean" disabled>Clean up litter</button>
+      </div>
+      <div id="careNote">&nbsp;</div>
+      <div id="careRows"></div>
+    </div>
+  </details>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -434,6 +483,252 @@ function showHud() {
     : ('<span class="warn">self-test</span> &middot; ' + rate);
   hudSrc.textContent = source ? sourceLine(source) : "";
 }
+
+// ---------------------------------------------------------------------------
+// Care (optional). Everything here is off by default and behind a closed
+// <details>: the ambient display stays ambient. Three things it must never do,
+// all of them structural rather than a matter of care:
+//
+//   * It never draws into `frameBytes`. The target marker goes on its own
+//     overlay canvas above the net, so what the cube shows and what this page
+//     shows are still the same bytes.
+//   * It never claims an effect the world did not report. Every row's outcome
+//     and every quantity comes from the receipt in /care/status, never from
+//     looking at the frame.
+//   * It registers with the server for an identity rather than inventing one.
+//     After a restart the epoch changes, every earlier identity is retired, and
+//     the page registers again; a request that was in flight across that
+//     restart is reported honestly as unknown.
+// ---------------------------------------------------------------------------
+const CARE_HEADERS = {
+  "Content-Type": "application/json",
+  // A cross-origin page cannot set this on a fetch without a preflight, and the
+  // host answers no preflight. It is the lock on the whole surface.
+  "X-Cubarium-Care": "1"
+};
+
+const careTargetEl = document.getElementById("careTarget");
+const careNoteEl = document.getElementById("careNote");
+const careRowsEl = document.getElementById("careRows");
+const careButtons = {
+  feed: document.getElementById("careFeed"),
+  rain: document.getElementById("careRain"),
+  clean: document.getElementById("careClean")
+};
+const markCanvas = document.getElementById("netMark");
+markCanvas.width = netCanvas.width;
+markCanvas.height = netCanvas.height;
+const markCtx = markCanvas.getContext("2d");
+
+let careClient = null;      // the server-issued identity, null until registered
+let careEpoch = null;
+let careEnabled = false;
+let careRequest = 0;        // this page's monotonic request number
+let careTarget = null;      // { face, u, v }
+const careRows = new Map(); // request number -> row element
+
+// A click on the net, in chart coordinates. The net is NET_COLS x NET_ROWS cells
+// of FACE_SIZE pixels at NET_SCALE, laid out by NET_CELL -- the same table the
+// drawing code uses, so what you click is what you see.
+function netTarget(ev) {
+  const r = netCanvas.getBoundingClientRect();
+  if (r.width <= 0 || r.height <= 0) return null;
+  const px = (ev.clientX - r.left) / r.width * netCanvas.width;
+  const py = (ev.clientY - r.top) / r.height * netCanvas.height;
+  const col = Math.floor(px / (FACE_SIZE * NET_SCALE));
+  const row = Math.floor(py / (FACE_SIZE * NET_SCALE));
+  for (let f = 0; f < NUM_FACES; f++) {
+    if (NET_CELL[f][0] !== col || NET_CELL[f][1] !== row) continue;
+    const u = Math.floor(px / NET_SCALE) - col * FACE_SIZE;
+    const v = Math.floor(py / NET_SCALE) - row * FACE_SIZE;
+    if (u < 0 || v < 0 || u >= FACE_SIZE || v >= FACE_SIZE) return null;
+    return { face: f, u: u, v: v };
+  }
+  return null;   // one of the three empty cells of the net
+}
+
+function drawMark() {
+  markCtx.clearRect(0, 0, markCanvas.width, markCanvas.height);
+  if (!careTarget) return;
+  const cell = NET_CELL[careTarget.face];
+  const x = (cell[0] * FACE_SIZE + careTarget.u + 0.5) * NET_SCALE;
+  const y = (cell[1] * FACE_SIZE + careTarget.v + 0.5) * NET_SCALE;
+  markCtx.strokeStyle = "#FFD36E";
+  markCtx.lineWidth = 2;
+  markCtx.beginPath();
+  markCtx.arc(x, y, 7, 0, Math.PI * 2);
+  markCtx.stroke();
+  markCtx.beginPath();
+  markCtx.moveTo(x - 12, y); markCtx.lineTo(x - 4, y);
+  markCtx.moveTo(x + 4, y);  markCtx.lineTo(x + 12, y);
+  markCtx.moveTo(x, y - 12); markCtx.lineTo(x, y - 4);
+  markCtx.moveTo(x, y + 4);  markCtx.lineTo(x, y + 12);
+  markCtx.stroke();
+}
+
+netCanvas.addEventListener("click", function (ev) {
+  const hit = netTarget(ev);
+  if (!hit) return;
+  careTarget = hit;
+  careTargetEl.textContent =
+    FACE_FRAMES[hit.face].name + " (" + hit.u + ", " + hit.v + ")";
+  drawMark();
+  refreshButtons();
+});
+
+function refreshButtons() {
+  const ready = careEnabled && careClient !== null && careTarget !== null;
+  for (const k in careButtons) careButtons[k].disabled = !ready;
+}
+
+function careSay(text, warn) {
+  careNoteEl.textContent = text || "\u00A0";
+  careNoteEl.className = warn ? "warn" : "";
+}
+
+function rowFor(request) {
+  let el = careRows.get(request);
+  if (!el) {
+    el = document.createElement("div");
+    careRowsEl.prepend(el);
+    careRows.set(request, el);
+    while (careRowsEl.children.length > 24) careRowsEl.lastChild.remove();
+  }
+  return el;
+}
+
+function setRow(request, state, text) {
+  const el = rowFor(request);
+  el.className = "st-" + state;
+  el.textContent = "#" + request + "  " + text;
+}
+
+function register() {
+  fetch("/care/register", { method: "POST", headers: CARE_HEADERS, body: "{}" })
+    .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+    .then(function (res) {
+      if (!res.ok) {
+        careEnabled = false;
+        careSay(res.j.error === "care disabled"
+          ? "this world is not offering care"
+          : ("care is unavailable: " + (res.j.error || "")), true);
+      } else {
+        careClient = res.j.client;
+        careEpoch = res.j.epoch;
+        careEnabled = true;
+        careSay("registered \u00B7 click the net, then choose an action");
+      }
+      refreshButtons();
+    })
+    .catch(function () { careSay("this host does not offer care", true); });
+}
+
+// Quantities come from the receipt. Nothing here inspects the picture.
+function describe(row) {
+  const q = row.applied;
+  const parts = [];
+  if (q && typeof q === "object") {
+    if (q.material_in) parts.push(q.material_in.toFixed(2) + " m fed");
+    if (q.water_depth) parts.push(q.water_depth.toFixed(2) + " d of water");
+    if (q.material_out) parts.push(q.material_out.toFixed(2) + " m removed");
+    if (q.cells) parts.push(q.cells + " cells");
+    if (q.ends_tick) parts.push("until tick " + q.ends_tick);
+  }
+  if (row.reason) parts.push(row.reason);
+  return parts.join(" \u00B7 ");
+}
+
+function send(kind) {
+  if (!careEnabled || careClient === null || careTarget === null) return;
+  careRequest += 1;
+  const request = careRequest;
+  const payload = {
+    client: careClient, request: request, kind: kind, target: careTarget
+  };
+  setRow(request, "queued", kind + " \u2192 queued");
+  fetch("/care", { method: "POST", headers: CARE_HEADERS, body: JSON.stringify(payload) })
+    .then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j }; }); })
+    .then(function (res) {
+      if (res.s === 202 && res.j.seq !== undefined) {
+        setRow(request, "accepted",
+          kind + " \u2192 accepted as seq " + res.j.seq + " at boundary " + res.j.apply_after_tick);
+      } else if (res.s === 202) {
+        // Still committing after five seconds. Not an acceptance and not a
+        // refusal; the result arrives through /care/status.
+        setRow(request, "queued", kind + " \u2192 still committing, watching for the receipt");
+      } else if (res.s === 200) {
+        setRow(request, res.j.state || "accepted", kind + " \u2192 already sent \u00B7 " + describe(res.j));
+      } else if (res.j.care === "replaying" || res.j.care === "opening") {
+        setRow(request, "queued", kind + " \u2192 the world is " + res.j.care + "; try again shortly");
+      } else {
+        setRow(request, "rejected", kind + " \u2192 " + res.s + " " + (res.j.error || ""));
+      }
+    })
+    .catch(function () {
+      // The connection died with the request in flight. It is either in the
+      // journal and will be replayed, or it was never accepted; the page cannot
+      // tell, and says so rather than guessing.
+      setRow(request, "failed", kind + " \u2192 unknown after a lost connection, check the receipts");
+    });
+}
+careButtons.feed.addEventListener("click", function () { send("feed"); });
+careButtons.rain.addEventListener("click", function () { send("rain"); });
+careButtons.clean.addEventListener("click", function () { send("clean"); });
+
+let careInFlight = false;
+function pollCare() {
+  if (careInFlight) return;
+  careInFlight = true;
+  fetch("/care/status", { cache: "no-store" })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (s) {
+      if (!s) return;
+      if (!s.enabled) {
+        if (careEnabled) { careEnabled = false; careSay("care was turned off", true); refreshButtons(); }
+        return;
+      }
+      // A restart changes the epoch and retires every identity issued before it.
+      if (careEpoch !== null && s.epoch !== careEpoch) {
+        careEpoch = s.epoch;
+        careClient = null;
+        careSay("the host restarted \u00B7 earlier requests are unknown, check the receipts", true);
+        refreshButtons();
+        register();
+        return;
+      }
+      if (s.care === "failed") {
+        careSay("care failed at tick " + s.holding_at + " \u00B7 " +
+          (s.reason || "") + " \u00B7 the world is held here until a clean stop", true);
+      } else if (s.care === "holding") {
+        careSay("holding at tick " + s.holding_at + " while a command is made durable");
+      } else if (s.care === "replaying" || s.care === "opening") {
+        careSay("the world is " + s.care + " \u00B7 care opens shortly");
+      } else if (careClient !== null) {
+        const used = s.journal && s.journal.limit
+          ? " \u00B7 journal " + Math.round(100 * s.journal.bytes / s.journal.limit) + "%"
+          : "";
+        careSay("ready \u00B7 tick " + s.world_tick + used);
+      }
+      // Our own rows, from the server's receipts.
+      (s.receipts || []).forEach(function (row) {
+        if (row.client !== careClient) return;
+        const at = row.apply_after_tick === null ? "?" : row.apply_after_tick;
+        if (row.state === "accepted") {
+          setRow(row.request, "accepted",
+            row.kind + " \u2192 accepted as seq " + row.seq + " at boundary " + at);
+        } else if (row.state !== "queued") {
+          const detail = describe(row);
+          setRow(row.request, row.state,
+            row.kind + " \u2192 " + row.state + " at boundary " + at + (detail ? " \u00B7 " + detail : ""));
+        }
+      });
+    })
+    .catch(function () { /* an older host has no /care/status */ })
+    .finally(function () { careInFlight = false; });
+}
+register();
+pollCare();
+setInterval(pollCare, STATUS_MS);
 
 function loop(now) {
   requestAnimationFrame(loop);

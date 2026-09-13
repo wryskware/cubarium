@@ -1523,6 +1523,61 @@ mod tests {
         }
     }
 
+    /// The page's click-to-target mapping must be built from the same two constants the
+    /// drawing code uses, or a click would land on a different cell than the one under the
+    /// cursor — and the world would be fed somewhere nobody chose.
+    #[test]
+    fn the_pages_click_mapping_is_built_from_net_cell_and_face_size() {
+        let start = INDEX_HTML.find("function netTarget(").expect("the page maps clicks to cells");
+        let end = INDEX_HTML[start..].find("\n}").expect("netTarget must end") + start;
+        let body = &INDEX_HTML[start..end];
+        assert!(body.contains("NET_CELL[f][0]") && body.contains("NET_CELL[f][1]"),
+            "the mapping must use the same NET_CELL table the net is drawn from: {body}");
+        assert!(body.contains("FACE_SIZE * NET_SCALE"), "{body}");
+        assert!(body.contains("col * FACE_SIZE") && body.contains("row * FACE_SIZE"), "{body}");
+        // Chart coordinates stay inside the face, so a click on a seam cannot address a
+        // pixel of some other face.
+        assert!(body.contains("u >= FACE_SIZE") && body.contains("v >= FACE_SIZE"), "{body}");
+        // The marker is drawn on the overlay, never into the frame bytes.
+        let mark = INDEX_HTML.find("function drawMark(").expect("the page draws a marker");
+        let mark_end = INDEX_HTML[mark..].find("\n}").expect("drawMark must end") + mark;
+        assert!(
+            !INDEX_HTML[mark..mark_end].contains("frameBytes"),
+            "the target marker must never be written into the frame"
+        );
+        assert!(INDEX_HTML.contains(r#"markCtx.clearRect"#), "the overlay is redrawn, not stacked");
+    }
+
+    /// The care panel: closed by default, registers on load, and posts only with the
+    /// header a cross-origin page cannot send.
+    #[test]
+    fn the_page_declares_a_closed_care_panel_that_registers_and_posts() {
+        assert!(INDEX_HTML.contains(r#"<details class="panel" id="carePanel">"#));
+        assert!(
+            !INDEX_HTML.contains(r#"id="carePanel" open"#)
+                && !INDEX_HTML.contains(r#"<details open class="panel" id="carePanel">"#),
+            "the care panel must be closed by default"
+        );
+        assert!(INDEX_HTML.contains("<summary>Care (optional)</summary>"));
+        for label in ["Scatter food", "Shower", "Clean up litter"] {
+            assert!(INDEX_HTML.contains(label), "the panel is missing the button {label:?}");
+        }
+        assert!(INDEX_HTML.contains(r#""X-Cubarium-Care": "1""#), "the custom header is the lock");
+        assert!(INDEX_HTML.contains(r#"fetch("/care/register""#), "the page registers on load");
+        assert!(INDEX_HTML.contains(r#"fetch("/care", { method: "POST""#));
+        assert!(INDEX_HTML.contains(r#"fetch("/care/status""#));
+        // Every state the contract asks a request row to show.
+        for state in ["queued", "accepted", "applied", "partial", "rejected"] {
+            assert!(INDEX_HTML.contains(&format!(".st-{state}")), "no style for {state}");
+        }
+        assert!(INDEX_HTML.contains("holding at tick"), "the hold must be visible");
+        assert!(INDEX_HTML.contains("care failed at tick"), "the failure must be visible");
+        assert!(
+            INDEX_HTML.contains("earlier requests are unknown, check the receipts"),
+            "a restart must be reported honestly rather than guessed at"
+        );
+    }
+
     /// Guard the page's other load-bearing constants and its one external dependency.
     #[test]
     fn the_page_declares_the_expected_sizes_and_one_external_script() {

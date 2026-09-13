@@ -55,15 +55,25 @@ pub const OUTCOME_RESERVE: u64 = 512;
 /// line is well under this.
 pub const ACCEPTED_ESTIMATE: u64 = 512;
 
-/// Why a journal write did not happen. The distinction is load-bearing: a capacity
-/// refusal happened *before* anything was attempted, so nothing is uncertain and the world
-/// keeps running with care refused; an uncertain write may or may not be on disk, and the
-/// runner's only safe response is to hold the boundary until a clean stop.
+/// Why a journal write did not happen.
+///
+/// The distinction is load-bearing, and it is a distinction of *origin*, never of error
+/// kind. [`JournalError::Full`] can only come from the advertised-capacity comparison,
+/// which runs before a single byte is seeked, written or synced: nothing was attempted, so
+/// nothing is uncertain, the sequence numbers go back and the world keeps stepping.
+///
+/// Everything that happens once I/O has begun is [`JournalError::Uncertain`] — including
+/// `ENOSPC`. A write can partially succeed before the disk fills, and a `sync_all` can fail
+/// after complete record bytes reached the file; the OS error kind says nothing about which
+/// happened. Reading `StorageFull` as "the file is unchanged" would reclaim a sequence
+/// number for a record that survived, and a later restart would then apply it at a boundary
+/// the original world walked past. So the rule is simply: do not infer from the error kind
+/// whether bytes changed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum JournalError {
-    /// The 4 MiB bound would be exceeded. Nothing was written.
+    /// The advertised bound would be exceeded. No write was attempted.
     Full(String),
-    /// The append or `fsync` failed with an unknown durable result.
+    /// I/O had begun and failed. The bytes may or may not be there.
     Uncertain(String),
 }
 
@@ -152,6 +162,14 @@ pub struct JournalHooks {
     /// exactly one record's length to reproduce a batch whose first record survived and
     /// whose second never reached the file. Consumed by the append that uses it.
     pub short_write_bytes: Arc<AtomicU64>,
+    /// Fail this many appends with `ENOSPC` *after* the seek has begun: a real disk filling
+    /// up, which must be treated as uncertain and not as a capacity refusal.
+    pub enospc_after_write: Arc<AtomicU64>,
+    /// Incremented every time the parent directory is synced at open. A test reads it to
+    /// establish that the barrier happened before any accepted append could.
+    pub dir_syncs: Arc<AtomicU64>,
+    /// Fail the next `n` parent-directory syncs at open.
+    pub fail_dir_sync: Arc<AtomicU64>,
 }
 
 impl JournalHooks {
@@ -174,6 +192,45 @@ impl JournalHooks {
     pub fn short_write(&self, bytes: u64) {
         self.short_write_bytes.store(bytes, Ordering::Relaxed);
     }
+
+    /// Make the next `n` appends fail with `ENOSPC` once I/O has begun.
+    pub fn enospc(&self, n: u64) {
+        self.enospc_after_write.store(n, Ordering::Relaxed);
+    }
+
+    /// How many times a journal open has synced the parent directory.
+    pub fn dir_sync_count(&self) -> u64 {
+        self.dir_syncs.load(Ordering::Relaxed)
+    }
+
+    /// Make the next `n` parent-directory syncs fail.
+    pub fn fail_dir_sync(&self, n: u64) {
+        self.fail_dir_sync.store(n, Ordering::Relaxed);
+    }
+
+    /// Attach these hooks to the next journal [`Journal::open`] creates, wherever it is
+    /// opened from — including inside `run_world`, which builds its own.
+    ///
+    /// The evidence the contract asks for ("the world provably stays at `B` under a delayed
+    /// acknowledgement") is about the *runner's* journal, which an integration test has no
+    /// other handle on. Process-global and therefore one test at a time: the integration
+    /// tests that use it serialize on their own mutex. [`JournalHooks::uninstall`] puts it
+    /// back.
+    pub fn install(&self) {
+        *installed().lock().unwrap_or_else(|e| e.into_inner()) = Some(self.clone());
+    }
+
+    /// Remove any installed hooks.
+    pub fn uninstall() {
+        *installed().lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+}
+
+/// The process-global slot [`JournalHooks::install`] writes to.
+fn installed() -> &'static std::sync::Mutex<Option<JournalHooks>> {
+    static INSTALLED: std::sync::OnceLock<std::sync::Mutex<Option<JournalHooks>>> =
+        std::sync::OnceLock::new();
+    INSTALLED.get_or_init(|| std::sync::Mutex::new(None))
 }
 
 /// The open journal. One per run, owned by the journal worker thread.
@@ -209,7 +266,12 @@ impl Journal {
     ///
     /// The caller must already hold the state lock: this both reads and rewrites the file.
     pub fn open(dir: &Path, epoch: &str, build: &str) -> Result<Journal> {
-        Journal::open_with_hooks(dir, epoch, build, JournalHooks::default())
+        let hooks = installed()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .unwrap_or_default();
+        Journal::open_with_hooks(dir, epoch, build, hooks)
     }
 
     /// [`Journal::open`] with the durable-path test hooks attached.
@@ -264,6 +326,31 @@ impl Journal {
             );
         }
 
+        // `create(true)` makes a *directory entry*, and syncing the file's own contents
+        // says nothing about whether that entry survives a power loss — the same reason
+        // `state::write_snapshot` fsyncs the directory after its rename. A resumed world
+        // receiving its first ever care has no opening checkpoint to do this for it, so it
+        // could otherwise acknowledge an accepted command whose journal pathname is not yet
+        // durable, and lose the whole history while keeping the old checkpoint. Done on
+        // every open; it costs one `fsync` per run.
+        if take_one(&hooks.fail_dir_sync) {
+            anyhow::bail!(
+                "{}: injected failure syncing the care journal's directory (test hook); no \
+                 command may be accepted until the journal's own pathname is durable",
+                dir.display()
+            );
+        }
+        File::open(dir)
+            .and_then(|d| d.sync_all())
+            .with_context(|| {
+                format!(
+                    "syncing {} so the care journal's directory entry is durable before any \
+                     command is accepted",
+                    dir.display()
+                )
+            })?;
+        hooks.dir_syncs.fetch_add(1, Ordering::Relaxed);
+
         let status = Arc::new(JournalStatus::default());
         status.bytes.store(verified.prefix as u64, Ordering::Relaxed);
         let owing = verified
@@ -300,8 +387,11 @@ impl Journal {
         // when even the epoch record does not fit, care is disabled for this run and the
         // file is left exactly as it was.
         if journal.fits(line.len() as u64, 0) {
-            journal.write_durably(&line).with_context(|| {
-                format!("writing the epoch record to {}", journal.path.display())
+            journal.write_durably(line.as_bytes()).map_err(|e| {
+                anyhow::anyhow!(
+                    "writing the epoch record to {}: {e}",
+                    journal.path.display()
+                )
             })?;
         } else {
             journal.care_available = false;
@@ -523,7 +613,7 @@ impl Journal {
             // Sliced as bytes, not as `str`: a short write lands wherever the disk stopped,
             // which is not obliged to be a character boundary.
             let partial = &text.as_bytes()[..short.min(text.len())];
-            self.write_durably(partial).map_err(uncertain).inspect_err(|e| self.poison(e))?;
+            self.write_durably(partial).inspect_err(|e| self.poison(e))?;
             let e = JournalError::Uncertain(
                 "injected short journal write (test hook); the partial record is durable"
                     .to_string(),
@@ -531,7 +621,7 @@ impl Journal {
             self.poison(&e);
             return Err(e);
         }
-        self.write_durably(text).map_err(uncertain).inspect_err(|e| self.poison(e))?;
+        self.write_durably(text.as_bytes()).inspect_err(|e| self.poison(e))?;
         if take_one(&self.hooks.fail_after_sync) {
             // The bytes above are on disk. This is the case the review named: the writer
             // reported a failure and the record survives anyway.
@@ -557,26 +647,38 @@ impl Journal {
 
     /// Append at the end of the file and `fsync`.
     ///
-    /// The one place bytes reach the file, and therefore the one place the bound is
-    /// enforced against *actual* lengths rather than estimates — epoch records and outcome
-    /// records included. A caller that got its arithmetic wrong is refused here rather than
-    /// silently growing the file past what this host advertises.
-    fn write_durably(&mut self, bytes: impl AsRef<[u8]>) -> io::Result<()> {
-        let bytes = bytes.as_ref();
+    /// The one place bytes reach the file, and therefore the one place the advertised bound
+    /// is enforced against *actual* lengths rather than estimates — epoch records and
+    /// outcome records included. The capacity comparison happens first, before any seek, so
+    /// a caller that got its arithmetic wrong is refused with a typed
+    /// [`JournalError::Full`] and nothing has been attempted.
+    ///
+    /// Past that point every failure is [`JournalError::Uncertain`], `ENOSPC` included.
+    fn write_durably(&mut self, bytes: &[u8]) -> Result<(), JournalError> {
         if self.status.bytes() + bytes.len() as u64 > JOURNAL_LIMIT {
-            return Err(io::Error::new(
-                io::ErrorKind::StorageFull,
-                format!(
-                    "{}: {} more bytes would take the care journal past its {JOURNAL_LIMIT}-byte \
-                     bound",
-                    self.path.display(),
-                    bytes.len()
-                ),
-            ));
+            return Err(JournalError::Full(format!(
+                "{}: {} more bytes would take the care journal past its {JOURNAL_LIMIT}-byte \
+                 bound",
+                self.path.display(),
+                bytes.len()
+            )));
         }
-        self.file.seek(SeekFrom::End(0))?;
-        self.file.write_all(bytes)?;
-        self.file.sync_all()?;
+        // --- nothing below here can report `Full` ---------------------------------
+        let uncertain = |e: io::Error| JournalError::Uncertain(e.to_string());
+        self.file.seek(SeekFrom::End(0)).map_err(uncertain)?;
+        if take_one(&self.hooks.enospc_after_write) {
+            // A real disk filling up mid-append. Whether any of these bytes landed is
+            // exactly what nobody can know, so it is uncertain — never a capacity refusal.
+            let _ = self.file.write_all(&bytes[..bytes.len() / 2]);
+            let _ = self.file.sync_all();
+            self.status.bytes.fetch_add((bytes.len() / 2) as u64, Ordering::Relaxed);
+            return Err(uncertain(io::Error::new(
+                io::ErrorKind::StorageFull,
+                "injected ENOSPC part-way through a journal append (test hook)",
+            )));
+        }
+        self.file.write_all(bytes).map_err(uncertain)?;
+        self.file.sync_all().map_err(uncertain)?;
         self.status.bytes.fetch_add(bytes.len() as u64, Ordering::Relaxed);
         Ok(())
     }
@@ -588,16 +690,6 @@ impl Journal {
             Ordering::Relaxed,
             |owed| Some(owed.saturating_sub(n)),
         );
-    }
-}
-
-/// A raw I/O failure on the durable path is always ambiguous — except a capacity refusal
-/// from [`Journal::write_durably`]'s central guard, where nothing was attempted.
-fn uncertain(e: io::Error) -> JournalError {
-    if e.kind() == io::ErrorKind::StorageFull {
-        JournalError::Full(e.to_string())
-    } else {
-        JournalError::Uncertain(e.to_string())
     }
 }
 
@@ -1170,6 +1262,126 @@ mod tests {
         .unwrap_err();
         assert!(err.is_full(), "{err:?}");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Astra's final blocker: a real disk filling up is never a capacity refusal. Both
+    /// injected `ENOSPC` shapes — part-way through a record, and after a complete record
+    /// reached the file — are uncertain, poison the writer, and leave the bytes alone.
+    #[test]
+    fn enospc_once_io_has_begun_is_uncertain_and_never_a_capacity_refusal() {
+        // (a) ENOSPC part-way through: a torn suffix survives, repaired at the next open.
+        let dir = scratch("enospc-partial");
+        let hooks = JournalHooks::default();
+        {
+            let mut j = Journal::open_with_hooks(&dir, "s", "b", hooks.clone()).unwrap();
+            // Armed after the open, so the epoch record lands normally and the injected
+            // failure is squarely on the care write.
+            hooks.enospc(1);
+            let err = j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap_err();
+            assert!(!err.is_full(), "ENOSPC from a write in progress is not a capacity refusal");
+            assert!(matches!(err, JournalError::Uncertain(_)), "{err:?}");
+            assert!(j.poisoned().is_some(), "the writer must be poisoned");
+
+            // Every later queued job is refused with the file untouched.
+            let after_failure = std::fs::read(dir.join(JOURNAL_NAME)).unwrap();
+            let e = j
+                .append_outcomes(&[OutcomeRecord {
+                    seq: 1,
+                    tick: 100,
+                    outcome: "applied",
+                    reason: String::new(),
+                    applied: serde_json::json!({}),
+                }])
+                .unwrap_err();
+            assert!(matches!(e, JournalError::Uncertain(_)), "{e:?}");
+            let e = j.append_accepted(&[command(2, 100, CareKind::Clean)]).unwrap_err();
+            assert!(matches!(e, JournalError::Uncertain(_)), "{e:?}");
+            assert_eq!(
+                std::fs::read(dir.join(JOURNAL_NAME)).unwrap(),
+                after_failure,
+                "a poisoned writer must not touch the file again, in any job"
+            );
+        }
+        let j = Journal::open(&dir, "s2", "b").unwrap();
+        assert!(j.truncated_bytes() > 0, "the half record is repaired away");
+        assert!(j.accepted_records().is_empty(), "no complete record survived");
+        assert_eq!(j.max_seq(), None, "seq 1 was never applied, and is not consumed");
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        // (b) The complete record reached the file and the failure came at the sync. The
+        // record replays once at its boundary.
+        let dir = scratch("enospc-complete");
+        let hooks = JournalHooks::default();
+        {
+            let mut j = Journal::open_with_hooks(&dir, "s", "b", hooks.clone()).unwrap();
+            hooks.fail_after_sync(1);
+            let err = j.append_accepted(&[command(7, 100, CareKind::Rain)]).unwrap_err();
+            assert!(!err.is_full(), "{err:?}");
+            assert!(j.poisoned().is_some());
+        }
+        let j = Journal::open(&dir, "s2", "b").unwrap();
+        assert_eq!(j.accepted_records().len(), 1);
+        let plan = j.replay_plan(6, 100).unwrap();
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].seq, 7);
+        assert_eq!(plan[0].apply_after_tick, 100);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The other side of the same rule, kept explicit: the *configured* limit is checked
+    /// before any write is attempted, so it is typed `Full`, the file is untouched, and the
+    /// writer is not poisoned — autonomous life carries on with care refused.
+    #[test]
+    fn the_configured_limit_is_refused_without_attempting_a_write_or_poisoning() {
+        let dir = scratch("configured-limit");
+        let mut j = Journal::open(&dir, "s", "b").unwrap();
+        let before = std::fs::read(dir.join(JOURNAL_NAME)).unwrap();
+        j.status().set_for_test(JOURNAL_LIMIT - 1, 0);
+
+        let err = j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap_err();
+        assert!(err.is_full(), "{err:?}");
+        assert!(j.poisoned().is_none(), "a capacity refusal must not poison the writer");
+        assert_eq!(std::fs::read(dir.join(JOURNAL_NAME)).unwrap(), before);
+
+        // And once there is room again the same writer still works: nothing was broken.
+        j.status().set_for_test(before.len() as u64, 0);
+        j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap();
+        assert_eq!(j.accepted_records().len(), 1);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Creating `care.jsonl` makes a directory entry, and syncing the file's own contents
+    /// says nothing about whether that entry survives a power loss. The barrier has to be
+    /// crossed at open, before any command can be accepted.
+    #[test]
+    fn the_journals_directory_entry_is_made_durable_before_any_command_is_accepted() {
+        let dir = scratch("dir-barrier");
+        let hooks = JournalHooks::default();
+        assert_eq!(hooks.dir_sync_count(), 0);
+        let mut j = Journal::open_with_hooks(&dir, "s", "b", hooks.clone()).unwrap();
+        assert_eq!(
+            hooks.dir_sync_count(),
+            1,
+            "the directory must be synced at open, which is before any append is possible"
+        );
+        j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap();
+        assert_eq!(hooks.dir_sync_count(), 1, "one barrier per run is enough");
+        drop(j);
+
+        // A failure at that barrier refuses to open at all: no service is published on the
+        // strength of a file whose own pathname may not survive.
+        let dir2 = scratch("dir-barrier-fails");
+        let hooks = JournalHooks::default();
+        hooks.fail_dir_sync(1);
+        let err = format!("{:#}", Journal::open_with_hooks(&dir2, "s", "b", hooks).unwrap_err());
+        assert!(err.contains("no \ncommand may be accepted") || err.contains("command may be accepted"), "{err}");
+        assert!(
+            !dir2.join(JOURNAL_NAME).exists()
+                || std::fs::read(dir2.join(JOURNAL_NAME)).unwrap().is_empty(),
+            "a journal that failed its barrier must carry no records"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::remove_dir_all(&dir2).unwrap();
     }
 
     #[test]
