@@ -155,6 +155,135 @@ Live-process host tests (`run_persistence`, `care_replay`) are load-flaky when s
 `cargo test` invocations contend for the state lock at once; each passes alone. Not a
 change of this session; noted for whoever runs the suite beside root's experiments.
 
+### Living pose and juvenile scale (second slice, 2026-09-13)
+
+Per Astra's `lanternjaw-ecology-animation-contract-2026-09-13.md`. The study's `Mode` and
+`parts(seconds, mode)` remain the gallery; the ecology entry points are
+`LivingPose { ambient, movement, attack: Option<AttackEpisode>, gut, cocoon }`,
+`attack_channels(episode)` (a pure schedule over **attack time**: windup stretched over the
+real windup, the cocked pose held through a strike until its final 120 ms cubic extension,
+full contact reached exactly at the settlement boundary and **held past it**, the 200 ms
+recoil only in `Recovering`/`Handling` and from the reach the previous phase actually
+displayed, the far claw 45 ms behind in attack time and holding the previous phase's far
+reach through the lag), `Channels` (the rasterizer's explicit inputs, produced either by
+`Channels::study` — bit-identical to the gallery — or `Channels::living`), and
+`Lanternjaw::draw_living(.., scale, ..)` which scales the **whole rig** through
+`cubarium_render::stamp_rig_scaled` (body coordinates divided by the scale, query radius
+multiplied by it; offsets, pivots, lattice, lunge and limbs shrink together). Admitted scale
+`SCALE_MIN` 0.5 ..= 1; outside it, or non-finite, panics as a configuration error. No
+cocoon without `Some(gestation)`; no gut breath without gut; a held real phase never strikes.
+
+Delivered (commit named under "Commits"): `parts(seconds, mode)` is now literally
+`rasterize(&Channels::study(seconds, mode))` and was proven bit-identical to the previous
+rasterizer over 81 120 texels of a pre-refactor fixture (0 differing bytes) and, permanently,
+over 567 840 texels by a unit test. `attack_channels` follows the normative schedule (the
+strike accent rises from exactly 0 twenty milliseconds before the extension, inside the
+hold — the one wording ambiguity the workers found, ruled in favour of the continuous
+reading; at the study's keyframes reach/compress/lunge/charge/blink agree to 1e-9 and the
+accent agrees within the phase that owns it). The study route gained `--scale` and a
+`phases` scene: real phases held longer than six seconds (perched; stalking at movement
+0.6; windup 0.6 s → strike 1 s → full extension **held** 2 s → recovering 5 s → handling
+with gut 0.8; a funded escrow 0→1; a `SCALE_MIN` juvenile beside an adult). Sheets:
+`captures/lanternjaw/phases.png` and `captures/lanternjaw/juvenile.png` (gallery at 0.5 /
+0.7 / 1.0, and the seams scene at 0.6). Fable's reading: the attack row shows the
+compressed charged coil, the cocked hold through the paid approach, the warm claw driving
+out at 1.55–1.58 s, the extension visibly still with claws out at 2.58 and 3.58 s, the
+recoil and the quiet fold after; the cocoon is absent at gestation 0 and fades up by 0.2;
+the 0.6-scale body is continuous across the side/side and side/top seams and the top
+vertex. Honest limits: at scale 0.5 the lantern chain reads as one lighter stripe (bilinear
+minification of adult art; 0.7 keeps the rhythm), the 0.24 px gut breath is a brightness
+change, not a silhouette, at 64 px, and the strike accent is over by the settlement frames
+(`ACCENT_SECONDS` 0.24), so a held extension reads as a dark arm out front. The `seams`
+scene's rim body is the study `Hunt` mode (adult), so the scaled rim cut is unit-tested but
+not pictured.
+
+Tests: `crates/cubarium/tests/lanternjaw_living.rs` (23) and
+`crates/cubarium-render/tests/multipart_scale.rs` (12), independent; plus 15 in-module
+lanternjaw unit tests; and `crates/cubarium/tests/lanternjaw_scale.rs` (5, Fable) sweeping
+the core-admitted scales 0.2, 0.316227766…, 0.632455532… and 1: drawing at every scale, the
+scaled footprint bound, light rising with scale near the area law, effectors linear to the
+last bit with the near claw on the drawn limb, seam light conservation across Front/Right
+and Right/Top at matched phase, one owner per pixel at a top vertex, and the rim cut with no
+reflection.
+
+**Minification is box-filtered, not point-sampled.** The first version of the four-scale
+claw test had to widen its tolerance to half a source-texel stride (2.5 px at scale 0.2,
+larger than the body) because one point sample per pixel simply missed a sub-pixel claw:
+that would have admitted invisible, spatially fictitious contact. Instead
+`stamp_rig_scaled` now averages `n × n` samples over each destination pixel below scale 1
+(`n = ceil(1 / scale)`, offsets `(i + 0.5) / n − 0.5` along the body axes, query radius plus
+`SUPERSAMPLE_REACH` 0.5), so a texel smaller than a pixel contributes its share of the
+pixel's area; scale 1 is `n = 1` with a zero offset and stays bit-identical (the scale-1
+identity sweeps pass unchanged). Measured on the settled strike: the pixel over the named
+near claw carries near-limb light 0.026 / 0.092 / 0.252 / 0.236 at scales 0.2 / 0.316 /
+0.632 / 1, the nearest painted limb pixel is 0.41 / 0.40 / 0.50 / 0.30 px from it (the test
+tolerance is one pixel at every scale), and the light ratios track the area law (0.040 /
+0.100 / 0.400 / 1.000 of the adult). Honest limit: at 0.2 the claw's light is 2–3 % of a
+pixel — geometrically where the effector is, invisible on an LED — and a 0.2-scale body is
+under four pixels long, a smudge with a brighter head. That is the core's admitted range
+reported faithfully, not a claim of visible contact at the smallest sizes. Sheets made
+after the range change and the filter: `captures/lanternjaw/juvenile-scales.png` (the
+gallery at 0.2 / 0.316 / 0.632 / 1 and the seams scene at 0.6) and
+`captures/lanternjaw/phases-min02.png` (the phases scene with a 0.2 juvenile beside the
+adult); the earlier `juvenile.png` and `phases.png` (0.5 minimum, point-sampled) are kept
+as they were. Fable's reading of the new sheets: 0.632 is a small but recognisable
+Lanternjaw with its chain rhythm; 0.316 is an elongated violet blob with a pink head; 0.2 is
+a two-pixel smudge with a brighter head; the 0.6 body is continuous across the Front/Right
+seam and cut at the rim. Two of the tester's first-draft claims were their own errors
+(the far claw is 45 ms *after* settlement, not at it — hence the `Effectors::far_claw`
+wording; a walking leg's swing legitimately reaches the cocoon's rightmost column).
+
+**Requirements reported back to the core / root's adapter (art is not shortened to fit
+the placeholder):**
+
+- The core trial's six-pixel jaw offset and 1.5 px reach are **not** the visible jaw. In
+  adult body pixels (+x forward, +y to the clockwise side; painted texel centres, the
+  lattice's +0.5 included, without the decorative wave): ingestion mouth `(8.5, 0)` folded
+  and `(9.6, 0)` at full lunge; near claw at settlement exactly
+  **`(13.279411764705882, 1.1)`** — `x = 12.3 + head_dx + 0.5` with `head_dx = −0.3 · (1 −
+  13/17) + 1.1 · 0.5 = 0.4794117647058823`, `y = 0.6 + 0.5`; the far claw the same one
+  pixel higher **45 ms after** settlement (at the boundary it is 62 % through its own
+  extension, so a settlement check uses the near claw); a single grasp region enclosing
+  both would be centred near `(13.0, 0.7)`. This is the agreed value (core commit `15e599d`
+  and after adopt it); the earlier `y = 1.162368` was the decorated study measurement at
+  one instant, wave included, and is superseded — the 0.062 px difference is inside any
+  proposed tolerance but the exact-centres assertion must use 1.1.
+  `cubarium::lanternjaw::effectors(scale)` returns these scaled. Any contact tolerance is
+  the core's choice; a trial disk at `(6, 0)` r 1.5 sits behind the thorax and would
+  capture visibly untouched prey.
+- **Scale range reconciled to the core's** (Astra's hunter geometry review, gate 2):
+  `SCALE_MIN` is 0.2, the trial's `body_scale_min`, so every valid `body_scale` (`max(0.2,
+  (S / S_adult)^0.5)`: 0.316… at child fraction 0.1, 0.632… at the default 0.4) draws through
+  the same whole-rig scaling as the effectors; nothing is clamped in the renderer alone. A
+  non-finite scale still panics here; the core rejects NaN at admission separately. Tests
+  cover 0.2, 0.316227766…, 0.632455532… and 1 for drawing, effectors, seams and coverage.
+- Schema 11 `HunterView` (`phase_started_tick`, `phase_ends_tick`, `entered_from`,
+  `episode`, `attack_counter`, `body_scale`, `ContactEvidence`) supplies what
+  `AttackEpisode` needs: `elapsed` from `phase_started_tick` and the presenter's clock,
+  `duration` from the ticks, `from` from `entered_from`, the episode key for continuity.
+  The core's post-movement Handling/Recovering timestamps are currently one tick early
+  (Astra gate 1); the renderer does **not** compensate — it draws the boundary it is given,
+  and the fix belongs in core.
+- Capture must be evaluated **once, at the strike's settlement boundary**, where the art
+  holds full extension; during windup and the strike's hold the claws are folded/cocked and
+  the effector is not there. If the core ever captures during extension, it must share the
+  extension trajectory (`attack_channels` at the same attack time).
+- The eight-pixel root-centred sense range and the pursuit stopping distance must be
+  audited against a thirteen-pixel effector together (Astra's warning); the renderer does
+  not and must not extend sensing.
+- Adapter inputs: `elapsed = present_seconds(tick, f) − phase_started_tick · DT` (attack
+  time, never a modulo), `duration` from the profile (`windup_seconds`, `strike_seconds`),
+  `from` = the previous episode's `AttackChannels::reach()` at the instant of transition
+  (keep the previous phase and settlement boundary through the one-tick interpolation
+  interval, as the contract says), `movement` from real root speed over the profile's
+  maximum, `gut = gut_material / gut_capacity`, `cocoon = HunterView.gestation`,
+  `scale` from one authoritative mapping of structure (candidate `sqrt(S / S_adult)`,
+  clamped to the admitted range) applied to `effectors` and the draw alike.
+- Seam/rim contact must be evaluated by unfolding the prey from the hunter's **root** with
+  the rig's own ownership (`unfold`), not by `travel`ling an effector offset, and never by
+  reflecting an off-rim effector; the safe first policy is no capture when the grasp centre
+  is off-surface, while still charging the attempt.
+
 ## Package 2 — Authored growth expansion
 
 Commit `5d7ea69`. Nine hand-authored 4 s `grow01`/`grow12` clips for glowcap, rootveil,
@@ -188,7 +317,14 @@ like a side-face plant, rooted at its ripple row. `crates/cubarium/tests/art_win
 
 - `b8b8a11` reed rule; `5d7ea69` growth pack; `5a59b8c` Lanternjaw rig, study route,
   tests and cost test; `3f2182f` presenter doc qualifiers and the refined endpoint test;
-  `56cf476` this record, the brief, the roadmap status and the README pointer.
+  `56cf476` this record, the brief, the roadmap status and the README pointer; `4cffab7`
+  the one-ulp qualifier and test-pass corrections.
+- Second slice: `7b8ad4f` `stamp_rig_scaled` with box-filtered minification and its 12
+  independent tests; `5554c48` the semantic living pose, real attack phases, the core's
+  admitted scale range 0.2..=1, `effectors`, the `phases` scene and `--scale`, with the 23
+  living-pose tests, the 5 four-scale tests and 15 unit tests. Whole render + host suite at
+  `5554c48`: **559 passed, 0 failed, exit 0** (`cargo test -p cubarium-render -p
+  cubarium`, run once in the foreground; log `/tmp/lw-full.log`).
 - Validation: `cargo test -p cubarium-render -p cubarium` (every suite green at each
   commit); `./scripts/art-bake.sh` twice with `cmp`; the ignored cost test above; the PNG
   captures above.
