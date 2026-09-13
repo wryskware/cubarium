@@ -14,9 +14,11 @@
 use cubarium::art::ArtPack;
 use cubarium::art_present::{ArtPresenter, present_seconds};
 use cubarium::clock::DT;
+mod support;
+
 use cubarium::hunter_present::{
     COCKED, HUNTER_FULL_SPEED_PX_S, HunterFrame, HunterMemory, entry_reach, episode_of,
-    hunter_scale_supported, movement_of, settled_reach,
+    hunter_scale_supported, movement_of, settled_reach, validate_profile, validate_view,
 };
 use cubarium::lanternjaw::{
     AttackPhase, RECOIL_SECONDS, Reach, SCALE_MIN, attack_channels, effectors,
@@ -31,6 +33,7 @@ use cubarium_core::{World, WorldConfig, decode_snapshot, encode_snapshot};
 use cubarium_render::Canvas;
 use cubarium_surface::{PathSegment, SurfacePoint, Vec2, travel};
 use cube_proto::Face;
+use support::{Scratch, parse, run, snapshot_ticks};
 
 // ---------------------------------------------------------------- fixtures
 
@@ -168,12 +171,17 @@ fn phase_of(world: &World, id: OrganismId) -> HunterPhase {
     world.hunters().member(id).expect("a member").phase
 }
 
-/// Step one tick and feed the presenter exactly as the runner does.
+/// Step one tick and feed the presenter exactly as the runner does: life events and hunter
+/// events drained every tick, the membership and this tick's hunter events observed after
+/// the view.
 fn step(world: &mut World, p: &mut ArtPresenter) {
     world.step();
+    world.drain_events();
+    let hunted = world.drain_hunter_events();
     let view = world.render_view();
     p.observe(&view);
-    p.observe_hunters(&view, &world.hunter_view());
+    p.observe_hunters(&view, &world.hunter_view(), &hunted)
+        .expect("a validated profile's members are drawable");
 }
 
 fn step_until(
@@ -430,7 +438,8 @@ fn an_empty_membership_draws_the_image_a_presenter_never_told_about_hunters_draw
         plain.observe(&view);
         told.observe(&view);
         assert!(world.hunter_view().is_empty());
-        told.observe_hunters(&view, &world.hunter_view());
+        told.observe_hunters(&view, &world.hunter_view(), &[])
+            .unwrap();
         for f in [0.0, 0.5, 0.999] {
             let mut a = Canvas::new();
             let mut b = Canvas::new();
@@ -443,7 +452,7 @@ fn an_empty_membership_draws_the_image_a_presenter_never_told_about_hunters_draw
             );
         }
     }
-    assert!(told.hunter_ids().is_empty() && told.unsupported_hunters().is_empty());
+    assert!(told.hunter_ids().is_empty());
 }
 
 #[test]
@@ -488,7 +497,7 @@ fn a_member_is_drawn_once_as_the_lanternjaw_by_full_id_and_ordinary_bodies_are_u
         let mut c = Canvas::new();
         let mut p = presenter();
         p.observe(&view);
-        p.observe_hunters(&view, &world.hunter_view());
+        p.observe_hunters(&view, &world.hunter_view(), &[]).unwrap();
         p.draw(&view, 0.5, &mut c);
         c
     };
@@ -571,7 +580,9 @@ fn a_certain_strike_settles_fully_extended_at_the_capture_boundary_and_the_prey_
     // A presenter that never saw the prey: same world, same tick, hunters observed fresh.
     let view = world.render_view();
     without_prey.observe(&view);
-    without_prey.observe_hunters(&view, &world.hunter_view());
+    without_prey
+        .observe_hunters(&view, &world.hunter_view(), &[])
+        .unwrap();
     let fresh = {
         let mut c = Canvas::new();
         without_prey.draw(&view, 0.5, &mut c);
@@ -692,7 +703,9 @@ fn a_viewer_joining_mid_hunt_or_a_restart_initializes_from_the_persisted_origin(
     let mut fresh = presenter();
     let view = restarted.render_view();
     fresh.observe(&view);
-    fresh.observe_hunters(&view, &restarted.hunter_view());
+    fresh
+        .observe_hunters(&view, &restarted.hunter_view(), &[])
+        .unwrap();
     let m = fresh
         .hunter_of(hunter)
         .expect("the member is recovered by id");
@@ -712,7 +725,9 @@ fn a_viewer_joining_mid_hunt_or_a_restart_initializes_from_the_persisted_origin(
     let mut fresh = presenter();
     let view = restarted.render_view();
     fresh.observe(&view);
-    fresh.observe_hunters(&view, &restarted.hunter_view());
+    fresh
+        .observe_hunters(&view, &restarted.hunter_view(), &[])
+        .unwrap();
     let m = fresh.hunter_of(hunter).unwrap();
     assert_eq!(m.cur.entered_from, HunterPhase::Strike);
     assert_eq!(m.from, settled_reach());
@@ -731,7 +746,9 @@ fn a_viewer_joining_mid_hunt_or_a_restart_initializes_from_the_persisted_origin(
     let mut fresh = presenter();
     let view = restarted.render_view();
     fresh.observe(&view);
-    fresh.observe_hunters(&view, &restarted.hunter_view());
+    fresh
+        .observe_hunters(&view, &restarted.hunter_view(), &[])
+        .unwrap();
     let (a, _) = p
         .hunter_of(hunter)
         .unwrap()
@@ -760,7 +777,7 @@ fn a_stale_id_is_ignored_and_dropped_membership_is_forgotten() {
     };
     let mut q = presenter();
     q.observe(&view);
-    q.observe_hunters(&view, &stale);
+    q.observe_hunters(&view, &stale, &[]).unwrap();
     assert!(
         q.hunter_ids().is_empty(),
         "a stale generation must not resolve to a body"
@@ -768,7 +785,7 @@ fn a_stale_id_is_ignored_and_dropped_membership_is_forgotten() {
     let mut c = Canvas::new();
     q.draw(&view, 0.5, &mut c);
     // Membership dropped: memory forgotten, the body returns to its ordinary rig.
-    p.observe_hunters(&view, &[]);
+    p.observe_hunters(&view, &[], &[]).unwrap();
     assert!(p.hunter_ids().is_empty() && p.hunter_of(hunter).is_none());
     let mut plain = presenter();
     plain.observe(&view);
@@ -779,43 +796,553 @@ fn a_stale_id_is_ignored_and_dropped_membership_is_forgotten() {
     assert!(identical(&a, &b));
 }
 
+// ---------------------------------------------------------------- capability
+
+/// The renderer states what it can draw before a world is stepped: the fixed trial profile
+/// is drawable; a profile whose contact geometry, ingestion mouth or scale range is not the
+/// art's is refused by name — never clamped, never given an ordinary predator body.
 #[test]
-fn an_unsupported_body_scale_is_reported_once_and_drawn_with_the_ordinary_rig_not_clamped() {
-    // A custom admitted profile: minimum 0.05 with a square-law mapping, so a default
-    // child (0.4 of the adult) has body scale 0.16 — valid for the core, below SCALE_MIN.
-    let mut profile = certain(trial(&empty_world()));
-    profile.body_scale_min = 0.05;
-    profile.body_scale_exponent = 2.0;
-    let (mut world, hunter, _) = staged(profile);
-    {
-        let o = world.state.organisms.get_mut(hunter).unwrap();
-        o.structure = 0.4 * o.phenotype.structure_adult;
-    }
-    let mut p = presenter();
-    step(&mut world, &mut p);
-    let view = world.render_view();
-    let scale = world.hunter_view()[0].body_scale;
+fn the_capability_check_admits_the_trial_profile_and_names_what_it_cannot_draw() {
+    let base = trial(&empty_world());
+    assert_eq!(validate_profile(&base), Ok(()));
+    assert_eq!(validate_profile(&certain(base.clone())), Ok(()));
+    let mut claw = base.clone();
+    claw.capture_offset_body = Vec2::ZERO;
+    let err = validate_profile(&claw).unwrap_err();
     assert!(
-        !hunter_scale_supported(scale),
-        "the fixture must produce an unsupported scale, got {scale}"
+        err.contains("capture_offset_body") && err.contains("13.279"),
+        "{err}"
     );
+    let mut mouth = base.clone();
+    mouth.ingestion_offset_body = Vec2::new(6.0, 0.0);
+    let err = validate_profile(&mouth).unwrap_err();
+    assert!(
+        err.contains("ingestion_offset_body") && err.contains("9.6"),
+        "{err}"
+    );
+    let mut small = base.clone();
+    small.body_scale_min = 0.05;
+    let err = validate_profile(&small).unwrap_err();
+    assert!(
+        err.contains("body_scale_min") && err.contains("0.05"),
+        "{err}"
+    );
+    let mut exponent = base.clone();
+    exponent.body_scale_exponent = -1.0;
+    assert!(
+        validate_profile(&exponent)
+            .unwrap_err()
+            .contains("body_scale_exponent")
+    );
+    // The presenter exposes the same check.
+    assert_eq!(presenter().validate_hunter_profile(&base), Ok(()));
+    assert!(presenter().validate_hunter_profile(&claw).is_err());
+    // And the per-member check refuses a view whose published geometry is not the drawn
+    // claw, even at a supported scale (Astra's fixture): nothing is drawn as the rig.
+    let mut world = empty_world();
+    world
+        .start_hunter_trial(claw, target_of(SurfacePoint::new(Face::Front, 32.0, 32.0)))
+        .unwrap();
+    let view = world.render_view();
+    let h = world.hunter_view();
+    let mut p = presenter();
+    p.observe(&view);
+    let err = p.observe_hunters(&view, &h, &[]).unwrap_err();
+    assert!(err.contains("capture offset"), "{err}");
     assert!(
         p.hunter_ids().is_empty(),
-        "an unsupported scale is not drawn as the rig"
+        "a refused member is not drawn as the rig"
     );
-    assert_eq!(p.unsupported_hunters(), vec![(hunter, scale)]);
-    assert_eq!(p.take_new_unsupported(), vec![(hunter, scale)]);
-    assert!(p.take_new_unsupported().is_empty(), "reported once");
+    assert_eq!(validate_view(&h[0]).is_err(), true);
+}
+
+/// The actual runner refuses a saved world whose profile the art cannot draw, by name and
+/// before any tick; the same world runs without `--art`, and a saved trial world resumes
+/// with `--art`. The runner's own preflight, not a presenter unit.
+#[test]
+fn the_runner_refuses_an_undrawable_profile_at_load_and_resumes_a_drawable_one() {
+    let scratch = Scratch::new("hunter-present-preflight");
+    // A saved world with a profile the art cannot draw.
+    let bad_state = scratch.join("bad");
+    std::fs::create_dir_all(&bad_state).unwrap();
+    let mut bad = trial(&empty_world());
+    bad.capture_offset_body = Vec2::ZERO;
+    let (world, _, _) = staged(bad);
+    let bytes = encode_snapshot(&world.state, "hunter-present-test");
+    cubarium::state::write_snapshot(&bad_state, world.tick(), &bytes).unwrap();
+    let art = atelier();
+    let refused = cubarium::run_world(&parse(&[
+        "--sink",
+        "none",
+        "--speed",
+        "0",
+        "--seconds",
+        "1",
+        "--state",
+        bad_state.to_str().unwrap(),
+        "--art",
+        art.to_str().unwrap(),
+        "--require-resume",
+    ]));
+    let err = match refused {
+        Ok(out) => panic!("the run must be refused, got {out:?}"),
+        Err(e) => format!("{e:#}"),
+    };
+    assert!(
+        err.contains("hunter profile") && err.contains("capture_offset_body"),
+        "{err}"
+    );
+    assert!(
+        err.contains("without --art"),
+        "the refusal names the opt-out: {err}"
+    );
+    // Unmutated: the saved snapshot is the only one, and nothing was stepped or written.
+    assert_eq!(snapshot_ticks(&bad_state), vec![world.tick()]);
+    // The same world runs without the art.
+    let out = run(&[
+        "--sink",
+        "none",
+        "--speed",
+        "0",
+        "--seconds",
+        "2",
+        "--state",
+        bad_state.to_str().unwrap(),
+        "--require-resume",
+    ]);
+    assert_eq!(out.start_tick, world.tick());
+    assert_eq!(out.final_tick, world.tick() + 40);
+    // A drawable saved trial world resumes with the art and steps.
+    let good_state = scratch.join("good");
+    std::fs::create_dir_all(&good_state).unwrap();
+    let (world, _, _) = staged(certain(trial(&empty_world())));
+    let bytes = encode_snapshot(&world.state, "hunter-present-test");
+    cubarium::state::write_snapshot(&good_state, world.tick(), &bytes).unwrap();
+    let out = run(&[
+        "--sink",
+        "none",
+        "--speed",
+        "0",
+        "--seconds",
+        "2",
+        "--state",
+        good_state.to_str().unwrap(),
+        "--art",
+        art.to_str().unwrap(),
+        "--require-resume",
+    ]);
+    assert_eq!(out.final_tick, world.tick() + 40);
+}
+
+/// The actual runner drains the world's hunter events every tick, headless and not: a run
+/// through many paid attempts ends with the same state a hand-stepped world that drains per
+/// tick reaches (draining changes nothing), the life log still carries the prey's death by
+/// predation, and the runner never accumulates the buffer — proved on the hand-stepped twin,
+/// whose buffer is empty after every tick, and on the runner by its outcome equalling that
+/// twin's state hash.
+#[test]
+fn the_runner_drains_hunter_events_every_tick_without_touching_state_or_life_events() {
+    let scratch = Scratch::new("hunter-present-drain");
+    let state = scratch.join("state");
+    std::fs::create_dir_all(&state).unwrap();
+    // A certain miss with a frozen prey in the claws: the hunter attacks again and again.
+    let (world, hunter, prey) = staged(never(trial(&empty_world())));
+    let bytes = encode_snapshot(&world.state, "hunter-present-test");
+    cubarium::state::write_snapshot(&state, world.tick(), &bytes).unwrap();
+    // The twin: stepped by hand with every buffer drained per tick, exactly as the runner.
+    let (_, decoded) = decode_snapshot(&bytes).unwrap();
+    let mut twin = World::from_state(decoded).unwrap();
+    let mut attempts = 0usize;
+    let ticks = 20 * 60;
+    for _ in 0..ticks {
+        twin.step();
+        twin.drain_events();
+        let hunted = twin.drain_hunter_events();
+        attempts += hunted
+            .iter()
+            .filter(|e| matches!(e, cubarium_core::HunterEvent::Attempt { .. }))
+            .count();
+        assert!(twin.drain_hunter_events().is_empty(), "drained means empty");
+    }
+    assert!(
+        attempts >= 3,
+        "the fixture must attack repeatedly, got {attempts} attempts"
+    );
+    assert!(
+        twin.hunters().member(hunter).is_some() && twin.state.organisms.get(prey).is_some(),
+        "a certain miss keeps both alive"
+    );
+    let want = state_hash(&twin.state);
+    // The actual runner, headless, over the same ticks.
+    let out = run(&[
+        "--sink",
+        "none",
+        "--speed",
+        "0",
+        "--seconds",
+        "60",
+        "--state",
+        state.to_str().unwrap(),
+        "--require-resume",
+    ]);
+    assert_eq!(out.final_tick, world.tick() + ticks);
+    assert_eq!(
+        out.state_hash, want,
+        "draining hunter events changed the world"
+    );
+    // And with the art on, the same.
+    let state2 = scratch.join("state-art");
+    std::fs::create_dir_all(&state2).unwrap();
+    cubarium::state::write_snapshot(&state2, world.tick(), &bytes).unwrap();
+    let out = run(&[
+        "--sink",
+        "none",
+        "--speed",
+        "0",
+        "--seconds",
+        "60",
+        "--state",
+        state2.to_str().unwrap(),
+        "--art",
+        atelier().to_str().unwrap(),
+        "--require-resume",
+    ]);
+    assert_eq!(out.state_hash, want, "the art path changed the world");
+}
+
+// ---------------------------------------------------------------- Astra's adapter fixtures
+
+/// Synthetic observer frames over a real trial world isolate the bookkeeping: the same view
+/// tick observed twice must not discard the prior tick's phase, and a rewind must not carry a
+/// later phase's reach back in time.
+fn synthetic(
+    world: &World,
+    tick: u64,
+    phase: HunterPhase,
+    started: u64,
+    ends: u64,
+    origin: HunterPhase,
+) -> (cubarium_core::RenderView, HunterView) {
+    let mut view = world.render_view();
+    view.tick = tick;
+    let mut h = world.hunter_view()[0];
+    h.phase = phase;
+    h.phase_started_tick = started;
+    h.phase_ends_tick = ends;
+    h.entered_from = origin;
+    h.episode = 1;
+    (view, h)
+}
+
+fn observe_pair(p: &mut ArtPresenter, pair: &(cubarium_core::RenderView, HunterView)) {
+    p.observe(&pair.0);
+    p.observe_hunters(&pair.0, &[pair.1], &[]).unwrap();
+}
+
+#[test]
+fn a_repeated_observation_of_the_same_tick_changes_no_fractional_frame() {
+    let (world, hunter, _) = staged(certain(trial(&empty_world())));
+    let strike = synthetic(&world, 19, HunterPhase::Strike, 1, 20, HunterPhase::Windup);
+    let handled = synthetic(
+        &world,
+        20,
+        HunterPhase::Handling,
+        20,
+        20,
+        HunterPhase::Strike,
+    );
+    let mut p = presenter();
+    observe_pair(&mut p, &strike);
+    observe_pair(&mut p, &handled);
+    let before: Vec<_> = [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0]
+        .into_iter()
+        .map(|f| p.hunter_of(hunter).unwrap().living_pose(20, f, &[]))
+        .collect();
+    let images_before: Vec<Canvas> = [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0]
+        .into_iter()
+        .map(|f| {
+            let mut c = Canvas::new();
+            p.draw(&handled.0, f, &mut c);
+            c
+        })
+        .collect();
+    let memory_before = p.hunter_of(hunter).unwrap().clone();
+    observe_pair(&mut p, &handled);
+    observe_pair(&mut p, &handled);
+    assert_eq!(
+        p.hunter_of(hunter).unwrap(),
+        &memory_before,
+        "a repeated observation changed the memory"
+    );
+    for (k, f) in [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0].into_iter().enumerate() {
+        assert_eq!(
+            p.hunter_of(hunter).unwrap().living_pose(20, f, &[]),
+            before[k],
+            "f {f}"
+        );
+        let mut c = Canvas::new();
+        p.draw(&handled.0, f, &mut c);
+        assert!(identical(&c, &images_before[k]), "f {f}: the image changed");
+    }
+    // The prior tick's strike is still what the frames before the boundary show.
+    let (pose, _) = p.hunter_of(hunter).unwrap().living_pose(20, 0.5, &[]);
+    assert_eq!(pose.attack.unwrap().phase, AttackPhase::Strike);
+}
+
+#[test]
+fn a_rewound_presenter_reconstructs_hunter_memory_like_a_fresh_one() {
+    let (world, hunter, _) = staged(certain(trial(&empty_world())));
+    let strike = synthetic(&world, 19, HunterPhase::Strike, 1, 20, HunterPhase::Windup);
+    let handled = synthetic(
+        &world,
+        20,
+        HunterPhase::Handling,
+        20,
+        20,
+        HunterPhase::Strike,
+    );
+    let old = synthetic(&world, 5, HunterPhase::Windup, 2, 10, HunterPhase::Stalking);
+    let mut reused = presenter();
+    observe_pair(&mut reused, &strike);
+    observe_pair(&mut reused, &handled);
+    observe_pair(&mut reused, &old);
+    let mut fresh = presenter();
+    observe_pair(&mut fresh, &old);
+    let a = reused.hunter_of(hunter).unwrap();
+    let b = fresh.hunter_of(hunter).unwrap();
+    assert_eq!(
+        a, b,
+        "future attack reach must not leak into a rewound world"
+    );
+    assert_eq!(a.from, Reach::FOLDED);
+    for f in [0.0, 0.5, 1.0] {
+        let mut x = Canvas::new();
+        let mut y = Canvas::new();
+        reused.draw(&old.0, f, &mut x);
+        fresh.draw(&old.0, f, &mut y);
+        assert!(
+            identical(&x, &y),
+            "f {f}: a rewound presenter draws differently from a fresh one"
+        );
+    }
+}
+
+// ---------------------------------------------------------------- moving prey, topology, hold
+
+/// A quiet world: nothing grows, nothing falls, no light — so the backdrop is the bare
+/// ground and every painted pixel near the hunter is the hunter's or the prey's.
+fn quiet_world() -> World {
+    let mut cfg = WorldConfig::default();
+    cfg.founders.kinds.clear();
+    cfg.founders.count = 0;
+    cfg.weather.amplitude = 0.0;
+    cfg.water.rain_rate = 0.0;
+    cfg.habitat.light_base = 0.0;
+    cfg.habitat.light_height_gain = 0.0;
+    cfg.habitat.light_noise_gain = 0.0;
+    cfg.detritus.initial_dark = 0.0;
+    cfg.detritus.decomposition = 0.0;
+    cfg.detritus.fall = 0.0;
+    World::new(cfg).expect("a quiet world is valid")
+}
+
+/// A hunter at `spot` facing `heading`, in a quiet world, with a free (unfrozen) prey placed
+/// in its claws; the prey may move on its own while the strike runs.
+fn staged_moving(
+    spot: SurfacePoint,
+    heading: Vec2,
+    profile: FixedHunterProfile,
+) -> (World, OrganismId, OrganismId) {
+    let mut world = quiet_world();
+    let receipt = world
+        .start_hunter_trial(profile.clone(), target_of(spot))
+        .expect("the trial starts");
+    let hunter = receipt.id;
+    aim(&mut world, hunter, heading, 1.0);
+    let grasp = effector_point(spot, heading, &profile, 1.0);
+    let prey = place_prey(&mut world, grasp, 0.5, 0.3, 0.4, false);
+    (world, hunter, prey)
+}
+
+/// Runs a moving-prey capture and returns what the boundary tick showed: the retained prey's
+/// settlement position from the event, its last published position, and the presenter.
+fn captured(
+    spot: SurfacePoint,
+    heading: Vec2,
+) -> (World, ArtPresenter, OrganismId, OrganismId, u64) {
+    let (mut world, hunter, prey) = staged_moving(spot, heading, certain(trial(&quiet_world())));
+    let mut p = presenter();
+    let tick = step_until(&mut world, &mut p, hunter, HunterPhase::Handling, 400);
+    (world, p, hunter, prey, tick)
+}
+
+#[test]
+fn a_captured_prey_is_carried_to_the_events_settlement_position_and_meets_the_claw() {
+    let (world, mut p, hunter, prey, tick) = captured(
+        SurfacePoint::new(Face::Front, 20.0, 32.0),
+        Vec2::new(1.0, 0.0),
+    );
+    let m = p.hunter_of(hunter).unwrap();
+    let held = m
+        .prey
+        .as_ref()
+        .expect("the captured prey is retained for the boundary tick");
+    assert_eq!(held.id, prey);
+    let at = m
+        .prey_at
+        .expect("the Capture event's settlement position was noted");
+    // The drawn pose walks from the last published position to the settlement position.
+    let (start, _) = m.retained_prey_pose(0.0).unwrap();
+    let (end, heading) = m.retained_prey_pose(1.0).unwrap();
+    assert_eq!(start, held.pos);
+    assert_eq!(
+        heading, held.heading,
+        "the event carries no heading: the last published one holds"
+    );
+    assert!((end.u - at.u).abs() < 1e-9 && (end.v - at.v).abs() < 1e-9 && end.face == at.face);
+    let (mid, _) = m.retained_prey_pose(0.5).unwrap();
+    let want = Vec2::new((start.u + at.u) * 0.5, (start.v + at.v) * 0.5);
+    assert!(
+        (mid.u - want.x).abs() < 1e-9 && (mid.v - want.y).abs() < 1e-9,
+        "a straight chart path"
+    );
+    // At the boundary the prey is inside the hunter's grasp: within the core's own reach of
+    // the drawn near claw, carried from the hunter's interpolated root at f → 1.
+    let view = world.render_view();
+    let o = view.organisms.iter().find(|o| o.id == hunter).unwrap();
+    let h = world
+        .hunter_view()
+        .into_iter()
+        .find(|h| h.id == hunter)
+        .unwrap();
+    let (root, dir) = cubarium::present::interpolate(&o.moved, o.pos, o.heading, 1.0);
+    let claw = travel(
+        root,
+        body_offset(dir, effectors(h.body_scale).near_claw, 1.0),
+    )
+    .end;
+    let d = ((end.u - claw.u).powi(2) + (end.v - claw.v).powi(2)).sqrt();
+    assert!(
+        d <= h.geometry.capture_reach_px + 0.5,
+        "at settlement the prey is {d} px from the drawn claw (reach {})",
+        h.geometry.capture_reach_px
+    );
+    // Drawn: at f = 0.999 the prey's light sits at the settlement position, not its start.
+    let before = draw(&mut p, &world, 0.999);
+    let mut fresh = presenter();
+    fresh.observe(&view);
+    fresh
+        .observe_hunters(&view, &world.hunter_view(), &[])
+        .unwrap();
+    let mut none = Canvas::new();
+    fresh.draw(&view, 0.999, &mut none);
+    assert!(
+        differing_near(&before, &none, at, 3.0) > 0,
+        "the prey is not drawn at its settlement position"
+    );
+    let _ = tick;
+}
+
+#[test]
+fn a_capture_across_a_seam_carries_the_prey_onto_the_next_face_and_the_body_stays_whole() {
+    let (world, mut p, hunter, _, _) = captured(
+        SurfacePoint::new(Face::Front, 52.0, 32.0),
+        Vec2::new(1.0, 0.0),
+    );
+    let m = p.hunter_of(hunter).unwrap();
+    let held = m.prey.as_ref().expect("retained");
+    let at = m.prey_at.expect("noted");
+    assert_eq!(
+        at.face,
+        Face::Right,
+        "the grasp is past the Front/Right seam"
+    );
+    // A different face: drawn at the settlement position itself (the labelled approximation).
+    let (pos, _) = m.retained_prey_pose(0.5).unwrap();
+    if held.pos.face != at.face {
+        assert_eq!(pos, at);
+    }
+    let image = draw(&mut p, &world, 0.5);
+    assert!(
+        lit_faces(&image) >= 2,
+        "the hunter and its prey span the seam"
+    );
+    let on_right = every_pixel()
+        .filter(|&(f, x, y)| f == Face::Right && image.get(f, x, y) != [0.0; 3])
+        .count();
+    assert!(on_right > 0);
+}
+
+#[test]
+fn a_capture_at_the_open_rim_draws_nothing_below_it_and_a_vertex_hunt_does_not_panic() {
+    // Heading straight down the Front face toward the rim: the grasp sits just above it.
+    let (world, mut p, hunter, _, _) = captured(
+        SurfacePoint::new(Face::Front, 32.0, 48.0),
+        Vec2::new(0.0, 1.0),
+    );
+    let m = p.hunter_of(hunter).unwrap();
+    let at = m.prey_at.expect("noted");
+    assert!(at.v < 64.0 && at.face == Face::Front);
+    // Nothing of the hunter or its prey leaves the Front face: every pixel off it is the
+    // hunter-free image's (the floor and ground paint every face), and nothing is reflected
+    // back above the rim that the flat body does not have.
+    let image = draw(&mut p, &world, 0.5);
+    let view = world.render_view();
     let mut plain = presenter();
     plain.observe(&view);
-    let mut a = Canvas::new();
-    let mut b = Canvas::new();
-    p.draw(&view, 0.5, &mut a);
-    plain.draw(&view, 0.5, &mut b);
-    assert!(
-        identical(&a, &b),
-        "the unsupported member must be drawn with its ordinary rig, unchanged"
+    let mut base = Canvas::new();
+    plain.draw(&view, 0.5, &mut base);
+    for (f, x, y) in every_pixel() {
+        if f != Face::Front {
+            assert_eq!(
+                image.get(f, x, y),
+                base.get(f, x, y),
+                "light off the Front face at the rim: {f:?} ({x}, {y})"
+            );
+        }
+    }
+    assert!(differing_near(&image, &base, at, 4.0) > 0, "the grasp near the rim is drawn");
+    // Toward a top vertex: whatever the core decides about the grasp, the presenter draws
+    // one owner per pixel and never panics.
+    let (mut world, hunter, _) = staged_moving(
+        SurfacePoint::new(Face::Top, 6.0, 6.0),
+        Vec2::new(-0.7071, -0.7071),
+        certain(trial(&quiet_world())),
     );
+    let mut p = presenter();
+    for _ in 0..120 {
+        step(&mut world, &mut p);
+        let image = draw(&mut p, &world, 0.5);
+        for (f, x, y) in every_pixel() {
+            assert!(image.get(f, x, y).iter().all(|&c| c <= 1.0 + 1e-6));
+        }
+    }
+    let _ = hunter;
+}
+
+/// Held time (the runner passes `f = 1` while care holds a boundary) freezes the attack and
+/// the ambient body alike: repeated draws are identical and nothing advances.
+#[test]
+fn held_time_freezes_the_attack_and_the_ambient_body() {
+    let (mut world, hunter, _) = staged(certain(trial(&empty_world())));
+    let mut p = presenter();
+    step_until(&mut world, &mut p, hunter, HunterPhase::Strike, 400);
+    let view = world.render_view();
+    let a = draw(&mut p, &world, 1.0);
+    let (pa, _) = p
+        .hunter_of(hunter)
+        .unwrap()
+        .living_pose(view.tick, 1.0, &[]);
+    for _ in 0..5 {
+        let b = draw(&mut p, &world, 1.0);
+        assert!(identical(&a, &b), "a held frame drifted");
+        let (pb, _) = p
+            .hunter_of(hunter)
+            .unwrap()
+            .living_pose(view.tick, 1.0, &[]);
+        assert_eq!(pa, pb);
+    }
+    assert_eq!(pa.ambient, present_seconds(view.tick, 1.0));
 }
 
 #[test]
@@ -936,7 +1463,13 @@ fn capture_a_real_attack_as_native_frames() {
         d.to_string_lossy().into_owned()
     });
     std::fs::create_dir_all(&dir).unwrap();
-    let (mut world, hunter, _) = staged(certain(trial(&empty_world())));
+    // A quiet backdrop (no plants, no light) and a free prey in the claws: what is drawn
+    // near the hunter is the hunter and the prey.
+    let (mut world, hunter, _) = staged_moving(
+        SurfacePoint::new(Face::Front, 20.0, 32.0),
+        Vec2::new(1.0, 0.0),
+        certain(trial(&quiet_world())),
+    );
     let mut p = presenter();
     let mut sink = PngSink::new(&dir, 1).unwrap();
     let mut frame = cube_proto::Frame::black();
@@ -987,7 +1520,8 @@ fn draw_cost_with_hunters() {
         let view = world.render_view();
         let mut with = presenter();
         with.observe(&view);
-        with.observe_hunters(&view, &world.hunter_view());
+        with.observe_hunters(&view, &world.hunter_view(), &[])
+            .unwrap();
         let mut without = presenter();
         without.observe(&view);
         let time = |p: &mut ArtPresenter| {

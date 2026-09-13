@@ -10,16 +10,115 @@
 //! from the previous frame when one was observed, and conservatively from `entered_from`
 //! after a restart. Contract: `design/7_Research/lanternjaw-ecology-animation-contract-2026-09-13.md`.
 
-use cubarium_core::hunter::{HunterPhase, HunterView};
+use cubarium_core::hunter::{FixedHunterProfile, HunterPhase, HunterRole, HunterView};
 use cubarium_core::view::OrganismView;
-use cubarium_surface::PathSegment;
+use cubarium_surface::{PathSegment, SurfacePoint, Vec2};
 
 use crate::art_present::present_seconds;
 use crate::clock::DT;
 use crate::lanternjaw::{
     AttackEpisode, AttackPhase, LivingPose, RECOIL_SECONDS, Reach, SCALE_MAX, SCALE_MIN,
-    attack_channels,
+    attack_channels, effectors,
 };
+
+/// Tolerance, in body pixels, within which a profile's contact geometry must equal the art's
+/// named effectors for the rig to be allowed to draw that profile.
+pub const GEOMETRY_TOLERANCE: f64 = 1e-6;
+
+/// Whether the Lanternjaw art can draw hunters of this profile: the renderer stating its
+/// capability **before** a world with this profile is stepped or drawn, so a saved world
+/// whose profile the art cannot honour fails by name at load, and nothing is clamped or
+/// substituted later.
+///
+/// **Normative.** `Ok` exactly when: the role is `Lanternjaw`; `capture_offset_body` equals
+/// [`effectors`]`(1).near_claw` and `ingestion_offset_body` equals `effectors(1).mouth`, each
+/// component within [`GEOMETRY_TOLERANCE`] (the core's contact geometry is *the art's* claw and
+/// mouth, scaled — a profile that tests contact somewhere else would draw claws where the
+/// world does not bite); `body_scale_min` is finite and within [`SCALE_MIN`]`..=`[`SCALE_MAX`]
+/// and `body_scale_exponent` is finite and non-negative, so every `body_scale = max(min,
+/// (S / S_adult)^exponent)` of a member with `S ≤ S_adult` lies in the admitted range. The
+/// error names the offending field and both values. A world without a hunter profile needs
+/// no capability and is never asked.
+pub fn validate_profile(profile: &FixedHunterProfile) -> Result<(), String> {
+    if profile.role != HunterRole::Lanternjaw {
+        return Err(format!(
+            "hunter role {:?} has no art; only Lanternjaw is drawn",
+            profile.role
+        ));
+    }
+    let adult = effectors(1.0);
+    let close = |a: Vec2, b: Vec2| {
+        (a.x - b.x).abs() <= GEOMETRY_TOLERANCE && (a.y - b.y).abs() <= GEOMETRY_TOLERANCE
+    };
+    if !close(profile.capture_offset_body, adult.near_claw) {
+        return Err(format!(
+            "capture_offset_body ({}, {}) is not the Lanternjaw's near claw ({}, {})",
+            profile.capture_offset_body.x,
+            profile.capture_offset_body.y,
+            adult.near_claw.x,
+            adult.near_claw.y
+        ));
+    }
+    if !close(profile.ingestion_offset_body, adult.mouth) {
+        return Err(format!(
+            "ingestion_offset_body ({}, {}) is not the Lanternjaw's mouth ({}, {})",
+            profile.ingestion_offset_body.x,
+            profile.ingestion_offset_body.y,
+            adult.mouth.x,
+            adult.mouth.y
+        ));
+    }
+    if !hunter_scale_supported(profile.body_scale_min) {
+        return Err(format!(
+            "body_scale_min {} is outside the art's admitted {SCALE_MIN}..={SCALE_MAX}",
+            profile.body_scale_min
+        ));
+    }
+    if !(profile.body_scale_exponent.is_finite() && profile.body_scale_exponent >= 0.0) {
+        return Err(format!(
+            "body_scale_exponent {} could scale a body past the adult",
+            profile.body_scale_exponent
+        ));
+    }
+    Ok(())
+}
+
+/// Whether one member's published geometry is the art's at its own scale: the same test as
+/// [`validate_profile`], applied to the scaled `ContactGeometry` a view carries.
+pub fn validate_view(view: &HunterView) -> Result<(), String> {
+    if !hunter_scale_supported(view.body_scale) {
+        return Err(format!(
+            "hunter {:?}: body scale {} is outside the art's admitted {SCALE_MIN}..={SCALE_MAX}",
+            view.id, view.body_scale
+        ));
+    }
+    let e = effectors(view.body_scale);
+    let tolerance = GEOMETRY_TOLERANCE * view.body_scale.max(1.0);
+    let close = |a: Vec2, b: Vec2| (a.x - b.x).abs() <= tolerance && (a.y - b.y).abs() <= tolerance;
+    if !close(view.geometry.capture_offset_body, e.near_claw) {
+        return Err(format!(
+            "hunter {:?}: capture offset ({}, {}) is not the drawn near claw ({}, {}) at scale {}",
+            view.id,
+            view.geometry.capture_offset_body.x,
+            view.geometry.capture_offset_body.y,
+            e.near_claw.x,
+            e.near_claw.y,
+            view.body_scale
+        ));
+    }
+    if !close(view.geometry.ingestion_offset_body, e.mouth) {
+        return Err(format!(
+            "hunter {:?}: ingestion offset ({}, {}) is not the drawn mouth ({}, {}) at scale {}",
+            view.id,
+            view.geometry.ingestion_offset_body.x,
+            view.geometry.ingestion_offset_body.y,
+            e.mouth.x,
+            e.mouth.y,
+            view.body_scale
+        ));
+    }
+    Ok(())
+}
 
 /// The root speed, in chart pixels per second, at which the hunter's ambient body is in full
 /// locomotion (`LivingPose::movement = 1`): the trial profile's adult maximum, about
@@ -181,6 +280,9 @@ pub struct HunterMemory {
     /// the tick the target left the view while the hunter entered `Handling`; cleared the
     /// tick after. Bounded: one per hunter.
     pub prey: Option<OrganismView>,
+    /// Where the world says the retained prey was at settlement (the `Capture` event's
+    /// post-movement `prey_pos`), when the event was seen; `None` otherwise.
+    pub prey_at: Option<SurfacePoint>,
     /// The target's view as of the last tick, so the tick it disappears still has it.
     pub target_view: Option<OrganismView>,
 }
@@ -195,6 +297,7 @@ impl HunterMemory {
             from,
             prev_from: from,
             prey: None,
+            prey_at: None,
             target_view: None,
         }
     }
@@ -203,8 +306,18 @@ impl HunterMemory {
     /// phase key changed, the new `from` is the reach the previous phase displayed at the new
     /// phase's entry boundary (`reach_at(prev, prev_from, started · DT)`), so every phase
     /// continues from the picture the last one left — an interrupted windup recoils from its
-    /// partial cock, a settled strike from full extension.
+    /// partial cock, a settled strike from full extension. **Idempotent**: a frame of the tick
+    /// already recorded changes nothing (the same completed view observed twice is one
+    /// observation), and a frame of an *earlier* tick starts the memory over as if first seen
+    /// (a rewind never carries a later phase's reach back in time).
     pub fn observe(&mut self, frame: HunterFrame) {
+        if frame.tick == self.cur.tick {
+            return;
+        }
+        if frame.tick < self.cur.tick {
+            *self = HunterMemory::enter(frame);
+            return;
+        }
         let previous = self.cur;
         let previous_from = self.from;
         if frame.key() != previous.key() {
@@ -213,6 +326,36 @@ impl HunterMemory {
         self.prev = Some(previous);
         self.prev_from = previous_from;
         self.cur = frame;
+    }
+
+    /// Record where the world says the retained prey was taken: the `Capture` event's
+    /// post-movement position. Ignored unless it names the retained prey.
+    pub fn note_capture(&mut self, prey: cubarium_core::OrganismId, at: SurfacePoint) {
+        if self.prey.as_ref().is_some_and(|p| p.id == prey) {
+            self.prey_at = Some(at);
+        }
+    }
+
+    /// Where the retained prey is drawn at fraction `f` of the capture tick, and with which
+    /// heading. **Normative**: with `p` its last published view and `q` the settlement position
+    /// from the `Capture` event: no `q` ⇒ `p.pos`; `q` on the same face as `p.pos` ⇒ the chart
+    /// point `p.pos + f · (q − p.pos)` (a straight chart path from where the prey was last
+    /// published to where it was taken — an **approximation** of its unpublished capture-tick
+    /// movement, which the event does not carry); `q` on another face ⇒ `q` itself. The heading
+    /// is always the last published one (the event carries none). `None` without a retained prey.
+    pub fn retained_prey_pose(&self, f: f64) -> Option<(SurfacePoint, Vec2)> {
+        let p = self.prey.as_ref()?;
+        let f = if f.is_finite() { f.clamp(0.0, 1.0) } else { 0.0 };
+        let pos = match self.prey_at {
+            None => p.pos,
+            Some(q) if q.face == p.pos.face => {
+                let (a, b) = (p.pos.chart(), q.chart());
+                SurfacePoint::new(p.pos.face, a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f)
+                    .canonicalize()
+            }
+            Some(q) => q,
+        };
+        Some((pos, p.heading))
     }
 
     /// The frame and entry reach in effect at fraction `f` of `tick`'s presentation interval.

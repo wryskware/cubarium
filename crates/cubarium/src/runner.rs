@@ -515,20 +515,38 @@ impl Show {
         }
     }
 
-    /// Once per completed tick, after `observe`: the world's own hunter membership. The
-    /// plain image ignores it (the decided disc path is unchanged); the art image draws each
-    /// listed member once as the Lanternjaw, and reports — once per member — a body scale
-    /// the rig cannot draw, which is then drawn with its ordinary rig rather than clamped.
-    fn observe_hunters(&mut self, view: &RenderView, hunters: &[cubarium_core::HunterView]) {
+    /// Once per completed tick, after `observe`: the world's own hunter membership and the
+    /// hunter events it committed this tick. The plain image ignores both (the decided disc
+    /// path is unchanged); the art image draws each listed member once as the Lanternjaw. A
+    /// member the art cannot honour is a named error — the profile was validated at load, so
+    /// this cannot happen for a world that started.
+    fn observe_hunters(
+        &mut self,
+        view: &RenderView,
+        hunters: &[cubarium_core::HunterView],
+        events: &[cubarium_core::HunterEvent],
+    ) -> Result<()> {
         if let Show::Art(p) = self {
-            p.observe_hunters(view, hunters);
-            for (id, scale) in p.take_new_unsupported() {
-                eprintln!(
-                    "hunter {id:?}: body scale {scale} is outside the art's admitted range; \
-                     drawn with its ordinary rig"
-                );
-            }
+            p.observe_hunters(view, hunters, events)
+                .map_err(|e| anyhow::anyhow!("the art cannot draw this world's hunters: {e}"))?;
         }
+        Ok(())
+    }
+
+    /// The renderer's capability against a world's hunter profile, asked at load and before
+    /// any tick: the plain image needs none; the art image refuses by name a profile whose
+    /// geometry or scale range it cannot draw, so the caller can stop before mutating the
+    /// world, or run without `--art`.
+    fn validate_hunters(&self, world: &World) -> Result<()> {
+        if let (Show::Art(p), Some(profile)) = (self, world.hunters().profile()) {
+            p.validate_hunter_profile(profile).map_err(|e| {
+                anyhow::anyhow!(
+                    "the art cannot draw this world's hunter profile ({e}); run without --art \
+                     to opt out of the art, or use a profile the Lanternjaw can draw"
+                )
+            })?;
+        }
+        Ok(())
     }
 
     /// Once per rendered frame.
@@ -932,6 +950,11 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
     }
 
     let (mut world, loaded_from, loaded_tick) = open_world(run)?;
+    // The presentation, and its capability against the world's hunter profile, before
+    // anything below (care's opening checkpoint, the sink, the loop) touches the world: a
+    // saved world whose profile the art cannot draw fails here by name, unmutated.
+    let mut presenter = open_show(run)?;
+    presenter.validate_hunters(&world)?;
     let config = world.config().clone();
     let checkpoint_ticks = ticks_of(config.capacity.checkpoint_seconds);
     let telemetry_ticks = ticks_of(config.capacity.telemetry_seconds);
@@ -1041,7 +1064,6 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
     }
     let tick_limit = (run.seconds > 0.0).then(|| (run.seconds * f64::from(TICK_HZ)).round() as u64);
 
-    let mut presenter = open_show(run)?;
     let mut canvas = Canvas::new();
     let mut frame = Frame::black();
     let mut view: Option<RenderView> = None;
@@ -1075,12 +1097,17 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
         if let Some(log) = events.as_mut() {
             log.write_tick(&committed);
         }
+        // Hunter events are drained on the same rule, headless or not: the world's own
+        // transient buffer must never grow for the life of the process. They are handed to
+        // the presentation (a capture's settlement position) before they are dropped; this
+        // run does not journal them.
+        let hunted = world.drain_hunter_events();
         if !headless {
             // Trails are simulated history: they are fed per tick, not per frame.
             let published = world.render_view();
             presenter.observe(&published);
             // The owning world's hunter membership, by full id (empty without a trial).
-            presenter.observe_hunters(&published, &world.hunter_view());
+            presenter.observe_hunters(&published, &world.hunter_view(), &hunted)?;
             *view = Some(published);
         }
         // Cadences are anchored on the absolute tick, so a resumed world keeps the same
@@ -1100,6 +1127,7 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
         if tick.is_multiple_of(checkpoint_ticks) {
             checkpoints.queue(tick, encode_snapshot(&world.state, &build_id));
         }
+        Ok::<(), anyhow::Error>(())
     };
 
     let reached = |ticks_done: u64| tick_limit.is_some_and(|l| ticks_done >= l);
@@ -1125,7 +1153,7 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
                     &mut checkpoints,
                     &mut sink,
                     &mut ticks_done,
-                );
+                )?;
                 if let Some(rt) = care.as_ref() {
                     rt.service.publish_tick(world.tick());
                 }
@@ -1174,7 +1202,7 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
                                 &mut checkpoints,
                                 &mut sink,
                                 &mut ticks_done,
-                            );
+                            )?;
                             if let Some(rt) = care.as_ref() {
                                 rt.service.publish_tick(world.tick());
                             }

@@ -63,7 +63,7 @@ use std::sync::LazyLock;
 
 use cube_proto::{FACE_SIZE, Face};
 use cubarium_core::OrganismId;
-use cubarium_core::hunter::{HunterPhase, HunterView};
+use cubarium_core::hunter::{FixedHunterProfile, HunterEvent, HunterPhase, HunterView};
 use cubarium_core::organism::Mode;
 use cubarium_core::view::{OrganismView, RenderView};
 use cubarium_render::{
@@ -77,7 +77,7 @@ use cubarium_surface::{
 pub use crate::art::Band;
 use crate::art::{ArtPack, Clip, GroundTile, Plant, TallPlant};
 use crate::clock::DT;
-use crate::hunter_present::{HunterFrame, HunterMemory, hunter_scale_supported};
+use crate::hunter_present::{HunterFrame, HunterMemory, validate_profile, validate_view};
 use crate::lanternjaw::{Lanternjaw, Part};
 use crate::present::{
     self, DETRITUS_SCALE, DETRITUS_THRESHOLD, JUVENILE_SCALE, PALETTE, PRODUCER_SATURATION,
@@ -2318,11 +2318,6 @@ pub struct ArtPresenter {
     /// handed to [`ArtPresenter::observe_hunters`]; an id the list no longer carries is
     /// forgotten there. Never derived from `genome.form`.
     hunters: std::collections::BTreeMap<OrganismId, HunterMemory>,
-    /// Members whose authoritative `body_scale` the rig cannot draw
-    /// ([`hunter_scale_supported`]): drawn with their ordinary rig instead, and reported.
-    unsupported: std::collections::BTreeMap<OrganismId, f64>,
-    /// Unsupported members already handed out by [`ArtPresenter::take_new_unsupported`].
-    reported: std::collections::BTreeSet<OrganismId>,
     /// Scratch for the rig's parts, reused across frames.
     hunter_parts: Vec<Part>,
 }
@@ -2365,31 +2360,52 @@ impl ArtPresenter {
             last_tick: None,
             lanternjaw: Lanternjaw::new(),
             hunters: std::collections::BTreeMap::new(),
-            unsupported: std::collections::BTreeMap::new(),
-            reported: std::collections::BTreeSet::new(),
             hunter_parts: Vec::new(),
         }
     }
 
+    /// Whether this presenter can draw hunters of `profile`: [`validate_profile`], the
+    /// renderer's capability stated before a world is stepped or drawn. A host asks this at
+    /// load, with the saved world's own profile, and fails by name rather than clamping,
+    /// substituting an ordinary body, or panicking mid-frame later.
+    pub fn validate_hunter_profile(&self, profile: &FixedHunterProfile) -> Result<(), String> {
+        validate_profile(profile)
+    }
+
     /// Record this tick's hunter membership from the world's own observer, after
-    /// [`ArtPresenter::observe`] of the same view.
+    /// [`ArtPresenter::observe`] of the same view, together with the hunter events the world
+    /// committed at this tick.
     ///
     /// **Normative.** A member is a hunter by its full id in `hunters` and nothing else: an
     /// ordinary organism with the same `genome.form` is not one, and an entry whose id does
     /// not resolve to an organism of `view` (a stale generation) is ignored. A member whose
-    /// `body_scale` the rig cannot draw ([`hunter_scale_supported`]) is not clamped: it is
-    /// listed by [`ArtPresenter::unsupported_hunters`] and drawn with its ordinary rig. Every
-    /// other member gets a [`HunterMemory`] — entered from its persisted `entered_from` when
-    /// first seen, advanced by [`HunterMemory::observe`] after — and is drawn once, as the
-    /// Lanternjaw, never also as its atelier rig. Memory of an id the list no longer carries
-    /// is dropped, so the map is bounded by the membership. A target that leaves the view at
-    /// the same boundary its hunter enters `Handling` is kept for that one tick's frames
-    /// ([`HunterMemory::prey`]) so a captured prey is not shown vanishing before the claws
-    /// close; nothing is kept longer, and nothing is regenerated.
+    /// published scale or contact geometry the rig cannot honour ([`validate_view`]) is an
+    /// error, named: nothing is clamped and no ordinary body is substituted — a host that
+    /// validated the profile at load never sees this. Every other member gets a
+    /// [`HunterMemory`] — entered from its persisted `entered_from` when first seen, advanced
+    /// by [`HunterMemory::observe`] after — and is drawn once, as the Lanternjaw, never also as
+    /// its atelier rig. Memory of an id the list no longer carries is dropped, so the map is
+    /// bounded by the membership. A target that leaves the view at the same boundary its
+    /// hunter enters `Handling` is kept for that one tick's frames ([`HunterMemory::prey`]),
+    /// carried to the `Capture` event's settlement position when the event names it, so a
+    /// captured prey is not shown vanishing before the claws close; nothing is kept longer,
+    /// and nothing is regenerated.
     ///
-    /// With an empty list this changes nothing: the image is bit for bit the one a presenter
-    /// never told about hunters draws.
-    pub fn observe_hunters(&mut self, view: &RenderView, hunters: &[HunterView]) {
+    /// **Idempotent and rewind-safe**: the same completed view observed again changes no
+    /// memory and no frame; a view of an earlier tick (a rewind or a replaced world — the
+    /// same rule [`ArtPresenter::observe`] snaps on) starts every memory over as first seen,
+    /// so a later phase's reach never leaks into an earlier tick. With an empty list this
+    /// changes nothing: the image is bit for bit the one a presenter never told about hunters
+    /// draws.
+    pub fn observe_hunters(
+        &mut self,
+        view: &RenderView,
+        hunters: &[HunterView],
+        events: &[HunterEvent],
+    ) -> Result<(), String> {
+        if self.hunters.values().any(|m| view.tick < m.cur.tick) {
+            self.hunters.clear();
+        }
         let live: std::collections::HashSet<OrganismId> =
             view.organisms.iter().map(|o| o.id).collect();
         let mut listed = Vec::with_capacity(hunters.len());
@@ -2397,20 +2413,17 @@ impl ArtPresenter {
             if !live.contains(&h.id) {
                 continue;
             }
+            validate_view(h)?;
             listed.push(h.id);
-            if !hunter_scale_supported(h.body_scale) {
-                self.unsupported.insert(h.id, h.body_scale);
-                self.hunters.remove(&h.id);
-                continue;
-            }
-            self.unsupported.remove(&h.id);
-            self.reported.remove(&h.id);
             let frame = HunterFrame::of(h, view.tick);
             let target_view = frame
                 .target
                 .and_then(|t| view.organisms.iter().find(|o| o.id == t))
                 .cloned();
             match self.hunters.get_mut(&h.id) {
+                Some(memory) if memory.cur.tick == view.tick => {
+                    // The same completed view again: one observation, nothing moves.
+                }
                 Some(memory) => {
                     memory.observe(frame);
                     let captured = memory.prev.as_ref().is_some_and(|p| {
@@ -2419,6 +2432,7 @@ impl ArtPresenter {
                             && frame.started == view.tick
                     });
                     memory.prey = if captured { memory.target_view.take() } else { None };
+                    memory.prey_at = None;
                     memory.target_view = target_view;
                 }
                 None => {
@@ -2429,8 +2443,15 @@ impl ArtPresenter {
             }
         }
         self.hunters.retain(|id, _| listed.contains(id));
-        self.unsupported.retain(|id, _| listed.contains(id));
-        self.reported.retain(|id| listed.contains(id));
+        for event in events {
+            if let HunterEvent::Capture { tick, hunter, prey, evidence, .. } = event
+                && *tick == view.tick
+                && let Some(memory) = self.hunters.get_mut(hunter)
+            {
+                memory.note_capture(*prey, evidence.prey_pos);
+            }
+        }
+        Ok(())
     }
 
     /// The adapter's memory of a hunter, if it is drawn as the Lanternjaw.
@@ -2441,23 +2462,6 @@ impl ArtPresenter {
     /// The hunters currently drawn as the Lanternjaw, in composite order.
     pub fn hunter_ids(&self) -> Vec<OrganismId> {
         self.hunters.keys().copied().collect()
-    }
-
-    /// Members whose `body_scale` the rig cannot draw, with that scale.
-    pub fn unsupported_hunters(&self) -> Vec<(OrganismId, f64)> {
-        self.unsupported.iter().map(|(id, s)| (*id, *s)).collect()
-    }
-
-    /// The unsupported members not yet returned by this method: what a host logs once.
-    pub fn take_new_unsupported(&mut self) -> Vec<(OrganismId, f64)> {
-        let fresh: Vec<(OrganismId, f64)> = self
-            .unsupported
-            .iter()
-            .filter(|(id, _)| !self.reported.contains(id))
-            .map(|(id, s)| (*id, *s))
-            .collect();
-        self.reported.extend(fresh.iter().map(|(id, _)| *id));
-        fresh
     }
 
     /// The measured amplitude budget of an asset, in tile pixels: the largest `|amplitude|`
@@ -2555,6 +2559,11 @@ impl ArtPresenter {
             None => true,
             Some(last) => view.tick < last,
         };
+        if snap {
+            // A rewind or a replaced world: the hunters' memory starts over with everything
+            // else, so no later phase's reach can leak back in time.
+            self.hunters.clear();
+        }
         let dt = match self.last_tick {
             Some(last) if view.tick >= last => {
                 (((view.tick - last) as f64) * DT).clamp(0.0, MAX_STEP_SECONDS)
@@ -2972,12 +2981,21 @@ impl ArtPresenter {
         }
 
         // A prey the world removed at this tick's boundary while its hunter entered
-        // `Handling`: still on screen for the frames before that boundary, at the pose its
-        // last view left it (its tick-of-capture movement is not published), gone at `f = 1`.
+        // `Handling`: still on screen for the frames before that boundary, carried from its
+        // last published pose to the settlement position the `Capture` event names
+        // ([`HunterMemory::retained_prey_pose`]), gone at `f = 1`.
         if f < 1.0 {
             for memory in self.hunters.values() {
-                if let Some(prey) = &memory.prey {
-                    stamp_creature(&self.pack, &mut self.scratch, prey, None, seconds, 1.0, canvas);
+                if let (Some(prey), Some((pos, heading))) =
+                    (&memory.prey, memory.retained_prey_pose(f))
+                {
+                    let held = OrganismView {
+                        pos,
+                        heading,
+                        moved: Vec::new(),
+                        ..prey.clone()
+                    };
+                    stamp_creature(&self.pack, &mut self.scratch, &held, None, seconds, 1.0, canvas);
                 }
             }
         }
