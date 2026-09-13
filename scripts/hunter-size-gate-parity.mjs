@@ -14,9 +14,9 @@
 //   The semantic profile selector differs from tick zero by construction, so a raw stream or
 //   hash comparison would report a difference that is the experiment, not a finding. The
 //   projection below removes exactly the selector and its derived diagnostic metadata from the
-//   census rows — named field by field, nothing wildcarded — and then requires equality up to
-//   the first tick whose member stocks differ. That tick is the first altered growth
-//   transaction, and after it the worlds are legitimately different and are not compared.
+//   census rows — named field by field, nothing wildcarded — and reports the first sampled
+//   difference separately from the mutation-site first-growth record. A sampled stock or
+//   membership difference alone is not the timestamp of a growth transaction.
 //
 // Nothing here judges biology. A pilot that grows nothing is a result, not a failure.
 import assert from 'node:assert/strict';
@@ -49,6 +49,20 @@ export const SELECTOR_PROJECTED_FIELDS = [
 export const RESIDUAL_TOLERANCE = 1e-9;
 /// The four reserve intake channels, named so no single one can stand in for the total.
 export const INTAKE_SOURCES = ['digestion', 'frugivory', 'grazing', 'scavenging'];
+
+/// Scope metadata follows both the requested seeds and the recorded runs, not a pilot-era label.
+export function reductionScope(seeds, referenceManifest, candidateManifest) {
+  const prescribed = Array.from({length: 12}, (_, i) => i + 1);
+  const full = values => Array.isArray(values) && values.length === 12 &&
+    [...values].sort((a, b) => a - b).every((s, i) => s === prescribed[i]);
+  const cohort = full(seeds) && [referenceManifest, candidateManifest].every(m =>
+    m.seed_subset_pilot === false && full(m.ran_seeds) && full(m.cohort_seeds));
+  return {kind: cohort ? 'hunter-size-gate-cohort-parity' : 'hunter-size-gate-pilot-parity',
+    pilot: !cohort,
+    pilot_note: cohort
+      ? 'All twelve prescribed seeds and six arms per recipe. Complete coverage is not biological acceptance or a viability claim.'
+      : 'A seed subset or incomplete declared cohort scope. Not a full-cohort result or a viability claim.'};
+}
 
 /// Validate one arm's per-member flow record.
 ///
@@ -277,10 +291,10 @@ function armOutcome(summary) {
   };
 }
 
-/// The pilot's growth question, answered from the 200-tick census: did any member's structure
+/// The sampled growth question, answered from the 200-tick census: did any member's structure
 /// ever move, and how far. A census cadence bounds *when* a change is first seen, never
-/// whether a mutation-site transaction happened between boundaries; the per-member flow ledger
-/// is the instrument for that and is not wired into this runner yet.
+/// whether a mutation-site transaction happened between boundaries; the separately checked
+/// per-member flow ledger supplies the actual transaction evidence.
 export function structureObservations(rows) {
   const members = new Map();
   for (const row of rows)
@@ -498,9 +512,7 @@ export async function reduce({reference, candidate, retained, seeds, binarySha25
   const grew = Object.values(outcomes.candidate)
     .flatMap(o => o.members).filter(m => m.structure_ever_increased);
   return {
-    kind: 'hunter-size-gate-pilot-parity',
-    pilot: true,
-    pilot_note: 'A SEED SUBSET. Not a cohort result and not a viability claim: the unrun seeds were never started, and one seed cannot answer maturation or recruitment.',
+    ...reductionScope(seedList, ref.manifest, cand.manifest),
     seeds: seedList,
     pinned_binary_sha256: binarySha256,
     runs: {reference: ref.dir, candidate: cand.dir, retained_reference: retainedRoot},
@@ -534,7 +546,9 @@ export async function reduce({reference, candidate, retained, seeds, binarySha25
       members_whose_structure_increased: grew.length,
       detail: grew,
       basis: 'the 200-tick census. It bounds when a change is first seen, never whether a mutation-site transaction happened between boundaries.',
-      instrument_gap: 'the per-member flow ledger (cubarium_core::flow) is adapted for the moving gate and unit-tested, but is not yet wired into hunter_compare, so this pilot has no per-tick growth record.',
+      instrument_gap: Object.values(flow).every(arms => Object.values(arms).every(a =>
+        a.present && a.complete_horizon && a.problems.length === 0)) ? null
+        : 'At least one requested arm lacks a complete passing mutation-site flow record; see flow_records and problems.',
     },
     limits: 'Read-only over recorded artifacts. It does not re-run the executable, decode semantic WorldState, or judge biology. A pilot that grows nothing is a recorded result. Identity after the first altered growth transaction is not expected and is not checked.',
   };
