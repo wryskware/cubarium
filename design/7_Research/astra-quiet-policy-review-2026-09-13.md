@@ -190,3 +190,17 @@ The checked-in rejection test was executed in the separate workspace cache
 filtered out**, exit 101, with the expected assertion about a correct envelope
 not legitimizing an unconsumed tail. An earlier invocation reused the isolated
 copy's binary and selected zero tests; that invocation is not counted as evidence.
+
+### Root correction and rerun
+
+The current-schema branch now uses `decode_exact::<WorldState>` as well. Its
+error describes a payload/schema shape mismatch without claiming all trailing
+bytes must come from a newer writer. The public decoder documentation is attached
+to the decoder again and lists all seven supported schemas.
+
+Root reran `CARGO_TARGET_DIR=captures/build-cache/quiet-policy cargo test --offline
+-p cubarium-core`: **348 passed, 0 failed, 2 ignored**, exit 0, including all nine
+independent probes and the genuine schema-12 continuation tests. Log:
+`/tmp/cubarium-quiet-exact-decode-tests.log`. The original red result and frozen
+forensic copy remain retained. This correction changes acceptance of malformed
+payloads, not valid-state physiology; quiet remains Off and is not deployed.

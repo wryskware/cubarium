@@ -93,20 +93,7 @@ pub fn encode_snapshot(state: &WorldState, build_id: &str) -> Vec<u8> {
     out
 }
 
-/// Validate magic, schema, length, CRC, decode, then `state.validate()`; every failure is a
-/// distinct error so the loader can report why an older snapshot was tried.
-///
-/// Six schemas decode: the current [`SCHEMA_VERSION`]; [`SCHEMA_V11`] through the frozen
-/// [`WorldStateV11`] mirror, whose in-flight showers open at the standard dose; [`SCHEMA_V10`],
-/// **only with an empty hunter extension** (an active schema 10 trial is
-/// [`SnapshotError::Invalid`] with the reason, never silently reinterpreted); [`SCHEMA_V9`]
-/// through the frozen [`WorldStateV9`] mirror with `hunters = HunterState::default()`;
-/// [`SCHEMA_V8`] through [`WorldStateV8`], which adds `energy_correction =
-/// EnergyCorrection::default()`; and [`SCHEMA_V7`] through [`WorldStateV7`], which adds
-/// `care = CareState::default()` as well. Anything else is
-/// [`SnapshotError::UnsupportedSchema`]. `SnapshotMeta.schema` reports what was read, not what
-/// the build writes.
-/// Decode one frozen mirror, requiring the payload to be **fully consumed**.
+/// Decode the current state or a frozen mirror, requiring the payload to be **fully consumed**.
 ///
 /// `postcard::from_bytes` tolerates trailing bytes, and every schema since 8 has grown by
 /// *appending*. Without this check a newer payload relabelled with an older schema number would
@@ -121,14 +108,28 @@ where
         postcard::take_from_bytes::<T>(payload).map_err(|e| SnapshotError::Decode(e.to_string()))?;
     if !rest.is_empty() {
         return Err(SnapshotError::Decode(format!(
-            "a schema {schema} payload has {} trailing byte(s); it was written by a later schema \
-             and must be read as that one",
+            "a schema {schema} payload has {} trailing byte(s); its shape does not match \
+             the declared schema",
             rest.len()
         )));
     }
     Ok(value)
 }
 
+/// Validate magic, schema, length, CRC, exact decode, then `state.validate()`; every failure is a
+/// distinct error so the loader can report why an older snapshot was tried.
+///
+/// Seven schemas decode: the current [`SCHEMA_VERSION`]; [`SCHEMA_V12`] through the frozen
+/// [`WorldStateV12`] mirror, which migrates ordinary quiet Off; [`SCHEMA_V11`] through
+/// [`WorldStateV11`], whose in-flight showers open at the standard dose; [`SCHEMA_V10`],
+/// **only with an empty hunter extension** (an active schema 10 trial is
+/// [`SnapshotError::Invalid`] with the reason, never silently reinterpreted); [`SCHEMA_V9`]
+/// through the frozen [`WorldStateV9`] mirror with `hunters = HunterState::default()`;
+/// [`SCHEMA_V8`] through [`WorldStateV8`], which adds `energy_correction =
+/// EnergyCorrection::default()`; and [`SCHEMA_V7`] through [`WorldStateV7`], which adds
+/// `care = CareState::default()` as well. Anything else is
+/// [`SnapshotError::UnsupportedSchema`]. `SnapshotMeta.schema` reports what was read, not what
+/// the build writes. Every schema rejects unconsumed payload bytes.
 pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), SnapshotError> {
     let take = |at: usize, n: usize| -> Result<&[u8], SnapshotError> {
         bytes.get(at..at + n).ok_or(SnapshotError::Truncated)
@@ -174,7 +175,7 @@ pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), Snaps
             .map_err(SnapshotError::Invalid)?,
         SCHEMA_V11 => WorldState::from(decode_exact::<WorldStateV11>(payload, schema)?),
         SCHEMA_V12 => WorldState::from(decode_exact::<WorldStateV12>(payload, schema)?),
-        _ => postcard::from_bytes(payload).map_err(|e| SnapshotError::Decode(e.to_string()))?,
+        _ => decode_exact::<WorldState>(payload, schema)?,
     };
     state.validate().map_err(SnapshotError::Invalid)?;
     Ok((SnapshotMeta { schema, build_id, payload_len, crc32 }, state))
