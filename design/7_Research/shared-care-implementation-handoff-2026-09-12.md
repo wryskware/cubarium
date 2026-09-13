@@ -120,3 +120,26 @@ do not silently label it complete. No implemented apex ecology until tested late
 
 Deliver runnable shared viewer/care commands, evidence, exact commits, candidate
 comparison, and remaining limitations. Check in your work throughout, not only at end.
+
+## Root rollout finding (read before assuming latest tick means current history)
+
+Live PID2295402 was started with --fresh in state/, now around tick49600, but that
+directory retains old snapshots up to446277. The current highest-tick snapshot is
+NOT the live world; pruning may continually discard this fresh run's checkpoints.
+Root is coordinating recovery: archive exact old snapshots before graceful stop,
+then verify the new live final snapshot and resume only it. Do not operate state/.
+Consider a focused --fresh isolation/archive fix under the state-lock ownership
+package so this cannot recur. Astra is reviewing the behavior independently.
+Root binary backup is captures/checkpoints/pre-care/cubarium, SHA256
+ca2a51f281ed7f7a6f515e2f22a814d615f8513e4c39bd5337a44ff3b82facaf.
+The backup world-446277.cubw is explicitly an OLD historical snapshot, not a verified
+rollback point for the current live world. Root will add the correct one at rollout.
+
+Root archived the eight exact stale snapshots to
+captures/checkpoints/pre-care/retired-history/ without deleting them or moving the
+active state directory. The cube now retains current-run snapshots (52800,54000,
+55200 observed). Root preserved55200 too; final clean checkpoint still required.
+Root studio is served on7400, files art/studies/megafauna/{index.html,gallery.js,
+root.js,root.md,README.md}; your fable.js will be loaded automatically on page reload.
+Root visually reviewed its candidate with isolated Chromium. No art changes to live
+world. Fable should commit only its own candidate files; root handles gallery.

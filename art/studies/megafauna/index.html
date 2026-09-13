@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cubarium · Megafauna candidates</title>
+<style>
+:root{color-scheme:dark;font:16px/1.5 system-ui,sans-serif;background:#100922;color:#dcd7ef}
+*{box-sizing:border-box}body{margin:0;padding:32px;max-width:1150px;margin-inline:auto}
+h1{font-size:30px;font-weight:600;margin:0 0 8px}h2{font-size:22px;margin:0}
+p{color:#aaa2c5;max-width:80ch}.eyebrow{color:#a88bdc;font-size:12px;letter-spacing:.18em}
+.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:25px 0}
+button,select{font:inherit;color:inherit;background:#21133d;border:1px solid #68528c;border-radius:8px;padding:8px 14px}
+button[aria-pressed=true]{background:#4b3376;border-color:#baa0ed}button:focus-visible,select:focus-visible{outline:2px solid #b8ead9;outline-offset:3px}
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:22px}.card{border:1px solid #493163;border-radius:16px;background:#180f2d;padding:22px}
+.author{color:#bfa7e6;font-size:13px;margin:4px 0 16px}.views{display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap}
+canvas{image-rendering:pixelated;background:#080816;display:block;max-width:100%;border-radius:4px}.large{width:320px;height:320px}.native{width:64px;height:64px}
+.caption{font-size:12px;color:#9386b1;margin-top:6px}.description{min-height:72px}.note{border-left:2px solid #6c5296;padding-left:15px;margin-top:26px;font-size:14px}
+.facts{display:flex;gap:18px;color:#b3a8cc;font-size:13px}.pending{display:grid;place-items:center;min-height:320px;color:#9e8cb9}
+@media(max-width:760px){body{padding:20px}.cards{grid-template-columns:1fr}.large{width:256px;height:256px}}
+</style>
+<div class="eyebrow">CUBARIUM / ATELIER / BODY STUDY</div>
+<h1>Two possible giants.</h1>
+<p>Same habitat, native scale, and clock. Choose a silhouette and a motion language;
+these are candidates, not creatures added to your live world.</p>
+<div class="toolbar" role="group" aria-label="Animation controls">
+<button data-mode="rest" aria-pressed="true">Rest</button><button data-mode="move" aria-pressed="false">Move</button>
+<button data-mode="hunt" aria-pressed="false">Hunt</button><button data-mode="bud" aria-pressed="false">Offspring</button>
+<button id="pause">Pause</button><button id="restart">Restart pose</button>
+<label>Habitat <select id="habitat"><option value="canopy">Canopy</option><option value="plain">Plain silhouette</option></select></label>
+</div>
+<main class="cards" id="cards" aria-live="polite"></main>
+<p class="note">Large views are exactly 5× the same 64×64 image; the small view is native size.
+The small grazer at lower left is an 8-pixel scale reference. Hunting is a scripted motion
+study, not a simulated kill. Neither candidate is selected automatically.</p>
+<div class="facts"><span id="clock">Study time 0.00 s</span><span id="status">Loading candidates…</span></div>
+<script type="module" src="./gallery.js"></script>
+</html>
