@@ -28,7 +28,8 @@ harness, live state or care file was touched.
 | Settlement metadata on events, timing facts in the view | landed |
 | Astra review corrections: NaN bounds, settlement boundaries, authored claw | landed |
 | Exact reproduction transaction evidence (`5ee8fee`) | landed |
-| Read-only reproduction observer for the harness (`d7d190a`, `f4c410a`) | landed, awaiting root's wiring |
+| Read-only reproduction observer (`d7d190a`, `f4c410a`), wired by root in `71669e3` | landed |
+| Adversarial hardening of that observer (`2ac20eb`) | landed |
 | Deterministic test suite (27 behaviour + 8 geometry + 6 migration + 7 reproduction) | landed |
 | Paired experiment runs, ecological gates | **not started — root owns the harness** |
 
@@ -333,11 +334,41 @@ skipped tick, a mid-gestation opening — each rejected **atomically**, with the
 still accepted afterwards. Memory stays bounded over repeated outcomes, and a run with the audit
 ends on the same world hash as one without it.
 
-Until root wires it, the module is not compiled by the workspace. It was built and tested
-through a throwaway fixture that includes the file by path
-(`/tmp/cubarium-reproduction-fixture-sBPNoX`, disposable): **17 passed, 0 failed**, clippy clean.
-Once wired it runs under
-`cargo test -p cubarium --example hunter_compare --test hunter_observers --offline`.
+Root wired it in `71669e3`. It runs under
+`cargo test -p cubarium --example hunter_compare --test hunter_observers --offline`: **66 passed**
+in the example (27 of them this module's) and **22** in the observer target, clippy clean.
+
+#### Hardened against Astra's adversarial probes (`2ac20eb`)
+
+`astra-reproduction-observer-review-2026-09-13.md` proved eight streams the first version
+accepted, against a green suite. All eight are fixed, and the reviewer's fixtures are ported
+here as rejection tests rather than edited into agreement:
+
+1. **Identity.** The audit now carries the lineage as it stood when the tick began, and every
+   transaction must be signed by a member of that pre-step set. An unknown ID, a **stale
+   generation** of a live member, an ordinary bystander with arithmetically perfect records, and
+   a hunter born in the very commit being audited can no longer sign one.
+2. **Membership reconciliation.** Previous members, minus the deaths actually reported, plus the
+   children actually born, must equal the membership the world holds. A founder inserted behind
+   the audit's back is refused rather than absorbed — the module no longer leans on root's outer
+   harness for that, as the review asked.
+3. **One disposition per parent per tick.** At most one funding *or* one refusal, never both and
+   never twice; at most one closure; and a key that closed cannot be reopened or reclosed, so
+   duplicating a genuine same-tick funding-and-loss pair no longer counts two of each. Core's
+   due-birth and budding branches are exclusive, so a parent that closed a gestation this tick
+   cannot also fund one.
+4. **Terminal branches by meaning, not only algebra.** A refund requires a living parent with no
+   death in either channel — a balanced refund to a corpse was accepted before. A miscarriage
+   requires the parent's death in **both** channels with the same cause, so a dropped hunter
+   death record no longer passes, and duplicated or disagreeing death records are refused. A
+   birth requires a living parent.
+5. **Checked arithmetic.** Key ticks and the consecutive-tick expectation both use checked
+   arithmetic: `u64::MAX` returns `Err` where it used to panic.
+
+Every refusal is atomic — the tick's scratch is discarded whole and the genuine batch still
+audits afterwards, which each test asserts. Legitimate streams are untouched: same-tick funding
+and death, cap and stock refusals, births, refunds and losses all still pass, and a run with the
+audit still ends on the same world hash as one without it.
 
 ### The geometry contract, in one paragraph
 
@@ -697,10 +728,13 @@ root's twelve-seed screen is measuring.
 - **Events are not history.** The hunter event stream is transient, including the new
   transaction records. Root must journal what it wants to keep: a reloaded snapshot replays the
   same records going forward, but does not reproduce the ones drained before the checkpoint.
-- **One host change is outstanding and is root's.** `hunter_compare.rs:377` matches
-  `HunterEvent` exhaustively to read a tick and no longer compiles; `event.tick()` replaces the
-  whole match. Until root adapts it, `cargo check --workspace` fails there and only there —
-  `cargo test -p cubarium-core --offline` is green.
+- **The observer's limits, after hardening.** It still cannot attach mid-gestation, and it still
+  checks that a reported heat is arithmetically right rather than that exactly that much heat
+  entered the world's ledger — a tick's heat is the sum of every source in it. Its identity
+  guarantees now rest on the lineage reconciliation and per-tick uniqueness rather than on
+  root's outer harness, but they are guarantees about the *record stream*: a core that mutated
+  silently without emitting a record would show up as a reconciliation failure, not as a
+  reconstructed transaction.
 - **Nothing here measures reproduction rates.** These records say what each transaction moved;
   how often a lineage funds one, and whether it replaces itself, is what root's screen is for.
 
