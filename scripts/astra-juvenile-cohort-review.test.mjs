@@ -2,7 +2,7 @@
 // preserve demonstrated acceptance gaps; no original artifacts are changed.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFile, writeFile, mkdir, mkdtemp, rm} from 'node:fs/promises';
+import {copyFile, readFile, writeFile, mkdir, mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -16,7 +16,7 @@ const originals = await Promise.all(evidence.arms.map(async arm => {
   assert.equal(createHash('sha256').update(bytes).digest('hex'), arm.ledger_sha256);
   const dir = join(evidence.sources.retained_cohort, `seed-${arm.seed}`, arm.arm);
   return {report: JSON.parse(bytes), opening: await load(join(dir, 'opening.json')),
-    summary: await load(join(dir, 'summary.json'))};
+    summary: await load(join(dir, 'summary.json')), snapshots: dir};
 }));
 
 test('retained raw evidence has 29 sound member boundaries and eight scavenging children', () => {
@@ -53,8 +53,10 @@ for (const [name, mutate] of [
   assert(checkGates(report, opening, summary).length > 0, name);
 });
 
-// Tiny copied JSON fixture set; the substitute executable is only a SHA fixture.
-// Neither retained snapshots nor the real diagnostic executable are executed.
+// Tiny copied fixture set; the substitute executable is only a SHA fixture.
+// The original retained snapshots are copied into a unique per-arm temporary tree so the
+// reducer's byte-level identity gate stays active. Neither snapshots nor the real diagnostic
+// executable are executed or changed.
 async function cliFixture(mutate) {
   const dir = await mkdtemp(join(tmpdir(), 'astra-juvenile-reducer-probe-'));
   try {
@@ -64,11 +66,13 @@ async function cliFixture(mutate) {
     const ledgerDir = join(dir, 'ledgers'), cohort = join(dir, 'cohort');
     await mkdir(ledgerDir);
     for (let i = 0; i < rows.length; i++) {
-      const {report, opening, summary} = rows[i];
+      const {report, opening, summary, snapshots} = rows[i];
       const arm = join(cohort, `seed-${report.opening.seed}`, report.opening.arm);
       await mkdir(arm, {recursive: true});
       await writeFile(join(arm, 'opening.json'), JSON.stringify(opening));
       await writeFile(join(arm, 'summary.json'), JSON.stringify(summary));
+      await copyFile(join(snapshots, 'post-initialization.cubw'), join(arm, 'post-initialization.cubw'));
+      await copyFile(join(snapshots, 'closing.cubw'), join(arm, 'closing.cubw'));
       await writeFile(join(ledgerDir, `${i}.json`), JSON.stringify(report));
     }
     const binary = join(dir, 'not-executed'), censusFile = join(dir, 'census.json');
@@ -88,17 +92,36 @@ test('CLI fixture control reproduces complete 11-arm/18-child acceptance', async
   assert.equal(run.status, 0, run.stderr);
   assert.equal(run.result.arms_reduced, 11);
   assert.equal(run.result.cohort.children, 18);
+  assert.equal(run.result.cohort_basis.members_reduced, 29);
+  assert.deepEqual(run.result.invalid_arms, []);
+  assert(run.result.arms.every(arm => arm.independently_verified.opening.schema === 12
+    && arm.independently_verified.closing.schema === 12),
+  'the control must reach verification of the copied snapshot bytes');
 });
 
-for (const [name, mutate] of [
-  ['missing expected arm', rows => {rows.pop();}],
-  ['duplicate arm', rows => {rows.push(structuredClone(rows[0]));}],
-  ['census disagreement', (_rows, census) => {census.juvenile_evidence.children_detail[0].birth_tick++;}],
+for (const [name, mutate, assertReason] of [
+  ['missing expected arm', rows => {rows.pop();}, result => {
+    assert(result.invalid_arms.some(arm => arm.failures.some(f => f.gate === 'cohort_membership'
+      && f.detail === 'no ledger found')));
+  }],
+  ['duplicate arm', rows => {rows.push(structuredClone(rows[0]));}, result => {
+    assert(result.invalid_arms.some(arm => arm.failures.some(f => f.gate === 'cohort_membership'
+      && f.detail.includes('duplicate of'))));
+  }],
+  ['census disagreement', (_rows, census) => {census.juvenile_evidence.children_detail[0].birth_tick++;}, result => {
+    assert.equal(result.cross_check_vs_census_reduction.ran, true);
+    assert.equal(result.cross_check_vs_census_reduction.disagreements.length, 1);
+    assert(result.cross_check_vs_census_reduction.disagreements[0].why.includes('birth_tick'));
+  }],
   ['child boundary mismatch', rows => {
     rows[0].report.ledger.members.find(m => m.origin === 'Descendant').residual.checked_ticks++;
+  }, result => {
+    assert(result.invalid_arms.some(arm => arm.failures.some(f => f.gate === 'boundary_identity')));
   }],
   ['founder boundary mismatch', rows => {
     rows[0].report.ledger.members.find(m => m.origin !== 'Descendant').residual.checked_ticks++;
+  }, result => {
+    assert(result.invalid_arms.some(arm => arm.failures.some(f => f.gate === 'boundary_identity')));
   }],
 ]) test(`CLI refuses ${name}`, async () => {
   const run = await cliFixture(mutate);
@@ -106,4 +129,6 @@ for (const [name, mutate] of [
     gateFailures: run.result?.arms_with_gate_failures,
     boundary: run.result?.boundary_identity_holds,
     disagreements: run.result?.cross_check_vs_census_reduction.disagreements.length}));
+  assert(run.result, `${name}: reducer must emit its structured refusal result`);
+  assertReason(run.result);
 });
