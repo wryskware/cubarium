@@ -4,11 +4,13 @@ Study-only diagnostics and a retained-final-owner candidate. No production defau
 assets, ecology or surface ownership rules are changed. See
 [the review](../../../design/7_Research/astra-growth-corner-review-2026-09-13.md).
 
-`build.rs` extracts the **actual private** `draw_column` from the current host source,
+`build.rs` extracts the **actual private** `draw_column` from git revision `a9eb064`,
 then creates a second function by substituting only the cap's owning chart. It does
 not expose a new host API or overwrite that source. The captured source matches
-`a9eb064`; this study intentionally uses current relative dependencies, unlike the
-older frozen vine study. Recheck provenance if rerunning after presenter changes.
+`a9eb064`; the function is now pinned so the production fix cannot erase the
+historical failure fixture. This study still uses current relative dependencies,
+unlike the older frozen vine study. It requires the named revision in local git;
+recheck helper/asset provenance when rerunning after other changes.
 
 ```sh
 CARGO_TARGET_DIR=captures/build-cache/vine-production cargo test --offline --manifest-path art/studies/growth-corner/Cargo.toml

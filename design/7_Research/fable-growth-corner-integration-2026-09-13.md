@@ -129,6 +129,24 @@ Left0 capture, per-frame `strips/`.
 
 ## Commands
 
+### Root release-readiness follow-up
+
+The two named integration gaps are closed. The shipped spiretree and glasscane
+scenes now explicitly carry `corner_cap_owner` metadata; `art/bake.gd` emits it
+only for that opted-in crown and refuses an unsupported selector or host. A
+custom scene without the metadata stays unflagged. The manifest's key order now
+matches the baker's deterministic output. A fresh headless bake under
+`captures/crown-owner-rebake-verified-2026-09-13` is **byte-identical for all five
+atlases and pack.json**, with no error in its log. An earlier trial's missing-meta
+log was corrected by checking `has_meta` before reading; its output is retained.
+
+Astra's original study now pins just its extracted private column body to
+`a9eb064`, preserving the original failure even after production changes; current
+relative helpers/assets remain explicit dependencies. Root reran all six study
+tests: six pass in 36.94 seconds, including the original red-case assertions.
+No original capture was rewritten. These checks do not replace the clean-release
+workspace test or copied-world/live rollout verification.
+
 ```
 CARGO_TARGET_DIR=captures/build-cache/corner-cap cargo test --offline -p cubarium --lib corner_cap
 CARGO_TARGET_DIR=captures/build-cache/growth-corner-fable-review cargo build --offline --release --manifest-path art/studies/growth-corner-fable-review/Cargo.toml
