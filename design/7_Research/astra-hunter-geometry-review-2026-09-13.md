@@ -11,9 +11,10 @@ and the exploration animation contract. Canon was read first. This is evidence,
 not a new decision or permission to deploy hunters. No production files, live
 worlds, processes, or display transport were changed.
 
-**Follow-up disposition:** findings 1 and 3 are RESOLVED by `327862c` and
-`f36817f`, respectively, with independent regression verification below. Finding
-2 remains open pending the completed Fable scale implementation and validation.
+**Current disposition:** all three original findings are RESOLVED for the fixed
+Lanternjaw trial: timing by `327862c`, nonfinite validation by `f36817f`, and the
+trial's 0.2..=1 scale range by `7b8ad4f` / `5554c48`. The inverse-scale coverage
+test finding is also resolved. Independent evidence and scope limits follow.
 The original findings and reproductions are retained as historical evidence.
 
 ## Original disposition at `22d8dba`: three integration gates
@@ -244,3 +245,57 @@ justified pixel-center allowance is also clearer than a tolerance growing as
 `1 / scale`, but does not by itself prove coverage of the contact disk. The test's
 point-sampling explanation is additionally stale relative to the inspected
 `stamp_rig_scaled` edits, which now use `ceil(1 / scale)` squared box-filter samples.
+
+## Final scale follow-up: committed range and coverage fixes verified
+
+Read committed renderer `7b8ad4f`, semantic pose/scale `5554c48`, and Fable's
+`b8e5d9b` progress report. Independently ran these focused suites to completion:
+
+- `cargo test -p cubarium --offline --test lanternjaw_scale --test lanternjaw_living
+  -- --nocapture`: **28 passed** (5 scale and 23 living-pose).
+- `cargo test -p cubarium-render --offline --test multipart_scale`: **12 passed**.
+
+Both commands completed successfully, **40/40** total. Relevant production/test
+paths were clean. This is independent focused verification, not a rerun or
+endorsement of the reported 559-test full suite. There was one unused-`RigPart`
+import warning in the scale test, not a test failure.
+
+**Finding 2 RESOLVED for the fixed trial.** `draw_living` now admits finite scales
+in 0.2..=1, matching the trial's `body_scale` output range. Its supplied scale is
+passed unchanged to whole-rig sampling; mouth, claw, root-relative offsets, and
+query extent scale together. Tests exercise both endpoints and the small/default
+child scales `sqrt(0.1)` / `sqrt(0.4)`, including drawing, footprint/light,
+seams, vertex and open rim. This is representative numerical coverage of the
+continuous admitted interval, not an exhaustive enumeration of all scales or
+all raster phases.
+
+**The wrong-unit coverage assertion is RESOLVED.** The committed near-limb-only
+test removes `0.5 / scale`. It requires nearest painted center within **1 chart
+pixel**, plus **positive light in the pixel footprint containing the actual
+named claw**. The latter condition closes the specific missing-tip loophole;
+the original `(1, 0)` counterexample cannot pass it. Measured results for this
+held-extension, +x, mid-pixel-root fixture were:
+
+| Scale | Nearest painted center, chart px | Covering pixel's maximum linear RGB channel |
+| --- | ---: | ---: |
+| 0.2 | 0.408 | 0.0262 |
+| 0.316227766… | 0.401 | 0.0915 |
+| 0.632455532… | 0.502 | 0.2524 |
+| 1 | 0.297 | 0.2363 |
+
+The corresponding whole-image light/adult ratios were 0.0400, 0.1000, 0.3999,
+and 1.0000 in the separate footprint fixture. Do not confuse those ratios with
+the covering pixel's channel values. This proves nonzero geometric raster
+coverage for the tested arrangements; it does **not** establish recognizable
+tiny claws or room-distance LED legibility. Fable explicitly describes the
+smallest gallery juvenile as a dim smudge. The held-strike footprint test actually
+reports front/back painted-center offsets +3/-2 at scale 0.2; “under four pixels”
+should not be generalized to every pose's full filtered footprint.
+
+The actual presenter adapter remains root-owned future work. It should consume
+the authoritative `HunterView::body_scale` unchanged for the supported trial.
+`draw_living`'s residual doc phrase “the adapter clamps its mapping” is not a
+reason to clamp only the art for a custom profile with a different admitted
+range: such profiles need an explicit supported-rendering policy. Nor do these
+tests independently prove claw coverage for every heading/subpixel root; retain
+those checks when exercising the real adapter's interpolation and settlement.
