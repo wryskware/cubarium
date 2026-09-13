@@ -1,0 +1,1087 @@
+{
+  "arm": "/home/wrysk/wryskware/cubarium/captures/hunter-charge-candidate-two-hour-512ee52/seed-6/facultative_on",
+  "build_label_supplied_to_encoder": "0.1.0+512ee52",
+  "closing_identity": {
+    "checked": true,
+    "closing_snapshot_sha256": "68edef57caebba3c36f34b4320d3c12f2686f4fa2bb4d7a6110b562635505aeb",
+    "closing_state_hash": "11174133049431148431",
+    "recorded_closing_snapshot_sha256": "68edef57caebba3c36f34b4320d3c12f2686f4fa2bb4d7a6110b562635505aeb"
+  },
+  "derived": {
+    "29:6": {
+      "energy_in_total": 19.55062937153027,
+      "energy_net": -3.0000000000099227,
+      "energy_out_total": 22.550629371540193,
+      "gate_open_fraction": 0.0,
+      "mean_pre_growth_energy": 2.8093606832525984,
+      "mean_pre_growth_reserve": 2.201889915902418,
+      "note": "shares are over this member's own recorded outflow; upkeep is an energy debit and is not a reserve outflow",
+      "oxidation_above_reference_fraction": 0.49232219418007117,
+      "oxidation_active_fraction": 0.5317298628637456,
+      "reserve_in_total": 8.342924722735356,
+      "reserve_net": -1.9999999999978275,
+      "reserve_out_share_funding": 0.1546951218240318,
+      "reserve_out_share_growth": 0.0,
+      "reserve_out_share_oxidation": 0.8453048781759682,
+      "reserve_out_total": 10.342924722733184,
+      "reserve_zero_fraction": 0.10642503116733056,
+      "upkeep_over_reserve_intake": 1.6562452414181437
+    },
+    "74:5": {
+      "energy_in_total": 1.968363645210996,
+      "energy_net": -0.5999999999999328,
+      "energy_out_total": 2.568363645210929,
+      "gate_open_fraction": 0.0,
+      "mean_pre_growth_energy": 0.989873473559889,
+      "mean_pre_growth_reserve": 0.13739261988189105,
+      "note": "shares are over this member's own recorded outflow; upkeep is an energy debit and is not a reserve outflow",
+      "oxidation_above_reference_fraction": 0.0,
+      "oxidation_active_fraction": 0.25499480309504563,
+      "reserve_in_total": 0.3036898434754238,
+      "reserve_net": -0.7999999999999963,
+      "reserve_out_share_funding": 0.0,
+      "reserve_out_share_growth": 0.0,
+      "reserve_out_share_oxidation": 1.0,
+      "reserve_out_total": 1.10368984347542,
+      "reserve_zero_fraction": 0.7451206836817185,
+      "upkeep_over_reserve_intake": 7.890496494015438
+    }
+  },
+  "kind": "juvenile-mutation-site-flow-diagnostic",
+  "ledger": {
+    "members": [
+      {
+        "adult_structure": 2.0,
+        "adult_ticks": 32887,
+        "bins": [
+          {
+            "end_stocks": {
+              "energy": 3.222396248353589,
+              "reserve": 2.347120797046257,
+              "structure": 2.0,
+              "tick": 145199
+            },
+            "energy_in": 1.0961471980309596,
+            "energy_out": 0.8737509496772918,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 763,
+            "reserve_in_digestion": 0.7286207970464189,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.3815000000000003,
+            "start_tick": 144000,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 3.0377109297152742,
+              "reserve": 2.023956439555046,
+              "structure": 2.0,
+              "tick": 146399
+            },
+            "energy_in": 0.6866904283392962,
+            "energy_out": 0.8713757469775479,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 796,
+            "reserve_in_digestion": 0.07483564250892684,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.3980000000000003,
+            "start_tick": 145200,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 3.2004422521810683,
+              "reserve": 2.1357032453377496,
+              "structure": 2.0,
+              "tick": 147599
+            },
+            "energy_in": 0.7612978705219168,
+            "energy_out": 0.5985665480560585,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 606,
+            "reserve_in_digestion": 0.41474680578285716,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.3030000000000002,
+            "start_tick": 146400,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 3.1265601969612025,
+              "reserve": 2.4147047272320914,
+              "structure": 2.0,
+              "tick": 148799
+            },
+            "energy_in": 0.637067654596254,
+            "energy_out": 0.7109497098160934,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 398,
+            "reserve_in_digestion": 0.478001481894376,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.19900000000000015,
+            "start_tick": 147600,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 3.200203104663918,
+              "reserve": 2.709803216775489,
+              "structure": 2.0,
+              "tick": 149999
+            },
+            "energy_in": 0.7384656596956772,
+            "energy_out": 0.6648227519929556,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 478,
+            "reserve_in_digestion": 0.5340984895435091,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.23900000000000018,
+            "start_tick": 148800,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 3.1363706116332475,
+              "reserve": 2.3823669482225758,
+              "structure": 2.0,
+              "tick": 151199
+            },
+            "energy_in": 0.6169758209648054,
+            "energy_out": 0.6808083139954899,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 737,
+            "reserve_in_digestion": 0.041063731447201386,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.36850000000000027,
+            "start_tick": 150000,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 3.029339739348302,
+              "reserve": 1.9846298791552448,
+              "structure": 2.0,
+              "tick": 152399
+            },
+            "energy_in": 0.7548419539552143,
+            "energy_out": 0.861872826240143,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 900,
+            "reserve_in_digestion": 0.05226293093280152,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.45000000000000034,
+            "start_tick": 151200,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 3.117216840049258,
+              "reserve": 2.011645094372309,
+              "structure": 2.0,
+              "tick": 153599
+            },
+            "energy_in": 1.0210101434780765,
+            "energy_out": 0.9331330427770655,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 885,
+            "reserve_in_digestion": 0.46170349947293066,
+            "reserve_in_field": 0.007811715744166185,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.44250000000000034,
+            "start_tick": 152400,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 3.1749295539954865,
+              "reserve": 2.331867167174505,
+              "structure": 2.0,
+              "tick": 154799
+            },
+            "energy_in": 1.002281381868181,
+            "energy_out": 0.9445686679219537,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 696,
+            "reserve_in_digestion": 0.6682220728022488,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.34800000000000025,
+            "start_tick": 153600,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 3.2287288166427452,
+              "reserve": 2.8352517355962394,
+              "structure": 2.0,
+              "tick": 155999
+            },
+            "energy_in": 0.9135897122811878,
+            "energy_out": 0.8597904496339788,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 510,
+            "reserve_in_digestion": 0.7364982292323698,
+            "reserve_in_field": 0.02188633918939478,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.25500000000000017,
+            "start_tick": 154800,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 3.226416395376652,
+              "reserve": 3.3521672316864892,
+              "structure": 2.0,
+              "tick": 157199
+            },
+            "energy_in": 0.6710103307268531,
+            "energy_out": 0.6733227519929565,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 288,
+            "reserve_in_digestion": 0.660915496090281,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.1440000000000001,
+            "start_tick": 156000,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 3.200424325101694,
+              "reserve": 3.063667231686393,
+              "structure": 2.0,
+              "tick": 158399
+            },
+            "energy_in": 0.461600000000005,
+            "energy_out": 0.4875920702750139,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 577,
+            "reserve_in_digestion": 0.0,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.2885000000000002,
+            "start_tick": 157200,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 3.2006414243494987,
+              "reserve": 3.207508459879134,
+              "structure": 2.0,
+              "tick": 159599
+            },
+            "energy_in": 0.8518274854618771,
+            "energy_out": 0.8516103862140656,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 667,
+            "reserve_in_digestion": 0.47734122819280744,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.33350000000000024,
+            "start_tick": 158400,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 3.2007507155255115,
+              "reserve": 3.4105145426210344,
+              "structure": 2.0,
+              "tick": 160799
+            },
+            "energy_in": 0.7042707218279926,
+            "energy_out": 0.7041614306519725,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 502,
+            "reserve_in_digestion": 0.45400608274197557,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.25100000000000017,
+            "start_tick": 159600,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 3.0525171475152573,
+              "reserve": 3.0583712765593885,
+              "structure": 2.0,
+              "tick": 161999
+            },
+            "energy_in": 0.5812378226256578,
+            "energy_out": 0.7294713906359586,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 720,
+            "reserve_in_digestion": 0.007856733938474431,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.36000000000000026,
+            "start_tick": 160800,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 3.2002211439221386,
+              "reserve": 3.2473727512642476,
+              "structure": 2.0,
+              "tick": 163199
+            },
+            "energy_in": 0.7289343164699686,
+            "energy_out": 0.5812303200630626,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 532,
+            "reserve_in_digestion": 0.45500147470494223,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.2660000000000002,
+            "start_tick": 162000,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 3.22559265320182,
+              "reserve": 3.867175495278272,
+              "structure": 2.0,
+              "tick": 164399
+            },
+            "energy_in": 0.6036018293426645,
+            "energy_out": 0.57823032006306,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 168,
+            "reserve_in_digestion": 0.7038027440139917,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.08400000000000006,
+            "start_tick": 163200,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 3.2005109717818416,
+              "reserve": 3.599675495278183,
+              "structure": 2.0,
+              "tick": 165599
+            },
+            "energy_in": 0.42800000000000404,
+            "energy_out": 0.4530816814200647,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 535,
+            "reserve_in_digestion": 0.0,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.2675000000000002,
+            "start_tick": 164400,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 3.2002292903618605,
+              "reserve": 3.3166754952780884,
+              "structure": 2.0,
+              "tick": 166799
+            },
+            "energy_in": 0.45280000000000475,
+            "energy_out": 0.4530816814200647,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 566,
+            "reserve_in_digestion": 0.0,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.2830000000000002,
+            "start_tick": 165600,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 3.008722689570977,
+              "reserve": 2.8651754952779376,
+              "structure": 2.0,
+              "tick": 167999
+            },
+            "energy_in": 0.7224000000000125,
+            "energy_out": 0.9139066007909138,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 903,
+            "reserve_in_digestion": 0.0,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.45150000000000035,
+            "start_tick": 166800,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 2.3932547851038963,
+              "reserve": 1.298291961660014,
+              "structure": 2.0,
+              "tick": 169199
+            },
+            "energy_in": 1.2358776442546868,
+            "energy_out": 1.8513455487217831,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 1071,
+            "reserve_in_digestion": 0.56861646638205,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 1.6,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.5354999999999964,
+            "start_tick": 168000,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 2.157619157047458,
+              "reserve": 0.69829196166008,
+              "structure": 2.0,
+              "tick": 170399
+            },
+            "energy_in": 0.9600000000000193,
+            "energy_out": 1.1956356280564393,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 1200,
+            "reserve_in_digestion": 0.0,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.5999999999999893,
+            "start_tick": 169200,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 2.202101624848913,
+              "reserve": 0.2463897318862761,
+              "structure": 2.0,
+              "tick": 171599
+            },
+            "energy_in": 1.0587318468174642,
+            "energy_out": 1.0142493790159766,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 1200,
+            "reserve_in_digestion": 0.14809777022617432,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.5999999999999893,
+            "start_tick": 170400,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 1.587262710834444,
+              "reserve": 0.0,
+              "structure": 2.0,
+              "tick": 172799
+            },
+            "energy_in": 0.3942235710180445,
+            "energy_out": 1.0090624850325147,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 493,
+            "reserve_in_digestion": 0.0,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.24638973188627608,
+            "start_tick": 171600,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 1.7730233997383005,
+              "reserve": 0.21303499084771538,
+              "structure": 2.0,
+              "tick": 173999
+            },
+            "energy_in": 1.1268899938984762,
+            "energy_out": 0.9411293049944597,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 869,
+            "reserve_in_digestion": 0.6475349908477188,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.43450000000000033,
+            "start_tick": 172800,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 1.194456863047851,
+              "reserve": 0.0,
+              "structure": 2.0,
+              "tick": 175199
+            },
+            "energy_in": 0.34085598535634587,
+            "energy_out": 0.9194225220466492,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 427,
+            "reserve_in_digestion": 0.0,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.21303499084771535,
+            "start_tick": 174000,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 0.3692354485882093,
+              "reserve": 0.0,
+              "structure": 2.0,
+              "tick": 176399
+            },
+            "energy_in": 0.0,
+            "energy_out": 0.8252214144596174,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 0,
+            "reserve_in_digestion": 0.0,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.0,
+            "start_tick": 175200,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 0.0003145708843376049,
+              "reserve": 0.0,
+              "structure": 2.0,
+              "tick": 176885
+            },
+            "energy_in": 0.0,
+            "energy_out": 0.3692354485882097,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 0,
+            "reserve_in_digestion": 0.0,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.0,
+            "start_tick": 176400,
+            "ticks": 486
+          }
+        ],
+        "born_tick": 144000,
+        "close_stocks": {
+          "energy": 0.0003145708843376049,
+          "reserve": 0.0,
+          "structure": 2.0,
+          "tick": 176885
+        },
+        "death_stocks": {
+          "energy": 0.0,
+          "reserve": 0.0,
+          "structure": 2.0,
+          "tick": 176886
+        },
+        "digestion": {
+          "energy_gain": 5.542151111868255,
+          "heat": 5.542151111868255,
+          "material": 22.586494464594015,
+          "ticks": 4527,
+          "to_detritus": 14.273267796791417,
+          "to_reserve": 8.313226667801795
+        },
+        "end_cause": "Starvation",
+        "end_tick": 176886,
+        "energy_max": 4.0,
+        "first_observed_tick": 144000,
+        "frugivory": {
+          "energy_gain": 0.0,
+          "heat": 0.0,
+          "material": 0.0,
+          "ticks": 0,
+          "to_reserve": 0.0
+        },
+        "funding": {
+          "build_heat": 0.4,
+          "energy_debit": 1.0,
+          "escrow_energy": 0.6,
+          "escrow_reserve": 0.8,
+          "escrow_structure": 0.8,
+          "funded_count": 1,
+          "refunded_count": 0,
+          "refunded_energy": 0.0,
+          "refunded_reserve": 0.0,
+          "reserve_debit": 1.6
+        },
+        "gate": {
+          "branch_entered_ticks": 0,
+          "energy_sum": 92391.4447901282,
+          "gate_reserve": 1.2,
+          "max_energy": 3.4653483762865336,
+          "max_reserve": 3.867175495278272,
+          "min_reserve_deficit": 0.00020803833997518062,
+          "observed_ticks": 32887,
+          "reserve_above_min_ticks": 25396,
+          "reserve_sum": 72413.55366428282,
+          "reserve_zero_ticks": 3500,
+          "structure_below_adult_ticks": 0
+        },
+        "grazing": {
+          "energy_gain": 0.0,
+          "heat": 0.0,
+          "material": 0.0,
+          "ticks": 0,
+          "to_reserve": 0.0
+        },
+        "growth": {
+          "bound_by_energy": 0,
+          "bound_by_rate": 0,
+          "bound_by_remaining_structure": 0,
+          "bound_by_reserve": 0,
+          "energy_cost": 0.0,
+          "heat": 0.0,
+          "reserve_spent": 0.0,
+          "structure_gained": 0.0,
+          "ticks": 0
+        },
+        "handling": {
+          "demanded": 0.45269999999996646,
+          "paid": 0.45269999999996646,
+          "ticks": 4527,
+          "unaffordable_ticks": 0
+        },
+        "id": {
+          "generation": 6,
+          "slot": 29
+        },
+        "juvenile_ticks": 0,
+        "last_observed_tick": 176885,
+        "open_stocks": {
+          "energy": 3.0,
+          "reserve": 2.0,
+          "structure": 2.0,
+          "tick": 144000
+        },
+        "origin": "Founder",
+        "oxidation": {
+          "above_reference_reserve_burned": 8.095389731884678,
+          "above_reference_ticks": 16191,
+          "energy_gained": 13.988679556372976,
+          "heat": 3.497169889093244,
+          "reserve_burned": 8.742924722733184,
+          "ticks": 17487
+        },
+        "parent": null,
+        "reserve_max": 4.0,
+        "residual": {
+          "checked_ticks": 32887,
+          "first_violation_tick": null,
+          "max_energy": 6.093216209368535e-16,
+          "max_reserve": 3.845665105806084e-16,
+          "max_structure": 0.0,
+          "violations": 0
+        },
+        "scavenging": {
+          "energy_gain": 0.019798703289040626,
+          "heat": 0.019798703289040626,
+          "material": 0.05068267832364246,
+          "ticks": 140,
+          "to_reserve": 0.029698054933560956
+        },
+        "strike": {
+          "demanded": 7.280000000000005,
+          "paid": 7.280000000000005,
+          "shortfall": 0.0,
+          "ticks": 91
+        },
+        "upkeep": {
+          "demanded_maintenance": 8.221750000003514,
+          "demanded_move": 1.649802368714076,
+          "demanded_sense": 3.9464399999975583,
+          "demanded_total": 13.817992368723731,
+          "paid": 13.817929371540218,
+          "shortfall": 0.00006299718351245157,
+          "shortfall_ticks": 1,
+          "ticks": 32887
+        }
+      },
+      {
+        "adult_structure": 2.0,
+        "adult_ticks": 0,
+        "bins": [
+          {
+            "end_stocks": {
+              "energy": 1.2833375088682186,
+              "reserve": 0.5041898434754861,
+              "structure": 0.8,
+              "tick": 171937
+            },
+            "energy_in": 1.161659895650284,
+            "energy_out": 0.4783223867819743,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 1199,
+            "reserve_in_digestion": 0.3036898434754238,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.5994999999999894,
+            "start_tick": 170738,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 1.7537904293542588,
+              "reserve": 0.0,
+              "structure": 0.8,
+              "tick": 173137
+            },
+            "energy_in": 0.8067037495607927,
+            "energy_out": 0.33625082907460735,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 1009,
+            "reserve_in_digestion": 0.0,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.504189843475486,
+            "start_tick": 171938,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 1.4175971175943682,
+              "reserve": 0.0,
+              "structure": 0.8,
+              "tick": 174337
+            },
+            "energy_in": 0.0,
+            "energy_out": 0.3361933117598491,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 0,
+            "reserve_in_digestion": 0.0,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.0,
+            "start_tick": 173138,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 1.0813462885197194,
+              "reserve": 0.0,
+              "structure": 0.8,
+              "tick": 175537
+            },
+            "energy_in": 0.0,
+            "energy_out": 0.33625082907460735,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 0,
+            "reserve_in_digestion": 0.0,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.0,
+            "start_tick": 174338,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 0.7450954594450699,
+              "reserve": 0.0,
+              "structure": 0.8,
+              "tick": 176737
+            },
+            "energy_in": 0.0,
+            "energy_out": 0.33625082907460735,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 0,
+            "reserve_in_digestion": 0.0,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.0,
+            "start_tick": 175538,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 0.4088446303704384,
+              "reserve": 0.0,
+              "structure": 0.8,
+              "tick": 177937
+            },
+            "energy_in": 0.0,
+            "energy_out": 0.33625082907460735,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 0,
+            "reserve_in_digestion": 0.0,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.0,
+            "start_tick": 176738,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 0.07265131861059612,
+              "reserve": 0.0,
+              "structure": 0.8,
+              "tick": 179137
+            },
+            "energy_in": 0.0,
+            "energy_out": 0.3361933117598491,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 0,
+            "reserve_in_digestion": 0.0,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.0,
+            "start_tick": 177938,
+            "ticks": 1200
+          },
+          {
+            "end_stocks": {
+              "energy": 0.000047799573702769055,
+              "reserve": 0.0,
+              "structure": 0.8,
+              "tick": 179396
+            },
+            "energy_in": 0.0,
+            "energy_out": 0.07265131861059612,
+            "gate_open_ticks": 0,
+            "growth_ticks": 0,
+            "oxidation_ticks": 0,
+            "reserve_in_digestion": 0.0,
+            "reserve_in_field": 0.0,
+            "reserve_out_funding": 0.0,
+            "reserve_out_growth": 0.0,
+            "reserve_out_oxidation": 0.0,
+            "start_tick": 179138,
+            "ticks": 259
+          }
+        ],
+        "born_tick": 170739,
+        "close_stocks": {
+          "energy": 0.000047799573702769055,
+          "reserve": 0.0,
+          "structure": 0.8,
+          "tick": 179396
+        },
+        "death_stocks": {
+          "energy": 0.0,
+          "reserve": 0.0,
+          "structure": 0.8,
+          "tick": 179397
+        },
+        "digestion": {
+          "energy_gain": 0.2024598956502822,
+          "heat": 0.2024598956502822,
+          "material": 0.6035863309232206,
+          "ticks": 121,
+          "to_detritus": 0.2998964874477968,
+          "to_reserve": 0.3036898434754238
+        },
+        "end_cause": "Starvation",
+        "end_tick": 179397,
+        "energy_max": 4.0,
+        "first_observed_tick": 170738,
+        "frugivory": {
+          "energy_gain": 0.0,
+          "heat": 0.0,
+          "material": 0.0,
+          "ticks": 0,
+          "to_reserve": 0.0
+        },
+        "funding": {
+          "build_heat": 0.0,
+          "energy_debit": 0.0,
+          "escrow_energy": 0.0,
+          "escrow_reserve": 0.0,
+          "escrow_structure": 0.0,
+          "funded_count": 0,
+          "refunded_count": 0,
+          "refunded_energy": 0.0,
+          "refunded_reserve": 0.0,
+          "reserve_debit": 0.0
+        },
+        "gate": {
+          "branch_entered_ticks": 0,
+          "energy_sum": 8571.314407555079,
+          "gate_reserve": 1.2,
+          "max_energy": 1.8073169195420753,
+          "max_reserve": 1.0271898434754285,
+          "min_reserve_deficit": 0.17281015652457143,
+          "observed_ticks": 8659,
+          "reserve_above_min_ticks": 0,
+          "reserve_sum": 1189.6826955572947,
+          "reserve_zero_ticks": 6452,
+          "structure_below_adult_ticks": 8659
+        },
+        "grazing": {
+          "energy_gain": 0.0,
+          "heat": 0.0,
+          "material": 0.0,
+          "ticks": 0,
+          "to_reserve": 0.0
+        },
+        "growth": {
+          "bound_by_energy": 0,
+          "bound_by_rate": 0,
+          "bound_by_remaining_structure": 0,
+          "bound_by_reserve": 0,
+          "energy_cost": 0.0,
+          "heat": 0.0,
+          "reserve_spent": 0.0,
+          "structure_gained": 0.0,
+          "ticks": 0
+        },
+        "handling": {
+          "demanded": 0.012099999999999982,
+          "paid": 0.012099999999999982,
+          "ticks": 121,
+          "unaffordable_ticks": 0
+        },
+        "id": {
+          "generation": 5,
+          "slot": 74
+        },
+        "juvenile_ticks": 8659,
+        "last_observed_tick": 179396,
+        "open_stocks": {
+          "energy": 0.6,
+          "reserve": 0.8,
+          "structure": 0.8,
+          "tick": 170739
+        },
+        "origin": "Descendant",
+        "oxidation": {
+          "above_reference_reserve_burned": 0.0,
+          "above_reference_ticks": 0,
+          "energy_gained": 1.765903749560714,
+          "heat": 0.4414759373901785,
+          "reserve_burned": 1.10368984347542,
+          "ticks": 2208
+        },
+        "parent": {
+          "generation": 6,
+          "slot": 29
+        },
+        "reserve_max": 4.0,
+        "residual": {
+          "checked_ticks": 8660,
+          "first_violation_tick": null,
+          "max_energy": 1.3682631416767066e-16,
+          "max_reserve": 1.5525775109992423e-16,
+          "max_structure": 0.0,
+          "violations": 0
+        },
+        "scavenging": {
+          "energy_gain": 0.0,
+          "heat": 0.0,
+          "material": 0.0,
+          "ticks": 0,
+          "to_reserve": 0.0
+        },
+        "strike": {
+          "demanded": 0.16,
+          "paid": 0.16,
+          "shortfall": 0.0,
+          "ticks": 2
+        },
+        "upkeep": {
+          "demanded_maintenance": 0.865899999999921,
+          "demanded_move": 0.49145887286410733,
+          "demanded_sense": 1.0390800000000302,
+          "demanded_total": 2.3964388728643664,
+          "paid": 2.396263645210929,
+          "shortfall": 0.00017522765343725355,
+          "shortfall_ticks": 1,
+          "ticks": 8659
+        }
+      }
+    ],
+    "opened_tick": 144000,
+    "unregistered_records": 0
+  },
+  "limits": "Measures where a member's own reserve and energy moved. It does not establish a counterfactual: no juvenile in this cohort ran under the world's configured oxidation threshold, so the ledger cannot attribute the deficit to the raised one. Upkeep is recorded as three demanded terms and one clamped payment; the payment is deliberately not split across them.",
+  "observer_neutrality": {
+    "basis": "two full replays from the same decoded opening, differing only in enable_flow_ledger()",
+    "checked": true,
+    "closing_bytes_equal": true,
+    "event_stream_sha256": "4c229bde677a7478e048355b551fd0decc7485632b864d946c560fcfb6f23fda",
+    "event_ticks_compared": 757,
+    "state_hash_equal": true
+  },
+  "opening": {
+    "arm": "facultative_on",
+    "member_oxidation_threshold": 0.8,
+    "profile_recipe": "reserve-targets-charge80-v1",
+    "seed": 6,
+    "snapshot_sha256": "ee5f3497c2a3be1dcf82a86c3449e631fc70d34449a014f69922e25b6b238042",
+    "state_hash": "6873749331658897442",
+    "tick": 144000,
+    "world_oxidation_threshold": 0.5
+  },
+  "reconciliation": {
+    "basis": "per member per tick: stocks(t) - stocks(t-1) == sum of flows recorded at the mutation sites in tick t; the death tick closes against the removal site",
+    "tolerance": 1e-9,
+    "violations": 0
+  },
+  "replayed_ticks": 144000
+}

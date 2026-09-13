@@ -350,6 +350,14 @@ budget above is a bound from recorded transactions, not that ledger.
 
 ## Next action: one read-only flow observer, no cohort, no retune
 
+**Built and run.** See
+[the juvenile flow diagnostic](hunter-juvenile-flow-diagnostic-2026-09-13.md):
+on the two arms measured so far the growth branch is confirmed never to have run,
+including the terminal suffix this report could not observe, and the raised
+charging threshold turns out to account for 12.0% and 0.0% of those juveniles'
+reserve burn. The paragraph below is the proposal as written; the diagnostic's
+findings supersede its expectation about what the ledger would show.
+
 Add a **per-member tickwise reserve-flow observer** and replay the retained
 candidate arms that actually produced children — `specialist_on` seeds 1, 5, 7, 8 and `facultative_on` seeds 1, 2, 5, 6, 7, 8,
 12, eleven arms in all — from their own recorded

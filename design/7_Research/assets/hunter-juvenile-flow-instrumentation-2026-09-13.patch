@@ -1,0 +1,1733 @@
+From 0d867f1adf7e78328fe11022c19a6da702e044b9 Mon Sep 17 00:00:00 2001
+From: Wrysk <wrysk@wryskware.dev>
+Date: Sun, 13 Sep 2026 05:09:09 -0700
+Subject: [PATCH] Add a read-only per-member flow ledger and its replay
+ diagnostic
+
+Diagnostic branch only, based on frozen 512ee52. This is not for main: it exists
+so the paid juvenile bottleneck can be measured at the mutation sites instead of
+inferred from the 200-tick census in the retained charging artifacts.
+
+crates/cubarium-core/src/flow.rs is a write-only accumulator. Every amount is
+read at the assignment that moves it, in the core's own expression, so a tick
+that both oxidises and grows is not collapsed into one reserve delta. The growth
+predicate is read before the branch it gates, so a closed gate is an observation
+rather than the absence of a growth record. Upkeep keeps its three demanded terms
+apart from the single clamped debit the core actually pays; splitting that debit
+across them would be attribution, not measurement.
+
+world.rs gains one Option field and twelve recording sites, each a null check
+when the ledger is absent. The only existing lines changed are the five that name
+the growth step's four caps so the binding one can be recorded; the arithmetic and
+its order are untouched, and the closing-bytes identity gate proves it.
+
+FlowLedger::probe reconciles the recording rather than trusting it: for every
+member and every tick, the stocks the world holds must equal the previous tick's
+stocks plus exactly the flows recorded, with the death tick closing against the
+removal site. A missed mutation site shows up as a residual.
+
+crates/cubarium/examples/juvenile_flow.rs replays one retained arm behind four
+gates: recorded opening sha256 and state hash, replayed closing bytes and state
+hash equal to the retained artifact, two replays differing only in
+enable_flow_ledger() agreeing on closing bytes and every event record, and zero
+reconciliation violations. Output is one record per member plus 60-second bins.
+
+No configuration, threshold, cost, geometry, gate or default moves.
+
+cargo test -p cubarium-core: 149 lib (8 new) plus every integration suite pass.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+---
+ crates/cubarium-core/src/flow.rs          | 942 ++++++++++++++++++++++
+ crates/cubarium-core/src/lib.rs           |   1 +
+ crates/cubarium-core/src/world.rs         | 246 +++++-
+ crates/cubarium/examples/juvenile_flow.rs | 321 ++++++++
+ 4 files changed, 1505 insertions(+), 5 deletions(-)
+ create mode 100644 crates/cubarium-core/src/flow.rs
+ create mode 100644 crates/cubarium/examples/juvenile_flow.rs
+
+diff --git a/crates/cubarium-core/src/flow.rs b/crates/cubarium-core/src/flow.rs
+new file mode 100644
+index 0000000..3f7c50c
+--- /dev/null
++++ b/crates/cubarium-core/src/flow.rs
+@@ -0,0 +1,942 @@
++//! A read-only per-member reserve/energy/structure flow ledger, recorded at the exact
++//! mutation sites in [`crate::world::World::step`].
++//!
++//! This exists to answer one question the retained charging artifacts cannot: where a paid
++//! juvenile's reserve actually goes, tick by tick, between the meal that supplies it and the
++//! growth branch that would spend it. The 200-tick census in those artifacts observes stocks;
++//! it never observes a flow, so every "oxidation drained it" statement made from that census
++//! is a budget inference. This module measures the flows themselves.
++//!
++//! Three rules keep it a measurement rather than an attribution:
++//!
++//! 1. **Every amount is read at the assignment that moves it**, in the same expression the
++//!    core uses, and is never reconstructed from a post-step stock difference. A post-step
++//!    delta cannot tell oxidation from growth; both move reserve in the same tick.
++//! 2. **Gate state is read before the branch it gates**, not after. `growth_gate` records the
++//!    predicate's two sides as the core evaluates them, so a closed gate is observed, not
++//!    inferred from the absence of growth.
++//! 3. **Nothing here is ever read back by the tick.** The ledger is write-only from the
++//!    world's point of view: no decision, draw, clamp or branch consults it. When it is
++//!    absent (the default) every recording site is a null check. [`FlowLedger::residual`]
++//!    then proves the recording is complete rather than merely plausible: for every member
++//!    and every tick of its life, the stocks the world actually holds must equal the previous
++//!    tick's stocks plus exactly the flows recorded here.
++//!
++//! Output is bounded by construction: one record per hunter member plus fixed-width time
++//! bins, never a per-tick dump.
++
++use std::collections::BTreeMap;
++
++use serde::{Serialize, Serializer};
++
++use crate::ids::OrganismId;
++
++/// Width of one aggregation bin, in ticks: 60 s at the core's 20 Hz step.
++pub const BIN_TICKS: u64 = 1200;
++/// Bins retained per member before the last one absorbs the tail (2 h 40 m of life).
++pub const MAX_BINS: usize = 160;
++/// Reconciliation tolerance. Flows are summed in a different order than the world applies
++/// them, so exact bit equality is not available; this is a rounding envelope, not a slack
++/// that could hide a missing mutation site (one missed site moves a stock by ~1e-4 or more).
++pub const RESIDUAL_TOLERANCE: f64 = 1e-9;
++
++/// The three stocks this ledger reconciles, read together at one point.
++#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
++pub struct Stocks {
++    pub tick: u64,
++    pub structure: f64,
++    pub reserve: f64,
++    pub energy: f64,
++}
++
++/// Gut digestion: `hunter::digest_step` applied at `world.rs` "Handling and digestion".
++#[derive(Clone, Copy, Debug, Default, Serialize)]
++pub struct Digestion {
++    pub ticks: u64,
++    /// Gut material consumed by the step (`step.material`).
++    pub material: f64,
++    pub to_reserve: f64,
++    pub energy_gain: f64,
++    pub to_detritus: f64,
++    pub heat: f64,
++}
++
++/// One of the three field-feeding channels. A Lanternjaw's diet is 0.0, so a nonzero
++/// frugivory or grazing total here would itself be a finding.
++#[derive(Clone, Copy, Debug, Default, Serialize)]
++pub struct FieldFeeding {
++    pub ticks: u64,
++    pub material: f64,
++    pub to_reserve: f64,
++    pub energy_gain: f64,
++    pub heat: f64,
++}
++
++/// The oxidation branch: reserve burned into battery charge.
++#[derive(Clone, Copy, Debug, Default, Serialize)]
++pub struct Oxidation {
++    pub ticks: u64,
++    pub reserve_burned: f64,
++    pub energy_gained: f64,
++    pub heat: f64,
++    /// Ticks whose burn happened only because the member's activation threshold was raised
++    /// above the world's configured one — the same `above_reference` test the charging
++    /// diagnostics use, recorded per member instead of per process.
++    pub above_reference_ticks: u64,
++    pub above_reference_reserve_burned: f64,
++}
++
++/// The growth branch, and which of its four caps actually bound the step.
++#[derive(Clone, Copy, Debug, Default, Serialize)]
++pub struct Growth {
++    /// Ticks on which the branch was entered *and* produced a positive step.
++    pub ticks: u64,
++    pub reserve_spent: f64,
++    pub structure_gained: f64,
++    pub energy_cost: f64,
++    pub heat: f64,
++    pub bound_by_rate: u64,
++    pub bound_by_remaining_structure: u64,
++    pub bound_by_reserve: u64,
++    pub bound_by_energy: u64,
++}
++
++/// Maintenance, movement and sensing. The core pays these as one lumped debit clamped to the
++/// battery, so the three components are recorded as *demanded* — their exact terms in the
++/// core's own expression — beside the single amount actually paid. Splitting `paid` across
++/// them would be attribution, not measurement, and is deliberately not done.
++#[derive(Clone, Copy, Debug, Default, Serialize)]
++pub struct Upkeep {
++    pub ticks: u64,
++    pub demanded_maintenance: f64,
++    pub demanded_move: f64,
++    pub demanded_sense: f64,
++    pub demanded_total: f64,
++    pub paid: f64,
++    pub shortfall: f64,
++    /// Ticks where the battery could not cover the full demand.
++    pub shortfall_ticks: u64,
++}
++
++/// A paid strike, charged in full at entry before any outcome is known.
++#[derive(Clone, Copy, Debug, Default, Serialize)]
++pub struct Strike {
++    pub ticks: u64,
++    pub demanded: f64,
++    pub paid: f64,
++    pub shortfall: f64,
++}
++
++/// Handling: paid first and in full, or nothing is digested this tick.
++#[derive(Clone, Copy, Debug, Default, Serialize)]
++pub struct Handling {
++    pub ticks: u64,
++    pub demanded: f64,
++    pub paid: f64,
++    /// Ticks where the meal could not be carried, so digestion was skipped entirely.
++    pub unaffordable_ticks: u64,
++}
++
++/// Reproduction transfers on the parent's side.
++#[derive(Clone, Copy, Debug, Default, Serialize)]
++pub struct Funding {
++    pub funded_count: u64,
++    pub reserve_debit: f64,
++    pub energy_debit: f64,
++    pub build_heat: f64,
++    pub escrow_structure: f64,
++    pub escrow_reserve: f64,
++    pub escrow_energy: f64,
++    /// A birth refused at the population cap returns the escrow to the parent untouched.
++    pub refunded_count: u64,
++    pub refunded_reserve: f64,
++    pub refunded_energy: f64,
++}
++
++/// The growth predicate, sampled at the mutation site before the branch runs.
++#[derive(Clone, Copy, Debug, Default, Serialize)]
++pub struct GrowthGate {
++    /// Ticks on which the predicate was evaluated at all (the member was alive and reached
++    /// the physiology pass).
++    pub observed_ticks: u64,
++    pub structure_below_adult_ticks: u64,
++    pub reserve_above_min_ticks: u64,
++    /// Ticks where both sides held, i.e. the branch body ran (it may still have stepped zero).
++    pub branch_entered_ticks: u64,
++    /// The constant threshold `growth_reserve_min · reserve_max` for this member.
++    pub gate_reserve: f64,
++    /// Closest the member ever came to the gate from below: `min(gate − reserve)` over ticks
++    /// where it was below. `f64::INFINITY` if it was never below.
++    pub min_reserve_deficit: f64,
++    pub max_reserve: f64,
++    /// Sum of pre-growth reserve over `observed_ticks`, for a mean.
++    pub reserve_sum: f64,
++    pub max_energy: f64,
++    pub energy_sum: f64,
++    /// Ticks with the reserve stock at exactly zero when the predicate was evaluated.
++    pub reserve_zero_ticks: u64,
++}
++
++/// Per-tick reconciliation of recorded flows against the stocks the world actually holds.
++#[derive(Clone, Copy, Debug, Default, Serialize)]
++pub struct Residual {
++    pub checked_ticks: u64,
++    pub max_structure: f64,
++    pub max_reserve: f64,
++    pub max_energy: f64,
++    pub violations: u64,
++    pub first_violation_tick: Option<u64>,
++}
++
++impl Residual {
++    fn observe(&mut self, tick: u64, structure: f64, reserve: f64, energy: f64) {
++        self.checked_ticks += 1;
++        self.max_structure = self.max_structure.max(structure.abs());
++        self.max_reserve = self.max_reserve.max(reserve.abs());
++        self.max_energy = self.max_energy.max(energy.abs());
++        if structure.abs() > RESIDUAL_TOLERANCE
++            || reserve.abs() > RESIDUAL_TOLERANCE
++            || energy.abs() > RESIDUAL_TOLERANCE
++        {
++            self.violations += 1;
++            self.first_violation_tick.get_or_insert(tick);
++        }
++    }
++}
++
++/// One fixed-width slice of a member's life.
++#[derive(Clone, Copy, Debug, Default, Serialize)]
++pub struct Bin {
++    pub start_tick: u64,
++    pub ticks: u64,
++    pub reserve_in_digestion: f64,
++    pub reserve_in_field: f64,
++    pub reserve_out_oxidation: f64,
++    pub reserve_out_growth: f64,
++    pub reserve_out_funding: f64,
++    pub energy_in: f64,
++    pub energy_out: f64,
++    pub growth_ticks: u64,
++    pub gate_open_ticks: u64,
++    pub oxidation_ticks: u64,
++    /// Stocks at the last end-of-tick probe inside this bin.
++    pub end_stocks: Stocks,
++}
++
++/// Everything recorded for one hunter member over its whole life.
++#[derive(Clone, Debug, Serialize)]
++pub struct MemberFlow {
++    pub id: OrganismId,
++    pub born_tick: u64,
++    pub origin: &'static str,
++    pub parent: Option<OrganismId>,
++    pub first_observed_tick: u64,
++    pub last_observed_tick: u64,
++    pub end_tick: Option<u64>,
++    pub end_cause: Option<&'static str>,
++    pub adult_structure: f64,
++    pub reserve_max: f64,
++    pub energy_max: f64,
++    /// Stocks the member started life with. For a paid descendant this is its escrow.
++    pub open_stocks: Stocks,
++    /// Last end-of-tick probe.
++    pub close_stocks: Stocks,
++    /// Stocks read at the removal site, on the tick the member died. `None` if it survived to
++    /// the horizon — a censoring, not a zero.
++    pub death_stocks: Option<Stocks>,
++    pub juvenile_ticks: u64,
++    pub adult_ticks: u64,
++    pub digestion: Digestion,
++    pub frugivory: FieldFeeding,
++    pub grazing: FieldFeeding,
++    pub scavenging: FieldFeeding,
++    pub oxidation: Oxidation,
++    pub growth: Growth,
++    pub upkeep: Upkeep,
++    pub strike: Strike,
++    pub handling: Handling,
++    pub funding: Funding,
++    pub gate: GrowthGate,
++    pub residual: Residual,
++    pub bins: Vec<Bin>,
++    /// Flows recorded since the last probe, and the stocks at that probe. Reset every tick;
++    /// this is the reconciliation's working state, not a result.
++    #[serde(skip)]
++    pending: Pending,
++}
++
++#[derive(Clone, Copy, Debug, Default)]
++struct Pending {
++    structure: f64,
++    reserve: f64,
++    energy: f64,
++    have_previous: bool,
++    previous: Stocks,
++}
++
++impl MemberFlow {
++    fn new(
++        id: OrganismId,
++        born_tick: u64,
++        origin: &'static str,
++        parent: Option<OrganismId>,
++    ) -> Self {
++        MemberFlow {
++            id,
++            born_tick,
++            origin,
++            parent,
++            first_observed_tick: u64::MAX,
++            last_observed_tick: 0,
++            end_tick: None,
++            end_cause: None,
++            adult_structure: 0.0,
++            reserve_max: 0.0,
++            energy_max: 0.0,
++            open_stocks: Stocks::default(),
++            close_stocks: Stocks::default(),
++            death_stocks: None,
++            juvenile_ticks: 0,
++            adult_ticks: 0,
++            digestion: Digestion::default(),
++            frugivory: FieldFeeding::default(),
++            grazing: FieldFeeding::default(),
++            scavenging: FieldFeeding::default(),
++            oxidation: Oxidation::default(),
++            growth: Growth::default(),
++            upkeep: Upkeep::default(),
++            strike: Strike::default(),
++            handling: Handling::default(),
++            funding: Funding::default(),
++            gate: GrowthGate {
++                min_reserve_deficit: f64::INFINITY,
++                ..GrowthGate::default()
++            },
++            residual: Residual::default(),
++            bins: Vec::new(),
++            pending: Pending::default(),
++        }
++    }
++
++    fn bin(&mut self, tick: u64) -> &mut Bin {
++        let first = if self.first_observed_tick == u64::MAX {
++            tick
++        } else {
++            self.first_observed_tick.min(tick)
++        };
++        let index = ((tick.saturating_sub(first)) / BIN_TICKS) as usize;
++        let index = index.min(MAX_BINS - 1);
++        while self.bins.len() <= index {
++            let start = first + (self.bins.len() as u64) * BIN_TICKS;
++            self.bins.push(Bin {
++                start_tick: start,
++                ..Bin::default()
++            });
++        }
++        &mut self.bins[index]
++    }
++}
++
++/// The ledger itself. Absent by default; every recording site is a null check when it is.
++#[derive(Clone, Debug, Default, Serialize)]
++pub struct FlowLedger {
++    pub opened_tick: u64,
++    /// Keyed by full slot/generation ID, but serialized as a list: a JSON object cannot key
++    /// on a composite ID, and flattening one to a string would lose the generation.
++    #[serde(serialize_with = "members_as_list")]
++    pub members: BTreeMap<OrganismId, MemberFlow>,
++    /// Members observed at a mutation site that were never registered. Always zero in a sound
++    /// run; a nonzero value means the ledger missed a lifecycle edge.
++    pub unregistered_records: u64,
++}
++
++impl FlowLedger {
++    pub fn new(opened_tick: u64) -> Self {
++        FlowLedger {
++            opened_tick,
++            members: BTreeMap::new(),
++            unregistered_records: 0,
++        }
++    }
++
++    /// Register a member the ledger has not seen. Called for the founders present when the
++    /// ledger is enabled and for each paid descendant at its birth commit.
++    pub fn register(
++        &mut self,
++        id: OrganismId,
++        born_tick: u64,
++        origin: &'static str,
++        parent: Option<OrganismId>,
++        stocks: Stocks,
++        adult_structure: f64,
++        reserve_max: f64,
++        energy_max: f64,
++    ) {
++        let entry = self
++            .members
++            .entry(id)
++            .or_insert_with(|| MemberFlow::new(id, born_tick, origin, parent));
++        entry.adult_structure = adult_structure;
++        entry.reserve_max = reserve_max;
++        entry.energy_max = energy_max;
++        entry.open_stocks = stocks;
++        entry.pending = Pending {
++            have_previous: true,
++            previous: stocks,
++            ..Pending::default()
++        };
++    }
++
++    fn at(&mut self, id: OrganismId) -> Option<&mut MemberFlow> {
++        if self.members.contains_key(&id) {
++            self.members.get_mut(&id)
++        } else {
++            self.unregistered_records += 1;
++            None
++        }
++    }
++
++    pub fn record_digestion(
++        &mut self,
++        id: OrganismId,
++        tick: u64,
++        material: f64,
++        to_reserve: f64,
++        energy_gain: f64,
++        to_detritus: f64,
++        heat: f64,
++    ) {
++        let Some(m) = self.at(id) else { return };
++        m.digestion.ticks += 1;
++        m.digestion.material += material;
++        m.digestion.to_reserve += to_reserve;
++        m.digestion.energy_gain += energy_gain;
++        m.digestion.to_detritus += to_detritus;
++        m.digestion.heat += heat;
++        m.pending.reserve += to_reserve;
++        m.pending.energy += energy_gain;
++        let bin = m.bin(tick);
++        bin.reserve_in_digestion += to_reserve;
++        bin.energy_in += energy_gain;
++    }
++
++    pub fn record_field_feeding(
++        &mut self,
++        id: OrganismId,
++        tick: u64,
++        channel: FeedingChannel,
++        material: f64,
++        to_reserve: f64,
++        energy_gain: f64,
++        heat: f64,
++    ) {
++        let Some(m) = self.at(id) else { return };
++        let slot = match channel {
++            FeedingChannel::Frugivory => &mut m.frugivory,
++            FeedingChannel::Grazing => &mut m.grazing,
++            FeedingChannel::Scavenging => &mut m.scavenging,
++        };
++        slot.ticks += 1;
++        slot.material += material;
++        slot.to_reserve += to_reserve;
++        slot.energy_gain += energy_gain;
++        slot.heat += heat;
++        m.pending.reserve += to_reserve;
++        m.pending.energy += energy_gain;
++        let bin = m.bin(tick);
++        bin.reserve_in_field += to_reserve;
++        bin.energy_in += energy_gain;
++    }
++
++    pub fn record_oxidation(
++        &mut self,
++        id: OrganismId,
++        tick: u64,
++        burned: f64,
++        gained: f64,
++        heat: f64,
++        above_reference: bool,
++    ) {
++        let Some(m) = self.at(id) else { return };
++        m.oxidation.ticks += 1;
++        m.oxidation.reserve_burned += burned;
++        m.oxidation.energy_gained += gained;
++        m.oxidation.heat += heat;
++        if above_reference {
++            m.oxidation.above_reference_ticks += 1;
++            m.oxidation.above_reference_reserve_burned += burned;
++        }
++        m.pending.reserve -= burned;
++        m.pending.energy += gained;
++        let bin = m.bin(tick);
++        bin.reserve_out_oxidation += burned;
++        bin.energy_in += gained;
++        bin.oxidation_ticks += 1;
++    }
++
++    /// The growth predicate, read before the branch. `reserve` and `energy` are the stocks the
++    /// core is about to test, not values recovered afterwards.
++    pub fn record_growth_gate(
++        &mut self,
++        id: OrganismId,
++        tick: u64,
++        structure: f64,
++        adult_structure: f64,
++        reserve: f64,
++        gate_reserve: f64,
++        energy: f64,
++    ) {
++        let Some(m) = self.at(id) else { return };
++        let g = &mut m.gate;
++        g.observed_ticks += 1;
++        g.gate_reserve = gate_reserve;
++        let structure_open = structure < adult_structure;
++        let reserve_open = reserve > gate_reserve;
++        if structure_open {
++            g.structure_below_adult_ticks += 1;
++        }
++        if reserve_open {
++            g.reserve_above_min_ticks += 1;
++        } else {
++            g.min_reserve_deficit = g.min_reserve_deficit.min(gate_reserve - reserve);
++        }
++        if structure_open && reserve_open {
++            g.branch_entered_ticks += 1;
++        }
++        g.max_reserve = g.max_reserve.max(reserve);
++        g.reserve_sum += reserve;
++        g.max_energy = g.max_energy.max(energy);
++        g.energy_sum += energy;
++        if reserve == 0.0 {
++            g.reserve_zero_ticks += 1;
++        }
++        if structure + f64::EPSILON < adult_structure {
++            m.juvenile_ticks += 1;
++        } else {
++            m.adult_ticks += 1;
++        }
++        let entered = structure_open && reserve_open;
++        let bin = m.bin(tick);
++        if entered {
++            bin.gate_open_ticks += 1;
++        }
++    }
++
++    /// A growth step that actually moved structure, with the four caps the core minimised over.
++    #[allow(clippy::too_many_arguments)]
++    pub fn record_growth(
++        &mut self,
++        id: OrganismId,
++        tick: u64,
++        grown: f64,
++        energy_cost: f64,
++        heat: f64,
++        rate_term: f64,
++        remaining_structure_term: f64,
++        reserve_term: f64,
++        energy_term: Option<f64>,
++    ) {
++        let Some(m) = self.at(id) else { return };
++        m.growth.ticks += 1;
++        m.growth.reserve_spent += grown;
++        m.growth.structure_gained += grown;
++        m.growth.energy_cost += energy_cost;
++        m.growth.heat += heat;
++        // Which cap bound the step. Ties are attributed once, in the core's own `.min` order.
++        let mut best = rate_term;
++        let mut which = 0u8;
++        for (value, tag) in [
++            (remaining_structure_term, 1u8),
++            (reserve_term, 2),
++            (energy_term.unwrap_or(f64::INFINITY), 3),
++        ] {
++            if value < best {
++                best = value;
++                which = tag;
++            }
++        }
++        match which {
++            0 => m.growth.bound_by_rate += 1,
++            1 => m.growth.bound_by_remaining_structure += 1,
++            2 => m.growth.bound_by_reserve += 1,
++            _ => m.growth.bound_by_energy += 1,
++        }
++        m.pending.reserve -= grown;
++        m.pending.structure += grown;
++        m.pending.energy -= energy_cost;
++        let bin = m.bin(tick);
++        bin.reserve_out_growth += grown;
++        bin.energy_out += energy_cost;
++        bin.growth_ticks += 1;
++    }
++
++    #[allow(clippy::too_many_arguments)]
++    pub fn record_upkeep(
++        &mut self,
++        id: OrganismId,
++        tick: u64,
++        maintenance: f64,
++        movement: f64,
++        sensing: f64,
++        demanded: f64,
++        paid: f64,
++    ) {
++        let Some(m) = self.at(id) else { return };
++        m.upkeep.ticks += 1;
++        m.upkeep.demanded_maintenance += maintenance;
++        m.upkeep.demanded_move += movement;
++        m.upkeep.demanded_sense += sensing;
++        m.upkeep.demanded_total += demanded;
++        m.upkeep.paid += paid;
++        let shortfall = (demanded - paid).max(0.0);
++        m.upkeep.shortfall += shortfall;
++        if shortfall > 0.0 {
++            m.upkeep.shortfall_ticks += 1;
++        }
++        m.pending.energy -= paid;
++        m.bin(tick).energy_out += paid;
++    }
++
++    pub fn record_strike(&mut self, id: OrganismId, tick: u64, demanded: f64, paid: f64) {
++        let Some(m) = self.at(id) else { return };
++        m.strike.ticks += 1;
++        m.strike.demanded += demanded;
++        m.strike.paid += paid;
++        m.strike.shortfall += (demanded - paid).max(0.0);
++        m.pending.energy -= paid;
++        m.bin(tick).energy_out += paid;
++    }
++
++    pub fn record_handling(
++        &mut self,
++        id: OrganismId,
++        tick: u64,
++        demanded: f64,
++        paid: f64,
++        affordable: bool,
++    ) {
++        let Some(m) = self.at(id) else { return };
++        m.handling.ticks += 1;
++        m.handling.demanded += demanded;
++        m.handling.paid += paid;
++        if !affordable {
++            m.handling.unaffordable_ticks += 1;
++        }
++        m.pending.energy -= paid;
++        m.bin(tick).energy_out += paid;
++    }
++
++    #[allow(clippy::too_many_arguments)]
++    pub fn record_funding(
++        &mut self,
++        id: OrganismId,
++        tick: u64,
++        structure: f64,
++        reserve: f64,
++        energy: f64,
++        build_heat: f64,
++    ) {
++        let Some(m) = self.at(id) else { return };
++        let reserve_debit = structure + reserve;
++        let energy_debit = build_heat + energy;
++        m.funding.funded_count += 1;
++        m.funding.reserve_debit += reserve_debit;
++        m.funding.energy_debit += energy_debit;
++        m.funding.build_heat += build_heat;
++        m.funding.escrow_structure += structure;
++        m.funding.escrow_reserve += reserve;
++        m.funding.escrow_energy += energy;
++        m.pending.reserve -= reserve_debit;
++        m.pending.energy -= energy_debit;
++        let bin = m.bin(tick);
++        bin.reserve_out_funding += reserve_debit;
++        bin.energy_out += energy_debit;
++    }
++
++    pub fn record_refund(
++        &mut self,
++        id: OrganismId,
++        tick: u64,
++        structure: f64,
++        reserve: f64,
++        energy: f64,
++    ) {
++        let Some(m) = self.at(id) else { return };
++        m.funding.refunded_count += 1;
++        m.funding.refunded_reserve += structure + reserve;
++        m.funding.refunded_energy += energy;
++        m.pending.reserve += structure + reserve;
++        m.pending.energy += energy;
++        // A refund is a returned escrow, not an intake channel: it moves the stocks back and
++        // is deliberately not folded into any feeding total.
++        m.bin(tick).energy_in += energy;
++    }
++
++    /// End-of-tick stock probe. Reconciles the tick's recorded flows against the stocks the
++    /// world actually holds, then arms the next tick.
++    pub fn probe(&mut self, id: OrganismId, tick: u64, structure: f64, reserve: f64, energy: f64) {
++        let Some(m) = self.at(id) else { return };
++        let now = Stocks {
++            tick,
++            structure,
++            reserve,
++            energy,
++        };
++        if m.pending.have_previous {
++            let p = m.pending.previous;
++            m.residual.observe(
++                tick,
++                (structure - p.structure) - m.pending.structure,
++                (reserve - p.reserve) - m.pending.reserve,
++                (energy - p.energy) - m.pending.energy,
++            );
++        }
++        m.pending = Pending {
++            have_previous: true,
++            previous: now,
++            ..Pending::default()
++        };
++        if m.first_observed_tick == u64::MAX {
++            m.first_observed_tick = tick;
++        }
++        m.last_observed_tick = tick;
++        m.close_stocks = now;
++        let bin = m.bin(tick);
++        bin.ticks += 1;
++        bin.end_stocks = now;
++    }
++
++    /// The removal site: the member's last stocks, read before the body is dispersed. This
++    /// closes the reconciliation for the death tick, which no end-of-tick probe reaches.
++    pub fn record_death(
++        &mut self,
++        id: OrganismId,
++        tick: u64,
++        cause: &'static str,
++        structure: f64,
++        reserve: f64,
++        energy: f64,
++    ) {
++        let Some(m) = self.at(id) else { return };
++        if m.pending.have_previous {
++            let p = m.pending.previous;
++            m.residual.observe(
++                tick,
++                (structure - p.structure) - m.pending.structure,
++                (reserve - p.reserve) - m.pending.reserve,
++                (energy - p.energy) - m.pending.energy,
++            );
++        }
++        m.end_tick = Some(tick);
++        m.end_cause = Some(cause);
++        m.death_stocks = Some(Stocks {
++            tick,
++            structure,
++            reserve,
++            energy,
++        });
++        m.pending.have_previous = false;
++    }
++
++    /// Total reconciliation violations over every member. Zero is the gate.
++    pub fn total_violations(&self) -> u64 {
++        self.members
++            .values()
++            .map(|m| m.residual.violations)
++            .sum::<u64>()
++            + self.unregistered_records
++    }
++}
++
++fn members_as_list<S: Serializer>(
++    members: &BTreeMap<OrganismId, MemberFlow>,
++    serializer: S,
++) -> Result<S::Ok, S::Error> {
++    serializer.collect_seq(members.values())
++}
++
++/// Which field-feeding channel a record came from.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum FeedingChannel {
++    Frugivory,
++    Grazing,
++    Scavenging,
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn id(slot: u32) -> OrganismId {
++        OrganismId {
++            slot,
++            generation: 1,
++        }
++    }
++
++    fn ledger() -> FlowLedger {
++        let mut l = FlowLedger::new(100);
++        l.register(
++            id(1),
++            100,
++            "Descendant",
++            Some(id(2)),
++            Stocks {
++                tick: 100,
++                structure: 0.8,
++                reserve: 0.8,
++                energy: 0.6,
++            },
++            2.0,
++            4.0,
++            4.0,
++        );
++        l
++    }
++
++    #[test]
++    fn a_tick_whose_flows_match_the_stocks_leaves_no_residual() {
++        let mut l = ledger();
++        // Oxidation burns 0.0005 reserve into 0.0008 energy; upkeep then pays 0.0002.
++        l.record_oxidation(id(1), 101, 0.0005, 0.0008, 0.0002, true);
++        l.record_upkeep(id(1), 101, 0.0001, 0.00005, 0.00005, 0.0002, 0.0002);
++        l.probe(id(1), 101, 0.8, 0.8 - 0.0005, 0.6 + 0.0008 - 0.0002);
++        let m = &l.members[&id(1)];
++        assert_eq!(m.residual.violations, 0);
++        assert_eq!(m.residual.checked_ticks, 1);
++        assert!(m.residual.max_reserve < RESIDUAL_TOLERANCE);
++        assert_eq!(l.total_violations(), 0);
++    }
++
++    #[test]
++    fn an_unrecorded_stock_movement_is_reported_as_a_residual() {
++        let mut l = ledger();
++        l.record_oxidation(id(1), 101, 0.0005, 0.0008, 0.0002, false);
++        // The world also moved 0.01 of reserve through a site the ledger does not cover.
++        l.probe(id(1), 101, 0.8, 0.8 - 0.0005 - 0.01, 0.6 + 0.0008);
++        let m = &l.members[&id(1)];
++        assert_eq!(m.residual.violations, 1);
++        assert_eq!(m.residual.first_violation_tick, Some(101));
++        assert!((m.residual.max_reserve - 0.01).abs() < 1e-12);
++        assert_eq!(l.total_violations(), 1);
++    }
++
++    #[test]
++    fn the_death_tick_reconciles_against_the_removal_site_not_a_probe() {
++        let mut l = ledger();
++        l.probe(id(1), 101, 0.8, 0.8, 0.6);
++        l.record_upkeep(id(1), 102, 0.4, 0.1, 0.1, 0.6, 0.6);
++        l.record_oxidation(id(1), 102, 0.8, 0.0, 1.6, true);
++        l.record_death(id(1), 102, "Starvation", 0.8, 0.0, 0.0);
++        let m = &l.members[&id(1)];
++        assert_eq!(m.residual.violations, 0);
++        assert_eq!(m.residual.checked_ticks, 2);
++        assert_eq!(m.end_cause, Some("Starvation"));
++        assert_eq!(m.death_stocks.unwrap().reserve, 0.0);
++    }
++
++    #[test]
++    fn the_gate_records_both_sides_before_the_branch() {
++        let mut l = ledger();
++        // Below the gate by 0.4, then by 0.1, then above it.
++        l.record_growth_gate(id(1), 101, 0.8, 2.0, 0.8, 1.2, 0.6);
++        l.record_growth_gate(id(1), 102, 0.8, 2.0, 1.1, 1.2, 0.6);
++        l.record_growth_gate(id(1), 103, 0.8, 2.0, 1.3, 1.2, 0.6);
++        let g = l.members[&id(1)].gate;
++        assert_eq!(g.observed_ticks, 3);
++        assert_eq!(g.structure_below_adult_ticks, 3);
++        assert_eq!(g.reserve_above_min_ticks, 1);
++        assert_eq!(g.branch_entered_ticks, 1);
++        assert!((g.min_reserve_deficit - 0.1).abs() < 1e-12);
++        assert!((g.max_reserve - 1.3).abs() < 1e-12);
++        assert_eq!(l.members[&id(1)].juvenile_ticks, 3);
++        assert_eq!(l.members[&id(1)].adult_ticks, 0);
++    }
++
++    #[test]
++    fn a_growth_step_names_the_cap_that_bound_it() {
++        let mut l = ledger();
++        // rate 0.0001, headroom 1.2, reserve 1.3, energy/build 5.0 -> the rate binds.
++        l.record_growth(
++            id(1),
++            101,
++            0.0001,
++            0.00005,
++            0.0003,
++            0.0001,
++            1.2,
++            1.3,
++            Some(5.0),
++        );
++        // reserve 0.00002 is now the smallest term.
++        l.record_growth(
++            id(1),
++            102,
++            0.00002,
++            0.00001,
++            0.0001,
++            0.0001,
++            1.2,
++            0.00002,
++            Some(5.0),
++        );
++        // the affordable-energy term binds.
++        l.record_growth(
++            id(1),
++            103,
++            0.000005,
++            0.0000025,
++            0.00002,
++            0.0001,
++            1.2,
++            1.3,
++            Some(0.000005),
++        );
++        let g = l.members[&id(1)].growth;
++        assert_eq!(g.ticks, 3);
++        assert_eq!(g.bound_by_rate, 1);
++        assert_eq!(g.bound_by_reserve, 1);
++        assert_eq!(g.bound_by_energy, 1);
++        assert_eq!(g.bound_by_remaining_structure, 0);
++        assert!((g.structure_gained - 0.000125).abs() < 1e-12);
++    }
++
++    #[test]
++    fn upkeep_keeps_demand_and_payment_apart_instead_of_splitting_the_debit() {
++        let mut l = ledger();
++        // Demanded 0.6, only 0.25 in the battery.
++        l.record_upkeep(id(1), 101, 0.4, 0.1, 0.1, 0.6, 0.25);
++        let u = l.members[&id(1)].upkeep;
++        assert!((u.demanded_maintenance - 0.4).abs() < 1e-12);
++        assert!((u.demanded_move - 0.1).abs() < 1e-12);
++        assert!((u.demanded_sense - 0.1).abs() < 1e-12);
++        assert!((u.paid - 0.25).abs() < 1e-12);
++        assert!((u.shortfall - 0.35).abs() < 1e-12);
++        assert_eq!(u.shortfall_ticks, 1);
++    }
++
++    #[test]
++    fn bins_are_fixed_width_and_bounded() {
++        let mut l = ledger();
++        for tick in 0..5 {
++            l.probe(id(1), 100 + tick * BIN_TICKS, 0.8, 0.5, 0.5);
++        }
++        let m = &l.members[&id(1)];
++        assert_eq!(m.bins.len(), 5);
++        assert_eq!(m.bins[0].start_tick, 100);
++        assert_eq!(m.bins[4].start_tick, 100 + 4 * BIN_TICKS);
++        assert!(m.bins.iter().all(|b| b.ticks == 1));
++        // Far beyond the retained span, the last bin absorbs the tail rather than growing.
++        l.probe(id(1), 100 + 5000 * BIN_TICKS, 0.8, 0.5, 0.5);
++        assert_eq!(l.members[&id(1)].bins.len(), MAX_BINS);
++    }
++
++    #[test]
++    fn a_record_for_an_unregistered_member_is_counted_not_silently_dropped() {
++        let mut l = ledger();
++        l.record_oxidation(id(9), 101, 0.1, 0.1, 0.0, false);
++        assert_eq!(l.unregistered_records, 1);
++        assert_eq!(l.total_violations(), 1);
++        assert!(!l.members.contains_key(&id(9)));
++    }
++}
+diff --git a/crates/cubarium-core/src/lib.rs b/crates/cubarium-core/src/lib.rs
+index 81cee67..635af45 100644
+--- a/crates/cubarium-core/src/lib.rs
++++ b/crates/cubarium-core/src/lib.rs
+@@ -32,6 +32,7 @@ pub mod config;
+ pub mod controller;
+ pub mod events;
+ pub mod fields;
++pub mod flow;
+ pub mod genome;
+ pub mod habitat;
+ pub mod hunter;
+diff --git a/crates/cubarium-core/src/world.rs b/crates/cubarium-core/src/world.rs
+index 6fc84cd..bea078d 100644
+--- a/crates/cubarium-core/src/world.rs
++++ b/crates/cubarium-core/src/world.rs
+@@ -25,6 +25,7 @@ use crate::hunter::{
+     HunterFounderReceipt, HunterPhase, HunterState, HunterTarget, HunterView,
+ };
+ use crate::ids::{OrganismId, Slots};
++use crate::flow;
+ use crate::organism::{DeathCause, Escrow, Mode, Organism, Origin};
+ use crate::pairs::{Body, NeighborLists};
+ use crate::rng::{Counter, Stream, draw, normal, unit};
+@@ -445,6 +446,10 @@ pub struct World {
+     /// [`ChargingDiagnostics`] documents: never checkpointed, never hashed, never read by the
+     /// tick.
+     charging: ChargingDiagnostics,
++    /// The read-only per-member flow ledger (`crate::flow`), absent unless a diagnostic asks
++    /// for it. Transient in exactly the sense [`ChargingDiagnostics`] documents, and
++    /// additionally write-only: no branch, draw or clamp in the tick ever reads it.
++    flow: Option<Box<flow::FlowLedger>>,
+     initial_material: f64,
+ }
+ 
+@@ -646,6 +651,7 @@ impl World {
+             hunter_events: Vec::new(),
+             counters: TickCounters::default(),
+             charging: ChargingDiagnostics::default(),
++            flow: None,
+             initial_material,
+         };
+         // Make the derived light/moisture readable before the first tick advances weather.
+@@ -707,6 +713,7 @@ impl World {
+                 hunter_events,
+                 counters,
+                 charging,
++                flow,
+                 initial_material: _,
+             } = &mut *self;
+             let WorldState {
+@@ -1156,6 +1163,9 @@ impl World {
+                         let paid = cost.min(o.energy).max(0.0);
+                         o.energy -= paid;
+                         heat(paid);
++                        if let Some(ledger) = flow.as_deref_mut() {
++                            ledger.record_strike(id, now, cost, paid);
++                        }
+                     }
+                 }
+ 
+@@ -1230,6 +1240,21 @@ impl World {
+                 let paid = cost.min(o.energy).max(0.0);
+                 o.energy -= paid;
+                 heat(paid);
++                if let Some(ledger) = flow.as_deref_mut()
++                    && hunters.contains(*id)
++                {
++                    // The three terms of the core's own expression, recorded as demanded
++                    // beside the single clamped debit it actually paid.
++                    ledger.record_upkeep(
++                        *id,
++                        now,
++                        o.phenotype.maintenance * o.structure * dt,
++                        org_cfg.move_cost * o.structure * speed * dt,
++                        org_cfg.sense_cost * o.phenotype.sense_radius * dt,
++                        cost,
++                        paid,
++                    );
++                }
+             }
+ 
+             // 6b. Capture settlement, from the common post-movement state and before any
+@@ -1495,6 +1520,19 @@ impl World {
+                         let gained = (eta_e * spare).clamp(0.0, room);
+                         o.energy += gained;
+                         heat(spare - gained);
++                        if let Some(ledger) = flow.as_deref_mut()
++                            && hunters.contains(id)
++                        {
++                            ledger.record_field_feeding(
++                                id,
++                                now,
++                                flow::FeedingChannel::Frugivory,
++                                q,
++                                to_reserve,
++                                gained,
++                                spare - gained,
++                            );
++                        }
+                         eaten += q;
+                     }
+                 }
+@@ -1513,6 +1551,19 @@ impl World {
+                         let gained = (eta_e * spare).clamp(0.0, room);
+                         o.energy += gained;
+                         heat(spare - gained);
++                        if let Some(ledger) = flow.as_deref_mut()
++                            && hunters.contains(id)
++                        {
++                            ledger.record_field_feeding(
++                                id,
++                                now,
++                                flow::FeedingChannel::Grazing,
++                                q,
++                                to_reserve,
++                                gained,
++                                spare - gained,
++                            );
++                        }
+                         eaten += q;
+                     }
+                 }
+@@ -1537,6 +1588,19 @@ impl World {
+                         let gained = (eta_e * spare).clamp(0.0, room);
+                         o.energy += gained;
+                         heat(spare - gained);
++                        if let Some(ledger) = flow.as_deref_mut()
++                            && hunters.contains(id)
++                        {
++                            ledger.record_field_feeding(
++                                id,
++                                now,
++                                flow::FeedingChannel::Scavenging,
++                                q,
++                                to_reserve,
++                                gained,
++                                spare - gained,
++                            );
++                        }
+                         eaten += q;
+                     }
+                 }
+@@ -1565,6 +1629,9 @@ impl World {
+                     let paid = handling.min(o.energy).max(0.0);
+                     o.energy -= paid;
+                     heat(paid);
++                    if let Some(ledger) = flow.as_deref_mut() {
++                        ledger.record_handling(m.id, now, handling, paid, paid >= handling);
++                    }
+                     if paid < handling {
+                         // It could not carry its meal this tick; the gut keeps everything and
+                         // ordinary oxidation may refill the battery for the next one.
+@@ -1586,6 +1653,17 @@ impl World {
+                         o.energy += step.energy_gain;
+                         fields.d[cell_of(&o.pos).index()] += step.to_detritus;
+                         heat(step.heat);
++                        if let Some(ledger) = flow.as_deref_mut() {
++                            ledger.record_digestion(
++                                m.id,
++                                now,
++                                step.material,
++                                step.to_reserve,
++                                step.energy_gain,
++                                step.to_detritus,
++                                step.heat,
++                            );
++                        }
+                         let member = &mut hunters.members[index];
+                         member.gut_material -= step.material;
+                         member.gut_energy -= step.carried;
+@@ -1673,8 +1751,35 @@ impl World {
+                         charging.extra_energy_gained += gained;
+                         charging.extra_heat += released - gained;
+                     }
++                    if let Some(ledger) = flow.as_deref_mut()
++                        && member.is_some()
++                    {
++                        ledger.record_oxidation(
++                            *id,
++                            now,
++                            burned,
++                            gained,
++                            released - gained,
++                            above_reference,
++                        );
++                    }
+                 }
+ 
++                // The predicate's two sides, read here rather than recovered from the step
++                // that follows: a closed gate must be an observation, not the absence of one.
++                if let Some(ledger) = flow.as_deref_mut()
++                    && member.is_some()
++                {
++                    ledger.record_growth_gate(
++                        *id,
++                        now,
++                        o.structure,
++                        o.phenotype.structure_adult,
++                        o.reserve,
++                        org_cfg.growth_reserve_min * o.phenotype.reserve_max,
++                        o.energy,
++                    );
++                }
+                 if o.structure < o.phenotype.structure_adult
+                     && o.reserve > org_cfg.growth_reserve_min * o.phenotype.reserve_max
+                 {
+@@ -1682,12 +1787,14 @@ impl World {
+                         (Some(_), Some(profile)) => profile.juvenile_growth_rate,
+                         _ => org_cfg.growth_rate,
+                     };
+-                    let mut grown = (growth_rate * dt)
+-                        .min(o.phenotype.structure_adult - o.structure)
+-                        .min(o.reserve);
++                    let rate_term = growth_rate * dt;
++                    let remaining_term = o.phenotype.structure_adult - o.structure;
++                    let reserve_term = o.reserve;
++                    let mut grown = rate_term.min(remaining_term).min(reserve_term);
+                     // Building is paid for up front: what the energy cannot cover is not built.
+-                    if org_cfg.build_cost > 0.0 {
+-                        grown = grown.min(o.energy / org_cfg.build_cost);
++                    let energy_term = (org_cfg.build_cost > 0.0).then(|| o.energy / org_cfg.build_cost);
++                    if let Some(energy_term) = energy_term {
++                        grown = grown.min(energy_term);
+                     }
+                     if grown > 0.0 {
+                         o.reserve -= grown;
+@@ -1696,6 +1803,21 @@ impl World {
+                         o.energy -= cost;
+                         // Structure holds no chemical energy: the reserve's energy is released.
+                         heat(cost + e_r * grown);
++                        if let Some(ledger) = flow.as_deref_mut()
++                            && member.is_some()
++                        {
++                            ledger.record_growth(
++                                *id,
++                                now,
++                                grown,
++                                cost,
++                                cost + e_r * grown,
++                                rate_term,
++                                remaining_term,
++                                reserve_term,
++                                energy_term,
++                            );
++                        }
+                     }
+                 }
+ 
+@@ -1732,6 +1854,11 @@ impl World {
+                             o.reserve -= structure + reserve;
+                             o.energy -= build + energy;
+                             heat(build);
++                            if let Some(ledger) = flow.as_deref_mut()
++                                && member.is_some()
++                            {
++                                ledger.record_funding(*id, now, structure, reserve, energy, build);
++                            }
+                             let genome = o.genome.clone();
+                             o.escrow = Some(Escrow {
+                                 structure,
+@@ -1813,6 +1940,25 @@ impl World {
+                     continue;
+                 };
+                 let cell = cell_of(&o.pos).index();
++                if let Some(ledger) = flow.as_deref_mut()
++                    && hunters.contains(*id)
++                {
++                    // The last stocks, read at the removal site: no end-of-tick probe reaches
++                    // the tick a member dies on, so this is what closes its reconciliation.
++                    ledger.record_death(
++                        *id,
++                        now,
++                        match cause {
++                            DeathCause::Starvation => "Starvation",
++                            DeathCause::Age => "Age",
++                            DeathCause::Collapse => "Collapse",
++                            DeathCause::Predation => "Predation",
++                        },
++                        o.structure,
++                        o.reserve,
++                        o.energy,
++                    );
++                }
+                 // The body: structure carries no energy, the reserve carries `e_r` per unit.
+                 let material = o.structure + o.reserve;
+                 let energy = o.energy + e_r * o.reserve;
+@@ -1913,6 +2059,17 @@ impl World {
+                         let (reserve_before, energy_before) = (parent.reserve, parent.energy);
+                         parent.reserve += escrow.structure + escrow.reserve;
+                         parent.energy += escrow.energy;
++                        if let Some(ledger) = flow.as_deref_mut()
++                            && hunter_parent.is_some()
++                        {
++                            ledger.record_refund(
++                                *parent_id,
++                                now,
++                                escrow.structure,
++                                escrow.reserve,
++                                escrow.energy,
++                            );
++                        }
+                         counters.cap_rejections += 1;
+                         *cap_rejections_total += 1;
+                         if hunter_parent.is_some() {
+@@ -2030,8 +2187,33 @@ impl World {
+                 };
+                 let genome_digest = child.genome.digest();
+                 let origin = child.origin;
++                let opening = flow::Stocks {
++                    tick: now + 1,
++                    structure: child.structure,
++                    reserve: child.reserve,
++                    energy: child.energy,
++                };
++                let child_shape = (
++                    child.phenotype.structure_adult,
++                    child.phenotype.reserve_max,
++                    child.phenotype.energy_max,
++                );
+                 let child_id = organisms.insert(child);
+                 if let Some(index) = hunter_parent {
++                    if let Some(ledger) = flow.as_deref_mut() {
++                        // The child's opening stocks are its escrow, read at the placement
++                        // that creates it, so its reconciliation starts from an actual value.
++                        ledger.register(
++                            child_id,
++                            now + 1,
++                            "Descendant",
++                            Some(*parent_id),
++                            opening,
++                            child_shape.0,
++                            child_shape.1,
++                            child_shape.2,
++                        );
++                    }
+                     // The funded descendant joins the lineage with no target, an empty gut and
+                     // a fresh attack counter, and the parent starts its recovery interval.
+                     hunters.insert_member(hunter::HunterMember::new(child_id, now + 1));
+@@ -2089,6 +2271,17 @@ impl World {
+                 *births_total += 1;
+             }
+ 
++            // The end-of-tick stock probe, after the commit and before the counter advances:
++            // one reading per live member per tick, against which this tick's recorded flows
++            // must reconcile exactly (`crate::flow::FlowLedger::probe`).
++            if let Some(ledger) = flow.as_deref_mut() {
++                for m in &hunters.members {
++                    if let Some(o) = organisms.get(m.id) {
++                        ledger.probe(m.id, now, o.structure, o.reserve, o.energy);
++                    }
++                }
++            }
++
+             *tick += 1;
+         }
+ 
+@@ -2233,6 +2426,49 @@ impl World {
+     /// What the member oxidation policy did that this world's configured threshold would not
+     /// have done, since this `World` value was built. Read-only, transient and process-scoped;
+     /// see [`ChargingDiagnostics`] for the exact transaction scope and time window.
++    /// Start recording the per-member flow ledger (`crate::flow`). Every member alive now is
++    /// registered from its current stocks; paid descendants register at their own birth.
++    /// Calling this twice keeps the first ledger.
++    ///
++    /// The ledger is write-only: nothing in [`World::step`] reads it, so enabling it cannot
++    /// change a trajectory. `crates/cubarium/examples/juvenile_flow.rs` proves that against
++    /// the retained artifacts rather than asserting it.
++    pub fn enable_flow_ledger(&mut self) {
++        if self.flow.is_some() {
++            return;
++        }
++        let mut ledger = flow::FlowLedger::new(self.state.tick);
++        for m in &self.state.hunters.members {
++            let Some(o) = self.state.organisms.get(m.id) else {
++                continue;
++            };
++            ledger.register(
++                m.id,
++                o.born_tick,
++                match o.origin {
++                    crate::organism::Origin::Founder => "Founder",
++                    crate::organism::Origin::Descendant => "Descendant",
++                },
++                o.parent,
++                flow::Stocks {
++                    tick: self.state.tick,
++                    structure: o.structure,
++                    reserve: o.reserve,
++                    energy: o.energy,
++                },
++                o.phenotype.structure_adult,
++                o.phenotype.reserve_max,
++                o.phenotype.energy_max,
++            );
++        }
++        self.flow = Some(Box::new(ledger));
++    }
++
++    /// Borrow the ledger, if one is recording.
++    pub fn flow_ledger(&self) -> Option<&flow::FlowLedger> {
++        self.flow.as_deref()
++    }
++
+     pub fn charging_diagnostics(&self) -> ChargingDiagnostics {
+         self.charging
+     }
+diff --git a/crates/cubarium/examples/juvenile_flow.rs b/crates/cubarium/examples/juvenile_flow.rs
+new file mode 100644
+index 0000000..8741e28
+--- /dev/null
++++ b/crates/cubarium/examples/juvenile_flow.rs
+@@ -0,0 +1,321 @@
++//! Read-only mutation-site flow diagnostic for the paid juvenile bottleneck.
++//!
++//! Replays one retained arm of the corrected charging cohort from its own recorded
++//! `post-initialization.cubw`, with the per-member flow ledger (`cubarium_core::flow`)
++//! recording every reserve/energy/structure movement at the assignment that makes it.
++//!
++//! Nothing here changes ecology. The diagnostic earns the right to be believed with four
++//! gates, all of which must pass before any number is printed as a result:
++//!
++//! 1. **Input identity** — the decoded opening's SHA256 and state hash equal the ones the
++//!    original run recorded in `opening.json`.
++//! 2. **Output identity** — the replayed closing state re-encodes to bytes identical to the
++//!    retained `closing.cubw`, and its state hash equals `summary.json`'s. The build label is
++//!    supplied to the encoder, not derived, so this is a statement about the state.
++//! 3. **Observer neutrality** — the same replay is run twice, once with the ledger off and
++//!    once on, and the two must agree on the closing bytes, the state hash and every record
++//!    of both event streams. Enabling the observer is proven inert, not asserted to be.
++//! 4. **Flow/stock reconciliation** — for every member and every tick of its life, the stocks
++//!    the world actually holds must equal the previous tick's stocks plus exactly the flows
++//!    recorded. Any mutation site the ledger missed shows up here as a residual.
++//!
++//! Usage:
++//!   juvenile_flow <ARM_DIR> [--ticks N] [--out FILE]
++//!
++//! `ARM_DIR` is a retained arm, e.g.
++//! `captures/hunter-charge-candidate-two-hour-512ee52/seed-8/specialist_on`.
++//! `--ticks` runs a shorter prefix for a smoke check and explicitly drops gate 2.
++
++use std::collections::BTreeMap;
++use std::io::Write;
++use std::process::{Command, Stdio};
++
++use cubarium_core::flow::FlowLedger;
++use cubarium_core::{World, WorldState, decode_snapshot, encode_snapshot, snapshot};
++use serde_json::{Value, json};
++
++const BUILD: &str = "0.1.0+512ee52";
++
++/// The repository's existing convention for content hashes in an example: shell out rather
++/// than pull a crypto dependency into this crate (`ambient_compare.rs`).
++fn sha256(bytes: &[u8]) -> String {
++    let mut child = Command::new("sha256sum")
++        .stdin(Stdio::piped())
++        .stdout(Stdio::piped())
++        .spawn()
++        .expect("sha256sum");
++    child
++        .stdin
++        .take()
++        .expect("stdin")
++        .write_all(bytes)
++        .expect("write");
++    let out = child.wait_with_output().expect("sha256sum output");
++    assert!(out.status.success(), "sha256sum failed");
++    String::from_utf8(out.stdout)
++        .expect("utf8")
++        .split_whitespace()
++        .next()
++        .expect("digest")
++        .to_string()
++}
++
++/// One replay. Returns the closing state, the whole recorded event stream and, when asked
++/// for, the ledger. The two calls differ in exactly one argument.
++///
++/// The event stream is kept verbatim rather than digested: comparing the actual records is a
++/// stronger neutrality check than comparing a hash of them, and it points at the first
++/// divergence if there ever is one.
++fn replay(
++    opening: &WorldState,
++    ticks: u64,
++    record: bool,
++) -> (WorldState, Vec<(u64, String)>, Option<FlowLedger>) {
++    let mut world = World::from_state(opening.clone()).expect("retained opening is a valid world");
++    if record {
++        world.enable_flow_ledger();
++    }
++    let mut stream = Vec::new();
++    for _ in 0..ticks {
++        world.step();
++        let life = world.drain_events();
++        let hunter = world.drain_hunter_events();
++        if !life.is_empty() || !hunter.is_empty() {
++            stream.push((
++                world.tick(),
++                serde_json::to_string(&json!({"life": life, "hunter": hunter}))
++                    .expect("events serialize"),
++            ));
++        }
++    }
++    let ledger = world.flow_ledger().cloned();
++    (world.state, stream, ledger)
++}
++
++/// Per-member derived view. Everything here is arithmetic over recorded flows; no new
++/// measurement and no attribution of a lumped debit to one of its terms.
++fn member_view(m: &Value) -> Value {
++    let f = |path: &[&str]| -> f64 {
++        let mut cursor = m;
++        for key in path {
++            cursor = &cursor[key];
++        }
++        cursor.as_f64().unwrap_or(0.0)
++    };
++    let u = |path: &[&str]| -> u64 {
++        let mut cursor = m;
++        for key in path {
++            cursor = &cursor[key];
++        }
++        cursor.as_u64().unwrap_or(0)
++    };
++    let reserve_in = f(&["digestion", "to_reserve"])
++        + f(&["frugivory", "to_reserve"])
++        + f(&["grazing", "to_reserve"])
++        + f(&["scavenging", "to_reserve"]);
++    let reserve_out = f(&["oxidation", "reserve_burned"])
++        + f(&["growth", "reserve_spent"])
++        + f(&["funding", "reserve_debit"]);
++    let energy_in = f(&["digestion", "energy_gain"])
++        + f(&["frugivory", "energy_gain"])
++        + f(&["grazing", "energy_gain"])
++        + f(&["scavenging", "energy_gain"])
++        + f(&["oxidation", "energy_gained"]);
++    let energy_out = f(&["upkeep", "paid"])
++        + f(&["strike", "paid"])
++        + f(&["handling", "paid"])
++        + f(&["growth", "energy_cost"])
++        + f(&["funding", "energy_debit"]);
++    let observed = u(&["gate", "observed_ticks"]).max(1) as f64;
++    json!({
++        "reserve_in_total": reserve_in,
++        "reserve_out_total": reserve_out,
++        "reserve_net": reserve_in - reserve_out,
++        "reserve_out_share_oxidation": f(&["oxidation", "reserve_burned"]) / reserve_out.max(f64::MIN_POSITIVE),
++        "reserve_out_share_growth": f(&["growth", "reserve_spent"]) / reserve_out.max(f64::MIN_POSITIVE),
++        "reserve_out_share_funding": f(&["funding", "reserve_debit"]) / reserve_out.max(f64::MIN_POSITIVE),
++        "energy_in_total": energy_in,
++        "energy_out_total": energy_out,
++        "energy_net": energy_in - energy_out,
++        "mean_pre_growth_reserve": f(&["gate", "reserve_sum"]) / observed,
++        "mean_pre_growth_energy": f(&["gate", "energy_sum"]) / observed,
++        "gate_open_fraction": u(&["gate", "branch_entered_ticks"]) as f64 / observed,
++        "reserve_zero_fraction": u(&["gate", "reserve_zero_ticks"]) as f64 / observed,
++        "oxidation_active_fraction": u(&["oxidation", "ticks"]) as f64 / observed,
++        "oxidation_above_reference_fraction":
++            u(&["oxidation", "above_reference_ticks"]) as f64 / observed,
++        "upkeep_over_reserve_intake": f(&["upkeep", "paid"]) / reserve_in.max(f64::MIN_POSITIVE),
++        "note": "shares are over this member's own recorded outflow; upkeep is an energy debit and is not a reserve outflow",
++    })
++}
++
++fn main() {
++    let mut args = std::env::args().skip(1);
++    let dir = args.next().expect("ARM_DIR");
++    let mut ticks: u64 = 144_000;
++    let mut out: Option<String> = None;
++    let mut full_horizon = true;
++    while let Some(arg) = args.next() {
++        match arg.as_str() {
++            "--ticks" => {
++                ticks = args.next().expect("--ticks N").parse().expect("tick count");
++                full_horizon = false;
++            }
++            "--out" => out = Some(args.next().expect("--out FILE")),
++            other => panic!("unknown argument {other}"),
++        }
++    }
++
++    let opening_bytes = std::fs::read(format!("{dir}/post-initialization.cubw")).expect("opening");
++    let opening_meta: Value = serde_json::from_slice(
++        &std::fs::read(format!("{dir}/opening.json")).expect("opening.json"),
++    )
++    .expect("opening.json parses");
++    let summary: Value = serde_json::from_slice(
++        &std::fs::read(format!("{dir}/summary.json")).expect("summary.json"),
++    )
++    .expect("summary.json parses");
++
++    // Gate 1: the input is the exact artifact the original run wrote.
++    let opening_sha = sha256(&opening_bytes);
++    assert_eq!(
++        opening_sha,
++        opening_meta["post_snapshot_sha256"]
++            .as_str()
++            .expect("recorded opening sha"),
++        "the opening snapshot is not the retained one"
++    );
++    let (_, opening_state) = decode_snapshot(&opening_bytes).expect("opening decodes normally");
++    assert_eq!(
++        snapshot::state_hash(&opening_state).to_string(),
++        opening_meta["post_state_hash"]
++            .as_str()
++            .expect("recorded opening state hash"),
++        "the opening state hash is not the retained one"
++    );
++    let opening_tick = opening_state.tick;
++
++    // Gate 3, first half: the identical replay with no observer at all.
++    let (plain_state, plain_stream, none) = replay(&opening_state, ticks, false);
++    assert!(none.is_none(), "no ledger was requested");
++    let plain_bytes = encode_snapshot(&plain_state, BUILD);
++
++    // …and with the observer recording.
++    let (observed_state, observed_stream, ledger) = replay(&opening_state, ticks, true);
++    let observed_bytes = encode_snapshot(&observed_state, BUILD);
++    let ledger = ledger.expect("the ledger was requested");
++
++    // Gate 3, second half.
++    assert_eq!(
++        plain_bytes, observed_bytes,
++        "the observer changed the closing state"
++    );
++    assert_eq!(
++        snapshot::state_hash(&plain_state),
++        snapshot::state_hash(&observed_state),
++        "the observer changed the state hash"
++    );
++    assert_eq!(
++        plain_stream.len(),
++        observed_stream.len(),
++        "the observer changed how many ticks emitted events"
++    );
++    for (a, b) in plain_stream.iter().zip(observed_stream.iter()) {
++        assert_eq!(a, b, "the observer changed an event record at tick {}", a.0);
++    }
++
++    // Gate 2: the replay reproduces the retained closing artifact exactly.
++    let closing_state_hash = snapshot::state_hash(&observed_state).to_string();
++    let closing_identity = if full_horizon {
++        let closing_bytes = std::fs::read(format!("{dir}/closing.cubw")).expect("closing");
++        assert_eq!(
++            observed_bytes, closing_bytes,
++            "the replayed closing state differs from the retained bytes"
++        );
++        assert_eq!(
++            closing_state_hash,
++            summary["closing_state_hash"]
++                .as_str()
++                .expect("recorded closing state hash"),
++            "the replayed closing state hash differs from the retained one"
++        );
++        json!({
++            "checked": true,
++            "closing_snapshot_sha256": sha256(&observed_bytes),
++            "recorded_closing_snapshot_sha256": summary["closing_snapshot_sha256"],
++            "closing_state_hash": closing_state_hash,
++        })
++    } else {
++        json!({
++            "checked": false,
++            "reason": format!("--ticks {ticks} is a prefix, not the recorded horizon; closing identity is not asserted"),
++            "prefix_state_hash": closing_state_hash,
++        })
++    };
++
++    // Gate 4.
++    let violations = ledger.total_violations();
++    let ledger_value = serde_json::to_value(&ledger).expect("ledger serializes");
++    let mut derived = BTreeMap::new();
++    if let Some(members) = ledger_value["members"].as_array() {
++        for m in members {
++            let key = format!("{}:{}", m["id"]["slot"], m["id"]["generation"]);
++            derived.insert(key, member_view(m));
++        }
++    }
++    assert_eq!(
++        violations, 0,
++        "flow/stock reconciliation failed: a mutation site is missing from the ledger"
++    );
++
++    let report = json!({
++        "kind": "juvenile-mutation-site-flow-diagnostic",
++        "arm": dir,
++        "build_label_supplied_to_encoder": BUILD,
++        "opening": {
++            "tick": opening_tick,
++            "snapshot_sha256": opening_sha,
++            "state_hash": snapshot::state_hash(&opening_state).to_string(),
++            "seed": opening_state.config.seed,
++            "arm": opening_meta["arm"],
++            "profile_recipe": opening_meta["profile_recipe"],
++            "world_oxidation_threshold": opening_meta["world_oxidation_threshold"],
++            "member_oxidation_threshold": opening_meta["world_member_oxidation_threshold"],
++        },
++        "replayed_ticks": ticks,
++        "closing_identity": closing_identity,
++        "observer_neutrality": {
++            "checked": true,
++            "closing_bytes_equal": true,
++            "state_hash_equal": true,
++            "event_ticks_compared": plain_stream.len(),
++            "event_stream_sha256": sha256(
++                plain_stream
++                    .iter()
++                    .map(|(t, s)| format!("{t} {s}\n"))
++                    .collect::<String>()
++                    .as_bytes()
++            ),
++            "basis": "two full replays from the same decoded opening, differing only in enable_flow_ledger()",
++        },
++        "reconciliation": {
++            "violations": violations,
++            "tolerance": cubarium_core::flow::RESIDUAL_TOLERANCE,
++            "basis": "per member per tick: stocks(t) - stocks(t-1) == sum of flows recorded at the mutation sites in tick t; the death tick closes against the removal site",
++        },
++        "ledger": ledger_value,
++        "derived": derived,
++        "limits": "Measures where a member's own reserve and energy moved. It does not establish a counterfactual: no juvenile in this cohort ran under the world's configured oxidation threshold, so the ledger cannot attribute the deficit to the raised one. Upkeep is recorded as three demanded terms and one clamped payment; the payment is deliberately not split across them.",
++    });
++    let text = serde_json::to_string_pretty(&report).expect("report serializes");
++    match out {
++        Some(path) => {
++            if let Some(parent) = std::path::Path::new(&path).parent() {
++                std::fs::create_dir_all(parent).expect("report directory");
++            }
++            std::fs::write(&path, format!("{text}\n")).expect("write report");
++            eprintln!("all four gates passed; ledger written to {path}");
++        }
++        None => println!("{text}"),
++    }
++}
+-- 
+2.55.0
+
