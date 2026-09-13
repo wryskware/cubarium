@@ -247,16 +247,12 @@ fn run(
             let kind = scheduled_kind(elapsed, period);
             if let Some(kind) = kind {
                 let before_energy = energy(&world.state);
-                let receipt = world.apply_care(&CareCommand {
-                    seq: world
-                        .care()
-                        .admitted_seq
-                        .checked_add(1)
-                        .context("care seq exhausted")?,
-                    apply_after_tick: world.tick(),
+                let receipt = world.apply_care(&CareCommand::standard(
+                    world.care().admitted_seq.checked_add(1).context("care seq exhausted")?,
+                    world.tick(),
                     kind,
-                    target: targets[(elapsed / period) as usize % targets.len()],
-                });
+                    targets[(elapsed / period) as usize % targets.len()],
+                ));
                 let booked = receipt
                     .outcome
                     .applied()

@@ -22,6 +22,12 @@
 //!   that was in flight across the restart can never be re-admitted as a new command under
 //!   a remembered identity; it is either already in the journal (and replays) or was never
 //!   accepted.
+//!
+//! The adjustable dose (`design/7_Research/adjustable-care-dose-handoff-2026-09-13.md`) adds a
+//! fourth: **the amount is part of the request's identity, and the host never invents one.**
+//! An omitted `dose_permille` means exactly [`CareDose::STANDARD`] and nothing else; an
+//! explicit value is validated here and journaled verbatim before the world ever sees it. The
+//! core alone applies it.
 
 pub mod journal;
 
@@ -32,6 +38,11 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::clock::TICK_HZ;
+
+/// The dose type is the **core's**, not a host copy: the host validates and records an amount,
+/// and the world is the only thing that applies one. A second definition here could drift from
+/// the bounds the world actually enforces.
+pub use cubarium_core::care::CareDose;
 
 pub use journal::{
     ACCEPTED_ESTIMATE, JOURNAL_LIMIT, Journal, JournalError, JournalHooks, JournalStatus,
@@ -135,10 +146,35 @@ pub struct PlannedCommand {
     pub apply_after_tick: u64,
     pub kind: CareKind,
     pub target: CareTarget,
+    /// How much of the standard amount was asked for. Journaled with the command, so a replay
+    /// applies the amount the original history applied rather than a default.
+    pub dose: CareDose,
     /// The server-issued identity that asked for it.
     pub client: String,
     /// That client's monotonic request number.
     pub request: u64,
+}
+
+impl PlannedCommand {
+    /// The standard-dose form, for callers that never offer an amount.
+    pub fn standard(
+        seq: u64,
+        apply_after_tick: u64,
+        kind: CareKind,
+        target: CareTarget,
+        client: impl Into<String>,
+        request: u64,
+    ) -> PlannedCommand {
+        PlannedCommand {
+            seq,
+            apply_after_tick,
+            kind,
+            target,
+            dose: CareDose::STANDARD,
+            client: client.into(),
+            request,
+        }
+    }
 }
 
 /// The diagnostic record written after the world has answered.
@@ -227,6 +263,9 @@ struct Row {
     request: u64,
     kind: CareKind,
     target: CareTarget,
+    /// The amount this request asked for. Part of its identity, and reported in every
+    /// `/care/status` row so the viewer can say what was actually requested.
+    dose: CareDose,
     seq: Option<u64>,
     apply_after_tick: Option<u64>,
     state: RowState,
@@ -240,13 +279,14 @@ impl Row {
             v.map_or("null".to_string(), |n| n.to_string())
         };
         format!(
-            r#"{{"client":{},"request":{},"kind":"{}","target":{{"face":{},"u":{},"v":{}}},"seq":{},"apply_after_tick":{},"state":"{}","reason":{},"applied":{},"duplicate":{duplicate}}}"#,
+            r#"{{"client":{},"request":{},"kind":"{}","target":{{"face":{},"u":{},"v":{}}},"dose_permille":{},"seq":{},"apply_after_tick":{},"state":"{}","reason":{},"applied":{},"duplicate":{duplicate}}}"#,
             serde_json::Value::from(self.client.as_str()),
             self.request,
             self.kind.as_str(),
             self.target.face,
             self.target.u,
             self.target.v,
+            self.dose.permille(),
             number(self.seq),
             number(self.apply_after_tick),
             self.state.as_str(),
@@ -263,6 +303,7 @@ struct Prepared {
     request: u64,
     kind: CareKind,
     target: CareTarget,
+    dose: CareDose,
 }
 
 /// What `POST /care/register` answers.
@@ -430,8 +471,8 @@ impl CareShared {
         RegisterOutcome::Registered { client, epoch: self.epoch.clone() }
     }
 
-    /// Validate one request, put it in the prepared FIFO, and wait up to [`ACCEPT_WAIT`]
-    /// for the durable acknowledgement.
+    /// [`CareShared::submit_dosed`] at the standard dose — what an omitted `dose_permille`
+    /// means, and what every caller meant before the amount existed.
     pub fn submit(
         &self,
         client: &str,
@@ -439,8 +480,32 @@ impl CareShared {
         kind: CareKind,
         target: CareTarget,
     ) -> SubmitOutcome {
+        self.submit_dosed(client, request, kind, target, CareDose::STANDARD)
+    }
+
+    /// Validate one request, put it in the prepared FIFO, and wait up to [`ACCEPT_WAIT`]
+    /// for the durable acknowledgement.
+    ///
+    /// `dose` is part of the request's identity: a retry of the same identity *and the same
+    /// amount* gets the retained receipt, while the same request number carrying a different
+    /// amount is a [`SubmitOutcome::Conflict`] rather than a second command. The integer is
+    /// what makes that comparison exact.
+    pub fn submit_dosed(
+        &self,
+        client: &str,
+        request: u64,
+        kind: CareKind,
+        target: CareTarget,
+        dose: CareDose,
+    ) -> SubmitOutcome {
         if let Err(reason) = target.validate() {
             return SubmitOutcome::Invalid(reason);
+        }
+        // A dose that reached this far out of range would be a host defect rather than a bad
+        // request — `CareDose` cannot be built out of range in process — but the world would
+        // reject it at admission, so it is refused here instead of being journaled.
+        if dose.validate("dose_permille").is_err() {
+            return SubmitOutcome::Invalid("`dose_permille` is outside 250..=2000");
         }
         let mut inner = self.lock();
 
@@ -459,7 +524,7 @@ impl CareShared {
         // The retained receipt answers a retry; a different payload under the same request
         // number is a genuine conflict and must not silently become a second command.
         if let Some(row) = inner.find(client, request) {
-            if row.kind == kind && row.target == target {
+            if row.kind == kind && row.target == target && row.dose == dose {
                 let receipt = row.to_json(true);
                 return SubmitOutcome::Duplicate(receipt);
             }
@@ -484,8 +549,7 @@ impl CareShared {
             return SubmitOutcome::Limited("cooldown");
         }
 
-        let prepared =
-            Prepared { client: client.to_string(), request, kind, target };
+        let prepared = Prepared { client: client.to_string(), request, kind, target, dose };
         match self.tx.try_send(prepared) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => return SubmitOutcome::Unavailable("intake full"),
@@ -506,6 +570,7 @@ impl CareShared {
             request,
             kind,
             target,
+            dose,
             seq: None,
             apply_after_tick: None,
             state: RowState::Queued,
@@ -543,6 +608,15 @@ impl CareShared {
         }
     }
 
+    /// The dose capability block, verbatim in `/care/status`.
+    ///
+    /// A viewer enables amount selection **only** after reading exactly this: an older host
+    /// serves no `dose` key at all, and an unknown `version` means a capability this page does
+    /// not understand. Either way the answer is standard-only requests with no dose property,
+    /// which every host from the first care build onwards accepts.
+    pub const DOSE_CAPABILITY_JSON: &'static str =
+        r#"{"version":1,"min_permille":250,"max_permille":2000,"default_permille":1000}"#;
+
     /// `GET /care/status`.
     pub fn status_json(&self) -> String {
         let inner = self.lock();
@@ -564,11 +638,12 @@ impl CareShared {
             _ => "null".to_string(),
         };
         format!(
-            r#"{{"enabled":true,"care":"{}","reason":{reason},"holding_at":{},"epoch":{},"world_tick":{now},"outstanding":{},"cooldowns":{{{cooldowns}}},"journal":{{"bytes":{},"limit":{},"outstanding":{}}},"receipts":[{receipts}]}}"#,
+            r#"{{"enabled":true,"care":"{}","reason":{reason},"holding_at":{},"epoch":{},"world_tick":{now},"outstanding":{},"cooldowns":{{{cooldowns}}},"dose":{},"journal":{{"bytes":{},"limit":{},"outstanding":{}}},"receipts":[{receipts}]}}"#,
             inner.care.as_str(),
             inner.holding_at.map_or("null".to_string(), |b| b.to_string()),
             serde_json::Value::from(self.epoch.as_str()),
             inner.outstanding,
+            CareShared::DOSE_CAPABILITY_JSON,
             self.journal.bytes(),
             self.journal.limit(),
             self.journal.outstanding(),
@@ -577,6 +652,9 @@ impl CareShared {
 
     /// The `/care/status` body a host without `--care` serves, so the page can tell
     /// "this world does not offer care" from "this host is too old to know the route".
+    ///
+    /// No `dose` key: a host that offers no care offers no amounts either, and the capability
+    /// must never read as available on a route that answers `503`.
     pub fn disabled_status_json() -> String {
         r#"{"enabled":false,"care":"disabled","reason":null,"holding_at":null,"epoch":null,"world_tick":0,"outstanding":0,"cooldowns":{},"journal":{"bytes":0,"limit":0,"outstanding":0},"receipts":[]}"#
             .to_string()
@@ -643,6 +721,7 @@ impl CareService {
                 apply_after_tick: boundary,
                 kind: prepared.kind,
                 target: prepared.target,
+                dose: prepared.dose,
                 client: prepared.client,
                 request: prepared.request,
             });
@@ -1192,6 +1271,7 @@ mod tests {
                 request: i,
                 kind: CareKind::Feed,
                 target: target(),
+                dose: CareDose::STANDARD,
                 seq: Some(i),
                 apply_after_tick: Some(0),
                 state: RowState::Applied,
@@ -1211,14 +1291,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let journal = Journal::open(&dir, "e", "b").unwrap();
         let worker = JournalWorker::spawn(journal);
-        let command = PlannedCommand {
-            seq: 1,
-            apply_after_tick: 40,
-            kind: CareKind::Feed,
-            target: target(),
-            client: "e.1".into(),
-            request: 1,
-        };
+        let command = PlannedCommand::standard(1, 40, CareKind::Feed, target(), "e.1", 1);
         assert!(worker.submit(JournalJob::Accept(vec![command.clone()])));
         match worker.wait_ack(Duration::from_secs(5)).expect("an acknowledgement") {
             JournalAck::Accepted { commands, result } => {
@@ -1231,5 +1304,125 @@ mod tests {
         let journal = worker.shutdown().expect("the worker returns the journal");
         assert_eq!(journal.accepted_records().len(), 1);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // ------------------------------------------------------------------ the dose
+
+    /// The capability `/care/status` advertises is exactly the one the contract names, and it
+    /// is what the viewer gates amount selection on. A host without care advertises none:
+    /// absence must never read as "amounts are available here".
+    #[test]
+    fn the_status_advertises_the_documented_dose_capability() {
+        let care = service();
+        let v: serde_json::Value = serde_json::from_str(&care.shared().status_json()).unwrap();
+        assert_eq!(v["dose"]["version"], 1);
+        assert_eq!(v["dose"]["min_permille"], 250);
+        assert_eq!(v["dose"]["max_permille"], 2000);
+        assert_eq!(v["dose"]["default_permille"], 1000);
+        // And it is the core's own bounds, not a second copy that could drift from them.
+        assert_eq!(v["dose"]["min_permille"], CareDose::MIN_PERMILLE);
+        assert_eq!(v["dose"]["max_permille"], CareDose::MAX_PERMILLE);
+        assert_eq!(v["dose"]["default_permille"], CareDose::STANDARD_PERMILLE);
+        assert_eq!(v["dose"]["version"], CareDose::VERSION);
+
+        let disabled: serde_json::Value =
+            serde_json::from_str(&CareShared::disabled_status_json()).unwrap();
+        assert!(disabled["dose"].is_null(), "a host with no care advertises no amounts");
+    }
+
+    /// Every retained receipt row carries the amount that was asked for, so the page can say
+    /// what the server actually recorded rather than what its selector currently shows.
+    #[test]
+    fn every_receipt_row_reports_the_amount_that_was_requested() {
+        let care = service();
+        let shared = care.shared();
+        let RegisterOutcome::Registered { client, .. } = shared.register() else { panic!() };
+        care.publish_tick(100_000);
+
+        let waiter = {
+            let shared = Arc::clone(&shared);
+            let client = client.clone();
+            std::thread::spawn(move || {
+                shared.submit_dosed(
+                    &client,
+                    1,
+                    CareKind::Feed,
+                    target(),
+                    CareDose::new(1500).unwrap(),
+                )
+            })
+        };
+        let planned = wait_for_planned(&care, 1);
+        assert_eq!(planned[0].dose.permille(), 1500, "the amount reaches the planned command");
+        care.commit_accepted(&planned);
+        let _ = waiter.join();
+
+        let v: serde_json::Value = serde_json::from_str(&shared.status_json()).unwrap();
+        assert_eq!(v["receipts"][0]["dose_permille"], 1500);
+        assert_eq!(v["receipts"][0]["seq"], 1);
+    }
+
+    /// `submit` is the standard-dose wrapper, and a row it produces reports 1000: an omitted
+    /// amount and an explicit standard one are one semantic payload, all the way to the row.
+    #[test]
+    fn the_plain_submit_is_the_standard_dose_and_says_so() {
+        let care = service();
+        let shared = care.shared();
+        let RegisterOutcome::Registered { client, .. } = shared.register() else { panic!() };
+        let waiter = {
+            let shared = Arc::clone(&shared);
+            let client = client.clone();
+            std::thread::spawn(move || shared.submit(&client, 1, CareKind::Feed, target()))
+        };
+        let planned = wait_for_planned(&care, 1);
+        assert!(planned[0].dose.is_standard());
+        care.commit_accepted(&planned);
+        let _ = waiter.join();
+
+        let v: serde_json::Value = serde_json::from_str(&shared.status_json()).unwrap();
+        assert_eq!(v["receipts"][0]["dose_permille"], 1000);
+
+        // A retry at the *same* amount is the duplicate; the same request number at a
+        // different amount is a conflict, never a second command.
+        let same = shared.submit(&client, 1, CareKind::Feed, target());
+        let SubmitOutcome::Duplicate(receipt) = &same else { panic!("{same:?}") };
+        assert!(receipt.contains(r#""dose_permille":1000"#), "{receipt}");
+        let explicit =
+            shared.submit_dosed(&client, 1, CareKind::Feed, target(), CareDose::STANDARD);
+        assert!(matches!(explicit, SubmitOutcome::Duplicate(_)), "{explicit:?}");
+        let louder =
+            shared.submit_dosed(&client, 1, CareKind::Feed, target(), CareDose::new(1500).unwrap());
+        assert!(matches!(louder, SubmitOutcome::Conflict("conflict")), "{louder:?}");
+        assert_eq!(louder.http_status(), "409 Conflict");
+    }
+
+    /// The amount travels through the planned command unchanged, for every value the contract
+    /// admits — and a command still carries exactly one amount, never an accumulated one.
+    #[test]
+    fn the_amount_reaches_the_planned_command_unchanged() {
+        for permille in [250u16, 500, 1000, 1500, 2000] {
+            let care = service();
+            let shared = care.shared();
+            let RegisterOutcome::Registered { client, .. } = shared.register() else { panic!() };
+            let waiter = {
+                let shared = Arc::clone(&shared);
+                let client = client.clone();
+                std::thread::spawn(move || {
+                    shared.submit_dosed(
+                        &client,
+                        1,
+                        CareKind::Clean,
+                        target(),
+                        CareDose::new(permille).unwrap(),
+                    )
+                })
+            };
+            let planned = wait_for_planned(&care, 7);
+            assert_eq!(planned.len(), 1);
+            assert_eq!(planned[0].seq, 7);
+            assert_eq!(planned[0].dose.permille(), permille);
+            care.commit_accepted(&planned);
+            let _ = waiter.join();
+        }
     }
 }

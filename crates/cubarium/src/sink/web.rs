@@ -615,18 +615,37 @@ fn care_route(
         }
         CareRoute::Submit => match parse_care_request(&body) {
             Err(message) => json_error(stream, "400 Bad Request", message),
-            Ok((client, request, kind, target)) => {
-                let outcome = care.submit(&client, request, kind, target);
+            Ok(CareRequest { client, request, kind, target, dose }) => {
+                let outcome = care.submit_dosed(&client, request, kind, target, dose);
                 json(stream, outcome.http_status(), &outcome.body())
             }
         },
     }
 }
 
-/// `{"client": "...", "request": N, "kind": "feed", "target": {"face": f, "u": u, "v": v}}`.
-/// Every field is required and nothing is guessed at: a request the host cannot read
+/// One parsed `POST /care` body.
+struct CareRequest {
+    client: String,
+    request: u64,
+    kind: CareKind,
+    target: CareTarget,
+    dose: care::CareDose,
+}
+
+/// `{"client": "...", "request": N, "kind": "feed", "target": {"face": f, "u": u, "v": v}}`,
+/// with one optional property: `"dose_permille": N`.
+///
+/// Every other field is required and nothing is guessed at: a request the host cannot read
 /// exactly is a `400`, never a command aimed at a cell nobody chose.
-fn parse_care_request(body: &[u8]) -> Result<(String, u64, CareKind, CareTarget), &'static str> {
+///
+/// The amount is the same rule applied to a value that may be absent. **Absent** means exactly
+/// the standard dose — that is what every request meant before this property existed. Anything
+/// *present* must be an integer inside the documented range: an explicit `null`, a fractional
+/// or negative number, a string, or a value outside 250..=2000 is a `400`. None of them is
+/// clamped, and none of them is treated as omission — a page that sent `null` because its
+/// selector was empty asked a question this host cannot answer, and telling it so is the only
+/// answer that cannot deliver an amount nobody chose.
+fn parse_care_request(body: &[u8]) -> Result<CareRequest, &'static str> {
     let value: serde_json::Value =
         serde_json::from_slice(body).map_err(|_| "the request body is not JSON")?;
     let client = value
@@ -651,7 +670,18 @@ fn parse_care_request(body: &[u8]) -> Result<(String, u64, CareKind, CareTarget)
     let target =
         CareTarget { face: component("face")?, u: component("u")?, v: component("v")? };
     target.validate()?;
-    Ok((client, request, kind, target))
+    let dose = match value.get("dose_permille") {
+        None => care::CareDose::STANDARD,
+        Some(raw) => {
+            let n = raw
+                .as_u64()
+                .and_then(|n| u16::try_from(n).ok())
+                .ok_or("`dose_permille` must be an integer, or omitted for the standard dose")?;
+            care::CareDose::new(n)
+                .map_err(|_| "`dose_permille` must be an integer from 250 to 2000")?
+        }
+    };
+    Ok(CareRequest { client, request, kind, target, dose })
 }
 
 /// The `/frame` body: 8-byte little-endian render sequence then the frame bytes. With no
@@ -1304,6 +1334,101 @@ mod tests {
             let (status, _, answer) = care_post(addr, "/care", body);
             assert_eq!(status, "HTTP/1.1 400 Bad Request", "body {body} answered {answer}");
         }
+    }
+
+    /// The one new HTTP property. Omission is the standard dose; anything *present* must be an
+    /// integer inside the documented range. An explicit `null`, a fractional or negative
+    /// number, a string or an out-of-range value is a `400` — never clamped, and never read as
+    /// omission. Every one of these is refused before any identity is even consulted, so a
+    /// rejected amount cannot burn a request number.
+    #[test]
+    fn an_unusable_dose_is_400_and_is_never_clamped_or_read_as_omission() {
+        let (sink, _service) = care_sink();
+        let addr = sink.addr();
+        let with = |dose: &str| {
+            format!(
+                r#"{{"client":"x","request":1,"kind":"feed","target":{{"face":0,"u":0,"v":0}},"dose_permille":{dose}}}"#
+            )
+        };
+        for dose in [
+            "null", "1500.5", "-500", "0", "249", "2001", "65536", "99999999999999999999",
+            "\"1500\"", "true", "[1500]", "{}",
+        ] {
+            let body = with(dose);
+            let (status, _, answer) = care_post(addr, "/care", &body);
+            assert_eq!(status, "HTTP/1.1 400 Bad Request", "dose {dose} answered {answer}");
+            assert!(answer.contains("dose_permille"), "the refusal names the field: {answer}");
+        }
+        // The bounds themselves are not refused: they get as far as the identity check, which
+        // is the next gate and a different answer.
+        for dose in ["250", "1000", "2000"] {
+            let (status, _, answer) = care_post(addr, "/care", &with(dose));
+            assert_eq!(status, "HTTP/1.1 409 Conflict", "dose {dose} answered {answer}");
+        }
+    }
+
+    /// A valid amount reaches the planned command verbatim, and an omitted one is the standard
+    /// dose — the two paths a viewer can take, end to end through the actual HTTP route.
+    #[test]
+    fn a_posted_dose_reaches_the_planned_command_and_omission_is_standard() {
+        for (property, want) in [(r#","dose_permille":1500"#, 1500u16), ("", 1000)] {
+            let (sink, service) = care_sink();
+            let addr = sink.addr();
+            let (_, _, body) = care_post(addr, "/care/register", "{}");
+            let client = serde_json::from_str::<serde_json::Value>(&body).unwrap()["client"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            let payload = format!(
+                r#"{{"client":"{client}","request":1,"kind":"rain","target":{{"face":2,"u":31,"v":7}}{property}}}"#
+            );
+            let posted = std::thread::spawn(move || care_post(addr, "/care", &payload));
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            let planned = loop {
+                let planned = service.drain_prepared(1, 60);
+                if !planned.is_empty() {
+                    break planned;
+                }
+                assert!(std::time::Instant::now() < deadline, "the request never arrived");
+                std::thread::sleep(Duration::from_millis(2));
+            };
+            assert_eq!(planned[0].dose.permille(), want, "property {property:?}");
+            service.commit_accepted(&planned);
+            let (status, _, _) = posted.join().unwrap();
+            assert_eq!(status, "HTTP/1.1 202 Accepted");
+
+            // And the amount is in the row the page reads back.
+            let (_, _, body) = get(sink.addr(), "/care/status");
+            let v: serde_json::Value = serde_json::from_str(&body_text(&body)).unwrap();
+            assert_eq!(v["receipts"][0]["dose_permille"], want);
+            assert_eq!(v["dose"]["version"], 1);
+        }
+    }
+
+    /// The capability block a viewer gates amount selection on, served over the real route —
+    /// and absent from a host that offers no care at all.
+    #[test]
+    fn the_status_route_advertises_the_dose_capability_only_when_care_is_enabled() {
+        let (sink, _service) = care_sink();
+        let (status, _, body) = get(sink.addr(), "/care/status");
+        assert_eq!(status, "HTTP/1.1 200 OK");
+        let v: serde_json::Value = serde_json::from_str(&body_text(&body)).unwrap();
+        assert_eq!(v["enabled"], true);
+        assert_eq!(
+            v["dose"],
+            serde_json::json!({
+                "version": 1,
+                "min_permille": 250,
+                "max_permille": 2000,
+                "default_permille": 1000,
+            })
+        );
+
+        let plain = WebSink::new(0).expect("binding");
+        let (_, _, body) = get(plain.addr(), "/care/status");
+        let v: serde_json::Value = serde_json::from_str(&body_text(&body)).unwrap();
+        assert_eq!(v["enabled"], false);
+        assert!(v["dose"].is_null(), "no care means no advertised amounts");
     }
 
     #[test]

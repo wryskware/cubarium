@@ -29,6 +29,30 @@
 //!   being applied twice. So there is a hard 4 MiB bound with a reserve for the records
 //!   already-accepted commands still owe, and care is refused (`503`) before it is hit
 //!   while autonomous life continues. No compaction in this slice.
+//!
+//! ## Two accepted records, and why the amount gets its own discriminator
+//!
+//! A standard-dose command is still written as `{"rec":"accepted", …}`, exactly as before: it
+//! carries no amount because the amount it carries is the only one that build could mean, and
+//! an older binary reading it applies precisely the right thing. A **nonstandard** command is
+//! written as `{"rec":"accepted_dose_v1", …,"dose_permille":N}`. The new discriminator is the
+//! point: an older binary does not know the record kind, so it refuses to start rather than
+//! reading the line as an ordinary command and quietly applying the wrong amount. An extra
+//! field on the old record would have been ignored, which is exactly the silent failure this
+//! avoids.
+//!
+//! Parsing is deliberately asymmetric, for the same reason:
+//!
+//! * `accepted` must have **no** `dose_permille` — its presence, even at the standard 1000, is
+//!   refused. A record that carried an amount under the old name would mean a writer somewhere
+//!   believed old readers would honour it.
+//! * `accepted_dose_v1` must have an explicit, valid, integral `dose_permille`. Missing never
+//!   defaults to standard: a dropped field would silently turn a Generous command into an
+//!   ordinary one.
+//!
+//! Anything else — `accepted_dose_v2`, a fractional or out-of-range amount, a malformed line —
+//! fails closed at open, including at the final newline-terminated record. Only an actually
+//! unterminated tail is truncatable.
 
 use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
@@ -40,7 +64,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 
-use super::{CareKind, CareTarget, OutcomeRecord, PlannedCommand};
+use super::{CareDose, CareKind, CareTarget, OutcomeRecord, PlannedCommand};
 use crate::state::JOURNAL_NAME;
 
 /// The journal's hard byte bound.
@@ -51,8 +75,8 @@ const READ_SENTINEL: u64 = 4096;
 /// Reserved for each accepted record that does not yet have an outcome record, so a
 /// command already promised durability can always record what it did.
 pub const OUTCOME_RESERVE: u64 = 512;
-/// Budgeted for one `accepted` record. Client ids and targets are fixed-width, so a real
-/// line is well under this.
+/// Budgeted for one `accepted` or `accepted_dose_v1` record. Client ids, targets and the
+/// four-digit amount are fixed-width, so a real line is well under this.
 pub const ACCEPTED_ESTIMATE: u64 = 512;
 
 /// Why a journal write did not happen.
@@ -702,10 +726,28 @@ fn take_one(counter: &AtomicU64) -> bool {
         .is_ok()
 }
 
-/// One `accepted` line, hand-built so the key order is the contract's.
+/// One accepted line, hand-built so the key order is the contract's.
+///
+/// A standard dose writes the legacy `accepted` record, with **no** amount field: an older
+/// binary reads it and applies exactly the right thing. A nonstandard dose writes
+/// `accepted_dose_v1` with an explicit `dose_permille`, which an older binary refuses by name
+/// rather than misreading. See the module documentation.
 fn accepted_line(c: &PlannedCommand) -> String {
+    if c.dose.is_standard() {
+        return format!(
+            r#"{{"rec":"accepted","seq":{},"apply_after_tick":{},"client":{},"request":{},"kind":"{}","target":{{"face":{},"u":{},"v":{}}}}}"#,
+            c.seq,
+            c.apply_after_tick,
+            serde_json::Value::from(c.client.as_str()),
+            c.request,
+            c.kind.as_str(),
+            c.target.face,
+            c.target.u,
+            c.target.v,
+        );
+    }
     format!(
-        r#"{{"rec":"accepted","seq":{},"apply_after_tick":{},"client":{},"request":{},"kind":"{}","target":{{"face":{},"u":{},"v":{}}}}}"#,
+        r#"{{"rec":"accepted_dose_v1","seq":{},"apply_after_tick":{},"client":{},"request":{},"kind":"{}","target":{{"face":{},"u":{},"v":{}}},"dose_permille":{}}}"#,
         c.seq,
         c.apply_after_tick,
         serde_json::Value::from(c.client.as_str()),
@@ -714,6 +756,7 @@ fn accepted_line(c: &PlannedCommand) -> String {
         c.target.face,
         c.target.u,
         c.target.v,
+        c.dose.permille(),
     )
 }
 
@@ -807,7 +850,37 @@ fn parse_record(line: &[u8]) -> std::result::Result<Record, String> {
             object.get("epoch").and_then(|v| v.as_str()).ok_or("no `epoch` string")?;
             Ok(Record::Epoch)
         }
-        "accepted" => {
+        "accepted" | "accepted_dose_v1" => {
+            let dose = match rec {
+                // The legacy record has no amount, and must not: an `accepted` line carrying
+                // `dose_permille` would mean somebody wrote an amount under a name older
+                // readers ignore. Refused even when the amount is the standard one, because
+                // the writer's intent is what is wrong, not the number.
+                "accepted" => {
+                    if object.contains_key("dose_permille") {
+                        return Err(
+                            "an `accepted` record carries no `dose_permille`; a dosed command \
+                             must be written as `accepted_dose_v1`, which older readers refuse \
+                             by name rather than silently ignoring the amount"
+                                .to_string(),
+                        );
+                    }
+                    CareDose::STANDARD
+                }
+                // The new record must state its amount. Missing never defaults to standard: a
+                // dropped field would silently turn a Generous command into an ordinary one.
+                _ => {
+                    let raw = object
+                        .get("dose_permille")
+                        .ok_or("an `accepted_dose_v1` record must carry `dose_permille`")?;
+                    let n = raw.as_u64().ok_or_else(|| {
+                        format!("`dose_permille` must be a non-negative integer, not {raw}")
+                    })?;
+                    let n = u16::try_from(n)
+                        .map_err(|_| format!("`dose_permille` is out of range: {n}"))?;
+                    CareDose::new(n)?
+                }
+            };
             let kind = object.get("kind").and_then(|v| v.as_str()).ok_or("no `kind` string")?;
             let kind = CareKind::parse(kind).ok_or_else(|| format!("unknown kind `{kind}`"))?;
             let target = object.get("target").ok_or("no `target`")?;
@@ -825,6 +898,7 @@ fn parse_record(line: &[u8]) -> std::result::Result<Record, String> {
                 apply_after_tick: u64_field("apply_after_tick")?,
                 kind,
                 target,
+                dose,
                 client: object
                     .get("client")
                     .and_then(|v| v.as_str())
@@ -851,13 +925,21 @@ mod tests {
     }
 
     fn command(seq: u64, boundary: u64, kind: CareKind) -> PlannedCommand {
-        PlannedCommand {
+        PlannedCommand::standard(
             seq,
-            apply_after_tick: boundary,
+            boundary,
             kind,
-            target: CareTarget { face: 1, u: 12, v: 34 },
-            client: "epoch-1.7".to_string(),
-            request: seq,
+            CareTarget { face: 1, u: 12, v: 34 },
+            "epoch-1.7",
+            seq,
+        )
+    }
+
+    /// The same command at a nonstandard amount, which is written as `accepted_dose_v1`.
+    fn dosed(seq: u64, boundary: u64, kind: CareKind, permille: u16) -> PlannedCommand {
+        PlannedCommand {
+            dose: CareDose::new(permille).expect("the test's dose is in range"),
+            ..command(seq, boundary, kind)
         }
     }
 
@@ -1396,5 +1478,177 @@ mod tests {
         let j = Journal::open(&dir, "s", "b").unwrap();
         assert!(j.accepted_records().is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // ------------------------------------------------------------------ the dose records
+
+    /// A standard dose is still written as the legacy `accepted` record, with **no** amount
+    /// field: an older binary reads it and applies exactly the right thing. A nonstandard dose
+    /// is written as `accepted_dose_v1`, which that binary refuses by name.
+    #[test]
+    fn a_standard_dose_stays_a_legacy_record_and_a_nonstandard_one_gets_its_own_kind() {
+        let dir = scratch("dose-records");
+        {
+            let mut j = Journal::open(&dir, "s", "b").unwrap();
+            j.append_accepted(&[
+                command(1, 100, CareKind::Feed),
+                dosed(2, 100, CareKind::Rain, 1500),
+                dosed(3, 100, CareKind::Clean, 250),
+            ])
+            .unwrap();
+        }
+        let text = contents(&dir);
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(lines[1].contains(r#""rec":"accepted","seq":1"#), "{}", lines[1]);
+        assert!(
+            !lines[1].contains("dose_permille"),
+            "a standard command must carry no amount at all: {}",
+            lines[1]
+        );
+        assert!(lines[2].contains(r#""rec":"accepted_dose_v1","seq":2"#), "{}", lines[2]);
+        assert!(lines[2].contains(r#""dose_permille":1500"#), "{}", lines[2]);
+        assert!(lines[3].contains(r#""dose_permille":250"#), "{}", lines[3]);
+
+        // And every one of them reads back as the amount it was written with — a mixed
+        // old/new journal, which is what any upgraded world's journal actually is.
+        let j = Journal::open(&dir, "s2", "b").unwrap();
+        let plan = j.replay_plan(0, 100).unwrap();
+        assert_eq!(
+            plan.iter().map(|c| (c.seq, c.dose.permille())).collect::<Vec<_>>(),
+            vec![(1, 1000), (2, 1500), (3, 250)]
+        );
+        assert!(plan[0].dose.is_standard(), "a legacy record means the standard dose");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Both bounds survive the round trip exactly, with no clamping anywhere in the path.
+    #[test]
+    fn the_documented_bounds_round_trip_through_the_journal() {
+        let dir = scratch("dose-bounds");
+        {
+            let mut j = Journal::open(&dir, "s", "b").unwrap();
+            j.append_accepted(&[
+                dosed(1, 10, CareKind::Feed, CareDose::MIN_PERMILLE),
+                dosed(2, 10, CareKind::Feed, CareDose::MAX_PERMILLE),
+            ])
+            .unwrap();
+        }
+        let j = Journal::open(&dir, "s2", "b").unwrap();
+        assert_eq!(
+            j.accepted_records().iter().map(|c| c.dose.permille()).collect::<Vec<_>>(),
+            vec![CareDose::MIN_PERMILLE, CareDose::MAX_PERMILLE]
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The asymmetry, case by case, and **at the final newline-terminated line** — the one
+    /// position where a reader might be tempted to call a complete record a torn tail. Every
+    /// one of these fails closed, and the bytes are preserved for a human to look at.
+    #[test]
+    fn a_malformed_or_mislabelled_dose_record_fails_closed_even_as_the_last_line() {
+        let cases: [(&str, &str); 8] = [
+            // A legacy record carrying an amount: somebody wrote a dose under a name older
+            // readers ignore. Refused even at the standard value — the intent is what is wrong.
+            (
+                "legacy-with-standard-dose",
+                r#"{"rec":"accepted","seq":2,"apply_after_tick":100,"client":"c","request":2,"kind":"feed","target":{"face":1,"u":12,"v":34},"dose_permille":1000}"#,
+            ),
+            (
+                "legacy-with-nonstandard-dose",
+                r#"{"rec":"accepted","seq":2,"apply_after_tick":100,"client":"c","request":2,"kind":"feed","target":{"face":1,"u":12,"v":34},"dose_permille":1500}"#,
+            ),
+            // The new record without its amount: missing never defaults to standard.
+            (
+                "dosed-without-amount",
+                r#"{"rec":"accepted_dose_v1","seq":2,"apply_after_tick":100,"client":"c","request":2,"kind":"feed","target":{"face":1,"u":12,"v":34}}"#,
+            ),
+            (
+                "dosed-null-amount",
+                r#"{"rec":"accepted_dose_v1","seq":2,"apply_after_tick":100,"client":"c","request":2,"kind":"feed","target":{"face":1,"u":12,"v":34},"dose_permille":null}"#,
+            ),
+            (
+                "dosed-fractional-amount",
+                r#"{"rec":"accepted_dose_v1","seq":2,"apply_after_tick":100,"client":"c","request":2,"kind":"feed","target":{"face":1,"u":12,"v":34},"dose_permille":1500.5}"#,
+            ),
+            (
+                "dosed-negative-amount",
+                r#"{"rec":"accepted_dose_v1","seq":2,"apply_after_tick":100,"client":"c","request":2,"kind":"feed","target":{"face":1,"u":12,"v":34},"dose_permille":-500}"#,
+            ),
+            (
+                "dosed-out-of-range-amount",
+                r#"{"rec":"accepted_dose_v1","seq":2,"apply_after_tick":100,"client":"c","request":2,"kind":"feed","target":{"face":1,"u":12,"v":34},"dose_permille":5000}"#,
+            ),
+            // A version this build does not know. Fails closed exactly like any other
+            // unknown record kind, rather than being read as its nearest relative.
+            (
+                "future-version",
+                r#"{"rec":"accepted_dose_v2","seq":2,"apply_after_tick":100,"client":"c","request":2,"kind":"feed","target":{"face":1,"u":12,"v":34},"dose_permille":1500}"#,
+            ),
+        ];
+        for (name, line) in cases {
+            let dir = scratch(name);
+            {
+                let mut j = Journal::open(&dir, "s", "b").unwrap();
+                j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap();
+            }
+            let damaged = format!("{}{line}\n", contents(&dir));
+            std::fs::write(dir.join(JOURNAL_NAME), &damaged).unwrap();
+            let err = format!("{:#}", Journal::open(&dir, "s2", "b").unwrap_err());
+            assert!(err.contains("cannot be trusted"), "{name}: {err}");
+            assert_eq!(
+                contents(&dir),
+                damaged,
+                "{name}: a complete record is evidence, not a torn tail to repair"
+            );
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+    }
+
+    /// The one thing that *is* still repairable: an unterminated suffix, even when it is a
+    /// half-written dosed record. Nothing here changes what "torn" means.
+    #[test]
+    fn a_half_written_dosed_record_is_still_just_a_torn_tail() {
+        let dir = scratch("dose-torn");
+        {
+            let mut j = Journal::open(&dir, "s", "b").unwrap();
+            j.append_accepted(&[dosed(1, 100, CareKind::Rain, 1500)]).unwrap();
+        }
+        let intact = contents(&dir);
+        let suffix = br#"{"rec":"accepted_dose_v1","seq":2,"apply_after_tick":100,"dose_per"#;
+        let mut f = std::fs::OpenOptions::new().append(true).open(dir.join(JOURNAL_NAME)).unwrap();
+        f.write_all(suffix).unwrap();
+        drop(f);
+
+        let j = Journal::open(&dir, "s2", "b").unwrap();
+        assert_eq!(j.truncated_bytes(), suffix.len() as u64);
+        assert_eq!(j.accepted_records().len(), 1);
+        assert_eq!(j.accepted_records()[0].dose.permille(), 1500, "the complete record is intact");
+        assert!(contents(&dir).starts_with(&intact));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// What an **older** binary does with a dosed record, established from that binary's own
+    /// reader rather than asserted: the pre-dose build knew exactly three record kinds, and
+    /// `accepted_dose_v1` is not one of them, so it takes the `unknown record kind` path — a
+    /// refusal to start, not a silently ignored amount. (The executable evidence is in
+    /// `design/7_Research/adjustable-care-dose-progress-2026-09-13.md`; this is the in-repo
+    /// guard that the discriminator stays outside the old set.)
+    #[test]
+    fn the_new_discriminator_is_outside_the_pre_dose_readers_vocabulary() {
+        const PRE_DOSE_RECORD_KINDS: [&str; 3] = ["epoch", "accepted", "outcome"];
+        let line = accepted_line(&dosed(1, 100, CareKind::Rain, 1500));
+        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+        let rec = value["rec"].as_str().unwrap();
+        assert_eq!(rec, "accepted_dose_v1");
+        assert!(
+            !PRE_DOSE_RECORD_KINDS.contains(&rec),
+            "a dosed command must not reuse a record kind the old reader accepts"
+        );
+        // And the standard one deliberately *is* in that vocabulary, so an old binary can go
+        // on reading a standard-only history correctly.
+        let legacy: serde_json::Value =
+            serde_json::from_str(&accepted_line(&command(1, 100, CareKind::Feed))).unwrap();
+        assert!(PRE_DOSE_RECORD_KINDS.contains(&legacy["rec"].as_str().unwrap()));
+        assert!(legacy.get("dose_permille").is_none());
     }
 }

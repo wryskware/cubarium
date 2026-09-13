@@ -601,6 +601,9 @@ fn to_core(command: &care::PlannedCommand) -> CareCommand {
             u: f64::from(command.target.u),
             v: f64::from(command.target.v),
         },
+        // The journaled amount, carried through verbatim. The host never substitutes a
+        // default here: a replayed command applies what its record says it asked for.
+        dose: command.dose,
     }
 }
 
@@ -1367,18 +1370,14 @@ mod tests {
             let mut world = World::new(WorldConfig::default()).unwrap();
             world.step();
             let opening_hash = cubarium_core::snapshot::state_hash(&world.state);
-            let command = care::PlannedCommand {
-                seq: 1,
-                apply_after_tick: world.tick(),
-                kind: care::CareKind::Feed,
-                target: care::CareTarget {
-                    face: 0,
-                    u: 32,
-                    v: 32,
-                },
-                client: "visual-test".to_string(),
-                request: 1,
-            };
+            let command = care::PlannedCommand::standard(
+                1,
+                world.tick(),
+                care::CareKind::Feed,
+                care::CareTarget { face: 0, u: 32, v: 32 },
+                "visual-test",
+                1,
+            );
             let sample = |rt: &mut CareRuntime| {
                 let mut canvas = Canvas::new();
                 rt.effects
@@ -1455,20 +1454,12 @@ mod tests {
         let mut receipt_log = Vec::new();
         for _ in 0..510 {
             if world.tick() == 400 || world.tick() == 470 {
-                let command = CareCommand {
-                    seq: if world.tick() == 400 { 1 } else { 2 },
-                    apply_after_tick: world.tick(),
-                    kind: if world.tick() == 400 {
-                        CareKind::Feed
-                    } else {
-                        CareKind::Clean
-                    },
-                    target: CareTarget {
-                        face: 0,
-                        u: 32.0,
-                        v: 48.0,
-                    },
-                };
+                let command = CareCommand::standard(
+                    if world.tick() == 400 { 1 } else { 2 },
+                    world.tick(),
+                    if world.tick() == 400 { CareKind::Feed } else { CareKind::Clean },
+                    CareTarget { face: 0, u: 32.0, v: 48.0 },
+                );
                 let receipt = world.apply_care(&command);
                 effects.observe(&command, &receipt);
                 receipt_log.push(serde_json::json!({

@@ -45,6 +45,21 @@ fn accepted_line(seq: u64, boundary: u64, kind: &str, face: u8, u: u8, v: u8) ->
     )
 }
 
+/// One `accepted_dose_v1` journal line, exactly as the host writes a nonstandard amount.
+fn dosed_line(
+    seq: u64,
+    boundary: u64,
+    kind: &str,
+    face: u8,
+    u: u8,
+    v: u8,
+    permille: u16,
+) -> String {
+    format!(
+        r#"{{"rec":"accepted_dose_v1","seq":{seq},"apply_after_tick":{boundary},"client":"test.1","request":{seq},"kind":"{kind}","target":{{"face":{face},"u":{u},"v":{v}}},"dose_permille":{permille}}}"#
+    )
+}
+
 /// Write a journal holding an epoch record and the given accepted lines.
 fn write_journal(dir: &Path, lines: &[String]) {
     let mut text = String::from(r#"{"rec":"epoch","epoch":"test-epoch","build":"test"}"#);
@@ -117,18 +132,55 @@ fn reference_ecology(
             world.step();
             world.drain_events();
         }
-        let receipt = world.apply_care(&CareCommand {
-            seq: *seq,
-            apply_after_tick: *boundary,
-            kind: *kind,
-            target: CareTarget { face: *face, u: f64::from(*u), v: f64::from(*v) },
-        });
+        let receipt = world.apply_care(&CareCommand::standard(
+            *seq,
+            *boundary,
+            *kind,
+            CareTarget { face: *face, u: f64::from(*u), v: f64::from(*v) },
+        ));
         assert_ne!(
             receipt.outcome.reason(),
             Some("out of order"),
             "the reference world refused seq {seq}"
         );
         assert_ne!(receipt.outcome.reason(), Some("wrong boundary"));
+    }
+    while world.tick() < final_tick {
+        world.step();
+        world.drain_events();
+    }
+    assert_eq!(world.tick(), final_tick);
+    ecology_hash(&world.state)
+}
+
+/// [`reference_ecology`] with an explicit amount per command: the world that *would* have
+/// existed if a run carrying exactly these doses had never been interrupted.
+fn dosed_reference_ecology(
+    snapshot: &Path,
+    commands: &[(u64, u64, cubarium_core::care::CareKind, u8, u8, u8, u16)],
+    final_tick: u64,
+) -> u64 {
+    use cubarium_core::care::{CareCommand, CareDose, CareTarget};
+    let bytes = std::fs::read(snapshot).unwrap();
+    let (_meta, state) = decode_snapshot(&bytes).unwrap();
+    let mut world = World::from_state(state).unwrap();
+    for (seq, boundary, kind, face, u, v, permille) in commands {
+        while world.tick() < *boundary {
+            world.step();
+            world.drain_events();
+        }
+        let receipt = world.apply_care(&CareCommand {
+            seq: *seq,
+            apply_after_tick: *boundary,
+            kind: *kind,
+            target: CareTarget { face: *face, u: f64::from(*u), v: f64::from(*v) },
+            dose: CareDose::new(*permille).expect("the test's dose is in range"),
+        });
+        assert!(
+            receipt.outcome.applied().is_some(),
+            "the reference world refused seq {seq}: {:?}",
+            receipt.outcome
+        );
     }
     while world.tick() < final_tick {
         world.step();
@@ -286,6 +338,124 @@ fn a_shower_interrupted_by_a_snapshot_resumes_where_it_left_off() {
         split_hash,
         reference_ecology(&seeded.join("world-400.cubw"), &commands, 600),
         "a shower resumed from a mid-shower snapshot must deliver the same water"
+    );
+}
+
+/// A **mixed** journal: the legacy `accepted` records a pre-dose run wrote, and the
+/// `accepted_dose_v1` records this build writes, in one file. Replay must apply each command
+/// at the amount its own record states — the legacy ones at the standard dose, the new ones at
+/// theirs — and land on exactly the ecology an uninterrupted run with those amounts would have.
+///
+/// This is the durability claim the whole record-discriminator design exists for: the amount
+/// that survives a crash is the amount that was asked for, not a default the reader chose.
+#[test]
+fn a_mixed_old_and_new_journal_replays_every_command_at_its_own_amount() {
+    let _serial = hook_guard();
+    let scratch = Scratch::new("mixed-journal");
+    let (seeded, seeded_tick) = seed(&scratch, "seed", "20");
+    assert_eq!(seeded_tick, 400);
+    keep_only_snapshot(&seeded, 400);
+
+    // seq 1 is a pre-dose record (no amount at all); seq 2 and 3 carry explicit amounts at
+    // both ends of the documented range.
+    let commands = [
+        (1u64, 420u64, cubarium_core::care::CareKind::Feed, 0u8, 32u8, 32u8, 1000u16),
+        (2, 440, cubarium_core::care::CareKind::Feed, 0, 32, 32, 2000),
+        (3, 480, cubarium_core::care::CareKind::Clean, 0, 32, 32, 250),
+    ];
+    let lines = vec![
+        accepted_line(1, 420, "feed", 0, 32, 32),
+        dosed_line(2, 440, "feed", 0, 32, 32, 2000),
+        dosed_line(3, 480, "clean", 0, 32, 32, 250),
+    ];
+
+    let state = fork_state(&scratch, &seeded, "mixed");
+    write_journal(&state, &lines);
+    let config = scratch.write("fast.toml", FAST_CHECKPOINTS);
+    let out = run(&[
+        "--sink", "none", "--speed", "0", "--seconds", "10",
+        "--config", config.to_str().unwrap(),
+        "--state", state.to_str().unwrap(),
+    ]);
+    assert_eq!(out.loaded_tick, Some(400));
+    assert_eq!(out.final_tick, 600);
+
+    let (tick, replayed) = newest_ecology(&state);
+    assert_eq!(tick, 600);
+    assert_eq!(
+        replayed,
+        dosed_reference_ecology(&seeded.join("world-400.cubw"), &commands, 600),
+        "a replayed world must apply exactly the amounts its journal records"
+    );
+
+    // And it is genuinely the amounts that made the difference: a run that read every record
+    // as standard would land somewhere else entirely.
+    let all_standard: Vec<_> =
+        commands.iter().map(|(s, b, k, f, u, v, _)| (*s, *b, *k, *f, *u, *v)).collect();
+    assert_ne!(
+        replayed,
+        reference_ecology(&seeded.join("world-400.cubw"), &all_standard, 600),
+        "if this matched, the doses were being ignored and the test would prove nothing"
+    );
+
+    // The replayed outcomes are journaled beside the records that caused them, and the
+    // history is still append-only: the dosed records are untouched.
+    let history = std::fs::read_to_string(state.join("care.jsonl")).unwrap();
+    assert_eq!(history.matches(r#""rec":"accepted_dose_v1""#).count(), 2, "{history}");
+    assert!(history.contains(r#""dose_permille":2000"#), "{history}");
+    assert!(history.contains(r#""dose_permille":250"#), "{history}");
+    assert_eq!(history.matches(r#""rec":"outcome""#).count(), 3, "{history}");
+}
+
+/// A **nonstandard** shower interrupted by a snapshot. The amount lives on the shower, in the
+/// snapshot, so the water that falls after the restart is the water the original command asked
+/// for — not the standard four units a reader without the field would have delivered.
+#[test]
+fn a_nonstandard_shower_resumes_at_its_own_amount_after_a_restart() {
+    let _serial = hook_guard();
+    let scratch = Scratch::new("mid-shower-dosed");
+    let (seeded, _) = seed(&scratch, "seed", "20");
+    keep_only_snapshot(&seeded, 400);
+    let commands = [(1u64, 420u64, cubarium_core::care::CareKind::Rain, 1u8, 20u8, 20u8, 1500u16)];
+    let lines = vec![dosed_line(1, 420, "rain", 1, 20, 20, 1500)];
+    let config = scratch.write("fast.toml", FAST_CHECKPOINTS);
+
+    // Stop at tick 460: the shower started at 420 and has 80 of its 120 samples left.
+    let split = fork_state(&scratch, &seeded, "split");
+    write_journal(&split, &lines);
+    let first = run(&[
+        "--sink", "none", "--speed", "0", "--seconds", "3",
+        "--config", config.to_str().unwrap(),
+        "--state", split.to_str().unwrap(),
+    ]);
+    assert_eq!(first.final_tick, 460, "the snapshot lands inside the shower");
+
+    // The amount is in the snapshot, not inferred from the journal on the way back in.
+    let (_, mid) = cubarium::state::list_snapshots(&split).into_iter().next().unwrap();
+    let (_, state) = decode_snapshot(&std::fs::read(&mid).unwrap()).unwrap();
+    let shower = &state.care.showers[0];
+    assert_eq!((shower.seq, shower.delivered), (1, 40));
+    assert_eq!(shower.dose_permille, 1500, "the snapshot carries the amount that was asked for");
+
+    let second = run(&[
+        "--sink", "none", "--speed", "0", "--seconds", "7",
+        "--config", config.to_str().unwrap(),
+        "--state", split.to_str().unwrap(),
+    ]);
+    assert_eq!(second.loaded_tick, Some(460));
+    assert_eq!(second.final_tick, 600);
+    let (tick, split_hash) = newest_ecology(&split);
+    assert_eq!(tick, 600);
+    assert_eq!(
+        split_hash,
+        dosed_reference_ecology(&seeded.join("world-400.cubw"), &commands, 600),
+        "a resumed shower must deliver the remaining samples of its own amount"
+    );
+    let standard = [(1u64, 420u64, cubarium_core::care::CareKind::Rain, 1u8, 20u8, 20u8)];
+    assert_ne!(
+        split_hash,
+        reference_ecology(&seeded.join("world-400.cubw"), &standard, 600),
+        "a standard shower is a different world; if these matched the amount was lost"
     );
 }
 

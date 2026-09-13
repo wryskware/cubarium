@@ -235,6 +235,7 @@ mod tests {
                 u: 32.0,
                 v: 32.0,
             },
+            dose: cubarium_core::care::CareDose::STANDARD,
         };
         let mut q = CareApplied {
             cells: 5,
