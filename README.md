@@ -40,6 +40,26 @@ remain presentation changes: ecology still advances at 20 Hz, with 60 fps output
 See the [second-pass review](design/7_Research/animation-slice2-2026-09-12.md)
 for measurements, limits, and remaining work, including higher-resolution ideas.
 
+The web viewer can now mirror the **same owning runner** as the physical cube,
+using `--sink shim --mirror-web`. It fans out one encoded frame, not a second
+simulation; `/status` identifies the process, state directory and world tick.
+See the [verified shared-viewer handover](design/7_Research/shared-viewer-rollout-2026-09-12.md).
+
+Optional feed/rain/litter-cleanup has a committed core and host API with explicit
+source/export accounting, schema-7 migration and journaled input. The visible
+care panel and final crash-recovery checks are still in progress; care has not
+yet been deployed to the live cube. See the
+[copied-world browser checks](design/7_Research/care-browser-rollout-review-2026-09-12.md)
+and [short matched numerical audit](design/7_Research/care-matched-audit-2026-09-12.md).
+Zero input preserves autonomous ecology; cleanup removes litter, not a new toxin
+pool, and no hands-on autonomy preset has been tuned.
+
+Wrysk prefers Fable's **Lanternjaw** megafauna body. The
+[comparison studio](art/studies/megafauna/README.md) retains Veilwarden as an
+alternate; neither is a live predator yet. The
+[next rendering slice](art/studies/megafauna/integration-notes.md) covers the long
+body's bounded multipart rendering and seam tests before an ecology experiment.
+
 Start with the [design overview](design/README.md), then the
 [implementation plan](design/implementation-plan.md). The
 [owner's brief](design/brief.md) records the requirements; architecture and
