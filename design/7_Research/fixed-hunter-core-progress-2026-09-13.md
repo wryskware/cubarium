@@ -19,30 +19,53 @@ harness, live state or care file was touched.
 | Slice | State |
 | --- | --- |
 | Extension types, profile, validation, pure rules | landed |
-| Schema 10 with frozen schema 9 mirror, 9/8/7 migrations | landed |
+| Schema 11 with frozen 10/9/8/7 mirrors and the schema 10 refusal | landed |
 | Initializers (`start_hunter_trial`, budget-matched control) | landed |
 | Observer API (`hunter_view`, `drain_hunter_events`, telemetry) | landed |
 | Gut in stored totals, invariants and both energy audits | landed |
 | Tick behaviour: phases, escape, contact, capture, digestion, offspring | landed |
-| Deterministic test suite (25 behaviour tests + 4 migration tests) | landed |
+| Root-chart contact geometry, measured claws, shared body scale | landed |
+| Settlement metadata on events, timing facts in the view | landed |
+| Deterministic test suite (25 behaviour + 6 geometry + 6 migration) | landed |
 | Paired experiment runs, ecological gates | **not started — root owns the harness** |
 
-## API, frozen for the paired harness
+**Read this section if you integrated against the first delivery.** The geometry correction
+of `lanternjaw-core-art-integration-gaps-2026-09-13.md` changed the profile's shape, so the
+profile is `PROFILE_VERSION 2` and the snapshot is **schema 11**. Nothing in root's harness
+broke — `cargo check --workspace --all-targets --offline` is clean, because the harness matches
+event variants with `..` — but three things changed meaning:
 
-This is the surface root can build the experiment entrypoint against. It compiles today
-(`cargo check --workspace --all-targets --offline` is clean) and the behaviour slice added no
-new signature to it.
+- `profile.jaw_offset_px` / `jaw_reach_px` are gone. The capture effector is
+  `capture_offset_body: Vec2` with `capture_reach_px`, and the ingestion mouth is its own
+  `ingestion_offset_body`.
+- `HunterView.mouth` is gone. `capture_center` and `ingestion_center` are `Option`, and they
+  are `None` exactly when the point cannot honestly be drawn there.
+- Any archived schema 10 artifact **carrying a trial** no longer loads: it is refused by name.
+  Archived smoke files with an empty extension still load and migrate exactly.
+
+## Final API, for root and Fable
+
+Everything below compiles today (`cargo check --workspace --all-targets --offline` clean) and
+is what the behaviour actually uses: the world tests contact with the same numbers it
+publishes.
 
 ```rust
 // crates/cubarium-core/src/hunter.rs  (re-exported from the crate root)
-pub const PROFILE_VERSION: u32 = 1;
+pub const PROFILE_VERSION: u32 = 2;      // version 1 is refused, never reinterpreted
+pub const GRASP_EPS: f64 = 1e-6;         // how exactly a grasp centre must round-trip
 
-pub enum HunterRole { Lanternjaw }           // semantic role; genome.form only picks a rig
-pub struct HunterTarget { face: u8, u: f64, v: f64 }   // resolve() -> Option<SurfacePoint>
+pub enum HunterRole { Lanternjaw }       // semantic role; genome.form only picks a rig
+pub struct HunterTarget { face: u8, u: f64, v: f64 }
 
 pub struct FixedHunterProfile {
-    version: u32, role: HunterRole, genome: Genome, attacks_enabled: bool,
-    body_extent_px, jaw_offset_px, jaw_reach_px,
+    version, role, genome, attacks_enabled,
+    // three extents, kept distinct on purpose
+    body_extent_px,            // physical crowding extent (pair pass, repulsion) — 9.0
+    visual_query_extent_px,    // artwork query support around the root — 16.0
+    capture_offset_body: Vec2, // MEASURED near claw, body-local (13.2794, 1.1624)
+    capture_reach_px,          // trial grasp tolerance — 1.5
+    ingestion_offset_body: Vec2,   // the mouth, separately — (9.6, 0.0) at full extension
+    body_scale_exponent, body_scale_min,   // scale = max(min, (S/S_adult)^exponent) — 0.5, 0.2
     founder_reserve_fraction, founder_energy_fraction,
     perch_reserve_fraction, seek_reserve_fraction,
     prey_structure_min, prey_structure_fraction_max,
@@ -53,76 +76,132 @@ pub struct FixedHunterProfile {
     gut_capacity_material, handling_cost_per_second, digest_rate, meal_recovery_seconds,
     scavenge_fraction,
     reproduce_min_age_seconds, reproduce_reserve_fraction, reproduce_energy_fraction,
-    reproduce_interval_seconds, gestation_seconds, juvenile_growth_rate,   // all f64
+    reproduce_interval_seconds, gestation_seconds, juvenile_growth_rate,
 }
 impl FixedHunterProfile {
-    fn lanternjaw_trial(config: &WorldConfig) -> Self;   // the trial placeholders below
-    fn facultative(self) -> Self;                        // scavenge_fraction = 0.25
-    fn without_attacks(self) -> Self;                    // attacks_enabled = false
+    fn lanternjaw_trial(config: &WorldConfig) -> Self;   // the trial placeholders
+    fn facultative(self) -> Self;      // scavenge_fraction = 0.25
+    fn without_attacks(self) -> Self;  // attacks_enabled = false
     fn validate(&self) -> Result<(), String>;
+}
+
+// ---- the one shared geometry surface. Core owns it; the world and the observer use it.
+pub fn body_basis(heading: Vec2) -> Option<(Vec2, Vec2)>;   // (+x forward, +y clockwise side)
+pub fn body_scale(profile, structure, structure_adult) -> f64;
+
+pub struct ContactGeometry {        // already scaled
+    scale, capture_offset_body: Vec2, capture_reach_px,
+    ingestion_offset_body: Vec2, visual_query_extent_px,
+}
+impl ContactGeometry { fn of(profile, organism) -> Self; }
+
+pub struct ContactMeasure { body: Vec2, root_distance, effector_distance, tolerance }
+impl ContactMeasure { fn in_contact(&self) -> bool; }
+
+/// Unfold the prey FROM THE HUNTER ROOT through the rig's own shortest image, rotate into the
+/// body basis, compare with the scaled effector. This is the contact authority.
+pub fn measure_contact(images, root, heading, &geometry, prey_pos, prey_extent)
+    -> Option<ContactMeasure>;
+
+/// The surface point of a scaled body-local offset, or None when it cannot honestly be drawn
+/// there: the sweep reflected off the open rim, hit the fallback, resolved a vertex tie, or
+/// does not round-trip to the body coordinate it was built from.
+pub fn body_point(images, root, heading, offset_body: Vec2) -> Option<SurfacePoint>;
+
+pub struct ContactEvidence {        // the settlement, captured before removal
+    prey: OrganismId, prey_pos: SurfacePoint, prey_extent: f64,
+    hunter_pos: SurfacePoint, hunter_heading: Vec2,
+    geometry: ContactGeometry,
+    capture_center: Option<SurfacePoint>, ingestion_center: Option<SurfacePoint>,
+    measure: Option<ContactMeasure>,
+}
+impl ContactEvidence {
+    fn gather(images, profile, hunter, prey_id, prey) -> Self;
+    fn grants_capture(&self) -> bool;   // in contact AND a drawable grasp centre
 }
 
 pub enum HunterPhase { Perched, Stalking, Windup, Strike, Recovering, Handling }
 pub struct HunterMember {
-    id: OrganismId, phase: HunterPhase, phase_started_tick: u64, phase_ends_tick: u64,
-    target: Option<OrganismId>, attack_counter: u64, next_reproduction_tick: u64,
-    gut_material: f64, gut_energy: f64,
+    id, phase, phase_started_tick, phase_ends_tick, target, attack_counter,
+    next_reproduction_tick, gut_material, gut_energy,
+    entered_from: HunterPhase,   // persisted transition origin
+    episode: u64,                // the paid attempt this phase belongs to, 0 if none
 }
-pub struct HunterState {            // WorldState.hunters, appended at schema 10
-    profile: Option<FixedHunterProfile>, members: Vec<HunterMember>,   // sorted by full ID
-    founder_material_in, founder_energy_in, control_material_in, control_energy_in: f64,
-    control_deposited: bool, founders_placed: u32,
-    attacks_total, captures_total, predation_deaths_total,
-    hunter_deaths_total, hunter_births_total: u64,
-}
+pub struct HunterState { profile: Option<..>, members: Vec<HunterMember>, /* ledgers, counters */ }
 
 // world
 impl World {
-    pub fn hunters(&self) -> &HunterState;
-    pub fn start_hunter_trial(&mut self, profile: FixedHunterProfile, target: HunterTarget)
-        -> Result<HunterFounderReceipt, String>;
-    pub fn deposit_hunter_budget_control(&mut self, profile: FixedHunterProfile, target: HunterTarget)
+    fn hunters(&self) -> &HunterState;
+    fn start_hunter_trial(&mut self, profile, target) -> Result<HunterFounderReceipt, String>;
+    fn deposit_hunter_budget_control(&mut self, profile, target)
         -> Result<HunterControlReceipt, String>;
-    pub fn hunter_view(&self) -> Vec<HunterView>;
-    pub fn drain_hunter_events(&mut self) -> Vec<HunterEvent>;
+    fn hunter_view(&self) -> Vec<HunterView>;
+    fn drain_hunter_events(&mut self) -> Vec<HunterEvent>;
 }
 
-pub struct HunterFounderReceipt {   // what was actually placed and booked
-    id: OrganismId, tick: u64, pos: SurfacePoint,
-    structure: f64, reserve: f64, energy: f64, material_in: f64, energy_in: f64,
-    extent: f64, sense_radius: f64, jaw_offset_px: f64, jaw_reach_px: f64,
+pub struct HunterFounderReceipt {
+    id, tick, pos, structure, reserve, energy, material_in, energy_in,
+    extent, sense_radius, geometry: ContactGeometry,
 }
-pub struct HunterControlReceipt {   // the same inventory, deposited as local D/De
-    tick: u64, cell: u16, material_in: f64,
-    energy_in: f64, energy_stored: f64, energy_heat: f64,
-}
-pub struct HunterView {             // one per live member, keyed by full ID
-    id, role, phase, phase_progress: Option<f32>, pos, heading,
-    mouth: SurfacePoint, mouth_reach_px: f64, target: Option<OrganismId>,
-    structure, extent, juvenile, gut_material, gut_energy, gut_fraction: f32,
+pub struct HunterControlReceipt { tick, cell, material_in, energy_in, energy_stored, energy_heat }
+
+pub struct HunterView {
+    id, role, phase,
+    phase_progress: Option<f32>,        // convenience only
+    phase_started_tick, phase_ends_tick, entered_from, episode, attack_counter,
+    pos, heading,
+    geometry: ContactGeometry, body_scale: f64,
+    capture_center: Option<SurfacePoint>, ingestion_center: Option<SurfacePoint>,
+    target: Option<OrganismId>,
+    structure, structure_adult, extent, juvenile,
+    gut_material, gut_energy, gut_fraction: f32, gut_capacity,
     gestation: Option<f32>,
 }
-pub enum HunterEvent {              // transient, drained like LifeEvent
-    Attempt { tick, hunter, target: Option<OrganismId>, outcome: AttemptOutcome, energy_paid: f64 },
-    Capture { tick, hunter, prey, material: f64, energy: f64 },
-    Offspring { tick, parent, child },
-    Death { tick, id, cause: DeathCause, gut_material, gut_energy, gut_energy_stored },
+
+pub enum HunterEvent {
+    Attempt { tick, hunter, target: Option<OrganismId>, outcome: AttemptOutcome,
+              energy_paid: f64,
+              attack_counter: Option<u64>,          // None on an unpaid refusal
+              evidence: Option<ContactEvidence> },  // None when the target did not resolve
+    Capture { tick, hunter, prey, material, energy,
+              attack_counter: u64, evidence: ContactEvidence },
+    Offspring { tick, parent, child },              // unchanged
+    Death { tick, id, cause, gut_material, gut_energy, gut_energy_stored },
 }
 pub enum AttemptOutcome {
-    Captured, Missed, OutOfReach, TargetLost, TargetClaimed, Ineligible, Unaffordable,
+    Captured, Missed, OutOfReach, TargetLost, TargetClaimed, Ineligible,
+    GraspUnmapped,   // in reach, but of a grasp the artwork would clip — still paid
+    Unaffordable,    // refused before payment: no cost, no draw, no counter
 }
 ```
 
-`Telemetry` gained (all `#[serde(default)]`, all zero without hunters): `hunters`,
-`hunter_juveniles`, `hunter_attacks`, `hunter_captures`, `deaths_predation` (per sample, like
-`births`), `hunter_gut_material`, `hunter_gut_energy`, `hunter_attacks_total`,
-`hunter_captures_total`, `predation_deaths_total`, `hunter_births_total`,
-`hunter_deaths_total`, `hunter_material_in`, `hunter_energy_in`. `RenderView` and
-`OrganismView` are **unchanged**, as the work order requires.
+`Telemetry` is unchanged from the first delivery. `RenderView`, `OrganismView` and `LifeEvent`
+still have exactly their old fields.
 
-`DeathCause` gained an appended `Predation`; the three natural causes keep their order and
-their index in the persisted `deaths_total` triple. `LifeEvent` gained no variant: a consumed
-prey emits exactly one ordinary `LifeEvent::Death` with the new cause.
+### The geometry contract, in one paragraph
+
+Body coordinates are `stamp_rig`'s: `+x` along the heading, `+y` its clockwise side
+(`side = (-h.y, h.x)`), and a part at body offset `o` is drawn at chart offset `scale · o` from
+the root. Core measures contact by unfolding the **prey** from the **hunter root** through the
+same shortest image the rig is drawn through, rotating into that basis, and comparing with
+`geometry.capture_offset_body` inside `geometry.capture_reach_px + prey extent`. A physical
+centre (`capture_center`, `ingestion_center`) is published only when its sweep neither reflects
+nor falls back nor resolves a vertex tie **and** round-trips through the root's own unfolding to
+the body coordinate it was built from, within `GRASP_EPS`. Otherwise it is `None` — the world
+never publishes, and never captures from, a point the renderer would clip. Pass `body_scale`
+straight to `stamp_rig_scaled`; do not derive a second scale from `juvenile` or from `extent`.
+
+### Sensing, stopping and admission, reconciled with the real reach
+
+The claws close `|capture_offset| + capture_reach ≈ 14.8` px from the root, so the profile now
+senses at the genome's maximum `12` px and **pays for it** at the ordinary `sense_cost` every
+tick (`0.0024 e/s` against the old `0.0016`). Acquisition and retention use the pair pass, whose
+reach is `sense + both extents ≈ 22.4` px, comfortably past the grasp; a test asserts that
+relation rather than leaving it implicit. A stalk closes only while the grasp is still ahead of
+the prey: a prey already inside the reach envelope is **not** approached further, and a windup is
+admitted only within `capture_reach · scale + prey extent + strike_speed · strike_seconds` — the
+gap the paid strike can actually close. Capture is still evaluated **once, at the end of the paid
+strike**; a windup never kills.
 
 ### Both arms of an experiment
 
@@ -135,8 +214,8 @@ let control = other.deposit_hunter_budget_control(profile, target)?;  // budget-
 
 Both validate everything before touching the world, refuse a repeat, refuse the other arm's
 world, and return the amounts actually booked. Neither resets the world's opening history: the
-import is booked in the extension, so `mass_residual()` is unmoved by the initialization
-itself (asserted in debug).
+import is booked in the extension, so `mass_residual()` is unmoved by the initialization itself
+(asserted in debug).
 
 ## Accounting
 
@@ -153,32 +232,49 @@ at a zero residual. A capture, a digestion and a hunter's death are **internal t
 move no term of the energy identity except heat, which goes through the same compensated
 accumulator (`crate::accounting`) as every other payment.
 
-## Schema 10
+## Schema 11, and what happens to schema 10
 
-`SCHEMA_VERSION` is now **10**; schema 10 is schema 9 plus exactly `WorldState.hunters`, 41
-bytes when empty. `snapshot/v9.rs` freezes `WorldStateV9` (the field list at root's `1f0fc3a`)
-with `project()` and a migration that opens the extension empty. `decode_snapshot` accepts
-10, 9, 8 and 7 and reports which it read; 6 and older are still refused. `ecology_hash` is
-still the schema 7 projection, so existing care/no-care comparisons are unaffected.
+`SCHEMA_VERSION` is now **11**. Schema 10 appended `WorldState.hunters`; schema 11 changed the
+*shape* of that extension — the measured capture effector, the ingestion mouth, the visual query
+extent, the body-scale mapping, and each member's `entered_from` and `episode`.
+
+`snapshot/v10.rs` freezes the schema 10 world, including its own copies of the version 1 profile
+and member, and is the one migration in this crate that can refuse:
+
+- an **empty** schema 10 extension migrates exactly, like 9, 8 and 7 before it;
+- a schema 10 payload carrying an **active trial** is `SnapshotError::Invalid` naming why — its
+  profile cannot be given a capture geometry and a scale mapping it never had without silently
+  changing what a running experiment meant. Re-create the trial from its recorded recipe.
+
+`v10::project` returns `Option`: a schema 11 world with a trial running has no honest schema 10
+image. `ecology_hash` is still the schema 7 projection, so care/no-care comparisons are
+unaffected, and the genuine 9/8/7 continuations are byte-identical as before.
 
 ## Trial parameters (placeholders, not balance)
 
-Founder genome `size 2, reserve 2, mouth 1, speed 1, sense 8, metabolism 0.5, depth 0.85,
+Founder genome `size 2, reserve 2, mouth 1, speed 1, sense 12, metabolism 0.5, depth 0.85,
 swim 0.1, diet 0`, form 4, role `Lanternjaw`. At the default config that decodes to
-`S_adult = 2`, `R_max = 4`, `E_max = 4`, `v_max ≈ 0.2523 px/s`, maintenance `0.0025` per
+`S_adult = 2`, `R_max = 4`, `E_max = 4`, `v_max ~ 0.2523 px/s`, maintenance `0.0025` per
 structural unit per second, and the derived founder inventory is `S = 2, R = 2, E = 3` —
 **4 material and 7 energy**, derived from the config, never hardcoded.
 
-Behaviour: perch above 65 % reserve, hunt below 35 %; prey `0.15 ≤ S ≤ 0.75 · S_hunter` whose
-whole inventory fits the 4 m gut; 8 s stalk timeout; 0.6 s windup (no capture); 1 s strike at
-up to 1 px/s costing 0.08 e, charged in full at entry; capture
-`clamp(0.65 · S_h/(S_h + S_p), 0.1, 0.75)`; 5 s recovery after a failed attempt; handling
-0.002 e/s; digestion 0.1 m/s; 20 s pause after a meal; escape up to 2× the prey's own maximum
-speed within 240 °/s, both limited by the movement energy it has. Reproduction: full adult
-structure, 1200 s age, 80 % reserve, 75 % energy, no gut, no hunt, 1800 s since the last birth,
-120 s gestation, juvenile growth 0.002 m/s. The six-pixel jaw offset and 1.5 px reach are
-**placeholders the art worker must confirm against the visible jaw**; `HunterView.mouth` is the
-transported anchor contact is actually tested at.
+Geometry: capture effector `(13.2794, 1.1624)` with a `1.5` px tolerance, ingestion mouth
+`(9.6, 0)`, physical extent `9`, visual query extent `16`, scale `sqrt(S / S_adult)` floored at
+`0.2`. The effector is Fable's measured fully extended near claw, recomputed in the animation
+contract from the actual `ROWS`, `limb_pose`, `hunt_state` and column transforms; the arms were
+not shortened to keep the old six-pixel placeholder. The `1.5` px tolerance and the `16` px
+query extent are still **trial values**: the art worker must confirm that `HunterView`'s
+`capture_center` tracks the drawn claw and that the query radius covers the whole filtered rig.
+
+Behaviour: perch above 65 % reserve, hunt below 35 %; prey `0.15 <= S <= 0.75 · S_hunter` whose
+whole inventory fits the 4 m gut; 8 s stalk timeout; 0.6 s windup (no capture, and the hunter
+holds position while cocking); 1 s strike at up to 1 px/s costing 0.08 e, charged in full at
+entry; capture `clamp(0.65 · S_h/(S_h + S_p), 0.1, 0.75)` evaluated once at strike end; 5 s
+recovery after a failed attempt; handling 0.002 e/s; digestion 0.1 m/s; 20 s pause after a meal,
+starting in the tick the gut empties; escape up to 2x the prey's own maximum speed within
+240 deg/s, both limited by the movement energy it has. Reproduction: full adult structure,
+1200 s age, 80 % reserve, 75 % energy, no gut, no hunt, 1800 s since the last birth, 120 s
+gestation, juvenile growth 0.002 m/s.
 
 ## What a tick actually does now
 
@@ -191,8 +287,10 @@ continuation below.
    hunter, grew out of the window or stopped fitting the gut; drop a stalk or a windup that
    lost local sensing of its target; expire timed phases; perch when satiated or carrying.
    A hungry hunter with attacks enabled takes the **nearest eligible prey its own neighbour
-   list already holds** — sorted by `(distance, id)`, never a global scan. When the
-   transported jaw is in reach it winds up (0.6 s, no capture). At the end of the windup it
+   list already holds** — sorted by `(distance, id)`, never a global scan. It closes only while
+   the grasp is still ahead of the prey, and winds up (0.6 s, no capture, holding position)
+   when the prey is within the gap a paid strike can close, measured from the root in the
+   renderer's body basis. At the end of the windup it
    strikes **only if the whole strike cost is available**, and that cost is charged there and
    then, before any outcome is known; otherwise the attempt is refused with an explicit
    `Unaffordable` record, no draw and no attack counted. A member never grazes or eats fruit;
@@ -207,8 +305,11 @@ continuation below.
    and never below the speed it would ordinarily have had.
 4. **Capture settlement (after both creatures moved, before feeding and physiology).** Every
    paid attempt ending this tick is collected, ordered by its own seeded priority draw with
-   the full ID as the tiebreak, and resolved once. Contact is re-evaluated from the
-   transported jaw anchor. At most one hunter claims each prey; a contender whose target was
+   the full ID as the tiebreak, and resolved once. Contact is re-evaluated from the hunter
+   **root**, and a capture additionally requires a grasp centre the renderer could actually
+   draw — an off-rim or vertex-ambiguous grasp is `GraspUnmapped`, paid and refused. The whole
+   settlement is recorded as `ContactEvidence` **before** anything is removed. At most one
+   hunter claims each prey; a contender whose target was
    claimed is told so and keeps its payment. A claimed prey is removed exactly once, with one
    ordinary `LifeEvent::Death` carrying `DeathCause::Predation`, and its whole body **and
    escrow** move into the gut — an internal transfer with no source ledger and no detritus
@@ -218,7 +319,8 @@ continuation below.
    was carrying, stores `eta_m · min(1, rho/e_r) · q` as reserve, rejects the rest as
    energy-free litter in the hunter's own cell, and sends the spare energy to the battery or
    to heat. Reserve headroom shrinks the **portion**, not the assimilation. A finished meal
-   ends exactly empty; a satiated hunter keeps its meal, counted and checkpointed, with no
+   ends exactly empty **and the recovery pause starts in that same tick**, so a member is never
+   left handling nothing; a satiated hunter keeps its meal, counted and checkpointed, with no
    hidden discard timer.
 6. **Physiology.** A member gestates on the profile's clock, grows at the profile's juvenile
    ceiling, and buds only through the profile's own gate — local parent state only, never a
@@ -238,7 +340,7 @@ moved.
 ## Evidence
 
 ```text
-cargo test -p cubarium-core --offline          # 249 passed, 0 failed, 2 ignored
+cargo test -p cubarium-core --offline          # 257 passed, 0 failed, 2 ignored
 cargo clippy -p cubarium-core --offline --all-targets   # clean
 cargo check --workspace --all-targets --offline         # clean, no host edit needed
 ```
@@ -292,9 +394,10 @@ Two trial parameters are replaced in these fixtures to make outcomes determinist
   nothing and logs nothing.
 - **Death.** A hunter that starves hands its carried meal to the cell with its body, capped
   like a body with the remainder as heat, leaves the member list, and closes both identities.
-- **Geometry.** The jaw reaches **across a seam** onto a face the body is not on, and
-  **reflects off the open rim**, and captures in both cases; `HunterView.mouth` is the
-  transported anchor.
+- **Geometry.** The grasp reaches **across a seam** onto a face the body is not on and captures
+  there, and a reach aimed **past the open rim** captures nothing and publishes no centre —
+  the regression that replaced the earlier reflected-capture fixture, which proved a defect
+  rather than desired geometry.
 - **One funded offspring.** The escrow is funded at the world's own child fractions out of the
   parent; the child is a member with the fixed genome copied exactly **with mutation on**, the
   profile's extent, a fresh attack counter, and the parent starts its recovery interval;
@@ -311,45 +414,92 @@ Two trial parameters are replaced in these fixtures to make outcomes determinist
   aiming at itself, members without a profile, a control world holding a hunter, a negative
   import, and an unknown profile version.
 
+### `tests/hunter_geometry.rs`, 6 tests on the corrected contact
+
+- **Every published grasp centre round-trips through the root chart.** A sweep over five faces,
+  twenty-five positions each, eight headings and both offsets: where a centre is published, the
+  root's own shortest image of it is the body coordinate it was built from (within `GRASP_EPS`)
+  and its sweep neither reflected, fell back nor resolved a tie; where nothing is published, the
+  sweep explains why. The sweep exercises hundreds of publications and real refusals at rims and
+  vertices, so it is a property of the whole chart, not of one fixture.
+- **Contact is decided at the grasp, not at the thorax**, on an interior point and across an
+  ordinary seam: a prey at the published centre is captured, and a prey at the old six-pixel
+  placeholder never is.
+- **A juvenile grasps at its own published scale.** A member shrunk to a funded child's
+  structure has `body_scale = sqrt(S/S_adult)`, every published number is that one scale applied
+  to the profile, it captures at its own claws, and a prey at the *adult* reach is out of its
+  grasp entirely.
+- **Capture metadata is the settlement.** The evidence measures its own reported pairing when
+  recomputed from its own numbers, the grasp and mouth are distinct points, and the `Capture`
+  and its paid `Attempt` carry one `attack_counter` key that equals the member's counter and its
+  `episode`.
+- **Unpaid refusals carry no paid key**, so they can never alias a paid attempt, and a stale
+  target carries no prey position.
+- **Phase timing and episode identity survive a restart.** The view's timing is the member's
+  timing; a checkpoint taken mid-strike reloads to the same hash and the same member record, and
+  the resumed run reproduces the event stream key for key.
+
+### `tests/hunter_migration.rs`, 6 tests
+
+The byte-exact schema 9 continuation above, the schema 8 and 7 projections, the inert
+never-opted-in world, plus: a schema 10 snapshot **without** a trial migrates exactly, and one
+**with** an active trial is refused by name while a running schema 11 trial refuses to project
+backwards.
+
 ## Open, and not claimed
 
 - **No ecological claim at all.** These are unit and integration tests of mechanism, not
-  evidence about balance. Long-run prey margins are *not* validated: the twelve-hour
-  comparisons retain total population but lose skimmers and founder diversity, so a green
-  suite is not a reason to put this lineage anywhere near the live world.
-- **The paired experiment has not been run.** Root owns the harness and the runs: twelve
-  paired seeds from documented mature snapshots, stratified by initial prey population, with
-  the four arms the plan names (untouched baseline, budget-matched deposit, attack-disabled
-  living hunter, specialist and facultative hunters), two hours per seed before anything
-  longer.
-- **The jaw geometry is unconfirmed.** Six pixels forward with 1.5 px reach are placeholders;
-  the art worker must confirm that `HunterView.mouth` tracks the visible jaw before any
-  integration. The 9 px body extent is the world's own `body_extent_max`, not a measurement of
-  the assembled silhouette.
+  evidence about balance. Long-run prey margins are *not* validated: the twelve-hour comparisons
+  retain total population but lose skimmers and founder diversity, so a green suite is not a
+  reason to put this lineage anywhere near the live world.
+- **The paired experiment has not been run, and this package does not run it.** Root owns the
+  harness and the runs: **six arms** (untouched, budget control, specialist off/on, facultative
+  off/on) across **all twelve seeds** at two hours, per
+  `hunter-experiment-contract-2026-09-13.md`. Root's harness `5f27172` and its smokes exist; the
+  biological screen was waiting on exactly the capture metadata and geometry this package now
+  delivers.
+- **The art confirmation is still owed.** `capture_offset_body` is recomputed from Fable's
+  source in the animation contract, not measured against a rendered frame; the `1.5` px
+  tolerance and the `16` px query extent are trial values. Debug contact overlays and the
+  seam/vertex/rim visual comparison belong to the art package, which owns `lanternjaw.rs`,
+  `multipart.rs` and the whole-rig scaling this core hands `body_scale` to.
 - **Untuned trial numbers with a known demand.** At the founder defaults, maintenance alone is
-  about 18 e/hour before sensing and movement; how much prey turnover that actually requires
-  is a measurement nobody has made yet.
+  about 18 e/hour before sensing and movement, and sensing now costs `0.0024 e/s`; how much prey
+  turnover that actually requires is a measurement nobody has made yet.
+- **Events are not history.** The hunter event stream is transient. Root must journal what it
+  wants to keep: a reloaded snapshot does not replay old captures.
 
 ## Remaining gates before this lineage goes anywhere
 
-1. Root's paired runs pass their accounting checks and do not universally collapse the prey.
-2. Fable confirms the jaw anchor and maps `HunterRole::Lanternjaw` to the body; only then does
-   the render integration land.
-3. Wrysk's explicit authorization for any live introduction or any default change. Nothing in
-   this package alters a default: an untouched world has no profile, no members and no
-   imports, and steps exactly as the pre-hunter build did.
+1. Root's six-arm, twelve-seed two-hour screen completes with its accounting gates passing, and
+   its capture/recovery metrics come out of the new `ContactEvidence` rather than an
+   approximation from the previous tick.
+2. Fable confirms `capture_center` tracks the drawn claw at rest, full coil, settlement and
+   recoil, at adult and juvenile scale, and maps `HunterRole::Lanternjaw` to the body; the
+   renderer scales the whole rig by the published `body_scale`.
+3. Wrysk's explicit authorization for any live introduction or default change. Nothing here
+   alters a default: an untouched world has no profile, no members and no imports, and steps
+   exactly as the pre-hunter build did — the byte-exact schema 9 continuation still proves it.
 
-## Deviations from the plan, and why
+## Deviations, and why
 
-- **Schema 10, not the plan's schema 9.** The accounting correction took 9 (`b47eacc`), as the
-  work order says; the hunter extension is appended after `energy_correction`, and the frozen
-  `WorldStateV9` mirror preserves the whole schema 9 prefix.
+- **Schema 11, and a refusal.** The geometry correction changed the persisted profile and member
+  shape. Rather than smuggle a new meaning into the same wire version, the schema is bumped, the
+  old shape is frozen in `snapshot/v10.rs`, empty schema 10 worlds migrate exactly and an active
+  schema 10 trial is refused by name.
 - **Two draws per paid attempt, not one.** The plan asks for "one draw per paid attempt" and
   also for a "dedicated seeded draw" for contested-claim priority. Deriving both from one draw
-  would correlate a hunter's claim priority with its own capture roll, so the priority and the
-  capture roll are separate counters in the same stream. Nothing else consumes a draw.
-- **`RenderView` and `OrganismView` untouched.** Per the work order, the hunter view is
-  published separately so Fable's concurrent host work is not forced to change.
+  would correlate a hunter's claim priority with its own capture roll, so priority and capture
+  are separate counters in the same stream (`2·n` and `2·n + 1`). Nothing else consumes a draw.
+- **Sensing raised in the world, not in the presenter.** Eight pixels could not acquire prey the
+  claws could grasp. The genome now senses at its own maximum, 12 px, and pays the ordinary
+  sense cost for it every tick.
+- **`HunterView.mouth` removed rather than kept as a lie.** It reported a reflected point as if
+  it were visible. The replacement names capture and ingestion separately and admits `None`.
 - **A refused birth waits one gestation**, not the full reproduction interval: long enough that
   a world at its cap cannot retry every tick, short enough that a refusal is not a de facto
   half-hour ban. The plan asks only for "a retry/recovery interval".
+- **The persisted transition origin is two fields, not an animation state.** `entered_from` and
+  `episode` are semantic facts the tick already knew; the adapter reads them instead of guessing
+  a recoil's origin from durations. No pose, no timeline and no generic animation state entered
+  the snapshot.
