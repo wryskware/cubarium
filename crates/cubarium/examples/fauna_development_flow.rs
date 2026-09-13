@@ -41,6 +41,7 @@ use cubarium_core::{
 };
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::path::PathBuf;
 
 /// The revision this worktree is based on. Supplied, not derived: see `notes`.
@@ -792,8 +793,20 @@ fn notes() -> Value {
     ])
 }
 
+/// Reserve the final path before any expensive replay. An interrupted run can leave an
+/// empty/partial artifact (which readers must reject), but can never replace prior evidence.
+fn reserve_output(path: &std::path::Path) -> Result<std::fs::File> {
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating output parent {}", parent.display()))?;
+    }
+    std::fs::OpenOptions::new().write(true).create_new(true).open(path)
+        .with_context(|| format!("output must be a NEW file: {}", path.display()))
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
+    let mut output = reserve_output(&args.out)?;
     let horizon = args.ticks;
     let cohort = &args.cohort;
     let seed = args.seed;
@@ -1320,12 +1333,10 @@ fn main() -> Result<()> {
         "notes": notes(),
     });
 
-    if let Some(dir) = args.out.parent() {
-        std::fs::create_dir_all(dir).ok();
-    }
     let encoded = serde_json::to_vec(&artifact)?;
-    std::fs::write(&args.out, &encoded)
+    output.write_all(&encoded)
         .with_context(|| format!("writing {}", args.out.display()))?;
+    output.sync_all().context("syncing the completed artifact")?;
 
     // ----- The gate table, printed whatever the outcome -----
     println!();
@@ -1428,6 +1439,40 @@ fn crc32_of(data: &[u8]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn output_reservation_refuses_existing_files_directories_and_symlinks() {
+        let dir = std::env::temp_dir().join(format!("cubarium-fauna-output-{}-{}",
+            std::process::id(), std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("nested/artifact.json");
+        let mut first = reserve_output(&path).unwrap();
+        first.write_all(b"retained evidence").unwrap();
+        assert!(reserve_output(&path).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"retained evidence");
+        assert!(reserve_output(&dir).is_err());
+        #[cfg(unix)]
+        {
+            let link = dir.join("link.json");
+            std::os::unix::fs::symlink(&path, &link).unwrap();
+            assert!(reserve_output(&link).is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), b"retained evidence");
+        }
+        drop(first);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn an_interrupted_empty_reservation_cannot_be_reused() {
+        let path = std::env::temp_dir().join(format!("cubarium-fauna-interrupted-{}-{}.json",
+            std::process::id(), std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        drop(reserve_output(&path).unwrap());
+        assert!(reserve_output(&path).is_err());
+        assert!(std::fs::read(&path).unwrap().is_empty());
+        std::fs::remove_file(path).unwrap();
+    }
 
     #[test]
     fn sha256_matches_known_vectors() {
