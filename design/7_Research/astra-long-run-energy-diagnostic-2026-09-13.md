@@ -94,3 +94,48 @@ attributing the error to a transfer rule.
 Current source makes long-counter rounding plausible but does not establish it
 as the cause of root's measured failures. This comparison should precede paid
 hunter transfer implementation; no tolerance relaxation is proposed.
+
+## Measured disposition: seed 1, repeated care, twelve hours
+
+Read the actual reports in
+`captures/care-longitudinal-2026-09-13/seed1-repeated-window200.json` and
+`seed1-repeated-window20.json`. Both run 864,000 ticks from seed 1 with care every
+2,400 ticks. The no-care world's full state hash is `2601251707681483130` in both
+reports; the cared world's hash is `5399110610278733365` in both. Changing observer
+cadence therefore did not change either world state.
+
+The cared persisted-counter peak is `2.0506936266428966e-5`, above the unchanged
+limit `1.9563930834586353e-5`: its original audit still fails. Independent windowed
+peaks are `6.281197784119286e-10` at 200 ticks and `2.8410340746631846e-10` at
+20 ticks. Both report a maximum care-boundary error of `4.547473508864641e-13`.
+
+At the final tick, cared persisted energy residual is `2.034550846019556e-5`.
+The persistent-minus-windowed heat discrepancy is `2.0344043150544167e-5` in
+the 200-tick report and `2.034491626545787e-5` in the 20-tick report. Light
+discrepancy is only `8.585629984736443e-10`; feed discrepancy is zero and cleanup
+discrepancy is `4.547473508864641e-13`. The signed discrepancy identity above
+accounts for the failed residual. The no-care arm also has a roughly `1.68337e-5`
+heat-counter discrepancy, although its peak remains inside this run's limit.
+
+Conclusion: these matched reports establish persisted heat-counter accumulation
+rounding as the dominant cause of this seed/schedule's failed energy audit. They
+do not establish every other failed seed's cause or retroactively pass persisted
+accounting. In this case the independent stock/flow observations provide strong
+evidence against a care-transfer leak at the measured scale.
+
+The narrow correction is compensated accumulation of the persisted energy source
+and sink ledgers, retaining their current units and threshold. Persist the
+compensation state with an explicit snapshot migration so restart does not discard
+it. Coordinate that extension with the next schema change rather than issuing
+competing schema numbers for accounting and hunters. Migrate old compensation to
+zero; the existing cumulative totals are historical observations and their lost
+low-order bits cannot be recovered from a snapshot alone.
+
+Verify from a fixed opening snapshot that corrected ledger accumulation tracks
+the independently windowed totals under the original threshold, and test resumed
+versus uninterrupted compensated state exactly. Compare fields, organisms,
+weather and care transfers to the pre-correction run; full state hashes will
+necessarily change when the audited counters change, so do not mistake that
+intended correction for altered ecological behavior. Repeat the other failed
+seed/schedule cases before closing the long-run accounting issue. No correction
+was implemented by this review.
