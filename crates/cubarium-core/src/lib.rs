@@ -7,6 +7,7 @@
 //! explicit schema version.
 //!
 //! Module map:
+//! - [`care`]: the optional bounded feed / rain / clean commands and their ledgers.
 //! - [`config`]: every rate and bound, serde-loadable, with the spec's initial values as defaults.
 //! - [`rng`]: counter-based keyed draws partitioned by stream.
 //! - [`ids`]: generation-checked organism slots.
@@ -23,6 +24,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod care;
 pub mod config;
 pub mod controller;
 pub mod events;
@@ -39,10 +41,16 @@ pub mod view;
 pub mod water;
 pub mod world;
 
+pub use care::{
+    ActiveShower, CareApplied, CareCommand, CareKind, CareOutcome, CareReceipt, CareState, CareTarget,
+};
 pub use config::WorldConfig;
 pub use events::LifeEvent;
 pub use ids::OrganismId;
-pub use snapshot::{SCHEMA_VERSION, SnapshotError, decode_snapshot, encode_snapshot};
+pub use snapshot::{
+    SCHEMA_V7, SCHEMA_VERSION, SnapshotError, WorldStateV7, decode_snapshot, ecology_hash,
+    encode_snapshot,
+};
 pub use telemetry::Telemetry;
 pub use view::RenderView;
 pub use world::{World, WorldState};

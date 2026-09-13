@@ -9,6 +9,9 @@ use cubarium_surface::{
     Vec2, cell_of, chart_images, face_frame, travel_into, unfold_with,
 };
 
+use crate::care::{
+    ActiveShower, CareApplied, CareCommand, CareKind, CareOutcome, CareReceipt, CareState,
+};
 use crate::config::{FounderKind, WorldConfig};
 use crate::controller::{Decision, Observation, TurnGate, decide};
 use crate::events::LifeEvent;
@@ -22,7 +25,7 @@ use crate::rng::{Counter, Stream, normal, unit};
 use crate::telemetry::Telemetry;
 use crate::view::{FieldDump, OrganismView, RenderView};
 use crate::water;
-use crate::{DT, pairs, snapshot};
+use crate::{DT, care, pairs, snapshot};
 
 /// Everything a checkpoint must capture. Transient caches are rebuilt on load.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -47,6 +50,12 @@ pub struct WorldState {
     pub rain_in_total: f64,
     #[serde(default)]
     pub evap_out_total: f64,
+    /// Optional care (`design/7_Research/care-contract-2026-09-12.md`): the sequence cursor,
+    /// any shower in progress, and the six ledgers the mass, energy and water identities
+    /// carry. **Appended last**: schema 8 is schema 7 plus exactly this field, which is what
+    /// makes [`crate::snapshot::WorldStateV7`] a byte-exact projection.
+    #[serde(default)]
+    pub care: CareState,
 }
 
 impl WorldState {
@@ -82,6 +91,7 @@ impl WorldState {
             }
         }
         self.fields.check(self.config.detritus.energy_cap)?;
+        self.care.validate(self.tick)?;
 
         for blob in self.weather.light.iter().chain(self.weather.moisture.iter()) {
             if !blob.center.iter().chain(blob.axis.iter()).all(|c| c.is_finite()) || !blob.rate.is_finite() {
@@ -240,6 +250,12 @@ pub struct World {
     rain_source: Box<[f64; CELL_COUNT]>,
     /// This tick's rain rate per cell (d/s), for the render view.
     rain: Box<[f32; CELL_COUNT]>,
+    /// This tick's *manual* rain rate per cell (d/s), rebuilt from the active shower. Only
+    /// handed to `water::step` while a shower is running; with no shower the water stage is
+    /// passed `None` and runs the pre-care arithmetic unchanged.
+    manual_rain: Box<[f64; CELL_COUNT]>,
+    /// The shower envelope, computed once: static for the life of the process.
+    rain_envelope: [f64; care::RAIN_SAMPLES],
     scratch: (ScalarField, ScalarField),
     water_scratch: ScalarField,
     /// `sense_rings[cell][d − 1]`: the cells at graph distance exactly `d` from `cell`, for
@@ -357,6 +373,7 @@ impl World {
             heat_out_total: 0.0,
             rain_in_total: 0.0,
             evap_out_total: 0.0,
+            care: CareState::default(),
         };
         Ok(World::assemble(state, habitat, initial_material))
     }
@@ -387,7 +404,12 @@ impl World {
         state.validate()?;
         let habitat = Habitat::new(&state.config.habitat, state.config.seed);
         let organism_material: f64 = state.organisms.iter().map(|(_, o)| o.material()).sum();
-        let initial_material = state.fields.total_material() + organism_material - state.external_material_in;
+        // The same terms `mass_residual` subtracts, so a loaded world reads zero: care has
+        // imported `feed_material_in` and exported `clean_material_out` since creation.
+        let initial_material = state.fields.total_material() + organism_material
+            - state.external_material_in
+            - state.care.feed_material_in
+            + state.care.clean_material_out;
         Ok(World::assemble(state, habitat, initial_material))
     }
 
@@ -405,6 +427,8 @@ impl World {
             moisture: Box::new([0.0; CELL_COUNT]),
             rain_source: Box::new([0.0; CELL_COUNT]),
             rain: Box::new([0.0; CELL_COUNT]),
+            manual_rain: Box::new([0.0; CELL_COUNT]),
+            rain_envelope: care::rain_envelope(),
             scratch: (ScalarField::zeros(), ScalarField::zeros()),
             water_scratch: ScalarField::zeros(),
             sense_rings: Vec::new(),
@@ -435,7 +459,13 @@ impl World {
     pub fn step(&mut self) -> &TickCounters {
         let dt = DT;
         #[cfg(debug_assertions)]
-        let audit = (stored_energy(&self.state), self.state.light_in_total, self.state.heat_out_total);
+        let audit = (
+            stored_energy(&self.state),
+            self.state.light_in_total,
+            self.state.heat_out_total,
+            self.state.care.feed_energy_in,
+            self.state.care.clean_energy_out,
+        );
         #[cfg(debug_assertions)]
         let water_audit = (
             self.state.fields.w.iter().sum::<f64>(),
@@ -452,6 +482,8 @@ impl World {
                 moisture,
                 rain_source,
                 rain,
+                manual_rain,
+                rain_envelope,
                 scratch,
                 water_scratch,
                 sense_rings,
@@ -476,6 +508,7 @@ impl World {
                 heat_out_total,
                 rain_in_total,
                 evap_out_total,
+                care,
             } = state;
             let cfg: &WorldConfig = config;
             let org_cfg = &cfg.organism;
@@ -498,10 +531,29 @@ impl World {
 
             // 2b. Water: rain, downhill flow, evaporation (`design/water.md`). Before the
             //     field reactions, so growth sees this tick's wetness and flooding.
+            //
+            //     Manual rain (the care contract) joins the natural rate here and nowhere
+            //     else, so `rain[c]` publishes what actually falls and the depth is inside
+            //     `rain_in_total` once. With no shower running the water stage is handed
+            //     `None` and executes the pre-care arithmetic operation for operation.
+            let manual: Option<&[f64; CELL_COUNT]> = if care.showers.is_empty() {
+                None
+            } else {
+                manual_rain.fill(0.0);
+                for shower in care.showers.iter() {
+                    let k = shower.delivered as usize;
+                    let Some(&e) = rain_envelope.get(k) else { continue };
+                    for (c, w) in shower.cells.iter().zip(shower.weights.iter()) {
+                        manual_rain[usize::from(*c)] += care::RAIN_DEPTH_TOTAL * w * e;
+                    }
+                }
+                Some(&**manual_rain)
+            };
             let water_ledger = water::step(
                 &mut fields.w,
                 &cfg.water,
                 water::Drivers { terrain: &habitat.terrain, light, rain_source },
+                manual,
                 rain,
                 graph,
                 water_scratch,
@@ -510,6 +562,15 @@ impl World {
             counters.evap_out += water_ledger.evap_out;
             *rain_in_total += water_ledger.rain_in;
             *evap_out_total += water_ledger.evap_out;
+            if !care.showers.is_empty() {
+                // Book the manual share of the depth that actually landed, then retire the
+                // shower once its 120th sample has been delivered.
+                care.rain_depth_in += water_ledger.manual_in;
+                for shower in care.showers.iter_mut() {
+                    shower.delivered += 1;
+                }
+                care.showers.retain(|s| s.delivered < care::RAIN_TICKS);
+            }
 
             // 3. Field reactions (growth, mortality, decomposition, N diffusion).
             let ledger = fields.react(cfg, light, moisture, graph, scratch);
@@ -961,9 +1022,14 @@ impl World {
             if let Err(e) = self.check_invariants() {
                 panic!("invariant violated after tick {}: {e}", self.state.tick);
             }
-            // The energy audit is an exact identity: every joule is light, heat, or stored.
-            let (before, light, heat) = audit;
-            let booked = (self.state.light_in_total - light) - (self.state.heat_out_total - heat);
+            // The energy audit is an exact identity: every joule is light, heat, stored, or
+            // (with care) fed in or cleaned out. Feed and clean commit at a boundary, never
+            // inside a step, so their terms are zero here; they are written out anyway so
+            // the identity the contract states is the identity the code checks.
+            let (before, light, heat, fed, cleaned) = audit;
+            let booked = (self.state.light_in_total - light) - (self.state.heat_out_total - heat)
+                + (self.state.care.feed_energy_in - fed)
+                - (self.state.care.clean_energy_out - cleaned);
             let drift = (stored_energy(&self.state) - before) - booked;
             assert!(drift.abs() < AUDIT_TOLERANCE, "energy audit drifted by {drift:e} in tick {}", self.state.tick);
             // The water budget is the same kind of identity: `Δ Σw == rain_in − evap_out`.
@@ -982,11 +1048,174 @@ impl World {
         self.state.fields.w.iter().sum::<f64>() - (self.state.rain_in_total - self.state.evap_out_total)
     }
 
-    /// Mass invariant: `Σ fields + Σ organisms (incl. escrow) − external_material_in − initial`.
-    /// Should stay within `1e-9 · initial` per hour of simulated time; telemetry reports it.
+    /// Mass invariant: `Σ fields + Σ organisms (incl. escrow) − external_material_in
+    /// − feed_material_in + clean_material_out − initial`. Should stay within
+    /// `1e-9 · initial` per hour of simulated time; telemetry reports it. Fed crumbs are
+    /// material admitted from outside and cleaned litter is material exported, exactly like
+    /// the founders in `external_material_in`.
     pub fn mass_residual(&self) -> f64 {
         let organisms: f64 = self.state.organisms.iter().map(|(_, o)| o.material()).sum();
-        self.state.fields.total_material() + organisms - self.state.external_material_in - self.initial_material
+        self.state.fields.total_material() + organisms
+            - self.state.external_material_in
+            - self.state.care.feed_material_in
+            + self.state.care.clean_material_out
+            - self.initial_material
+    }
+
+    /// The care ledgers, the sequence cursor, and any shower in progress.
+    pub fn care(&self) -> &CareState {
+        &self.state.care
+    }
+
+    /// Apply one care command at a held boundary
+    /// (`design/7_Research/care-contract-2026-09-12.md`).
+    ///
+    /// Admission is strict and total:
+    /// - only `seq == care.admitted_seq + 1` is accepted; any other `seq` is
+    ///   `Rejected("out of order")` **without changing a single value**;
+    /// - `world.tick()` must equal `cmd.apply_after_tick`, else `Rejected("wrong boundary")`,
+    ///   again without changing anything (the host treats it as a recovery failure);
+    /// - a command with the expected `seq` at the right boundary **always** consumes that
+    ///   seq, including when its own validation rejects it, so replay is a pure function of
+    ///   the journal.
+    ///
+    /// Feed and Clean change the fields immediately. Rain registers a shower whose first
+    /// sample falls in the step `B → B + 1`.
+    pub fn apply_care(&mut self, cmd: &CareCommand) -> CareReceipt {
+        let tick = self.state.tick;
+        let receipt = |outcome| CareReceipt { seq: cmd.seq, tick, outcome };
+        if cmd.seq != self.state.care.admitted_seq.wrapping_add(1) {
+            return receipt(CareOutcome::Rejected("out of order".into()));
+        }
+        if tick != cmd.apply_after_tick {
+            return receipt(CareOutcome::Rejected("wrong boundary".into()));
+        }
+        // From here the seq is spent whatever happens next.
+        self.state.care.admitted_seq = cmd.seq;
+        let Some(center) = cmd.target.resolve() else {
+            return receipt(CareOutcome::Rejected("invalid target".into()));
+        };
+        let outcome = match cmd.kind {
+            CareKind::Feed => self.feed(center),
+            CareKind::Rain => self.shower(cmd.seq, tick, center),
+            CareKind::Clean => self.clean(center),
+        };
+        receipt(outcome)
+    }
+
+    /// Consume `seq` with no effect. The host calls this for a record it durably aborted, so
+    /// a replay of the journal reaches the same cursor as the run that wrote it. Returns
+    /// false (and changes nothing) when `seq` is not the next one.
+    pub fn void_care(&mut self, seq: u64) -> bool {
+        if seq != self.state.care.admitted_seq.wrapping_add(1) {
+            return false;
+        }
+        self.state.care.admitted_seq = seq;
+        true
+    }
+
+    /// "Scatter food": charged organic crumbs into `D` and `De`. Per cell `D += m·w_c` and
+    /// `De += rho·(m·w_c)` with `rho = detritus.energy_cap`, so `De ≤ energy_cap · D` is
+    /// preserved cell by cell and existing scavenging diets can eat all of it. No organism
+    /// state is touched: they find it by the sensing they already have.
+    fn feed(&mut self, center: CellId) -> CareOutcome {
+        let m = care::FEED_MATERIAL;
+        // The bound is the nominal dose. The ledger books the actual f64 sums, which trail
+        // the nominal total by a few ulps (a rim footprint sums `3 · w_c` to
+        // `3.0000000000000004`), so without the tolerance the allowance would silently buy
+        // one fewer feed at the rim than in the interior.
+        if self.state.care.allowance_used + m > care::FEED_ALLOWANCE + care::ALLOWANCE_TOLERANCE {
+            return CareOutcome::Rejected("allowance exhausted".into());
+        }
+        let rho = care::feed_energy_density(&self.state.config);
+        let footprint = care::footprint(&self.graph, center, care::FEED_HOPS);
+        let (mut material, mut energy) = (0.0, 0.0);
+        for (cell, w) in &footprint {
+            let add = m * w;
+            let add_energy = rho * add;
+            self.state.fields.d[cell.index()] += add;
+            self.state.fields.de[cell.index()] += add_energy;
+            material += add;
+            energy += add_energy;
+        }
+        self.state.care.feed_material_in += material;
+        self.state.care.feed_energy_in += energy;
+        self.state.care.allowance_used += material;
+        CareOutcome::Applied(CareApplied {
+            material_in: material,
+            energy_in: energy,
+            cells: footprint.len() as u32,
+            ..CareApplied::default()
+        })
+    }
+
+    /// "Shower": register the one active shower. Cells and weights are resolved now, so a
+    /// snapshot taken mid-shower resumes at the next undelivered sample over the same
+    /// footprint. The weather source is never mutated.
+    fn shower(&mut self, seq: u64, tick: u64, center: CellId) -> CareOutcome {
+        if !self.state.care.showers.is_empty() {
+            return CareOutcome::Rejected("shower active".into());
+        }
+        let footprint = care::footprint(&self.graph, center, care::RAIN_HOPS);
+        let cells = footprint.len() as u32;
+        self.state.care.showers.push(ActiveShower {
+            seq,
+            apply_after_tick: tick,
+            cells: footprint.iter().map(|(c, _)| c.0).collect(),
+            weights: footprint.iter().map(|(_, w)| *w).collect(),
+            delivered: 0,
+        });
+        CareOutcome::Applied(CareApplied {
+            // The scheduled total; what lands is booked tick by tick in `rain_depth_in`.
+            water_depth: care::RAIN_DEPTH_TOTAL,
+            cells,
+            ends_tick: Some(tick + u64::from(care::RAIN_TICKS)),
+            ..CareApplied::default()
+        })
+    }
+
+    /// "Clean up litter": export `D` and the chemical energy it carried, at the cell's own
+    /// energy density, so `De ≤ energy_cap · D` still holds. `N`, `P`, `F`, `w` and every
+    /// organism are untouched, and the exported energy is an export, not heat dissipated
+    /// inside the world.
+    fn clean(&mut self, center: CellId) -> CareOutcome {
+        let footprint = care::footprint(&self.graph, center, care::CLEAN_HOPS);
+        let (mut material, mut energy) = (0.0, 0.0);
+        for (cell, w) in &footprint {
+            let i = cell.index();
+            let d = self.state.fields.d[i];
+            if d <= 0.0 {
+                continue;
+            }
+            let take = (care::CLEAN_FRACTION * d).min(care::CLEAN_MATERIAL * w);
+            if take <= 0.0 {
+                continue;
+            }
+            let de = self.state.fields.de[i];
+            let removed = (de * (take / d)).min(de).max(0.0);
+            self.state.fields.d[i] = d - take;
+            self.state.fields.de[i] = de - removed;
+            material += take;
+            energy += removed;
+        }
+        if material <= 0.0 {
+            return CareOutcome::Rejected("nothing to remove".into());
+        }
+        self.state.care.clean_material_out += material;
+        self.state.care.clean_energy_out += energy;
+        // A clean gives the allowance back, but never turns into credit.
+        self.state.care.allowance_used = (self.state.care.allowance_used - material).max(0.0);
+        let q = CareApplied {
+            material_out: material,
+            energy_out: energy,
+            cells: footprint.len() as u32,
+            ..CareApplied::default()
+        };
+        if material + care::WEIGHT_TOLERANCE < care::CLEAN_MATERIAL {
+            CareOutcome::Partial(q)
+        } else {
+            CareOutcome::Applied(q)
+        }
     }
 
     /// Full invariant check (fields finite/nonnegative, organisms finite, positions canonical,
@@ -995,6 +1224,9 @@ impl World {
     pub fn check_invariants(&self) -> Result<(), String> {
         let cfg = &self.state.config;
         self.state.fields.check(cfg.detritus.energy_cap)?;
+        // The care ledgers and any shower's progress are runtime invariants too: catching a
+        // defect here stops a checkpoint that would not load back.
+        self.state.care.validate(self.state.tick)?;
         let cap = cfg.capacity.max_organisms as usize;
         if self.state.organisms.len() > cap {
             return Err(format!("population {} exceeds cap {cap}", self.state.organisms.len()));
@@ -1202,6 +1434,14 @@ impl World {
             population_by_form,
             mean_height_by_form,
             state_hash: snapshot::state_hash(&self.state),
+            ecology_hash: snapshot::ecology_hash(&self.state),
+            care_admitted_seq: self.state.care.admitted_seq,
+            care_feed_material_in: self.state.care.feed_material_in,
+            care_feed_energy_in: self.state.care.feed_energy_in,
+            care_rain_depth_in: self.state.care.rain_depth_in,
+            care_clean_material_out: self.state.care.clean_material_out,
+            care_clean_energy_out: self.state.care.clean_energy_out,
+            care_allowance_used: self.state.care.allowance_used,
         };
         self.counters = TickCounters::default();
         self.neighbors.pairs_considered = 0;

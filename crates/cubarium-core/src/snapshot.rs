@@ -4,8 +4,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::world::WorldState;
 
-/// Bumped whenever `WorldState` or any nested type changes shape.
-pub const SCHEMA_VERSION: u32 = 7;
+pub mod v7;
+
+pub use v7::{SCHEMA_V7, WorldStateV7};
+
+/// Bumped whenever `WorldState` or any nested type changes shape. Version 8 appends
+/// `WorldState.care`; [`SCHEMA_V7`] payloads are still accepted through [`v7`].
+pub const SCHEMA_VERSION: u32 = 8;
 pub const MAGIC: [u8; 4] = *b"CUBW";
 /// Fixed header length: magic 4, schema 4, build-id length 2, then the build id bytes,
 /// then payload length 8 and CRC32 4 (all little-endian).
@@ -62,6 +67,11 @@ pub fn encode_snapshot(state: &WorldState, build_id: &str) -> Vec<u8> {
 
 /// Validate magic, schema, length, CRC, decode, then `state.validate()`; every failure is a
 /// distinct error so the loader can report why an older snapshot was tried.
+///
+/// Two schemas decode: the current [`SCHEMA_VERSION`], and [`SCHEMA_V7`] through the frozen
+/// [`WorldStateV7`] mirror with `care = CareState::default()`. Anything else is
+/// [`SnapshotError::UnsupportedSchema`]. `SnapshotMeta.schema` reports what was read, not
+/// what the build writes.
 pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), SnapshotError> {
     let take = |at: usize, n: usize| -> Result<&[u8], SnapshotError> {
         bytes.get(at..at + n).ok_or(SnapshotError::Truncated)
@@ -74,7 +84,7 @@ pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), Snaps
         return Err(SnapshotError::BadMagic);
     }
     let schema = u32::from_le_bytes(take(4, 4)?.try_into().expect("4 bytes"));
-    if schema != SCHEMA_VERSION {
+    if schema != SCHEMA_VERSION && schema != SCHEMA_V7 {
         return Err(SnapshotError::UnsupportedSchema(schema));
     }
     let id_len = u16::from_le_bytes(take(8, 2)?.try_into().expect("2 bytes")) as usize;
@@ -92,17 +102,33 @@ pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), Snaps
     if crc32fast::hash(payload) != crc32 {
         return Err(SnapshotError::BadChecksum);
     }
-    let state: WorldState =
-        postcard::from_bytes(payload).map_err(|e| SnapshotError::Decode(e.to_string()))?;
+    let state: WorldState = if schema == SCHEMA_V7 {
+        postcard::from_bytes::<WorldStateV7>(payload)
+            .map(WorldState::from)
+            .map_err(|e| SnapshotError::Decode(e.to_string()))?
+    } else {
+        postcard::from_bytes(payload).map_err(|e| SnapshotError::Decode(e.to_string()))?
+    };
     state.validate().map_err(SnapshotError::Invalid)?;
     Ok((SnapshotMeta { schema, build_id, payload_len, crc32 }, state))
 }
 
 /// FNV-1a 64 over the postcard encoding of the state (the replay hash in telemetry).
 pub fn state_hash(state: &WorldState) -> u64 {
-    let payload = postcard::to_allocvec(state).expect("WorldState is always postcard-encodable");
+    fnv1a(&postcard::to_allocvec(state).expect("WorldState is always postcard-encodable"))
+}
+
+/// FNV-1a 64 over the postcard encoding of the state's **schema 7 projection**: everything
+/// but `care`. Two worlds with the same ecology and different care histories hash alike, so
+/// a care run and a matched no-care run are directly comparable and a migrated schema 7
+/// world with zero care hashes exactly as the pre-care build's `state_hash` did.
+pub fn ecology_hash(state: &WorldState) -> u64 {
+    fnv1a(&postcard::to_allocvec(&v7::project(state)).expect("the projection is encodable"))
+}
+
+fn fnv1a(payload: &[u8]) -> u64 {
     let mut h = 0xcbf2_9ce4_8422_2325u64;
-    for &b in &payload {
+    for &b in payload {
         h ^= u64::from(b);
         h = h.wrapping_mul(0x100_0000_01b3);
     }
@@ -136,6 +162,7 @@ mod tests {
             heat_out_total: 0.0,
             rain_in_total: 0.0,
             evap_out_total: 0.0,
+            care: crate::care::CareState::default(),
         }
     }
 
@@ -238,6 +265,26 @@ mod tests {
         let mut c = state();
         c.fields.n[17] += 1e-12;
         assert_ne!(state_hash(&a), state_hash(&c));
+    }
+
+    #[test]
+    fn the_schema_seven_projection_is_the_payload_without_care() {
+        let s = state();
+        // Zero care appends exactly `CareState::default()`: a zero varint cursor, an empty
+        // shower vector, and six zero f64 ledgers.
+        let full = postcard::to_allocvec(&s).unwrap();
+        let projected = postcard::to_allocvec(&v7::project(&s)).unwrap();
+        assert_eq!(&full[..projected.len()], &projected[..], "the projection is a prefix of the payload");
+        assert_eq!(full.len(), projected.len() + 1 + 1 + 6 * 8);
+        assert_eq!(ecology_hash(&s), super::fnv1a(&projected));
+        // Care moves `state_hash` and never `ecology_hash`.
+        let mut fed = s.clone();
+        fed.care.feed_material_in = 1.0;
+        assert_ne!(state_hash(&fed), state_hash(&s));
+        assert_eq!(ecology_hash(&fed), ecology_hash(&s));
+        // A schema 7 payload round-trips through the mirror into an identical state.
+        let back: WorldState = postcard::from_bytes::<WorldStateV7>(&projected).unwrap().into();
+        assert_eq!(back, s);
     }
 
     #[test]

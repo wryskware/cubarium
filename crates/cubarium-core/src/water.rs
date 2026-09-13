@@ -32,6 +32,10 @@ pub struct WaterLedger {
     pub rain_in: f64,
     /// Depth removed by evaporation, summed over cells.
     pub evap_out: f64,
+    /// The share of `rain_in` that came from the manual rate (the care contract's shower),
+    /// summed over cells. Always zero when no manual array is supplied. Manual water is
+    /// inside `rain_in` once; this is the attribution, not a second budget.
+    pub manual_in: f64,
 }
 
 /// One tick of water, in the order rain → flow → evaporation, every stage reading the
@@ -49,11 +53,18 @@ pub struct WaterLedger {
 /// - evaporation: `w −= min(w, evap · max(L, evap_floor) · w · dt)`; the floor keeps the
 ///   dark soil drying slowly, so a moat cannot fill without bound.
 ///
+/// `manual` is the care contract's shower: an optional per-cell rate in d/s added to the
+/// natural rate at the rain stage, so `rain[c]` publishes what actually falls and the depth
+/// is inside `rain_in` once. `None` is not "an array of zeros": it takes the pre-care branch
+/// and executes the original arithmetic operation for operation, which is what lets a world
+/// that is never given care replay bit for bit.
+///
 /// Returns the ledger; `Σw_after − Σw_before == rain_in − evap_out` to rounding.
 pub fn step(
     w: &mut [f64],
     cfg: &WaterConfig,
     drivers: Drivers<'_>,
+    manual: Option<&[f64; CELL_COUNT]>,
     rain: &mut [f32; CELL_COUNT],
     graph: &FieldGraph,
     scratch: &mut ScalarField,
@@ -63,13 +74,31 @@ pub fn step(
     let mut ledger = WaterLedger::default();
 
     // Rain.
-    for i in 0..CELL_COUNT {
-        let excess = rain_source[i] - cfg.rain_threshold;
-        let rate = if excess > 0.0 { cfg.rain_rate * excess } else { 0.0 };
-        rain[i] = rate as f32;
-        let added = rate * DT;
-        w[i] += added;
-        ledger.rain_in += added;
+    match manual {
+        None => {
+            for i in 0..CELL_COUNT {
+                let excess = rain_source[i] - cfg.rain_threshold;
+                let rate = if excess > 0.0 { cfg.rain_rate * excess } else { 0.0 };
+                rain[i] = rate as f32;
+                let added = rate * DT;
+                w[i] += added;
+                ledger.rain_in += added;
+            }
+        }
+        Some(manual) => {
+            for i in 0..CELL_COUNT {
+                let excess = rain_source[i] - cfg.rain_threshold;
+                let natural = if excess > 0.0 { cfg.rain_rate * excess } else { 0.0 };
+                let rate = natural + manual[i];
+                rain[i] = rate as f32;
+                let added = rate * DT;
+                w[i] += added;
+                ledger.rain_in += added;
+                // What the manual rate actually put in this cell, given the combined
+                // rounding. Exactly `manual[i] · DT` wherever nothing natural is falling.
+                ledger.manual_in += added - natural * DT;
+            }
+        }
     }
 
     // Flow.
@@ -173,10 +202,15 @@ mod tests {
         }
 
         fn step(&mut self, w: &mut [f64]) -> WaterLedger {
+            self.step_with(w, None)
+        }
+
+        fn step_with(&mut self, w: &mut [f64], manual: Option<&[f64; CELL_COUNT]>) -> WaterLedger {
             step(
                 w,
                 &self.cfg,
                 Drivers { terrain: &self.terrain, light: &self.light, rain_source: &self.source },
+                manual,
                 &mut self.rain,
                 &self.graph,
                 &mut self.scratch,
@@ -220,6 +254,44 @@ mod tests {
         assert!(dry.iter().all(|&x| x == 0.0));
         assert_eq!(ledger.rain_in, 0.0);
         assert!(h.rain.iter().all(|&r| r == 0.0));
+    }
+
+    #[test]
+    fn a_manual_rate_joins_the_natural_one_and_is_published_and_booked() {
+        let mut h = Harness::new(0.0);
+        h.cfg.flow = 0.0;
+        h.cfg.evap = 0.0;
+        let wet = CellId::new(Face::Front, 3, 3).index();
+        let dry = CellId::new(Face::Front, 9, 9).index();
+        h.source[wet] = h.cfg.rain_threshold + 0.5;
+        let natural = h.cfg.rain_rate * 0.5;
+        let mut manual = Box::new([0.0f64; CELL_COUNT]);
+        manual[wet] = 0.25;
+        manual[dry] = 0.125;
+
+        let mut w = vec![0.0; CELL_COUNT];
+        let ledger = h.step_with(&mut w, Some(&manual));
+        // The published rate is the sum, so the visible shower and the deposited water agree.
+        assert!((f64::from(h.rain[wet]) - (natural + 0.25)).abs() < 1e-6, "{}", h.rain[wet]);
+        assert!((f64::from(h.rain[dry]) - 0.125).abs() < 1e-9, "{}", h.rain[dry]);
+        assert!((w[wet] - (natural + 0.25) * DT).abs() < 1e-15);
+        assert!((w[dry] - 0.125 * DT).abs() < 1e-15);
+        // Manual water is inside `rain_in` once, and attributed exactly where nothing
+        // natural falls.
+        assert!((ledger.rain_in - (natural + 0.375) * DT).abs() < 1e-15);
+        assert!((ledger.manual_in - 0.375 * DT).abs() < 1e-15);
+        assert_eq!(ledger.evap_out, 0.0);
+
+        // `None` and an all-zero array agree on the water; only the branch differs.
+        let zeros = Box::new([0.0f64; CELL_COUNT]);
+        let mut a = vec![0.0; CELL_COUNT];
+        let la = h.step_with(&mut a, None);
+        let mut b = vec![0.0; CELL_COUNT];
+        let lb = h.step_with(&mut b, Some(&zeros));
+        assert_eq!(a, b);
+        assert_eq!(la.rain_in, lb.rain_in);
+        assert_eq!(la.manual_in, 0.0);
+        assert_eq!(lb.manual_in, 0.0);
     }
 
     #[test]
