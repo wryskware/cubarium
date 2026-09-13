@@ -1,0 +1,56 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Matched meal continuity review — 8d489f7</title>
+<style>
+body{background:#080811;color:#ddd;font:16px monospace;margin:20px}button,select{font:inherit}
+.pair{display:flex;gap:20px;flex-wrap:wrap}canvas{image-rendering:pixelated;background:#000}
+.net{width:512px;height:256px}.crop{width:256px;height:256px}p{max-width:1100px}
+</style>
+<h2>Same trajectory, old / meal-continuity candidate</h2>
+<p>Development review only. Both recordings are native five-face frames. 1× playback at60fps; the excerpt repeats with a marked replay cut. Recent intake is not necessarily manual-food ingestion.</p>
+<select id="case"><option>seed1-t0-feed</option><option>seed8-t0-feed</option><option>seed1-noinput</option></select>
+<button id="play">Pause</button><span id="status">Loading</span>
+<div class="pair"><section>Old<div><canvas class="net" id="old" width="256" height="128"></canvas></div></section><section>Candidate<div><canvas class="net" id="new" width="256" height="128"></canvas></div></section></div>
+<p>Front face (nearest-neighbor enlarged); below: a24px neighborhood following the selected organism’s actual recorded position.</p>
+<div class="pair"><canvas class="crop" id="front-old" width="64" height="64"></canvas><canvas class="crop" id="front-new" width="64" height="64"></canvas><canvas class="crop" id="body-old" width="24" height="24"></canvas><canvas class="crop" id="body-new" width="24" height="24"></canvas></div>
+<p><label>Tracked full ID <select id="track"></select></label> <span id="body-state"></span></p>
+<input id="scrub" type="range" min="0" value="0" style="width:1080px">
+<script type="module">
+const el=id=>document.getElementById(id), contexts=Object.fromEntries(['old','new','front-old','front-new','body-old','body-new'].map(id=>[id,el(id).getContext('2d')]));
+let images={},rows=new Map(),report={},origin=performance.now(),frame=0,playing=true,ready=false,epoch=0;
+window.review={samples:[],case:null};
+window.addEventListener('error',e=>{window.review.error=e.message;el('status').textContent=e.message;});
+const requested=new URLSearchParams(location.search).get('case');if(requested)el('case').value=requested;
+async function load(){
+  const version=++epoch;ready=false;el('status').textContent='Loading exact frame pairs';
+  const name=el('case').value;report=await(await fetch(`${name}/report.json`)).json();
+  const observed=(await(await fetch(`${name}/organisms.jsonl`)).text()).trim().split('\n').map(JSON.parse);
+  rows=new Map();for(const r of observed){if(!rows.has(r.elapsed))rows.set(r.elapsed,[]);rows.get(r.elapsed).push(r);}
+  const ids=[...new Set(observed.filter(r=>r.onset!==null).map(r=>r.id))];el('track').replaceChildren(...ids.map(id=>new Option(id,id)));
+  if(ids.includes('79:5'))el('track').value='79:5';
+  images={old:[],new:[]};const first=report.frames_from*3,count=report.frame_pairs_written;
+  const bundle=await(await fetch(`${name}/frames.json`)).json();
+  await Promise.all(['old','new'].flatMap(label=>Array.from({length:count},(_,i)=>new Promise((resolve,reject)=>{const im=new Image();im.onload=resolve;im.onerror=reject;im.src=bundle[label][i];images[label][i]=im;}))));
+  if(version!==epoch)return;el('scrub').max=count-1;origin=performance.now();frame=0;ready=true;window.review={samples:[],case:name,report};
+}
+function draw(now){
+  if(ready){
+    if(playing)frame=Math.floor(Math.max(0,now-origin)*60/1000)%images.old.length;
+    const elapsed=report.frames_from+Math.floor(frame/3), body=(rows.get(elapsed)||[]).find(r=>r.id===el('track').value);
+    const xy=body?({0:[64,64],1:[128,64],2:[192,64],3:[0,64],4:[64,0]})[body.face]:null;
+    for(const label of ['old','new']){
+      contexts[label].drawImage(images[label][frame],0,0);
+      contexts[`front-${label}`].drawImage(images[label][frame],64,64,64,64,0,0,64,64);
+      const c=contexts[`body-${label}`];c.clearRect(0,0,24,24);
+      if(xy)c.drawImage(images[label][frame],xy[0]+Math.max(0,Math.min(40,Math.floor(body.u)-12)),xy[1]+Math.max(0,Math.min(40,Math.floor(body.v)-12)),24,24,0,0,24,24);
+    }
+    el('scrub').value=frame;el('status').textContent=` ${elapsed/20}s · frame ${frame}/${images.old.length} · 1×`;
+    el('body-state').textContent=body?`${body.mode}, intake=${body.fed}, bout weight=${body.weight?.toFixed(2)}`:'not present';
+    if(window.review.samples.length<1200)window.review.samples.push({now,frame});
+  }
+  requestAnimationFrame(draw);
+}
+el('case').onchange=()=>load();el('play').onclick=()=>{playing=!playing;origin=performance.now()-frame*1000/60;el('play').textContent=playing?'Pause':'Play';};
+el('scrub').oninput=()=>{playing=false;el('play').textContent='Play';frame=Number(el('scrub').value);};
+await load();requestAnimationFrame(draw);
+</script>
