@@ -884,6 +884,137 @@ impl AttemptOutcome {
     }
 }
 
+/// The stable identity of one funded gestation: the parent's full ID and the tick its escrow
+/// was started, which the world already persists in `Escrow::started_tick`.
+///
+/// A parent holds at most one escrow at a time, so this names exactly one transaction from its
+/// funding to whichever way it ends. It is not a new counter and nothing new is persisted to
+/// carry it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+pub struct EscrowKey {
+    pub parent: OrganismId,
+    pub started_tick: u64,
+}
+
+/// Why a member that wanted to fund an offspring never got an escrow at all. This is a
+/// **non-transaction**: nothing moved, and there is no [`EscrowKey`] to name.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FundingBlocked {
+    /// The world was at its organism cap when the gestation would have started.
+    Cap,
+    /// The parent's own reserve or usable energy could not cover the child's inventory and its
+    /// build cost.
+    Stocks,
+}
+
+/// One reproduction transaction, recorded **at the mutation itself**: the numbers below are the
+/// values the world actually moved, read on either side of the assignment that moved them, not
+/// a post-step difference an observer could have taken for itself.
+///
+/// A gestation is funded once and ends exactly once — as a birth, a refund at the cap, or an
+/// export to the litter when its parent dies. All four name the same [`EscrowKey`], so a
+/// reader can close every transaction it opens. A funding and its loss can both happen in the
+/// same tick, and both are emitted.
+///
+/// Material and energy identities the records satisfy exactly, by construction:
+///
+/// ```text
+/// Funded:      reserve_before − reserve_after = escrow_structure + escrow_reserve
+///              (e_r·reserve + energy)_before − (e_r·reserve + energy)_after
+///                  = e_r·(escrow_structure + escrow_reserve) + escrow_energy + build_heat
+/// Born:        child_structure/reserve/energy = the escrow's own S/R/E
+///              birth_heat = e_r · escrow_structure      (structure holds no chemical energy)
+/// Refunded:    reserve_after − reserve_before = refunded_structure + refunded_reserve
+///              energy_after − energy_before  = refunded_energy      (no heat: nothing burned)
+/// Miscarried:  material = escrow S + R;  energy = e_r·material + escrow E
+///              energy_stored + energy_heat = energy;  energy_stored ≤ energy_cap · material
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(tag = "transaction", rename_all = "snake_case")]
+pub enum Reproduction {
+    /// The parent paid for a gestation: reserve and usable energy debited, the build cost
+    /// released as heat, and an escrow now exists.
+    Funded {
+        key: EscrowKey,
+        /// The parent's stocks immediately before and after the debit.
+        parent_reserve_before: f64,
+        parent_reserve_after: f64,
+        parent_energy_before: f64,
+        parent_energy_after: f64,
+        /// What the escrow holds.
+        escrow_structure: f64,
+        escrow_reserve: f64,
+        escrow_energy: f64,
+        /// `build_cost · escrow_structure`, heated at funding time.
+        build_heat: f64,
+    },
+    /// The escrow became a child. Emitted with — and reconciling one-for-one against — the
+    /// [`HunterEvent::Offspring`] record and the ordinary `LifeEvent::Birth` of the same tick.
+    Born {
+        key: EscrowKey,
+        child: OrganismId,
+        /// The child's actual initial inventory, which is the escrow's.
+        child_structure: f64,
+        child_reserve: f64,
+        child_energy: f64,
+        /// `e_r · escrow_structure`: the reserve energy the structural material gives up when
+        /// it becomes structure.
+        birth_heat: f64,
+    },
+    /// A due birth the organism cap refused. The escrow went back to the parent exactly as it
+    /// left: no heat, no discard.
+    Refunded {
+        key: EscrowKey,
+        refunded_structure: f64,
+        refunded_reserve: f64,
+        refunded_energy: f64,
+        parent_reserve_before: f64,
+        parent_reserve_after: f64,
+        parent_energy_before: f64,
+        parent_energy_after: f64,
+    },
+    /// The parent died holding it. The escrow's own material and energy are exported to the
+    /// cell's litter under the detritus cap — **only** the escrow: the body and any carried gut
+    /// are separate terms of the same death, reported separately.
+    Miscarried {
+        key: EscrowKey,
+        cause: DeathCause,
+        /// `escrow S + R` added to `D`.
+        material: f64,
+        /// `e_r · material + escrow E` removed with it, of which …
+        energy: f64,
+        /// … the cap let `De` keep this much …
+        energy_stored: f64,
+        /// … and this much left as heat.
+        energy_heat: f64,
+    },
+    /// A member that was ready to fund and did not: **no escrow was ever created**, nothing
+    /// moved, and no later record closes this one.
+    NotFunded { parent: OrganismId, reason: FundingBlocked },
+}
+
+impl Reproduction {
+    /// The gestation this record belongs to, or `None` for a non-transaction.
+    pub fn key(&self) -> Option<EscrowKey> {
+        match self {
+            Reproduction::Funded { key, .. }
+            | Reproduction::Born { key, .. }
+            | Reproduction::Refunded { key, .. }
+            | Reproduction::Miscarried { key, .. } => Some(*key),
+            Reproduction::NotFunded { .. } => None,
+        }
+    }
+
+    /// The member the record is about, transaction or not.
+    pub fn parent(&self) -> OrganismId {
+        match self {
+            Reproduction::NotFunded { parent, .. } => *parent,
+            other => other.key().expect("every transaction names its parent").parent,
+        }
+    }
+}
+
 /// Everything the settlement actually used, recorded from the **common post-movement state
 /// before the prey is removed or any target is cleared**. The later render view cannot
 /// recover it: the prey is gone and the hunter has moved on.
@@ -981,6 +1112,10 @@ pub enum HunterEvent {
     },
     /// A funded descendant was placed.
     Offspring { tick: u64, parent: OrganismId, child: OrganismId },
+    /// One reproduction transaction, recorded at the mutation that moved it
+    /// ([`Reproduction`]). A birth emits this **and** the [`HunterEvent::Offspring`] record
+    /// above, so the identity link and the transaction reconcile one-for-one.
+    Reproduction { tick: u64, hunter: OrganismId, record: Reproduction },
     /// A member died; its carried gut went to the local fields.
     Death {
         tick: u64,
@@ -991,6 +1126,31 @@ pub enum HunterEvent {
         /// Energy the detritus cap allowed the gut to keep; the rest became heat.
         gut_energy_stored: f64,
     },
+}
+
+impl HunterEvent {
+    /// The completed-tick boundary this record belongs to, so an observer can order or bucket
+    /// events without repeating the variant list.
+    pub fn tick(&self) -> u64 {
+        match self {
+            HunterEvent::Attempt { tick, .. }
+            | HunterEvent::Capture { tick, .. }
+            | HunterEvent::Offspring { tick, .. }
+            | HunterEvent::Reproduction { tick, .. }
+            | HunterEvent::Death { tick, .. } => *tick,
+        }
+    }
+
+    /// The member the record is about: the attacker, the captor, the parent, or the deceased.
+    pub fn hunter(&self) -> OrganismId {
+        match self {
+            HunterEvent::Attempt { hunter, .. }
+            | HunterEvent::Capture { hunter, .. }
+            | HunterEvent::Reproduction { hunter, .. } => *hunter,
+            HunterEvent::Offspring { parent, .. } => *parent,
+            HunterEvent::Death { id, .. } => *id,
+        }
+    }
 }
 
 /// One hunter as the renderer sees it, keyed by full ID. Transient and published separately

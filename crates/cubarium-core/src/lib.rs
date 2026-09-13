@@ -52,8 +52,9 @@ pub use care::{
 pub use config::WorldConfig;
 pub use events::LifeEvent;
 pub use hunter::{
-    AttemptOutcome, FixedHunterProfile, HunterControlReceipt, HunterEvent, HunterFounderReceipt,
-    HunterMember, HunterPhase, HunterRole, HunterState, HunterTarget, HunterView,
+    AttemptOutcome, EscrowKey, FixedHunterProfile, FundingBlocked, HunterControlReceipt,
+    HunterEvent, HunterFounderReceipt, HunterMember, HunterPhase, HunterRole, HunterState,
+    HunterTarget, HunterView, Reproduction,
 };
 pub use ids::OrganismId;
 pub use snapshot::{

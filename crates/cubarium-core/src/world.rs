@@ -1453,15 +1453,58 @@ impl World {
                         let energy = org_cfg.child_energy_fraction * o.phenotype.energy_max;
                         let build = org_cfg.build_cost * structure;
                         if o.reserve >= structure + reserve && o.energy >= build + energy {
+                            // Read on either side of the assignment that moves them: this is the
+                            // transaction, not a post-step difference (`crate::hunter`).
+                            let (reserve_before, energy_before) = (o.reserve, o.energy);
                             o.reserve -= structure + reserve;
                             o.energy -= build + energy;
                             heat(build);
                             let genome = o.genome.clone();
                             o.escrow = Some(Escrow { structure, reserve, energy, started_tick: now, genome });
+                            if member.is_some() {
+                                hunter_events.push(HunterEvent::Reproduction {
+                                    tick: now + 1,
+                                    hunter: *id,
+                                    record: hunter::Reproduction::Funded {
+                                        key: hunter::EscrowKey { parent: *id, started_tick: now },
+                                        parent_reserve_before: reserve_before,
+                                        parent_reserve_after: o.reserve,
+                                        parent_energy_before: energy_before,
+                                        parent_energy_after: o.energy,
+                                        escrow_structure: structure,
+                                        escrow_reserve: reserve,
+                                        escrow_energy: energy,
+                                        build_heat: build,
+                                    },
+                                });
+                            }
+                        } else if member.is_some() {
+                            // Ready by its own gate, but the stocks could not cover the child:
+                            // no escrow exists and nothing moved.
+                            hunter_events.push(HunterEvent::Reproduction {
+                                tick: now + 1,
+                                hunter: *id,
+                                record: hunter::Reproduction::NotFunded {
+                                    parent: *id,
+                                    reason: hunter::FundingBlocked::Stocks,
+                                },
+                            });
                         }
                     } else {
                         counters.cap_rejections += 1;
                         *cap_rejections_total += 1;
+                        if member.is_some() {
+                            // The cap refused the gestation before it began: no escrow was ever
+                            // created, so there is no transaction to close later.
+                            hunter_events.push(HunterEvent::Reproduction {
+                                tick: now + 1,
+                                hunter: *id,
+                                record: hunter::Reproduction::NotFunded {
+                                    parent: *id,
+                                    reason: hunter::FundingBlocked::Cap,
+                                },
+                            });
+                        }
                     }
                 }
 
@@ -1501,6 +1544,22 @@ impl World {
                     let kept = energy.min(e_d_max * material);
                     fields.de[cell] += kept;
                     heat(energy - kept);
+                    // The escrow's own terms, kept apart from the body above and the gut below:
+                    // a miscarriage is not the whole corpse.
+                    if hunters.contains(*id) {
+                        hunter_events.push(HunterEvent::Reproduction {
+                            tick: now + 1,
+                            hunter: *id,
+                            record: hunter::Reproduction::Miscarried {
+                                key: hunter::EscrowKey { parent: *id, started_tick: es.started_tick },
+                                cause: *cause,
+                                material,
+                                energy,
+                                energy_stored: kept,
+                                energy_heat: energy - kept,
+                            },
+                        });
+                    }
                 }
                 let slot = match cause {
                     DeathCause::Starvation => 0,
@@ -1561,10 +1620,32 @@ impl World {
                     let Some(escrow) = parent.escrow.take() else { continue };
                     if full {
                         // A refused birth returns its escrow to the parent untouched.
+                        let (reserve_before, energy_before) = (parent.reserve, parent.energy);
                         parent.reserve += escrow.structure + escrow.reserve;
                         parent.energy += escrow.energy;
                         counters.cap_rejections += 1;
                         *cap_rejections_total += 1;
+                        if hunter_parent.is_some() {
+                            // A refund, not a miscarriage: every unit went back where it came
+                            // from, and nothing was burned or dropped.
+                            hunter_events.push(HunterEvent::Reproduction {
+                                tick: now + 1,
+                                hunter: *parent_id,
+                                record: hunter::Reproduction::Refunded {
+                                    key: hunter::EscrowKey {
+                                        parent: *parent_id,
+                                        started_tick: escrow.started_tick,
+                                    },
+                                    refunded_structure: escrow.structure,
+                                    refunded_reserve: escrow.reserve,
+                                    refunded_energy: escrow.energy,
+                                    parent_reserve_before: reserve_before,
+                                    parent_reserve_after: parent.reserve,
+                                    parent_energy_before: energy_before,
+                                    parent_energy_after: parent.energy,
+                                },
+                            });
+                        }
                         // …and the parent waits a gestation before trying again, so a world at
                         // its cap cannot spin a hunter through a free birth attempt per tick.
                         if let Some(index) = hunter_parent {
@@ -1654,6 +1735,24 @@ impl World {
                         tick: now + 1,
                         parent: *parent_id,
                         child: child_id,
+                    });
+                    // The transaction beside the identity link: the child's actual opening
+                    // inventory is the escrow's, and the structural material gave up its
+                    // reserve energy as heat on the way.
+                    hunter_events.push(HunterEvent::Reproduction {
+                        tick: now + 1,
+                        hunter: *parent_id,
+                        record: hunter::Reproduction::Born {
+                            key: hunter::EscrowKey {
+                                parent: *parent_id,
+                                started_tick: escrow.started_tick,
+                            },
+                            child: child_id,
+                            child_structure: escrow.structure,
+                            child_reserve: escrow.reserve,
+                            child_energy: escrow.energy,
+                            birth_heat: e_r * escrow.structure,
+                        },
                     });
                 }
                 events.push(LifeEvent::Birth {

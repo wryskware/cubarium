@@ -1469,3 +1469,42 @@ fn a_crafted_hunter_extension_is_refused_one_property_at_a_time() {
     future.hunters.profile.as_mut().expect("a profile").version = 99;
     refused(future, "version");
 }
+
+// ---------------------------------------------------------------- observation is not change
+
+/// Two fixed profile-3 hunter worlds, hashed after a run that captures, digests, funds an
+/// escrow and commits a birth. The numbers are recorded from the build **before** the
+/// reproduction-evidence work began (core `9eacb7e`, the commit root's twelve-seed screen runs
+/// on): adding observations must not move a single bit of the world they observe.
+#[test]
+fn observations_do_not_move_a_profile_three_hunter_world() {
+    // A: a hunt that captures and digests.
+    let profile = certain(trial(&empty_world()));
+    let (mut world, _hunter, _prey) = staged_in(quiet_world(), profile);
+    for _ in 0..400 {
+        world.step();
+        world.drain_hunter_events();
+        world.drain_events();
+    }
+    let hunt_hash = state_hash(&world.state);
+
+    // B: a funded escrow that becomes a child.
+    let mut world = quiet_world();
+    let breeding = breeder(&world);
+    let parent = world
+        .start_hunter_trial(breeding, target_of(SurfacePoint::new(Face::Top, 22.0, 34.0)))
+        .expect("started")
+        .id;
+    feed_to_full(&mut world, parent);
+    for _ in 0..200 {
+        world.step();
+        world.drain_hunter_events();
+        world.drain_events();
+    }
+    let birth_hash = state_hash(&world.state);
+    assert_eq!(world.hunters().hunter_births_total, 1, "scenario B must actually give birth");
+
+    // Recorded from `9eacb7e`, before any reproduction-evidence code existed.
+    assert_eq!(hunt_hash, 15_771_965_630_209_811_797, "a hunt-and-digest world moved");
+    assert_eq!(birth_hash, 3_410_443_867_288_973_882, "a funded-birth world moved");
+}
