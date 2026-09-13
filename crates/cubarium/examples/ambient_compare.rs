@@ -577,6 +577,37 @@ impl Arm {
 
 // ---------------------------------------------------------------- driver
 
+/// Finalization can fail after simulation has advanced (for example a refused output write).
+/// Keep the actual progress and original step error without presenting stale observers as a
+/// valid completed measurement. The caller can still run every other prescribed arm.
+fn finish_retained(arm: &mut Arm, dir: &Path, planned: u64, horizon: Horizon, reason: Option<String>) -> Value {
+    match arm.finish(dir, planned, horizon, reason.clone()) {
+        Ok(summary) => summary,
+        Err(error) => json!({
+            "arm": dir.file_name().and_then(|n| n.to_str()),
+            "technical_complete": false, "complete_experiment_measurement": false,
+            "audit_passed": false,
+            "termination": "finalization_failure", "error": format!("{error:#}"),
+            "step_failure": reason,
+            "planned_ticks": planned, "closing_tick": arm.world.tick(),
+            "elapsed_ticks": arm.world.tick() - arm.opening.tick,
+            "closing_population": arm.world.population(),
+            "observer_trust": "partial; no completed measurement is claimed",
+        }),
+    }
+}
+
+fn numerical_success(seeds: &[Value]) -> bool {
+    seeds.len() == 12 && seeds.iter().all(|s| {
+        s["technical_complete"] == true
+            && s["arms"].as_array().is_some_and(|arms| {
+                arms.len() == ARMS.len() && arms.iter().all(|a| {
+                    a["technical_complete"] == true && a["audit_passed"] == true
+                })
+            })
+    })
+}
+
 fn run_seed(opening: &Opening, dir: &Path, planned: u64, horizon: Horizon, sample_every: u64) -> Result<Value> {
     fs::create_dir(dir)?;
     let base = Baseline::read(&opening.state)?;
@@ -604,7 +635,11 @@ fn run_seed(opening: &Opening, dir: &Path, planned: u64, horizon: Horizon, sampl
                 break;
             }
         }
-        summaries.push(arm.finish(&arm_dir, planned, horizon, reason)?);
+        let summary = finish_retained(&mut arm, &arm_dir, planned, horizon, reason);
+        if summary["technical_complete"] != true || summary["audit_passed"] != true {
+            failure.get_or_insert_with(|| format!("{name}: numerical or finalization failure"));
+        }
+        summaries.push(summary);
     }
     let complete = summaries.iter().all(|s| s["technical_complete"] == true);
     let result = json!({
@@ -665,7 +700,15 @@ fn main() -> Result<()> {
     let mut failed = false;
     for opening in &openings {
         let seed = opening.state.config.seed;
-        let result = run_seed(opening, &args.out.join(format!("seed-{seed}")), planned, args.horizon, args.sample_every)?;
+        let result = match run_seed(opening, &args.out.join(format!("seed-{seed}")), planned, args.horizon, args.sample_every) {
+            Ok(result) => result,
+            Err(error) => json!({
+                "seed": seed, "technical_complete": false,
+                "complete_experiment_measurement": false, "audit_passed": false,
+                "termination": "seed_output_or_initialization_failure",
+                "error": format!("{error:#}"),
+            }),
+        };
         if result["technical_complete"] != true {
             failed = true;
         }
@@ -675,17 +718,21 @@ fn main() -> Result<()> {
         );
         all.push(result);
     }
+    let numerical_passed = numerical_success(&all);
     let summary = json!({
         "technical_complete": !failed,
+        "audit_passed": numerical_passed,
         "complete_experiment_measurement": !failed
             && args.horizon.prescribed()
-            && all.iter().all(|s| s["arms"].as_array().is_some_and(|a| a.iter().all(|x| x["audit_passed"] == true))),
+            && args.sample_every == 200
+            && numerical_passed,
         "horizon": args.horizon, "ticks": planned,
         "seeds": all,
         "retention": "every seed is retained, extinction and technical failure included; nothing is filtered, retried or reseeded",
     });
     json_new(&args.out.join("summary.json"), &summary)?;
     println!("{}", args.out.display());
+    ensure!(numerical_passed, "retained ambient cohort contains technical or numerical failures; see summary.json");
     Ok(())
 }
 
@@ -709,6 +756,47 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn completion_rejects_failed_missing_or_partial_arms_even_at_a_full_horizon() {
+        let seed = json!({"technical_complete": true,
+            "arms": (0..6).map(|_| json!({"technical_complete": true, "audit_passed": true})).collect::<Vec<_>>()});
+        let good = vec![seed; 12];
+        assert!(numerical_success(&good));
+        for field in ["audit_passed", "technical_complete"] {
+            let mut bad = good.clone();
+            bad[11]["arms"][5][field] = json!(false);
+            assert!(!numerical_success(&bad), "{field} must cause a failing process result");
+        }
+        assert!(!numerical_success(&good[..11]));
+        let mut missing = good.clone();
+        missing[0]["arms"].as_array_mut().unwrap().pop();
+        assert!(!numerical_success(&missing));
+        let mut missing = good;
+        missing[0] = json!({"technical_complete": false, "error": "seed output failed"});
+        assert!(!numerical_success(&missing));
+    }
+
+    #[test]
+    fn finalization_failure_retains_actual_progress_and_original_step_error() {
+        let o = opening();
+        let dir = temp("retained-finalization");
+        let arm_dir = dir.join("arm");
+        let mut arm = Arm::new(&o, Baseline::read(&o).unwrap(), "rain100_none", false, None, &arm_dir).unwrap();
+        arm.step(0, 200).unwrap();
+        // An exclusive-write refusal is deterministic; this is not an ENOSPC simulation.
+        write_new(&arm_dir.join("closing.cubw"), b"do not overwrite").unwrap();
+        let summary = finish_retained(&mut arm, &arm_dir, 2400, Horizon::Smoke, Some("original step fault".into()));
+        assert_eq!(summary["termination"], "finalization_failure");
+        assert_eq!(summary["technical_complete"], false);
+        assert_eq!(summary["audit_passed"], false);
+        assert_eq!(summary["elapsed_ticks"], 1);
+        assert_eq!(summary["closing_tick"], arm.world.tick());
+        assert_eq!(summary["closing_population"], arm.world.population());
+        assert_eq!(summary["step_failure"], "original step fault");
+        assert_eq!(fs::read(arm_dir.join("closing.cubw")).unwrap(), b"do not overwrite");
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     /// The 100 % arm is the copied world, bit for bit. Not `rate * 1.0`, not `rate * 100 / 100`:

@@ -15,6 +15,8 @@ mod audit;
 mod local;
 
 use audit::{AccurateSum, Ancestry, WindowAudit, audit_passes, energy, material};
+#[cfg(test)]
+use cubarium_core::{LifeEvent, OrganismId};
 
 const TARGETS: [CareTarget; 3] = [
     CareTarget {
