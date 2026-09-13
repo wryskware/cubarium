@@ -102,3 +102,47 @@ metadata. None of these source checks or root's short smoke runs establish paid
 predator balance, local prey recovery or exact reproduction funding. This reviewer
 did not rerun the concurrently executing harness test suite or claim those results
 as independent execution.
+
+## Resolution verification
+
+**RESOLVED: all three substantive findings above**, after rereading root's
+corrected source and independently running the complete example test suite.
+The original findings remain above as the review history, not current blockers.
+
+1. `offspring_children` now rejects duplicate child IDs before counting and
+   requires each offspring event's exact parent/child pair to match a life birth.
+   The duplicate/wrong-parent fixture passes. A correct record plus an additional
+   wrong-parent record for the same child is also rejected by the duplicate guard.
+   The earlier suggestion to validate event tick equality remains optional
+   hardening; it was not the duplicate-count defect and is not represented here
+   as completed work.
+2. `last_complete_observer_tick` advances only at the successful end of `Arm::step`.
+   Closing population now comes from World, while `observer_live_count`, explicit
+   trust status and the partial-observer warning distinguish incomplete observer
+   state. The synthetic advanced-world/stale-observer summary fixture verifies
+   these fields and passes.
+3. Initialization is wrapped so a failure retains an audit JSON and diagnostic
+   snapshot when writable. Main now catches initialization/finalization failures,
+   finalizes the arms already constructed, records failed finalizations without
+   preventing later arms' attempts, and writes a per-seed `result.json` before
+   continuing. Overall failure remains sticky and returns nonzero. An unopened
+   audit starts with `passed=false`/`legacy_passed=false`, avoiding an unexecuted
+   check appearing successful. The refused-founder evidence fixture now keeps
+   config valid (`founders.count` matches actual population) so it actually tests
+   initializer refusal rather than pre-initializer config rejection. It passes.
+   Finalization-loop retention is source-verified; this suite does not inject a
+   real disk failure, and no claim of durable output on a failed disk is made.
+
+After root confirmed its preceding test process had terminated and corrected that
+fixture, I ran:
+
+```text
+cargo test -p cubarium --offline --example hunter_compare
+28 passed; 0 failed; 0 ignored; exit 0
+```
+
+This includes six audit tests, sixteen recovery tests and six orchestration tests.
+It clears this bounded source/evidence-path review. Exact local capture integration,
+core funding proofs and full paired ecological experiments remain separately open;
+the source still truthfully labels the measurement slice incomplete. Only this
+review document was changed by the reviewer.
