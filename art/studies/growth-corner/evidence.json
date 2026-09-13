@@ -1,0 +1,482 @@
+{
+  "source": "a9eb064 cap path; no production edits",
+  "reported_boundary_paths": [
+    {
+      "frame": 1177,
+      "height": 8.8275,
+      "ownership": {
+        "anchor": [
+          2,
+          2.6899999999999977
+        ],
+        "candidates": [
+          {
+            "distance": 6.3691522198798145,
+            "local": [
+              0.5,
+              -3.5
+            ],
+            "path": "[(Front, Top)]"
+          },
+          {
+            "distance": 6.358152247312106,
+            "local": [
+              -3.5,
+              -0.5
+            ],
+            "path": "[(Front, Left), (Left, Top)]"
+          }
+        ],
+        "selected": "[(Front, Left), (Left, Top)]"
+      }
+    },
+    {
+      "frame": 1178,
+      "height": 8.835,
+      "ownership": {
+        "anchor": [
+          2,
+          2.6599999999999966
+        ],
+        "candidates": [
+          {
+            "distance": 6.339999999999996,
+            "local": [
+              0.5,
+              -3.5
+            ],
+            "path": "[(Front, Top)]"
+          },
+          {
+            "distance": 6.343153789716909,
+            "local": [
+              -3.5,
+              -0.5
+            ],
+            "path": "[(Front, Left), (Left, Top)]"
+          }
+        ],
+        "selected": "[(Front, Top)]"
+      }
+    }
+  ],
+  "nonzero_threshold_cases": [
+    {
+      "candidate_column": {
+        "max_linear_channel": 5.960464477539063e-8,
+        "pixel": {
+          "after": [
+            0.04704010859131813,
+            0.2644566297531128,
+            0.2334161102771759
+          ],
+          "after_rgb8": [
+            61,
+            141,
+            133
+          ],
+          "before": [
+            0.047040097415447235,
+            0.264456570148468,
+            0.23341608047485352
+          ],
+          "before_rgb8": [
+            61,
+            141,
+            133
+          ],
+          "face": "Front",
+          "x": 2,
+          "y": 2
+        }
+      },
+      "cap_only": {
+        "max_linear_channel": 0.4072261452674866,
+        "pixel": {
+          "after": [
+            0.08569572865962982,
+            0.41104963421821594,
+            0.38850855827331543
+          ],
+          "after_rgb8": [
+            83,
+            172,
+            167
+          ],
+          "before": [
+            0.005974945612251759,
+            0.003823481034487486,
+            0.06337616592645645
+          ],
+          "before_rgb8": [
+            18,
+            12,
+            71
+          ],
+          "face": "Top",
+          "x": 0,
+          "y": 60
+        }
+      },
+      "column": "TallColumn { face: Front, cx: 0, pick: 0, vine: true }",
+      "epsilon": 1e-8,
+      "selected": false,
+      "threshold_height": 8.833333333333334,
+      "whole_column": {
+        "max_linear_channel": 0.4072261452674866,
+        "pixel": {
+          "after": [
+            0.08569572865962982,
+            0.41104963421821594,
+            0.38850855827331543
+          ],
+          "after_rgb8": [
+            83,
+            172,
+            167
+          ],
+          "before": [
+            0.005974945612251759,
+            0.003823481034487486,
+            0.06337616592645645
+          ],
+          "before_rgb8": [
+            18,
+            12,
+            71
+          ],
+          "face": "Top",
+          "x": 0,
+          "y": 60
+        }
+      }
+    },
+    {
+      "candidate_column": {
+        "max_linear_channel": 1.7881393432617188e-7,
+        "pixel": {
+          "after": [
+            0.41648730635643005,
+            0.5052856802940369,
+            0.6381434202194214
+          ],
+          "after_rgb8": [
+            173,
+            188,
+            209
+          ],
+          "before": [
+            0.41648727655410767,
+            0.5052858591079712,
+            0.6381434202194214
+          ],
+          "before_rgb8": [
+            173,
+            188,
+            209
+          ],
+          "face": "Top",
+          "x": 62,
+          "y": 3
+        }
+      },
+      "cap_only": {
+        "max_linear_channel": 0.6448944807052612,
+        "pixel": {
+          "after": [
+            0.1305694282054901,
+            0.6498169302940369,
+            0.6120346188545227
+          ],
+          "after_rgb8": [
+            101,
+            211,
+            205
+          ],
+          "before": [
+            0.007960089482367039,
+            0.004922440741211176,
+            0.09559538215398788
+          ],
+          "before_rgb8": [
+            22,
+            15,
+            87
+          ],
+          "face": "Top",
+          "x": 60,
+          "y": 0
+        }
+      },
+      "column": "TallColumn { face: Right, cx: 15, pick: 0, vine: true }",
+      "epsilon": 1e-8,
+      "selected": false,
+      "threshold_height": 8.833333333333334,
+      "whole_column": {
+        "max_linear_channel": 0.6448944807052612,
+        "pixel": {
+          "after": [
+            0.1305694282054901,
+            0.6498169302940369,
+            0.6120346188545227
+          ],
+          "after_rgb8": [
+            101,
+            211,
+            205
+          ],
+          "before": [
+            0.007960089482367039,
+            0.004922440741211176,
+            0.09559538215398788
+          ],
+          "before_rgb8": [
+            22,
+            15,
+            87
+          ],
+          "face": "Top",
+          "x": 60,
+          "y": 0
+        }
+      }
+    },
+    {
+      "candidate_column": {
+        "max_linear_channel": 5.960464477539063e-8,
+        "pixel": {
+          "after": [
+            0.007146885152906179,
+            0.115449920296669,
+            0.3218214213848114
+          ],
+          "after_rgb8": [
+            20,
+            95,
+            154
+          ],
+          "before": [
+            0.007146885152906179,
+            0.1154499426484108,
+            0.3218214809894562
+          ],
+          "before_rgb8": [
+            20,
+            95,
+            154
+          ],
+          "face": "Back",
+          "x": 60,
+          "y": 4
+        }
+      },
+      "cap_only": {
+        "max_linear_channel": 0.19027158617973328,
+        "pixel": {
+          "after": [
+            0.006446638610213995,
+            0.05954322963953018,
+            0.19027158617973328
+          ],
+          "after_rgb8": [
+            19,
+            69,
+            121
+          ],
+          "before": [
+            0,
+            0,
+            0
+          ],
+          "before_rgb8": [
+            0,
+            0,
+            0
+          ],
+          "face": "Top",
+          "x": 3,
+          "y": 0
+        }
+      },
+      "column": "TallColumn { face: Left, cx: 0, pick: 1, vine: true }",
+      "epsilon": 1e-8,
+      "selected": true,
+      "threshold_height": 8.833333333333334,
+      "whole_column": {
+        "max_linear_channel": 0.19027158617973328,
+        "pixel": {
+          "after": [
+            0.006446638610213995,
+            0.05954322963953018,
+            0.19027158617973328
+          ],
+          "after_rgb8": [
+            19,
+            69,
+            121
+          ],
+          "before": [
+            0,
+            0,
+            0
+          ],
+          "before_rgb8": [
+            0,
+            0,
+            0
+          ],
+          "face": "Top",
+          "x": 3,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "final_endpoint": [
+    {
+      "candidate_light": 40.912298042327166,
+      "column": "TallColumn { face: Front, cx: 14, pick: 1, vine: true }",
+      "original_light": 40.912298042327166,
+      "static_difference": {
+        "max_linear_channel": 0,
+        "pixel": null
+      }
+    },
+    {
+      "candidate_light": 46.68522494845092,
+      "column": "TallColumn { face: Back, cx: 14, pick: 0, vine: false }",
+      "original_light": 46.68522494845092,
+      "static_difference": {
+        "max_linear_channel": 0,
+        "pixel": null
+      }
+    },
+    {
+      "candidate_light": 22.49325464013964,
+      "column": "TallColumn { face: Left, cx: 0, pick: 1, vine: true }",
+      "original_light": 22.49325464013964,
+      "static_difference": {
+        "max_linear_channel": 0,
+        "pixel": null
+      }
+    }
+  ],
+  "rejected_v10_endpoint": [
+    {
+      "candidate_light": 40.912298042327166,
+      "column": "TallColumn { face: Front, cx: 14, pick: 1, vine: true }",
+      "original_light": 40.912298042327166,
+      "static_difference": {
+        "max_linear_channel": 0,
+        "pixel": null
+      }
+    },
+    {
+      "candidate_light": 46.68522494845092,
+      "column": "TallColumn { face: Back, cx: 14, pick: 0, vine: false }",
+      "original_light": 46.68522494845092,
+      "static_difference": {
+        "max_linear_channel": 0,
+        "pixel": null
+      }
+    },
+    {
+      "candidate_light": 18.270236449316144,
+      "column": "TallColumn { face: Left, cx: 0, pick: 1, vine: true }",
+      "original_light": 22.49325464013964,
+      "static_difference": {
+        "max_linear_channel": 0.4813794791698456,
+        "pixel": {
+          "after": [
+            0,
+            0,
+            0
+          ],
+          "after_rgb8": [
+            0,
+            0,
+            0
+          ],
+          "before": [
+            0.030165567994117737,
+            0.28635987639427185,
+            0.4813794791698456
+          ],
+          "before_rgb8": [
+            49,
+            146,
+            184
+          ],
+          "face": "Top",
+          "x": 2,
+          "y": 0
+        }
+      }
+    }
+  ],
+  "temporal": {
+    "candidate_peak": {
+      "frame": 120,
+      "height": 8,
+      "max_linear_channel": 0.027000010013580322,
+      "pixel": {
+        "after": [
+          0.8203476071357727,
+          0.027516784146428108,
+          0.8230361342430115
+        ],
+        "after_rgb8": [
+          234,
+          46,
+          234
+        ],
+        "before": [
+          0.7933475971221924,
+          0.03265460208058357,
+          0.8109887838363647
+        ],
+        "before_rgb8": [
+          230,
+          51,
+          233
+        ],
+        "face": "Left",
+        "x": 0,
+        "y": 2
+      }
+    },
+    "fps": 60,
+    "frames": 241,
+    "old_peak": {
+      "frame": 180,
+      "height": 8.5,
+      "max_linear_channel": 0.4533713161945343,
+      "pixel": {
+        "after": [
+          0.007847132161259651,
+          0.17135663330554962,
+          0.4533713161945343
+        ],
+        "after_rgb8": [
+          22,
+          115,
+          179
+        ],
+        "before": [
+          0,
+          0,
+          0
+        ],
+        "before_rgb8": [
+          0,
+          0,
+          0
+        ],
+        "face": "Top",
+        "x": 1,
+        "y": 0
+      }
+    },
+    "scope": "Actual selected Left0; synthetic linear height7..9/4seconds; fixed clip time49.625; wind0. Not a recorded ecological trajectory."
+  }
+}
