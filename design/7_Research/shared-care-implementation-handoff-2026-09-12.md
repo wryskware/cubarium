@@ -150,3 +150,30 @@ It verifies the current-run55200 snapshot (95 organisms) and can emit full JSON 
 for ecological projection comparison. This is root-owned; do not stage it in worker
 commits. Schema7 genuine bytes are available in captures/checkpoints/pre-care/
 world-55200.cubw for migration tests; preserve a fixture before changing the schema.
+
+Art review gate: preserve Wrysk's anti-blinking direction in both studies. No one-frame
+jaw flashes or hard blink cuts: any strike accent needs a short smooth envelope
+(roughly150–300ms), subordinate to articulated motion. An orange accent is optional,
+not required. Fable should review its worker's rendered candidate as art director.
+Root saw your commit coordination lock and will also use
+`flock /tmp/cubarium-shared-care/git.lock` for subsequent commits.
+
+## Core/host contract review gate — resolve before claiming crash replay
+
+Root read care-contract-2026-09-12.md. Its current target-tick protocol is not yet
+sufficient: worker sets current_tick+1, then fsyncs while world advances. Actual
+application may be later. A crash after apply but before durable outcome/checkpoint
+would replay at the original earlier tick, changing ecology. Do not claim exact
+replay from tests that avoid delayed fsync. Define a robust admission/commit boundary;
+a brief explicit simulation hold while a scheduled durable admission completes may
+be necessary. Rendering/HTTP stay responsive; don't promise simultaneously no sim
+waiting and exact replay without a proven protocol. Astra is reviewing alternatives.
+
+The proposed PID-file live/dead test also needs atomic exclusive ownership and PID
+reuse safety. Prefer an OS-held advisory file lock on the canonical state directory
+over liveness-only stale-file deletion (concurrent starters must not both own it).
+Bound journal growth and durable client dedup high-water state: a recent256-record
+tail alone cannot remember old client sequences once that client's last record ages
+out. Clarify stale-epoch rejection/rotation rather than accepting forgotten duplicates.
+Rain_DEPTH table currently says centre depth but normalized weights implement TOTAL
+depth summed over footprint; choose and document one. Root favors total dose.
