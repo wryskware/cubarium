@@ -7,13 +7,14 @@ decision_refs: []
 # Ordinary-fauna development flow: the skimmer grows, then is not replaced
 
 Two full two-hour replays of the retained pre-hunter cohort, instrumented at the
-mutation sites, answer a question the
+mutation sites, examine a question the
 [census follow-up](fauna-development-followup-2026-09-13.md) could only bound:
-the eight skimmer populations that vanish at 71–120 simulated minutes are **not
-failing to develop**. In both pilots the skimmer's growth branch runs, most
+whether late skimmer losses reflect failure to develop. **In these two pilots**
+the skimmer's growth branch runs, most
 skimmers reach their adult target, and every death is starvation at exactly zero
 reserve and zero energy. What ends the seed-2 population is that budding stops
-and the standing adults are not replaced.
+and the standing adults are not replaced. Seed2 is only one of the eight known
+losses; the other seven loss histories are not certified by these two pilots.
 
 Nothing was retuned, seeded, migrated or fed. No ecological configuration,
 default, rate, threshold, gate, cost or geometry moved. This is exploration
@@ -139,15 +140,17 @@ The five remaining animals die over the next 26.3 minutes, the last at tick
 (88700, 88800]. Seed 1 keeps budding until tick 136666 (113.9 min) and censors
 four survivors.
 
-## Funding is never what blocks a birth
+## Every requested bud was funded
 
 Across both pilots and all four forms, `bud_decisions == funded` **exactly**:
 839 budding decisions, 839 fundings, zero blocked by reserve, zero blocked by
 energy, zero blocked by the population cap, zero blocked by an escrow already
 held, zero refunds, zero miscarriages. 835 of those became placed children; the
 other four were still gestating at the horizon. When the controller decides to
-bud, the animal can always pay. The limiting quantity is the *rate* of budding
-decisions, not their affordability:
+bud in these pilots, the animal can pay at the funding site. The recorded
+difference is the *rate* of budding decisions, not rejected funding requests.
+This does not rule out reserve/energy-dependent eligibility in the controller
+before a request exists, nor explain why those requests become less frequent:
 
 | per million member-ticks | grazer | glider | burrower | skimmer |
 | --- | ---: | ---: | ---: | ---: |
