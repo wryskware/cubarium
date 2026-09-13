@@ -95,8 +95,8 @@ Astra's independent reviews are `ca1a0b7` and
 
 ## Still required before the biological screen
 
-- Local recovery is now wired; see the subsequent integration below. Its paired
-  short smoke still needs a frozen-build run before claiming end-to-end evidence.
+- Local recovery is now wired and its paired short smoke completed; see below.
+  Default-profile capture-window behavior still needs the longer biological run.
 - Complete/review actual hunting, digestion, paid escape and offspring core tests;
   link exact funding identities to the observer evidence. Current smoke duration
   does not establish successful predation or paid lineage replacement.
@@ -162,3 +162,28 @@ The generic observer target still repeats22 of these tests. The new restart test
 does not include reproduction. Exact funding transactions/escrow closure causes,
 full biological stages and current core/art phase/scale review findings remain
 open. No hunter was deployed by this observer package.
+
+### Frozen spatial-bridge smoke evidence
+
+Detached worktree `/tmp/cubarium-hunter-spatial-frozen-DIZmNc` is exactly `6bc725c`,
+excluding concurrent source edits. Its release build and its own separate36-test
+example suite both completed successfully. Two runs used its SAME frozen binary:
+`/tmp/cubarium-hunter-spatial-smoke-20260913-{1,2}/`,400elapsed ticks per arm,
+audit windows200and20 respectively. Executable SHA256:
+`0a231a0c475eb6e23c11d27252133c0852954e1482183032bf8405a32758e485`;
+build label `0.1.0+6bc725c` truthfully identifies this isolated source.
+
+All12seeds ×6arms reached144400 with strict audits passing; peak independent
+energy residual in the200tick run was4.7126746949288645e-12. All72 closing full
+hashes and snapshot SHA256s, every non-audit arm-summary field, paired local
+summaries and local JSONL files match across runs. Complete paired/arm observer
+coverage is144400, active windows after close zero, and seen-capture denominators
+match the arm capture counts. **There were zero captures in these20second smokes.**
+Their empty local streams verify plumbing, not natural capture/recovery behavior;
+the actual-capture and synthetic-window tests above cover those paths separately.
+
+This frozen build predates the subsequent post-settlement boundary correction
+`327862c` and measured profile-v3 effector `9eacb7e`. It is not a candidate balance
+result for that later profile. The current two-hour experiment will use a separately
+frozen corrected profile; missing funding details and art integration are still
+explicitly excluded from complete-experiment claims.
