@@ -118,3 +118,112 @@ that the future worker package fails them. Retest the exact final commit, then
 distinguish passing mechanism/observer gates from actual quiet opportunity and
 the unchanged no-care survival/diversity requirements. No core, art, live state,
 care recipe or canonical decision changed in this review.
+
+## Committed correction review — `2fbd092` / `d3f9782`
+
+The completed correction was reviewed read-only, including its full handoff,
+observer, runner shadow, life/path output and reducer. The relevant core, runner,
+observer and reducer sources match `2fbd092` exactly during these tests. No
+48-arm collection was launched. The original **six**, not three, independent
+regressions above now pass unchanged. The handoff's occasional “three previously
+failing” wording understates the preserved first-package result.
+
+Verified closures and evidence:
+
+- `cargo test -p cubarium --example quiet_compare`: **18 pass**.
+- Original six `astra_` observer tests: **6 pass**, including successful release
+  into natural rest and death on completed B+40.
+- `node scripts/reduce-quiet-compare.test.mjs`: **24 pass**. Two frozen snapshot
+  inspection tests initially encountered sandbox child-process EPERM; rerunning
+  with permission passes both. EPERM is not a reducer defect.
+- Root's unmodified `assets/root-quiet-gate-probe.mjs`, using
+  `captures/quiet-smoke-validated-2026-09-13c`: all **five** cases have
+  `gap:false` (untouched control accepted, four damaged summaries refused).
+- Core `astra_quiet_policy` integration suite: **9 pass**, including genuine
+  schema-12 continuations and actual last-boundary snapshot restart. Core
+  movement-accessor parity test: **1 pass**. Filtered-out tests are not additional
+  successes. This is not a new full-workspace test claim.
+
+### Corrected restart, ancestry and receipt paths
+
+`Arm::begin_shadow` now decodes once and compares that state directly with the
+actual primary before allowing the shadow. `advance_shadow` follows the real
+arm's normal step, comparing complete persisted state and both record streams.
+The primary is never reconstructed to serve as its own oracle. Both receive the
+identical care command if a comparison window overlaps elapsed 600. A failed or
+unfinished proof is retained and disqualifies the arm. The damaged-shadow test
+really demonstrates the old two-decodes agreement and a dropped pause's
+disagreement with the uninterrupted primary. A rewritten underlying mode may
+converge after a tick; equality at the initial decode, not a promise of later
+divergence, is the right check for that case. No defect found in this correction.
+
+Opening organisms and all birth/death records now retain full IDs, form and
+opening ancestry. Births are resolved before same-tick deaths, and living ancestry
+is bounded. The low-level life reducer checks generational depth, known parents,
+death identity/age and closing survivor counts. The new movement accessor only
+borrows existing transient segments; births explicitly clear a reused slot's
+segments. Observer segment sums cover **post-step living organisms**, matching
+its population-time denominator. They do not include a removed organism's final
+movement. Do not expand the claim to every pre-step creature's terminal motion,
+or claim unavailable terminal intake/RNG checks. Prior active-mode versus
+already-resting recovery-entry classification also remains absent; retain the
+earlier limitation rather than implying all admissions interrupted activity.
+
+The care checks now verify the single Standard Feed's dose/target/sequence,
+elapsed and absolute application ticks, applied outcome and ledger equality;
+no-care requires every ledger field zero. Root's four concrete false-certification
+cases are closed. These are validation of recorded evidence, not a new care
+replay or ecological conclusion.
+
+### Remaining correction gates
+
+1. **Death during the first held interval loses the whole bout.** The corrected
+   `Observer::after` death branch iterates only `self.open`. At admission the
+   parent was still active, so no recovery bout exists yet. If age death occurs
+   during decision B, core emits the real `Abort(ParentGone, completed_ticks=1)`
+   at B+1, but the observer remains reconciled and emits no recovery bout at all.
+   New owned fixture
+   `astra_death_on_first_held_interval_retains_the_actual_one_tick_bout` performs
+   a real paid birth, sets fixture-only maximum age to B*DT, and fails because
+   the one-tick bout is absent. Record this real terminal interval even when it
+   has no previously open bout; keep it separate from post-step population-time.
+
+2. **The closing-snapshot check repeats the already-fixed B+40 range error.**
+   `verifyClosingSnapshot` requires `inspection.tick < pause.end_tick`
+   (lines 670–674). A genuine completed B+40 state still carries that entry until
+   the following ordinary decision. Core's independent 40-interval/restart test
+   passes this exact boundary. The new separate JavaScript validator fixture
+   demonstrates the false refusal and deliberately labels its envelope/inspection
+   synthetic; it is not misrepresented as an actual captured world. Admit equality
+   at this completed boundary, not a later expired entry.
+
+3. **The reducer changes the energy completion contract.** `verifyArm` demands
+   `gates.legacy_raw_energy == true` and raw energy drift below the opening limit.
+   The runner's imported `shared/audit.rs::audit_passes` deliberately requires
+   raw material/water plus persisted-corrected, independently windowed and
+   immediate receipt-boundary energy, leaving raw energy diagnostic. Thus an arm
+   can truthfully pass the runner's technical gate and be rejected by the reducer
+   solely for naive-counter rounding. Preserve the raw value and honest false
+   legacy flag, but use the same compensated contract and unchanged 1e-8 limits
+   in both places. A separate JavaScript regression changes only raw energy and
+   its flag in a copied smoke summary; it fails as expected. It does not claim
+   this smoke actually had the injected drift.
+
+4. **Cross-file paid-birth linkage discards the child identity.** In `loadRun`,
+   the offer key contains `parent@tick>child`, but the check is only
+   `life.birthsByParent.has(offer.split('>')[0])`. A read-only mutation of seed-1
+   candidate no-care records changes the child generation in its matching Begin
+   and End from `11/5` to `11/100005` at boundary 144228. `reduceQuietEvents` and
+   `reduceLife` both pass, and the current cross-file predicate accepts
+   `47/5@144228>11/100005`, despite the actual birth map naming `11/5`.
+   Compare the map's child value as well. `recoveryOrigins` similarly retains
+   parent+boundary without child, so carry/check the child in that crosswalk too.
+   This is a concrete in-memory probe of the exported checks and exact current
+   cross-file predicate, **not** a claim to have launched a full-horizon reduction.
+
+After adding the first-death fixture, the independent Rust observer command is
+**6 pass, 1 fail**. `node scripts/astra-quiet-correction-review.test.mjs` is
+**0 pass, 2 fail**, intentionally preserving the other two desired-behavior
+boundary/audit regressions. Correct these narrow issues and exact-child linkage
+before freezing the first 48-arm behavioral screen. The existing green smoke is
+technical evidence only; it establishes no biological acceptance or live default.

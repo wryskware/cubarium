@@ -136,6 +136,31 @@ mod independent {
     }
 
     #[test]
+    fn astra_death_on_first_held_interval_retains_the_actual_one_tick_bout() {
+        let (world, mut observer, parent) = started();
+        let boundary = world.tick();
+        let mut state = world.state;
+        state.config.organism.max_age_seconds = boundary as f64 * cubarium_core::DT;
+        let mut world = World::from_state(state).unwrap();
+        let pre = observer.before(&world);
+        world.step();
+        let life = world.drain_events();
+        let quiet = world.drain_quiet_events();
+        assert!(quiet.iter().any(|e| matches!(e, QuietEvent::Abort {
+            parent: p, completed_ticks: 1, reason: QuietReason::ParentGone, ..
+        } if *p == parent)));
+        observer.after(&world, pre, &life, &quiet).unwrap();
+        assert!(observer.reconciled(), "{}", observer.summary());
+        let done = observer.drain_bouts();
+        let recovery = done.iter().find(|b|
+            b.id == parent && b.class == RestClass::PostBirthRecovery)
+            .expect("death in the first held interval must not erase the entire recovery bout");
+        assert_eq!(recovery.ticks, 1);
+        assert_eq!(recovery.start_tick, boundary + 1);
+        assert_eq!(recovery.end, BoutEnd::Aborted(QuietReason::ParentGone));
+    }
+
+    #[test]
     fn astra_duplicate_begin_record_is_not_a_second_paid_birth_opportunity() {
         let mut p = pending_birth();
         p.quiet.push(p.quiet[0]);
