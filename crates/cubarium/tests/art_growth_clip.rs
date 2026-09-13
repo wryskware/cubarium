@@ -401,18 +401,18 @@ fn the_shipped_pack_carries_the_lanternstalks_growth_transitions_and_the_pilot_i
     assert!(clip.frames.len() >= 2, "a clip needs two samples to blend");
     assert!(clip.seconds > 0.0);
 
-    // Every side species carries both steps (2026-09-13); the two radial canopy species carry
-    // none, so their steps keep the reveal mask until a top-down opening is authored.
+    // Every species carries both steps (the side species since 2026-09-13, the two radial
+    // canopy species — a top-down opening from the centre — later the same day), so no
+    // plant of the shipped pack keeps the reveal mask for a stage step any more.
     for plant in &art.plants {
         let pairs = plant.transitions.iter().map(|t| (t.from, t.to)).collect::<Vec<_>>();
-        if plant.band == Band::Canopy {
-            assert!(pairs.is_empty(), "{} carries {pairs:?}; canopy keeps the masks", plant.name);
-            for (from, to) in [(0u8, 1u8), (1, 2)] {
-                assert!(plant.transition(from, to).is_none(), "{} {from} → {to}", plant.name);
-            }
-        } else {
-            assert_eq!(pairs, vec![(0u8, 1u8), (1, 2)], "{} growth clips", plant.name);
-        }
+        assert_eq!(pairs, vec![(0u8, 1u8), (1, 2)], "{} growth clips", plant.name);
+        assert_eq!(
+            plant.band == Band::Canopy,
+            matches!(plant.name.as_str(), "umbrellafrond" | "bloomcrown"),
+            "{}: the canopy band is exactly the two radial species",
+            plant.name
+        );
     }
 }
 

@@ -733,8 +733,8 @@ mod tests {
             ("rootveil", Band::Soil, false, &[(0, 1), (1, 2)]),
             ("lanternstalk", Band::Foliage, true, &[(0, 1), (1, 2)]),
             ("tendrilfan", Band::Foliage, true, &[(0, 1), (1, 2)]),
-            ("umbrellafrond", Band::Canopy, false, &[]),
-            ("bloomcrown", Band::Canopy, true, &[]),
+            ("umbrellafrond", Band::Canopy, false, &[(0, 1), (1, 2)]),
+            ("bloomcrown", Band::Canopy, true, &[(0, 1), (1, 2)]),
             ("reedspire", Band::Water, false, &[(0, 1), (1, 2)]),
         ];
         assert_eq!(art.plants.len(), expected.len());

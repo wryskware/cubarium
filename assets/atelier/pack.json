@@ -388,18 +388,24 @@
 		{
 			"band": "canopy",
 			"frames": 24,
-			"name": "bloomcrown",
+			"from": 0,
+			"loop": false,
+			"name": "umbrellafrond",
 			"row": 25,
-			"seconds": 3.0,
-			"stage": 0
+			"seconds": 4.0,
+			"stage": "grow",
+			"to": 1
 		},
 		{
 			"band": "canopy",
 			"frames": 24,
-			"name": "bloomcrown",
+			"from": 1,
+			"loop": false,
+			"name": "umbrellafrond",
 			"row": 26,
-			"seconds": 3.0,
-			"stage": 1
+			"seconds": 4.0,
+			"stage": "grow",
+			"to": 2
 		},
 		{
 			"band": "canopy",
@@ -407,7 +413,7 @@
 			"name": "bloomcrown",
 			"row": 27,
 			"seconds": 3.0,
-			"stage": 2
+			"stage": 0
 		},
 		{
 			"band": "canopy",
@@ -415,13 +421,51 @@
 			"name": "bloomcrown",
 			"row": 28,
 			"seconds": 3.0,
+			"stage": 1
+		},
+		{
+			"band": "canopy",
+			"frames": 24,
+			"name": "bloomcrown",
+			"row": 29,
+			"seconds": 3.0,
+			"stage": 2
+		},
+		{
+			"band": "canopy",
+			"frames": 24,
+			"name": "bloomcrown",
+			"row": 30,
+			"seconds": 3.0,
 			"stage": "fruit"
+		},
+		{
+			"band": "canopy",
+			"frames": 24,
+			"from": 0,
+			"loop": false,
+			"name": "bloomcrown",
+			"row": 31,
+			"seconds": 4.0,
+			"stage": "grow",
+			"to": 1
+		},
+		{
+			"band": "canopy",
+			"frames": 24,
+			"from": 1,
+			"loop": false,
+			"name": "bloomcrown",
+			"row": 32,
+			"seconds": 4.0,
+			"stage": "grow",
+			"to": 2
 		},
 		{
 			"band": "water",
 			"frames": 24,
 			"name": "reedspire",
-			"row": 29,
+			"row": 33,
 			"seconds": 3.0,
 			"stage": 0
 		},
@@ -429,7 +473,7 @@
 			"band": "water",
 			"frames": 24,
 			"name": "reedspire",
-			"row": 30,
+			"row": 34,
 			"seconds": 3.0,
 			"stage": 1
 		},
@@ -437,7 +481,7 @@
 			"band": "water",
 			"frames": 24,
 			"name": "reedspire",
-			"row": 31,
+			"row": 35,
 			"seconds": 3.0,
 			"stage": 2
 		},
@@ -447,7 +491,7 @@
 			"from": 0,
 			"loop": false,
 			"name": "reedspire",
-			"row": 32,
+			"row": 36,
 			"seconds": 4.0,
 			"stage": "grow",
 			"to": 1
@@ -458,7 +502,7 @@
 			"from": 1,
 			"loop": false,
 			"name": "reedspire",
-			"row": 33,
+			"row": 37,
 			"seconds": 4.0,
 			"stage": "grow",
 			"to": 2

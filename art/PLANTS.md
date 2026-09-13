@@ -48,8 +48,10 @@ pixel's source coordinate, a slowly turning one-pixel stem can hold the same pix
 through several samples and then change; the temporal blend spreads that change over
 one sample interval (125 ms) rather than removing it. Growth between stages is a
 runtime reveal (up the stalk on side faces, from the center on the top face) over the
-authored stage clips; authored "extending stalk" poses replace that reveal, not the
-pacing — see "Pack v5: growth transitions" below, where `lanternstalk` has the first.
+authored stage clips wherever a pack carries no clip for the step; authored "extending
+stalk" and "opening crown" poses replace that reveal, not the pacing — see "Pack v5: growth
+transitions" below. Since 2026-09-13 every species of the shipped pack carries both of its
+steps, so the reveal remains only for the first appearance out of bare ground.
 
 `fruit` is the full-grown plant in flower or bearing fruit, with the warm accent or a
 bright cyan glow on the fruit bodies so it reads as food at 16 px. Fauna that eat fruit
@@ -176,10 +178,10 @@ pixel-identical to the neutral `Stalk1` image** — which is stage 1's *half-per
 quarter-period sample, the sprout at modulate 1. The presenter blends the endpoints into the
 running stage loops, so neither endpoint has to match an arbitrary sway phase.
 
-### The ten authored steps (2026-09-13)
+### The ten authored side-face steps (2026-09-13)
 
-Every side-face species now carries both of its steps; the two canopy species still use the
-runtime's radial reveal. Each clip is 4 s, `loop_mode = LOOP_NONE`, and lives in its own
+Every side-face species carries both of its steps (the two canopy species got theirs later
+the same day, below). Each clip is 4 s, `loop_mode = LOOP_NONE`, and lives in its own
 hidden `Grow<from><to>` group of Sprite2D copies of the parts the stages already use — no
 clip touches another clip's pivots and no new part was painted for any of them.
 
@@ -226,3 +228,35 @@ leak a growth transform into the stage and fruit rows. A `Node2D` pivot's `modul
 whole sub-assembly at once (the baker multiplies every `CanvasItem` parent's `modulate`);
 scaling that pivot scales its children's positions too, which is how a part is scaled about
 a chosen root rather than about its own centre.
+
+### The four canopy steps (2026-09-13, later)
+
+The two top-down species have no root row: their anchor is the tile **centre**, so "roots
+stay planted" becomes "the centre stays put" — every frame paints the centre pixel, keeps its
+painted footprint centred on it to within one pixel, and reaches no further than the target
+stage and no less than the source. Nothing is scaled or faded as a whole sprite: a canopy
+plant opens from its centre by parts that extend, slide and light in turn. Because the stage
+art is single sprites, each was **cut into pieces, pixel for pixel** — the same colours at the
+same offsets, nothing repainted — and the pieces of one stage are a partition of it, checked
+by `art/plants/author_grow.py` (`canopy_parts`), so a clip's last frame *is* the stage art:
+`umbrellafrond` `ribs1`/`blades1` (frond1), `cross2`/`diag2`/`blades2` (frond2);
+`bloomcrown` `petal1` (one 3×3 petal, drawn four times flipped into the quadrants; the dark
+cross under it is the centre's), `lobe2` (a 4×3 side lobe, four times), `tip2` (a 3×4
+north petal, twice), `waist2` (the two-pixel notch between the lobes, twice) and `core2`
+(the 3×5 body the crown sits on). The sway pivots are untouched; the stage and fruit rows
+are byte-identical to the previous pack. Same 4 s, `LOOP_NONE`, own hidden `Grow<from><to>`
+group, endpoints RESET-neutral (the centre at modulate 1, which for both species is stage
+1's and stage 2's phase-0 *silhouette* with a dimmer centre; the presenter's 12 % blends carry
+the colour), `grow01`'s last frame byte-identical to `grow12`'s first.
+
+| clip | what it shows |
+| --- | --- |
+| `umbrellafrond grow01` | the sprout holds; the mint **ribs** come in under it at half length (at scale 0.5 the 9 px cross samples exactly the sprout's mint diamond) and extend to 9 px with their cyan tips (0.6–2.2 s); the **blades** unfurl out from the ribs — two opaque copies of `blades1`, one squeezed to 0.35 along x, one along y, spreading to full width over 1.4–3.4 and 1.6–3.6 s, so the canopy fills sideways out of each rib pair; the cyan centre lights last (3.0–3.8 s) and the sprout under it is dropped once it is covered |
+| `umbrellafrond grow12` | frond1 holds underneath at full opacity to the last sample; the four cardinal ribs (`cross2`) come in over it at 2/3 length (9 of 13 px) and push out to 13 (0.8–2.4 s); four **diagonal ribs** (`diag2`) sprout from the centre 0.36 → 1 (1.4–3.0 s); the blades follow, each copy first lengthening along its rib axis with the cross (11/15 → 1) and then spreading sideways (0.45 → 1, 1.8–3.6 and 2.0–3.8 s); the centre never changes |
+| `bloomcrown grow01` | the warm centre swells over the sprout (its alpha plane is the sprout's, 0.4–1.0 s) as a **bud**: the four petals sit tucked under it at the centre showing only their dark corners; then they **slide out** diagonally to their places, NW/SE leading (1.0–2.6 s) and NE/SW after (1.3–2.9 s) |
+| `bloomcrown grow12` | the small crown stays on top throughout; the body's `core2` forms under it (0.9–1.5 s); the four **side lobes** form over the old petals (NW/SE 0.9–1.5, NE/SW 1.2–1.8 s) and the old bloom is dropped once they are opaque; two new petals (`tip2`) push out north (1.6–3.2 s) and south (1.9–3.5 s) from under the crown, the lobes slide one pixel outward (2.0–3.2, 2.3–3.5 s), the notches light (2.0–2.6 s) and the 5 px crown **opens over** the 3 px one last (a cross-fade, 2.6–3.4 s — a nearest-sampled scale-up of the ring loses the ring for a sample and reads as a solid warm fruit, so it is not done that way). The `Fruit` part is never used |
+
+Both species keep their in-place wind spin through a step (`slot_wind` treats a growth stamp
+exactly like a stage stamp), and their measured bend budgets are unchanged (0.33 and 2.07
+px, both irrelevant to a species that spins). Where a canopy slot sits on the rim of the top
+face the stamp crosses the seam onto the side face as one body, as every stamp does.

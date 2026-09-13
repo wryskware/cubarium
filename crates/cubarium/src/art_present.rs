@@ -2734,7 +2734,8 @@ impl ArtPresenter {
     /// growth stamp never reads the `fruit` clip. On the *mask* path a full-grown plant in
     /// fruit that turns round still carries the accent [`growth_between`] interpolates from
     /// the previous tick for the first frames of the step (about two frames at 60 fps, only
-    /// for a fruiting species whose 1 → 2 step has no clip — bloomcrown on the shipped pack).
+    /// for a fruiting species whose 1 → 2 step has no clip — none on the shipped pack since
+    /// the canopy species were authored on 2026-09-13; a v1–v4 pack's bloomcrown).
     pub fn draw_with_fruit(
         &mut self,
         view: &RenderView,
@@ -3117,7 +3118,6 @@ const _: () = assert!(CELL_COUNT == 1280);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::art::Transition;
     use crate::present::Presenter;
     use cube_proto::Face;
     use std::path::Path;
@@ -4257,9 +4257,9 @@ mod tests {
 
     #[test]
     fn a_radial_slot_with_a_clip_plays_it_unmasked_too() {
-        // No canopy species is authored with a growth clip yet, so the top face's rule is
-        // exercised by lending one the pilot's clip: same tile size and pivot, so the blend
-        // is the same arithmetic the shipped pack would do.
+        // The canopy species carry their own clips (2026-09-13), so the top face's rule is
+        // exercised on the shipped umbrellafrond's 0 → 1 and compared against the same pack
+        // with that plant's clips stripped — the radial reveal it used before.
         let cell = CellId::all()
             .find(|&c| {
                 c.face() == Face::Top
@@ -4269,28 +4269,23 @@ mod tests {
                     && (4..=11).contains(&c.cy())
             })
             .expect("a rank-2 umbrellafrond slot in the middle of Top");
-        let lent = || {
-            let source = pack();
-            let clip = source.plant("lanternstalk").unwrap().transition(0, 1).unwrap();
+        let stripped = || {
             let mut art = pack();
             let target =
                 art.plants.iter_mut().find(|p| p.name == CANOPY_PLANTS[0]).expect("the canopy plant");
-            target.transitions.push(Transition {
-                from: 0,
-                to: 1,
-                clip: Clip { frames: clip.frames.clone(), seconds: clip.seconds, looping: false },
-            });
+            assert!(!target.transitions.is_empty(), "the shipped canopy plant carries clips");
+            target.transitions.clear();
             art
         };
         // The canopy's own thresholds bracket the same two fixture densities.
         let th = stage_thresholds(Band::Canopy);
         assert!(th[0] < AT_SPROUT && AT_SPROUT < th[1] && th[1] < AT_MID && AT_MID < th[2]);
-        let mut p = growing_from(lent(), cell, 2);
+        let mut p = growing(cell, 2);
         let (v, f, t) = (one_cell_view(41, cell, AT_MID), 1.0, 0.5);
         let seconds = present_seconds(v.tick, f);
-        let art = lent();
+        let art = pack();
         let plant = art.plant(CANOPY_PLANTS[0]).unwrap();
-        let clip = plant.transition(0, 1).unwrap();
+        let clip = plant.transition(0, 1).expect("the shipped canopy 0 → 1 clip");
         let budget = p.bend_budget(&plant.name);
         // A radial plant is never bent: it turns in place, and the reveal it no longer uses
         // measured from that same stationary centre.
@@ -4318,8 +4313,8 @@ mod tests {
         );
         let drawn = drawn_with(&mut p, &v, f);
         assert_eq!(worst_diff(&drawn, &want), 0.0, "a top-face clip is not drawn unmasked");
-        // Without the lent clip the same slot keeps its radial reveal, which looks different.
-        let masked = drawn_with(&mut growing(cell, 2), &v, f);
+        // With the clips stripped the same slot keeps its radial reveal, which looks different.
+        let masked = drawn_with(&mut growing_from(stripped(), cell, 2), &v, f);
         assert!(worst_diff(&drawn, &masked) > 0.01, "the radial reveal and the clip agree");
     }
 

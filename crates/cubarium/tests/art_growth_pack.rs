@@ -826,7 +826,67 @@ fn a_growth_clip_keeps_its_root_between_the_two_stages_rows_and_moves_it_at_most
                 .collect();
             println!("  {what:<22} stage roots {low_src} → {low_dst}, clip roots {lows:?}");
             if plant.band == Band::Canopy {
-                // A radial plant has no root row to keep; its own reveal is from the centre.
+                // A radial plant has no root row: its anchor is the tile **centre**, so the
+                // planted-root rule becomes a centred one. Every frame paints the centre
+                // pixel (the plant never lifts off its pivot), its painted footprint stays
+                // centred on that pixel to within one pixel in each axis (an even-sized
+                // piece sliding out, or one of an opposite pair leading the other, can be a
+                // pixel ahead; a whole plant drifting off its pivot cannot hide in that), and
+                // its painted reach lies between the two stages' own, so nothing shrinks
+                // below the sprout or pokes past the target's tips.
+                let reach = |s: &Sprite| -> f64 {
+                    let mut r: f64 = 0.0;
+                    for y in 0..s.height() as i32 {
+                        for x in 0..s.width() as i32 {
+                            if s.texel(x, y)[3] > 0.0 {
+                                r = r.max((f64::from(x) + 0.5 - 8.0).hypot(f64::from(y) + 0.5 - 8.0));
+                            }
+                        }
+                    }
+                    r
+                };
+                let bounds = |s: &Sprite| -> (i32, i32, i32, i32) {
+                    let (mut x0, mut x1, mut y0, mut y1) = (i32::MAX, i32::MIN, i32::MAX, i32::MIN);
+                    for y in 0..s.height() as i32 {
+                        for x in 0..s.width() as i32 {
+                            if s.texel(x, y)[3] > 0.0 {
+                                (x0, x1, y0, y1) = (x0.min(x), x1.max(x), y0.min(y), y1.max(y));
+                            }
+                        }
+                    }
+                    (x0, x1, y0, y1)
+                };
+                let lo = reach(&plant.stages[usize::from(from)].frames[0]);
+                let hi = reach(&plant.stages[usize::from(to)].frames[0]);
+                assert!(lo < hi, "{what}: stage {to} reaches no further than stage {from}");
+                let mut reaches = Vec::with_capacity(lows.len());
+                for (i, frame) in transition.clip.frames.iter().enumerate() {
+                    assert!(
+                        frame.texel(8, 8)[3] > 0.0,
+                        "{what}: frame {i} leaves the tile centre unpainted — the plant lifted \
+                         off its pivot"
+                    );
+                    let (x0, x1, y0, y1) = bounds(frame);
+                    assert!(
+                        (x0 + x1 - 15).abs() <= 1 && (y0 + y1 - 15).abs() <= 1,
+                        "{what}: frame {i}'s footprint {x0}..={x1} × {y0}..={y1} is off the tile \
+                         centre"
+                    );
+                    let r = reach(frame);
+                    assert!(
+                        r >= lo - 1e-9 && r <= hi + 1e-9,
+                        "{what}: frame {i} reaches {r} px from the centre, outside the stages' \
+                         {lo}..={hi}"
+                    );
+                    reaches.push(r);
+                }
+                println!(
+                    "  {what:<22} radial: centre painted, footprint centred, reach {lo:.2} → \
+                     {hi:.2} px (frames {:.2}..{:.2})",
+                    reaches.iter().cloned().fold(f64::INFINITY, f64::min),
+                    reaches.iter().cloned().fold(0.0, f64::max)
+                );
+                checked += 1;
                 continue;
             }
             let (lo, hi) = (low_src.min(low_dst), low_src.max(low_dst));
@@ -871,7 +931,8 @@ fn a_growth_clip_keeps_its_root_between_the_two_stages_rows_and_moves_it_at_most
             checked += 1;
         }
     }
-    println!("  {checked} side-species transition(s) checked");
+    println!("  {checked} transition(s) checked (side species by root row, canopy by centre)");
+    assert_eq!(checked, art.plants.len() * 2, "every plant's two steps must be checked");
 }
 
 // ---------------------------------------------------------------------------
@@ -1121,6 +1182,7 @@ fn the_presenter_plays_every_authored_step_as_the_documented_three_layer_stamp()
     let art = plants_only();
     let mut checked = 0;
     let mut bent: HashSet<String> = HashSet::new();
+    let mut spun: HashSet<String> = HashSet::new();
     for plant in &art.plants {
         if plant.transitions.is_empty() {
             continue;
@@ -1169,7 +1231,28 @@ fn the_presenter_plays_every_authored_step_as_the_documented_three_layer_stamp()
                         "{what} at {label}: the packet must be quiet"
                     );
                 }
-                if admitted == 0.0 {
+                let radial = site.cell.face() == Face::Top
+                    && wind_response(site.species).spin_deg > 0.0;
+                if radial {
+                    // A radial (top-face) species turns in place: never a bend, and at a
+                    // windy instant its heading is spun off the slot's own — that spin is
+                    // the whole of what the breeze does to a canopy plant, growing or not.
+                    assert_eq!(
+                        wind.0,
+                        Bend::NONE,
+                        "{what} at {label}: a radial species must never bend"
+                    );
+                    assert_eq!(
+                        wind.1 != slot_of(site.cell).heading,
+                        windy,
+                        "{what} at {label}: the crown's heading is {:?} against the slot's {:?}",
+                        wind.1,
+                        slot_of(site.cell).heading
+                    );
+                    if windy {
+                        spun.insert(plant.name.clone());
+                    }
+                } else if admitted == 0.0 {
                     assert_eq!(
                         wind,
                         (Bend::NONE, slot_of(site.cell).heading),
@@ -1259,6 +1342,141 @@ fn the_presenter_plays_every_authored_step_as_the_documented_three_layer_stamp()
          stopped being exercised: {names:?}",
         bent.len()
     );
+    let mut names: Vec<&String> = spun.iter().collect();
+    names.sort();
+    println!("  the radial (spun) branch was exercised by {names:?}");
+    assert!(
+        spun.len() >= 2,
+        "only {} species were drawn turning in place mid-step; both canopy species carry \
+         clips: {names:?}",
+        spun.len()
+    );
+}
+
+/// A canopy plant whose slot lies on the **rim** of the top face: its 16-px tile crosses the
+/// seam onto a side face. An authored step there is still the one documented three-layer
+/// stamp — hand-built through the same seam-continuous [`stamp_layers_bent`] — so the
+/// crown opens as one body on two faces, every channel stays bounded, and the plant is lit
+/// on both faces. Both clips of both radial species, at a windy instant (so the in-place
+/// spin is live across the seam too).
+#[test]
+fn a_canopy_step_on_the_rim_of_the_top_face_opens_as_one_stamp_on_two_faces() {
+    let art = plants_only();
+    let mut checked = 0;
+    for species in ["umbrellafrond", "bloomcrown"] {
+        let plant = art.plant(species).expect(species);
+        let cell = CellId::all()
+            .find(|&c| {
+                c.face() == Face::Top
+                    && (c.cx() == 0 || c.cx() == 15 || c.cy() == 0 || c.cy() == 15)
+                    && band_of(c) == Band::Canopy
+                    && plant_cap(Band::Canopy, c) == Some(2)
+                    && species_of(Band::Canopy, c) == species
+            })
+            .unwrap_or_else(|| panic!("the top face's rim has no rank-2 {species} slot"));
+        let site = Site { cell, band: Band::Canopy, species };
+        let budget = plant_bend_budget(plant);
+        for transition in &plant.transitions {
+            let (from, to) = (transition.from, transition.to);
+            let what = format!("{species} grow{from}{to} at Top cell ({}, {})", cell.cx(), cell.cy());
+            let density = density_for(Band::Canopy, to);
+            // Three observes into the sprout's step (t = 0.75, the petals out and the ribs
+            // long enough to reach a seam two pixels off), two into the wider one.
+            let observes = observes_before(from) + if from == 0 { 3 } else { 2 };
+            let tick = fixture_tick(WIND_PEAK_TICK, observes * 20);
+            let f = 0.5;
+            let mut p = ArtPresenter::new(plants_only());
+            let v = drive_to(&mut p, site, density, 20, observes, tick);
+            let seconds = present_seconds(v.tick, f);
+            let step = drawn_step(&p, site.cell, f)
+                .unwrap_or_else(|| panic!("{what}: the fixture is not in flight"));
+            assert_eq!((step.lower, step.upper), (Some(from), to), "{what}: wrong step");
+            assert!(step.t > GROW_BLEND && step.t < 1.0 - GROW_BLEND, "{what}: t = {}", step.t);
+            let wind = wind_of(site, budget, seconds);
+            assert_eq!(wind.0, Bend::NONE, "{what}: a radial species never bends");
+            let bg = background(&v, f);
+            let actual = draw(&mut p, &v, f);
+            let expected = expected_step(&art, &bg, site, density, seconds, wind, step);
+            assert_same_canvas(&actual, &expected, &what);
+            let lit: HashSet<Face> = differing(&actual, &bg).into_iter().map(|(f, _, _)| f).collect();
+            assert!(
+                lit.contains(&Face::Top) && lit.len() >= 2,
+                "{what}: the crown on the rim lights {lit:?}, not the top face and a side face"
+            );
+            for (face, x, y) in every_pixel() {
+                let px = actual.get(face, x, y);
+                assert!(
+                    px.iter().all(|&c| (0.0..=1.0 + 1e-6).contains(&c)),
+                    "{what}: pixel {face:?} ({x}, {y}) is {px:?}"
+                );
+            }
+            println!("  {what:<44} t = {:.4}, lit {lit:?}", step.t);
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 4, "both clips of both canopy species must be drawn on the rim");
+}
+
+/// Native 64 px frames of both canopy species climbing sprout → stage 1 → stage 2 through
+/// their authored clips and then wilting back through them, three frames per tick (60 fps
+/// over the 20 Hz clock), on the presenter's own published-view path with the two cells
+/// fed and nothing else. Ignored: writes files. `CANOPY_CAPTURE_DIR` names the directory.
+#[test]
+#[ignore = "review capture, not behaviour"]
+fn capture_the_canopy_steps_as_native_frames() {
+    use cubarium::sink::{FrameSink, PngSink};
+    let dir = std::env::var("CANOPY_CAPTURE_DIR").unwrap_or_else(|_| {
+        let d = std::env::temp_dir().join(format!("canopy-growth-{}", std::process::id()));
+        d.to_string_lossy().into_owned()
+    });
+    std::fs::create_dir_all(&dir).unwrap();
+    let art = plants_only();
+    let sites: Vec<Site> = ["umbrellafrond", "bloomcrown"]
+        .iter()
+        .map(|s| site_of(art.plant(s).unwrap()))
+        .collect();
+    let view = |tick: u64, density: f64| {
+        let mut v = bare_view(tick);
+        for site in &sites {
+            v.producer[site.cell.index()] = density * saturation();
+        }
+        v
+    };
+    let mut p = ArtPresenter::new(plants_only());
+    let mut sink = PngSink::new(&dir, 1).unwrap();
+    let mut frame = cube_proto::Frame::black();
+    let mut manifest = String::new();
+    p.observe(&view(0, 0.0));
+    // 12 s up (three 4 s steps), 1 s held full-grown, then 6 s starved back to a sprout.
+    let up = density_for(Band::Canopy, 2);
+    let down = density_for(Band::Canopy, 0);
+    for tick in 1..=400u64 {
+        let v = view(tick, if tick <= 260 { up } else { down });
+        p.observe(&v);
+        for k in 0..FRAMES_PER_TICK {
+            let f = k as f64 / FRAMES_PER_TICK as f64;
+            let mut canvas = Canvas::new();
+            p.draw(&v, f, &mut canvas);
+            canvas.encode(&mut frame);
+            sink.submit(&frame).unwrap();
+            let steps: Vec<String> = sites
+                .iter()
+                .map(|s| match drawn_step(&p, s.cell, f) {
+                    Some(step) => format!("{}:{:?}>{}@{:.3}", s.species, step.lower, step.upper, step.t),
+                    None => format!("{}:idle", s.species),
+                })
+                .collect();
+            manifest.push_str(&format!("tick {tick} f {f:.3} {}\n", steps.join(" ")));
+        }
+    }
+    sink.finish().unwrap();
+    std::fs::write(format!("{dir}/manifest.txt"), manifest).unwrap();
+    let cells: Vec<String> = sites
+        .iter()
+        .map(|s| format!("{} at Top cell ({}, {}) anchor {:?}", s.species, s.cell.cx(), s.cell.cy(), slot_of(s.cell).at))
+        .collect();
+    std::fs::write(format!("{dir}/sites.txt"), cells.join("\n") + "\n").unwrap();
+    eprintln!("frames in {dir}");
 }
 
 // ---------------------------------------------------------------------------

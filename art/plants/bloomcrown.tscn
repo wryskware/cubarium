@@ -1,4 +1,4 @@
-[gd_scene load_steps=13 format=3]
+[gd_scene load_steps=20 format=3]
 
 [ext_resource type="Texture2D" path="res://parts/plant_bloomcrown_sprout.svg" id="1"]
 
@@ -11,6 +11,16 @@
 [ext_resource type="Texture2D" path="res://parts/plant_bloomcrown_center2.svg" id="5"]
 
 [ext_resource type="Texture2D" path="res://parts/plant_bloomcrown_fruit2.svg" id="6"]
+
+[ext_resource type="Texture2D" path="res://parts/plant_bloomcrown_petal1.svg" id="7"]
+
+[ext_resource type="Texture2D" path="res://parts/plant_bloomcrown_lobe2.svg" id="8"]
+
+[ext_resource type="Texture2D" path="res://parts/plant_bloomcrown_tip2.svg" id="9"]
+
+[ext_resource type="Texture2D" path="res://parts/plant_bloomcrown_waist2.svg" id="10"]
+
+[ext_resource type="Texture2D" path="res://parts/plant_bloomcrown_core2.svg" id="11"]
 
 [sub_resource type="Animation" id="Animation_RESET"]
 resource_name = "RESET"
@@ -147,6 +157,501 @@ tracks/11/keys = {
 "transitions": PackedFloat32Array(1),
 "update": 0,
 "values": [Color(1, 1, 1, 1)]
+}
+
+tracks/12/type = "value"
+tracks/12/path = NodePath("Grow01:visible")
+tracks/12/interp = 1
+tracks/12/enabled = true
+tracks/12/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/13/type = "value"
+tracks/13/path = NodePath("Grow01/Sprout:visible")
+tracks/13/interp = 1
+tracks/13/enabled = true
+tracks/13/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/14/type = "value"
+tracks/14/path = NodePath("Grow01/Center:visible")
+tracks/14/interp = 1
+tracks/14/enabled = true
+tracks/14/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/15/type = "value"
+tracks/15/path = NodePath("Grow01/Center:self_modulate")
+tracks/15/interp = 1
+tracks/15/enabled = true
+tracks/15/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/16/type = "value"
+tracks/16/path = NodePath("Grow01/PetalNW:visible")
+tracks/16/interp = 1
+tracks/16/enabled = true
+tracks/16/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/17/type = "value"
+tracks/17/path = NodePath("Grow01/PetalNW:self_modulate")
+tracks/17/interp = 1
+tracks/17/enabled = true
+tracks/17/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/18/type = "value"
+tracks/18/path = NodePath("Grow01/PetalNW:position")
+tracks/18/interp = 1
+tracks/18/enabled = true
+tracks/18/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(-2, -2)]
+}
+
+tracks/19/type = "value"
+tracks/19/path = NodePath("Grow01/PetalSE:visible")
+tracks/19/interp = 1
+tracks/19/enabled = true
+tracks/19/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/20/type = "value"
+tracks/20/path = NodePath("Grow01/PetalSE:self_modulate")
+tracks/20/interp = 1
+tracks/20/enabled = true
+tracks/20/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/21/type = "value"
+tracks/21/path = NodePath("Grow01/PetalSE:position")
+tracks/21/interp = 1
+tracks/21/enabled = true
+tracks/21/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(2, 2)]
+}
+
+tracks/22/type = "value"
+tracks/22/path = NodePath("Grow01/PetalNE:visible")
+tracks/22/interp = 1
+tracks/22/enabled = true
+tracks/22/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/23/type = "value"
+tracks/23/path = NodePath("Grow01/PetalNE:self_modulate")
+tracks/23/interp = 1
+tracks/23/enabled = true
+tracks/23/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/24/type = "value"
+tracks/24/path = NodePath("Grow01/PetalNE:position")
+tracks/24/interp = 1
+tracks/24/enabled = true
+tracks/24/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(2, -2)]
+}
+
+tracks/25/type = "value"
+tracks/25/path = NodePath("Grow01/PetalSW:visible")
+tracks/25/interp = 1
+tracks/25/enabled = true
+tracks/25/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/26/type = "value"
+tracks/26/path = NodePath("Grow01/PetalSW:self_modulate")
+tracks/26/interp = 1
+tracks/26/enabled = true
+tracks/26/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/27/type = "value"
+tracks/27/path = NodePath("Grow01/PetalSW:position")
+tracks/27/interp = 1
+tracks/27/enabled = true
+tracks/27/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(-2, 2)]
+}
+
+tracks/28/type = "value"
+tracks/28/path = NodePath("Grow12:visible")
+tracks/28/interp = 1
+tracks/28/enabled = true
+tracks/28/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/29/type = "value"
+tracks/29/path = NodePath("Grow12/Old:visible")
+tracks/29/interp = 1
+tracks/29/enabled = true
+tracks/29/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/30/type = "value"
+tracks/30/path = NodePath("Grow12/Center1:visible")
+tracks/30/interp = 1
+tracks/30/enabled = true
+tracks/30/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/31/type = "value"
+tracks/31/path = NodePath("Grow12/Core:visible")
+tracks/31/interp = 1
+tracks/31/enabled = true
+tracks/31/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/32/type = "value"
+tracks/32/path = NodePath("Grow12/Core:self_modulate")
+tracks/32/interp = 1
+tracks/32/enabled = true
+tracks/32/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/33/type = "value"
+tracks/33/path = NodePath("Grow12/Center:visible")
+tracks/33/interp = 1
+tracks/33/enabled = true
+tracks/33/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/34/type = "value"
+tracks/34/path = NodePath("Grow12/Center:self_modulate")
+tracks/34/interp = 1
+tracks/34/enabled = true
+tracks/34/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/35/type = "value"
+tracks/35/path = NodePath("Grow12/WaistW:visible")
+tracks/35/interp = 1
+tracks/35/enabled = true
+tracks/35/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/36/type = "value"
+tracks/36/path = NodePath("Grow12/WaistW:self_modulate")
+tracks/36/interp = 1
+tracks/36/enabled = true
+tracks/36/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/37/type = "value"
+tracks/37/path = NodePath("Grow12/WaistE:visible")
+tracks/37/interp = 1
+tracks/37/enabled = true
+tracks/37/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/38/type = "value"
+tracks/38/path = NodePath("Grow12/WaistE:self_modulate")
+tracks/38/interp = 1
+tracks/38/enabled = true
+tracks/38/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/39/type = "value"
+tracks/39/path = NodePath("Grow12/LobeNW:visible")
+tracks/39/interp = 1
+tracks/39/enabled = true
+tracks/39/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/40/type = "value"
+tracks/40/path = NodePath("Grow12/LobeNW:self_modulate")
+tracks/40/interp = 1
+tracks/40/enabled = true
+tracks/40/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/41/type = "value"
+tracks/41/path = NodePath("Grow12/LobeNW:position")
+tracks/41/interp = 1
+tracks/41/enabled = true
+tracks/41/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(-3.5, -2)]
+}
+
+tracks/42/type = "value"
+tracks/42/path = NodePath("Grow12/LobeSE:visible")
+tracks/42/interp = 1
+tracks/42/enabled = true
+tracks/42/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/43/type = "value"
+tracks/43/path = NodePath("Grow12/LobeSE:self_modulate")
+tracks/43/interp = 1
+tracks/43/enabled = true
+tracks/43/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/44/type = "value"
+tracks/44/path = NodePath("Grow12/LobeSE:position")
+tracks/44/interp = 1
+tracks/44/enabled = true
+tracks/44/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(3.5, 2)]
+}
+
+tracks/45/type = "value"
+tracks/45/path = NodePath("Grow12/LobeNE:visible")
+tracks/45/interp = 1
+tracks/45/enabled = true
+tracks/45/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/46/type = "value"
+tracks/46/path = NodePath("Grow12/LobeNE:self_modulate")
+tracks/46/interp = 1
+tracks/46/enabled = true
+tracks/46/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/47/type = "value"
+tracks/47/path = NodePath("Grow12/LobeNE:position")
+tracks/47/interp = 1
+tracks/47/enabled = true
+tracks/47/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(3.5, -2)]
+}
+
+tracks/48/type = "value"
+tracks/48/path = NodePath("Grow12/LobeSW:visible")
+tracks/48/interp = 1
+tracks/48/enabled = true
+tracks/48/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/49/type = "value"
+tracks/49/path = NodePath("Grow12/LobeSW:self_modulate")
+tracks/49/interp = 1
+tracks/49/enabled = true
+tracks/49/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/50/type = "value"
+tracks/50/path = NodePath("Grow12/LobeSW:position")
+tracks/50/interp = 1
+tracks/50/enabled = true
+tracks/50/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(-3.5, 2)]
+}
+
+tracks/51/type = "value"
+tracks/51/path = NodePath("Grow12/TipN:visible")
+tracks/51/interp = 1
+tracks/51/enabled = true
+tracks/51/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/52/type = "value"
+tracks/52/path = NodePath("Grow12/TipN:self_modulate")
+tracks/52/interp = 1
+tracks/52/enabled = true
+tracks/52/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/53/type = "value"
+tracks/53/path = NodePath("Grow12/TipN:position")
+tracks/53/interp = 1
+tracks/53/enabled = true
+tracks/53/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(0, -4.5)]
+}
+
+tracks/54/type = "value"
+tracks/54/path = NodePath("Grow12/TipS:visible")
+tracks/54/interp = 1
+tracks/54/enabled = true
+tracks/54/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/55/type = "value"
+tracks/55/path = NodePath("Grow12/TipS:self_modulate")
+tracks/55/interp = 1
+tracks/55/enabled = true
+tracks/55/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/56/type = "value"
+tracks/56/path = NodePath("Grow12/TipS:position")
+tracks/56/interp = 1
+tracks/56/enabled = true
+tracks/56/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(0, 4.5)]
 }
 
 
@@ -306,13 +811,520 @@ tracks/3/keys = {
 }
 
 
+[sub_resource type="Animation" id="Animation_grow01"]
+resource_name = "grow01"
+length = 4
+loop_mode = 0
+
+tracks/0/type = "value"
+tracks/0/path = NodePath("Grow01:visible")
+tracks/0/interp = 1
+tracks/0/enabled = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [true]
+}
+
+tracks/1/type = "value"
+tracks/1/path = NodePath("Grow01/Sprout:visible")
+tracks/1/interp = 1
+tracks/1/enabled = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0, 1.05),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [true, false]
+}
+
+tracks/2/type = "value"
+tracks/2/path = NodePath("Grow01/Center:visible")
+tracks/2/interp = 1
+tracks/2/enabled = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0, 0.4),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/3/type = "value"
+tracks/3/path = NodePath("Grow01/Center:self_modulate")
+tracks/3/interp = 1
+tracks/3/enabled = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0.4, 1),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+tracks/4/type = "value"
+tracks/4/path = NodePath("Grow01/PetalNW:visible")
+tracks/4/interp = 1
+tracks/4/enabled = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0, 0.6),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/5/type = "value"
+tracks/5/path = NodePath("Grow01/PetalNW:self_modulate")
+tracks/5/interp = 1
+tracks/5/enabled = true
+tracks/5/keys = {
+"times": PackedFloat32Array(0.6, 1),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+tracks/6/type = "value"
+tracks/6/path = NodePath("Grow01/PetalNW:position")
+tracks/6/interp = 1
+tracks/6/enabled = true
+tracks/6/keys = {
+"times": PackedFloat32Array(0, 1, 2.6, 4),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0, 0), Vector2(0, 0), Vector2(-2, -2), Vector2(-2, -2)]
+}
+
+tracks/7/type = "value"
+tracks/7/path = NodePath("Grow01/PetalSE:visible")
+tracks/7/interp = 1
+tracks/7/enabled = true
+tracks/7/keys = {
+"times": PackedFloat32Array(0, 0.6),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/8/type = "value"
+tracks/8/path = NodePath("Grow01/PetalSE:self_modulate")
+tracks/8/interp = 1
+tracks/8/enabled = true
+tracks/8/keys = {
+"times": PackedFloat32Array(0.6, 1),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+tracks/9/type = "value"
+tracks/9/path = NodePath("Grow01/PetalSE:position")
+tracks/9/interp = 1
+tracks/9/enabled = true
+tracks/9/keys = {
+"times": PackedFloat32Array(0, 1, 2.6, 4),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0, 0), Vector2(0, 0), Vector2(2, 2), Vector2(2, 2)]
+}
+
+tracks/10/type = "value"
+tracks/10/path = NodePath("Grow01/PetalNE:visible")
+tracks/10/interp = 1
+tracks/10/enabled = true
+tracks/10/keys = {
+"times": PackedFloat32Array(0, 0.9),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/11/type = "value"
+tracks/11/path = NodePath("Grow01/PetalNE:self_modulate")
+tracks/11/interp = 1
+tracks/11/enabled = true
+tracks/11/keys = {
+"times": PackedFloat32Array(0.9, 1.3),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+tracks/12/type = "value"
+tracks/12/path = NodePath("Grow01/PetalNE:position")
+tracks/12/interp = 1
+tracks/12/enabled = true
+tracks/12/keys = {
+"times": PackedFloat32Array(0, 1.3, 2.9, 4),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0, 0), Vector2(0, 0), Vector2(2, -2), Vector2(2, -2)]
+}
+
+tracks/13/type = "value"
+tracks/13/path = NodePath("Grow01/PetalSW:visible")
+tracks/13/interp = 1
+tracks/13/enabled = true
+tracks/13/keys = {
+"times": PackedFloat32Array(0, 0.9),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/14/type = "value"
+tracks/14/path = NodePath("Grow01/PetalSW:self_modulate")
+tracks/14/interp = 1
+tracks/14/enabled = true
+tracks/14/keys = {
+"times": PackedFloat32Array(0.9, 1.3),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+tracks/15/type = "value"
+tracks/15/path = NodePath("Grow01/PetalSW:position")
+tracks/15/interp = 1
+tracks/15/enabled = true
+tracks/15/keys = {
+"times": PackedFloat32Array(0, 1.3, 2.9, 4),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0, 0), Vector2(0, 0), Vector2(-2, 2), Vector2(-2, 2)]
+}
+
+[sub_resource type="Animation" id="Animation_grow12"]
+resource_name = "grow12"
+length = 4
+loop_mode = 0
+
+tracks/0/type = "value"
+tracks/0/path = NodePath("Grow12:visible")
+tracks/0/interp = 1
+tracks/0/enabled = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [true]
+}
+
+tracks/1/type = "value"
+tracks/1/path = NodePath("Grow12/Old:visible")
+tracks/1/interp = 1
+tracks/1/enabled = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0, 1.85),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [true, false]
+}
+
+tracks/2/type = "value"
+tracks/2/path = NodePath("Grow12/Center1:visible")
+tracks/2/interp = 1
+tracks/2/enabled = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0, 3.45),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [true, false]
+}
+
+tracks/3/type = "value"
+tracks/3/path = NodePath("Grow12/Core:visible")
+tracks/3/interp = 1
+tracks/3/enabled = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0, 0.9),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/4/type = "value"
+tracks/4/path = NodePath("Grow12/Core:self_modulate")
+tracks/4/interp = 1
+tracks/4/enabled = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0.9, 1.5),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+tracks/5/type = "value"
+tracks/5/path = NodePath("Grow12/Center:visible")
+tracks/5/interp = 1
+tracks/5/enabled = true
+tracks/5/keys = {
+"times": PackedFloat32Array(0, 2.6),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/6/type = "value"
+tracks/6/path = NodePath("Grow12/Center:self_modulate")
+tracks/6/interp = 1
+tracks/6/enabled = true
+tracks/6/keys = {
+"times": PackedFloat32Array(2.6, 3.4),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+tracks/7/type = "value"
+tracks/7/path = NodePath("Grow12/LobeNW:visible")
+tracks/7/interp = 1
+tracks/7/enabled = true
+tracks/7/keys = {
+"times": PackedFloat32Array(0, 0.9),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/8/type = "value"
+tracks/8/path = NodePath("Grow12/LobeNW:self_modulate")
+tracks/8/interp = 1
+tracks/8/enabled = true
+tracks/8/keys = {
+"times": PackedFloat32Array(0.9, 1.5),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+tracks/9/type = "value"
+tracks/9/path = NodePath("Grow12/LobeNW:position")
+tracks/9/interp = 1
+tracks/9/enabled = true
+tracks/9/keys = {
+"times": PackedFloat32Array(0, 2, 3.2, 4),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(-2.5, -2), Vector2(-2.5, -2), Vector2(-3.5, -2), Vector2(-3.5, -2)]
+}
+
+tracks/10/type = "value"
+tracks/10/path = NodePath("Grow12/LobeSE:visible")
+tracks/10/interp = 1
+tracks/10/enabled = true
+tracks/10/keys = {
+"times": PackedFloat32Array(0, 0.9),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/11/type = "value"
+tracks/11/path = NodePath("Grow12/LobeSE:self_modulate")
+tracks/11/interp = 1
+tracks/11/enabled = true
+tracks/11/keys = {
+"times": PackedFloat32Array(0.9, 1.5),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+tracks/12/type = "value"
+tracks/12/path = NodePath("Grow12/LobeSE:position")
+tracks/12/interp = 1
+tracks/12/enabled = true
+tracks/12/keys = {
+"times": PackedFloat32Array(0, 2, 3.2, 4),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(2.5, 2), Vector2(2.5, 2), Vector2(3.5, 2), Vector2(3.5, 2)]
+}
+
+tracks/13/type = "value"
+tracks/13/path = NodePath("Grow12/LobeNE:visible")
+tracks/13/interp = 1
+tracks/13/enabled = true
+tracks/13/keys = {
+"times": PackedFloat32Array(0, 1.2),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/14/type = "value"
+tracks/14/path = NodePath("Grow12/LobeNE:self_modulate")
+tracks/14/interp = 1
+tracks/14/enabled = true
+tracks/14/keys = {
+"times": PackedFloat32Array(1.2, 1.8),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+tracks/15/type = "value"
+tracks/15/path = NodePath("Grow12/LobeNE:position")
+tracks/15/interp = 1
+tracks/15/enabled = true
+tracks/15/keys = {
+"times": PackedFloat32Array(0, 2.3, 3.5, 4),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(2.5, -2), Vector2(2.5, -2), Vector2(3.5, -2), Vector2(3.5, -2)]
+}
+
+tracks/16/type = "value"
+tracks/16/path = NodePath("Grow12/LobeSW:visible")
+tracks/16/interp = 1
+tracks/16/enabled = true
+tracks/16/keys = {
+"times": PackedFloat32Array(0, 1.2),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/17/type = "value"
+tracks/17/path = NodePath("Grow12/LobeSW:self_modulate")
+tracks/17/interp = 1
+tracks/17/enabled = true
+tracks/17/keys = {
+"times": PackedFloat32Array(1.2, 1.8),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+tracks/18/type = "value"
+tracks/18/path = NodePath("Grow12/LobeSW:position")
+tracks/18/interp = 1
+tracks/18/enabled = true
+tracks/18/keys = {
+"times": PackedFloat32Array(0, 2.3, 3.5, 4),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(-2.5, 2), Vector2(-2.5, 2), Vector2(-3.5, 2), Vector2(-3.5, 2)]
+}
+
+tracks/19/type = "value"
+tracks/19/path = NodePath("Grow12/TipN:visible")
+tracks/19/interp = 1
+tracks/19/enabled = true
+tracks/19/keys = {
+"times": PackedFloat32Array(0, 1.3),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/20/type = "value"
+tracks/20/path = NodePath("Grow12/TipN:self_modulate")
+tracks/20/interp = 1
+tracks/20/enabled = true
+tracks/20/keys = {
+"times": PackedFloat32Array(1.3, 1.7),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+tracks/21/type = "value"
+tracks/21/path = NodePath("Grow12/TipN:position")
+tracks/21/interp = 1
+tracks/21/enabled = true
+tracks/21/keys = {
+"times": PackedFloat32Array(0, 1.6, 3.2, 4),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0, -1.5), Vector2(0, -1.5), Vector2(0, -4.5), Vector2(0, -4.5)]
+}
+
+tracks/22/type = "value"
+tracks/22/path = NodePath("Grow12/TipS:visible")
+tracks/22/interp = 1
+tracks/22/enabled = true
+tracks/22/keys = {
+"times": PackedFloat32Array(0, 1.6),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/23/type = "value"
+tracks/23/path = NodePath("Grow12/TipS:self_modulate")
+tracks/23/interp = 1
+tracks/23/enabled = true
+tracks/23/keys = {
+"times": PackedFloat32Array(1.6, 2),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+tracks/24/type = "value"
+tracks/24/path = NodePath("Grow12/TipS:position")
+tracks/24/interp = 1
+tracks/24/enabled = true
+tracks/24/keys = {
+"times": PackedFloat32Array(0, 1.9, 3.5, 4),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0, 1.5), Vector2(0, 1.5), Vector2(0, 4.5), Vector2(0, 4.5)]
+}
+
+tracks/25/type = "value"
+tracks/25/path = NodePath("Grow12/WaistW:visible")
+tracks/25/interp = 1
+tracks/25/enabled = true
+tracks/25/keys = {
+"times": PackedFloat32Array(0, 2),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/26/type = "value"
+tracks/26/path = NodePath("Grow12/WaistW:self_modulate")
+tracks/26/interp = 1
+tracks/26/enabled = true
+tracks/26/keys = {
+"times": PackedFloat32Array(2, 2.6),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+tracks/27/type = "value"
+tracks/27/path = NodePath("Grow12/WaistE:visible")
+tracks/27/interp = 1
+tracks/27/enabled = true
+tracks/27/keys = {
+"times": PackedFloat32Array(0, 2),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/28/type = "value"
+tracks/28/path = NodePath("Grow12/WaistE:self_modulate")
+tracks/28/interp = 1
+tracks/28/enabled = true
+tracks/28/keys = {
+"times": PackedFloat32Array(2, 2.6),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
 [sub_resource type="AnimationLibrary" id="Library"]
 _data = {
 &"RESET": SubResource("Animation_RESET"),
 &"stage0": SubResource("Animation_stage0"),
 &"stage1": SubResource("Animation_stage1"),
 &"stage2": SubResource("Animation_stage2"),
-&"fruit": SubResource("Animation_fruit")
+&"fruit": SubResource("Animation_fruit"),
+&"grow01": SubResource("Animation_grow01"),
+&"grow12": SubResource("Animation_grow12")
 }
 
 [node name="Bloomcrown" type="Node2D"]
@@ -361,6 +1373,117 @@ texture = ExtResource("4")
 [node name="Fruit" type="Sprite2D" parent="Fruit"]
 position = Vector2(0, 0)
 texture = ExtResource("6")
+
+[node name="Grow01" type="Node2D" parent="."]
+visible = false
+position = Vector2(0.5, 0.5)
+
+[node name="Sprout" type="Sprite2D" parent="Grow01"]
+visible = false
+position = Vector2(0, 0)
+texture = ExtResource("1")
+
+[node name="PetalNW" type="Sprite2D" parent="Grow01"]
+visible = false
+position = Vector2(-2, -2)
+texture = ExtResource("7")
+
+[node name="PetalNE" type="Sprite2D" parent="Grow01"]
+visible = false
+position = Vector2(2, -2)
+texture = ExtResource("7")
+flip_h = true
+
+[node name="PetalSW" type="Sprite2D" parent="Grow01"]
+visible = false
+position = Vector2(-2, 2)
+texture = ExtResource("7")
+flip_v = true
+
+[node name="PetalSE" type="Sprite2D" parent="Grow01"]
+visible = false
+position = Vector2(2, 2)
+texture = ExtResource("7")
+flip_h = true
+flip_v = true
+
+[node name="Center" type="Sprite2D" parent="Grow01"]
+visible = false
+position = Vector2(0, 0)
+texture = ExtResource("3")
+
+[node name="Grow12" type="Node2D" parent="."]
+visible = false
+position = Vector2(0.5, 0.5)
+
+[node name="Old" type="Node2D" parent="Grow12"]
+visible = false
+position = Vector2(0, 0)
+
+[node name="Petals" type="Sprite2D" parent="Grow12/Old"]
+position = Vector2(0, 0)
+texture = ExtResource("2")
+
+[node name="Core" type="Sprite2D" parent="Grow12"]
+visible = false
+position = Vector2(0, 0)
+texture = ExtResource("11")
+
+[node name="LobeNW" type="Sprite2D" parent="Grow12"]
+visible = false
+position = Vector2(-3.5, -2)
+texture = ExtResource("8")
+
+[node name="LobeNE" type="Sprite2D" parent="Grow12"]
+visible = false
+position = Vector2(3.5, -2)
+texture = ExtResource("8")
+flip_h = true
+
+[node name="LobeSW" type="Sprite2D" parent="Grow12"]
+visible = false
+position = Vector2(-3.5, 2)
+texture = ExtResource("8")
+flip_v = true
+
+[node name="LobeSE" type="Sprite2D" parent="Grow12"]
+visible = false
+position = Vector2(3.5, 2)
+texture = ExtResource("8")
+flip_h = true
+flip_v = true
+
+[node name="TipN" type="Sprite2D" parent="Grow12"]
+visible = false
+position = Vector2(0, -4.5)
+texture = ExtResource("9")
+
+[node name="TipS" type="Sprite2D" parent="Grow12"]
+visible = false
+position = Vector2(0, 4.5)
+texture = ExtResource("9")
+flip_v = true
+
+[node name="WaistW" type="Sprite2D" parent="Grow12"]
+visible = false
+position = Vector2(-2.5, 0)
+texture = ExtResource("10")
+
+[node name="WaistE" type="Sprite2D" parent="Grow12"]
+visible = false
+position = Vector2(2.5, 0)
+texture = ExtResource("10")
+flip_h = true
+
+[node name="Center1" type="Sprite2D" parent="Grow12"]
+visible = false
+position = Vector2(0, 0)
+texture = ExtResource("3")
+
+[node name="Center" type="Sprite2D" parent="Grow12"]
+visible = false
+position = Vector2(0, 0)
+texture = ExtResource("5")
 
 [node name="AnimationPlayer" type="AnimationPlayer" parent="."]
 libraries = {
