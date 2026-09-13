@@ -137,15 +137,15 @@ lower-priority plant-history/LCD ideas remain open. Use lightweight Git tags for
 code checkpoints and regularly ship verified visible improvements, per Wrysk's
 updated working preference; do not hold ready packages for unrelated backlog work.
 
-Current update, 2026-09-13: **`0.1.0+1236205` is live**, exactly resumed at510790
-with care sequence5 unchanged. Spiretree sway earned more art headroom without
-larger footprints or a new wind schedule;1079 clean workspace tests passed and
-the shared viewer measured59.9 distinctfps. See the
-[same-world rollout](7_Research/spiretree-live-update-2026-09-13.md).
+Current update, 2026-09-13: **`0.1.0+d55d8af` is live**, exactly resumed at560883
+with care sequence5 unchanged. It keeps the spiretree wind improvement and adds
+actual-intake meal continuity with reviewed bud/capture handoffs;1098 clean
+workspace tests passed and the shared viewer measured59.9 distinctfps. See the
+[same-world rollout](7_Research/meal-live-update-2026-09-13.md).
 The108-case isolated care screen is complete: Feed usually increases real local
 feeding, rain is mixed, cleanup usually reduces feeding; sustained Resting is
 not demonstrated. The [meal-continuity candidate](7_Research/meal-onset-continuity-2026-09-13.md)
-is committed and under matched visual/boundary review, not deployed. The completed
+is deployed following matched visual/boundary review. The completed
 [quiet diagnosis](7_Research/astra-quiet-results-2026-09-13.md) explains why existing
 rest gates never open in the observed cohort; the
 [post-birth pause](7_Research/astra-ordinary-quiet-experiment-proposal-2026-09-13.md)
@@ -154,8 +154,10 @@ is a proposal, not implemented biology. The
 requires earlier-life evidence for fragile skimmers. Keep this distinct from the
 reviewed natural-rainfall harness's isolated3e9bc2f two-hour collection now running.
 Both paid-charging jobs terminated; candidate seed6 retained an invariant failure,
-so the full matched screen cannot pass. Exact failure replay and interpretation
-are underway. The [AA study](7_Research/astra-aa-comparison-2026-09-13.md) rejects
+so the full matched screen cannot pass. The
+[complete retained interpretation](7_Research/astra-hunter-charging-results-2026-09-13.md)
+finds paid births but no adult descendants; a separate cleanup fix is under
+review before repeating the unchanged recipe. The [AA study](7_Research/astra-aa-comparison-2026-09-13.md) rejects
 blanket coverage baking as a default and proposes only a selective wing follow-up.
 All earlier failures and the broader goal/backlog above remain open.
 

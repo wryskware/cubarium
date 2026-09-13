@@ -67,21 +67,21 @@ and improved viewer delivery in build `0.1.0+a44dc98`. That rollout preserved
 the exact running world and all five existing care inputs; 854 tests passed,
 and the live mirror measured about 60 distinct frames/s in isolated Chromium.
 See the [schema 9 rollout and rollback record](design/7_Research/presentation-v9-rollout-2026-09-13.md).
-Current live build **`0.1.0+1236205`** includes adjustable care amounts, authored
-canopy growth and the newly readable spiretree wind. It resumed the same world
-at tick510790; 1079 workspace tests passed and the live shared viewer measured
-59.9 distinct frames/s. See the
-[current update record](design/7_Research/spiretree-live-update-2026-09-13.md).
+Current live build **`0.1.0+d55d8af`** includes adjustable care amounts, authored
+canopy growth, readable spiretree wind and continuous actual-intake meal gestures.
+It resumed the same world at tick560883;1098 workspace tests passed and the live
+shared viewer measured59.9 distinct frames/s. See the
+[current update record](design/7_Research/meal-live-update-2026-09-13.md).
 An isolated [local care screen](design/7_Research/local-care-observation-2026-09-13.md)
 now measures existing biological responses across all twelve mature worlds and
 three fixed targets. Feed increased local feeding in 27 of 36 patches; cleanup
 usually reduced it and rain was mixed. Actual Resting was nearly absent in this
 short screen. A [meal-continuity candidate](design/7_Research/meal-onset-continuity-2026-09-13.md)
-is checked in and undergoing matched visual/boundary review. The
+is now deployed after matched visual and boundary review. The
 [quiet diagnosis](design/7_Research/astra-quiet-results-2026-09-13.md) found no
 active-to-rest transitions; an affordable post-birth pause remains a separate
 [experimental proposal](design/7_Research/astra-ordinary-quiet-experiment-proposal-2026-09-13.md).
-Neither is deployed, and no hunter is live yet.
+The quiet proposal is not implemented, and no hunter is live yet.
 
 The first complete [hunter screen](design/7_Research/hunter-profile3-two-hour-results-2026-09-13.md)
 ran all twelve seeds in six matched arms for two hours. All 72 numerical audits
@@ -101,8 +101,10 @@ and ordinary fauna unchanged. It raises only the battery threshold for spending
 reserve on charge, not available energy or reproduction subsidies. Independent
 review is complete. Both full matched jobs have now terminated: the background
 completed, but the candidate retained a seed6 state-invariant failure. That
-failure prevents a full-cohort pass; analysis and exact replay are underway.
-No ecological acceptance or live introduction follows from partial results.
+failure prevents a full-cohort pass. The
+[retained results and exact replay](design/7_Research/astra-hunter-charging-results-2026-09-13.md)
+show real paid births but zero adult descendants; the isolated cleanup fix is
+under review before an unchanged rerun. No live introduction follows from these results.
 
 Wrysk prefers Fable's **Lanternjaw** megafauna body. The
 [comparison studio](art/studies/megafauna/README.md) retains Veilwarden as an
@@ -131,8 +133,8 @@ dependence-on-attention control. Its [reviewed harness](design/7_Research/astra-
 passed25 focused tests; the frozen3e9bc2f twelve-seed/six-arm two-hour screen is
 running in isolated copies. Both canopy plants' opening clips are
 also live; missing clips in older/custom packs still use the reveal fallback.
-Spiretree wind is now live; glasscane/vine headroom remains limited. The next art
-pass compares actual-intake meal gestures. The
+Spiretree wind and actual-intake meal continuity are now live;
+glasscane/vine headroom remains limited. The
 [AA comparison](design/7_Research/astra-aa-comparison-2026-09-13.md) retains the
 current renderer default: blanket coverage baking steadied wings but softened
 small bodies too much. A selective wing-only study remains a possible follow-up.
