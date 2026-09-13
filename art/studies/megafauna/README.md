@@ -4,6 +4,11 @@ Two independent, code-native body studies for Wrysk to choose between. They do n
 modify the Godot production atlas, founder configuration, or predation mechanics.
 `root.js` is Codex's Veilwarden; `fable.js` is Fable's independent candidate.
 
+Wrysk's preference (2026-09-12): “i prefer the fable creature”. Lanternjaw is
+the direction to develop next; Veilwarden stays available as an alternate study.
+This selects the visual direction, not a production footprint, population rule,
+or predation mechanism. Neither body is installed in the live ecosystem yet.
+
 Serve this directory on loopback, for example:
 
 ```sh
@@ -22,5 +27,5 @@ from a standalone ES module; args are `{time, mode, x, y}`. Face right; aim for
 canvas state; do not clear the canvas or use wall-clock/random state. Neither
 candidate has yet passed production renderer footprint/seam validation.
 
-The winner is not selected by code. A later owner-approved tie can use a stable
-seed choice or retain the other design for a later lineage.
+The code does not randomly select between these bodies. Future reuse of the
+alternate remains possible; no tie-breaking policy is currently implemented.

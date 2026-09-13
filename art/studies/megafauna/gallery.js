@@ -27,7 +27,7 @@ function habitat(ctx, plain) {
 function addCard(candidate, key) {
   const article = document.createElement('article'); article.className = 'card';
   const title = document.createElement('h2'); title.textContent = candidate.name;
-  const author = document.createElement('div'); author.className = 'author'; author.textContent = candidate.author;
+  const author = document.createElement('div'); author.className = 'author'; author.textContent = candidate.author + (key === 'fable' ? ' · Wrysk’s preferred direction' : ' · retained alternate');
   const views = document.createElement('div'); views.className = 'views';
   const main = document.createElement('canvas'); main.width = main.height = 64; main.className = 'large'; main.id = key;
   main.setAttribute('aria-label', candidate.name + ' enlarged animation study');

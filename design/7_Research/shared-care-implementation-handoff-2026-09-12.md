@@ -6,6 +6,14 @@ decision_refs: []
 
 # Shared-instance viewer, optional care, and megafauna candidates
 
+## Owner update: preferred megafauna direction
+
+Wrysk now says “i prefer the fable creature” (2026-09-12). Continue with
+Lanternjaw as the preferred visual direction; preserve Veilwarden as an alternate.
+Root has recorded this in the gallery. Finish Fable's motion polish and commit
+the body study. This preference does not make the study production-integrated
+or choose its ecological parameters. Care remains the current live-rollout gate.
+
 ## Integrator gate: revision 2 abort recovery
 
 Astra's bounded follow-up found that an uncertain partial accepted-line write
