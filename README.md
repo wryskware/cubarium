@@ -114,3 +114,19 @@ See the [local integration findings](design/7_Research/local-contracts.md).
 Design authority follows [Lore's vault rules](design/0_Canon/README.md) and the
 [decision ledger](design/0_Canon/DECISIONS.md). `.lore.toml` enables `lore-v1` in
 `annotate` mode. A detailed proposal is not an accepted decision.
+
+## Development checkpoints and live updates
+
+Wrysk's working preference (2026-09-13): commit scoped work and use lightweight
+local `checkpoint/…` Git tags for milestones. Do not make a full executable/art/
+state backup for every iteration. Git preserves code and authored assets, not
+the running world's history; retain a matched snapshot and care journal only
+when a storage migration or other concrete recovery risk requires it.
+
+Periodically deploy verified development improvements to the owning cube/web
+runner so progress is visible at a glance. Resume the existing world, confirm
+the expected build and advancing tick through `/status`, and keep experimental
+ecology opt-in until it meets its acceptance checks. Do not wait for unrelated
+backlog items before shipping a ready presentation or interaction improvement.
+The shared viewer remains on 7393; stale web-only previews on 7395–7396 may be
+stopped after checking their process identity. The display shim is separate.
