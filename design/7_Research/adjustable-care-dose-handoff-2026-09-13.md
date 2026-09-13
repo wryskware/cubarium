@@ -44,6 +44,13 @@ admission, uncertain-write hold, single-owner rules and security checks. Dose
 is part of the full request identity: same request ID and different dose is a
 conflict; omitted and explicit standard are the same semantic payload.
 
+Status advertises `dose: {version: 1, min_permille: 250, max_permille: 2000,
+default_permille: 1000}`. Every retained receipt row includes `dose_permille`.
+The viewer enables amount selection only after validating that capability;
+an older host ignores unknown HTTP fields, so absence or an unknown version
+means standard-only requests with no dose property. Defaults remain usable on
+older hosts without falsely presenting a nonstandard effect.
+
 ## Durability and compatibility
 
 Core is the sole authority applying doses. The host validates and journals the
@@ -71,6 +78,16 @@ Keep existing journals append-only; do not rewrite history or infer a changed
 dose from a receipt. Test mixed old/new journals and complete schedule validation
 before advancing a recovered world.
 
+Parsing is deliberately asymmetric: a legacy `accepted` record must have **no**
+dose field (presence is refused, even standard), while `accepted_dose_v1` must
+have an explicit valid `dose_permille` (missing never defaults). Otherwise a
+changed discriminator or missing new field can silently reinterpret the command.
+For standard-dose continuation preserve the existing arithmetic grouping as
+well as the numbers: food `m * weight`, then `rho * added`; rain
+`(RAIN_DEPTH_TOTAL * weight) * envelope[k]`; cleanup applies the nominal cap
+before the per-cell minimum. Compare genuine old commands/executables, not only
+omitted versus explicit standard in the new implementation.
+
 No live rollout in this package. A later upgrade needs a matched snapshot/journal
 backup and guarded exact resume; executable-only rollback is unsafe after new
 snapshot or journal shapes have been written.
@@ -96,3 +113,19 @@ to `state/`, live owner, shim, or `.vscode/`.
 
 This package does not complete ambient-support tuning, ecological response
 diversity, quiet habits, long-run predator viability, or lower-priority LCD detail.
+
+## Root viewer checkpoint (backend integration pending)
+
+The inline viewer now offers the three presets, gates them on the exact capability
+above, captures amount/target at submission, and labels server receipt amounts
+independently of the current selection. Missing, malformed or unknown capability
+resets to standard-only and omits the dose field. The panel remains closed by
+default and its controls/marker remain outside world frame bytes.
+
+`node scripts/viewer-care-dose.test.mjs`: **10 passed, zero failed**. These tests
+execute the actual inline care script in a bounded DOM/transport mock, covering
+markup/defaults, legacy fallback, all three actions, in-flight changes, server
+receipts, malformed/narrower capabilities, invalid selections, disabled care,
+refusal and lost connection. They are not browser layout, core dose arithmetic,
+journal, migration, or actual owning-runner acceptance evidence; those remain
+pending while the native backend package is implemented.

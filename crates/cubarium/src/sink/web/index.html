@@ -63,12 +63,15 @@
   #careBody > * { min-width: 0; }
   #careAim { flex: 0 0 auto; }
   #careActs { flex: 1 1 260px; display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; }
-  #careActs button {
+  #careActs button, #careDose {
     font: inherit; color: var(--ink); background: #1C1046;
     border: 1px solid var(--edge); border-radius: 4px; padding: 5px 10px; cursor: pointer;
   }
   #careActs button:hover:not(:disabled) { background: #26155E; }
   #careActs button:disabled { opacity: .4; cursor: default; }
+  #careAmount { display: flex; gap: 6px; align-items: center; }
+  #careDose:disabled { opacity: .6; cursor: default; }
+  #careDoseNote { flex: 1 1 100%; color: var(--ink-dim); }
   #careNote { flex: 1 1 100%; color: var(--ink-dim); }
   #careNote.warn { color: #FF7AA2; }
   #careRows { flex: 1 1 100%; max-height: 160px; overflow-y: auto; }
@@ -106,10 +109,18 @@
     <div id="careBody">
       <div id="careAim">target &mdash; <span id="careTarget">click the net</span></div>
       <div id="careActs">
+        <label id="careAmount" for="careDose">Amount
+          <select id="careDose" disabled aria-describedby="careDoseNote">
+            <option value="500">Gentle · ½×</option>
+            <option value="1000" selected>Standard · 1×</option>
+            <option value="1500">Generous · 1½×</option>
+          </select>
+        </label>
         <button id="careFeed" disabled>Scatter food</button>
         <button id="careRain" disabled>Shower</button>
         <button id="careClean" disabled>Clean up litter</button>
       </div>
+      <div id="careDoseNote">Standard amount · waiting for host capabilities. Ambient conditions are unchanged.</div>
       <div id="careNote">&nbsp;</div>
       <div id="careRows"></div>
     </div>
@@ -510,6 +521,8 @@ const CARE_HEADERS = {
 const careTargetEl = document.getElementById("careTarget");
 const careNoteEl = document.getElementById("careNote");
 const careRowsEl = document.getElementById("careRows");
+const careDoseEl = document.getElementById("careDose");
+const careDoseNoteEl = document.getElementById("careDoseNote");
 const careButtons = {
   feed: document.getElementById("careFeed"),
   rain: document.getElementById("careRain"),
@@ -525,6 +538,7 @@ let careEpoch = null;
 let careEnabled = false;
 let careRequest = 0;        // this page's monotonic request number
 let careTarget = null;      // { face, u, v }
+let careDoseRange = null;   // null means the host offers legacy standard doses only
 const careRows = new Map(); // request number -> row element
 const CARE_ROWS_MAX = 24;
 // Registration is retried, because the first attempt can legitimately fail: the
@@ -587,6 +601,41 @@ netCanvas.addEventListener("click", function (ev) {
 function refreshButtons() {
   const ready = careEnabled && careClient !== null && careTarget !== null;
   for (const k in careButtons) careButtons[k].disabled = !ready;
+  careDoseEl.disabled = !careEnabled || careClient === null || careDoseRange === null;
+}
+
+// Negotiate explicitly: an older host ignores unknown request fields, so it must
+// never receive a nonstandard amount merely because this page knows about one.
+function updateDoseCapability(status) {
+  const d = status && status.enabled && status.dose;
+  careDoseRange = d && d.version === 1
+    && Number.isInteger(d.min_permille) && Number.isInteger(d.max_permille)
+    && d.min_permille >= 250 && d.max_permille <= 2000
+    && d.min_permille <= 1000 && d.max_permille >= 1000
+    && d.default_permille === 1000 ? d : null;
+  for (const option of careDoseEl.options) {
+    const amount = Number(option.value);
+    option.disabled = careDoseRange === null ? amount !== 1000
+      : amount < careDoseRange.min_permille || amount > careDoseRange.max_permille;
+  }
+  const selected = Number(careDoseEl.value);
+  if (careDoseRange === null || ![500, 1000, 1500].includes(selected)
+      || selected < careDoseRange.min_permille || selected > careDoseRange.max_permille) {
+    careDoseEl.value = "1000";
+  }
+  careDoseNoteEl.textContent = careDoseRange
+    ? "Amount applies to the next action only. Cleanup leaves at least half the litter in each affected cell. Ambient conditions are unchanged."
+    : "This host offers standard amounts only. Ambient conditions are unchanged.";
+  refreshButtons();
+}
+
+function doseLabel(permille) {
+  return ({500: "gentle", 1000: "standard", 1500: "generous"})[permille]
+    || (permille / 1000).toFixed(3).replace(/0+$/, "").replace(/\.$/, "") + "×";
+}
+
+function requestedAction(kind, permille) {
+  return kind + " (" + doseLabel(permille === undefined ? 1000 : permille) + ")";
 }
 
 function careSay(text, warn) {
@@ -663,35 +712,44 @@ function describe(row) {
 
 function send(kind) {
   if (!careEnabled || careClient === null || careTarget === null) return;
+  const dose = careDoseRange ? Number(careDoseEl.value) : 1000;
+  if (![500, 1000, 1500].includes(dose) || (careDoseRange
+      && (dose < careDoseRange.min_permille || dose > careDoseRange.max_permille))) {
+    careSay("choose an amount offered by this host", true);
+    return;
+  }
   careRequest += 1;
   const request = careRequest;
   const payload = {
-    client: careClient, request: request, kind: kind, target: careTarget
+    client: careClient, request: request, kind: kind, target: { ...careTarget }
   };
-  setRow(request, "queued", kind + " \u2192 queued");
+  if (careDoseRange) payload.dose_permille = dose;
+  // Capture the selection for this request; a later change belongs only to the next one.
+  const action = requestedAction(kind, dose);
+  setRow(request, "queued", action + " \u2192 queued");
   fetch("/care", { method: "POST", headers: CARE_HEADERS, body: JSON.stringify(payload) })
     .then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j }; }); })
     .then(function (res) {
       if (res.s === 202 && res.j.seq !== undefined) {
         setRow(request, "accepted",
-          kind + " \u2192 accepted as seq " + res.j.seq + " at boundary " + res.j.apply_after_tick);
+          action + " \u2192 accepted as seq " + res.j.seq + " at boundary " + res.j.apply_after_tick);
       } else if (res.s === 202) {
         // Still committing after five seconds. Not an acceptance and not a
         // refusal; the result arrives through /care/status.
-        setRow(request, "queued", kind + " \u2192 still committing, watching for the receipt");
+        setRow(request, "queued", action + " \u2192 still committing, watching for the receipt");
       } else if (res.s === 200) {
-        setRow(request, res.j.state || "accepted", kind + " \u2192 already sent \u00B7 " + describe(res.j));
+        setRow(request, res.j.state || "accepted", action + " \u2192 already sent \u00B7 " + describe(res.j));
       } else if (res.j.care === "replaying" || res.j.care === "opening") {
-        setRow(request, "queued", kind + " \u2192 the world is " + res.j.care + "; try again shortly");
+        setRow(request, "queued", action + " \u2192 the world is " + res.j.care + "; try again shortly");
       } else {
-        setRow(request, "rejected", kind + " \u2192 " + res.s + " " + (res.j.error || ""));
+        setRow(request, "rejected", action + " \u2192 " + res.s + " " + (res.j.error || ""));
       }
     })
     .catch(function () {
       // The connection died with the request in flight. It is either in the
       // journal and will be replayed, or it was never accepted; the page cannot
       // tell, and says so rather than guessing.
-      setRow(request, "failed", kind + " \u2192 unknown after a lost connection, check the receipts");
+      setRow(request, "failed", action + " \u2192 unknown after a lost connection, check the receipts");
     });
 }
 careButtons.feed.addEventListener("click", function () { send("feed"); });
@@ -708,9 +766,11 @@ function pollCare() {
       if (!s) return;
       if (!s.enabled) {
         if (careEnabled) { careEnabled = false; careSay("care was turned off", true); refreshButtons(); }
+        updateDoseCapability(s);
         return;
       }
       careEnabled = true;
+      updateDoseCapability(s);
       // A restart changes the epoch and retires every identity issued before it.
       if (careEpoch !== null && s.epoch !== careEpoch) {
         careEpoch = s.epoch;
@@ -744,13 +804,14 @@ function pollCare() {
       (s.receipts || []).forEach(function (row) {
         if (row.client !== careClient) return;
         const at = row.apply_after_tick === null ? "?" : row.apply_after_tick;
+        const action = requestedAction(row.kind, row.dose_permille);
         if (row.state === "accepted") {
           setRow(row.request, "accepted",
-            row.kind + " \u2192 accepted as seq " + row.seq + " at boundary " + at);
+            action + " \u2192 accepted as seq " + row.seq + " at boundary " + at);
         } else if (row.state !== "queued") {
           const detail = describe(row);
           setRow(row.request, row.state,
-            row.kind + " \u2192 " + row.state + " at boundary " + at + (detail ? " \u00B7 " + detail : ""));
+            action + " \u2192 " + row.state + " at boundary " + at + (detail ? " \u00B7 " + detail : ""));
         }
       });
     })
