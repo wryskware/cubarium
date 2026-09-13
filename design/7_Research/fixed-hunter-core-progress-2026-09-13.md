@@ -28,6 +28,7 @@ harness, live state or care file was touched.
 | Settlement metadata on events, timing facts in the view | landed |
 | Astra review corrections: NaN bounds, settlement boundaries, authored claw | landed |
 | Exact reproduction transaction evidence (`5ee8fee`) | landed |
+| Read-only reproduction observer for the harness (`d7d190a`, `f4c410a`) | landed, awaiting root's wiring |
 | Deterministic test suite (27 behaviour + 8 geometry + 6 migration + 7 reproduction) | landed |
 | Paired experiment runs, ecological gates | **not started — root owns the harness** |
 
@@ -273,6 +274,70 @@ any carried gut are separate terms of the same death, the gut reported in `Hunte
 Every number is read on either side of the assignment that moved it. A post-step difference
 cannot substitute: oxidation, growth, movement and a death can all touch the same parent in the
 same tick.
+
+### The observer that reads them: `ReproductionAudit`
+
+`crates/cubarium/examples/hunter_compare/reproduction.rs` (`d7d190a`, `f4c410a`) is a read-only
+audit of those transactions, written to root's observer conventions and **not yet wired**: root
+owns `hunter_compare.rs` and the integration.
+
+```rust
+pub struct ReproductionAudit;
+impl ReproductionAudit {
+    pub fn new(state: &WorldState) -> anyhow::Result<Self>;   // refuses a mid-gestation opening
+    pub fn observe(&mut self, events: &[HunterEvent], life: &[LifeEvent], state: &WorldState)
+        -> anyhow::Result<()>;                                // one completed tick, consecutive
+    pub fn summary(&self) -> serde_json::Value;
+    pub fn open_gestations(&self) -> usize;                   // censored at the horizon
+    pub fn last_complete_tick(&self) -> u64;
+}
+```
+
+Wiring is three lines: `#[path = "hunter_compare/reproduction.rs"] mod reproduction;` beside the
+existing module declarations, one `ReproductionAudit::new(&world.state)?` per arm at the
+post-initialization opening (before any member can have started a gestation), and
+`audit.observe(&hunter_events, &life_events, &world.state)?` with the batches already drained
+each tick. `summary()` drops into the arm summary as a JSON object.
+
+**What it validates, per tick, committing only after the whole tick passes.** Consecutive tick
+coverage; every record stamped with that tick; the wrapper's `hunter` equal to the record's own
+`parent()`; a funding's `started_tick` being the tick it opened in; one outstanding gestation per
+parent; no second funding, no repeated or unknown closure, no stale generation on either side;
+`Born` reconciled one-for-one against both the `Offspring` record and the ordinary
+`LifeEvent::Birth` (and every hunter birth having one); a `Miscarried` matched to that parent's
+death, with the same cause, in the same tick; and, at the end of the tick, the open gestations
+reconciled against the escrows the world is **actually holding** — key, start tick and inventory.
+A funding and its loss inside one tick are processed in order and both counted.
+
+**What it recomputes independently**, from the world's config and the parent's own decoded size
+(cached per member, so a parent that funds and dies in one tick can still be checked): the
+funding debit against the escrow it bought, in material and in energy; the build heat against
+`build_cost · S`; the child inventory against the configured fractions; the birth heat against
+`e_r · S`; a refund against what it returned; and a miscarriage's split against
+`min(energy, energy_cap · material)`. Aggregates accumulate through core's own
+`accounting::accumulate`, so a seventy-two-hour arm's totals are compensated.
+
+**What it does not claim.** The quantities are core's mutation evidence: no observer outside the
+tick can measure them, and the summary says so in a `provenance` field. It never treats post-step
+parent stocks as an isolated funding difference. It checks that a reported heat is arithmetically
+right, **not** that exactly that much heat entered the world's ledger — a tick's heat is the sum
+of every source in it, and this audit does not attribute it. And it refuses a mid-gestation
+attachment rather than inventing the debits that paid for an escrow already in flight.
+
+Seventeen inline tests drive genuine streams from real breeder worlds (funded and born, a cap
+refund, a funding and an age death in one tick, an ordinary miscarriage, blocked funding counted
+separately by cap and by stocks), then a refusal battery — dropped, duplicated and reordered
+closures, a duplicated funding, stale generations on either side, an invented heat, a child that
+is not the escrow, a NaN, a wrapper disagreeing with its record, a record from another tick, a
+skipped tick, a mid-gestation opening — each rejected **atomically**, with the genuine batch
+still accepted afterwards. Memory stays bounded over repeated outcomes, and a run with the audit
+ends on the same world hash as one without it.
+
+Until root wires it, the module is not compiled by the workspace. It was built and tested
+through a throwaway fixture that includes the file by path
+(`/tmp/cubarium-reproduction-fixture-sBPNoX`, disposable): **17 passed, 0 failed**, clippy clean.
+Once wired it runs under
+`cargo test -p cubarium --example hunter_compare --test hunter_observers --offline`.
 
 ### The geometry contract, in one paragraph
 
