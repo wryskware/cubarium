@@ -166,3 +166,66 @@ sink to an already running binary. The straightforward path is a controlled clea
 restart of the same saved world with the combined output enabled. Inspect the actual
 deployment owner and shim contract before doing that switch; this review did not
 operate the display or inspect its live process.
+
+## Follow-up: fresh worlds mixed with older checkpoint generations
+
+Root reported a running process launched with `--fresh --state state`, current
+telemetry near tick 49,600, while that same directory contains older-world snapshots
+as high as tick 446,277. These live observations are root's evidence; this reviewer
+checked the code path read-only and did not operate the process or its state files.
+
+The cause is confirmed in `state.rs::checkpoint_loop`: after writing every snapshot,
+the worker calls `prune_snapshots`, which sorts filenames by descending numeric tick
+and retains eight. It has no world identity or creation generation. Eight old files
+with higher ticks can therefore cause the just-written current checkpoint to be
+deleted immediately. `load_newest` selects those old files by the same ordering.
+`--fresh` only skips loading; it does not isolate or retire old snapshots and it
+appends observer logs to the same files. This is a real persistence defect, not
+merely an ambiguous “latest” label.
+
+The clean-stop final checkpoint uses the same worker and pruning path. Sending
+SIGINT before isolating the stale snapshots can lose the final current-world state.
+The runner reports its final tick and returns success even when the worker logged a
+write failure, so successful process exit alone does not prove a usable checkpoint.
+
+Recommended recovery sequence for the process owner:
+
+1. Preserve the current executable, exact command line/config/art inputs, and the
+   latest log evidence. Identify stale snapshots from the actual run history and
+   decoded metadata; do not call the greatest filename tick the current world.
+2. Make a recoverable archive outside the active directory's direct snapshot scan.
+   Copy and verify the exact stale snapshot files, then relocate those exact files
+   out of the active scan. Higher-than-current-run ticks are strong evidence here;
+   equal or lower ticks require provenance rather than a blanket assumption.
+   Re-list afterward to confirm no stale candidates remain that could win loading.
+3. Leave the active state directory itself in place. The worker retains its path,
+   not an open directory handle; renaming the whole directory while it runs would
+   redirect subsequent writes to a missing or replacement location. Avoid handling
+   `tmp-*.cubw` or a current write as though it were a completed stale snapshot.
+4. Request one graceful SIGINT and wait for the original process to exit. Avoid a
+   second interrupt, which exits without the final checkpoint. Read its final tick
+   and all checkpoint error lines.
+5. Decode and validate the resulting final snapshot. Its embedded tick must equal
+   the final reported tick, and its state hash should match the final outcome where
+   available. Preserve a verified copy separately before any schema migration.
+   If this fails, do not assume an old high-tick snapshot is an acceptable substitute.
+6. Resume using the verified state and compatible binary without `--fresh`. Verify
+   startup reports the expected checkpoint and tick. Root retains ownership of the
+   eventual combined-output switch and rollback.
+
+The narrow prevention fix is to refuse `--fresh` when the selected state directory
+already contains recognized snapshot files, before opening logs, spawning workers,
+or opening sinks. Tell the operator to choose a new state directory. Enumerate the
+directory with propagated I/O errors for this guard: existing `list_snapshots` treats
+an unreadable directory as empty, which is unsuitable for a protective check.
+Include stale temporary snapshot files and known nonempty persistent logs/journals
+in the occupied-state policy so interrupted or partially initialized worlds do not
+silently mix histories. Keep arbitrary unrelated files outside that narrow policy.
+
+Add an integration regression with eight higher-tick old snapshots: a fresh launch
+into that directory must fail before changing any snapshot or appending logs; a
+fresh launch into a new directory must persist and resume its own final tick.
+Normal resume into existing state should keep working. A state ownership lock closes
+the race between checking the directory and another writer starting. Sorting by
+modification time or always retaining the just-written low-tick file is insufficient:
+neither gives `load_newest` a world identity or disentangles the mixed history.
