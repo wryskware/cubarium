@@ -1,0 +1,38 @@
+[
+  {
+    "bake_us_coverage4": 24508,
+    "bake_us_nearest": 1356,
+    "clip": "stage1",
+    "frames": 24,
+    "kind": "plants",
+    "name": "lanternstalk",
+    "seconds": 3.0
+  },
+  {
+    "bake_us_coverage4": 26283,
+    "bake_us_nearest": 1530,
+    "clip": "stage1",
+    "frames": 24,
+    "kind": "plants",
+    "name": "reedspire",
+    "seconds": 3.0
+  },
+  {
+    "bake_us_coverage4": 27640,
+    "bake_us_nearest": 1520,
+    "clip": "move",
+    "frames": 16,
+    "kind": "creatures",
+    "name": "sail",
+    "seconds": 2.4
+  },
+  {
+    "bake_us_coverage4": 33070,
+    "bake_us_nearest": 1847,
+    "clip": "move",
+    "frames": 16,
+    "kind": "creatures",
+    "name": "skimmer",
+    "seconds": 1.6
+  }
+]

@@ -1,0 +1,18 @@
+[package]
+name = "cubarium-aa-study"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "aa_comparison"
+path = "aa_comparison.rs"
+
+[dependencies]
+cubarium-render = { path = "../../../crates/cubarium-render" }
+cubarium-surface = { path = "../../../crates/cubarium-surface" }
+cube-proto = { path = "../../../vendor/cube-proto" }
+png = "0.18"
+serde_json = "1"
