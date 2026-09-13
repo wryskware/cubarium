@@ -1,6 +1,6 @@
 ---
 design_status: exploration
-last_reviewed: 2026-09-12
+last_reviewed: 2026-09-13
 decision_refs: []
 ---
 
@@ -121,6 +121,38 @@ a balanced flourish of activity, possible autonomy tuning, and rare larger apex
 predators. Preserve the current unattended experience. The
 [care and megafauna proposal](7_Research/care-and-megafauna-proposal-2026-09-12.md)
 records candidate mechanics, single-offspring reproduction, resource-accounting
-risks, and isolated validation steps. These features are not implemented. Add the
-narrow optional care pass alongside the animation work; keep predation a separate
-experiment before changing the approved world.
+risks, and isolated validation steps. Optional care has since landed and is live;
+predation remains a separate experiment before changing the approved world.
+
+## Active backlog after shared care (2026-09-13)
+
+Wrysk requested continued work across the discussed open items. This list keeps
+their full scope visible; a completed package is not completion of the whole list.
+The dated slice notes above are historical evidence, not current status promises.
+
+Delivered: shared owning runner for cube/web, optional bounded Feed/Rain/Clean,
+durable input replay and guarded snapshot migration, two smoothing/wind passes,
+one authored growth pilot, and two megafauna body studies. Wrysk chose Fable's
+Lanternjaw; Veilwarden remains an alternate. Live care rollout and 774-test/browser
+evidence are in [the rollout record](7_Research/care-browser-rollout-review-2026-09-12.md).
+
+| Open item | Current work / evidence needed |
+| --- | --- |
+| Lanternjaw production body | Fable implementing reusable shared-root multipart rendering; Astra's [geometry plan](7_Research/astra-lanternjaw-production-plan-2026-09-13.md); native animation, edge/vertex/rim and performance checks before integration |
+| Broader authored plant growth | Fable implementing lanternstalk 1→2 and side-family transitions; canopy opening, fixed roots, reversals and matched endpoints must be demonstrated, not implied by the pilot |
+| Wind readability | Tall-plant headroom/registration improvements and flooded-top reed response; preserve quiet intervals and rooted contact |
+| Residual flicker / AA | Compare native temporal captures; coverage-AA remains conditional on visible thin-stalk benefit, not indiscriminate blur |
+| Care flourish | Food-deposit and cleanup acknowledgement, rain aftermath, locally grounded creature/plant reactions; no global wakeup or fake feeding |
+| Calm creature habits | Antenna testing, feeding gestures, fin folding and pool-edge pauses; distinct, eased and not continuous synchronized activity |
+| Care balance / autonomy | Root's longer seeded matched runs in progress; separate ambient support and dose tuning without changing unattended defaults; cumulative accounting and rejection outcomes remain visible |
+| Rare apex lineage | Paid founder, local hunting/escape, failed hunts, digestion, maturation and costly single offspring; schema/replay and paired prey-recovery tests before live introduction |
+| Richer plant history | Senescence/wilt/collapse/regrowth and persistent individual age/flowering are a later biological extension, beyond resource-driven presentation history |
+| Fine detail / higher resolution | Droplets and nibble detail remain lower priority as requested; possible LCD cube is exploration, not an authorized hardware migration |
+
+The two current production packages and ownership boundaries are in
+[the work order](7_Research/living-world-next-handoff-2026-09-13.md).
+`care_compare` now accepts either an exact checkpoint or `--seed`, up to 24 hours,
+and `--care-every` for occasional/repeated input schedules. It records opening-
+cohort ancestry, forms, extinction and conservation separately. Twelve-hour
+seeded runs are being measured; do not infer their results or lineage survival
+from the previously completed ten-minute single-checkpoint audit.
