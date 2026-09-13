@@ -2293,6 +2293,15 @@ pub fn turn_heading(dir: Vec2, turn: f64, f: f64) -> Vec2 {
     Vec2::from_screen_angle(dir.screen_angle() - (1.0 - f) * turn)
 }
 
+/// Outgoing presentation of an observed target that disappeared at this boundary.
+/// Kept only for a hunter's retained-prey interpolation tick, never as dead-id history.
+#[derive(Clone, Copy)]
+struct OutgoingPrey {
+    tick: u64,
+    body: Option<BodyMemory>,
+    meal: Option<MealMemory>,
+}
+
 /// The live world drawn with the baked art. Holds the pack, the scratch buffers the
 /// field and sprite paths need, the fixed per-cell slots, and the renderer-side history the
 /// art image keeps: how far each cell's plant, each tall column and each body has got
@@ -2360,8 +2369,11 @@ pub struct ArtPresenter {
     /// The meal memory of every ordinary organism ([`crate::meal_present`]): where the feed
     /// clip is read from once an actual intake bout has begun.
     meals: Meals,
-    /// Whether the meal onset is drawn at all; off, a body is drawn exactly as before the
-    /// meal memory existed (a review switch for paired captures and tests, not a setting).
+    /// At most one entry per previously observed hunter target, pruned to actual retained
+    /// prey after hunter observation and cleared at the next ordinary tick or snap.
+    outgoing_prey: std::collections::BTreeMap<OrganismId, OutgoingPrey>,
+    /// Whether the meal onset is drawn at all; off, bodies use their original shared clip
+    /// clock (a review switch for paired captures and tests, not a setting).
     meal_onset: bool,
 }
 
@@ -2405,13 +2417,15 @@ impl ArtPresenter {
             hunters: std::collections::BTreeMap::new(),
             hunter_parts: Vec::new(),
             meals: Meals::new(),
+            outgoing_prey: std::collections::BTreeMap::new(),
             meal_onset: true,
         }
     }
 
     /// This presenter with the meal onset ([`crate::meal_present`]) switched off, so ordinary
-    /// bodies are drawn exactly as they were before it: the "before" half of a paired
-    /// capture. Observation still tracks meals, so the switch can be compared frame for frame.
+    /// bodies use their original shared clip clock: the "before" half of a paired capture.
+    /// Both halves retain an outgoing prey's body fade through capture. Observation still
+    /// tracks meals, so the switch can be compared frame for frame.
     pub fn without_meal_onset(mut self) -> ArtPresenter {
         self.meal_onset = false;
         self
@@ -2468,6 +2482,7 @@ impl ArtPresenter {
     ) -> Result<(), String> {
         if self.hunters.values().any(|m| view.tick < m.cur.tick) {
             self.hunters.clear();
+            self.outgoing_prey.clear();
         }
         let live: std::collections::HashSet<OrganismId> =
             view.organisms.iter().map(|o| o.id).collect();
@@ -2517,6 +2532,13 @@ impl ArtPresenter {
                 memory.note_capture(*prey, evidence.prey_pos);
             }
         }
+        // Only a prey the hunter adapter actually retains may keep this one-tick pose.
+        // A vanished target without Handling, an empty membership list, and a later tick
+        // all discard the provisional copy. Repeating this boundary preserves the copy.
+        self.outgoing_prey.retain(|id, outgoing| {
+            outgoing.tick == view.tick
+                && self.hunters.values().any(|m| m.prey.as_ref().is_some_and(|p| p.id == *id))
+        });
         Ok(())
     }
 
@@ -2629,6 +2651,7 @@ impl ArtPresenter {
             // A rewind or a replaced world: the hunters' memory starts over with everything
             // else, so no later phase's reach can leak back in time.
             self.hunters.clear();
+            self.outgoing_prey.clear();
         }
         let dt = match self.last_tick {
             Some(last) if view.tick >= last => {
@@ -2640,6 +2663,23 @@ impl ArtPresenter {
         // observe of the same tick retargets but must not fold them forward, or a frame
         // drawn mid-tick would stop interpolating from the tick before.
         let new_tick = self.last_tick != Some(view.tick);
+        if new_tick {
+            self.outgoing_prey.clear();
+            // Save the last published target's outgoing pose before live-body/meal pruning.
+            // The hunter observer follows this call and decides whether a capture actually
+            // retained that target. No targets are fabricated on a first view or rewind.
+            for hunter in self.hunters.values() {
+                if let Some(prey) = &hunter.target_view
+                    && !view.organisms.iter().any(|o| o.id == prey.id)
+                {
+                    self.outgoing_prey.insert(prey.id, OutgoingPrey {
+                        tick: view.tick,
+                        body: self.bodies.get(&prey.id).copied(),
+                        meal: self.meals.memory_of(prey.id),
+                    });
+                }
+            }
+        }
         for (index, cell) in CellId::all().enumerate() {
             let band = cell_band(cell, view.water.get(index).copied());
             if band != self.bands[index] {
@@ -3066,7 +3106,17 @@ impl ArtPresenter {
                         moved: Vec::new(),
                         ..prey.clone()
                     };
-                    stamp_creature(&self.pack, &mut self.scratch, &held, None, None, seconds, 1.0, canvas);
+                    let outgoing = self.outgoing_prey.get(&prey.id).filter(|p| p.tick == view.tick);
+                    let meal = if self.meal_onset {
+                        outgoing.and_then(|p| p.meal).and_then(|m| {
+                            // The previous completed tick's weight, not its interpolation
+                            // start. No new intake or meal fade is inferred for removed prey.
+                            let weight = m.weight_at(1.0);
+                            if weight > 0.0 { m.bout_seconds(seconds).map(|t| (t, weight)) } else { None }
+                        })
+                    } else { None };
+                    stamp_creature(&self.pack, &mut self.scratch, &held,
+                        outgoing.and_then(|p| p.body.as_ref()), meal, seconds, 1.0, canvas);
                 }
             }
         }
