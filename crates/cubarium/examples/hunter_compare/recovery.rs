@@ -42,7 +42,8 @@ pub struct Milestone {
     /// Last cadence sample at or before the requested endpoint; never future data.
     pub observed_tick: u64,
     pub counts: [u64; ARMS],
-    pub differences_in_change: [f64; ARMS],
+    /// None when the selected capture lacks a complete pre-reference.
+    pub differences_in_change: Option<[f64; ARMS]>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -187,7 +188,7 @@ impl LocalRecovery {
             }
         }
         self.last_batch = Some(tick);
-        let mut out = self.expire_before(tick);
+        let out = self.expire_before(tick);
         for window in &mut self.windows {
             for c in captures {
                 if window.cells.contains(&c.cell) {
@@ -253,10 +254,6 @@ impl LocalRecovery {
                     record.recurrent_exposures[other.arm] += 1;
                 }
             }
-            if record.status != LocalStatus::RightCensored {
-                out.push(record);
-                continue;
-            }
             self.windows.push(Window {
                 record,
                 cells,
@@ -299,7 +296,7 @@ impl LocalRecovery {
             w.last_sample = Some((tick, values));
             w.record.observed_until_tick = tick;
             Self::milestones_until(&mut w, tick);
-            if w.record.status != LocalStatus::Recovered
+            if w.record.status == LocalStatus::RightCensored
                 && values[w.record.capture.arm] >= w.record.target.unwrap()
             {
                 let start = *w.qualifying_since.get_or_insert(tick);
@@ -309,7 +306,7 @@ impl LocalRecovery {
                     w.record.closed_tick = tick;
                     w.record.status = LocalStatus::Recovered;
                 }
-            } else if w.record.status != LocalStatus::Recovered {
+            } else if w.record.status == LocalStatus::RightCensored {
                 w.qualifying_since = None;
             }
             if tick == w.deadline {
@@ -335,14 +332,14 @@ impl LocalRecovery {
             }
             if let Some((observed, counts)) = w.last_sample {
                 if observed <= requested {
-                    let means = w.record.pre_means.unwrap();
-                    let treated = counts[w.record.capture.arm] as f64 - means[w.record.capture.arm];
                     w.record.milestones.push(Milestone {
                         requested_tick: requested,
                         observed_tick: observed,
                         counts,
-                        differences_in_change: std::array::from_fn(|a| {
-                            treated - (counts[a] as f64 - means[a])
+                        differences_in_change: w.record.pre_means.map(|means| {
+                            let treated =
+                                counts[w.record.capture.arm] as f64 - means[w.record.capture.arm];
+                            std::array::from_fn(|a| treated - (counts[a] as f64 - means[a]))
                         }),
                     });
                 }
@@ -352,7 +349,7 @@ impl LocalRecovery {
     }
 
     fn close(mut w: Window, status: LocalStatus, reason: Option<&str>) -> LocalRecord {
-        if w.record.status != LocalStatus::Recovered {
+        if w.record.status == LocalStatus::RightCensored {
             w.record.status = status;
             w.record.crossing_tick = w.qualifying_since;
         }
@@ -623,12 +620,20 @@ mod tests {
     #[test]
     fn missing_pre_and_no_deficit_are_not_recoveries() {
         let mut r = LocalRecovery::new(0, vec![vec![0], vec![1]], vec![3]).unwrap();
-        let records = r.record_captures(0, &[capture(3, 1)], &counts(1)).unwrap();
+        assert!(
+            r.record_captures(0, &[capture(3, 1)], &counts(1))
+                .unwrap()
+                .is_empty()
+        );
+        let records = r.finish(0, "end").unwrap();
         assert_eq!(records[0].status, LocalStatus::InsufficientPre);
         let mut r = prepared();
-        let records = r
-            .record_captures(1201, &[capture(3, 1)], &counts(2))
-            .unwrap();
+        assert!(
+            r.record_captures(1201, &[capture(3, 1)], &counts(2))
+                .unwrap()
+                .is_empty()
+        );
+        let records = r.finish(1201, "end").unwrap();
         assert_eq!(records[0].status, LocalStatus::NoMeasuredDeficit);
     }
     #[test]
@@ -661,7 +666,10 @@ mod tests {
         assert_eq!(records[0].confirmation_tick, Some(2600));
         assert_eq!(records[0].milestones[0].requested_tick, 2401);
         assert_eq!(records[0].milestones[0].observed_tick, 2400);
-        assert_eq!(records[0].milestones[0].differences_in_change, [0.0; ARMS]);
+        assert_eq!(
+            records[0].milestones[0].differences_in_change,
+            Some([0.0; ARMS])
+        );
     }
     #[test]
     fn horizon_is_not_extended_to_next_aligned_sample() {
@@ -764,7 +772,7 @@ mod tests {
         let records = r.finish(2600, "end").unwrap();
         assert_eq!(records[0].pre_means.unwrap()[0], 10.0);
         assert_eq!(records[0].pre_means.unwrap()[3], 4.0);
-        let change = records[0].milestones[0].differences_in_change;
+        let change = records[0].milestones[0].differences_in_change.unwrap();
         assert_eq!(change[0], 0.0); // both treated and control lost one
         assert_eq!(change[1], -1.0); // this control stayed unchanged
         assert_eq!(change[3], 0.0); // own-arm reference is always zero
@@ -775,9 +783,12 @@ mod tests {
         for tick in (0..=1000).step_by(200) {
             r.observe_sample(tick, &counts(5)).unwrap();
         }
-        let records = r
-            .record_captures(1001, &[capture(3, 1)], &counts(1))
-            .unwrap();
+        assert!(
+            r.record_captures(1001, &[capture(3, 1)], &counts(1))
+                .unwrap()
+                .is_empty()
+        );
+        let records = r.finish(1001, "end").unwrap();
         assert_eq!(records[0].pre_samples, 6);
         assert_eq!(records[0].status, LocalStatus::InsufficientPre);
         let mut r = LocalRecovery::new(0, vec![vec![0], vec![1]], vec![3]).unwrap();
@@ -816,5 +827,50 @@ mod tests {
         assert_eq!(record.confirmation_tick, None);
         assert_eq!(record.status, WholeStatus::NotRecoveredBy6h);
         assert_eq!(record.census_until_tick, 432_001);
+    }
+    #[test]
+    fn non_deficit_and_insufficient_windows_keep_all_milestones_and_exposures() {
+        for insufficient in [true, false] {
+            let (mut r, capture_tick, first_sample) = if insufficient {
+                let mut observer = LocalRecovery::new(0, vec![vec![0], vec![1]], vec![3]).unwrap();
+                observer.observe_sample(0, &counts(2)).unwrap();
+                (observer, 1, 200)
+            } else {
+                (prepared(), 1201, 1400)
+            };
+            assert!(
+                r.record_captures(capture_tick, &[capture(3, 1)], &counts(2))
+                    .unwrap()
+                    .is_empty()
+            );
+            let mut records = Vec::new();
+            for tick in (first_sample..=capture_tick + LOCAL_HORIZON + CADENCE - 1).step_by(200) {
+                if tick == first_sample {
+                    records.extend(
+                        r.record_captures(tick - 1, &[capture(3, 2)], &counts(1))
+                            .unwrap(),
+                    );
+                }
+                records.extend(r.observe_sample(tick, &counts(2)).unwrap());
+            }
+            assert_eq!(records.len(), 1);
+            let record = &records[0];
+            assert_eq!(
+                record.status,
+                if insufficient {
+                    LocalStatus::InsufficientPre
+                } else {
+                    LocalStatus::NoMeasuredDeficit
+                }
+            );
+            assert_eq!(record.confirmation_tick, None);
+            assert_eq!(record.milestones.len(), 4);
+            assert_eq!(record.recurrent_exposures[3], 1);
+            assert_eq!(
+                record.milestones[0].differences_in_change.is_none(),
+                insufficient
+            );
+            assert_eq!(record.milestones[0].counts, [2; ARMS]);
+        }
     }
 }

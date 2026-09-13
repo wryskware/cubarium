@@ -63,16 +63,20 @@ six to avoid rounding a whole-number mean slightly upward before `ceil`.
 
 The first capture in each 12,000-tick elapsed bin per on-arm is selected regardless
 of whether its subsequent data are convenient. Insufficient-pre and no-deficit
-records are explicit immediate outputs, not recoveries. For a deficit, count must
+statuses are explicit and never become recoveries. For a deficit, count must
 reach `ceil(pre_mean)` for 1,200 ticks observed at 200-tick cadence; a sampled dip
 resets the hold. Crossing and confirmation ticks are separate. Within-cadence
 dips cannot be detected by this local sampling scheme and are not claimed absent.
 
-Confirmed windows remain active until 72,000 ticks after capture, retaining later
+All selected windows remain active until 72,000 ticks after capture, retaining later
 milestones and recurrent exposures. All other captures in the same neighbourhood
 are counted by arm, including same-tick nonselected captures and post-recovery
 exposures; the index capture is excluded. Each control uses its own pre-mean for
-the paired difference-in-change, not the treated arm's reference.
+the paired difference-in-change, not the treated arm's reference. When no complete
+pre-reference exists, raw milestone counts still appear and the serialized
+`differences_in_change: Option<[f64;6]>` is null. Root identified the loss of
+follow-up in the initial immediate-output handling; this refinement keeps all
+selected windows without changing the memory bound or relabeling their statuses.
 
 Milestones request offsets 1,200 / 6,000 / 18,000 / 72,000 ticks. Because captures
 rarely align to the census grid, the reported count is the **last cadence sample
@@ -117,10 +121,11 @@ rustc --edition=2024 --test crates/cubarium/examples/hunter_compare/recovery.rs 
 /tmp/cubarium-recovery-tests
 ```
 
-Result: **15 passed, 0 failed**. Tests cover strict-prior ordering, stable ties,
+Result: **16 passed, 0 failed**. Tests cover strict-prior ordering, stable ties,
 partial prehistory, no deficit, hold reset, censored crossings, per-control means,
 graph-cell aggregation, exact and off-grid deadlines, post-recovery follow-up,
-bounded dense-capture memory, invalid inputs, absent forms, exact decline/zero
+full follow-up for non-deficit/insufficient-pre windows, bounded dense-capture
+memory, invalid inputs, absent forms, exact decline/zero
 ticks, between-sample whole-world dips and late unconfirmed recovery.
 
 Root still must include the module, stream records, reconcile events, map real
