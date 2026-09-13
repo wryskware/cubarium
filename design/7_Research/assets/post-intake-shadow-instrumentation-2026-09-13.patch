@@ -1,0 +1,4147 @@
+diff --git a/crates/cubarium-core/src/lib.rs b/crates/cubarium-core/src/lib.rs
+index 31453ce..2e47f97 100644
+--- a/crates/cubarium-core/src/lib.rs
++++ b/crates/cubarium-core/src/lib.rs
+@@ -20,6 +20,7 @@
+ //! - [`controller`]: observation → decision (pure).
+ //! - [`events`]: transient birth/death records for the observer.
+ //! - [`pairs`]: chord-filtered all-pairs neighbor lists.
++//! - [`post_intake`]: the transient, non-intervening post-intake opportunity shadow (off by default).
+ //! - [`world`]: the tick, invariants, births/deaths, telemetry.
+ //! - [`snapshot`]: header + postcard encoding, validation.
+ //! - [`view`]: immutable render view.
+@@ -38,6 +39,7 @@ pub mod hunter;
+ pub mod ids;
+ pub mod organism;
+ pub mod pairs;
++pub mod post_intake;
+ pub mod quiet;
+ pub mod rng;
+ pub mod snapshot;
+diff --git a/crates/cubarium-core/src/post_intake.rs b/crates/cubarium-core/src/post_intake.rs
+new file mode 100644
+index 0000000..e217687
+--- /dev/null
++++ b/crates/cubarium-core/src/post_intake.rs
+@@ -0,0 +1,1583 @@
++//! The bounded, **non-intervening** post-intake opportunity check
++//! (`design/7_Research/root-post-intake-shadow-scope-2026-09-13.md`).
++//!
++//! This is a measurement, not a behaviour. Nothing here writes an organism, a field, a stock, a
++//! mode, an escrow, a snapshot or an RNG counter. It reads what the tick already computed, keeps a
++//! small transient per-live-ID record beside it, and emits records a harness drains. A world with
++//! the shadow off is the same world it was before this module existed, operation for operation;
++//! a world with it on takes the identical trajectory and additionally says what *could* have been
++//! offered.
++//!
++//! ## What it measures, and what that is not
++//!
++//! At a completed boundary `B` the shadow asks one fixed question of one organism: **had the rule
++//! been running, would this animal have been admitted to a 30-decision pause?** If yes, it opens a
++//! *hypothetical window* covering decisions `B..B+29` and re-tests, at every later boundary, that
++//! the still-freely-feeding baseline would have stayed compatible with holding it.
++//!
++//! The window is **not** a pause. The animal keeps feeding, moving, growing, gestating and dying
++//! exactly as it would have. So:
++//!
++//! * the window's length is *baseline-compatible window time*, not rest time, and not a claim that
++//!   the animal would have rested that long under an intervention;
++//! * the baseline's intake during a window is recorded separately and is **not** "food the pause
++//!   would have cost". A real pause would have changed the patch, the neighbours' shares, the
++//!   animal's position and every later stock in either direction;
++//! * none of this is an upper bound on anything. An intervention has a different future.
++//!
++//! ## The fixed rule
++//!
++//! * **Credit** is actual material credited to reserve by field settlement — the `to_reserve`
++//!   terms the settlement stage really applied — never raw food, a `fed` flag or a reserve delta.
++//!   It accumulates within an episode and is capped at `Q`.
++//! * **Episode expiry** is evaluated at a settlement boundary, *before* that boundary's new
++//!   settlement is added: an episode whose last positive settlement is [`EPISODE_EXPIRY_TICKS`] or
++//!   more ticks old is dropped, and the new settlement opens a fresh one.
++//! * **The quota** is the diet-permitted channel sum
++//!   `Q = QUOTA_SECONDS · η_m · (I_g·graze_rate + I_f·graze_rate + I_s·scavenge_rate)`, with the
++//!   controller's own [`DIET_GATE`]/[`FRUIT_DIET`] gates and the world's own `η_m`. It is a
++//!   **diet-permitted unconstrained rate ceiling**, not an attainable meal rate: density, headroom,
++//!   food energy and mode all reduce what actually settles.
++//! * **An attempt** fires only when a fresh positive settlement at this boundary carries the
++//!   episode to `Q`, no window is open, and no refractory deadline is outstanding. Nothing fires
++//!   from a timer. Every attempt consumes the credit, refusal included.
++//! * **Admission** is tested after the completed tick's own physiology, funding and death checks,
++//!   with the unchanged [`Budget::of`]/[`Budget::affordable`] over [`WINDOW_DECISIONS`] decisions
++//!   plus the existing safety tick.
++//! * **Refractory** runs [`REFRACTORY_TICKS`] ticks from a release, an abort or a refused attempt.
++//!   Credit may accumulate during it; it simply cannot fire.
++//!
++//! ## Bounds
++//!
++//! Entries are keyed by full generational [`OrganismId`], so a reused slot is a different animal
++//! and inherits no credit and no cooldown. Entries are removed when the organism is removed, and
++//! an idle entry — no episode, no window, no future deadline — is removed at the next commit. The
++//! map never exceeds the world's live organism capacity.
++
++use serde::{Deserialize, Serialize};
++use std::collections::BTreeMap;
++
++use crate::config::OrganismConfig;
++use crate::controller::{DIET_GATE, FRUIT_DIET};
++use crate::ids::{OrganismId, Slots};
++use crate::organism::{Mode, Organism};
++use crate::quiet::{Budget, horizon_seconds};
++
++/// Wire version of the records this module emits, so an artifact states which rule produced it.
++pub const SHADOW_VERSION: u32 = 1;
++
++/// The quota's normalisation window: two seconds of the diet-permitted unconstrained rate.
++pub const QUOTA_SECONDS: f64 = 2.0;
++
++/// An episode ends after this many ticks without a positive settlement. One second at 20 Hz.
++pub const EPISODE_EXPIRY_TICKS: u64 = 20;
++
++/// The hypothetical window's length in decisions: `B..B+29`, releasing at `B + 30`.
++pub const WINDOW_DECISIONS: u64 = 30;
++
++/// Ticks of refractory after a release, an abort, or a refused attempt.
++pub const REFRACTORY_TICKS: u64 = 600;
++
++/// Why an attempt was refused, or why a hypothetical window ended before its release boundary.
++///
++/// A window that ends early ends for a fact about the **baseline**, which was never held and never
++/// paused. It is deliberately not spelled like a production policy's abort.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
++pub enum ShadowReason {
++    /// The organism died at this very boundary; the completed physiology does not qualify it.
++    Dead,
++    /// A hunter member is never offered this ordinary behaviour in this slice.
++    HunterMember,
++    /// Below actual adult structure.
++    Juvenile,
++    /// Holding an escrow, including one funded at this same boundary.
++    Gestating,
++    /// The tick's ordinary mode was neither Seeking nor Feeding.
++    InactiveMode,
++    /// One or more of the budget's inputs was not a finite nonnegative number.
++    InvalidInputs,
++    /// The conservative budget was not met at admission. Strict: landing on it is not meeting it.
++    Unaffordable,
++    /// The tick arithmetic would overflow.
++    Overflow,
++    /// The per-ID bound was full, so no record could be kept for this organism.
++    Bounded,
++    /// The budget stopped being met at a later baseline decision boundary.
++    UnaffordableRemaining,
++    /// The baseline organism was removed while a window was open.
++    BaselineGone,
++    /// The baseline funded an escrow while a window was open.
++    BaselineEscrow,
++    /// The baseline fell below adult structure while a window was open.
++    BaselineJuvenile,
++    /// The measurement ended with the window still open. Censoring, not an outcome.
++    RunEnd,
++}
++
++impl ShadowReason {
++    pub fn as_str(self) -> &'static str {
++        match self {
++            ShadowReason::Dead => "dead",
++            ShadowReason::HunterMember => "hunter_member",
++            ShadowReason::Juvenile => "juvenile",
++            ShadowReason::Gestating => "gestating",
++            ShadowReason::InactiveMode => "inactive_mode",
++            ShadowReason::InvalidInputs => "invalid_inputs",
++            ShadowReason::Unaffordable => "unaffordable",
++            ShadowReason::Overflow => "overflow",
++            ShadowReason::Bounded => "bounded",
++            ShadowReason::UnaffordableRemaining => "unaffordable_remaining",
++            ShadowReason::BaselineGone => "baseline_gone",
++            ShadowReason::BaselineEscrow => "baseline_escrow",
++            ShadowReason::BaselineJuvenile => "baseline_juvenile",
++            ShadowReason::RunEnd => "run_end",
++        }
++    }
++
++    /// Every reason, in a fixed order, so a per-reason table always has the same rows — including
++    /// the zeros, which is what makes "never happened" readable instead of absent.
++    pub const ALL: [ShadowReason; 14] = [
++        ShadowReason::Dead,
++        ShadowReason::HunterMember,
++        ShadowReason::Juvenile,
++        ShadowReason::Gestating,
++        ShadowReason::InactiveMode,
++        ShadowReason::InvalidInputs,
++        ShadowReason::Unaffordable,
++        ShadowReason::Overflow,
++        ShadowReason::Bounded,
++        ShadowReason::UnaffordableRemaining,
++        ShadowReason::BaselineGone,
++        ShadowReason::BaselineEscrow,
++        ShadowReason::BaselineJuvenile,
++        ShadowReason::RunEnd,
++    ];
++}
++
++/// The unchanged [`Budget`]'s five numbers plus the horizon they were taken over, in a shape an
++/// artifact can carry. Recorded, never used to decide anything: the decision is `Budget::affordable`
++/// on the real struct.
++#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
++pub struct BudgetRecord {
++    pub horizon_seconds: f64,
++    pub per_second: f64,
++    pub growth: f64,
++    pub oxidation: f64,
++    pub energy: f64,
++    pub material: f64,
++}
++
++impl BudgetRecord {
++    fn of(b: &Budget, horizon_seconds: f64) -> BudgetRecord {
++        BudgetRecord {
++            horizon_seconds,
++            per_second: b.per_second,
++            growth: b.growth,
++            oxidation: b.oxidation,
++            energy: b.energy,
++            material: b.material,
++        }
++    }
++}
++
++/// The joint per-ID state at the boundary a record was written, read from the organism after the
++/// tick's own physiology, funding and death checks. Historical feeding flags and lifetime flow
++/// sums cannot reconstruct these together, which is the whole reason the hook exists.
++#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
++pub struct ShadowSample {
++    pub form: u8,
++    pub structure: f64,
++    pub structure_adult: f64,
++    pub reserve: f64,
++    pub energy: f64,
++    pub reserve_max: f64,
++    pub energy_max: f64,
++    /// The tick's **ordinary** mode, as the controller decided it.
++    pub mode: Mode,
++    pub gestating: bool,
++    /// The tick the open escrow started, when there is one: a gestation's identity, so repeat
++    /// refusals can be de-duplicated per gestation without deleting them from the record.
++    pub escrow_started_tick: Option<u64>,
++    pub hunter_member: bool,
++    pub age_ticks: u64,
++    /// The diet-permitted rate ceiling. `None` when the diet permits no channel or an input was
++    /// not a finite nonnegative number — no opportunity, never a division by zero.
++    pub quota: Option<f64>,
++    pub graze_rate: f64,
++    pub scavenge_rate: f64,
++    pub diet: f64,
++    pub budget: Option<BudgetRecord>,
++}
++
++impl ShadowSample {
++    fn read(
++        o: &Organism,
++        cfg: &OrganismConfig,
++        grazing: bool,
++        scavenging: bool,
++        boundary: u64,
++        hunter_member: bool,
++        budget: Option<BudgetRecord>,
++    ) -> ShadowSample {
++        ShadowSample {
++            form: o.phenotype.form,
++            structure: o.structure,
++            structure_adult: o.phenotype.structure_adult,
++            reserve: o.reserve,
++            energy: o.energy,
++            reserve_max: o.phenotype.reserve_max,
++            energy_max: o.phenotype.energy_max,
++            mode: o.mode,
++            gestating: o.escrow.is_some(),
++            escrow_started_tick: o.escrow.as_ref().map(|e| e.started_tick),
++            hunter_member,
++            age_ticks: o.age_ticks(boundary),
++            quota: quota(o, cfg, grazing, scavenging),
++            graze_rate: o.phenotype.graze_rate,
++            scavenge_rate: o.phenotype.scavenge_rate,
++            diet: o.phenotype.diet,
++            budget,
++        }
++    }
++}
++
++/// The episode that earned the credit an attempt consumed.
++#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
++pub struct EpisodeRecord {
++    /// The boundary the episode's first positive settlement landed on.
++    pub start_tick: u64,
++    /// The boundary of its last positive settlement.
++    pub last_positive_tick: u64,
++    /// Boundaries within the episode that carried a positive settlement. Intake is gappy; this is
++    /// not the episode's length.
++    pub positive_ticks: u64,
++    /// The episode's elapsed length in ticks, `last_positive_tick − start_tick`.
++    pub elapsed_ticks: u64,
++    /// Every unit of material the episode credited to reserve, **uncapped**.
++    pub assimilated: f64,
++    /// What the rule actually held, capped at `Q`.
++    pub credit: f64,
++}
++
++/// Transient measurement records, drained by the observer exactly as life and quiet events are:
++/// never checkpointed, never hashed, never read back by the tick, never shown on the display.
++#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
++pub enum ShadowEvent {
++    /// A fresh positive settlement carried an episode to `Q` with no window open and no refractory
++    /// outstanding. `admitted` says whether a hypothetical window opened. Repeats are kept: a
++    /// gestating adult that re-earns `Q` every few seconds really does attempt every few seconds,
++    /// and deleting those would misreport the rule rather than improve it.
++    Attempt {
++        tick: u64,
++        id: OrganismId,
++        admitted: bool,
++        reason: Option<ShadowReason>,
++        episode: EpisodeRecord,
++        sample: ShadowSample,
++        /// The release boundary of the window this attempt opened, when it opened one.
++        window_end_tick: Option<u64>,
++        /// The cooldown deadline this entry carries as the attempt ends. A **refusal** arms it
++        /// here, at `tick + REFRACTORY_TICKS`. An **admission** does not: the window itself is
++        /// what blocks a further attempt, and the operative deadline arrives with the close, so
++        /// what an admission reports here is the spent previous deadline (always `None` or at or
++        /// before `tick`), kept because it says what the animal had just come out of.
++        refractory_until: Option<u64>,
++    },
++    /// A hypothetical window reached its release boundary with the baseline compatible throughout.
++    /// This is baseline-compatible window time, not observed rest.
++    Release {
++        tick: u64,
++        id: OrganismId,
++        window_start_tick: u64,
++        held_decisions: u64,
++        /// What the freely feeding baseline actually assimilated across the window. Recorded
++        /// separately and deliberately: it is **not** food a pause would have cost.
++        baseline_intake_material: f64,
++        baseline_intake_ticks: u64,
++        /// The baseline died at this same boundary, after the window's last hypothetical decision.
++        baseline_died_at_release: bool,
++        sample: ShadowSample,
++        refractory_until: Option<u64>,
++    },
++    /// The baseline stopped being compatible with holding the window before its release boundary.
++    Abort {
++        tick: u64,
++        id: OrganismId,
++        window_start_tick: u64,
++        completed_decisions: u64,
++        reason: ShadowReason,
++        baseline_intake_material: f64,
++        baseline_intake_ticks: u64,
++        sample: Option<ShadowSample>,
++        refractory_until: Option<u64>,
++    },
++    /// The measurement ended with the window still open. A censored interval, never a release.
++    Censor {
++        tick: u64,
++        id: OrganismId,
++        window_start_tick: u64,
++        completed_decisions: u64,
++        baseline_intake_material: f64,
++        baseline_intake_ticks: u64,
++    },
++}
++
++impl ShadowEvent {
++    pub fn tick(&self) -> u64 {
++        match self {
++            ShadowEvent::Attempt { tick, .. }
++            | ShadowEvent::Release { tick, .. }
++            | ShadowEvent::Abort { tick, .. }
++            | ShadowEvent::Censor { tick, .. } => *tick,
++        }
++    }
++
++    pub fn id(&self) -> OrganismId {
++        match self {
++            ShadowEvent::Attempt { id, .. }
++            | ShadowEvent::Release { id, .. }
++            | ShadowEvent::Abort { id, .. }
++            | ShadowEvent::Censor { id, .. } => *id,
++        }
++    }
++}
++
++/// The diet-permitted unconstrained rate ceiling for one organism, or `None` when the diet permits
++/// no channel at all or an input is not a finite nonnegative number.
++///
++/// `Q = QUOTA_SECONDS · η_m · (I_g·graze_rate + I_f·graze_rate + I_s·scavenge_rate)`, where `I_g`
++/// needs grazing enabled and `diet ≥ DIET_GATE`, `I_f` needs grazing enabled and
++/// `diet ≥ FRUIT_DIET`, and `I_s` needs scavenging enabled and `diet ≤ 1 − DIET_GATE` — the
++/// controller's own gates, read from the controller, not restated as approximate numbers here.
++///
++/// Two channels open on `graze_rate` because producer and fruit are two separate requests the
++/// settlement really serves, and both are gated separately. This is a normalisation and not a
++/// claim that any diet attains it: density, headroom, food energy density and mode all reduce
++/// what actually settles.
++pub fn quota(o: &Organism, cfg: &OrganismConfig, grazing: bool, scavenging: bool) -> Option<f64> {
++    let p = &o.phenotype;
++    let inputs = [cfg.assimilation_material, p.graze_rate, p.scavenge_rate, p.diet];
++    if !inputs.iter().all(|x| x.is_finite() && *x >= 0.0) {
++        return None;
++    }
++    let graze_channel = grazing && p.diet >= DIET_GATE;
++    let fruit_channel = grazing && p.diet >= FRUIT_DIET;
++    let scavenge_channel = scavenging && p.diet <= 1.0 - DIET_GATE;
++    let mut sum = 0.0;
++    if graze_channel {
++        sum += p.graze_rate;
++    }
++    if fruit_channel {
++        sum += p.graze_rate;
++    }
++    if scavenge_channel {
++        sum += p.scavenge_rate;
++    }
++    let q = QUOTA_SECONDS * cfg.assimilation_material * sum;
++    (q.is_finite() && q > 0.0).then_some(q)
++}
++
++// ---------------------------------------------------------------- per-ID state
++
++/// One productive episode: the credit the rule holds, and what earned it.
++#[derive(Clone, Copy, Debug, PartialEq)]
++struct Episode {
++    start_tick: u64,
++    last_positive_tick: u64,
++    positive_ticks: u64,
++    assimilated: f64,
++    credit: f64,
++}
++
++impl Episode {
++    fn record(&self) -> EpisodeRecord {
++        EpisodeRecord {
++            start_tick: self.start_tick,
++            last_positive_tick: self.last_positive_tick,
++            positive_ticks: self.positive_ticks,
++            elapsed_ticks: self.last_positive_tick.saturating_sub(self.start_tick),
++            assimilated: self.assimilated,
++            credit: self.credit,
++        }
++    }
++}
++
++/// One open hypothetical window. The baseline is not held and not paused; this records which
++/// decisions the rule *would* have claimed and what the still-feeding baseline did meanwhile.
++#[derive(Clone, Copy, Debug, PartialEq)]
++struct Window {
++    start_tick: u64,
++    end_tick: u64,
++    /// The form the admitted organism wore. Carried so a window closed away from its organism —
++    /// the commit sweep's removal, or the run's end — is still attributed to a form instead of
++    /// quietly landing only in the whole-world total.
++    form: u8,
++    baseline_material: f64,
++    baseline_ticks: u64,
++}
++
++/// Everything the rule keeps for one live full ID. Credit, window and deadline are independent:
++/// dropping expired credit never drops an outstanding cooldown, and the entry survives as long as
++/// any one of the three is live.
++#[derive(Clone, Copy, Debug, Default, PartialEq)]
++struct Entry {
++    episode: Option<Episode>,
++    window: Option<Window>,
++    refractory_until: Option<u64>,
++}
++
++impl Entry {
++    /// No credit, no window, no future deadline: nothing about this ID is still being tracked.
++    fn idle(&self, boundary: u64) -> bool {
++        self.episode.is_none()
++            && self.window.is_none()
++            && self.refractory_until.is_none_or(|until| boundary >= until)
++    }
++}
++
++// ---------------------------------------------------------------- counters
++
++/// Exposure and outcome tallies for one form, or for the whole world. Every field is a count of
++/// boundaries or of records; nothing here is inferred from a difference.
++#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
++pub struct Exposure {
++    /// Living organism-boundaries observed.
++    pub organism_ticks: u64,
++    /// ... of which at or above actual adult structure.
++    pub adult_ticks: u64,
++    /// ... of which adult and holding no escrow.
++    pub adult_unencumbered_ticks: u64,
++    /// ... of which also in an ordinary Seeking or Feeding mode and not a hunter member. This is
++    /// the population the rule can ever ask about; affordability is **not** included, because it
++    /// is tested only where the rule actually tests it.
++    pub eligible_ticks: u64,
++    /// Boundaries carrying a positive field assimilation for this organism.
++    pub settlement_ticks: u64,
++    /// Material actually credited to reserve by field settlement.
++    pub assimilated: f64,
++    /// Settlement boundaries at which the diet permitted no quota at all.
++    pub settlement_ticks_without_quota: u64,
++    /// Episodes dropped because [`EPISODE_EXPIRY_TICKS`] passed with no positive settlement.
++    pub episodes_expired: u64,
++    pub attempts: u64,
++    pub admissions: u64,
++    pub releases: u64,
++    pub aborts: u64,
++    pub censored: u64,
++    /// Hypothetical decisions completed inside windows that closed, by whatever route.
++    pub completed_window_decisions: u64,
++    /// Material the freely feeding baseline assimilated while a window was open. Recorded, never
++    /// presented as food a pause would have cost.
++    pub baseline_intake_in_windows: f64,
++    /// Refusals by [`ShadowReason::ALL`] index, repeats included.
++    pub refusals: [u64; 14],
++}
++
++impl Exposure {
++    fn refuse(&mut self, reason: ShadowReason) {
++        let at = ShadowReason::ALL.iter().position(|r| *r == reason).expect("every reason is listed");
++        self.refusals[at] += 1;
++    }
++}
++
++/// Per-form and whole-world tallies. Forms are the phenotype's eight rig indices and every one is
++/// always present, so a form that never ate keeps a visible row of zeros rather than vanishing.
++#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
++pub struct ShadowCounters {
++    pub total: Exposure,
++    pub by_form: [Exposure; 8],
++    /// Boundaries at which at least one window was open anywhere in the world.
++    pub world_window_ticks: u64,
++    /// Boundaries observed at all.
++    pub world_ticks: u64,
++    /// The largest the per-ID map ever grew.
++    pub peak_entries: usize,
++    /// Attempts that could not be recorded because the per-ID bound was full.
++    pub bounded_refusals: u64,
++}
++
++impl ShadowCounters {
++    fn each(&mut self, form: u8) -> [&mut Exposure; 2] {
++        let index = (form as usize).min(7);
++        let (total, by_form) = (&mut self.total, &mut self.by_form);
++        [total, &mut by_form[index]]
++    }
++}
++
++// ---------------------------------------------------------------- the shadow
++
++/// The transient observer. Constructed by [`crate::world::World::enable_post_intake_shadow`],
++/// dropped with the process, absent from every snapshot.
++#[derive(Clone, Debug, PartialEq)]
++pub struct PostIntakeShadow {
++    /// The world's live organism capacity: the per-ID map may never exceed it.
++    cap: usize,
++    entries: BTreeMap<OrganismId, Entry>,
++    events: Vec<ShadowEvent>,
++    counters: ShadowCounters,
++}
++
++impl PostIntakeShadow {
++    pub fn new(cap: usize) -> PostIntakeShadow {
++        PostIntakeShadow {
++            cap,
++            entries: BTreeMap::new(),
++            events: Vec::new(),
++            counters: ShadowCounters::default(),
++        }
++    }
++
++    pub fn counters(&self) -> &ShadowCounters {
++        &self.counters
++    }
++
++    pub fn entries(&self) -> usize {
++        self.entries.len()
++    }
++
++    pub fn capacity(&self) -> usize {
++        self.cap
++    }
++
++    /// Open hypothetical windows right now. Not paused animals: nothing is held.
++    pub fn open_windows(&self) -> usize {
++        self.entries.values().filter(|e| e.window.is_some()).count()
++    }
++
++    pub fn drain_events(&mut self) -> Vec<ShadowEvent> {
++        std::mem::take(&mut self.events)
++    }
++
++    /// A positive field-assimilation settlement of `assimilated` material credited to reserve for
++    /// `id` at completed boundary `boundary`.
++    ///
++    /// Called from the settlement stage, from the transfers it really applied. Expiry is evaluated
++    /// here, **before** this boundary's material is added, which is the whole difference between
++    /// "brief nibble gaps are one meal" and "an old meal banks a rest forever".
++    ///
++    /// While a window is open the baseline's intake is recorded on the window and **not** credited:
++    /// the animal was never actually held, so treating its continuing meal as earned credit would
++    /// be measuring a counterfactual that did not happen.
++    #[allow(clippy::too_many_arguments)]
++    pub fn observe_settlement(
++        &mut self,
++        id: OrganismId,
++        o: &Organism,
++        cfg: &OrganismConfig,
++        grazing: bool,
++        scavenging: bool,
++        boundary: u64,
++        assimilated: f64,
++    ) {
++        if !(assimilated.is_finite() && assimilated > 0.0) {
++            return;
++        }
++        let form = o.phenotype.form;
++        for e in self.counters.each(form) {
++            e.settlement_ticks += 1;
++            e.assimilated += assimilated;
++        }
++        let quota = quota(o, cfg, grazing, scavenging);
++        let Some(entry) = Self::slot(&mut self.entries, self.cap, &mut self.counters, id) else {
++            return;
++        };
++        if let Some(window) = entry.window.as_mut() {
++            window.baseline_material += assimilated;
++            window.baseline_ticks += 1;
++            for e in self.counters.each(form) {
++                e.baseline_intake_in_windows += assimilated;
++            }
++            return;
++        }
++        let Some(quota) = quota else {
++            // No channel the diet can open, or an input that describes no rate: no opportunity.
++            // Recorded so a per-form zero reads as "the rule never applied" and not as biology.
++            for e in self.counters.each(form) {
++                e.settlement_ticks_without_quota += 1;
++            }
++            return;
++        };
++        if Self::expire(entry, boundary) {
++            for e in self.counters.each(form) {
++                e.episodes_expired += 1;
++            }
++        }
++        match entry.episode.as_mut() {
++            Some(episode) => {
++                episode.last_positive_tick = boundary;
++                episode.positive_ticks += 1;
++                episode.assimilated += assimilated;
++                episode.credit = (episode.credit + assimilated).min(quota);
++            }
++            None => {
++                entry.episode = Some(Episode {
++                    start_tick: boundary,
++                    last_positive_tick: boundary,
++                    positive_ticks: 1,
++                    assimilated,
++                    credit: assimilated.min(quota),
++                });
++            }
++        }
++    }
++
++    /// One organism's completed boundary, called from the physiology stage **after** that
++    /// organism's oxidation, growth, gestation/funding and death checks have all run.
++    ///
++    /// `mode` is the tick's ordinary decided mode, `dying` says the death check named a cause at
++    /// this boundary, and `hunter_member` whether the extension owns it. Nothing here is written
++    /// back: the organism is read.
++    #[allow(clippy::too_many_arguments)]
++    pub fn observe_boundary(
++        &mut self,
++        id: OrganismId,
++        o: &Organism,
++        cfg: &OrganismConfig,
++        grazing: bool,
++        scavenging: bool,
++        boundary: u64,
++        dt: f64,
++        mode: Mode,
++        dying: bool,
++        hunter_member: bool,
++    ) {
++        let form = o.phenotype.form;
++        let adult = o.structure >= o.phenotype.structure_adult;
++        let unencumbered = adult && o.escrow.is_none();
++        let active = matches!(mode, Mode::Seeking | Mode::Feeding);
++        for e in self.counters.each(form) {
++            e.organism_ticks += 1;
++            e.adult_ticks += u64::from(adult);
++            e.adult_unencumbered_ticks += u64::from(unencumbered);
++            e.eligible_ticks += u64::from(unencumbered && active && !hunter_member);
++        }
++
++        let Some(entry) = self.entries.get(&id).copied() else {
++            return;
++        };
++        if entry.window.is_some() {
++            self.step_window(id, o, cfg, grazing, scavenging, boundary, dt, dying, hunter_member);
++            return;
++        }
++        // A dying animal's completed physiology does not qualify it; if it had reached Q this
++        // boundary the attempt is still recorded, because the opportunity really was evaluated.
++        self.try_attempt(id, o, cfg, grazing, scavenging, boundary, dt, mode, dying, hunter_member);
++    }
++
++    /// Re-test an open window against the baseline at this boundary, or release it.
++    #[allow(clippy::too_many_arguments)]
++    fn step_window(
++        &mut self,
++        id: OrganismId,
++        o: &Organism,
++        cfg: &OrganismConfig,
++        grazing: bool,
++        scavenging: bool,
++        boundary: u64,
++        dt: f64,
++        dying: bool,
++        hunter_member: bool,
++    ) {
++        let entry = self.entries.get(&id).copied().expect("checked by the caller");
++        let window = entry.window.expect("checked by the caller");
++        let form = o.phenotype.form;
++        // The release boundary is reached only after every one of the window's decisions is
++        // behind it. A death at the release boundary is recorded on the release, not used to
++        // retract decisions that had already completed.
++        if boundary >= window.end_tick {
++            let sample =
++                ShadowSample::read(o, cfg, grazing, scavenging, boundary, hunter_member, None);
++            let refractory = self.close(id, boundary, WINDOW_DECISIONS);
++            for e in self.counters.each(form) {
++                e.releases += 1;
++                e.completed_window_decisions += WINDOW_DECISIONS;
++            }
++            self.events.push(ShadowEvent::Release {
++                tick: boundary,
++                id,
++                window_start_tick: window.start_tick,
++                held_decisions: WINDOW_DECISIONS,
++                baseline_intake_material: window.baseline_material,
++                baseline_intake_ticks: window.baseline_ticks,
++                baseline_died_at_release: dying,
++                sample,
++                refractory_until: refractory,
++            });
++            return;
++        }
++        let remaining = window.end_tick - boundary;
++        let (reason, budget) = if dying {
++            (Some(ShadowReason::BaselineGone), None)
++        } else if o.escrow.is_some() {
++            (Some(ShadowReason::BaselineEscrow), None)
++        } else if o.structure < o.phenotype.structure_adult {
++            (Some(ShadowReason::BaselineJuvenile), None)
++        } else if hunter_member {
++            (Some(ShadowReason::HunterMember), None)
++        } else {
++            match horizon_seconds(remaining, dt) {
++                None => (Some(ShadowReason::Overflow), None),
++                Some(horizon) => match Budget::of(o, cfg, horizon) {
++                    None => (Some(ShadowReason::InvalidInputs), None),
++                    Some(budget) => {
++                        let record = BudgetRecord::of(&budget, horizon);
++                        if budget.affordable(o) {
++                            (None, Some(record))
++                        } else {
++                            (Some(ShadowReason::UnaffordableRemaining), Some(record))
++                        }
++                    }
++                },
++            }
++        };
++        let Some(reason) = reason else {
++            let _ = budget;
++            return;
++        };
++        let completed = boundary.saturating_sub(window.start_tick).min(WINDOW_DECISIONS);
++        let sample =
++            ShadowSample::read(o, cfg, grazing, scavenging, boundary, hunter_member, budget);
++        let refractory = self.close(id, boundary, completed);
++        for e in self.counters.each(form) {
++            e.aborts += 1;
++            e.completed_window_decisions += completed;
++            e.refuse(reason);
++        }
++        self.events.push(ShadowEvent::Abort {
++            tick: boundary,
++            id,
++            window_start_tick: window.start_tick,
++            completed_decisions: completed,
++            reason,
++            baseline_intake_material: window.baseline_material,
++            baseline_intake_ticks: window.baseline_ticks,
++            sample: Some(sample),
++            refractory_until: refractory,
++        });
++    }
++
++    /// Evaluate one attempt, if this boundary earned one.
++    #[allow(clippy::too_many_arguments)]
++    fn try_attempt(
++        &mut self,
++        id: OrganismId,
++        o: &Organism,
++        cfg: &OrganismConfig,
++        grazing: bool,
++        scavenging: bool,
++        boundary: u64,
++        dt: f64,
++        mode: Mode,
++        dying: bool,
++        hunter_member: bool,
++    ) {
++        let entry = self.entries.get(&id).copied().expect("checked by the caller");
++        // Nothing fires from a timer: the trigger is *this* boundary's fresh positive settlement.
++        let Some(episode) = entry.episode.filter(|e| e.last_positive_tick == boundary) else {
++            return;
++        };
++        let Some(quota) = quota(o, cfg, grazing, scavenging) else {
++            return;
++        };
++        if episode.credit < quota {
++            return;
++        }
++        // A cooldown suppresses the attempt; it does not consume the credit. Credit that keeps
++        // accruing through a cooldown is the point of the rule, so the first fresh settlement
++        // after the deadline fires, with no extra earning period demanded of the animal.
++        if entry.refractory_until.is_some_and(|until| boundary < until) {
++            return;
++        }
++
++        let form = o.phenotype.form;
++        let record = episode.record();
++        let adult = o.structure >= o.phenotype.structure_adult;
++        let active = matches!(mode, Mode::Seeking | Mode::Feeding);
++        let mut budget_record = None;
++        let reason = if dying {
++            Some(ShadowReason::Dead)
++        } else if hunter_member {
++            Some(ShadowReason::HunterMember)
++        } else if !adult {
++            Some(ShadowReason::Juvenile)
++        } else if o.escrow.is_some() {
++            Some(ShadowReason::Gestating)
++        } else if !active {
++            Some(ShadowReason::InactiveMode)
++        } else {
++            match horizon_seconds(WINDOW_DECISIONS, dt) {
++                None => Some(ShadowReason::Overflow),
++                Some(horizon) => match Budget::of(o, cfg, horizon) {
++                    None => Some(ShadowReason::InvalidInputs),
++                    Some(budget) => {
++                        budget_record = Some(BudgetRecord::of(&budget, horizon));
++                        if budget.affordable(o) { None } else { Some(ShadowReason::Unaffordable) }
++                    }
++                },
++            }
++        };
++        let end_tick = boundary.checked_add(WINDOW_DECISIONS);
++        let reason = match (reason, end_tick) {
++            (Some(reason), _) => Some(reason),
++            (None, None) => Some(ShadowReason::Overflow),
++            (None, Some(_)) => None,
++        };
++
++        // The attempt consumes the credit whatever it decides. A hungry animal is never left
++        // waiting on a hidden latch; the next attempt needs new food.
++        let sample = ShadowSample::read(
++            o,
++            cfg,
++            grazing,
++            scavenging,
++            boundary,
++            hunter_member,
++            budget_record,
++        );
++        let mut window_end = None;
++        let refractory;
++        {
++            let entry = self.entries.get_mut(&id).expect("checked by the caller");
++            entry.episode = None;
++            match (reason, end_tick) {
++                (None, Some(end)) => {
++                    entry.window = Some(Window {
++                        start_tick: boundary,
++                        end_tick: end,
++                        form,
++                        baseline_material: 0.0,
++                        baseline_ticks: 0,
++                    });
++                    window_end = Some(end);
++                    // A window's cooldown is set when it closes, from the boundary it closed at.
++                    refractory = entry.refractory_until;
++                }
++                _ => {
++                    refractory = boundary.checked_add(REFRACTORY_TICKS);
++                    entry.refractory_until = refractory;
++                }
++            }
++        }
++        for e in self.counters.each(form) {
++            e.attempts += 1;
++            match reason {
++                None => e.admissions += 1,
++                Some(reason) => e.refuse(reason),
++            }
++        }
++        self.events.push(ShadowEvent::Attempt {
++            tick: boundary,
++            id,
++            admitted: reason.is_none(),
++            reason,
++            episode: record,
++            sample,
++            window_end_tick: window_end,
++            refractory_until: refractory,
++        });
++    }
++
++    /// Close an open window and arm the cooldown from the boundary it closed at.
++    fn close(&mut self, id: OrganismId, boundary: u64, _completed: u64) -> Option<u64> {
++        let entry = self.entries.get_mut(&id).expect("checked by the caller");
++        entry.window = None;
++        entry.refractory_until = boundary.checked_add(REFRACTORY_TICKS);
++        entry.refractory_until
++    }
++
++    /// At the world's commit stage, after every removal path has run: drop the entries of
++    /// organisms that are gone, and the entries that are tracking nothing.
++    ///
++    /// An open window whose organism was removed by a path that never reached the physiology loop
++    /// — a settled capture, say — is closed here with its own baseline reason rather than
++    /// disappearing.
++    pub fn prune_removed(&mut self, organisms: &Slots<Organism>, boundary: u64) {
++        let mut gone: Vec<(OrganismId, Option<Window>)> = Vec::new();
++        for (id, entry) in self.entries.iter_mut() {
++            if organisms.get(*id).is_none() {
++                gone.push((*id, entry.window));
++                continue;
++            }
++            if Self::expire(entry, boundary) {
++                // Counted against no form on purpose: the organism is alive and its form is
++                // knowable, but this sweep deliberately reads only its own map.
++                self.counters.total.episodes_expired += 1;
++            }
++        }
++        for (id, window) in gone {
++            self.entries.remove(&id);
++            let Some(window) = window else { continue };
++            let completed = boundary.saturating_sub(window.start_tick).min(WINDOW_DECISIONS);
++            for e in self.counters.each(window.form) {
++                e.aborts += 1;
++                e.completed_window_decisions += completed;
++                e.refuse(ShadowReason::BaselineGone);
++            }
++            self.events.push(ShadowEvent::Abort {
++                tick: boundary,
++                id,
++                window_start_tick: window.start_tick,
++                completed_decisions: completed,
++                reason: ShadowReason::BaselineGone,
++                baseline_intake_material: window.baseline_material,
++                baseline_intake_ticks: window.baseline_ticks,
++                sample: None,
++                refractory_until: None,
++            });
++        }
++        // Only now, when credit, window and deadline are all absent, does the entry go.
++        self.entries.retain(|_, entry| !entry.idle(boundary));
++        self.counters.world_ticks += 1;
++        if self.entries.values().any(|e| e.window.is_some()) {
++            self.counters.world_window_ticks += 1;
++        }
++        self.counters.peak_entries = self.counters.peak_entries.max(self.entries.len());
++        debug_assert!(self.entries.len() <= self.cap, "the per-ID map exceeded the live capacity");
++    }
++
++    /// End the measurement. Every open window is censored where it stands — a censored interval,
++    /// never a release, and never silently dropped so the run looks tidy.
++    pub fn censor(&mut self, boundary: u64) {
++        let open: Vec<(OrganismId, Window)> = self
++            .entries
++            .iter()
++            .filter_map(|(id, e)| e.window.map(|w| (*id, w)))
++            .collect();
++        for (id, window) in open {
++            let completed = boundary.saturating_sub(window.start_tick).min(WINDOW_DECISIONS);
++            // Right-censored, not discarded: the decisions the baseline really did stay
++            // compatible with are counted, and the interval is reported as censored so nobody
++            // reads a truncated window as a short one.
++            for e in self.counters.each(window.form) {
++                e.censored += 1;
++                e.completed_window_decisions += completed;
++                e.refuse(ShadowReason::RunEnd);
++            }
++            self.events.push(ShadowEvent::Censor {
++                tick: boundary,
++                id,
++                window_start_tick: window.start_tick,
++                completed_decisions: completed,
++                baseline_intake_material: window.baseline_material,
++                baseline_intake_ticks: window.baseline_ticks,
++            });
++            if let Some(entry) = self.entries.get_mut(&id) {
++                entry.window = None;
++            }
++        }
++    }
++
++    /// Drop an episode whose last positive settlement is [`EPISODE_EXPIRY_TICKS`] or more ticks
++    /// old. The refractory deadline is untouched: expiring credit is not serving a cooldown.
++    fn expire(entry: &mut Entry, boundary: u64) -> bool {
++        let stale = entry
++            .episode
++            .is_some_and(|e| boundary.saturating_sub(e.last_positive_tick) >= EPISODE_EXPIRY_TICKS);
++        if stale {
++            entry.episode = None;
++        }
++        stale
++    }
++
++    /// The entry for `id`, created if the bound allows it. The map never exceeds the world's live
++    /// organism capacity; a refused insert is counted rather than silently growing the map.
++    fn slot<'a>(
++        entries: &'a mut BTreeMap<OrganismId, Entry>,
++        cap: usize,
++        counters: &mut ShadowCounters,
++        id: OrganismId,
++    ) -> Option<&'a mut Entry> {
++        if !entries.contains_key(&id) {
++            if entries.len() >= cap {
++                counters.bounded_refusals += 1;
++                counters.total.refuse(ShadowReason::Bounded);
++                return None;
++            }
++            entries.insert(id, Entry::default());
++            counters.peak_entries = counters.peak_entries.max(entries.len());
++        }
++        entries.get_mut(&id)
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::DT;
++    use crate::config::WorldConfig;
++    use crate::genome::{Genome, decode};
++    use crate::organism::{Escrow, Origin};
++    use crate::rng::Counter;
++    use cubarium_surface::{Face, SurfacePoint, Vec2};
++
++    fn cfg() -> OrganismConfig {
++        WorldConfig::default().organism
++    }
++
++    fn organism(structure: f64, reserve: f64, energy: f64) -> Organism {
++        let world = WorldConfig::default();
++        let mut genome = Genome::founder(0.5, &world.drives);
++        genome.clamp();
++        let phenotype = decode(&genome, &world.organism);
++        Organism {
++            pos: SurfacePoint::new(Face::Top, 10.0, 10.0),
++            heading: Vec2::new(1.0, 0.0),
++            ou: Vec2::ZERO,
++            structure,
++            reserve,
++            energy,
++            born_tick: 0,
++            hunger_memory: 0.5,
++            mode: Mode::Feeding,
++            escrow: None,
++            births: 0,
++            genome,
++            phenotype,
++            parent: None,
++            origin: Origin::Founder,
++            turn_counter: Counter::default(),
++            fed_this_tick: false,
++        }
++    }
++
++    /// A comfortable adult: well above every bound the strict budget can ask for.
++    fn adult() -> Organism {
++        let mut o = organism(0.0, 0.0, 0.0);
++        o.structure = o.phenotype.structure_adult;
++        o.reserve = 0.5 * o.phenotype.reserve_max;
++        o.energy = 0.9 * o.phenotype.energy_max;
++        o
++    }
++
++    fn id(slot: u32, generation: u32) -> OrganismId {
++        OrganismId { slot, generation }
++    }
++
++    /// Feed `id` one positive settlement at `boundary`, then let the boundary complete.
++    fn tick(
++        s: &mut PostIntakeShadow,
++        id: OrganismId,
++        o: &Organism,
++        boundary: u64,
++        assimilated: f64,
++    ) {
++        if assimilated > 0.0 {
++            s.observe_settlement(id, o, &cfg(), true, true, boundary, assimilated);
++        }
++        s.observe_boundary(id, o, &cfg(), true, true, boundary, DT, o.mode, false, false);
++    }
++
++    fn events(s: &mut PostIntakeShadow) -> Vec<ShadowEvent> {
++        s.drain_events()
++    }
++
++    #[test]
++    fn the_quota_is_the_diet_permitted_channel_sum_and_nothing_else() {
++        let cfg = cfg();
++        let mut o = adult();
++        o.phenotype.graze_rate = 0.03;
++        o.phenotype.scavenge_rate = 0.02;
++
++        // A pure grazer below FRUIT_DIET opens one channel; at or above it, two.
++        o.phenotype.diet = FRUIT_DIET - 1e-9;
++        let one = quota(&o, &cfg, true, false).unwrap();
++        assert_eq!(one, QUOTA_SECONDS * cfg.assimilation_material * 0.03);
++        o.phenotype.diet = FRUIT_DIET;
++        let two = quota(&o, &cfg, true, false).unwrap();
++        assert_eq!(two, QUOTA_SECONDS * cfg.assimilation_material * (0.03 + 0.03));
++
++        // The scavenge gate is the controller's, from the other end of the diet axis.
++        o.phenotype.diet = 1.0 - DIET_GATE;
++        let with = quota(&o, &cfg, false, true).unwrap();
++        assert_eq!(with, QUOTA_SECONDS * cfg.assimilation_material * 0.02);
++        o.phenotype.diet = 1.0 - DIET_GATE + 1e-9;
++        assert_eq!(quota(&o, &cfg, false, true), None);
++
++        // A mechanism that is off opens nothing, and a diet below DIET_GATE cannot graze.
++        o.phenotype.diet = 0.5;
++        assert_eq!(quota(&o, &cfg, false, false), None);
++        o.phenotype.diet = DIET_GATE - 1e-9;
++        assert_eq!(quota(&o, &cfg, true, false), None);
++    }
++
++    #[test]
++    fn an_invalid_rate_is_no_opportunity_rather_than_a_nan() {
++        let cfg = cfg();
++        let mut o = adult();
++        for bad in [f64::NAN, f64::INFINITY, -1.0] {
++            let mut broken = o.clone();
++            broken.phenotype.graze_rate = bad;
++            assert_eq!(quota(&broken, &cfg, true, true), None, "graze_rate {bad}");
++            let mut broken = o.clone();
++            broken.phenotype.diet = bad;
++            assert_eq!(quota(&broken, &cfg, true, true), None, "diet {bad}");
++        }
++        // A zero maximum rate is no opportunity, not a division.
++        o.phenotype.graze_rate = 0.0;
++        o.phenotype.scavenge_rate = 0.0;
++        assert_eq!(quota(&o, &cfg, true, true), None);
++
++        // And nothing is ever recorded for it beyond the explicit zero-quota exposure.
++        let mut s = PostIntakeShadow::new(8);
++        tick(&mut s, id(1, 1), &o, 100, 1.0);
++        assert!(events(&mut s).is_empty());
++        assert_eq!(s.counters().total.settlement_ticks_without_quota, 1);
++        assert_eq!(s.counters().total.attempts, 0);
++        assert_eq!(s.entries(), 1);
++    }
++
++    #[test]
++    fn the_episode_expires_at_twenty_ticks_and_not_at_nineteen() {
++        let o = adult();
++        let q = quota(&o, &cfg(), true, true).unwrap();
++        let bite = q / 4.0;
++        for (gap, expected) in [(19u64, 2.0 * bite), (20, bite)] {
++            let mut s = PostIntakeShadow::new(8);
++            let who = id(3, 1);
++            tick(&mut s, who, &o, 100, bite);
++            tick(&mut s, who, &o, 100 + gap, bite);
++            let episode = s.entries.get(&who).unwrap().episode.unwrap();
++            assert_eq!(episode.credit, expected, "gap {gap}");
++            assert_eq!(episode.start_tick, if gap == 19 { 100 } else { 100 + gap }, "gap {gap}");
++        }
++    }
++
++    #[test]
++    fn credit_is_capped_at_the_quota_and_every_attempt_consumes_it() {
++        let o = adult();
++        let q = quota(&o, &cfg(), true, true).unwrap();
++        let mut s = PostIntakeShadow::new(8);
++        let who = id(2, 7);
++        // Two bites, the second far larger than the remaining headroom.
++        tick(&mut s, who, &o, 500, q / 2.0);
++        assert!(events(&mut s).is_empty(), "half the quota must not fire");
++        tick(&mut s, who, &o, 501, q * 10.0);
++        let drained = events(&mut s);
++        assert_eq!(drained.len(), 1);
++        let ShadowEvent::Attempt { admitted, episode, window_end_tick, .. } = &drained[0] else {
++            panic!("expected an attempt, got {drained:?}");
++        };
++        assert!(admitted, "a comfortable adult in an active mode must be admitted");
++        assert_eq!(episode.credit, q, "credit is capped at the quota");
++        assert_eq!(episode.assimilated, q / 2.0 + q * 10.0, "the uncapped total is kept too");
++        assert_eq!(episode.start_tick, 500);
++        assert_eq!(episode.elapsed_ticks, 1);
++        assert_eq!(*window_end_tick, Some(501 + WINDOW_DECISIONS));
++        assert!(s.entries.get(&who).unwrap().episode.is_none(), "the attempt consumed the credit");
++    }
++
++    #[test]
++    fn the_window_runs_exactly_thirty_decisions_and_releases_at_its_boundary() {
++        let o = adult();
++        let q = quota(&o, &cfg(), true, true).unwrap();
++        let mut s = PostIntakeShadow::new(8);
++        let who = id(0, 1);
++        tick(&mut s, who, &o, 1000, q);
++        assert!(matches!(events(&mut s)[0], ShadowEvent::Attempt { admitted: true, .. }));
++        for boundary in 1001..1000 + WINDOW_DECISIONS {
++            s.observe_boundary(who, &o, &cfg(), true, true, boundary, DT, o.mode, false, false);
++            assert!(events(&mut s).is_empty(), "boundary {boundary} must stay inside the window");
++            assert_eq!(s.open_windows(), 1);
++        }
++        let release = 1000 + WINDOW_DECISIONS;
++        s.observe_boundary(who, &o, &cfg(), true, true, release, DT, o.mode, false, false);
++        let drained = events(&mut s);
++        let [ShadowEvent::Release { tick, held_decisions, window_start_tick, refractory_until, .. }] =
++            &drained[..]
++        else {
++            panic!("expected one release, got {drained:?}");
++        };
++        assert_eq!((*tick, *held_decisions, *window_start_tick), (release, WINDOW_DECISIONS, 1000));
++        assert_eq!(*refractory_until, Some(release + REFRACTORY_TICKS));
++        assert_eq!(s.open_windows(), 0);
++    }
++
++    #[test]
++    fn the_baselines_intake_during_a_window_is_recorded_and_never_credited() {
++        let o = adult();
++        let q = quota(&o, &cfg(), true, true).unwrap();
++        let mut s = PostIntakeShadow::new(8);
++        let who = id(0, 1);
++        tick(&mut s, who, &o, 1000, q);
++        let _ = events(&mut s);
++        for boundary in 1001..1000 + WINDOW_DECISIONS {
++            tick(&mut s, who, &o, boundary, q);
++        }
++        assert!(events(&mut s).is_empty(), "a window may not fire a second attempt");
++        s.observe_boundary(who, &o, &cfg(), true, true, 1030, DT, o.mode, false, false);
++        let drained = events(&mut s);
++        let [ShadowEvent::Release { baseline_intake_material, baseline_intake_ticks, .. }] =
++            &drained[..]
++        else {
++            panic!("expected one release, got {drained:?}");
++        };
++        assert_eq!(*baseline_intake_ticks, WINDOW_DECISIONS - 1);
++        // The running sum the window really accumulated, add for add: a closed-form product is a
++        // different float and would make this assertion about arithmetic rather than about the rule.
++        let expected = (0..WINDOW_DECISIONS - 1).fold(0.0, |acc, _| acc + q);
++        assert_eq!(*baseline_intake_material, expected);
++        assert!(
++            s.entries.get(&who).unwrap().episode.is_none(),
++            "window intake must not have become credit"
++        );
++    }
++
++    #[test]
++    fn no_attempt_fires_before_the_refractory_deadline_and_credit_survives_it() {
++        let o = adult();
++        let q = quota(&o, &cfg(), true, true).unwrap();
++        let mut s = PostIntakeShadow::new(8);
++        let who = id(5, 2);
++        tick(&mut s, who, &o, 2000, q);
++        let release = 2000 + WINDOW_DECISIONS;
++        for boundary in 2001..=release {
++            s.observe_boundary(who, &o, &cfg(), true, true, boundary, DT, o.mode, false, false);
++        }
++        let _ = events(&mut s);
++        let deadline = release + REFRACTORY_TICKS;
++
++        // Credit forms during the cooldown and is not consumed by it: no attempt is even made.
++        tick(&mut s, who, &o, deadline - 1, q);
++        assert!(events(&mut s).is_empty(), "an attempt fired one tick early");
++        assert_eq!(s.entries.get(&who).unwrap().episode.unwrap().credit, q);
++
++        // The deadline alone fires nothing; only fresh assimilation can.
++        s.observe_boundary(who, &o, &cfg(), true, true, deadline, DT, o.mode, false, false);
++        assert!(events(&mut s).is_empty(), "a timer fired an attempt without fresh assimilation");
++
++        // The very next positive settlement fires, with no extra earning period demanded.
++        tick(&mut s, who, &o, deadline + 1, q / 1000.0);
++        let drained = events(&mut s);
++        let [ShadowEvent::Attempt { admitted: true, episode, .. }] = &drained[..] else {
++            panic!("expected one admitted attempt, got {drained:?}");
++        };
++        assert_eq!(episode.start_tick, deadline - 1, "the cooldown episode carried through");
++    }
++
++    #[test]
++    fn a_refusal_consumes_the_credit_and_arms_the_same_cooldown() {
++        let mut o = adult();
++        o.escrow = Some(Escrow {
++            structure: 0.1,
++            reserve: 0.1,
++            energy: 0.1,
++            started_tick: 40,
++            genome: o.genome.clone(),
++        });
++        let q = quota(&o, &cfg(), true, true).unwrap();
++        let mut s = PostIntakeShadow::new(8);
++        let who = id(9, 3);
++        tick(&mut s, who, &o, 100, q);
++        let drained = events(&mut s);
++        let [ShadowEvent::Attempt { admitted: false, reason, refractory_until, sample, .. }] =
++            &drained[..]
++        else {
++            panic!("expected one refusal, got {drained:?}");
++        };
++        assert_eq!(*reason, Some(ShadowReason::Gestating));
++        assert_eq!(*refractory_until, Some(100 + REFRACTORY_TICKS));
++        assert_eq!(sample.escrow_started_tick, Some(40), "the gestation is identifiable");
++        assert!(s.entries.get(&who).unwrap().episode.is_none());
++
++        // A gestating adult keeps eating and really does attempt again after each cooldown. The
++        // repeats are the rule's behaviour and are kept, not collapsed.
++        tick(&mut s, who, &o, 100 + REFRACTORY_TICKS, q);
++        let again = events(&mut s);
++        assert_eq!(again.len(), 1, "the repeat attempt is preserved");
++        assert_eq!(s.counters().total.attempts, 2);
++        let at = ShadowReason::ALL.iter().position(|r| *r == ShadowReason::Gestating).unwrap();
++        assert_eq!(s.counters().total.refusals[at], 2);
++    }
++
++    #[test]
++    fn exact_budget_equality_is_refused_because_the_test_is_strict() {
++        let mut o = adult();
++        let horizon = horizon_seconds(WINDOW_DECISIONS, DT).unwrap();
++        let budget = Budget::of(&o, &cfg(), horizon).unwrap();
++        o.energy = budget.energy;
++        o.reserve = budget.material + 1.0;
++        let q = quota(&o, &cfg(), true, true).unwrap();
++        let mut s = PostIntakeShadow::new(8);
++        tick(&mut s, id(1, 1), &o, 100, q);
++        let drained = events(&mut s);
++        let [ShadowEvent::Attempt { admitted: false, reason, sample, .. }] = &drained[..] else {
++            panic!("expected one refusal, got {drained:?}");
++        };
++        assert_eq!(*reason, Some(ShadowReason::Unaffordable));
++        assert_eq!(sample.budget.unwrap().energy, budget.energy, "the tested bound is recorded");
++    }
++
++    #[test]
++    fn the_admission_reasons_are_ordered_and_every_one_is_reachable() {
++        let q = quota(&adult(), &cfg(), true, true).unwrap();
++        let juvenile = {
++            let mut o = adult();
++            o.structure = 0.5 * o.phenotype.structure_adult;
++            o
++        };
++        let gestating = {
++            let mut o = adult();
++            o.escrow = Some(Escrow {
++                structure: 0.1,
++                reserve: 0.1,
++                energy: 0.1,
++                started_tick: 1,
++                genome: o.genome.clone(),
++            });
++            o
++        };
++        let broke = {
++            let mut o = adult();
++            o.energy = 0.0;
++            o.reserve = 0.4 * o.phenotype.reserve_max;
++            o
++        };
++        // (organism, dying, member, mode, expected reason)
++        let cases: [(Organism, bool, bool, Mode, ShadowReason); 6] = [
++            (adult(), true, false, Mode::Feeding, ShadowReason::Dead),
++            (adult(), false, true, Mode::Feeding, ShadowReason::HunterMember),
++            (juvenile, false, false, Mode::Feeding, ShadowReason::Juvenile),
++            (gestating, false, false, Mode::Feeding, ShadowReason::Gestating),
++            (adult(), false, false, Mode::Resting, ShadowReason::InactiveMode),
++            (broke, false, false, Mode::Feeding, ShadowReason::Unaffordable),
++        ];
++        for (o, dying, member, mode, expected) in cases {
++            let mut s = PostIntakeShadow::new(8);
++            let who = id(1, 1);
++            s.observe_settlement(who, &o, &cfg(), true, true, 100, q);
++            s.observe_boundary(who, &o, &cfg(), true, true, 100, DT, mode, dying, member);
++            let drained = events(&mut s);
++            let [ShadowEvent::Attempt { admitted: false, reason, .. }] = &drained[..] else {
++                panic!("expected a refusal for {expected:?}, got {drained:?}");
++            };
++            assert_eq!(*reason, Some(expected));
++        }
++    }
++
++    #[test]
++    fn a_same_boundary_funding_or_death_refuses_on_its_own_terms() {
++        let q = quota(&adult(), &cfg(), true, true).unwrap();
++        // Funded an escrow at this very boundary: the completed physiology no longer qualifies it,
++        // and the child it just paid for is never deprioritised for this.
++        let mut funded = adult();
++        funded.escrow = Some(Escrow {
++            structure: 0.1,
++            reserve: 0.1,
++            energy: 0.1,
++            started_tick: 300,
++            genome: funded.genome.clone(),
++        });
++        let mut s = PostIntakeShadow::new(8);
++        tick(&mut s, id(1, 1), &funded, 300, q);
++        let drained = events(&mut s);
++        assert!(matches!(
++            drained[..],
++            [ShadowEvent::Attempt { reason: Some(ShadowReason::Gestating), .. }]
++        ));
++
++        // Died at this very boundary: the attempt is recorded rather than vanishing.
++        let mut s = PostIntakeShadow::new(8);
++        let who = id(1, 1);
++        let o = adult();
++        s.observe_settlement(who, &o, &cfg(), true, true, 300, q);
++        s.observe_boundary(who, &o, &cfg(), true, true, 300, DT, Mode::Feeding, true, false);
++        let drained = events(&mut s);
++        assert!(matches!(
++            drained[..],
++            [ShadowEvent::Attempt { reason: Some(ShadowReason::Dead), .. }]
++        ));
++    }
++
++    #[test]
++    fn a_window_ends_on_the_baselines_own_change_with_its_own_reason() {
++        let o = adult();
++        let q = quota(&o, &cfg(), true, true).unwrap();
++        // The baseline funds an escrow mid-window: the compatible window ends, and the record says
++        // the baseline changed rather than claiming a policy aborted a pause that never ran.
++        let mut s = PostIntakeShadow::new(8);
++        let who = id(4, 1);
++        tick(&mut s, who, &o, 700, q);
++        let _ = events(&mut s);
++        let mut later = o.clone();
++        later.escrow = Some(Escrow {
++            structure: 0.1,
++            reserve: 0.1,
++            energy: 0.1,
++            started_tick: 710,
++            genome: o.genome.clone(),
++        });
++        s.observe_boundary(who, &later, &cfg(), true, true, 710, DT, Mode::Feeding, false, false);
++        let drained = events(&mut s);
++        let [ShadowEvent::Abort { reason, completed_decisions, .. }] = &drained[..] else {
++            panic!("expected one abort, got {drained:?}");
++        };
++        assert_eq!((*reason, *completed_decisions), (ShadowReason::BaselineEscrow, 10));
++
++        // And the strict budget is re-tested at every later boundary, not only at admission.
++        let mut s = PostIntakeShadow::new(8);
++        tick(&mut s, who, &o, 700, q);
++        let _ = events(&mut s);
++        let mut starving = o.clone();
++        starving.energy = 0.0;
++        s.observe_boundary(who, &starving, &cfg(), true, true, 705, DT, Mode::Feeding, false, false);
++        let drained = events(&mut s);
++        let [ShadowEvent::Abort { reason, completed_decisions, sample, .. }] = &drained[..] else {
++            panic!("expected one abort, got {drained:?}");
++        };
++        assert_eq!((*reason, *completed_decisions), (ShadowReason::UnaffordableRemaining, 5));
++        assert!(sample.unwrap().budget.is_some(), "the re-tested bound is recorded");
++    }
++
++    #[test]
++    fn a_reused_slot_inherits_no_credit_and_no_cooldown() {
++        let o = adult();
++        let q = quota(&o, &cfg(), true, true).unwrap();
++        let mut s = PostIntakeShadow::new(8);
++        let first = id(6, 1);
++        tick(&mut s, first, &o, 100, q);
++        assert!(matches!(events(&mut s)[..], [ShadowEvent::Attempt { admitted: true, .. }]));
++
++        // The same slot, a new generation, at the very next boundary: a different animal.
++        let second = id(6, 2);
++        tick(&mut s, second, &o, 101, q);
++        let drained = events(&mut s);
++        let [ShadowEvent::Attempt { admitted: true, id: who, .. }] = &drained[..] else {
++            panic!("expected the new occupant's own admitted attempt, got {drained:?}");
++        };
++        assert_eq!(*who, second);
++        assert_eq!(s.entries(), 2, "the two generations are separate entries");
++        assert!(s.entries.get(&first).unwrap().window.is_some());
++        assert!(s.entries.get(&second).unwrap().window.is_some());
++    }
++
++    #[test]
++    fn dropping_expired_credit_never_drops_an_outstanding_cooldown() {
++        let mut entry = Entry {
++            episode: Some(Episode {
++                start_tick: 10,
++                last_positive_tick: 10,
++                positive_ticks: 1,
++                assimilated: 1.0,
++                credit: 1.0,
++            }),
++            window: None,
++            refractory_until: Some(900),
++        };
++        assert!(PostIntakeShadow::expire(&mut entry, 10 + EPISODE_EXPIRY_TICKS));
++        assert!(entry.episode.is_none(), "the stale episode is gone");
++        assert_eq!(entry.refractory_until, Some(900), "the cooldown survived it");
++        assert!(!entry.idle(30), "an entry with a future deadline is not idle");
++        assert!(entry.idle(900), "and is idle once the deadline has passed");
++    }
++
++    #[test]
++    fn the_final_open_window_is_censored_and_never_counted_as_a_release() {
++        let o = adult();
++        let q = quota(&o, &cfg(), true, true).unwrap();
++        let mut s = PostIntakeShadow::new(8);
++        let who = id(7, 1);
++        tick(&mut s, who, &o, 100, q);
++        let _ = events(&mut s);
++        s.censor(110);
++        let drained = events(&mut s);
++        let [ShadowEvent::Censor { tick, completed_decisions, window_start_tick, .. }] = &drained[..]
++        else {
++            panic!("expected one censor, got {drained:?}");
++        };
++        assert_eq!((*tick, *completed_decisions, *window_start_tick), (110, 10, 100));
++        assert_eq!(s.counters().total.releases, 0, "a censored interval is not a release");
++        assert_eq!(s.counters().total.censored, 1);
++    }
++
++    #[test]
++    fn the_per_id_map_is_bounded_by_the_live_capacity() {
++        let o = adult();
++        let q = quota(&o, &cfg(), true, true).unwrap();
++        let mut s = PostIntakeShadow::new(2);
++        for slot in 0..5u32 {
++            s.observe_settlement(id(slot, 1), &o, &cfg(), true, true, 100, q / 8.0);
++        }
++        assert_eq!(s.entries(), 2, "the map stopped at the capacity");
++        assert_eq!(s.counters().bounded_refusals, 3);
++        assert!(s.counters().peak_entries <= s.capacity());
++    }
++
++    #[test]
++    fn an_idle_entry_is_removed_only_when_nothing_is_still_tracked() {
++        let o = adult();
++        let q = quota(&o, &cfg(), true, true).unwrap();
++        let mut arena: Slots<Organism> = Slots::with_capacity(4);
++        let live = arena.insert(o.clone());
++        let mut s = PostIntakeShadow::new(4);
++
++        // Credit alone keeps the entry; expiring it with no window and no deadline removes it.
++        s.observe_settlement(live, &o, &cfg(), true, true, 100, q / 8.0);
++        s.prune_removed(&arena, 100);
++        assert_eq!(s.entries(), 1);
++        s.prune_removed(&arena, 100 + EPISODE_EXPIRY_TICKS);
++        assert_eq!(s.entries(), 0, "an idle entry is dropped");
++
++        // A removed organism's entry goes with it, and an open window is closed, not lost.
++        s.observe_settlement(live, &o, &cfg(), true, true, 200, q);
++        s.observe_boundary(live, &o, &cfg(), true, true, 200, DT, Mode::Feeding, false, false);
++        let _ = events(&mut s);
++        arena.remove(live);
++        s.prune_removed(&arena, 205);
++        let drained = events(&mut s);
++        let [ShadowEvent::Abort { reason, completed_decisions, .. }] = &drained[..] else {
++            panic!("expected one abort for the removed organism, got {drained:?}");
++        };
++        assert_eq!((*reason, *completed_decisions), (ShadowReason::BaselineGone, 5));
++        assert_eq!(s.entries(), 0);
++    }
++
++    /// A window that closes away from its organism — censored at the run's end, or swept when the
++    /// organism was removed — still belongs to a form. Counting it only in the whole-world total
++    /// makes the per-form rows disagree with the event stream, which is exactly the disagreement
++    /// an independent reduction is for.
++    #[test]
++    fn a_window_closed_away_from_its_organism_still_lands_in_its_forms_row() {
++        let o = adult();
++        let form = (o.phenotype.form as usize).min(7);
++        let q = quota(&o, &cfg(), true, true).unwrap();
++
++        let mut s = PostIntakeShadow::new(8);
++        let who = id(2, 1);
++        tick(&mut s, who, &o, 100, q);
++        let _ = events(&mut s);
++        s.censor(112);
++        let c = s.counters();
++        assert_eq!(c.total.censored, 1);
++        assert_eq!(c.by_form[form].censored, 1, "the censored window lost its form");
++        assert_eq!(c.total.completed_window_decisions, 12);
++        assert_eq!(
++            c.by_form[form].completed_window_decisions, 12,
++            "a right-censored window's compatible decisions are real and belong to the form"
++        );
++
++        let mut arena: Slots<Organism> = Slots::with_capacity(4);
++        let live = arena.insert(o.clone());
++        let mut s = PostIntakeShadow::new(4);
++        tick(&mut s, live, &o, 200, q);
++        let _ = events(&mut s);
++        arena.remove(live);
++        s.prune_removed(&arena, 207);
++        let c = s.counters();
++        assert_eq!(c.by_form[form].aborts, 1, "the swept window lost its form");
++        assert_eq!(c.by_form[form].completed_window_decisions, 7);
++    }
++
++    #[test]
++    fn no_intake_produces_no_record_at_all() {
++        let o = adult();
++        let mut s = PostIntakeShadow::new(8);
++        for boundary in 0..200 {
++            s.observe_boundary(id(1, 1), &o, &cfg(), true, true, boundary, DT, o.mode, false, false);
++        }
++        assert!(events(&mut s).is_empty());
++        assert_eq!(s.counters().total.attempts, 0);
++        assert_eq!(s.counters().total.organism_ticks, 200);
++        assert_eq!(s.counters().total.eligible_ticks, 200);
++        assert_eq!(s.entries(), 0, "an organism that never ate is never tracked");
++    }
++}
+diff --git a/crates/cubarium-core/src/world.rs b/crates/cubarium-core/src/world.rs
+index 15e083f..ab4ecb2 100644
+--- a/crates/cubarium-core/src/world.rs
++++ b/crates/cubarium-core/src/world.rs
+@@ -27,6 +27,7 @@ use crate::hunter::{
+ use crate::ids::{OrganismId, Slots};
+ use crate::organism::{DeathCause, Escrow, Mode, Organism, Origin};
+ use crate::pairs::{Body, NeighborLists};
++use crate::post_intake::{PostIntakeShadow, ShadowEvent};
+ use crate::quiet::{QuietEvent, QuietOverride, QuietPause, QuietReason, QuietState};
+ use crate::rng::{Counter, Stream, draw, normal, unit};
+ use crate::telemetry::Telemetry;
+@@ -466,6 +467,12 @@ pub struct World {
+     /// [`ChargingDiagnostics`] documents: never checkpointed, never hashed, never read by the
+     /// tick.
+     charging: ChargingDiagnostics,
++    /// The opt-in, non-intervening post-intake opportunity shadow (`crate::post_intake`). `None`
++    /// in every ordinary world, including every world this repository ships: a world that never
++    /// enables it executes the pre-shadow tick operation for operation. Transient in exactly the
++    /// sense the other observers are — never checkpointed, never hashed, never read by the tick,
++    /// never consulted by a decision, a stock, a draw, a transport or a mode.
++    post_intake: Option<PostIntakeShadow>,
+     initial_material: f64,
+ }
+ 
+@@ -791,6 +798,7 @@ impl World {
+             quiet_events: Vec::new(),
+             counters: TickCounters::default(),
+             charging: ChargingDiagnostics::default(),
++            post_intake: None,
+             initial_material,
+         };
+         // Make the derived light/moisture readable before the first tick advances weather.
+@@ -853,6 +861,7 @@ impl World {
+                 quiet_events,
+                 counters,
+                 charging,
++                post_intake,
+                 initial_material: _,
+             } = &mut *self;
+             let WorldState {
+@@ -1644,6 +1653,10 @@ impl World {
+                     continue;
+                 };
+                 let mut eaten = 0.0;
++                // What this settlement really credits to the reserve, summed as the transfers are
++                // applied. Not a reserve difference and not a `fed` flag: the actual assimilated
++                // material, per channel, at the site that moves it (`crate::post_intake`).
++                let mut assimilated = 0.0;
+                 if f > 0.0 {
+                     // Frugivory: F -> reserve (η_m) and F -> D (the rest, energy-free). Fruit
+                     // carries `e_f` per unit, richer than leaf.
+@@ -1653,6 +1666,7 @@ impl World {
+                         fields.f[cell] -= q;
+                         fields.d[cell] += q - to_reserve;
+                         o.reserve += to_reserve;
++                        assimilated += to_reserve;
+                         let spare = (e_f - e_r * eta_m) * q;
+                         let room = (o.phenotype.energy_max - o.energy).max(0.0);
+                         let gained = (eta_e * spare).clamp(0.0, room);
+@@ -1669,6 +1683,7 @@ impl World {
+                         fields.p[cell] -= q;
+                         fields.d[cell] += q - to_reserve;
+                         o.reserve += to_reserve;
++                        assimilated += to_reserve;
+                         // The food carried `e_p · q`; `e_r · η_m · q` of it is now stored in
+                         // the reserve, and `η_e` of the difference is usable energy.
+                         let spare = (e_p - e_r * eta_m) * q;
+@@ -1693,6 +1708,7 @@ impl World {
+                         let to_reserve = eta * q;
+                         fields.d[cell] -= to_reserve;
+                         o.reserve += to_reserve;
++                        assimilated += to_reserve;
+                         let carried = (rho * q).min(fields.de[cell]);
+                         fields.de[cell] -= carried;
+                         let spare = carried - e_r * to_reserve;
+@@ -1704,6 +1720,21 @@ impl World {
+                     }
+                 }
+                 o.fed_this_tick = eaten > 0.0;
++                // The shadow's one settlement hook: read-only, after the transfers, and only in a
++                // world that explicitly enabled it. It writes nothing the step reads.
++                if let Some(shadow) = post_intake.as_mut()
++                    && assimilated > 0.0
++                {
++                    shadow.observe_settlement(
++                        id,
++                        o,
++                        org_cfg,
++                        cfg.mechanisms.grazing,
++                        cfg.mechanisms.scavenging,
++                        now + 1,
++                        assimilated,
++                    );
++                }
+             }
+ 
+             // 7b. Handling and digestion. A carried carcass is homogeneous: a portion `q`
+@@ -1962,6 +1993,25 @@ impl World {
+                 } else {
+                     None
+                 };
++                // The shadow's one boundary hook, deliberately the **last** thing this organism's
++                // physiology iteration does: every existing oxidation, growth, gestation, funding
++                // and death check has already run and is already booked, so nothing here can
++                // reorder them or delay a child this tick otherwise paid for. Read-only
++                // (`crate::post_intake`).
++                if let Some(shadow) = post_intake.as_mut() {
++                    shadow.observe_boundary(
++                        *id,
++                        o,
++                        org_cfg,
++                        cfg.mechanisms.grazing,
++                        cfg.mechanisms.scavenging,
++                        now + 1,
++                        dt,
++                        d.underlying_mode,
++                        cause.is_some(),
++                        member.is_some(),
++                    );
++                }
+                 if let Some(cause) = cause {
+                     deaths.push((*id, cause));
+                     // A parent that dies this tick miscarries: the escrow goes to detritus.
+@@ -2080,6 +2130,15 @@ impl World {
+                 quiet.pauses = kept;
+             }
+ 
++            // Every removal path has now happened, so the shadow's per-ID map can be reconciled
++            // against the arena: a gone organism's entry is dropped and its open hypothetical
++            // window is closed with the baseline's own reason, and an entry tracking nothing at
++            // all is removed. Births below cannot inherit a slot's old entry: the key carries the
++            // generation (`crate::post_intake`).
++            if let Some(shadow) = post_intake.as_mut() {
++                shadow.prune_removed(organisms, now + 1);
++            }
++
+             for parent_id in &births {
+                 let full = organisms.len() >= cap;
+                 // A member's child inherits the lineage, not the appearance: membership is
+@@ -2769,6 +2828,51 @@ impl World {
+         &self.state.quiet
+     }
+ 
++    /// Turn on the transient post-intake opportunity shadow (`crate::post_intake`).
++    ///
++    /// Refused in a hunter world and in a world running an enabled quiet policy: this first
++    /// measurement's scope is ordinary, hunter-free, policy-Off worlds, and a shadow that silently
++    /// measured something else would be worse than no shadow. Refused twice over, so a caller
++    /// cannot restart it mid-run and present two partial histories as one.
++    ///
++    /// Enabling changes no config value, no stock, no draw and no persisted byte: the world takes
++    /// the identical trajectory either way, which is a property the harness tests rather than
++    /// assumes.
++    pub fn enable_post_intake_shadow(&mut self) -> Result<(), String> {
++        if self.post_intake.is_some() {
++            return Err("the post-intake shadow is already enabled".into());
++        }
++        if self.state.hunters != HunterState::default() {
++            return Err("the post-intake shadow refuses a hunter world".into());
++        }
++        if self.state.quiet.policy.enabled() {
++            return Err("the post-intake shadow refuses an enabled quiet policy".into());
++        }
++        let cap = self.state.config.capacity.max_organisms as usize;
++        self.post_intake = Some(PostIntakeShadow::new(cap));
++        Ok(())
++    }
++
++    /// The shadow's bounded state, when one is running.
++    pub fn post_intake(&self) -> Option<&PostIntakeShadow> {
++        self.post_intake.as_ref()
++    }
++
++    /// Post-intake opportunity records since the observer last drained them. Transient in exactly
++    /// the sense the life, hunter and quiet records are.
++    pub fn drain_post_intake_events(&mut self) -> Vec<ShadowEvent> {
++        self.post_intake.as_mut().map(PostIntakeShadow::drain_events).unwrap_or_default()
++    }
++
++    /// Close the measurement: every still-open hypothetical window is censored where it stands.
++    /// A censored interval is never reported as a release.
++    pub fn censor_post_intake_shadow(&mut self) {
++        let tick = self.state.tick;
++        if let Some(shadow) = self.post_intake.as_mut() {
++            shadow.censor(tick);
++        }
++    }
++
+     /// "Scatter food": charged organic crumbs into `D` and `De`. Per cell `D += m·w_c` and
+     /// `De += rho·(m·w_c)` with `rho = detritus.energy_cap`, so `De ≤ energy_cap · D` is
+     /// preserved cell by cell and existing scavenging diets can eat all of it. No organism
+diff --git a/crates/cubarium/examples/post_intake_shadow.rs b/crates/cubarium/examples/post_intake_shadow.rs
+new file mode 100644
+index 0000000..3f67e09
+--- /dev/null
++++ b/crates/cubarium/examples/post_intake_shadow.rs
+@@ -0,0 +1,1511 @@
++//! The bounded, non-intervening post-intake opportunity pilot
++//! (`design/7_Research/root-post-intake-shadow-scope-2026-09-13.md`).
++//!
++//! **A measurement harness, not a feature and not an intervention.** Every world here runs
++//! `QuietPolicy::Off`, carries no hunters, and takes exactly the trajectory it would have taken
++//! without this file existing. The shadow reads; it never decides.
++//!
++//! The pilot root authorised, and nothing more:
++//!
++//! | | no care | one Standard Feed |
++//! | --- | --- | --- |
++//! | **seed 1** (Off) | `seed-1/off_nocare` | `seed-1/off_feed` |
++//! | **seed 8** (Off) | `seed-8/off_nocare` | `seed-8/off_feed` |
++//!
++//! Four arms. Twelve thousand elapsed ticks from the retained tick-144000 openings, one Standard
++//! Feed at elapsed 600, Front (32, 48), dose 1000. Root's full twelve-by-two ten-minute shadow is
++//! **not** authorised by this file and is not run by it.
++//!
++//! ## What each arm proves before it reports a number
++//!
++//! 1. **Observer neutrality, exactly.** Each arm steps two worlds from the identical opening in
++//!    lockstep — one with the shadow enabled, one without — and compares the whole persisted
++//!    `WorldState`, the life record stream and the quiet record stream after *every* tick. A
++//!    residual near zero is not the test; bit equality of the state and of the records is.
++//! 2. **The retained Off continuation, exactly.** The instrumented arm's closing state is compared
++//!    against the retained `quiet-ten-minute-provenance-2026-09-13` arm of the same seed and the
++//!    same care, decoded from that run's own `closing.cubw` and compared as a whole state, not by
++//!    trusting the summary's description of it. (The file's SHA-256 cannot match: a snapshot header
++//!    carries the build that wrote it, and this build is not that one. The state inside it must.)
++//! 3. **Conservation**, on the shared per-seed pre-intervention baseline, at the unchanged
++//!    `1e-8 · max(opening inventory, 1)` limits.
++//!
++//! An arm that fails any of these is retained as the failure it is. Nothing is retried or dropped.
++//!
++//! ## What the output is, and what it is not
++//!
++//! `shadow-events.jsonl` carries every attempt — repeats included — with the joint per-ID
++//! quantities the rule consumed: the episode that earned the credit, the quota, the
++//! post-physiology reserve and energy, the budget actually tested, the ordinary mode, the form.
++//! Windows carry the length the **baseline stayed compatible** with holding them.
++//!
++//! That is an admission-opportunity estimate. It is not a pause, not an upper bound on anything,
++//! not actual missed food, and not a prediction that an intervention would produce these windows:
++//! a real pause changes the patch, the neighbours' shares, the position and every later stock in
++//! either direction. Whether any of it would be *readable* at native 64 px is a separate question
++//! this run cannot answer.
++
++use anyhow::{Context, Result, anyhow, ensure};
++use clap::Parser;
++use cubarium_core::organism::DeathCause;
++use cubarium_core::post_intake::{
++    EPISODE_EXPIRY_TICKS, QUOTA_SECONDS, REFRACTORY_TICKS, SHADOW_VERSION, ShadowEvent,
++    ShadowReason, ShadowSample, WINDOW_DECISIONS,
++};
++use cubarium_core::quiet::{QuietEvent, QuietPolicy, QuietState, SAFETY_MARGIN_TICKS};
++use cubarium_core::{
++    CareCommand, CareDose, CareKind, CareTarget, DT, LifeEvent, OrganismId, World, WorldState,
++    decode_snapshot,
++};
++use cubarium::meal_present::{MEAL_FADE_SECONDS, MEAL_SETTLE_SECONDS};
++use serde_json::{Value, json};
++use std::collections::{BTreeMap, BTreeSet};
++use std::fs::{self, File, OpenOptions};
++use std::io::{BufWriter, Write};
++use std::path::{Path, PathBuf};
++use std::process::{Command, Stdio};
++
++// The shared observer helpers, used unchanged. This pilot has no lineage question of its own, so
++// the module's ancestry half is deliberately unused rather than copied or edited.
++#[path = "shared/audit.rs"]
++#[allow(dead_code)]
++mod audit;
++
++use audit::{AccurateSum, WindowAudit, audit_passes, energy, material};
++
++const BUILD: &str = concat!(env!("CARGO_PKG_VERSION"), "+", env!("CUBARIUM_GIT_HASH"));
++
++/// The unchanged single input, identical to the retained quiet comparison's own.
++const FEED_TARGET: CareTarget = CareTarget { face: 0, u: 32.0, v: 48.0 };
++const FEED_ELAPSED: u64 = 600;
++const FEED_DOSE_PERMILLE: u16 = 1000;
++
++/// The fixed pilot: two seeds, two care levels, no policy factor. Not a parameter.
++const PILOT_SEEDS: [u64; 2] = [1, 8];
++const ARMS: [(&str, bool); 2] = [("off_nocare", false), ("off_feed", true)];
++const PILOT_ELAPSED: u64 = 12_000;
++const OPENING_TICK: u64 = 144_000;
++/// The retained run's own census cadence, so the two histories are stepped identically.
++const SAMPLE_EVERY: u64 = 200;
++
++/// The source files whose bytes decide what this measurement means. Hashed into the manifest so a
++/// reader can tell whether a later artifact came from the same rule.
++const SOURCE_FILES: [&str; 5] = [
++    "crates/cubarium-core/src/post_intake.rs",
++    "crates/cubarium-core/src/world.rs",
++    "crates/cubarium-core/src/quiet.rs",
++    "crates/cubarium-core/src/controller.rs",
++    "crates/cubarium/examples/post_intake_shadow.rs",
++];
++
++#[derive(Parser)]
++struct Args {
++    /// Completed `prepare-hunter-worlds` cohort directory (all twelve seeds).
++    cohort: PathBuf,
++    /// The retained `quiet-ten-minute-provenance-2026-09-13` directory, read only, for the exact
++    /// Off-arm continuation comparison.
++    retained: PathBuf,
++    /// Brand-new directory; existing output is never overwritten or resumed.
++    out: PathBuf,
++    /// The repository root the source hashes are read from.
++    #[arg(long, default_value = ".")]
++    source_root: PathBuf,
++}
++
++// ---------------------------------------------------------------- small io
++
++fn sha256(bytes: &[u8]) -> Result<String> {
++    let mut child =
++        Command::new("sha256sum").stdin(Stdio::piped()).stdout(Stdio::piped()).spawn()?;
++    child.stdin.take().context("checksum stdin")?.write_all(bytes)?;
++    let out = child.wait_with_output()?;
++    ensure!(out.status.success(), "sha256sum failed");
++    let text = String::from_utf8(out.stdout)?;
++    let hash = text.split_whitespace().next().context("missing checksum")?;
++    ensure!(hash.len() == 64 && hash.bytes().all(|c| c.is_ascii_hexdigit()), "invalid checksum");
++    Ok(hash.to_owned())
++}
++
++fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
++    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
++    file.write_all(bytes)?;
++    file.sync_all()?;
++    Ok(())
++}
++
++fn json_new(path: &Path, value: &Value) -> Result<()> {
++    write_new(path, &serde_json::to_vec_pretty(value)?)
++}
++
++fn stream(path: &Path) -> Result<BufWriter<File>> {
++    Ok(BufWriter::new(OpenOptions::new().write(true).create_new(true).open(path)?))
++}
++
++fn line(file: &mut BufWriter<File>, value: &Value) -> Result<()> {
++    serde_json::to_writer(&mut *file, value)?;
++    file.write_all(b"\n")?;
++    Ok(())
++}
++
++// ---------------------------------------------------------------- the fixed cohort
++
++struct Opening {
++    state: WorldState,
++    source: Value,
++}
++
++/// The prescribed openings, verified against the manifest's own checksums before anything is built
++/// from them. The manifest's **raw bytes** come back with it: `serde_json` without `float_roundtrip`
++/// can land one ULP from the correctly rounded value, so a re-serialized copy is a different number
++/// and nothing re-encoded from a `Value` may stand in for the source.
++fn load_cohort(dir: &Path) -> Result<(Vec<u8>, Value, Vec<Opening>)> {
++    let raw = fs::read(dir.join("manifest.json"))?;
++    let manifest: Value = serde_json::from_slice(&raw)?;
++    ensure!(
++        manifest["complete"] == true && manifest["kind"] == "pre-hunter-cohort-preparation",
++        "a complete unfiltered preparation manifest is required"
++    );
++    ensure!(
++        manifest["opening_tick"].as_u64() == Some(OPENING_TICK),
++        "the cohort is not the retained tick-{OPENING_TICK} opening set"
++    );
++    let rows = manifest["openings"].as_array().context("opening rows")?;
++    ensure!(rows.len() == 12, "the complete twelve-seed cohort is required");
++    let mut openings = Vec::new();
++    let mut seen = BTreeSet::new();
++    for row in rows {
++        let seed = row["seed"].as_u64().context("seed")?;
++        ensure!((1..=12).contains(&seed) && seen.insert(seed), "duplicate/unprescribed seed");
++        if !PILOT_SEEDS.contains(&seed) {
++            continue;
++        }
++        let bytes = fs::read(dir.join(format!("seed-{seed}/world-{OPENING_TICK}.cubw")))?;
++        ensure!(
++            sha256(&bytes)? == row["sha256"].as_str().context("snapshot SHA256")?,
++            "seed{seed} checksum changed"
++        );
++        let (meta, state) = decode_snapshot(&bytes).map_err(|e| anyhow!("{e:?}"))?;
++        ensure!(
++            meta.schema == 9 && state.tick == OPENING_TICK && state.config.seed == seed,
++            "seed{seed} is not its frozen pre-hunter two-hour opening"
++        );
++        ensure!(
++            state.hunters == Default::default() && state.care == Default::default(),
++            "opening contains hunter/care state"
++        );
++        ensure!(state.quiet == QuietState::default(), "opening already carries a quiet extension");
++        ensure!(
++            state.organisms.len() as u64 == row["population"].as_u64().context("population")?,
++            "opening census mismatch"
++        );
++        ensure!(
++            cubarium_core::ecology_hash(&state).to_string()
++                == row["ecology_hash"].as_str().context("ecology hash")?,
++            "opening ecology hash mismatch"
++        );
++        let mut source = row.clone();
++        if let Some(row) = source.as_object_mut() {
++            row.remove("telemetry");
++            row.insert(
++                "telemetry".into(),
++                json!(
++                    "in cohort-manifest.json, byte for byte; not re-serialized here because \
++                     serde_json's default decimal parse can move a value by one ULP"
++                ),
++            );
++        }
++        openings.push(Opening { state, source });
++    }
++    ensure!(
++        openings.len() == PILOT_SEEDS.len(),
++        "the cohort does not carry every prescribed pilot seed"
++    );
++    openings.sort_by_key(|o| o.state.config.seed);
++    Ok((raw, manifest, openings))
++}
++
++// ---------------------------------------------------------------- the retained Off reference
++
++/// One retained Off arm of the frozen quiet comparison, read only. Its closing **state** is the
++/// reference this pilot must continue to exactly.
++struct Retained {
++    state: WorldState,
++    summary: Value,
++    file_sha256: String,
++    path: PathBuf,
++}
++
++fn load_retained(dir: &Path, seed: u64, arm: &str) -> Result<Retained> {
++    let arm_dir = dir.join(format!("seed-{seed}")).join(arm);
++    let summary: Value = serde_json::from_slice(&fs::read(arm_dir.join("summary.json"))?)?;
++    ensure!(
++        summary["arm"] == arm
++            && summary["quiet_policy"] == QuietPolicy::Off.as_str()
++            && summary["technical_complete"] == true
++            && summary["audit_passed"] == true,
++        "the retained {arm} reference for seed {seed} is not a completed Off measurement"
++    );
++    ensure!(
++        summary["planned_ticks"].as_u64() == Some(PILOT_ELAPSED)
++            && summary["elapsed_ticks"].as_u64() == Some(PILOT_ELAPSED)
++            && summary["closing_tick"].as_u64() == Some(OPENING_TICK + PILOT_ELAPSED),
++        "the retained reference does not cover this pilot's exact horizon"
++    );
++    let path = arm_dir.join("closing.cubw");
++    let bytes = fs::read(&path)?;
++    let file_sha256 = sha256(&bytes)?;
++    // The summary's own receipt definition: the harness that wrote it hashed exactly these bytes.
++    ensure!(
++        summary["closing_snapshot_sha256"].as_str() == Some(file_sha256.as_str()),
++        "the retained closing snapshot does not match its own recorded checksum"
++    );
++    let (_, state) = decode_snapshot(&bytes).map_err(|e| anyhow!("{e:?}"))?;
++    ensure!(
++        cubarium_core::snapshot::state_hash(&state).to_string()
++            == summary["closing_state_hash"].as_str().context("retained state hash")?,
++        "the retained closing state does not match its own recorded state hash"
++    );
++    Ok(Retained { state, summary, file_sha256, path })
++}
++
++// ---------------------------------------------------------------- records
++
++fn sample_json(s: &ShadowSample) -> Value {
++    json!({
++        "form": s.form,
++        "structure": s.structure, "structure_adult": s.structure_adult,
++        "reserve": s.reserve, "energy": s.energy,
++        "reserve_max": s.reserve_max, "energy_max": s.energy_max,
++        "reserve_fraction": if s.reserve_max > 0.0 { Some(s.reserve / s.reserve_max) } else { None },
++        "mode": format!("{:?}", s.mode),
++        "gestating": s.gestating, "escrow_started_tick": s.escrow_started_tick,
++        "hunter_member": s.hunter_member, "age_ticks": s.age_ticks,
++        "quota": s.quota,
++        "graze_rate": s.graze_rate, "scavenge_rate": s.scavenge_rate, "diet": s.diet,
++        "budget": s.budget.map(|b| json!({
++            "horizon_seconds": b.horizon_seconds, "per_second": b.per_second,
++            "growth": b.growth, "oxidation": b.oxidation,
++            "energy": b.energy, "material": b.material,
++        })),
++    })
++}
++
++/// One transient record in the harness's own flat shape, spelled with the labels the summaries use
++/// rather than Rust's variant names — two spellings for one thing in one artifact set is a trap.
++fn shadow_record(event: &ShadowEvent) -> Value {
++    match event {
++        ShadowEvent::Attempt {
++            tick,
++            id,
++            admitted,
++            reason,
++            episode,
++            sample,
++            window_end_tick,
++            refractory_until,
++        } => json!({
++            "kind": "attempt", "tick": tick, "id": id,
++            "admitted": admitted, "reason": reason.map(ShadowReason::as_str),
++            "episode": {
++                "start_tick": episode.start_tick,
++                "last_positive_tick": episode.last_positive_tick,
++                "positive_ticks": episode.positive_ticks,
++                "elapsed_ticks": episode.elapsed_ticks,
++                "elapsed_seconds": episode.elapsed_ticks as f64 * DT,
++                "assimilated": episode.assimilated,
++                "credit": episode.credit,
++            },
++            "sample": sample_json(sample),
++            "window_end_tick": window_end_tick,
++            "refractory_until": refractory_until,
++        }),
++        ShadowEvent::Release {
++            tick,
++            id,
++            window_start_tick,
++            held_decisions,
++            baseline_intake_material,
++            baseline_intake_ticks,
++            baseline_died_at_release,
++            sample,
++            refractory_until,
++        } => json!({
++            "kind": "release", "tick": tick, "id": id,
++            "window_start_tick": window_start_tick,
++            "compatible_decisions": held_decisions,
++            "compatible_seconds": *held_decisions as f64 * DT,
++            "baseline_intake_material": baseline_intake_material,
++            "baseline_intake_ticks": baseline_intake_ticks,
++            "baseline_died_at_release": baseline_died_at_release,
++            "sample": sample_json(sample),
++            "refractory_until": refractory_until,
++        }),
++        ShadowEvent::Abort {
++            tick,
++            id,
++            window_start_tick,
++            completed_decisions,
++            reason,
++            baseline_intake_material,
++            baseline_intake_ticks,
++            sample,
++            refractory_until,
++        } => json!({
++            "kind": "abort", "tick": tick, "id": id,
++            "window_start_tick": window_start_tick,
++            "compatible_decisions": completed_decisions,
++            "compatible_seconds": *completed_decisions as f64 * DT,
++            "reason": reason.as_str(),
++            "baseline_intake_material": baseline_intake_material,
++            "baseline_intake_ticks": baseline_intake_ticks,
++            "sample": sample.as_ref().map(sample_json),
++            "refractory_until": refractory_until,
++        }),
++        ShadowEvent::Censor {
++            tick,
++            id,
++            window_start_tick,
++            completed_decisions,
++            baseline_intake_material,
++            baseline_intake_ticks,
++        } => json!({
++            "kind": "censor", "tick": tick, "id": id,
++            "window_start_tick": window_start_tick,
++            "compatible_decisions": completed_decisions,
++            "compatible_seconds": *completed_decisions as f64 * DT,
++            "baseline_intake_material": baseline_intake_material,
++            "baseline_intake_ticks": baseline_intake_ticks,
++            "censored": true,
++        }),
++    }
++}
++
++fn exposure_json(e: &cubarium_core::post_intake::Exposure) -> Value {
++    let mut refusals = serde_json::Map::new();
++    for (at, reason) in ShadowReason::ALL.iter().enumerate() {
++        refusals.insert(reason.as_str().into(), json!(e.refusals[at]));
++    }
++    json!({
++        "organism_ticks": e.organism_ticks,
++        "adult_ticks": e.adult_ticks,
++        "adult_unencumbered_ticks": e.adult_unencumbered_ticks,
++        "eligible_ticks": e.eligible_ticks,
++        "settlement_ticks": e.settlement_ticks,
++        "assimilated": e.assimilated,
++        "settlement_ticks_without_quota": e.settlement_ticks_without_quota,
++        "episodes_expired": e.episodes_expired,
++        "attempts": e.attempts,
++        "admissions": e.admissions,
++        "releases": e.releases,
++        "aborts": e.aborts,
++        "censored": e.censored,
++        "compatible_window_decisions": e.completed_window_decisions,
++        "baseline_intake_in_windows": e.baseline_intake_in_windows,
++        "refusals": Value::Object(refusals),
++    })
++}
++
++// ---------------------------------------------------------------- the lockstep identity proof
++
++/// The one comparison that decides whether the shadow is an observer. Factored out so an
++/// adversarial test can feed it two deliberately different worlds instead of two copies of one
++/// decode that would agree however wrong they both were.
++fn instrumentation_disagreement(
++    observed: &WorldState,
++    reference: &WorldState,
++    observed_life: &[LifeEvent],
++    reference_life: &[LifeEvent],
++    observed_quiet: &[QuietEvent],
++    reference_quiet: &[QuietEvent],
++) -> Option<String> {
++    let at = reference.tick;
++    if observed != reference {
++        return Some(format!(
++            "tick {at}: the instrumented state differs from the uninstrumented one (state hashes \
++             {} and {})",
++            cubarium_core::snapshot::state_hash(observed),
++            cubarium_core::snapshot::state_hash(reference)
++        ));
++    }
++    if format!("{observed_life:?}") != format!("{reference_life:?}") {
++        return Some(format!("tick {at}: the life records differ"));
++    }
++    if format!("{observed_quiet:?}") != format!("{reference_quiet:?}") {
++        return Some(format!("tick {at}: the quiet records differ"));
++    }
++    None
++}
++
++// ---------------------------------------------------------------- one arm
++
++#[derive(Clone, Copy)]
++struct Baseline {
++    material: f64,
++    energy: f64,
++    water: f64,
++    limits: [f64; 3],
++}
++
++impl Baseline {
++    fn read(s: &WorldState) -> Result<Self> {
++        let (material, energy, water) = (material(s), energy(s), s.fields.w.iter().sum::<f64>());
++        ensure!(
++            [material, energy, water].iter().all(|x| x.is_finite() && *x >= 0.0),
++            "invalid pre-intervention baseline"
++        );
++        Ok(Self {
++            material,
++            energy,
++            water,
++            limits: [material, energy, water].map(|n| 1e-8 * n.max(1.0)),
++        })
++    }
++
++    fn json(&self) -> Value {
++        json!({
++            "material": self.material, "energy": self.energy, "water": self.water,
++            "limits": {"material": self.limits[0], "energy": self.limits[1],
++                "water": self.limits[2]},
++            "basis": "one shared pre-intervention inventory per seed, read from the untouched \
++                      opening before any care; limits are a fixed 1e-8 fraction of it and never \
++                      scale with cumulative input",
++        })
++    }
++}
++
++/// Per-ID sets, kept so repeats and distinct individuals can both be reported. Bounded by the
++/// number of distinct organisms that ever reached the rule, which is bounded by the opening
++/// population plus the births — **not** by the live capacity, unlike the core's own map.
++#[derive(Default)]
++struct Distinct {
++    attempted: BTreeSet<OrganismId>,
++    admitted: BTreeSet<OrganismId>,
++    released: BTreeSet<OrganismId>,
++    /// One entry per (organism, gestation), so a gestating adult's repeated refusals collapse to
++    /// the gestations they really concern without being deleted from the event record.
++    refused_gestations: BTreeSet<(OrganismId, u64)>,
++    refused_by_reason: BTreeMap<&'static str, BTreeSet<OrganismId>>,
++}
++
++impl Distinct {
++    fn observe(&mut self, event: &ShadowEvent) {
++        match event {
++            ShadowEvent::Attempt { id, admitted, reason, sample, .. } => {
++                self.attempted.insert(*id);
++                if *admitted {
++                    self.admitted.insert(*id);
++                }
++                if let Some(reason) = reason {
++                    self.refused_by_reason.entry(reason.as_str()).or_default().insert(*id);
++                    if let Some(started) = sample.escrow_started_tick {
++                        self.refused_gestations.insert((*id, started));
++                    }
++                }
++            }
++            ShadowEvent::Release { id, .. } => {
++                self.released.insert(*id);
++            }
++            ShadowEvent::Abort { .. } | ShadowEvent::Censor { .. } => {}
++        }
++    }
++
++    fn json(&self) -> Value {
++        let by_reason: serde_json::Map<String, Value> = self
++            .refused_by_reason
++            .iter()
++            .map(|(reason, ids)| ((*reason).to_owned(), json!(ids.len())))
++            .collect();
++        json!({
++            "attempted_ids": self.attempted.len(),
++            "admitted_ids": self.admitted.len(),
++            "released_ids": self.released.len(),
++            "refused_gestations": self.refused_gestations.len(),
++            "refused_ids_by_reason": Value::Object(by_reason),
++            "basis": "distinct full generational IDs, computed beside the event stream and never \
++                      by deleting repeats from it. A repeat attempt by one gestating adult is a \
++                      real attempt and stays in shadow-events.jsonl.",
++        })
++    }
++}
++
++struct Arm {
++    /// The world carrying the shadow. Its trajectory is the measurement's.
++    observed: World,
++    /// The identical world without the shadow. Its only purpose is to disagree if the shadow is
++    /// not an observer.
++    reference: World,
++    base: Baseline,
++    opening: WorldState,
++    feed: bool,
++    fed_at: Option<u64>,
++    receipts: Vec<Value>,
++    receipt_energy_in: AccurateSum,
++    receipt_energy_out: AccurateSum,
++    opening_ledgers: cubarium_core::EnergyLedgers,
++    windowed: WindowAudit,
++    worst: [f64; 3],
++    worst_corrected_energy: f64,
++    worst_windowed_energy: f64,
++    worst_care_energy: f64,
++    /// The first tick at which the instrumented and uninstrumented worlds disagreed, if ever.
++    instrumentation_failure: Option<String>,
++    compared_ticks: u64,
++    births: u64,
++    deaths: [u64; 4],
++    population_min: usize,
++    population_max: usize,
++    /// Boundaries at which at least one hypothetical window was open anywhere in the world.
++    world_window_ticks: u64,
++    peak_entries: usize,
++    events_written: u64,
++    distinct: Distinct,
++    /// Every closed window's compatible length in decisions, for the distribution.
++    window_lengths: Vec<u64>,
++    event_stream: BufWriter<File>,
++    census_stream: BufWriter<File>,
++}
++
++impl Arm {
++    fn new(opening: &WorldState, base: Baseline, feed: bool, dir: &Path) -> Result<Self> {
++        fs::create_dir(dir)?;
++        // The Off arm never writes the policy field: the opening already carries the default, and
++        // leaving it untouched is the point.
++        let state = opening.clone();
++        ensure!(
++            state.quiet == opening.quiet && state.quiet.policy == QuietPolicy::Off,
++            "an arm changed the quiet policy"
++        );
++        ensure!(&state == opening, "an arm changed the opening");
++        let mut observed = World::from_state(state.clone()).map_err(|e| anyhow!(e))?;
++        let reference = World::from_state(state.clone()).map_err(|e| anyhow!(e))?;
++        observed.enable_post_intake_shadow().map_err(|e| anyhow!(e))?;
++        ensure!(
++            observed.state == reference.state,
++            "enabling the shadow changed the world's persisted state"
++        );
++        let shadow = observed.post_intake().context("the shadow did not start")?;
++        ensure!(
++            shadow.entries() == 0 && shadow.capacity() == state.config.capacity.max_organisms as usize,
++            "the shadow did not start empty and bounded by the live capacity"
++        );
++        json_new(
++            &dir.join("opening.json"),
++            &json!({
++                "arm": dir.file_name().and_then(|n| n.to_str()),
++                "quiet_policy": state.quiet.policy.as_str(),
++                "care": if feed {
++                    json!({"kind": "feed", "dose_permille": FEED_DOSE_PERMILLE,
++                        "elapsed_tick": FEED_ELAPSED, "target": FEED_TARGET, "count": 1})
++                } else {
++                    Value::Null
++                },
++                "opening_tick": state.tick,
++                "opening_population": state.organisms.len(),
++                "state_hash": cubarium_core::snapshot::state_hash(&state).to_string(),
++                "ecology_hash": cubarium_core::ecology_hash(&state).to_string(),
++                "config_sha256": sha256(&serde_json::to_vec(&state.config)?)?,
++                "config": state.config,
++                "pre_intervention_baseline": base.json(),
++                "shadow_bound": state.config.capacity.max_organisms,
++            }),
++        )?;
++        Ok(Self {
++            population_min: observed.population(),
++            population_max: observed.population(),
++            opening_ledgers: state.energy_ledgers(),
++            observed,
++            reference,
++            base,
++            opening: state,
++            feed,
++            fed_at: None,
++            receipts: Vec::new(),
++            receipt_energy_in: AccurateSum::default(),
++            receipt_energy_out: AccurateSum::default(),
++            windowed: WindowAudit::default(),
++            worst: [0.0; 3],
++            worst_corrected_energy: 0.0,
++            worst_windowed_energy: 0.0,
++            worst_care_energy: 0.0,
++            instrumentation_failure: None,
++            compared_ticks: 0,
++            births: 0,
++            deaths: [0; 4],
++            world_window_ticks: 0,
++            peak_entries: 0,
++            events_written: 0,
++            distinct: Distinct::default(),
++            window_lengths: Vec::new(),
++            event_stream: stream(&dir.join("shadow-events.jsonl"))?,
++            census_stream: stream(&dir.join("census.jsonl"))?,
++        })
++    }
++
++    fn step(&mut self, elapsed: u64) -> Result<()> {
++        // The one controlled input, applied identically to both worlds at the identical boundary.
++        if self.feed && elapsed == FEED_ELAPSED {
++            let before_energy = energy(&self.observed.state);
++            let seq =
++                self.observed.care().admitted_seq.checked_add(1).context("care seq exhausted")?;
++            let command = CareCommand {
++                seq,
++                apply_after_tick: self.observed.tick(),
++                kind: CareKind::Feed,
++                target: FEED_TARGET,
++                dose: CareDose::new(FEED_DOSE_PERMILLE).map_err(|e| anyhow!(e))?,
++            };
++            let receipt = self.observed.apply_care(&command);
++            let mirror = self.reference.apply_care(&command);
++            ensure!(
++                format!("{receipt:?}") == format!("{mirror:?}"),
++                "the instrumented and uninstrumented care receipts differ"
++            );
++            let booked = receipt.outcome.applied().map_or(0.0, |q| q.energy_in - q.energy_out);
++            if let Some(q) = receipt.outcome.applied() {
++                self.receipt_energy_in.add(q.energy_in);
++                self.receipt_energy_out.add(q.energy_out);
++            }
++            self.worst_care_energy = self
++                .worst_care_energy
++                .max((energy(&self.observed.state) - before_energy - booked).abs());
++            self.fed_at = Some(self.observed.tick());
++            self.receipts.push(json!({
++                "elapsed": elapsed, "tick": self.observed.tick(), "kind": "feed",
++                "dose_permille": FEED_DOSE_PERMILLE, "target": FEED_TARGET,
++                "outcome": receipt.outcome.as_str(), "reason": receipt.outcome.reason(),
++                "receipt": receipt,
++            }));
++        }
++
++        let counters = self.observed.step();
++        let (transient_light, transient_heat) = (counters.light_in, counters.heat_out);
++        self.observed
++            .check_invariants()
++            .map_err(|e| anyhow!("tick {}: {e}", self.observed.tick()))?;
++        let life = self.observed.drain_events();
++        let quiet = self.observed.drain_quiet_events();
++
++        // The uninstrumented world takes the same step, and the two are compared whole. This is
++        // the neutrality proof: equality of the persisted state and of the records, not a small
++        // residual.
++        self.reference.step();
++        let reference_life = self.reference.drain_events();
++        let reference_quiet = self.reference.drain_quiet_events();
++        self.compared_ticks += 1;
++        if self.instrumentation_failure.is_none() {
++            self.instrumentation_failure = instrumentation_disagreement(
++                &self.observed.state,
++                &self.reference.state,
++                &life,
++                &reference_life,
++                &quiet,
++                &reference_quiet,
++            );
++        }
++        ensure!(quiet.is_empty(), "an Off world published a quiet record");
++
++        for event in self.observed.drain_post_intake_events() {
++            self.distinct.observe(&event);
++            match &event {
++                ShadowEvent::Release { held_decisions, .. } => {
++                    self.window_lengths.push(*held_decisions)
++                }
++                ShadowEvent::Abort { completed_decisions, .. }
++                | ShadowEvent::Censor { completed_decisions, .. } => {
++                    self.window_lengths.push(*completed_decisions)
++                }
++                ShadowEvent::Attempt { .. } => {}
++            }
++            line(&mut self.event_stream, &shadow_record(&event))?;
++            self.events_written += 1;
++        }
++        let shadow = self.observed.post_intake().context("the shadow vanished mid-run")?;
++        ensure!(
++            shadow.entries() <= shadow.capacity(),
++            "the shadow's per-ID map exceeded the live capacity"
++        );
++        self.peak_entries = self.peak_entries.max(shadow.entries());
++        let open_windows = shadow.open_windows();
++        if open_windows > 0 {
++            self.world_window_ticks += 1;
++        }
++
++        for event in &life {
++            match event {
++                LifeEvent::Birth { .. } => self.births += 1,
++                LifeEvent::Death { cause, .. } => {
++                    self.deaths[match cause {
++                        DeathCause::Starvation => 0,
++                        DeathCause::Age => 1,
++                        DeathCause::Collapse => 2,
++                        DeathCause::Predation => 3,
++                    }] += 1
++                }
++            }
++        }
++        self.population_min = self.population_min.min(self.observed.population());
++        self.population_max = self.population_max.max(self.observed.population());
++
++        let s = &self.observed.state;
++        let initial = &self.opening;
++        let corrected_residual = energy(s)
++            - self.base.energy
++            - s.energy_ledgers().net_since(self.opening_ledgers)
++            - (s.care.feed_energy_in - initial.care.feed_energy_in)
++            + (s.care.clean_energy_out - initial.care.clean_energy_out);
++        ensure!(corrected_residual.is_finite(), "nonfinite corrected energy audit");
++        self.worst_corrected_energy = self.worst_corrected_energy.max(corrected_residual.abs());
++        let windowed_residual = energy(s)
++            - self.base.energy
++            - (self.windowed.light.value() + transient_light)
++            + (self.windowed.heat.value() + transient_heat)
++            - self.receipt_energy_in.value()
++            + self.receipt_energy_out.value();
++        ensure!(windowed_residual.is_finite(), "nonfinite windowed audit");
++        self.worst_windowed_energy = self.worst_windowed_energy.max(windowed_residual.abs());
++        let residuals = [
++            material(s)
++                - self.base.material
++                - (s.external_material_in - initial.external_material_in)
++                - (s.care.feed_material_in - initial.care.feed_material_in)
++                + (s.care.clean_material_out - initial.care.clean_material_out),
++            energy(s) - self.base.energy - (s.light_in_total - initial.light_in_total)
++                + (s.heat_out_total - initial.heat_out_total)
++                - (s.care.feed_energy_in - initial.care.feed_energy_in)
++                + (s.care.clean_energy_out - initial.care.clean_energy_out),
++            s.fields.w.iter().sum::<f64>() - self.base.water
++                - (s.rain_in_total - initial.rain_in_total)
++                + (s.evap_out_total - initial.evap_out_total),
++        ];
++        for (peak, residual) in self.worst.iter_mut().zip(residuals) {
++            ensure!(residual.is_finite(), "nonfinite audit at tick {}", s.tick);
++            *peak = peak.max(residual.abs());
++        }
++
++        if (elapsed + 1).is_multiple_of(SAMPLE_EVERY) {
++            let raw = self.observed.telemetry();
++            // Stepped identically on both worlds so the reference's transient counters follow the
++            // same cadence; the value is discarded.
++            let _ = self.reference.telemetry();
++            let shadow = self.observed.post_intake().context("the shadow vanished mid-run")?;
++            let c = shadow.counters();
++            let census = json!({
++                "tick": raw.tick, "elapsed": elapsed + 1,
++                "population": raw.population, "population_by_form": raw.population_by_form,
++                "window_births": raw.births,
++                "window_deaths": {"starvation": raw.deaths_starvation, "age": raw.deaths_age,
++                    "collapse": raw.deaths_collapse},
++                "mode": {"resting": raw.mode_resting, "seeking": raw.mode_seeking,
++                    "feeding": raw.mode_feeding},
++                "escrows": raw.escrows,
++                "producer": raw.producer, "fruit": raw.fruit, "detritus": raw.detritus,
++                "nutrient": raw.nutrient, "water": raw.water,
++                "organism_material": raw.organism_material,
++                "organism_energy": raw.organism_energy,
++                "window_light_in": raw.light_in, "window_heat_out": raw.heat_out,
++                "state_hash": raw.state_hash.to_string(),
++                "ecology_hash": raw.ecology_hash.to_string(),
++                "shadow": {
++                    "entries": shadow.entries(), "open_windows": shadow.open_windows(),
++                    "peak_entries": c.peak_entries, "bound": shadow.capacity(),
++                    "attempts": c.total.attempts, "admissions": c.total.admissions,
++                    "releases": c.total.releases, "aborts": c.total.aborts,
++                    "world_window_ticks": c.world_window_ticks,
++                },
++            });
++            line(&mut self.census_stream, &census)?;
++            self.windowed.observe(raw);
++        }
++        Ok(())
++    }
++
++    fn finish(
++        &mut self,
++        dir: &Path,
++        retained: &Retained,
++        reason: Option<String>,
++    ) -> Result<Value> {
++        // Every still-open window is censored where it stands, before anything is summarised.
++        self.observed.censor_post_intake_shadow();
++        for event in self.observed.drain_post_intake_events() {
++            self.distinct.observe(&event);
++            if let ShadowEvent::Censor { completed_decisions, .. } = &event {
++                self.window_lengths.push(*completed_decisions);
++            }
++            line(&mut self.event_stream, &shadow_record(&event))?;
++            self.events_written += 1;
++        }
++        for s in [&mut self.event_stream, &mut self.census_stream] {
++            s.flush()?;
++            s.get_ref().sync_all()?;
++        }
++
++        let s = &self.observed.state;
++        let bytes = cubarium_core::encode_snapshot(s, BUILD);
++        write_new(&dir.join("closing.cubw"), &bytes)?;
++        let reference_bytes = cubarium_core::encode_snapshot(&self.reference.state, BUILD);
++        write_new(&dir.join("closing-uninstrumented.cubw"), &reference_bytes)?;
++
++        let elapsed = s.tick - self.opening.tick;
++        let complete = reason.is_none() && elapsed == PILOT_ELAPSED;
++        let limits = self.base.limits;
++        let audits = audit_passes(
++            self.worst,
++            self.worst_corrected_energy,
++            self.worst_windowed_energy,
++            self.worst_care_energy,
++            limits,
++        );
++        // Bit equality, both ways: the two closing snapshots and every compared tick.
++        let closing_sha = sha256(&bytes)?;
++        let uninstrumented_sha = sha256(&reference_bytes)?;
++        let neutral = self.instrumentation_failure.is_none()
++            && self.compared_ticks == PILOT_ELAPSED
++            && closing_sha == uninstrumented_sha
++            && self.observed.state == self.reference.state;
++
++        // The retained Off continuation, as a whole decoded state. The file's SHA-256 deliberately
++        // is not the test: a snapshot header carries the build that wrote it, and this build is not
++        // the retained run's.
++        let continuation_state_equal = self.observed.state == retained.state;
++        let closing_state_hash = cubarium_core::snapshot::state_hash(s).to_string();
++        let closing_ecology_hash = cubarium_core::ecology_hash(s).to_string();
++        let continuation = json!({
++            "source": retained.path,
++            "retained_file_sha256": retained.file_sha256,
++            "retained_state_hash": retained.summary["closing_state_hash"],
++            "retained_ecology_hash": retained.summary["closing_ecology_hash"],
++            "retained_closing_population": retained.summary["closing_population"],
++            "retained_births": retained.summary["births"],
++            "retained_deaths": retained.summary["deaths"],
++            "whole_state_equal": continuation_state_equal,
++            "state_hash_equal": retained.summary["closing_state_hash"] == json!(closing_state_hash),
++            "ecology_hash_equal":
++                retained.summary["closing_ecology_hash"] == json!(closing_ecology_hash),
++            "population_equal":
++                retained.summary["closing_population"].as_u64() == Some(s.organisms.len() as u64),
++            "births_equal": retained.summary["births"].as_u64() == Some(self.births),
++            "deaths_equal": retained.summary["deaths"] == json!({
++                "starvation": self.deaths[0], "age": self.deaths[1],
++                "collapse": self.deaths[2], "predation": self.deaths[3]}),
++            "basis": "the retained arm's own closing.cubw, decoded and compared as a whole \
++                      WorldState. The snapshot file's SHA-256 cannot match across builds because \
++                      the header records the build that wrote it; the state inside must.",
++        });
++        let continuation_pass = continuation_state_equal
++            && continuation["state_hash_equal"] == true
++            && continuation["ecology_hash_equal"] == true
++            && continuation["births_equal"] == true
++            && continuation["deaths_equal"] == true;
++
++        let shadow = self.observed.post_intake().context("the shadow vanished")?;
++        let c = *shadow.counters();
++        let by_form: Vec<Value> = (0..8)
++            .map(|form| {
++                let mut row = exposure_json(&c.by_form[form]);
++                if let Some(map) = row.as_object_mut() {
++                    map.insert("form".into(), json!(form));
++                }
++                row
++            })
++            .collect();
++        let mut lengths = self.window_lengths.clone();
++        lengths.sort_unstable();
++        let window_seconds = |d: u64| d as f64 * DT;
++        let presenter_tail = MEAL_SETTLE_SECONDS + MEAL_FADE_SECONDS;
++
++        // Assembled in pieces rather than as one literal: a single deeply nested `json!` blows the
++        // macro's recursion limit, and a reader is better served by named blocks anyway.
++        let memory = json!({
++            "bound": shadow.capacity(),
++            "peak_entries": c.peak_entries.max(self.peak_entries),
++            "entries_at_close": shadow.entries(),
++            "bounded_refusals": c.bounded_refusals,
++            "basis": "one entry per live full generational ID, dropped at the organism's removal \
++                      and when credit, window and deadline are all absent; the map may never \
++                      exceed the world's live organism capacity",
++        });
++        let windows = json!({
++            "closed": lengths.len(),
++            "compatible_decisions_total": c.total.completed_window_decisions,
++            "min_decisions": lengths.first(),
++            "max_decisions": lengths.last(),
++            "median_decisions": lengths.get(lengths.len() / 2),
++            "full_length_windows": lengths.iter().filter(|d| **d == WINDOW_DECISIONS).count(),
++            "whole_world_compatible_window_ticks": self.world_window_ticks,
++            "whole_world_compatible_window_fraction":
++                self.world_window_ticks as f64 / PILOT_ELAPSED as f64,
++            "meaning": "the number of decisions the freely feeding baseline stayed compatible with \
++                        holding. Not rest, not a pause, not an upper bound on an intervention.",
++        });
++        let readability = json!({
++            "full_window_seconds": window_seconds(WINDOW_DECISIONS),
++            "presenter_tail_seconds": presenter_tail,
++            "arithmetic_remainder_seconds": window_seconds(WINDOW_DECISIONS) - presenter_tail,
++            "basis": "MEAL_SETTLE_SECONDS + MEAL_FADE_SECONDS from the current presenter \
++                      constants, subtracted from a full window. This is arithmetic on presenter \
++                      constants, reported conservatively as root asked; it is NOT an observed \
++                      native-64 transition and establishes no readable quiet interval. The 1.5 s \
++                      timer is unchanged and is not lengthened here.",
++        });
++        let shadow_json = json!({
++            "events_written": self.events_written,
++            "total": exposure_json(&c.total),
++            "by_form": by_form,
++            "distinct": self.distinct.json(),
++            "memory": memory,
++            "windows": windows,
++            "readability": readability,
++        });
++        let instrumentation = json!({
++            "compared_ticks": self.compared_ticks,
++            "planned_ticks": PILOT_ELAPSED,
++            "first_disagreement": self.instrumentation_failure,
++            "closing_snapshot_sha256": closing_sha,
++            "uninstrumented_closing_snapshot_sha256": uninstrumented_sha,
++            "snapshots_identical": closing_sha == uninstrumented_sha,
++            "basis": "two worlds from the identical opening, stepped in lockstep, the whole \
++                      persisted WorldState and both record streams compared after every tick. Not \
++                      a residual: equality.",
++        });
++        let gates = json!({
++            "conservation_and_flow_audits": audits,
++            "observer_is_exactly_neutral": neutral,
++            "retained_off_continuation_identical": continuation_pass,
++        });
++        let limits = json!([
++            "A hypothetical window is baseline-compatible window time, never a real pause, never \
++             an upper bound, and never measured missed food.",
++            "Baseline intake during a window is recorded separately and is not the food a pause \
++             would have cost: a real pause changes patch, shares, position and every later stock \
++             in either direction.",
++            "Eligible exposure here excludes affordability, which is tested only where the rule \
++             tests it: at an attempt and at each later baseline boundary.",
++            "Two seeds and one care level each. Nothing here supports a per-seed or per-form \
++             generalisation, and the usefulness screen is not evaluated.",
++        ]);
++        let passed = audits && neutral && continuation_pass;
++        let summary = json!({
++            "arm": dir.file_name().and_then(|n| n.to_str()),
++            "kind": "post-intake-opportunity-shadow-arm",
++            "shadow_version": SHADOW_VERSION,
++            "planned_ticks": PILOT_ELAPSED, "closing_tick": s.tick, "elapsed_ticks": elapsed,
++            "technical_complete": complete,
++            "audit_passed": passed,
++            "complete_measurement": complete && passed,
++            "termination": reason.clone().unwrap_or_else(|| "planned_horizon".into()),
++            "gates": gates,
++            "instrumentation": instrumentation,
++            "retained_off_continuation": continuation,
++            "max_absolute_drift": {"material": self.worst[0], "energy": self.worst[1],
++                "water": self.worst[2]},
++            "corrected_energy_drift": self.worst_corrected_energy,
++            "independent_windowed_energy_drift": self.worst_windowed_energy,
++            "care_boundary_energy_drift": self.worst_care_energy,
++            "pre_intervention_baseline": self.base.json(),
++            "quiet_policy": s.quiet.policy.as_str(),
++            "care": {
++                "planned": self.feed, "applied_at_tick": self.fed_at,
++                "receipts": self.receipts, "ledgers": self.observed.care().clone(),
++            },
++            "population_min": self.population_min, "population_max": self.population_max,
++            "closing_population": s.organisms.len(),
++            "births": self.births,
++            "deaths": {"starvation": self.deaths[0], "age": self.deaths[1],
++                "collapse": self.deaths[2], "predation": self.deaths[3]},
++            "closing_state_hash": closing_state_hash,
++            "closing_ecology_hash": closing_ecology_hash,
++            "closing_snapshot_sha256": closing_sha,
++            "shadow": shadow_json,
++            "rule": rule_json(),
++            "limits": limits,
++        });
++        json_new(&dir.join("summary.json"), &summary)?;
++        Ok(summary)
++    }
++}
++
++/// The fixed rule, written into every artifact so a reader never has to reconstruct it from the
++/// numbers it produced.
++fn rule_json() -> Value {
++    json!({
++        "name": "post_intake_opportunity_shadow_v1",
++        "version": SHADOW_VERSION,
++        "quota": "Q = QUOTA_SECONDS · eta_m · (I_g·graze_rate + I_f·graze_rate + I_s·scavenge_rate); \
++                  I_g needs grazing and diet >= DIET_GATE, I_f needs grazing and diet >= FRUIT_DIET, \
++                  I_s needs scavenging and diet <= 1 - DIET_GATE. A diet-permitted unconstrained \
++                  rate ceiling, not an attainable meal rate.",
++        "quota_seconds": QUOTA_SECONDS,
++        "episode_expiry_ticks": EPISODE_EXPIRY_TICKS,
++        "window_decisions": WINDOW_DECISIONS,
++        "safety_margin_ticks": SAFETY_MARGIN_TICKS,
++        "refractory_ticks": REFRACTORY_TICKS,
++        "credit": "actual material credited to reserve by field settlement, accumulated within an \
++                   episode and capped at Q; never raw food, a fed flag or a reserve difference",
++        "expiry": "evaluated at a settlement boundary before that boundary's new settlement is \
++                   added, and again in the commit sweep; the refractory deadline is untouched by it",
++        "trigger": "a fresh positive settlement at this boundary carrying the episode to Q, with no \
++                    window open and no refractory outstanding. Nothing fires from a timer.",
++        "admission": "tested after the completed tick's own physiology, funding and death checks, \
++                      with the unchanged Budget::of / Budget::affordable over the window's \
++                      decisions plus one safety tick",
++        "consumption": "every attempt consumes the credit, refusal included; the cooldown does not",
++        "population": "ordinary adults, no escrow, alive, ordinary Seeking or Feeding mode, no \
++                       hunter world",
++    })
++}
++
++// ---------------------------------------------------------------- driver
++
++fn finish_retained_arm(
++    arm: &mut Arm,
++    dir: &Path,
++    retained: &Retained,
++    reason: Option<String>,
++) -> Value {
++    match arm.finish(dir, retained, reason.clone()) {
++        Ok(summary) => summary,
++        Err(error) => json!({
++            "arm": dir.file_name().and_then(|n| n.to_str()),
++            "technical_complete": false, "audit_passed": false, "complete_measurement": false,
++            "termination": "finalization_failure", "error": format!("{error:#}"),
++            "step_failure": reason,
++            "closing_tick": arm.observed.tick(),
++            "observer_trust": "partial; no completed measurement is claimed",
++        }),
++    }
++}
++
++fn run_seed(opening: &Opening, retained_dir: &Path, dir: &Path) -> Result<Value> {
++    fs::create_dir(dir)?;
++    let seed = opening.state.config.seed;
++    let base = Baseline::read(&opening.state)?;
++    let mut summaries = Vec::new();
++    let mut failure: Option<String> = None;
++    for (name, feed) in ARMS {
++        let arm_dir = dir.join(name);
++        let retained = match load_retained(retained_dir, seed, name) {
++            Ok(retained) => retained,
++            Err(error) => {
++                let text = format!("{name}: retained reference unusable: {error:#}");
++                failure.get_or_insert(text.clone());
++                summaries.push(json!({"arm": name, "technical_complete": false,
++                    "audit_passed": false, "error": text}));
++                continue;
++            }
++        };
++        let mut arm = match Arm::new(&opening.state, base, feed, &arm_dir) {
++            Ok(arm) => arm,
++            Err(error) => {
++                let text = format!("{name}: initialization_failure: {error:#}");
++                json_new(&arm_dir.join("initialization-failure.json"), &json!({"error": text}))
++                    .ok();
++                failure.get_or_insert(text.clone());
++                summaries.push(json!({"arm": name, "technical_complete": false,
++                    "audit_passed": false, "error": text}));
++                continue;
++            }
++        };
++        let mut reason = None;
++        for elapsed in 0..PILOT_ELAPSED {
++            if let Err(error) = arm.step(elapsed) {
++                reason = Some(format!("step_failure at elapsed {elapsed}: {error:#}"));
++                failure.get_or_insert_with(|| format!("{name}: {}", reason.clone().unwrap()));
++                break;
++            }
++        }
++        let summary = finish_retained_arm(&mut arm, &arm_dir, &retained, reason);
++        if summary["technical_complete"] != true || summary["audit_passed"] != true {
++            failure.get_or_insert_with(|| format!("{name}: numerical or finalization failure"));
++        }
++        summaries.push(summary);
++    }
++    let complete = summaries.iter().all(|s| s["technical_complete"] == true);
++    let result = json!({
++        "seed": seed,
++        "opening": opening.source,
++        "pre_intervention_baseline": base.json(),
++        "technical_complete": complete,
++        "failure": failure,
++        "arms": summaries,
++    });
++    json_new(&dir.join("result.json"), &result)?;
++    Ok(result)
++}
++
++fn main() -> Result<()> {
++    let args = Args::parse();
++    let (cohort_bytes, cohort, openings) = load_cohort(&args.cohort)?;
++    let retained_manifest = fs::read(args.retained.join("manifest.json"))?;
++
++    // A brand new directory, or nothing.
++    fs::create_dir(&args.out).context("output must be a NEW directory")?;
++    let executable_path = std::env::current_exe()?;
++    let executable = fs::read(&executable_path)?;
++    write_new(&args.out.join("post_intake_shadow.frozen"), &executable)?;
++    fs::set_permissions(
++        args.out.join("post_intake_shadow.frozen"),
++        fs::metadata(executable_path)?.permissions(),
++    )?;
++    // Both provenance manifests copied byte for byte, never re-encoded from a parsed `Value`.
++    write_new(&args.out.join("cohort-manifest.json"), &cohort_bytes)?;
++    write_new(&args.out.join("retained-quiet-manifest.json"), &retained_manifest)?;
++
++    let mut sources = serde_json::Map::new();
++    for name in SOURCE_FILES {
++        let bytes = fs::read(args.source_root.join(name))
++            .with_context(|| format!("source file {name} is not readable"))?;
++        sources.insert(
++            name.into(),
++            json!({"sha256": sha256(&bytes)?, "bytes": bytes.len()}),
++        );
++    }
++
++    json_new(
++        &args.out.join("manifest.json"),
++        &json!({
++            "kind": "post-intake-opportunity-shadow-pilot",
++            "build": BUILD,
++            "executable_sha256": sha256(&executable)?,
++            "source": {
++                "root": args.source_root,
++                "files": Value::Object(sources),
++                "basis": "the actual bytes of the files that decide what this measurement means, \
++                          hashed by this process at the moment it ran",
++            },
++            "cohort_manifest": {
++                "source": args.cohort, "copy": "cohort-manifest.json",
++                "sha256": sha256(&cohort_bytes)?, "bytes": cohort_bytes.len(),
++                "basis": "the cohort's manifest as it is on disk, copied rather than re-encoded. \
++                          serde_json without float_roundtrip can parse a decimal one ULP away from \
++                          its correctly rounded value, so a re-serialized copy is a different \
++                          number and no exact checker can accept it as the source",
++            },
++            "retained_quiet_manifest": {
++                "source": args.retained, "copy": "retained-quiet-manifest.json",
++                "sha256": sha256(&retained_manifest)?, "bytes": retained_manifest.len(),
++                "basis": "the retained Off-arm run's own manifest bytes, copied for the same reason",
++            },
++            "cohort_summary": {
++                "kind": cohort["kind"], "complete": cohort["complete"],
++                "opening_tick": cohort["opening_tick"],
++                "prescribed_seeds": cohort["prescribed_seeds"],
++                "runner_sha256": cohort["runner_sha256"],
++                "seeds_used": openings.iter().map(|o| o.source.clone()).collect::<Vec<_>>(),
++                "basis": "the exact, integer and string provenance every check here uses. The \
++                          float-bearing preparation telemetry is deliberately not reproduced: read \
++                          cohort-manifest.json for it",
++            },
++            "pilot": {
++                "seeds": PILOT_SEEDS,
++                "arms": ARMS.map(|(n, _)| n),
++                "elapsed_ticks": PILOT_ELAPSED,
++                "opening_tick": OPENING_TICK,
++                "sample_every": SAMPLE_EVERY,
++                "quiet_policy": QuietPolicy::Off.as_str(),
++                "hunters": false,
++                "care": {"levels": [null, "one Standard Feed"],
++                    "recipe": {"kind": "feed", "dose_permille": FEED_DOSE_PERMILLE,
++                        "elapsed_tick": FEED_ELAPSED, "target": FEED_TARGET, "count": 1}},
++                "authorised_scope": "root's four-arm pilot. The full twelve-by-two ten-minute \
++                                     shadow is NOT authorised and is not run here.",
++            },
++            "rule": rule_json(),
++            "unchanged": "every config value, ambient support, weather and RNG streams, \
++                          physiology, reproduction eligibility and costs, stocks, IDs, opening \
++                          ledgers and the Off quiet default; no hunters, no cleanup, no rain, no \
++                          rolling parameter change",
++            "observer_contract": "post-intake-opportunity-shadow-v1; a transient per-live-full-ID \
++                                  map bounded by the world's organism capacity, fed only by the \
++                                  actual to_reserve transfers the settlement stage applies and by \
++                                  the completed tick's own physiology. It is absent from every \
++                                  snapshot, hash, decision, stock, draw, transport and mode. Each \
++                                  arm proves that by stepping an uninstrumented twin in lockstep \
++                                  and comparing whole states and record streams every tick.",
++            "limits": "An admission-opportunity estimate on two seeds. Not an active rest policy, \
++                       not ecological acceptance, not a proven upper bound, not measured missed \
++                       food, not evidence that any interval would read at native 64 px, and not \
++                       permission to change a default or to run a longer horizon.",
++        }),
++    )?;
++
++    let mut all = Vec::new();
++    let mut failed = false;
++    for opening in &openings {
++        let seed = opening.state.config.seed;
++        let result = match run_seed(opening, &args.retained, &args.out.join(format!("seed-{seed}")))
++        {
++            Ok(result) => result,
++            Err(error) => json!({
++                "seed": seed, "technical_complete": false, "audit_passed": false,
++                "termination": "seed_output_or_initialization_failure",
++                "error": format!("{error:#}"),
++            }),
++        };
++        if result["technical_complete"] != true {
++            failed = true;
++        }
++        eprintln!(
++            "seed {seed} {}",
++            if result["technical_complete"] == true { "complete" } else { "RETAINED WITH FAILURE" }
++        );
++        all.push(result);
++    }
++    let arms_passed = all.len() == PILOT_SEEDS.len()
++        && all.iter().all(|s| {
++            s["arms"].as_array().is_some_and(|arms| {
++                arms.len() == ARMS.len()
++                    && arms.iter().all(|a| a["complete_measurement"] == true)
++            })
++        });
++    let summary = json!({
++        "kind": "post-intake-opportunity-shadow-pilot",
++        "technical_complete": !failed,
++        "audit_passed": arms_passed,
++        "complete_measurement": !failed && arms_passed,
++        "seeds": all,
++        "retention": "every arm is retained, failure included; nothing is filtered, retried or \
++                      reseeded",
++        "next_gate": "root reviews this four-arm pilot. No twelve-by-two shadow, no longer \
++                      horizon, no parameter sweep and no active policy is authorised by it.",
++    });
++    json_new(&args.out.join("summary.json"), &summary)?;
++    println!("{}", args.out.display());
++    ensure!(arms_passed, "the pilot contains technical or numerical failures; see summary.json");
++    Ok(())
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn opening() -> WorldState {
++        let mut cfg = cubarium_core::WorldConfig::default();
++        cfg.founders.count = 12;
++        World::new(cfg).unwrap().state
++    }
++
++    fn temp(name: &str) -> PathBuf {
++        let dir = std::env::temp_dir()
++            .join(format!("post-intake-shadow-{name}-{}", std::process::id()));
++        let _ = fs::remove_dir_all(&dir);
++        dir
++    }
++
++    #[test]
++    fn the_pilot_is_the_four_arms_root_authorised_and_no_others() {
++        assert_eq!(PILOT_SEEDS, [1, 8]);
++        assert_eq!(ARMS.map(|(n, _)| n), ["off_nocare", "off_feed"]);
++        assert_eq!(PILOT_SEEDS.len() * ARMS.len(), 4);
++        assert_eq!(PILOT_ELAPSED, 12_000);
++        assert_eq!(OPENING_TICK, 144_000);
++        assert_eq!((FEED_ELAPSED, FEED_DOSE_PERMILLE), (600, 1000));
++        assert_eq!((FEED_TARGET.face, FEED_TARGET.u, FEED_TARGET.v), (0, 32.0, 48.0));
++        // Every arm is Off. There is no policy factor in this pilot at all.
++        assert!(ARMS.iter().all(|_| QuietPolicy::Off == QuietPolicy::default()));
++    }
++
++    #[test]
++    fn the_rules_constants_are_the_cores_own_and_not_restated_here() {
++        assert_eq!(WINDOW_DECISIONS, 30);
++        assert_eq!(REFRACTORY_TICKS, 600);
++        assert_eq!(EPISODE_EXPIRY_TICKS, 20);
++        assert_eq!(QUOTA_SECONDS, 2.0);
++        assert_eq!(SAFETY_MARGIN_TICKS, 1);
++        let rule = rule_json();
++        assert_eq!(rule["window_decisions"], json!(WINDOW_DECISIONS));
++        assert_eq!(rule["refractory_ticks"], json!(REFRACTORY_TICKS));
++        assert_eq!(rule["episode_expiry_ticks"], json!(EPISODE_EXPIRY_TICKS));
++    }
++
++    #[test]
++    fn enabling_the_shadow_changes_no_persisted_byte_and_no_trajectory() {
++        let state = opening();
++        let mut observed = World::from_state(state.clone()).unwrap();
++        let mut reference = World::from_state(state.clone()).unwrap();
++        observed.enable_post_intake_shadow().unwrap();
++        assert_eq!(observed.state, reference.state, "enabling wrote into the state");
++        for _ in 0..400 {
++            observed.step();
++            reference.step();
++            let a = observed.drain_events();
++            let b = reference.drain_events();
++            let qa = observed.drain_quiet_events();
++            let qb = reference.drain_quiet_events();
++            assert_eq!(
++                instrumentation_disagreement(
++                    &observed.state,
++                    &reference.state,
++                    &a,
++                    &b,
++                    &qa,
++                    &qb
++                ),
++                None
++            );
++            let _ = observed.drain_post_intake_events();
++        }
++        assert_eq!(
++            cubarium_core::encode_snapshot(&observed.state, BUILD),
++            cubarium_core::encode_snapshot(&reference.state, BUILD),
++            "the instrumented world's snapshot differs byte for byte"
++        );
++    }
++
++    #[test]
++    fn the_neutrality_check_really_catches_a_difference() {
++        let a = opening();
++        let mut b = a.clone();
++        b.tick += 1;
++        assert!(instrumentation_disagreement(&a, &b, &[], &[], &[], &[]).is_some());
++        // ... and a record-stream difference too, with the states equal.
++        let life = [LifeEvent::Death {
++            tick: 1,
++            id: OrganismId { slot: 0, generation: 1 },
++            age_ticks: 1,
++            cause: DeathCause::Age,
++            births: 0,
++            genome: 0,
++        }];
++        assert!(instrumentation_disagreement(&a, &a, &life, &[], &[], &[]).is_some());
++        assert_eq!(instrumentation_disagreement(&a, &a, &life, &life, &[], &[]), None);
++    }
++
++    #[test]
++    fn the_shadow_refuses_a_hunter_world_and_an_enabled_quiet_policy() {
++        let mut state = opening();
++        state.quiet = QuietState::post_birth_pause_v1();
++        let mut world = World::from_state(state).unwrap();
++        assert!(world.enable_post_intake_shadow().is_err(), "an enabled policy was accepted");
++
++        let mut world = World::from_state(opening()).unwrap();
++        world.enable_post_intake_shadow().unwrap();
++        assert!(world.enable_post_intake_shadow().is_err(), "a second enable was accepted");
++    }
++
++    #[test]
++    fn a_shadow_record_keeps_the_labels_the_summaries_use() {
++        let event = ShadowEvent::Abort {
++            tick: 7,
++            id: OrganismId { slot: 1, generation: 2 },
++            window_start_tick: 2,
++            completed_decisions: 5,
++            reason: ShadowReason::UnaffordableRemaining,
++            baseline_intake_material: 0.25,
++            baseline_intake_ticks: 3,
++            sample: None,
++            refractory_until: Some(607),
++        };
++        let row = shadow_record(&event);
++        assert_eq!(row["kind"], "abort");
++        assert_eq!(row["reason"], "unaffordable_remaining");
++        assert_eq!(row["compatible_decisions"], 5);
++        assert_eq!(row["compatible_seconds"], 5.0 * DT);
++        assert_eq!(row["baseline_intake_material"], 0.25);
++    }
++
++    #[test]
++    fn a_per_form_table_always_carries_every_form_and_every_reason() {
++        let e = cubarium_core::post_intake::Exposure::default();
++        let row = exposure_json(&e);
++        let refusals = row["refusals"].as_object().unwrap();
++        assert_eq!(refusals.len(), ShadowReason::ALL.len());
++        for reason in ShadowReason::ALL {
++            assert_eq!(refusals[reason.as_str()], 0, "{}", reason.as_str());
++        }
++    }
++
++    #[test]
++    fn distinct_summaries_never_delete_a_repeat_from_the_record() {
++        let id = OrganismId { slot: 3, generation: 1 };
++        let sample = ShadowSample {
++            form: 0,
++            structure: 1.0,
++            structure_adult: 1.0,
++            reserve: 1.0,
++            energy: 1.0,
++            reserve_max: 2.0,
++            energy_max: 2.0,
++            mode: cubarium_core::organism::Mode::Feeding,
++            gestating: true,
++            escrow_started_tick: Some(40),
++            hunter_member: false,
++            age_ticks: 900,
++            quota: Some(0.1),
++            graze_rate: 0.03,
++            scavenge_rate: 0.01,
++            diet: 0.6,
++            budget: None,
++        };
++        let episode = cubarium_core::post_intake::EpisodeRecord {
++            start_tick: 1,
++            last_positive_tick: 2,
++            positive_ticks: 2,
++            elapsed_ticks: 1,
++            assimilated: 0.2,
++            credit: 0.1,
++        };
++        let mut distinct = Distinct::default();
++        for tick in [100, 700, 1300] {
++            distinct.observe(&ShadowEvent::Attempt {
++                tick,
++                id,
++                admitted: false,
++                reason: Some(ShadowReason::Gestating),
++                episode,
++                sample,
++                window_end_tick: None,
++                refractory_until: Some(tick + REFRACTORY_TICKS),
++            });
++        }
++        let row = distinct.json();
++        assert_eq!(row["attempted_ids"], 1, "one individual");
++        assert_eq!(row["refused_gestations"], 1, "one gestation, three real attempts");
++        assert_eq!(row["refused_ids_by_reason"]["gestating"], 1);
++    }
++
++    #[test]
++    fn an_existing_output_path_is_refused() {
++        let dir = temp("existing");
++        fs::create_dir_all(&dir).unwrap();
++        assert!(fs::create_dir(&dir).is_err(), "an existing output directory was accepted");
++        assert!(write_new(&dir.join("x"), b"a").is_ok());
++        assert!(write_new(&dir.join("x"), b"b").is_err(), "an existing file was overwritten");
++        fs::remove_dir_all(&dir).ok();
++    }
++
++    #[test]
++    fn a_retained_reference_that_is_not_a_completed_off_measurement_is_refused() {
++        let dir = temp("retained");
++        let arm = dir.join("seed-1").join("off_nocare");
++        fs::create_dir_all(&arm).unwrap();
++        let good = json!({
++            "arm": "off_nocare", "quiet_policy": "off",
++            "technical_complete": true, "audit_passed": true,
++            "planned_ticks": PILOT_ELAPSED, "elapsed_ticks": PILOT_ELAPSED,
++            "closing_tick": OPENING_TICK + PILOT_ELAPSED,
++            "closing_snapshot_sha256": "0".repeat(64),
++        });
++        type Damage = fn(&mut Value);
++        let damages: [(&str, Damage); 4] = [
++            ("policy", |v| v["quiet_policy"] = json!("post_birth_pause_v1")),
++            ("incomplete", |v| v["technical_complete"] = json!(false)),
++            ("audit", |v| v["audit_passed"] = json!(false)),
++            ("horizon", |v| v["elapsed_ticks"] = json!(2400)),
++        ];
++        for (name, damage) in damages {
++            let mut summary = good.clone();
++            damage(&mut summary);
++            let path = arm.join("summary.json");
++            fs::write(&path, serde_json::to_vec(&summary).unwrap()).unwrap();
++            assert!(
++                load_retained(&dir, 1, "off_nocare").is_err(),
++                "a {name}-damaged retained reference was accepted"
++            );
++        }
++        // Even undamaged, a summary whose closing snapshot is missing cannot stand in for one.
++        fs::write(arm.join("summary.json"), serde_json::to_vec(&good).unwrap()).unwrap();
++        assert!(load_retained(&dir, 1, "off_nocare").is_err(), "a missing snapshot was accepted");
++        fs::remove_dir_all(&dir).ok();
++    }
++}
+diff --git a/scripts/post-intake-shadow.mjs b/scripts/post-intake-shadow.mjs
+new file mode 100644
+index 0000000..9d7180e
+--- /dev/null
++++ b/scripts/post-intake-shadow.mjs
+@@ -0,0 +1,546 @@
++// Read-only reduction of a completed post-intake opportunity shadow pilot.
++//
++// Reduces `captures/post-intake-shadow-pilot-2026-09-13`-shaped output against the fixed rule of
++// design/7_Research/root-post-intake-shadow-scope-2026-09-13.md. It writes nothing, steps nothing
++// and decides nothing about ecology.
++//
++// **Nothing an arm says about itself is taken as evidence for itself.** Every counter, per-form
++// table and distinct-ID summary is recomputed from `shadow-events.jsonl` and compared to the
++// summary exactly; the rule is replayed per full generational ID as a state machine, so a window
++// that outlived its length, an attempt inside a cooldown, an attempt with a window already open,
++// a credit that is not the quota, a release that is not thirty decisions, or a close that never
++// happened is a refusal rather than a footnote. The provenance manifests and the frozen
++// executable are checksummed against what the manifest claims.
++//
++// What it deliberately does **not** do: turn a compatible window into a pause, a compatible-window
++// fraction into an upper bound, baseline intake during a window into missed food, or a passing
++// technical gate into evidence that anything would be readable at native 64 px. The usefulness
++// screen root named needs nine of twelve no-care seeds; a two-seed pilot cannot evaluate it and
++// this script reports the inputs to it rather than a verdict on it.
++
++import assert from 'node:assert/strict';
++import {createHash} from 'node:crypto';
++import {readFile} from 'node:fs/promises';
++import {join} from 'node:path';
++
++/// The pilot root authorised, and nothing else.
++export const SEEDS = [1, 8];
++export const ARMS = ['off_nocare', 'off_feed'];
++export const ELAPSED_TICKS = 12000;
++export const OPENING_TICK = 144000;
++/// The rule's fixed constants, restated here so the reduction is an independent check of the run
++/// rather than a reading of its own manifest.
++export const WINDOW_DECISIONS = 30;
++export const REFRACTORY_TICKS = 600;
++export const EPISODE_EXPIRY_TICKS = 20;
++export const QUOTA_SECONDS = 2;
++export const DT = 1 / 20;
++/// Every reason the core can name, in its own fixed order.
++export const REASONS = [
++  'dead', 'hunter_member', 'juvenile', 'gestating', 'inactive_mode', 'invalid_inputs',
++  'unaffordable', 'overflow', 'bounded', 'unaffordable_remaining', 'baseline_gone',
++  'baseline_escrow', 'baseline_juvenile', 'run_end',
++];
++/// Root's unvalidated usefulness thresholds. Recorded so the inputs to them are visible; this
++/// pilot cannot evaluate the screen, which needs nine of twelve no-care seeds.
++export const SCREEN = {
++  eligible_adult_exposure: 0.002,
++  whole_world_compatible_window_time: 0.15,
++  no_care_seeds: 9,
++  of_seeds: 12,
++};
++
++const key = id => `${id.slot}/${id.generation}`;
++const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
++const sum = xs => xs.reduce((a, b) => a + b, 0);
++
++export function median(sorted) {
++  if (sorted.length === 0) return null;
++  return sorted[Math.floor(sorted.length / 2)];
++}
++
++export async function readJson(path) {
++  return JSON.parse(await readFile(path, 'utf8'));
++}
++
++export async function readEvents(path) {
++  const text = await readFile(path, 'utf8');
++  return text.split('\n').filter(l => l.length > 0).map(l => JSON.parse(l));
++}
++
++/// An empty per-reason table. Every reason is always a row, so a zero reads as "never happened"
++/// rather than as an absent key.
++export function emptyReasons() {
++  return Object.fromEntries(REASONS.map(r => [r, 0]));
++}
++
++function blankExposure() {
++  return {
++    settlement_ticks: 0, attempts: 0, admissions: 0, releases: 0, aborts: 0, censored: 0,
++    compatible_window_decisions: 0, baseline_intake_in_windows: 0, refusals: emptyReasons(),
++  };
++}
++
++/// Recompute, from the event stream alone, everything the summary claims about it.
++export function reduceEvents(rows) {
++  const total = blankExposure();
++  const byForm = Array.from({length: 8}, blankExposure);
++  const distinct = {
++    attempted: new Set(), admitted: new Set(), released: new Set(),
++    refusedGestations: new Set(), refusedByReason: new Map(),
++  };
++  const windows = [];
++  const episodes = Array.from({length: 8}, () => []);
++  const openWindowForm = new Map();
++  for (const row of rows) {
++    const id = key(row.id);
++    if (row.kind === 'attempt') {
++      const form = row.sample.form;
++      const bucket = [total, byForm[form]];
++      for (const b of bucket) b.attempts += 1;
++      distinct.attempted.add(id);
++      episodes[form].push({
++        elapsed_ticks: row.episode.elapsed_ticks,
++        positive_ticks: row.episode.positive_ticks,
++        assimilated: row.episode.assimilated,
++        credit: row.episode.credit,
++        quota: row.sample.quota,
++        admitted: row.admitted,
++      });
++      if (row.admitted) {
++        for (const b of bucket) b.admissions += 1;
++        distinct.admitted.add(id);
++        openWindowForm.set(id, form);
++      } else {
++        for (const b of bucket) b.refusals[row.reason] += 1;
++        if (!distinct.refusedByReason.has(row.reason)) {
++          distinct.refusedByReason.set(row.reason, new Set());
++        }
++        distinct.refusedByReason.get(row.reason).add(id);
++        if (row.sample.escrow_started_tick !== null
++            && row.sample.escrow_started_tick !== undefined) {
++          distinct.refusedGestations.add(`${id}@${row.sample.escrow_started_tick}`);
++        }
++      }
++      continue;
++    }
++    // A close. `abort` from the commit sweep carries no sample, so the form comes from the
++    // admission that opened the window rather than from an absent field.
++    const form = row.sample?.form ?? openWindowForm.get(id);
++    const bucket = form === undefined ? [total] : [total, byForm[form]];
++    windows.push({
++      id, form, kind: row.kind, decisions: row.compatible_decisions,
++      start: row.window_start_tick, end: row.tick,
++      baseline_intake_material: row.baseline_intake_material,
++      baseline_intake_ticks: row.baseline_intake_ticks,
++      reason: row.reason ?? (row.kind === 'censor' ? 'run_end' : null),
++    });
++    for (const b of bucket) {
++      b.compatible_window_decisions += row.compatible_decisions;
++      b.baseline_intake_in_windows += row.baseline_intake_material;
++    }
++    if (row.kind === 'release') {
++      for (const b of bucket) b.releases += 1;
++      distinct.released.add(id);
++    } else if (row.kind === 'abort') {
++      for (const b of bucket) b.aborts += 1;
++      for (const b of bucket) b.refusals[row.reason] += 1;
++    } else {
++      total.censored += 1;
++      if (form !== undefined) byForm[form].censored += 1;
++      total.refusals.run_end += 1;
++      if (form !== undefined) byForm[form].refusals.run_end += 1;
++    }
++    openWindowForm.delete(id);
++  }
++  return {total, byForm, distinct, windows, episodes};
++}
++
++/// Replay the rule per full generational ID. Every violation is collected, never thrown away: a
++/// run with one bad window is a run with one bad window, and the reader is owed the list.
++export function replayRule(rows) {
++  const violations = [];
++  const state = new Map();
++  let last = -1;
++  for (const row of rows) {
++    if (row.tick < last) violations.push(`records are out of tick order at ${row.tick}`);
++    last = row.tick;
++    const id = key(row.id);
++    const s = state.get(id) ?? {window: null, deadline: null, closes: 0, admissions: 0};
++    state.set(id, s);
++    if (row.kind === 'attempt') {
++      if (s.window !== null) {
++        violations.push(`${id}: an attempt at ${row.tick} while a window opened at ${s.window} \
++was still open`);
++      }
++      if (s.deadline !== null && row.tick < s.deadline) {
++        violations.push(`${id}: an attempt at ${row.tick} inside a cooldown to ${s.deadline}`);
++      }
++      if (row.sample.quota === null) {
++        violations.push(`${id}: an attempt at ${row.tick} with no quota at all`);
++      } else if (row.episode.credit !== row.sample.quota) {
++        violations.push(`${id}: an attempt at ${row.tick} with credit ${row.episode.credit} \
++against quota ${row.sample.quota}; every attempt must consume exactly the quota`);
++      }
++      if (row.episode.assimilated < row.episode.credit) {
++        violations.push(`${id}: an attempt at ${row.tick} credited more than it assimilated`);
++      }
++      if (row.episode.elapsed_ticks !== row.episode.last_positive_tick - row.episode.start_tick) {
++        violations.push(`${id}: an episode length at ${row.tick} is not its own span`);
++      }
++      if (row.episode.last_positive_tick !== row.tick) {
++        violations.push(`${id}: an attempt at ${row.tick} fired without this boundary's own \
++positive settlement (last positive ${row.episode.last_positive_tick})`);
++      }
++      if (row.admitted) {
++        if (row.reason !== null) violations.push(`${id}: an admission at ${row.tick} carries a reason`);
++        if (row.window_end_tick !== row.tick + WINDOW_DECISIONS) {
++          violations.push(`${id}: a window opened at ${row.tick} does not end at +${WINDOW_DECISIONS}`);
++        }
++        // An admission reports the *spent* deadline it came out of; the operative one is armed by
++        // the close.
++        if (row.refractory_until !== null && row.refractory_until > row.tick) {
++          violations.push(`${id}: an admission at ${row.tick} reports a live cooldown`);
++        }
++        s.window = row.tick;
++        s.admissions += 1;
++      } else {
++        if (!REASONS.includes(row.reason)) {
++          violations.push(`${id}: an unknown refusal reason ${row.reason} at ${row.tick}`);
++        }
++        if (row.window_end_tick !== null) {
++          violations.push(`${id}: a refusal at ${row.tick} opened a window`);
++        }
++        if (row.refractory_until !== row.tick + REFRACTORY_TICKS) {
++          violations.push(`${id}: a refusal at ${row.tick} did not arm the cooldown`);
++        }
++        s.deadline = row.refractory_until;
++      }
++      continue;
++    }
++    if (s.window === null) {
++      violations.push(`${id}: a ${row.kind} at ${row.tick} closed no open window`);
++    } else if (row.window_start_tick !== s.window) {
++      violations.push(`${id}: a ${row.kind} at ${row.tick} names window ${row.window_start_tick}, \
++not the open ${s.window}`);
++    }
++    const expected = Math.min(row.tick - row.window_start_tick, WINDOW_DECISIONS);
++    if (row.compatible_decisions !== expected) {
++      violations.push(`${id}: a ${row.kind} at ${row.tick} claims ${row.compatible_decisions} \
++decisions, not ${expected}`);
++    }
++    if (row.kind === 'release') {
++      if (row.compatible_decisions !== WINDOW_DECISIONS) {
++        violations.push(`${id}: a release at ${row.tick} is not a whole window`);
++      }
++      if (row.refractory_until !== row.tick + REFRACTORY_TICKS) {
++        violations.push(`${id}: a release at ${row.tick} did not arm the cooldown`);
++      }
++      s.deadline = row.refractory_until;
++    } else if (row.kind === 'abort') {
++      if (row.compatible_decisions >= WINDOW_DECISIONS) {
++        violations.push(`${id}: an abort at ${row.tick} ran a whole window`);
++      }
++      // The commit sweep's abort for a removed organism arms nothing: the ID is gone.
++      if (row.refractory_until !== null && row.refractory_until !== row.tick + REFRACTORY_TICKS) {
++        violations.push(`${id}: an abort at ${row.tick} armed a wrong cooldown`);
++      }
++      s.deadline = row.refractory_until;
++    } else if (row.compatible_decisions >= WINDOW_DECISIONS) {
++      violations.push(`${id}: a censor at ${row.tick} ran a whole window`);
++    }
++    if (row.baseline_intake_ticks > row.compatible_decisions) {
++      violations.push(`${id}: a ${row.kind} at ${row.tick} records more baseline intake ticks \
++than the window had decisions`);
++    }
++    s.window = null;
++    s.closes += 1;
++  }
++  let openAtEnd = 0;
++  for (const [id, s] of state) {
++    if (s.window !== null) {
++      openAtEnd += 1;
++      violations.push(`${id}: a window opened at ${s.window} was never closed or censored`);
++    }
++  }
++  return {violations, open_at_end: openAtEnd, tracked_ids: state.size};
++}
++
++/// Per-form episode statistics: how long a form's animals really took to earn Q, and how much they
++/// actually assimilated doing it. Fable's correction: without this, a per-form zero or a per-form
++/// rarity is misread as biology when it is the quota's normalisation.
++export function episodeStats(episodes) {
++  return episodes.map((rows, form) => {
++    if (rows.length === 0) {
++      return {form, attempts: 0, seconds_to_quota: null, assimilated_mean: null, quota: null};
++    }
++    const spans = rows.map(r => r.elapsed_ticks).sort((a, b) => a - b);
++    const positives = rows.map(r => r.positive_ticks).sort((a, b) => a - b);
++    const quotas = [...new Set(rows.map(r => r.quota))];
++    return {
++      form,
++      attempts: rows.length,
++      seconds_to_quota: {
++        min: spans[0] * DT,
++        median: median(spans) * DT,
++        max: spans[spans.length - 1] * DT,
++        mean: (sum(spans) / spans.length) * DT,
++      },
++      positive_ticks: {min: positives[0], median: median(positives),
++        max: positives[positives.length - 1]},
++      assimilated_mean: sum(rows.map(r => r.assimilated)) / rows.length,
++      quota: {min: Math.min(...quotas), max: Math.max(...quotas), distinct: quotas.length},
++      basis: 'the elapsed span from an episode\'s first positive settlement to the one that '
++        + 'carried it to Q. Gappy intake means this is not the same as time spent eating.',
++    };
++  });
++}
++
++/// One arm, verified end to end. Returns the recomputed reduction beside the arm's own claims and
++/// the list of every disagreement.
++export async function verifyArm(root, seed, arm) {
++  const dir = join(root, `seed-${seed}`, arm);
++  const summary = await readJson(join(dir, 'summary.json'));
++  const opening = await readJson(join(dir, 'opening.json'));
++  const rows = await readEvents(join(dir, 'shadow-events.jsonl'));
++  const census = await readEvents(join(dir, 'census.jsonl'));
++  const problems = [];
++  const reduced = reduceEvents(rows);
++  const replay = replayRule(rows);
++  problems.push(...replay.violations);
++
++  const check = (ok, message) => {
++    if (!ok) problems.push(message);
++  };
++  check(summary.arm === arm, `the summary names arm ${summary.arm}`);
++  check(summary.quiet_policy === 'off', `the arm ran policy ${summary.quiet_policy}, not Off`);
++  check(opening.quiet_policy === 'off', 'the opening did not carry the Off policy');
++  check(summary.elapsed_ticks === ELAPSED_TICKS,
++    `the arm ran ${summary.elapsed_ticks} ticks, not ${ELAPSED_TICKS}`);
++  check(summary.closing_tick === OPENING_TICK + ELAPSED_TICKS,
++    `the arm closed at ${summary.closing_tick}`);
++  check(opening.opening_tick === OPENING_TICK, `the arm opened at ${opening.opening_tick}`);
++  check((arm === 'off_feed') === (summary.care.planned === true),
++    'the arm\'s care does not match its name');
++  if (arm === 'off_feed') {
++    check(summary.care.applied_at_tick === OPENING_TICK + 600,
++      `the feed landed at ${summary.care.applied_at_tick}`);
++    check(summary.care.receipts.length === 1, 'the fed arm does not carry exactly one receipt');
++  } else {
++    check(summary.care.applied_at_tick === null, 'the no-care arm applied care');
++    check(summary.care.receipts.length === 0, 'the no-care arm carries a receipt');
++  }
++
++  // The three gates, checked as facts rather than as flags.
++  const gates = summary.gates;
++  check(gates.observer_is_exactly_neutral === true, 'the observer was not proved neutral');
++  check(summary.instrumentation.first_disagreement === null,
++    `the instrumented and uninstrumented worlds disagreed: ${summary.instrumentation.first_disagreement}`);
++  check(summary.instrumentation.compared_ticks === ELAPSED_TICKS,
++    `only ${summary.instrumentation.compared_ticks} ticks were compared`);
++  check(summary.instrumentation.snapshots_identical === true,
++    'the two closing snapshots are not identical');
++  check(gates.retained_off_continuation_identical === true,
++    'the arm did not continue the retained Off arm exactly');
++  const cont = summary.retained_off_continuation;
++  for (const field of ['whole_state_equal', 'state_hash_equal', 'ecology_hash_equal',
++    'population_equal', 'births_equal', 'deaths_equal']) {
++    check(cont[field] === true, `the retained continuation differs: ${field}`);
++  }
++  check(gates.conservation_and_flow_audits === true, 'the conservation audits did not pass');
++  // The audit limits, re-derived from the arm's own opening inventory and the fixed 1e-8 rule.
++  const base = opening.pre_intervention_baseline;
++  for (const [name, index] of [['material', 0], ['energy', 1], ['water', 2]]) {
++    const limit = 1e-8 * Math.max(base[name], 1);
++    check(Math.abs(base.limits[name] - limit) < 1e-18,
++      `the ${name} limit is not the fixed 1e-8 rule`);
++    check(summary.max_absolute_drift[name] < limit,
++      `the ${name} drift ${summary.max_absolute_drift[name]} reaches its limit ${limit}`);
++  }
++
++  // Every recomputed counter against the arm's own.
++  const claimed = summary.shadow.total;
++  check(summary.shadow.events_written === rows.length,
++    `the arm wrote ${summary.shadow.events_written} records and the stream holds ${rows.length}`);
++  for (const field of ['attempts', 'admissions', 'releases', 'aborts', 'censored',
++    'compatible_window_decisions']) {
++    check(claimed[field] === reduced.total[field],
++      `${field}: the summary says ${claimed[field]}, the stream says ${reduced.total[field]}`);
++  }
++  for (const reason of REASONS) {
++    check(claimed.refusals[reason] === reduced.total.refusals[reason],
++      `refusals.${reason}: summary ${claimed.refusals[reason]}, stream ${reduced.total.refusals[reason]}`);
++  }
++  for (let form = 0; form < 8; form += 1) {
++    const row = summary.shadow.by_form[form];
++    check(row.form === form, `the per-form table is out of order at ${form}`);
++    for (const field of ['attempts', 'admissions', 'releases', 'compatible_window_decisions']) {
++      check(row[field] === reduced.byForm[form][field],
++        `form ${form} ${field}: summary ${row[field]}, stream ${reduced.byForm[form][field]}`);
++    }
++  }
++  const distinct = summary.shadow.distinct;
++  check(distinct.attempted_ids === reduced.distinct.attempted.size,
++    `distinct attempts: summary ${distinct.attempted_ids}, stream ${reduced.distinct.attempted.size}`);
++  check(distinct.admitted_ids === reduced.distinct.admitted.size,
++    `distinct admissions: summary ${distinct.admitted_ids}, stream ${reduced.distinct.admitted.size}`);
++  check(distinct.refused_gestations === reduced.distinct.refusedGestations.size,
++    `refused gestations: summary ${distinct.refused_gestations}, stream ${reduced.distinct.refusedGestations.size}`);
++  // Repeats really are preserved: attempts must be at least the distinct count, and the two are
++  // allowed to differ. Collapsing them would be the failure.
++  check(reduced.total.attempts >= reduced.distinct.attempted.size,
++    'more distinct attempting IDs than attempts');
++
++  // Memory: the map never exceeded the world's live organism capacity.
++  const memory = summary.shadow.memory;
++  check(memory.peak_entries <= memory.bound,
++    `the per-ID map peaked at ${memory.peak_entries} against a bound of ${memory.bound}`);
++  check(memory.bounded_refusals === 0,
++    `${memory.bounded_refusals} records were lost to the bound`);
++  for (const row of census) {
++    check(row.shadow.entries <= row.shadow.bound,
++      `the per-ID map exceeded its bound at tick ${row.tick}`);
++    check(row.shadow.open_windows <= row.population,
++      `more open windows than organisms at tick ${row.tick}`);
++  }
++  check(census.length === ELAPSED_TICKS / 200,
++    `the census has ${census.length} windows`);
++
++  // Censoring is reported as censoring, never as a release.
++  const censored = reduced.windows.filter(w => w.kind === 'censor');
++  check(censored.length === reduced.total.censored, 'the censored count disagrees with the stream');
++  check(replay.open_at_end === 0, `${replay.open_at_end} windows were left open`);
++
++  const eligible = summary.shadow.total.eligible_ticks;
++  const exposure = eligible > 0 ? reduced.total.compatible_window_decisions / eligible : null;
++  return {
++    seed, arm, problems,
++    reduced: {
++      total: reduced.total,
++      by_form: reduced.byForm.map((e, form) => ({form, ...e})),
++      episodes: episodeStats(reduced.episodes),
++      windows: {
++        closed: reduced.windows.length,
++        full_length: reduced.windows.filter(w => w.decisions === WINDOW_DECISIONS).length,
++        by_reason: reduced.windows.reduce((acc, w) => {
++          const k = w.reason ?? 'release';
++          acc[k] = (acc[k] ?? 0) + 1;
++          return acc;
++        }, {}),
++        decisions: (() => {
++          const d = reduced.windows.map(w => w.decisions).sort((a, b) => a - b);
++          return {min: d[0] ?? null, median: median(d), max: d[d.length - 1] ?? null};
++        })(),
++      },
++      distinct: {
++        attempted: reduced.distinct.attempted.size,
++        admitted: reduced.distinct.admitted.size,
++        released: reduced.distinct.released.size,
++        refused_gestations: reduced.distinct.refusedGestations.size,
++        refused_by_reason: Object.fromEntries(
++          [...reduced.distinct.refusedByReason].map(([r, ids]) => [r, ids.size])),
++      },
++    },
++    screen_inputs: {
++      eligible_adult_ticks: eligible,
++      organism_ticks: summary.shadow.total.organism_ticks,
++      compatible_window_decisions: reduced.total.compatible_window_decisions,
++      compatible_decisions_per_eligible_adult_tick: exposure,
++      whole_world_compatible_window_fraction:
++        summary.shadow.windows.whole_world_compatible_window_fraction,
++      exposed_forms: reduced.byForm.filter(e => e.admissions > 0).length,
++      basis: 'inputs to root\'s unvalidated usefulness screen, not a verdict on it: the screen '
++        + 'asks for nine of twelve no-care seeds and this pilot ran two.',
++    },
++    replay,
++  };
++}
++
++/// Provenance: the run's own frozen executable and copied manifests really are what the manifest
++/// says they are.
++export async function verifyProvenance(root) {
++  const manifest = await readJson(join(root, 'manifest.json'));
++  const problems = [];
++  const frozen = await readFile(join(root, 'post_intake_shadow.frozen'));
++  if (sha256(frozen) !== manifest.executable_sha256) {
++    problems.push('the frozen executable does not match its recorded checksum');
++  }
++  for (const [copy, block] of [['cohort-manifest.json', manifest.cohort_manifest],
++    ['retained-quiet-manifest.json', manifest.retained_quiet_manifest]]) {
++    const bytes = await readFile(join(root, copy));
++    if (bytes.length !== block.bytes) problems.push(`${copy} is not its recorded length`);
++    if (sha256(bytes) !== block.sha256) problems.push(`${copy} does not match its checksum`);
++  }
++  if (!manifest.source?.files || Object.keys(manifest.source.files).length === 0) {
++    problems.push('the manifest records no source hashes');
++  }
++  if (manifest.kind !== 'post-intake-opportunity-shadow-pilot') {
++    problems.push(`the manifest is a ${manifest.kind}`);
++  }
++  if (manifest.pilot.quiet_policy !== 'off' || manifest.pilot.hunters !== false) {
++    problems.push('the pilot did not run Off and hunter-free');
++  }
++  const seeds = manifest.pilot.seeds;
++  if (JSON.stringify(seeds) !== JSON.stringify(SEEDS)) {
++    problems.push(`the pilot ran seeds ${JSON.stringify(seeds)}`);
++  }
++  if (manifest.pilot.elapsed_ticks !== ELAPSED_TICKS) {
++    problems.push(`the pilot ran ${manifest.pilot.elapsed_ticks} ticks`);
++  }
++  if (manifest.rule.window_decisions !== WINDOW_DECISIONS
++      || manifest.rule.refractory_ticks !== REFRACTORY_TICKS
++      || manifest.rule.episode_expiry_ticks !== EPISODE_EXPIRY_TICKS
++      || manifest.rule.quota_seconds !== QUOTA_SECONDS) {
++    problems.push('the recorded rule is not the one this reduction checks');
++  }
++  return {manifest, problems};
++}
++
++export async function reduce(root) {
++  const provenance = await verifyProvenance(root);
++  const summary = await readJson(join(root, 'summary.json'));
++  const arms = [];
++  for (const seed of SEEDS) {
++    for (const arm of ARMS) {
++      arms.push(await verifyArm(root, seed, arm));
++    }
++  }
++  const problems = [...provenance.problems, ...arms.flatMap(a => a.problems)];
++  if (summary.complete_measurement !== true) {
++    problems.push('the run does not claim a complete measurement');
++  }
++  return {
++    kind: 'post-intake-opportunity-shadow-reduction',
++    root,
++    build: provenance.manifest.build,
++    executable_sha256: provenance.manifest.executable_sha256,
++    source: provenance.manifest.source,
++    reduction_passed: problems.length === 0,
++    problems,
++    arms,
++    screen: {
++      thresholds: SCREEN,
++      evaluated: false,
++      why: 'root\'s usefulness screen needs at least nine of twelve no-care seeds and '
++        + 'contributions from more than one exposed form. This pilot ran two seeds, so the '
++        + 'screen is not evaluated here and no pass or fail is claimed for it.',
++    },
++    limits: [
++      'A compatible window is the number of decisions the freely feeding baseline stayed '
++      + 'compatible with holding. It is not a pause, not rest, not an upper bound on an '
++      + 'intervention, and not measured missed food.',
++      'Baseline intake during a window is the baseline\'s own meal, recorded separately. An '
++      + 'intervention would have changed the patch, the neighbours\' shares, the position and '
++      + 'every later stock in either direction.',
++      'Nothing here says whether any interval would be readable at native 64 px.',
++    ],
++  };
++}
++
++if (import.meta.url === `file://${process.argv[1]}`) {
++  const root = process.argv[2];
++  assert(root, 'usage: node scripts/post-intake-shadow.mjs <pilot directory>');
++  const report = await reduce(root);
++  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
++  if (!report.reduction_passed) process.exitCode = 1;
++}
+diff --git a/scripts/post-intake-shadow.test.mjs b/scripts/post-intake-shadow.test.mjs
+new file mode 100644
+index 0000000..5d7f24c
+--- /dev/null
++++ b/scripts/post-intake-shadow.test.mjs
+@@ -0,0 +1,271 @@
++// Tests for the post-intake opportunity reduction.
++//
++// The unit checks run on synthetic streams, because the interesting cases — an attempt inside a
++// cooldown, a window that outlives its length, a release that is not thirty decisions, a credit
++// that is not the quota — must not depend on a real run happening to contain them. The end-to-end
++// check then runs against the completed pilot, so every check above has met artifacts of the real
++// shape and not only fixtures. It is skipped, loudly, when that run is not on this machine.
++
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import {existsSync} from 'node:fs';
++import {
++  ARMS, DT, ELAPSED_TICKS, EPISODE_EXPIRY_TICKS, OPENING_TICK, REASONS, REFRACTORY_TICKS, SCREEN,
++  SEEDS, WINDOW_DECISIONS, emptyReasons, episodeStats, median, reduce, reduceEvents, replayRule,
++} from './post-intake-shadow.mjs';
++
++/// The completed four-arm pilot. Resolved against the repository this script lives in, and also
++/// against the main checkout, because the harness runs from an isolated worktree whose own
++/// captures tree is not where the run was written.
++const CANDIDATES = [
++  new URL('../captures/post-intake-shadow-pilot-2026-09-13-v2/', import.meta.url).pathname,
++  '/home/wrysk/wryskware/cubarium/captures/post-intake-shadow-pilot-2026-09-13-v2',
++];
++const PILOT = CANDIDATES.find(p => existsSync(p));
++
++const id = (slot, generation = 1) => ({slot, generation});
++
++function attempt(tick, who, over = {}) {
++  const {sample = {}, episode = {}, ...rest} = over;
++  return {
++    kind: 'attempt', tick, id: who, admitted: true, reason: null,
++    episode: {
++      start_tick: tick - 10, last_positive_tick: tick, positive_ticks: 4, elapsed_ticks: 10,
++      elapsed_seconds: 10 * DT, assimilated: 0.2, credit: 0.1, ...episode,
++    },
++    sample: {
++      form: 2, structure: 1, structure_adult: 1, reserve: 1, energy: 1, reserve_max: 2,
++      energy_max: 2, reserve_fraction: 0.5, mode: 'Feeding', gestating: false,
++      escrow_started_tick: null, hunter_member: false, age_ticks: 5000, quota: 0.1,
++      graze_rate: 0.03, scavenge_rate: 0.01, diet: 0.6, budget: null, ...sample,
++    },
++    window_end_tick: tick + WINDOW_DECISIONS, refractory_until: null,
++    ...rest,
++  };
++}
++
++function refusal(tick, who, reason, over = {}) {
++  const {sample, episode, ...rest} = over;
++  const row = attempt(tick, who, {sample, episode});
++  return {
++    ...row, admitted: false, reason, window_end_tick: null,
++    refractory_until: tick + REFRACTORY_TICKS,
++    ...rest,
++  };
++}
++
++function release(tick, who, start, over = {}) {
++  return {
++    kind: 'release', tick, id: who, window_start_tick: start,
++    compatible_decisions: WINDOW_DECISIONS, compatible_seconds: WINDOW_DECISIONS * DT,
++    baseline_intake_material: 0.5, baseline_intake_ticks: 10, baseline_died_at_release: false,
++    sample: attempt(tick, who).sample, refractory_until: tick + REFRACTORY_TICKS, ...over,
++  };
++}
++
++test('the pilot this reduction checks is the four arms root authorised', () => {
++  assert.deepEqual(SEEDS, [1, 8]);
++  assert.deepEqual(ARMS, ['off_nocare', 'off_feed']);
++  assert.equal(SEEDS.length * ARMS.length, 4);
++  assert.equal(ELAPSED_TICKS, 12000);
++  assert.equal(OPENING_TICK, 144000);
++  assert.equal(WINDOW_DECISIONS, 30);
++  assert.equal(REFRACTORY_TICKS, 600);
++  assert.equal(EPISODE_EXPIRY_TICKS, 20);
++});
++
++test('every reason is always a row, so a zero reads as never happened', () => {
++  const table = emptyReasons();
++  assert.equal(Object.keys(table).length, REASONS.length);
++  for (const reason of REASONS) assert.equal(table[reason], 0, reason);
++});
++
++test('a clean cycle replays without a single violation', () => {
++  const who = id(1);
++  const rows = [
++    attempt(100, who),
++    release(130, who, 100),
++    // The next attempt is allowed exactly at the deadline, not one tick before it.
++    attempt(730, who),
++    release(760, who, 730),
++  ];
++  const {violations, open_at_end: open} = replayRule(rows);
++  assert.deepEqual(violations, []);
++  assert.equal(open, 0);
++});
++
++test('an attempt inside a cooldown is a refusal of the run, not a footnote', () => {
++  const who = id(1);
++  const {violations} = replayRule([attempt(100, who), release(130, who, 100), attempt(729, who)]);
++  assert.ok(violations.some(v => /inside a cooldown to 730/.test(v)), violations);
++});
++
++test('an attempt with a window already open is caught', () => {
++  const who = id(1);
++  const {violations} = replayRule([attempt(100, who), attempt(110, who)]);
++  assert.match(violations[0], /while a window opened at 100/);
++});
++
++test('a credit that is not exactly the quota is caught', () => {
++  const who = id(1);
++  const {violations} = replayRule([attempt(100, who, {episode: {credit: 0.09}})]);
++  assert.match(violations[0], /credit 0.09 against quota 0.1/);
++});
++
++test('an attempt without this boundary\'s own positive settlement is caught', () => {
++  const who = id(1);
++  const rows = [attempt(100, who, {episode: {last_positive_tick: 98, elapsed_ticks: 8}})];
++  const {violations} = replayRule(rows);
++  assert.ok(violations.some(v => /without this boundary's own positive settlement/.test(v)),
++    violations);
++});
++
++test('a release that is not a whole window, and an abort that is one, are both caught', () => {
++  const who = id(1);
++  const short = replayRule([
++    attempt(100, who),
++    release(120, who, 100, {compatible_decisions: 20, tick: 120}),
++  ]);
++  assert.ok(short.violations.some(v => /is not a whole window/.test(v)), short.violations);
++
++  const long = replayRule([
++    attempt(100, who),
++    {
++      kind: 'abort', tick: 130, id: who, window_start_tick: 100, compatible_decisions: 30,
++      compatible_seconds: 1.5, reason: 'unaffordable_remaining', baseline_intake_material: 0,
++      baseline_intake_ticks: 0, sample: null, refractory_until: 730,
++    },
++  ]);
++  assert.ok(long.violations.some(v => /ran a whole window/.test(v)), long.violations);
++});
++
++test('a window that is never closed is reported rather than forgotten', () => {
++  const who = id(4, 2);
++  const {violations, open_at_end: open} = replayRule([attempt(100, who)]);
++  assert.equal(open, 1);
++  assert.match(violations[0], /never closed or censored/);
++});
++
++test('a refusal that failed to arm the cooldown is caught', () => {
++  const who = id(1);
++  const {violations} = replayRule([refusal(100, who, 'gestating', {refractory_until: 100})]);
++  assert.match(violations[0], /did not arm the cooldown/);
++});
++
++test('repeats are counted as repeats and distinct IDs as distinct', () => {
++  const who = id(7);
++  const rows = [
++    refusal(100, who, 'gestating', {sample: {escrow_started_tick: 40}}),
++    refusal(700, who, 'gestating', {sample: {escrow_started_tick: 40}}),
++    refusal(1300, who, 'gestating', {sample: {escrow_started_tick: 40}}),
++    refusal(1900, id(8), 'juvenile'),
++  ];
++  const {total, distinct, byForm} = reduceEvents(rows);
++  assert.equal(total.attempts, 4, 'every real attempt is kept');
++  assert.equal(total.refusals.gestating, 3);
++  assert.equal(distinct.attempted.size, 2);
++  assert.equal(distinct.refusedGestations.size, 1, 'three attempts, one gestation');
++  assert.equal(byForm[2].attempts, 4);
++});
++
++test('a censored window is a censored window and never a release', () => {
++  const who = id(3);
++  const rows = [
++    attempt(100, who),
++    {
++      kind: 'censor', tick: 112, id: who, window_start_tick: 100, compatible_decisions: 12,
++      compatible_seconds: 12 * DT, baseline_intake_material: 0.3, baseline_intake_ticks: 5,
++      censored: true,
++    },
++  ];
++  const {total, byForm, windows} = reduceEvents(rows);
++  assert.equal(total.releases, 0);
++  assert.equal(total.censored, 1);
++  assert.equal(total.refusals.run_end, 1);
++  // A right-censored window's decisions are real and belong to the form that earned them. This is
++  // the disagreement that failed the first pilot's own per-form table.
++  assert.equal(total.compatible_window_decisions, 12);
++  assert.equal(byForm[2].compatible_window_decisions, 12);
++  assert.equal(byForm[2].censored, 1);
++  assert.equal(windows[0].reason, 'run_end');
++  assert.deepEqual(replayRule(rows).violations, []);
++});
++
++test('a swept abort with no sample is still attributed to the form that opened the window', () => {
++  const who = id(5);
++  const rows = [
++    attempt(100, who, {sample: {form: 1}}),
++    {
++      kind: 'abort', tick: 105, id: who, window_start_tick: 100, compatible_decisions: 5,
++      compatible_seconds: 5 * DT, reason: 'baseline_gone', baseline_intake_material: 0.1,
++      baseline_intake_ticks: 2, sample: null, refractory_until: null,
++    },
++  ];
++  const {total, byForm} = reduceEvents(rows);
++  assert.equal(byForm[1].aborts, 1);
++  assert.equal(byForm[1].compatible_window_decisions, 5);
++  assert.equal(total.refusals.baseline_gone, 1);
++  assert.deepEqual(replayRule(rows).violations, []);
++});
++
++test('baseline intake cannot exceed the decisions the window had', () => {
++  const who = id(1);
++  const rows = [attempt(100, who), release(130, who, 100, {baseline_intake_ticks: 31})];
++  const {violations} = replayRule(rows);
++  assert.match(violations[0], /more baseline intake ticks than the window had decisions/);
++});
++
++test('episode statistics are per form and say what they measure', () => {
++  const episodes = Array.from({length: 8}, () => []);
++  episodes[2] = [
++    {elapsed_ticks: 20, positive_ticks: 4, assimilated: 0.2, credit: 0.1, quota: 0.1},
++    {elapsed_ticks: 60, positive_ticks: 9, assimilated: 0.3, credit: 0.1, quota: 0.1},
++    {elapsed_ticks: 100, positive_ticks: 12, assimilated: 0.4, credit: 0.1, quota: 0.1},
++  ];
++  const stats = episodeStats(episodes);
++  assert.equal(stats[2].attempts, 3);
++  assert.equal(stats[2].seconds_to_quota.min, 1);
++  assert.equal(stats[2].seconds_to_quota.max, 5);
++  assert.equal(stats[2].seconds_to_quota.median, 3);
++  assert.ok(stats[2].basis.includes('not the same as time spent eating'));
++  // A form that never attempted keeps a visible row rather than vanishing.
++  assert.equal(stats[0].attempts, 0);
++  assert.equal(stats[0].seconds_to_quota, null);
++});
++
++test('median of an empty distribution is absent, not zero', () => {
++  assert.equal(median([]), null);
++  assert.equal(median([1, 2, 3]), 2);
++});
++
++test('the usefulness screen is reported as unevaluated on a two-seed pilot', async t => {
++  if (!PILOT) {
++    t.skip(`the completed pilot is not on this machine (looked in ${CANDIDATES.join(', ')})`);
++    return;
++  }
++  const report = await reduce(PILOT);
++  assert.equal(report.screen.evaluated, false);
++  assert.equal(report.screen.thresholds.no_care_seeds, SCREEN.no_care_seeds);
++  assert.match(report.screen.why, /two seeds/);
++  assert.ok(report.limits.some(l => /not an upper bound/.test(l)));
++});
++
++test('the completed pilot reduces without a single disagreement', async t => {
++  if (!PILOT) {
++    t.skip(`the completed pilot is not on this machine (looked in ${CANDIDATES.join(', ')})`);
++    return;
++  }
++  const report = await reduce(PILOT);
++  assert.deepEqual(report.problems, [], 'the pilot disagrees with its own event stream');
++  assert.equal(report.reduction_passed, true);
++  assert.equal(report.arms.length, 4);
++  for (const arm of report.arms) {
++    assert.deepEqual(arm.replay.violations, [], `${arm.seed}/${arm.arm}`);
++    assert.equal(arm.replay.open_at_end, 0);
++    // Real opportunity really was found, and repeats really were preserved.
++    assert.ok(arm.reduced.total.attempts > 0, 'no attempt at all');
++    assert.ok(arm.reduced.total.attempts >= arm.reduced.distinct.attempted,
++      'attempts were collapsed to distinct IDs');
++    assert.ok(arm.screen_inputs.exposed_forms >= 2, 'only one form was ever exposed');
++  }
++});

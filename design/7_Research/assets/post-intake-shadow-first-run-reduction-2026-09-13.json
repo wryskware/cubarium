@@ -1,0 +1,1671 @@
+{
+  "kind": "post-intake-opportunity-shadow-reduction",
+  "root": "/home/wrysk/wryskware/cubarium/captures/post-intake-shadow-pilot-2026-09-13",
+  "build": "0.1.0+ac5975b",
+  "executable_sha256": "efb55c452defe7b69d53db7d76cd42a362ded1eb62851137cfe6982e87cac98a",
+  "source": {
+    "basis": "the actual bytes of the files that decide what this measurement means, hashed by this process at the moment it ran",
+    "files": {
+      "crates/cubarium-core/src/controller.rs": {
+        "bytes": 21946,
+        "sha256": "fe17d9f76cd50f022db8c1606bbd75e30d24ddea25ab3648cc0c11efa3369421"
+      },
+      "crates/cubarium-core/src/post_intake.rs": {
+        "bytes": 64349,
+        "sha256": "2bfe19bb10b452dd972ab46ba986d86f20160890e86c8718a759f11bbf50d8c7"
+      },
+      "crates/cubarium-core/src/quiet.rs": {
+        "bytes": 31734,
+        "sha256": "7f6dfb9c0a220247e48cd21bf5507ef4cfd9906ecb6ad99f349eff7189f08668"
+      },
+      "crates/cubarium-core/src/world.rs": {
+        "bytes": 239793,
+        "sha256": "d356c1ced37ae8538db9de6346810264887a79208544a719a7a74989848807a5"
+      },
+      "crates/cubarium/examples/post_intake_shadow.rs": {
+        "bytes": 68912,
+        "sha256": "1d27a781e1904158d4aec4c608a6bdb62ed76222c17e945c1181ce06c47c8d6b"
+      }
+    },
+    "root": "."
+  },
+  "reduction_passed": false,
+  "problems": [
+    "compatible_window_decisions: the summary says 10525, the stream says 10544",
+    "form 0 compatible_window_decisions: summary 2335, stream 2339",
+    "form 2 compatible_window_decisions: summary 5790, stream 5805",
+    "compatible_window_decisions: the summary says 10217, the stream says 10245",
+    "form 0 compatible_window_decisions: summary 2297, stream 2325",
+    "compatible_window_decisions: the summary says 7683, the stream says 7713",
+    "form 0 compatible_window_decisions: summary 2283, stream 2310",
+    "form 1 compatible_window_decisions: summary 930, stream 933"
+  ],
+  "arms": [
+    {
+      "seed": 1,
+      "arm": "off_nocare",
+      "problems": [
+        "compatible_window_decisions: the summary says 10525, the stream says 10544",
+        "form 0 compatible_window_decisions: summary 2335, stream 2339",
+        "form 2 compatible_window_decisions: summary 5790, stream 5805"
+      ],
+      "reduced": {
+        "total": {
+          "settlement_ticks": 0,
+          "attempts": 814,
+          "admissions": 353,
+          "releases": 350,
+          "aborts": 1,
+          "censored": 2,
+          "compatible_window_decisions": 10544,
+          "baseline_intake_in_windows": 2.9899592395345973,
+          "refusals": {
+            "dead": 0,
+            "hunter_member": 0,
+            "juvenile": 311,
+            "gestating": 21,
+            "inactive_mode": 0,
+            "invalid_inputs": 0,
+            "unaffordable": 129,
+            "overflow": 0,
+            "bounded": 0,
+            "unaffordable_remaining": 0,
+            "baseline_gone": 0,
+            "baseline_escrow": 1,
+            "baseline_juvenile": 0,
+            "run_end": 2
+          }
+        },
+        "by_form": [
+          {
+            "form": 0,
+            "settlement_ticks": 0,
+            "attempts": 184,
+            "admissions": 79,
+            "releases": 77,
+            "aborts": 1,
+            "censored": 1,
+            "compatible_window_decisions": 2339,
+            "baseline_intake_in_windows": 1.0304358979261015,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 71,
+              "gestating": 9,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 25,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 1,
+              "baseline_juvenile": 0,
+              "run_end": 1
+            }
+          },
+          {
+            "form": 1,
+            "settlement_ticks": 0,
+            "attempts": 164,
+            "admissions": 76,
+            "releases": 76,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 2280,
+            "baseline_intake_in_windows": 1.160887294642058,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 74,
+              "gestating": 9,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 5,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 2,
+            "settlement_ticks": 0,
+            "attempts": 449,
+            "admissions": 194,
+            "releases": 193,
+            "aborts": 0,
+            "censored": 1,
+            "compatible_window_decisions": 5805,
+            "baseline_intake_in_windows": 0.7543207250341181,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 154,
+              "gestating": 2,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 99,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 1
+            }
+          },
+          {
+            "form": 3,
+            "settlement_ticks": 0,
+            "attempts": 17,
+            "admissions": 4,
+            "releases": 4,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 120,
+            "baseline_intake_in_windows": 0.04431532193231951,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 12,
+              "gestating": 1,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 0,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 4,
+            "settlement_ticks": 0,
+            "attempts": 0,
+            "admissions": 0,
+            "releases": 0,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 0,
+            "baseline_intake_in_windows": 0,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 0,
+              "gestating": 0,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 0,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 5,
+            "settlement_ticks": 0,
+            "attempts": 0,
+            "admissions": 0,
+            "releases": 0,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 0,
+            "baseline_intake_in_windows": 0,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 0,
+              "gestating": 0,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 0,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 6,
+            "settlement_ticks": 0,
+            "attempts": 0,
+            "admissions": 0,
+            "releases": 0,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 0,
+            "baseline_intake_in_windows": 0,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 0,
+              "gestating": 0,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 0,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 7,
+            "settlement_ticks": 0,
+            "attempts": 0,
+            "admissions": 0,
+            "releases": 0,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 0,
+            "baseline_intake_in_windows": 0,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 0,
+              "gestating": 0,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 0,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          }
+        ],
+        "episodes": [
+          {
+            "form": 0,
+            "attempts": 184,
+            "seconds_to_quota": {
+              "min": 8.55,
+              "median": 10.600000000000001,
+              "max": 30.450000000000003,
+              "mean": 12.346739130434784
+            },
+            "positive_ticks": {
+              "min": 170,
+              "median": 210,
+              "max": 600
+            },
+            "assimilated_mean": 0.1298037759790376,
+            "quota": {
+              "min": 0.10231562714089153,
+              "max": 0.12578528297746067,
+              "distinct": 8
+            },
+            "basis": "the elapsed span from an episode's first positive settlement to the one that carried it to Q. Gappy intake means this is not the same as time spent eating."
+          },
+          {
+            "form": 1,
+            "attempts": 164,
+            "seconds_to_quota": {
+              "min": 8.1,
+              "median": 10.200000000000001,
+              "max": 29.950000000000003,
+              "mean": 11.361585365853658
+            },
+            "positive_ticks": {
+              "min": 163,
+              "median": 198,
+              "max": 600
+            },
+            "assimilated_mean": 0.12644239081356773,
+            "quota": {
+              "min": 0.11117888689041137,
+              "max": 0.12693251768543348,
+              "distinct": 6
+            },
+            "basis": "the elapsed span from an episode's first positive settlement to the one that carried it to Q. Gappy intake means this is not the same as time spent eating."
+          },
+          {
+            "form": 2,
+            "attempts": 449,
+            "seconds_to_quota": {
+              "min": 9.450000000000001,
+              "median": 30.400000000000002,
+              "max": 109.60000000000001,
+              "mean": 36.09265033407572
+            },
+            "positive_ticks": {
+              "min": 177,
+              "median": 600,
+              "max": 1214
+            },
+            "assimilated_mean": 0.07339486948314503,
+            "quota": {
+              "min": 0.05728971473872661,
+              "max": 0.07209353432079377,
+              "distinct": 4
+            },
+            "basis": "the elapsed span from an episode's first positive settlement to the one that carried it to Q. Gappy intake means this is not the same as time spent eating."
+          },
+          {
+            "form": 3,
+            "attempts": 17,
+            "seconds_to_quota": {
+              "min": 11.200000000000001,
+              "median": 12.25,
+              "max": 29.950000000000003,
+              "mean": 13.635294117647058
+            },
+            "positive_ticks": {
+              "min": 220,
+              "median": 242,
+              "max": 600
+            },
+            "assimilated_mean": 0.09773482332084307,
+            "quota": {
+              "min": 0.08870602386073385,
+              "max": 0.08870602386073385,
+              "distinct": 1
+            },
+            "basis": "the elapsed span from an episode's first positive settlement to the one that carried it to Q. Gappy intake means this is not the same as time spent eating."
+          },
+          {
+            "form": 4,
+            "attempts": 0,
+            "seconds_to_quota": null,
+            "assimilated_mean": null,
+            "quota": null
+          },
+          {
+            "form": 5,
+            "attempts": 0,
+            "seconds_to_quota": null,
+            "assimilated_mean": null,
+            "quota": null
+          },
+          {
+            "form": 6,
+            "attempts": 0,
+            "seconds_to_quota": null,
+            "assimilated_mean": null,
+            "quota": null
+          },
+          {
+            "form": 7,
+            "attempts": 0,
+            "seconds_to_quota": null,
+            "assimilated_mean": null,
+            "quota": null
+          }
+        ],
+        "windows": {
+          "closed": 353,
+          "full_length": 350,
+          "by_reason": {
+            "release": 350,
+            "baseline_escrow": 1,
+            "run_end": 2
+          },
+          "decisions": {
+            "min": 4,
+            "median": 30,
+            "max": 30
+          }
+        },
+        "distinct": {
+          "attempted": 114,
+          "admitted": 60,
+          "released": 60,
+          "refused_gestations": 21,
+          "refused_by_reason": {
+            "juvenile": 69,
+            "gestating": 18,
+            "unaffordable": 24
+          }
+        }
+      },
+      "screen_inputs": {
+        "eligible_adult_ticks": 651274,
+        "organism_ticks": 1194809,
+        "compatible_window_decisions": 10544,
+        "compatible_decisions_per_eligible_adult_tick": 0.016189806440914268,
+        "whole_world_compatible_window_fraction": 0.587,
+        "exposed_forms": 4,
+        "basis": "inputs to root's unvalidated usefulness screen, not a verdict on it: the screen asks for nine of twelve no-care seeds and this pilot ran two."
+      },
+      "replay": {
+        "violations": [],
+        "open_at_end": 0,
+        "tracked_ids": 114
+      }
+    },
+    {
+      "seed": 1,
+      "arm": "off_feed",
+      "problems": [
+        "compatible_window_decisions: the summary says 10217, the stream says 10245",
+        "form 0 compatible_window_decisions: summary 2297, stream 2325"
+      ],
+      "reduced": {
+        "total": {
+          "settlement_ticks": 0,
+          "attempts": 791,
+          "admissions": 343,
+          "releases": 340,
+          "aborts": 1,
+          "censored": 2,
+          "compatible_window_decisions": 10245,
+          "baseline_intake_in_windows": 2.8127173476247376,
+          "refusals": {
+            "dead": 0,
+            "hunter_member": 0,
+            "juvenile": 297,
+            "gestating": 19,
+            "inactive_mode": 0,
+            "invalid_inputs": 0,
+            "unaffordable": 132,
+            "overflow": 0,
+            "bounded": 0,
+            "unaffordable_remaining": 0,
+            "baseline_gone": 0,
+            "baseline_escrow": 1,
+            "baseline_juvenile": 0,
+            "run_end": 2
+          }
+        },
+        "by_form": [
+          {
+            "form": 0,
+            "settlement_ticks": 0,
+            "attempts": 176,
+            "admissions": 79,
+            "releases": 76,
+            "aborts": 1,
+            "censored": 2,
+            "compatible_window_decisions": 2325,
+            "baseline_intake_in_windows": 1.0139303066966043,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 64,
+              "gestating": 9,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 24,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 1,
+              "baseline_juvenile": 0,
+              "run_end": 2
+            }
+          },
+          {
+            "form": 1,
+            "settlement_ticks": 0,
+            "attempts": 153,
+            "admissions": 66,
+            "releases": 66,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 1980,
+            "baseline_intake_in_windows": 0.9762294679790472,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 73,
+              "gestating": 7,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 7,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 2,
+            "settlement_ticks": 0,
+            "attempts": 444,
+            "admissions": 194,
+            "releases": 194,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 5820,
+            "baseline_intake_in_windows": 0.7782422510167677,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 147,
+              "gestating": 2,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 101,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 3,
+            "settlement_ticks": 0,
+            "attempts": 18,
+            "admissions": 4,
+            "releases": 4,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 120,
+            "baseline_intake_in_windows": 0.04431532193231952,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 13,
+              "gestating": 1,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 0,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 4,
+            "settlement_ticks": 0,
+            "attempts": 0,
+            "admissions": 0,
+            "releases": 0,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 0,
+            "baseline_intake_in_windows": 0,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 0,
+              "gestating": 0,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 0,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 5,
+            "settlement_ticks": 0,
+            "attempts": 0,
+            "admissions": 0,
+            "releases": 0,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 0,
+            "baseline_intake_in_windows": 0,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 0,
+              "gestating": 0,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 0,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 6,
+            "settlement_ticks": 0,
+            "attempts": 0,
+            "admissions": 0,
+            "releases": 0,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 0,
+            "baseline_intake_in_windows": 0,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 0,
+              "gestating": 0,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 0,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 7,
+            "settlement_ticks": 0,
+            "attempts": 0,
+            "admissions": 0,
+            "releases": 0,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 0,
+            "baseline_intake_in_windows": 0,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 0,
+              "gestating": 0,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 0,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          }
+        ],
+        "episodes": [
+          {
+            "form": 0,
+            "attempts": 176,
+            "seconds_to_quota": {
+              "min": 8.5,
+              "median": 10.65,
+              "max": 51.800000000000004,
+              "mean": 12.37528409090909
+            },
+            "positive_ticks": {
+              "min": 163,
+              "median": 209,
+              "max": 1037
+            },
+            "assimilated_mean": 0.12744274345410977,
+            "quota": {
+              "min": 0.10231562714089153,
+              "max": 0.12578528297746067,
+              "distinct": 8
+            },
+            "basis": "the elapsed span from an episode's first positive settlement to the one that carried it to Q. Gappy intake means this is not the same as time spent eating."
+          },
+          {
+            "form": 1,
+            "attempts": 153,
+            "seconds_to_quota": {
+              "min": 8.1,
+              "median": 10,
+              "max": 29.950000000000003,
+              "mean": 10.948039215686276
+            },
+            "positive_ticks": {
+              "min": 163,
+              "median": 196,
+              "max": 486
+            },
+            "assimilated_mean": 0.12260428005056205,
+            "quota": {
+              "min": 0.11117888689041137,
+              "max": 0.12693251768543348,
+              "distinct": 6
+            },
+            "basis": "the elapsed span from an episode's first positive settlement to the one that carried it to Q. Gappy intake means this is not the same as time spent eating."
+          },
+          {
+            "form": 2,
+            "attempts": 444,
+            "seconds_to_quota": {
+              "min": 9.450000000000001,
+              "median": 30.55,
+              "max": 109.60000000000001,
+              "mean": 36.468693693693695
+            },
+            "positive_ticks": {
+              "min": 177,
+              "median": 600,
+              "max": 1105
+            },
+            "assimilated_mean": 0.07486020748557683,
+            "quota": {
+              "min": 0.05728971473872661,
+              "max": 0.07209353432079377,
+              "distinct": 4
+            },
+            "basis": "the elapsed span from an episode's first positive settlement to the one that carried it to Q. Gappy intake means this is not the same as time spent eating."
+          },
+          {
+            "form": 3,
+            "attempts": 18,
+            "seconds_to_quota": {
+              "min": 11.200000000000001,
+              "median": 13.100000000000001,
+              "max": 29.950000000000003,
+              "mean": 13.791666666666666
+            },
+            "positive_ticks": {
+              "min": 220,
+              "median": 253,
+              "max": 600
+            },
+            "assimilated_mean": 0.09723598415677552,
+            "quota": {
+              "min": 0.08870602386073385,
+              "max": 0.08870602386073385,
+              "distinct": 1
+            },
+            "basis": "the elapsed span from an episode's first positive settlement to the one that carried it to Q. Gappy intake means this is not the same as time spent eating."
+          },
+          {
+            "form": 4,
+            "attempts": 0,
+            "seconds_to_quota": null,
+            "assimilated_mean": null,
+            "quota": null
+          },
+          {
+            "form": 5,
+            "attempts": 0,
+            "seconds_to_quota": null,
+            "assimilated_mean": null,
+            "quota": null
+          },
+          {
+            "form": 6,
+            "attempts": 0,
+            "seconds_to_quota": null,
+            "assimilated_mean": null,
+            "quota": null
+          },
+          {
+            "form": 7,
+            "attempts": 0,
+            "seconds_to_quota": null,
+            "assimilated_mean": null,
+            "quota": null
+          }
+        ],
+        "windows": {
+          "closed": 343,
+          "full_length": 340,
+          "by_reason": {
+            "release": 340,
+            "baseline_escrow": 1,
+            "run_end": 2
+          },
+          "decisions": {
+            "min": 12,
+            "median": 30,
+            "max": 30
+          }
+        },
+        "distinct": {
+          "attempted": 112,
+          "admitted": 61,
+          "released": 60,
+          "refused_gestations": 19,
+          "refused_by_reason": {
+            "juvenile": 66,
+            "gestating": 16,
+            "unaffordable": 29
+          }
+        }
+      },
+      "screen_inputs": {
+        "eligible_adult_ticks": 661310,
+        "organism_ticks": 1205108,
+        "compatible_window_decisions": 10245,
+        "compatible_decisions_per_eligible_adult_tick": 0.015491978043580167,
+        "whole_world_compatible_window_fraction": 0.5773333333333334,
+        "exposed_forms": 4,
+        "basis": "inputs to root's unvalidated usefulness screen, not a verdict on it: the screen asks for nine of twelve no-care seeds and this pilot ran two."
+      },
+      "replay": {
+        "violations": [],
+        "open_at_end": 0,
+        "tracked_ids": 112
+      }
+    },
+    {
+      "seed": 8,
+      "arm": "off_nocare",
+      "problems": [],
+      "reduced": {
+        "total": {
+          "settlement_ticks": 0,
+          "attempts": 699,
+          "admissions": 264,
+          "releases": 264,
+          "aborts": 0,
+          "censored": 0,
+          "compatible_window_decisions": 7920,
+          "baseline_intake_in_windows": 2.1385320727653654,
+          "refusals": {
+            "dead": 0,
+            "hunter_member": 0,
+            "juvenile": 298,
+            "gestating": 12,
+            "inactive_mode": 0,
+            "invalid_inputs": 0,
+            "unaffordable": 125,
+            "overflow": 0,
+            "bounded": 0,
+            "unaffordable_remaining": 0,
+            "baseline_gone": 0,
+            "baseline_escrow": 0,
+            "baseline_juvenile": 0,
+            "run_end": 0
+          }
+        },
+        "by_form": [
+          {
+            "form": 0,
+            "settlement_ticks": 0,
+            "attempts": 190,
+            "admissions": 79,
+            "releases": 79,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 2370,
+            "baseline_intake_in_windows": 1.0306814228751324,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 81,
+              "gestating": 9,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 21,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 1,
+            "settlement_ticks": 0,
+            "attempts": 89,
+            "admissions": 39,
+            "releases": 39,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 1170,
+            "baseline_intake_in_windows": 0.5040230075208274,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 41,
+              "gestating": 2,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 7,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 2,
+            "settlement_ticks": 0,
+            "attempts": 420,
+            "admissions": 146,
+            "releases": 146,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 4380,
+            "baseline_intake_in_windows": 0.6038276423694041,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 176,
+              "gestating": 1,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 97,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 3,
+            "settlement_ticks": 0,
+            "attempts": 0,
+            "admissions": 0,
+            "releases": 0,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 0,
+            "baseline_intake_in_windows": 0,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 0,
+              "gestating": 0,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 0,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 4,
+            "settlement_ticks": 0,
+            "attempts": 0,
+            "admissions": 0,
+            "releases": 0,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 0,
+            "baseline_intake_in_windows": 0,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 0,
+              "gestating": 0,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 0,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 5,
+            "settlement_ticks": 0,
+            "attempts": 0,
+            "admissions": 0,
+            "releases": 0,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 0,
+            "baseline_intake_in_windows": 0,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 0,
+              "gestating": 0,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 0,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 6,
+            "settlement_ticks": 0,
+            "attempts": 0,
+            "admissions": 0,
+            "releases": 0,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 0,
+            "baseline_intake_in_windows": 0,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 0,
+              "gestating": 0,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 0,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 7,
+            "settlement_ticks": 0,
+            "attempts": 0,
+            "admissions": 0,
+            "releases": 0,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 0,
+            "baseline_intake_in_windows": 0,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 0,
+              "gestating": 0,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 0,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          }
+        ],
+        "episodes": [
+          {
+            "form": 0,
+            "attempts": 190,
+            "seconds_to_quota": {
+              "min": 7.300000000000001,
+              "median": 10.5,
+              "max": 39.25,
+              "mean": 11.312894736842106
+            },
+            "positive_ticks": {
+              "min": 147,
+              "median": 204,
+              "max": 735
+            },
+            "assimilated_mean": 0.11580811328977123,
+            "quota": {
+              "min": 0.09337604248563255,
+              "max": 0.12340138397114495,
+              "distinct": 10
+            },
+            "basis": "the elapsed span from an episode's first positive settlement to the one that carried it to Q. Gappy intake means this is not the same as time spent eating."
+          },
+          {
+            "form": 1,
+            "attempts": 89,
+            "seconds_to_quota": {
+              "min": 8.450000000000001,
+              "median": 10.25,
+              "max": 25.150000000000002,
+              "mean": 11.149438202247191
+            },
+            "positive_ticks": {
+              "min": 166,
+              "median": 202,
+              "max": 493
+            },
+            "assimilated_mean": 0.1233059675618201,
+            "quota": {
+              "min": 0.11399999856948853,
+              "max": 0.13197566025151425,
+              "distinct": 2
+            },
+            "basis": "the elapsed span from an episode's first positive settlement to the one that carried it to Q. Gappy intake means this is not the same as time spent eating."
+          },
+          {
+            "form": 2,
+            "attempts": 420,
+            "seconds_to_quota": {
+              "min": 6.6000000000000005,
+              "median": 29.950000000000003,
+              "max": 82.35000000000001,
+              "mean": 33.38761904761905
+            },
+            "positive_ticks": {
+              "min": 133,
+              "median": 600,
+              "max": 1140
+            },
+            "assimilated_mean": 0.07834908146365516,
+            "quota": {
+              "min": 0.054123068007972515,
+              "max": 0.06316162332448573,
+              "distinct": 5
+            },
+            "basis": "the elapsed span from an episode's first positive settlement to the one that carried it to Q. Gappy intake means this is not the same as time spent eating."
+          },
+          {
+            "form": 3,
+            "attempts": 0,
+            "seconds_to_quota": null,
+            "assimilated_mean": null,
+            "quota": null
+          },
+          {
+            "form": 4,
+            "attempts": 0,
+            "seconds_to_quota": null,
+            "assimilated_mean": null,
+            "quota": null
+          },
+          {
+            "form": 5,
+            "attempts": 0,
+            "seconds_to_quota": null,
+            "assimilated_mean": null,
+            "quota": null
+          },
+          {
+            "form": 6,
+            "attempts": 0,
+            "seconds_to_quota": null,
+            "assimilated_mean": null,
+            "quota": null
+          },
+          {
+            "form": 7,
+            "attempts": 0,
+            "seconds_to_quota": null,
+            "assimilated_mean": null,
+            "quota": null
+          }
+        ],
+        "windows": {
+          "closed": 264,
+          "full_length": 264,
+          "by_reason": {
+            "release": 264
+          },
+          "decisions": {
+            "min": 30,
+            "median": 30,
+            "max": 30
+          }
+        },
+        "distinct": {
+          "attempted": 94,
+          "admitted": 46,
+          "released": 46,
+          "refused_gestations": 12,
+          "refused_by_reason": {
+            "juvenile": 51,
+            "gestating": 10,
+            "unaffordable": 29
+          }
+        }
+      },
+      "screen_inputs": {
+        "eligible_adult_ticks": 535615,
+        "organism_ticks": 1083543,
+        "compatible_window_decisions": 7920,
+        "compatible_decisions_per_eligible_adult_tick": 0.014786740475901533,
+        "whole_world_compatible_window_fraction": 0.5033333333333333,
+        "exposed_forms": 3,
+        "basis": "inputs to root's unvalidated usefulness screen, not a verdict on it: the screen asks for nine of twelve no-care seeds and this pilot ran two."
+      },
+      "replay": {
+        "violations": [],
+        "open_at_end": 0,
+        "tracked_ids": 94
+      }
+    },
+    {
+      "seed": 8,
+      "arm": "off_feed",
+      "problems": [
+        "compatible_window_decisions: the summary says 7683, the stream says 7713",
+        "form 0 compatible_window_decisions: summary 2283, stream 2310",
+        "form 1 compatible_window_decisions: summary 930, stream 933"
+      ],
+      "reduced": {
+        "total": {
+          "settlement_ticks": 0,
+          "attempts": 706,
+          "admissions": 259,
+          "releases": 256,
+          "aborts": 1,
+          "censored": 2,
+          "compatible_window_decisions": 7713,
+          "baseline_intake_in_windows": 2.0398907605020615,
+          "refusals": {
+            "dead": 0,
+            "hunter_member": 0,
+            "juvenile": 316,
+            "gestating": 13,
+            "inactive_mode": 0,
+            "invalid_inputs": 0,
+            "unaffordable": 118,
+            "overflow": 0,
+            "bounded": 0,
+            "unaffordable_remaining": 0,
+            "baseline_gone": 0,
+            "baseline_escrow": 1,
+            "baseline_juvenile": 0,
+            "run_end": 2
+          }
+        },
+        "by_form": [
+          {
+            "form": 0,
+            "settlement_ticks": 0,
+            "attempts": 201,
+            "admissions": 78,
+            "releases": 76,
+            "aborts": 1,
+            "censored": 1,
+            "compatible_window_decisions": 2310,
+            "baseline_intake_in_windows": 1.0023129463815816,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 91,
+              "gestating": 10,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 22,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 1,
+              "baseline_juvenile": 0,
+              "run_end": 1
+            }
+          },
+          {
+            "form": 1,
+            "settlement_ticks": 0,
+            "attempts": 82,
+            "admissions": 32,
+            "releases": 31,
+            "aborts": 0,
+            "censored": 1,
+            "compatible_window_decisions": 933,
+            "baseline_intake_in_windows": 0.4262408754346301,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 39,
+              "gestating": 2,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 9,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 1
+            }
+          },
+          {
+            "form": 2,
+            "settlement_ticks": 0,
+            "attempts": 423,
+            "admissions": 149,
+            "releases": 149,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 4470,
+            "baseline_intake_in_windows": 0.6113369386858479,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 186,
+              "gestating": 1,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 87,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 3,
+            "settlement_ticks": 0,
+            "attempts": 0,
+            "admissions": 0,
+            "releases": 0,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 0,
+            "baseline_intake_in_windows": 0,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 0,
+              "gestating": 0,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 0,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 4,
+            "settlement_ticks": 0,
+            "attempts": 0,
+            "admissions": 0,
+            "releases": 0,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 0,
+            "baseline_intake_in_windows": 0,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 0,
+              "gestating": 0,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 0,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 5,
+            "settlement_ticks": 0,
+            "attempts": 0,
+            "admissions": 0,
+            "releases": 0,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 0,
+            "baseline_intake_in_windows": 0,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 0,
+              "gestating": 0,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 0,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 6,
+            "settlement_ticks": 0,
+            "attempts": 0,
+            "admissions": 0,
+            "releases": 0,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 0,
+            "baseline_intake_in_windows": 0,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 0,
+              "gestating": 0,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 0,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          },
+          {
+            "form": 7,
+            "settlement_ticks": 0,
+            "attempts": 0,
+            "admissions": 0,
+            "releases": 0,
+            "aborts": 0,
+            "censored": 0,
+            "compatible_window_decisions": 0,
+            "baseline_intake_in_windows": 0,
+            "refusals": {
+              "dead": 0,
+              "hunter_member": 0,
+              "juvenile": 0,
+              "gestating": 0,
+              "inactive_mode": 0,
+              "invalid_inputs": 0,
+              "unaffordable": 0,
+              "overflow": 0,
+              "bounded": 0,
+              "unaffordable_remaining": 0,
+              "baseline_gone": 0,
+              "baseline_escrow": 0,
+              "baseline_juvenile": 0,
+              "run_end": 0
+            }
+          }
+        ],
+        "episodes": [
+          {
+            "form": 0,
+            "attempts": 201,
+            "seconds_to_quota": {
+              "min": 7.25,
+              "median": 10.200000000000001,
+              "max": 41.300000000000004,
+              "mean": 11.153980099502489
+            },
+            "positive_ticks": {
+              "min": 146,
+              "median": 201,
+              "max": 732
+            },
+            "assimilated_mean": 0.11452657033154422,
+            "quota": {
+              "min": 0.09337604248563255,
+              "max": 0.12340138397114495,
+              "distinct": 11
+            },
+            "basis": "the elapsed span from an episode's first positive settlement to the one that carried it to Q. Gappy intake means this is not the same as time spent eating."
+          },
+          {
+            "form": 1,
+            "attempts": 82,
+            "seconds_to_quota": {
+              "min": 8.450000000000001,
+              "median": 10.05,
+              "max": 15.700000000000001,
+              "mean": 10.365853658536587
+            },
+            "positive_ticks": {
+              "min": 166,
+              "median": 198,
+              "max": 295
+            },
+            "assimilated_mean": 0.11745478872318671,
+            "quota": {
+              "min": 0.11399999856948853,
+              "max": 0.13197566025151425,
+              "distinct": 2
+            },
+            "basis": "the elapsed span from an episode's first positive settlement to the one that carried it to Q. Gappy intake means this is not the same as time spent eating."
+          },
+          {
+            "form": 2,
+            "attempts": 423,
+            "seconds_to_quota": {
+              "min": 6,
+              "median": 29.950000000000003,
+              "max": 82.35000000000001,
+              "mean": 33.66690307328605
+            },
+            "positive_ticks": {
+              "min": 121,
+              "median": 600,
+              "max": 1140
+            },
+            "assimilated_mean": 0.0788957555343031,
+            "quota": {
+              "min": 0.054123068007972515,
+              "max": 0.06316162332448573,
+              "distinct": 5
+            },
+            "basis": "the elapsed span from an episode's first positive settlement to the one that carried it to Q. Gappy intake means this is not the same as time spent eating."
+          },
+          {
+            "form": 3,
+            "attempts": 0,
+            "seconds_to_quota": null,
+            "assimilated_mean": null,
+            "quota": null
+          },
+          {
+            "form": 4,
+            "attempts": 0,
+            "seconds_to_quota": null,
+            "assimilated_mean": null,
+            "quota": null
+          },
+          {
+            "form": 5,
+            "attempts": 0,
+            "seconds_to_quota": null,
+            "assimilated_mean": null,
+            "quota": null
+          },
+          {
+            "form": 6,
+            "attempts": 0,
+            "seconds_to_quota": null,
+            "assimilated_mean": null,
+            "quota": null
+          },
+          {
+            "form": 7,
+            "attempts": 0,
+            "seconds_to_quota": null,
+            "assimilated_mean": null,
+            "quota": null
+          }
+        ],
+        "windows": {
+          "closed": 259,
+          "full_length": 256,
+          "by_reason": {
+            "release": 256,
+            "baseline_escrow": 1,
+            "run_end": 2
+          },
+          "decisions": {
+            "min": 3,
+            "median": 30,
+            "max": 30
+          }
+        },
+        "distinct": {
+          "attempted": 98,
+          "admitted": 47,
+          "released": 47,
+          "refused_gestations": 13,
+          "refused_by_reason": {
+            "juvenile": 54,
+            "gestating": 11,
+            "unaffordable": 27
+          }
+        }
+      },
+      "screen_inputs": {
+        "eligible_adult_ticks": 524491,
+        "organism_ticks": 1092863,
+        "compatible_window_decisions": 7713,
+        "compatible_decisions_per_eligible_adult_tick": 0.014705686084222609,
+        "whole_world_compatible_window_fraction": 0.47933333333333333,
+        "exposed_forms": 3,
+        "basis": "inputs to root's unvalidated usefulness screen, not a verdict on it: the screen asks for nine of twelve no-care seeds and this pilot ran two."
+      },
+      "replay": {
+        "violations": [],
+        "open_at_end": 0,
+        "tracked_ids": 98
+      }
+    }
+  ],
+  "screen": {
+    "thresholds": {
+      "eligible_adult_exposure": 0.002,
+      "whole_world_compatible_window_time": 0.15,
+      "no_care_seeds": 9,
+      "of_seeds": 12
+    },
+    "evaluated": false,
+    "why": "root's usefulness screen needs at least nine of twelve no-care seeds and contributions from more than one exposed form. This pilot ran two seeds, so the screen is not evaluated here and no pass or fail is claimed for it."
+  },
+  "limits": [
+    "A compatible window is the number of decisions the freely feeding baseline stayed compatible with holding. It is not a pause, not rest, not an upper bound on an intervention, and not measured missed food.",
+    "Baseline intake during a window is the baseline's own meal, recorded separately. An intervention would have changed the patch, the neighbours' shares, the position and every later stock in either direction.",
+    "Nothing here says whether any interval would be readable at native 64 px."
+  ]
+}
