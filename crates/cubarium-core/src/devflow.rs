@@ -1014,10 +1014,103 @@ mod tests {
         l.record_upkeep(a, 0.1, 0.1, 0.05, 0.25, 0.25, 1.0, 1.0, 1.0);
         l.record_intake_settlement(a, FeedingChannel::Grazing, 1.0, 0.6, 0.5, 0.125, 0.01);
         l.record_oxidation(a, true, true, 0.25, 0.375, 0.02);
-        l.close_tick(a, 0, Stocks { structure: 1.0, reserve: 2.25, energy: 1.5 });
+        // reserve: 2.0 + 0.5 grazed - 0.25 oxidised = 2.25.
+        // energy:  1.0 + 0.125 grazed + 0.375 oxidised - 0.25 upkeep = 1.25.
+        l.close_tick(a, 0, Stocks { structure: 1.0, reserve: 2.25, energy: 1.25 });
         let t = l.totals();
         assert_eq!((t.checks, t.violations), (1, 0));
         assert_eq!(t.worst_residual, Stocks::default());
+    }
+
+    #[test]
+    fn the_terminal_transaction_closes_the_member_and_disperses_both_bodies() {
+        let mut l = DevFlowLedger::new(0);
+        let a = id(3, 2);
+        open(&mut l, a, 42, Stocks { structure: 1.0, reserve: 0.5, energy: 0.3 });
+        l.record_upkeep(a, 0.06, 0.02, 0.02, 0.1, 0.1, 1.0, 1.0, 1.0);
+        l.open_boundary();
+        // The removal site closes the tick: no end-of-tick sweep reaches the tick a member
+        // dies on, so this is the only reconciliation the member's last tick ever gets.
+        l.record_death(
+            a,
+            42,
+            "starvation",
+            900,
+            Stocks { structure: 1.0, reserve: 0.5, energy: 0.2 },
+            Some(EscrowAmounts { structure: 0.4, reserve: 0.3, energy: 0.2 }),
+            ToDetritus { material: 1.5, energy_kept: 0.45, heat: 0.05 },
+            Some(ToDetritus { material: 0.7, energy_kept: 0.3, heat: 0.02 }),
+        );
+        let t = l.totals();
+        assert_eq!((t.checks, t.violations), (1, 0), "the terminal site must reconcile, not skip");
+        let d = l.members[&a].death.expect("a death record");
+        assert_eq!((d.decision_tick, d.event_tick), (42, 43), "the core stamps the event at now + 1");
+        assert_eq!(d.last_stepped_tick, 42);
+        assert_eq!(d.ticks_between_last_step_and_event, 1, "the final interval is explicit");
+        assert_eq!(d.cause, "starvation");
+        assert_eq!(d.to_detritus.material, 1.5);
+        let e = d.escrow_to_detritus.expect("a miscarried escrow disperses separately");
+        assert_eq!(e.material, 0.7, "the body and the escrow are never merged");
+    }
+
+    #[test]
+    fn the_funding_a_parent_paid_is_the_escrow_its_child_opens_with() {
+        let mut l = DevFlowLedger::new(0);
+        let (parent, child) = (id(6, 1), id(9, 1));
+        open(&mut l, parent, 10, Stocks { structure: 1.0, reserve: 2.0, energy: 1.0 });
+        l.record_funding(parent, 10, 0.4, 0.3, 0.2, 0.05);
+        // reserve debit 0.4 + 0.3, energy debit 0.05 + 0.2.
+        l.close_tick(parent, 10, Stocks { structure: 1.0, reserve: 1.3, energy: 0.75 });
+        l.open_boundary();
+        l.record_birth(
+            child,
+            parent,
+            11,
+            3,
+            Stocks { structure: 0.4, reserve: 0.3, energy: 0.2 },
+            0.9,
+            0.85,
+            1.8,
+        );
+        let t = l.totals();
+        assert_eq!((t.checks, t.violations), (1, 0), "funding must reconcile against the parent's stocks");
+        let p = &l.members[&parent];
+        assert_eq!((p.reproduction.funded, p.reproduction.births_delivered), (1, 1));
+        assert_eq!(p.reproduction.reserve_debit, 0.7);
+        assert_eq!(p.reproduction.energy_debit, 0.25);
+        let c = &l.members[&child];
+        assert_eq!(c.origin, "descendant");
+        assert_eq!(c.parent, Some(parent));
+        assert_eq!(c.born_tick, 11);
+        let pay = c.birth_payment.expect("the child carries the payment its parent made");
+        assert_eq!(pay.funded_tick, 10, "the child is priced at the tick the parent paid");
+        assert_eq!((pay.escrow.structure, pay.escrow.reserve, pay.escrow.energy), (0.4, 0.3, 0.2));
+        assert_eq!(pay.parent_reserve_debit, 0.7);
+        assert_eq!(pay.parent_energy_debit, 0.25);
+        assert_eq!(pay.build_heat, 0.05);
+        assert!(!pay.refunded);
+        assert_eq!(pay.slot_freed_same_boundary_by, None, "slot 9 was not freed this boundary");
+    }
+
+    #[test]
+    fn each_feeding_channel_keeps_its_own_source_and_they_reconcile_together() {
+        let mut l = DevFlowLedger::new(0);
+        let a = id(1, 1);
+        open(&mut l, a, 5, Stocks { structure: 1.0, reserve: 0.0, energy: 0.0 });
+        l.record_intake_settlement(a, FeedingChannel::Frugivory, 1.0, 0.2, 0.10, 0.01, 0.0);
+        l.record_intake_settlement(a, FeedingChannel::Grazing, 1.0, 0.5, 0.25, 0.02, 0.0);
+        l.record_intake_settlement(a, FeedingChannel::Scavenging, 1.0, 0.8, 0.40, 0.04, 0.0);
+        l.close_tick(a, 5, Stocks { structure: 1.0, reserve: 0.75, energy: 0.07 });
+        let t = l.totals();
+        assert_eq!((t.checks, t.violations), (1, 0));
+        let i = &l.members[&a].intake;
+        assert_eq!(i.frugivory.to_reserve, 0.10);
+        assert_eq!(i.grazing.to_reserve, 0.25);
+        assert_eq!(i.scavenging.to_reserve, 0.40);
+        assert_eq!(i.frugivory.energy, 0.01);
+        assert_eq!(i.grazing.energy, 0.02);
+        assert_eq!(i.scavenging.energy, 0.04);
+        assert_eq!(i.ticks_any_actual_intake, 0, "the tick is only counted when the close says so");
     }
 
     #[test]
@@ -1030,7 +1123,9 @@ mod tests {
         let t = l.totals();
         assert_eq!((t.checks, t.violations), (1, 1));
         assert_eq!(t.first_violation_tick, Some(7));
-        assert!((t.worst_residual.reserve + 0.25).abs() < 1e-15);
+        // `worst_residual` is a magnitude: the gate compares it against the tolerance, so the
+        // direction of the miss is deliberately not carried here.
+        assert!((t.worst_residual.reserve - 0.25).abs() < 1e-15);
     }
 
     #[test]
