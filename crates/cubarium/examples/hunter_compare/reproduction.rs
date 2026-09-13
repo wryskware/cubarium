@@ -365,6 +365,10 @@ impl ReproductionAudit {
                 }
                 Reproduction::NotFunded { parent, reason } => {
                     ensure!(
+                        !scratch.seen.closed.contains_key(&parent),
+                        "{parent:?} reported refused budding after closing a gestation in one pass"
+                    );
+                    ensure!(
                         !scratch.open.contains_key(&parent),
                         "{parent:?} reported a blocked funding while already gestating"
                     );
@@ -609,6 +613,11 @@ impl ReproductionAudit {
             key.parent
         );
         let held = self.take(open, key, "birth")?;
+        ensure!(
+            !seen.funded.contains(&key.parent) && !seen.refused.contains(&key.parent),
+            "{:?} reported both a due gestation and a new budding decision in one pass",
+            key.parent
+        );
 
         // The child is the escrow, and the structural material gave up its reserve energy.
         ensure!(close(child_structure, held.structure), "child structure {child_structure} is not the escrow's {}", held.structure);
@@ -699,6 +708,13 @@ impl ReproductionAudit {
             key.parent
         );
         let held = self.take(open, key, "refund")?;
+        // The due-birth branch precedes and excludes new budding. A freshly
+        // funded escrow can miscarry, but cannot already be due for a refund.
+        ensure!(
+            !seen.funded.contains(&key.parent) && !seen.refused.contains(&key.parent),
+            "{:?} reported both a due gestation and a new budding decision in one pass",
+            key.parent
+        );
         ensure!(close(refunded_structure, held.structure), "refunded structure is not the escrow's");
         ensure!(close(refunded_reserve, held.reserve), "refunded reserve is not the escrow's");
         ensure!(close(refunded_energy, held.energy), "refunded energy is not the escrow's");
@@ -1640,6 +1656,49 @@ mod tests {
         assert_eq!(watched, unwatched, "observation moved the world");
         assert_eq!(captures, same_captures);
         assert!(captures >= 1, "this fixture should settle a capture: {captures}");
+    }
+
+    // Additional independent branch-order probes (Astra, 2026-09-13).
+    #[test]
+    fn birth_cannot_also_report_a_refused_budding_branch() {
+        let mut staged = staged_birth();
+        let (_, parent, _) = born_record(&staged.hunter);
+        let before = staged.audit.summary();
+        let mut malformed = staged.hunter.clone();
+        malformed.push(blocked(staged.world.tick(), parent));
+        assert!(staged.audit.observe(&malformed, &staged.life, &staged.world.state).is_err());
+        assert_eq!(staged.audit.summary(), before);
+        staged.audit.observe(&staged.hunter, &staged.life, &staged.world.state).unwrap();
+    }
+
+    #[test]
+    fn a_member_cannot_fund_and_refund_in_the_same_physiology_pass() {
+        let mut world = quiet(WorldConfig::default());
+        let profile = breeder(&world);
+        let parent = found(&mut world, profile);
+        let mut audit = ReproductionAudit::new(&world.state).unwrap();
+        world.step();
+        let hunter = world.drain_hunter_events();
+        let life = world.drain_events();
+        assert!(!saw(&hunter, "funded"));
+        let before = audit.summary();
+        assert!(audit.observe(&fund_refund(&world, parent), &life, &world.state).is_err());
+        assert_eq!(audit.summary(), before);
+        audit.observe(&hunter, &life, &world.state).unwrap();
+    }
+
+    #[test]
+    fn maximum_tick_returns_an_atomic_error_without_panicking() {
+        let mut world = quiet(WorldConfig::default());
+        world.state.tick = u64::MAX;
+        let mut audit = ReproductionAudit::new(&world.state).unwrap();
+        let before = audit.summary();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            audit.observe(&[], &[], &world.state)
+        })).expect("checked next tick must not panic");
+        assert!(result.is_err());
+        assert_eq!(audit.summary(), before);
+        assert_eq!(audit.last_complete_tick(), u64::MAX);
     }
 
     // ------------------------------------------------------------ ported adversarial probes
