@@ -4,9 +4,11 @@
 use anyhow::{Context, Result, anyhow, ensure};
 use clap::Parser;
 use cubarium_core::{
-    CareCommand, CareKind, CareTarget, World, WorldConfig, WorldState, decode_snapshot,
+    CareCommand, CareKind, CareTarget, LifeEvent, OrganismId, World, WorldConfig, WorldState,
+    decode_snapshot,
 };
 use serde_json::{Value, json};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -46,13 +48,64 @@ fn energy(s: &WorldState) -> f64 {
             .sum::<f64>()
 }
 
-fn census(s: &WorldState) -> Value {
+/// Bounded by the living population, not by total births in a long experiment.
+/// A checkpoint's opening cohort is not necessarily its original founder lineage.
+struct Ancestry {
+    live: BTreeMap<OrganismId, (OrganismId, u64)>,
+    maximum_depth: u64,
+}
+
+impl Ancestry {
+    fn new(state: &WorldState) -> Self {
+        Self {
+            live: state
+                .organisms
+                .iter()
+                .map(|(id, _)| (id, (id, 0)))
+                .collect(),
+            maximum_depth: 0,
+        }
+    }
+
+    fn observe(&mut self, events: &[LifeEvent]) -> Result<()> {
+        // Resolve births before removals: a parent can die in the birth's tick.
+        for event in events {
+            if let LifeEvent::Birth { id, parent, .. } = event {
+                let (cohort, depth) = *self.live.get(parent).context("unobserved birth parent")?;
+                let depth = depth.checked_add(1).context("ancestry depth overflow")?;
+                ensure!(
+                    self.live.insert(*id, (cohort, depth)).is_none(),
+                    "duplicate birth id"
+                );
+                self.maximum_depth = self.maximum_depth.max(depth);
+            }
+        }
+        for event in events {
+            if let LifeEvent::Death { id, .. } = event {
+                ensure!(self.live.remove(id).is_some(), "unobserved death id");
+            }
+        }
+        Ok(())
+    }
+
+    fn surviving_cohorts(&self) -> usize {
+        self.live
+            .values()
+            .map(|(cohort, _)| *cohort)
+            .collect::<BTreeSet<_>>()
+            .len()
+    }
+}
+
+fn census(s: &WorldState, ancestry: &Ancestry) -> Value {
     let mut forms = [0u32; 8];
     for (_, o) in s.organisms.iter() {
         forms[usize::from(o.phenotype.form).min(7)] += 1;
     }
     json!({"tick":s.tick,"population":s.organisms.len(),"population_by_form":forms,
-        "producer":s.fields.p.iter().sum::<f64>(),"water":s.fields.w.iter().sum::<f64>()})
+        "producer":s.fields.p.iter().sum::<f64>(),"water":s.fields.w.iter().sum::<f64>(),
+        "surviving_opening_cohorts":ancestry.surviving_cohorts(),
+        "maximum_descendant_depth":ancestry.maximum_depth})
 }
 
 fn scheduled_kind(elapsed: u64, period: u64) -> Option<CareKind> {
@@ -73,7 +126,8 @@ fn run(initial: &WorldState, ticks: u64, care: bool, period: u64) -> Result<Valu
     let mut population_min = world.population();
     let mut population_max = population_min;
     let mut receipts = Vec::new();
-    let mut samples = vec![census(initial)];
+    let mut ancestry = Ancestry::new(initial);
+    let mut samples = vec![census(initial, &ancestry)];
     let mut extinction_tick = if population_min == 0 {
         Some(initial.tick)
     } else {
@@ -120,7 +174,11 @@ fn run(initial: &WorldState, ticks: u64, care: bool, period: u64) -> Result<Valu
         world
             .check_invariants()
             .map_err(|e| anyhow!("tick {}: {e}", world.tick()))?;
-        world.drain_events(); // Keep the observer's transient event list bounded.
+        ancestry.observe(&world.drain_events())?;
+        ensure!(
+            ancestry.live.len() == world.population() as usize,
+            "ancestry census mismatch"
+        );
         population_min = population_min.min(world.population());
         population_max = population_max.max(world.population());
         if world.population() == 0 && extinction_tick.is_none() {
@@ -129,7 +187,7 @@ fn run(initial: &WorldState, ticks: u64, care: bool, period: u64) -> Result<Valu
         // Read directly rather than calling telemetry(), which resets counters.
         // At most 145 samples for the maximum 24-hour run.
         if (elapsed + 1) % 12000 == 0 || elapsed + 1 == ticks {
-            samples.push(census(&world.state));
+            samples.push(census(&world.state, &ancestry));
         }
         let s = &world.state;
         let delta_feed = s.care.feed_material_in - initial.care.feed_material_in;
@@ -184,7 +242,9 @@ fn run(initial: &WorldState, ticks: u64, care: bool, period: u64) -> Result<Valu
         json!({"care":care,"population_min":population_min,"population_max":population_max,
         "max_absolute_drift":{"material":worst[0],"energy":worst[1],"water":worst[2]},
         "care_ledgers":ledgers,"receipts":receipts,"samples":samples,
-        "first_extinction_tick":extinction_tick,"final":sample}),
+        "first_extinction_tick":extinction_tick,
+        "surviving_opening_cohorts":ancestry.surviving_cohorts(),
+        "maximum_descendant_depth":ancestry.maximum_depth,"final":sample}),
     )
 }
 
@@ -217,7 +277,8 @@ fn main() -> Result<()> {
             "input":args.path,"seed":initial.config.seed,"input_schema":input_schema,"start_tick":initial.tick,
             "ticks":args.ticks,"simulated_seconds":args.ticks as f64 * cubarium_core::DT,
             "care_every_ticks":args.care_every,
-            "note":"Matched in-memory numerical scenario; forms are not founder lineages. No host durability or visual-response proof; survival is censored at the reported duration.",
+            "ancestry_basis":if args.seed.is_some() { "original founders" } else { "individuals alive at opening checkpoint; earlier ancestry unknown" },
+            "note":"Matched in-memory numerical scenario; forms are not lineages. No host durability or visual-response proof; survival is censored at the reported duration.",
             "baseline":baseline,"cared":cared
         }))?
     );
@@ -258,6 +319,42 @@ mod tests {
                 ]
             );
         }
+    }
+
+    #[test]
+    fn ancestry_preserves_a_dead_parent_and_distinguishes_reused_slots() {
+        let state = World::new(WorldConfig::default()).unwrap().state;
+        let mut ancestry = Ancestry::new(&state);
+        let parent = state.organisms.iter().next().unwrap().0;
+        let child = OrganismId {
+            slot: parent.slot,
+            generation: parent.generation + 1,
+        };
+        let death = LifeEvent::Death {
+            tick: 1,
+            id: parent,
+            age_ticks: 1,
+            cause: cubarium_core::organism::DeathCause::Age,
+            births: 1,
+            genome: 0,
+        };
+        let birth = LifeEvent::Birth {
+            tick: 1,
+            id: child,
+            parent,
+            parent_age_ticks: 1,
+            parent_births: 1,
+            genome: 0,
+            origin: cubarium_core::organism::Origin::Descendant,
+            mutations: vec![],
+        };
+        ancestry.observe(&[death, birth.clone()]).unwrap();
+        assert_eq!(ancestry.live.get(&child), Some(&(parent, 1)));
+        assert!(!ancestry.live.contains_key(&parent));
+        assert_eq!(ancestry.live.len(), state.organisms.len());
+        assert_eq!(ancestry.surviving_cohorts(), state.organisms.len());
+        assert_eq!(ancestry.maximum_depth, 1);
+        assert!(ancestry.observe(&[birth]).is_err());
     }
 
     #[test]
