@@ -49,6 +49,26 @@ contract. Respect the following updates to that plan:
 
 ## Required implementation, not a skeleton
 
+### New geometry and experiment evidence (read before core sign-off)
+
+Astra has now measured the actual selected rig in
+`lanternjaw-ecology-animation-contract-2026-09-13.md` (`2c8e90d`). The6px placeholder
+does NOT align with the body: ingestion jaw is8.5–9.6px forward and the extended
+near capture claw is approximately(13.2794,1.1624). Distinguish ingestion and
+capture; coordinate sense range, stopping distance, phase-end settlement and
+whole-body juvenile scale rather than merely moving an unconfirmed point.
+Root-owned contact charts must match the rig at vertices and clip at the rim;
+independently traveling/reflected appendage anchors can create invisible captures.
+If this evidence arrives after the first core profile is authored, label that
+profile/contact geometry unintegrated and expose the necessary parameters/data
+for the correction. Do not claim visual contact from six-pixel unit fixtures.
+
+`hunter-experiment-contract-2026-09-13.md` (`5ad6bbc`) defines the paired measurement:
+six arms, not one diet-confounded attacks-off control; all twelve seeds at2h,
+fixed placements, strict PRE-import inventories, capture-position-based recovery
+and right censoring. Root is preparing the exact cohort. These are candidate
+experimental parameters, not new canonical tuning decisions.
+
 Implement the detailed plan's explicit initialization, persisted finite validated
 profile/member extension, dedicated new RNG stream, local phase machine and paid
 escape/strike, common post-movement contact and single-claim resolution, carried
