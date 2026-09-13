@@ -19,12 +19,14 @@ in the current-status paragraph and the linked research reports below.
 
 ## Current release status
 
-Updated2026-09-13. Live build **`0.1.0+6d7a831`** resumes the same persistent world
-and drives the cube and shared viewer on7393. It includes independent care doses,
+Updated2026-09-13. Wrysk authorized discarding the old collapsed world and generated
+captures. The development launcher `scripts/run-cube.sh` builds current main with
+normal assets and drives the cube and shared viewer on7393; the prior6d7a831
+release is historical, not the deployment target. The implementation includes independent care doses,
 all seven plants' authored growth clips, spiretree wind, and actual-intake meal
 continuity, plus the stable sail swimming body, calm rest/feed fins, vine-covered
 spire sway and near-corner crown-growth continuity;1130 workspace tests and
-copied/live59.9fps measurements are recorded in the
+historical copied/live59.9fps measurements are recorded in the
 [rollout](7_Research/sail-calm-live-update-2026-09-13.md). Neither hunters nor modified
 ambient support nor a new rest policy is live.
 

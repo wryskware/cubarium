@@ -25,7 +25,8 @@ independent reviews, or a permanently pinned release workflow.
   be blocked by an agent-invented preservation requirement. Do not hide ecological
   decline behind a healthy process, passing numerical audits or smooth frame rate.
 
-At this correction the old6d7a831 process is still live. Changing this policy does
-not itself deploy current main, reset the world, or delete the88GiB capture tree.
-Discuss and execute that cleanup/deployment as the next concrete operation; do not
-start additional ecological or art research first.
+Wrysk subsequently authorized the cleanup and fresh-world deployment. Use
+`./scripts/run-cube.sh` to rebuild the current checkout and launch normal assets;
+stop the existing owner first. It does not silently erase state or auto-watch
+source files. Old raw captures are deliberately discarded, not missing backups;
+historical reports must not imply they can still be revalidated from local data.

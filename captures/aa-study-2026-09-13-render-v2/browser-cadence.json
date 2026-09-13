@@ -1,9 +1,0 @@
-{
-  "samples": 362,
-  "span_ms": 6016.400000000001,
-  "raf_fps": 60.002659397646426,
-  "p95_ms": 16.799999999999727,
-  "max_ms": 16.800000000000182,
-  "unique_frame_indices": 360,
-  "scope": "Local headless Chromium viewer cadence, not physical display or whole-world renderer throughput."
-}

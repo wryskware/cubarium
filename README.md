@@ -1,5 +1,13 @@
 # Cubarium
 
+Development launch: `./scripts/run-cube.sh` rebuilds the current checkout and
+drives the cube plus shared viewer at `http://127.0.0.1:7393/`, using normal
+`assets/atelier` and `state/`. Stop the existing runner before relaunching.
+There is no frozen-release deployment or automatic rebuild watcher. Completed
+development changes should be deployed by relaunching this script.
+Old captures and duplicate build trees are disposable; dated reports below
+describe historical runs, not promises that their raw artifacts are retained.
+
 A persistent artificial ecosystem living on the five visible surfaces of a
 64×64 LED cube. Small organisms should acquire recognizable habits and shapes,
 alter their surroundings, leave descendants, and sometimes disappear. The world
@@ -158,7 +166,7 @@ preceded the current vine update:
 1102 workspace tests passed; the same world resumed at tick633208, and the shared
 viewer measured59.9 distinct fps.
 
-Current live build **`0.1.0+6d7a831`** adds reviewed calm sail fins on top of
+The earlier **`0.1.0+6d7a831`** release added reviewed calm sail fins on top of
 crown continuity and vine wind. Feeding fins stay braced around the existing chew;
 resting fins make one brief adjustment instead of continuous tip chatter.
 It resumed the same world at tick801935 after1130 workspace tests passed;
@@ -166,7 +174,8 @@ the existing care journal and ecology were preserved. Copied and live viewers
 each measured59.9 distinct fps. See the [calm-fin rollout](design/7_Research/sail-calm-live-update-2026-09-13.md)
 and [earlier crown rollout](design/7_Research/crown-live-update-2026-09-13.md);
 the [earlier vine rollout](design/7_Research/vine-live-update-2026-09-13.md) retains its original measurements.
-Experimental quiet and hunter changes remain isolated.
+The development launcher now builds current main instead of that release copy.
+Experimental quiet and hunter behavior remains disabled by default.
 
 The [current release backlog](design/implementation-plan.md#current-release-status)
 is the concise source for remaining work; dated rollout reports preserve history.
