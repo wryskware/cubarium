@@ -5,6 +5,9 @@ not a species, a diet, a capability or a founder. No ecology, no hunting
 outcome, no footprint or seam validation is implied or claimed anywhere below.
 Source: `fable.js`, drawn by `art/studies/megafauna/index.html` (root's gallery).
 
+Wrysk preferred this candidate on 2026-09-12. Next-step engineering notes are in
+`integration-notes.md`; the preference does not imply production integration.
+
 ## What it is
 
 A long, low, segmented ambusher — mantis shrimp crossed with a glasswing. A
@@ -125,14 +128,15 @@ magenta blob with no eye socket; a dorsal antenna read as a bar floating beside
 the head and was cut; and the folded forelimbs plus a doubled set of legs turned
 the whole underside into a blue slab at 13×.
 
-## Limitations — read these before choosing
+## Limitations — read these before integration
 
 1. **It is an art study.** Nothing here has been checked against the surface
    renderer's nine-pixel radial stamp budget, the seam atlas, the vertex
-   ownership rule, or the cost of drawing a body this large. An 18 px body is
-   *twice* the 9 px extent the renderer currently enforces; if this direction is
-   chosen, that is the first engineering question, and it may well change the
-   proportions.
+   ownership rule, or the cost of drawing a body this large. Body length is not
+   the same measurement as the renderer's radial extent: the full painted pose,
+   its pivot and filtering support must fit. In particular, the strike reaches
+   x+12 before adding filtering support, beyond one stamp's 9 px radius. That is
+   the first engineering question and may affect how the body is split into parts.
 2. **The motion is deliberately stepped.** Every position is rounded to whole
    cube pixels, so the wave, the gait and the lunge move in 1 px jumps rather
    than smoothly. That is a pixel-art choice made for crispness under
