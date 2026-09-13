@@ -25,6 +25,7 @@ use crate::hunter::{
     HunterFounderReceipt, HunterPhase, HunterState, HunterTarget, HunterView,
 };
 use crate::ids::{OrganismId, Slots};
+use crate::flow;
 use crate::organism::{DeathCause, Escrow, Mode, Organism, Origin};
 use crate::pairs::{Body, NeighborLists};
 use crate::rng::{Counter, Stream, draw, normal, unit};
@@ -445,6 +446,10 @@ pub struct World {
     /// [`ChargingDiagnostics`] documents: never checkpointed, never hashed, never read by the
     /// tick.
     charging: ChargingDiagnostics,
+    /// The read-only per-member flow ledger (`crate::flow`), absent unless a diagnostic asks
+    /// for it. Transient in exactly the sense [`ChargingDiagnostics`] documents, and
+    /// additionally write-only: no branch, draw or clamp in the tick ever reads it.
+    flow: Option<Box<flow::FlowLedger>>,
     initial_material: f64,
 }
 
@@ -646,6 +651,7 @@ impl World {
             hunter_events: Vec::new(),
             counters: TickCounters::default(),
             charging: ChargingDiagnostics::default(),
+            flow: None,
             initial_material,
         };
         // Make the derived light/moisture readable before the first tick advances weather.
@@ -707,6 +713,7 @@ impl World {
                 hunter_events,
                 counters,
                 charging,
+                flow,
                 initial_material: _,
             } = &mut *self;
             let WorldState {
@@ -1156,6 +1163,9 @@ impl World {
                         let paid = cost.min(o.energy).max(0.0);
                         o.energy -= paid;
                         heat(paid);
+                        if let Some(ledger) = flow.as_deref_mut() {
+                            ledger.record_strike(id, now, cost, paid);
+                        }
                     }
                 }
 
@@ -1230,6 +1240,21 @@ impl World {
                 let paid = cost.min(o.energy).max(0.0);
                 o.energy -= paid;
                 heat(paid);
+                if let Some(ledger) = flow.as_deref_mut()
+                    && hunters.contains(*id)
+                {
+                    // The three terms of the core's own expression, recorded as demanded
+                    // beside the single clamped debit it actually paid.
+                    ledger.record_upkeep(
+                        *id,
+                        now,
+                        o.phenotype.maintenance * o.structure * dt,
+                        org_cfg.move_cost * o.structure * speed * dt,
+                        org_cfg.sense_cost * o.phenotype.sense_radius * dt,
+                        cost,
+                        paid,
+                    );
+                }
             }
 
             // 6b. Capture settlement, from the common post-movement state and before any
@@ -1495,6 +1520,19 @@ impl World {
                         let gained = (eta_e * spare).clamp(0.0, room);
                         o.energy += gained;
                         heat(spare - gained);
+                        if let Some(ledger) = flow.as_deref_mut()
+                            && hunters.contains(id)
+                        {
+                            ledger.record_field_feeding(
+                                id,
+                                now,
+                                flow::FeedingChannel::Frugivory,
+                                q,
+                                to_reserve,
+                                gained,
+                                spare - gained,
+                            );
+                        }
                         eaten += q;
                     }
                 }
@@ -1513,6 +1551,19 @@ impl World {
                         let gained = (eta_e * spare).clamp(0.0, room);
                         o.energy += gained;
                         heat(spare - gained);
+                        if let Some(ledger) = flow.as_deref_mut()
+                            && hunters.contains(id)
+                        {
+                            ledger.record_field_feeding(
+                                id,
+                                now,
+                                flow::FeedingChannel::Grazing,
+                                q,
+                                to_reserve,
+                                gained,
+                                spare - gained,
+                            );
+                        }
                         eaten += q;
                     }
                 }
@@ -1537,6 +1588,19 @@ impl World {
                         let gained = (eta_e * spare).clamp(0.0, room);
                         o.energy += gained;
                         heat(spare - gained);
+                        if let Some(ledger) = flow.as_deref_mut()
+                            && hunters.contains(id)
+                        {
+                            ledger.record_field_feeding(
+                                id,
+                                now,
+                                flow::FeedingChannel::Scavenging,
+                                q,
+                                to_reserve,
+                                gained,
+                                spare - gained,
+                            );
+                        }
                         eaten += q;
                     }
                 }
@@ -1565,6 +1629,9 @@ impl World {
                     let paid = handling.min(o.energy).max(0.0);
                     o.energy -= paid;
                     heat(paid);
+                    if let Some(ledger) = flow.as_deref_mut() {
+                        ledger.record_handling(m.id, now, handling, paid, paid >= handling);
+                    }
                     if paid < handling {
                         // It could not carry its meal this tick; the gut keeps everything and
                         // ordinary oxidation may refill the battery for the next one.
@@ -1586,6 +1653,17 @@ impl World {
                         o.energy += step.energy_gain;
                         fields.d[cell_of(&o.pos).index()] += step.to_detritus;
                         heat(step.heat);
+                        if let Some(ledger) = flow.as_deref_mut() {
+                            ledger.record_digestion(
+                                m.id,
+                                now,
+                                step.material,
+                                step.to_reserve,
+                                step.energy_gain,
+                                step.to_detritus,
+                                step.heat,
+                            );
+                        }
                         let member = &mut hunters.members[index];
                         member.gut_material -= step.material;
                         member.gut_energy -= step.carried;
@@ -1673,8 +1751,35 @@ impl World {
                         charging.extra_energy_gained += gained;
                         charging.extra_heat += released - gained;
                     }
+                    if let Some(ledger) = flow.as_deref_mut()
+                        && member.is_some()
+                    {
+                        ledger.record_oxidation(
+                            *id,
+                            now,
+                            burned,
+                            gained,
+                            released - gained,
+                            above_reference,
+                        );
+                    }
                 }
 
+                // The predicate's two sides, read here rather than recovered from the step
+                // that follows: a closed gate must be an observation, not the absence of one.
+                if let Some(ledger) = flow.as_deref_mut()
+                    && member.is_some()
+                {
+                    ledger.record_growth_gate(
+                        *id,
+                        now,
+                        o.structure,
+                        o.phenotype.structure_adult,
+                        o.reserve,
+                        org_cfg.growth_reserve_min * o.phenotype.reserve_max,
+                        o.energy,
+                    );
+                }
                 if o.structure < o.phenotype.structure_adult
                     && o.reserve > org_cfg.growth_reserve_min * o.phenotype.reserve_max
                 {
@@ -1682,12 +1787,14 @@ impl World {
                         (Some(_), Some(profile)) => profile.juvenile_growth_rate,
                         _ => org_cfg.growth_rate,
                     };
-                    let mut grown = (growth_rate * dt)
-                        .min(o.phenotype.structure_adult - o.structure)
-                        .min(o.reserve);
+                    let rate_term = growth_rate * dt;
+                    let remaining_term = o.phenotype.structure_adult - o.structure;
+                    let reserve_term = o.reserve;
+                    let mut grown = rate_term.min(remaining_term).min(reserve_term);
                     // Building is paid for up front: what the energy cannot cover is not built.
-                    if org_cfg.build_cost > 0.0 {
-                        grown = grown.min(o.energy / org_cfg.build_cost);
+                    let energy_term = (org_cfg.build_cost > 0.0).then(|| o.energy / org_cfg.build_cost);
+                    if let Some(energy_term) = energy_term {
+                        grown = grown.min(energy_term);
                     }
                     if grown > 0.0 {
                         o.reserve -= grown;
@@ -1696,6 +1803,21 @@ impl World {
                         o.energy -= cost;
                         // Structure holds no chemical energy: the reserve's energy is released.
                         heat(cost + e_r * grown);
+                        if let Some(ledger) = flow.as_deref_mut()
+                            && member.is_some()
+                        {
+                            ledger.record_growth(
+                                *id,
+                                now,
+                                grown,
+                                cost,
+                                cost + e_r * grown,
+                                rate_term,
+                                remaining_term,
+                                reserve_term,
+                                energy_term,
+                            );
+                        }
                     }
                 }
 
@@ -1732,6 +1854,11 @@ impl World {
                             o.reserve -= structure + reserve;
                             o.energy -= build + energy;
                             heat(build);
+                            if let Some(ledger) = flow.as_deref_mut()
+                                && member.is_some()
+                            {
+                                ledger.record_funding(*id, now, structure, reserve, energy, build);
+                            }
                             let genome = o.genome.clone();
                             o.escrow = Some(Escrow {
                                 structure,
@@ -1813,6 +1940,25 @@ impl World {
                     continue;
                 };
                 let cell = cell_of(&o.pos).index();
+                if let Some(ledger) = flow.as_deref_mut()
+                    && hunters.contains(*id)
+                {
+                    // The last stocks, read at the removal site: no end-of-tick probe reaches
+                    // the tick a member dies on, so this is what closes its reconciliation.
+                    ledger.record_death(
+                        *id,
+                        now,
+                        match cause {
+                            DeathCause::Starvation => "Starvation",
+                            DeathCause::Age => "Age",
+                            DeathCause::Collapse => "Collapse",
+                            DeathCause::Predation => "Predation",
+                        },
+                        o.structure,
+                        o.reserve,
+                        o.energy,
+                    );
+                }
                 // The body: structure carries no energy, the reserve carries `e_r` per unit.
                 let material = o.structure + o.reserve;
                 let energy = o.energy + e_r * o.reserve;
@@ -1913,6 +2059,17 @@ impl World {
                         let (reserve_before, energy_before) = (parent.reserve, parent.energy);
                         parent.reserve += escrow.structure + escrow.reserve;
                         parent.energy += escrow.energy;
+                        if let Some(ledger) = flow.as_deref_mut()
+                            && hunter_parent.is_some()
+                        {
+                            ledger.record_refund(
+                                *parent_id,
+                                now,
+                                escrow.structure,
+                                escrow.reserve,
+                                escrow.energy,
+                            );
+                        }
                         counters.cap_rejections += 1;
                         *cap_rejections_total += 1;
                         if hunter_parent.is_some() {
@@ -2030,8 +2187,33 @@ impl World {
                 };
                 let genome_digest = child.genome.digest();
                 let origin = child.origin;
+                let opening = flow::Stocks {
+                    tick: now + 1,
+                    structure: child.structure,
+                    reserve: child.reserve,
+                    energy: child.energy,
+                };
+                let child_shape = (
+                    child.phenotype.structure_adult,
+                    child.phenotype.reserve_max,
+                    child.phenotype.energy_max,
+                );
                 let child_id = organisms.insert(child);
                 if let Some(index) = hunter_parent {
+                    if let Some(ledger) = flow.as_deref_mut() {
+                        // The child's opening stocks are its escrow, read at the placement
+                        // that creates it, so its reconciliation starts from an actual value.
+                        ledger.register(
+                            child_id,
+                            now + 1,
+                            "Descendant",
+                            Some(*parent_id),
+                            opening,
+                            child_shape.0,
+                            child_shape.1,
+                            child_shape.2,
+                        );
+                    }
                     // The funded descendant joins the lineage with no target, an empty gut and
                     // a fresh attack counter, and the parent starts its recovery interval.
                     hunters.insert_member(hunter::HunterMember::new(child_id, now + 1));
@@ -2087,6 +2269,17 @@ impl World {
                 moved[slot].clear();
                 counters.births += 1;
                 *births_total += 1;
+            }
+
+            // The end-of-tick stock probe, after the commit and before the counter advances:
+            // one reading per live member per tick, against which this tick's recorded flows
+            // must reconcile exactly (`crate::flow::FlowLedger::probe`).
+            if let Some(ledger) = flow.as_deref_mut() {
+                for m in &hunters.members {
+                    if let Some(o) = organisms.get(m.id) {
+                        ledger.probe(m.id, now, o.structure, o.reserve, o.energy);
+                    }
+                }
             }
 
             *tick += 1;
@@ -2233,6 +2426,49 @@ impl World {
     /// What the member oxidation policy did that this world's configured threshold would not
     /// have done, since this `World` value was built. Read-only, transient and process-scoped;
     /// see [`ChargingDiagnostics`] for the exact transaction scope and time window.
+    /// Start recording the per-member flow ledger (`crate::flow`). Every member alive now is
+    /// registered from its current stocks; paid descendants register at their own birth.
+    /// Calling this twice keeps the first ledger.
+    ///
+    /// The ledger is write-only: nothing in [`World::step`] reads it, so enabling it cannot
+    /// change a trajectory. `crates/cubarium/examples/juvenile_flow.rs` proves that against
+    /// the retained artifacts rather than asserting it.
+    pub fn enable_flow_ledger(&mut self) {
+        if self.flow.is_some() {
+            return;
+        }
+        let mut ledger = flow::FlowLedger::new(self.state.tick);
+        for m in &self.state.hunters.members {
+            let Some(o) = self.state.organisms.get(m.id) else {
+                continue;
+            };
+            ledger.register(
+                m.id,
+                o.born_tick,
+                match o.origin {
+                    crate::organism::Origin::Founder => "Founder",
+                    crate::organism::Origin::Descendant => "Descendant",
+                },
+                o.parent,
+                flow::Stocks {
+                    tick: self.state.tick,
+                    structure: o.structure,
+                    reserve: o.reserve,
+                    energy: o.energy,
+                },
+                o.phenotype.structure_adult,
+                o.phenotype.reserve_max,
+                o.phenotype.energy_max,
+            );
+        }
+        self.flow = Some(Box::new(ledger));
+    }
+
+    /// Borrow the ledger, if one is recording.
+    pub fn flow_ledger(&self) -> Option<&flow::FlowLedger> {
+        self.flow.as_deref()
+    }
+
     pub fn charging_diagnostics(&self) -> ChargingDiagnostics {
         self.charging
     }

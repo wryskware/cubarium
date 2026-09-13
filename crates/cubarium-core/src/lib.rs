@@ -32,6 +32,7 @@ pub mod config;
 pub mod controller;
 pub mod events;
 pub mod fields;
+pub mod flow;
 pub mod genome;
 pub mod habitat;
 pub mod hunter;
