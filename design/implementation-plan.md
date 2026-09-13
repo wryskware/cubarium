@@ -17,7 +17,35 @@ reasoning and qualifications; the [experiment plan](experiments.md) gives E1–E
 protocols. These revisions remain `leaning`; completed experiments are recorded
 in the current-status paragraph and the linked research reports below.
 
-## Current deliverable — repository and vault
+## Current release status
+
+Updated2026-09-13. Live build **`0.1.0+d55d8af`** resumes the same persistent world
+and drives the cube and shared viewer on7393. It includes independent care doses,
+all seven plants' authored growth clips, spiretree wind, and actual-intake meal
+continuity;1098 workspace tests and59.9 distinct viewer fps are recorded in the
+[rollout](7_Research/meal-live-update-2026-09-13.md). Neither hunters nor modified
+ambient support nor a new rest policy is live.
+
+| Work | Verified state | Next gate |
+| --- | --- | --- |
+| Residual animation flicker | [Stable sail body + fin-only coverage](7_Research/astra-sail-stable-body-2026-09-13.md), a88b15b, committed; all other art unchanged | Independent Fable/root visual review, frozen release tests, copied-world preview before rollout |
+| Local care responses | [108-case screen](7_Research/astra-care-response-results-2026-09-13.md): Feed usually increases local feeding, rain mixed, Clean usually reduces feeding; meal continuity deployed | Further readable responses must reflect actual events; no global wakeup or invented satiation |
+| Quiet habits | [Diagnosis](7_Research/astra-quiet-results-2026-09-13.md) found no sustained active-to-rest transitions; [affordable post-birth policy](7_Research/astra-ordinary-quiet-experiment-proposal-2026-09-13.md) implementation in progress | Persistence/controller review, matched no-care/Feed behavior and viability screen; no live default change yet |
+| Ambient support | Reviewed3e9bc2f two-hour twelve-seed/six-arm collection finished; strict artifact/accounting reduction passes | Review every biological contrast before unchanged24/72h stages; manual dose remains separate |
+| Rare Lanternjaw lineage | Fable body/adapter ready; original charging screen produced paid births but no adult descendants and retained a shared-target failure | Reviewed512ee52 fix is in unchanged full-cohort reruns; maturation, self-replacement and prey/diversity outcomes remain unproven |
+| Fragile fauna/diversity | [Early-life census](7_Research/fauna-development-followup-2026-09-13.md) locates eight skimmer losses after initial population growth, about71–120 simulated minutes | All twelve tick-zero histories need individual growth/intake/allocation evidence through2h before tuning |
+| Later ideas | Persistent plant age/senescence/regrowth, tiny foliage details and possible LCD presentation remain recorded in the [animation roadmap](animation-roadmap.md) | Lower priority; not an authorized hardware migration |
+
+Ship verified visible slices without waiting for unrelated long experiments.
+Retain failed seeds and comparisons; tests and total surviving population alone
+do not establish ecology or whole-goal completion. Commit scoped work, use local
+checkpoint tags, and preserve the running world and care journal. No pushes.
+
+## Historical implementation record — not current deployment status
+
+The dated entries below describe their own checkpoints and evidence. Statements
+such as "in progress" or "live" in this section are historical; use the table
+above for the current release and remaining gates.
 
 Completed in the planning phase: Git repository initialization, root README and
 ignore rules, `lore-v1` authority configuration, a canon constitution and ledger,
@@ -136,31 +164,6 @@ AA comparison, autonomous-support tuning, lineage viability/diversity and the
 lower-priority plant-history/LCD ideas remain open. Use lightweight Git tags for
 code checkpoints and regularly ship verified visible improvements, per Wrysk's
 updated working preference; do not hold ready packages for unrelated backlog work.
-
-Current update, 2026-09-13: **`0.1.0+d55d8af` is live**, exactly resumed at560883
-with care sequence5 unchanged. It keeps the spiretree wind improvement and adds
-actual-intake meal continuity with reviewed bud/capture handoffs;1098 clean
-workspace tests passed and the shared viewer measured59.9 distinctfps. See the
-[same-world rollout](7_Research/meal-live-update-2026-09-13.md).
-The108-case isolated care screen is complete: Feed usually increases real local
-feeding, rain is mixed, cleanup usually reduces feeding; sustained Resting is
-not demonstrated. The [meal-continuity candidate](7_Research/meal-onset-continuity-2026-09-13.md)
-is deployed following matched visual/boundary review. The completed
-[quiet diagnosis](7_Research/astra-quiet-results-2026-09-13.md) explains why existing
-rest gates never open in the observed cohort; the
-[post-birth pause](7_Research/astra-ordinary-quiet-experiment-proposal-2026-09-13.md)
-is a proposal, not implemented biology. The
-[developmental follow-up](7_Research/fauna-development-followup-2026-09-13.md)
-requires earlier-life evidence for fragile skimmers. Keep this distinct from the
-reviewed natural-rainfall harness's isolated3e9bc2f two-hour collection now running.
-Both paid-charging jobs terminated; candidate seed6 retained an invariant failure,
-so the full matched screen cannot pass. The
-[complete retained interpretation](7_Research/astra-hunter-charging-results-2026-09-13.md)
-finds paid births but no adult descendants; the separately reviewed512ee52 cleanup
-fix is now in a fresh full twelve-seed paired rerun of the unchanged recipe.
-The [AA study](7_Research/astra-aa-comparison-2026-09-13.md) rejects
-blanket coverage baking as a default and proposes only a selective wing follow-up.
-All earlier failures and the broader goal/backlog above remain open.
 
 ## M1 — prove the surface and presentation path
 

@@ -29,8 +29,9 @@ Matched twelve-hour runs now exist; corrected accounting passes the original
 limits, but surviving total population does not establish ecological balance.
 See the [twelve-hour evidence](design/7_Research/corrected-care-twelve-hour-results-2026-09-13.md).
 The [developmental follow-up](design/7_Research/fauna-development-followup-2026-09-13.md)
-finds skimmers already absent in eight of twelve mature openings; studying early
-loss needs an earlier cohort, not only care applied to the survivors.
+now locates those eight skimmer losses in the original twelve-seed histories:
+initial populations grow, then disappear at about71–120 simulated minutes.
+Individual growth/intake/allocation still needs causal investigation from tick0.
 
 The first animation pass adds interpolated poses and turns, softer rain, and
 paced, resource-driven plant stages and tree height at 60 fps. Existing vegetation
@@ -38,10 +39,10 @@ initializes from the loaded world; ongoing growth is presentation history, not
 individual plant age. See the [animation review](design/7_Research/animation-slice1-2026-09-13.md)
 and the [ideas and next steps](design/animation-roadmap.md).
 
-The second animation pass adds a shared, intermittent breeze with rooted plant
-bends and joined tree/vine motion, plus an authored lanternstalk sprout-to-stalk
-growth pilot. Other growth stages retain their paced reveal transitions. These
-remain presentation changes: ecology still advances at 20 Hz, with 60 fps output.
+The second animation pass added a shared, intermittent breeze with rooted plant
+bends and joined tree/vine motion. The original lanternstalk growth pilot has since
+expanded to authored transitions for all seven plant species. These remain
+presentation changes: ecology advances at20Hz, with60fps output.
 See the [second-pass review](design/7_Research/animation-slice2-2026-09-12.md)
 for measurements, limits, and remaining work, including higher-resolution ideas.
 
@@ -81,7 +82,8 @@ is now deployed after matched visual and boundary review. The
 [quiet diagnosis](design/7_Research/astra-quiet-results-2026-09-13.md) found no
 active-to-rest transitions; an affordable post-birth pause remains a separate
 [experimental proposal](design/7_Research/astra-ordinary-quiet-experiment-proposal-2026-09-13.md).
-The quiet proposal is not implemented, and no hunter is live yet.
+The quiet policy is now being implemented as an isolated opt-in experiment; it is
+not yet reviewed, validated, or deployed. No hunter is live.
 
 The first complete [hunter screen](design/7_Research/hunter-profile3-two-hour-results-2026-09-13.md)
 ran all twelve seeds in six matched arms for two hours. All 72 numerical audits
@@ -132,14 +134,20 @@ durable amounts and schema-12 migration passed source, browser and restart check
 [Natural rainfall](design/7_Research/astra-ambient-support-experiment-proposal-2026-09-13.md)
 is a separate ambient-support experiment, not a changed default or a generic
 dependence-on-attention control. Its [reviewed harness](design/7_Research/astra-ambient-harness-review-2026-09-13.md)
-passed25 focused tests; the frozen3e9bc2f twelve-seed/six-arm two-hour screen is
-running in isolated copies. Both canopy plants' opening clips are
+passed25 focused tests; the frozen3e9bc2f twelve-seed/six-arm two-hour screen has
+finished. Full artifact/accounting consistency checks pass; biological contrasts
+are under review, not an accepted autonomy setting. Both canopy plants' opening clips are
 also live; missing clips in older/custom packs still use the reveal fallback.
 Spiretree wind and actual-intake meal continuity are now live;
 glasscane/vine headroom remains limited. The
 [AA comparison](design/7_Research/astra-aa-comparison-2026-09-13.md) retains the
 current renderer default: blanket coverage baking steadied wings but softened
-small bodies too much. A selective wing-only study remains a possible follow-up.
+small bodies too much. The [stable-sail candidate](design/7_Research/astra-sail-stable-body-2026-09-13.md)
+combines fin-only coverage with removal of an over-quantized body squash. It is
+committed at a88b15b and undergoing independent visual/release review, not live yet.
+
+The [current release backlog](design/implementation-plan.md#current-release-status)
+is the concise source for remaining work; dated rollout reports preserve history.
 
 Start with the [design overview](design/README.md), then the
 [implementation plan](design/implementation-plan.md). The
