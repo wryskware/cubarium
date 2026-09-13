@@ -30,6 +30,8 @@ fn main() -> Result<()> {
         "seed": state.config.seed,
         "population": state.organisms.len(),
         "state_hash": state_hash(&state).to_string(),
+        "ecology_hash": cubarium_core::ecology_hash(&state).to_string(),
+        "care": state.care,
         "material": state.fields.total_material() + organism_material,
         "nutrient": state.fields.n.iter().sum::<f64>(),
         "producer": state.fields.p.iter().sum::<f64>(),
