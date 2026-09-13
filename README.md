@@ -24,8 +24,10 @@ onto the canopy, ground cover, pools with shimmer and rain, and the four rigs.
 The art is a [Godot 4.7 project](art/README.md) baked headlessly into
 `assets/atelier`; see [art/PLANTS.md](art/PLANTS.md) for the plant contract.
 Without `--art` the older disc image is drawn unchanged. Known open items:
-the skimmer kind does not yet hold its numbers, population margins are thin,
-and no run longer than six simulated hours has been measured.
+the skimmer kind does not yet hold its numbers and lineage diversity is thin.
+Matched twelve-hour runs now exist; corrected accounting passes the original
+limits, but surviving total population does not establish ecological balance.
+See the [twelve-hour evidence](design/7_Research/corrected-care-twelve-hour-results-2026-09-13.md).
 
 The first animation pass adds interpolated poses and turns, softer rain, and
 paced, resource-driven plant stages and tree height at 60 fps. Existing vegetation

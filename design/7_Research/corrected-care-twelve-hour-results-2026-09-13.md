@@ -52,17 +52,37 @@ validate predator prey-recovery margins, or establish ecological stability beyon
 the measured horizon. Genuine pre-change schema7/8 continuation tests and restart
 tests are separate evidence reviewed in `1d7b386`.
 
-## Remaining schedule checks
+## Completed occasional-care checks
 
-Started with the SAME frozen corrected executable:
+Both additional runs completed with exit0 (root polled handles98612/77787), using
+the SAME frozen corrected executable:
 
 - Seed1 occasional, care cycle12000ticks: root exec98612,
   `seed1-occasional-compensated-window200.json`.
 - Seed2 occasional, care cycle12000ticks: root exec77787,
   `seed2-occasional-compensated-window200.json`.
 
-Each is another matched12h comparison. Seed1 has a complete old report for exact
-comparison; seed2's older occasional attempt failed before emitting JSON, so no
-missing old ecology can be invented. These handles were live at launch; poll them
-before reporting completion. No live state, user care or display transport was
-changed for any of these experiments.
+Each is another matched12h comparison,864000ticks with a12000tick care cycle
+and200tick independent observer window. Root read both full JSON results,
+verified their horizons/cadences and independently checked finite numerical peaks
+against the unchanged limits, not just the saved pass booleans.
+
+| Seed / arm | Raw legacy peak | Corrected peak | Independent windowed peak | Raw / joint gate |
+| --- | --- | --- | --- | --- |
+| 1 untreated | 1.6832076653e-5 | 2.3328539100e-10 | 6.4028427005e-10 | pass / pass |
+| 1 occasional | 2.2022607851e-5 | 9.0480511972e-11 | 1.2159375729e-9 | fail / pass |
+| 2 untreated | 1.8029561033e-5 | 8.5947249318e-11 | 1.2223608792e-9 | pass / pass |
+| 2 occasional | 2.4914762761e-5 | 2.2683366296e-10 | 1.5066916603e-9 | fail / pass |
+
+Maximum immediate care energy error is3.9168668309e-13. All material and water
+peaks also pass their original limits. Seed1's old occasional report was compared
+by deep equality over the same fields listed above, including all final telemetry
+except the new full-state hash: its ecology is unchanged. Seed2's older occasional
+attempt emitted no JSON, so this is new evidence, not a preservation comparison.
+
+The closing untreated/cared populations are129/93 for seed1 and120/111 for seed2.
+Both cared worlds still have zero skimmers. Seed2's cared world also has zero
+grazers (92 burrowers,19 gliders), versus6/93/21/0 in its untreated arm. Neither
+arm becomes extinct over this horizon; these observations do not excuse the
+remaining diversity and prey-recovery concerns. No live state, user care or
+display transport was changed for these experiments.
