@@ -276,7 +276,11 @@ pub enum ShadowEvent {
         sample: ShadowSample,
         /// The release boundary of the window this attempt opened, when it opened one.
         window_end_tick: Option<u64>,
-        /// The boundary before which no further attempt may fire.
+        /// The cooldown deadline this entry carries as the attempt ends. A **refusal** arms it
+        /// here, at `tick + REFRACTORY_TICKS`. An **admission** does not: the window itself is
+        /// what blocks a further attempt, and the operative deadline arrives with the close, so
+        /// what an admission reports here is the spent previous deadline (always `None` or at or
+        /// before `tick`), kept because it says what the animal had just come out of.
         refractory_until: Option<u64>,
     },
     /// A hypothetical window reached its release boundary with the baseline compatible throughout.
@@ -404,6 +408,10 @@ impl Episode {
 struct Window {
     start_tick: u64,
     end_tick: u64,
+    /// The form the admitted organism wore. Carried so a window closed away from its organism —
+    /// the commit sweep's removal, or the run's end — is still attributed to a form instead of
+    /// quietly landing only in the whole-world total.
+    form: u8,
     baseline_material: f64,
     baseline_ticks: u64,
 }
@@ -836,6 +844,7 @@ impl PostIntakeShadow {
                     entry.window = Some(Window {
                         start_tick: boundary,
                         end_tick: end,
+                        form,
                         baseline_material: 0.0,
                         baseline_ticks: 0,
                     });
@@ -899,9 +908,11 @@ impl PostIntakeShadow {
             self.entries.remove(&id);
             let Some(window) = window else { continue };
             let completed = boundary.saturating_sub(window.start_tick).min(WINDOW_DECISIONS);
-            self.counters.total.aborts += 1;
-            self.counters.total.completed_window_decisions += completed;
-            self.counters.total.refuse(ShadowReason::BaselineGone);
+            for e in self.counters.each(window.form) {
+                e.aborts += 1;
+                e.completed_window_decisions += completed;
+                e.refuse(ShadowReason::BaselineGone);
+            }
             self.events.push(ShadowEvent::Abort {
                 tick: boundary,
                 id,
@@ -934,8 +945,14 @@ impl PostIntakeShadow {
             .collect();
         for (id, window) in open {
             let completed = boundary.saturating_sub(window.start_tick).min(WINDOW_DECISIONS);
-            self.counters.total.censored += 1;
-            self.counters.total.refuse(ShadowReason::RunEnd);
+            // Right-censored, not discarded: the decisions the baseline really did stay
+            // compatible with are counted, and the interval is reported as censored so nobody
+            // reads a truncated window as a short one.
+            for e in self.counters.each(window.form) {
+                e.censored += 1;
+                e.completed_window_decisions += completed;
+                e.refuse(ShadowReason::RunEnd);
+            }
             self.events.push(ShadowEvent::Censor {
                 tick: boundary,
                 id,
@@ -1512,6 +1529,42 @@ mod tests {
         };
         assert_eq!((*reason, *completed_decisions), (ShadowReason::BaselineGone, 5));
         assert_eq!(s.entries(), 0);
+    }
+
+    /// A window that closes away from its organism — censored at the run's end, or swept when the
+    /// organism was removed — still belongs to a form. Counting it only in the whole-world total
+    /// makes the per-form rows disagree with the event stream, which is exactly the disagreement
+    /// an independent reduction is for.
+    #[test]
+    fn a_window_closed_away_from_its_organism_still_lands_in_its_forms_row() {
+        let o = adult();
+        let form = (o.phenotype.form as usize).min(7);
+        let q = quota(&o, &cfg(), true, true).unwrap();
+
+        let mut s = PostIntakeShadow::new(8);
+        let who = id(2, 1);
+        tick(&mut s, who, &o, 100, q);
+        let _ = events(&mut s);
+        s.censor(112);
+        let c = s.counters();
+        assert_eq!(c.total.censored, 1);
+        assert_eq!(c.by_form[form].censored, 1, "the censored window lost its form");
+        assert_eq!(c.total.completed_window_decisions, 12);
+        assert_eq!(
+            c.by_form[form].completed_window_decisions, 12,
+            "a right-censored window's compatible decisions are real and belong to the form"
+        );
+
+        let mut arena: Slots<Organism> = Slots::with_capacity(4);
+        let live = arena.insert(o.clone());
+        let mut s = PostIntakeShadow::new(4);
+        tick(&mut s, live, &o, 200, q);
+        let _ = events(&mut s);
+        arena.remove(live);
+        s.prune_removed(&arena, 207);
+        let c = s.counters();
+        assert_eq!(c.by_form[form].aborts, 1, "the swept window lost its form");
+        assert_eq!(c.by_form[form].completed_window_decisions, 7);
     }
 
     #[test]
