@@ -29,15 +29,20 @@ fn stepped_world(ticks: u64) -> World {
 /// Version 11 changed the *shape* of that extension — the measured capture effector, the
 /// ingestion mouth, the body scale and each member's transition origin
 /// (`design/7_Research/lanternjaw-core-art-integration-gaps-2026-09-13.md`).
+/// Version 12 changed the shape of `WorldState.care`: an in-flight shower persists the
+/// `dose_permille` it was admitted with
+/// (`design/7_Research/adjustable-care-dose-handoff-2026-09-13.md`).
 ///
-/// Version 8 was the first that migrates rather than refuses; version 11 migrates all four of
-/// its predecessors through their frozen mirrors, with an empty hunter extension, and zero
-/// care and zero corrections where those are missing too — except that a schema 10 payload
-/// carrying an *active* trial is refused by name rather than reinterpreted. Everything older is
-/// still rejected outright.
+/// Version 8 was the first that migrates rather than refuses; version 12 migrates all five of
+/// its predecessors through their frozen mirrors — every one of them carrying the frozen
+/// pre-dose care shape, whose in-flight showers open at the standard dose, and the older three
+/// an empty hunter extension, and the oldest two zero corrections and zero care besides. The
+/// one exception stands: a schema 10 payload carrying an *active* trial is refused by name
+/// rather than reinterpreted. Everything older is still rejected outright.
 #[test]
-fn the_schema_version_is_eleven_and_its_four_predecessors_still_load() {
-    assert_eq!(SCHEMA_VERSION, 11);
+fn the_schema_version_is_twelve_and_its_five_predecessors_still_load() {
+    assert_eq!(SCHEMA_VERSION, 12);
+    assert_eq!(cubarium_core::SCHEMA_V11, 11);
     assert_eq!(cubarium_core::SCHEMA_V10, 10);
     assert_eq!(cubarium_core::SCHEMA_V9, 9);
     assert_eq!(cubarium_core::SCHEMA_V8, 8);

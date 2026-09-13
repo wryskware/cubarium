@@ -28,7 +28,6 @@ use serde::{Deserialize, Serialize};
 use cubarium_surface::Vec2;
 
 use crate::accounting::EnergyCorrection;
-use crate::care::CareState;
 use crate::config::WorldConfig;
 use crate::fields::Fields;
 use crate::genome::Genome;
@@ -37,6 +36,8 @@ use crate::hunter::{HunterPhase, HunterRole, HunterState};
 use crate::ids::{OrganismId, Slots};
 use crate::organism::Organism;
 use crate::world::WorldState;
+
+use super::care_v1::{self, CareStateV1};
 
 /// The schema this mirror speaks.
 pub const SCHEMA_V10: u32 = 10;
@@ -140,7 +141,7 @@ pub struct WorldStateV10 {
     #[serde(default)]
     pub evap_out_total: f64,
     #[serde(default)]
-    pub care: CareState,
+    pub care: CareStateV1,
     #[serde(default)]
     pub energy_correction: EnergyCorrection,
     #[serde(default)]
@@ -171,7 +172,7 @@ pub fn project(state: &WorldState) -> Option<WorldStateV10> {
         heat_out_total: state.heat_out_total,
         rain_in_total: state.rain_in_total,
         evap_out_total: state.evap_out_total,
-        care: state.care.clone(),
+        care: care_v1::project(&state.care)?,
         energy_correction: state.energy_correction,
         hunters: HunterStateV10::default(),
     })
@@ -204,7 +205,7 @@ pub fn migrate(old: WorldStateV10) -> Result<WorldState, String> {
         heat_out_total: old.heat_out_total,
         rain_in_total: old.rain_in_total,
         evap_out_total: old.evap_out_total,
-        care: old.care,
+        care: old.care.into(),
         energy_correction: old.energy_correction,
         hunters: HunterState::default(),
     })

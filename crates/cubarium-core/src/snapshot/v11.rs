@@ -1,19 +1,21 @@
-//! The frozen schema 9 `WorldState`.
+//! The frozen schema 11 `WorldState`: the last build before the adjustable care dose.
 //!
 //! This is the field list of [`crate::world::WorldState`] exactly as it stood at commit
-//! `1f0fc3a`, the last pre-hunter build, with the same serde attributes. **Never change it.**
-//! `postcard` is not self-describing: the bytes of a schema 9 payload are this struct's
-//! fields in this order, so editing it silently misreads every live snapshot the accounting
-//! builds wrote.
+//! `e55501d`, with the same serde attributes — and, critically, with the **frozen pre-dose
+//! care shape** ([`super::care_v1::CareStateV1`]) rather than the live one, which grew
+//! `ActiveShower::dose_permille` in schema 12. **Never change it.**
 //!
-//! It has the same two jobs [`super::v7`] and [`super::v8`] have:
+//! The hunter extension is still the live [`HunterState`], because this package did not touch
+//! it. That borrow is exactly the bet schemas 8–11 made about care, and it came due here — so
+//! it is guarded rather than assumed: `tests/care_dose_migration.rs` decodes genuine schema 11
+//! payloads written by the pre-dose binary, and any change to the hunter shape that forgets to
+//! freeze it here fails that test rather than misreading a live world.
 //!
-//! 1. [`decode_snapshot`](super::decode_snapshot) reads a schema 9 payload into it and
-//!    converts to the current [`WorldState`] with `hunters = HunterState::default()` — an
-//!    empty, inert extension. Migration never introduces a predator.
-//! 2. [`project`] goes the other way, dropping only `hunters`, so a world migrated from
-//!    schema 9 and stepped forward with no hunters re-encodes to exactly the bytes the
-//!    pre-hunter build would have written: care, and the signed energy corrections, included.
+//! 1. [`decode_snapshot`](super::decode_snapshot) reads a schema 11 payload into this and
+//!    converts, opening any in-flight shower at the standard dose — the only dose that build
+//!    could deliver.
+//! 2. [`project`] goes the other way and **refuses** a world whose active shower is
+//!    nonstandard: the old shape has nowhere to put the amount.
 
 use serde::{Deserialize, Serialize};
 
@@ -29,42 +31,39 @@ use crate::world::WorldState;
 use super::care_v1::{self, CareStateV1};
 
 /// The schema this mirror speaks.
-pub const SCHEMA_V9: u32 = 9;
+pub const SCHEMA_V11: u32 = 11;
 
-/// `WorldState` as of commit `1f0fc3a`. Frozen; see the module docs.
+/// `WorldState` as of commit `e55501d`. Frozen; see the module docs.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct WorldStateV9 {
+pub struct WorldStateV11 {
     pub config: WorldConfig,
     pub tick: u64,
     pub fields: Fields,
     pub weather: Weather,
     pub organisms: Slots<Organism>,
-    /// Cumulative counters since world creation.
     pub births_total: u64,
     pub deaths_total: [u64; 3],
     pub cap_rejections_total: u64,
-    /// Material admitted from outside (founders and any future stimuli), for the invariant.
     pub external_material_in: f64,
-    /// Running energy audit: the raw, uncompensated counters.
     pub light_in_total: f64,
     pub heat_out_total: f64,
-    /// Running water budget (`design/water.md`).
     #[serde(default)]
     pub rain_in_total: f64,
     #[serde(default)]
     pub evap_out_total: f64,
-    /// Optional care, in the **frozen pre-dose shape** (`super::care_v1`).
+    /// The **pre-dose** care shape.
     #[serde(default)]
     pub care: CareStateV1,
-    /// The persisted signed energy corrections (`crate::accounting`).
     #[serde(default)]
     pub energy_correction: EnergyCorrection,
+    #[serde(default)]
+    pub hunters: HunterState,
 }
 
-/// The schema 9 projection of a current state: every field but `hunters` — or `None` when the
-/// active shower carries a nonstandard dose this shape cannot represent.
-pub fn project(state: &WorldState) -> Option<WorldStateV9> {
-    Some(WorldStateV9 {
+/// The schema 11 image of a current state, or `None` when there is no honest one: a shower
+/// falling at a nonstandard dose cannot be written into a shape with no dose.
+pub fn project(state: &WorldState) -> Option<WorldStateV11> {
+    Some(WorldStateV11 {
         config: state.config.clone(),
         tick: state.tick,
         fields: state.fields.clone(),
@@ -80,13 +79,13 @@ pub fn project(state: &WorldState) -> Option<WorldStateV9> {
         evap_out_total: state.evap_out_total,
         care: care_v1::project(&state.care)?,
         energy_correction: state.energy_correction,
+        hunters: state.hunters.clone(),
     })
 }
 
-/// Migration: a schema 9 world has never had a hunter, so the extension opens empty —
-/// no profile, no members, no imports, no counters. Nothing else is touched.
-impl From<WorldStateV9> for WorldState {
-    fn from(old: WorldStateV9) -> WorldState {
+/// Migration: everything carries across, and an in-flight shower opens at the standard dose.
+impl From<WorldStateV11> for WorldState {
+    fn from(old: WorldStateV11) -> WorldState {
         WorldState {
             config: old.config,
             tick: old.tick,
@@ -103,7 +102,7 @@ impl From<WorldStateV9> for WorldState {
             evap_out_total: old.evap_out_total,
             care: old.care.into(),
             energy_correction: old.energy_correction,
-            hunters: HunterState::default(),
+            hunters: old.hunters,
         }
     }
 }

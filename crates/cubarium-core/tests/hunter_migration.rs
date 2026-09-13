@@ -64,7 +64,8 @@ fn the_live_schema_nine_snapshot_migrates_without_a_hunter() {
     assert_eq!(state.hunters.imported_material(), 0.0);
     assert_eq!(state.hunters.imported_energy(), 0.0);
 
-    let projected = postcard::to_allocvec(&v9::project(&state)).expect("encodable");
+    let projected =
+        postcard::to_allocvec(&v9::project(&state).expect("standard care projects")).expect("encodable");
     assert_eq!(projected, payload(&bytes), "re-encoding the projection is not the original payload");
     // The provenance's own schema 9 hash, computed here from the file's bytes.
     assert_eq!(format!("{:x}", fnv1a(payload(&bytes))), "134f4db0135d8a0a");
@@ -95,7 +96,8 @@ fn an_empty_extension_reproduces_the_pre_hunter_binarys_next_600_ticks() {
     }
     assert_eq!(world.tick(), 174_000);
 
-    let projected = postcard::to_allocvec(&v9::project(&world.state)).expect("encodable");
+    let projected = postcard::to_allocvec(&v9::project(&world.state).expect("standard care projects"))
+        .expect("encodable");
     assert_eq!(
         projected,
         payload(&plus600),
@@ -128,7 +130,7 @@ fn the_older_projections_still_drop_only_what_they_are_named_for() {
     let (_, v8_state) = decode_snapshot(&bytes).expect("schema 8 loads");
     assert_eq!(v8_state.hunters, HunterState::default());
     assert_eq!(
-        postcard::to_allocvec(&v8::project(&v8_state)).unwrap(),
+        postcard::to_allocvec(&v8::project(&v8_state).expect("standard care projects")).unwrap(),
         payload(&bytes),
         "the schema 8 projection is still the original payload"
     );

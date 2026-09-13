@@ -1,0 +1,94 @@
+//! Writes the genuine pre-change schema 11 fixtures the adjustable-dose migration is tested
+//! against. Run only from an isolated copy of the tree **before** the schema changes; the
+//! snapshots it writes are what that build actually produced, not a struct relabelled as old.
+//!
+//! Two worlds, both from the default config and its own seed:
+//!
+//! * `care-v11-shower-*`: fed, cleaned, then rained on, checkpointed **mid-shower** so the
+//!   migration has to resume an unfinished rain, and continued 600 ticks.
+//! * `care-v11-hunters-*`: an actual hunter trial founded and stepped, fed once, checkpointed
+//!   and continued 600 ticks, so the migration is exercised against a real schema 11 extension.
+
+use std::path::PathBuf;
+
+use cubarium_core::care::{CareCommand, CareKind, CareTarget};
+use cubarium_core::hunter::{FixedHunterProfile, HunterTarget};
+use cubarium_core::{CareOutcome, SCHEMA_VERSION, World, WorldConfig, encode_snapshot};
+use cubarium_surface::{Face, SurfacePoint};
+
+const BUILD: &str = "pre-dose-fixture";
+
+fn target(face: Face, u: f64, v: f64) -> CareTarget {
+    let p = SurfacePoint::new(face, u, v);
+    CareTarget { face: p.face.index() as u8, u: p.u, v: p.v }
+}
+
+fn care(world: &mut World, seq: u64, kind: CareKind, at: CareTarget) {
+    let tick = world.tick();
+    let receipt = world.apply_care(&CareCommand { seq, apply_after_tick: tick, kind, target: at });
+    println!("  seq {seq} {:?} at tick {tick}: {:?}", kind, receipt.outcome);
+    assert!(
+        !matches!(receipt.outcome, CareOutcome::Rejected(_)),
+        "the fixture needs this command to land"
+    );
+}
+
+fn step_to(world: &mut World, tick: u64) {
+    while world.tick() < tick {
+        world.step();
+    }
+}
+
+fn write(dir: &PathBuf, name: &str, world: &World) {
+    let bytes = encode_snapshot(&world.state, BUILD);
+    let path = dir.join(name);
+    std::fs::write(&path, &bytes).expect("write the fixture");
+    println!(
+        "  wrote {name}: schema {SCHEMA_VERSION}, tick {}, {} bytes, population {}",
+        world.tick(),
+        bytes.len(),
+        world.population()
+    );
+}
+
+fn main() {
+    let dir = PathBuf::from(std::env::args().nth(1).expect("an output directory"));
+    std::fs::create_dir_all(&dir).expect("the output directory");
+    assert_eq!(SCHEMA_VERSION, 11, "this generator writes the pre-change schema");
+
+    // ---- a world with care history and an unfinished shower
+    println!("shower world:");
+    let mut world = World::new(WorldConfig::default()).expect("defaults are valid");
+    step_to(&mut world, 100);
+    care(&mut world, 1, CareKind::Feed, target(Face::Top, 20.0, 20.0));
+    step_to(&mut world, 200);
+    care(&mut world, 2, CareKind::Clean, target(Face::Front, 30.0, 30.0));
+    step_to(&mut world, 300);
+    care(&mut world, 3, CareKind::Rain, target(Face::Top, 40.0, 40.0));
+    // Mid-shower: 60 of its 120 samples are gone.
+    step_to(&mut world, 360);
+    let shower = &world.care().showers[0];
+    println!("  shower seq {} delivered {}/120", shower.seq, shower.delivered);
+    assert_eq!(shower.delivered, 60, "the fixture needs an unfinished shower");
+    write(&dir, "care-v11-shower-360.cubw", &world);
+    step_to(&mut world, 960);
+    assert!(world.care().showers.is_empty(), "the shower finished during the continuation");
+    write(&dir, "care-v11-shower-360-plus600.cubw", &world);
+
+    // ---- a world with an actual hunter trial
+    println!("hunter world:");
+    let mut world = World::new(WorldConfig::default()).expect("defaults are valid");
+    step_to(&mut world, 50);
+    let profile = FixedHunterProfile::lanternjaw_trial(world.config());
+    let receipt = world
+        .start_hunter_trial(profile, HunterTarget { face: 4, u: 32.0, v: 32.0 })
+        .expect("the trial starts");
+    println!("  founder {:?}, imported {} m / {} e", receipt.id, receipt.material_in, receipt.energy_in);
+    step_to(&mut world, 120);
+    care(&mut world, 1, CareKind::Feed, target(Face::Top, 24.0, 24.0));
+    step_to(&mut world, 200);
+    assert_eq!(world.hunters().members.len(), 1, "the fixture needs a live member");
+    write(&dir, "care-v11-hunters-200.cubw", &world);
+    step_to(&mut world, 800);
+    write(&dir, "care-v11-hunters-200-plus600.cubw", &world);
+}

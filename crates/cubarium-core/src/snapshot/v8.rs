@@ -19,13 +19,14 @@
 use serde::{Deserialize, Serialize};
 
 use crate::accounting::EnergyCorrection;
-use crate::care::CareState;
 use crate::config::WorldConfig;
 use crate::fields::Fields;
 use crate::habitat::Weather;
 use crate::ids::Slots;
 use crate::organism::Organism;
 use crate::world::WorldState;
+
+use super::care_v1::{self, CareStateV1};
 
 /// The schema this mirror speaks.
 pub const SCHEMA_V8: u32 = 8;
@@ -54,14 +55,18 @@ pub struct WorldStateV8 {
     pub rain_in_total: f64,
     #[serde(default)]
     pub evap_out_total: f64,
-    /// Optional care (`design/7_Research/care-contract-2026-09-12.md`).
+    /// Optional care (`design/7_Research/care-contract-2026-09-12.md`), in the **frozen
+    /// pre-dose shape**: schema 12 added `ActiveShower::dose_permille`, and this payload's
+    /// bytes are the shape without it (`super::care_v1`).
     #[serde(default)]
-    pub care: CareState,
+    pub care: CareStateV1,
 }
 
-/// The schema 8 projection of a current state: every field but `energy_correction`.
-pub fn project(state: &WorldState) -> WorldStateV8 {
-    WorldStateV8 {
+/// The schema 8 projection of a current state: every field but `energy_correction` — or
+/// `None` when the world's active shower carries a nonstandard dose, which this shape cannot
+/// represent and must not silently drop (`super::care_v1::project`).
+pub fn project(state: &WorldState) -> Option<WorldStateV8> {
+    Some(WorldStateV8 {
         config: state.config.clone(),
         tick: state.tick,
         fields: state.fields.clone(),
@@ -75,8 +80,8 @@ pub fn project(state: &WorldState) -> WorldStateV8 {
         heat_out_total: state.heat_out_total,
         rain_in_total: state.rain_in_total,
         evap_out_total: state.evap_out_total,
-        care: state.care.clone(),
-    }
+        care: care_v1::project(&state.care)?,
+    })
 }
 
 /// Migration: the corrections of a schema 8 world open at **zero**. Its raw totals are kept
@@ -98,7 +103,7 @@ impl From<WorldStateV8> for WorldState {
             heat_out_total: old.heat_out_total,
             rain_in_total: old.rain_in_total,
             evap_out_total: old.evap_out_total,
-            care: old.care,
+            care: old.care.into(),
             energy_correction: EnergyCorrection::default(),
             hunters: crate::hunter::HunterState::default(),
         }

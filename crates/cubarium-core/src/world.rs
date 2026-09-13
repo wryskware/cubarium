@@ -11,7 +11,7 @@ use cubarium_surface::{
 
 use crate::accounting::{self, EnergyCorrection, EnergyLedgers, Ledger};
 use crate::care::{
-    ActiveShower, CareApplied, CareCommand, CareKind, CareOutcome, CareReceipt, CareState,
+    ActiveShower, CareApplied, CareCommand, CareDose, CareKind, CareOutcome, CareReceipt, CareState,
 };
 use crate::config::{FounderKind, WorldConfig};
 use crate::controller::{Decision, Observation, TurnGate, decide, turn_toward};
@@ -652,8 +652,10 @@ impl World {
                 for shower in care.showers.iter() {
                     let k = shower.delivered as usize;
                     let Some(&e) = rain_envelope.get(k) else { continue };
+                    // The shower's own persisted dose, not whatever a panel now offers.
+                    let depth = shower.dose().scale(care::RAIN_DEPTH_TOTAL);
                     for (c, w) in shower.cells.iter().zip(shower.weights.iter()) {
-                        manual_rain[usize::from(*c)] += care::RAIN_DEPTH_TOTAL * w * e;
+                        manual_rain[usize::from(*c)] += depth * w * e;
                     }
                 }
                 Some(&**manual_rain)
@@ -1875,13 +1877,18 @@ impl World {
         }
         // From here the seq is spent whatever happens next.
         self.state.care.admitted_seq = cmd.seq;
+        // A dose outside the documented range is refused, not clamped — and it still spends
+        // its sequence, like every other admitted-then-rejected command.
+        if let Err(reason) = cmd.dose.validate("care dose") {
+            return receipt(CareOutcome::Rejected(reason));
+        }
         let Some(center) = cmd.target.resolve() else {
             return receipt(CareOutcome::Rejected("invalid target".into()));
         };
         let outcome = match cmd.kind {
-            CareKind::Feed => self.feed(center),
-            CareKind::Rain => self.shower(cmd.seq, tick, center),
-            CareKind::Clean => self.clean(center),
+            CareKind::Feed => self.feed(center, cmd.dose),
+            CareKind::Rain => self.shower(cmd.seq, tick, center, cmd.dose),
+            CareKind::Clean => self.clean(center, cmd.dose),
         };
         receipt(outcome)
     }
@@ -2165,12 +2172,17 @@ impl World {
     /// `De += rho·(m·w_c)` with `rho = detritus.energy_cap`, so `De ≤ energy_cap · D` is
     /// preserved cell by cell and existing scavenging diets can eat all of it. No organism
     /// state is touched: they find it by the sensing they already have.
-    fn feed(&mut self, center: CellId) -> CareOutcome {
-        let m = care::FEED_MATERIAL;
+    fn feed(&mut self, center: CellId, dose: CareDose) -> CareOutcome {
+        // The dose scales the nominal total this command moves, and nothing else: the
+        // footprint, the weights, the energy density and the allowance rule are unchanged.
+        let m = dose.scale(care::FEED_MATERIAL);
         // The bound is the nominal dose. The ledger books the actual f64 sums, which trail
         // the nominal total by a few ulps (a rim footprint sums `3 · w_c` to
         // `3.0000000000000004`), so without the tolerance the allowance would silently buy
         // one fewer feed at the rim than in the interior.
+        //
+        // A dose the remaining allowance cannot cover is **refused**, not quietly served
+        // smaller: the viewer asked for an amount, and a smaller one is a different answer.
         if self.state.care.allowance_used + m > care::FEED_ALLOWANCE + care::ALLOWANCE_TOLERANCE {
             return CareOutcome::Rejected("allowance exhausted".into());
         }
@@ -2199,7 +2211,7 @@ impl World {
     /// "Shower": register the one active shower. Cells and weights are resolved now, so a
     /// snapshot taken mid-shower resumes at the next undelivered sample over the same
     /// footprint. The weather source is never mutated.
-    fn shower(&mut self, seq: u64, tick: u64, center: CellId) -> CareOutcome {
+    fn shower(&mut self, seq: u64, tick: u64, center: CellId, dose: CareDose) -> CareOutcome {
         if !self.state.care.showers.is_empty() {
             return CareOutcome::Rejected("shower active".into());
         }
@@ -2211,10 +2223,13 @@ impl World {
             cells: footprint.iter().map(|(c, _)| c.0).collect(),
             weights: footprint.iter().map(|(_, w)| *w).collect(),
             delivered: 0,
+            // Persisted with the shower: the amount that was asked for is the amount its
+            // remaining samples deliver, across any number of restarts.
+            dose_permille: dose.permille(),
         });
         CareOutcome::Applied(CareApplied {
             // The scheduled total; what lands is booked tick by tick in `rain_depth_in`.
-            water_depth: care::RAIN_DEPTH_TOTAL,
+            water_depth: dose.scale(care::RAIN_DEPTH_TOTAL),
             cells,
             ends_tick: Some(tick + u64::from(care::RAIN_TICKS)),
             ..CareApplied::default()
@@ -2225,7 +2240,11 @@ impl World {
     /// energy density, so `De ≤ energy_cap · D` still holds. `N`, `P`, `F`, `w` and every
     /// organism are untouched, and the exported energy is an export, not heat dissipated
     /// inside the world.
-    fn clean(&mut self, center: CellId) -> CareOutcome {
+    fn clean(&mut self, center: CellId, dose: CareDose) -> CareOutcome {
+        // The dose scales the maximum export. The per-cell half-of-what-is-there limit, the
+        // footprint and the proportional energy export are untouched, so a larger dose still
+        // cannot sterilize a cell.
+        let cap = dose.scale(care::CLEAN_MATERIAL);
         let footprint = care::footprint(&self.graph, center, care::CLEAN_HOPS);
         let (mut material, mut energy) = (0.0, 0.0);
         for (cell, w) in &footprint {
@@ -2234,7 +2253,7 @@ impl World {
             if d <= 0.0 {
                 continue;
             }
-            let take = (care::CLEAN_FRACTION * d).min(care::CLEAN_MATERIAL * w);
+            let take = (care::CLEAN_FRACTION * d).min(cap * w);
             if take <= 0.0 {
                 continue;
             }
@@ -2258,7 +2277,7 @@ impl World {
             cells: footprint.len() as u32,
             ..CareApplied::default()
         };
-        if material + care::WEIGHT_TOLERANCE < care::CLEAN_MATERIAL {
+        if material + care::WEIGHT_TOLERANCE < cap {
             CareOutcome::Partial(q)
         } else {
             CareOutcome::Applied(q)

@@ -76,7 +76,7 @@ fn target_of(cell: CellId) -> CareTarget {
 }
 
 fn command(seq: u64, tick: u64, kind: CareKind, cell: CellId) -> CareCommand {
-    CareCommand { seq, apply_after_tick: tick, kind, target: target_of(cell) }
+    CareCommand::standard(seq, tick, kind, target_of(cell))
 }
 
 // ---------------------------------------------------------------- migration
@@ -101,7 +101,8 @@ fn the_live_schema_eight_snapshot_migrates_with_zero_corrections() {
     assert_eq!(state.heat_out_corrected(), state.heat_out_total);
     assert!(state.light_in_total > 0.0 && state.heat_out_total > 0.0);
 
-    let projected = postcard::to_allocvec(&v8::project(&state)).expect("encodable");
+    let projected = postcard::to_allocvec(&v8::project(&state).expect("standard care projects"))
+        .expect("encodable");
     assert_eq!(projected, payload(&bytes), "re-encoding the projection is not the original payload");
     // The care-era ecology hash is unmoved as well: it reads the schema 7 projection.
     assert_eq!(ecology_hash(&state), fnv1a(&postcard::to_allocvec(&v7::project(&state)).unwrap()));
@@ -135,7 +136,8 @@ fn zero_corrections_reproduce_the_pre_correction_binarys_next_600_ticks() {
     }
     assert_eq!(world.tick(), 173_400);
 
-    let projected = postcard::to_allocvec(&v8::project(&world.state)).expect("encodable");
+    let projected = postcard::to_allocvec(&v8::project(&world.state).expect("standard care projects"))
+        .expect("encodable");
     assert_eq!(
         projected,
         payload(&plus600),

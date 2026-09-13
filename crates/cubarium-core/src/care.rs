@@ -52,6 +52,73 @@ pub const WEIGHT_TOLERANCE: f64 = 1e-12;
 /// stay exact.
 pub const ALLOWANCE_TOLERANCE: f64 = 1e-9;
 
+/// How much of a dose one command asks for, in **permille of the standard dose**
+/// (`design/7_Research/adjustable-care-dose-handoff-2026-09-13.md`).
+///
+/// A bounded total multiplier on the nominal amount a command moves — never a per-cell
+/// multiplier, and never a way to queue several commands as one. The integer is the identity:
+/// two requests carrying 1000 are the same request, with no float-equivalence ambiguity.
+///
+/// [`CareDose::STANDARD`] is what every command meant before this existed, and it is applied by
+/// a documented identity branch, so a standard dose is the **same arithmetic, bit for bit**,
+/// as the pre-dose builds performed. Only a nonstandard dose multiplies anything.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+pub struct CareDose(u16);
+
+impl CareDose {
+    /// Smallest and largest dose a command may carry, in permille.
+    pub const MIN_PERMILLE: u16 = 250;
+    pub const MAX_PERMILLE: u16 = 2000;
+    /// The dose every pre-dose command meant, and what an omitted field means.
+    pub const STANDARD_PERMILLE: u16 = 1000;
+    /// The wire version of this capability, for a host that advertises it.
+    pub const VERSION: u32 = 1;
+    /// The standard dose.
+    pub const STANDARD: CareDose = CareDose(Self::STANDARD_PERMILLE);
+
+    /// A dose from permille, or the reason it is not one. Out-of-range values are **refused**,
+    /// never clamped: a request for twice the maximum is a mistake to report, not a request for
+    /// the maximum.
+    pub fn new(permille: u16) -> Result<CareDose, String> {
+        if !(Self::MIN_PERMILLE..=Self::MAX_PERMILLE).contains(&permille) {
+            return Err(format!(
+                "dose_permille {permille} is outside {}..={}",
+                Self::MIN_PERMILLE,
+                Self::MAX_PERMILLE
+            ));
+        }
+        Ok(CareDose(permille))
+    }
+
+    pub fn permille(self) -> u16 {
+        self.0
+    }
+
+    pub fn is_standard(self) -> bool {
+        self.0 == Self::STANDARD_PERMILLE
+    }
+
+    /// `nominal · permille / 1000`, and **exactly `nominal`** at the standard dose.
+    ///
+    /// The identity branch is deliberate: `x * 1000.0 / 1000.0` is not bit-identical to `x` for
+    /// every `x`, and a world that takes no nonstandard dose must step exactly as it did before
+    /// this field existed.
+    pub fn scale(self, nominal: f64) -> f64 {
+        if self.is_standard() { nominal } else { nominal * f64::from(self.0) / 1000.0 }
+    }
+
+    /// Range check for a dose that came off a snapshot rather than through [`CareDose::new`].
+    pub fn validate(self, what: &str) -> Result<(), String> {
+        CareDose::new(self.0).map(|_| ()).map_err(|e| format!("{what}: {e}"))
+    }
+}
+
+impl Default for CareDose {
+    fn default() -> Self {
+        CareDose::STANDARD
+    }
+}
+
 /// `FEED_ENERGY_DENSITY`: the world's `detritus.energy_cap`, so fed crumbs are fully
 /// charged and fully edible to existing scavenging diets while `De ≤ energy_cap · D` is
 /// preserved exactly (a cell gains `rho · x` of `De` for `x` of `D`).
@@ -110,6 +177,17 @@ pub struct CareCommand {
     pub apply_after_tick: u64,
     pub kind: CareKind,
     pub target: CareTarget,
+    /// How much of the standard amount to move. Transient: this type is the host→world wire,
+    /// never part of a snapshot. A command whose dose is out of range is rejected on
+    /// admission, spending its sequence like any other rejection.
+    pub dose: CareDose,
+}
+
+impl CareCommand {
+    /// A command at the standard dose — what every pre-dose caller meant.
+    pub fn standard(seq: u64, apply_after_tick: u64, kind: CareKind, target: CareTarget) -> CareCommand {
+        CareCommand { seq, apply_after_tick, kind, target, dose: CareDose::STANDARD }
+    }
 }
 
 /// The contract's `q`: what actually happened, in the world's own units.
@@ -189,6 +267,19 @@ pub struct ActiveShower {
     pub weights: Vec<f64>,
     /// Samples already delivered; the next sample is `envelope[delivered]`.
     pub delivered: u32,
+    /// The dose this shower was admitted with, in permille, **persisted** so a restart
+    /// delivers its remaining samples at the amount that was actually asked for. Changing a
+    /// panel selection cannot change a shower already falling. A world migrated from a
+    /// pre-dose schema opens its in-flight rain at [`CareDose::STANDARD`], which is what it
+    /// was.
+    pub dose_permille: u16,
+}
+
+impl ActiveShower {
+    /// The dose this shower is delivering.
+    pub fn dose(&self) -> CareDose {
+        CareDose(self.dose_permille)
+    }
 }
 
 /// Everything care adds to `WorldState`. Appended last; nothing else is reordered.
@@ -248,6 +339,9 @@ impl CareState {
             if s.cells.len() > CELL_COUNT {
                 return Err(format!("care shower {} covers more cells than the surface has", s.seq));
             }
+            // The persisted dose is range-checked like every other decoded value: a shower
+            // whose dose is outside the documented bounds is refused, never clamped.
+            s.dose().validate(&format!("care shower {}", s.seq))?;
             // A footprint is a set: a repeated cell would take its share twice.
             let mut seen = vec![false; CELL_COUNT];
             for &c in &s.cells {

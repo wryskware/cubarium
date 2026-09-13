@@ -9,8 +9,9 @@
 use std::path::PathBuf;
 
 use cubarium_core::care::{
-    ActiveShower, CLEAN_MATERIAL, CareCommand, CareKind, CareOutcome, CareState, CareTarget,
-    FEED_ALLOWANCE, FEED_MATERIAL, RAIN_DEPTH_TOTAL, RAIN_TICKS, footprint, rain_envelope,
+    ActiveShower, CLEAN_MATERIAL, CareCommand, CareDose, CareKind, CareOutcome, CareState,
+    CareTarget, FEED_ALLOWANCE, FEED_MATERIAL, RAIN_DEPTH_TOTAL, RAIN_TICKS, footprint,
+    rain_envelope,
 };
 use cubarium_core::snapshot::{HEADER_FIXED_BYTES, state_hash, v7};
 use cubarium_core::world::WorldState;
@@ -69,7 +70,7 @@ fn target_of(cell: CellId) -> CareTarget {
 }
 
 fn command(seq: u64, tick: u64, kind: CareKind, cell: CellId) -> CareCommand {
-    CareCommand { seq, apply_after_tick: tick, kind, target: target_of(cell) }
+    CareCommand::standard(seq, tick, kind, target_of(cell))
 }
 
 /// A world with no natural rain and no flow or evaporation, so every drop of water in it
@@ -538,6 +539,7 @@ fn a_wrong_seq_or_a_wrong_boundary_changes_nothing_and_void_only_moves_the_curso
         apply_after_tick: tick,
         kind: CareKind::Feed,
         target: CareTarget { face: 9, u: FACE_EXTENT * 2.0, v: f64::NAN },
+        dose: CareDose::STANDARD,
     };
     assert_eq!(world.apply_care(&bad).outcome, CareOutcome::Rejected("invalid target".into()));
     assert_eq!(world.care().admitted_seq, 3);
@@ -600,6 +602,7 @@ fn a_crafted_shower_is_refused_by_the_decoder_one_property_at_a_time() {
         cells: vec![0],
         weights: vec![1.0],
         delivered: 0,
+        dose_permille: CareDose::STANDARD_PERMILLE,
     };
     let base = || {
         let mut world = World::new(still_water_config()).expect("valid");

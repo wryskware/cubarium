@@ -8,11 +8,15 @@ pub mod v7;
 pub mod v8;
 pub mod v9;
 pub mod v10;
+pub mod v11;
+
+pub mod care_v1;
 
 pub use v7::{SCHEMA_V7, WorldStateV7};
 pub use v8::{SCHEMA_V8, WorldStateV8};
 pub use v9::{SCHEMA_V9, WorldStateV9};
 pub use v10::{SCHEMA_V10, WorldStateV10};
+pub use v11::{SCHEMA_V11, WorldStateV11};
 
 /// Bumped whenever `WorldState` or any nested type changes shape. Version 8 appends
 /// `WorldState.care`; version 9 appends `WorldState.energy_correction`
@@ -20,13 +24,19 @@ pub use v10::{SCHEMA_V10, WorldStateV10};
 /// Version 11 changes the *shape* of that extension: the measured capture effector, the
 /// ingestion mouth, the body-scale mapping, and each member's persisted transition origin and
 /// attack episode.
+/// Version 12 changes the shape of `WorldState.care`: an in-flight shower now persists the
+/// `dose_permille` it was admitted with, so a restart delivers the remaining samples of the
+/// amount that was actually asked for
+/// (`design/7_Research/adjustable-care-dose-handoff-2026-09-13.md`).
 ///
-/// [`SCHEMA_V9`], [`SCHEMA_V8`] and [`SCHEMA_V7`] payloads are still accepted through the
-/// frozen mirrors in [`v9`], [`v8`] and [`v7`], each migrating with an empty hunter extension,
-/// and the older two with zero corrections as well. [`SCHEMA_V10`] is accepted only when its
-/// extension is empty: an active schema 10 trial is refused by name rather than reinterpreted
-/// in the new profile shape (see [`v10`]).
-pub const SCHEMA_VERSION: u32 = 11;
+/// [`SCHEMA_V11`], [`SCHEMA_V9`], [`SCHEMA_V8`] and [`SCHEMA_V7`] payloads are still accepted
+/// through the frozen mirrors in [`v11`], [`v9`], [`v8`] and [`v7`]. All four carry the frozen
+/// pre-dose care shape ([`care_v1`]), whose in-flight showers migrate to the standard dose —
+/// the only dose those builds could deliver. The three older ones also migrate with an empty
+/// hunter extension, and the oldest two with zero corrections as well. [`SCHEMA_V10`] is
+/// accepted only when its extension is empty: an active schema 10 trial is refused by name
+/// rather than reinterpreted in the schema 11 profile shape (see [`v10`]).
+pub const SCHEMA_VERSION: u32 = 12;
 pub const MAGIC: [u8; 4] = *b"CUBW";
 /// Fixed header length: magic 4, schema 4, build-id length 2, then the build id bytes,
 /// then payload length 8 and CRC32 4 (all little-endian).
@@ -84,12 +94,14 @@ pub fn encode_snapshot(state: &WorldState, build_id: &str) -> Vec<u8> {
 /// Validate magic, schema, length, CRC, decode, then `state.validate()`; every failure is a
 /// distinct error so the loader can report why an older snapshot was tried.
 ///
-/// Five schemas decode: the current [`SCHEMA_VERSION`]; [`SCHEMA_V10`], **only with an empty
-/// hunter extension** (an active schema 10 trial is [`SnapshotError::Invalid`] with the reason,
-/// never silently reinterpreted); [`SCHEMA_V9`] through the frozen [`WorldStateV9`] mirror with
-/// `hunters = HunterState::default()`; [`SCHEMA_V8`] through [`WorldStateV8`], which adds
-/// `energy_correction = EnergyCorrection::default()`; and [`SCHEMA_V7`] through
-/// [`WorldStateV7`], which adds `care = CareState::default()` as well. Anything else is
+/// Six schemas decode: the current [`SCHEMA_VERSION`]; [`SCHEMA_V11`] through the frozen
+/// [`WorldStateV11`] mirror, whose in-flight showers open at the standard dose; [`SCHEMA_V10`],
+/// **only with an empty hunter extension** (an active schema 10 trial is
+/// [`SnapshotError::Invalid`] with the reason, never silently reinterpreted); [`SCHEMA_V9`]
+/// through the frozen [`WorldStateV9`] mirror with `hunters = HunterState::default()`;
+/// [`SCHEMA_V8`] through [`WorldStateV8`], which adds `energy_correction =
+/// EnergyCorrection::default()`; and [`SCHEMA_V7`] through [`WorldStateV7`], which adds
+/// `care = CareState::default()` as well. Anything else is
 /// [`SnapshotError::UnsupportedSchema`]. `SnapshotMeta.schema` reports what was read, not what
 /// the build writes.
 pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), SnapshotError> {
@@ -105,6 +117,7 @@ pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), Snaps
     }
     let schema = u32::from_le_bytes(take(4, 4)?.try_into().expect("4 bytes"));
     if schema != SCHEMA_VERSION
+        && schema != SCHEMA_V11
         && schema != SCHEMA_V10
         && schema != SCHEMA_V9
         && schema != SCHEMA_V8
@@ -140,6 +153,9 @@ pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), Snaps
         SCHEMA_V10 => postcard::from_bytes::<WorldStateV10>(payload)
             .map_err(|e| SnapshotError::Decode(e.to_string()))
             .and_then(|old| v10::migrate(old).map_err(SnapshotError::Invalid))?,
+        SCHEMA_V11 => postcard::from_bytes::<WorldStateV11>(payload)
+            .map(WorldState::from)
+            .map_err(|e| SnapshotError::Decode(e.to_string()))?,
         _ => postcard::from_bytes(payload).map_err(|e| SnapshotError::Decode(e.to_string()))?,
     };
     state.validate().map_err(SnapshotError::Invalid)?;
@@ -307,9 +323,10 @@ mod tests {
         let s = state();
         // An empty hunter extension appends exactly `HunterState::default()`: no profile, an
         // empty member vector, four zero f64 imports, the control flag, the founder count and
-        // five zero counters.
+        // five zero counters. The dose is *not* in this difference: schema 12 put it inside
+        // `care`, and this state's care is empty, so the frozen mirror's care encodes alike.
         let full = postcard::to_allocvec(&s).unwrap();
-        let projected = postcard::to_allocvec(&v9::project(&s)).unwrap();
+        let projected = postcard::to_allocvec(&v9::project(&s).unwrap()).unwrap();
         assert_eq!(&full[..projected.len()], &projected[..], "the projection is a prefix of the payload");
         assert_eq!(full.len(), projected.len() + EMPTY_HUNTERS);
 
@@ -321,7 +338,7 @@ mod tests {
         hunted.hunters.founder_material_in = 4.0;
         hunted.hunters.captures_total = 3;
         assert_eq!(
-            postcard::to_allocvec(&v9::project(&hunted)).unwrap(),
+            postcard::to_allocvec(&v9::project(&hunted).unwrap()).unwrap(),
             projected,
             "a hunter extension must not move the schema 9 projection"
         );
@@ -339,7 +356,7 @@ mod tests {
         let s = state();
         // Zero corrections append exactly two zero f64: schema 9 is schema 8 plus 16 bytes.
         let full = postcard::to_allocvec(&s).unwrap();
-        let projected = postcard::to_allocvec(&v8::project(&s)).unwrap();
+        let projected = postcard::to_allocvec(&v8::project(&s).unwrap()).unwrap();
         assert_eq!(&full[..projected.len()], &projected[..], "the projection is a prefix of the payload");
         assert_eq!(full.len(), projected.len() + 2 * 8 + EMPTY_HUNTERS);
 
@@ -350,7 +367,7 @@ mod tests {
         let mut compensated = s.clone();
         compensated.energy_correction.heat_out = -1.5e-9;
         assert_eq!(
-            postcard::to_allocvec(&v8::project(&compensated)).unwrap(),
+            postcard::to_allocvec(&v8::project(&compensated).unwrap()).unwrap(),
             projected,
             "a correction must not move the schema 8 projection"
         );
