@@ -218,7 +218,7 @@ fn strict(old: &ArtPack, new: &ArtPack) -> serde_json::Value {
                     };
                     assert!(
                         amplitude.abs()
-                            <= frame.bend_headroom(base, TALL_BEND_ROOT, TALL_BEND_LENGTH)
+                            <= frame.bend_headroom(TALL_BEND_ROOT, TALL_BEND_LENGTH, base)
                     );
                     for face in Face::ALL {
                         for (u, v) in [(0.1, 0.1), (63.9, 0.1), (31.3, 31.7)] {

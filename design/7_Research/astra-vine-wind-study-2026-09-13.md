@@ -142,3 +142,44 @@ patch; if approved, make one explicit pack/renderer integration with old/custom
 pack validation, then render a copied actual
 world with typical/high column populations and check cadence. No production
 switch is authorized by this study's test count alone.
+
+## Assertion correction and preferred integration representation
+
+Follow-up source review found that the study's supplemental headroom assertion
+passed `(base, root, length)` to an API taking `(root, length, base)`. That made
+this one assertion vacuous (zero length returns infinite headroom). The actual
+4,320 larger-query comparisons constructed `Bend` with named fields correctly;
+their clipping evidence was not affected. The assertion now uses the correct
+argument order. All four tests pass again, unchanged in scope and tolerances,
+in6.88s; log `captures/vine-wind-headroom-correction-tests.log`. Original evidence
+is retained rather than retroactively claiming that assertion was useful.
+
+Root proposed a better **production representation**, which I recommend over
+shipping the study's clear-ended atlas: retain the original fully periodic
+`TallPlant.trunk` and atlas bytes; put explicit additive metadata on the vine
+trunk row; derive/cache `VineStrips { trunk, endpoint }` in a separate optional
+field at load. This derives exactly the same pixels as the study while old
+loaders ignore the additive field and still see the complete original endpoint.
+The existing loader reads individual fields from `serde_json::Value`, so this
+compatibility is supported by source; an exact old-binary loading test should
+still accompany integration. Keep pack version5 for an optional enhancement.
+
+Suggested selector: `"vine_strips": "period4_endpoint_v1"`, absent by default.
+Reject malformed/unknown selectors or a flagged base/crown-bearing plant, rather
+than silently falling back from an invalid opt-in. Validate all16×16/pivot(8,8)
+frames, finite positive loop duration, actual looping, and exact four-row
+periodicity over **all16 rows**, not the existing permissive endpoint test.
+Compare premultiplied texels so invisible RGB is irrelevant. Copy the original
+sample count, duration and loop flag into both derived clips; clear only0/15 in
+the derived trunk and retain only4..7 in the endpoint. Unflagged old/custom packs
+remain on the exact legacy path. Limit activation to the supported vine role;
+do not imply that arbitrary other tall entries are routed as climbers.
+
+For an opt-in vine, its budget must be the minimum of the **derived** trunk at
+tile9 and endpoint at tile10, replacing—not additionally including—the raw
+trunk budget. Otherwise the retained raw0.465px limit defeats the enhancement.
+Do not change host strip heuristics to recognize the now-intact raw vine trunk:
+the vine renderer must explicitly select the cached derived pair. The tested
+Axial growth ceiling, tile9 chart owner/tile10 support center, compositing order
+and one shared bend remain necessary. Atlas/representation changes alone do not
+remove the proven vertex ownership failure.

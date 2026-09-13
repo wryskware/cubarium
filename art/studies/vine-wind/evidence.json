@@ -1,4 +1,9 @@
 {
+  "headroom_assertion_correction": {
+    "issue": "Supplemental headroom assertion originally passed(base,root,length) instead of(root,length,base), yielding an infinite bound. Correctly named Bend construction in the4320 clipping comparisons was unaffected.",
+    "disposition": "Corrected argument order; all four tests pass again with unchanged comparisons/tolerances in6.88s.",
+    "log": "captures/vine-wind-headroom-correction-tests.log"
+  },
   "frozen_source": "9cf0e1d",
   "scope": "Study-only49-insertion patch; no production art or source switch",
   "validation": {
