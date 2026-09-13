@@ -107,8 +107,10 @@ failure prevents a full-cohort pass. The
 [retained results and exact replay](design/7_Research/astra-hunter-charging-results-2026-09-13.md)
 show real paid births but zero adult descendants. The
 [reviewed cleanup fix](design/7_Research/astra-hunter-target-cleanup-review-2026-09-13.md)
-is frozen at512ee52; both unchanged full twelve-seed jobs are now running again
-in new directories. No live introduction follows from these results.
+is frozen at512ee52; both unchanged full twelve-seed reruns have now completed
+and pass the strict comparison. They produced18 paid offspring but no adult
+descendants. Full biological interpretation is underway; no live introduction
+follows from these results, and the original failure remains retained.
 
 Wrysk prefers Fable's **Lanternjaw** megafauna body. The
 [comparison studio](art/studies/megafauna/README.md) retains Veilwarden as an
@@ -135,8 +137,10 @@ durable amounts and schema-12 migration passed source, browser and restart check
 is a separate ambient-support experiment, not a changed default or a generic
 dependence-on-attention control. Its [reviewed harness](design/7_Research/astra-ambient-harness-review-2026-09-13.md)
 passed25 focused tests; the frozen3e9bc2f twelve-seed/six-arm two-hour screen has
-finished. Full artifact/accounting consistency checks pass; biological contrasts
-are under review, not an accepted autonomy setting. Both canopy plants' opening clips are
+finished. [Full results](design/7_Research/astra-ambient-support-results-2026-09-13.md)
+pass artifact/accounting checks but show additional skimmer losses at90% natural
+rain without care. The unchanged24-hour collection is running; the live default
+is not reduced. Both canopy plants' opening clips are
 also live; missing clips in older/custom packs still use the reveal fallback.
 Spiretree wind and actual-intake meal continuity are now live;
 glasscane/vine headroom remains limited. The

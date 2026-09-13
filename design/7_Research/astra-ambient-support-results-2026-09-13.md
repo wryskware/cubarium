@@ -164,3 +164,30 @@ recipe to the proposed 24/72-hour horizons, with the same failures, form losses,
 no-input controls and fixed audit limits retained. Do not tune the candidate or
 combine it with the separate quiet-behavior experiment and call that continuation.
 No core, production config, live state, care schedule or canon changed here.
+
+## Unchanged24-hour collection launched
+
+Root read the complete reducer and report, reran all ten tests, and independently
+reduced all72 arms with exit0. Its output at
+`/tmp/cubarium-root-ambient-two-hour-reduction.json` is byte-identical to the
+committed reduction asset, SHA256
+`ff9dd52fde1778e316aedac9fbb7e11a9485a46f43aa0ae91b37902dbca14435`.
+
+The same frozen executable (SHA above) is now collecting the preregistered
+**24 elapsed simulated hours** after each same mature opening:
+
+```sh
+captures/build-cache/ambient-review/release/examples/ambient_compare \
+  captures/hunter-openings-2026-09-13 \
+  captures/ambient-rain-twenty-four-hour-3e9bc2f \
+  --horizon twenty-four-hour
+```
+
+Root handle80539 was confirmed live. Log:
+`/tmp/cubarium-ambient-twenty-four-hour-3e9bc2f.log`. The actual manifest records
+build3e9bc2f, unchanged executable SHA,1,728,000 elapsed ticks,200-tick cadence,
+all twelve openings and the same six arms. This is a new longer collection,
+not a resumed/relabelled two-hour result. No24-hour outcome or72-hour gate is
+claimed yet; the current reducer intentionally refuses the longer contract.
+The additional short-screen skimmer losses remain evidence against changing
+the live default, which is unchanged.
