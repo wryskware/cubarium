@@ -65,11 +65,12 @@ pub const RIG_MARGIN: f64 = 0.5;
 pub const SUPERSAMPLE_REACH: f64 = std::f64::consts::FRAC_1_SQRT_2;
 
 /// The smallest whole-rig scale the box filter supports: `1 / MAX_GRID`. Below it a
-/// destination pixel would need more than [`MAX_GRID`]`²` samples, and the work grows as the
-/// square of `1 / scale` without bound, so a smaller scale is a **configuration error** that
-/// panics in every build before any sampling — never silently enlarged to fit, never
-/// point-sampled behind the caller's back. The Lanternjaw's admitted minimum (0.2) needs a
-/// grid of 5.
+/// destination pixel would need a grid past [`MAX_GRID`], and the work grows as the square
+/// of `1 / scale` without bound, so a smaller scale is a **configuration error** that panics
+/// in every build before any sampling — never silently enlarged to fit, never point-sampled
+/// behind the caller's back. The bound this buys: at most `7² + 8² = 113` complete body
+/// samples per pixel where two grids blend (`8² = 64` at an integer `1 / scale`); the
+/// Lanternjaw's admitted minimum (0.2) needs a grid of 5, at most `4² + 5² = 41` samples.
 pub const MIN_RIG_SCALE: f64 = 1.0 / MAX_GRID as f64;
 /// The largest box-filter grid per axis.
 pub const MAX_GRID: usize = 8;
@@ -192,11 +193,13 @@ pub fn stamp_rig(
 ///   grid blended toward the `⌈q⌉` grid by `q − ⌊q⌋`, so the filter is **continuous in the
 ///   scale** — an integer `q` is one grid, and just below scale 1 the image is almost the
 ///   point sample rather than a sudden full-width box (Astra's 43.75 % centre jump at
-///   `1 − 1e-9` is gone). This is an approximate, smoothly varying reconstruction filter,
-///   exact as a box integral only at integer `q`. A texel smaller than a pixel thereby
-///   contributes its share of the pixel's area instead of being hit or missed by one point
-///   sample: the pixel over a 0.2-scale claw carries about `0.2²` of the claw's light —
-///   present and geometrically honest, though far too faint to see on an LED;
+///   `1 − 1e-9` is gone). This is an approximate, smoothly varying reconstruction filter —
+///   a finite quadrature, not an exact box integral even at an integer `q` (a rotated
+///   bilinear field is not integrated exactly by any grid); it is a continuous
+///   reconstruction choice, stated as such. A texel smaller than a pixel thereby contributes
+///   about its share of the pixel's area instead of being hit or missed by one point sample:
+///   the pixel over a 0.2-scale claw carries about `0.2²` of the claw's light — present and
+///   geometrically honest, though far too faint to see on an LED;
 /// * the query radius is [`rig_radius`]` · scale`, plus [`SUPERSAMPLE_REACH`] (the radial
 ///   corner reach of a box sample, `1/√2`) when box-filtered, validated against
 ///   `MAX_LOCAL_RADIUS` after scaling;
@@ -207,8 +210,11 @@ pub fn stamp_rig(
 /// `scale = 1` is [`stamp_rig`] bit for bit (`n = 1`, offset exactly zero). Above 1 the body
 /// is magnified by the plain bilinear sample and the caller's own radius bound must still
 /// hold. The root, heading, ownership and depth rules are those of [`stamp_rig`]. Every
-/// painted pixel centre lies within `scale · (r + 1) + 0.5` of the root when `r` bounds the
-/// painted texel centres, the `+ 0.5` only below scale 1.
+/// painted pixel centre lies within `scale · (r + √2) + SUPERSAMPLE_REACH` of the root when
+/// `r` bounds the painted texel centres (the texel's bilinear corner is `√2` texels out, a box
+/// sample up to `1/√2` px from its pixel centre; the reach term only below scale 1) — the
+/// saved centred-texel case at scale 0.2 paints a pixel 0.846 px out, inside this 0.990
+/// bound, and past the `0.7` an earlier per-axis statement would have allowed.
 pub fn stamp_rig_scaled(
     canvas: &mut Canvas,
     root: SurfacePoint,
