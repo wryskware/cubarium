@@ -129,3 +129,14 @@ receipts, malformed/narrower capabilities, invalid selections, disabled care,
 refusal and lost connection. They are not browser layout, core dose arithmetic,
 journal, migration, or actual owning-runner acceptance evidence; those remain
 pending while the native backend package is implemented.
+
+Root also inspected the actual page in the dedicated Chromium test browser using
+`/tmp/cubarium-care-dose-ui-fixture.mjs`, a loopback-only fixture explicitly labeled
+"no ecosystem attached". Desktop (1400×1000) and narrow (390×844) layouts had no
+horizontal document overflow; the selector/buttons stayed within the narrow
+viewport. A desktop target click and Generous Shower submitted exactly integer
+1500 and the selected Front coordinates. The fixture deliberately refused it;
+the viewer displayed that refusal without claiming water was delivered.
+Inspected captures: `/tmp/cubarium-care-dose-ui-desktop.png` and
+`/tmp/cubarium-care-dose-ui-mobile.png`. This verifies browser layout and wire
+intent only: no simulated or live world was loaded or changed by the fixture.
