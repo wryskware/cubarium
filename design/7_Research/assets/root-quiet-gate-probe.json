@@ -1,0 +1,41 @@
+{
+  "scope": "read-only mutation probes against copied in-memory summaries, not a biological run or completed-horizon certification",
+  "reducer_sha256": "e3ea62335b6fff5bc8b10aa62824bc52e81a35b41a767d0be840bb2eae7eb1c2",
+  "results": [
+    {
+      "name": "untouched smoke summary (low-level gate only)",
+      "accepted": true,
+      "shouldAccept": true,
+      "gap": false,
+      "error": null
+    },
+    {
+      "name": "inflated drift limit hides a material error",
+      "accepted": true,
+      "shouldAccept": false,
+      "gap": true,
+      "error": null
+    },
+    {
+      "name": "no-care arm has an unreceipted Feed ledger",
+      "accepted": true,
+      "shouldAccept": false,
+      "gap": true,
+      "error": null
+    },
+    {
+      "name": "Feed has a wrong absolute application tick",
+      "accepted": true,
+      "shouldAccept": false,
+      "gap": true,
+      "error": null
+    },
+    {
+      "name": "Feed receipt has a rejected outcome",
+      "accepted": true,
+      "shouldAccept": false,
+      "gap": true,
+      "error": null
+    }
+  ]
+}
