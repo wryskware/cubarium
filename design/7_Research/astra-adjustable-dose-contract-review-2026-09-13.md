@@ -35,6 +35,14 @@ proportional litter-energy export. Two details need explicit implementation gate
    new viewer against an old-capability status response. Journal versioning alone
    does not protect this mixed-version HTTP case.
 
+Root has added these requirements to the handoff during review, with the exact
+advertisement `status.dose = {version: 1, min_permille: 250, max_permille: 2000,
+default_permille: 1000}` and `dose_permille` on each retained row. Root reports
+capability-gated fallback in the in-progress viewer; this review has not verified
+that implementation. The worker may have read the earlier handoff, so asymmetric
+parsing, standard arithmetic and this wire capability remain first-package
+verification gates rather than assumed completed fixes.
+
 ## Concrete implementation checks
 
 - Freeze the old `ActiveShower` and `CareState` layout, not just `WorldState`.
