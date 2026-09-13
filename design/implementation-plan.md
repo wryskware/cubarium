@@ -85,6 +85,14 @@ the live checkpoint recovery and limitations; this is not proof of long-run
 ecological balance or complete M5 durability under real power loss. Fable's
 Lanternjaw is Wrysk's preferred megafauna art study, not yet a live predator.
 
+Latest runtime checkpoint, 2026-09-13: frozen `0.1.0+a44dc98` is live on the
+same shim/web owner, resumed exactly at tick 283643 with care sequence 5 intact.
+It adds completed authored growth, top-reed wind, care flourishes, viewer delivery
+and schema 9 compensated accounting; 854 tests passed. See the
+[rollout evidence](7_Research/presentation-v9-rollout-2026-09-13.md), including
+copied-world restart, exact cross-version continuation and matched rollback set.
+The in-progress Lanternjaw hunter extension is deliberately not deployed.
+
 ## M1 — prove the surface and presentation path
 
 Create the minimal Rust workspace, pin/reuse `cube-proto` from the existing shim,

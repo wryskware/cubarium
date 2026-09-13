@@ -57,10 +57,14 @@ and [short matched numerical audit](design/7_Research/care-matched-audit-2026-09
 Zero input preserves autonomous ecology; cleanup removes litter, not a new toxin
 pool, and no hands-on autonomy preset has been tuned.
 
-New source-only [care flourishes](design/7_Research/care-flourish-integration-2026-09-13.md)
+New [care flourishes](design/7_Research/care-flourish-integration-2026-09-13.md)
 add smooth local feed crumbs and proportional cleanup flecks to the same shared
-frame. Durability/replay and native captures are checked; these visual changes
-are not deployed to the live cube yet. Nearby biological responses remain open.
+frame. These are now live with authored side-plant growth, rooted top-reed wind,
+and improved viewer delivery in frozen build `0.1.0+a44dc98`. The rollout preserved
+the exact running world and all five existing care inputs; 854 tests passed,
+and the live mirror measured about 60 distinct frames/s in isolated Chromium.
+See the [schema 9 rollout and rollback record](design/7_Research/presentation-v9-rollout-2026-09-13.md).
+Nearby biological responses remain open; no hunter is live yet.
 
 Wrysk prefers Fable's **Lanternjaw** megafauna body. The
 [comparison studio](art/studies/megafauna/README.md) retains Veilwarden as an
