@@ -70,6 +70,10 @@ a separate mouth anchor with rim reflection. Add a paired-copy tamper regression
 and retain the genuine seam/rim capture cases. Otherwise explicitly describe
 spatial validity as trusted core evidence, not independently validated geometry.
 This finding was sent to root while its implementation remained active.
+Root accepted the paired-copy counterexample and is adding the recomputation and
+regression. This will establish internal evidence consistency using shared core
+helpers, not independently prove those helpers' geometry implementation. The fix
+was not yet reviewed or included in the passing counts below.
 
 ## Deduplication is not complete attempt telemetry
 
