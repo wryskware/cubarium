@@ -162,8 +162,9 @@ flight is not saved with the world: after a restart the plants stand where the f
 say, not part-way.
 
 **Authored growth.** Where a pack (v5 and up) carries a `grow<from><to>`
-clip for the step a cell is actually in — since 2026-09-13 every side species (glowcap,
-rootveil, lanternstalk, tendrilfan, reedspire) has both its 4 s `grow01` and `grow12`; the
+clip for the step a cell is actually in — since 2026-09-13 all seven species (glowcap,
+rootveil, lanternstalk, tendrilfan, reedspire, umbrellafrond, bloomcrown) have both
+their 4 s `grow01` and `grow12`; the
 pilot was the lanternstalk's `grow01`, from sprout to middle stalk — that clip *is* the picture, and the reveal mask
 is not used at all: the stem extends and the bulb opens as the artwork says, rather than
 the next stage appearing from behind a rising line. The clip is driven by the same
@@ -176,8 +177,8 @@ phase, so entering and leaving the clip lands exactly on the image the idle plan
 showing instead of cutting its sway and its pulse. The opacity crosses linearly from the
 lower stage's to the upper stage's over the step, and the slot's wind bend applies to the
 growth stamp exactly as to any other, so the breeze carries on right through growing. Any
-step the pack has no clip for — the two radial canopy species (umbrellafrond, bloomcrown),
-the first appearance out of bare ground, and every plant of a v1–v4 pack — keeps the reveal
+step the pack has no clip for — the first appearance out of bare ground, a missing
+transition in a custom pack, and every plant of a v1–v4 pack — keeps the reveal
 masks described above, unchanged. See `PLANTS.md` "Pack v5" for what each clip shows.
 
 ### Wind
