@@ -26,6 +26,7 @@ use anyhow::{Context, Result};
 use cube_proto::{FRAME_BYTES, Frame};
 
 use super::FrameSink;
+use crate::care::{self, CareKind, CareShared, CareTarget};
 
 /// The viewer page, embedded so a running host has no runtime asset dependency.
 pub const INDEX_HTML: &str = include_str!("web/index.html");
@@ -37,9 +38,22 @@ pub const FRAME_BODY_BYTES: usize = 8 + FRAME_BYTES;
 /// How long the accept loop sleeps between polls of a non-blocking listener. Bounds how
 /// long `finish` waits for the server thread to notice the stop flag.
 const ACCEPT_POLL: Duration = Duration::from_millis(10);
-/// Read and write timeout on an accepted connection, so one stalled client cannot pin a
-/// handler thread forever.
+/// Read and write timeout on one socket operation.
 const CONN_TIMEOUT: Duration = Duration::from_secs(5);
+/// Absolute deadline for receiving a whole request — head *and* body — measured from the
+/// moment the connection was accepted.
+///
+/// [`CONN_TIMEOUT`] alone does not bound a handler: it is a *per read* timeout, so a peer
+/// that sends one byte every 4.9 s renews it forever and keeps its thread for hours. This
+/// is the bound that actually makes a handler short-lived. It is deliberately separate
+/// from the care service's own five-second wait for a durable acknowledgement, which
+/// begins only once a complete, valid request has arrived.
+const REQUEST_DEADLINE: Duration = Duration::from_secs(5);
+/// Connection handler threads alive at once. Excess connections are closed immediately in
+/// the accept loop, without spawning a thread and without the loop waiting for anything:
+/// the care limits (four outstanding, 64 clients, eight-deep intake) all apply *after* a
+/// request has been read, so none of them can bound the threads doing the reading.
+const MAX_HANDLERS: usize = 32;
 /// Longest request head accepted. A `GET` from the viewer page is a few hundred bytes.
 const MAX_REQUEST_BYTES: usize = 8 * 1024;
 
@@ -117,10 +131,22 @@ struct Shared {
     served: AtomicU64,
     /// The world's tick as of the last completed tick the host reported.
     world_tick: AtomicU64,
+    /// Connection handler threads currently alive; the permit is released on every exit
+    /// path by [`HandlerPermit`]'s `Drop`.
+    handlers: AtomicU64,
+    /// Connections closed without a handler because [`MAX_HANDLERS`] was already reached.
+    refused: AtomicU64,
     /// A short line the viewer's HUD appends, fixed for the life of the sink. The host
     /// puts the simulation speed here so a reviewer can tell 1× from 8× on sight.
     note: String,
     source: Source,
+    /// The port actually bound, so the `Host` and `Origin` guards on the care routes can
+    /// check what a browser sent against what this server actually is.
+    port: u16,
+    /// Present only with `--care`. The one thing served here that is *not* read-only, and
+    /// it still cannot reach the world: it can only put a validated request in a bounded
+    /// queue the simulation owner drains at a boundary of its own choosing.
+    care: Option<Arc<CareShared>>,
 }
 
 impl Shared {
@@ -166,6 +192,19 @@ impl WebSink {
 
     /// [`WebSink::with_note`] plus the read-only host identity `GET /status` reports.
     pub fn with_source(port: u16, note: impl Into<String>, source: Source) -> Result<WebSink> {
+        WebSink::with_care(port, note, source, None)
+    }
+
+    /// [`WebSink::with_source`] plus the care service, when `--care` asked for one. With
+    /// `None`, `/care/status` answers `{"enabled": false}` and the two `POST` routes answer
+    /// `503 care disabled` — the page can tell "this world does not offer care" from "this
+    /// host has never heard of the route".
+    pub fn with_care(
+        port: u16,
+        note: impl Into<String>,
+        source: Source,
+        care: Option<Arc<CareShared>>,
+    ) -> Result<WebSink> {
         let note = note.into();
         let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port)))
             .with_context(|| format!("binding the web viewer to 127.0.0.1:{port}"))?;
@@ -180,8 +219,12 @@ impl WebSink {
             ticks: AtomicU64::new(0),
             served: AtomicU64::new(0),
             world_tick: AtomicU64::new(0),
+            handlers: AtomicU64::new(0),
+            refused: AtomicU64::new(0),
             note,
             source,
+            port: addr.port(),
+            care,
         });
         let server = {
             let shared = Arc::clone(&shared);
@@ -226,6 +269,16 @@ impl WebSink {
     /// `/frame` requests answered with a frame.
     pub fn served(&self) -> u64 {
         self.shared.served.load(Ordering::Relaxed)
+    }
+
+    /// Connection handler threads alive right now. Never above [`MAX_HANDLERS`].
+    pub fn handlers(&self) -> u64 {
+        self.shared.handlers.load(Ordering::Relaxed)
+    }
+
+    /// Connections closed in the accept loop because the handler cap was already reached.
+    pub fn refused_connections(&self) -> u64 {
+        self.shared.refused.load(Ordering::Relaxed)
     }
 
     /// The HUD note this sink serves at `/note` (empty when there is none).
@@ -274,18 +327,58 @@ impl Drop for WebSink {
     }
 }
 
+/// One live connection handler. Taking the permit is a non-blocking compare-and-swap, and
+/// dropping it — on *every* exit path, including a panicking handler — gives it back.
+struct HandlerPermit(Arc<Shared>);
+
+impl HandlerPermit {
+    /// A permit if one is free, `None` if [`MAX_HANDLERS`] are already alive. Never waits.
+    fn take(shared: &Arc<Shared>) -> Option<HandlerPermit> {
+        shared
+            .handlers
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                (n < MAX_HANDLERS as u64).then(|| n + 1)
+            })
+            .ok()
+            .map(|_| HandlerPermit(Arc::clone(shared)))
+    }
+}
+
+impl Drop for HandlerPermit {
+    fn drop(&mut self) {
+        self.0.handlers.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 /// Accept connections until the stop flag is set, handing each to a short-lived thread so
 /// one slow client cannot delay the next.
+///
+/// "Short-lived" is enforced, not assumed: a handler needs one of [`MAX_HANDLERS`] permits,
+/// and it has [`REQUEST_DEADLINE`] to receive a whole request. Beyond the cap the loop
+/// closes the connection immediately and goes back to accepting — it never waits for a
+/// permit, because a loop that blocks is a loop the next connection cannot reach either.
 fn accept_loop(shared: &Arc<Shared>, listener: &TcpListener) {
     while !shared.stop.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok((stream, _)) => {
+                let Some(permit) = HandlerPermit::take(shared) else {
+                    shared.refused.fetch_add(1, Ordering::Relaxed);
+                    // Closed without a byte of response: a client holding sockets open gets
+                    // nothing from them, and the loop is back at `accept` immediately.
+                    drop(stream);
+                    continue;
+                };
                 let shared = Arc::clone(shared);
                 let spawned = std::thread::Builder::new()
                     .name("cubarium-web-conn".into())
-                    .spawn(move || handle(&shared, stream));
+                    .spawn(move || {
+                        let _permit = permit;
+                        handle(&shared, stream);
+                    });
                 if spawned.is_err() {
-                    // Out of threads: drop the connection rather than stall the loop.
+                    // Out of threads: drop the connection rather than stall the loop. The
+                    // permit went into the closure that was never created, so it is already
+                    // dropped and the count is correct.
                     std::thread::sleep(ACCEPT_POLL);
                 }
             }
@@ -303,14 +396,42 @@ fn handle(shared: &Shared, mut stream: TcpStream) {
     let _ = stream.set_read_timeout(Some(CONN_TIMEOUT));
     let _ = stream.set_write_timeout(Some(CONN_TIMEOUT));
     let _ = stream.set_nodelay(true);
+    let deadline = std::time::Instant::now() + REQUEST_DEADLINE;
 
-    let head = match read_head(&mut stream) {
+    let (head, buffered) = match read_head(&mut stream, deadline) {
         Some(h) => h,
         None => return,
     };
     let route = request_path(&head);
 
     let _ = match route {
+        // --- care ----------------------------------------------------------------
+        Some(("GET", "/care/status")) => respond(
+            &mut stream,
+            "200 OK",
+            "application/json; charset=utf-8",
+            "Cache-Control: no-store\r\n",
+            match &shared.care {
+                Some(care) => care.status_json(),
+                None => CareShared::disabled_status_json(),
+            }
+            .as_bytes(),
+        ),
+        // A mutation through GET is refused outright. It is the one request a
+        // cross-origin page can make without a preflight, so it must never do anything.
+        Some(("GET", "/care")) | Some(("GET", "/care/register")) => respond(
+            &mut stream,
+            "405 Method Not Allowed",
+            "application/json; charset=utf-8",
+            "Allow: POST\r\nCache-Control: no-store\r\n",
+            br#"{"error":"care is POST only"}"#,
+        ),
+        Some(("POST", "/care/register")) => {
+            care_route(&mut stream, shared, &head, buffered, CareRoute::Register, deadline)
+        }
+        Some(("POST", "/care")) => {
+            care_route(&mut stream, shared, &head, buffered, CareRoute::Submit, deadline)
+        }
         Some(("GET", "/")) | Some(("GET", "/index.html")) => respond(
             &mut stream,
             "200 OK",
@@ -348,6 +469,162 @@ fn handle(shared: &Shared, mut stream: TcpStream) {
     let _ = stream.shutdown(std::net::Shutdown::Both);
 }
 
+// --- the care routes -----------------------------------------------------------------
+
+/// Which of the two mutating routes is being served.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CareRoute {
+    Register,
+    Submit,
+}
+
+/// One JSON answer. There are deliberately **no** `Access-Control-*` headers anywhere in
+/// this file: without them a browser will not hand a cross-origin page the response, and
+/// the preflight that would be needed to send `X-Cubarium-Care` is never answered either
+/// (it falls through to the 404 arm). Those two facts together are what keep a random page
+/// on the internet from watering someone's world.
+fn json(stream: &mut TcpStream, status: &str, body: &str) -> std::io::Result<()> {
+    respond(
+        stream,
+        status,
+        "application/json; charset=utf-8",
+        "Cache-Control: no-store\r\n",
+        body.as_bytes(),
+    )
+}
+
+fn json_error(stream: &mut TcpStream, status: &str, message: &str) -> std::io::Result<()> {
+    json(stream, status, &format!(r#"{{"error":{}}}"#, serde_json::Value::from(message)))
+}
+
+/// Everything a care request must satisfy before the service ever sees it.
+///
+/// The custom header is the load-bearing one: a cross-origin page cannot set
+/// `X-Cubarium-Care` on a `fetch` without triggering a CORS preflight, and this server
+/// answers no preflight. `Host` and `Origin` are checked against the port actually bound
+/// so a DNS-rebinding page that resolves some other name to 127.0.0.1 is refused too.
+///
+/// The statuses here are the ordinary HTTP ones for each refusal; the contract enumerates
+/// the *care* outcomes (`400/409/429/503`) and leaves these transport checks unnumbered.
+fn care_guard(head: &str, port: u16) -> Option<(&'static str, String)> {
+    if header_value(head, "x-cubarium-care") != Some("1") {
+        return Some((
+            "403 Forbidden",
+            "a care request must carry the header X-Cubarium-Care: 1".to_string(),
+        ));
+    }
+    let expected = [format!("127.0.0.1:{port}"), format!("localhost:{port}")];
+    match header_value(head, "host") {
+        Some(host) if expected.iter().any(|e| e == host) => {}
+        Some(host) => {
+            return Some((
+                "403 Forbidden",
+                format!("this server is 127.0.0.1:{port}, not {host}"),
+            ));
+        }
+        None => return Some(("403 Forbidden", "a care request needs a Host header".to_string())),
+    }
+    // `Origin` is optional (a same-origin `fetch` from a page loaded over http may omit
+    // it); when it is there it must be *exactly* one of this server's two origins. Not
+    // `https://`: this server has no TLS, so an `https` origin is by definition some other
+    // server that a browser has been talked into believing is this one.
+    if let Some(origin) = header_value(head, "origin") {
+        let ok = expected.iter().any(|e| origin == format!("http://{e}"));
+        if !ok {
+            return Some((
+                "403 Forbidden",
+                format!("cross-origin care is refused: {origin} is not this viewer"),
+            ));
+        }
+    }
+    match header_value(head, "content-type") {
+        Some(ct) if ct.split(';').next().unwrap_or("").trim() == "application/json" => {}
+        _ => {
+            return Some((
+                "415 Unsupported Media Type",
+                "a care request must be Content-Type: application/json".to_string(),
+            ));
+        }
+    }
+    None
+}
+
+/// Serve `POST /care/register` or `POST /care`.
+fn care_route(
+    stream: &mut TcpStream,
+    shared: &Shared,
+    head: &str,
+    buffered: Vec<u8>,
+    route: CareRoute,
+    deadline: std::time::Instant,
+) -> std::io::Result<()> {
+    if let Some((status, message)) = care_guard(head, shared.port) {
+        return json_error(stream, status, &message);
+    }
+    let body = match read_body(stream, head, buffered, deadline) {
+        Ok(body) => body,
+        Err(BodyError::TooLarge) => {
+            return json_error(
+                stream,
+                "413 Payload Too Large",
+                &format!("a care request body must be at most {} bytes", care::MAX_BODY_BYTES),
+            );
+        }
+        Err(BodyError::Invalid(message)) => {
+            return json_error(stream, "400 Bad Request", message);
+        }
+    };
+    // Only now, with the request proven well-formed and same-origin, is the service told
+    // anything at all.
+    let Some(care) = shared.care.as_ref() else {
+        return json_error(stream, "503 Service Unavailable", "care disabled");
+    };
+    match route {
+        CareRoute::Register => {
+            let outcome = care.register();
+            json(stream, outcome.http_status(), &outcome.body())
+        }
+        CareRoute::Submit => match parse_care_request(&body) {
+            Err(message) => json_error(stream, "400 Bad Request", message),
+            Ok((client, request, kind, target)) => {
+                let outcome = care.submit(&client, request, kind, target);
+                json(stream, outcome.http_status(), &outcome.body())
+            }
+        },
+    }
+}
+
+/// `{"client": "...", "request": N, "kind": "feed", "target": {"face": f, "u": u, "v": v}}`.
+/// Every field is required and nothing is guessed at: a request the host cannot read
+/// exactly is a `400`, never a command aimed at a cell nobody chose.
+fn parse_care_request(body: &[u8]) -> Result<(String, u64, CareKind, CareTarget), &'static str> {
+    let value: serde_json::Value =
+        serde_json::from_slice(body).map_err(|_| "the request body is not JSON")?;
+    let client = value
+        .get("client")
+        .and_then(|v| v.as_str())
+        .ok_or("`client` must be the identity from /care/register")?
+        .to_string();
+    let request = value
+        .get("request")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or("`request` must be this client's monotonic request number")?;
+    let kind = value.get("kind").and_then(|v| v.as_str()).ok_or("`kind` must be a string")?;
+    let kind = CareKind::parse(kind).ok_or("`kind` must be feed, rain or clean")?;
+    let target = value.get("target").ok_or("`target` must be {face, u, v}")?;
+    let component = |key: &str| -> Result<u8, &'static str> {
+        target
+            .get(key)
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|n| u8::try_from(n).ok())
+            .ok_or("`target` must be {face, u, v} with small non-negative integers")
+    };
+    let target =
+        CareTarget { face: component("face")?, u: component("u")?, v: component("v")? };
+    target.validate()?;
+    Ok((client, request, kind, target))
+}
+
 /// The `/frame` body: 8-byte little-endian render sequence then the frame bytes. With no
 /// frame yet, sequence 0 and a black frame, so the page has something valid to draw
 /// immediately. The layout is fixed: the page checks this length.
@@ -367,18 +644,35 @@ fn frame_body(slot: &Slot) -> Vec<u8> {
     body
 }
 
-/// Read the request head (everything before the blank line). `None` on a timeout, a
-/// closed connection, or a head that runs past [`MAX_REQUEST_BYTES`].
-fn read_head(stream: &mut TcpStream) -> Option<String> {
+/// Read the request head (everything before the blank line), plus whatever bytes of the
+/// body arrived in the same read. `None` on a timeout, a closed connection, or a head that
+/// runs past [`MAX_REQUEST_BYTES`].
+///
+/// The over-read matters now that there are `POST` routes: a `fetch` sends the head and a
+/// small JSON body in one segment, so the body is usually already in this buffer and
+/// [`read_body`] must not go looking for it on the socket.
+fn read_head(stream: &mut TcpStream, deadline: std::time::Instant) -> Option<(String, Vec<u8>)> {
     let mut buf = Vec::with_capacity(512);
     let mut chunk = [0u8; 512];
     loop {
+        if std::time::Instant::now() >= deadline {
+            return None;
+        }
         match stream.read(&mut chunk) {
             Ok(0) => return None,
             Ok(n) => {
                 buf.extend_from_slice(&chunk[..n]);
                 if let Some(end) = find_head_end(&buf) {
-                    return String::from_utf8(buf[..end].to_vec()).ok();
+                    // Checked on the *resolved* head, not on the buffer before the
+                    // delimiter was found: a blank line arriving in the read that crosses
+                    // the cap would otherwise admit an oversized head.
+                    if end > MAX_REQUEST_BYTES {
+                        return None;
+                    }
+                    let head = String::from_utf8(buf[..end].to_vec()).ok()?;
+                    let body_start = if buf[end..].starts_with(b"\r\n\r\n") { end + 4 } else { end + 2 };
+                    let rest = buf.get(body_start..).unwrap_or_default().to_vec();
+                    return Some((head, rest));
                 }
                 if buf.len() > MAX_REQUEST_BYTES {
                     return None;
@@ -388,6 +682,64 @@ fn read_head(stream: &mut TcpStream) -> Option<String> {
             Err(_) => return None,
         }
     }
+}
+
+/// One header's value, matched case-insensitively as HTTP requires. The first occurrence
+/// wins; a duplicated header is not merged, because nothing here takes a list.
+fn header_value<'a>(head: &'a str, name: &str) -> Option<&'a str> {
+    head.lines().skip(1).find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        key.trim().eq_ignore_ascii_case(name).then(|| value.trim())
+    })
+}
+
+/// Why a body could not be taken.
+enum BodyError {
+    /// Past [`care::MAX_BODY_BYTES`].
+    TooLarge,
+    Invalid(&'static str),
+}
+
+/// Read exactly `Content-Length` bytes, refusing anything past the contract's 4 KiB.
+///
+/// `Content-Length` is required and `Transfer-Encoding` is refused: the only client is a
+/// page on the loopback posting a hundred bytes of JSON, and a chunked reader would be
+/// unbounded input handling written for no caller.
+fn read_body(
+    stream: &mut TcpStream,
+    head: &str,
+    buffered: Vec<u8>,
+    deadline: std::time::Instant,
+) -> Result<Vec<u8>, BodyError> {
+    if header_value(head, "transfer-encoding").is_some() {
+        return Err(BodyError::Invalid("a chunked body is not accepted; send Content-Length"));
+    }
+    let declared = header_value(head, "content-length")
+        .ok_or(BodyError::Invalid("a care request needs a Content-Length"))?;
+    let len: usize = declared
+        .parse()
+        .map_err(|_| BodyError::Invalid("Content-Length is not a number"))?;
+    if len > care::MAX_BODY_BYTES {
+        return Err(BodyError::TooLarge);
+    }
+    let mut body = buffered;
+    body.truncate(len);
+    let mut chunk = [0u8; 512];
+    while body.len() < len {
+        if std::time::Instant::now() >= deadline {
+            return Err(BodyError::Invalid("the request body did not arrive in time"));
+        }
+        match stream.read(&mut chunk) {
+            Ok(0) => return Err(BodyError::Invalid("the request body ended early")),
+            Ok(n) => {
+                let take = n.min(len - body.len());
+                body.extend_from_slice(&chunk[..take]);
+            }
+            Err(e) if e.kind() == ErrorKind::Interrupted => {}
+            Err(_) => return Err(BodyError::Invalid("the request body could not be read")),
+        }
+    }
+    Ok(body)
 }
 
 /// Index just past the end of the request head, accepting both CRLFCRLF and LFLF.
@@ -669,6 +1021,371 @@ mod tests {
         let (status, _, body) = get(sink.addr(), "/frame?t=12345");
         assert_eq!(status, "HTTP/1.1 200 OK");
         assert_eq!(body.len(), FRAME_BODY_BYTES);
+    }
+
+    // -- the care surface over a real socket --------------------------------------
+
+    use crate::care::{CareService, JournalStatus};
+
+    /// A sink with care attached, plus the service the runner would own.
+    fn care_sink() -> (WebSink, CareService) {
+        let service = CareService::new("epoch-http", Arc::new(JournalStatus::default()));
+        let sink =
+            WebSink::with_care(0, "", Source::default(), Some(service.shared())).expect("binding");
+        (sink, service)
+    }
+
+    /// One raw request, written verbatim so a test can send exactly the head it means to.
+    fn raw(addr: SocketAddr, request: &str) -> (String, String, String) {
+        let mut s = TcpStream::connect(addr).expect("connecting");
+        s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        s.write_all(request.as_bytes()).unwrap();
+        s.flush().unwrap();
+        let mut buf = Vec::new();
+        s.read_to_end(&mut buf).expect("reading the response");
+        let end = find_head_end(&buf).expect("a complete response head");
+        let head = String::from_utf8_lossy(&buf[..end]).into_owned();
+        let start = if buf[end..].starts_with(b"\r\n\r\n") { end + 4 } else { end + 2 };
+        let status = head.lines().next().unwrap_or_default().to_string();
+        (status, head, String::from_utf8_lossy(&buf[start..]).into_owned())
+    }
+
+    /// A well-formed care POST: every header the contract requires.
+    fn care_post(addr: SocketAddr, path: &str, body: &str) -> (String, String, String) {
+        raw(
+            addr,
+            &format!(
+                "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nOrigin: http://127.0.0.1:{}\r\n\
+                 Content-Type: application/json\r\nX-Cubarium-Care: 1\r\n\
+                 Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                addr.port(),
+                addr.port(),
+                body.len(),
+            ),
+        )
+    }
+
+    #[test]
+    fn a_host_without_care_reports_it_disabled_and_refuses_the_post_routes() {
+        let sink = WebSink::new(0).expect("binding");
+        let (status, _, body) = get(sink.addr(), "/care/status");
+        assert_eq!(status, "HTTP/1.1 200 OK");
+        let v: serde_json::Value = serde_json::from_str(&body_text(&body)).unwrap();
+        assert_eq!(v["enabled"], false, "the page must be able to tell care is off");
+        assert_eq!(v["care"], "disabled");
+
+        let (status, _, body) = care_post(sink.addr(), "/care/register", "{}");
+        assert_eq!(status, "HTTP/1.1 503 Service Unavailable");
+        assert!(body.contains("care disabled"), "{body}");
+    }
+
+    fn body_text(bytes: &[u8]) -> String {
+        String::from_utf8_lossy(bytes).into_owned()
+    }
+
+    #[test]
+    fn registering_then_posting_reaches_the_service_and_nothing_touches_the_world() {
+        let (sink, service) = care_sink();
+        let addr = sink.addr();
+
+        let (status, head, body) = care_post(addr, "/care/register", "{}");
+        assert_eq!(status, "HTTP/1.1 200 OK");
+        assert!(head.contains("Content-Type: application/json"), "{head}");
+        // The refusal that matters most is the one that is *absent*: no CORS header, ever.
+        assert!(
+            !head.to_ascii_lowercase().contains("access-control-"),
+            "a CORS header would let any page on the internet water this world: {head}"
+        );
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        let client = v["client"].as_str().expect("an issued identity").to_string();
+        assert!(client.starts_with("epoch-http."), "the id embeds the epoch: {client}");
+        assert_eq!(v["epoch"], "epoch-http");
+
+        // A submit, answered as soon as the "runner" commits it.
+        let posted = std::thread::spawn(move || {
+            care_post(
+                addr,
+                "/care",
+                &format!(
+                    r#"{{"client":"{client}","request":1,"kind":"feed","target":{{"face":2,"u":31,"v":7}}}}"#
+                ),
+            )
+        });
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let planned = loop {
+            let planned = service.drain_prepared(1, 60);
+            if !planned.is_empty() {
+                break planned;
+            }
+            assert!(std::time::Instant::now() < deadline, "the request never reached the FIFO");
+            std::thread::sleep(Duration::from_millis(2));
+        };
+        assert_eq!(planned[0].kind.as_str(), "feed");
+        assert_eq!(planned[0].target.face, 2);
+        assert_eq!((planned[0].target.u, planned[0].target.v), (31, 7));
+        service.commit_accepted(&planned);
+
+        let (status, _, body) = posted.join().unwrap();
+        assert_eq!(status, "HTTP/1.1 202 Accepted");
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["seq"], 1);
+        assert_eq!(v["apply_after_tick"], 60);
+        drop(sink);
+    }
+
+    #[test]
+    fn a_cross_origin_page_is_refused_and_so_is_a_missing_custom_header() {
+        let (sink, _service) = care_sink();
+        let addr = sink.addr();
+        let port = addr.port();
+
+        // The header a cross-origin `fetch` cannot set without a preflight.
+        let (status, _, body) = raw(
+            addr,
+            &format!(
+                "POST /care/register HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\
+                 Content-Type: application/json\r\nContent-Length: 2\r\n\
+                 Connection: close\r\n\r\n{{}}"
+            ),
+        );
+        assert_eq!(status, "HTTP/1.1 403 Forbidden");
+        assert!(body.contains("X-Cubarium-Care"), "{body}");
+
+        // An Origin that is not this viewer.
+        for origin in
+            ["http://evil.example", "http://localhost:1", "null", "https://127.0.0.1"]
+        {
+            let (status, _, body) = raw(
+                addr,
+                &format!(
+                    "POST /care/register HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\
+                     Origin: {origin}\r\nContent-Type: application/json\r\n\
+                     X-Cubarium-Care: 1\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+                ),
+            );
+            assert_eq!(status, "HTTP/1.1 403 Forbidden", "origin {origin}");
+            assert!(body.contains("cross-origin"), "origin {origin}: {body}");
+        }
+
+        // A Host naming some other server (a DNS-rebinding page resolving to 127.0.0.1).
+        let (status, _, body) = raw(
+            addr,
+            &format!(
+                "POST /care/register HTTP/1.1\r\nHost: rebind.example:{port}\r\n\
+                 Content-Type: application/json\r\nX-Cubarium-Care: 1\r\n\
+                 Content-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+            ),
+        );
+        assert_eq!(status, "HTTP/1.1 403 Forbidden");
+        assert!(body.contains("not rebind.example"), "{body}");
+
+        // A preflight is never answered, so the browser never sends the real request.
+        let (status, head, _) = raw(
+            addr,
+            &format!(
+                "OPTIONS /care HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\
+                 Origin: http://evil.example\r\n\
+                 Access-Control-Request-Method: POST\r\nConnection: close\r\n\r\n"
+            ),
+        );
+        assert_eq!(status, "HTTP/1.1 404 Not Found");
+        assert!(!head.to_ascii_lowercase().contains("access-control-"), "{head}");
+
+        // And the wrong content type.
+        let (status, _, _) = raw(
+            addr,
+            &format!(
+                "POST /care/register HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\
+                 Content-Type: text/plain\r\nX-Cubarium-Care: 1\r\n\
+                 Content-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+            ),
+        );
+        assert_eq!(status, "HTTP/1.1 415 Unsupported Media Type");
+    }
+
+    #[test]
+    fn a_mutation_through_get_is_405_and_never_registers_anything() {
+        let (sink, _service) = care_sink();
+        for path in ["/care", "/care/register"] {
+            let (status, head, _) = get(sink.addr(), path);
+            assert_eq!(status, "HTTP/1.1 405 Method Not Allowed", "{path}");
+            assert!(head.contains("Allow: POST"), "{head}");
+        }
+        // Nothing was issued by those requests.
+        let (_, _, body) = get(sink.addr(), "/care/status");
+        let v: serde_json::Value = serde_json::from_str(&body_text(&body)).unwrap();
+        assert!(v["receipts"].as_array().unwrap().is_empty(), "{v}");
+    }
+
+    #[test]
+    fn an_oversize_body_is_413_and_a_malformed_one_is_400() {
+        let (sink, _service) = care_sink();
+        let addr = sink.addr();
+        let port = addr.port();
+
+        // Declared past the 4 KiB bound: refused without reading the body at all.
+        let (status, _, body) = raw(
+            addr,
+            &format!(
+                "POST /care HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\
+                 Content-Type: application/json\r\nX-Cubarium-Care: 1\r\n\
+                 Content-Length: {}\r\nConnection: close\r\n\r\n",
+                care::MAX_BODY_BYTES + 1
+            ),
+        );
+        assert_eq!(status, "HTTP/1.1 413 Payload Too Large");
+        assert!(body.contains("4096"), "{body}");
+
+        // No Content-Length at all.
+        let (status, _, _) = raw(
+            addr,
+            &format!(
+                "POST /care HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\
+                 Content-Type: application/json\r\nX-Cubarium-Care: 1\r\n\
+                 Connection: close\r\n\r\n"
+            ),
+        );
+        assert_eq!(status, "HTTP/1.1 400 Bad Request");
+
+        // Well-formed transport, unusable payloads.
+        for body in [
+            "not json",
+            r#"{"request":1,"kind":"feed","target":{"face":0,"u":0,"v":0}}"#,
+            r#"{"client":"x","request":1,"kind":"polish","target":{"face":0,"u":0,"v":0}}"#,
+            r#"{"client":"x","request":1,"kind":"feed","target":{"face":9,"u":0,"v":0}}"#,
+            r#"{"client":"x","request":1,"kind":"feed","target":{"face":0,"u":64,"v":0}}"#,
+        ] {
+            let (status, _, answer) = care_post(addr, "/care", body);
+            assert_eq!(status, "HTTP/1.1 400 Bad Request", "body {body} answered {answer}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_identity_is_409_retired_and_a_full_journal_is_503() {
+        let status = Arc::new(JournalStatus::default());
+        let service = CareService::new("epoch-http", Arc::clone(&status));
+        let sink = WebSink::with_care(0, "", Source::default(), Some(service.shared())).unwrap();
+
+        let (code, _, body) = care_post(
+            sink.addr(),
+            "/care",
+            r#"{"client":"epoch-http.99","request":1,"kind":"feed","target":{"face":0,"u":1,"v":1}}"#,
+        );
+        assert_eq!(code, "HTTP/1.1 409 Conflict");
+        assert!(body.contains("retired"), "{body}");
+
+        // Register properly, then fill the journal.
+        let (_, _, body) = care_post(sink.addr(), "/care/register", "{}");
+        let client = serde_json::from_str::<serde_json::Value>(&body).unwrap()["client"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        status.set_for_test(crate::care::JOURNAL_LIMIT, 0);
+        let (code, _, body) = care_post(
+            sink.addr(),
+            "/care",
+            &format!(
+                r#"{{"client":"{client}","request":1,"kind":"feed","target":{{"face":0,"u":1,"v":1}}}}"#
+            ),
+        );
+        assert_eq!(code, "HTTP/1.1 503 Service Unavailable");
+        assert!(body.contains("journal full"), "{body}");
+    }
+
+    #[test]
+    fn care_is_503_replaying_until_the_recovered_schedule_is_exhausted() {
+        let (sink, service) = care_sink();
+        service.gate_until_replayed();
+        let (_, _, body) = care_post(sink.addr(), "/care/register", "{}");
+        let client = serde_json::from_str::<serde_json::Value>(&body).unwrap()["client"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let payload = format!(
+            r#"{{"client":"{client}","request":1,"kind":"feed","target":{{"face":0,"u":1,"v":1}}}}"#
+        );
+        let (code, _, body) = care_post(sink.addr(), "/care", &payload);
+        assert_eq!(code, "HTTP/1.1 503 Service Unavailable");
+        // A state, not an error: the page retries rather than reporting a failure.
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&body).unwrap()["care"],
+            "replaying",
+            "{body}"
+        );
+
+        service.open_intake();
+        let addr = sink.addr();
+        let posted = std::thread::spawn(move || care_post(addr, "/care", &payload));
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let planned = service.drain_prepared(1, 20);
+            if !planned.is_empty() {
+                service.commit_accepted(&planned);
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "intake never opened");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(posted.join().unwrap().0, "HTTP/1.1 202 Accepted");
+        drop(sink);
+    }
+
+    /// Astra's bound: partial connections beyond the cap must not raise the number of live
+    /// handlers, and permits must come back when the request deadline expires.
+    #[test]
+    fn partial_connections_cannot_push_live_handlers_past_the_cap() {
+        let sink = WebSink::new(0).expect("binding");
+        let addr = sink.addr();
+        // Twice the cap, each sending a head that never ends.
+        let mut held = Vec::new();
+        for _ in 0..(MAX_HANDLERS * 2) {
+            match TcpStream::connect_timeout(&addr, Duration::from_secs(2)) {
+                Ok(mut s) => {
+                    let _ = write!(s, "GET /frame HTTP/1.1\r\nHost: localhost\r\n");
+                    let _ = s.flush();
+                    held.push(s);
+                }
+                Err(_) => break,
+            }
+        }
+        // Let the accept loop work through them.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while sink.refused_connections() == 0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            sink.handlers() <= MAX_HANDLERS as u64,
+            "live handlers {} above the cap {MAX_HANDLERS}",
+            sink.handlers()
+        );
+        assert!(sink.refused_connections() > 0, "the excess must be closed, not queued");
+
+        // The permits come back once the absolute deadline expires, even though every one
+        // of those peers is still connected and would renew a per-read timeout forever.
+        let deadline = std::time::Instant::now() + REQUEST_DEADLINE + Duration::from_secs(5);
+        while sink.handlers() > 0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert_eq!(sink.handlers(), 0, "a permit was not released on some exit path");
+        // And the sink still answers.
+        let (status, _, _) = get(addr, "/status");
+        assert_eq!(status, "HTTP/1.1 200 OK");
+        drop(held);
+    }
+
+    #[test]
+    fn a_head_that_crosses_the_cap_in_one_read_is_still_refused() {
+        let sink = WebSink::new(0).expect("binding");
+        let mut s = TcpStream::connect(sink.addr()).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        // One write: an oversized head and its terminating blank line together, so the
+        // delimiter is found in the same read that crosses `MAX_REQUEST_BYTES`.
+        let padding = "x".repeat(MAX_REQUEST_BYTES * 2);
+        let _ = write!(s, "GET /status HTTP/1.1\r\nHost: localhost\r\nX-Pad: {padding}\r\n\r\n");
+        let _ = s.flush();
+        let mut buf = Vec::new();
+        let _ = s.read_to_end(&mut buf);
+        assert!(buf.is_empty(), "an oversized head must be dropped, not answered: {} bytes", buf.len());
     }
 
     // -- the page's face table cannot drift from the Rust one --------------------

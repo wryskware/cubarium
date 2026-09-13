@@ -6,12 +6,13 @@
 //! world never stops for them.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+use anyhow::{Context, Result};
 use cubarium_core::world::WorldState;
 use cubarium_core::{decode_snapshot, SnapshotError};
 
@@ -22,6 +23,12 @@ pub const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
 const PREFIX: &str = "world-";
 const SUFFIX: &str = ".cubw";
+/// Temp files [`write_snapshot`] renames from; an interrupted write leaves one behind.
+const TMP_PREFIX: &str = "tmp-";
+/// The care journal, named here because the occupancy guard has to recognize it.
+pub const JOURNAL_NAME: &str = "care.jsonl";
+/// The advisory lock file. Opened and locked, never unlinked and never replaced.
+pub const LOCK_NAME: &str = ".lock";
 
 /// The build identity written into every snapshot header: the crate version plus the
 /// git short hash captured by `build.rs` (`unknown` when git was unavailable).
@@ -58,6 +65,175 @@ pub fn list_snapshots(dir: &Path) -> Vec<(u64, PathBuf)> {
     // Descending tick, then descending path so the order is total and stable.
     found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
     found
+}
+
+// --- Exclusive ownership of the state directory ------------------------------------
+
+/// An exclusive, non-blocking advisory lock (`flock(2)`) on `<state>/.lock`, held by an
+/// open handle for the whole run.
+///
+/// Why an OS lock and not a pid file: a `LOCK` file holding a pid that the launcher
+/// checks against `/proc` has a check-then-create race — two launchers can both see an
+/// absent or dead owner and both start writing — and pid reuse makes liveness no proof
+/// of identity either. `flock` is acquired atomically by the kernel and released by the
+/// kernel when the owning process exits, however it exits, so a leftover `.lock` file is
+/// harmless and never needs deleting.
+///
+/// The file's *content* is diagnostic only (pid and start stamp): nothing reads it to
+/// decide ownership. The inode is never unlinked or replaced, because another process may
+/// be holding a lock on it right now and replacing the inode would silently hand the
+/// directory to two owners.
+#[derive(Debug)]
+pub struct StateLock {
+    path: PathBuf,
+    /// Dropped last: closing this descriptor is what releases the lock.
+    file: File,
+}
+
+impl StateLock {
+    /// Lock `dir`, or return an error naming the directory. The directory must exist.
+    pub fn acquire(dir: &Path) -> Result<StateLock> {
+        let path = dir.join(LOCK_NAME);
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)
+            .with_context(|| format!("opening the state lock {}", path.display()))?;
+        match flock_exclusive_nonblocking(&file) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                anyhow::bail!(
+                    "the state directory {} is already in use by another cubarium process \
+                     (it holds the lock {}); stop that process or choose a different --state \
+                     directory",
+                    dir.display(),
+                    path.display()
+                );
+            }
+            Err(e) => {
+                return Err(anyhow::Error::new(e))
+                    .with_context(|| format!("locking the state directory {}", dir.display()));
+            }
+        }
+        let mut lock = StateLock { path, file };
+        lock.write_diagnostics();
+        Ok(lock)
+    }
+
+    /// The lock file's path.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Pid and start stamp, for a human reading the directory. Best effort: a failure to
+    /// write the note does not cost the run its ownership, which the kernel already granted.
+    fn write_diagnostics(&mut self) {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let note = format!("pid {} started {stamp}\n", std::process::id());
+        let _ = self.file.set_len(0);
+        let _ = self.file.write_all(note.as_bytes());
+        let _ = self.file.flush();
+    }
+}
+
+/// `flock(fd, LOCK_EX | LOCK_NB)`. Contention arrives as [`io::ErrorKind::WouldBlock`].
+///
+/// The only `unsafe` in this crate. It is sound: `as_raw_fd` yields a descriptor the
+/// `File` keeps open for the duration of the call (and for the life of the [`StateLock`]),
+/// `flock` takes only that integer and a flag constant, and the return value is fully
+/// described by `errno`, which is read through `io::Error::last_os_error`.
+#[allow(unsafe_code)]
+fn flock_exclusive_nonblocking(file: &File) -> io::Result<()> {
+    use std::os::unix::io::AsRawFd;
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if rc == 0 { Ok(()) } else { Err(io::Error::last_os_error()) }
+}
+
+// --- What a state directory already holds -------------------------------------------
+
+/// The narrow "this directory already holds a world" policy the `--fresh` guard uses.
+/// Deliberately narrow: snapshots, interrupted snapshot writes, and a non-empty care
+/// journal. Arbitrary unrelated files (telemetry, a README, the lock itself) are not
+/// occupancy — an operator may keep notes beside a world.
+#[derive(Debug, Default, Clone)]
+pub struct Occupancy {
+    /// `world-<tick>.cubw` files, newest tick first.
+    pub snapshots: Vec<(u64, PathBuf)>,
+    /// `tmp-*.cubw` files left by an interrupted write.
+    pub temporaries: Vec<PathBuf>,
+    /// A `care.jsonl` that exists and is not empty.
+    pub journal: Option<PathBuf>,
+}
+
+impl Occupancy {
+    /// True when a `--fresh` launch here would mix two worlds' histories.
+    pub fn is_occupied(&self) -> bool {
+        !self.snapshots.is_empty() || !self.temporaries.is_empty() || self.journal.is_some()
+    }
+
+    /// What was found, for the refusal message.
+    pub fn describe(&self) -> String {
+        let mut parts = Vec::new();
+        if let Some((tick, _)) = self.snapshots.first() {
+            parts.push(format!(
+                "{} snapshot{} (newest tick {tick})",
+                self.snapshots.len(),
+                if self.snapshots.len() == 1 { "" } else { "s" }
+            ));
+        }
+        if !self.temporaries.is_empty() {
+            parts.push(format!("{} interrupted snapshot write(s)", self.temporaries.len()));
+        }
+        if self.journal.is_some() {
+            parts.push(format!("a non-empty {JOURNAL_NAME}"));
+        }
+        parts.join(", ")
+    }
+}
+
+/// Enumerate `dir` for the `--fresh` guard. Unlike [`list_snapshots`], every I/O error is
+/// propagated: a protective check that reads an unreadable directory as empty would wave
+/// the very launch it exists to refuse straight through. A directory that does not exist
+/// yet is genuinely empty, and only that is reported as unoccupied.
+pub fn occupancy(dir: &Path) -> io::Result<Occupancy> {
+    let mut found = Occupancy::default();
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(found),
+        Err(e) => return Err(io::Error::new(e.kind(), format!("{}: {e}", dir.display()))),
+    };
+    for entry in entries {
+        let entry = entry.map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", dir.display())))?;
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+        let file_type = entry
+            .file_type()
+            .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", path.display())))?;
+        if !file_type.is_file() {
+            continue;
+        }
+        if let Some(tick) = parse_tick(name) {
+            found.snapshots.push((tick, path));
+        } else if name.starts_with(TMP_PREFIX) && name.ends_with(SUFFIX) {
+            found.temporaries.push(path);
+        } else if name == JOURNAL_NAME {
+            let len = entry
+                .metadata()
+                .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", path.display())))?
+                .len();
+            if len > 0 {
+                found.journal = Some(path);
+            }
+        }
+    }
+    found.snapshots.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+    found.temporaries.sort();
+    Ok(found)
 }
 
 /// A snapshot that decoded, with where it came from.
@@ -160,13 +336,30 @@ pub struct Checkpointer {
 impl Checkpointer {
     /// Spawn the worker for `dir`. The directory must already exist.
     pub fn spawn(dir: impl Into<PathBuf>) -> Checkpointer {
+        Checkpointer::spawn_holding(dir, None)
+    }
+
+    /// [`Checkpointer::spawn`], with the worker thread holding a share of the state lock.
+    ///
+    /// This is what makes the one-writer guarantee true rather than merely intended.
+    /// [`Checkpointer::shutdown`] *detaches* a worker still writing after
+    /// [`SHUTDOWN_TIMEOUT`], and a library caller can then return and start another owner
+    /// while that thread is still renaming a snapshot into the directory. Holding a clone of
+    /// the same `Arc<StateLock>` — the same open file description, never a second `open` or
+    /// a second `flock` — keeps the kernel's lock held for exactly as long as a writer
+    /// actually exists, timeout or no timeout.
+    pub fn spawn_holding(dir: impl Into<PathBuf>, lock: Option<Arc<StateLock>>) -> Checkpointer {
         let dir = dir.into();
         let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
         let worker_dir = dir.clone();
         let worker_shared = Arc::clone(&shared);
         let handle = std::thread::Builder::new()
             .name("cubarium-checkpoint".into())
-            .spawn(move || checkpoint_loop(&worker_dir, &worker_shared))
+            .spawn(move || {
+                // Moved into the thread and dropped when it returns, however it returns.
+                let _ownership = lock;
+                checkpoint_loop(&worker_dir, &worker_shared);
+            })
             .expect("spawning the checkpoint worker");
         Checkpointer { dir, shared, handle: Some(handle), queued: 0, warned_drop: false }
     }
@@ -393,6 +586,100 @@ mod tests {
         let cp = Checkpointer::spawn(&dir);
         cp.shutdown(Some((7, b"final".to_vec())));
         assert_eq!(fs::read(snapshot_path(&dir, 7)).unwrap(), b"final");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn occupancy_sees_snapshots_temp_files_and_a_nonempty_journal_only() {
+        let dir = temp_dir("occupancy");
+        assert!(!occupancy(&dir).unwrap().is_occupied(), "an empty directory is not occupied");
+
+        // Files an operator may keep beside a world are not occupancy.
+        fs::write(dir.join("telemetry.jsonl"), b"{}\n").unwrap();
+        fs::write(dir.join("README"), b"notes").unwrap();
+        fs::write(dir.join(LOCK_NAME), b"pid 1\n").unwrap();
+        fs::write(dir.join("world-oops.cubw"), b"x").unwrap();
+        // An *empty* journal is not occupancy either: care that never accepted anything
+        // left no history to mix.
+        fs::write(dir.join(JOURNAL_NAME), b"").unwrap();
+        assert!(!occupancy(&dir).unwrap().is_occupied(), "{:?}", occupancy(&dir).unwrap());
+
+        fs::write(dir.join(JOURNAL_NAME), b"{\"rec\":\"epoch\"}\n").unwrap();
+        let seen = occupancy(&dir).unwrap();
+        assert!(seen.is_occupied());
+        assert!(seen.journal.is_some());
+        assert!(seen.describe().contains(JOURNAL_NAME), "{}", seen.describe());
+
+        fs::write(snapshot_path(&dir, 5), b"x").unwrap();
+        fs::write(snapshot_path(&dir, 446_277), b"x").unwrap();
+        fs::write(dir.join("tmp-99.cubw"), b"x").unwrap();
+        let seen = occupancy(&dir).unwrap();
+        assert_eq!(seen.snapshots.len(), 2);
+        assert_eq!(seen.snapshots[0].0, 446_277, "newest tick first");
+        assert_eq!(seen.temporaries.len(), 1);
+        assert!(seen.describe().contains("446277"), "{}", seen.describe());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn occupancy_propagates_a_read_error_and_reports_a_missing_directory_as_empty() {
+        // `list_snapshots` treats both as empty; the protective check must not.
+        assert!(!occupancy(Path::new("/definitely/not/here")).unwrap().is_occupied());
+        // A path that is a file, not a directory, is an error rather than "nothing here".
+        let dir = temp_dir("occupancy-error");
+        let file = dir.join("not-a-directory");
+        fs::write(&file, b"x").unwrap();
+        let err = occupancy(&file).unwrap_err();
+        assert!(err.to_string().contains("not-a-directory"), "{err}");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_state_lock_is_exclusive_and_reusable_without_deleting_the_file() {
+        let dir = temp_dir("lock");
+        let held = StateLock::acquire(&dir).expect("the first launcher owns the directory");
+        assert!(held.path().exists());
+
+        let err = StateLock::acquire(&dir).expect_err("a second launcher must be refused");
+        let text = format!("{err:#}");
+        assert!(text.contains(&dir.display().to_string()), "the refusal names the directory: {text}");
+
+        // The diagnostic content is content, not the mechanism.
+        let note = fs::read_to_string(held.path()).unwrap();
+        assert!(note.contains(&format!("pid {}", std::process::id())), "{note}");
+
+        drop(held);
+        assert!(dir.join(LOCK_NAME).exists(), "the lock file is never unlinked");
+        let again = StateLock::acquire(&dir).expect("the lock is free once the owner drops it");
+        drop(again);
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The one-writer guarantee has to survive a *detached* writer. `shutdown` gives up
+    /// after [`SHUTDOWN_TIMEOUT`] and leaves the worker running; if ownership lived only in
+    /// the runner's local, a second launcher could start while that thread was still
+    /// renaming a snapshot into the directory.
+    #[test]
+    fn a_checkpoint_worker_keeps_the_directory_owned_after_the_runner_drops_its_lock() {
+        let dir = temp_dir("lock-through-worker");
+        let lock = Arc::new(StateLock::acquire(&dir).unwrap());
+        let cp = Checkpointer::spawn_holding(&dir, Some(Arc::clone(&lock)));
+
+        // The runner returns and drops its own handle. The worker thread still holds a
+        // clone of the same open file description, so the kernel's lock is still held.
+        drop(lock);
+        assert!(
+            StateLock::acquire(&dir).is_err(),
+            "a second launcher must not start while a writer thread is alive"
+        );
+
+        // Only when the worker has actually stopped is the directory free — and the lock
+        // file is still there, never unlinked.
+        cp.shutdown(Some((1, b"final".to_vec())));
+        assert!(dir.join(LOCK_NAME).exists());
+        let again = StateLock::acquire(&dir).expect("free once every writer has exited");
+        drop(again);
+        assert!(snapshot_path(&dir, 1).exists(), "the detached writer's work still landed");
         fs::remove_dir_all(&dir).unwrap();
     }
 

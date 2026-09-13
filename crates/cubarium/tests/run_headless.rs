@@ -115,16 +115,21 @@ fn a_different_seed_gives_a_different_world() {
 #[test]
 fn telemetry_goes_where_the_option_says_and_is_appended_across_runs() {
     let scratch = Scratch::new("telemetry-path");
-    let state = scratch.join("state");
     let log = scratch.join("elsewhere.jsonl");
-    for _ in 0..2 {
+    // A state directory each: `--fresh` is now refused in a directory that already holds a
+    // world, so "two runs" means two worlds. The point of the test is the *telemetry* path,
+    // which both runs share.
+    let mut states = Vec::new();
+    for i in 0..2 {
+        let state = scratch.join(&format!("state-{i}"));
         run(&[
             "--sink", "none", "--speed", "0", "--seconds", "10", "--fresh",
             "--state", state.to_str().unwrap(),
             "--telemetry", log.to_str().unwrap(),
         ]);
+        assert!(!state.join("telemetry.jsonl").exists(), "the default path must not be used");
+        states.push(state);
     }
-    assert!(!state.join("telemetry.jsonl").exists(), "the default path must not be used");
     // Two identical runs of 10 s at a 5 s cadence: four samples, appended not truncated.
     assert_eq!(telemetry_lines(&log).len(), 4);
 }

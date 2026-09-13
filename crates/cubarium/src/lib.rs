@@ -8,10 +8,14 @@
 //! owns no geometry: every spatial operation goes through `cubarium-surface` and every
 //! pixel through `cubarium-render`.
 
-#![forbid(unsafe_code)]
+// `deny` rather than `forbid`: exactly one place in this crate needs `unsafe`, the
+// `flock(2)` call in [`state::StateLock`], and it carries its own `#[allow]` with the
+// argument for why it is sound. Everything else in the host stays unsafe-free.
+#![deny(unsafe_code)]
 
 pub mod art;
 pub mod art_present;
+pub mod care;
 pub mod cli;
 pub mod clock;
 pub mod net;

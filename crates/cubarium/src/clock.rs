@@ -202,6 +202,16 @@ impl Clock {
         Step::Sleep(due.saturating_duration_since(now))
     }
 
+    /// Re-base the clock on `now`, as if a pause had just ended.
+    ///
+    /// The care hold uses this: a boundary held for the length of an `fsync` is a pause the
+    /// world genuinely spent not stepping, and fast-forwarding afterwards would compress
+    /// that time into a burst of catch-up ticks nobody asked for. The world resumes at its
+    /// normal rate from wherever the hold left it.
+    pub fn rebase_now(&mut self, now: Instant) {
+        self.rebase(now);
+    }
+
     fn rebase(&mut self, now: Instant) {
         self.next_tick = now + self.tick_period;
         self.render_base = now;

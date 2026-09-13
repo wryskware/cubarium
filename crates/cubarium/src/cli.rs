@@ -135,9 +135,18 @@ pub struct Run {
     /// Overrides `config.seed` when creating a fresh world.
     #[arg(long)]
     pub seed: Option<u64>,
-    /// Ignore existing snapshots and create a new world.
+    /// Ignore existing snapshots and create a new world. Refused when `--state` already
+    /// holds snapshots, an interrupted snapshot write, or a non-empty care journal.
     #[arg(long, default_value_t = false)]
     pub fresh: bool,
+    /// Refuse to start unless an existing snapshot loads. Turns "no loadable snapshot,
+    /// so here is a brand new world" into an error, for a run that must be a resume.
+    #[arg(long, default_value_t = false)]
+    pub require_resume: bool,
+    /// Offer the optional care interaction (feed, rain, clean) on the viewer. Needs
+    /// `--sink web` or `--mirror-web`: care is served over the same loopback HTTP server.
+    #[arg(long, default_value_t = false)]
+    pub care: bool,
     /// JSON-lines telemetry file (appended). Defaults to `<state>/telemetry.jsonl`.
     #[arg(long)]
     pub telemetry: Option<PathBuf>,
@@ -232,6 +241,19 @@ impl Run {
                 "--mirror-web is redundant with --sink web, which is already the viewer"
             );
         }
+        if self.care {
+            // Care arrives over the viewer's own HTTP server; without one there is no
+            // route to offer it on, and silently enabling nothing would be a lie.
+            anyhow::ensure!(
+                self.sink == RunSinkArg::Web || self.mirror_web,
+                "--care needs the viewer: use --sink web, or --mirror-web beside another sink"
+            );
+        }
+        anyhow::ensure!(
+            !(self.fresh && self.require_resume),
+            "--fresh and --require-resume ask for opposite things: one demands a new world, \
+             the other demands an old one"
+        );
         anyhow::ensure!(self.every >= 1, "--every must be at least 1");
         anyhow::ensure!(self.scale >= 1, "--scale must be at least 1");
         check_fps(self.fps)?;
@@ -340,7 +362,33 @@ mod tests {
         assert_eq!(r.web_port, 7393);
         assert!(!r.mirror_web, "the mirrored viewer is opt-in");
         assert_eq!(r.art, None, "the art image is opt-in");
+        assert!(!r.care, "care is opt-in");
+        assert!(!r.require_resume, "a run may still create a new world by default");
         r.validate().unwrap();
+    }
+
+    #[test]
+    fn care_needs_the_viewer_and_is_accepted_with_either_spelling_of_it() {
+        parse_run(["cubarium", "run", "--sink", "web", "--care"]).validate().unwrap();
+        parse_run(["cubarium", "run", "--sink", "shim", "--mirror-web", "--care"])
+            .validate()
+            .unwrap();
+        for sink in ["shim", "preview"] {
+            let r = parse_run(["cubarium", "run", "--sink", sink, "--care"]);
+            let err = r.validate().unwrap_err().to_string();
+            assert!(err.contains("--care needs the viewer"), "{sink}: {err}");
+        }
+        let r = parse_run(["cubarium", "run", "--sink", "none", "--speed", "0", "--care"]);
+        assert!(r.validate().is_err(), "a headless run has no viewer to offer care on");
+    }
+
+    #[test]
+    fn a_fresh_world_and_a_required_resume_cannot_be_asked_for_together() {
+        let r = parse_run(["cubarium", "run", "--fresh", "--require-resume"]);
+        let err = r.validate().unwrap_err().to_string();
+        assert!(err.contains("opposite things"), "{err}");
+        parse_run(["cubarium", "run", "--require-resume"]).validate().unwrap();
+        parse_run(["cubarium", "run", "--fresh"]).validate().unwrap();
     }
 
     #[test]

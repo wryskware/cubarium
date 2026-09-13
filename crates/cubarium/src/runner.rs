@@ -23,10 +23,12 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use cube_proto::Frame;
 use cubarium_core::view::{FieldDump, RenderView};
+use cubarium_core::care::{CareCommand, CareKind, CareOutcome, CareReceipt, CareTarget};
 use cubarium_core::{LifeEvent, Telemetry, World, WorldConfig, encode_snapshot};
 use cubarium_render::Canvas;
 
 use crate::art::ArtPack;
+use crate::care;
 use crate::art_present::ArtPresenter;
 use crate::cli::{Run, RunSinkArg};
 use crate::clock::{Clock, Step, TICK_HZ};
@@ -381,10 +383,17 @@ fn open_world(run: &Run) -> Result<(World, Option<PathBuf>, Option<u64>)> {
     };
 
     if !run.fresh {
-        let mut report = |path: &Path, failure: &state::LoadFailure| {
-            eprintln!("cubarium: skipping {}: {failure}", path.display());
+        // Every failure is collected as well as printed: whether *any* snapshot file was
+        // present and simply would not load decides between "a new world" and an error.
+        let mut failures: Vec<String> = Vec::new();
+        let loaded = {
+            let mut report = |path: &Path, failure: &state::LoadFailure| {
+                eprintln!("cubarium: skipping {}: {failure}", path.display());
+                failures.push(format!("{}: {failure}", path.display()));
+            };
+            state::load_newest(&run.state, &mut report)
         };
-        if let Some(loaded) = state::load_newest(&run.state, &mut report) {
+        if let Some(loaded) = loaded {
             let state::Loaded { path, tick, mut state } = loaded;
             eprintln!("cubarium: resuming {} at tick {tick}", path.display());
             if let Some(file_config) = &from_file {
@@ -394,6 +403,27 @@ fn open_world(run: &Run) -> Result<(World, Option<PathBuf>, Option<u64>)> {
                 .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
             return Ok((world, Some(path), Some(tick)));
         }
+        // A directory holding snapshot files, none of which load, is a damaged world, not
+        // an empty one. Starting a new world there would put tick 0 beside eight higher
+        // ticks the pruner keeps in preference to it, and the operator would find their
+        // world gone rather than merely unreadable. Only a directory with no snapshot
+        // files at all is genuinely a new world.
+        if !failures.is_empty() {
+            anyhow::bail!(
+                "{}: {} snapshot file(s) are present and none of them loaded:\n  {}\n\
+                 This is a damaged world, not an empty directory, so no new world is created \
+                 here. Recover or move those files aside deliberately, or choose a different \
+                 --state directory.",
+                run.state.display(),
+                failures.len(),
+                failures.join("\n  "),
+            );
+        }
+        anyhow::ensure!(
+            !run.require_resume,
+            "--require-resume: {} holds no snapshot to resume from",
+            run.state.display()
+        );
         eprintln!("cubarium: no loadable snapshot in {}; creating a new world", run.state.display());
     }
 
@@ -429,20 +459,27 @@ fn source_of(run: &Run, start_tick: u64, resumed_from: Option<&Path>) -> web::So
 /// [`FanOutSink`]. The loop above still encodes exactly once per rendered frame; the
 /// fan-out hands that one `&Frame` to both, so the cube and the browser are never looking
 /// at different pixels.
-fn open_sink(run: &Run, source: &web::Source) -> Result<Option<Box<dyn FrameSink>>> {
+fn open_sink(
+    run: &Run,
+    source: &web::Source,
+    care: Option<std::sync::Arc<care::CareShared>>,
+) -> Result<Option<Box<dyn FrameSink>>> {
     let primary: Box<dyn FrameSink> = match run.sink {
         RunSinkArg::None => return Ok(None),
         RunSinkArg::Preview => Box::new(PreviewSink::new(run.scale, &run.out)?),
         RunSinkArg::Shim => Box::new(ShimSink::new(run.addr.clone())),
         RunSinkArg::Png => Box::new(PngSink::new(&run.out, run.every)?),
-        RunSinkArg::Web => {
-            Box::new(WebSink::with_source(run.web_port, speed_note(run.speed), source.clone())?)
-        }
+        RunSinkArg::Web => Box::new(WebSink::with_care(
+            run.web_port,
+            speed_note(run.speed),
+            source.clone(),
+            care.clone(),
+        )?),
     };
     if !run.mirror_web {
         return Ok(Some(primary));
     }
-    let web = WebSink::with_source(run.web_port, speed_note(run.speed), source.clone())?;
+    let web = WebSink::with_care(run.web_port, speed_note(run.speed), source.clone(), care)?;
     // `--web-port 0` binds an ephemeral port, so the URL has to be reported to be usable.
     eprintln!("cubarium: mirroring the same frames to the viewer at {}", web.url());
     Ok(Some(Box::new(FanOutSink::new(vec![primary, Box::new(web)]))))
@@ -498,6 +535,328 @@ fn open_show(run: &Run) -> Result<Show> {
     }
 }
 
+// --- optional care -------------------------------------------------------------------
+
+/// This run's epoch: the stamp the journal's first record carries and every client
+/// identity embeds. Nanoseconds plus the pid, so two runs a millisecond apart on the same
+/// machine still retire each other's identities.
+fn care_epoch() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{nanos:x}-{}", std::process::id())
+}
+
+/// One command as the core wants it. The host keeps whole-pixel targets because that is
+/// what a click on the net *is*; the core takes chart coordinates as `f64`.
+fn to_core(command: &care::PlannedCommand) -> CareCommand {
+    CareCommand {
+        seq: command.seq,
+        apply_after_tick: command.apply_after_tick,
+        kind: match command.kind {
+            care::CareKind::Feed => CareKind::Feed,
+            care::CareKind::Rain => CareKind::Rain,
+            care::CareKind::Clean => CareKind::Clean,
+        },
+        target: CareTarget {
+            face: command.target.face,
+            u: f64::from(command.target.u),
+            v: f64::from(command.target.v),
+        },
+    }
+}
+
+/// The receipt's quantities, for the journal's diagnostic record and for the viewer.
+fn applied_json(outcome: &CareOutcome) -> serde_json::Value {
+    match outcome.applied() {
+        None => serde_json::Value::Null,
+        Some(q) => serde_json::json!({
+            "material_in": q.material_in,
+            "energy_in": q.energy_in,
+            "water_depth": q.water_depth,
+            "material_out": q.material_out,
+            "energy_out": q.energy_out,
+            "cells": q.cells,
+            "ends_tick": q.ends_tick,
+        }),
+    }
+}
+
+/// Everything `--care` adds to the loop: the service the HTTP server talks to, the journal
+/// worker, the recovered schedule, and the hold.
+///
+/// The whole of the contract's admission protocol lives in [`CareRuntime::boundary`],
+/// which the loop calls at each tick boundary and obeys: while it answers `false` the world
+/// does not advance, and everything else — rendering, `/frame`, `/status`, `/care/status` —
+/// keeps running.
+struct CareRuntime {
+    service: care::CareService,
+    worker: care::JournalWorker,
+    /// The next sequence number to allocate: after the journal's maximum, not after the
+    /// snapshot's cursor. A record in the journal has reserved its sequence already.
+    next_seq: u64,
+    /// Recovered commands still to apply, in sequence order.
+    replay: std::collections::VecDeque<care::PlannedCommand>,
+    /// Handed to the journal worker, not yet acknowledged.
+    inflight: Vec<care::PlannedCommand>,
+    /// The boundary the world is held at.
+    holding_at: Option<u64>,
+    /// Set once an uncertain write has happened. The world never advances again: the only
+    /// way out is a clean stop, which still writes the final snapshot at this boundary.
+    failed: bool,
+    /// False without `--care`. Recovery of *already accepted* history never depends on this
+    /// flag — a durable command at `B ≥ S` must be replayed whether or not this run is
+    /// willing to accept new ones, or restarting without the flag would advance past `B`
+    /// and checkpoint a history the journal disagrees with. The flag only decides whether
+    /// anything *new* may be admitted.
+    intake_allowed: bool,
+    /// A hold ended this iteration, so the clock owes itself a re-base.
+    released: bool,
+}
+
+impl CareRuntime {
+    /// True while the world is held at a boundary and must not advance. The presentation
+    /// freezes with it: see the render arm of the loop.
+    fn is_holding(&self) -> bool {
+        self.failed || self.holding_at.is_some()
+    }
+
+    /// True when the world may step. Never blocks: a pending commit is discovered by
+    /// polling the worker, once per loop iteration.
+    fn boundary(&mut self, world: &mut World) -> Result<bool> {
+        if self.failed {
+            return Ok(false);
+        }
+        self.drain_acks(world)?;
+        if self.failed || self.holding_at.is_some() {
+            return Ok(false);
+        }
+        // The recovered schedule owns the boundary until it is exhausted. Intake is gated
+        // `replaying` meanwhile, so nothing new can interleave with it.
+        if self.apply_replay(world)? {
+            return Ok(true);
+        }
+        if !self.replay.is_empty() || !self.intake_allowed {
+            return Ok(true);
+        }
+        let boundary = world.tick();
+        let planned = self.service.drain_prepared(self.next_seq, boundary);
+        if planned.is_empty() {
+            return Ok(true);
+        }
+        self.next_seq += planned.len() as u64;
+        self.inflight = planned.clone();
+        self.holding_at = Some(boundary);
+        self.service.hold_at(boundary);
+        eprintln!(
+            "cubarium: holding at tick {boundary} while {} care command(s) are made durable",
+            planned.len()
+        );
+        if !self.worker.submit(care::JournalJob::Accept(planned)) {
+            self.fail(boundary, "the care journal worker is gone");
+        }
+        Ok(false)
+    }
+
+    /// Apply every recovered command whose boundary is this one. Returns true when at least
+    /// one was applied.
+    fn apply_replay(&mut self, world: &mut World) -> Result<bool> {
+        let mut applied = false;
+        while let Some(head) = self.replay.front() {
+            if head.apply_after_tick > world.tick() {
+                break;
+            }
+            // The schedule was validated whole before the first step, so this cannot happen
+            // from a well-formed journal; if it does, something else is wrong and stopping
+            // is the only answer that does not invent history.
+            anyhow::ensure!(
+                head.apply_after_tick == world.tick(),
+                "care recovery: seq {} belongs at boundary {} but the world is already at \
+                 tick {}",
+                head.seq,
+                head.apply_after_tick,
+                world.tick()
+            );
+            let command = self.replay.pop_front().expect("just inspected");
+            let receipt = world.apply_care(&to_core(&command));
+            if let Some(reason) = receipt.outcome.reason()
+                && (reason == "out of order" || reason == "wrong boundary")
+            {
+                anyhow::bail!(
+                    "care recovery: the world refused seq {} at boundary {} with \"{reason}\". \
+                     A replayed command the core will not admit is a recovery error, not \
+                     something to skip past.",
+                    command.seq,
+                    command.apply_after_tick
+                );
+            }
+            eprintln!(
+                "cubarium: replayed care seq {} ({}) at tick {}: {}",
+                command.seq,
+                command.kind.as_str(),
+                receipt.tick,
+                receipt.outcome.as_str()
+            );
+            self.record(&command, &receipt);
+            applied = true;
+        }
+        if applied && self.replay.is_empty() && self.intake_allowed {
+            eprintln!("cubarium: the recovered care schedule is exhausted; care is open");
+            self.service.open_intake();
+        }
+        Ok(applied)
+    }
+
+    /// Answer the journal worker. This is where an acknowledgement turns into application.
+    fn drain_acks(&mut self, world: &mut World) -> Result<()> {
+        while let Some(ack) = self.worker.poll_ack() {
+            match ack {
+                care::JournalAck::Accepted { commands, result: Ok(()) } => {
+                    // Durable. Only now does anything reach the world.
+                    self.service.commit_accepted(&commands);
+                    for command in &commands {
+                        let receipt = world.apply_care(&to_core(command));
+                        self.record(command, &receipt);
+                    }
+                    self.inflight.clear();
+                    self.holding_at = None;
+                    self.released = true;
+                    self.service.release_hold();
+                }
+                care::JournalAck::Accepted { commands, result: Err(e) } if e.is_full() => {
+                    // Nothing was attempted, so nothing is uncertain: the sequence numbers
+                    // go back, the clients are told, and the world resumes. This is the one
+                    // journal failure that does not stop the world.
+                    eprintln!("cubarium: care refused: {e}");
+                    self.next_seq = self.next_seq.saturating_sub(commands.len() as u64);
+                    for command in &commands {
+                        self.service.record_outcome(
+                            command.seq,
+                            "rejected",
+                            "journal full",
+                            serde_json::Value::Null,
+                        );
+                    }
+                    self.inflight.clear();
+                    self.holding_at = None;
+                    self.released = true;
+                    self.service.release_hold();
+                }
+                care::JournalAck::Accepted { result: Err(e), .. } => {
+                    self.fail(world.tick(), format!("{e}"));
+                }
+                care::JournalAck::Outcome { result: Err(e) } => {
+                    if e.is_full() {
+                        // Diagnostic only; replay never needs it.
+                        eprintln!("cubarium: could not record a care outcome: {e}");
+                    } else {
+                        // The hold was already released when this was submitted, so the
+                        // world has advanced. It holds *here*, at the tick it has reached.
+                        self.fail(world.tick(), format!("{e}"));
+                    }
+                }
+                care::JournalAck::Outcome { result: Ok(()) } => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Hand a receipt to the waiting client and to the journal's diagnostic record.
+    fn record(&mut self, command: &care::PlannedCommand, receipt: &CareReceipt) {
+        let reason = receipt.outcome.reason().unwrap_or_default().to_string();
+        let applied = applied_json(&receipt.outcome);
+        self.service.record_outcome(
+            command.seq,
+            receipt.outcome.as_str(),
+            &reason,
+            applied.clone(),
+        );
+        self.worker.submit(care::JournalJob::Outcome(vec![care::OutcomeRecord {
+            seq: command.seq,
+            tick: receipt.tick,
+            outcome: receipt.outcome.as_str(),
+            reason,
+            applied,
+        }]));
+    }
+
+    /// An uncertain write. The world holds where it is for the rest of the process.
+    ///
+    /// `observed_at` is the world's *actual* tick right now, which is not always the
+    /// acceptance boundary: a diagnostic outcome record is written after the hold was
+    /// released, so its failure can arrive with the world several ticks further on. The
+    /// world holds at the tick it has actually reached, and that is the tick the final
+    /// snapshot will carry — claiming otherwise would send an operator looking for a
+    /// checkpoint that does not exist.
+    fn fail(&mut self, observed_at: u64, reason: impl Into<String>) {
+        let reason = reason.into();
+        if self.failed {
+            return;
+        }
+        self.failed = true;
+        self.holding_at = Some(observed_at);
+        self.service.hold_at(observed_at);
+        eprintln!(
+            "cubarium: care failed, observed at tick {observed_at}: {reason}\n\
+             cubarium: the record may or may not be on disk, so the world will not advance \
+             past tick {observed_at}. Nothing more will be appended to the journal in this \
+             process. Stop cleanly (Ctrl-C) — the final snapshot is written at tick \
+             {observed_at} — and restart: recovery applies whatever accepted records \
+             survived, each at its own boundary."
+        );
+        self.service.fail(reason);
+    }
+
+    /// Whether a hold ended since this was last asked, so the clock can re-base instead of
+    /// fast-forwarding through the time the world spent waiting on a disk.
+    fn take_released(&mut self) -> bool {
+        std::mem::take(&mut self.released)
+    }
+}
+
+/// Open the journal, validate the recovered schedule, and build the runtime. Everything
+/// that can refuse to start does so here, before a log, a worker or a sink is opened.
+fn open_care(
+    run: &Run,
+    world: &World,
+    build_id: &str,
+    lock: &std::sync::Arc<state::StateLock>,
+) -> Result<CareRuntime> {
+    let epoch = care_epoch();
+    let journal = care::Journal::open(&run.state, &epoch, build_id)?;
+    let admitted = world.care().admitted_seq;
+    let plan = journal.replay_plan(admitted, world.tick())?;
+    // After the journal's maximum, never after the snapshot's cursor: the journal has
+    // already reserved those numbers even where the world has not reached them yet.
+    let next_seq = journal.max_seq().unwrap_or(admitted).max(admitted) + 1;
+    if !plan.is_empty() {
+        eprintln!(
+            "cubarium: {} care command(s) to replay from {}, seq {}..={} at boundaries {}..={}",
+            plan.len(),
+            journal.path().display(),
+            plan[0].seq,
+            plan[plan.len() - 1].seq,
+            plan[0].apply_after_tick,
+            plan[plan.len() - 1].apply_after_tick,
+        );
+    }
+    let status = journal.status();
+    let worker = care::JournalWorker::spawn_holding(journal, Some(std::sync::Arc::clone(lock)));
+    let service = care::CareService::new(epoch, status);
+    Ok(CareRuntime {
+        service,
+        worker,
+        next_seq,
+        replay: plan.into(),
+        inflight: Vec::new(),
+        holding_at: None,
+        failed: false,
+        intake_allowed: run.care,
+        released: false,
+    })
+}
+
 /// Run the persistent world. Fatal errors (an unwritable state directory, an invalid
 /// config, a window that will not open) are returned; disk errors inside the checkpoint
 /// worker and telemetry are logged and the world continues.
@@ -512,6 +871,40 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
 
     std::fs::create_dir_all(&run.state)
         .with_context(|| format!("creating the state directory {}", run.state.display()))?;
+
+    // Ownership first, before the occupancy check, before loading, and before any
+    // persistent write: an OS advisory lock held by an open handle for the whole run is
+    // what makes "exactly one owner" atomic. Declared here so it is dropped *after* the
+    // checkpoint worker has stopped (drop order is reverse declaration order).
+    let lock = std::sync::Arc::new(state::StateLock::acquire(&run.state)?);
+
+    let occupied = state::occupancy(&run.state).with_context(|| {
+        format!("checking what the state directory {} already holds", run.state.display())
+    })?;
+    if run.fresh && occupied.is_occupied() {
+        // The defect this guard exists for: `--fresh` only ever skipped *loading*. The
+        // pruner keeps the eight highest ticks with no notion of world identity, so a new
+        // world beside eight higher-tick snapshots has its own checkpoints deleted as fast
+        // as it writes them — and `load_newest` would then resume the old world.
+        anyhow::bail!(
+            "--fresh refuses to start in {}: it already holds {}.\n\
+             A new world in an occupied directory mixes two histories, and the snapshot \
+             pruner — which ranks by tick, not by world — would delete the new world's \
+             checkpoints in favour of the old world's higher ticks. Choose a new --state \
+             directory.",
+            run.state.display(),
+            occupied.describe()
+        );
+    }
+    if !run.fresh && occupied.journal.is_some() && occupied.snapshots.is_empty() {
+        anyhow::bail!(
+            "{} holds a care journal but no snapshot.\n\
+             Those journaled commands were accepted against a world this directory can no \
+             longer produce, and creating one from today's defaults would replay them against \
+             the wrong world. Restore the snapshot, or move the journal aside deliberately.",
+            run.state.display()
+        );
+    }
 
     let (mut world, loaded_from, loaded_tick) = open_world(run)?;
     let config = world.config().clone();
@@ -532,13 +925,80 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
         true => Some(EventLog::open(&run.events_path())?),
         false => None,
     };
-    let mut checkpoints = Checkpointer::spawn(&run.state);
+    // The worker holds a share of the same lock handle, so the directory stays owned for
+    // as long as a thread can still write into it — including after `shutdown` gives up
+    // waiting and detaches one.
+    let mut checkpoints =
+        Checkpointer::spawn_holding(&run.state, Some(std::sync::Arc::clone(&lock)));
     let build_id = state::build_id();
+
+    // Care opens before the sink, because the sink serves it and because everything that
+    // can refuse the run — an unreadable journal, an inconsistent recovery schedule — must
+    // refuse before a socket is listening.
+    // Opened whenever this run may need care at all: because `--care` asked for intake, or
+    // because the directory already holds journaled history that must be recovered whether
+    // or not this run accepts anything new.
+    let mut care = match run.care || occupied.journal.is_some() {
+        false => None,
+        true => Some(open_care(run, &world, &build_id, &lock)?),
+    };
+    if let Some(rt) = care.as_mut() {
+        if !rt.intake_allowed {
+            if rt.replay.is_empty() {
+                // Nothing to recover and no intake: the journal was opened, validated and
+                // left alone. Drop it rather than carry a service nobody can reach.
+                let rt = care.take().expect("just matched");
+                let _ = rt.worker.shutdown();
+            } else {
+                eprintln!(
+                    "cubarium: {} command(s) of accepted care history will be replayed even \
+                     though --care is not set; recovering already accepted care does not \
+                     depend on accepting new care",
+                    rt.replay.len()
+                );
+            }
+        }
+    }
+    if let Some(rt) = care.as_mut() {
+        if loaded_from.is_none() && rt.intake_allowed {
+            // A world this run created owes a durable opening checkpoint before it accepts
+            // anything: a crash before the first periodic checkpoint would otherwise leave
+            // journaled commands with no persisted world to replay them against.
+            rt.service.gate_until_opened();
+            match state::write_snapshot(
+                &run.state,
+                world.tick(),
+                &encode_snapshot(&world.state, &build_id),
+            ) {
+                Ok(path) => {
+                    eprintln!(
+                        "cubarium: wrote the opening checkpoint {} before enabling care",
+                        path.display()
+                    );
+                    rt.service.open_intake();
+                }
+                Err(e) => eprintln!(
+                    "cubarium: the opening checkpoint could not be written ({e}); care stays \
+                     closed for this run and the world runs on without it"
+                ),
+            }
+        }
+        if !rt.replay.is_empty() || !rt.intake_allowed {
+            rt.service.gate_until_replayed();
+        }
+        rt.service.publish_tick(world.tick());
+    }
 
     // Read before the sink opens: `--mirror-web`'s `/status` names the tick this run
     // started at, and nothing steps the world between here and the loop.
     let start_tick = world.tick();
-    let mut sink = open_sink(run, &source_of(run, start_tick, loaded_from.as_deref()))?;
+    let mut sink = open_sink(
+        run,
+        &source_of(run, start_tick, loaded_from.as_deref()),
+        // Only an intake-enabled run serves the care routes; a recovery-only run leaves
+        // `/care/status` reporting `enabled: false`, which is the truth.
+        care.as_ref().filter(|rt| rt.intake_allowed).map(|rt| rt.service.shared()),
+    )?;
     let headless = sink.is_none();
     let pace = Pace::of(run.speed);
 
@@ -620,6 +1080,14 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
     match pace {
         Pace::Unlimited => {
             while !reached(ticks_done) && !stop.load(Ordering::Relaxed) {
+                if let Some(rt) = care.as_mut()
+                    && !rt.boundary(&mut world)?
+                {
+                    // Held. `--speed 0` has no clock to sleep against, so a short sleep
+                    // keeps a held world from spinning a core while it waits on a disk.
+                    std::thread::sleep(Duration::from_millis(1));
+                    continue;
+                }
                 advance(
                     &mut world,
                     &mut presenter,
@@ -631,6 +1099,9 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
                     &mut sink,
                     &mut ticks_done,
                 );
+                if let Some(rt) = care.as_ref() {
+                    rt.service.publish_tick(world.tick());
+                }
             }
         }
         _ => {
@@ -657,6 +1128,15 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
                             if reached(ticks_done) {
                                 break;
                             }
+                            // The contract's held boundary. While a record is being made
+                            // durable this refuses to let the world advance; rendering,
+                            // `/frame`, `/status` and `/care/status` all keep serving,
+                            // because they are handled below and on other threads.
+                            if let Some(rt) = care.as_mut()
+                                && !rt.boundary(&mut world)?
+                            {
+                                break;
+                            }
                             advance(
                                 &mut world,
                                 &mut presenter,
@@ -668,12 +1148,32 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
                                 &mut sink,
                                 &mut ticks_done,
                             );
+                            if let Some(rt) = care.as_ref() {
+                                rt.service.publish_tick(world.tick());
+                            }
+                        }
+                        // A hold is time the world really did spend not stepping. Re-base
+                        // rather than fast-forward: replaying it as catch-up ticks would
+                        // turn an `fsync` into a visible lurch.
+                        if care.as_mut().is_some_and(CareRuntime::take_released) {
+                            clock.rebase_now(Instant::now());
                         }
                     }
                     Step::Render { f } => {
                         if let (Some(s), Some(v)) = (sink.as_mut(), view.as_ref()) {
                             // `f` walks each body along the path of the last completed
                             // tick, so a 20 Hz world reads as continuous at `--fps`.
+                            //
+                            // Except while care holds the boundary. The world is not
+                            // advancing, so `f` cycling 0→1 every wall tick would replay
+                            // the last movement segment over and over and make a stopped
+                            // world jitter at 20 Hz. Held time is presented at its
+                            // endpoint: a fixed `f = 1.0`, which is where the held tick
+                            // actually finished and where the next one will start.
+                            let f = match care.as_ref().is_some_and(CareRuntime::is_holding) {
+                                true => 1.0,
+                                false => f,
+                            };
                             presenter.draw(v, f, &mut canvas);
                             // Exactly one encode per rendered frame; the identical bytes
                             // reach whichever sink is active.
@@ -707,11 +1207,36 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
     if let Some(s) = sink.as_mut() {
         s.finish()?;
     }
+    // Care stops before the final snapshot: the journal worker has to be off the disk
+    // before the checkpoint that this world's recovery will be measured against, and a
+    // world held at `B` writes its final snapshot at exactly `B`.
+    if let Some(rt) = care.take() {
+        if let Some(boundary) = rt.holding_at {
+            eprintln!(
+                "cubarium: stopping while care is held at tick {boundary}; the final snapshot is \
+                 written there"
+            );
+        }
+        let CareRuntime { worker, service, .. } = rt;
+        drop(service);
+        if let Some(journal) = worker.shutdown()
+            && let Some(reason) = journal.poisoned()
+        {
+            eprintln!(
+                "cubarium: {} accepted nothing after an uncertain write ({reason}); its bytes \
+                 are exactly as that write left them",
+                journal.path().display()
+            );
+        }
+    }
+
     // The clean-shutdown snapshot, always: the checkpoint interval is the recovery
     // bound only for an *un*clean stop.
     checkpoints.queue(final_tick, encode_snapshot(&world.state, &build_id));
     let checkpoints_queued = checkpoints.queued();
     checkpoints.shutdown(None);
+    // Only now is the directory free: the lock outlives every writer it protects.
+    drop(lock);
 
     let outcome = RunOutcome {
         start_tick,
