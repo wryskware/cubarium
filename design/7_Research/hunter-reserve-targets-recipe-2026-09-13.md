@@ -96,5 +96,41 @@ opening organisms/fields/configuration/import receipts, age-boundary counting,
 and completion flags for short, partial, failed and full horizons.
 
 Root reran `cargo test -p cubarium --example hunter_compare` against this recipe:
-74 passed, zero failed or ignored. Independent recipe review and the full paired
-runs are still pending; no candidate outcome is reported here.
+74 passed, zero failed or ignored. The independent
+[recipe review](astra-reserve-target-recipe-review-2026-09-13.md) (`031bcbd`)
+likewise passed all 74 and found no blocker to collecting the proposed data.
+
+## Frozen launch checkpoint
+
+Committed recipe: `b547ad086405c8b4fad1361f370001fa16f564f8`. Detached source at
+`/tmp/cubarium-reserve-recipe-QkCViu` built the release comparison executable;
+its manifest correctly reports `0.1.0+b547ad0`. Baseline and candidate each
+completed a 200-tick twelve-seed/six-arm smoke under `/tmp/`:
+`cubarium-reserve-recipe-smoke-{baseline,candidate}-b547ad0`. All 144 arms passed
+technical/numerical checks; measurement completion stayed false as intended.
+
+All twelve untouched-control summaries were exactly equal across recipes.
+Budget-only controls retain the requested hunter profile even with no members,
+so their full-state and snapshot hashes intentionally differ; all their other
+summary fields, including ecology projection hashes, were exactly equal. Root's
+initial overly broad full-summary equality assertion caught this metadata
+difference; the corrected check explicitly excludes only those two full-state
+hash fields and verifies the budget profile's exact two-field difference.
+
+Full 144,000-tick runs were then started in new directories:
+
+- `captures/hunter-reserve-baseline-two-hour-b547ad0`
+- `captures/hunter-reserve-candidate-two-hour-b547ad0`
+
+Each keeps its own frozen executable and manifest. Logs are the corresponding
+`/tmp/cubarium-reserve-{baseline,candidate}-two-hour-b547ad0.log` files. These
+jobs are in progress at this checkpoint, not completed results. No live process,
+opening cohort, prior experiment, or current world state was changed.
+
+Separately, root reran `cargo test --workspace --lib --tests` after Fable's
+`a559e54` adapter hardening and the recipe commit: **1,013 passed, zero failed,
+16 ignored**, exit 0, across 66 test summaries. Log:
+`/tmp/cubarium-lanternjaw-hardening-workspace-tests.log`. This includes the actual
+adapter behavior but excludes the example target counted separately above.
+The independent [adapter review](astra-hunter-adapter-hardening-review-2026-09-13.md)
+closes earlier concrete blockers while retaining endpoint/restart approximations.
