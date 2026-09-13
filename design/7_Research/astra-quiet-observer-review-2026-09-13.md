@@ -227,3 +227,77 @@ After adding the first-death fixture, the independent Rust observer command is
 boundary/audit regressions. Correct these narrow issues and exact-child linkage
 before freezing the first 48-arm behavioral screen. The existing green smoke is
 technical evidence only; it establishes no biological acceptance or live default.
+
+## Second correction closure — `fe114f9` / `42faaa2`
+
+**Ready for root to freeze and run the first 48-arm, ten-minute screen.** This
+closes the four findings in `5479e11`; it is not evidence of biological benefit,
+adequate quiet opportunity or permission to change the Off/live default. No
+experiment was launched by this reviewer. The compared runner, observer and
+reducer sources match `fe114f9` during the tests below; the handoff-only follow-up
+is `42faaa2`.
+
+1. **First-held death: resolved.** `Observer::after` now derives held deaths
+   from the full pre-decision pause set and actual LifeEvent death, not just
+   already-open bouts. It opens/extends the real recovery bout before terminal
+   closure, handling a parent previously active or resting. The independent
+   one-tick fixture now also checks exactly one `held_intervals_ended_by_death`,
+   one completed core held tick, one recovery bout, and zero post-step living
+   recovery ticks. Thus the removed interval is retained without silently
+   entering the population-time denominator. The original fortieth-interval
+   fixture remains green. The crosswalk additionally refuses a positive-duration
+   close whose bout was dropped, and accepts its restored one-tick bout.
+
+2. **Completed B+40 snapshot: resolved.** The reducer permits
+   `start_tick <= tick <= end_tick`. The independent validator fixture accepts
+   exact equality and now explicitly rejects B+41. This is the core boundary,
+   not a widened pause duration.
+
+3. **Raw energy re-gating: resolved.** The reducer matches the runner's fixed
+   material/water and persisted-corrected/windowed/receipt energy gates. Raw
+   energy remains finite, nonnegative, visible and separately flagged; it no
+   longer determines completion. The independent test accepts a correctly
+   flagged raw-only failure and still refuses equality at the unchanged energy
+   limit for each of the three actual energy gates. No tolerance changed.
+
+4. **Exact child crosswalk: resolved.** New exported `crossCheck` compares the
+   child identity against the actual birth set and separately carries it from
+   recovery bout to admission/close. The exact retained seed-1 probe now rejects
+   `47/5@144228` with substituted child `11/100005` instead of `11/5`, despite
+   the Begin/End stream remaining internally consistent. A separate reciprocal
+   mutation of the bout's origin child is also rejected. The independent fixture
+   invokes the actual exported crosswalk, not a copied predicate. Positive
+   terminal durations must have matching-length bouts in the reverse direction.
+
+Fresh checks:
+
+| Check | Result |
+| --- | --- |
+| Full `astra_quiet_observer` example | 16 pass, including seven independent fixtures and nine included module tests |
+| Seven independent fixtures after strengthening first-death counters | 7 pass, 9 module tests filtered |
+| `quiet_compare` example | 19 pass |
+| Native quiet reducer tests, including frozen read-only inspection | 27 pass |
+| Independent `astra-quiet-correction-review.test.mjs` | 4 pass: retained boundary/audit fixtures plus exact-child and missing-bout crosswalk probes |
+| Root's unmodified five summary probes against smoke `…-13d` | all five `gap:false` |
+
+The two Rust example suites share module tests; their results are reported by
+command, not added together as independent coverage. The native full-core test
+claim was not rerun for this bounded correction; core source did not change in
+the correction. The prior independent core boundary/compatibility checks remain
+separate evidence.
+
+Read-only comparison of all twelve seeds × four arms in confirmation smoke
+`captures/quiet-smoke-validated-2026-09-13d` against `…-13c` confirms **48/48
+closing state hashes identical**. Every new smoke arm reports technical/audit
+completion and correctly leaves `complete_experiment_measurement:false`.
+`held_intervals_ended_by_death` is zero across this smoke: it supports inertness
+where the death branch did not execute, not observational coverage of that branch.
+The actual synthetic core-death fixtures above supply boundary coverage.
+
+No further directly relevant boundary defect was found in this bounded pass.
+Keep the explicit measurement limits now acknowledged in the native handoff:
+post-step living path/population-time only, terminal intake/RNG unavailable,
+entry activity not distinguished from already-resting admission, and no exact
+funding/oxidation attribution through the ordinary API. Report the first screen
+as completed-horizon measurements with those limits, not a result inferred from
+the short smoke or a recommendation to deploy the candidate.

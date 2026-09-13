@@ -151,6 +151,9 @@ mod independent {
         } if *p == parent)));
         observer.after(&world, pre, &life, &quiet).unwrap();
         assert!(observer.reconciled(), "{}", observer.summary());
+        assert_eq!(observer.held_intervals_ended_by_death, 1);
+        assert_eq!(observer.summary()["quiet_records"]["completed_held_ticks"], 1.0);
+        assert_eq!(observer.summary()["post_birth_recovery"]["organism_ticks"], 0);
         let done = observer.drain_bouts();
         let recovery = done.iter().find(|b|
             b.id == parent && b.class == RestClass::PostBirthRecovery)
@@ -158,6 +161,7 @@ mod independent {
         assert_eq!(recovery.ticks, 1);
         assert_eq!(recovery.start_tick, boundary + 1);
         assert_eq!(recovery.end, BoutEnd::Aborted(QuietReason::ParentGone));
+        assert_eq!(observer.summary()["post_birth_recovery"]["bouts"], 1);
     }
 
     #[test]
