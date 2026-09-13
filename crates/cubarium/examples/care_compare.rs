@@ -218,21 +218,11 @@ fn run(initial: &WorldState, ticks: u64, care: bool, period: u64) -> Result<Valu
     }
     // Relative tolerances scale with the opening inventory, not with cumulative
     // inputs, so additional care cannot relax the audit.
-    ensure!(
-        worst[0] < 1e-8 * opening_mass.max(1.0),
-        "material drift {}",
-        worst[0]
-    );
-    ensure!(
-        worst[1] < 1e-8 * opening_energy.max(1.0),
-        "energy drift {}",
-        worst[1]
-    );
-    ensure!(
-        worst[2] < 1e-8 * opening_water.max(1.0),
-        "water drift {}",
-        worst[2]
-    );
+    let limits = [opening_mass, opening_energy, opening_water].map(|n| 1e-8 * n.max(1.0));
+    let audit_passed = worst
+        .iter()
+        .zip(limits)
+        .all(|(drift, limit)| *drift < limit);
     let ledgers = world.care().clone();
     let mut sample = serde_json::to_value(world.telemetry())?;
     // Hashes are strings so browser/JSON consumers do not round u64 values.
@@ -241,6 +231,11 @@ fn run(initial: &WorldState, ticks: u64, care: bool, period: u64) -> Result<Valu
     Ok(
         json!({"care":care,"population_min":population_min,"population_max":population_max,
         "max_absolute_drift":{"material":worst[0],"energy":worst[1],"water":worst[2]},
+        "audit_passed":audit_passed,
+        "audit_limits":{"material":limits[0],"energy":limits[1],"water":limits[2]},
+        "opening_inventory":{"material":opening_mass,"energy":opening_energy,"water":opening_water},
+        "cumulative_energy_delta":{"light":world.state.light_in_total-initial.light_in_total,
+            "heat":world.state.heat_out_total-initial.heat_out_total},
         "care_ledgers":ledgers,"receipts":receipts,"samples":samples,
         "first_extinction_tick":extinction_tick,
         "surviving_opening_cohorts":ancestry.surviving_cohorts(),
@@ -271,6 +266,7 @@ fn main() -> Result<()> {
     );
     let baseline = run(&initial, args.ticks, false, args.care_every)?;
     let cared = run(&initial, args.ticks, true, args.care_every)?;
+    let audit_passed = baseline["audit_passed"] == true && cared["audit_passed"] == true;
     println!(
         "{}",
         serde_json::to_string_pretty(&json!({
@@ -281,6 +277,12 @@ fn main() -> Result<()> {
             "note":"Matched in-memory numerical scenario; forms are not lineages. No host durability or visual-response proof; survival is censored at the reported duration.",
             "baseline":baseline,"cared":cared
         }))?
+    );
+    // Keep the full numerical evidence even on a strict audit failure. This is
+    // deliberately still an unsuccessful command, not a relaxed acceptance gate.
+    ensure!(
+        audit_passed,
+        "strict inventory-scaled audit failed; see emitted report"
     );
     Ok(())
 }
