@@ -15,6 +15,22 @@ use cubarium_core::ids::OrganismId;
 use cubarium_core::organism::{DeathCause, Mode, Organism, Origin};
 use cubarium_core::rng::Counter;
 use cubarium_core::snapshot::{SnapshotError, state_hash};
+
+/// The schema 12 replay hash of a world: FNV-1a over its frozen schema 12 projection. Recorded
+/// constants from before schema 13 are properties of those bytes, so they are checked against
+/// those bytes rather than restated.
+fn schema_twelve_hash(state: &cubarium_core::WorldState) -> u64 {
+    let payload = postcard::to_allocvec(
+        &cubarium_core::snapshot::v12::project(state).expect("an Off world has a schema 12 image"),
+    )
+    .expect("encodable");
+    let mut h = 0xcbf2_9ce4_8422_2325u64;
+    for &b in &payload {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x100_0000_01b3);
+    }
+    h
+}
 use cubarium_core::world::WorldState;
 use cubarium_core::{LifeEvent, World, WorldConfig, decode_snapshot, encode_snapshot};
 use cubarium_surface::{Face, SurfacePoint, Vec2, travel};
@@ -2194,7 +2210,7 @@ fn observations_do_not_move_a_profile_three_hunter_world() {
         world.drain_hunter_events();
         world.drain_events();
     }
-    let hunt_hash = state_hash(&world.state);
+    let hunt_hash = schema_twelve_hash(&world.state);
 
     // B: a funded escrow that becomes a child.
     let mut world = quiet_world();
@@ -2212,14 +2228,17 @@ fn observations_do_not_move_a_profile_three_hunter_world() {
         world.drain_hunter_events();
         world.drain_events();
     }
-    let birth_hash = state_hash(&world.state);
+    let birth_hash = schema_twelve_hash(&world.state);
     assert_eq!(
         world.hunters().hunter_births_total,
         1,
         "scenario B must actually give birth"
     );
 
-    // Recorded from `9eacb7e`, before any reproduction-evidence code existed.
+    // Recorded from `9eacb7e`, before any reproduction-evidence code existed, when the live
+    // `state_hash` and the schema 12 payload were the same bytes. Schema 13 appends the inert
+    // ordinary-quiet extension, so the recorded numbers are read off the schema 12 projection —
+    // which is every field they ever described (`snapshot::v12`).
     assert_eq!(
         hunt_hash, 15_771_965_630_209_811_797,
         "a hunt-and-digest world moved"

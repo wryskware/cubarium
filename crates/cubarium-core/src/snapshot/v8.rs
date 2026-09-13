@@ -66,6 +66,13 @@ pub struct WorldStateV8 {
 /// `None` when the world's active shower carries a nonstandard dose, which this shape cannot
 /// represent and must not silently drop (`super::care_v1::project`).
 pub fn project(state: &WorldState) -> Option<WorldStateV8> {
+    // An enabled ordinary quiet policy, or a held pause, has no image in a shape that predates
+    // the extension: dropping a live timer would make two behaviourally different worlds compare
+    // equal (`crate::quiet`).
+    if state.quiet.policy.enabled() || !state.quiet.pauses.is_empty() {
+        return None;
+    }
+
     Some(WorldStateV8 {
         config: state.config.clone(),
         tick: state.tick,
@@ -106,6 +113,9 @@ impl From<WorldStateV8> for WorldState {
             care: old.care.into(),
             energy_correction: EnergyCorrection::default(),
             hunters: crate::hunter::HunterState::default(),
+            // Off, with no retroactive pauses: a world written before the ordinary quiet
+            // extension existed never ran one (`crate::quiet`).
+            quiet: crate::quiet::QuietState::default(),
         }
     }
 }

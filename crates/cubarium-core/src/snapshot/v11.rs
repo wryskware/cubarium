@@ -63,6 +63,13 @@ pub struct WorldStateV11 {
 /// The schema 11 image of a current state, or `None` when there is no honest one: a shower
 /// falling at a nonstandard dose cannot be written into a shape with no dose.
 pub fn project(state: &WorldState) -> Option<WorldStateV11> {
+    // An enabled ordinary quiet policy, or a held pause, has no image in a shape that predates
+    // the extension: dropping a live timer would make two behaviourally different worlds compare
+    // equal (`crate::quiet`).
+    if state.quiet.policy.enabled() || !state.quiet.pauses.is_empty() {
+        return None;
+    }
+
     Some(WorldStateV11 {
         config: state.config.clone(),
         tick: state.tick,
@@ -103,6 +110,9 @@ impl From<WorldStateV11> for WorldState {
             care: old.care.into(),
             energy_correction: old.energy_correction,
             hunters: old.hunters,
+            // Off, with no retroactive pauses: a world written before the ordinary quiet
+            // extension existed never ran one (`crate::quiet`).
+            quiet: crate::quiet::QuietState::default(),
         }
     }
 }

@@ -38,6 +38,13 @@ pub struct Observation {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Decision {
     pub mode: Mode,
+    /// The **ordinary** mode this tick's hysteresis produced, before any quiet override.
+    ///
+    /// Equal to `mode` whenever no override applies, which is every tick of an Off world. While
+    /// a `post_birth_pause_v1` pause holds, `mode` is the imposed `Resting` and this is what the
+    /// controller would otherwise have chosen — the value the pause carries forward so release
+    /// resumes ordinary hysteresis instead of latching in the rest band (`crate::quiet`).
+    pub underlying_mode: Mode,
     /// New unit heading after the bounded turn.
     pub heading: Vec2,
     /// Updated OU vector.
@@ -124,6 +131,36 @@ pub fn decide(
     scavenging: bool,
     gate: TurnGate,
 ) -> Decision {
+    decide_quiet(org, obs, now, dt, grazing, scavenging, gate, None)
+}
+
+/// [`decide`] with the optional ordinary-quiet override of `crate::quiet`.
+///
+/// `None` is the ordinary controller, byte for byte: every expression below reduces to what it
+/// was before this parameter existed, and an Off world always passes `None`.
+///
+/// With `Some(q)`, two things change and nothing else:
+///
+/// 1. the hysteresis reads `q.underlying` instead of `org.mode`, because during a pause the
+///    organism's public mode is the imposed `Resting` and feeding that back in would latch it;
+/// 2. when `q.hold` is set, the ordinary result is computed first and recorded in
+///    [`Decision::underlying_mode`], and *then* `Resting` is imposed — **before** the turn gate,
+///    the effort and the intake/bud selection all read the mode. The release tick passes
+///    `hold: false`, which substitutes the underlying mode and imposes nothing.
+///
+/// The noise pair in `obs` is drawn by the caller either way, so an override consumes no extra
+/// RNG and shifts no stream.
+#[allow(clippy::too_many_arguments)]
+pub fn decide_quiet(
+    org: &Organism,
+    obs: &Observation,
+    now: u64,
+    dt: f64,
+    grazing: bool,
+    scavenging: bool,
+    gate: TurnGate,
+    quiet: Option<crate::quiet::QuietOverride>,
+) -> Decision {
     let d = &org.phenotype.drives;
     let h = org.hunger();
     let diet = org.phenotype.diet;
@@ -139,7 +176,7 @@ pub fn decide(
     let can_fruit = grazing && diet >= FRUIT_DIET && obs.f_here >= feed_min;
     let can_scavenge = scavenging && diet <= 1.0 - DIET_GATE && obs.d_here >= feed_min;
     let any_food = can_graze || can_fruit || can_scavenge;
-    let mut mode = org.mode;
+    let mut mode = quiet.map_or(org.mode, |q| q.underlying);
     if mode == Mode::Resting {
         if hunger_memory > f64::from(d.seek_on) {
             mode = Mode::Seeking;
@@ -151,6 +188,14 @@ pub fn decide(
         mode = Mode::Feeding;
     } else if mode == Mode::Feeding && !any_food {
         mode = Mode::Seeking;
+    }
+
+    // The ordinary answer is settled here, and it is the one the pause carries forward. Only
+    // now may the override repaint the mode the rest of this function reads.
+    let underlying_mode = mode;
+    let held = quiet.is_some_and(|q| q.hold);
+    if held {
+        mode = Mode::Resting;
     }
 
     // Turning is gated by the mode decided this tick: the noise injection and the turn
@@ -175,17 +220,33 @@ pub fn decide(
         Mode::Resting => f64::from(d.rest_effort),
     };
     let feeding = mode == Mode::Feeding;
-    let fruit_effort = if feeding && can_fruit { 1.0 } else { 0.0 };
-    let graze_effort = if feeding && can_graze { 1.0 } else { 0.0 };
-    let scavenge_effort = if feeding && can_scavenge { 1.0 } else { 0.0 };
+    // A held tick cannot be Feeding, so these are already zero; the explicit guard states the
+    // contract rather than relying on that, and covers a future mode the override might impose.
+    let fruit_effort = if feeding && can_fruit && !held { 1.0 } else { 0.0 };
+    let graze_effort = if feeding && can_graze && !held { 1.0 } else { 0.0 };
+    let scavenge_effort = if feeding && can_scavenge && !held { 1.0 } else { 0.0 };
 
     let age_seconds = org.age_ticks(now) as f64 * dt;
-    let bud = org.escrow.is_none()
+    // New budding requests are suppressed until release. The completed child's stores and birth
+    // event are untouched; this refuses a *new* gestation, it does not cancel one.
+    let bud = !held
+        && org.escrow.is_none()
         && org.reserve >= f64::from(d.bud_reserve) * org.phenotype.reserve_max
         && org.energy >= f64::from(d.bud_energy) * org.phenotype.energy_max
         && age_seconds >= f64::from(d.bud_min_age_seconds);
 
-    Decision { mode, heading, ou, effort, fruit_effort, graze_effort, scavenge_effort, bud, hunger_memory }
+    Decision {
+        mode,
+        underlying_mode,
+        heading,
+        ou,
+        effort,
+        fruit_effort,
+        graze_effort,
+        scavenge_effort,
+        bud,
+        hunger_memory,
+    }
 }
 
 /// Relaxation time of the turn-noise process, in seconds (spec: `τ_ou = 2 s`).

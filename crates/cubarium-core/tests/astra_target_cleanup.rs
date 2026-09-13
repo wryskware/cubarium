@@ -1,8 +1,21 @@
 //! Independent boundary probes for the shared-prey cleanup repair (512ee52).
 use cubarium_core::{
     HunterEvent, HunterMember, HunterPhase, HunterState, OrganismId, World, WorldState,
-    decode_snapshot, encode_snapshot,
+    WorldStateV12, decode_snapshot, encode_snapshot,
 };
+
+/// FNV-1a 64 over a payload, the hash `snapshot::state_hash` computes. Written out here so the
+/// recorded schema 12 replay hash below can stay the number that was verified: schema 13
+/// appends the inert ordinary-quiet extension, so the live `state_hash` of the same world is a
+/// different — and equally correct — number. This one is a property of the frozen payload.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut h = 0xcbf2_9ce4_8422_2325u64;
+    for &b in bytes {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x100_0000_01b3);
+    }
+    h
+}
 
 #[test]
 fn invalidation_is_full_id_scoped_and_preserves_paid_episode() {
@@ -97,11 +110,17 @@ fn exact_seed6_boundary_changes_only_unpaid_parent_phase_and_restarts() {
         12
     );
     let build_len = u16::from_le_bytes(old_closing[8..10].try_into().unwrap()) as usize;
-    let mut expected: WorldState = postcard::from_bytes(&old_closing[22 + build_len..]).unwrap();
+    // The payload is schema 12, so it is read through its frozen mirror; the live `WorldState`
+    // grew the ordinary-quiet extension in schema 13 and can no longer decode these bytes
+    // directly (`snapshot::v12`).
+    let old: WorldStateV12 = postcard::from_bytes(&old_closing[22 + build_len..]).unwrap();
     assert_eq!(
-        cubarium_core::snapshot::state_hash(&expected),
+        fnv1a(&postcard::to_allocvec(&old).unwrap()),
         9140998897574537509
     );
+    let mut expected: WorldState = old.into();
+    // Migration adds nothing but an inert Off extension.
+    assert_eq!(expected.quiet, cubarium_core::quiet::QuietState::default());
     let parent = OrganismId {
         slot: 29,
         generation: 6,
@@ -126,8 +145,16 @@ fn exact_seed6_boundary_changes_only_unpaid_parent_phase_and_restarts() {
         world.drain_events();
         world.drain_hunter_events();
     }
+    // The recorded number is this world's schema 12 replay hash, so it is read off the schema
+    // 12 projection — which is every field the recording covered. Schema 13's inert Off
+    // extension moves the live hash and changes nothing it describes.
     assert_eq!(
-        cubarium_core::snapshot::state_hash(&world.state),
+        fnv1a(
+            &postcard::to_allocvec(
+                &cubarium_core::snapshot::v12::project(&world.state).expect("an Off world projects")
+            )
+            .unwrap()
+        ),
         2258426608805215987,
         "every state field remains identical through the prior boundary"
     );

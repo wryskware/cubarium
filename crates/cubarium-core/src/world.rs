@@ -14,7 +14,7 @@ use crate::care::{
     ActiveShower, CareApplied, CareCommand, CareDose, CareKind, CareOutcome, CareReceipt, CareState,
 };
 use crate::config::{FounderKind, WorldConfig};
-use crate::controller::{Decision, Observation, TurnGate, decide, turn_toward};
+use crate::controller::{Decision, Observation, TurnGate, decide_quiet, turn_toward};
 use crate::events::LifeEvent;
 use crate::fields::Fields;
 use crate::genome::Phenotype;
@@ -27,6 +27,7 @@ use crate::hunter::{
 use crate::ids::{OrganismId, Slots};
 use crate::organism::{DeathCause, Escrow, Mode, Organism, Origin};
 use crate::pairs::{Body, NeighborLists};
+use crate::quiet::{QuietEvent, QuietOverride, QuietPause, QuietReason, QuietState};
 use crate::rng::{Counter, Stream, draw, normal, unit};
 use crate::telemetry::Telemetry;
 use crate::view::{FieldDump, OrganismView, RenderView};
@@ -82,6 +83,11 @@ pub struct WorldState {
     /// for every world that never opts in.
     #[serde(default)]
     pub hunters: HunterState,
+    /// The opt-in ordinary quiet extension (`crate::quiet`). Appended in schema 13, outside
+    /// every legacy nested organism and config payload. Off with no entries by default, and an
+    /// Off world never enters a quiet code path.
+    #[serde(default)]
+    pub quiet: QuietState,
 }
 
 impl WorldState {
@@ -126,6 +132,18 @@ impl WorldState {
         self.care.validate(self.tick)?;
         self.hunters
             .validate(self.tick, &self.organisms, &self.config)?;
+        // The ordinary quiet extension, against this world's own clock, capacity and live
+        // organisms — and against the hunter extension, which this slice refuses to combine
+        // with an enabled policy (`crate::quiet`).
+        self.quiet.validate(
+            self.tick,
+            self.config.capacity.max_organisms as usize,
+            self.hunters.profile.is_some()
+                || self.hunters.founders_placed > 0
+                || self.hunters.control_deposited
+                || !self.hunters.members.is_empty(),
+            |id| self.organisms.get(id).is_some(),
+        )?;
         // The corrections are signed, so they are checked as the *combined* totals they are
         // part of: finite corrections, and finite nonnegative corrected cumulative flows.
         // Nothing is clamped or reset — an unusable accounting state fails the load.
@@ -440,12 +458,137 @@ pub struct World {
     /// Hunter attempts, captures, offspring and deaths since the observer last drained them.
     /// Transient in exactly the same sense (`crate::hunter::HunterEvent`).
     hunter_events: Vec<HunterEvent>,
+    /// Ordinary-quiet begin/refuse/end/abort records since the observer last drained them.
+    /// Transient in exactly the same sense (`crate::quiet::QuietEvent`).
+    quiet_events: Vec<QuietEvent>,
     counters: TickCounters,
     /// Bounded read-only totals for the paid-charging policy. Transient in exactly the sense
     /// [`ChargingDiagnostics`] documents: never checkpointed, never hashed, never read by the
     /// tick.
     charging: ChargingDiagnostics,
     initial_material: f64,
+}
+
+// --- ordinary quiet (`crate::quiet`) ------------------------------------------------------
+//
+// Both helpers are observer-shaped: they read the organism, never charge it, and consume no RNG
+// draw. They run only in a world whose policy is enabled.
+
+/// What the controller should do with this organism's decision at boundary `now`.
+///
+/// Expiry and early abort both remove the entry and return an override that substitutes the
+/// **underlying** ordinary mode without imposing anything, so the parent uses the ordinary
+/// controller on that same tick and re-enters the hysteresis from where it really was.
+fn quiet_hold(
+    quiet: &mut QuietState,
+    events: &mut Vec<QuietEvent>,
+    id: OrganismId,
+    o: &Organism,
+    cfg: &crate::config::OrganismConfig,
+    now: u64,
+    dt: f64,
+) -> Option<QuietOverride> {
+    let index = quiet.pauses.iter().position(|p| p.parent == id)?;
+    let p = quiet.pauses[index];
+    let released = Some(QuietOverride { underlying: p.underlying, hold: false });
+    if !p.holds(now) {
+        // The promised window is over. Release at its exact end, not one tick late.
+        quiet.pauses.remove(index);
+        events.push(QuietEvent::End {
+            tick: now,
+            parent: p.parent,
+            child: p.child,
+            completed_ticks: p.completed(now),
+            underlying: p.underlying,
+        });
+        return released;
+    }
+    // The conservative budget is re-tested before every held decision, over the decisions that
+    // remain plus one ordinary tick. A parent that can no longer cover it stops resting now.
+    let abort = |events: &mut Vec<QuietEvent>, quiet: &mut QuietState, reason: QuietReason| {
+        quiet.pauses.remove(index);
+        events.push(QuietEvent::Abort {
+            tick: now,
+            parent: p.parent,
+            child: p.child,
+            completed_ticks: p.completed(now),
+            reason,
+        });
+        Some(QuietOverride { underlying: p.underlying, hold: false })
+    };
+    let Some(horizon) = crate::quiet::horizon_seconds(p.remaining(now), dt) else {
+        return abort(events, quiet, QuietReason::Overflow);
+    };
+    let Some(budget) = crate::quiet::Budget::of(o, cfg, horizon) else {
+        return abort(events, quiet, QuietReason::InvalidInputs);
+    };
+    if !budget.affordable(o) {
+        return abort(events, quiet, QuietReason::UnaffordableRemaining);
+    }
+    Some(QuietOverride { underlying: p.underlying, hold: true })
+}
+
+/// Offer a pause to the parent of an actual paid insertion at completed boundary `birth_tick`.
+///
+/// Every refusal is recorded and the opportunity is then forgotten: a hungry parent is never
+/// made to wait for permission to act, and nothing is retried on a later tick.
+#[allow(clippy::too_many_arguments)]
+fn quiet_admit(
+    quiet: &mut QuietState,
+    events: &mut Vec<QuietEvent>,
+    organisms: &Slots<Organism>,
+    cfg: &crate::config::OrganismConfig,
+    cap: usize,
+    birth_tick: u64,
+    dt: f64,
+    parent: OrganismId,
+    child: OrganismId,
+    hunter_parent: bool,
+) {
+    let mut refuse = |reason: QuietReason| {
+        events.push(QuietEvent::Refuse { tick: birth_tick, parent, child, reason });
+    };
+    if hunter_parent {
+        // `QuietState::validate` already refuses this combination outright; the record exists so
+        // a harness sees why nothing happened rather than inferring it from silence.
+        return refuse(QuietReason::HunterMember);
+    }
+    let Some(o) = organisms.get(parent) else {
+        return refuse(QuietReason::ParentGone);
+    };
+    if quiet.pauses.iter().any(|p| p.parent == parent) {
+        return refuse(QuietReason::AlreadyPaused);
+    }
+    if quiet.pauses.len() >= cap {
+        return refuse(QuietReason::Bounded);
+    }
+    let Some(end_tick) = birth_tick.checked_add(crate::quiet::POST_BIRTH_PAUSE_TICKS) else {
+        return refuse(QuietReason::Overflow);
+    };
+    let Some(horizon) = crate::quiet::horizon_seconds(crate::quiet::POST_BIRTH_PAUSE_TICKS, dt)
+    else {
+        return refuse(QuietReason::Overflow);
+    };
+    let Some(budget) = crate::quiet::Budget::of(o, cfg, horizon) else {
+        return refuse(QuietReason::InvalidInputs);
+    };
+    if !budget.affordable(o) {
+        return refuse(QuietReason::Unaffordable);
+    }
+    // The mode the parent is actually in as this tick closes: the ordinary value release will
+    // resume from.
+    let pause = QuietPause { parent, child, start_tick: birth_tick, end_tick, underlying: o.mode };
+    let at = quiet
+        .pauses
+        .partition_point(|p| (p.parent.slot, p.parent.generation) < (parent.slot, parent.generation));
+    quiet.pauses.insert(at, pause);
+    events.push(QuietEvent::Begin {
+        tick: birth_tick,
+        parent,
+        child,
+        end_tick,
+        underlying: pause.underlying,
+    });
 }
 
 impl World {
@@ -573,6 +716,7 @@ impl World {
             care: CareState::default(),
             energy_correction: EnergyCorrection::default(),
             hunters: HunterState::default(),
+            quiet: QuietState::default(),
         };
         Ok(World::assemble(state, habitat, initial_material))
     }
@@ -644,6 +788,7 @@ impl World {
             moved: Vec::new(),
             events: Vec::new(),
             hunter_events: Vec::new(),
+            quiet_events: Vec::new(),
             counters: TickCounters::default(),
             charging: ChargingDiagnostics::default(),
             initial_material,
@@ -705,6 +850,7 @@ impl World {
                 moved,
                 events,
                 hunter_events,
+                quiet_events,
                 counters,
                 charging,
                 initial_material: _,
@@ -732,6 +878,7 @@ impl World {
                         heat_out: heat_out_correction,
                     },
                 hunters,
+                quiet,
             } = state;
             let cfg: &WorldConfig = config;
             let org_cfg = &cfg.organism;
@@ -739,6 +886,8 @@ impl World {
             let k_p = org_cfg.intake_half_saturation;
             let e_f = cfg.fruit.energy_density;
             let gate = TurnGate::from_config(org_cfg);
+            // One boolean, read once: an Off world never touches a quiet code path again.
+            let quiet_on = quiet.active();
             let now = *tick;
             let seed = cfg.seed;
             // Every heat payment of the tick goes through here: the transient counter keeps
@@ -908,18 +1057,32 @@ impl World {
                     normal(seed, Stream::OrganismTurn, key, cy),
                 );
 
-                decisions.push((
-                    id,
-                    decide(
-                        o,
-                        &obs,
-                        now,
-                        dt,
-                        cfg.mechanisms.grazing,
-                        cfg.mechanisms.scavenging,
-                        gate,
-                    ),
-                ));
+                // The ordinary-quiet override (`crate::quiet`). `None` in every Off world,
+                // and `decide_quiet(.., None)` is `decide` expression for expression, so the
+                // reference trajectory is untouched. The noise pair above is drawn either way.
+                let quiet_override = if quiet_on {
+                    quiet_hold(quiet, quiet_events, id, o, org_cfg, now, dt)
+                } else {
+                    None
+                };
+                let decision = decide_quiet(
+                    o,
+                    &obs,
+                    now,
+                    dt,
+                    cfg.mechanisms.grazing,
+                    cfg.mechanisms.scavenging,
+                    gate,
+                    quiet_override,
+                );
+                // Carry the ordinary mode forward, once, so release resumes the real hysteresis
+                // rather than the imposed Resting.
+                if quiet_override.is_some_and(|q| q.hold)
+                    && let Some(p) = quiet.pauses.iter_mut().find(|p| p.parent == id)
+                {
+                    p.underlying = decision.underlying_mode;
+                }
+                decisions.push((id, decision));
             }
 
             // 5b. Hunters (`crate::hunter`), when any member exists: advance each member's
@@ -1896,6 +2059,27 @@ impl World {
                 });
             }
 
+            // Every removal path — starvation, age, collapse, a settled capture — has now
+            // happened. A pause whose parent is gone is aborted here, once, before any birth
+            // can add a new one (`crate::quiet`).
+            if quiet_on && !quiet.pauses.is_empty() {
+                let mut kept = Vec::with_capacity(quiet.pauses.len());
+                for p in std::mem::take(&mut quiet.pauses) {
+                    if organisms.get(p.parent).is_some() {
+                        kept.push(p);
+                    } else {
+                        quiet_events.push(QuietEvent::Abort {
+                            tick: now + 1,
+                            parent: p.parent,
+                            child: p.child,
+                            completed_ticks: p.completed(now + 1),
+                            reason: QuietReason::ParentGone,
+                        });
+                    }
+                }
+                quiet.pauses = kept;
+            }
+
             for parent_id in &births {
                 let full = organisms.len() >= cap;
                 // A member's child inherits the lineage, not the appearance: membership is
@@ -2069,6 +2253,22 @@ impl World {
                             birth_heat: e_r * escrow.structure,
                         },
                     });
+                }
+                // The trigger is this successful core commit, not an observer's post-step
+                // inference: the child is in the arena and the parent survived to see it.
+                if quiet_on {
+                    quiet_admit(
+                        quiet,
+                        quiet_events,
+                        organisms,
+                        org_cfg,
+                        cap,
+                        now + 1,
+                        dt,
+                        *parent_id,
+                        child_id,
+                        hunter_parent.is_some(),
+                    );
                 }
                 events.push(LifeEvent::Birth {
                     tick: now + 1,
@@ -2272,6 +2472,14 @@ impl World {
         profile: FixedHunterProfile,
         target: HunterTarget,
     ) -> Result<HunterFounderReceipt, String> {
+        if self.state.quiet.active() {
+            return Err(
+                "this world runs an ordinary quiet policy; the hunter extension is not combined \
+                 with it in this slice, because threat and escape interactions need their own \
+                 explicit contract"
+                    .into(),
+            );
+        }
         if self.state.hunters.control_deposited {
             return Err("this world is a budget-matched control and must not gain a hunter".into());
         }
@@ -2372,6 +2580,14 @@ impl World {
         profile: FixedHunterProfile,
         target: HunterTarget,
     ) -> Result<HunterControlReceipt, String> {
+        if self.state.quiet.active() {
+            return Err(
+                "this world runs an ordinary quiet policy; the hunter extension is not combined \
+                 with it in this slice, because threat and escape interactions need their own \
+                 explicit contract"
+                    .into(),
+            );
+        }
         if self.state.hunters.profile.is_some() || self.state.hunters.founders_placed > 0 {
             return Err("the hunter extension is already initialized".into());
         }
@@ -2538,6 +2754,19 @@ impl World {
     /// [`DeathCause::Predation`].
     pub fn drain_hunter_events(&mut self) -> Vec<HunterEvent> {
         std::mem::take(&mut self.hunter_events)
+    }
+
+    /// Ordinary-quiet begin/refuse/end/abort records since the last drain (`crate::quiet`).
+    ///
+    /// Transient measurement output for a harness: never checkpointed, never hashed, never read
+    /// back by the tick, and never routed to the ambient display. Always empty in an Off world.
+    pub fn drain_quiet_events(&mut self) -> Vec<QuietEvent> {
+        std::mem::take(&mut self.quiet_events)
+    }
+
+    /// The opt-in ordinary quiet extension: policy and any held pauses (`crate::quiet`).
+    pub fn quiet(&self) -> &QuietState {
+        &self.state.quiet
     }
 
     /// "Scatter food": charged organic crumbs into `D` and `De`. Per cell `D += m·w_c` and

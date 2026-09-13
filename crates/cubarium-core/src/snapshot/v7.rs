@@ -94,6 +94,9 @@ impl From<WorldStateV7> for WorldState {
             care: crate::care::CareState::default(),
             energy_correction: crate::accounting::EnergyCorrection::default(),
             hunters: crate::hunter::HunterState::default(),
+            // Off, with no retroactive pauses: a world written before the ordinary quiet
+            // extension existed never ran one (`crate::quiet`).
+            quiet: crate::quiet::QuietState::default(),
         }
     }
 }

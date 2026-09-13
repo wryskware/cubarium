@@ -32,16 +32,23 @@ fn stepped_world(ticks: u64) -> World {
 /// Version 12 changed the shape of `WorldState.care`: an in-flight shower persists the
 /// `dose_permille` it was admitted with
 /// (`design/7_Research/adjustable-care-dose-handoff-2026-09-13.md`).
+/// Version 13 **appends** the opt-in ordinary-quiet extension
+/// (`design/7_Research/astra-ordinary-quiet-experiment-proposal-2026-09-13.md`). It adds a
+/// field beside the others rather than reshaping one, and an Off world's three inert bytes are
+/// the whole difference — but postcard is not self-describing, so a schema 12 payload is still
+/// read through a frozen mirror rather than as a schema 13 one missing its tail.
 ///
-/// Version 8 was the first that migrates rather than refuses; version 12 migrates all five of
-/// its predecessors through their frozen mirrors — every one of them carrying the frozen
-/// pre-dose care shape, whose in-flight showers open at the standard dose, and the older three
-/// an empty hunter extension, and the oldest two zero corrections and zero care besides. The
-/// one exception stands: a schema 10 payload carrying an *active* trial is refused by name
-/// rather than reinterpreted. Everything older is still rejected outright.
+/// Version 8 was the first that migrates rather than refuses; version 13 migrates all six of
+/// its predecessors through their frozen mirrors — every one of them opening the quiet
+/// extension Off with no retroactive pauses, the five older ones carrying the frozen pre-dose
+/// care shape whose in-flight showers open at the standard dose, the older three an empty
+/// hunter extension, and the oldest two zero corrections and zero care besides. The one
+/// exception stands: a schema 10 payload carrying an *active* trial is refused by name rather
+/// than reinterpreted. Everything older is still rejected outright.
 #[test]
-fn the_schema_version_is_twelve_and_its_five_predecessors_still_load() {
-    assert_eq!(SCHEMA_VERSION, 12);
+fn the_schema_version_is_thirteen_and_its_six_predecessors_still_load() {
+    assert_eq!(SCHEMA_VERSION, 13);
+    assert_eq!(cubarium_core::SCHEMA_V12, 12);
     assert_eq!(cubarium_core::SCHEMA_V11, 11);
     assert_eq!(cubarium_core::SCHEMA_V10, 10);
     assert_eq!(cubarium_core::SCHEMA_V9, 9);

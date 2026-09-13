@@ -38,6 +38,7 @@ pub mod hunter;
 pub mod ids;
 pub mod organism;
 pub mod pairs;
+pub mod quiet;
 pub mod rng;
 pub mod snapshot;
 pub mod telemetry;
@@ -59,8 +60,8 @@ pub use hunter::{
 };
 pub use ids::OrganismId;
 pub use snapshot::{
-    SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_VERSION, SnapshotError,
-    WorldStateV7, WorldStateV8, WorldStateV9, WorldStateV10, WorldStateV11, decode_snapshot,
+    SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_VERSION, SnapshotError,
+    WorldStateV7, WorldStateV8, WorldStateV9, WorldStateV10, WorldStateV11, WorldStateV12, decode_snapshot,
     ecology_hash, encode_snapshot,
 };
 pub use telemetry::Telemetry;

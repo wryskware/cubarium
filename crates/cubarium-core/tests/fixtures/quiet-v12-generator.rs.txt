@@ -1,0 +1,86 @@
+//! Writes the genuine pre-change schema 12 fixtures the ordinary-quiet migration is tested
+//! against. Run only from an isolated copy of the tree **before** the quiet extension exists;
+//! the snapshots it writes are what that build actually produced, not a struct relabelled old.
+//!
+//! Two worlds, both from the default config and its own seed, because the migration has to be
+//! shown byte-exact for **both** the default no-care trajectory and a default care one:
+//!
+//! Both resume the same frozen mature opening the quiet diagnosis used (seed 1 of the
+//! prescribed cohort), because a freshly created world has not reproduced yet and the
+//! migration has to be shown across worlds that carry real paid births.
+//!
+//! * `quiet-v12-plain-*`: no care at all, a plain autonomous world.
+//! * `quiet-v12-care-*`: the quiet diagnosis's own recipe — one Standard Feed at elapsed 600,
+//!   Front (32, 48) — so a schema 12 world carrying real care ledgers is covered too.
+
+use std::path::PathBuf;
+
+use cubarium_core::care::{CareCommand, CareKind, CareTarget};
+use cubarium_core::{CareOutcome, SCHEMA_VERSION, World, decode_snapshot, encode_snapshot};
+
+const BUILD: &str = "pre-quiet-fixture";
+
+fn write(dir: &PathBuf, name: &str, world: &World) {
+    let bytes = encode_snapshot(&world.state, BUILD);
+    std::fs::write(dir.join(name), &bytes).expect("write the fixture");
+    println!(
+        "  wrote {name}: schema {SCHEMA_VERSION}, tick {}, {} bytes, pop {}, births {}, hash {}",
+        world.tick(),
+        bytes.len(),
+        world.population(),
+        world.state.births_total,
+        cubarium_core::snapshot::state_hash(&world.state)
+    );
+}
+
+fn step_to(world: &mut World, tick: u64) {
+    while world.tick() < tick {
+        world.step();
+        world.drain_events();
+    }
+}
+
+fn opening(path: &str) -> World {
+    let bytes = std::fs::read(path).expect("the prescribed opening");
+    let (meta, state) = decode_snapshot(&bytes).expect("it decodes");
+    println!("  opening: schema {} tick {} pop {}", meta.schema, state.tick, state.organisms.len());
+    assert!(state.care == Default::default() && state.hunters == Default::default());
+    World::from_state(state).expect("a valid world")
+}
+
+fn main() {
+    let mut args = std::env::args().skip(1);
+    let dir = PathBuf::from(args.next().expect("an output directory"));
+    let source = args.next().expect("a prescribed opening snapshot");
+    std::fs::create_dir_all(&dir).expect("the output directory");
+    assert_eq!(SCHEMA_VERSION, 12, "this generator writes the pre-change schema");
+
+    // ---- a plain autonomous world that has actually reproduced
+    println!("plain world:");
+    let mut world = opening(&source);
+    step_to(&mut world, 144_000 + 3000);
+    assert!(world.state.births_total > 0, "the fixture needs real paid births");
+    write(&dir, "quiet-v12-plain-3000.cubw", &world);
+    step_to(&mut world, 144_000 + 3600);
+    write(&dir, "quiet-v12-plain-3000-plus600.cubw", &world);
+
+    // ---- the same world with the quiet diagnosis's single Standard Feed
+    println!("care world:");
+    let mut world = opening(&source);
+    step_to(&mut world, 144_000 + 600);
+    let tick = world.tick();
+    let receipt = world.apply_care(&CareCommand::standard(
+        1,
+        tick,
+        CareKind::Feed,
+        CareTarget { face: 0, u: 32.0, v: 48.0 },
+    ));
+    println!("  feed at tick {tick}: {:?}", receipt.outcome);
+    assert!(!matches!(receipt.outcome, CareOutcome::Rejected(_)), "the fixture needs this feed");
+    step_to(&mut world, 144_000 + 3000);
+    assert!(world.state.care.admitted_seq == 1 && world.state.care.feed_material_in > 0.0);
+    assert!(world.state.births_total > 0, "the care fixture needs real paid births too");
+    write(&dir, "quiet-v12-care-3000.cubw", &world);
+    step_to(&mut world, 144_000 + 3600);
+    write(&dir, "quiet-v12-care-3000-plus600.cubw", &world);
+}

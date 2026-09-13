@@ -9,6 +9,7 @@ pub mod v8;
 pub mod v9;
 pub mod v10;
 pub mod v11;
+pub mod v12;
 
 pub mod care_v1;
 
@@ -17,6 +18,7 @@ pub use v8::{SCHEMA_V8, WorldStateV8};
 pub use v9::{SCHEMA_V9, WorldStateV9};
 pub use v10::{SCHEMA_V10, WorldStateV10};
 pub use v11::{SCHEMA_V11, WorldStateV11};
+pub use v12::{SCHEMA_V12, WorldStateV12};
 
 /// Bumped whenever `WorldState` or any nested type changes shape. Version 8 appends
 /// `WorldState.care`; version 9 appends `WorldState.energy_correction`
@@ -36,7 +38,7 @@ pub use v11::{SCHEMA_V11, WorldStateV11};
 /// hunter extension, and the oldest two with zero corrections as well. [`SCHEMA_V10`] is
 /// accepted only when its extension is empty: an active schema 10 trial is refused by name
 /// rather than reinterpreted in the schema 11 profile shape (see [`v10`]).
-pub const SCHEMA_VERSION: u32 = 12;
+pub const SCHEMA_VERSION: u32 = 13;
 pub const MAGIC: [u8; 4] = *b"CUBW";
 /// Fixed header length: magic 4, schema 4, build-id length 2, then the build id bytes,
 /// then payload length 8 and CRC32 4 (all little-endian).
@@ -104,6 +106,29 @@ pub fn encode_snapshot(state: &WorldState, build_id: &str) -> Vec<u8> {
 /// `care = CareState::default()` as well. Anything else is
 /// [`SnapshotError::UnsupportedSchema`]. `SnapshotMeta.schema` reports what was read, not what
 /// the build writes.
+/// Decode one frozen mirror, requiring the payload to be **fully consumed**.
+///
+/// `postcard::from_bytes` tolerates trailing bytes, and every schema since 8 has grown by
+/// *appending*. Without this check a newer payload relabelled with an older schema number would
+/// decode cleanly and silently drop whatever was appended — a care dose, a hunter extension, an
+/// ordinary quiet timer. The length is the only evidence a non-self-describing format offers
+/// that the reader and the writer agreed about the shape, so it is checked.
+fn decode_exact<'a, T>(payload: &'a [u8], schema: u32) -> Result<T, SnapshotError>
+where
+    T: serde::Deserialize<'a>,
+{
+    let (value, rest) =
+        postcard::take_from_bytes::<T>(payload).map_err(|e| SnapshotError::Decode(e.to_string()))?;
+    if !rest.is_empty() {
+        return Err(SnapshotError::Decode(format!(
+            "a schema {schema} payload has {} trailing byte(s); it was written by a later schema \
+             and must be read as that one",
+            rest.len()
+        )));
+    }
+    Ok(value)
+}
+
 pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), SnapshotError> {
     let take = |at: usize, n: usize| -> Result<&[u8], SnapshotError> {
         bytes.get(at..at + n).ok_or(SnapshotError::Truncated)
@@ -117,6 +142,7 @@ pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), Snaps
     }
     let schema = u32::from_le_bytes(take(4, 4)?.try_into().expect("4 bytes"));
     if schema != SCHEMA_VERSION
+        && schema != SCHEMA_V12
         && schema != SCHEMA_V11
         && schema != SCHEMA_V10
         && schema != SCHEMA_V9
@@ -141,21 +167,13 @@ pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), Snaps
         return Err(SnapshotError::BadChecksum);
     }
     let state: WorldState = match schema {
-        SCHEMA_V7 => postcard::from_bytes::<WorldStateV7>(payload)
-            .map(WorldState::from)
-            .map_err(|e| SnapshotError::Decode(e.to_string()))?,
-        SCHEMA_V8 => postcard::from_bytes::<WorldStateV8>(payload)
-            .map(WorldState::from)
-            .map_err(|e| SnapshotError::Decode(e.to_string()))?,
-        SCHEMA_V9 => postcard::from_bytes::<WorldStateV9>(payload)
-            .map(WorldState::from)
-            .map_err(|e| SnapshotError::Decode(e.to_string()))?,
-        SCHEMA_V10 => postcard::from_bytes::<WorldStateV10>(payload)
-            .map_err(|e| SnapshotError::Decode(e.to_string()))
-            .and_then(|old| v10::migrate(old).map_err(SnapshotError::Invalid))?,
-        SCHEMA_V11 => postcard::from_bytes::<WorldStateV11>(payload)
-            .map(WorldState::from)
-            .map_err(|e| SnapshotError::Decode(e.to_string()))?,
+        SCHEMA_V7 => WorldState::from(decode_exact::<WorldStateV7>(payload, schema)?),
+        SCHEMA_V8 => WorldState::from(decode_exact::<WorldStateV8>(payload, schema)?),
+        SCHEMA_V9 => WorldState::from(decode_exact::<WorldStateV9>(payload, schema)?),
+        SCHEMA_V10 => v10::migrate(decode_exact::<WorldStateV10>(payload, schema)?)
+            .map_err(SnapshotError::Invalid)?,
+        SCHEMA_V11 => WorldState::from(decode_exact::<WorldStateV11>(payload, schema)?),
+        SCHEMA_V12 => WorldState::from(decode_exact::<WorldStateV12>(payload, schema)?),
         _ => postcard::from_bytes(payload).map_err(|e| SnapshotError::Decode(e.to_string()))?,
     };
     state.validate().map_err(SnapshotError::Invalid)?;
@@ -214,6 +232,7 @@ mod tests {
             care: crate::care::CareState::default(),
             energy_correction: crate::accounting::EnergyCorrection::default(),
             hunters: crate::hunter::HunterState::default(),
+            quiet: crate::quiet::QuietState::default(),
         }
     }
 
@@ -328,7 +347,7 @@ mod tests {
         let full = postcard::to_allocvec(&s).unwrap();
         let projected = postcard::to_allocvec(&v9::project(&s).unwrap()).unwrap();
         assert_eq!(&full[..projected.len()], &projected[..], "the projection is a prefix of the payload");
-        assert_eq!(full.len(), projected.len() + EMPTY_HUNTERS);
+        assert_eq!(full.len(), projected.len() + EMPTY_HUNTERS + EMPTY_QUIET);
 
         // A schema 9 payload round-trips through the mirror into an identical state, and an
         // initialized extension is exactly what the projection drops.
@@ -351,6 +370,11 @@ mod tests {
     /// the five extension counters (all zero varints).
     const EMPTY_HUNTERS: usize = 1 + 1 + 4 * 8 + 1 + 1 + 5;
 
+    /// Bytes an inert [`crate::quiet::QuietState`] appends: the version varint, the `Off`
+    /// variant index and an empty pause vector's length. Three bytes, and every one of them is
+    /// a constant in an Off world.
+    const EMPTY_QUIET: usize = 1 + 1 + 1;
+
     #[test]
     fn the_schema_eight_projection_is_the_payload_without_the_corrections() {
         let s = state();
@@ -358,7 +382,7 @@ mod tests {
         let full = postcard::to_allocvec(&s).unwrap();
         let projected = postcard::to_allocvec(&v8::project(&s).unwrap()).unwrap();
         assert_eq!(&full[..projected.len()], &projected[..], "the projection is a prefix of the payload");
-        assert_eq!(full.len(), projected.len() + 2 * 8 + EMPTY_HUNTERS);
+        assert_eq!(full.len(), projected.len() + 2 * 8 + EMPTY_HUNTERS + EMPTY_QUIET);
 
         // A schema 8 payload round-trips through the mirror into an identical state, and a
         // nonzero correction is exactly what the projection drops.
@@ -383,7 +407,10 @@ mod tests {
         let full = postcard::to_allocvec(&s).unwrap();
         let projected = postcard::to_allocvec(&v7::project(&s)).unwrap();
         assert_eq!(&full[..projected.len()], &projected[..], "the projection is a prefix of the payload");
-        assert_eq!(full.len(), projected.len() + 1 + 1 + 6 * 8 + 2 * 8 + EMPTY_HUNTERS);
+        assert_eq!(
+            full.len(),
+            projected.len() + 1 + 1 + 6 * 8 + 2 * 8 + EMPTY_HUNTERS + EMPTY_QUIET
+        );
         assert_eq!(ecology_hash(&s), super::fnv1a(&projected));
         // Care moves `state_hash` and never `ecology_hash`.
         let mut fed = s.clone();

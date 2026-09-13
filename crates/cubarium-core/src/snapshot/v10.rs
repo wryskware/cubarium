@@ -155,6 +155,13 @@ pub struct WorldStateV10 {
 /// schema 10 image, so this returns `None` rather than writing a world whose profile the old
 /// shape cannot hold.
 pub fn project(state: &WorldState) -> Option<WorldStateV10> {
+    // An enabled ordinary quiet policy, or a held pause, has no image in a shape that predates
+    // the extension: dropping a live timer would make two behaviourally different worlds compare
+    // equal (`crate::quiet`).
+    if state.quiet.policy.enabled() || !state.quiet.pauses.is_empty() {
+        return None;
+    }
+
     if state.hunters != crate::hunter::HunterState::default() {
         return None;
     }
@@ -208,6 +215,9 @@ pub fn migrate(old: WorldStateV10) -> Result<WorldState, String> {
         care: old.care.into(),
         energy_correction: old.energy_correction,
         hunters: HunterState::default(),
+        // Off, with no retroactive pauses: a world written before the ordinary quiet
+        // extension existed never ran one (`crate::quiet`).
+        quiet: crate::quiet::QuietState::default(),
     })
 }
 

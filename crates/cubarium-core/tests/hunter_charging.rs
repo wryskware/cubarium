@@ -532,7 +532,14 @@ fn a_version_three_member_reproduces_the_pre_change_binarys_next_600_ticks() {
     }
     assert_eq!(world.tick(), 6170);
     assert_eq!(
-        payload(&encode_snapshot(&world.state, "pre-charge-fixture")),
+        // The fixture is a schema 12 payload, so the comparison is against this world's schema
+        // 12 projection. Schema 13 appends the inert ordinary-quiet extension beside it; the
+        // claim — that 600 ticks reproduce the pre-change binary's bytes — is unchanged
+        // (`snapshot::v12`).
+        postcard::to_allocvec(
+            &cubarium_core::snapshot::v12::project(&world.state).expect("an Off world projects")
+        )
+        .expect("encodable"),
         payload(&plus600),
         "600 ticks of the policy build diverged from the pre-change binary"
     );
