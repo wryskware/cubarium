@@ -102,8 +102,10 @@ response's own:
   3.15 s after the rain. In the captures the same restart differs by 13/255 (v2) / 8/255
   (v3) on its first frame and is identical after 2.15 s.
 
-So restart is exact during rain and **not exact in the tail: the decay is dropped and the
-plant is cut to still**, a one-time bounded difference in the direction of quiet. On a
+Restart therefore nearly matches after sustained saturating rain, but is **not exact
+throughout rain**: a restart during the rising level skips part of the attack. It is
+also **not exact in the tail: the decay is dropped and the plant is cut to still**,
+a one-time bounded difference in the direction of quiet. On a
 real opening a restart already changes 1900 net pixels by ≥ 8/255 for reasons unrelated
 to rain (growth snapped to target, bodies re-posed), which dwarfs the rain tail. No
 schema change is proposed to persist the level; the cut is preferable to a persisted
@@ -115,8 +117,10 @@ history for a presentation detail.
    2.7–4.3 Hz that is two thirds of the streaks' own, sustained for as long as it rains;
    under a natural drizzle that is minutes. This is the shimmer to reduce, not add.
 2. **Revise to v3, minus glowcap.** Same driver (`RenderView.rain`), same rooted
-   geometry, no ecology change, more change per still frame, a quarter of the added
-   motion, and a slow sway a viewer is less likely to notice as flicker. Drop the glowcap
+   geometry, no ecology change, more change per still frame, and less added motion.
+   In the mature peak crop its added-motion mean is about 36% of v2's (0.21/0.58),
+   or about a quarter of the original streaks-and-wind motion (0.21/0.90), not a
+   quarter of v2. The slower sway is a candidate for less visible flicker. Drop the glowcap
    entry: on the cap the response is only rim shimmer in both variants. The recommended
    package is `presenter-v2.patch` + `presenter-v3.patch` with `RAIN_RESPONSE` reduced to
    lanternstalk and reedspire (one line; unmeasured as such, but the glowcap entry does
