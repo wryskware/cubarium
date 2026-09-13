@@ -72,6 +72,81 @@ impl Sprite {
         })
     }
 
+    /// A sprite from **premultiplied linear** RGBA already in the canvas's own light, for
+    /// art that is rasterized in code every frame rather than loaded from a baked atlas.
+    ///
+    /// **Normative.** `pixels` is row-major, `width · height` long, `[r, g, b, a]` with
+    /// every channel finite, `0 ≤ a ≤ 1` and `0 ≤ r, g, b ≤ a` (premultiplied light can
+    /// never exceed its coverage); a pixel violating this is an error, never clamped
+    /// silently. The extent is measured exactly as [`Sprite::from_rgba`] measures it
+    /// (`hypot` of the painted texel's centre offset from the pivot plus the bilinear
+    /// support) and the same nine-pixel budget rejects the sprite. `from_rgba` followed by
+    /// nothing is bit-identical to this constructor fed the decoded premultiplied values.
+    pub fn from_premultiplied(
+        width: usize,
+        height: usize,
+        pivot: Vec2,
+        pixels: Vec<[f32; 4]>,
+    ) -> Result<Self, String> {
+        if width == 0
+            || height == 0
+            || width > 64
+            || height > 64
+            || pixels.len() != width * height
+            || !pivot.is_finite()
+        {
+            return Err("invalid sprite dimensions, pivot or pixel count".into());
+        }
+        let mut extent = 0.0f64;
+        for (i, p) in pixels.iter().enumerate() {
+            let a = p[3];
+            if !p.iter().all(|c| c.is_finite())
+                || !(0.0..=1.0).contains(&a)
+                || p[..3].iter().any(|&c| c < 0.0 || c > a)
+            {
+                return Err(format!("pixel {i} is not premultiplied linear RGBA in range: {p:?}"));
+            }
+            if a > 0.0 {
+                let x = (i % width) as f64 + 0.5 - pivot.x;
+                let y = (i / width) as f64 + 0.5 - pivot.y;
+                extent = extent.max(x.hypot(y) + TEXEL_SUPPORT);
+            }
+        }
+        if extent > FOOTPRINT_RADIUS {
+            return Err(format!(
+                "sprite extent {extent:.2} exceeds the 9-pixel surface budget"
+            ));
+        }
+        Ok(Self { width, height, pivot, pixels, extent })
+    }
+
+    /// The pivot, in sprite pixels from the image's upper-left corner.
+    pub fn pivot(&self) -> Vec2 {
+        self.pivot
+    }
+
+    /// The premultiplied linear RGBA of texel `(x, y)`; transparent outside the image.
+    pub fn texel(&self, x: i32, y: i32) -> [f32; 4] {
+        self.pixel(x, y)
+    }
+
+    /// The bilinear premultiplied sample at `point`, in sprite pixels **relative to the
+    /// pivot** (so `Vec2::ZERO` is the pivot itself): exactly the sample every stamp reads,
+    /// exposed for multipart rigs ([`crate::stamp_rig`]) and their tests. **Normative**: with
+    /// `p = point + pivot − (0.5, 0.5)`, the four texels `(⌊p.x⌋ + {0, 1}, ⌊p.y⌋ + {0, 1})`
+    /// weighted by the fractional parts of `p`, texels outside the image transparent.
+    pub fn sample_at(&self, point: Vec2) -> [f32; 4] {
+        self.sample(point)
+    }
+
+    /// Whether a bilinear sample at `point` (relative to the pivot, as in
+    /// [`Sprite::sample_at`]) can read any texel at all: `p` within one pixel outside the
+    /// image on each axis. A cheap rejection before sampling.
+    pub fn can_reach(&self, point: Vec2) -> bool {
+        let p = point + self.pivot;
+        p.x > -1.0 && p.y > -1.0 && p.x < self.width as f64 + 1.0 && p.y < self.height as f64 + 1.0
+    }
+
     pub fn extent(&self) -> f64 {
         self.extent
     }

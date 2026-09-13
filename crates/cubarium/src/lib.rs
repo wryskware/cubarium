@@ -18,6 +18,7 @@ pub mod art_present;
 pub mod care;
 pub mod cli;
 pub mod clock;
+pub mod lanternjaw;
 pub mod net;
 pub mod present;
 pub mod raycast;
