@@ -137,6 +137,19 @@ lower-priority plant-history/LCD ideas remain open. Use lightweight Git tags for
 code checkpoints and regularly ship verified visible improvements, per Wrysk's
 updated working preference; do not hold ready packages for unrelated backlog work.
 
+Current update, 2026-09-13: **`0.1.0+1236205` is live**, exactly resumed at510790
+with care sequence5 unchanged. Spiretree sway earned more art headroom without
+larger footprints or a new wind schedule;1079 clean workspace tests passed and
+the shared viewer measured59.9 distinctfps. See the
+[same-world rollout](7_Research/spiretree-live-update-2026-09-13.md).
+The108-case isolated care screen is complete: Feed usually increases real local
+feeding, rain is mixed, cleanup usually reduces feeding; sustained Resting is
+not demonstrated. Actual-intake meal animation, ordinary quiet-gate diagnosis
+and isolated natural-rainfall experiment implementation proceed separately.
+The reviewed, frozen paid-charging12-seed/six-arm comparison is now running;
+it is not a viability result. All earlier ecological failures remain retained,
+and the broader goal/backlog above remains open.
+
 ## M1 — prove the surface and presentation path
 
 Create the minimal Rust workspace, pin/reuse `cube-proto` from the existing shim,

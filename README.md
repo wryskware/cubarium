@@ -64,11 +64,11 @@ and improved viewer delivery in build `0.1.0+a44dc98`. That rollout preserved
 the exact running world and all five existing care inputs; 854 tests passed,
 and the live mirror measured about 60 distinct frames/s in isolated Chromium.
 See the [schema 9 rollout and rollback record](design/7_Research/presentation-v9-rollout-2026-09-13.md).
-Current live build **`0.1.0+9598044`** also includes adjustable care amounts and
-authored canopy growth; it resumed the same world at tick 457013. Root's full
-workspace check passed 1057 tests, and the new clips passed independent
-preservation/integration review. See the
-[current update record](design/7_Research/care-dose-live-update-2026-09-13.md).
+Current live build **`0.1.0+1236205`** includes adjustable care amounts, authored
+canopy growth and the newly readable spiretree wind. It resumed the same world
+at tick510790; 1079 workspace tests passed and the live shared viewer measured
+59.9 distinct frames/s. See the
+[current update record](design/7_Research/spiretree-live-update-2026-09-13.md).
 An isolated [local care screen](design/7_Research/local-care-observation-2026-09-13.md)
 now measures existing biological responses across all twelve mature worlds and
 three fixed targets. Feed increased local feeding in 27 of 36 patches; cleanup
@@ -92,7 +92,8 @@ The next [paid-charging experiment](design/7_Research/astra-hunter-paid-charging
 is implemented as an explicit opt-in hunter policy, leaving the existing policy
 and ordinary fauna unchanged. It raises only the battery threshold for spending
 reserve on charge, not available energy or reproduction subsidies. Independent
-review and a full matched screen remain gates before judging its ecological value.
+review is complete and the full matched screen is running in isolated copies;
+results remain a gate before judging its ecological value.
 
 Wrysk prefers Fable's **Lanternjaw** megafauna body. The
 [comparison studio](art/studies/megafauna/README.md) retains Veilwarden as an
@@ -119,7 +120,9 @@ durable amounts and schema-12 migration passed source, browser and restart check
 is a separate proposed ambient-support experiment, not a changed default or a
 generic dependence-on-attention control. Both canopy plants' opening clips are
 also live; missing clips in older/custom packs still use the reveal fallback.
-The next art pass addresses the remaining art-limited tall-plant wind.
+Spiretree wind is now live; glasscane/vine headroom remains limited. The next art
+pass compares actual-intake meal gestures, while an isolated natural-rainfall
+experiment harness is being implemented. Neither is a changed live behavior yet.
 
 Start with the [design overview](design/README.md), then the
 [implementation plan](design/implementation-plan.md). The

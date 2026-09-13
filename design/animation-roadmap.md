@@ -154,12 +154,12 @@ evidence are in [the rollout record](7_Research/care-browser-rollout-review-2026
 | --- | --- |
 | Lanternjaw production body | Multipart rig and real-world adapter implemented and reviewed, including juveniles and capture-boundary continuity; remains off the live world pending viable ecology; restart/path reconstruction limitations remain documented |
 | Broader authored plant growth | Delivered and live: both transitions for all seven species, including centred canopy opening; fixed anchors, reversal, wind support and seam playback tested; not persistent individual plant age |
-| Wind readability | Flooded-top reed response delivered; Fable now improving one art-limited tall family, with native before/after and registration checks; preserve quiet intervals and rooted contact |
+| Wind readability | Flooded-top reed and stronger bare-spiretree sway delivered/live; native comparison, strip registration and footprint checks passed; glasscane/vine headroom remains limited |
 | Residual flicker / AA | Compare native temporal captures; coverage-AA remains conditional on visible thin-stalk benefit, not indiscriminate blur |
-| Care flourish | Food-deposit and cleanup acknowledgement, rain aftermath, locally grounded creature/plant reactions; no global wakeup or fake feeding |
-| Calm creature habits | Antenna testing, feeding gestures, fin folding and pool-edge pauses; distinct, eased and not continuous synchronized activity |
-| Care balance / autonomy | Twelve-hour care evidence completed with corrected accounting; independently adjustable doses now live; natural-rainfall support experiment still proposed, defaults unchanged; diversity remains weak |
-| Rare apex lineage | Paid hunt/digestion/offspring mechanics implemented; complete baseline and reserve-target screens failed self-replacement despite captures; investigate the mature energy bottleneck separately from strike geometry before live introduction |
+| Care flourish | Acknowledgements live; completed108-case isolated screen confirms real but heterogeneous feeding responses. Fable comparing actual-intake meal onset; no global wakeup or fake satiation |
+| Calm creature habits | Mature care screen shows nearly no real Resting; copied-world stock/gate diagnosis separates biology from presentation. No controller change yet; fin folding/pauses remain candidates |
+| Care balance / autonomy | Twelve-hour accounting evidence and independent manual doses delivered; isolated natural-rainfall comparison implementation underway, defaults unchanged; diversity remains weak |
+| Rare apex lineage | Earlier screens failed self-replacement; reviewed paid-charging experiment now running on the fixed12-seed six-arm cohort. No live hunters; lineage and prey outcomes remain gates |
 | Richer plant history | Senescence/wilt/collapse/regrowth and persistent individual age/flowering are a later biological extension, beyond resource-driven presentation history |
 | Fine detail / higher resolution | Droplets and nibble detail remain lower priority as requested; possible LCD cube is exploration, not an authorized hardware migration |
 
