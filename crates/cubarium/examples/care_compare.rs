@@ -2,14 +2,84 @@
 //! No state writes, HTTP, shim output, or changes to the running cube.
 
 use anyhow::{Context, Result, anyhow, ensure};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use cubarium_core::{
-    CareCommand, CareKind, CareTarget, LifeEvent, OrganismId, World, WorldConfig, WorldState,
-    decode_snapshot,
+    CareCommand, CareDose, CareKind, CareTarget, LifeEvent, OrganismId, World, WorldConfig,
+    WorldState, decode_snapshot,
 };
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+
+#[path = "care_compare/local.rs"]
+mod local;
+
+const TARGETS: [CareTarget; 3] = [
+    CareTarget {
+        face: 0,
+        u: 32.0,
+        v: 48.0,
+    },
+    CareTarget {
+        face: 0,
+        u: 63.5,
+        v: 48.0,
+    },
+    CareTarget {
+        face: 1,
+        u: 32.0,
+        v: 63.5,
+    },
+];
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum CareSchedule {
+    #[default]
+    Cycle,
+    Feed,
+    Rain,
+    Clean,
+}
+
+impl CareSchedule {
+    fn kind(self, elapsed: u64, period: u64) -> Option<CareKind> {
+        match self {
+            Self::Cycle => scheduled_kind(elapsed, period),
+            Self::Feed if elapsed % period == 0 => Some(CareKind::Feed),
+            Self::Rain if elapsed % period == 0 => Some(CareKind::Rain),
+            Self::Clean if elapsed % period == 0 => Some(CareKind::Clean),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct ObservationOptions {
+    schedule: CareSchedule,
+    dose: CareDose,
+    start: u64,
+    local_every: u64,
+    target_index: usize,
+}
+
+impl ObservationOptions {
+    fn validate(self, ticks: u64) -> Result<()> {
+        ensure!(
+            self.start < ticks,
+            "care start must precede the closing tick"
+        );
+        ensure!(self.target_index < TARGETS.len(), "invalid target index");
+        if self.local_every > 0 {
+            ensure!(
+                ticks.div_ceil(self.local_every) <= 2000,
+                "local observations are bounded to 2000 intervals; increase --local-every or shorten the run"
+            );
+        }
+        self.dose
+            .validate("care comparison")
+            .map_err(|e| anyhow!(e))
+    }
+}
 
 #[derive(Parser)]
 struct Args {
@@ -28,6 +98,20 @@ struct Args {
     /// Reset observer counters at this cadence for an independent energy audit.
     #[arg(long, default_value_t = 200, value_parser = clap::value_parser!(u64).range(1..=12000))]
     audit_window: u64,
+    /// Isolate one action; cycle preserves the original Feed/Rain/Clean stress recipe.
+    #[arg(long, value_enum, default_value_t = CareSchedule::Cycle)]
+    care_kind: CareSchedule,
+    #[arg(long, default_value_t = 1000, value_parser = clap::value_parser!(u16).range(250..=2000))]
+    dose_permille: u16,
+    /// First action's elapsed boundary. Single-kind recipes act here, not at cycle offsets.
+    #[arg(long, default_value_t = 0)]
+    care_start: u64,
+    /// Optional local snapshots every N ticks; counts still observe EVERY tick. 0 disables.
+    #[arg(long, default_value_t = 0)]
+    local_every: u64,
+    /// First target: 0 interior, 1 side seam, 2 open rim. Later cycles rotate as before.
+    #[arg(long, default_value_t = 0, value_parser = clap::value_parser!(u8).range(0..=2))]
+    target_index: u8,
 }
 
 #[derive(Default)]
@@ -187,12 +271,19 @@ fn audit_passes(
     care_boundary_energy: f64,
     limits: [f64; 3],
 ) -> bool {
-    [legacy[0], legacy[2], corrected_energy, windowed_energy, care_boundary_energy]
-        .into_iter()
-        .zip([limits[0], limits[2], limits[1], limits[1], limits[1]])
-        .all(|(drift, limit)| drift.is_finite() && drift >= 0.0 && drift < limit)
+    [
+        legacy[0],
+        legacy[2],
+        corrected_energy,
+        windowed_energy,
+        care_boundary_energy,
+    ]
+    .into_iter()
+    .zip([limits[0], limits[2], limits[1], limits[1], limits[1]])
+    .all(|(drift, limit)| drift.is_finite() && drift >= 0.0 && drift < limit)
 }
 
+#[cfg(test)]
 fn run(
     initial: &WorldState,
     ticks: u64,
@@ -200,6 +291,29 @@ fn run(
     period: u64,
     audit_window: u64,
 ) -> Result<Value> {
+    run_with_options(
+        initial,
+        ticks,
+        care,
+        period,
+        audit_window,
+        ObservationOptions::default(),
+    )
+}
+
+fn run_with_options(
+    initial: &WorldState,
+    ticks: u64,
+    care: bool,
+    period: u64,
+    audit_window: u64,
+    options: ObservationOptions,
+) -> Result<Value> {
+    options.validate(ticks)?;
+    ensure!(
+        initial.hunters.profile().is_none(),
+        "care comparison requires a no-hunter opening"
+    );
     let mut world = World::from_state(initial.clone()).map_err(|e| anyhow!(e))?;
     let opening_mass = material(initial);
     let opening_energy = energy(initial);
@@ -217,42 +331,45 @@ fn run(
     let mut receipts = Vec::new();
     let mut ancestry = Ancestry::new(initial);
     let mut samples = vec![census(initial, &ancestry)];
+    let mut local = if options.local_every > 0 {
+        Some(local::LocalObserver::new(initial, &TARGETS)?)
+    } else {
+        None
+    };
+    let mut local_samples = Vec::new();
+    if let Some(observer) = &local {
+        local_samples.push(observer.sample(initial)?);
+    }
     let mut extinction_tick = if population_min == 0 {
         Some(initial.tick)
     } else {
         None
     };
-    // Ordinary face, side seam, open bottom rim: doses use the same constants.
-    let targets = [
-        CareTarget {
-            face: 0,
-            u: 32.0,
-            v: 48.0,
-        },
-        CareTarget {
-            face: 0,
-            u: 63.5,
-            v: 48.0,
-        },
-        CareTarget {
-            face: 1,
-            u: 32.0,
-            v: 63.5,
-        },
-    ];
     for elapsed in 0..ticks {
-        if care {
+        if elapsed == options.start {
+            if let Some(observer) = &mut local {
+                observer.mark_first_pulse(&world.state)?;
+            }
+        }
+        if care && elapsed >= options.start {
             // Each kind is at least 60 simulated seconds apart; no host cooldown
             // bypass is needed to reproduce this schedule through the real controls.
-            let kind = scheduled_kind(elapsed, period);
+            let relative = elapsed - options.start;
+            let kind = options.schedule.kind(relative, period);
             if let Some(kind) = kind {
                 let before_energy = energy(&world.state);
-                let receipt = world.apply_care(&CareCommand::standard(
-                    world.care().admitted_seq.checked_add(1).context("care seq exhausted")?,
-                    world.tick(),
+                let receipt = world.apply_care(&CareCommand {
+                    seq: world
+                        .care()
+                        .admitted_seq
+                        .checked_add(1)
+                        .context("care seq exhausted")?,
+                    apply_after_tick: world.tick(),
                     kind,
-                    targets[(elapsed / period) as usize % targets.len()],
-                ));
+                    target: TARGETS
+                        [((relative / period) as usize + options.target_index) % TARGETS.len()],
+                    dose: options.dose,
+                });
                 let booked = receipt
                     .outcome
                     .applied()
@@ -273,6 +390,12 @@ fn run(
             .check_invariants()
             .map_err(|e| anyhow!("tick {}: {e}", world.tick()))?;
         ancestry.observe(&world.drain_events())?;
+        if let Some(observer) = &mut local {
+            observer.observe(&world.state)?;
+            if (elapsed + 1) % options.local_every == 0 || elapsed + 1 == ticks {
+                local_samples.push(observer.sample(&world.state)?);
+            }
+        }
         ensure!(
             ancestry.live.len() == world.population() as usize,
             "ancestry census mismatch"
@@ -349,7 +472,11 @@ fn run(
     // representation AND an independent observer. The raw legacy result remains
     // visible below even when it fails; it is never relabeled passing.
     let audit_passed = audit_passes(
-        worst, worst_corrected_energy, worst_windowed_energy, worst_care_energy, limits,
+        worst,
+        worst_corrected_energy,
+        worst_windowed_energy,
+        worst_care_energy,
+        limits,
     );
     let ledgers = world.care().clone();
     let mut sample = serde_json::to_value(windowed.observe(world.telemetry()))?;
@@ -369,8 +496,7 @@ fn run(
     // Hashes are strings so browser/JSON consumers do not round u64 values.
     sample["state_hash"] = json!(cubarium_core::snapshot::state_hash(&world.state).to_string());
     sample["ecology_hash"] = json!(cubarium_core::ecology_hash(&world.state).to_string());
-    Ok(
-        json!({"care":care,"population_min":population_min,"population_max":population_max,
+    let mut result = json!({"care":care,"population_min":population_min,"population_max":population_max,
         "max_absolute_drift":{"material":worst[0],"energy":worst[1],"water":worst[2]},
         "audit_passed":audit_passed,
         "audit_basis":"Unchanged opening-inventory limits; material, water, persisted compensated energy, independent windowed energy, and immediate care-boundary energy must all pass. max_absolute_drift.energy remains the raw legacy diagnostic.",
@@ -397,12 +523,26 @@ fn run(
         "care_ledgers":ledgers,"receipts":receipts,"samples":samples,
         "first_extinction_tick":extinction_tick,
         "surviving_opening_cohorts":ancestry.surviving_cohorts(),
-        "maximum_descendant_depth":ancestry.maximum_depth,"final":sample}),
-    )
+        "maximum_descendant_depth":ancestry.maximum_depth,"final":sample});
+    if options.local_every > 0 {
+        result["local_activity"] = json!({"graph_hops":local::HOPS,
+            "sample_every_ticks":options.local_every,"samples":local_samples,
+            "first_pulse_cohorts":local.as_ref().unwrap().cohorts(),
+            "basis":"Fixed identical graph neighborhoods in both arms. Cumulative counts observe each completed tick, excluding the opening instant; they are member-ticks, not unique animals or amounts eaten. fed_this_tick is any field intake, not proof of eating manual crumbs. Feeding mode is distinct. Exact pre-first-pulse local IDs are also followed anywhere; their traits are reported without claiming all are eligible or within sensing reach. Regions may overlap and must not be summed as a disjoint population."});
+    }
+    Ok(result)
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    let options = ObservationOptions {
+        schedule: args.care_kind,
+        dose: CareDose::new(args.dose_permille).map_err(|e| anyhow!(e))?,
+        start: args.care_start,
+        local_every: args.local_every,
+        target_index: usize::from(args.target_index),
+    };
+    options.validate(args.ticks)?;
     let (input_schema, initial) = if let Some(path) = &args.path {
         let bytes = std::fs::read(path).context("reading exact checkpoint")?;
         let (meta, initial) = decode_snapshot(&bytes).context("decoding checkpoint")?;
@@ -422,19 +562,21 @@ fn main() -> Result<()> {
         initial.tick.checked_add(args.ticks).is_some(),
         "tick overflow"
     );
-    let baseline = run(
+    let baseline = run_with_options(
         &initial,
         args.ticks,
         false,
         args.care_every,
         args.audit_window,
+        options,
     )?;
-    let cared = run(
+    let cared = run_with_options(
         &initial,
         args.ticks,
         true,
         args.care_every,
         args.audit_window,
+        options,
     )?;
     let audit_passed = baseline["audit_passed"] == true && cared["audit_passed"] == true;
     println!(
@@ -443,6 +585,9 @@ fn main() -> Result<()> {
             "input":args.path,"seed":initial.config.seed,"input_schema":input_schema,"start_tick":initial.tick,
             "ticks":args.ticks,"simulated_seconds":args.ticks as f64 * cubarium_core::DT,
             "care_every_ticks":args.care_every,
+            "care_kind":args.care_kind.to_possible_value().unwrap().get_name(),
+            "care_start_tick":args.care_start,"dose_permille":args.dose_permille,
+            "first_target_index":args.target_index,"targets":TARGETS,
             "audit_window_ticks":args.audit_window,
             "ancestry_basis":if args.seed.is_some() { "original founders" } else { "individuals alive at opening checkpoint; earlier ancestry unknown" },
             "note":"Matched in-memory numerical scenario; forms are not lineages. No host durability or visual-response proof; survival is censored at the reported duration.",
@@ -507,6 +652,104 @@ mod tests {
                 ]
             );
         }
+    }
+
+    #[test]
+    fn isolated_actions_have_one_common_pulse_and_exact_requested_dose() {
+        let initial = World::new(WorldConfig::default()).unwrap().state;
+        for (schedule, kind) in [
+            (CareSchedule::Feed, "feed"),
+            (CareSchedule::Rain, "rain"),
+            (CareSchedule::Clean, "clean"),
+        ] {
+            let options = ObservationOptions {
+                schedule,
+                dose: CareDose::new(500).unwrap(),
+                start: 60,
+                local_every: 20,
+                target_index: 1,
+            };
+            let cared = run_with_options(&initial, 420, true, 2400, 200, options).unwrap();
+            let baseline = run_with_options(&initial, 420, false, 2400, 200, options).unwrap();
+            assert_eq!(cared["receipts"].as_array().unwrap().len(), 1);
+            assert_eq!(cared["receipts"][0]["elapsed"], 60);
+            assert_eq!(cared["receipts"][0]["kind"], kind);
+            assert_eq!(cared["audit_passed"], true);
+            assert_eq!(baseline["audit_passed"], true);
+            let expected = match kind {
+                "feed" => ("feed_material_in", 1.5),
+                "rain" => ("rain_depth_in", 2.0),
+                _ => ("clean_material_out", 1.0),
+            };
+            let amount = cared["care_ledgers"][expected.0].as_f64().unwrap();
+            if kind == "clean" {
+                assert!(amount > 0.0 && amount <= expected.1);
+            } else {
+                assert!((amount - expected.1).abs() < 1e-12);
+            }
+            assert_eq!(
+                cared["local_activity"]["first_pulse_cohorts"],
+                baseline["local_activity"]["first_pulse_cohorts"]
+            );
+            assert_eq!(
+                cared["local_activity"]["samples"][3], baseline["local_activity"]["samples"][3],
+                "both arms are still identical at the pre-pulse tick60"
+            );
+            let samples = cared["local_activity"]["samples"].as_array().unwrap();
+            assert_eq!(samples.len(), 22);
+            assert_eq!(samples.last().unwrap()["elapsed"], 420);
+            let mut without = cared.clone();
+            without.as_object_mut().unwrap().remove("local_activity");
+            assert_eq!(
+                without,
+                run_with_options(
+                    &initial,
+                    420,
+                    true,
+                    2400,
+                    200,
+                    ObservationOptions {
+                        local_every: 0,
+                        ..options
+                    }
+                )
+                .unwrap(),
+                "local measurements change neither ecology nor other audit results"
+            );
+        }
+    }
+
+    #[test]
+    fn local_report_and_cli_are_explicitly_bounded() {
+        assert!(Args::try_parse_from(["audit", "--seed", "1", "--dose-permille", "249"]).is_err());
+        assert!(Args::try_parse_from(["audit", "--seed", "1", "--target-index", "3"]).is_err());
+        assert!(
+            Args::try_parse_from(["audit", "--seed", "1", "--care-kind", "everything"]).is_err()
+        );
+        assert!(
+            ObservationOptions {
+                local_every: 1,
+                ..Default::default()
+            }
+            .validate(2001)
+            .is_err()
+        );
+        assert!(
+            ObservationOptions {
+                start: 420,
+                ..Default::default()
+            }
+            .validate(420)
+            .is_err()
+        );
+        assert!(
+            ObservationOptions {
+                local_every: 200,
+                ..Default::default()
+            }
+            .validate(400000)
+            .is_ok()
+        );
     }
 
     #[test]
