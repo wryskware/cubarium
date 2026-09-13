@@ -370,15 +370,17 @@ impl HunterMemory {
         if f <= 0.0 {
             return Some((p.pos, p.heading));
         }
+        if f >= 1.0 {
+            // The recorded endpoint owns its tangent chart. A sweep ending exactly on
+            // its edge can cross onward; that next chart's heading does not belong to q.
+            return Some((q, u.map.inverse().apply(p.heading)));
+        }
         let d = u.local - p.pos.chart();
         let t = travel(p.pos, d * f);
         if t.reflections > 0 || t.fallback {
             return Some((q, p.heading));
         }
         let heading = t.map.apply(p.heading);
-        if f >= 1.0 {
-            return Some((q, heading));
-        }
         Some((t.end, heading))
     }
 

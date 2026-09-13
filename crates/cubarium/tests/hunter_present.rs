@@ -1629,6 +1629,24 @@ fn a_retained_prey_on_one_face_walks_the_chart_chord_and_the_fallback_is_the_end
     assert_eq!(fallback.retained_prey_pose(f64::NAN).unwrap().0, far);
 }
 
+/// At f = 1 the recorded settlement chart owns both position and heading, even when
+/// a sweep ending exactly on its edge would cross onward to a third face.
+#[test]
+fn a_retained_prey_endpoint_heading_belongs_to_the_recorded_settlement_chart() {
+    let start = SurfacePoint::new(Face::Front, 63.0, 1.0);
+    let end = SurfacePoint::new(Face::Right, 0.125, 0.0);
+    let heading = Vec2::new(0.6, -0.8);
+    let memory = retained(start, heading, end);
+    assert_eq!(memory.retained_prey_pose(0.0), Some((start, heading)));
+    // Front → Right has no tangent turn. Returning a Top-chart quarter turn here
+    // would pair the recorded Right position with a heading in a different chart.
+    assert_eq!(memory.retained_prey_pose(1.0), Some((end, heading)));
+    let (near, near_heading) = memory.retained_prey_pose(1.0 - 1e-6).unwrap();
+    assert_eq!(near.face, Face::Right);
+    assert_eq!(near_heading, heading);
+    assert!(surface_distance(near, end) < 2e-6);
+}
+
 /// A chord that skirts the open rim while crossing a side seam never leaves the surface: no
 /// sample lies at or below the rim and none is reflected back up (the walk stays on the two
 /// faces, monotone along the chord).

@@ -101,3 +101,27 @@ saved research fixture; run the same command with `--test astra_boundary_probe`.
 The reused target directory is build cache only; sources come from the exact archive.
 The author's **497 passed / 14 ignored** full host result was not independently
 rerun here; the independently established count is the bounded adapter suite above.
+
+## Authorized correction verified
+
+After preserving the failure in `b49a59d`, root authorized the exact endpoint map
+correction and a focused owned test. The implementation now returns the recorded
+endpoint with `u.map.inverse().apply(p.heading)` before sweeping when `f >= 1`.
+Intermediate fractions, fallback behavior and body state are unchanged. The owned
+regression uses the concrete Front/Right endpoint above and explicitly checks the
+known identity seam rotation, independent of an expected value recomputed by the
+same helper.
+
+Copied only those two scoped source/test changes into the exact archive and ran:
+
+```text
+cargo test -p cubarium --test hunter_present --test astra_boundary_probe --target-dir /tmp/cubarium-fable-cont-0l8noL/target
+```
+
+From `/tmp/cubarium-astra-boundary-fFKZYY`: **29 adapter tests passed, 3 ignored;
+2 independent sweeps passed; exit 0**. The five-chart heading sweep now completes
+instead of stopping at its first mismatch; the near-endpoint position sweep
+remains green. No existing tests were weakened. This closes the demonstrated
+endpoint contract defect without claiming a newly observed visible animation fix.
+The reconstruction and evidence limitations above remain; no other concrete
+blocker was found in this bounded review.
