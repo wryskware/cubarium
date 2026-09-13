@@ -1,0 +1,100 @@
+diff --git a/crates/cubarium-render/src/lib.rs b/crates/cubarium-render/src/lib.rs
+index 7549452..926c1e8 100644
+--- a/crates/cubarium-render/src/lib.rs
++++ b/crates/cubarium-render/src/lib.rs
+@@ -31,7 +31,7 @@ pub use multipart::{
+     stamp_rig, stamp_rig_scaled, stamp_rig_with_radius,
+ };
+ pub use sprite::{
+-    Bend, Mask, Pose, Sprite, stamp_layers, stamp_layers_bent, stamp_layers_bent_with_radius,
++    Bend, Mask, Pose, Sprite, stamp_layers, stamp_layers_bent, stamp_layers_bent_with_radius, stamp_pose_in_chart,
+     stamp_pose, stamp_sprite,
+ };
+ pub use trail::{Trail, TrailSegment, draw_trail};
+diff --git a/crates/cubarium-render/src/sprite.rs b/crates/cubarium-render/src/sprite.rs
+index a56ca08..fcc6cb4 100644
+--- a/crates/cubarium-render/src/sprite.rs
++++ b/crates/cubarium-render/src/sprite.rs
+@@ -777,6 +777,37 @@ fn stamp_unfolded<const BENT: bool>(
+     }
+ }
+ 
++/// STUDY ONLY: a recentered patch retaining a same-face original tile's chart ownership.
++/// Query radius is a candidate superset, not a larger stamp: each sample is rejected
++/// outside nine pixels of the patch center in that owning chart.
++pub fn stamp_pose_in_chart(
++    canvas: &mut Canvas, owner: SurfacePoint, center: SurfacePoint, heading: Vec2,
++    pose: Pose, opacity: f32, mask: Mask, bend: Bend, scratch: &mut Vec<PixelImage>,
++) {
++    assert_eq!(owner.face, center.face);
++    let h = heading.normalized().unwrap();
++    let side = Vec2::new(-h.y, h.x);
++    let radius = (pose.extent() + bend.amplitude.abs()).min(FOOTPRINT_RADIUS);
++    assert!(pose.extent() <= FOOTPRINT_RADIUS);
++    let query = radius + (owner.chart() - center.chart()).length();
++    unfold_pixels(owner, query, scratch);
++    let reference = pose.first;
++    for pixel in scratch.iter() {
++        let d = pixel.local - center.chart();
++        if d.length() > radius + 1e-9 { continue; }
++        let local = Vec2::new(h.dot(d), side.dot(d));
++        let at = Vec2::new(local.x - bend.displacement(reference.height as f64, local.y + reference.pivot.y), local.y);
++        let coverage = mask.coverage(at + reference.pivot, reference.height, reference.pivot);
++        let mut rgba = pose.sample(at);
++        for c in &mut rgba { *c *= coverage; }
++        let a = rgba[3] * opacity;
++        if a <= 0.0 { continue; }
++        let background = canvas.get(pixel.face, pixel.x, pixel.y);
++        canvas.set(pixel.face, pixel.x, pixel.y,
++            std::array::from_fn(|c| rgba[c] * opacity + background[c] * (1.0-a)));
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+diff --git a/crates/cubarium/src/art_present.rs b/crates/cubarium/src/art_present.rs
+index b9cf631..56d159b 100644
+--- a/crates/cubarium/src/art_present.rs
++++ b/crates/cubarium/src/art_present.rs
+@@ -2023,7 +2023,7 @@ pub fn tall_grown_px(height: f64) -> f64 {
+ /// height coordinate: no tile join opens, the cap stays on the stem's curve even where its
+ /// pixels are owned by Top, and a vine cannot slide against its trunk. An amplitude of 0 is
+ /// [`Bend::NONE`] and the column is drawn exactly as it was before the wind existed.
+-fn draw_column(
++pub fn draw_column(
+     canvas: &mut Canvas,
+     column: &TallColumn,
+     height: f64,
+@@ -2080,8 +2080,10 @@ fn draw_column(
+         stamp(cap, height + 1.0, Mask::None, TALL_OPACITY * fade);
+     }
+     if let (true, Some(vine)) = (column.vine, vine) {
++        // STUDY ONLY: cleared ends + a separately derived phase-registered endpoint.
++        let retiled = vine.cap.is_some() && trunk_strip(vine).1 == TALL_STRIP_TOP;
+         for i in (1..=TALL_MAX_SEGMENTS).step_by(2) {
+-            let top = if i + 2 > TALL_MAX_SEGMENTS { TILE_ROWS } else { TALL_VINE_TOP };
++            let top = if i + 2 > TALL_MAX_SEGMENTS && !retiled { TILE_ROWS } else { TALL_VINE_TOP };
+             let reveal = local(i).min(top);
+             if reveal <= TALL_VINE_FLOOR {
+                 break;
+@@ -2093,6 +2095,19 @@ fn draw_column(
+                 TALL_OPACITY * fade,
+             );
+         }
++        if retiled {
++            let i = f64::from(TALL_MAX_SEGMENTS) + 1.0;
++            // Do not introduce a new Strip start-envelope at global height40.
++            // The source patch itself owns rows4..7, while Axial keeps the old
++            // grown ceiling and the original already-complete start envelope.
++            let clip = vine.cap.as_ref().unwrap();
++            let pose = clip.sample(seconds + tall_phase_of(column.face, column.cx, clip.seconds));
++            cubarium_render::stamp_pose_in_chart(canvas,
++                tall_anchor(column.face, column.cx, TALL_MAX_SEGMENTS),
++                tall_anchor_at(column.face, column.cx, i), heading, pose, TALL_OPACITY * fade,
++                Mask::Axial { reveal: grown - tall_bend_base(i) },
++                Bend { amplitude, base: tall_bend_base(i), root: TALL_BEND_ROOT, length: TALL_BEND_LENGTH }, scratch);
++        }
+     }
+ }
+ 

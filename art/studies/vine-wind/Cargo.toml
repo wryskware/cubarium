@@ -1,0 +1,17 @@
+[package]
+name = "cubarium-vine-wind-study"
+version = "0.0.0"
+edition = "2024"
+publish = false
+[workspace]
+[[bin]]
+name = "vine_wind"
+path = "main.rs"
+[dependencies]
+cubarium = { path = "../../../captures/build-cache/vine-wind-frozen/crates/cubarium" }
+cubarium-core = { path = "../../../captures/build-cache/vine-wind-frozen/crates/cubarium-core" }
+cubarium-render = { path = "../../../captures/build-cache/vine-wind-frozen/crates/cubarium-render" }
+cubarium-surface = { path = "../../../captures/build-cache/vine-wind-frozen/crates/cubarium-surface" }
+cube-proto = { path = "../../../captures/build-cache/vine-wind-frozen/vendor/cube-proto" }
+serde_json = "1"
+png = "0.18"

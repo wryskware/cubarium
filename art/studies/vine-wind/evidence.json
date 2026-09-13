@@ -1,0 +1,173 @@
+{
+  "frozen_source": "9cf0e1d",
+  "scope": "Study-only49-insertion patch; no production art or source switch",
+  "validation": {
+    "naive_endpoint_failures": 40,
+    "quiet_exact_frames": 1460,
+    "quiet_max_linear_delta": 0,
+    "same_amplitude_comparisons": 2920
+  },
+  "measurements": {
+    "cost_scope": "Five rounds of1000 isolated full column draws each; includes Canvas/scratch allocation, excludes ecology/encode/PNG/browser. Not whole-world frame cost.",
+    "full_height_cases": [
+      {
+        "case": "interior",
+        "max_amplitude": 0.3769147161656562,
+        "max_frame_rgb_l1": 1.2540547080513988,
+        "max_frame_rgb_l1_frame": 798,
+        "mean_frame_rgb_l1": 0.8926941641630768,
+        "mean_luma_sum": 40.14830036233964,
+        "mean_pixels_luma_gt_01": 247.21416666666667,
+        "median_ms_per_column": 0.138096043,
+        "peak_frame": 340,
+        "peak_pixel_luma": 0.6529143496841191,
+        "quiet_frames_exact": 120,
+        "timing_rounds_ms": [
+          0.138006749,
+          0.138082103,
+          0.138096043,
+          0.138103464,
+          0.13825055
+        ],
+        "variant": "old"
+      },
+      {
+        "case": "interior",
+        "max_amplitude": 0.8022948141397702,
+        "max_frame_rgb_l1": 1.2986816180800815,
+        "max_frame_rgb_l1_frame": 798,
+        "mean_frame_rgb_l1": 0.9132333952954454,
+        "mean_luma_sum": 40.596878306522775,
+        "mean_pixels_luma_gt_01": 246.43416666666667,
+        "median_ms_per_column": 0.14283023,
+        "peak_frame": 340,
+        "peak_pixel_luma": 0.6529143496841191,
+        "quiet_frames_exact": 120,
+        "timing_rounds_ms": [
+          0.142705195,
+          0.142806839,
+          0.14283023,
+          0.142887092,
+          0.142928855
+        ],
+        "variant": "new"
+      },
+      {
+        "case": "vertex",
+        "max_amplitude": 0.05374588510449408,
+        "max_frame_rgb_l1": 1.1075016702252363,
+        "max_frame_rgb_l1_frame": 898,
+        "mean_frame_rgb_l1": 0.8122275594570276,
+        "mean_luma_sum": 35.81612592041285,
+        "mean_pixels_luma_gt_01": 227.2675,
+        "median_ms_per_column": 0.177887972,
+        "peak_frame": 317,
+        "peak_pixel_luma": 0.6538503332972526,
+        "quiet_frames_exact": 120,
+        "timing_rounds_ms": [
+          0.177871701,
+          0.177873651,
+          0.177887972,
+          0.177958025,
+          0.178426186
+        ],
+        "variant": "old"
+      },
+      {
+        "case": "vertex",
+        "max_amplitude": 0.11440265675839523,
+        "max_frame_rgb_l1": 1.1157892188176106,
+        "max_frame_rgb_l1_frame": 898,
+        "mean_frame_rgb_l1": 0.814604846584434,
+        "mean_luma_sum": 35.89705941447976,
+        "mean_pixels_luma_gt_01": 230.06166666666667,
+        "median_ms_per_column": 0.174333077,
+        "peak_frame": 317,
+        "peak_pixel_luma": 0.6537024937540292,
+        "quiet_frames_exact": 120,
+        "timing_rounds_ms": [
+          0.174218351,
+          0.174305905,
+          0.174333077,
+          0.174389039,
+          0.174543276
+        ],
+        "variant": "new"
+      },
+      {
+        "case": "right",
+        "max_amplitude": 0.050257980378425535,
+        "max_frame_rgb_l1": 1.1146809165172442,
+        "max_frame_rgb_l1_frame": 629,
+        "mean_frame_rgb_l1": 0.8167613704332828,
+        "mean_luma_sum": 36.17348986240145,
+        "mean_pixels_luma_gt_01": 233.38166666666666,
+        "median_ms_per_column": 0.175949607,
+        "peak_frame": 317,
+        "peak_pixel_luma": 0.6529745820909738,
+        "quiet_frames_exact": 120,
+        "timing_rounds_ms": [
+          0.17579081,
+          0.175876473,
+          0.175949607,
+          0.176036281,
+          0.176071861
+        ],
+        "variant": "old"
+      },
+      {
+        "case": "right",
+        "max_amplitude": 0.10697835689978075,
+        "max_frame_rgb_l1": 1.1318192116638528,
+        "max_frame_rgb_l1_frame": 629,
+        "mean_frame_rgb_l1": 0.8210073635108776,
+        "mean_luma_sum": 36.362502946075004,
+        "mean_pixels_luma_gt_01": 236.06666666666666,
+        "median_ms_per_column": 0.172378391,
+        "peak_frame": 317,
+        "peak_pixel_luma": 0.6529745820909738,
+        "quiet_frames_exact": 120,
+        "timing_rounds_ms": [
+          0.17225572500000003,
+          0.172322919,
+          0.172378391,
+          0.172425613,
+          0.173276131
+        ],
+        "variant": "new"
+      }
+    ]
+  },
+  "pack": {
+    "changed_atlas_rows": [
+      96,
+      111
+    ],
+    "changed_pixels": 96,
+    "other_files_exact": [
+      "creatures.png",
+      "ground.png",
+      "habitat.png",
+      "pack.json",
+      "plants.png"
+    ],
+    "passed": true
+  },
+  "browser": {
+    "samples": 362,
+    "span_ms": 6016.4,
+    "raf_fps": 60.00265939764644,
+    "unique_frames": 362,
+    "scope": "Local preloaded PNG browser playback only, not renderer throughput or physical display"
+  },
+  "test_output": "warning: `cubarium-core` (lib) generated 1 warning\n   Compiling cubarium-vine-wind-study v0.0.0 (/home/wrysk/wryskware/cubarium/art/studies/vine-wind)\n    Finished `release` profile [optimized] target(s) in 2.47s\n     Running unittests main.rs (captures/build-cache/vine-wind/release/deps/vine_wind-dc116332ad30b5aa)\n\nrunning 4 tests\nTop(0,62) tile9 owner=[0.0, 0.0, 0.0], independent tile10=[0.2226006, 0.006143244, 0.21707682]\ntest tests::independent_endpoint_anchor_is_not_the_old_owning_chart ... ok\n48480 nonzero endpoint destinations independently inside physical9px neighborhood\ntest tests::retained_chart_endpoint_stays_within_nine_physical_pixels ... ok\n{\"naive_endpoint_failures\":40,\"quiet_exact_frames\":1460,\"quiet_max_linear_delta\":0.0,\"same_amplitude_comparisons\":2920}\n180 exact colored-background comparisons\ntest tests::direct_opt_in_rejects_and_same_bend_keeps_material ... ok\n{\"all_slots_both_hosts_quiet_held\":21120,\"authored_three_second_loops\":1024,\"larger_query_support_comparisons\":4320,\"root_rows_exact\":1024}\ntest tests::candidate_growth_quiet_and_support ... ok\n\ntest result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.74s\n\n",
+  "hashes": {
+    "old_tall": "b911d16a777e12713536ec1134268109b40400ed31b2f5f7dc00efc6ab16bfa7",
+    "candidate_tall": "37d453708501a420a4ee199679f5ae0cec325406015438b758eaca3fd20c17c3",
+    "native_pair_mp4": "8a33532d461463d7d8321d0f959ae62d97d144f2ba4225133188e37f8a852ebf",
+    "peak_old": "bc1a271a3222b1f5995107a20ded4ce49b1629dcfcceecd3fd15d1ab3a6cd557",
+    "peak_new": "57eecba5805d4792090bebc6e99320dd2dd8978ecca5c3236f297af3bdbcad6f",
+    "worst_old": "d5c8d50ef76b259e47c6145a7b338365f264aab6819b57ef60cc87ab71791467",
+    "worst_new": "0afb779298011fb8a714cb9de8e6f737f0ee59c3cbbce520da74abc12c7e3896"
+  }
+}

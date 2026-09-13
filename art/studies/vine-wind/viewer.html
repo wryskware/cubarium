@@ -1,0 +1,22 @@
+<!doctype html><meta charset="utf-8"><title>Vine wind retile — isolated study</title>
+<style>body{background:#10131b;color:#ddd;font:16px system-ui;margin:20px}label{margin-right:20px}canvas{image-rendering:pixelated;background:#000}main{display:flex;gap:24px}article{width:768px}small{display:block;color:#aaa;margin:10px 0}.native{width:256px;height:128px}.large{width:768px;height:384px}button,select,input{font:inherit}#seek{width:450px}</style>
+<h1>Vine host wind — original / retiled endpoint</h1>
+<p>Deterministic native64 renderer frames. Same shared wind and species response; different admitted geometry budget. No world simulation, changed gust, or physical-cube claim.</p>
+<label>Placement <select id="scene"><option>interior</option><option>vertex</option><option>right</option></select></label>
+<label>Height <select id="mode"><option>full</option><option>growth</option></select></label>
+<button id="pause">Pause</button> <input id="seek" type="range" min="0" max="1199" value="0"><span id="time"></span>
+<small>Full: height9, including Top crossing. Growth: controlled linear height0→9 over20s (not an ecology trajectory). Interior column is an actual spire+vine slot; edge columns are deliberate diagnostic fixtures. Loops reset the20s recording, not a claim of20s wind periodicity.</small>
+<main><article><h2>Original: admitted tip0.423px</h2><canvas class="native" width="256" height="128"></canvas><small>1× / 3× nearest-neighbor viewer</small><canvas class="large" width="256" height="128"></canvas></article><article><h2>Retiled: desired tip0.9px</h2><canvas class="native" width="256" height="128"></canvas><small>Same palette, source phase and host registration</small><canvas class="large" width="256" height="128"></canvas></article></main>
+<script>
+let index=0,playing=true,views=[],start=performance.now(),loaded=false;
+const scene=document.querySelector('#scene'),mode=document.querySelector('#mode');
+async function select(){loaded=false;views=await Promise.all(['old','new'].map(async label=>{
+ const images=Array(1200);let next=0;await Promise.all(Array.from({length:8},async()=>{while(next<1200){const i=next++;const image=new Image();image.src=`${scene.value}-${mode.value}-${label}/frame_${String(i).padStart(4,'0')}.png`;await image.decode();images[i]=image;}}));return images;
+}));loaded=true;start=performance.now()-index*1000/60;paint();}
+function paint(){if(!loaded)return;document.querySelectorAll('article').forEach((a,i)=>a.querySelectorAll('canvas').forEach(c=>c.getContext('2d').drawImage(views[i][index],0,0)));document.querySelector('#seek').value=index;document.querySelector('#time').textContent=` frame${index} / ${(30+index/60).toFixed(3)}s`;}
+scene.onchange=mode.onchange=()=>window.ready=select();
+document.querySelector('#pause').onclick=()=>{playing=!playing;start=performance.now()-index*1000/60;document.querySelector('#pause').textContent=playing?'Pause':'Play';};
+document.querySelector('#seek').oninput=e=>{playing=false;index=Number(e.target.value);paint();};
+function animate(t){if(playing&&loaded){index=Math.floor((t-start)*60/1000)%1200;paint();}requestAnimationFrame(animate);}requestAnimationFrame(animate);
+window.ready=select();
+</script>
