@@ -1,5 +1,15 @@
-// Read-only reduction of a completed matched baseline/reserve-targets-v1 screen.
+// Read-only reduction of completed matched hunter-recipe screens.
 // Does not run an executable, modify artifacts, or infer ecological acceptance.
+//
+// Two contracts live here, and they are deliberately separate rather than one permissive check:
+//
+//   compare()        baseline            vs reserve-targets-v1            (schema 11 artifacts)
+//   compareCharge()  reserve-targets-v1  vs reserve-targets-charge80-v1   (schema 12 artifacts)
+//
+// The first describes a terminal, immutable study; it must keep verifying exactly what it
+// always verified, including that study's snapshot schema. The second is a different pair with
+// a different expected profile diff, so it gets its own pair check rather than an ignore-list
+// bolted onto the first.
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
@@ -108,7 +118,7 @@ export function verifyRecipePair(a, b) {
   assert.deepEqual(b.profile, expected, 'candidate changed another profile field');
 }
 
-export async function loadRun(directory, recipe) {
+export async function loadRun(directory, recipe, schema = 11) {
   const root = resolve(directory), m = await json(join(root, 'manifest.json'));
   const summary = await json(join(root, 'summary.json')); // Missing means still running, never partial success.
   assert.equal(m.kind, 'six-arm-hunter-comparison');
@@ -135,7 +145,7 @@ export async function loadRun(directory, recipe) {
       verifyArm(a, m.ticks, m.cohort.opening_tick);
       for (const [file, sha, state] of [['post-initialization.cubw', opening.post_snapshot_sha256, opening.post_state_hash],
         ['closing.cubw', a.closing_snapshot_sha256, a.closing_state_hash]]) {
-        const snapshot = inspectSnapshot(await readFile(join(path, file)), 11);
+        const snapshot = inspectSnapshot(await readFile(join(path, file)), schema);
         assert.equal(snapshot.sha256, sha); assert.equal(snapshot.state_hash, state); assert.equal(snapshot.build, m.build);
       }
       const events = reduceEvents(await jsonl(join(path, 'events.jsonl')), m.cohort.opening_tick, a.closing_tick);
@@ -155,6 +165,104 @@ export async function loadRun(directory, recipe) {
     seeds.push({seed:s.seed, arms});
   }
   return {root, manifest:m, seeds};
+}
+
+// --- the paid-charging pair -------------------------------------------------------------
+//
+// `reserve-targets-charge80-v1` is `reserve-targets-v1` with semantic profile version 3 raised
+// to 4 and nothing else. Version 4's one meaning is a fixed 0.80 E_max oxidation activation
+// threshold for authoritative members, so the recipe must also *say* that in words and numbers:
+// a version number alone could be mistaken for a geometry update.
+
+export const CHARGE_POLICY = {baseline: 'configured-world-threshold', candidate: 'fixed-member-threshold', threshold: 0.8};
+
+export function verifyChargePair(a, b) {
+  assert.equal(a.profile_recipe, 'reserve-targets-v1');
+  assert.equal(b.profile_recipe, 'reserve-targets-charge80-v1');
+  for (const key of ['arm', 'config', 'heading', 'target', 'pre_import_inventory', 'post_import_inventory', 'receipt'])
+    assert.deepEqual(a[key], b[key], `opening ${key} changed`);
+
+  // The resolved policy, recorded per arm, is the one the recipe claims.
+  assert.equal(a.recipe_oxidation_policy, CHARGE_POLICY.baseline);
+  assert.equal(b.recipe_oxidation_policy, CHARGE_POLICY.candidate);
+  assert.equal(a.world_oxidation_threshold, b.world_oxidation_threshold, 'the worlds disagree about the configured threshold');
+  assert.equal(a.recipe_oxidation_threshold, a.world_oxidation_threshold, 'the baseline recipe must defer to the world');
+  assert.equal(b.recipe_oxidation_threshold, CHARGE_POLICY.threshold);
+  assert(b.recipe_oxidation_threshold > b.world_oxidation_threshold, 'the candidate threshold must be the raised one');
+  // An arm that installs no profile resolves the world's own threshold, whatever the label.
+  for (const o of [a, b])
+    assert.equal(o.world_member_oxidation_threshold,
+      o.profile === null ? o.world_oxidation_threshold : o.recipe_oxidation_threshold,
+      'the arm\'s world resolved a threshold its profile does not imply');
+
+  if (a.profile === null) {assert.equal(b.profile, null); return;}
+  const expected = structuredClone(a.profile);
+  assert.equal(expected.version, 3);
+  // The fixed background this family runs on, asserted rather than assumed.
+  assert.equal(expected.seek_reserve_fraction, 0.80);
+  assert.equal(expected.perch_reserve_fraction, 0.90);
+  expected.version = 4;
+  assert.deepEqual(b.profile, expected, 'candidate changed a profile field other than `version`');
+}
+
+// The bounded oxidation diagnostics, checked for shape, sign and internal consistency — never
+// for a value, which is the experiment's result and not this script's business.
+export function verifyOxidation(a, recipeThreshold) {
+  const o = a.oxidation;
+  assert(o && typeof o.scope === 'string' && o.scope.length > 0, 'missing oxidation scope');
+  assert.equal(o.member_threshold, recipeThreshold);
+  assert(Number.isFinite(o.world_threshold) && o.world_threshold > 0);
+  const c = o.charging_above_reference;
+  safeCount(c.transactions);
+  for (const key of ['reserve_burned', 'energy_gained', 'conversion_heat'])
+    assert(Number.isFinite(c[key]) && c[key] >= 0, `invalid ${key}`);
+  if (o.member_threshold <= o.world_threshold)
+    assert.equal(c.transactions, 0, 'an unraised threshold cannot produce extra oxidation');
+  if (c.transactions === 0)
+    for (const key of ['reserve_burned', 'energy_gained', 'conversion_heat'])
+      assert.equal(c[key], 0, `${key} without a transaction`);
+  else
+    assert(c.reserve_burned > 0, 'a transaction that burned nothing');
+  return c;
+}
+
+export async function compareCharge(backgroundDir, candidateDir) {
+  const a = await loadRun(backgroundDir, 'reserve-targets-v1', 12);
+  const b = await loadRun(candidateDir, 'reserve-targets-charge80-v1', 12);
+  for (const key of ['cohort', 'ticks', 'audit_window', 'build', 'executable_sha256', 'observer_contract'])
+    assert.deepEqual(a.manifest[key], b.manifest[key], `unmatched ${key}`);
+  // The manifest states the policy in words and in a number, not only as a version.
+  assert.equal(a.manifest.member_oxidation_policy, CHARGE_POLICY.baseline);
+  assert.equal(b.manifest.member_oxidation_policy, CHARGE_POLICY.candidate);
+  assert.equal(b.manifest.member_oxidation_threshold, CHARGE_POLICY.threshold);
+  assert.equal(a.manifest.member_oxidation_threshold, a.manifest.world_oxidation_threshold);
+  assert.equal(a.manifest.world_oxidation_threshold, b.manifest.world_oxidation_threshold);
+  assert(typeof b.manifest.oxidation_observer === 'string' && b.manifest.oxidation_observer.includes('charging_above_reference'));
+  for (const m of [a.manifest, b.manifest]) assert(typeof m.profile_recipe_scope === 'string' && m.profile_recipe_scope.length > 0);
+  assert(b.manifest.profile_recipe_scope.includes('version 3 raised to 4'), 'the candidate scope must name its whole diff');
+
+  const seeds = a.seeds.map(s => {
+    const t = b.seeds.find(x => x.seed === s.seed);
+    assert(t, `candidate is missing seed ${s.seed}`);
+    return {seed: s.seed, arms: s.arms.map((arm, i) => {
+      verifyChargePair(arm.opening, t.arms[i].opening);
+      const bg = verifyOxidation(arm.summary, arm.opening.world_member_oxidation_threshold);
+      const cand = verifyOxidation(t.arms[i].summary, t.arms[i].opening.world_member_oxidation_threshold);
+      assert.equal(bg.transactions, 0, 'the background recipe must never charge above the reference');
+      // Only the untouched arm is required to be identical. Every arm carrying a member —
+      // including the attack-disabled controls — may legitimately diverge, because the policy
+      // is theirs too.
+      if (i === 0) assert.deepEqual(arm.summary, t.arms[i].summary, 'the untouched arm changed');
+      return {arm: arm.name, background: metrics(arm), candidate: metrics(t.arms[i]),
+        charging: {background: bg, candidate: cand}};
+    })};
+  });
+  return {kind: 'matched-hunter-charging-reduction',
+    artifact_checks_passed: true,
+    policy: `member oxidation activation raised from the configured ${a.manifest.world_oxidation_threshold} to a fixed ${CHARGE_POLICY.threshold} of E_max, for authoritative members only, at every age and phase`,
+    biological_acceptance: 'not inferred; more battery is not success if reserve readiness collapses or founders still starve',
+    limits: 'Checks artifact integrity, summary coverage/count reconciliation, recipe isolation to the semantic version alone, and the internal consistency of the bounded oxidation diagnostics. Does not re-run core audits, decode semantic WorldState, reconstruct contact geometry, or judge whether charging helped. Charging totals are per-arm process-scoped and are not persisted, so they describe each run, not each world. Off-hunter arms carry the policy and are not expected to match.',
+    background: a.root, candidate: b.root, build: a.manifest.build, ticks: a.manifest.ticks, seeds};
 }
 
 export function metrics(arm) {
@@ -202,7 +310,11 @@ export async function compare(baselineDir, candidateDir) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
-    assert.equal(process.argv.length,4,'Usage: node scripts/compare-hunter-recipes.mjs BASELINE_DIR CANDIDATE_DIR');
-    console.log(JSON.stringify(await compare(process.argv[2],process.argv[3]),null,2));
+    const [,, a, b, family = 'reserve-targets'] = process.argv;
+    assert(a && b && process.argv.length <= 6,
+      'Usage: node scripts/compare-hunter-recipes.mjs BASELINE_DIR CANDIDATE_DIR [reserve-targets|charge80]');
+    assert(['reserve-targets', 'charge80'].includes(family), `unknown family ${family}`);
+    const result = family === 'charge80' ? await compareCharge(a, b) : await compare(a, b);
+    console.log(JSON.stringify(result, null, 2));
   } catch(error) {console.error(`Comparison refused: ${error.message}`);process.exitCode=1;}
 }

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {verifyArm, reduceEvents, verifyRecipePair, metrics} from './compare-hunter-recipes.mjs';
+import {verifyArm, reduceEvents, verifyRecipePair, verifyChargePair, verifyOxidation, CHARGE_POLICY, metrics} from './compare-hunter-recipes.mjs';
 import {inspectSnapshot} from './prepare-hunter-worlds.mjs';
 
 function arm() {
@@ -128,4 +128,79 @@ test('snapshot envelope integrity can explicitly check schema11 without loosenin
   assert.equal(checked.state_hash,inspectSnapshot(original).state_hash);
   const damaged=Buffer.from(relabeled);damaged[damaged.length-1]^=1;
   assert.throws(()=>inspectSnapshot(damaged,11),/checksum/);
+});
+
+// --- the paid-charging pair --------------------------------------------------------------
+
+function chargeOpening(recipe) {
+  const candidate = recipe === 'reserve-targets-charge80-v1';
+  return {
+    arm:'specialist_on', profile_recipe:recipe, config:{seed:1}, heading:0.5,
+    target:{face:4,u:32,v:32}, pre_import_inventory:{m:1}, post_import_inventory:{m:5},
+    receipt:{material_in:4},
+    recipe_oxidation_policy: candidate ? CHARGE_POLICY.candidate : CHARGE_POLICY.baseline,
+    recipe_oxidation_threshold: candidate ? 0.8 : 0.5,
+    world_member_oxidation_threshold: candidate ? 0.8 : 0.5,
+    world_oxidation_threshold: 0.5,
+    profile:{version: candidate ? 4 : 3, seek_reserve_fraction:.8, perch_reserve_fraction:.9,
+      strike_energy_cost:.08, capture_offset_body:{x:13.28,y:1.1}},
+  };
+}
+const chargePair = () => [chargeOpening('reserve-targets-v1'), chargeOpening('reserve-targets-charge80-v1')];
+
+test('the charging pair permits only the semantic version, on the fixed reserve-target background', () => {
+  const [a,b] = chargePair();
+  verifyChargePair(a,b);
+
+  // Any other profile field is a refusal, including geometry and the background itself.
+  for (const mutate of [
+    p=>p.strike_energy_cost=.09, p=>p.capture_offset_body.x=13.3,
+    p=>p.seek_reserve_fraction=.7, p=>p.perch_reserve_fraction=.95,
+  ]) {const [x,y]=chargePair();mutate(y.profile);assert.throws(()=>verifyChargePair(x,y),/profile field/);}
+  // The background must really be the raised reserve targets, on both sides.
+  for (const mutate of [p=>p.seek_reserve_fraction=.35, p=>p.perch_reserve_fraction=.65]) {
+    const [x,y]=chargePair();mutate(x.profile);mutate(y.profile);assert.throws(()=>verifyChargePair(x,y));
+  }
+  // A candidate that forgot to raise the version, or a baseline that raised it, are both wrong.
+  {const [x,y]=chargePair();y.profile.version=3;assert.throws(()=>verifyChargePair(x,y),/profile field/);}
+  {const [x,y]=chargePair();x.profile.version=4;assert.throws(()=>verifyChargePair(x,y));}
+
+  // The recorded policy has to match the recipe, and the resolved number has to match the policy.
+  {const [x,y]=chargePair();y.recipe_oxidation_policy=CHARGE_POLICY.baseline;assert.throws(()=>verifyChargePair(x,y));}
+  {const [x,y]=chargePair();y.recipe_oxidation_threshold=0.5;assert.throws(()=>verifyChargePair(x,y));}
+  {const [x,y]=chargePair();x.recipe_oxidation_threshold=0.8;assert.throws(()=>verifyChargePair(x,y),/defer to the world/);}
+  {const [x,y]=chargePair();y.world_member_oxidation_threshold=0.5;assert.throws(()=>verifyChargePair(x,y),/does not imply/);}
+  {const [x,y]=chargePair();y.world_oxidation_threshold=0.6;assert.throws(()=>verifyChargePair(x,y));}
+  // Opening identity is still checked exactly.
+  {const [x,y]=chargePair();y.receipt.material_in=5;assert.throws(()=>verifyChargePair(x,y),/receipt/);}
+
+  // An arm with no profile installed resolves the world's threshold, under either label.
+  const none = r => ({...chargeOpening(r), profile:null, world_member_oxidation_threshold:0.5});
+  verifyChargePair(none('reserve-targets-v1'), none('reserve-targets-charge80-v1'));
+});
+
+test('the oxidation diagnostics are checked for shape and consistency, never for a result', () => {
+  const summary = (member, c) => ({oxidation:{member_threshold:member, world_threshold:0.5,
+    charging_above_reference:c, scope:'member oxidation transactions above the configured threshold'}});
+  const zero = {transactions:0, reserve_burned:0, energy_gained:0, conversion_heat:0};
+  const some = {transactions:7, reserve_burned:0.0035, energy_gained:0.0056, conversion_heat:0.0014};
+
+  assert.deepEqual(verifyOxidation(summary(0.5, zero), 0.5), zero);
+  assert.deepEqual(verifyOxidation(summary(0.8, some), 0.8), some);
+  // A big result is not the script's business: it passes, and says nothing about whether it helped.
+  verifyOxidation(summary(0.8, {transactions:9e6, reserve_burned:1e3, energy_gained:1e3, conversion_heat:1e3}), 0.8);
+
+  // An unraised threshold that somehow charged is a contradiction, not a finding.
+  assert.throws(()=>verifyOxidation(summary(0.5, some), 0.5), /unraised/);
+  // So are quantities without transactions, transactions without a burn, and bad numbers.
+  assert.throws(()=>verifyOxidation(summary(0.8, {...zero, conversion_heat:1}), 0.8), /without a transaction/);
+  assert.throws(()=>verifyOxidation(summary(0.8, {...some, reserve_burned:0}), 0.8), /burned nothing/);
+  assert.throws(()=>verifyOxidation(summary(0.8, {...some, energy_gained:-1}), 0.8), /energy_gained/);
+  assert.throws(()=>verifyOxidation(summary(0.8, {...some, conversion_heat:NaN}), 0.8), /conversion_heat/);
+  assert.throws(()=>verifyOxidation(summary(0.8, {...some, transactions:1.5}), 0.8));
+  // The record must agree with the opening it came from, and must state its own scope.
+  assert.throws(()=>verifyOxidation(summary(0.8, some), 0.5));
+  assert.throws(()=>verifyOxidation({oxidation:{member_threshold:0.8, world_threshold:0.5,
+    charging_above_reference:some}}, 0.8), /scope/);
+  assert.throws(()=>verifyOxidation({}, 0.8), /scope/);
 });

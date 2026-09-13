@@ -47,6 +47,19 @@ enum ProfileVariant {
     Baseline,
     /// Only the reserve targets for acquiring/ending a hunt change to .80/.90.
     ReserveTargetsV1,
+    /// [`ProfileVariant::ReserveTargetsV1`]'s background, and the paid-charging policy on top
+    /// of it: semantic profile version 4, whose one meaning is a fixed 0.80 `E_max` oxidation
+    /// activation threshold for authoritative members
+    /// (`design/7_Research/astra-hunter-paid-charging-proposal-2026-09-13.md`). Its profile
+    /// diff from `reserve-targets-v1` is the version number and nothing else.
+    ReserveTargetsCharge80V1,
+}
+
+impl ProfileVariant {
+    /// The reserve-target background this recipe runs on, if any.
+    fn raises_reserve_targets(self) -> bool {
+        matches!(self, ProfileVariant::ReserveTargetsV1 | ProfileVariant::ReserveTargetsCharge80V1)
+    }
 }
 
 fn profile_for(
@@ -55,14 +68,22 @@ fn profile_for(
     variant: ProfileVariant,
 ) -> FixedHunterProfile {
     let mut profile = FixedHunterProfile::lanternjaw_trial(config);
-    if variant == ProfileVariant::ReserveTargetsV1 {
+    if variant.raises_reserve_targets() {
         profile.seek_reserve_fraction = 0.80;
         profile.perch_reserve_fraction = 0.90;
+    }
+    if variant == ProfileVariant::ReserveTargetsCharge80V1 {
+        // The only change, and the only one there is: the semantic version. Every geometry,
+        // cost, gate, target and stock is the one `reserve-targets-v1` already carried.
+        profile = profile.charge80();
     }
     if index >= 4 {
         profile = profile.facultative();
     }
     if index == 2 || index == 4 {
+        // An attack-disabled control takes its recipe's charging policy too: it is there to
+        // expose starvation and intake without predation, and a control that quietly ran the
+        // other policy would not be a control for this experiment.
         profile = profile.without_attacks();
     }
     profile
@@ -251,6 +272,30 @@ fn offspring_children(life: &[LifeEvent], hunting: &[HunterEvent]) -> Result<BTr
     Ok(children)
 }
 
+/// The bounded oxidation diagnostics for one arm, with their scope stated in the record rather
+/// than left to a reader's assumption.
+///
+/// These are totals over **this arm's whole run** — from its post-initialization state, which is
+/// where its `World` value was built, to whatever tick it stopped at. They count only the member
+/// oxidation transactions that the world's configured threshold would not have permitted, so an
+/// arm whose resolved member threshold equals the configured one reports zeros by construction,
+/// not by luck. The core never persists them, so nothing here survives a restart and nothing
+/// here can reach a snapshot or a hash.
+fn oxidation_json(world: &World) -> Value {
+    let d = world.charging_diagnostics();
+    json!({
+        "member_threshold":world.member_oxidation_threshold(),
+        "world_threshold":world.config().organism.oxidation_threshold,
+        "charging_above_reference":{
+            "transactions":d.extra_transactions,
+            "reserve_burned":d.extra_reserve_burned,
+            "energy_gained":d.extra_energy_gained,
+            "conversion_heat":d.extra_heat,
+        },
+        "scope":"member oxidation transactions above the world's configured threshold, over this arm's whole run; never persisted, never hashed",
+    })
+}
+
 fn prey_counts(state: &WorldState) -> [u32; 9] {
     let mut counts = [0; 9];
     for (id, o) in state.organisms.iter() {
@@ -354,6 +399,15 @@ impl Arm {
         json_new(
             &dir.join("opening.json"),
             &json!({"arm":NAMES[index], "target":target,"profile_recipe":variant,
+            // The resolved policy, beside the version that selects it: a reader should not have
+            // to know what version 4 means to know what this arm actually ran. Two numbers,
+            // because they are two different facts — what the recipe carries, and what this
+            // arm's world resolves. The untouched arm installs no profile, so its world
+            // resolves the configured threshold however the recipe is labelled.
+            "recipe_oxidation_policy":profile.oxidation_policy().as_str(),
+            "recipe_oxidation_threshold":profile.oxidation_threshold(&world.config().organism),
+            "world_member_oxidation_threshold":world.member_oxidation_threshold(),
+            "world_oxidation_threshold":world.config().organism.oxidation_threshold,
             "heading":founder.and_then(|id|world.state.organisms.get(id).map(|o|o.heading)),
             "config":world.config(), "profile":world.hunters().profile(),
             "profile_sha256":sha256(&serde_json::to_vec(&world.hunters().profile())?)?,
@@ -646,6 +700,7 @@ impl Arm {
             "whole_recovery":self.whole_recovery.summary(reason.as_deref().unwrap_or("planned_horizon")),
             "audit":self.audit.report,"prey_min":self.prey_min,"prey_tick_integral":self.prey_sum,
             "adult_definition":"structure + core TOLERANCE >= decoded structure_adult",
+            "oxidation":oxidation_json(&self.world),
             "reproductive_opportunity":self.eligibility.summary(),
             "adult_occupancy_ticks_0_1_2_over2":self.adult_bins,"adult_max":self.adults_max,
             "longest_over_two_ticks":self.over_two_longest,"zero_hunter_ticks":self.zero_hunter_ticks,
@@ -788,6 +843,16 @@ impl PairedLocal {
     }
 }
 
+/// What this recipe changes from the original fixed profile, in words, for the manifest. A
+/// reader must not have to infer the scope of an experiment from a version number.
+fn recipe_scope(variant: ProfileVariant) -> &'static str {
+    match variant {
+        ProfileVariant::Baseline => "baseline preserves the original fixed profile exactly",
+        ProfileVariant::ReserveTargetsV1 => "reserve-targets-v1 changes only seek/perch reserve fractions to .80/.90; all costs, reproductive gates, geometry, imports and placements unchanged",
+        ProfileVariant::ReserveTargetsCharge80V1 => "reserve-targets-charge80-v1 is reserve-targets-v1 (seek/perch .80/.90) with semantic profile version 3 raised to 4 and nothing else; version 4's one meaning is a fixed 0.80 E_max oxidation activation threshold for authoritative members at every age and phase. The conversion block, costs, reproductive gates, geometry, imports and placements are unchanged, and ordinary organisms keep the world's configured threshold",
+    }
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
     ensure!(
@@ -795,6 +860,25 @@ fn main() -> Result<()> {
         "independent window must be20 or200 ticks"
     );
     let (cohort, openings) = load_cohort(&args.cohort)?;
+    // Resolved from the cohort's **own** configs, so the manifest records the number this run
+    // actually applied rather than a constant repeated by hand. Every opening must agree, or
+    // one manifest line could not honestly describe all twelve.
+    let world_threshold = openings
+        .first()
+        .context("a cohort has at least one opening")?
+        .state
+        .config
+        .organism
+        .oxidation_threshold;
+    ensure!(
+        openings.iter().all(|o| o.state.config.organism.oxidation_threshold == world_threshold),
+        "the cohort's openings disagree about the configured oxidation threshold"
+    );
+    let resolved = {
+        let config = &openings[0].state.config;
+        let p = profile_for(config, 3, args.profile);
+        (p.oxidation_policy().as_str(), p.oxidation_threshold(&config.organism))
+    };
     fs::create_dir(&args.out).context("output must be a NEW directory")?;
     let executable_path = std::env::current_exe()?;
     let executable = fs::read(&executable_path)?;
@@ -810,7 +894,10 @@ fn main() -> Result<()> {
         "ticks":args.ticks,"audit_window":args.audit_window,"arms":NAMES,
         "profile_recipe":args.profile,
         "observer_contract":"exact-reproduction-v2; bounded branch-checked transactions and boundary-stock diagnostics",
-        "profile_recipe_scope":"reserve-targets-v1 changes only seek/perch reserve fractions to .80/.90; all costs, reproductive gates, geometry, imports and placements unchanged",
+        "profile_recipe_scope":recipe_scope(args.profile),
+        "member_oxidation_policy":resolved.0,"member_oxidation_threshold":resolved.1,
+        "world_oxidation_threshold":world_threshold,
+        "oxidation_observer":"charging_above_reference; per-arm running totals of the member oxidation transactions the world's configured threshold would not have permitted, over that arm's whole run from its post-initialization state to its closing tick. Counts transactions, reserve burned, battery gained and conversion heat only; no per-tick history, no RNG draw, no world state read or written for measurement. Zero by construction under any recipe whose resolved member threshold equals the configured one.",
         "care":false,"resume_supported":false,"ancestry_basis":"aged opening cohorts, not original founders",
         "notes":"All twelve seeds retained. Exact paid capture evidence drives paired local recovery; reproduction quantities come from core mutation records with independently checked identities. Measurement completion never implies biological acceptance. Renderer is not part of this headless trial."}),
     )?;
@@ -957,6 +1044,58 @@ mod tests {
         }
     }
 
+    /// The candidate's profile diff from `reserve-targets-v1` is the semantic version and
+    /// nothing else — on every arm, including the two attack-disabled controls.
+    #[test]
+    fn the_charge80_recipe_changes_only_the_semantic_version_of_reserve_targets() {
+        let config = cubarium_core::WorldConfig::default();
+        for index in 0..6 {
+            let background = profile_for(&config, index, ProfileVariant::ReserveTargetsV1);
+            let candidate = profile_for(&config, index, ProfileVariant::ReserveTargetsCharge80V1);
+            assert_eq!(background.version, 3);
+            assert_eq!(candidate.version, 4);
+            let mut expected = background.clone();
+            expected.version = 4;
+            assert_eq!(candidate, expected, "arm {index} changed a field other than `version`");
+            // The reserve-target background really is the fixed .80/.90 one.
+            assert_eq!(candidate.seek_reserve_fraction, 0.80);
+            assert_eq!(candidate.perch_reserve_fraction, 0.90);
+            background.validate().unwrap();
+            candidate.validate().unwrap();
+            // And the one thing it resolves to.
+            assert_eq!(
+                background.oxidation_threshold(&config.organism),
+                config.organism.oxidation_threshold
+            );
+            assert_eq!(candidate.oxidation_threshold(&config.organism), 0.80);
+            assert_eq!(candidate.oxidation_policy().as_str(), "fixed-member-threshold");
+            // Attack-off controls take the candidate policy too; that is the whole point of
+            // running them under the same recipe.
+            assert_eq!(candidate.attacks_enabled, index != 2 && index != 4);
+            assert_eq!(candidate.scavenge_fraction, if index >= 4 { 0.25 } else { 0.0 });
+        }
+    }
+
+    /// Every recipe states its own scope, and the strings are distinct: a manifest line is how a
+    /// later reader learns what was varied.
+    #[test]
+    fn every_recipe_states_a_distinct_scope() {
+        let all = [
+            ProfileVariant::Baseline,
+            ProfileVariant::ReserveTargetsV1,
+            ProfileVariant::ReserveTargetsCharge80V1,
+        ];
+        let scopes: Vec<&str> = all.iter().map(|v| recipe_scope(*v)).collect();
+        for (i, a) in scopes.iter().enumerate() {
+            assert!(!a.is_empty());
+            for b in &scopes[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+        assert!(recipe_scope(ProfileVariant::ReserveTargetsCharge80V1).contains("0.80 E_max"));
+        assert!(recipe_scope(ProfileVariant::ReserveTargetsCharge80V1).contains("version 3 raised to 4"));
+    }
+
     #[test]
     fn recipe_selection_is_explicit_and_unknown_variants_are_refused() {
         let baseline = Args::try_parse_from(["compare", "cohort", "out"]).unwrap();
@@ -970,7 +1109,17 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(candidate.profile, ProfileVariant::ReserveTargetsV1);
+        let charge = Args::try_parse_from([
+            "compare",
+            "cohort",
+            "out",
+            "--profile",
+            "reserve-targets-charge80-v1",
+        ])
+        .unwrap();
+        assert_eq!(charge.profile, ProfileVariant::ReserveTargetsCharge80V1);
         assert!(Args::try_parse_from(["compare", "cohort", "out", "--profile", "rescue"]).is_err());
+        assert!(Args::try_parse_from(["compare", "cohort", "out", "--profile", "charge80"]).is_err());
     }
 
     #[test]
