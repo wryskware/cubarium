@@ -38,10 +38,18 @@ Open the editor with `./scripts/godot.sh --editor`, edit a scene or repaint a pa
 Every scene's `AnimationPlayer` holds `RESET` plus looping clips `stage0`, `stage1`,
 `stage2`, and optionally `fruit`. `RESET` hides every pivot and zeros every animated
 property, so a clip only has to switch on what it shows. The bake samples each clip at
-phase 0, ¼, ½ and ¾ of its length; stages 1 and 2 and `fruit` must produce four
-distinct frames (rotation plus a glow pulse with four different levels is the easy
-way), stage 0 needs two. The current clips are 3 s long; the runtime plays them on
-simulated time, so a plant's sway slows and speeds with the world.
+`PLANT_FRAMES` (24) evenly spaced phases of its length (pack v4; it was four); across a
+clip, stages 1 and 2 and `fruit` must produce at least four distinct frames (rotation
+plus a glow pulse is the easy way), stage 0 at least two. The current clips are 3 s
+long; the runtime plays them on simulated time, blending each frame between the two
+nearest samples (`Clip::sample`), so a plant's sway is continuous at the render rate
+and slows and speeds with the world. Because the baker still floors each output
+pixel's source coordinate, a slowly turning one-pixel stem can hold the same pixels
+through several samples and then change; the temporal blend spreads that change over
+one sample interval (125 ms) rather than removing it. Growth between stages is a
+runtime reveal (up the stalk on side faces, from the center on the top face) over the
+authored stage clips; authored "extending stalk" poses replace that reveal, not the
+pacing — see "Pack v5: growth transitions" below, where `lanternstalk` has the first.
 
 `fruit` is the full-grown plant in flower or bearing fruit, with the warm accent or a
 bright cyan glow on the fruit bodies so it reads as food at 16 px. Fauna that eat fruit
@@ -115,6 +123,61 @@ by construction; the loader test checks the wrap step against the interior.
 species-major order with parts in base, trunk, crown order. `ground_atlas: "ground.png"`
 is 32 × (8 × rows) with `ground_tile: 8`, `ground_frames: 4` and
 `ground: [{name, band, row, frames: 4, seconds}]`. The Rust side exposes
-`ArtPack::tall` (`TallPlant { name, base, trunk, crown }`), `ArtPack::tall_plant(name)`,
-`ArtPack::ground` (`GroundTile { name, band, frames, seconds }`) and
-`ArtPack::ground_for(band)`. Godot 4.7.2 is the reference baker.
+`ArtPack::tall` (`TallPlant { name, base, trunk, crown, cap, tail_row }`),
+`ArtPack::tall_plant(name)`, `ArtPack::ground` (`GroundTile { name, band, frames,
+seconds }`) and `ArtPack::ground_for(band)`. Godot 4.7.2 is the reference baker.
+
+## Pack v4: sample counts are data
+
+`version: 4` changes no file layout; it makes the sample counts data. `frames` (creature
+samples per clip, 16) and `plant_frames` (plant and tall samples per clip, 24) may be
+anything in 2..=32; the atlases are `16 · frames` wide accordingly. Packs v1–v3 still
+load and still say 8 and 4. `art/bake.gd` `FRAMES` and `PLANT_FRAMES` set them; the bake
+stays byte-reproducible and the phase-0 sample of every clip is unchanged from v3.
+
+The loader also derives each tall plant's **cap**: the crown with its trunk-joining tail
+cleared. `tail_row` is measured from the baked pixels — the first crown row from which,
+in every frame, every texel the trunk paints the crown paints identically (spiretree 8,
+glasscane 6) — and only rows `tail_row..16` are cleared, so a dome pixel that happens
+to share the trunk's colour is never taken for trunk. The runtime draws the cap, never
+the crown, at the column's continuous height, over trunk rows each painted exactly
+once. For that pairing the loader requires a plant's crown and trunk clips to share one
+sample count and duration, and rejects a tail that would start above row 4 (the top
+segment reaches four rows into the crown's tile).
+
+## Pack v5: growth transitions
+
+`version: 5` is additive over v4: a plant scene may carry **authored growth clips** beside
+its looping stage clips. An animation named `grow<from><to>` — `to == from + 1`, `loop_mode`
+`LOOP_NONE` — is baked as one extra row of `plant_frames` samples in `plants.png`, placed
+after that plant's own stage and fruit rows so the atlas stays plant-major, and described in
+the `plants` array as `{name, band, stage: "grow", from, to, row, frames, seconds, loop:
+false}`. Every other row, every other atlas and every stage/fruit tile is unchanged from v4;
+the bake stays byte-reproducible.
+
+A growth row is sampled **inclusively**, at `i / (plant_frames − 1)` of the clip's length,
+not at `i / plant_frames` like a loop: frame 0 is the source stage's pose, the last frame the
+target's, and nothing wraps the end back into the beginning. `cubarium::art` exposes
+`Plant::transitions: Vec<Transition { from, to, clip }>` (`clip.looping == false`) and
+`Plant::transition(from, to) -> Option<&Clip>`; a v1–v4 pack, and any pair without an
+authored clip, returns `None` and keeps the runtime's reveal mask. The loader requires one
+stage step up, no duplicate pair, the pack's sample count, and the same 9-pixel extent budget
+as every other frame.
+
+`lanternstalk` has the first one, `grow01` (4 s, stage 0 → stage 1): the sprout dissolves into
+a stalk that extends upward — a `stalk1` sprite scaled about its bottom, its centre offset
+kept at exactly `−2.5 · scale.y` so the lower edge stays on the root — and a `bulb1` sprite
+that fades in at the stalk's tip and enlarges to the mature lantern, always overlapping the
+stem's top row by the one row stage 1 overlaps, so no gap can open. The root contact is fixed:
+tile row 14 is the lowest painted row of every frame. Because `stalk1` is uniform along its
+length, the scaled stem reproduces the mature art exactly, and the clip's **last frame is
+pixel-identical to the neutral `Stalk1` image** — which is stage 1's *half-period* sample
+(rotation 0, bulb modulate 1), not its phase-0 one; likewise the first frame is stage 0's
+quarter-period sample, the sprout at modulate 1. The presenter blends the endpoints into the
+running stage loops, so neither endpoint has to match an arbitrary sway phase.
+
+Authoring one: keep the plant's shared root, extend the support before the head, never scale
+a part to zero (a singular transform is skipped by the baker — fade in with visibility and
+`self_modulate` alpha instead), and add **every** newly animated property's neutral value to
+`RESET`, including the new group's `visible`, or the bake's RESET-before-each-sample loop will
+leak a growth transform into the stage and fruit rows.

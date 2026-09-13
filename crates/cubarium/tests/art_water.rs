@@ -11,15 +11,16 @@ use cubarium::art_present::{
     ArtPresenter, FOLIAGE_STAGES, GROUND_LATTICE, GROUND_OPACITY, MOTIF_OPACITY, RAIN_BLINK,
     RAIN_DENSITY, RAIN_MAX_STREAKS, RAIN_PERIOD, RAIN_SPEED, TALL_COLUMN_P, TALL_MAX_SEGMENTS,
     TALL_PLANTS, TALL_STEP, WATER_FILM, WATER_SHIMMER_SECONDS, band_of, column_density,
-    foliage_rows, ground_frame, ground_opacity, ground_phase_of, ground_points, ground_weight,
-    TALL_HYST, next_tall, rain_blink_on, tall_rise, rain_fall, rain_marks, rain_origin, rain_streaks, soil_weight,
+    foliage_rows, ground_pose, ground_opacity, ground_phase_of, ground_points, ground_weight,
+    TALL_HYST, next_tall, rain_blink, rain_blink_on, tall_rise, rain_fall, rain_marks, rain_origin, rain_streaks, soil_weight,
     stage_thresholds, tall_anchor, tall_column_of, tall_columns, tall_target, up_of,
-    water_brightness, water_coverage,
+    water_brightness, water_coverage, present_seconds,
+    WIND_QUIET_TICK, plant_bend_budget, slot_of, slot_wind, wind_fixture_tick, wind_strength,
 };
 use cubarium::clock::DT;
 use cubarium::present::PRODUCER_SATURATION;
 use cubarium_core::view::RenderView;
-use cubarium_render::{Canvas, stamp_sprite};
+use cubarium_render::{Canvas, Mask, stamp_layers_bent, stamp_pose};
 use cubarium::art_present::{algae_water_color, water_color, band_opacity, next_stage, placement_of, plant_density, plant_phase_of, rank_cap_of, species_of, stage_opacity};
 use cubarium_surface::{CELL_COUNT, CELLS_PER_FACE_EDGE, CellId, PixelImage, SurfacePoint, Vec2, cell_of};
 
@@ -160,14 +161,18 @@ fn the_shimmer_repeats_on_its_period_and_is_still_within_a_tick() {
     let vh = view(40 + ticks / 2, flat(0.0), flat(0.0), water, vec![0.0; CELL_COUNT]);
     let mut p = ArtPresenter::new(pack());
     let a = draw_at(&mut p, &v0, 0.0);
-    let a_again = draw_at(&mut p, &v0, 0.7);
+    let a_again = draw_at(&mut p, &v0, 0.0);
+    let a_between = draw_at(&mut p, &v0, 0.7);
     let b = draw_at(&mut p, &v1, 0.0);
     let h = draw_at(&mut p, &vh, 0.0);
-    assert!(differing(&a, &a_again).is_empty(), "the frame fraction must not move the water");
+    assert!(differing(&a, &a_again).is_empty(), "the same frame must draw the same water");
+    // The shimmer runs on presentation time, which includes the frame fraction: a frame
+    // part-way through the tick shows the glints slid part-way, not held.
+    assert!(!differing(&a, &a_between).is_empty(), "the frame fraction must slide the shimmer");
     assert!(differing(&a, &b).is_empty(), "a whole shimmer period later the water differs");
     assert!(!differing(&a, &h).is_empty(), "half a period later nothing shimmered");
     let phase = 1.0;
-    assert!((water_brightness(0, phase) - water_brightness(ticks, phase)).abs() < 1e-6);
+    assert!((water_brightness(0.0, phase) - water_brightness(ticks as f64 * DT, phase)).abs() < 1e-6);
 }
 
 #[test]
@@ -228,7 +233,9 @@ fn a_streak_falls_downhill_and_wraps_within_its_cell() {
     let up = up_of(cell).expect("side face");
     let (dx, dy) = rain_origin(cell, 0);
     assert!(dx < 4 && dy < 4);
-    let head_at = |seconds: f64| rain_marks(cell, 0, seconds)[0];
+    // The head is the first (wrapped) mark; its weight is the part of the pixel the
+    // streak's continuous position still covers.
+    let head_at = |seconds: f64| rain_marks(cell, 0, seconds)[0].0;
     let (x0, y0) = head_at(0.0);
     assert_eq!(x0, cell.cx() * 4 + dx);
     assert_eq!(y0, cell.cy() * 4 + dy);
@@ -237,15 +244,20 @@ fn a_streak_falls_downhill_and_wraps_within_its_cell() {
     let (x1, y1) = head_at(one_px + 1e-9);
     let expected_y = i32::from(cell.cy()) * 4 + (i32::from(dy) + if up.y < 0.0 { 1 } else { -1 }).rem_euclid(4);
     assert_eq!((i32::from(x1), i32::from(y1)), (i32::from(x0), expected_y), "the streak did not fall one pixel downhill");
-    // Every mark stays inside the cell's column and the face; the fall wraps.
+    // Every head stays inside the cell's column and the face; the fall wraps; a streak is
+    // at most three weighted pixels (head, body, tail) whose weights sum to the 1×2 mark.
     for k in 0..RAIN_MAX_STREAKS {
         for step in 0..40 {
             let seconds = step as f64 * RAIN_PERIOD / 40.0 + 7.0;
             let marks = rain_marks(cell, k, seconds);
-            assert!(!marks.is_empty() && marks.len() <= 2);
-            let head = marks[0];
+            assert!(!marks.is_empty() && marks.len() <= 3);
+            let head = marks[0].0;
             assert_eq!(head.0 / 4, cell.cx(), "head left its cell column");
             assert_eq!(head.1 / 4, cell.cy(), "head left its cell row");
+            if marks.len() == 3 {
+                let total: f32 = marks.iter().map(|m| m.1).sum();
+                assert!((total - 2.0).abs() < 1e-5, "a whole streak weighs 2, got {total}");
+            }
         }
     }
     assert!((rain_fall(RAIN_PERIOD + 0.1) - RAIN_SPEED * 0.1).abs() < 1e-9, "the fall wraps every period");
@@ -258,7 +270,8 @@ fn top_face_streaks_blink_instead_of_falling() {
     let (dx, dy) = rain_origin(cell, 1);
     let on = rain_marks(cell, 1, 0.01);
     assert!(rain_blink_on(0.01));
-    assert_eq!(on, vec![(cell.cx() * 4 + dx, cell.cy() * 4 + dy)]);
+    assert_eq!(on, vec![((cell.cx() * 4 + dx, cell.cy() * 4 + dy), rain_blink(0.01))]);
+    assert!(rain_blink(0.01) > 0.0 && rain_blink(0.01) < 1.0, "a sparkle swells rather than switching on");
     let off_time = RAIN_BLINK + 0.01;
     assert!(!rain_blink_on(off_time));
     assert!(rain_marks(cell, 1, off_time).is_empty());
@@ -276,7 +289,8 @@ fn rain_adds_a_few_pixels_in_its_cell_and_nothing_without_rain() {
     let b = draw_at(&mut p, &raining, 0.0);
     let diff = differing(&a, &b);
     assert!(!diff.is_empty(), "rain drew nothing");
-    assert!(diff.len() <= 2 * RAIN_DENSITY.ceil() as usize, "{} pixels for one raining cell", diff.len());
+    // A streak sliding between pixels touches up to three of them.
+    assert!(diff.len() <= 3 * RAIN_DENSITY.ceil() as usize, "{} pixels for one raining cell", diff.len());
     for (f, x, y) in &diff {
         assert_eq!(*f, Face::Front);
         let c = cell_of(&SurfacePoint::pixel_center(*f, *x, *y));
@@ -358,29 +372,44 @@ fn each_band_lays_its_own_tile_at_the_lattice_point() {
         // Expected from the rules: the rich ground, then the band's tile at the lattice
         // point (full opacity times the band weight), then the cell's own plant on top.
         let tile = art.ground_for(band).expect("tile");
-        let frame = ground_frame(tile, rich.tick as f64 * DT + ground_phase_of(face, x, y, tile.seconds));
+        let seconds = present_seconds(rich.tick, 0.0);
+        let pose = ground_pose(tile, seconds + ground_phase_of(face, x, y, tile.seconds));
         let opacity = GROUND_OPACITY * ground_weight(face, x, y, band);
         assert!(opacity > 0.0);
         let mut expected = a.clone();
         let mut scratch: Vec<PixelImage> = Vec::new();
-        stamp_sprite(&mut expected, SurfacePoint::pixel_center(face, x, y), Vec2::new(1.0, 0.0), frame, 1.0, opacity, &mut scratch);
+        stamp_pose(&mut expected, SurfacePoint::pixel_center(face, x, y), Vec2::new(1.0, 0.0), pose, 1.0, opacity, Mask::None, &mut scratch);
         assert!(!differing(&a, &expected).is_empty(), "{band:?} tile painted nothing");
         let t = plant_density(&rich, cell.index(), band);
         if let Some(stage) = next_stage(None, t, &stage_thresholds(band), rank_cap_of(cell)) {
             let plant = art.plant(species_of(band, cell)).expect("plant");
             let clip = &plant.stages[usize::from(stage)];
-            let sprite = clip.at(rich.tick as f64 * DT + plant_phase_of(cell, clip.seconds));
-            let (at, heading) = placement_of(cell);
+            let pose = clip.sample(seconds + plant_phase_of(cell, clip.seconds));
+            let (at, _) = placement_of(cell);
             let po = stage_opacity(stage, t, &stage_thresholds(band), band_opacity(band));
-            stamp_sprite(&mut expected, at, heading, sprite, 1.0, po, &mut scratch);
+            // The slot's share of the shared breeze: a bend on a side face, a rotation
+            // about the stationary centre on the top one.
+            let (bend, heading) =
+                slot_wind(&slot_of(cell), &plant.name, plant_bend_budget(plant), seconds);
+            stamp_layers_bent(
+                &mut expected,
+                at,
+                heading,
+                &[(pose, 1.0)],
+                1.0,
+                po,
+                Mask::None,
+                bend,
+                &mut scratch,
+            );
         }
         let diff = differing(&b, &expected);
         assert!(diff.is_empty(), "{band:?}: {} pixels differ from tile-then-plant, first {:?}", diff.len(), diff.first());
         // The other bands' tiles at the same point would be a different image.
         let other = art.ground_for(if band == Band::Soil { Band::Canopy } else { Band::Soil }).unwrap();
         let mut wrong = a.clone();
-        let wf = ground_frame(other, rich.tick as f64 * DT + ground_phase_of(face, x, y, other.seconds));
-        stamp_sprite(&mut wrong, SurfacePoint::pixel_center(face, x, y), Vec2::new(1.0, 0.0), wf, 1.0, opacity, &mut scratch);
+        let wf = ground_pose(other, seconds + ground_phase_of(face, x, y, other.seconds));
+        stamp_pose(&mut wrong, SurfacePoint::pixel_center(face, x, y), Vec2::new(1.0, 0.0), wf, 1.0, opacity, Mask::None, &mut scratch);
         assert!(!differing(&wrong, &expected).is_empty() || differing(&a, &wrong).is_empty(), "the two tiles draw alike");
     }
 }
@@ -484,20 +513,25 @@ fn a_full_column_stacks_to_the_rim_and_its_crown_reaches_the_top_face() {
     for cy in 0..=10u8 {
         producer[CellId::new(column.face, column.cx, cy).index()] = saturation();
     }
-    let v = view(5, producer, flat(0.0), flat(0.0), vec![0.0; CELL_COUNT]);
+    // Inside a wind packet's quiet interval, where the shared breeze is exactly zero, so
+    // what this test measures is the column's own pulse and nothing else.
+    let quiet = WIND_QUIET_TICK;
+    let v = view(quiet, producer, flat(0.0), flat(0.0), vec![0.0; CELL_COUNT]);
     let mut p = ArtPresenter::new(pack());
     let with = draw_at(&mut p, &v, 0.0);
     let index = p.columns().iter().position(|c| *c == column).unwrap();
     assert_eq!(p.segments_of(index), TALL_MAX_SEGMENTS);
-    let bare = draw(&view(5, flat(0.0), flat(0.0), flat(0.0), vec![0.0; CELL_COUNT]));
+    let bare = draw(&view(quiet, flat(0.0), flat(0.0), flat(0.0), vec![0.0; CELL_COUNT]));
     let diff = differing(&bare, &with);
     assert!(diff.iter().any(|&(f, _, _)| f == Face::Top), "the crown did not reach the top face");
     assert!(diff.iter().any(|&(f, _, y)| f == column.face && y > 44), "the base did not reach below the horizon");
     // Nothing on the other side faces.
     assert!(diff.iter().all(|&(f, _, _)| f == Face::Top || f == column.face), "another face changed");
-    // Two draws agree; a column period later the pulse repeats.
-    let again = draw_at(&mut p, &v, 0.3);
+    // Two draws of one frame agree; a frame part-way through the tick has moved (the pulse
+    // runs on presentation time); a column period later the pulse repeats.
+    let again = draw_at(&mut p, &v, 0.0);
     assert!(differing(&with, &again).is_empty());
+    assert!(!differing(&with, &draw_at(&mut p, &v, 0.3)).is_empty(), "the frame fraction must move the pulse");
     fn gcd(a: u64, b: u64) -> u64 { if b == 0 { a } else { gcd(b, a % b) } }
     let mut period = (plant.trunk.seconds / DT).round() as u64;
     for tile in &art.ground {
@@ -508,7 +542,7 @@ fn a_full_column_stacks_to_the_rim_and_its_crown_reaches_the_top_face() {
         let g = (plant.stages[2].seconds / DT).round() as u64;
         period = period / gcd(period, g) * g;
     }
-    let later = view(5 + period, v.producer.clone(), flat(0.0), flat(0.0), vec![0.0; CELL_COUNT]);
+    let later = view(quiet + period, v.producer.clone(), flat(0.0), flat(0.0), vec![0.0; CELL_COUNT]);
     assert!(differing(&with, &draw_at(&mut p, &later, 0.0)).is_empty(), "the pulse did not repeat");
 }
 
@@ -578,7 +612,10 @@ fn everything_on_draw_cost() {
             moved: Vec::new(),
         })
         .collect();
-    let mut v = view(77, flat(saturation()), flat(1.5), flat(1.0), vec![1.0; CELL_COUNT]);
+    // Inside a wind packet by default (`wind_fixture_tick`); `CUBARIUM_WIND_TICK` puts the
+    // same fixture in a quiet interval, where the added wind is exactly zero.
+    let base = wind_fixture_tick();
+    let mut v = view(base, flat(saturation()), flat(1.5), flat(1.0), vec![1.0; CELL_COUNT]);
     v.organisms = organisms;
     let mut p = ArtPresenter::new(pack());
     let mut canvas = Canvas::new();
@@ -587,12 +624,16 @@ fn everything_on_draw_cost() {
     let frames = 60;
     let start = std::time::Instant::now();
     for i in 0..frames {
-        v.tick = 77 + i;
+        v.tick = base + i;
         p.observe(&v);
         p.draw(&v, 0.37, &mut canvas);
     }
     let ms = start.elapsed().as_secs_f64() * 1e3 / frames as f64;
-    println!("ArtPresenter::draw everything on: {ms:.3} ms/frame (all wet, raining, rich, all columns tall, 200 organisms) = {:.0}% of a 60 fps budget", ms / (1000.0 / 60.0) * 100.0);
+    println!(
+        "ArtPresenter::draw everything on: {ms:.3} ms/frame (all wet, raining, rich, all columns tall, 200 organisms, wind {:.3} at tick {base}) = {:.0}% of a 60 fps budget",
+        wind_strength(present_seconds(base, 0.37)),
+        ms / (1000.0 / 60.0) * 100.0
+    );
     assert!(ms < 1000.0 / 60.0, "{ms} ms/frame exceeds the 60 fps budget");
 }
 

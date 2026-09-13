@@ -27,6 +27,19 @@ Without `--art` the older disc image is drawn unchanged. Known open items:
 the skimmer kind does not yet hold its numbers, population margins are thin,
 and no run longer than six simulated hours has been measured.
 
+The first animation pass adds interpolated poses and turns, softer rain, and
+paced, resource-driven plant stages and tree height at 60 fps. Existing vegetation
+initializes from the loaded world; ongoing growth is presentation history, not
+individual plant age. See the [animation review](design/7_Research/animation-slice1-2026-09-13.md)
+and the [ideas and next steps](design/animation-roadmap.md).
+
+The second animation pass adds a shared, intermittent breeze with rooted plant
+bends and joined tree/vine motion, plus an authored lanternstalk sprout-to-stalk
+growth pilot. Other growth stages retain their paced reveal transitions. These
+remain presentation changes: ecology still advances at 20 Hz, with 60 fps output.
+See the [second-pass review](design/7_Research/animation-slice2-2026-09-12.md)
+for measurements, limits, and remaining work, including higher-resolution ideas.
+
 Start with the [design overview](design/README.md), then the
 [implementation plan](design/implementation-plan.md). The
 [owner's brief](design/brief.md) records the requirements; architecture and

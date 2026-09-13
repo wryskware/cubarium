@@ -10,9 +10,9 @@ use std::time::Duration;
 
 use cube_proto::{FACE_SIZE, Face};
 use cubarium::art::{ArtPack, Clip, STATES};
-use cubarium::art_present::{rank_cap_of, 
+use cubarium::art_present::{rank_cap_of,
     ArtPresenter, CANOPY_STAGES, FOLIAGE_STAGES, SOIL_SCALE, SOIL_STAGES, clip_time, form_of,
-    phase_of, soil_weight, state_of,
+    phase_of, present_seconds, soil_weight, state_of,
 };
 use cubarium::clock::DT;
 use cubarium::present::{JUVENILE_SCALE, PRODUCER_SATURATION, Presenter, interpolate};
@@ -350,12 +350,26 @@ fn clip_time_drives_looping_clips_on_simulated_time() {
             assert!(clip.looping, "rest/move/feed must loop ({form}/{state})");
             let phase = phase_of(id(form as u32, state as u32), clip.seconds);
             for tick in [0u64, 1, 17, 400, 100_000] {
+                // The presentation seconds of a tick are the simulated instant the frame
+                // shows, `(tick − 1 + f) · DT`, written out again here rather than borrowed.
+                let seconds = present_seconds(tick, 0.0);
                 assert_eq!(
-                    clip_time(clip, tick, phase, None),
-                    tick as f64 * DT + phase,
+                    seconds,
+                    tick.saturating_sub(1) as f64 * DT,
+                    "present_seconds is not the tick's own simulated instant ({tick})"
+                );
+                assert_eq!(
+                    clip_time(clip, seconds, phase, None),
+                    seconds + phase,
                     "form {form} state {state} tick {tick}"
                 );
             }
+            // And the fraction of a tick carries through continuously.
+            assert_eq!(
+                clip_time(clip, present_seconds(17, 0.5), phase, None),
+                16.5 * DT + phase,
+                "form {form} state {state} mid-tick"
+            );
         }
     }
 }
@@ -365,11 +379,12 @@ fn clip_time_ignores_wall_clock_delay() {
     let pack = pack();
     let clip = clip_of(&pack, 1, 0);
     let phase = phase_of(id(9, 4), clip.seconds);
-    let first = clip_time(clip, 1234, phase, None);
+    let seconds = present_seconds(1234, 0.0);
+    let first = clip_time(clip, seconds, phase, None);
     std::thread::sleep(Duration::from_millis(8));
-    let second = clip_time(clip, 1234, phase, None);
+    let second = clip_time(clip, seconds, phase, None);
     std::thread::sleep(Duration::from_millis(8));
-    let third = clip_time(clip, 1234, phase, None);
+    let third = clip_time(clip, seconds, phase, None);
     assert_eq!(first, second, "the same tick must sample the same instant of the clip");
     assert_eq!(second, third);
 }
@@ -384,7 +399,7 @@ fn clip_time_drives_the_bud_clip_on_gestation_progress() {
         for progress in [0.0f32, 0.5, 1.0] {
             for tick in [0u64, 7, 9_999] {
                 assert_eq!(
-                    clip_time(bud, tick, phase, Some(progress)),
+                    clip_time(bud, present_seconds(tick, 0.0), phase, Some(progress)),
                     f64::from(progress) * bud.seconds,
                     "form {form} progress {progress} tick {tick}: the bud clip is driven \
                      by gestation, not by the tick or the phase"
@@ -398,7 +413,7 @@ fn clip_time_drives_the_bud_clip_on_gestation_progress() {
 fn clip_time_yields_zero_for_a_non_looping_clip_without_gestation() {
     let pack = pack();
     let bud = clip_of(&pack, 0, 3);
-    assert_eq!(clip_time(bud, 500, 1.25, None), 0.0);
+    assert_eq!(clip_time(bud, present_seconds(500, 0.0), 1.25, None), 0.0);
 }
 
 #[test]
@@ -408,7 +423,7 @@ fn clip_time_keeps_looping_clips_on_simulated_time_even_while_gestating() {
     let pack = pack();
     let clip = clip_of(&pack, 2, 1);
     let phase = phase_of(id(3, 3), clip.seconds);
-    assert_eq!(clip_time(clip, 40, phase, Some(0.5)), 40.0 * DT + phase);
+    assert_eq!(clip_time(clip, 40.0 * DT, phase, Some(0.5)), 40.0 * DT + phase);
 }
 
 // ---------------------------------------------------------------------------
@@ -501,20 +516,23 @@ fn a_feeding_body_repeats_on_its_own_period_and_not_before() {
     let slot = slot_phased_mid_frame(feed, 6);
     let body = organism(id(slot, 6), hue, Mode::Feeding, SurfacePoint::new(Face::Left, 30.0, 30.0));
 
+    // From tick 1, not tick 0: the presentation clock of a frame is the interval `tick − 1
+    // → tick`, so ticks 0 and 1 both show simulated instant 0 and only ticks from 1 on are
+    // one-to-one with it.
     let mut p = presenter();
-    let now = pose_at(&mut p, &body, 0);
+    let now = pose_at(&mut p, &body, 1);
     assert_same_canvas(
         &now,
-        &pose_at(&mut p, &body, period_ticks),
+        &pose_at(&mut p, &body, 1 + period_ticks),
         "one whole feed period later",
     );
     assert_same_canvas(
         &now,
-        &pose_at(&mut p, &body, 5 * period_ticks),
+        &pose_at(&mut p, &body, 1 + 5 * period_ticks),
         "five whole feed periods later",
     );
     assert!(
-        !differing(&now, &pose_at(&mut p, &body, period_ticks / 2)).is_empty(),
+        !differing(&now, &pose_at(&mut p, &body, 1 + period_ticks / 2)).is_empty(),
         "half a feed period later the pose must have moved"
     );
 }
@@ -623,7 +641,12 @@ fn a_full_gestation_draws_the_bud_clips_last_frame() {
 
     let bud_seconds = clip_of(p.pack(), form, 3).seconds;
     let phase = phase_of(body.id, bud_seconds);
-    let t = clip_time(clip_of(p.pack(), form, 3), peopled.tick, phase, body.gestation);
+    let t = clip_time(
+        clip_of(p.pack(), form, 3),
+        present_seconds(peopled.tick, 0.0),
+        phase,
+        body.gestation,
+    );
     assert_eq!(t, bud_seconds, "progress 1 must land exactly on the end of the bud clip");
 
     let (anchor, facing) = interpolate(&body.moved, body.pos, body.heading, 0.0);

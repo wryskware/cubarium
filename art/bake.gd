@@ -8,7 +8,12 @@ const HABITAT = ["rosette", "fern", "lichen"]
 ## Plants: name and band. Each scene carries stage0/stage1/stage2 (and optionally fruit).
 const PLANTS = [["glowcap", "soil"], ["rootveil", "soil"], ["lanternstalk", "foliage"], ["tendrilfan", "foliage"], ["umbrellafrond", "canopy"], ["bloomcrown", "canopy"], ["reedspire", "water"]]
 const STAGES = ["stage0", "stage1", "stage2"]
-const PLANT_FRAMES = 4
+## A plant scene may also carry authored growth clips named grow<from><to> (pack v5), one
+## stage step up and nonlooping: they are baked as extra rows after that plant's own rows.
+const GROW_PREFIX = "grow"
+## Samples per plant/tall clip (pack v4: dense so the runtime can blend adjacent samples;
+## a 3 s loop is sampled every 125 ms).
+const PLANT_FRAMES = 24
 ## Tall plants: name and the column parts the scene provides as looping clips. A trunk is
 ## a 4-px-periodic segment stacked every cell; base and crown cap the column.
 const TALL = [["spiretree", ["base", "trunk", "crown"]], ["glasscane", ["base", "trunk", "crown"]], ["vinecoil", ["trunk"]]]
@@ -19,7 +24,8 @@ const GROUND_TILE = 8
 const GROUND_FRAMES = 4
 const GROUND_SECONDS = 6.0
 const TILE = 16
-const FRAMES = 8
+## Samples per creature clip (pack v4: 16, so a 1.6 s walk is sampled every 100 ms).
+const FRAMES = 16
 var images: Dictionary = {}
 var failed := false
 
@@ -169,6 +175,38 @@ func bake() -> void:
 				plant_tiles.append(raster(rig))
 			var stage = clip_index if clip_index < STAGES.size() else "fruit"
 			plant_rows.append({"name": plant_name, "band": entry[1], "stage": stage, "row": plant_rows.size(), "frames": PLANT_FRAMES, "seconds": animation.length})
+		# Growth transitions, after this plant's stage and fruit rows so the atlas stays
+		# plant-major. A transition is played once, so its PLANT_FRAMES samples are spaced
+		# *inclusively*: frame 0 is the source stage's neutral pose and the last frame the
+		# target's, and the runtime never wraps the last sample back into the first.
+		var grow_names: Array = []
+		for animation_name in player.get_animation_list():
+			if String(animation_name).begins_with(GROW_PREFIX):
+				grow_names.append(String(animation_name))
+		grow_names.sort()
+		for grow_name in grow_names:
+			var steps: String = grow_name.substr(GROW_PREFIX.length())
+			# Validate each stage digit: is_valid_int() on the whole suffix also accepts
+			# signed values such as "+1", which would otherwise be misread as grow01.
+			if steps.length() != 2 or not steps.substr(0, 1).is_valid_int() or not steps.substr(1, 1).is_valid_int():
+				fail(plant_name + ": " + grow_name + " must be named grow<from><to>")
+				continue
+			var from: int = steps.substr(0, 1).to_int()
+			var to: int = steps.substr(1, 1).to_int()
+			if from + 1 != to or to > STAGES.size() - 1:
+				fail(plant_name + " " + grow_name + " must go one stage step up")
+				continue
+			var growth := player.get_animation(grow_name)
+			if growth.loop_mode != Animation.LOOP_NONE:
+				fail(plant_name + " " + grow_name + " must not loop")
+				continue
+			for frame in range(PLANT_FRAMES):
+				player.play("RESET")
+				player.advance(0)
+				player.play(grow_name)
+				player.seek(float(frame) / (PLANT_FRAMES - 1) * growth.length, true)
+				plant_tiles.append(raster(rig))
+			plant_rows.append({"name": plant_name, "band": entry[1], "stage": "grow", "from": from, "to": to, "row": plant_rows.size(), "frames": PLANT_FRAMES, "seconds": growth.length, "loop": false})
 		rig.queue_free()
 	var plant_atlas := Image.create(TILE * PLANT_FRAMES, TILE * maxi(plant_rows.size(), 1), false, Image.FORMAT_RGBA8)
 	plant_atlas.fill(Color.TRANSPARENT)
@@ -235,6 +273,6 @@ func bake() -> void:
 	if file == null:
 		fail("Cannot write pack.json")
 	else:
-		file.store_string(JSON.stringify({"version": 3, "tile": TILE, "frames": FRAMES, "pivot": [8,8], "facing": "+x", "creatures": "creatures.png", "habitat": "habitat.png", "habitat_names": HABITAT, "creature_names": NAMES, "clips": clips, "plant_atlas": "plants.png", "plant_frames": PLANT_FRAMES, "plants": plant_rows, "tall_atlas": "tall.png", "tall": tall_rows, "ground_atlas": "ground.png", "ground_tile": GROUND_TILE, "ground_frames": GROUND_FRAMES, "ground": ground_rows}, "\t") + "\n")
+		file.store_string(JSON.stringify({"version": 5, "tile": TILE, "frames": FRAMES, "pivot": [8,8], "facing": "+x", "creatures": "creatures.png", "habitat": "habitat.png", "habitat_names": HABITAT, "creature_names": NAMES, "clips": clips, "plant_atlas": "plants.png", "plant_frames": PLANT_FRAMES, "plants": plant_rows, "tall_atlas": "tall.png", "tall": tall_rows, "ground_atlas": "ground.png", "ground_tile": GROUND_TILE, "ground_frames": GROUND_FRAMES, "ground": ground_rows}, "\t") + "\n")
 	print("Cubarium: baked ", NAMES.size(), " rigs, ", clips.size(), " clips, three habitat motifs, ", plant_rows.size(), " plant rows, ", tall_rows.size(), " tall rows and ", ground_rows.size(), " ground tiles to ", output)
 	quit(1 if failed else 0)

@@ -25,5 +25,8 @@ mod trail;
 pub use body::{BodyShape, Lobe, stamp_body};
 pub use canvas::{Canvas, srgb_decode, srgb_encode};
 pub use field::draw_field;
-pub use sprite::{Sprite, stamp_sprite};
+pub use sprite::{
+    Bend, Mask, Pose, Sprite, stamp_layers, stamp_layers_bent, stamp_layers_bent_with_radius,
+    stamp_pose, stamp_sprite,
+};
 pub use trail::{Trail, TrailSegment, draw_trail};

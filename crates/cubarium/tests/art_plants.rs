@@ -15,17 +15,21 @@ use cubarium::art_present::{
     SOIL_PLANTS, SOIL_SCALE, SOIL_STAGES, STAGE_HYST, WATER_PLANT, band_of, band_opacity,
     cell_band, fruit_stage, next_stage, placement_of, plant_density, plant_phase_of,
     plant_cap, rank_cap_of, slot_of, soil_weight, species_of, stage_opacity, stage_thresholds,
-    stalk_heading, up_of, column_density, ground_frame, ground_opacity, ground_phase_of,
+    stalk_heading, up_of, column_density, ground_pose, ground_opacity, ground_phase_of,
     ground_points, ground_weight, tall_anchor, tall_columns, tall_heading,
     tall_phase_of, tall_target, algae_water_color, water_brightness, water_coverage, water_phase,
-    TALL_PLANTS, VINE_PLANT,
+    TALL_PLANTS, VINE_PLANT, present_seconds, tall_grown_px, TALL_FIRST_JOIN, TALL_JOIN,
+    TALL_MAX_SEGMENTS, TALL_OPACITY, TALL_VINE_FLOOR, TALL_VINE_TOP, TILE_ROWS,
+    plant_bend_budget, slot_wind, tall_amplitude, tall_bend_base, tall_bend_budget, wind_strength,
+    WIND_QUIET_TICK,
+    TALL_BEND_LENGTH, TALL_BEND_ROOT,
 };
 use cubarium::clock::DT;
 use cubarium::present::{
     self, DETRITUS_SCALE, DETRITUS_THRESHOLD, PALETTE, PRODUCER_SATURATION, srgb_linear,
 };
 use cubarium_core::view::RenderView;
-use cubarium_render::{Canvas, draw_field, stamp_sprite};
+use cubarium_render::{Bend, Canvas, Mask, draw_field, stamp_layers_bent, stamp_pose};
 use cubarium_surface::{
     CELL_COUNT, CellId, Edge, PixelImage, ScalarField, SurfacePoint, Vec2, cell_of,
     pixel_neighbor,
@@ -63,9 +67,11 @@ fn view(tick: u64, producer: Vec<f64>, detritus: Vec<f64>, water: Vec<f64>) -> R
     }
 }
 
+/// Observe the view against `fruit` (the accent is paced in `observe`, and a first view
+/// snaps it fully on), then draw the same frame against the same fruit.
 fn draw(p: &mut ArtPresenter, v: &RenderView, fruit: Option<&[f64]>) -> Canvas {
     let mut canvas = Canvas::new();
-    p.observe(v);
+    p.observe_with_fruit(v, fruit);
     p.draw_with_fruit(v, 0.0, &mut canvas, fruit);
     canvas
 }
@@ -182,8 +188,9 @@ fn expected_ground(v: &RenderView) -> Canvas {
             if opacity <= 0.0 {
                 continue;
             }
-            let frame = ground_frame(tile, v.tick as f64 * DT + ground_phase_of(face, x, y, tile.seconds));
-            stamp_sprite(&mut canvas, point, Vec2::new(1.0, 0.0), frame, 1.0, opacity, &mut scratch);
+            // Presentation time of a frame at fraction 0: the tick's own instant.
+            let pose = ground_pose(tile, present_seconds(v.tick, 0.0) + ground_phase_of(face, x, y, tile.seconds));
+            stamp_pose(&mut canvas, point, Vec2::new(1.0, 0.0), pose, 1.0, opacity, Mask::None, &mut scratch);
         }
     }
     // Water: filtered depth, coverage 1 − exp(−w/film), source-over, shimmering.
@@ -199,7 +206,7 @@ fn expected_ground(v: &RenderView) -> Canvas {
         let cell = cell_of(&SurfacePoint::pixel_center(face, x, y));
         let p_t = if saturation > 0.0 { v.producer[cell.index()] / saturation } else { 0.0 };
         let c = algae_water_color(w, p_t);
-        let b = water_brightness(v.tick, water_phase(face, x, y));
+        let b = water_brightness(present_seconds(v.tick, 0.0), water_phase(face, x, y));
         let under = canvas.get(face, x, y);
         canvas.set(face, x, y, [
             c[0] * b * a + under[0] * (1.0 - a),
@@ -210,8 +217,10 @@ fn expected_ground(v: &RenderView) -> Canvas {
     canvas
 }
 
-/// The tall columns the rules predict from bare ground (one tick, no history): base,
-/// `n` trunks, crown, then the vine's trunks at the odd positions.
+/// The tall columns the rules predict from bare ground (one tick, no history, so the
+/// column stands at its whole target height `n`), every row painted once: the base, trunk
+/// tiles `1..=n` each owning the rows above its join line up to the grown height, the cap
+/// at `n + 1`, then the vine's tiles at the odd positions owning their eight rows each.
 fn stamp_tall(canvas: &mut Canvas, v: &RenderView, pack: &ArtPack) {
     let mut scratch: Vec<PixelImage> = Vec::new();
     for column in tall_columns() {
@@ -219,25 +228,62 @@ fn stamp_tall(canvas: &mut Canvas, v: &RenderView, pack: &ArtPack) {
         if n == 0 {
             continue;
         }
+        let grown = tall_grown_px(f64::from(n));
         let plant = pack.tall_plant(TALL_PLANTS[column.pick]).expect("tall species");
         let heading = tall_heading(column.face, column.cx);
-        let mut stamp = |clip: &cubarium::art::Clip, i: u8| {
-            let sprite = clip.at(v.tick as f64 * DT + tall_phase_of(column.face, column.cx, clip.seconds));
-            stamp_sprite(canvas, tall_anchor(column.face, column.cx, i), heading, sprite, 1.0, MOTIF_OPACITY, &mut scratch);
+        // The column's single wind amplitude, bounded by its own family's measured budget
+        // and, where it carries one, the vine's: every part takes this same amplitude with
+        // its own tile's bend base.
+        let budget = {
+            let own = tall_bend_budget(plant);
+            if column.vine {
+                own.min(tall_bend_budget(pack.tall_plant(VINE_PLANT).expect("vine")))
+            } else {
+                own
+            }
         };
+        let amplitude = tall_amplitude(&column, budget, present_seconds(v.tick, 0.0));
+        let mut stamp = |clip: &cubarium::art::Clip, i: u8, mask: Mask| {
+            let pose = clip.sample(present_seconds(v.tick, 0.0) + tall_phase_of(column.face, column.cx, clip.seconds));
+            let bend = Bend {
+                amplitude,
+                base: tall_bend_base(f64::from(i)),
+                root: TALL_BEND_ROOT,
+                length: TALL_BEND_LENGTH,
+            };
+            stamp_layers_bent(
+                canvas,
+                tall_anchor(column.face, column.cx, i),
+                heading,
+                &[(pose, 1.0)],
+                1.0,
+                TALL_OPACITY,
+                mask,
+                bend,
+                &mut scratch,
+            );
+        };
+        // The grown height in tile `i`'s own rows: its bottom edge is 4i − 8 px up the face.
+        let local = |i: u8| grown - (4.0 * f64::from(i) - 8.0);
         if let Some(base) = &plant.base {
-            stamp(base, 0);
+            stamp(base, 0, Mask::None);
         }
         for i in 1..=n {
-            stamp(&plant.trunk, i);
+            let floor = if i == 1 { TALL_FIRST_JOIN } else { TALL_JOIN };
+            stamp(&plant.trunk, i, Mask::Strip { floor, reveal: local(i).min(TILE_ROWS) });
         }
-        if let Some(crown) = &plant.crown {
-            stamp(crown, n + 1);
+        if let Some(cap) = &plant.cap {
+            stamp(cap, n + 1, Mask::None);
         }
         if column.vine {
             let vine = pack.tall_plant(VINE_PLANT).expect("vine");
-            for i in (1..=n).filter(|i| i % 2 == 1) {
-                stamp(&vine.trunk, i);
+            for i in (1..=TALL_MAX_SEGMENTS).step_by(2) {
+                let top = if i + 2 > TALL_MAX_SEGMENTS { TILE_ROWS } else { TALL_VINE_TOP };
+                let reveal = local(i).min(top);
+                if reveal <= TALL_VINE_FLOOR {
+                    break;
+                }
+                stamp(&vine.trunk, i, Mask::Strip { floor: TALL_VINE_FLOOR, reveal });
             }
         }
     }
@@ -271,9 +317,26 @@ fn expected_image(v: &RenderView, pack: &ArtPack, fruit: Option<&[f64]>) -> Canv
             (Some(clip), true) => clip,
             _ => &plant.stages[usize::from(stage)],
         };
-        let sprite = clip.at(v.tick as f64 * DT + plant_phase_of(cell, clip.seconds));
-        let (at, heading) = placement_of(cell);
-        stamp_sprite(&mut canvas, at, heading, sprite, 1.0, opacity, &mut scratch);
+        let pose = clip.sample(present_seconds(v.tick, 0.0) + plant_phase_of(cell, clip.seconds));
+        let (at, _) = placement_of(cell);
+        // The shared breeze at this slot: a bend on a side face, a rotation on the top one.
+        let (bend, heading) = slot_wind(
+            &slot_of(cell),
+            &plant.name,
+            plant_bend_budget(plant),
+            present_seconds(v.tick, 0.0),
+        );
+        stamp_layers_bent(
+            &mut canvas,
+            at,
+            heading,
+            &[(pose, 1.0)],
+            1.0,
+            opacity,
+            Mask::None,
+            bend,
+            &mut scratch,
+        );
     }
     stamp_tall(&mut canvas, v, pack);
     canvas
@@ -486,9 +549,17 @@ fn sway_runs_on_simulated_time_and_repeats_after_a_clip_period() {
     }
     let plant_period = ticks(seconds);
     let mut p = ArtPresenter::new(pack());
-    let v0 = view(100, flat(saturation()), flat(0.0), flat(0.0));
-    let v1 = view(100 + period, flat(saturation()), flat(0.0), flat(0.0));
-    let v_half = view(100 + plant_period / 2, flat(saturation()), flat(0.0), flat(0.0));
+    // Measured inside one wind packet's quiet interval, where the shared breeze is exactly
+    // zero at every one of these instants, so what repeats is the sway's own period. (The
+    // breeze itself has a 30 s packet and two slower factors, none of them a divisor of a
+    // clip period: it is deliberately not a loop.)
+    let base = WIND_QUIET_TICK;
+    for tick in [base, base + period, base + plant_period / 2] {
+        assert_eq!(wind_strength(present_seconds(tick, 0.0)), 0.0, "tick {tick} is windy");
+    }
+    let v0 = view(base, flat(saturation()), flat(0.0), flat(0.0));
+    let v1 = view(base + period, flat(saturation()), flat(0.0), flat(0.0));
+    let v_half = view(base + plant_period / 2, flat(saturation()), flat(0.0), flat(0.0));
     let a = draw(&mut p, &v0, None);
     let b = draw(&mut p, &v1, None);
     let h = draw(&mut p, &v_half, None);
@@ -516,11 +587,28 @@ fn a_saturated_foliage_cell_draws_its_species_stage_at_its_cap() {
 
     let name = species_of(Band::Foliage, cell);
     let clip = &art.plant(name).unwrap().stages[2];
-    let sprite = clip.at(v.tick as f64 * DT + plant_phase_of(cell, clip.seconds));
-    let (at, heading) = placement_of(cell);
+    let pose = clip.sample(present_seconds(v.tick, 0.0) + plant_phase_of(cell, clip.seconds));
+    let (at, _) = placement_of(cell);
+    // The slot carries the shared breeze; at this tick the packet is rising.
+    let (bend, heading) = slot_wind(
+        &slot_of(cell),
+        name,
+        plant_bend_budget(art.plant(name).unwrap()),
+        present_seconds(v.tick, 0.0),
+    );
     let mut expected = expected_ground(&v);
     let mut scratch: Vec<PixelImage> = Vec::new();
-    stamp_sprite(&mut expected, at, heading, sprite, 1.0, MOTIF_OPACITY, &mut scratch);
+    stamp_layers_bent(
+        &mut expected,
+        at,
+        heading,
+        &[(pose, 1.0)],
+        1.0,
+        MOTIF_OPACITY,
+        Mask::None,
+        bend,
+        &mut scratch,
+    );
     assert_same_canvas(&actual, &expected, "one full foliage plant");
     assert!(!differing(&actual, &expected_ground(&v)).is_empty(), "it drew nothing");
 
@@ -528,7 +616,8 @@ fn a_saturated_foliage_cell_draws_its_species_stage_at_its_cap() {
     let other = FOLIAGE_PLANTS.iter().find(|&&n| n != name).unwrap();
     let wrong = &art.plant(other).unwrap().stages[2];
     let mut other_img = expected_ground(&v);
-    stamp_sprite(&mut other_img, at, heading, wrong.at(v.tick as f64 * DT + plant_phase_of(cell, wrong.seconds)), 1.0, MOTIF_OPACITY, &mut scratch);
+    let wrong_pose = wrong.sample(present_seconds(v.tick, 0.0) + plant_phase_of(cell, wrong.seconds));
+    stamp_pose(&mut other_img, at, heading, wrong_pose, 1.0, MOTIF_OPACITY, Mask::None, &mut scratch);
     assert!(!differing(&actual, &other_img).is_empty(), "the two foliage species draw alike");
 }
 
@@ -600,11 +689,27 @@ fn fruit_shows_on_a_full_plant_only_when_the_cell_holds_enough() {
 
     let plant = art.plant("lanternstalk").unwrap();
     let clip = plant.fruit.as_ref().expect("lanternstalk has a fruit clip");
-    let sprite = clip.at(v.tick as f64 * DT + plant_phase_of(cell, clip.seconds));
-    let (at, heading) = placement_of(cell);
+    let pose = clip.sample(present_seconds(v.tick, 0.0) + plant_phase_of(cell, clip.seconds));
+    let (at, _) = placement_of(cell);
+    let (bend, heading) = slot_wind(
+        &slot_of(cell),
+        &plant.name,
+        plant_bend_budget(plant),
+        present_seconds(v.tick, 0.0),
+    );
     let mut expected = expected_ground(&v);
     let mut scratch: Vec<PixelImage> = Vec::new();
-    stamp_sprite(&mut expected, at, heading, sprite, 1.0, MOTIF_OPACITY, &mut scratch);
+    stamp_layers_bent(
+        &mut expected,
+        at,
+        heading,
+        &[(pose, 1.0)],
+        1.0,
+        MOTIF_OPACITY,
+        Mask::None,
+        bend,
+        &mut scratch,
+    );
     assert_same_canvas(&fruiting, &expected, "the fruit clip at the slot");
     fruit[cell.index()] = 0.1;
     assert_same_canvas(&fruiting, &expected_image(&v, &art, Some(&fruit)), "the full rule with fruit");

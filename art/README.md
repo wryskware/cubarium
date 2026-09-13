@@ -115,6 +115,13 @@ is gestating, that clip advanced by the real gestation progress so its last
 frame lands on the birth. Looping clips run on simulated time, so `--speed 8`
 animates eight times faster and a paused world holds its pose.
 
+Every frame is drawn at its own simulated instant, `present_seconds(tick, f) = (tick − 1
++ f) · DT` — the same interval the bodies are interpolated along — and every looping clip,
+the water shimmer, the ground breath and the rain read that clock. Clips are sampled
+between their two nearest baked frames (`Clip::sample`) and composited in one pass, so a
+3 s sway baked at 24 samples moves every frame instead of holding a pose for 750 ms, and a
+body changing state cross-fades for `BODY_FADE_SECONDS` (0.3 s) instead of cutting.
+
 Which rig an organism uses is its inherited `hue` gene's tercile —
 `min(2, floor(hue × 3))`, so lantern/sail/mossback are hue 0–⅓, ⅓–⅔ and ⅔–1.
 That is **cosmetic only**. `hue` is copied exactly at birth, which is why a
@@ -137,6 +144,97 @@ constants. Plants are scenery that follows the fields: they are not organisms,
 nothing in the world knows about them, they never move and they are never
 eaten. The legacy rosette/fern/lichen tiles stay in the pack but are no longer
 drawn.
+
+The thresholds decide what a cell *warrants*; the picture takes time to get there.
+Each slot climbs one stage per `STAGE_GROW_SECONDS` (4 s) and falls one per
+`STAGE_WILT_SECONDS` (2 s): the new stage is revealed up the stalk on a side face
+(outward from its center on the top face) while the old one fades under it, a step
+turns round mid-way if the field turns round, and a fresh presenter — a restart, or a
+viewer joining a mature world — snaps to the fields' targets instead of regrowing the
+forest. Tall columns extend at `TALL_GROW_PX_PER_S` (1.5 px/s) and decline at
+`TALL_WILT_PX_PER_S` (3 px/s), the newest segment growing out of the one below and the
+crown gliding with it. The fruit accent fades in over `FRUIT_FADE_SECONDS` (2 s) and
+leaves the moment the cell's fruit drops below `FRUIT_SHOW`: it is the food signal.
+Growth advances only in `observe`, once per tick, by simulated time; `draw` interpolates
+between the last two ticks by the frame fraction and never advances anything, so a
+repeated draw is the same image and `--speed`/pauses stay honest. A transition in
+flight is not saved with the world: after a restart the plants stand where the fields
+say, not part-way.
+
+**Authored growth (the pilot).** Where a pack (v5 and up) carries a `grow<from><to>`
+clip for the step a cell is actually in — at the moment only the lanternstalk's 4 s
+`grow01`, from sprout to middle stalk — that clip *is* the picture, and the reveal mask
+is not used at all: the stem extends and the bulb opens as the artwork says, rather than
+the next stage appearing from behind a rising line. The clip is driven by the same
+continuous progress the mask was, so it neither advances nor restarts on a frame draw or
+a wind packet, it runs backwards at exactly the same progress when the step reverses, and
+it is baked once — not resampled per plant. It is drawn as *one* stamp of three blended
+layers: over the first and last `GROW_BLEND` (12 %) of the progress the growth clip
+cross-fades with the lower and upper stage's own **running** sway loop, at that slot's own
+phase, so entering and leaving the clip lands exactly on the image the idle plant was
+showing instead of cutting its sway and its pulse. The opacity crosses linearly from the
+lower stage's to the upper stage's over the step, and the slot's wind bend applies to the
+growth stamp exactly as to any other, so the breeze carries on right through growing. Any
+step the pack has no clip for — every other species, the pilot's own 1 → 2, the first
+appearance out of bare ground, and every plant of a v1–v4 pack — keeps the reveal masks
+described above, unchanged.
+
+### Wind
+
+One shared breeze moves the plants, derived only from the presentation clock and position —
+there is no simulated weather, no wall time and no per-plant phase. It arrives in **packets**:
+every `WIND_PERIOD` (30 s) the strength eases in over `WIND_RISE` (5 s), holds for
+`WIND_HOLD` (8 s), eases out over `WIND_FALL` (5 s) and is then **exactly zero** for the
+remaining `WIND_QUIET_SECONDS` (12 s). Both edges of a packet have zero slope, so a gust
+never starts or stops with a jerk. Through the whole packet two slow factors multiply it: a
+`WIND_FLUTTER` (30 %) breath on a 2.3 s period, which is what you see during the hold, and a
+`WIND_PEAK_SECONDS` (97 s) modulation that drops a packet's peak by up to `WIND_PEAK_VARY`
+(15 %) so consecutive gusts are not the same gust twice. The strength is in `[0, 1]` and
+reaches 1 only when both are at their own maxima — the amplitude budgets below are sized for
+exactly that.
+
+The direction is a fixed chart field (`wind_chart`): with `a = u/32 − 1`, `b = v/32 − 1`, the
+side faces carry `(−(1 − a²), 0)` and the top face `(−b(1 − a²), a(1 − b²))`. It is chosen so
+that it **joins across every seam** under the same tangent transport the bodies use: at each
+side/top seam the rotated side-face vector *is* the top-face vector, and at every side/side
+seam, at each of the top face's four vertices and at the top face's centre it is exactly
+zero. Those calm lines are deliberate — a continuous circulation on a cube must have them,
+and they are far better than a direction that jumps at a seam. A plant answers the breeze at
+its own root, at a time shifted by its species' `lag_seconds` and by a small spatial phase
+(`0.5 · (x + z)` of the embedded position times `WIND_TRAVEL_SECONDS`, 0.6 s), so a gust
+crosses the cube as one front instead of arriving everywhere at once.
+
+What moves, and how much (`WIND_RESPONSE`, desired tip travel in pixels / response lag in
+seconds): lanternstalk 0.45/0.10, tendrilfan 0.55/0.15, reedspire 0.70/0.05, glowcap
+0.12/0.0, rootveil still. A side-face plant **bends**: its stamp is displaced horizontally by
+`amplitude · smoothstep(clamp((H − PLANT_BEND_ROOT) / PLANT_BEND_LENGTH, 0, 1))` at height
+`H` above its root line (1.5 px and 13 px), so the value *and* the slope are zero at the root
+— the painted root row is bit-identical windy or calm, and roots never skate — and the tip
+takes the whole amplitude. Rows are preserved, so a growth reveal still uncovers the same
+material. The amplitude is the wind projected onto the tile's own horizontal axis, jitter
+included, times a fixed per-slot factor of `1 ± WIND_SLOT_VARIATION` (10 %) so a patch reads
+as many plants. The two **canopy** species are radial and rotate instead: umbrellafrond 2°,
+bloomcrown 1.5° about their stationary centre, never translated. A **tall column** takes one
+wind sample at its base anchor and gives its base, every trunk strip, its cap and its vine
+*one* amplitude on one continuous curve (`TALL_BEND_ROOT` 0, `TALL_BEND_LENGTH` 48 px, with
+each tile's bend base `4i − 8`), so no tile join opens and a vine cannot slide against its
+trunk. Ground cover, water, rain and bodies do not move at all.
+
+The nine-pixel per-stamp footprint is a hard bound, so how far a species may actually bend is
+**measured from the pack's own pixels**, once, when the presenter is built: for every frame of
+every clip a plant can draw (its three stages, its fruit clip and any authored growth clip),
+`Sprite::bend_headroom` is the largest amplitude that keeps the whole bilinear support of
+every painted texel inside the footprint, and the family's budget is the smallest of those.
+A column's budget is the minimum over its base, trunk and cap at their highest placements and
+over its vine's. `ArtPresenter::bend_budget` exposes the table. The admitted amplitude is
+`min(desired, budget / (1 + WIND_SLOT_VARIATION))`, so even the windiest slot at full wind
+stays inside the measured room. On the shipped pack (2026-09-12) the budgets are lanternstalk
+3.23, tendrilfan 0.31, reedspire 4.38, glowcap 2.40, rootveil 5.43, umbrellafrond 0.33,
+bloomcrown 2.07, spiretree 0.30, glasscane 0.47, vinecoil 0.47 — so tendrilfan moves 0.29
+rather than 0.55 and a spiretree column 0.27 rather than 0.9. Widening those is an *art*
+change (a narrower tip or leaf), never a larger footprint. A quiet interval, a zero
+amplitude or a nonsense wind takes the renderer's identity path, which draws the windless
+image bit for bit and costs exactly what it cost before the wind existed.
 
 ### Bands
 
