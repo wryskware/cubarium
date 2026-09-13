@@ -88,6 +88,9 @@ use crate::rng::SplitMix64;
 #[cfg(test)]
 #[path = "vine_strips_present_tests.rs"]
 mod vine_strips_present_tests;
+#[cfg(test)]
+#[path = "corner_cap_present_tests.rs"]
+mod corner_cap_present_tests;
 
 // --- Plant constants ---------------------------------------------------------------
 //
@@ -1816,6 +1819,15 @@ pub const TALL_STEP: f64 = 0.08;
 /// Most trunk segments: base + 9 trunks + crown is eleven tiles, one per foliage cell,
 /// which puts the crown exactly at the rim cell's center.
 pub const TALL_MAX_SEGMENTS: u8 = 9;
+/// The face-local `v` of a near-corner cap's centre below which (i.e. nearer the top edge)
+/// an opted-in cap's pixels are owned by its final position's unfolding: tile row 10, the
+/// centre's `v` at `height = 7`, so the handoff happens before the cap's visible support
+/// reaches the corner. Studied, not tunable without re-running the corner handoff sweep.
+pub const CORNER_CAP_HANDOFF_V: f64 = 10.0;
+/// The face-local `v` of a full column's cap centre (`height = `[`TALL_MAX_SEGMENTS`]): the
+/// retained owner. At maturity the owner and the centre coincide and the ordinary stamp is
+/// used, so the mature image is the original one.
+pub const CORNER_CAP_FINAL_V: f64 = 2.0;
 /// Seeds the per-column hash.
 const TALL_SEED: u64 = 0x7461_6C6C_0000_0001;
 
@@ -2017,7 +2029,15 @@ pub fn tall_grown_px(height: f64) -> f64 {
 ///   is not drawn. A tile's row 15 is never drawn; for a family on the shifted strips its
 ///   row 0 is drawn only by that last segment, where its cap's dome covers the trunk columns;
 /// - the cap ([`TallPlant::cap`], never `crown`) glides at [`tall_anchor_at`]`(height + 1)`
-///   at `TALL_OPACITY · fade`; at rest on a whole cell it sits where the crown used to;
+///   at `TALL_OPACITY · fade`; at rest on a whole cell it sits where the crown used to. For
+///   a cap that carries the explicit [`TallPlant::corner_cap_owner`] capability, on a
+///   **near-corner** column (`cx` in {0, 1, 14, 15}) and only while the cap's centre is
+///   above tile row 10 of its face (`height > 7`), the pixels are chosen by the surface
+///   unfolding of the cap's *final* position `(u, 2)` ([`cubarium_render::stamp_pose_in_chart`])
+///   while sampling stays about the actual centre within the same nine-pixel footprint;
+///   at `height = 9` owner and centre coincide and the ordinary stamp is used, so the mature
+///   endpoint is the original image. Everything else about the cap is unchanged, and an
+///   unflagged cap never takes this path;
 /// - vine tiles at odd `i` own rows [`TALL_VINE_FLOOR`]`..`[`TALL_VINE_TOP`] (the topmost
 ///   possible tile up to 16) with the same cut, at `TALL_OPACITY · fade`. An explicitly
 ///   opted-in vine uses its derived trunk through tile9 with top12, then its separately
@@ -2054,7 +2074,12 @@ fn draw_column(
     let fade = (height / TALL_BASE_FADE).clamp(0.0, 1.0) as f32;
     let grown = tall_grown_px(height);
     let heading = tall_heading(column.face, column.cx);
-    let mut stamp = |clip: &Clip, i: f64, mask: Mask, opacity: f32| {
+    // `hold_owner` is true only for the cap: with the plant's explicit capability, on a
+    // near-corner column, while the cap centre is above tile row 10, its pixels are owned
+    // by the unfolding of the cap's final position `(u, 2)`; otherwise, and for every other
+    // part, the ordinary stamp about the actual anchor.
+    let near_corner = column.cx < 2 || column.cx > 13;
+    let mut stamp = |clip: &Clip, i: f64, mask: Mask, opacity: f32, hold_owner: bool| {
         let pose = clip.sample(seconds + tall_phase_of(column.face, column.cx, clip.seconds));
         let at = tall_anchor_at(column.face, column.cx, i);
         let bend = Bend {
@@ -2063,22 +2088,33 @@ fn draw_column(
             root: TALL_BEND_ROOT,
             length: TALL_BEND_LENGTH,
         };
-        stamp_layers_bent(
-            canvas,
-            at,
-            heading,
-            &[(pose, 1.0)],
-            1.0,
-            opacity,
-            mask,
-            bend,
-            scratch,
-        );
+        let owner = if hold_owner && plant.corner_cap_owner && near_corner && at.v < CORNER_CAP_HANDOFF_V {
+            SurfacePoint::new(at.face, at.u, CORNER_CAP_FINAL_V)
+        } else {
+            at
+        };
+        if owner == at {
+            stamp_layers_bent(
+                canvas,
+                at,
+                heading,
+                &[(pose, 1.0)],
+                1.0,
+                opacity,
+                mask,
+                bend,
+                scratch,
+            );
+        } else {
+            cubarium_render::stamp_pose_in_chart(
+                canvas, owner, at, heading, pose, opacity, mask, bend, scratch,
+            );
+        }
     };
     // The grown height in tile `i`'s own rows (its bottom edge is 4i − 8 px up the face).
     let local = |i: u8| grown - (4.0 * f64::from(i) - 8.0);
     if let Some(base) = &plant.base {
-        stamp(base, 0.0, Mask::None, TALL_OPACITY * fade);
+        stamp(base, 0.0, Mask::None, TALL_OPACITY * fade, false);
     }
     let (strip_floor, strip_top) = trunk_strip(plant);
     for i in 1..=TALL_MAX_SEGMENTS {
@@ -2088,10 +2124,10 @@ fn draw_column(
         if reveal <= floor {
             break;
         }
-        stamp(&plant.trunk, f64::from(i), Mask::Strip { floor, reveal }, TALL_OPACITY);
+        stamp(&plant.trunk, f64::from(i), Mask::Strip { floor, reveal }, TALL_OPACITY, false);
     }
     if let Some(cap) = &plant.cap {
-        stamp(cap, height + 1.0, Mask::None, TALL_OPACITY * fade);
+        stamp(cap, height + 1.0, Mask::None, TALL_OPACITY * fade, true);
     }
     if let (true, Some(vine)) = (column.vine, vine) {
         let strips = vine.vine_strips.as_ref();
@@ -2107,6 +2143,7 @@ fn draw_column(
                 f64::from(i),
                 Mask::Strip { floor: TALL_VINE_FLOOR, reveal },
                 TALL_OPACITY * fade,
+                false,
             );
         }
         if let Some(strips) = strips {

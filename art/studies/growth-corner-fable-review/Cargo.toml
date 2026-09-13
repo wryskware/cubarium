@@ -14,9 +14,18 @@ publish = false
 name = "growth_corner_cost"
 path = "main.rs"
 
+# Paired capture of the integrated capability through the actual host presenter on a
+# recorded (or, failing that, synthetic) growing world: flagged pack vs the same pack with
+# the capability cleared, native nets and enlarged seam crops.
+[[bin]]
+name = "corner_cap_capture"
+path = "capture.rs"
+
 [dependencies]
 cubarium = { path = "../../../crates/cubarium" }
+cubarium-core = { path = "../../../crates/cubarium-core" }
 cubarium-render = { path = "../../../crates/cubarium-render" }
 cubarium-surface = { path = "../../../crates/cubarium-surface" }
 cube-proto = { path = "../../../vendor/cube-proto" }
 serde_json = "1"
+png = "0.18"
