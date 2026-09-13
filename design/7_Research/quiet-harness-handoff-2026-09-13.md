@@ -26,7 +26,7 @@ below are the itemised answer.
 
 ## Commit
 
-`6d4ac7b` (first build), `2fbd092` (first correction) and `<this commit>` (second correction) —
+`6d4ac7b` (first build), `2fbd092` (first correction) and `fe114f9` (second correction) —
 `crates/cubarium/examples/quiet_compare.rs`,
 `crates/cubarium/examples/quiet_compare/bouts.rs`, `scripts/reduce-quiet-compare.mjs` and its
 test, this report, and **one additive read-only core accessor**
