@@ -4,15 +4,17 @@
 use anyhow::{Context, Result, anyhow, ensure};
 use clap::{Parser, ValueEnum};
 use cubarium_core::{
-    CareCommand, CareDose, CareKind, CareTarget, LifeEvent, OrganismId, World, WorldConfig,
-    WorldState, decode_snapshot,
+    CareCommand, CareDose, CareKind, CareTarget, World, WorldConfig, WorldState, decode_snapshot,
 };
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+#[path = "shared/audit.rs"]
+mod audit;
 #[path = "care_compare/local.rs"]
 mod local;
+
+use audit::{AccurateSum, Ancestry, WindowAudit, audit_passes, energy, material};
 
 const TARGETS: [CareTarget; 3] = [
     CareTarget {
@@ -114,136 +116,6 @@ struct Args {
     target_index: u8,
 }
 
-#[derive(Default)]
-struct AccurateSum {
-    sum: f64,
-    correction: f64,
-}
-impl AccurateSum {
-    fn add(&mut self, value: f64) {
-        let next = self.sum + value;
-        self.correction += if self.sum.abs() >= value.abs() {
-            (self.sum - next) + value
-        } else {
-            (value - next) + self.sum
-        };
-        self.sum = next;
-    }
-    fn value(&self) -> f64 {
-        self.sum + self.correction
-    }
-}
-
-#[derive(Default)]
-struct WindowAudit {
-    light: AccurateSum,
-    heat: AccurateSum,
-    rain: AccurateSum,
-    evap: AccurateSum,
-    counts: cubarium_core::Telemetry,
-}
-impl WindowAudit {
-    fn observe(&mut self, mut sample: cubarium_core::Telemetry) -> cubarium_core::Telemetry {
-        self.light.add(sample.light_in);
-        self.heat.add(sample.heat_out);
-        self.rain.add(sample.rain_in);
-        self.evap.add(sample.evap_out);
-        macro_rules! counters {
-            ($($field:ident),*) => { $(
-                self.counts.$field += sample.$field;
-                sample.$field = self.counts.$field;
-            )* };
-        }
-        counters!(
-            births,
-            deaths_starvation,
-            deaths_age,
-            deaths_collapse,
-            cap_rejections,
-            travel_fallbacks,
-            travel_ties,
-            pairs_considered,
-            pairs_unfolded,
-            neighbor_truncations
-        );
-        sample.light_in = self.light.value();
-        sample.heat_out = self.heat.value();
-        sample.rain_in = self.rain.value();
-        sample.evap_out = self.evap.value();
-        sample
-    }
-}
-
-fn material(s: &WorldState) -> f64 {
-    s.fields.total_material() + s.organisms.iter().map(|(_, o)| o.material()).sum::<f64>()
-}
-
-fn energy(s: &WorldState) -> f64 {
-    let reserve = s.config.organism.reserve_energy_density;
-    s.fields.p.iter().sum::<f64>() * s.config.producer.energy_density
-        + s.fields.f.iter().sum::<f64>() * s.config.fruit.energy_density
-        + s.fields.de.iter().sum::<f64>()
-        + s.organisms
-            .iter()
-            .map(|(_, o)| {
-                o.energy
-                    + reserve * o.reserve
-                    + o.escrow
-                        .as_ref()
-                        .map_or(0.0, |e| e.energy + reserve * (e.structure + e.reserve))
-            })
-            .sum::<f64>()
-}
-
-/// Bounded by the living population, not by total births in a long experiment.
-/// A checkpoint's opening cohort is not necessarily its original founder lineage.
-struct Ancestry {
-    live: BTreeMap<OrganismId, (OrganismId, u64)>,
-    maximum_depth: u64,
-}
-
-impl Ancestry {
-    fn new(state: &WorldState) -> Self {
-        Self {
-            live: state
-                .organisms
-                .iter()
-                .map(|(id, _)| (id, (id, 0)))
-                .collect(),
-            maximum_depth: 0,
-        }
-    }
-
-    fn observe(&mut self, events: &[LifeEvent]) -> Result<()> {
-        // Resolve births before removals: a parent can die in the birth's tick.
-        for event in events {
-            if let LifeEvent::Birth { id, parent, .. } = event {
-                let (cohort, depth) = *self.live.get(parent).context("unobserved birth parent")?;
-                let depth = depth.checked_add(1).context("ancestry depth overflow")?;
-                ensure!(
-                    self.live.insert(*id, (cohort, depth)).is_none(),
-                    "duplicate birth id"
-                );
-                self.maximum_depth = self.maximum_depth.max(depth);
-            }
-        }
-        for event in events {
-            if let LifeEvent::Death { id, .. } = event {
-                ensure!(self.live.remove(id).is_some(), "unobserved death id");
-            }
-        }
-        Ok(())
-    }
-
-    fn surviving_cohorts(&self) -> usize {
-        self.live
-            .values()
-            .map(|(cohort, _)| *cohort)
-            .collect::<BTreeSet<_>>()
-            .len()
-    }
-}
-
 fn census(s: &WorldState, ancestry: &Ancestry) -> Value {
     let mut forms = [0u32; 8];
     for (_, o) in s.organisms.iter() {
@@ -262,25 +134,6 @@ fn scheduled_kind(elapsed: u64, period: u64) -> Option<CareKind> {
         300 => Some(CareKind::Clean),
         _ => None,
     }
-}
-
-fn audit_passes(
-    legacy: [f64; 3],
-    corrected_energy: f64,
-    windowed_energy: f64,
-    care_boundary_energy: f64,
-    limits: [f64; 3],
-) -> bool {
-    [
-        legacy[0],
-        legacy[2],
-        corrected_energy,
-        windowed_energy,
-        care_boundary_energy,
-    ]
-    .into_iter()
-    .zip([limits[0], limits[2], limits[1], limits[1], limits[1]])
-    .all(|(drift, limit)| drift.is_finite() && drift >= 0.0 && drift < limit)
 }
 
 #[cfg(test)]
