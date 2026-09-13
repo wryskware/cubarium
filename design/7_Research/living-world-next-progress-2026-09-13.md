@@ -284,6 +284,62 @@ the placeholder):**
   reflecting an off-rim effector; the safe first policy is no capture when the grasp centre
   is off-surface, while still charging the attempt.
 
+### The hunter adapter (third slice, 2026-09-13): the world's hunters drawn as the Lanternjaw
+
+Study-side only: nothing is deployed, the live cube stays on its frozen schema-9 runner,
+no hunter is initialized anywhere by this work. `crates/cubarium/src/hunter_present.rs`
+turns the core's `HunterView` into the rig's `LivingPose`, and `ArtPresenter` draws each
+member once as the Lanternjaw; the runner hands the owning world's `hunter_view()` to the
+presenter after every tick's `observe` (`Show::observe_hunters`, the one runner callsite).
+
+- **Membership** is the observer's full id list; `genome.form` is never consulted; a stale
+  generation is ignored; memory is bounded by the list. The plain no-art image is untouched
+  and an empty list is bit-identical to a presenter never told about hunters.
+- **Timing.** `elapsed = present_seconds(tick, f) − phase_started_tick · DT`, duration from
+  the persisted end tick. Windup and Strike are pre-step decisions (a phase first seen in
+  view T started at T − 1, the start of the presented interval); post-movement
+  Handling/Recovering start at T, so for the frames before that boundary the previous
+  phase stays in effect — the strike is in its final extension and reaches full contact
+  exactly at settlement, and the recoil begins only after it. `from` is the reach the
+  previous phase displayed at the boundary; after a restart it is reconstructed from
+  `entered_from` (`settled_reach()` after a strike, `COCKED` after a windup, folded
+  otherwise) — a fraction of a pixel of far-claw lag off the observed value, never an
+  invented attack. The renderer does not compensate for the core's post-settlement
+  timestamp bug (fixed in core `327862c`); it draws the boundaries it is given.
+- **Prey.** A prey removed at the boundary its hunter entered Handling is drawn for that
+  tick's frames at its last published pose (its capture-tick movement is not published),
+  gone at the boundary; a miss retains nothing; nothing is regenerated.
+- **Scale.** The whole rig at the core's `body_scale`; a custom admitted profile whose scale
+  falls outside `SCALE_MIN..=SCALE_MAX` is reported once (`take_new_unsupported`, logged by
+  the runner) and that member is drawn with its ordinary rig — not clamped in the drawing
+  alone, no panic mid-frame. The core's `capture_offset_body` now equals
+  `effectors(scale).near_claw` exactly (`(13.279411764705882, 1.1)`), and the published
+  `capture_center` is that claw carried from the root — verified in the adapter tests.
+- **Minification corrected** (Astra's `astra-multipart-minification-review-2026-09-13.md`):
+  the box filter now blends the two neighbouring grids continuously in `1/scale` (no
+  43.75 % step at scale 1 − ε), samples over the destination pixel's chart-aligned square
+  (not a body-rotated one), extends the query by the radial corner reach `1/√2`, and bounds
+  the grid at `MAX_GRID` 8 (`MIN_RIG_SCALE` 1/8; smaller panics before sampling). Astra's
+  four fixtures are owned regressions; scale-1 identity is unchanged.
+
+Evidence: `crates/cubarium/tests/hunter_present.rs` (13 tests on actual staged Worlds —
+certain capture, certain miss, restart mid-windup and mid-handling, stale id, unsupported
+scale, sqrt(0.1) juvenile with core/art geometry equality, rate and repeat identity, seam
+hunter — plus an ignored native capture and an ignored cost run);
+`captures/lanternjaw/world-attack.png`, assembled from 480 native frames of a real
+`World`/`HunterView` sequence (frames in `/tmp/hunter-capture-7XMgqt/`): the prey sits in
+the claws through the strike, stays for the capture tick's three frames and is gone from
+the next tick; the body folds and carries the meal after. Cost on a staged 6.3 ms frame:
++40 µs for an adult, +106 µs for a 0.632 juvenile (two blended grids). Whole render + host
+library and test suites: **576 passed, 0 failed, exit 0** (`--lib --tests`; root's
+`hunter_compare` example does not build against Opus's new `HunterEvent` variant, which
+root owns).
+
+Limits: the fixture world is an empty world with plants, not the live one; the strike in
+that crowded patch reads modestly at 64 px; a restart during the 200 ms recoil differs
+from the continuous presenter by the far claw's lag fraction; hardware legibility is not
+established; no ecological claim follows.
+
 ## Package 2 — Authored growth expansion
 
 Commit `5d7ea69`. Nine hand-authored 4 s `grow01`/`grow12` clips for glowcap, rootveil,
@@ -325,6 +381,12 @@ like a side-face plant, rooted at its ripple row. `crates/cubarium/tests/art_win
   living-pose tests, the 5 four-scale tests and 15 unit tests. Whole render + host suite at
   `5554c48`: **559 passed, 0 failed, exit 0** (`cargo test -p cubarium-render -p
   cubarium`, run once in the foreground; log `/tmp/lw-full.log`).
+- Third slice: `5b24ac4` the continuous, chart-aligned, bounded minification filter with
+  Astra's four fixtures as owned regressions; `f4420fc` the hunter adapter
+  (`hunter_present.rs`, `ArtPresenter::observe_hunters`, the runner callsite) and its 13
+  world-driven tests. Whole render + host library and test suites at `f4420fc`: **576
+  passed, 0 failed, exit 0** (`cargo test -p cubarium-render -p cubarium --lib --tests`;
+  log `/tmp/lw-full2.log`).
 - Validation: `cargo test -p cubarium-render -p cubarium` (every suite green at each
   commit); `./scripts/art-bake.sh` twice with `cmp`; the ignored cost test above; the PNG
   captures above.
