@@ -180,6 +180,19 @@ fn scheduled_kind(elapsed: u64, period: u64) -> Option<CareKind> {
     }
 }
 
+fn audit_passes(
+    legacy: [f64; 3],
+    corrected_energy: f64,
+    windowed_energy: f64,
+    care_boundary_energy: f64,
+    limits: [f64; 3],
+) -> bool {
+    [legacy[0], legacy[2], corrected_energy, windowed_energy, care_boundary_energy]
+        .into_iter()
+        .zip([limits[0], limits[2], limits[1], limits[1], limits[1]])
+        .all(|(drift, limit)| drift.is_finite() && drift >= 0.0 && drift < limit)
+}
+
 fn run(
     initial: &WorldState,
     ticks: u64,
@@ -192,6 +205,8 @@ fn run(
     let opening_energy = energy(initial);
     let opening_water: f64 = initial.fields.w.iter().sum();
     let mut worst = [0.0_f64; 3];
+    let opening_energy_ledgers = initial.energy_ledgers();
+    let mut worst_corrected_energy = 0.0_f64;
     let mut windowed = WindowAudit::default();
     let mut worst_windowed_energy = 0.0_f64;
     let mut worst_care_energy = 0.0_f64;
@@ -277,6 +292,20 @@ fn run(
             samples.push(census(&world.state, &ancestry));
         }
         let s = &world.state;
+        // Difference raw and correction components separately: subtracting two
+        // already-rounded large totals would discard the low-order work again.
+        // A migrated checkpoint starts with zero corrections; this audits NEW
+        // flow only and does not claim to repair pre-migration rounding.
+        let corrected_residual = energy(s)
+            - opening_energy
+            - s.energy_ledgers().net_since(opening_energy_ledgers)
+            - (s.care.feed_energy_in - initial.care.feed_energy_in)
+            + (s.care.clean_energy_out - initial.care.clean_energy_out);
+        ensure!(
+            corrected_residual.is_finite(),
+            "nonfinite corrected energy audit"
+        );
+        worst_corrected_energy = worst_corrected_energy.max(corrected_residual.abs());
         let windowed_residual =
             energy(s) - opening_energy - (windowed.light.value() + transient_light)
                 + (windowed.heat.value() + transient_heat)
@@ -316,10 +345,16 @@ fn run(
     // Relative tolerances scale with the opening inventory, not with cumulative
     // inputs, so additional care cannot relax the audit.
     let limits = [opening_mass, opening_energy, opening_water].map(|n| 1e-8 * n.max(1.0));
-    let audit_passed = worst
+    let legacy_audit_passed = worst
         .iter()
         .zip(limits)
         .all(|(drift, limit)| *drift < limit);
+    // Same fixed inventory-scaled tolerances, using the persisted compensated
+    // representation AND an independent observer. The raw legacy result remains
+    // visible below even when it fails; it is never relabeled passing.
+    let audit_passed = audit_passes(
+        worst, worst_corrected_energy, worst_windowed_energy, worst_care_energy, limits,
+    );
     let ledgers = world.care().clone();
     let mut sample = serde_json::to_value(windowed.observe(world.telemetry()))?;
     let s = &world.state;
@@ -331,6 +366,10 @@ fn run(
     let measured_residual = stored_delta - windowed.light.value() + windowed.heat.value()
         - receipt_energy_in.value()
         + receipt_energy_out.value();
+    let corrected_residual = stored_delta
+        - s.energy_ledgers().net_since(opening_energy_ledgers)
+        - (s.care.feed_energy_in - initial.care.feed_energy_in)
+        + (s.care.clean_energy_out - initial.care.clean_energy_out);
     // Hashes are strings so browser/JSON consumers do not round u64 values.
     sample["state_hash"] = json!(cubarium_core::snapshot::state_hash(&world.state).to_string());
     sample["ecology_hash"] = json!(cubarium_core::ecology_hash(&world.state).to_string());
@@ -338,9 +377,14 @@ fn run(
         json!({"care":care,"population_min":population_min,"population_max":population_max,
         "max_absolute_drift":{"material":worst[0],"energy":worst[1],"water":worst[2]},
         "audit_passed":audit_passed,
+        "audit_basis":"Unchanged opening-inventory limits; material, water, persisted compensated energy, independent windowed energy, and immediate care-boundary energy must all pass. max_absolute_drift.energy remains the raw legacy diagnostic.",
+        "legacy_audit_passed":legacy_audit_passed,
+        "corrected_energy_audit":{"max_absolute_drift":worst_corrected_energy,
+            "passed":worst_corrected_energy<limits[1],
+            "closing_residual":corrected_residual},
         "windowed_energy_audit":{"max_absolute_drift":worst_windowed_energy,
             "passed":worst_windowed_energy<limits[1],"max_care_boundary_drift":worst_care_energy,
-            "note":"Compensated sum of short-lived observer counters; does not change persistent ledgers or relax their gate."},
+            "note":"Independent compensated sum of short-lived observer counters and actual care receipts; same opening-inventory limit."},
         "closing_signed_energy_evidence":{"tick":s.tick,
             "persisted_residual":persisted_residual,"windowed_residual":measured_residual,
             "windowed_minus_persisted_light":windowed.light.value()-(s.light_in_total-initial.light_in_total),
@@ -351,6 +395,9 @@ fn run(
         "opening_inventory":{"material":opening_mass,"energy":opening_energy,"water":opening_water},
         "cumulative_energy_delta":{"light":world.state.light_in_total-initial.light_in_total,
             "heat":world.state.heat_out_total-initial.heat_out_total},
+        "corrected_cumulative_energy_delta":{
+            "light":s.energy_ledgers().light_in.since(opening_energy_ledgers.light_in),
+            "heat":s.energy_ledgers().heat_out.since(opening_energy_ledgers.heat_out)},
         "care_ledgers":ledgers,"receipts":receipts,"samples":samples,
         "first_extinction_tick":extinction_tick,
         "surviving_opening_cohorts":ancestry.surviving_cohorts(),
@@ -418,6 +465,21 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn corrected_gate_requires_both_independent_energy_checks_at_the_same_limit() {
+        let limits = [1e-5; 3];
+        // Raw energy is retained as an explicitly failing legacy diagnostic;
+        // the new gate uses actual persisted compensation, not a larger limit.
+        assert!(audit_passes([0.0, 1.0, 0.0], 0.0, 0.0, 0.0, limits));
+        for bad in [1e-5, 1.0, f64::INFINITY, f64::NAN] {
+            assert!(!audit_passes([bad, 0.0, 0.0], 0.0, 0.0, 0.0, limits));
+            assert!(!audit_passes([0.0, 0.0, bad], 0.0, 0.0, 0.0, limits));
+            assert!(!audit_passes([0.0; 3], bad, 0.0, 0.0, limits));
+            assert!(!audit_passes([0.0; 3], 0.0, bad, 0.0, limits));
+            assert!(!audit_passes([0.0; 3], 0.0, 0.0, bad, limits));
+        }
+    }
 
     #[test]
     fn cli_requires_exactly_one_source_and_bounded_schedules() {
@@ -500,6 +562,8 @@ mod tests {
             );
             assert_eq!(first["final"]["births"], other["final"]["births"]);
             assert_eq!(other["windowed_energy_audit"]["passed"], true);
+            assert_eq!(other["corrected_energy_audit"]["passed"], true);
+            assert_eq!(other["audit_passed"], true);
         }
         assert_eq!(first["receipts"].as_array().unwrap().len(), 3);
         assert_eq!(first["samples"].as_array().unwrap().len(), 2);
