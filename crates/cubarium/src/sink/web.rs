@@ -5,9 +5,14 @@
 //! Same newest-frame mailbox as the shim sink: `submit` replaces the frame in a
 //! `Mutex<Option<..>>` and returns; it never touches a socket, so the simulation loop
 //! never waits on a browser. A viewer that polls slower than the host renders simply
-//! sees fewer, newer frames; a viewer that polls faster re-reads the same tick.
+//! sees fewer, newer frames; a viewer that polls faster re-reads the same frame.
 //!
-//! `std::net` only — no HTTP crate. The surface is four routes and `Connection: close`
+//! The 8-byte prefix on `/frame` is the *render sequence* — how many frames this sink has
+//! been handed — not the world's tick. The world's tick arrives separately through
+//! [`FrameSink::observe_tick`] and is reported, with a read-only description of the host
+//! process, at `GET /status`. Nothing served here can change the world.
+//!
+//! `std::net` only — no HTTP crate. The surface is five routes and `Connection: close`
 //! per request, which is all a `fetch` loop from one page on the loopback needs.
 
 use std::io::{ErrorKind, Read, Write};
@@ -25,7 +30,8 @@ use super::FrameSink;
 /// The viewer page, embedded so a running host has no runtime asset dependency.
 pub const INDEX_HTML: &str = include_str!("web/index.html");
 
-/// Length of a `/frame` body: an 8-byte little-endian tick then the encoded frame.
+/// Length of a `/frame` body: an 8-byte little-endian render sequence then the encoded
+/// frame.
 pub const FRAME_BODY_BYTES: usize = 8 + FRAME_BYTES;
 
 /// How long the accept loop sleeps between polls of a non-blocking listener. Bounds how
@@ -37,26 +43,104 @@ const CONN_TIMEOUT: Duration = Duration::from_secs(5);
 /// Longest request head accepted. A `GET` from the viewer page is a few hundred bytes.
 const MAX_REQUEST_BYTES: usize = 8 * 1024;
 
-/// The newest frame and the tick it was submitted under.
+/// The newest frame and the render sequence it was submitted under.
 type Slot = Option<Arc<(u64, Frame)>>;
+
+/// A read-only description of the host process behind this viewer, fixed for the life of
+/// the sink. It answers "whose world am I looking at?" for a viewer that may be one of
+/// several tabs on one machine — the state directory, the process, the build, and how the
+/// pixels are also leaving the host. Wall time, pids and paths are host facts: nothing
+/// here comes from, or reaches, `cubarium-core`.
+#[derive(Clone, Debug)]
+pub struct Source {
+    pub pid: u32,
+    /// Absolute (canonical where possible) state directory.
+    pub state_dir: String,
+    /// `crate::state::build_id()` of the running host.
+    pub build_id: String,
+    /// The primary sink the same frames are going to (`shim`, `preview`, `png`, `web`).
+    pub sink: String,
+    /// The snapshot this run resumed from, if any.
+    pub resumed_from: Option<String>,
+    /// The world tick this run started at.
+    pub start_tick: u64,
+    /// `--speed`.
+    pub speed: f64,
+}
+
+impl Default for Source {
+    fn default() -> Source {
+        Source {
+            pid: std::process::id(),
+            state_dir: String::new(),
+            build_id: crate::state::build_id(),
+            sink: "web".to_string(),
+            resumed_from: None,
+            start_tick: 0,
+            speed: 0.0,
+        }
+    }
+}
+
+impl Source {
+    /// The `source` object of `/status`, hand-built so the key order is the documented
+    /// one rather than `serde_json`'s sorted map.
+    fn to_json(&self) -> String {
+        let s = |v: &str| serde_json::Value::from(v).to_string();
+        let resumed = match &self.resumed_from {
+            Some(p) => s(p),
+            None => "null".to_string(),
+        };
+        // `--speed` is validated finite before a run starts; a non-finite one would have
+        // no JSON spelling, so it is reported as null rather than as a lie.
+        let speed = serde_json::Number::from_f64(self.speed)
+            .map_or("null".to_string(), |n| n.to_string());
+        format!(
+            r#"{{"pid":{},"state_dir":{},"build_id":{},"sink":{},"resumed_from":{resumed},"start_tick":{},"speed":{speed}}}"#,
+            self.pid,
+            s(&self.state_dir),
+            s(&self.build_id),
+            s(&self.sink),
+            self.start_tick,
+        )
+    }
+}
 
 struct Shared {
     /// Newest-frame mailbox. Unlike the shim's, the server does not *take* the frame: a
     /// viewer polling at its own rate must always find the latest one here.
     slot: Mutex<Slot>,
     stop: AtomicBool,
-    /// Frames submitted since start; also the tick of the next one.
+    /// Frames submitted since start; also the render sequence of the next one.
     ticks: AtomicU64,
     /// Requests answered on `/frame`.
     served: AtomicU64,
+    /// The world's tick as of the last completed tick the host reported.
+    world_tick: AtomicU64,
     /// A short line the viewer's HUD appends, fixed for the life of the sink. The host
     /// puts the simulation speed here so a reviewer can tell 1× from 8× on sight.
     note: String,
+    source: Source,
 }
 
 impl Shared {
     fn newest(&self) -> Slot {
         self.slot.lock().expect("web mailbox poisoned").clone()
+    }
+
+    /// The `/status` body. Read straight off the atomics: it never takes the mailbox lock,
+    /// so a status poll cannot delay `submit` either.
+    fn status_json(&self) -> String {
+        let submitted = self.ticks.load(Ordering::Relaxed);
+        format!(
+            r#"{{"world_tick":{},"render_seq":{},"frames_served":{},"source":{}}}"#,
+            self.world_tick.load(Ordering::Relaxed),
+            // The render sequence of the newest frame, which is exactly the number in the
+            // `/frame` prefix; before the first submit both read 0.
+            submitted.saturating_sub(1),
+            self.served.load(Ordering::Relaxed),
+            self.source.to_json(),
+        )
     }
 }
 
@@ -77,6 +161,11 @@ impl WebSink {
     /// [`WebSink::new`] with a HUD note served at `GET /note`. An empty note leaves the
     /// HUD exactly as it is; a non-empty one is appended to the live label.
     pub fn with_note(port: u16, note: impl Into<String>) -> Result<WebSink> {
+        WebSink::with_source(port, note, Source::default())
+    }
+
+    /// [`WebSink::with_note`] plus the read-only host identity `GET /status` reports.
+    pub fn with_source(port: u16, note: impl Into<String>, source: Source) -> Result<WebSink> {
         let note = note.into();
         let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port)))
             .with_context(|| format!("binding the web viewer to 127.0.0.1:{port}"))?;
@@ -90,7 +179,9 @@ impl WebSink {
             stop: AtomicBool::new(false),
             ticks: AtomicU64::new(0),
             served: AtomicU64::new(0),
+            world_tick: AtomicU64::new(0),
             note,
+            source,
         });
         let server = {
             let shared = Arc::clone(&shared);
@@ -117,9 +208,19 @@ impl WebSink {
         format!("http://{}/", self.addr)
     }
 
-    /// Frames submitted since start. The newest frame's tick is this minus one.
+    /// Frames submitted since start. The newest frame's render sequence is this minus one.
     pub fn submitted(&self) -> u64 {
         self.shared.ticks.load(Ordering::Relaxed)
+    }
+
+    /// The world tick last reported through [`FrameSink::observe_tick`].
+    pub fn world_tick(&self) -> u64 {
+        self.shared.world_tick.load(Ordering::Relaxed)
+    }
+
+    /// The host identity served at `/status`.
+    pub fn source(&self) -> &Source {
+        &self.shared.source
     }
 
     /// `/frame` requests answered with a frame.
@@ -132,7 +233,7 @@ impl WebSink {
         &self.shared.note
     }
 
-    /// The newest frame in the mailbox and its tick, if one has been submitted.
+    /// The newest frame in the mailbox and its render sequence, if one has been submitted.
     pub fn newest(&self) -> Option<(u64, Frame)> {
         self.shared.newest().map(|a| (a.0, a.1.clone()))
     }
@@ -147,12 +248,16 @@ impl WebSink {
 
 impl FrameSink for WebSink {
     fn submit(&mut self, frame: &Frame) -> Result<()> {
-        let tick = self.shared.ticks.fetch_add(1, Ordering::Relaxed);
-        let next = Arc::new((tick, frame.clone()));
+        let seq = self.shared.ticks.fetch_add(1, Ordering::Relaxed);
+        let next = Arc::new((seq, frame.clone()));
         let mut slot = self.shared.slot.lock().expect("web mailbox poisoned");
         // The newest frame always wins; nothing here waits on a client.
         *slot = Some(next);
         Ok(())
+    }
+
+    fn observe_tick(&mut self, tick: u64) {
+        self.shared.world_tick.store(tick, Ordering::Relaxed);
     }
 
     fn finish(&mut self) -> Result<()> {
@@ -224,6 +329,13 @@ fn handle(shared: &Shared, mut stream: TcpStream) {
                 &body,
             )
         }
+        Some(("GET", "/status")) => respond(
+            &mut stream,
+            "200 OK",
+            "application/json; charset=utf-8",
+            "Cache-Control: no-store\r\n",
+            shared.status_json().as_bytes(),
+        ),
         Some(("GET", "/note")) => respond(
             &mut stream,
             "200 OK",
@@ -236,8 +348,9 @@ fn handle(shared: &Shared, mut stream: TcpStream) {
     let _ = stream.shutdown(std::net::Shutdown::Both);
 }
 
-/// The `/frame` body: 8-byte little-endian tick then the frame bytes. With no frame yet,
-/// tick 0 and a black frame, so the page has something valid to draw immediately.
+/// The `/frame` body: 8-byte little-endian render sequence then the frame bytes. With no
+/// frame yet, sequence 0 and a black frame, so the page has something valid to draw
+/// immediately. The layout is fixed: the page checks this length.
 fn frame_body(slot: &Slot) -> Vec<u8> {
     let mut body = Vec::with_capacity(FRAME_BODY_BYTES);
     match slot {
@@ -359,8 +472,12 @@ mod tests {
         assert_eq!(status, "HTTP/1.1 200 OK");
         assert!(head.contains("Content-Type: application/octet-stream"), "{head}");
         assert!(head.contains("Cache-Control: no-store"), "{head}");
-        assert_eq!(body.len(), FRAME_BODY_BYTES, "8-byte tick plus {FRAME_BYTES} frame bytes");
-        assert_eq!(u64::from_le_bytes(body[..8].try_into().unwrap()), 0, "the first frame is tick 0");
+        assert_eq!(body.len(), FRAME_BODY_BYTES, "8-byte sequence plus {FRAME_BYTES} frame bytes");
+        assert_eq!(
+            u64::from_le_bytes(body[..8].try_into().unwrap()),
+            0,
+            "the first frame is render sequence 0"
+        );
         assert_eq!(&body[8..], frame.as_bytes().as_slice(), "the payload is the submitted frame");
     }
 
@@ -380,8 +497,8 @@ mod tests {
             sink.submit(&distinct_frame(seed)).unwrap();
         }
         let newest = distinct_frame(7);
-        let (tick, held) = sink.newest().expect("a frame in the mailbox");
-        assert_eq!(tick, 7, "eight submits, ticks 0..8, newest is 7");
+        let (seq, held) = sink.newest().expect("a frame in the mailbox");
+        assert_eq!(seq, 7, "eight submits, sequences 0..8, newest is 7");
         assert_eq!(held.as_bytes().as_slice(), newest.as_bytes().as_slice());
 
         // And the same is what the route hands out, twice: reading does not consume it.
@@ -402,6 +519,98 @@ mod tests {
             sink.submit(&frame).unwrap();
         }
         assert!(t0.elapsed() < Duration::from_millis(500), "submit blocked on I/O");
+    }
+
+    /// A browser tab that opens a socket, sends half a request head and never reads must
+    /// not be able to hold the simulation up: nothing in `submit` touches a socket.
+    #[test]
+    fn a_stalled_client_never_stalls_submit() {
+        let mut sink = WebSink::new(0).expect("binding an ephemeral port");
+        let mut stalled = TcpStream::connect(sink.addr()).expect("connecting to the web sink");
+        // A partial head: no blank line, so the handler thread stays in `read_head` until
+        // its own five-second timeout. The client never reads the response either.
+        write!(stalled, "GET /frame HTTP/1.1\r\nHost: localhost\r\n").unwrap();
+        stalled.flush().unwrap();
+
+        let frame = distinct_frame(5);
+        let t0 = std::time::Instant::now();
+        for _ in 0..200 {
+            sink.submit(&frame).unwrap();
+        }
+        let elapsed = t0.elapsed();
+        assert!(elapsed < Duration::from_millis(500), "submit waited on a client: {elapsed:?}");
+        assert_eq!(sink.submitted(), 200);
+        // And the sink still answers a well-behaved client while that one hangs.
+        let (status, _, body) = get(sink.addr(), "/frame");
+        assert_eq!(status, "HTTP/1.1 200 OK");
+        assert_eq!(&body[8..], frame.as_bytes().as_slice());
+        drop(stalled);
+    }
+
+    #[test]
+    fn the_status_route_reports_the_world_tick_the_sequence_and_the_source() {
+        let source = Source {
+            pid: 4321,
+            state_dir: "/tmp/cubarium-status-test/state".to_string(),
+            build_id: "0.1.0+abcdef1".to_string(),
+            sink: "shim".to_string(),
+            resumed_from: Some("/tmp/cubarium-status-test/state/world-100.cubw".to_string()),
+            start_tick: 100,
+            speed: 2.5,
+        };
+        let mut sink = WebSink::with_source(0, "2.5× time", source).expect("binding a port");
+        sink.submit(&distinct_frame(2)).unwrap();
+        sink.submit(&distinct_frame(3)).unwrap();
+        sink.observe_tick(4242);
+
+        let (status, head, body) = get(sink.addr(), "/status");
+        assert_eq!(status, "HTTP/1.1 200 OK");
+        assert!(head.contains("Content-Type: application/json; charset=utf-8"), "{head}");
+        assert!(head.contains("Cache-Control: no-store"), "{head}");
+        let text = String::from_utf8(body).expect("the status body is UTF-8");
+        let v: serde_json::Value =
+            serde_json::from_str(&text).unwrap_or_else(|e| panic!("status is not JSON: {e}\n{text}"));
+        assert_eq!(v["world_tick"], 4242);
+        assert_eq!(v["render_seq"], 1, "two submits: the newest frame is sequence 1");
+        assert_eq!(v["frames_served"], 0, "no /frame request has been answered yet");
+        let s = &v["source"];
+        assert_eq!(s["pid"], 4321);
+        assert_eq!(s["state_dir"], "/tmp/cubarium-status-test/state");
+        assert_eq!(s["build_id"], "0.1.0+abcdef1");
+        assert_eq!(s["sink"], "shim");
+        assert_eq!(s["resumed_from"], "/tmp/cubarium-status-test/state/world-100.cubw");
+        assert_eq!(s["start_tick"], 100);
+        assert_eq!(s["speed"], 2.5);
+
+        // `render_seq` is the number the `/frame` prefix carries, and serving one frame is
+        // what `frames_served` counts.
+        let (_, _, frame_body) = get(sink.addr(), "/frame");
+        assert_eq!(u64::from_le_bytes(frame_body[..8].try_into().unwrap()), 1);
+        let (_, _, body) = get(sink.addr(), "/status");
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["frames_served"], 1);
+    }
+
+    #[test]
+    fn a_plain_sink_still_answers_status_with_a_null_resume_and_this_process() {
+        let sink = WebSink::new(0).expect("binding an ephemeral port");
+        let (status, _, body) = get(sink.addr(), "/status");
+        assert_eq!(status, "HTTP/1.1 200 OK");
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["world_tick"], 0);
+        assert_eq!(v["render_seq"], 0, "before any submit the sequence reads 0, like /frame");
+        assert!(v["source"]["resumed_from"].is_null());
+        assert_eq!(v["source"]["pid"], serde_json::Value::from(std::process::id()));
+        assert_eq!(v["source"]["build_id"], crate::state::build_id());
+        assert_eq!(v["source"]["sink"], "web");
+    }
+
+    /// The page must actually ask for the status, or the HUD can never name the world.
+    #[test]
+    fn the_page_fetches_the_status_route() {
+        assert!(INDEX_HTML.contains("fetch(\"/status\""), "the page never fetches /status");
+        assert!(INDEX_HTML.contains("world_tick"), "the page never reads the world tick");
+        assert!(INDEX_HTML.contains("state_dir"), "the page never names the source state dir");
     }
 
     #[test]

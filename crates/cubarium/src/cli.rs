@@ -101,6 +101,17 @@ impl RunSinkArg {
     pub fn is_visual(self) -> bool {
         self != RunSinkArg::None
     }
+
+    /// The name `/status` reports for the primary sink.
+    pub fn name(self) -> &'static str {
+        match self {
+            RunSinkArg::Preview => "preview",
+            RunSinkArg::Shim => "shim",
+            RunSinkArg::Png => "png",
+            RunSinkArg::Web => "web",
+            RunSinkArg::None => "none",
+        }
+    }
 }
 
 /// `cubarium run`: the persistent world, its snapshots, and its telemetry.
@@ -156,6 +167,10 @@ pub struct Run {
     /// Port for the `web` sink (a viewer page at http://127.0.0.1:<port>/).
     #[arg(long, default_value_t = 7393)]
     pub web_port: u16,
+    /// Also serve the loopback viewer on `--web-port` while `--sink` keeps running. The
+    /// same world, the same render, the same frame bytes: one encode reaches both.
+    #[arg(long, default_value_t = false)]
+    pub mirror_web: bool,
     /// Draw the world with the baked sprite art in this directory (`assets/atelier`)
     /// instead of the procedural bodies. Omit it and the image is unchanged.
     #[arg(long)]
@@ -203,6 +218,19 @@ impl Run {
         // Same rule as `demo`: a capture run that never ends writes captures forever.
         if self.sink == RunSinkArg::Png {
             anyhow::ensure!(self.seconds > 0.0, "--seconds is required with --sink png");
+        }
+        if self.mirror_web {
+            // Both refusals are typos, not requests: a headless run renders nothing to
+            // mirror, and `--sink web` already *is* the viewer, so mirroring it would ask
+            // for the same port twice.
+            anyhow::ensure!(
+                self.sink != RunSinkArg::None,
+                "--mirror-web needs a rendering sink: with --sink none there is nothing to mirror"
+            );
+            anyhow::ensure!(
+                self.sink != RunSinkArg::Web,
+                "--mirror-web is redundant with --sink web, which is already the viewer"
+            );
         }
         anyhow::ensure!(self.every >= 1, "--every must be at least 1");
         anyhow::ensure!(self.scale >= 1, "--scale must be at least 1");
@@ -309,8 +337,48 @@ mod tests {
         assert_eq!(r.every, 30);
         assert_eq!(r.scale, 4);
         assert_eq!(r.fps, 60);
+        assert_eq!(r.web_port, 7393);
+        assert!(!r.mirror_web, "the mirrored viewer is opt-in");
         assert_eq!(r.art, None, "the art image is opt-in");
         r.validate().unwrap();
+    }
+
+    #[test]
+    fn mirroring_the_viewer_is_allowed_beside_every_rendering_sink() {
+        for sink in ["shim", "preview", "png"] {
+            let r = parse_run([
+                "cubarium", "run", "--sink", sink, "--mirror-web", "--web-port", "7393",
+                "--seconds", "5",
+            ]);
+            assert!(r.mirror_web, "{sink}");
+            assert_eq!(r.web_port, 7393);
+            r.validate().unwrap_or_else(|e| panic!("--mirror-web with --sink {sink}: {e}"));
+        }
+    }
+
+    #[test]
+    fn mirroring_a_headless_run_is_refused() {
+        let r = parse_run(["cubarium", "run", "--sink", "none", "--speed", "0", "--mirror-web"]);
+        let err = r.validate().unwrap_err().to_string();
+        assert!(err.contains("nothing to mirror"), "{err}");
+    }
+
+    #[test]
+    fn mirroring_the_web_sink_onto_itself_is_refused() {
+        let r = parse_run(["cubarium", "run", "--sink", "web", "--mirror-web"]);
+        let err = r.validate().unwrap_err().to_string();
+        assert!(err.contains("already the viewer"), "{err}");
+        // …and `--sink web` on its own is untouched.
+        parse_run(["cubarium", "run", "--sink", "web"]).validate().unwrap();
+    }
+
+    #[test]
+    fn every_run_sink_has_a_status_name() {
+        assert_eq!(RunSinkArg::Preview.name(), "preview");
+        assert_eq!(RunSinkArg::Shim.name(), "shim");
+        assert_eq!(RunSinkArg::Png.name(), "png");
+        assert_eq!(RunSinkArg::Web.name(), "web");
+        assert_eq!(RunSinkArg::None.name(), "none");
     }
 
     #[test]

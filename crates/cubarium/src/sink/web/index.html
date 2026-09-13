@@ -49,6 +49,9 @@
     white-space: nowrap;
   }
   #hud .warn { color: #FF7AA2; }
+  /* The source line only appears once /status answers; an older host leaves it empty
+     and the HUD is exactly one line, as before. */
+  #hudSrc:not(:empty) { display: block; margin-top: 2px; color: var(--ink-dim); }
   @media (max-width: 520px) { body { padding: 8px; } .cap { font-size: 10px; } }
 </style>
 
@@ -56,7 +59,7 @@
   <div class="panel" id="cubePanel">
     <p class="cap">cube &mdash; drag to orbit, wheel to zoom</p>
     <div id="cubeBox"></div>
-    <div id="hud">tick &mdash; &middot; -- fps</div>
+    <div id="hud"><span id="hudMain">seq &mdash; &middot; -- fps</span><span id="hudSrc"></span></div>
   </div>
   <div class="panel" id="netPanel">
     <p class="cap">net &mdash; top above front; left front right back</p>
@@ -130,7 +133,9 @@ function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 // so a poll only copies bytes in and flags the textures dirty.
 // ---------------------------------------------------------------------------
 const frameBytes = new Uint8Array(FRAME_BYTES);
-let tick = 0;
+// The 8-byte prefix on /frame is the host's *render sequence* -- how many frames it has
+// encoded -- not the world's tick. The tick comes from /status.
+let seq = 0;
 let live = false;          // true once /frame has answered at least once
 
 // Distinct dim base color per face, plus a faint ramp: red grows with +u,
@@ -348,7 +353,7 @@ function poll() {
     .then(function (buf) {
       if (buf.byteLength !== 8 + FRAME_BYTES) throw new Error("short frame: " + buf.byteLength);
       const dv = new DataView(buf);
-      tick = Number(dv.getBigUint64(0, true));
+      seq = Number(dv.getBigUint64(0, true));
       frameBytes.set(new Uint8Array(buf, 8, FRAME_BYTES));
       if (!live) { live = true; showHud(); }
       dirty = true;
@@ -359,7 +364,8 @@ function poll() {
     .finally(function () { inFlight = false; });
 }
 
-const hud = document.getElementById("hud");
+const hudMain = document.getElementById("hudMain");
+const hudSrc = document.getElementById("hudSrc");
 let frames = 0, fps = 0, fpsMark = performance.now(), lastT = performance.now();
 
 // A short line the host serves once at /note, such as "8\u00D7 time". It is how a
@@ -377,14 +383,56 @@ fetch("/note", { cache: "no-store" })
   .then(function (text) { note = text.trim(); showHud(); })
   .catch(function () { /* an older host has no /note; the HUD is unchanged */ });
 
-// Driven both by the fps window and by a live/self-test flip, so the label is never
-// left reading "self-test" after the host has answered.
+// ---------------------------------------------------------------------------
+// /status: the world's tick and a read-only line naming the host process, so a
+// reviewer with several tabs open can tell which world this one is. Polled about
+// twice a second with one fetch in flight at a time; every failure is tolerated,
+// and a host without the route simply leaves both fields out of the HUD. Nothing
+// here is sent back: the viewer has no way to touch the world.
+// ---------------------------------------------------------------------------
+const STATUS_MS = 500;
+let statusInFlight = false;
+let worldTick = null;      // null until /status has answered once
+let source = null;
+
+function pollStatus() {
+  if (statusInFlight) return;
+  statusInFlight = true;
+  fetch("/status", { cache: "no-store" })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (s) {
+      if (!s) return;
+      worldTick = s.world_tick;
+      source = s.source || null;
+      showHud();
+    })
+    .catch(function () { /* an older host has no /status; the HUD is unchanged */ })
+    .finally(function () { statusInFlight = false; });
+}
+pollStatus();
+setInterval(pollStatus, STATUS_MS);
+
+// "<state dir name> · pid N · <sink>", e.g. "state · pid 2295402 · shim".
+function sourceLine(s) {
+  const dir = String(s.state_dir || "").replace(/\/+$/, "");
+  const name = dir.slice(dir.lastIndexOf("/") + 1) || dir;
+  const parts = [];
+  if (name) parts.push(name);
+  if (s.pid !== undefined) parts.push("pid " + s.pid);
+  if (s.sink) parts.push(s.sink);
+  return parts.join(" · ");
+}
+
+// Driven by the fps window, a live/self-test flip and a status answer, so the label is
+// never left reading "self-test" after the host has answered.
 function showHud() {
   const rate = fps > 0 ? fps.toFixed(0) + " fps" : "-- fps";
   const tail = note ? (" &middot; " + escapeHtml(note)) : "";
-  hud.innerHTML = live
-    ? ("tick " + tick + " &middot; " + rate + tail)
+  const world = worldTick === null ? "" : ("world tick " + worldTick + " &middot; ");
+  hudMain.innerHTML = live
+    ? (world + "seq " + seq + " &middot; " + rate + tail)
     : ('<span class="warn">self-test</span> &middot; ' + rate);
+  hudSrc.textContent = source ? sourceLine(source) : "";
 }
 
 function loop(now) {

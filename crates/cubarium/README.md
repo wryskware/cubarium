@@ -69,12 +69,19 @@ one tick and never extrapolates.
   100 ms doubling to 5 s, reconnect, keep the newest frame. The simulation loop
   never waits on this thread.
 - `web`: a local HTTP server on `127.0.0.1:<web-port>` serving a viewer page
-  at `/` and the newest encoded frame at `/frame` (8-byte little-endian tick
-  followed by the 61,440 frame bytes, `Cache-Control: no-store`). The page
-  maps the five faces onto a rotatable cube (bottom black) using exactly the
-  `face_frame` orientation table, shows the flat net beside it, and polls
+  at `/` and the newest encoded frame at `/frame` (8-byte little-endian
+  **render sequence** — how many frames the host has encoded, *not* the world's
+  tick — followed by the 61,440 frame bytes, `Cache-Control: no-store`). The
+  page maps the five faces onto a rotatable cube (bottom black) using exactly
+  the `face_frame` orientation table, shows the flat net beside it, and polls
   `/frame` every animation frame. It exists so the world can be watched and
   screenshotted without the cube. Same newest-frame mailbox as the shim sink.
+  Two more routes describe the host and never change it: `/note` is the HUD's
+  fixed line (the `run` loop puts `--speed` there) and `/status` is JSON —
+  `{"world_tick", "render_seq", "frames_served", "source": {"pid",
+  "state_dir", "build_id", "sink", "resumed_from", "start_tick", "speed"}}` —
+  polled by the page about twice a second for the HUD's world tick and source
+  line. A viewer can read; it has no way to write.
 - `png`: writes `frame_NNNNNN.png` of the net layout at scale 1 (Top above
   Front; Left, Front, Right, Back in a row; black elsewhere), every `--every`
   frames, plus `final.png` on exit.
@@ -126,9 +133,10 @@ fixture capture and the world share one look.
 ## M2 addition — `run`
 
 ```
-cubarium run [--config world.toml] [--state state/] [--sink preview|shim|png|none]
+cubarium run [--config world.toml] [--state state/] [--sink preview|shim|png|web|none]
              [--speed N] [--seconds N] [--seed N] [--fresh] [--telemetry FILE]
              [--addr ..] [--out ..] [--every N] [--scale N] [--fps N]
+             [--web-port N] [--mirror-web]
 ```
 
 | Option | Default | Meaning |
@@ -144,6 +152,19 @@ cubarium run [--config world.toml] [--state state/] [--sink preview|shim|png|non
 | `--fields` | `<state>/fields.jsonl` | Field dump file, written only when `capacity.field_dump_seconds > 0` |
 | `--events` | `<state>/events.jsonl` | Life-event log (births, deaths), written only when `capacity.event_log` is true |
 | `--fps` | `60` | Render and output rate, 1–240, as for `demo` |
+| `--web-port` | `7393` | Port for the `web` sink and for `--mirror-web` |
+| `--mirror-web` | off | Also serve the loopback viewer on `--web-port` while `--sink` keeps running |
+
+`--mirror-web` is one world watched twice, not two worlds: the loop still steps
+one `World`, observes it once, draws once and calls `Canvas::encode` once per
+rendered frame, and a fan-out sink hands that one `Frame` to the chosen sink
+*and* to the viewer, so the cube and the browser can never show different
+pixels. It is valid with `--sink shim`, `preview` and `png`; it is refused with
+`--sink none` (nothing is rendered to mirror) and with `--sink web` (already the
+viewer). Without the flag every byte of the run is unchanged. The mirrored
+viewer's `/status` names the world's tick and the host behind it (pid, state
+directory, build id, sink, resumed snapshot, start tick, speed), which is how a
+reviewer with several tabs open tells which world a tab is showing.
 
 Startup: unless `--fresh`, load the newest valid snapshot in `--state` (trying
 older ones on failure, logging each reason); otherwise create a new world from

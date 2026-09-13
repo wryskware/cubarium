@@ -31,7 +31,7 @@ use crate::art_present::ArtPresenter;
 use crate::cli::{Run, RunSinkArg};
 use crate::clock::{Clock, Step, TICK_HZ};
 use crate::present::Presenter;
-use crate::sink::{FrameSink, PngSink, PreviewSink, ShimSink, WebSink};
+use crate::sink::{FanOutSink, FrameSink, PngSink, PreviewSink, ShimSink, WebSink, web};
 use crate::state::{self, Checkpointer};
 
 /// What one `run` produced. Returned so tests can drive the host through the library
@@ -405,14 +405,47 @@ fn open_world(run: &Run) -> Result<(World, Option<PathBuf>, Option<u64>)> {
     Ok((world, None, None))
 }
 
-fn open_sink(run: &Run) -> Result<Option<Box<dyn FrameSink>>> {
-    Ok(match run.sink {
-        RunSinkArg::None => None,
-        RunSinkArg::Preview => Some(Box::new(PreviewSink::new(run.scale, &run.out)?)),
-        RunSinkArg::Shim => Some(Box::new(ShimSink::new(run.addr.clone()))),
-        RunSinkArg::Png => Some(Box::new(PngSink::new(&run.out, run.every)?)),
-        RunSinkArg::Web => Some(Box::new(WebSink::with_note(run.web_port, speed_note(run.speed))?)),
-    })
+/// The read-only identity `--mirror-web`'s viewer serves at `/status`. Host facts only —
+/// the pid, the state directory, the build, how the pixels also leave this process — none
+/// of which the world knows about or can be changed through.
+fn source_of(run: &Run, start_tick: u64, resumed_from: Option<&Path>) -> web::Source {
+    // Canonical when the directory exists (it is created before this runs); a path that
+    // cannot be canonicalized is still reported absolute rather than dropped.
+    let state_dir = std::fs::canonicalize(&run.state)
+        .or_else(|_| std::env::current_dir().map(|cwd| cwd.join(&run.state)))
+        .unwrap_or_else(|_| run.state.clone());
+    web::Source {
+        pid: std::process::id(),
+        state_dir: state_dir.display().to_string(),
+        build_id: state::build_id(),
+        sink: run.sink.name().to_string(),
+        resumed_from: resumed_from.map(|p| p.display().to_string()),
+        start_tick,
+        speed: run.speed,
+    }
+}
+
+/// The primary sink, plus — with `--mirror-web` — the loopback viewer behind a
+/// [`FanOutSink`]. The loop above still encodes exactly once per rendered frame; the
+/// fan-out hands that one `&Frame` to both, so the cube and the browser are never looking
+/// at different pixels.
+fn open_sink(run: &Run, source: &web::Source) -> Result<Option<Box<dyn FrameSink>>> {
+    let primary: Box<dyn FrameSink> = match run.sink {
+        RunSinkArg::None => return Ok(None),
+        RunSinkArg::Preview => Box::new(PreviewSink::new(run.scale, &run.out)?),
+        RunSinkArg::Shim => Box::new(ShimSink::new(run.addr.clone())),
+        RunSinkArg::Png => Box::new(PngSink::new(&run.out, run.every)?),
+        RunSinkArg::Web => {
+            Box::new(WebSink::with_source(run.web_port, speed_note(run.speed), source.clone())?)
+        }
+    };
+    if !run.mirror_web {
+        return Ok(Some(primary));
+    }
+    let web = WebSink::with_source(run.web_port, speed_note(run.speed), source.clone())?;
+    // `--web-port 0` binds an ephemeral port, so the URL has to be reported to be usable.
+    eprintln!("cubarium: mirroring the same frames to the viewer at {}", web.url());
+    Ok(Some(Box::new(FanOutSink::new(vec![primary, Box::new(web)]))))
 }
 
 /// The viewer's HUD note for a `--speed`. `f64`'s own `Display` is the shortest decimal
@@ -502,11 +535,13 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
     let mut checkpoints = Checkpointer::spawn(&run.state);
     let build_id = state::build_id();
 
-    let mut sink = open_sink(run)?;
+    // Read before the sink opens: `--mirror-web`'s `/status` names the tick this run
+    // started at, and nothing steps the world between here and the loop.
+    let start_tick = world.tick();
+    let mut sink = open_sink(run, &source_of(run, start_tick, loaded_from.as_deref()))?;
     let headless = sink.is_none();
     let pace = Pace::of(run.speed);
 
-    let start_tick = world.tick();
     if let Some(log) = fields.as_mut()
         && log.fresh
     {
@@ -537,10 +572,16 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
                        fields: &mut Option<FieldLog>,
                        events: &mut Option<EventLog>,
                        checkpoints: &mut Checkpointer,
+                       sink: &mut Option<Box<dyn FrameSink>>,
                        ticks_done: &mut u64| {
         world.step();
         *ticks_done += 1;
         let tick = world.tick();
+        // Observation only, and only ever in this direction: a sink is told what the
+        // world did, and has no way to tell the world anything.
+        if let Some(s) = sink.as_mut() {
+            s.observe_tick(tick);
+        }
         // Drained every tick even when nothing logs them: `World` records births and
         // deaths whatever `capacity.event_log` says, and a buffer the host never takes
         // grows without bound for the life of the process. Written in the order the
@@ -587,6 +628,7 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
                     &mut fields,
                     &mut events,
                     &mut checkpoints,
+                    &mut sink,
                     &mut ticks_done,
                 );
             }
@@ -623,6 +665,7 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
                                 &mut fields,
                                 &mut events,
                                 &mut checkpoints,
+                                &mut sink,
                                 &mut ticks_done,
                             );
                         }
