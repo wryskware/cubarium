@@ -84,13 +84,22 @@ body, magenta tips and berries); the tall species and ground tiles below follow 
 
 A tall plant is a **column** of 16×16 tiles stacked along the up direction with a 4-px
 step per cell: `base` at the horizon, `trunk` segments up the foliage band, `crown` at
-the top. Because 16-px tiles sit on 4-px steps, segments overlap by 12 px; a trunk tile
-is therefore **periodic in y with period 4**, so every overlap draws identical pixels,
-and its sway is a brightness pulse only (a sub-pixel drift never moves a nearest-sampled
-texel and a whole-pixel one leaves the 9-px budget at the tile ends). A cap's rows that
+the top. Because 16-px tiles sit on 4-px steps, segments overlap by 12 px; the painted
+trunk pattern is therefore **periodic in y with period 4**. Current presentation owns
+non-overlapping strips of that pattern and bends the joined column through a shared
+breeze, within the unchanged nine-pixel footprint. The original pack's brightness
+pulse is not the only motion. A cap's rows that
 lie over a trunk segment repeat the trunk pattern in the same phase, so crown and base
 join without a seam; the cap's own art beside the trunk simply covers empty ground. All
 parts of one species share one pulse sequence so the join rows match in every frame.
+
+The [spiretree wind-room pass](../design/7_Research/spiretree-wind-room-2026-09-13.md)
+allows trunk rows 0 and 15 to be transparent; rows 1–14 retain the periodic pattern.
+When every frame leaves row 0 clear, the presenter uses shifted strips (tile rows
+1–4 rather than 0–3). Row 15 is never drawn; row 0 is drawn only at the last possible
+segment under the cap. Painted end rows must still match the periodic pattern.
+Glasscane and vinecoil retain their original strips. This is an art-derived
+registration rule, not permission to enlarge a sprite or leave gaps between segments.
 
 | name | parts | look |
 | --- | --- | --- |

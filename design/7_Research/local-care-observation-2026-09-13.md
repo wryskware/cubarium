@@ -118,8 +118,10 @@ world-population time. At the pre-pulse boundary the 69 region-member records
 manufacture satiated rest in presentation or claim existing rest hysteresis
 commonly produces long quiet bouts in these mature worlds.
 
-Next: independent per-seed/fixed-ID interpretation, then a presentation-only
-meal-onset/settling prototype if the actual intake is visually hard to recognize.
+The independent [complete per-seed/fixed-ID reduction](astra-care-response-results-2026-09-13.md)
+is now checked in, with a read-only reproducer; root reran it successfully.
+Next: a presentation-only meal-onset/settling prototype to compare whether actual
+intake becomes easier to recognize, not an assumption that the current art fails.
 Preserve ordinary ecology while evaluating that prototype. Longer-lived quiet
 habits need separate resource/drive evidence, not simply relabeling Feeding as
 Resting or forcing a crowd response after every input.
