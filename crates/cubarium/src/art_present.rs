@@ -2601,14 +2601,20 @@ impl ArtPresenter {
     ///   step keeps the **reveal masks**: the lower stage stamped whole at `opacity_of(lower)
     ///   · (1 − t)` and the upper stage over it at `opacity_of(upper)` through
     ///   [`Mask::Axial`]`{ reveal: t · `[`PLANT_REVEAL_PX`]` }` on a side face or
-    ///   [`Mask::Radial`] outward from the pivot on the top face.
+    ///   [`Mask::Radial`]`{ reveal: t · (extent + 0.5) }` outward from the pivot on the top
+    ///   face, `extent` being the largest [`cubarium_render::Pose::extent`] of the upper
+    ///   stage's layers — so `t = 1` is exactly [`Mask::None`] for that pose.
     ///
     /// The clip is a pure function of `t` and is therefore never restarted, resumed or
     /// advanced by anything a frame does: a repeated draw of the same (state, view, `f`) is
     /// the same image, a reversal replays the same `t` backwards ([`growth_step`]), a wind
     /// packet arriving mid-step changes only the bend, and pausing holds the pose. The fruit
-    /// accent takes no part in a step — [`advance_growth`] holds it at 0 while a plant is in
-    /// flight — so a growth stamp never reads the `fruit` clip.
+    /// accent takes no part in an authored step: [`advance_growth`] holds it at 0 while a
+    /// plant is in flight and the three-layer stamp has no fruit layer, so an authored
+    /// growth stamp never reads the `fruit` clip. On the *mask* path a full-grown plant in
+    /// fruit that turns round still carries the accent [`growth_between`] interpolates from
+    /// the previous tick for the first frames of the step (about two frames at 60 fps, only
+    /// for a fruiting species whose 1 → 2 step has no clip — bloomcrown on the shipped pack).
     pub fn draw_with_fruit(
         &mut self,
         view: &RenderView,

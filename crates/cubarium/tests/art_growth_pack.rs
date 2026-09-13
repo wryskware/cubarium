@@ -35,7 +35,7 @@ use cubarium::art::{ArtPack, Band, Clip, Plant};
 use cubarium::art_present::{
     ArtPresenter, GROW_BLEND, GrowthStep, PLANT_REVEAL_PX, REED_DEPTH, REED_SCALE, SOIL_SCALE,
     STAGE_GROW_SECONDS, WIND_PEAK_TICK, WIND_PERIOD, WIND_QUIET_TICK, WIND_RESPONSE,
-    WIND_SLOT_VARIATION, WindResponse, band_of, band_opacity, effective_tip, growth_between,
+    WIND_SLOT_VARIATION, band_of, band_opacity, effective_tip, growth_between,
     growth_step, growth_weights, next_stage, plant_bend_budget, plant_cap, plant_phase_of,
     present_seconds, slot_of, slot_wind, species_of, stage_opacity, stage_thresholds, up_of,
     wind_response, wind_strength,
@@ -350,11 +350,6 @@ fn paints_row(s: &Sprite, y: usize) -> bool {
 /// The lowest painted tile row of a sprite, `None` for an empty one.
 fn lowest_painted_row(s: &Sprite) -> Option<usize> {
     (0..s.height()).rev().find(|&y| paints_row(s, y))
-}
-
-/// The highest painted tile row of a sprite, `None` for an empty one.
-fn highest_painted_row(s: &Sprite) -> Option<usize> {
-    (0..s.height()).find(|&y| paints_row(s, y))
 }
 
 // ---------------------------------------------------------------------------
@@ -1287,6 +1282,7 @@ fn the_presenter_plays_every_authored_step_as_the_documented_three_layer_stamp()
 fn wilting_through_an_authored_step_replays_the_growing_pictures_backwards() {
     let art = plants_only();
     let mut checked = 0;
+    let mut bent: HashSet<String> = HashSet::new();
     for plant in &art.plants {
         if plant.transitions.is_empty() {
             continue;
@@ -1368,6 +1364,14 @@ fn wilting_through_an_authored_step_replays_the_growing_pictures_backwards() {
         }
     }
     assert!(checked >= 1, "no authored step was reversed");
+    let mut names: Vec<&String> = bent.iter().collect();
+    names.sort();
+    println!("  the windy branch was exercised by {names:?}");
+    assert!(
+        bent.len() >= 3,
+        "only {} species were reversed under a live bend: {names:?}",
+        bent.len()
+    );
 }
 
 /// An **authored** step never reads the `fruit` clip, whichever way it travels: the
