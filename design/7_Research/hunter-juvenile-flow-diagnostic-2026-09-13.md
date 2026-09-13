@@ -4,15 +4,15 @@ last_reviewed: 2026-09-13
 decision_refs: []
 ---
 
-# Juvenile flow diagnostic: growth never ran, and charging is not why
+# Juvenile flow diagnostic: growth never ran on two observed paths
 
 A read-only mutation-site ledger now measures where a paid juvenile's reserve and
 battery actually go. Run on two arms so far — the richest case in the corrected cohort (the seed-8
 `specialist_on` child that made 13 captures) and the seed-6 `facultative_on`
-child born at the old failure boundary — it settles two things the
+child born at the old failure boundary — it settles trajectory facts the
 [census-based reduction](hunter-charge-rerun-results-2026-09-13.md) could only
-bound, and it **contradicts the reading that the raised charging threshold is
-what starves the juvenile**.
+bound. It does **not** establish why those trajectories would change under a
+different charging threshold.
 
 Nothing was retuned, migrated or seeded. No configuration, threshold, cost,
 geometry, gate or default moved. Nine arms remain unrun; two children are not a
@@ -56,19 +56,20 @@ is the one place the core pays a lumped, clamped debit; its three terms are
 recorded as *demanded* beside the single amount paid, and the payment is
 deliberately **not** split across them.
 
-## Four gates, all passed
+## Four gates: seed-8 specialist arm
 
 | Gate | Result |
 | --- | --- |
 | 1. Input identity | Opening `81cc5909aded672bc4271021c94fdddf649149b88c67f85463f02d75afc078e5`, state hash `13859516448854398358` — both equal to `opening.json` |
 | 2. Output identity | Replayed closing re-encodes to `e567279199bf9c246113373c2e37f8c7ffa1277eb63f81f65ba0cd1fe5c546bd`, state hash `6145446113726102027` — both equal to the retained `closing.cubw` and `summary.json` |
 | 3. Observer neutrality | Two full 144000-tick replays differing only in `enable_flow_ledger()`: identical closing bytes, identical state hash, all 997 event-emitting ticks identical record for record |
-| 4. Flow/stock reconciliation | **0 violations** over 62279 member-ticks; worst residual 8.70e-17 reserve, 7.23e-16 energy, exactly 0 structure |
+| 4. Flow/stock reconciliation | **0 violations** across 62,279 growth-gate observations (39,649 founder; 22,630 child) and 62,280 reconciliation checks, including the child's terminal removal-site check; worst residual 8.70e-17 reserve, 7.23e-16 energy, exactly 0 structure |
 
 Gate 2 asserts the *state*: the build label is supplied to the encoder, not
-derived from the diagnostic binary. Gate 4 is what makes the ledger evidence
-rather than a plausible tally — a mutation site the ledger missed would move a
-stock by ~1e-4 or more and would show up immediately.
+derived from the diagnostic binary. Gate 4 validates the ledger against every
+nonzero stock movement exercised by this replay; a missed such movement would
+appear as a residual. It does not by itself exercise a dormant branch, including
+the growth-cap selection described below.
 
 `cargo test -p cubarium-core` on the branch: **149 lib tests** (8 of them new for
 the ledger) plus every integration suite, 0 failures — including `hunter` (28),
@@ -109,9 +110,9 @@ than by a rate bound.
 | Out — reproduction funding | 0.0000 | 0% |
 | At death | 0.0000 | closes to −4.3e-13 |
 
-**Charging accounts for one eighth of that burn.** The ledger applies the same
-`above_reference` test the charging diagnostics use, per member instead of per
-process:
+**On this realized path, 12.0% of the child's oxidation burn was recorded above
+the world's 0.5 reference.** The ledger applies the same `above_reference` test
+the charging diagnostics use, per member instead of per process:
 
 | Oxidation | child `41:5` | founder `6:6` |
 | --- | ---: | ---: |
@@ -120,13 +121,14 @@ process:
 | Reserve burned | 3.5227 | 10.9410 |
 | Burned above reference | **0.4225 (12.0%)** | **10.9410 (100%)** |
 
-88% of the juvenile's burn happened at battery levels below the *background*
-recipe's own activation point, so it would have happened under the background
-policy too. The intervention lands almost entirely on the adult founder, whose
-burn is 100% above reference. The reading in the previous report — that the
-battery mechanism converts precisely the stock the growth gate needs — is
-correct as a description of the pathway and **wrong as an attribution to the
-raised threshold** for the juvenile.
+On this path, 88% of the child's observed burn was at states below the
+background recipe's reference. That is a classification of the recorded path,
+not a background-policy replay: changing the threshold can change the adult's
+reserve and energy, funding and offspring timing, and then the juvenile's own
+encounters and stocks. The reading in the previous report — that the battery
+mechanism converts precisely the stock the growth gate needs — remains a
+description of the pathway, not an attribution of the juvenile deficit to the
+raised threshold.
 
 **What actually empties the battery is upkeep.**
 
@@ -167,9 +169,15 @@ matching the transaction records exactly.
 ## The second arm replicates it, and harder
 
 Seed-6 `facultative_on` — the arm whose invalid closing state
-`9140998897574537509` was the original study's failure — replays through all four
-gates too: closing state hash `11174133049431148431` equal to the retained one,
-observer-neutral across all 757 event-emitting ticks, 0 reconciliation violations.
+`9140998897574537509` was the original study's failure — independently passes all
+four gates: opening SHA256
+`ee5f3497c2a3be1dcf82a86c3449e631fc70d34449a014f69922e25b6b238042` and state
+hash `6873749331658897442` equal the retained opening; closing SHA256
+`68edef57caebba3c36f34b4320d3c12f2686f4fa2bb4d7a6110b562635505aeb` and state
+hash `11174133049431148431` equal the retained closing; its observer-neutral
+replays agree across all 757 event-emitting ticks; and reconciliation has zero
+violations. Its worst residual is `1.55e-16` reserve, `1.37e-16` energy and zero
+structure over the founder's 32887 and child's 8660 checked ticks.
 
 Child `74:5`, born 170739, starved 179397, juvenile for all 8659 ticks:
 
@@ -183,11 +191,14 @@ Child `74:5`, born 170739, starved 179397, juvenile for all 8659 ticks:
 | Oxidation burn above the 0.5 reference | **0.0%** | 12.0% |
 | Sensing share of upkeep demand | 43.4% | 46.3% |
 
-For this child the raised threshold contributed **literally nothing**: not one of
-its 2208 oxidation ticks was above the world's configured reference. Its parent
-`29:6`, by contrast, burned 92.6% of its reserve above reference. The pattern
-across both arms is the same and it is not marginal — charging lands on the
-adult (100%, 92.6%) and essentially misses the juvenile (12.0%, 0.0%).
+For this child's recorded path, none of its 2208 oxidation ticks was above the
+world's configured reference. That does not prove the raised threshold made no
+causal contribution: a lower threshold can alter its parent, the birth path and
+the child's later trajectory before this member's first oxidation tick. Its parent
+`29:6`, by contrast, burned 92.6% of its reserve above reference. Across these
+two recorded paths, the juvenile classifications are 12.0% and 0.0%, while the
+adult classifications are 100% and 92.6%; they are not a threshold-removal
+counterfactual.
 
 The facultative profile's scavenging is also now measured rather than assumed:
 founder `29:6` scavenged on 140 ticks for 0.0297 reserve — 0.36% of its intake —
@@ -214,7 +225,7 @@ for every member on both arms, as a diet-0.0 genome implies.
   captured nothing are unmeasured, and a child that never eats may fail for a
   different reason than one that eats and cannot bank it.
 
-## Running the other ten arms
+## Running the other nine birth-producing arms
 
 Same binary, same gates, one arm per invocation (~50 s each, two full replays):
 
