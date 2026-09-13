@@ -15,17 +15,19 @@ the committed `post_birth_pause_v1` core package (`0980eab`, handoff
 ten-minute collection and every longer horizon wait on root/Astra review. No live deployment, no
 art, no README or implementation-plan edit.
 
-**Second pass.** The first build (`6d4ac7b`) was reviewed by root and by Astra, who between them
-proved five real validation defects with read-only probes and six independent boundary
-regressions. This revision fixes them rather than documenting them: the restart proof, the
-reducer's limits, its horizon and cohort identity checks, its lifecycle reconciliation, and the
-path measurement are all rebuilt. Everything root and Astra proved is now covered by a test that
-fails without the fix. The section "What the review found, and what changed" below is the
-itemised answer.
+**Second and third passes.** The first build (`6d4ac7b`) was reviewed by root and by Astra, who
+between them proved five validation defects with read-only probes and six independent boundary
+regressions; `2fbd092` fixed those. Astra then reviewed that correction (`5479e11`) and proved
+four narrower ones — a lost one-tick bout, a false refusal at the completed `B+40` boundary, an
+energy contract the reducer had tightened past the runner's own, and a cross-file link that
+compared a parent and a boundary but dropped the child. This revision fixes those four.
+Everything root and Astra proved is covered by a test that fails without the fix. The sections
+below are the itemised answer.
 
 ## Commit
 
-`6d4ac7b` (first build) and `2fbd092` (this revision) — `crates/cubarium/examples/quiet_compare.rs`,
+`6d4ac7b` (first build), `2fbd092` (first correction) and `<this commit>` (second correction) —
+`crates/cubarium/examples/quiet_compare.rs`,
 `crates/cubarium/examples/quiet_compare/bouts.rs`, `scripts/reduce-quiet-compare.mjs` and its
 test, this report, and **one additive read-only core accessor**
 (`World::moved_segments`, `crates/cubarium-core/src/world.rs`) authorized by the review. Nothing
@@ -192,10 +194,10 @@ crossing is the pieces it really was and a rim's turn is inside them. Seam-cross
 counted as evidence that they are covered, not as an excuse for omitting them, and a test checks
 the accumulated total against `render_view`'s own published segments over 600 ticks.
 
-## What the review found, and what changed
+## What the first review found, and what changed
 
-Root's five proven findings and Astra's three failing regressions, each with the fix and the test
-that fails without it.
+Root's five proven findings and Astra's six independent regressions — three of which were failing
+against `6d4ac7b` — each with the fix and the test that fails without it.
 
 | proved | fix | test |
 | --- | --- | --- |
@@ -213,17 +215,34 @@ Root's own probe, unmodified, run as
 now reports `gap: false` on all five cases: the untouched summary is still accepted, and the
 inflated limit, the unreceipted no-care ledger, the wrong absolute application tick and the
 rejected receipt are each refused by name. Its own recorded reducer SHA256 moves from
-`e3ea6233…` to `5cc9d876…`.
+`e3ea6233…` to `5cc9d876…` and, after the second correction below, to `67cbb8c9…`.
+
+## What the second review found, and what changed
+
+Astra's read-only review of `2fbd092`/`d3f9782` confirmed those closures and proved four narrower
+defects (`5479e11`). All four are fixed here.
+
+| proved | fix | test |
+| --- | --- | --- |
+| A parent that dies during its **first** held interval loses the whole bout. The death branch iterated only already-open bouts, and at the admitting boundary the parent was still active, so no recovery bout existed to extend. The core's real `Abort(ParentGone, completed_ticks = 1)` was reconciled against nothing. | held deaths are now found from the pause set captured before the decision and the world's own death record, independently of whether a bout was open: the interval opens the bout it deserves, or extends the one already running, or displaces another class's bout that the pause had taken over | Astra's `astra_death_on_first_held_interval_retains_the_actual_one_tick_bout`; mine, `a_death_in_the_first_held_interval_is_a_one_tick_bout_matching_its_abort`, asserts the property the reducer depends on — the bout's length equals the abort's `completed_ticks` |
+| `verifyClosingSnapshot` required `tick < end_tick`, so a genuine completed `B+40` state — which still carries the entry until the following ordinary decision — was falsely refused | the range is the core's own: `start_tick <= tick <= end_tick`, equality at the completed boundary and nothing past it | Astra's `a completed B+40 snapshot may retain its pause until the following decision`; mine adds the reciprocal, that one tick past the decision and one whole window early are both still refused |
+| The reducer demanded `gates.legacy_raw_energy` and gated raw energy drift, which is stricter than the runner's own `shared/audit.rs::audit_passes` — that gates raw material and water plus the persisted-corrected, independently windowed and immediate care-boundary energy, and keeps raw legacy energy as a diagnostic. An arm could truthfully pass the runner and be refused here for a naive counter's rounding. | the reducer now uses exactly the runner's contract at exactly the same unchanged 1e-8 limits. The raw drift and its honest flag are retained, checked for being real numbers, returned by `verifyArm` and reported per arm in the paired output — preserved, never relabelled as passing | Astra's `legacy raw energy remains diagnostic when all fixed corrected energy gates pass`; mine, `the energy contract here is the runner's own…`, also asserts that none of the three compensated residuals and neither raw material nor raw water was relaxed with it |
+| The cross-file paid-birth link dropped the child: the offer key carried `parent@tick>child` but the predicate compared only `parent@tick`. Astra substituted the child of a real Begin/End pair from `11/5` to `11/100005` at `47/5@144228` in the actual smoke, and every component reducer and the crosswalk accepted it | the crosswalk is now an exported `crossCheck` over whole identities: every offer must name a child that parent really paid for at that boundary (a parent with two insertions on one tick keeps both), every recovery bout's origin child must be its admission's, and — reciprocally — every close with completed intervals must have a bout of exactly that length, every non-censored bout must have the record that closed it, and a censored bout must have none | `a substituted child generation is refused although every stream stays self-consistent` replays Astra's exact mutation on the real seed-1 records, and separately relabels the bout side; `the crosswalk compares whole identities, both ways round` drives every missing, extra and mismatched case through the predicate |
+
+Astra's review also corrected a wording slip here: all **six** of its first-package regressions
+pass, three of which were failing before `2fbd092`. That is what the table above now says.
 
 ## Tests and results
 
 | Command | Result |
 | --- | --- |
-| `cargo test -p cubarium --example quiet_compare` | **18 passed, 0 failed** |
-| `cargo test -p cubarium --example astra_quiet_observer` | **14 passed, 0 failed** (all six independent regressions, previously three failing) |
-| `cargo test -p cubarium-core` | **150 passed, 0 failed, 2 ignored** |
-| `node scripts/reduce-quiet-compare.test.mjs` | **24 passed, 0 failed** |
-| `cargo clippy -p cubarium --example quiet_compare -p cubarium-core` | no findings in any file touched here |
+| `cargo test -p cubarium --example quiet_compare` | **19 passed, 0 failed** |
+| `cargo test -p cubarium --example astra_quiet_observer` | **16 passed, 0 failed** — all **seven** independent observer fixtures, including the new first-held-interval death |
+| `cargo test -p cubarium-core` (whole crate) | **349 passed, 0 failed** |
+| `cargo test -p cubarium-core --test astra_quiet_policy` | **9 passed, 0 failed** |
+| `node scripts/reduce-quiet-compare.test.mjs` | **27 passed, 0 failed** |
+| `node scripts/astra-quiet-correction-review.test.mjs` | **2 passed, 0 failed** (both were red) |
+| `cargo clippy -p cubarium --example quiet_compare` | no findings in any file touched here |
 
 The example's tests cover the preregistered family and the named horizons; an arm changing the
 policy and nothing else; both Off arms as ordinary continuations **including** the Standard Feed,
@@ -266,6 +285,17 @@ ticks — recorded the fallback as the fallback.
 **The observation is inert, and this is the measurement that says so:** all 48 closing state
 hashes are identical to the pre-review smoke's, byte for byte, across the new segment accounting,
 the life stream, the opening census, the shadow proof and the inspect mode.
+
+The second correction touches the observer's death branch, so a confirmation smoke was run into
+a new directory — `captures/quiet-smoke-validated-2026-09-13d`, from a different build id
+(`0.1.0+1d648bf` → `0.1.0+61921e3`). Against `…-13c` it is identical in all 48 closing state and
+ecology hashes, all 48 rest observers, and all five output streams of all 48 arms byte for byte,
+with `held_intervals_ended_by_death` zero across the cohort. So the new branch changes nothing
+where no parent dies mid-pause, and `…-13c` remains valid reviewed evidence — which is also why
+the reducer's tests and Astra's fixture still read `…-13c`. All 48 arms of `…-13d` were run
+through every exported check including the crosswalk and the decoded closing snapshots, and
+`node scripts/reduce-quiet-compare.mjs captures/quiet-smoke-validated-2026-09-13d` still exits 1
+with `smoke is not a prescribed horizon`.
 
 Two observations worth flagging for the review, neither of which is a result:
 
@@ -317,18 +347,36 @@ written in the harness's own flat shape with a `kind` field and the same labels 
   from the ordinary API, and no post-step delta here is presented as either.
 * **The carried underlying mode is not detectable by a stepped restart comparison**, as measured
   above; it is checked where it is persisted.
-* **Raw and compensated energy remain separate numbers.** `legacy_raw_energy` is reported as its
-  own gate beside the corrected, windowed and care-boundary residuals; none of them is widened,
-  merged or traded off against another, and every limit is still 1e-8 of the opening inventory.
+* **Raw and compensated energy remain separate numbers, and only the compensated ones gate.**
+  That is the runner's own contract (`shared/audit.rs::audit_passes`): raw material and raw water,
+  the persisted compensated energy, the independently windowed energy and the immediate
+  care-boundary energy. The raw legacy energy drift is a **diagnostic** — retained, reported per
+  arm, and never relabelled as passing. Nothing is widened, merged or traded off, and every limit
+  is still 1e-8 of the opening inventory.
+* **The observer's transported path and organism-tick totals cover post-step living organisms.**
+  A dead organism's final movement segment is not among them; the held interval it died in is
+  counted as a bout and as `held_intervals_ended_by_death`, which is deliberately kept out of the
+  population-time denominator. No claim is made about every pre-step creature's terminal motion,
+  and terminal intake or RNG checks for a body that is already gone remain unavailable.
+* **Recovery entries are not separated into "interrupted activity" and "already resting".** The
+  classification says an interval was held; it does not say the parent would otherwise have been
+  moving. Do not read admissions as interruptions of activity.
+* **What is validated here is recorded evidence, not replayed biology.** The care checks verify a
+  receipt and the ledger it produced; the snapshot checks verify a decode of bytes this run
+  wrote. Neither re-runs the world, and no test passing here is evidence of ecological benefit,
+  adequate quiet opportunity or a reason to change the Off default.
 
 ## Independent review artifacts
 
 * root: `design/7_Research/root-quiet-harness-gate-review-2026-09-13.md` and its probe under
   `assets/` — re-run above, all five cases now `gap: false`.
-* Astra: `crates/cubarium/examples/astra_quiet_observer.rs` and
-  `design/7_Research/astra-quiet-observer-review-2026-09-13.md` — six independent regressions,
-  three of which failed against the first build and all of which pass now. Astra's file is
-  unmodified.
+* Astra: `crates/cubarium/examples/astra_quiet_observer.rs`,
+  `scripts/astra-quiet-correction-review.test.mjs` and
+  `design/7_Research/astra-quiet-observer-review-2026-09-13.md` — seven independent observer
+  fixtures and two validator fixtures. Six observer fixtures came with the first review (three of
+  them failing against `6d4ac7b`); the first-held-interval death and both validator fixtures came
+  with the second (`5479e11`) and were failing against `2fbd092`. All nine pass now, and Astra's
+  files are unmodified.
 
 ## Next command, when review clears it
 

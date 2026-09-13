@@ -6,7 +6,7 @@ import {
   ARMS, CLASSES, WINDOW_TICKS, SCREEN_TICKS, NO_CARE_LEDGER, HORIZON_TICKS,
   verifyArm, reduceBouts, reduceQuietEvents, reduceLife, reduceCensus, limitsFrom,
   parseSnapshotHeader, crc32, pair, inspect, verifyClosingSnapshot, loadRun,
-  verifySeedOpening, verifyArmOpening, readOpeningIdentities,
+  verifySeedOpening, verifyArmOpening, readOpeningIdentities, crossCheck,
 } from './reduce-quiet-compare.mjs';
 
 const OPENING = 144000;
@@ -100,7 +100,6 @@ test('an arm must clear every technical gate separately, not just one summary fl
     ['conservation_and_flow_audits', /conservation/],
     ['records_reconcile_to_the_world', /reconciliation/],
     ['restart_proofs_complete_and_equal', /restart proof/],
-    ['legacy_raw_energy', /raw energy/],
   ]) refuses(a => a.gates[gate] = false, 'candidate_nocare', says);
   for (const mutate of [
     a => a.technical_complete = false,
@@ -115,6 +114,31 @@ test('an arm must clear every technical gate separately, not just one summary fl
     a => a.rest.held_intake_ticks = 1,
     a => a.unsupported_measurements = [],
   ]) refuses(mutate);
+});
+
+test('the energy contract here is the runner\'s own: compensated gates, raw drift diagnostic', () => {
+  // `shared/audit.rs::audit_passes` gates raw material and water, the persisted compensated
+  // energy, the independently windowed energy and the immediate care-boundary energy. The raw
+  // legacy energy drift is deliberately left visible rather than gating, so an arm the runner
+  // truthfully completed cannot be rejected here for a naive counter's rounding.
+  const raw = arm();
+  raw.max_absolute_drift.energy = 2 * raw.pre_intervention_baseline.limits.energy;
+  raw.gates.legacy_raw_energy = false;
+  const report = verifyArm(raw, TICKS, OPENING, 'candidate_nocare');
+  assert.equal(report.rawEnergyDrift, raw.max_absolute_drift.energy,
+    'the raw drift is retained and returned, not dropped');
+  assert.equal(report.rawEnergyWithinOpeningLimit, false, 'and its honest flag with it');
+  // It still has to be a real number, and none of the gated residuals is relaxed with it.
+  refuses(a => a.max_absolute_drift.energy = -1, 'candidate_nocare', /raw energy drift/);
+  refuses(a => a.max_absolute_drift.energy = null, 'candidate_nocare', /raw energy drift/);
+  refuses(a => delete a.gates.legacy_raw_energy, 'candidate_nocare', /raw energy flag/);
+  for (const key of ['corrected_energy_drift', 'independent_windowed_energy_drift',
+    'care_boundary_energy_drift'])
+    refuses(a => a[key] = 2 * a.pre_intervention_baseline.limits.energy, 'candidate_nocare',
+      new RegExp(key));
+  for (const key of ['material', 'water'])
+    refuses(a => a.max_absolute_drift[key] = a.pre_intervention_baseline.limits[key],
+      'candidate_nocare', new RegExp(`${key} drift`));
 });
 
 test('a relabelled horizon is refused: the name and the tick count must be each other', () => {
@@ -691,14 +715,9 @@ test('the smoke artifacts pass every per-arm check they are eligible for', () =>
         m.cohort.openings.find(o => o.seed === seed.seed).population, name, opening);
       const life = reduceLife(lines('life.jsonl'), a, opening, closing, identities);
       reduceCensus(lines('census.jsonl'), a, opening, m.ticks, m.sample_every);
-      // The cross-file links the totals cannot make: an offer had a birth behind it, and a
-      // recovery bout had an admission behind it.
-      for (const offer of events.offers)
-        assert(life.birthsByParent.has(offer.split('>')[0]), `${name}: an offer with no birth`);
-      for (const origin of bouts.recoveryOrigins)
-        assert(events.admitted.has(origin), `${name}: a recovery bout with no admission`);
-      assert.equal(bouts.byClass.newborn_initial.bouts, life.births,
-        `${name}: newborn bouts are not the births`);
+      // The cross-file links the totals cannot make, through the same predicate the reduction
+      // itself uses.
+      crossCheck(bouts, events, life, name);
       const closingBytes = readFileSync(join(dir, 'closing.cubw'));
       const header = parseSnapshotHeader(closingBytes);
       assert.equal(header.build, m.build, `${name}: the closing snapshot's build`);
@@ -776,6 +795,107 @@ test('an opening is fingerprinted from the cohort source, and every arm is held 
   /duplicate opening identity/);
 });
 
+test('the crosswalk compares whole identities, both ways round', () => {
+  // The predicate on its own, so every way the three streams can disagree is named.
+  const whole = () => ({
+    bouts: {recoveryOrigins: new Map([['1/1@100', {child: '2/1', ticks: 40, end: 'released'}]]),
+      byClass: {newborn_initial: {bouts: 1}}},
+    events: {offers: new Map([['1/1@100', new Set(['2/1'])]]),
+      admitted: new Map([['1/1@100', '2/1']]),
+      closes: new Map([['1/1@100', {child: '2/1', completed: 40, kind: 'end'}]])},
+    life: {births: 1, birthsByParent: new Map([['1/1@100', new Set(['2/1'])]])},
+  });
+  const w = whole();
+  crossCheck(w.bouts, w.events, w.life, 'x');
+  const refused = (mutate, says) => {
+    const s = whole(); mutate(s);
+    assert.throws(() => crossCheck(s.bouts, s.events, s.life, 'x'), says);
+  };
+  // An offer nobody paid for, and an offer to a child the birth did not produce.
+  refused(s => s.life.birthsByParent.clear(), /no paid birth behind it/);
+  refused(s => s.events.offers.set('1/1@100', new Set(['2/9'])),
+    /names child 2\/9, but the paid births there were 2\/1/);
+  // A bout with no admission, and a bout whose admission named another organism.
+  refused(s => s.events.admitted.clear(), /with no admission behind it/);
+  refused(s => s.events.admitted.set('1/1@100', '2/9'),
+    /names child 2\/1, but that admission named 2\/9/);
+  // The bout and the record that closed it must be the same length and the same pair.
+  refused(s => s.events.closes.set('1/1@100', {child: '2/1', completed: 39, kind: 'end'}),
+    /completed 39 intervals and its bout covers 40/);
+  refused(s => s.events.closes.set('1/1@100', {child: '2/9', completed: 40, kind: 'end'}),
+    /naming another child/);
+  // Missing and extra records, in both directions.
+  refused(s => s.events.closes.clear(), /ended as released with no record/);
+  refused(s => s.bouts.recoveryOrigins.clear(),
+    /completed 40 intervals with no recovery bout behind it/);
+  refused(s => {
+    s.bouts.recoveryOrigins.set('1/1@100', {child: '2/1', ticks: 40, end: 'censored'});
+  }, /censored bout at 1\/1@100 that the world actually closed/);
+  refused(s => s.life.births = 2, /newborn bouts are not the births/);
+  // A pause that really completed nothing needs no bout, and is not an error.
+  const none = whole();
+  none.bouts.recoveryOrigins.clear();
+  none.events.closes.set('1/1@100', {child: '2/1', completed: 0, kind: 'abort'});
+  crossCheck(none.bouts, none.events, none.life, 'x');
+});
+
+test('a substituted child generation is refused although every stream stays self-consistent', () => {
+  // Astra's exact probe: in seed-1 candidate no-care, change the child of the Begin and its End
+  // at boundary 144228 from 11/5 to 11/100005. Each stream still reconciles with itself and with
+  // its summary; only the crosswalk between them can see that no such birth was ever paid for.
+  const root = new URL('../captures/quiet-smoke-validated-2026-09-13c/', import.meta.url).pathname;
+  if (!existsSync(join(root, 'summary.json'))) return;
+  const m = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
+  const dir = join(root, 'seed-1', 'candidate_nocare');
+  const a = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8'));
+  const opening = m.cohort.opening_tick, closing = opening + m.ticks;
+  const lines = p => readFileSync(join(dir, p), 'utf8').trim().split('\n')
+    .filter(Boolean).map(JSON.parse);
+  const identities = readOpeningIdentities(readFileSync(join(dir, 'opening-organisms.jsonl'),
+    'utf8'), m.cohort.openings.find(o => o.seed === 1).population, 'candidate_nocare', opening);
+  const boutRows = lines('bouts.jsonl');
+  const eventRows = lines('quiet-events.jsonl');
+  const life = reduceLife(lines('life.jsonl'), a, opening, closing, identities);
+  const bouts = reduceBouts(boutRows, a, opening, closing);
+  crossCheck(bouts, reduceQuietEvents(eventRows, a, opening, closing), life, 'candidate_nocare');
+
+  const begin = eventRows.find(e => e.kind === 'begin');
+  assert.deepEqual(begin.parent, {slot: 47, generation: 5}, 'the probe names this exact pause');
+  assert.deepEqual(begin.child, {slot: 11, generation: 5});
+  assert.equal(begin.tick, 144228);
+
+  // (a) the records name a child that was never born.
+  const substituted = structuredClone(eventRows);
+  for (const e of substituted)
+    if ((e.kind === 'begin' || e.kind === 'end') && e.parent.slot === 47 && e.child.slot === 11)
+      e.child.generation = 100005;
+  const mutatedEvents = reduceQuietEvents(substituted, a, opening, closing);
+  assert.equal(mutatedEvents.begin, a.rest.quiet_records.admissions,
+    'the record stream still reconciles with its own summary');
+  assert.throws(() => crossCheck(bouts, mutatedEvents, life, 'candidate_nocare'),
+    /names child 11\/100005, but the paid births there were 11\/5/);
+
+  // (b) the bout names a child its admission did not.
+  const relabelled = structuredClone(boutRows);
+  for (const b of relabelled)
+    if (b.class === 'post_birth_recovery' && b.origin_boundary === 144228)
+      b.origin_child.generation = 100005;
+  const mutatedBouts = reduceBouts(relabelled, a, opening, closing);
+  assert.throws(() => crossCheck(mutatedBouts,
+    reduceQuietEvents(eventRows, a, opening, closing), life, 'candidate_nocare'),
+  /names child 11\/100005, but that admission named 11\/5/);
+
+  // (c) and the reciprocal: the same pause with its records removed entirely.
+  const summaryWithout = structuredClone(a);
+  summaryWithout.rest.quiet_records.admissions -= 1;
+  summaryWithout.rest.quiet_records.releases -= 1;
+  const without = eventRows.filter(e =>
+    !(e.parent.slot === 47 && e.parent.generation === 5 && e.kind !== 'refuse'));
+  assert.throws(() => crossCheck(bouts,
+    reduceQuietEvents(without, summaryWithout, opening, closing), life, 'candidate_nocare'),
+  /with no admission behind it/);
+});
+
 test('a closing snapshot is checked as bytes and then decoded for what is inside it', async () => {
   const root = new URL('../captures/quiet-smoke-validated-2026-09-13c/', import.meta.url).pathname;
   if (!existsSync(join(root, 'summary.json'))) return;
@@ -795,6 +915,28 @@ test('a closing snapshot is checked as bytes and then decoded for what is inside
     const lying = structuredClone(summary);
     lying.closing_state_hash = '1';
     assert.throws(() => verifyClosingSnapshot(bytes, inspected, lying, m, name), /state hash/);
+
+    // A pause is removed at the ordinary decision on its end_tick, which is taken in the step
+    // after that tick is on the clock. So a state at exactly B+40 has completed all forty
+    // intervals and legitimately still carries the entry; one past B+40 never can, and the
+    // window is not widened to admit it.
+    const held = structuredClone(inspected);
+    const summaryAt = structuredClone(summary);
+    const start = held.tick - WINDOW_TICKS;
+    held.quiet.open_pauses = 1;
+    held.quiet.pauses = [{parent: {slot: 1, generation: 1}, child: {slot: 2, generation: 1},
+      start_tick: start, end_tick: start + WINDOW_TICKS}];
+    summaryAt.open_pauses_at_close = 1;
+    assert.doesNotThrow(() => verifyClosingSnapshot(bytes, held, summaryAt, m, name),
+      'a completed B+40 boundary still holds its entry');
+    for (const [shift, why] of [[-1, 'an entry one tick past its decision is still refused'],
+      [WINDOW_TICKS + 1, 'and so is one that cannot have opened yet']]) {
+      const outside = structuredClone(held);
+      outside.quiet.pauses[0].start_tick += shift;
+      outside.quiet.pauses[0].end_tick += shift;
+      assert.throws(() => verifyClosingSnapshot(bytes, outside, summaryAt, m, name),
+        /persisted pause at tick/, why);
+    }
   }
   // And the whole reduction still refuses a smoke, whatever its artifacts look like.
   await assert.rejects(loadRun(root), /not a prescribed horizon/);

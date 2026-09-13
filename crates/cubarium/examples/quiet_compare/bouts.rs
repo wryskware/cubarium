@@ -616,6 +616,51 @@ impl Observer {
             }
         }
 
+        // The held interval an organism died *in* still happened: its decision was held, it
+        // rested through the interval, and it died in the same step that completed it. The
+        // classification loop above cannot see it — there is no body left to iterate — so it is
+        // recorded here, from the pause set captured before the decision and the world's own
+        // death record.
+        //
+        // This includes the **first** held interval, where no bout is open yet because the
+        // parent was still active at the admitting boundary. A parent that dies during decision
+        // `B` produces a real `Abort(ParentGone, completed_ticks = 1)` and a real one-tick
+        // recovery bout at `B + 1`; iterating only the already-open bouts lost it entirely.
+        let held_deaths: Vec<(OrganismId, QuietPause)> = pre
+            .pauses
+            .iter()
+            .filter(|(id, p)| {
+                p.holds(pre.tick)
+                    && !aborted_at_pre.contains_key(id)
+                    && state.organisms.get(**id).is_none()
+                    && life.iter().any(|e| matches!(e, LifeEvent::Death { id: d, tick: t, .. }
+                        if d == *id && *t == now))
+            })
+            .map(|(id, p)| (*id, *p))
+            .collect();
+        for (id, pause) in held_deaths {
+            self.held_intervals_ended_by_death += 1;
+            match self.open.get(&id).map(|open| open.class) {
+                // Already recovering: the bout simply covers one interval more.
+                Some(RestClass::PostBirthRecovery) => {
+                    self.open.get_mut(&id).expect("just observed").last_tick = now;
+                }
+                // Resting for some other reason when the pause took over: that bout ended where
+                // it ended, and this interval is the recovery one.
+                Some(_) => {
+                    self.close_with(
+                        id,
+                        BoutEnd::Reclassified(RestClass::PostBirthRecovery),
+                        Some(RestClass::PostBirthRecovery),
+                    );
+                    self.begin(id, RestClass::PostBirthRecovery, now, Some((pause.child, pause.start_tick)));
+                }
+                None => {
+                    self.begin(id, RestClass::PostBirthRecovery, now, Some((pause.child, pause.start_tick)));
+                }
+            }
+        }
+
         // Anyone whose bout was open and who is no longer here died this tick. A recovery bout
         // that the world closed with its own record on the very same tick keeps that record:
         // "the pause was aborted because the parent is gone" is what happened, and `died` alone
@@ -627,21 +672,6 @@ impl Observer {
             .map(|(id, open)| (*id, open.class))
             .collect();
         for (id, open_class) in gone {
-            // The interval this organism died *in* still happened: its decision was held, it
-            // rested through the interval, and it died in the same step that completed it. The
-            // bout covers it, so a parent that dies on its fortieth held interval has a bout of
-            // forty and an abort that completed forty — the same number, not two different ones.
-            let held_to_the_end = open_class == RestClass::PostBirthRecovery
-                && pre
-                    .pauses
-                    .get(&id)
-                    .is_some_and(|p| p.holds(pre.tick) && !aborted_at_pre.contains_key(&id))
-                && life.iter().any(|e| matches!(e, LifeEvent::Death { id: d, tick: t, .. }
-                    if *d == id && *t == now));
-            if held_to_the_end && let Some(open) = self.open.get_mut(&id) {
-                open.last_tick = now;
-                self.held_intervals_ended_by_death += 1;
-            }
             let end = self.recovery_terminal(open_class, id, quiet).unwrap_or(BoutEnd::Died);
             self.close_with(id, end, None);
         }
@@ -788,6 +818,74 @@ mod tests {
         observer.close_censored();
         bouts.extend(observer.drain_bouts());
         (world, observer, bouts)
+    }
+
+    /// A pause aborted because its parent died holds the same number of intervals the bout
+    /// covers — including the very first one, where no bout is open yet because the parent was
+    /// still active at the admitting boundary. The reducer reconciles `completed_ticks` against
+    /// the bout's length, so losing that interval would make the two disagree by one.
+    #[test]
+    fn a_death_in_the_first_held_interval_is_a_one_tick_bout_matching_its_abort() {
+        let mut state = mature();
+        state.quiet = QuietState::post_birth_pause_v1();
+        let mut world = World::from_state(state).expect("valid");
+        let mut observer = Observer::new(&world.state);
+        // Run to the first real admission, observing ordinarily.
+        let opening = world.tick();
+        let boundary = loop {
+            let pre = observer.before(&world);
+            world.step();
+            let life = world.drain_events();
+            let quiet = world.drain_quiet_events();
+            observer.after(&world, pre, &life, &quiet).expect("observed");
+            let _ = observer.drain_bouts();
+            if let Some(tick) = quiet.iter().find_map(|e| match *e {
+                QuietEvent::Begin { tick, .. } => Some(tick),
+                _ => None,
+            }) {
+                break tick;
+            }
+            assert!(world.tick() - opening < 3000, "the fixture must admit a pause");
+        };
+        assert_eq!(world.tick(), boundary, "the admission is this boundary");
+        assert_eq!(observer.held_intervals_ended_by_death, 0);
+
+        // Fixture only: every body is now past its age limit, so the held parent dies during its
+        // very first held decision. Nothing else about the world is touched.
+        let mut state = world.state.clone();
+        state.config.organism.max_age_seconds = cubarium_core::DT;
+        let mut world = World::from_state(state).expect("valid");
+        let pre = observer.before(&world);
+        world.step();
+        let life = world.drain_events();
+        let quiet = world.drain_quiet_events();
+        observer.after(&world, pre, &life, &quiet).expect("observed");
+        assert!(observer.reconciled(), "{}", observer.summary());
+
+        let aborts: Vec<(OrganismId, u64)> = quiet
+            .iter()
+            .filter_map(|e| match *e {
+                QuietEvent::Abort { parent, completed_ticks, reason: QuietReason::ParentGone, .. } => {
+                    Some((parent, completed_ticks))
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(!aborts.is_empty(), "the held parent really died with the pause open");
+        let bouts = observer.drain_bouts();
+        for (parent, completed) in aborts {
+            assert_eq!(completed, 1, "the parent died in its first held interval");
+            let bout = bouts
+                .iter()
+                .find(|b| b.id == parent && b.class == RestClass::PostBirthRecovery)
+                .expect("the one held interval it lived through must still be a bout");
+            assert_eq!(bout.ticks, completed, "the bout and its abort must be the same length");
+            assert_eq!(bout.start_tick, boundary + 1);
+            assert_eq!(bout.end_tick, boundary + 1);
+            assert_eq!(bout.end, BoutEnd::Aborted(QuietReason::ParentGone));
+            assert_eq!(bout.origin.map(|(_, b)| b), Some(boundary));
+        }
+        assert!(observer.held_intervals_ended_by_death >= 1);
     }
 
     /// The transported path really is the path the world published, tick for tick, and the
