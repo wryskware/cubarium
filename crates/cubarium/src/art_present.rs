@@ -63,6 +63,7 @@ use std::sync::LazyLock;
 
 use cube_proto::{FACE_SIZE, Face};
 use cubarium_core::OrganismId;
+use cubarium_core::hunter::{HunterPhase, HunterView};
 use cubarium_core::organism::Mode;
 use cubarium_core::view::{OrganismView, RenderView};
 use cubarium_render::{
@@ -76,6 +77,8 @@ use cubarium_surface::{
 pub use crate::art::Band;
 use crate::art::{ArtPack, Clip, GroundTile, Plant, TallPlant};
 use crate::clock::DT;
+use crate::hunter_present::{HunterFrame, HunterMemory, hunter_scale_supported};
+use crate::lanternjaw::{Lanternjaw, Part};
 use crate::present::{
     self, DETRITUS_SCALE, DETRITUS_THRESHOLD, JUVENILE_SCALE, PALETTE, PRODUCER_SATURATION,
 };
@@ -2308,6 +2311,20 @@ pub struct ArtPresenter {
     /// tells `observe` how much simulated time to advance, and what makes the first view a
     /// snap instead of a replay of a mature world's whole growth.
     last_tick: Option<u64>,
+    /// The selected megafauna body, rasterized per frame for every hunter member.
+    lanternjaw: Lanternjaw,
+    /// The hunters the world's observer lists, by full generation-bearing id, in id order
+    /// so two hunters always composite in the same order. Bounded by the membership list
+    /// handed to [`ArtPresenter::observe_hunters`]; an id the list no longer carries is
+    /// forgotten there. Never derived from `genome.form`.
+    hunters: std::collections::BTreeMap<OrganismId, HunterMemory>,
+    /// Members whose authoritative `body_scale` the rig cannot draw
+    /// ([`hunter_scale_supported`]): drawn with their ordinary rig instead, and reported.
+    unsupported: std::collections::BTreeMap<OrganismId, f64>,
+    /// Unsupported members already handed out by [`ArtPresenter::take_new_unsupported`].
+    reported: std::collections::BTreeSet<OrganismId>,
+    /// Scratch for the rig's parts, reused across frames.
+    hunter_parts: Vec<Part>,
 }
 
 impl ArtPresenter {
@@ -2346,7 +2363,101 @@ impl ArtPresenter {
             bodies: std::collections::HashMap::new(),
             budgets,
             last_tick: None,
+            lanternjaw: Lanternjaw::new(),
+            hunters: std::collections::BTreeMap::new(),
+            unsupported: std::collections::BTreeMap::new(),
+            reported: std::collections::BTreeSet::new(),
+            hunter_parts: Vec::new(),
         }
+    }
+
+    /// Record this tick's hunter membership from the world's own observer, after
+    /// [`ArtPresenter::observe`] of the same view.
+    ///
+    /// **Normative.** A member is a hunter by its full id in `hunters` and nothing else: an
+    /// ordinary organism with the same `genome.form` is not one, and an entry whose id does
+    /// not resolve to an organism of `view` (a stale generation) is ignored. A member whose
+    /// `body_scale` the rig cannot draw ([`hunter_scale_supported`]) is not clamped: it is
+    /// listed by [`ArtPresenter::unsupported_hunters`] and drawn with its ordinary rig. Every
+    /// other member gets a [`HunterMemory`] — entered from its persisted `entered_from` when
+    /// first seen, advanced by [`HunterMemory::observe`] after — and is drawn once, as the
+    /// Lanternjaw, never also as its atelier rig. Memory of an id the list no longer carries
+    /// is dropped, so the map is bounded by the membership. A target that leaves the view at
+    /// the same boundary its hunter enters `Handling` is kept for that one tick's frames
+    /// ([`HunterMemory::prey`]) so a captured prey is not shown vanishing before the claws
+    /// close; nothing is kept longer, and nothing is regenerated.
+    ///
+    /// With an empty list this changes nothing: the image is bit for bit the one a presenter
+    /// never told about hunters draws.
+    pub fn observe_hunters(&mut self, view: &RenderView, hunters: &[HunterView]) {
+        let live: std::collections::HashSet<OrganismId> =
+            view.organisms.iter().map(|o| o.id).collect();
+        let mut listed = Vec::with_capacity(hunters.len());
+        for h in hunters {
+            if !live.contains(&h.id) {
+                continue;
+            }
+            listed.push(h.id);
+            if !hunter_scale_supported(h.body_scale) {
+                self.unsupported.insert(h.id, h.body_scale);
+                self.hunters.remove(&h.id);
+                continue;
+            }
+            self.unsupported.remove(&h.id);
+            self.reported.remove(&h.id);
+            let frame = HunterFrame::of(h, view.tick);
+            let target_view = frame
+                .target
+                .and_then(|t| view.organisms.iter().find(|o| o.id == t))
+                .cloned();
+            match self.hunters.get_mut(&h.id) {
+                Some(memory) => {
+                    memory.observe(frame);
+                    let captured = memory.prev.as_ref().is_some_and(|p| {
+                        p.target.is_some_and(|t| !live.contains(&t))
+                            && frame.phase == HunterPhase::Handling
+                            && frame.started == view.tick
+                    });
+                    memory.prey = if captured { memory.target_view.take() } else { None };
+                    memory.target_view = target_view;
+                }
+                None => {
+                    let mut memory = HunterMemory::enter(frame);
+                    memory.target_view = target_view;
+                    self.hunters.insert(h.id, memory);
+                }
+            }
+        }
+        self.hunters.retain(|id, _| listed.contains(id));
+        self.unsupported.retain(|id, _| listed.contains(id));
+        self.reported.retain(|id| listed.contains(id));
+    }
+
+    /// The adapter's memory of a hunter, if it is drawn as the Lanternjaw.
+    pub fn hunter_of(&self, id: OrganismId) -> Option<&HunterMemory> {
+        self.hunters.get(&id)
+    }
+
+    /// The hunters currently drawn as the Lanternjaw, in composite order.
+    pub fn hunter_ids(&self) -> Vec<OrganismId> {
+        self.hunters.keys().copied().collect()
+    }
+
+    /// Members whose `body_scale` the rig cannot draw, with that scale.
+    pub fn unsupported_hunters(&self) -> Vec<(OrganismId, f64)> {
+        self.unsupported.iter().map(|(id, s)| (*id, *s)).collect()
+    }
+
+    /// The unsupported members not yet returned by this method: what a host logs once.
+    pub fn take_new_unsupported(&mut self) -> Vec<(OrganismId, f64)> {
+        let fresh: Vec<(OrganismId, f64)> = self
+            .unsupported
+            .iter()
+            .filter(|(id, _)| !self.reported.contains(id))
+            .map(|(id, s)| (*id, *s))
+            .collect();
+        self.reported.extend(fresh.iter().map(|(id, _)| *id));
+        fresh
     }
 
     /// The measured amplitude budget of an asset, in tile pixels: the largest `|amplitude|`
@@ -2852,29 +2963,78 @@ impl ArtPresenter {
         // Bodies: the organism's real state, cross-faded for `BODY_FADE_SECONDS` after a
         // change so a body does not cut from one clip to another. Every clip in the fade
         // keeps its own temporal blend ([`Clip::sample`]); the layers are mixed in one stamp.
+        // A hunter member drawn as the Lanternjaw is skipped here: each body is drawn once.
         for o in &view.organisms {
-            let form = rig_of(o.form, o.hue, self.pack.creature_count());
-            let state = state_of(o);
-            let pose_of = |st: usize| {
-                let clip = &self.pack.clips[form * 4 + st];
-                // The bud clip's last frame *is* the birth, so a body that has just stopped
-                // budding fades out of that frame rather than out of a half-grown bud.
-                let gestation = if st == 3 && st != state { Some(1.0) } else { o.gestation };
-                clip.sample(clip_time(clip, seconds, phase_of(o.id, clip.seconds), gestation))
-            };
+            if self.hunters.contains_key(&o.id) {
+                continue;
+            }
+            stamp_creature(&self.pack, &mut self.scratch, o, self.bodies.get(&o.id), seconds, f, canvas);
+        }
+
+        // A prey the world removed at this tick's boundary while its hunter entered
+        // `Handling`: still on screen for the frames before that boundary, at the pose its
+        // last view left it (its tick-of-capture movement is not published), gone at `f = 1`.
+        if f < 1.0 {
+            for memory in self.hunters.values() {
+                if let Some(prey) = &memory.prey {
+                    stamp_creature(&self.pack, &mut self.scratch, prey, None, seconds, 1.0, canvas);
+                }
+            }
+        }
+
+        // The hunters, in id order, over the ordinary bodies: the living pose from the
+        // adapter's memory of the world's own phases, the root along the same interpolated
+        // path and turn every body uses, the whole rig at the authoritative scale.
+        for (id, memory) in &self.hunters {
+            let Some(o) = view.organisms.iter().find(|o| o.id == *id) else { continue };
             let (anchor, dir) = present::interpolate(&o.moved, o.pos, o.heading, f);
-            let memory = self.bodies.get(&o.id);
-            // The turn the tick began with is spent over the tick's frames.
-            let heading = turn_heading(dir, memory.map_or(0.0, |m| m.turn), f);
-            let scale = if o.juvenile { JUVENILE_SCALE } else { 1.0 };
-            let states = match memory {
-                Some(memory) if memory.fade_at(seconds) < 1.0 => memory.layers_at(seconds),
-                _ => vec![(state, 1.0)],
-            };
-            let layers: Vec<(Pose<'_>, f32)> = states.iter().map(|&(st, w)| (pose_of(st), w)).collect();
-            stamp_layers(canvas, anchor, heading, &layers, scale, 1.0, Mask::None, &mut self.scratch);
+            let heading = turn_heading(dir, self.bodies.get(id).map_or(0.0, |m| m.turn), f);
+            let (pose, scale) = memory.living_pose(view.tick, f, &o.moved);
+            self.lanternjaw.draw_living(
+                canvas,
+                anchor,
+                heading,
+                &pose,
+                scale,
+                1.0,
+                &mut self.hunter_parts,
+                &mut self.scratch,
+            );
         }
     }
+}
+
+/// One ordinary creature at fraction `f` of its tick: exactly the stamp the body loop has
+/// always made, with `memory` supplying the cross-fade and the turn (none for a body with
+/// no memory).
+fn stamp_creature(
+    pack: &ArtPack,
+    scratch: &mut Vec<PixelImage>,
+    o: &OrganismView,
+    memory: Option<&BodyMemory>,
+    seconds: f64,
+    f: f64,
+    canvas: &mut Canvas,
+) {
+    let form = rig_of(o.form, o.hue, pack.creature_count());
+    let state = state_of(o);
+    let pose_of = |st: usize| {
+        let clip = &pack.clips[form * 4 + st];
+        // The bud clip's last frame *is* the birth, so a body that has just stopped
+        // budding fades out of that frame rather than out of a half-grown bud.
+        let gestation = if st == 3 && st != state { Some(1.0) } else { o.gestation };
+        clip.sample(clip_time(clip, seconds, phase_of(o.id, clip.seconds), gestation))
+    };
+    let (anchor, dir) = present::interpolate(&o.moved, o.pos, o.heading, f);
+    // The turn the tick began with is spent over the tick's frames.
+    let heading = turn_heading(dir, memory.map_or(0.0, |m| m.turn), f);
+    let scale = if o.juvenile { JUVENILE_SCALE } else { 1.0 };
+    let states = match memory {
+        Some(memory) if memory.fade_at(seconds) < 1.0 => memory.layers_at(seconds),
+        _ => vec![(state, 1.0)],
+    };
+    let layers: Vec<(Pose<'_>, f32)> = states.iter().map(|&(st, w)| (pose_of(st), w)).collect();
+    stamp_layers(canvas, anchor, heading, &layers, scale, 1.0, Mask::None, scratch);
 }
 
 /// Add one ground layer to the image, each pixel scaled by `1 − `[`w_soil`].

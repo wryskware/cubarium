@@ -515,6 +515,22 @@ impl Show {
         }
     }
 
+    /// Once per completed tick, after `observe`: the world's own hunter membership. The
+    /// plain image ignores it (the decided disc path is unchanged); the art image draws each
+    /// listed member once as the Lanternjaw, and reports — once per member — a body scale
+    /// the rig cannot draw, which is then drawn with its ordinary rig rather than clamped.
+    fn observe_hunters(&mut self, view: &RenderView, hunters: &[cubarium_core::HunterView]) {
+        if let Show::Art(p) = self {
+            p.observe_hunters(view, hunters);
+            for (id, scale) in p.take_new_unsupported() {
+                eprintln!(
+                    "hunter {id:?}: body scale {scale} is outside the art's admitted range; \
+                     drawn with its ordinary rig"
+                );
+            }
+        }
+    }
+
     /// Once per rendered frame.
     fn draw(&mut self, view: &RenderView, f: f64, canvas: &mut Canvas) {
         match self {
@@ -1063,6 +1079,8 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
             // Trails are simulated history: they are fed per tick, not per frame.
             let published = world.render_view();
             presenter.observe(&published);
+            // The owning world's hunter membership, by full id (empty without a trial).
+            presenter.observe_hunters(&published, &world.hunter_view());
             *view = Some(published);
         }
         // Cadences are anchored on the absolute tick, so a resumed world keeps the same

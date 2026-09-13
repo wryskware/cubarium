@@ -14,7 +14,7 @@
 //! `SCALE_MIN..=SCALE_MAX`.
 
 use cubarium::lanternjaw::*;
-use cubarium_render::{Canvas, RigPart, SUPERSAMPLE_REACH, stamp_rig_scaled};
+use cubarium_render::{Canvas, SUPERSAMPLE_REACH, stamp_rig_scaled};
 use cubarium_surface::{SurfacePoint, Vec2};
 use cube_proto::Face;
 
