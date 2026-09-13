@@ -1469,7 +1469,7 @@ impl World {
                     // the branch a member under the configured threshold would not have taken.
                     // Reads nothing new, writes no world state, consumes no draw
                     // (`ChargingDiagnostics`).
-                    if above_reference {
+                    if above_reference && burned > 0.0 {
                         charging.extra_transactions += 1;
                         charging.extra_reserve_burned += burned;
                         charging.extra_energy_gained += gained;

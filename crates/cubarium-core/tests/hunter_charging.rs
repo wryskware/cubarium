@@ -457,6 +457,35 @@ fn a_zero_reserve_never_charges_and_no_energy_is_invented() {
     }
 }
 
+/// A world whose oxidation rate is zero transacts nothing, at either threshold — and records
+/// nothing, which is the part worth testing. The activation test alone would pass here (energy
+/// is below the threshold and the reserve is not empty) while the conversion moved nothing, so
+/// a counter that trusted the activation test would report transactions that burned nothing.
+/// Zero is a legal configured rate, so this is a reachable world and not a hypothetical.
+#[test]
+fn a_zero_oxidation_rate_transacts_nothing_and_records_nothing() {
+    for version in SUPPORTED_PROFILE_VERSIONS {
+        let mut cfg = quiet_config();
+        cfg.organism.oxidation_rate = 0.0;
+        let (mut world, id) = founded(version, cfg);
+        let full = reserve_max(&world, id);
+        set_reserve(&mut world, id, full);
+        // Below both thresholds, so the activation test passes and only the amount is zero.
+        set_energy_fraction(&mut world, id, 0.1);
+        let cell = cell_of(&world.state.organisms.get(id).unwrap().pos);
+        let n_before = world.state.fields.n[cell.index()];
+        world.step();
+
+        assert_eq!(reserve_of(&world, id), full, "v{version}: a zero rate burns nothing");
+        assert_eq!(world.state.fields.n[cell.index()], n_before, "v{version}");
+        assert_eq!(
+            world.charging_diagnostics(),
+            ChargingDiagnostics::default(),
+            "v{version}: a transaction that moved nothing is not a transaction"
+        );
+    }
+}
+
 /// A reserve smaller than one tick's ceiling is burned whole and no further.
 #[test]
 fn the_burn_is_capped_by_the_reserve_that_is_actually_there() {

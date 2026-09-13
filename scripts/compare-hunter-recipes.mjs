@@ -185,6 +185,12 @@ export function verifyChargePair(a, b) {
   // The resolved policy, recorded per arm, is the one the recipe claims.
   assert.equal(a.recipe_oxidation_policy, CHARGE_POLICY.baseline);
   assert.equal(b.recipe_oxidation_policy, CHARGE_POLICY.candidate);
+  for (const o of [a, b]) {
+    assert(Number.isFinite(o.config?.organism?.oxidation_threshold)
+      && o.config.organism.oxidation_threshold >= 0 && o.config.organism.oxidation_threshold <= 1);
+    assert.equal(o.world_oxidation_threshold, o.config.organism.oxidation_threshold,
+      'recorded world threshold disagrees with opening config');
+  }
   assert.equal(a.world_oxidation_threshold, b.world_oxidation_threshold, 'the worlds disagree about the configured threshold');
   assert.equal(a.recipe_oxidation_threshold, a.world_oxidation_threshold, 'the baseline recipe must defer to the world');
   assert.equal(b.recipe_oxidation_threshold, CHARGE_POLICY.threshold);
@@ -207,13 +213,24 @@ export function verifyChargePair(a, b) {
 
 // The bounded oxidation diagnostics, checked for shape, sign and internal consistency — never
 // for a value, which is the experiment's result and not this script's business.
-export function verifyOxidation(a, recipeThreshold) {
+export function verifyOxidation(a, recipeThreshold, opening) {
   const o = a.oxidation;
   assert(o && typeof o.scope === 'string' && o.scope.length > 0, 'missing oxidation scope');
   assert.equal(o.member_threshold, recipeThreshold);
-  assert(Number.isFinite(o.world_threshold) && o.world_threshold > 0);
+  const cfg = opening?.config?.organism;
+  assert(cfg, 'oxidation requires the actual opening config');
+  assert.equal(o.world_threshold, cfg.oxidation_threshold, 'summary threshold disagrees with opening config');
+  assert(Number.isFinite(o.world_threshold) && o.world_threshold >= 0 && o.world_threshold <= 1);
+  assert(Number.isFinite(cfg.oxidation_rate) && cfg.oxidation_rate >= 0);
+  assert(Number.isFinite(cfg.reserve_energy_density) && cfg.reserve_energy_density >= 0);
+  assert(Number.isFinite(cfg.oxidation_efficiency) && cfg.oxidation_efficiency >= 0 && cfg.oxidation_efficiency <= 1);
   const c = o.charging_above_reference;
   safeCount(c.transactions);
+  safeCount(a.planned_ticks);
+  safeCount(opening.config.capacity?.max_organisms);
+  const maxTransactions = a.planned_ticks * opening.config.capacity.max_organisms;
+  safeCount(maxTransactions);
+  assert(c.transactions <= maxTransactions, 'oxidation transactions exceed tick/population bound');
   for (const key of ['reserve_burned', 'energy_gained', 'conversion_heat'])
     assert(Number.isFinite(c[key]) && c[key] >= 0, `invalid ${key}`);
   if (o.member_threshold <= o.world_threshold)
@@ -223,7 +240,52 @@ export function verifyOxidation(a, recipeThreshold) {
       assert.equal(c[key], 0, `${key} without a transaction`);
   else
     assert(c.reserve_burned > 0, 'a transaction that burned nothing');
+  // Both sides are accumulated nonnegative transaction amounts. Allow a conservative
+  // floating-point summation envelope, not arbitrary finite but unpaid energy. DT is
+  // the frozen core's 20 Hz step, not the independently selected audit/census cadence.
+  const released = cfg.reserve_energy_density * c.reserve_burned;
+  const accounted = c.energy_gained + c.conversion_heat;
+  const maxBurn = c.transactions * cfg.oxidation_rate * 0.05;
+  assert([released, accounted, maxBurn].every(Number.isFinite), 'nonfinite derived oxidation bound');
+  const slack = (scale) => 32 * Number.EPSILON * Math.max(1, c.transactions) * Math.max(1, scale);
+  assert(Math.abs(released - accounted) <= slack(Math.max(released, accounted)), 'oxidation release != gain + heat');
+  assert(c.energy_gained <= cfg.oxidation_efficiency * released + slack(released), 'oxidation gain exceeds conversion efficiency');
+  assert(c.reserve_burned <= maxBurn + slack(Math.max(maxBurn, c.reserve_burned)), 'oxidation burn exceeds transaction rate ceiling');
+  if (cfg.oxidation_rate === 0) assert.equal(c.transactions, 0, 'zero-rate oxidation cannot transact');
+  if (opening.arm === 'untouched' || opening.arm === 'budget_control')
+    assert.equal(c.transactions, 0, 'a no-member control cannot charge');
   return c;
+}
+
+export function verifyChargeManifestOpening(manifest, opening) {
+  assert.equal(manifest.profile_recipe, opening.profile_recipe, 'manifest/opening recipe mismatch');
+  assert.equal(manifest.world_oxidation_threshold, opening.config.organism.oxidation_threshold,
+    'manifest threshold disagrees with opening config');
+  assert.equal(manifest.member_oxidation_policy, opening.recipe_oxidation_policy, 'manifest/opening policy mismatch');
+  assert.equal(manifest.member_oxidation_threshold, opening.recipe_oxidation_threshold, 'manifest/opening threshold mismatch');
+}
+
+export function verifyChargeControlPair(a, b, index) {
+  if (index > 1) return; // Real members, including attack-off hunters, may diverge.
+  if (index === 0) {
+    assert.deepEqual(a, b, 'the untouched arm changed');
+    return;
+  }
+  // Budget deposits install a profile but never a member. Only persisted policy hashes
+  // and the recorded hypothetical member threshold differ; its actual ecology must not.
+  for (const s of [a, b]) {
+    assert.equal(s.closing_hunters, 0, 'budget control has hunters');
+    assert.equal(s.reproductive_opportunity.member_ticks, 0, 'budget control observed a member');
+    assert.equal(s.oxidation.charging_above_reference.transactions, 0, 'budget control charged');
+  }
+  const project = s => {
+    const p = structuredClone(s);
+    delete p.closing_state_hash;
+    delete p.closing_snapshot_sha256;
+    delete p.oxidation.member_threshold;
+    return p;
+  };
+  assert.deepEqual(project(a), project(b), 'the no-member budget control changed beyond policy metadata');
 }
 
 export async function compareCharge(backgroundDir, candidateDir) {
@@ -246,13 +308,12 @@ export async function compareCharge(backgroundDir, candidateDir) {
     assert(t, `candidate is missing seed ${s.seed}`);
     return {seed: s.seed, arms: s.arms.map((arm, i) => {
       verifyChargePair(arm.opening, t.arms[i].opening);
-      const bg = verifyOxidation(arm.summary, arm.opening.world_member_oxidation_threshold);
-      const cand = verifyOxidation(t.arms[i].summary, t.arms[i].opening.world_member_oxidation_threshold);
+      verifyChargeManifestOpening(a.manifest, arm.opening);
+      verifyChargeManifestOpening(b.manifest, t.arms[i].opening);
+      const bg = verifyOxidation(arm.summary, arm.opening.world_member_oxidation_threshold, arm.opening);
+      const cand = verifyOxidation(t.arms[i].summary, t.arms[i].opening.world_member_oxidation_threshold, t.arms[i].opening);
       assert.equal(bg.transactions, 0, 'the background recipe must never charge above the reference');
-      // Only the untouched arm is required to be identical. Every arm carrying a member —
-      // including the attack-disabled controls — may legitimately diverge, because the policy
-      // is theirs too.
-      if (i === 0) assert.deepEqual(arm.summary, t.arms[i].summary, 'the untouched arm changed');
+      verifyChargeControlPair(arm.summary, t.arms[i].summary, i);
       return {arm: arm.name, background: metrics(arm), candidate: metrics(t.arms[i]),
         charging: {background: bg, candidate: cand}};
     })};

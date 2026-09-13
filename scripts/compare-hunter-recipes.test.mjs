@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {verifyArm, reduceEvents, verifyRecipePair, verifyChargePair, verifyOxidation, CHARGE_POLICY, metrics} from './compare-hunter-recipes.mjs';
+import {verifyArm, reduceEvents, verifyRecipePair, verifyChargePair, verifyOxidation as verifyOxidationWithOpening, CHARGE_POLICY, metrics} from './compare-hunter-recipes.mjs';
 import {inspectSnapshot} from './prepare-hunter-worlds.mjs';
 
 function arm() {
@@ -135,7 +135,8 @@ test('snapshot envelope integrity can explicitly check schema11 without loosenin
 function chargeOpening(recipe) {
   const candidate = recipe === 'reserve-targets-charge80-v1';
   return {
-    arm:'specialist_on', profile_recipe:recipe, config:{seed:1}, heading:0.5,
+    arm:'specialist_on', profile_recipe:recipe, config:{seed:1,capacity:{max_organisms:512},organism:{oxidation_threshold:0.5,
+      oxidation_rate:0.01,oxidation_efficiency:0.8,reserve_energy_density:2}}, heading:0.5,
     target:{face:4,u:32,v:32}, pre_import_inventory:{m:1}, post_import_inventory:{m:5},
     receipt:{material_in:4},
     recipe_oxidation_policy: candidate ? CHARGE_POLICY.candidate : CHARGE_POLICY.baseline,
@@ -147,6 +148,8 @@ function chargeOpening(recipe) {
   };
 }
 const chargePair = () => [chargeOpening('reserve-targets-v1'), chargeOpening('reserve-targets-charge80-v1')];
+const verifyOxidation = (summary, threshold) => verifyOxidationWithOpening(summary, threshold,
+  chargeOpening('reserve-targets-charge80-v1'));
 
 test('the charging pair permits only the semantic version, on the fixed reserve-target background', () => {
   const [a,b] = chargePair();
@@ -180,7 +183,7 @@ test('the charging pair permits only the semantic version, on the fixed reserve-
 });
 
 test('the oxidation diagnostics are checked for shape and consistency, never for a result', () => {
-  const summary = (member, c) => ({oxidation:{member_threshold:member, world_threshold:0.5,
+  const summary = (member, c) => ({planned_ticks:144000,oxidation:{member_threshold:member, world_threshold:0.5,
     charging_above_reference:c, scope:'member oxidation transactions above the configured threshold'}});
   const zero = {transactions:0, reserve_burned:0, energy_gained:0, conversion_heat:0};
   const some = {transactions:7, reserve_burned:0.0035, energy_gained:0.0056, conversion_heat:0.0014};
