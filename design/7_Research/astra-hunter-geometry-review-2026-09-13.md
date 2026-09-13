@@ -11,7 +11,12 @@ and the exploration animation contract. Canon was read first. This is evidence,
 not a new decision or permission to deploy hunters. No production files, live
 worlds, processes, or display transport were changed.
 
-## Disposition: three remaining integration gates
+**Follow-up disposition:** findings 1 and 3 are RESOLVED by `327862c` and
+`f36817f`, respectively, with independent regression verification below. Finding
+2 remains open pending the completed Fable scale implementation and validation.
+The original findings and reproductions are retained as historical evidence.
+
+## Original disposition at `22d8dba`: three integration gates
 
 1. **Post-settlement phase timestamps are one tick early.** In `World::step`,
    successful settlement enters Handling with `(now, now)` and failed settlement
@@ -184,3 +189,58 @@ fn astra_schema_ten_mirror_loads_empty_and_refuses_trial_history() {
         Err(SnapshotError::Invalid(reason)) if reason.contains("schema 10")));
 }
 ```
+
+## Follow-up: committed core corrections verified
+
+Read the actual diffs and regression tests in `f36817f` and `327862c`.
+Independently ran `cargo test -p cubarium-core --offline --test hunter --test
+hunter_geometry`: **34 passed, 0 failed** (26 hunter, 8 geometry). Core paths were
+clean when inspected; later documentation-only `ad512f8` was present at the final
+source-status check. No core or art source/test files were modified for this
+follow-up.
+
+- **Finding 1 RESOLVED:** successful capture, failed paid attempt, and the
+  post-digestion empty-gut pause now enter at `now + 1`, with timed deadlines
+  measured from that boundary. The pre-step decision timestamps are unchanged.
+  Regression tests check Handling starts at capture tick; paid-miss recovery
+  starts at its event tick and lasts its full span, including the contiguous
+  next phase; and the meal pause starts on the actual gut-empty tick. The restart
+  test now checks settlement-time entry in both worlds, not just eventual hashes.
+- **Finding 3 RESOLVED:** profile validation explicitly requires finite scale
+  minimum, scale exponent, and escape-speed multiple before their range checks.
+  The regression tests NaN and both infinities for each field, rejects both
+  initializers, rejects planted invalid state and snapshot payloads by field name,
+  and retains valid finite boundaries.
+- **Finding 2 still OPEN:** Fable's active worktree extends the drawing range to
+  0.2..=1.0 and is adding minification filtering. Those are promising in-progress
+  changes, not a completed independently verified rendering disposition. This
+  follow-up does not claim that the old tiny-scale panic remains in those edits.
+
+### Scale-test handoff: destination units, not inverse-scale tolerance
+
+In the inspected, uncommitted `tests/lanternjaw_scale.rs`,
+`the_named_effectors_are_linear_and_land_on_the_drawn_claw_at_every_admitted_scale`
+computes both `b` (destination pixel center minus root) and `effectors(s).near_claw`
+in **destination/chart pixels**. Its `(0.5 / s).max(1.0)` acceptance bound is
+therefore not the claimed destination-space half-texel bound: inverse scaling
+belongs to the source sampling chart, while destination pixel spacing remains
+one pixel. At scale 0.2 the test admits a **2.5 chart-pixel** error around a
+**0.3 chart-pixel** core capture radius. A nearer painted part of the arm can pass
+while the tip is missing. This identifies a weak assertion, not a new measured
+failure of the concurrently edited filtered renderer.
+
+For example, with the current +x/mid-pixel fixture the named tiny claw is
+`(2.6558823529411764, 0.22)`. A lone painted near-arm pixel centered at `(1, 0)`
+is about 1.67 px away and passes 2.5; even that pixel's square footprint stops
+about 1.156 px short of the claw, well outside a 0.3-px contact disk. Conversely,
+requiring pixel **centers** within 0.3 px would be too strict: the actual tip can
+fall between centers while its pixel footprint visibly covers it.
+
+Prefer a destination-space coverage assertion, such as distance from the named
+contact disk to a painted pixel's footprint, with any filter support explicitly
+included in destination units. Keep the near-limb isolation, assert nonzero
+coverage near the actual tip, and vary root subpixel phase and heading. A fixed,
+justified pixel-center allowance is also clearer than a tolerance growing as
+`1 / scale`, but does not by itself prove coverage of the contact disk. The test's
+point-sampling explanation is additionally stale relative to the inspected
+`stamp_rig_scaled` edits, which now use `ceil(1 / scale)` squared box-filter samples.
