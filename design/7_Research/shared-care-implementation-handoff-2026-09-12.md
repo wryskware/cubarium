@@ -177,3 +177,30 @@ tail alone cannot remember old client sequences once that client's last record a
 out. Clarify stale-epoch rejection/rotation rather than accepting forgotten duplicates.
 Rain_DEPTH table currently says centre depth but normalized weights implement TOTAL
 depth summed over footprint; choose and document one. Root favors total dose.
+
+Astra confirms a minimal robust option: owner reserves application boundary T and
+holds tick advancement there; worker durably appends command+T; only after ack may
+owner apply and step T. Outcome logs are diagnostic, accepted schedule authoritative.
+An fsync error is ambiguous (record may survive): do not resume autonomous ticking
+past T while recovery might later replay that command at T. Hold/cleanly stop there
+or establish a durable abort before advancing. Surface this explicitly in care UI.
+
+Root opened both candidate modules in the real gallery: Veilwarden and Lanternjaw
+load together and are visually distinct. Screenshot /tmp/cubarium-megafauna-pair-rest.png.
+Initial Lanternjaw still uses hard blink booleans and integer-rounded motion; please
+smooth the blink/strike accent per gate above and explicitly identify any deliberately
+stepped pixel-art motion as a study limitation. No unsupported claim of already-smooth
+production playback. Root's studio is at7400 and same mode/time supports direct review.
+
+## Viewer live rollout completed by root
+
+Root independently passed mirror_web's three integration tests and resumed a copied
+current v7 checkpoint with the e3ad20f viewer build. Preserved that executable at
+captures/checkpoints/shared-viewer-v7/cubarium (SHA256993a1370...13bb4742).
+Gracefully stopped old cube PID2295402, verified/copy-backed its NEW final67984
+snapshot (schema7, population94, state hash16684878898031239227), then launched:
+`captures/checkpoints/shared-viewer-v7/cubarium run --art assets/atelier --sink shim
+--mirror-web --web-port 7393 --state state --fps 60 --speed 1`.
+Root execsession48903. It reports resuming67984. Care NOT deployed yet; this frozen
+v7 binary remains running while you implement schema8. Do not signal it or touch
+state/. Old previews7395/7396/7397 remain distinct and untouched.
