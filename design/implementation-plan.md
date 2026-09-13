@@ -99,12 +99,28 @@ produced 479 captures, but all introduced hunters starved and none reproduced;
 no self-replacing lineage is established. See the
 [complete screen](7_Research/hunter-profile3-two-hour-results-2026-09-13.md).
 Exact reproduction observation and end-of-step stock diagnostics now exist,
-with adversarial observer hardening still open. Fable's real-world Lanternjaw
-adapter and continuous bounded minification are committed; independent review
-found remaining runner-event drainage, repeated-observation/reset and unsupported
-profile-capability issues. None changes the frozen live checkpoint above. Paid
+with the adversarial observer findings independently closed. The frozen paired
+[reserve-target experiment](7_Research/hunter-reserve-targets-recipe-2026-09-13.md)
+is in progress, changing only the seek/perch reserve targets. Fable's real-world
+Lanternjaw adapter and continuous bounded minification are committed; the reviewed
+runner-event drainage, repeated-observation/reset, profile-capability and exact
+endpoint-heading issues are corrected. Retained prey now crosses face seams with
+transported heading, while capture-tick path and restart reconstruction remain
+explicit approximations. None changes the frozen live checkpoint above. Paid
 adult descendants, longer matched runs, diversity and physical contact/readability
 remain requirements to verify, not achievements inferred from passing tests.
+
+Next care/art packages, 2026-09-13: the
+[adjustable-dose handoff](7_Research/adjustable-care-dose-handoff-2026-09-13.md)
+has a checked-in, tested viewer selector with legacy capability fallback; core
+dose persistence and journal/snapshot migration are in progress, not accepted or
+deployed. Ambient support remains separate: the
+[natural-rainfall proposal](7_Research/astra-ambient-support-experiment-proposal-2026-09-13.md)
+keeps today's default unchanged and requires paired evidence. Fable is authoring
+the two remaining canopy species' opening clips. Keep local biological care
+responses, quiet habits, stronger tall-plant wind, the AA comparison, and
+lower-priority persistent plant age/LCD details open rather than treating these
+packages as completion of the full iteration goal.
 
 ## M1 — prove the surface and presentation path
 

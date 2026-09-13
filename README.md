@@ -70,14 +70,20 @@ The first complete [hunter screen](design/7_Research/hunter-profile3-two-hour-re
 ran all twelve seeds in six matched arms for two hours. All 72 numerical audits
 passed and the hunting variants made 479 captures, but every introduced hunter
 starved and none reproduced. Stock diagnostics and exact reproduction auditing
-are now implemented; observer hardening, profile viability, diversity and longer
-runs remain open. This is an unsuccessful lineage baseline, not a deployment gate passed.
+are now implemented and independently hardened. A matched
+[reserve-target experiment](design/7_Research/hunter-reserve-targets-recipe-2026-09-13.md)
+is running on frozen copies; profile viability, diversity and longer runs remain
+open. The original screen is an unsuccessful lineage baseline, not a deployment gate passed.
 
 Wrysk prefers Fable's **Lanternjaw** megafauna body. The
 [comparison studio](art/studies/megafauna/README.md) retains Veilwarden as an
 alternate. Lanternjaw now has a world-driven multipart adapter, including scaled
-juveniles and real attack/gut/gestation state, but remains off the live cube while
-boundary, capability and runner-event handling issues are corrected. Its renderer:
+juveniles and real attack/gut/gestation state. Capability validation, runner-event
+draining, repeated-observation/reset issues and the reviewed endpoint-heading
+defect are corrected; [boundary continuity](design/7_Research/lanternjaw-boundary-continuity-2026-09-13.md)
+now carries retained prey across seams and times meal/growth visuals to published
+boundaries. Restart and unpublished-path reconstruction remain approximate, and
+the hunter stays off the live cube pending viable ecology. Its renderer:
 `cubarium::lanternjaw` draws it as a multipart rig through one root-owned surface query
 (`cubarium_render::stamp_rig`), exercised by `cargo run --release -p cubarium --example
 lanternjaw_study` (port 7399; `--sink png` for native captures, see
@@ -85,6 +91,16 @@ lanternjaw_study` (port 7399; `--sink png` for native captures, see
 not selected by form. The [progress record](design/7_Research/living-world-next-progress-2026-09-13.md)
 has the geometry, the tests and the measured cost. Every side-face plant also carries
 authored sprout-to-stalk and stalk-to-mature growth clips ([art/PLANTS.md](art/PLANTS.md)).
+
+The [adjustable care dose](design/7_Research/adjustable-care-dose-handoff-2026-09-13.md)
+package is in progress: the viewer's capability-gated Gentle/Standard/Generous
+selector is checked in and browser-tested, while durable dose application and
+snapshot/journal migration still await package acceptance. This is not deployed.
+[Natural rainfall](design/7_Research/astra-ambient-support-experiment-proposal-2026-09-13.md)
+is a separate proposed ambient-support experiment, not a changed default or a
+generic dependence-on-attention control. Authored opening sequences for the two
+canopy plants are also in progress; their runtime radial reveal remains the
+committed fallback until those clips pass review.
 
 Start with the [design overview](design/README.md), then the
 [implementation plan](design/implementation-plan.md). The
