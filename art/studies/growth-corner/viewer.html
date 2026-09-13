@@ -1,0 +1,20 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Growth corner: original / retained final owner</title>
+<style>
+body{background:#14151a;color:#ddd;font:16px system-ui;margin:24px}canvas{display:block;image-rendering:pixelated;max-width:100%;margin:16px 0}#large{width:1536px}input{width:512px;max-width:100%}button{font:inherit}p{max-width:850px}
+</style>
+<h1>Selected Left0 glasscane: original / candidate</h1>
+<p>Left: original. Right: retained final owner. Native 64px faces, then 3×. A synthetic four-second height7→9 sweep with fixed art phase and no wind—not an ecological recording. Playback stops at maturity; scrubbing holds an exact frame.</p>
+<button id="play" disabled>Loading…</button> <output id="label"></output><br>
+<input id="frame" type="range" min="0" max="240" value="0" aria-label="Diagnostic frame">
+<canvas id="native" width="512" height="128"></canvas>
+<canvas id="large" width="512" height="128"></canvas>
+<script type="module">
+const images=await Promise.all(Array.from({length:241},(_,i)=>new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=reject;image.src=`../../../captures/growth-corner-2026-09-13/selected-left-60fps/${String(i).padStart(4,'0')}.png`})));
+const button=document.querySelector('#play'), slider=document.querySelector('#frame');let playing=false, start=0;
+function show(i){slider.value=i;document.querySelector('#label').textContent=`Frame ${i}/240; height ${(7+i/120).toFixed(4)}`;for(const c of document.querySelectorAll('canvas'))c.getContext('2d').drawImage(images[i],0,0)}
+function step(t){if(!playing)return;const i=Math.min(240,Math.floor((t-start)*.06));show(i);if(i<240)requestAnimationFrame(step);else{playing=false;button.textContent='Play once at60fps'}}
+button.disabled=false;button.textContent='Play once at60fps';button.onclick=()=>{playing=!playing;if(playing){start=performance.now();button.textContent='Pause';requestAnimationFrame(step)}else button.textContent='Play once at60fps'};
+slider.oninput=()=>{playing=false;button.textContent='Play once at60fps';show(Number(slider.value))};show(0);
+</script>

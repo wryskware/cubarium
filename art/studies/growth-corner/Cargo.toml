@@ -1,0 +1,19 @@
+[package]
+name = "cubarium-growth-corner-study"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "growth_corner"
+path = "main.rs"
+
+[dependencies]
+cubarium = { path = "../../../crates/cubarium" }
+cubarium-render = { path = "../../../crates/cubarium-render" }
+cubarium-surface = { path = "../../../crates/cubarium-surface" }
+cube-proto = { path = "../../../vendor/cube-proto" }
+serde_json = "1"
+png = "0.18"
