@@ -375,6 +375,66 @@ fn the_trial_refuses_a_repeat_an_invalid_profile_and_an_impossible_target() {
     assert_eq!(world.hunters().founder_material_in, 4.0, "and nothing was booked twice");
 }
 
+/// **Regression.** A NaN passes every ordering test, so `body_scale_min <= 0 || > 1` and
+/// `escape_speed_multiple < 1` admitted one: the profile validated, the trial started, and the
+/// snapshot decoded (`astra-hunter-geometry-review-2026-09-13.md`). Both are now refused where
+/// a profile can enter the world **and** where one can come back from disk, and the legitimate
+/// finite range is untouched.
+#[test]
+fn a_non_finite_scale_bound_is_refused_at_admission_and_at_decode() {
+    /// One way to poison a scale bound with a value the range tests cannot see.
+    type Poison = fn(&mut FixedHunterProfile, f64);
+    let poison: [(&str, Poison); 3] = [
+        ("body_scale_min", |p, v| p.body_scale_min = v),
+        ("body_scale_exponent", |p, v| p.body_scale_exponent = v),
+        ("escape_speed_multiple", |p, v| p.escape_speed_multiple = v),
+    ];
+    let spot = SurfacePoint::new(Face::Top, 32.0, 32.0);
+    for (what, set) in poison {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut world = empty_world();
+            let mut profile = trial(&world);
+            set(&mut profile, bad);
+
+            // 1. The profile itself says no, by name.
+            let err = profile.validate().unwrap_err();
+            assert!(err.contains(what), "{what} = {bad}: {err}");
+
+            // 2. Neither initializer admits it, and neither changes anything.
+            assert!(world.start_hunter_trial(profile.clone(), target_of(spot)).is_err(), "{what} {bad}");
+            assert!(world.hunters().profile.is_none() && world.hunters().members.is_empty());
+            assert!(
+                world.deposit_hunter_budget_control(profile.clone(), target_of(spot)).is_err(),
+                "{what} {bad}"
+            );
+            assert_eq!(world.hunters(), &cubarium_core::HunterState::default());
+
+            // 3. And a snapshot that carries one does not come back from disk. The profile is
+            //    planted directly, as a crafted file would.
+            let mut world = empty_world();
+            let sound = trial(&world);
+            world.start_hunter_trial(sound, target_of(spot)).expect("a sound trial starts");
+            set(world.state.hunters.profile.as_mut().expect("a profile"), bad);
+            let err = world.state.validate().expect_err("a poisoned state must not validate");
+            assert!(err.contains(what), "{what} = {bad}: {err}");
+            match decode_snapshot(&encode_snapshot(&world.state, "nan-probe")) {
+                Err(SnapshotError::Invalid(reason)) => assert!(reason.contains(what), "{reason}"),
+                other => panic!("{what} = {bad} decoded as {other:?}"),
+            }
+        }
+    }
+
+    // The legitimate range still passes, at both ends.
+    for (min, exponent, multiple) in [(1e-6, 0.0, 1.0), (0.2, 0.5, 2.0), (1.0, 2.0, 10.0)] {
+        let world = empty_world();
+        let mut profile = trial(&world);
+        profile.body_scale_min = min;
+        profile.body_scale_exponent = exponent;
+        profile.escape_speed_multiple = multiple;
+        profile.validate().unwrap_or_else(|e| panic!("({min}, {exponent}, {multiple}) is legitimate: {e}"));
+    }
+}
+
 #[test]
 fn the_budget_matched_control_deposits_the_same_inventory_and_no_hunter() {
     let mut world = empty_world();

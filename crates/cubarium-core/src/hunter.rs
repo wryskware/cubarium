@@ -150,6 +150,9 @@ pub struct FixedHunterProfile {
     /// Body scale mapping, owned here so core and art cannot disagree:
     /// `scale = max(body_scale_min, (S / S_adult)^body_scale_exponent)`. The trial exponent
     /// `0.5` is the area-preserving candidate of the animation contract.
+    ///
+    /// Both are validated finite as well as in range: a NaN passes every ordering test, so an
+    /// ordering test alone is not a bound.
     pub body_scale_exponent: f64,
     pub body_scale_min: f64,
 
@@ -340,6 +343,17 @@ impl FixedHunterProfile {
                 "hunter profile capture_min {} exceeds capture_max {}",
                 self.capture_min, self.capture_max
             ));
+        }
+        // Finiteness first, and explicitly: an ordering test alone lets a NaN through, because
+        // every comparison against NaN is false (`astra-hunter-geometry-review-2026-09-13.md`).
+        for (name, v) in [
+            ("escape_speed_multiple", self.escape_speed_multiple),
+            ("body_scale_min", self.body_scale_min),
+            ("body_scale_exponent", self.body_scale_exponent),
+        ] {
+            if !v.is_finite() {
+                return Err(format!("hunter profile {name} = {v}, expected a finite number"));
+            }
         }
         if self.escape_speed_multiple < 1.0 {
             return Err(format!(
