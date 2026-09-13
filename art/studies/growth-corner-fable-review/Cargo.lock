@@ -260,9 +260,11 @@ name = "cubarium-growth-corner-fable-review"
 version = "0.0.0"
 dependencies = [
  "cubarium",
+ "cubarium-core",
  "cubarium-render",
  "cubarium-surface",
  "cube-proto",
+ "png",
  "serde_json",
 ]
 

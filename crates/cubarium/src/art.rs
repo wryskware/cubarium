@@ -159,7 +159,24 @@ pub struct TallPlant {
     /// `trunk` stays intact for legacy rendering and inspection; this derived pair replaces
     /// it only in the vine draw path and its wind budget. Never interpreted as a crown.
     pub vine_strips: Option<VineStrips>,
+    /// Explicit per-cap capability ([`CORNER_CAP_OWNER_V1`] on this plant's crown row):
+    /// while the cap of a **near-corner** column glides above tile row 10 of its face, its
+    /// pixels are owned by the surface unfolding of the cap's *final* position, `(u, 2)`,
+    /// so the crown's top edge no longer switches between two equally short charts at the
+    /// cube vertex part-way up. The cap's centre, pose, heading, bend, opacity, layer order
+    /// and mature endpoint are unchanged; below the handoff and at maturity the ordinary
+    /// stamp is used bit for bit. `false` for every unflagged asset, which is drawn exactly
+    /// as before. Accepted only on the shipped host caps named in
+    /// [`CORNER_CAP_OWNER_HOSTS`], whose handoff continuity is covered by the presenter's
+    /// dense corner tests; other art must be validated the same way before it is listed.
+    pub corner_cap_owner: bool,
 }
+
+/// Versioned selector on a host plant's crown metadata row for the retained final-position
+/// cap owner. Older pack readers ignore this field and render the cap as before.
+pub const CORNER_CAP_OWNER_V1: &str = "final_position_v1";
+/// The shipped host caps the selector is accepted on.
+pub const CORNER_CAP_OWNER_HOSTS: [&str; 2] = ["spiretree", "glasscane"];
 
 /// Versioned optional selector on a vine's trunk metadata row. Older pack readers ignore
 /// this field and still render the complete, unchanged authored trunk.
@@ -535,8 +552,9 @@ fn load_plants(
 
 /// Pack v3: `tall.png` is `plant_frames` tiles wide, one row per (tall plant, part) in
 /// plant-major order with parts in `base`, `trunk`, `crown` order, whichever the plant has.
-/// A tall plant being assembled: name, base, trunk, crown, explicit vine-strip opt-in.
-type PendingTall = Option<(String, Option<Clip>, Option<Clip>, Option<Clip>, bool)>;
+/// A tall plant being assembled: name, base, trunk, crown, explicit vine-strip opt-in,
+/// explicit corner-cap-owner opt-in.
+type PendingTall = Option<(String, Option<Clip>, Option<Clip>, Option<Clip>, bool, bool)>;
 
 fn load_tall(directory: &Path, meta: &serde_json::Value, plant_frames: usize) -> Result<Vec<TallPlant>> {
     ensure!(meta["tall_atlas"] == "tall.png", "unsupported tall atlas layout");
@@ -561,13 +579,21 @@ fn load_tall(directory: &Path, meta: &serde_json::Value, plant_frames: usize) ->
     let mut pending: PendingTall = None;
     let close = |pending: &mut PendingTall, out: &mut Vec<TallPlant>|
      -> Result<()> {
-        if let Some((name, base, trunk, crown, vine_opt_in)) = pending.take() {
+        if let Some((name, base, trunk, crown, vine_opt_in, corner_cap_owner)) = pending.take() {
             let trunk = trunk.with_context(|| format!("tall plant {name} has no trunk"))?;
             ensure!(out.iter().all(|p| p.name != name), "duplicate tall plant {name}");
             let vine_strips = if vine_opt_in {
                 ensure!(base.is_none() && crown.is_none(), "vine_strips requires a trunk-only vinecoil (no base or crown)");
                 Some(derive_vine_strips(&trunk).with_context(|| format!("tall plant {name}"))?)
             } else { None };
+            // The corner-cap owner is accepted only on the shipped host caps: the listing is
+            // the record of which art passed the dense corner handoff sweep. Checked once
+            // the plant is whole, after the vine's own shape rule.
+            ensure!(
+                !corner_cap_owner || CORNER_CAP_OWNER_HOSTS.contains(&name.as_str()),
+                "corner_cap_owner is accepted only on the shipped host caps {CORNER_CAP_OWNER_HOSTS:?}, not {name}"
+            );
+            ensure!(!corner_cap_owner || crown.is_some(), "corner_cap_owner requires a crown for tall plant {name}");
             let mut tail_row = 16;
             let cap = match &crown {
                 Some(crown) => {
@@ -599,7 +625,7 @@ fn load_tall(directory: &Path, meta: &serde_json::Value, plant_frames: usize) ->
                 }
                 None => None,
             };
-            out.push(TallPlant { name, base, trunk, crown, cap, tail_row, vine_strips });
+            out.push(TallPlant { name, base, trunk, crown, cap, tail_row, vine_strips, corner_cap_owner });
         }
         Ok(())
     };
@@ -612,14 +638,21 @@ fn load_tall(directory: &Path, meta: &serde_json::Value, plant_frames: usize) ->
             ensure!(entry.get("loop").is_none_or(|v| v.as_bool() == Some(true)), "vine_strips must loop");
             true
         } else { false };
+        let corner_cap_owner = if let Some(selector) = entry.get("corner_cap_owner") {
+            ensure!(selector.as_str() == Some(CORNER_CAP_OWNER_V1), "unsupported corner_cap_owner selector at tall row {row}");
+            ensure!(entry["part"] == "crown", "corner_cap_owner is supported only on a crown row (tall row {row})");
+            ensure!(entry.get("loop").is_none_or(|v| v.as_bool() == Some(true)), "corner_cap_owner must loop");
+            true
+        } else { false };
         let seconds = entry["seconds"].as_f64().context("tall row needs seconds")?;
         ensure!(entry["frames"] == plant_frames as u64, "tall rows carry {plant_frames} frames");
         if pending.as_ref().is_none_or(|(n, ..)| n != name) {
             close(&mut pending, &mut out)?;
-            pending = Some((name.to_string(), None, None, None, false));
+            pending = Some((name.to_string(), None, None, None, false, false));
         }
         let slot = pending.as_mut().unwrap();
         slot.4 |= vine_opt_in;
+        slot.5 |= corner_cap_owner;
         let clip = clip_at(row, seconds)?;
         // Parts arrive in base, trunk, crown order; each at most once.
         match entry["part"].as_str() {

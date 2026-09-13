@@ -528,7 +528,8 @@
 			"name": "spiretree",
 			"part": "crown",
 			"row": 2,
-			"seconds": 3.0
+			"seconds": 3.0,
+			"corner_cap_owner": "final_position_v1"
 		},
 		{
 			"frames": 24,
@@ -549,7 +550,8 @@
 			"name": "glasscane",
 			"part": "crown",
 			"row": 5,
-			"seconds": 3.0
+			"seconds": 3.0,
+			"corner_cap_owner": "final_position_v1"
 		},
 		{
 			"frames": 24,

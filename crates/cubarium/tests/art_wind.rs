@@ -958,6 +958,7 @@ fn striped_tall() -> TallPlant {
         cap: Some(one_frame(striped_tile(0..4, TRUNK_COLUMN, STRIPE_WIDTH))),
         tail_row: 16,
         vine_strips: None,
+        corner_cap_owner: false,
     }
 }
 
