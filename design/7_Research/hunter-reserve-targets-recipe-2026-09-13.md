@@ -134,3 +134,29 @@ Separately, root reran `cargo test --workspace --lib --tests` after Fable's
 adapter behavior but excludes the example target counted separately above.
 The independent [adapter review](astra-hunter-adapter-hardening-review-2026-09-13.md)
 closes earlier concrete blockers while retaining endpoint/restart approximations.
+
+## Read-only paired results tool
+
+`node scripts/compare-hunter-recipes.mjs BASELINE_DIR CANDIDATE_DIR` reads only
+completed twelve-seed/six-arm outputs. It checks manifest recipe identity,
+matching executable/cohort/configuration, completion and observer denominators,
+numerical peak summaries, saved snapshot CRC/SHA/full-state hashes, exact
+two-field profile isolation, event/offspring/maturity counts, and selected local
+recovery counts. Untouched controls must match completely; budget-only controls
+may differ only in the two full-state hashes that include their stored profile.
+The report keeps every seed and arm, uses null for no mature-member denominator,
+and separates stock readiness from actual funding, births, survival and prey loss.
+
+This is artifact reduction and consistency checking, not a rerun of numerical
+audits or independent reconstruction of contact geometry and transaction amounts.
+Snapshot checks validate the envelope and payload hash, not semantic WorldState.
+The shared snapshot helper still requires schema9 by default for preparation;
+the report explicitly selects schema11 because these experiments were frozen
+before the in-progress care-dose schema change.
+
+Seven new reduction tests and six existing preparation tests pass. A direct
+read of the first eight completed seeds in each run checked 96 actual arm
+artifacts using the helper checks, including CRC/SHA/full-state hashes, events,
+coverage and paired opening recipes. The full-report command correctly refused
+the still-incomplete cohort (global summary absent); no completed aggregate or
+candidate acceptance is inferred from those partial checks.

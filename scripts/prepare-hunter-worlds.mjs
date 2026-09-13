@@ -17,11 +17,13 @@ export function parseArgs(args) {
   return { runner, out };
 }
 
-export function inspectSnapshot(bytes) {
+// Header/payload integrity only, not semantic WorldState validation. Preparation
+// remains schema9 by default; offline result tools must name their frozen schema.
+export function inspectSnapshot(bytes, expectedSchema = 9) {
   if (bytes.length < 22 || bytes.subarray(0, 4).toString() !== 'CUBW')
     throw new Error('Invalid snapshot header');
   const schema = bytes.readUInt32LE(4);
-  if (schema !== 9) throw new Error(`Expected pre-hunter schema9, received${schema}`);
+  if (schema !== expectedSchema) throw new Error(`Expected ${expectedSchema === 9 ? 'pre-hunter ' : ''}schema${expectedSchema}, received${schema}`);
   const nameLength = bytes.readUInt16LE(8), offset = 10 + nameLength;
   if (offset + 12 > bytes.length) throw new Error('Truncated snapshot header');
   const payload = bytes.subarray(offset + 12);
