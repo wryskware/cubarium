@@ -15,7 +15,17 @@ path = "aa_comparison.rs"
 name = "sail_comparison"
 path = "sail_comparison.rs"
 
+[[bin]]
+name = "sail_meal_comparison"
+path = "sail_meal_comparison.rs"
+required-features = ["meals"]
+
+[features]
+meals = ["dep:cubarium", "dep:cubarium-core"]
+
 [dependencies]
+cubarium = { path = "../../../crates/cubarium", optional = true }
+cubarium-core = { path = "../../../crates/cubarium-core", optional = true }
 cubarium-render = { path = "../../../crates/cubarium-render" }
 cubarium-surface = { path = "../../../crates/cubarium-surface" }
 cube-proto = { path = "../../../vendor/cube-proto" }

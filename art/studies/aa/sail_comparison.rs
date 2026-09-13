@@ -180,8 +180,15 @@ fn main() {
             }
         }
     }
-    fs::write(output.join("measurements.json"),serde_json::to_vec_pretty(&json!({"fps":60,"frames_per_sequence":360,"candidate":"fin4, point body and bud", "cases":result,"transition_endpoints":transitions})).unwrap()).unwrap();
-    fs::write(output.join("viewer.html"), include_str!("sail_viewer.html")).unwrap();
+    let candidate = metadata["candidate"].as_str().unwrap_or("fin4, point body and bud");
+    fs::write(output.join("measurements.json"),serde_json::to_vec_pretty(&json!({"fps":60,"frames_per_sequence":360,"candidate":candidate, "cases":result,"transition_endpoints":transitions})).unwrap()).unwrap();
+    let mut viewer = include_str!("sail_viewer.html").to_owned();
+    if candidate == "stable-body-plus-fin4" {
+        viewer = viewer.replace("unchanged point-sampled body and bud", "point-sampled body and bud; move body held at scale 1 instead of its tiny squash")
+            .replace("Sail: coverage on fins, crisp body", "Sail: stable moving body + fin coverage")
+            .replace("Current / fin coverage", "Original / stable body + fin coverage");
+    }
+    fs::write(output.join("viewer.html"), viewer).unwrap();
 }
 
 #[cfg(test)]

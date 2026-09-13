@@ -101,7 +101,7 @@ func study() -> void:
 			player.play(entry[2])
 			player.seek(float(frame) / frames * clip.length, true)
 			var began := Time.get_ticks_usec()
-			baseline.blit_rect(super.raster(rig), Rect2i(0, 0, TILE, TILE), Vector2i(frame * TILE, 0))
+			baseline.blit_rect(super.raster_point(rig), Rect2i(0, 0, TILE, TILE), Vector2i(frame * TILE, 0))
 			micros[0] += Time.get_ticks_usec() - began
 			began = Time.get_ticks_usec()
 			candidate.blit_rect(coverage(rig), Rect2i(0, 0, TILE, TILE), Vector2i(frame * TILE, 0))

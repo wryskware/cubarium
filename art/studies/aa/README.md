@@ -1,6 +1,6 @@
 # Conditional authored-coverage study
 
-An isolated experiment, **not a new art-pack or renderer default**. See
+The original isolated experiment was **not a new art-pack or renderer default**. See
 [the evidence and disposition](../../../design/7_Research/astra-aa-comparison-2026-09-13.md).
 
 The Godot helper extends the current exporter and compares its exact `raster`
@@ -9,15 +9,17 @@ retain the existing layer order and RGBA8 source-over compositor. Coverage is
 resolved in linear premultiplied RGBA; the alternative does not repair the existing
 encoded-RGB *inter-layer* blend convention. No jitter or temporal feedback.
 
-The independent Cargo workspace depends only on the production render/surface
-crates and the shim protocol. It does not compile the host, mutate ecology, or
-communicate with any display. `net.rs` is reused from the host for capture layout.
+The default independent Cargo workspace uses only production render/surface
+crates and the shim protocol; it does not compile the host or mutate ecology.
+The optional `meals` feature compiles host/core for paired copied-world captures,
+stepping one local world and drawing two art packs. Neither mode communicates
+with a display. `net.rs` is reused from the host for capture layout.
 All generated output directories must be new. Keep build output under `captures`.
 
 ```sh
 godot --headless --path art --script res://studies/aa/bake_comparison.gd -- --out=/absolute/new/bake-directory
 CARGO_TARGET_DIR=captures/build-cache/astra-aa cargo test --offline --manifest-path art/studies/aa/Cargo.toml
-CARGO_TARGET_DIR=captures/build-cache/astra-aa cargo run --offline --release --manifest-path art/studies/aa/Cargo.toml -- /absolute/new/bake-directory /absolute/new/render-directory
+CARGO_TARGET_DIR=captures/build-cache/astra-aa cargo run --offline --release --manifest-path art/studies/aa/Cargo.toml --bin aa_comparison -- /absolute/new/bake-directory /absolute/new/render-directory
 node art/studies/aa/browser_capture.mjs /absolute/new/render-directory
 ```
 
@@ -52,8 +54,9 @@ study strips were independently byte-compared with those shipped RGBA rows.
 point-baked and composited above the resolved fins, preserving opaque highlights
 exactly. Their original animation tracks still run. Uniform coverage blocks are
 copied exactly, avoiding unnecessary color conversion/truncation. This override
-is opt-in in the study; the original whole-sprite comparison still reproduces
-its previous eight strips and 32 rendered sheets pixel-for-pixel.
+was opt-in in that study; at commit8c0b40a the original whole-sprite comparison
+reproduced its previous eight strips and 32 rendered sheets pixel-for-pixel.
+Use that historical commit for the following historical-source commands.
 
 ```sh
 godot --headless --path art --script res://studies/aa/bake_sail.gd -- --out=/absolute/new/sail-bake
@@ -69,3 +72,22 @@ The source bake asserts exact baseline agreement with shipped rows, preserved
 visible body/bud pixels, and actual rig endpoints. See the
 [sail-only report](../../../design/7_Research/astra-sail-aa-study-2026-09-13.md)
 for the mixed disposition, including the remaining point-baked body squash.
+
+## Stable sail source candidate
+
+See [the stable-body + fin4 report](../../../design/7_Research/astra-sail-stable-body-2026-09-13.md).
+This is an explicit source change plus the measured fin-only policy, not another
+filter candidate. Original pack is preserved at `captures/sail-stable-2026-09-13-original-pack`.
+The historical fin-only script now rejects an opted-in new rig rather than
+mislabeling its candidate output as an original baseline.
+
+```sh
+godot --headless --path art --script bake.gd -- --out=NEW_PACK_ABSOLUTE
+godot --headless --path art --script studies/aa/bake_sail_stable.gd -- --baseline=ORIGINAL_CREATURES_PNG_ABSOLUTE --out=NEW_BAKE_ABSOLUTE
+godot --headless --path art --script studies/aa/verify_sail_pack.gd -- ORIGINAL_PACK_ABSOLUTE NEW_PACK_ABSOLUTE REPORT_ABSOLUTE
+CARGO_TARGET_DIR=captures/build-cache/astra-aa cargo run --release --offline --manifest-path art/studies/aa/Cargo.toml --bin sail_comparison -- NEW_BAKE NEW_RENDER
+CARGO_TARGET_DIR=captures/build-cache/astra-aa cargo run --release --offline --manifest-path art/studies/aa/Cargo.toml --features meals --bin sail_meal_comparison -- WORLD ORIGINAL_PACK NEW_PACK NEW_MEAL_CAPTURE
+godot --headless --path art --script studies/aa/sail_meal_sheet.gd -- NEW_MEAL_CAPTURE_ABSOLUTE
+node art/studies/aa/package_sail_meals.mjs NEW_MEAL_CAPTURE
+node art/studies/aa/browser_capture.mjs NEW_MEAL_CAPTURE
+```

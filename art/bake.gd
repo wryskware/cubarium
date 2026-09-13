@@ -53,6 +53,42 @@ func collect(node: Node, result: Array[Sprite2D]) -> void:
 		collect(child, result)
 
 func raster(rig: Node2D) -> Image:
+	if rig.get_meta("sail_fin_coverage4", false):
+		return raster_sail(rig)
+	return raster_point(rig)
+
+func raster_sail(rig: Node2D) -> Image:
+	# Explicit source opt-in, not a species-wide/default filter. This compositor
+	# requires the two fins below the crisp body/bud; reject contract drift.
+	var paths := ["LeftFin/Sprite", "RightFin/Sprite", "Body/Sprite", "Bud/Sprite"]
+	var sources := ["res://parts/sail_fin.svg", "res://parts/sail_fin.svg", "res://parts/sail_body.svg", "res://parts/bud.svg"]
+	var sprites: Array[Sprite2D] = []
+	collect(rig, sprites)
+	if sprites.size() != paths.size():
+		fail("Sail fin coverage requires exactly four authored layers")
+		return raster_point(rig)
+	for i in range(sprites.size()):
+		if str(rig.get_path_to(sprites[i])) != paths[i] or sprites[i].texture.resource_path != sources[i]:
+			fail("Sail fin coverage layer/source mismatch at " + str(i))
+			return raster_point(rig)
+	var visible: Array = sprites.map(func(s): return s.visible)
+	sprites[2].visible = false
+	sprites[3].visible = false
+	var fins: Image = preload("res://sail_fin_coverage.gd").raster(rig, self)
+	sprites[2].visible = visible[2]
+	sprites[3].visible = visible[3]
+	sprites[0].visible = false
+	sprites[1].visible = false
+	var crisp := raster_point(rig)
+	for i in range(sprites.size()): sprites[i].visible = visible[i]
+	for y in range(TILE):
+		for x in range(TILE):
+			var pixel := crisp.get_pixel(x,y)
+			if pixel.a == 1.0: fins.set_pixel(x,y,pixel)
+			elif pixel.a > 0.0: fins.set_pixel(x,y,fins.get_pixel(x,y).blend(pixel))
+	return fins
+
+func raster_point(rig: Node2D) -> Image:
 	var image := Image.create(TILE, TILE, false, Image.FORMAT_RGBA8)
 	image.fill(Color.TRANSPARENT)
 	var sprites: Array[Sprite2D] = []
