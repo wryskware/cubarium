@@ -340,6 +340,76 @@ that crowded patch reads modestly at 64 px; a restart during the 200 ms recoil d
 from the continuous presenter by the far claw's lag fraction; hardware legibility is not
 established; no ecological claim follows.
 
+### Adapter corrections after Astra's final review (fourth slice, 2026-09-13)
+
+Per `astra-hunter-adapter-final-review-2026-09-13.md` and its saved fixture
+`assets/astra-hunter-adapter-regressions-2026-09-13.rs` (all three of its failing cases now
+pass as owned tests). Still study-side; nothing deployed, the live cube untouched.
+
+1. **Hunter events are drained every tick by the actual runner**, headless or not
+   (`world.drain_hunter_events()` beside `drain_events()` in the tick closure), and the
+   same drained batch is handed to the presentation before it is dropped; the runner does
+   not journal them. Test: the runner over 60 simulated seconds of repeated paid misses
+   ends at exactly the state hash of a hand-stepped twin that drains per tick (draining
+   changes no state or RNG), with and without `--art`; the twin's buffer is empty after
+   every tick.
+2. **Same-tick re-observation is idempotent**: `HunterMemory::observe` ignores a frame of
+   the tick already recorded (and re-enters on an earlier tick), and `observe_hunters`
+   leaves the retained prey alone, so a repeated observation of the settlement view
+   changes no memory, no fractional pose and no image at `f` 0, ⅓, ⅔, 1.
+3. **Rewind and world replacement reset the hunter memory** with the plant and body
+   history (the presenter's snap rule) and on any earlier-tick membership, so a reused
+   presenter restored into an earlier windup reconstructs the folded reach a fresh one
+   does — image-identical at every `f`.
+4. **Capability is validated before mutation, by name, with no fallback.**
+   `hunter_present::validate_profile` states the renderer's capability for a whole profile:
+   role `Lanternjaw`, `capture_offset_body == effectors(1).near_claw` and
+   `ingestion_offset_body == effectors(1).mouth` (to 1e-6), `body_scale_min ∈ [0.2, 1]`,
+   `body_scale_exponent ≥ 0` (so every member's scale lies in the admitted range). The runner
+   asks it right after the world is opened and before care's opening checkpoint, the sink
+   or any tick — a saved world whose profile the art cannot draw fails by name, unmutated,
+   and the error names `--art` as the thing to leave out; the same world runs without the
+   art, a fixed-trial world resumes with it, a profile-less world is unchanged. Per member,
+   `validate_view` refuses (as a named error the runner propagates at the boundary) a
+   published geometry that is not the drawn claw at its own scale; the ordinary-rig
+   substitution and the once-logged warning are gone. The core's ecological admission is
+   not narrowed; the renderer states what it can draw.
+5. **A captured prey is carried to the `Capture` event's settlement position.** The
+   retained last view walks a straight chart path from its last published position to the
+   event's post-movement `prey_pos` over the capture tick's frames (labelled an
+   approximation: the event carries no capture-tick path or heading, so the heading is the
+   last published one; a settlement on another face is drawn at the settlement point). Test
+   on a free prey in a quiet world: at the boundary the drawn prey is within the core's own
+   reach of the drawn near claw carried from the hunter's interpolated root; a capture
+   across the Front/Right seam draws the prey on the Right face with the body on both; a
+   capture heading into the open rim leaves every off-Front pixel exactly the hunter-free
+   image's and reflects nothing; a vertex-bound hunt draws one owner per pixel and never
+   panics; held time (`f = 1`) freezes attack and ambient alike.
+
+Evidence: `crates/cubarium/tests/hunter_present.rs` now 21 tests + 2 ignored (the eight
+above added), `crates/cubarium-render/tests/multipart_scale.rs` 16; whole render + host
+library and test suites: **584 passed, 0 failed, exit 0** (`--lib --tests`; root's
+`hunter_compare` example is mid-edit against the new core API at this moment and does not
+build, which root owns). Captures: `captures/lanternjaw/world-contact.png`, assembled from
+480 native frames of a quiet-world (no plants) free-prey capture (frames in
+`/tmp/hunter-contact-93MeN7/`): an unobstructed Lanternjaw, the prey in its claws through
+the strike, still there for the capture tick's three frames and gone the tick after, the
+body folded and turning while it handles the meal. Cost (release, staged 6.3 ms frame):
+one adult within measurement noise (−58 µs), one 0.632 juvenile +93 µs; two adults were not
+measured (one trial per world) and are not claimed.
+
+Astra's three documentation corrections on the filter are applied in `stamp_rig_scaled`'s
+doc: the blended-grid bound is `7² + 8² = 113` body samples per pixel (41 at the art's 0.2
+minimum), the quadrature is approximate everywhere, and the painted-centre support bound is
+`scale · (r + √2) + 1/√2`.
+
+Remaining honest limits: a restart during the 200 ms recoil is conservative, not
+frame-identical (no retained prey, reach from `entered_from`); `cur.gut`, `cur.gestation`
+and `cur.scale` are read while the previous phase is interpolated through the boundary
+(a meal's gut appears one interval early on the abdomen breath; a scale change across a
+boundary is not tested); the retained prey's path is the labelled straight-chart
+approximation; two-adult cost is unmeasured; hardware legibility is not established.
+
 ## Package 2 — Authored growth expansion
 
 Commit `5d7ea69`. Nine hand-authored 4 s `grow01`/`grow12` clips for glowcap, rootveil,
@@ -387,6 +457,12 @@ like a side-face plant, rooted at its ripple row. `crates/cubarium/tests/art_win
   world-driven tests. Whole render + host library and test suites at `f4420fc`: **576
   passed, 0 failed, exit 0** (`cargo test -p cubarium-render -p cubarium --lib --tests`;
   log `/tmp/lw-full2.log`).
+- Fourth slice: `ffa2cf1` the filter's documentation corrections (sample bound 113,
+  approximate quadrature, real support bound); `a559e54` load-time capability validation,
+  per-tick hunter-event draining in the runner, idempotent re-observation, rewind reset and
+  the captured prey carried to the event's settlement, with the eight new adapter tests.
+  Whole render + host library and test suites at `a559e54`: **584 passed, 0 failed, exit 0**
+  (`--lib --tests`; log `/tmp/lw-full4.log`).
 - Validation: `cargo test -p cubarium-render -p cubarium` (every suite green at each
   commit); `./scripts/art-bake.sh` twice with `cmp`; the ignored cost test above; the PNG
   captures above.
