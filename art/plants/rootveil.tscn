@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="Texture2D" path="res://parts/plant_rootveil_sprout.svg" id="1"]
 
@@ -75,6 +75,182 @@ tracks/5/path = NodePath("Veil2/Glints:self_modulate")
 tracks/5/interp = 1
 tracks/5/enabled = true
 tracks/5/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/6/type = "value"
+tracks/6/path = NodePath("Grow01:visible")
+tracks/6/interp = 1
+tracks/6/enabled = true
+tracks/6/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/7/type = "value"
+tracks/7/path = NodePath("Grow01/Sprout:visible")
+tracks/7/interp = 1
+tracks/7/enabled = true
+tracks/7/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/8/type = "value"
+tracks/8/path = NodePath("Grow01/Sprout:self_modulate")
+tracks/8/interp = 1
+tracks/8/enabled = true
+tracks/8/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/9/type = "value"
+tracks/9/path = NodePath("Grow01/Crust:visible")
+tracks/9/interp = 1
+tracks/9/enabled = true
+tracks/9/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/10/type = "value"
+tracks/10/path = NodePath("Grow01/Crust:modulate")
+tracks/10/interp = 1
+tracks/10/enabled = true
+tracks/10/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/11/type = "value"
+tracks/11/path = NodePath("Grow01/Crust:scale")
+tracks/11/interp = 1
+tracks/11/enabled = true
+tracks/11/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(1, 1)]
+}
+
+tracks/12/type = "value"
+tracks/12/path = NodePath("Grow01/Crust/Glints:visible")
+tracks/12/interp = 1
+tracks/12/enabled = true
+tracks/12/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/13/type = "value"
+tracks/13/path = NodePath("Grow01/Crust/Glints:self_modulate")
+tracks/13/interp = 1
+tracks/13/enabled = true
+tracks/13/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/14/type = "value"
+tracks/14/path = NodePath("Grow12:visible")
+tracks/14/interp = 1
+tracks/14/enabled = true
+tracks/14/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/15/type = "value"
+tracks/15/path = NodePath("Grow12/Old:visible")
+tracks/15/interp = 1
+tracks/15/enabled = true
+tracks/15/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/16/type = "value"
+tracks/16/path = NodePath("Grow12/Old:modulate")
+tracks/16/interp = 1
+tracks/16/enabled = true
+tracks/16/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/17/type = "value"
+tracks/17/path = NodePath("Grow12/Crust:visible")
+tracks/17/interp = 1
+tracks/17/enabled = true
+tracks/17/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/18/type = "value"
+tracks/18/path = NodePath("Grow12/Crust:modulate")
+tracks/18/interp = 1
+tracks/18/enabled = true
+tracks/18/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/19/type = "value"
+tracks/19/path = NodePath("Grow12/Crust:scale")
+tracks/19/interp = 1
+tracks/19/enabled = true
+tracks/19/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(1, 1)]
+}
+
+tracks/20/type = "value"
+tracks/20/path = NodePath("Grow12/Crust/Glints:visible")
+tracks/20/interp = 1
+tracks/20/enabled = true
+tracks/20/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/21/type = "value"
+tracks/21/path = NodePath("Grow12/Crust/Glints:self_modulate")
+tracks/21/interp = 1
+tracks/21/enabled = true
+tracks/21/keys = {
 "times": PackedFloat32Array(0),
 "transitions": PackedFloat32Array(1),
 "update": 0,
@@ -166,12 +342,200 @@ tracks/1/keys = {
 }
 
 
+[sub_resource type="Animation" id="Animation_grow01"]
+resource_name = "grow01"
+length = 4
+loop_mode = 0
+
+tracks/0/type = "value"
+tracks/0/path = NodePath("Grow01:visible")
+tracks/0/interp = 1
+tracks/0/enabled = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [true]
+}
+
+tracks/1/type = "value"
+tracks/1/path = NodePath("Grow01/Sprout:visible")
+tracks/1/interp = 1
+tracks/1/enabled = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0, 1.25),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [true, false]
+}
+
+tracks/2/type = "value"
+tracks/2/path = NodePath("Grow01/Sprout:self_modulate")
+tracks/2/interp = 1
+tracks/2/enabled = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0.6, 1.2),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 1), Color(1, 1, 1, 0)]
+}
+
+tracks/3/type = "value"
+tracks/3/path = NodePath("Grow01/Crust:visible")
+tracks/3/interp = 1
+tracks/3/enabled = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0, 0.2),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/4/type = "value"
+tracks/4/path = NodePath("Grow01/Crust:modulate")
+tracks/4/interp = 1
+tracks/4/enabled = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0.2, 0.9),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+tracks/5/type = "value"
+tracks/5/path = NodePath("Grow01/Crust:scale")
+tracks/5/interp = 1
+tracks/5/enabled = true
+tracks/5/keys = {
+"times": PackedFloat32Array(0, 0.6, 3.3, 4),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0.43, 1), Vector2(0.43, 1), Vector2(1, 1), Vector2(1, 1)]
+}
+
+tracks/6/type = "value"
+tracks/6/path = NodePath("Grow01/Crust/Glints:visible")
+tracks/6/interp = 1
+tracks/6/enabled = true
+tracks/6/keys = {
+"times": PackedFloat32Array(0, 2.6),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/7/type = "value"
+tracks/7/path = NodePath("Grow01/Crust/Glints:self_modulate")
+tracks/7/interp = 1
+tracks/7/enabled = true
+tracks/7/keys = {
+"times": PackedFloat32Array(2.6, 3.9),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+[sub_resource type="Animation" id="Animation_grow12"]
+resource_name = "grow12"
+length = 4
+loop_mode = 0
+
+tracks/0/type = "value"
+tracks/0/path = NodePath("Grow12:visible")
+tracks/0/interp = 1
+tracks/0/enabled = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [true]
+}
+
+tracks/1/type = "value"
+tracks/1/path = NodePath("Grow12/Old:visible")
+tracks/1/interp = 1
+tracks/1/enabled = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0, 1.55),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [true, false]
+}
+
+tracks/2/type = "value"
+tracks/2/path = NodePath("Grow12/Old:modulate")
+tracks/2/interp = 1
+tracks/2/enabled = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0.7, 1.5),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 1), Color(1, 1, 1, 0)]
+}
+
+tracks/3/type = "value"
+tracks/3/path = NodePath("Grow12/Crust:visible")
+tracks/3/interp = 1
+tracks/3/enabled = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0, 0.4),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/4/type = "value"
+tracks/4/path = NodePath("Grow12/Crust:modulate")
+tracks/4/interp = 1
+tracks/4/enabled = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0.4, 1.2),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+tracks/5/type = "value"
+tracks/5/path = NodePath("Grow12/Crust:scale")
+tracks/5/interp = 1
+tracks/5/enabled = true
+tracks/5/keys = {
+"times": PackedFloat32Array(0, 1, 3.4, 4),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0.64, 0.6), Vector2(0.64, 0.6), Vector2(1, 1), Vector2(1, 1)]
+}
+
+tracks/6/type = "value"
+tracks/6/path = NodePath("Grow12/Crust/Glints:visible")
+tracks/6/interp = 1
+tracks/6/enabled = true
+tracks/6/keys = {
+"times": PackedFloat32Array(0, 2.8),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/7/type = "value"
+tracks/7/path = NodePath("Grow12/Crust/Glints:self_modulate")
+tracks/7/interp = 1
+tracks/7/enabled = true
+tracks/7/keys = {
+"times": PackedFloat32Array(2.8, 3.9),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
 [sub_resource type="AnimationLibrary" id="Library"]
 _data = {
 &"RESET": SubResource("Animation_RESET"),
 &"stage0": SubResource("Animation_stage0"),
 &"stage1": SubResource("Animation_stage1"),
-&"stage2": SubResource("Animation_stage2")
+&"stage2": SubResource("Animation_stage2"),
+&"grow01": SubResource("Animation_grow01"),
+&"grow12": SubResource("Animation_grow12")
 }
 
 [node name="Rootveil" type="Node2D"]
@@ -206,6 +570,57 @@ position = Vector2(0, -2.5)
 texture = ExtResource("4")
 
 [node name="Glints" type="Sprite2D" parent="Veil2"]
+position = Vector2(0, -2.5)
+texture = ExtResource("5")
+
+[node name="Grow01" type="Node2D" parent="."]
+visible = false
+position = Vector2(0.5, 7)
+
+[node name="Sprout" type="Sprite2D" parent="Grow01"]
+visible = false
+position = Vector2(0, -1)
+texture = ExtResource("1")
+
+[node name="Crust" type="Node2D" parent="Grow01"]
+visible = false
+position = Vector2(0, 0)
+
+[node name="Veil" type="Sprite2D" parent="Grow01/Crust"]
+position = Vector2(0, -1.5)
+texture = ExtResource("2")
+
+[node name="Glints" type="Sprite2D" parent="Grow01/Crust"]
+visible = false
+position = Vector2(0, -1.5)
+texture = ExtResource("3")
+
+[node name="Grow12" type="Node2D" parent="."]
+visible = false
+position = Vector2(0.5, 7)
+
+[node name="Old" type="Node2D" parent="Grow12"]
+visible = false
+position = Vector2(0, 0)
+
+[node name="Veil" type="Sprite2D" parent="Grow12/Old"]
+position = Vector2(0, -1.5)
+texture = ExtResource("2")
+
+[node name="Glints" type="Sprite2D" parent="Grow12/Old"]
+position = Vector2(0, -1.5)
+texture = ExtResource("3")
+
+[node name="Crust" type="Node2D" parent="Grow12"]
+visible = false
+position = Vector2(0, 0)
+
+[node name="Veil" type="Sprite2D" parent="Grow12/Crust"]
+position = Vector2(0, -2.5)
+texture = ExtResource("4")
+
+[node name="Glints" type="Sprite2D" parent="Grow12/Crust"]
+visible = false
 position = Vector2(0, -2.5)
 texture = ExtResource("5")
 

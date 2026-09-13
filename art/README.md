@@ -161,9 +161,10 @@ repeated draw is the same image and `--speed`/pauses stay honest. A transition i
 flight is not saved with the world: after a restart the plants stand where the fields
 say, not part-way.
 
-**Authored growth (the pilot).** Where a pack (v5 and up) carries a `grow<from><to>`
-clip for the step a cell is actually in — at the moment only the lanternstalk's 4 s
-`grow01`, from sprout to middle stalk — that clip *is* the picture, and the reveal mask
+**Authored growth.** Where a pack (v5 and up) carries a `grow<from><to>`
+clip for the step a cell is actually in — since 2026-09-13 every side species (glowcap,
+rootveil, lanternstalk, tendrilfan, reedspire) has both its 4 s `grow01` and `grow12`; the
+pilot was the lanternstalk's `grow01`, from sprout to middle stalk — that clip *is* the picture, and the reveal mask
 is not used at all: the stem extends and the bulb opens as the artwork says, rather than
 the next stage appearing from behind a rising line. The clip is driven by the same
 continuous progress the mask was, so it neither advances nor restarts on a frame draw or
@@ -175,9 +176,9 @@ phase, so entering and leaving the clip lands exactly on the image the idle plan
 showing instead of cutting its sway and its pulse. The opacity crosses linearly from the
 lower stage's to the upper stage's over the step, and the slot's wind bend applies to the
 growth stamp exactly as to any other, so the breeze carries on right through growing. Any
-step the pack has no clip for — every other species, the pilot's own 1 → 2, the first
-appearance out of bare ground, and every plant of a v1–v4 pack — keeps the reveal masks
-described above, unchanged.
+step the pack has no clip for — the two radial canopy species (umbrellafrond, bloomcrown),
+the first appearance out of bare ground, and every plant of a v1–v4 pack — keeps the reveal
+masks described above, unchanged. See `PLANTS.md` "Pack v5" for what each clip shows.
 
 ### Wind
 
@@ -214,7 +215,10 @@ takes the whole amplitude. Rows are preserved, so a growth reveal still uncovers
 material. The amplitude is the wind projected onto the tile's own horizontal axis, jitter
 included, times a fixed per-slot factor of `1 ± WIND_SLOT_VARIATION` (10 %) so a patch reads
 as many plants. The two **canopy** species are radial and rotate instead: umbrellafrond 2°,
-bloomcrown 1.5° about their stationary centre, never translated. A **tall column** takes one
+bloomcrown 1.5° about their stationary centre, never translated. A **reed standing in a
+flooded top-face cell** is not radial — it is the same side-view tile lying along its own
+heading — so it bends along its tile's horizontal axis exactly as on a side face, rooted at
+its ripple row (since 2026-09-13; before that it stood still on the top face). A **tall column** takes one
 wind sample at its base anchor and gives its base, every trunk strip, its cap and its vine
 *one* amplitude on one continuous curve (`TALL_BEND_ROOT` 0, `TALL_BEND_LENGTH` 48 px, with
 each tile's bend base `4i − 8`), so no tile join opens and a vine cannot slide against its

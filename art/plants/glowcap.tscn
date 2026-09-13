@@ -1,4 +1,4 @@
-[gd_scene load_steps=14 format=3]
+[gd_scene load_steps=16 format=3]
 
 [ext_resource type="Texture2D" path="res://parts/plant_glowcap_sprout.svg" id="1"]
 
@@ -164,6 +164,325 @@ tracks/12/keys = {
 "values": [Color(1, 1, 1, 1)]
 }
 
+tracks/13/type = "value"
+tracks/13/path = NodePath("Grow01:visible")
+tracks/13/interp = 1
+tracks/13/enabled = true
+tracks/13/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/14/type = "value"
+tracks/14/path = NodePath("Grow01/Sprout:visible")
+tracks/14/interp = 1
+tracks/14/enabled = true
+tracks/14/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/15/type = "value"
+tracks/15/path = NodePath("Grow01/Sprout:self_modulate")
+tracks/15/interp = 1
+tracks/15/enabled = true
+tracks/15/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/16/type = "value"
+tracks/16/path = NodePath("Grow01/Stem:visible")
+tracks/16/interp = 1
+tracks/16/enabled = true
+tracks/16/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/17/type = "value"
+tracks/17/path = NodePath("Grow01/Stem:self_modulate")
+tracks/17/interp = 1
+tracks/17/enabled = true
+tracks/17/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/18/type = "value"
+tracks/18/path = NodePath("Grow01/Stem:scale")
+tracks/18/interp = 1
+tracks/18/enabled = true
+tracks/18/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(1, 1)]
+}
+
+tracks/19/type = "value"
+tracks/19/path = NodePath("Grow01/Stem:position")
+tracks/19/interp = 1
+tracks/19/enabled = true
+tracks/19/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(0, -2)]
+}
+
+tracks/20/type = "value"
+tracks/20/path = NodePath("Grow01/Cap:visible")
+tracks/20/interp = 1
+tracks/20/enabled = true
+tracks/20/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/21/type = "value"
+tracks/21/path = NodePath("Grow01/Cap:modulate")
+tracks/21/interp = 1
+tracks/21/enabled = true
+tracks/21/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/22/type = "value"
+tracks/22/path = NodePath("Grow01/Cap:scale")
+tracks/22/interp = 1
+tracks/22/enabled = true
+tracks/22/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(1, 1)]
+}
+
+tracks/23/type = "value"
+tracks/23/path = NodePath("Grow01/Cap:position")
+tracks/23/interp = 1
+tracks/23/enabled = true
+tracks/23/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(0, -5)]
+}
+
+tracks/24/type = "value"
+tracks/24/path = NodePath("Grow01/Cap/Gills:visible")
+tracks/24/interp = 1
+tracks/24/enabled = true
+tracks/24/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/25/type = "value"
+tracks/25/path = NodePath("Grow01/Cap/Gills:self_modulate")
+tracks/25/interp = 1
+tracks/25/enabled = true
+tracks/25/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/26/type = "value"
+tracks/26/path = NodePath("Grow12:visible")
+tracks/26/interp = 1
+tracks/26/enabled = true
+tracks/26/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/27/type = "value"
+tracks/27/path = NodePath("Grow12/Old:visible")
+tracks/27/interp = 1
+tracks/27/enabled = true
+tracks/27/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/28/type = "value"
+tracks/28/path = NodePath("Grow12/Old:self_modulate")
+tracks/28/interp = 1
+tracks/28/enabled = true
+tracks/28/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/29/type = "value"
+tracks/29/path = NodePath("Grow12/OldCap:visible")
+tracks/29/interp = 1
+tracks/29/enabled = true
+tracks/29/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/30/type = "value"
+tracks/30/path = NodePath("Grow12/OldCap:modulate")
+tracks/30/interp = 1
+tracks/30/enabled = true
+tracks/30/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/31/type = "value"
+tracks/31/path = NodePath("Grow12/Stem:visible")
+tracks/31/interp = 1
+tracks/31/enabled = true
+tracks/31/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/32/type = "value"
+tracks/32/path = NodePath("Grow12/Stem:self_modulate")
+tracks/32/interp = 1
+tracks/32/enabled = true
+tracks/32/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/33/type = "value"
+tracks/33/path = NodePath("Grow12/Stem:scale")
+tracks/33/interp = 1
+tracks/33/enabled = true
+tracks/33/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(1, 1)]
+}
+
+tracks/34/type = "value"
+tracks/34/path = NodePath("Grow12/Stem:position")
+tracks/34/interp = 1
+tracks/34/enabled = true
+tracks/34/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(0, -3)]
+}
+
+tracks/35/type = "value"
+tracks/35/path = NodePath("Grow12/Cap:visible")
+tracks/35/interp = 1
+tracks/35/enabled = true
+tracks/35/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/36/type = "value"
+tracks/36/path = NodePath("Grow12/Cap:modulate")
+tracks/36/interp = 1
+tracks/36/enabled = true
+tracks/36/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/37/type = "value"
+tracks/37/path = NodePath("Grow12/Cap:scale")
+tracks/37/interp = 1
+tracks/37/enabled = true
+tracks/37/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(1, 1)]
+}
+
+tracks/38/type = "value"
+tracks/38/path = NodePath("Grow12/Cap:position")
+tracks/38/interp = 1
+tracks/38/enabled = true
+tracks/38/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(0, -6)]
+}
+
+tracks/39/type = "value"
+tracks/39/path = NodePath("Grow12/Shelf:visible")
+tracks/39/interp = 1
+tracks/39/enabled = true
+tracks/39/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [false]
+}
+
+tracks/40/type = "value"
+tracks/40/path = NodePath("Grow12/Shelf:modulate")
+tracks/40/interp = 1
+tracks/40/enabled = true
+tracks/40/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Color(1, 1, 1, 1)]
+}
+
+tracks/41/type = "value"
+tracks/41/path = NodePath("Grow12/Shelf:scale")
+tracks/41/interp = 1
+tracks/41/enabled = true
+tracks/41/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 0,
+"values": [Vector2(1, 1)]
+}
+
 
 [sub_resource type="Animation" id="Animation_stage0"]
 resource_name = "stage0"
@@ -326,12 +645,343 @@ tracks/6/keys = {
 }
 
 
+[sub_resource type="Animation" id="Animation_grow01"]
+resource_name = "grow01"
+length = 4
+loop_mode = 0
+
+tracks/0/type = "value"
+tracks/0/path = NodePath("Grow01:visible")
+tracks/0/interp = 1
+tracks/0/enabled = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [true]
+}
+
+tracks/1/type = "value"
+tracks/1/path = NodePath("Grow01/Sprout:visible")
+tracks/1/interp = 1
+tracks/1/enabled = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0, 1.75),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [true, false]
+}
+
+tracks/2/type = "value"
+tracks/2/path = NodePath("Grow01/Sprout:self_modulate")
+tracks/2/interp = 1
+tracks/2/enabled = true
+tracks/2/keys = {
+"times": PackedFloat32Array(1.1, 1.7),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 1), Color(1, 1, 1, 0)]
+}
+
+tracks/3/type = "value"
+tracks/3/path = NodePath("Grow01/Stem:visible")
+tracks/3/interp = 1
+tracks/3/enabled = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0, 0.2),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/4/type = "value"
+tracks/4/path = NodePath("Grow01/Stem:self_modulate")
+tracks/4/interp = 1
+tracks/4/enabled = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0.2, 0.7),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+tracks/5/type = "value"
+tracks/5/path = NodePath("Grow01/Stem:scale")
+tracks/5/interp = 1
+tracks/5/enabled = true
+tracks/5/keys = {
+"times": PackedFloat32Array(0, 0.8, 2.4, 4),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(1, 0.5), Vector2(1, 0.5), Vector2(1, 1), Vector2(1, 1)]
+}
+
+tracks/6/type = "value"
+tracks/6/path = NodePath("Grow01/Stem:position")
+tracks/6/interp = 1
+tracks/6/enabled = true
+tracks/6/keys = {
+"times": PackedFloat32Array(0, 0.8, 2.4, 4),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0, -1), Vector2(0, -1), Vector2(0, -2), Vector2(0, -2)]
+}
+
+tracks/7/type = "value"
+tracks/7/path = NodePath("Grow01/Cap:visible")
+tracks/7/interp = 1
+tracks/7/enabled = true
+tracks/7/keys = {
+"times": PackedFloat32Array(0, 1.2),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/8/type = "value"
+tracks/8/path = NodePath("Grow01/Cap:modulate")
+tracks/8/interp = 1
+tracks/8/enabled = true
+tracks/8/keys = {
+"times": PackedFloat32Array(1.2, 1.8),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+tracks/9/type = "value"
+tracks/9/path = NodePath("Grow01/Cap:scale")
+tracks/9/interp = 1
+tracks/9/enabled = true
+tracks/9/keys = {
+"times": PackedFloat32Array(0, 1.2, 3.4, 4),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0.43, 1), Vector2(0.43, 1), Vector2(1, 1), Vector2(1, 1)]
+}
+
+tracks/10/type = "value"
+tracks/10/path = NodePath("Grow01/Cap:position")
+tracks/10/interp = 1
+tracks/10/enabled = true
+tracks/10/keys = {
+"times": PackedFloat32Array(0, 0.8, 2.4, 2.8, 3.6, 4),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0, -2), Vector2(0, -2), Vector2(0, -4), Vector2(0, -4), Vector2(0, -5), Vector2(0, -5)]
+}
+
+tracks/11/type = "value"
+tracks/11/path = NodePath("Grow01/Cap/Gills:visible")
+tracks/11/interp = 1
+tracks/11/enabled = true
+tracks/11/keys = {
+"times": PackedFloat32Array(0, 2.8),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/12/type = "value"
+tracks/12/path = NodePath("Grow01/Cap/Gills:self_modulate")
+tracks/12/interp = 1
+tracks/12/enabled = true
+tracks/12/keys = {
+"times": PackedFloat32Array(2.8, 3.9),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+[sub_resource type="Animation" id="Animation_grow12"]
+resource_name = "grow12"
+length = 4
+loop_mode = 0
+
+tracks/0/type = "value"
+tracks/0/path = NodePath("Grow12:visible")
+tracks/0/interp = 1
+tracks/0/enabled = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0),
+"transitions": PackedFloat32Array(1),
+"update": 1,
+"values": [true]
+}
+
+tracks/1/type = "value"
+tracks/1/path = NodePath("Grow12/Old:visible")
+tracks/1/interp = 1
+tracks/1/enabled = true
+tracks/1/keys = {
+"times": PackedFloat32Array(0, 1.25),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [true, false]
+}
+
+tracks/2/type = "value"
+tracks/2/path = NodePath("Grow12/Old:self_modulate")
+tracks/2/interp = 1
+tracks/2/enabled = true
+tracks/2/keys = {
+"times": PackedFloat32Array(0.5, 1.2),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 1), Color(1, 1, 1, 0)]
+}
+
+tracks/3/type = "value"
+tracks/3/path = NodePath("Grow12/OldCap:visible")
+tracks/3/interp = 1
+tracks/3/enabled = true
+tracks/3/keys = {
+"times": PackedFloat32Array(0, 1.45),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [true, false]
+}
+
+tracks/4/type = "value"
+tracks/4/path = NodePath("Grow12/OldCap:modulate")
+tracks/4/interp = 1
+tracks/4/enabled = true
+tracks/4/keys = {
+"times": PackedFloat32Array(0.6, 1.4),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 1), Color(1, 1, 1, 0)]
+}
+
+tracks/5/type = "value"
+tracks/5/path = NodePath("Grow12/Stem:visible")
+tracks/5/interp = 1
+tracks/5/enabled = true
+tracks/5/keys = {
+"times": PackedFloat32Array(0, 0.2),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/6/type = "value"
+tracks/6/path = NodePath("Grow12/Stem:self_modulate")
+tracks/6/interp = 1
+tracks/6/enabled = true
+tracks/6/keys = {
+"times": PackedFloat32Array(0.2, 0.9),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+tracks/7/type = "value"
+tracks/7/path = NodePath("Grow12/Stem:scale")
+tracks/7/interp = 1
+tracks/7/enabled = true
+tracks/7/keys = {
+"times": PackedFloat32Array(0, 0.8, 2.6, 4),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(1, 0.67), Vector2(1, 0.67), Vector2(1, 1), Vector2(1, 1)]
+}
+
+tracks/8/type = "value"
+tracks/8/path = NodePath("Grow12/Stem:position")
+tracks/8/interp = 1
+tracks/8/enabled = true
+tracks/8/keys = {
+"times": PackedFloat32Array(0, 0.8, 2.6, 4),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0, -2.01), Vector2(0, -2.01), Vector2(0, -3), Vector2(0, -3)]
+}
+
+tracks/9/type = "value"
+tracks/9/path = NodePath("Grow12/Cap:visible")
+tracks/9/interp = 1
+tracks/9/enabled = true
+tracks/9/keys = {
+"times": PackedFloat32Array(0, 0.3),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/10/type = "value"
+tracks/10/path = NodePath("Grow12/Cap:modulate")
+tracks/10/interp = 1
+tracks/10/enabled = true
+tracks/10/keys = {
+"times": PackedFloat32Array(0.3, 1.1),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+tracks/11/type = "value"
+tracks/11/path = NodePath("Grow12/Cap:scale")
+tracks/11/interp = 1
+tracks/11/enabled = true
+tracks/11/keys = {
+"times": PackedFloat32Array(0, 1, 3.4, 4),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0.78, 1), Vector2(0.78, 1), Vector2(1, 1), Vector2(1, 1)]
+}
+
+tracks/12/type = "value"
+tracks/12/path = NodePath("Grow12/Cap:position")
+tracks/12/interp = 1
+tracks/12/enabled = true
+tracks/12/keys = {
+"times": PackedFloat32Array(0, 0.8, 1.1, 2.6, 4),
+"transitions": PackedFloat32Array(1, 1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0, -3.02), Vector2(0, -3.02), Vector2(0, -3.35), Vector2(0, -6), Vector2(0, -6)]
+}
+
+tracks/13/type = "value"
+tracks/13/path = NodePath("Grow12/Shelf:visible")
+tracks/13/interp = 1
+tracks/13/enabled = true
+tracks/13/keys = {
+"times": PackedFloat32Array(0, 2),
+"transitions": PackedFloat32Array(1, 1),
+"update": 1,
+"values": [false, true]
+}
+
+tracks/14/type = "value"
+tracks/14/path = NodePath("Grow12/Shelf:modulate")
+tracks/14/interp = 1
+tracks/14/enabled = true
+tracks/14/keys = {
+"times": PackedFloat32Array(2, 2.8),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Color(1, 1, 1, 0), Color(1, 1, 1, 1)]
+}
+
+tracks/15/type = "value"
+tracks/15/path = NodePath("Grow12/Shelf:scale")
+tracks/15/interp = 1
+tracks/15/enabled = true
+tracks/15/keys = {
+"times": PackedFloat32Array(0, 2, 3.9, 4),
+"transitions": PackedFloat32Array(1, 1, 1, 1),
+"update": 0,
+"values": [Vector2(0.5, 0.5), Vector2(0.5, 0.5), Vector2(1, 1), Vector2(1, 1)]
+}
+
 [sub_resource type="AnimationLibrary" id="Library"]
 _data = {
 &"RESET": SubResource("Animation_RESET"),
 &"stage0": SubResource("Animation_stage0"),
 &"stage1": SubResource("Animation_stage1"),
-&"stage2": SubResource("Animation_stage2")
+&"stage2": SubResource("Animation_stage2"),
+&"grow01": SubResource("Animation_grow01"),
+&"grow12": SubResource("Animation_grow12")
 }
 
 [node name="Glowcap" type="Node2D"]
@@ -394,6 +1044,83 @@ position = Vector2(1, -1)
 texture = ExtResource("8")
 
 [node name="Gills" type="Sprite2D" parent="Cap2b"]
+position = Vector2(1, 1)
+texture = ExtResource("4")
+
+[node name="Grow01" type="Node2D" parent="."]
+visible = false
+position = Vector2(0.5, 7)
+
+[node name="Sprout" type="Sprite2D" parent="Grow01"]
+visible = false
+position = Vector2(0, -1.5)
+texture = ExtResource("1")
+
+[node name="Stem" type="Sprite2D" parent="Grow01"]
+visible = false
+position = Vector2(0, -2)
+texture = ExtResource("2")
+
+[node name="Cap" type="Node2D" parent="Grow01"]
+visible = false
+position = Vector2(0, -5)
+
+[node name="Cap" type="Sprite2D" parent="Grow01/Cap"]
+position = Vector2(0, -1)
+texture = ExtResource("3")
+
+[node name="Gills" type="Sprite2D" parent="Grow01/Cap"]
+visible = false
+position = Vector2(0, 1)
+texture = ExtResource("4")
+
+[node name="Grow12" type="Node2D" parent="."]
+visible = false
+position = Vector2(0.5, 7)
+
+[node name="Old" type="Sprite2D" parent="Grow12"]
+visible = false
+position = Vector2(0, -2)
+texture = ExtResource("2")
+
+[node name="OldCap" type="Node2D" parent="Grow12"]
+visible = false
+position = Vector2(0, -5)
+
+[node name="Cap" type="Sprite2D" parent="Grow12/OldCap"]
+position = Vector2(0, -1)
+texture = ExtResource("3")
+
+[node name="Gills" type="Sprite2D" parent="Grow12/OldCap"]
+position = Vector2(0, 1)
+texture = ExtResource("4")
+
+[node name="Stem" type="Sprite2D" parent="Grow12"]
+visible = false
+position = Vector2(0, -3)
+texture = ExtResource("5")
+
+[node name="Cap" type="Node2D" parent="Grow12"]
+visible = false
+position = Vector2(0, -6)
+
+[node name="Cap" type="Sprite2D" parent="Grow12/Cap"]
+position = Vector2(0, -3.5)
+texture = ExtResource("6")
+
+[node name="Gills" type="Sprite2D" parent="Grow12/Cap"]
+position = Vector2(0, -1)
+texture = ExtResource("7")
+
+[node name="Shelf" type="Node2D" parent="Grow12"]
+visible = false
+position = Vector2(2, -4)
+
+[node name="Cap" type="Sprite2D" parent="Grow12/Shelf"]
+position = Vector2(1, -1)
+texture = ExtResource("8")
+
+[node name="Gills" type="Sprite2D" parent="Grow12/Shelf"]
 position = Vector2(1, 1)
 texture = ExtResource("4")
 

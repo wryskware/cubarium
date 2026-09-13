@@ -188,18 +188,24 @@
 		{
 			"band": "soil",
 			"frames": 24,
-			"name": "rootveil",
+			"from": 0,
+			"loop": false,
+			"name": "glowcap",
 			"row": 3,
-			"seconds": 3.0,
-			"stage": 0
+			"seconds": 4.0,
+			"stage": "grow",
+			"to": 1
 		},
 		{
 			"band": "soil",
 			"frames": 24,
-			"name": "rootveil",
+			"from": 1,
+			"loop": false,
+			"name": "glowcap",
 			"row": 4,
-			"seconds": 3.0,
-			"stage": 1
+			"seconds": 4.0,
+			"stage": "grow",
+			"to": 2
 		},
 		{
 			"band": "soil",
@@ -207,13 +213,51 @@
 			"name": "rootveil",
 			"row": 5,
 			"seconds": 3.0,
+			"stage": 0
+		},
+		{
+			"band": "soil",
+			"frames": 24,
+			"name": "rootveil",
+			"row": 6,
+			"seconds": 3.0,
+			"stage": 1
+		},
+		{
+			"band": "soil",
+			"frames": 24,
+			"name": "rootveil",
+			"row": 7,
+			"seconds": 3.0,
 			"stage": 2
+		},
+		{
+			"band": "soil",
+			"frames": 24,
+			"from": 0,
+			"loop": false,
+			"name": "rootveil",
+			"row": 8,
+			"seconds": 4.0,
+			"stage": "grow",
+			"to": 1
+		},
+		{
+			"band": "soil",
+			"frames": 24,
+			"from": 1,
+			"loop": false,
+			"name": "rootveil",
+			"row": 9,
+			"seconds": 4.0,
+			"stage": "grow",
+			"to": 2
 		},
 		{
 			"band": "foliage",
 			"frames": 24,
 			"name": "lanternstalk",
-			"row": 6,
+			"row": 10,
 			"seconds": 3.0,
 			"stage": 0
 		},
@@ -221,7 +265,7 @@
 			"band": "foliage",
 			"frames": 24,
 			"name": "lanternstalk",
-			"row": 7,
+			"row": 11,
 			"seconds": 3.0,
 			"stage": 1
 		},
@@ -229,7 +273,7 @@
 			"band": "foliage",
 			"frames": 24,
 			"name": "lanternstalk",
-			"row": 8,
+			"row": 12,
 			"seconds": 3.0,
 			"stage": 2
 		},
@@ -237,7 +281,7 @@
 			"band": "foliage",
 			"frames": 24,
 			"name": "lanternstalk",
-			"row": 9,
+			"row": 13,
 			"seconds": 3.0,
 			"stage": "fruit"
 		},
@@ -247,7 +291,7 @@
 			"from": 0,
 			"loop": false,
 			"name": "lanternstalk",
-			"row": 10,
+			"row": 14,
 			"seconds": 4.0,
 			"stage": "grow",
 			"to": 1
@@ -255,104 +299,137 @@
 		{
 			"band": "foliage",
 			"frames": 24,
-			"name": "tendrilfan",
-			"row": 11,
-			"seconds": 3.0,
-			"stage": 0
-		},
-		{
-			"band": "foliage",
-			"frames": 24,
-			"name": "tendrilfan",
-			"row": 12,
-			"seconds": 3.0,
-			"stage": 1
-		},
-		{
-			"band": "foliage",
-			"frames": 24,
-			"name": "tendrilfan",
-			"row": 13,
-			"seconds": 3.0,
-			"stage": 2
-		},
-		{
-			"band": "foliage",
-			"frames": 24,
-			"name": "tendrilfan",
-			"row": 14,
-			"seconds": 3.0,
-			"stage": "fruit"
-		},
-		{
-			"band": "canopy",
-			"frames": 24,
-			"name": "umbrellafrond",
+			"from": 1,
+			"loop": false,
+			"name": "lanternstalk",
 			"row": 15,
-			"seconds": 3.0,
-			"stage": 0
+			"seconds": 4.0,
+			"stage": "grow",
+			"to": 2
 		},
 		{
-			"band": "canopy",
+			"band": "foliage",
 			"frames": 24,
-			"name": "umbrellafrond",
+			"name": "tendrilfan",
 			"row": 16,
 			"seconds": 3.0,
+			"stage": 0
+		},
+		{
+			"band": "foliage",
+			"frames": 24,
+			"name": "tendrilfan",
+			"row": 17,
+			"seconds": 3.0,
 			"stage": 1
+		},
+		{
+			"band": "foliage",
+			"frames": 24,
+			"name": "tendrilfan",
+			"row": 18,
+			"seconds": 3.0,
+			"stage": 2
+		},
+		{
+			"band": "foliage",
+			"frames": 24,
+			"name": "tendrilfan",
+			"row": 19,
+			"seconds": 3.0,
+			"stage": "fruit"
+		},
+		{
+			"band": "foliage",
+			"frames": 24,
+			"from": 0,
+			"loop": false,
+			"name": "tendrilfan",
+			"row": 20,
+			"seconds": 4.0,
+			"stage": "grow",
+			"to": 1
+		},
+		{
+			"band": "foliage",
+			"frames": 24,
+			"from": 1,
+			"loop": false,
+			"name": "tendrilfan",
+			"row": 21,
+			"seconds": 4.0,
+			"stage": "grow",
+			"to": 2
 		},
 		{
 			"band": "canopy",
 			"frames": 24,
 			"name": "umbrellafrond",
-			"row": 17,
-			"seconds": 3.0,
-			"stage": 2
-		},
-		{
-			"band": "canopy",
-			"frames": 24,
-			"name": "bloomcrown",
-			"row": 18,
-			"seconds": 3.0,
-			"stage": 0
-		},
-		{
-			"band": "canopy",
-			"frames": 24,
-			"name": "bloomcrown",
-			"row": 19,
-			"seconds": 3.0,
-			"stage": 1
-		},
-		{
-			"band": "canopy",
-			"frames": 24,
-			"name": "bloomcrown",
-			"row": 20,
-			"seconds": 3.0,
-			"stage": 2
-		},
-		{
-			"band": "canopy",
-			"frames": 24,
-			"name": "bloomcrown",
-			"row": 21,
-			"seconds": 3.0,
-			"stage": "fruit"
-		},
-		{
-			"band": "water",
-			"frames": 24,
-			"name": "reedspire",
 			"row": 22,
 			"seconds": 3.0,
 			"stage": 0
 		},
 		{
+			"band": "canopy",
+			"frames": 24,
+			"name": "umbrellafrond",
+			"row": 23,
+			"seconds": 3.0,
+			"stage": 1
+		},
+		{
+			"band": "canopy",
+			"frames": 24,
+			"name": "umbrellafrond",
+			"row": 24,
+			"seconds": 3.0,
+			"stage": 2
+		},
+		{
+			"band": "canopy",
+			"frames": 24,
+			"name": "bloomcrown",
+			"row": 25,
+			"seconds": 3.0,
+			"stage": 0
+		},
+		{
+			"band": "canopy",
+			"frames": 24,
+			"name": "bloomcrown",
+			"row": 26,
+			"seconds": 3.0,
+			"stage": 1
+		},
+		{
+			"band": "canopy",
+			"frames": 24,
+			"name": "bloomcrown",
+			"row": 27,
+			"seconds": 3.0,
+			"stage": 2
+		},
+		{
+			"band": "canopy",
+			"frames": 24,
+			"name": "bloomcrown",
+			"row": 28,
+			"seconds": 3.0,
+			"stage": "fruit"
+		},
+		{
 			"band": "water",
 			"frames": 24,
 			"name": "reedspire",
-			"row": 23,
+			"row": 29,
+			"seconds": 3.0,
+			"stage": 0
+		},
+		{
+			"band": "water",
+			"frames": 24,
+			"name": "reedspire",
+			"row": 30,
 			"seconds": 3.0,
 			"stage": 1
 		},
@@ -360,9 +437,31 @@
 			"band": "water",
 			"frames": 24,
 			"name": "reedspire",
-			"row": 24,
+			"row": 31,
 			"seconds": 3.0,
 			"stage": 2
+		},
+		{
+			"band": "water",
+			"frames": 24,
+			"from": 0,
+			"loop": false,
+			"name": "reedspire",
+			"row": 32,
+			"seconds": 4.0,
+			"stage": "grow",
+			"to": 1
+		},
+		{
+			"band": "water",
+			"frames": 24,
+			"from": 1,
+			"loop": false,
+			"name": "reedspire",
+			"row": 33,
+			"seconds": 4.0,
+			"stage": "grow",
+			"to": 2
 		}
 	],
 	"tall": [

@@ -176,8 +176,53 @@ pixel-identical to the neutral `Stalk1` image** — which is stage 1's *half-per
 quarter-period sample, the sprout at modulate 1. The presenter blends the endpoints into the
 running stage loops, so neither endpoint has to match an arbitrary sway phase.
 
+### The ten authored steps (2026-09-13)
+
+Every side-face species now carries both of its steps; the two canopy species still use the
+runtime's radial reveal. Each clip is 4 s, `loop_mode = LOOP_NONE`, and lives in its own
+hidden `Grow<from><to>` group of Sprite2D copies of the parts the stages already use — no
+clip touches another clip's pivots and no new part was painted for any of them.
+
+| clip | what it shows |
+| --- | --- |
+| `glowcap grow01` | the sprout fades under a `stem1` stem scaling 0.5 → 1 about its bottom; a `Cap1` pivot (cap1 + gills2b) rides one pixel above the stem top, fading in from 1.2 s while **widening** `scale.x` 0.43 → 1 — an umbrella opening — and the gills light last (2.8–3.9 s) as the cap settles onto its mature offset |
+| `glowcap grow12` | `stem1` cross-fades into `stem2` extending 0.67 → 1; `Cap1` cross-fades into a `Cap2` that widens 0.78 → 1 and climbs with the stem top; the side shelf `Cap2b` sprouts out of the stem, fading in 2.0–2.8 s and scaling 0.5 → 1 about its own root |
+| `rootveil grow01` | the crust spreads: `veil1` scales `scale.x` 0.43 → 1 about its bottom-centre pivot (0.6–3.3 s) while the sprout fades out, and `glints1` light 2.6–3.9 s |
+| `rootveil grow12` | `veil2` cross-fades over veil1 at scale (0.64, 0.6) — exactly veil1's footprint — then spreads to 1 over 1.0–3.4 s; `glints2` light 2.8–3.9 s |
+| `lanternstalk grow01` | the pilot, described above |
+| `lanternstalk grow12` | `Stalk1` cross-fades (0.4–1.3 s) into a `stalk2` stem pinned to row 14 at `scale.y` 0.625 that extends to 1 over 1.0–2.6 s (nine painted rows at the end); a `bulb2` lantern fades in over bulb1 at 1.6–2.4 s at scale 0.5 and enlarges to 1 by 3.6 s, riding at least 2.1 px into the stem's top row throughout |
+| `tendrilfan grow01` | `base1` fades in over the sprout, then each tendril **uncurls**: the `TendrilL1`/`TendrilR1` pivots scale 0.3 → 1 about their bases and rotate from ±0.6 rad inward to 0, the left leading the right by 0.3 s |
+| `tendrilfan grow12` | `base2` widens `scale.x` 0.7 → 1 over base1; the tendril1s cross-fade into tendril2s that scale 0.6 → 1 and rotate ±0.4 → 0 (0.8–3.4 s); `Center2` rises `scale.y` 0.3 → 1 about its pivot (1.4–3.9 s) |
+| `reedspire grow01` | the sprout fades under `ReedA1` shooting up `scale.y` 3/7 → 1 about its bottom pivot (0.6–2.8 s), `ReedB1` following 0.6 s later (3/5 → 1, to 3.9 s); `Ripple1` fades in 0.4–1.2 s |
+| `reedspire grow12` | A1/B1 cross-fade into A2/B2 at matched heights (A2 `scale.y` 7/11, B2 5/8 — the one-column shift left is carried inside the cross-fade), which then extend to 1 over 1.0–3.2 s while `ReedC2` shoots up out of the ripple (0.2 → 1, 1.8–3.9 s) and `Ripple2` cross-fades in |
+
+Three conventions bind all of them:
+
+- **Endpoints are neutral poses, not loop samples.** Frame 0 is the source stage's
+  RESET-neutral pose (every pivot at rotation 0, every `self_modulate` at 1) and the last
+  frame the target's. For `glowcap`, `rootveil` and `lanternstalk` that happens to *be* the
+  stage's phase-0 sample; for `tendrilfan` and `reedspire` it is **no** sample of the stage
+  row at all, because their two sway pivots are never at rotation 0 at the same phase. The
+  presenter's 12 % endpoint blends absorb the mismatch, so only the pilot's 0 → 1 keeps the
+  stricter "last frame is a loop sample" property. Frame 0 of a `grow12` clip is therefore
+  byte-identical to the last frame of the same plant's `grow01`.
+- **Roots stay planted.** Every stage of every side species bottoms on tile row 14, so every
+  frame of every clip paints row 14 and nothing paints row 15. (There is no one-row root
+  change anywhere: `lanternstalk`'s mature `stalk2` sits on rows 6–14, not 6–13.)
+- **Berries and fruit never appear.** The growth groups simply carry no berry or fruit
+  sprite, so `tendrilfan`'s berries and `bloomcrown`'s `Fruit` pivot cannot leak into a step.
+
+A fourth, softer rule came out of looking at the 8× strips: **nothing may fade to
+near-nothing before its replacement is up**. Two parts covering the same texels at alpha
+0.5 composite to 0.75, which reads as the plant blinking; so an outgoing part holds full
+opacity until its successor is opaque and only then fades. Measured on the shipped pack, no
+frame of any clip carries less total alpha than its own source pose.
+
 Authoring one: keep the plant's shared root, extend the support before the head, never scale
 a part to zero (a singular transform is skipped by the baker — fade in with visibility and
 `self_modulate` alpha instead), and add **every** newly animated property's neutral value to
 `RESET`, including the new group's `visible`, or the bake's RESET-before-each-sample loop will
-leak a growth transform into the stage and fruit rows.
+leak a growth transform into the stage and fruit rows. A `Node2D` pivot's `modulate` fades a
+whole sub-assembly at once (the baker multiplies every `CanvasItem` parent's `modulate`);
+scaling that pivot scales its children's positions too, which is how a part is scaled about
+a chosen root rather than about its own centre.

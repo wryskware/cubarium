@@ -729,13 +729,13 @@ mod tests {
                 .unwrap();
         // name, band, fruit clip, authored growth transitions (pack v5).
         let expected: [(&str, Band, bool, &[(u8, u8)]); 7] = [
-            ("glowcap", Band::Soil, false, &[]),
-            ("rootveil", Band::Soil, false, &[]),
-            ("lanternstalk", Band::Foliage, true, &[(0, 1)]),
-            ("tendrilfan", Band::Foliage, true, &[]),
+            ("glowcap", Band::Soil, false, &[(0, 1), (1, 2)]),
+            ("rootveil", Band::Soil, false, &[(0, 1), (1, 2)]),
+            ("lanternstalk", Band::Foliage, true, &[(0, 1), (1, 2)]),
+            ("tendrilfan", Band::Foliage, true, &[(0, 1), (1, 2)]),
             ("umbrellafrond", Band::Canopy, false, &[]),
             ("bloomcrown", Band::Canopy, true, &[]),
-            ("reedspire", Band::Water, false, &[]),
+            ("reedspire", Band::Water, false, &[(0, 1), (1, 2)]),
         ];
         assert_eq!(art.plants.len(), expected.len());
         for (plant, (name, band, fruit, transitions)) in art.plants.iter().zip(expected) {
@@ -878,7 +878,9 @@ mod tests {
         let art = ArtPack::load(&atelier()).unwrap();
         let plant = art.plant("lanternstalk").unwrap();
         let clip = plant.transition(0, 1).expect("pack v5 carries the growth pilot");
-        assert!(plant.transition(1, 2).is_none(), "only 0 → 1 is authored");
+        // 1 → 2 is authored too (the growth expansion); only this pilot carries the
+        // stricter "endpoint is a loop sample" property asserted below.
+        assert!(plant.transition(1, 2).is_some(), "the 1 → 2 step is authored as well");
         assert!(plant.transition(1, 0).is_none(), "a transition only runs upward");
         assert!(!clip.looping);
         assert_eq!(clip.frames.len(), art.plant_frames());

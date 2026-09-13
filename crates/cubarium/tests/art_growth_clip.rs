@@ -48,7 +48,8 @@ const PILOT: &str = "lanternstalk";
 /// ceiling: the step's opacity is then constant and every image comparison below is about the
 /// art, not about a ramp.
 const DENSITY: f64 = 0.60;
-/// A density that warrants stage 2, for the `1 → 2` step the pack has no clip for.
+/// A density that warrants stage 2, for the `1 → 2` step (authored since 2026-09-13, so the
+/// fallback sweep below treats it like the pilot's own step).
 const FULL_DENSITY: f64 = 0.85;
 
 fn atelier() -> PathBuf {
@@ -364,18 +365,18 @@ fn expected_idle(
 /// beginning. A looping transition would jump the plant back to a sprout at the top of every
 /// step.
 #[test]
-fn the_shipped_pack_carries_one_growth_transition_and_it_is_the_lanternstalks_0_to_1() {
+fn the_shipped_pack_carries_the_lanternstalks_growth_transitions_and_the_pilot_is_0_to_1() {
     let art = pack();
     let plant = art.plant(PILOT).expect("the pack must carry the pilot plant");
     assert_eq!(
         plant.transitions.iter().map(|t| (t.from, t.to)).collect::<Vec<_>>(),
-        vec![(0u8, 1u8)],
-        "the pilot must be the single 0 → 1 transition"
+        vec![(0u8, 1u8), (1, 2)],
+        "the pilot's 0 → 1 clip and the 1 → 2 clip authored on 2026-09-13"
     );
     let clip = plant.transition(0, 1).expect("pack v5 carries the growth pilot");
     assert!(!clip.looping, "a growth transition never loops");
     assert!(!plant.transitions[0].clip.looping, "`Transition::clip` is always non-looping");
-    assert!(plant.transition(1, 2).is_none(), "only 0 → 1 is authored");
+    assert!(plant.transition(1, 2).is_some(), "1 → 2 is authored too");
     assert!(plant.transition(0, 2).is_none(), "a transition is one stage step");
     assert!(plant.transition(1, 0).is_none(), "a transition only runs upward");
 
@@ -400,20 +401,17 @@ fn the_shipped_pack_carries_one_growth_transition_and_it_is_the_lanternstalks_0_
     assert!(clip.frames.len() >= 2, "a clip needs two samples to blend");
     assert!(clip.seconds > 0.0);
 
-    // And every other plant of the shipped pack has none at all, so every other step of every
-    // other species keeps the reveal mask.
+    // Every side species carries both steps (2026-09-13); the two radial canopy species carry
+    // none, so their steps keep the reveal mask until a top-down opening is authored.
     for plant in &art.plants {
-        if plant.name == PILOT {
-            continue;
-        }
-        assert!(
-            plant.transitions.is_empty(),
-            "{} carries {} transitions; only the pilot should",
-            plant.name,
-            plant.transitions.len()
-        );
-        for (from, to) in [(0u8, 1u8), (1, 2)] {
-            assert!(plant.transition(from, to).is_none(), "{} {from} → {to}", plant.name);
+        let pairs = plant.transitions.iter().map(|t| (t.from, t.to)).collect::<Vec<_>>();
+        if plant.band == Band::Canopy {
+            assert!(pairs.is_empty(), "{} carries {pairs:?}; canopy keeps the masks", plant.name);
+            for (from, to) in [(0u8, 1u8), (1, 2)] {
+                assert!(plant.transition(from, to).is_none(), "{} {from} → {to}", plant.name);
+            }
+        } else {
+            assert_eq!(pairs, vec![(0u8, 1u8), (1, 2)], "{} growth clips", plant.name);
         }
     }
 }
@@ -987,8 +985,8 @@ fn the_authored_step_moves_less_than_a_fraction_of_a_baked_sample_per_frame_at_6
 /// With the transitions cleared — a v1–v4 pack, or any pair the art has no clip for — the step
 /// is the reveal mask again, bit for bit: the lower stage fading at `opacity · (1 − t)` under
 /// the upper stage revealed along the stalk. And clearing them changes *nothing else*: the
-/// `None → 0` and `1 → 2` steps of the very same plant draw identically with and without the
-/// pilot clip.
+/// `None → 0` step of the very same plant — the one step no clip can ever cover — draws
+/// identically with and without the clips, while both authored steps differ mid-flight.
 #[test]
 fn a_pack_without_transitions_falls_back_to_the_reveal_masks_and_changes_no_other_step() {
     let cell = pilot_cell();
@@ -1030,7 +1028,7 @@ fn a_pack_without_transitions_falls_back_to_the_reveal_masks_and_changes_no_othe
     );
 
     // Every other pair: drive both packs identically to stage 2 and compare every frame. Only
-    // the 0 → 1 step may differ.
+    // the two authored steps may differ.
     let mut with = ArtPresenter::new(plants_only());
     let mut without = ArtPresenter::new(without_transitions());
     with.observe(&bare_view(0));
@@ -1057,7 +1055,7 @@ fn a_pack_without_transitions_falls_back_to_the_reveal_masks_and_changes_no_othe
                     seen.push(pair);
                 }
             }
-            if pair == Some((Some(0), 1)) {
+            if matches!(pair, Some((Some(0), 1)) | Some((Some(1), 2))) {
                 // The two paths necessarily *converge* at the ends of the step — both are the
                 // neighbouring idle stage image there — so only the middle of the step is
                 // required to differ.
