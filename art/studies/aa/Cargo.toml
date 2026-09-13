@@ -3,12 +3,17 @@ name = "cubarium-aa-study"
 version = "0.0.0"
 edition = "2024"
 publish = false
+default-run = "aa_comparison"
 
 [workspace]
 
 [[bin]]
 name = "aa_comparison"
 path = "aa_comparison.rs"
+
+[[bin]]
+name = "sail_comparison"
+path = "sail_comparison.rs"
 
 [dependencies]
 cubarium-render = { path = "../../../crates/cubarium-render" }

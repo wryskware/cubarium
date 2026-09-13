@@ -38,6 +38,13 @@ try {
     const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});
     await writeFile(join(dir,`browser-${scene}-${frame}.png`),Buffer.from(shot.data,'base64'),{flag:'wx'});
   }
+  if(await evaluate(`Boolean(document.querySelector('#scale'))`)) {
+    for(const [scale,selection,frame] of [['juvenile','states',45],['adult','feed-to-bud',60],['adult','feed-to-bud',69],['adult','feed-to-bud',78],['juvenile','bud-to-move',69]]) {
+      await evaluate(`(async()=>{playing=false;index=${frame};document.querySelector('#scale').value='${scale}';document.querySelector('#case').value='${selection}';document.querySelector('#scene').value='rooted';document.querySelector('#scene').onchange();await Promise.all(views.map(v=>v.image.decode()));await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));})()`);
+      const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});
+      await writeFile(join(dir,`browser-${scale}-${selection}-${frame}.png`),Buffer.from(shot.data,'base64'),{flag:'wx'});
+    }
+  }
   await writeFile(join(dir,'browser-cadence.json'),JSON.stringify(report,null,2)+'\n',{flag:'wx'});
   console.log(report);
 } finally {

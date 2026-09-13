@@ -12,6 +12,9 @@ const CASES = [
 func _initialize() -> void:
 	call_deferred("study")
 
+func preserve_constant_blocks() -> bool:
+	return false
+
 func coverage(rig: Node2D) -> Image:
 	# Quantize each subpixel's source-over layers just as the existing RGBA8 bake does.
 	# Then resolve spatial coverage in linear premultiplied RGBA, not encoded RGB.
@@ -54,12 +57,17 @@ func coverage(rig: Node2D) -> Image:
 	for y in range(TILE):
 		for x in range(TILE):
 			var sum := Color(0, 0, 0, 0)
+			var first := fine.get_pixel(x * GRID, y * GRID)
+			var constant := preserve_constant_blocks()
 			for sy in range(GRID):
 				for sx in range(GRID):
 					var c := fine.get_pixel(x * GRID + sx, y * GRID + sy)
+					constant = constant and c == first
 					var linear := c.srgb_to_linear()
 					sum += Color(linear.r * c.a, linear.g * c.a, linear.b * c.a, c.a)
-			if sum.a > 0:
+			if constant:
+				image.set_pixel(x, y, first)
+			elif sum.a > 0:
 				var resolved := Color(sum.r / sum.a, sum.g / sum.a, sum.b / sum.a, sum.a / (GRID * GRID))
 				image.set_pixel(x, y, resolved.linear_to_srgb())
 	return image

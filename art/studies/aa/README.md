@@ -44,3 +44,28 @@ This is representative geometry coverage, not an exhaustive topology proof.
 Frozen evidence uses Godot 4.7.2, the source blobs listed in the report, and exact
 production atlas rows lanternstalk 11, reedspire 34, sail 5, skimmer 13. The baseline
 study strips were independently byte-compared with those shipped RGBA rows.
+
+## Sail-only follow-up
+
+`bake_sail.gd` is a separate, fixed candidate: only `LeftFin/Sprite` and
+`RightFin/Sprite` get 4×4 coverage. The known `Body/Sprite` and `Bud/Sprite` are
+point-baked and composited above the resolved fins, preserving opaque highlights
+exactly. Their original animation tracks still run. Uniform coverage blocks are
+copied exactly, avoiding unnecessary color conversion/truncation. This override
+is opt-in in the study; the original whole-sprite comparison still reproduces
+its previous eight strips and 32 rendered sheets pixel-for-pixel.
+
+```sh
+godot --headless --path art --script res://studies/aa/bake_sail.gd -- --out=/absolute/new/sail-bake
+CARGO_TARGET_DIR=captures/build-cache/astra-aa cargo run --offline --release --manifest-path art/studies/aa/Cargo.toml --bin sail_comparison -- /absolute/new/sail-bake /absolute/new/sail-render
+node art/studies/aa/browser_capture.mjs /absolute/new/sail-render
+```
+
+The sail viewer adds adult/0.6 scale and all 12 directed inter-state blends. Bud
+sampling clamps to the last frame; it never wraps as a loop. Inter-state blends
+are 0.3 s sampling fixtures, not an ecology or meal-controller replay. Native/seam/
+rim/vertex, quiet frames, peak light and coverage are measured for all four states.
+The source bake asserts exact baseline agreement with shipped rows, preserved
+visible body/bud pixels, and actual rig endpoints. See the
+[sail-only report](../../../design/7_Research/astra-sail-aa-study-2026-09-13.md)
+for the mixed disposition, including the remaining point-baked body squash.

@@ -16,13 +16,14 @@ mod net;
 const FRAMES: usize = 360;
 const COLS: usize = 15;
 
-struct Clip {
-    sprites: Vec<Sprite>,
-    white: Vec<Sprite>,
-    seconds: f64,
+pub(crate) struct Clip {
+    pub(crate) sprites: Vec<Sprite>,
+    pub(crate) white: Vec<Sprite>,
+    pub(crate) seconds: f64,
+    pub(crate) looping: bool,
 }
 impl Clip {
-    fn load(path: &Path, seconds: f64) -> Self {
+    pub(crate) fn load(path: &Path, seconds: f64) -> Self {
         let mut reader = png::Decoder::new(BufReader::new(File::open(path).unwrap()))
             .read_info()
             .unwrap();
@@ -49,12 +50,17 @@ impl Clip {
             sprites,
             white,
             seconds,
+            looping: true,
         }
     }
-    fn pose(&self, time: f64, white: bool) -> Pose<'_> {
+    pub(crate) fn pose(&self, time: f64, white: bool) -> Pose<'_> {
         // Same bracketing schedule for both bakes. This is not a separate oracle for Clip::sample.
         let frames = if white { &self.white } else { &self.sprites };
-        let position = (time / self.seconds).rem_euclid(1.) * frames.len() as f64;
+        let position = if self.looping {
+            (time / self.seconds).rem_euclid(1.) * frames.len() as f64
+        } else {
+            (time / self.seconds).clamp(0., 1.) * (frames.len() - 1) as f64
+        };
         let i = position.floor() as usize;
         Pose {
             first: &frames[i],
@@ -64,7 +70,7 @@ impl Clip {
     }
 }
 
-fn png(path: &Path, width: usize, height: usize, bytes: &[u8]) {
+pub(crate) fn png(path: &Path, width: usize, height: usize, bytes: &[u8]) {
     let mut enc = png::Encoder::new(
         BufWriter::new(File::create(path).unwrap()),
         width as u32,
@@ -75,7 +81,7 @@ fn png(path: &Path, width: usize, height: usize, bytes: &[u8]) {
     enc.write_header().unwrap().write_image_data(bytes).unwrap();
 }
 
-fn placement(scene: &str, time: f64) -> (SurfacePoint, Vec2, f64) {
+pub(crate) fn placement(scene: &str, time: f64) -> (SurfacePoint, Vec2, f64) {
     let t = time * std::f64::consts::TAU / 6.;
     let (start, displacement, heading, scale) = match scene {
         "rooted" | "quiet" => (
@@ -121,7 +127,18 @@ fn placement(scene: &str, time: f64) -> (SurfacePoint, Vec2, f64) {
     (moved.end, moved.map.apply(heading), scale)
 }
 
-fn render(clip: &Clip, scene: &str, time: f64, white: bool) -> Canvas {
+#[cfg(test)]
+pub(crate) fn render(clip: &Clip, scene: &str, time: f64, white: bool) -> Canvas {
+    render_scaled(clip, scene, time, white, None)
+}
+
+pub(crate) fn render_scaled(
+    clip: &Clip,
+    scene: &str,
+    time: f64,
+    white: bool,
+    scale_override: Option<f64>,
+) -> Canvas {
     let (point, heading, scale) = placement(scene, time);
     let mut canvas = Canvas::new();
     stamp_pose(
@@ -129,7 +146,7 @@ fn render(clip: &Clip, scene: &str, time: f64, white: bool) -> Canvas {
         point,
         heading,
         clip.pose(if scene == "quiet" { 0.37 } else { time }, white),
-        scale,
+        scale_override.unwrap_or(scale),
         1.,
         Mask::None,
         &mut Vec::new(),
@@ -137,7 +154,7 @@ fn render(clip: &Clip, scene: &str, time: f64, white: bool) -> Canvas {
     canvas
 }
 
-fn linear(canvas: &Canvas) -> Vec<f64> {
+pub(crate) fn linear(canvas: &Canvas) -> Vec<f64> {
     let mut values = Vec::with_capacity(64 * 64 * 5);
     for face in Face::ALL {
         for y in 0..64 {
@@ -151,14 +168,18 @@ fn linear(canvas: &Canvas) -> Vec<f64> {
     values
 }
 
-fn stats(values: &[f64]) -> Value {
+pub(crate) fn stats(values: &[f64]) -> Value {
     let mean = values.iter().sum::<f64>() / values.len() as f64;
     json!({"mean":mean, "min":values.iter().copied().fold(f64::INFINITY, f64::min),
         "max":values.iter().copied().fold(f64::NEG_INFINITY, f64::max),
         "stddev":(values.iter().map(|v| (v-mean).powi(2)).sum::<f64>() / values.len() as f64).sqrt()})
 }
 
-fn measure(clip: &Clip, scene: &str) -> Value {
+pub(crate) fn measure(clip: &Clip, scene: &str) -> Value {
+    measure_scaled(clip, scene, None)
+}
+
+pub(crate) fn measure_scaled(clip: &Clip, scene: &str, scale_override: Option<f64>) -> Value {
     let mut previous: Option<Vec<f64>> = None;
     let mut previous_delta: Option<Vec<f64>> = None;
     let mut deltas = Vec::new();
@@ -170,11 +191,11 @@ fn measure(clip: &Clip, scene: &str) -> Value {
     let mut peaks = Vec::new();
     for frame in 0..FRAMES {
         let time = frame as f64 / 60.;
-        let canvas = render(clip, scene, time, false);
+        let canvas = render_scaled(clip, scene, time, false, scale_override);
         let current = linear(&canvas);
         energy.push(current.iter().sum());
         peaks.push(current.iter().copied().fold(0., f64::max));
-        let alpha = render(clip, scene, time, true);
+        let alpha = render_scaled(clip, scene, time, true, scale_override);
         let a = linear(&alpha);
         areas.push(a.iter().sum());
         opaque_areas.push(a.iter().filter(|v| **v >= 0.5).count() as f64);
@@ -199,8 +220,8 @@ fn measure(clip: &Clip, scene: &str) -> Value {
         assert!(deltas.iter().all(|v| *v == 0.));
         let mut a = Frame::default();
         let mut b = Frame::default();
-        render(clip, scene, 0., false).encode(&mut a);
-        render(clip, scene, 5., false).encode(&mut b);
+        render_scaled(clip, scene, 0., false, scale_override).encode(&mut a);
+        render_scaled(clip, scene, 5., false, scale_override).encode(&mut b);
         assert_eq!(a.as_bytes(), b.as_bytes());
     }
     assert!(areas.iter().all(|a| *a > 0.));
@@ -209,7 +230,7 @@ fn measure(clip: &Clip, scene: &str) -> Value {
         "fixed_front_root_band_alpha":stats(&root_coverage)})
 }
 
-fn benchmark(clips: &[Clip; 2], scene: &str) -> Value {
+pub(crate) fn benchmark(clips: &[Clip; 2], scene: &str) -> Value {
     let mut timings: [Vec<f64>; 2] = [vec![], vec![]];
     let mut canvas = Canvas::new();
     let mut scratch = Vec::new();
@@ -245,7 +266,16 @@ fn benchmark(clips: &[Clip; 2], scene: &str) -> Value {
     json!({"nearest_us_per_stamp":stats(&timings[0]), "coverage4_us_per_stamp":stats(&timings[1])})
 }
 
-fn pictures(clips: &[Clip; 2], name: &str, out: &Path) {
+pub(crate) fn pictures(clips: &[Clip; 2], name: &str, out: &Path) {
+    pictures_scaled(clips, name, out, None)
+}
+
+pub(crate) fn pictures_scaled(
+    clips: &[Clip; 2],
+    name: &str,
+    out: &Path,
+    scale_override: Option<f64>,
+) {
     for scene in [
         "rooted",
         "translated",
@@ -262,7 +292,8 @@ fn pictures(clips: &[Clip; 2], name: &str, out: &Path) {
         for frame in 0..FRAMES {
             for (mode, clip) in clips.iter().enumerate() {
                 let mut bytes = Frame::default();
-                render(clip, scene, frame as f64 / 60., false).encode(&mut bytes);
+                render_scaled(clip, scene, frame as f64 / 60., false, scale_override)
+                    .encode(&mut bytes);
                 let mut net_bytes = Vec::new();
                 if net_view {
                     net::net_rgb8(&bytes, &mut net_bytes);
@@ -295,7 +326,7 @@ fn pictures(clips: &[Clip; 2], name: &str, out: &Path) {
     for (row, scene) in ["seam", "rim", "vertex"].iter().enumerate() {
         for (mode, clip) in clips.iter().enumerate() {
             let mut frame = Frame::default();
-            render(clip, scene, 1.1, false).encode(&mut frame);
+            render_scaled(clip, scene, 1.1, false, scale_override).encode(&mut frame);
             let mut net = Vec::new();
             net::net_rgb8(&frame, &mut net);
             for y in 0..128 {
@@ -370,6 +401,7 @@ mod tests {
             sprites: vec![sprite.clone(), sprite.clone()],
             white: vec![sprite.clone(), sprite],
             seconds: 3.,
+            looping: true,
         }
     }
     #[test]
