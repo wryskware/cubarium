@@ -610,6 +610,9 @@ export function reduceLife(rows, summary, opening, closing, openingIdentities) {
   assert(depth <= summary.maximum_descendant_depth, 'a living lineage deeper than reported');
   out.survivors = live.size;
   out.survivingCohorts = cohorts.size;
+  // Preserve the identities behind richness: equal counts can conceal complete turnover.
+  out.survivingCohortIds = [...cohorts].sort();
+  out.survivingForms = [...new Set([...live.values()].map(o => o.form))].sort((a, b) => a - b);
   out.formsSeen = [...out.formsSeen].sort();
   out.formsOnlyAfterOpening = [...out.formsOnlyAfterOpening].sort();
   return out;
@@ -989,6 +992,18 @@ export async function loadRun(directory, options = {}) {
 
 /// The paired comparison, per seed. Every pair is reported; nothing is pooled into a verdict.
 export function pair(off, candidate) {
+  const matched = (reference, changed) => {
+    assert(Array.isArray(reference) && Array.isArray(changed),
+      'matched survivors require reconstructed identity sets');
+    const a = new Set(reference), b = new Set(changed);
+    assert.equal(a.size, reference.length, 'duplicate reference survivor identity');
+    assert.equal(b.size, changed.length, 'duplicate candidate survivor identity');
+    return {
+      reference_only: reference.filter(id => !b.has(id)),
+      candidate_only: changed.filter(id => !a.has(id)),
+      shared: reference.filter(id => b.has(id)),
+    };
+  };
   const of_ = a => ({
     population_organism_ticks: a.summary.population_organism_ticks,
     births: a.summary.births,
@@ -1019,6 +1034,11 @@ export function pair(off, candidate) {
   const a = of_(off), b = of_(candidate);
   return {
     off: a, candidate: b,
+    matched_survivors: {
+      opening_cohorts: matched(off.life.survivingCohortIds, candidate.life.survivingCohortIds),
+      forms: matched(off.life.survivingForms, candidate.life.survivingForms),
+      basis: 'Closing identities reconstructed from the common opening and each complete life stream. Both directions are retained; turnover alone is not global biological harm or a deployment gate.',
+    },
     delta: {
       population_organism_ticks: b.population_organism_ticks - a.population_organism_ticks,
       births: b.births - a.births,
@@ -1028,9 +1048,10 @@ export function pair(off, candidate) {
       intake_ticks: b.intake_ticks - a.intake_ticks,
       transported_path_px: b.transported_path_px - a.transported_path_px,
     },
-    // Losses the candidate has and its matched reference does not. The proposal asks for every
-    // paired loss to be inspected, not a favourable pooled mean.
+    // Historical count-based fields retained for compatibility, explicitly labelled as net
+    // deficits. See matched_survivors for actual identity losses and gains that can cancel.
     paired_losses: {
+      basis: 'Net count deficits, not exhaustive matched identity losses; see matched_survivors.',
       new_extinction: a.first_extinction_tick === null && b.first_extinction_tick !== null,
       lost_forms: Math.max(0, a.forms_present - b.forms_present),
       lost_opening_cohorts: Math.max(0, a.surviving_opening_cohorts - b.surviving_opening_cohorts),

@@ -109,3 +109,31 @@ A fresh ten-second isolated-viewer sample measured 59.9 distinct frames/s,
 `captures/root-visual-review-2026-09-13/cubarium-vine-3147775-periodic-cadence.json`.
 These are browser delivery measurements, not physical scanout or proof that
 every animated material is visually smooth.
+
+## Follow-up: identity-aware interpretation and one unchanged two-hour diagnostic
+
+Astra's completed `b9dd5f1` [review](astra-quiet-ten-minute-biological-review-2026-09-13.md)
+shows why the count-based `paired_losses` label was insufficient. The same number
+of living opening cohorts can conceal different surviving cohorts. Root added
+`matched_survivors` to the normal reducer, preserving reference-only,
+candidate-only and shared opening IDs and form IDs from its already validated
+life-stream reconstruction. Historical count fields remain, now explicitly
+labelled net deficits. No recorded artifact or biological trajectory is changed.
+
+All 32 reducer tests pass, including equal-richness turnover, generation-bearing
+IDs, reverse/identical pairs, duplicate/missing sets and the complete screen.
+The latter reproduces Astra's independent 28/24 no-care and 27/26 fed
+reference-only/candidate-only ancestry totals, with no form-set difference.
+Identity turnover is not automatically global harm; both directions are retained.
+
+Root selected one unchanged two-hour comparison as a bounded diagnostic of
+the short screen's modestly adverse population/reproduction tendency, not as a
+passed biological gate. It starts from the same twelve mature openings, all four
+arms, with the exact frozen `9fc29eb` executable SHA256
+`876b9ade000f33cc03761e0c5547bc648b237ca91288a4b62ccfaa681e4540db`.
+Output: `captures/quiet-two-hour-diagnostic-9fc29eb`; horizon 144,000 elapsed
+ticks, closing tick 288,000. No retuning, selected survivors, extra care, hunters,
+or automatic 24/72-hour extension. Interpret full no-care survival/population-time,
+paid recruitment, both ancestry directions and each adverse/beneficial outcome
+when it finishes. The live default remains Off. A separate art-side calm-fin
+study addresses rest/feed twinkle without claiming to create physiological rest.

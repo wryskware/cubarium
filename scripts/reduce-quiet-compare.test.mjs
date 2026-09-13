@@ -562,6 +562,8 @@ test('the life stream is one population history, by identity rather than by coun
   assert.equal(out.births, 2);
   assert.equal(out.survivors, 3);
   assert.equal(out.survivingCohorts, 1, 'both survivors descend from one opening organism');
+  assert.deepEqual(out.survivingCohortIds, ['1/1']);
+  assert.deepEqual(out.survivingForms, [0, 5]);
   assert.equal(out.openingOrganismDeaths, 1);
   // A form that never existed at the opening still leaves a record.
   assert.deepEqual(out.formsOnlyAfterOpening, [5]);
@@ -673,15 +675,17 @@ test('a snapshot is parsed, length-checked and CRC-checked here, not taken on tr
 
 // --- pairing ------------------------------------------------------------------------------
 
-test('pairing reports every loss and reaches no verdict', () => {
+test('pairing reports net count deficits separately and reaches no verdict', () => {
   const armOf = (name, over) => ({summary: arm(name, over),
     census: [{population_by_form: [3, 2, 1, 0, 0, 0, 0, 0]}],
-    life: {formsSeen: [0, 1, 2], openingOrganismDeaths: 1}});
+    life: {formsSeen: [0, 1, 2], openingOrganismDeaths: 1,
+      survivingCohortIds: Array.from({length: over?.surviving_opening_cohorts ?? 90}, (_, i) => `${i}/1`),
+      survivingForms: [0, 1, 2]}});
   const off = armOf('off_nocare');
   const worse = armOf('candidate_nocare', {births: 5, surviving_opening_cohorts: 80,
     first_extinction_tick: CLOSING - 5});
   worse.census = [{population_by_form: [3, 0, 0, 0, 0, 0, 0, 0]}];
-  worse.life = {formsSeen: [0], openingOrganismDeaths: 4};
+  worse.life = {...worse.life, formsSeen: [0], survivingForms: [0], openingOrganismDeaths: 4};
   const p = pair(off, worse);
   assert.equal(p.delta.births, -5);
   assert.equal(p.paired_losses.fewer_births, 5);
@@ -695,9 +699,37 @@ test('pairing reports every loss and reaches no verdict', () => {
   const better = armOf('candidate_nocare', {births: 14, surviving_opening_cohorts: 95});
   const q = pair(off, better);
   assert.deepEqual(q.paired_losses, {new_extinction: false, lost_forms: 0,
+    basis: 'Net count deficits, not exhaustive matched identity losses; see matched_survivors.',
     lost_opening_cohorts: 0, fewer_births: 0, more_opening_organism_deaths: 0});
   assert.equal(q.delta.births, 4);
   assert(!('verdict' in q) && !('passed' in q) && !('better' in q));
+});
+
+test('equal richness does not hide matched cohort or form turnover', () => {
+  const fixture = (cohorts, forms) => ({
+    summary: arm('off_nocare', {surviving_opening_cohorts: cohorts.length}),
+    census: [{population_by_form: Array.from({length: 8}, (_, i) => forms.includes(i) ? 1 : 0)}],
+    life: {formsSeen: forms, openingOrganismDeaths: 0,
+      survivingCohortIds: cohorts, survivingForms: forms},
+  });
+  const off = fixture(['1/1', '2/1'], [0, 1]);
+  const candidate = fixture(['1/2', '2/1'], [1, 2]);
+  const result = pair(off, candidate);
+  assert.equal(result.paired_losses.lost_opening_cohorts, 0);
+  assert.equal(result.paired_losses.lost_forms, 0);
+  assert.deepEqual(result.matched_survivors.opening_cohorts,
+    {reference_only: ['1/1'], candidate_only: ['1/2'], shared: ['2/1']});
+  assert.deepEqual(result.matched_survivors.forms,
+    {reference_only: [0], candidate_only: [2], shared: [1]});
+  assert.match(result.matched_survivors.basis, /turnover alone is not global biological harm/);
+  const reversed = pair(candidate, off);
+  assert.deepEqual(reversed.matched_survivors.opening_cohorts.reference_only, ['1/2']);
+  assert.deepEqual(pair(off, off).matched_survivors.opening_cohorts,
+    {reference_only: [], candidate_only: [], shared: ['1/1', '2/1']});
+  assert.throws(() => pair(off, fixture(['1/2', '1/2'], [1])), /duplicate candidate/);
+  const missing = fixture([], []);
+  delete missing.life.survivingCohortIds;
+  assert.throws(() => pair(off, missing), /reconstructed identity sets/);
 });
 
 // --- the real smoke artifacts ---------------------------------------------------------------
@@ -1042,6 +1074,18 @@ test('the whole reduction runs end to end on the completed ten-minute screen', a
   assert(Number.isFinite(one.raw_energy_drift));
   assert.equal(typeof one.raw_energy_within_opening_limit, 'boolean');
   assert(Number.isFinite(one.corrected_energy_drift));
+  // Independent interpretation b9dd5f1: equal/net-gained richness can still turn over IDs.
+  for (const [condition, expected] of [['nocare', [28, 24]], ['feed', [27, 26]]]) {
+    const totals = [0, 0];
+    for (const seed of result.seeds) {
+      const matched = seed[condition].matched_survivors;
+      totals[0] += matched.opening_cohorts.reference_only.length;
+      totals[1] += matched.opening_cohorts.candidate_only.length;
+      assert.deepEqual(matched.forms.reference_only, []);
+      assert.deepEqual(matched.forms.candidate_only, []);
+    }
+    assert.deepEqual(totals, expected);
+  }
 });
 
 test('a tampered screen is refused for the exact thing that was tampered with', async () => {
