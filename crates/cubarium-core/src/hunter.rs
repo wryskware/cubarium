@@ -451,12 +451,16 @@ impl FixedHunterProfile {
         }
         for (name, v) in self.positive_numbers() {
             if !v.is_finite() || v <= 0.0 {
-                return Err(format!("hunter profile {name} = {v}, expected a positive number"));
+                return Err(format!(
+                    "hunter profile {name} = {v}, expected a positive number"
+                ));
             }
         }
         for (name, v) in self.nonnegative_numbers() {
             if !v.is_finite() || v < 0.0 {
-                return Err(format!("hunter profile {name} = {v}, expected a nonnegative number"));
+                return Err(format!(
+                    "hunter profile {name} = {v}, expected a nonnegative number"
+                ));
             }
         }
         for (name, v) in [
@@ -464,12 +468,18 @@ impl FixedHunterProfile {
             ("founder_energy_fraction", self.founder_energy_fraction),
             ("perch_reserve_fraction", self.perch_reserve_fraction),
             ("seek_reserve_fraction", self.seek_reserve_fraction),
-            ("prey_structure_fraction_max", self.prey_structure_fraction_max),
+            (
+                "prey_structure_fraction_max",
+                self.prey_structure_fraction_max,
+            ),
             ("capture_base", self.capture_base),
             ("capture_min", self.capture_min),
             ("capture_max", self.capture_max),
             ("scavenge_fraction", self.scavenge_fraction),
-            ("reproduce_reserve_fraction", self.reproduce_reserve_fraction),
+            (
+                "reproduce_reserve_fraction",
+                self.reproduce_reserve_fraction,
+            ),
             ("reproduce_energy_fraction", self.reproduce_energy_fraction),
         ] {
             if !(0.0..=1.0).contains(&v) {
@@ -496,7 +506,9 @@ impl FixedHunterProfile {
             ("body_scale_exponent", self.body_scale_exponent),
         ] {
             if !v.is_finite() {
-                return Err(format!("hunter profile {name} = {v}, expected a finite number"));
+                return Err(format!(
+                    "hunter profile {name} = {v}, expected a finite number"
+                ));
             }
         }
         if self.escape_speed_multiple < 1.0 {
@@ -516,7 +528,10 @@ impl FixedHunterProfile {
             }
         }
         if self.body_scale_min <= 0.0 || self.body_scale_min > 1.0 {
-            return Err(format!("hunter profile body_scale_min {} is not in (0, 1]", self.body_scale_min));
+            return Err(format!(
+                "hunter profile body_scale_min {} is not in (0, 1]",
+                self.body_scale_min
+            ));
         }
         if !(0.0..=2.0).contains(&self.body_scale_exponent) {
             return Err(format!(
@@ -555,7 +570,10 @@ impl FixedHunterProfile {
             ("recovery_seconds", self.recovery_seconds),
             ("gut_capacity_material", self.gut_capacity_material),
             ("digest_rate", self.digest_rate),
-            ("reproduce_interval_seconds", self.reproduce_interval_seconds),
+            (
+                "reproduce_interval_seconds",
+                self.reproduce_interval_seconds,
+            ),
             ("gestation_seconds", self.gestation_seconds),
             ("juvenile_growth_rate", self.juvenile_growth_rate),
         ]
@@ -594,12 +612,18 @@ impl HunterPhase {
     /// Phases that end at a stored tick. The others end on a condition (satiety, contact, an
     /// empty gut) and store `phase_ends_tick == phase_started_tick`.
     pub fn is_timed(self) -> bool {
-        matches!(self, HunterPhase::Windup | HunterPhase::Strike | HunterPhase::Recovering)
+        matches!(
+            self,
+            HunterPhase::Windup | HunterPhase::Strike | HunterPhase::Recovering
+        )
     }
 
     /// Phases in which the hunter is pursuing a specific prey.
     pub fn hunting(self) -> bool {
-        matches!(self, HunterPhase::Stalking | HunterPhase::Windup | HunterPhase::Strike)
+        matches!(
+            self,
+            HunterPhase::Stalking | HunterPhase::Windup | HunterPhase::Strike
+        )
     }
 
     pub fn as_str(self) -> &'static str {
@@ -765,23 +789,27 @@ impl HunterState {
         }
     }
 
-    /// Remove a member and every other member's reference to it, returning the record.
-    pub fn remove_member(&mut self, id: OrganismId) -> Option<HunterMember> {
+    /// Remove a member and invalidate every other member's reference to it at `tick`, returning
+    /// the record.
+    pub fn remove_member(&mut self, id: OrganismId, tick: u64) -> Option<HunterMember> {
         let at = self.index_of(id)?;
         let gone = self.members.remove(at);
-        for m in &mut self.members {
-            if m.target == Some(id) {
-                m.target = None;
-            }
-        }
+        self.forget_target(id, tick);
         Some(gone)
     }
 
-    /// Clear every member's reference to a prey that has left the arena.
-    pub fn forget_target(&mut self, id: OrganismId) {
+    /// Invalidate every member's reference to a prey that left the arena at `tick`.
+    ///
+    /// An unpaid stalk or windup cannot continue without its prey, so it returns to the
+    /// ordinary perched state at the removal boundary. A paid strike keeps its phase and later
+    /// settles as a lost target; clearing it here must never refund or retry that attempt.
+    pub fn forget_target(&mut self, id: OrganismId, tick: u64) {
         for m in &mut self.members {
             if m.target == Some(id) {
                 m.target = None;
+                if matches!(m.phase, HunterPhase::Stalking | HunterPhase::Windup) {
+                    m.enter(HunterPhase::Perched, tick, tick, 0);
+                }
             }
         }
     }
@@ -841,7 +869,10 @@ impl HunterState {
             return Err("a budget-matched control world must not hold hunter members".into());
         }
         if self.members.len() > config.capacity.max_organisms as usize {
-            return Err(format!("hunter members {} exceed the organism cap", self.members.len()));
+            return Err(format!(
+                "hunter members {} exceed the organism cap",
+                self.members.len()
+            ));
         }
         let mut previous: Option<OrganismId> = None;
         for m in &self.members {
@@ -858,7 +889,10 @@ impl HunterState {
             let Some(_) = organisms.get(m.id) else {
                 return Err(format!("{who} is not a live organism"));
             };
-            for (name, v) in [("gut_material", m.gut_material), ("gut_energy", m.gut_energy)] {
+            for (name, v) in [
+                ("gut_material", m.gut_material),
+                ("gut_energy", m.gut_energy),
+            ] {
                 if !v.is_finite() || v < 0.0 {
                     return Err(format!("{who}: {name} = {v}"));
                 }
@@ -870,7 +904,10 @@ impl HunterState {
                 ));
             }
             if m.gut_material <= 0.0 && m.gut_energy > TOLERANCE {
-                return Err(format!("{who}: an empty gut carries {} energy", m.gut_energy));
+                return Err(format!(
+                    "{who}: an empty gut carries {} energy",
+                    m.gut_energy
+                ));
             }
             if m.episode > m.attack_counter {
                 return Err(format!(
@@ -878,7 +915,11 @@ impl HunterState {
                     m.episode, m.attack_counter
                 ));
             }
-            if m.episode > 0 && !matches!(m.phase, HunterPhase::Strike | HunterPhase::Recovering | HunterPhase::Handling)
+            if m.episode > 0
+                && !matches!(
+                    m.phase,
+                    HunterPhase::Strike | HunterPhase::Recovering | HunterPhase::Handling
+                )
             {
                 return Err(format!(
                     "{who}: phase {} claims attack episode {}",
@@ -887,16 +928,25 @@ impl HunterState {
                 ));
             }
             if m.phase_started_tick > tick {
-                return Err(format!("{who}: phase started at {} after tick {tick}", m.phase_started_tick));
+                return Err(format!(
+                    "{who}: phase started at {} after tick {tick}",
+                    m.phase_started_tick
+                ));
             }
             if m.phase_ends_tick < m.phase_started_tick {
                 return Err(format!("{who}: phase ends before it started"));
             }
             if m.phase.is_timed() && m.phase_ends_tick == m.phase_started_tick {
-                return Err(format!("{who}: timed phase {} has no duration", m.phase.as_str()));
+                return Err(format!(
+                    "{who}: timed phase {} has no duration",
+                    m.phase.as_str()
+                ));
             }
             if !m.phase.is_timed() && m.phase_ends_tick != m.phase_started_tick {
-                return Err(format!("{who}: untimed phase {} stores an end tick", m.phase.as_str()));
+                return Err(format!(
+                    "{who}: untimed phase {} stores an end tick",
+                    m.phase.as_str()
+                ));
             }
             if m.phase == HunterPhase::Handling && !m.carrying() {
                 return Err(format!("{who}: handling nothing"));
@@ -1103,7 +1153,10 @@ pub enum Reproduction {
     },
     /// A member that was ready to fund and did not: **no escrow was ever created**, nothing
     /// moved, and no later record closes this one.
-    NotFunded { parent: OrganismId, reason: FundingBlocked },
+    NotFunded {
+        parent: OrganismId,
+        reason: FundingBlocked,
+    },
 }
 
 impl Reproduction {
@@ -1122,7 +1175,12 @@ impl Reproduction {
     pub fn parent(&self) -> OrganismId {
         match self {
             Reproduction::NotFunded { parent, .. } => *parent,
-            other => other.key().expect("every transaction names its parent").parent,
+            other => {
+                other
+                    .key()
+                    .expect("every transaction names its parent")
+                    .parent
+            }
         }
     }
 }
@@ -1167,8 +1225,18 @@ impl ContactEvidence {
             hunter_pos: hunter.pos,
             hunter_heading: hunter.heading,
             geometry,
-            capture_center: body_point(images, hunter.pos, hunter.heading, geometry.capture_offset_body),
-            ingestion_center: body_point(images, hunter.pos, hunter.heading, geometry.ingestion_offset_body),
+            capture_center: body_point(
+                images,
+                hunter.pos,
+                hunter.heading,
+                geometry.capture_offset_body,
+            ),
+            ingestion_center: body_point(
+                images,
+                hunter.pos,
+                hunter.heading,
+                geometry.ingestion_offset_body,
+            ),
             measure: measure_contact(
                 images,
                 hunter.pos,
@@ -1223,11 +1291,19 @@ pub enum HunterEvent {
         evidence: ContactEvidence,
     },
     /// A funded descendant was placed.
-    Offspring { tick: u64, parent: OrganismId, child: OrganismId },
+    Offspring {
+        tick: u64,
+        parent: OrganismId,
+        child: OrganismId,
+    },
     /// One reproduction transaction, recorded at the mutation that moved it
     /// ([`Reproduction`]). A birth emits this **and** the [`HunterEvent::Offspring`] record
     /// above, so the identity link and the transaction reconcile one-for-one.
-    Reproduction { tick: u64, hunter: OrganismId, record: Reproduction },
+    Reproduction {
+        tick: u64,
+        hunter: OrganismId,
+        record: Reproduction,
+    },
     /// A member died; its carried gut went to the local fields.
     Death {
         tick: u64,
@@ -1366,7 +1442,13 @@ impl MoveBill {
     /// The fastest speed this creature can pay for out of `energy` in one tick, never below
     /// `ordinary_speed`: a boost is limited by the movement energy actually available, and
     /// ordinary movement keeps its existing semantics (pay what you can, then run out).
-    pub fn affordable_speed(&self, energy: f64, dt: f64, ordinary_speed: f64, wanted_speed: f64) -> f64 {
+    pub fn affordable_speed(
+        &self,
+        energy: f64,
+        dt: f64,
+        ordinary_speed: f64,
+        wanted_speed: f64,
+    ) -> f64 {
         if wanted_speed <= ordinary_speed {
             return wanted_speed;
         }
@@ -1393,12 +1475,17 @@ pub fn prey_inventory(prey: &Organism, e_r: f64) -> (f64, f64) {
 }
 
 /// `clamp(capture_base · S_h / (S_h + S_p), capture_min, capture_max)`.
-pub fn capture_probability(profile: &FixedHunterProfile, hunter_structure: f64, prey_structure: f64) -> f64 {
+pub fn capture_probability(
+    profile: &FixedHunterProfile,
+    hunter_structure: f64,
+    prey_structure: f64,
+) -> f64 {
     let total = hunter_structure + prey_structure;
     if !total.is_finite() || total <= 0.0 {
         return profile.capture_min;
     }
-    (profile.capture_base * hunter_structure / total).clamp(profile.capture_min, profile.capture_max)
+    (profile.capture_base * hunter_structure / total)
+        .clamp(profile.capture_min, profile.capture_max)
 }
 
 /// Is this prey inside the eligibility window, and does its whole inventory fit the gut
@@ -1466,7 +1553,11 @@ impl ContactGeometry {
     /// The geometry of this member right now: the profile's measured offsets scaled by the
     /// body scale its actual structure implies.
     pub fn of(profile: &FixedHunterProfile, organism: &Organism) -> ContactGeometry {
-        let scale = body_scale(profile, organism.structure, organism.phenotype.structure_adult);
+        let scale = body_scale(
+            profile,
+            organism.structure,
+            organism.phenotype.structure_adult,
+        );
         ContactGeometry {
             scale,
             capture_offset_body: profile.capture_offset_body * scale,
@@ -1478,7 +1569,8 @@ impl ContactGeometry {
 
     /// How far the local unfolding has to reach to decide contact with a body of `extent`.
     fn window(&self, extent: f64) -> f64 {
-        (self.capture_offset_body.length() + self.capture_reach_px + extent + 1.0).min(MAX_LOCAL_RADIUS)
+        (self.capture_offset_body.length() + self.capture_reach_px + extent + 1.0)
+            .min(MAX_LOCAL_RADIUS)
     }
 }
 
@@ -1486,12 +1578,20 @@ impl ContactGeometry {
 /// profile selected. A juvenile is the same rig, every part in the same relative place,
 /// `scale` times smaller — which is exactly what `stamp_rig_scaled` does with the same number.
 pub fn body_scale(profile: &FixedHunterProfile, structure: f64, structure_adult: f64) -> f64 {
-    if !structure_adult.is_finite() || structure_adult <= 0.0 || !structure.is_finite() || structure <= 0.0 {
+    if !structure_adult.is_finite()
+        || structure_adult <= 0.0
+        || !structure.is_finite()
+        || structure <= 0.0
+    {
         return profile.body_scale_min;
     }
     let ratio = (structure / structure_adult).clamp(0.0, 1.0);
     let scale = ratio.powf(profile.body_scale_exponent);
-    if scale.is_finite() { scale.max(profile.body_scale_min) } else { profile.body_scale_min }
+    if scale.is_finite() {
+        scale.max(profile.body_scale_min)
+    } else {
+        profile.body_scale_min
+    }
 }
 
 /// Where a prey actually sits relative to the claws, measured the way the renderer draws them.
@@ -1643,7 +1743,11 @@ pub fn digest_step(
         return DigestStep::default();
     }
     let density = gut_energy / gut_material;
-    let eta = if e_r > 0.0 { eta_m * (density / e_r).min(1.0) } else { eta_m };
+    let eta = if e_r > 0.0 {
+        eta_m * (density / e_r).min(1.0)
+    } else {
+        eta_m
+    };
     if eta <= 0.0 {
         return DigestStep::default();
     }
@@ -1687,7 +1791,13 @@ mod tests {
 
     /// The founder's own movement bill, spelled out rather than read off an organism.
     fn bill() -> MoveBill {
-        MoveBill { structure: 1.0, maintenance: 0.005, sense_radius: 6.0, move_cost: 0.006, sense_cost: 0.0002 }
+        MoveBill {
+            structure: 1.0,
+            maintenance: 0.005,
+            sense_radius: 6.0,
+            move_cost: 0.006,
+            sense_cost: 0.0002,
+        }
     }
 
     /// One way to make a valid profile invalid.
@@ -1698,7 +1808,10 @@ mod tests {
         let p = profile();
         p.validate().expect("the trial profile is valid");
         p.clone().facultative().validate().expect("facultative");
-        p.clone().without_attacks().validate().expect("attack-disabled");
+        p.clone()
+            .without_attacks()
+            .validate()
+            .expect("attack-disabled");
         assert_eq!(p.role.as_str(), "lanternjaw");
         assert_eq!(p.version, PROFILE_VERSION);
     }
@@ -1712,10 +1825,19 @@ mod tests {
         let head_dx = -0.3 * (1.0 - 13.0 / 17.0) + 1.1 * ((13.0 - 9.0) / 8.0f64).clamp(0.0, 1.0);
         let near = Vec2::new(12.3 + head_dx + 0.5, 0.6 + 0.5);
         assert_eq!(CAPTURE_OFFSET_BODY, near);
-        assert_eq!(CAPTURE_OFFSET_BODY.x, 13.279_411_764_705_882, "the documented x");
-        assert_eq!(CAPTURE_OFFSET_BODY.y, 1.1, "the authored y, not the decorated study's 1.162368");
+        assert_eq!(
+            CAPTURE_OFFSET_BODY.x, 13.279_411_764_705_882,
+            "the documented x"
+        );
+        assert_eq!(
+            CAPTURE_OFFSET_BODY.y, 1.1,
+            "the authored y, not the decorated study's 1.162368"
+        );
         assert_eq!(INGESTION_OFFSET_BODY, Vec2::new(9.6, 0.0));
-        assert_ne!(CAPTURE_OFFSET_BODY, INGESTION_OFFSET_BODY, "grasp and mouth are not one point");
+        assert_ne!(
+            CAPTURE_OFFSET_BODY, INGESTION_OFFSET_BODY,
+            "grasp and mouth are not one point"
+        );
 
         let p = profile();
         assert_eq!(p.capture_offset_body, CAPTURE_OFFSET_BODY);
@@ -1725,7 +1847,9 @@ mod tests {
         assert_eq!(PROFILE_VERSION, 3);
         let mut old = p.clone();
         old.version = 2;
-        let err = old.validate().expect_err("a version 2 trial must be refused");
+        let err = old
+            .validate()
+            .expect_err("a version 2 trial must be refused");
         assert!(err.contains("version 2 is not one of [3, 4]"), "{err}");
     }
 
@@ -1741,14 +1865,20 @@ mod tests {
         // The review's own fixture: `child_structure_fraction = 0.1` of a 2.0 adult.
         let small = body_scale(&p, 0.2, adult);
         assert!((small - 0.316_227_766_016_837_94).abs() < 1e-15, "{small}");
-        assert!(small < 0.5, "this fixture is below the renderer's current minimum on purpose");
+        assert!(
+            small < 0.5,
+            "this fixture is below the renderer's current minimum on purpose"
+        );
         // The floor holds, and nothing below it is ever published.
         assert_eq!(body_scale(&p, 1e-9, adult), p.body_scale_min);
         assert_eq!(body_scale(&p, 0.0, adult), p.body_scale_min);
         assert_eq!(body_scale(&p, adult, adult), 1.0, "an adult is scale 1");
         for structure in [0.2, 0.4, 0.8, 1.6, adult] {
             let scale = body_scale(&p, structure, adult);
-            assert!(scale.is_finite() && (p.body_scale_min..=1.0).contains(&scale), "{structure}: {scale}");
+            assert!(
+                scale.is_finite() && (p.body_scale_min..=1.0).contains(&scale),
+                "{structure}: {scale}"
+            );
         }
     }
 
@@ -1765,7 +1895,9 @@ mod tests {
             ("capture_min", |p| p.capture_min = 0.9),
             ("seek_reserve_fraction", |p| p.seek_reserve_fraction = 0.9),
             ("escape_speed_multiple", |p| p.escape_speed_multiple = 0.5),
-            ("capture reach", |p| p.capture_offset_body = Vec2::new(40.0, 0.0)),
+            ("capture reach", |p| {
+                p.capture_offset_body = Vec2::new(40.0, 0.0)
+            }),
             ("query extent", |p| p.visual_query_extent_px = 1.0),
             ("body scale", |p| p.body_scale_min = 0.0),
             ("genome", |p| p.genome.size = 9.0),
@@ -1790,10 +1922,16 @@ mod tests {
         assert!(big > small, "{big} vs {small}");
         for prey in [0.0, 0.01, 0.5, 1.5, 100.0] {
             let q = capture_probability(&p, 2.0, prey);
-            assert!((p.capture_min..=p.capture_max).contains(&q), "prey {prey} gave {q}");
+            assert!(
+                (p.capture_min..=p.capture_max).contains(&q),
+                "prey {prey} gave {q}"
+            );
         }
         // The documented formula, exactly.
-        assert_eq!(capture_probability(&p, 2.0, 1.0), (0.65 * 2.0 / 3.0f64).clamp(0.1, 0.75));
+        assert_eq!(
+            capture_probability(&p, 2.0, 1.0),
+            (0.65 * 2.0 / 3.0f64).clamp(0.1, 0.75)
+        );
     }
 
     #[test]
@@ -1822,8 +1960,14 @@ mod tests {
         let rich = digest_step(&p, DT, 4.0, 8.0, m, 10.0, 10.0);
         let poor = digest_step(&p, DT, 4.0, 2.0, m, 10.0, 10.0);
         assert_eq!(rich.material, poor.material, "the same portion is taken");
-        assert!((rich.to_reserve - eta_m * rich.material).abs() < 1e-15, "rich prey stores eta_m");
-        assert!((poor.to_reserve - eta_m * 0.25 * poor.material).abs() < 1e-15, "poor prey stores rho/e_r of it");
+        assert!(
+            (rich.to_reserve - eta_m * rich.material).abs() < 1e-15,
+            "rich prey stores eta_m"
+        );
+        assert!(
+            (poor.to_reserve - eta_m * 0.25 * poor.material).abs() < 1e-15,
+            "poor prey stores rho/e_r of it"
+        );
         assert!(poor.to_detritus > rich.to_detritus);
     }
 
@@ -1835,11 +1979,19 @@ mod tests {
         let step = digest_step(&p, DT, 4.0, 8.0, m, room, 10.0);
         assert!((step.to_reserve - room).abs() < 1e-15, "{:?}", step);
         // Still the same identity, on the reduced portion.
-        assert!((step.carried - (2.0 * step.to_reserve + step.energy_gain + step.heat)).abs() < 1e-12);
+        assert!(
+            (step.carried - (2.0 * step.to_reserve + step.energy_gain + step.heat)).abs() < 1e-12
+        );
         assert!(step.material < p.digest_rate * DT, "the portion shrank");
         // No headroom at all digests nothing and keeps the gut.
-        assert_eq!(digest_step(&p, DT, 4.0, 8.0, m, 0.0, 10.0), DigestStep::default());
-        assert_eq!(digest_step(&p, DT, 0.0, 0.0, m, 1.0, 1.0), DigestStep::default());
+        assert_eq!(
+            digest_step(&p, DT, 4.0, 8.0, m, 0.0, 10.0),
+            DigestStep::default()
+        );
+        assert_eq!(
+            digest_step(&p, DT, 0.0, 0.0, m, 1.0, 1.0),
+            DigestStep::default()
+        );
     }
 
     #[test]
@@ -1864,7 +2016,10 @@ mod tests {
         let some = bill().affordable_speed(energy, DT, 0.3, 5.0);
         let fixed = (0.005 * 1.0 + 0.0002 * 6.0) * DT;
         let budget = (energy - fixed) / (0.006 * 1.0 * DT);
-        assert!(budget > 0.3 && budget < 5.0, "the budget must bind for this to prove anything: {budget}");
+        assert!(
+            budget > 0.3 && budget < 5.0,
+            "the budget must bind for this to prove anything: {budget}"
+        );
         assert!((some - budget).abs() < 1e-12, "{some} vs {budget}");
         // A request at or below the ordinary speed is returned untouched.
         assert_eq!(bill().affordable_speed(0.0, DT, 0.3, 0.2), 0.2);
@@ -1874,37 +2029,107 @@ mod tests {
     fn member_bookkeeping_is_sorted_and_forgets_removed_ids() {
         let mut state = HunterState::default();
         assert!(!state.active());
-        let a = OrganismId { slot: 5, generation: 1 };
-        let b = OrganismId { slot: 2, generation: 3 };
+        let a = OrganismId {
+            slot: 5,
+            generation: 1,
+        };
+        let b = OrganismId {
+            slot: 2,
+            generation: 3,
+        };
         assert!(state.insert_member(HunterMember::new(a, 10)));
         assert!(state.insert_member(HunterMember::new(b, 10)));
-        assert!(!state.insert_member(HunterMember::new(a, 10)), "a repeat is refused");
-        assert_eq!(state.members.iter().map(|m| m.id).collect::<Vec<_>>(), vec![b, a]);
+        assert!(
+            !state.insert_member(HunterMember::new(a, 10)),
+            "a repeat is refused"
+        );
+        assert_eq!(
+            state.members.iter().map(|m| m.id).collect::<Vec<_>>(),
+            vec![b, a]
+        );
         assert!(state.contains(a) && state.contains(b));
-        assert!(!state.contains(OrganismId { slot: 5, generation: 2 }), "generation is part of the ID");
+        assert!(
+            !state.contains(OrganismId {
+                slot: 5,
+                generation: 2
+            }),
+            "generation is part of the ID"
+        );
 
         state.member_mut(b).expect("member").target = Some(a);
-        let gone = state.remove_member(a).expect("removed");
+        let gone = state.remove_member(a, 11).expect("removed");
         assert_eq!(gone.id, a);
-        assert_eq!(state.member(b).expect("member").target, None, "a removed hunter is forgotten");
-        state.member_mut(b).expect("member").target = Some(OrganismId { slot: 9, generation: 1 });
-        state.forget_target(OrganismId { slot: 9, generation: 1 });
-        assert_eq!(state.member(b).expect("member").target, None);
+        assert_eq!(
+            state.member(b).expect("member").target,
+            None,
+            "a removed hunter is forgotten"
+        );
+        state.member_mut(b).expect("member").target = Some(OrganismId {
+            slot: 9,
+            generation: 1,
+        });
+        let member = state.member_mut(b).expect("member");
+        member.phase = HunterPhase::Stalking;
+        member.phase_started_tick = 10;
+        member.phase_ends_tick = 10;
+        state.forget_target(
+            OrganismId {
+                slot: 9,
+                generation: 1,
+            },
+            12,
+        );
+        let b = state.member(b).expect("member");
+        assert_eq!(b.target, None);
+        assert_eq!(
+            b.phase,
+            HunterPhase::Perched,
+            "an unpaid stalk cannot outlive its prey"
+        );
+        assert_eq!(
+            b.phase_started_tick, 12,
+            "the perch begins at the removal boundary"
+        );
+        assert_eq!(b.entered_from, HunterPhase::Stalking);
     }
 
     #[test]
     fn phase_bookkeeping_reports_progress_and_drops_targets() {
-        let mut m = HunterMember::new(OrganismId { slot: 0, generation: 1 }, 100);
-        m.target = Some(OrganismId { slot: 1, generation: 1 });
+        let mut m = HunterMember::new(
+            OrganismId {
+                slot: 0,
+                generation: 1,
+            },
+            100,
+        );
+        m.target = Some(OrganismId {
+            slot: 1,
+            generation: 1,
+        });
         m.enter(HunterPhase::Windup, 100, 112, 0);
-        assert_eq!(m.target, Some(OrganismId { slot: 1, generation: 1 }), "a hunting phase keeps it");
-        assert_eq!(m.entered_from, HunterPhase::Perched, "the transition origin is recorded");
+        assert_eq!(
+            m.target,
+            Some(OrganismId {
+                slot: 1,
+                generation: 1
+            }),
+            "a hunting phase keeps it"
+        );
+        assert_eq!(
+            m.entered_from,
+            HunterPhase::Perched,
+            "the transition origin is recorded"
+        );
         assert_eq!(m.progress(100), Some(0.0));
         assert_eq!(m.progress(106), Some(0.5));
         assert_eq!(m.progress(999), Some(1.0));
         m.enter(HunterPhase::Recovering, 112, 212, 7);
         assert_eq!(m.target, None, "a non-hunting phase drops the target");
-        assert_eq!(m.entered_from, HunterPhase::Windup, "a recoil knows what it recoiled from");
+        assert_eq!(
+            m.entered_from,
+            HunterPhase::Windup,
+            "a recoil knows what it recoiled from"
+        );
         assert_eq!(m.episode, 7, "and which attack episode it belongs to");
         m.enter(HunterPhase::Perched, 212, 212, 0);
         assert_eq!(m.progress(300), None);
@@ -1914,12 +2139,36 @@ mod tests {
 
     #[test]
     fn a_target_resolves_only_inside_the_charts() {
-        assert!(HunterTarget { face: 0, u: 1.0, v: 2.0 }.resolve().is_some());
+        assert!(
+            HunterTarget {
+                face: 0,
+                u: 1.0,
+                v: 2.0
+            }
+            .resolve()
+            .is_some()
+        );
         for bad in [
-            HunterTarget { face: 9, u: 1.0, v: 1.0 },
-            HunterTarget { face: 0, u: -1.0, v: 1.0 },
-            HunterTarget { face: 0, u: 64.0, v: 1.0 },
-            HunterTarget { face: 0, u: f64::NAN, v: 1.0 },
+            HunterTarget {
+                face: 9,
+                u: 1.0,
+                v: 1.0,
+            },
+            HunterTarget {
+                face: 0,
+                u: -1.0,
+                v: 1.0,
+            },
+            HunterTarget {
+                face: 0,
+                u: 64.0,
+                v: 1.0,
+            },
+            HunterTarget {
+                face: 0,
+                u: f64::NAN,
+                v: 1.0,
+            },
         ] {
             assert!(bad.resolve().is_none(), "{bad:?} resolved");
         }

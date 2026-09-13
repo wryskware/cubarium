@@ -5,8 +5,8 @@ use std::f64::consts::TAU;
 use serde::{Deserialize, Serialize};
 
 use cubarium_surface::{
-    CELL_COUNT, CellId, ChartImage, FACE_EXTENT, Face, FieldGraph, MAX_SEAMS, ScalarField, SurfacePoint, Travel,
-    Vec2, cell_of, chart_images, face_frame, travel_into, unfold_with,
+    CELL_COUNT, CellId, ChartImage, FACE_EXTENT, Face, FieldGraph, MAX_SEAMS, ScalarField,
+    SurfacePoint, Travel, Vec2, cell_of, chart_images, face_frame, travel_into, unfold_with,
 };
 
 use crate::accounting::{self, EnergyCorrection, EnergyLedgers, Ledger};
@@ -17,9 +17,9 @@ use crate::config::{FounderKind, WorldConfig};
 use crate::controller::{Decision, Observation, TurnGate, decide, turn_toward};
 use crate::events::LifeEvent;
 use crate::fields::Fields;
+use crate::genome::Phenotype;
 use crate::genome::{Genome, MAX_FORMS, decode};
 use crate::habitat::{Habitat, Weather};
-use crate::genome::Phenotype;
 use crate::hunter::{
     self, AttemptOutcome, FixedHunterProfile, HunterControlReceipt, HunterEvent,
     HunterFounderReceipt, HunterPhase, HunterState, HunterTarget, HunterView,
@@ -95,7 +95,10 @@ impl WorldState {
         self.config.validate()?;
         let cap = self.config.capacity.max_organisms as usize;
         if self.organisms.len() > cap {
-            return Err(format!("population {} exceeds cap {cap}", self.organisms.len()));
+            return Err(format!(
+                "population {} exceeds cap {cap}",
+                self.organisms.len()
+            ));
         }
         for (name, v) in [
             ("external_material_in", self.external_material_in),
@@ -113,19 +116,34 @@ impl WorldState {
             ("de", &self.fields.de),
         ] {
             if v.len() != CELL_COUNT {
-                return Err(format!("field {name} has {} cells, expected {CELL_COUNT}", v.len()));
+                return Err(format!(
+                    "field {name} has {} cells, expected {CELL_COUNT}",
+                    v.len()
+                ));
             }
         }
         self.fields.check(self.config.detritus.energy_cap)?;
         self.care.validate(self.tick)?;
-        self.hunters.validate(self.tick, &self.organisms, &self.config)?;
+        self.hunters
+            .validate(self.tick, &self.organisms, &self.config)?;
         // The corrections are signed, so they are checked as the *combined* totals they are
         // part of: finite corrections, and finite nonnegative corrected cumulative flows.
         // Nothing is clamped or reset — an unusable accounting state fails the load.
         self.energy_ledgers().validate()?;
 
-        for blob in self.weather.light.iter().chain(self.weather.moisture.iter()) {
-            if !blob.center.iter().chain(blob.axis.iter()).all(|c| c.is_finite()) || !blob.rate.is_finite() {
+        for blob in self
+            .weather
+            .light
+            .iter()
+            .chain(self.weather.moisture.iter())
+        {
+            if !blob
+                .center
+                .iter()
+                .chain(blob.axis.iter())
+                .all(|c| c.is_finite())
+                || !blob.rate.is_finite()
+            {
                 return Err("weather blob has non-finite geometry".into());
             }
         }
@@ -147,22 +165,35 @@ impl WorldState {
                 return Err(format!("{who}: position {:?} is not canonical", o.pos));
             }
             if !o.heading.is_finite() || (o.heading.length() - 1.0).abs() > HEADING_TOLERANCE {
-                return Err(format!("{who}: heading {:?} is not a unit vector", o.heading));
+                return Err(format!(
+                    "{who}: heading {:?} is not a unit vector",
+                    o.heading
+                ));
             }
             if !o.ou.is_finite() {
                 return Err(format!("{who}: OU vector is not finite"));
             }
             if o.born_tick > self.tick {
-                return Err(format!("{who}: born at {} after tick {}", o.born_tick, self.tick));
+                return Err(format!(
+                    "{who}: born at {} after tick {}",
+                    o.born_tick, self.tick
+                ));
             }
             if let Some(e) = &o.escrow {
-                for (name, v) in [("structure", e.structure), ("reserve", e.reserve), ("energy", e.energy)] {
+                for (name, v) in [
+                    ("structure", e.structure),
+                    ("reserve", e.reserve),
+                    ("energy", e.energy),
+                ] {
                     if !v.is_finite() || v < 0.0 {
                         return Err(format!("{who}: escrow {name} = {v}"));
                     }
                 }
                 if e.started_tick > self.tick {
-                    return Err(format!("{who}: escrow started at {} after tick {}", e.started_tick, self.tick));
+                    return Err(format!(
+                        "{who}: escrow started at {} after tick {}",
+                        e.started_tick, self.tick
+                    ));
                 }
                 check_genome(&e.genome, &format!("{who} escrow"))?;
             }
@@ -179,8 +210,14 @@ impl WorldState {
     /// diagnostics and wire values, not as fully accurate totals.
     pub fn energy_ledgers(&self) -> EnergyLedgers {
         EnergyLedgers {
-            light_in: Ledger { raw: self.light_in_total, correction: self.energy_correction.light_in },
-            heat_out: Ledger { raw: self.heat_out_total, correction: self.energy_correction.heat_out },
+            light_in: Ledger {
+                raw: self.light_in_total,
+                correction: self.energy_correction.light_in,
+            },
+            heat_out: Ledger {
+                raw: self.heat_out_total,
+                correction: self.energy_correction.heat_out,
+            },
         }
     }
 
@@ -257,7 +294,11 @@ pub(crate) fn check_genome(g: &Genome, who: &str) -> Result<(), String> {
         }
     };
     if g.version != Genome::VERSION {
-        return Err(format!("{who}: genome version {} is not {}", g.version, Genome::VERSION));
+        return Err(format!(
+            "{who}: genome version {} is not {}",
+            g.version,
+            Genome::VERSION
+        ));
     }
     range("size", g.size, 0.5, 2.0)?;
     range("metabolism", g.metabolism, 0.5, 2.0)?;
@@ -270,7 +311,10 @@ pub(crate) fn check_genome(g: &Genome, who: &str) -> Result<(), String> {
     range("depth", g.depth, 0.0, 1.0)?;
     range("swim", g.swim, 0.0, 1.0)?;
     if g.form >= MAX_FORMS {
-        return Err(format!("{who}: genome form {} is not below {MAX_FORMS}", g.form));
+        return Err(format!(
+            "{who}: genome form {} is not below {MAX_FORMS}",
+            g.form
+        ));
     }
     let d = &g.drives;
     for (name, v) in [
@@ -295,10 +339,16 @@ pub(crate) fn check_genome(g: &Genome, who: &str) -> Result<(), String> {
         range(name, v, 0.0, 1.0)?;
     }
     if d.seek_off >= d.seek_on {
-        return Err(format!("{who}: seek_off {} is not below seek_on {}", d.seek_off, d.seek_on));
+        return Err(format!(
+            "{who}: seek_off {} is not below seek_on {}",
+            d.seek_off, d.seek_on
+        ));
     }
     range("tau_hunger_seconds", d.tau_hunger_seconds, 1.0, 60.0)?;
-    for (name, v) in [("bud_min_age_seconds", d.bud_min_age_seconds), ("turn_rate_max_deg", d.turn_rate_max_deg)] {
+    for (name, v) in [
+        ("bud_min_age_seconds", d.bud_min_age_seconds),
+        ("turn_rate_max_deg", d.turn_rate_max_deg),
+    ] {
         if !v.is_finite() || v < 0.0 {
             return Err(format!("{who}: genome {name} = {v}"));
         }
@@ -422,14 +472,18 @@ impl World {
         // a seed stays reproducible when another kind's count changes; without kinds the
         // v1 path keeps `key = index`.
         let roster: Vec<(u64, Option<&FounderKind>)> = if config.founders.kinds.is_empty() {
-            (0..u64::from(config.founders.count)).map(|i| (i, None)).collect()
+            (0..u64::from(config.founders.count))
+                .map(|i| (i, None))
+                .collect()
         } else {
             config
                 .founders
                 .kinds
                 .iter()
                 .enumerate()
-                .flat_map(|(k, kind)| (0..u64::from(kind.count)).map(move |j| (((k as u64) << 32) | j, Some(kind))))
+                .flat_map(|(k, kind)| {
+                    (0..u64::from(kind.count)).map(move |j| (((k as u64) << 32) | j, Some(kind)))
+                })
                 .collect()
         };
         for (index, kind) in roster.into_iter().take(cap as usize) {
@@ -441,19 +495,36 @@ impl World {
             let heading = Vec2::from_screen_angle(unit(seed, Stream::Founders, index, 3) * TAU);
             let hue = unit(seed, Stream::Founders, index, 4) as f32;
 
-            let mut genome = Genome::founder(kind.and_then(|k| k.hue).unwrap_or(hue), &config.drives);
+            let mut genome =
+                Genome::founder(kind.and_then(|k| k.hue).unwrap_or(hue), &config.drives);
             // Founders sense at the configured radius; the genome bounds still apply.
             genome.sense = config.organism.sense_radius as f32;
             if let Some(k) = kind {
                 // A kind fixes the loci it names; the rest keep the v1 founder values. The
                 // rig follows the kind, or the hue tercile when the kind leaves it open.
-                if let Some(x) = k.diet { genome.diet = x; }
-                if let Some(x) = k.depth { genome.depth = x; }
-                if let Some(x) = k.speed { genome.speed = x; }
-                if let Some(x) = k.size { genome.size = x; }
-                if let Some(x) = k.metabolism { genome.metabolism = x; }
-                if let Some(x) = k.swim { genome.swim = x; }
-                if let Some(x) = k.form { genome.form = x; } else { genome.form = crate::genome::form_of_hue(genome.hue); }
+                if let Some(x) = k.diet {
+                    genome.diet = x;
+                }
+                if let Some(x) = k.depth {
+                    genome.depth = x;
+                }
+                if let Some(x) = k.speed {
+                    genome.speed = x;
+                }
+                if let Some(x) = k.size {
+                    genome.size = x;
+                }
+                if let Some(x) = k.metabolism {
+                    genome.metabolism = x;
+                }
+                if let Some(x) = k.swim {
+                    genome.swim = x;
+                }
+                if let Some(x) = k.form {
+                    genome.form = x;
+                } else {
+                    genome.form = crate::genome::form_of_hue(genome.hue);
+                }
             }
             genome.clamp();
             let phenotype = decode(&genome, &config.organism);
@@ -536,13 +607,12 @@ impl World {
         // imported `feed_material_in` and exported `clean_material_out` since creation, the
         // hunter extension has imported its founders (and any budget-matched control deposit),
         // and a carried carcass is material that is still in the world.
-        let initial_material = state.fields.total_material()
-            + organism_material
-            + state.hunters.gut_material_total()
-            - state.external_material_in
-            - state.care.feed_material_in
-            + state.care.clean_material_out
-            - state.hunters.imported_material();
+        let initial_material =
+            state.fields.total_material() + organism_material + state.hunters.gut_material_total()
+                - state.external_material_in
+                - state.care.feed_material_in
+                + state.care.clean_material_out
+                - state.hunters.imported_material();
         Ok(World::assemble(state, habitat, initial_material))
     }
 
@@ -553,7 +623,11 @@ impl World {
             habitat,
             images: std::array::from_fn(|i| {
                 let mut v = Vec::new();
-                chart_images(Face::from_index(i as u8).expect("five faces"), MAX_SEAMS, &mut v);
+                chart_images(
+                    Face::from_index(i as u8).expect("five faces"),
+                    MAX_SEAMS,
+                    &mut v,
+                );
                 v
             }),
             light: Box::new([0.0; CELL_COUNT]),
@@ -584,7 +658,9 @@ impl World {
             &mut world.rain_source,
             cfg.habitat.moisture_min,
         );
-        world.moved.resize_with(world.state.organisms.slot_count(), Vec::new);
+        world
+            .moved
+            .resize_with(world.state.organisms.slot_count(), Vec::new);
         world.sense_rings = sense_rings(&world.graph);
         world
     }
@@ -651,7 +727,10 @@ impl World {
                 // Destructured field by field so the heat closure and the light accumulation
                 // borrow disjoint components.
                 energy_correction:
-                    EnergyCorrection { light_in: light_in_correction, heat_out: heat_out_correction },
+                    EnergyCorrection {
+                        light_in: light_in_correction,
+                        heat_out: heat_out_correction,
+                    },
                 hunters,
             } = state;
             let cfg: &WorldConfig = config;
@@ -675,7 +754,14 @@ impl World {
 
             // 2. Weather advance, then derive light, moisture and the rain source per cell.
             weather.advance(&cfg.weather, seed, now);
-            weather.sample(&cfg.weather, habitat, light, moisture, rain_source, cfg.habitat.moisture_min);
+            weather.sample(
+                &cfg.weather,
+                habitat,
+                light,
+                moisture,
+                rain_source,
+                cfg.habitat.moisture_min,
+            );
 
             // 2b. Water: rain, downhill flow, evaporation (`design/water.md`). Before the
             //     field reactions, so growth sees this tick's wetness and flooding.
@@ -690,7 +776,9 @@ impl World {
                 manual_rain.fill(0.0);
                 for shower in care.showers.iter() {
                     let k = shower.delivered as usize;
-                    let Some(&e) = rain_envelope.get(k) else { continue };
+                    let Some(&e) = rain_envelope.get(k) else {
+                        continue;
+                    };
                     // The shower's own persisted dose, not whatever a panel now offers.
                     let depth = shower.dose().scale(care::RAIN_DEPTH_TOTAL);
                     for (c, w) in shower.cells.iter().zip(shower.weights.iter()) {
@@ -702,7 +790,11 @@ impl World {
             let water_ledger = water::step(
                 &mut fields.w,
                 &cfg.water,
-                water::Drivers { terrain: &habitat.terrain, light, rain_source },
+                water::Drivers {
+                    terrain: &habitat.terrain,
+                    light,
+                    rain_source,
+                },
                 manual,
                 rain,
                 graph,
@@ -731,9 +823,19 @@ impl World {
             // 4. Pair pass.
             let mut bodies: Vec<Body> = Vec::with_capacity(organisms.len());
             for (id, o) in organisms.iter() {
-                bodies.push(Body { id, pos: o.pos, sense_radius: o.phenotype.sense_radius, extent: o.phenotype.extent });
+                bodies.push(Body {
+                    id,
+                    pos: o.pos,
+                    sense_radius: o.phenotype.sense_radius,
+                    extent: o.phenotype.extent,
+                });
             }
-            pairs::build(&bodies, images, cfg.capacity.max_neighbors as usize, neighbors);
+            pairs::build(
+                &bodies,
+                images,
+                cfg.capacity.max_neighbors as usize,
+                neighbors,
+            );
 
             // 5. Observe and decide (pure per organism, from the pre-movement world).
             let mut decisions: Vec<(OrganismId, Decision)> = Vec::with_capacity(organisms.len());
@@ -755,7 +857,12 @@ impl World {
                 for ring in &sense_rings[here][..depth] {
                     for neighbor in ring {
                         let center = neighbor.center();
-                        let Some(view) = unfold_with(&images[o.pos.face.index()], o.pos, center, CELL_UNFOLD_RADIUS) else {
+                        let Some(view) = unfold_with(
+                            &images[o.pos.face.index()],
+                            o.pos,
+                            center,
+                            CELL_UNFOLD_RADIUS,
+                        ) else {
                             continue;
                         };
                         let Some(dir) = (view.local - chart).normalized() else {
@@ -801,7 +908,18 @@ impl World {
                     normal(seed, Stream::OrganismTurn, key, cy),
                 );
 
-                decisions.push((id, decide(o, &obs, now, dt, cfg.mechanisms.grazing, cfg.mechanisms.scavenging, gate)));
+                decisions.push((
+                    id,
+                    decide(
+                        o,
+                        &obs,
+                        now,
+                        dt,
+                        cfg.mechanisms.grazing,
+                        cfg.mechanisms.scavenging,
+                        gate,
+                    ),
+                ));
             }
 
             // 5b. Hunters (`crate::hunter`), when any member exists: advance each member's
@@ -830,15 +948,20 @@ impl World {
                     // arena and the member list can be read freely, and only the finished
                     // member is written back.
                     let mut m = hunters.members[index];
-                    let Some(o) = organisms.get(m.id) else { continue };
+                    let Some(o) = organisms.get(m.id) else {
+                        continue;
+                    };
                     let headroom = profile.gut_capacity_material - m.gut_material;
                     let empty: &[pairs::Neighbor] = &[];
-                    let sensed = neighbors.lists.get(m.id.slot as usize).map_or(empty, |l| l.as_slice());
+                    let sensed = neighbors
+                        .lists
+                        .get(m.id.slot as usize)
+                        .map_or(empty, |l| l.as_slice());
                     let eligible = |id: OrganismId| -> bool {
                         !hunters.contains(id)
-                            && organisms
-                                .get(id)
-                                .is_some_and(|prey| hunter::prey_is_eligible(profile, o, prey, headroom, e_r))
+                            && organisms.get(id).is_some_and(|prey| {
+                                hunter::prey_is_eligible(profile, o, prey, headroom, e_r)
+                            })
                     };
 
                     // A target that died, had its slot reused, became a hunter, grew out of
@@ -881,7 +1004,8 @@ impl World {
                         m.enter(HunterPhase::Perched, now, now, 0);
                     }
 
-                    let hungry = o.reserve < profile.seek_reserve_fraction * o.phenotype.reserve_max;
+                    let hungry =
+                        o.reserve < profile.seek_reserve_fraction * o.phenotype.reserve_max;
                     let may_hunt = profile.attacks_enabled && !m.carrying() && hungry;
                     // The nearest eligible prey this hunter actually senses; the neighbour
                     // list is already sorted by `(distance, id)`, so this is "nearest, ties by
@@ -892,7 +1016,14 @@ impl World {
                     // How far from the grasp centre a prey may be and still be worth cocking
                     // at: the tolerance plus the gap the paid strike can close.
                     let admission = |prey: &Organism| -> Option<hunter::ContactMeasure> {
-                        hunter::measure_contact(images, o.pos, o.heading, &geometry, prey.pos, prey.phenotype.extent)
+                        hunter::measure_contact(
+                            images,
+                            o.pos,
+                            o.heading,
+                            &geometry,
+                            prey.pos,
+                            prey.phenotype.extent,
+                        )
                     };
                     let closing = strike_closing_px(profile);
 
@@ -919,7 +1050,8 @@ impl World {
                             if m.phase == HunterPhase::Stalking
                                 && let Some(t) = m.target
                                 && let Some(prey) = organisms.get(t)
-                                && admission(prey).is_some_and(|c| c.effector_distance <= c.tolerance + closing)
+                                && admission(prey)
+                                    .is_some_and(|c| c.effector_distance <= c.tolerance + closing)
                             {
                                 m.enter(HunterPhase::Windup, now, now + windup_ticks, 0);
                                 m.target = Some(t);
@@ -952,7 +1084,9 @@ impl World {
                                         .target
                                         .and_then(|t| organisms.get(t).map(|prey| (t, prey)))
                                         .map(|(t, prey)| {
-                                            hunter::ContactEvidence::gather(images, profile, o, t, prey)
+                                            hunter::ContactEvidence::gather(
+                                                images, profile, o, t, prey,
+                                            )
                                         }),
                                 });
                                 m.enter(HunterPhase::Perched, now, now, 0);
@@ -978,8 +1112,11 @@ impl World {
                         let hold = inside || m.phase == HunterPhase::Windup;
                         if let Some(d) = decisions.iter_mut().find(|(id, _)| *id == m.id) {
                             d.1.heading = toward;
-                            d.1.effort =
-                                if hold { f64::from(o.phenotype.drives.rest_effort) } else { 1.0 };
+                            d.1.effort = if hold {
+                                f64::from(o.phenotype.drives.rest_effort)
+                            } else {
+                                1.0
+                            };
                             if m.phase == HunterPhase::Strike && !inside {
                                 boosts.push((m.id, profile.strike_speed_px_s));
                             }
@@ -997,8 +1134,11 @@ impl World {
                             && !m.phase.hunting();
                         d.1.fruit_effort = 0.0;
                         d.1.graze_effort = 0.0;
-                        d.1.scavenge_effort =
-                            if may_scavenge { d.1.scavenge_effort * profile.scavenge_fraction } else { 0.0 };
+                        d.1.scavenge_effort = if may_scavenge {
+                            d.1.scavenge_effort * profile.scavenge_fraction
+                        } else {
+                            0.0
+                        };
                         d.1.bud = false;
                         if !m.phase.hunting() && d.1.scavenge_effort <= 0.0 {
                             // Perched, recovering or handling with nothing to forage: rest in
@@ -1024,12 +1164,23 @@ impl World {
                 //     briefly ask for more speed than its own maximum.
                 let escape_turn = profile.escape_turn_rate_deg.to_radians() * dt;
                 for (prey_id, hunter_id) in threats {
-                    let Some(prey) = organisms.get(prey_id) else { continue };
-                    let Some(list) = neighbors.lists.get(prey_id.slot as usize) else { continue };
-                    let Some(n) = list.iter().find(|n| n.id == hunter_id) else { continue };
-                    let Some(d) = decisions.iter_mut().find(|(id, _)| *id == prey_id) else { continue };
+                    let Some(prey) = organisms.get(prey_id) else {
+                        continue;
+                    };
+                    let Some(list) = neighbors.lists.get(prey_id.slot as usize) else {
+                        continue;
+                    };
+                    let Some(n) = list.iter().find(|n| n.id == hunter_id) else {
+                        continue;
+                    };
+                    let Some(d) = decisions.iter_mut().find(|(id, _)| *id == prey_id) else {
+                        continue;
+                    };
                     d.1.heading = turn_toward(d.1.heading, prey.pos.chart() - n.local, escape_turn);
-                    boosts.push((prey_id, profile.escape_speed_multiple * prey.phenotype.speed_max));
+                    boosts.push((
+                        prey_id,
+                        profile.escape_speed_multiple * prey.phenotype.speed_max,
+                    ));
                 }
             }
 
@@ -1039,7 +1190,9 @@ impl World {
                 segments.clear();
             }
             for (id, d) in &decisions {
-                let Some(o) = organisms.get_mut(*id) else { continue };
+                let Some(o) = organisms.get_mut(*id) else {
+                    continue;
+                };
                 o.mode = d.mode;
                 o.hunger_memory = d.hunger_memory;
                 o.fed_this_tick = false;
@@ -1058,7 +1211,11 @@ impl World {
                 }
                 travel_into(o.pos, d.heading * (speed * dt), travel_buf);
                 o.pos = travel_buf.end;
-                o.heading = travel_buf.map.apply(d.heading).normalized().unwrap_or(d.heading);
+                o.heading = travel_buf
+                    .map
+                    .apply(d.heading)
+                    .normalized()
+                    .unwrap_or(d.heading);
                 o.ou = travel_buf.map.apply(d.ou);
                 counters.travel_ties += travel_buf.ties;
                 counters.travel_fallbacks += u32::from(travel_buf.fallback);
@@ -1081,7 +1238,7 @@ impl World {
             //     removed exactly once with exactly one death event. Losing contenders paid
             //     at strike entry and are not refunded.
             if !hunters.members.is_empty()
-                && let Some(profile) = hunters.profile.as_ref()
+                && let Some(profile) = hunters.profile.clone()
             {
                 let recovery_ticks = ticks_from_seconds(profile.recovery_seconds, dt).max(1);
                 // Attempt priority is its own seeded draw, so a contested prey is not decided
@@ -1093,7 +1250,12 @@ impl World {
                     if m.phase == HunterPhase::Strike && now + 1 >= m.phase_ends_tick {
                         let key = hunter::draw_key(m.id);
                         let counter = hunter::priority_counter(m.attack_counter);
-                        attempts.push((draw(seed, Stream::Hunt, key, counter), m.id, index, m.target));
+                        attempts.push((
+                            draw(seed, Stream::Hunt, key, counter),
+                            m.id,
+                            index,
+                            m.target,
+                        ));
                     }
                 }
                 attempts.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
@@ -1101,7 +1263,9 @@ impl World {
                 let mut claimed: Vec<OrganismId> = Vec::new();
                 for (_, hunter_id, index, aimed_at) in attempts {
                     let m = hunters.members[index];
-                    let Some(hunter_o) = organisms.get(hunter_id) else { continue };
+                    let Some(hunter_o) = organisms.get(hunter_id) else {
+                        continue;
+                    };
                     let headroom = profile.gut_capacity_material - m.gut_material;
                     let mut caught: Option<(OrganismId, f64, f64)> = None;
                     // The settlement evidence is gathered here, from the common post-movement
@@ -1113,8 +1277,9 @@ impl World {
                         Some(t) if claimed.contains(&t) => {
                             // A contender that lost the claim still records what it saw.
                             if let Some(prey) = organisms.get(t) {
-                                evidence =
-                                    Some(hunter::ContactEvidence::gather(images, profile, hunter_o, t, prey));
+                                evidence = Some(hunter::ContactEvidence::gather(
+                                    images, &profile, hunter_o, t, prey,
+                                ));
                             }
                             AttemptOutcome::TargetClaimed
                         }
@@ -1123,10 +1288,14 @@ impl World {
                             // whoever reused the slot.
                             None => AttemptOutcome::TargetLost,
                             Some(prey) => {
-                                let seen = hunter::ContactEvidence::gather(images, profile, hunter_o, t, prey);
+                                let seen = hunter::ContactEvidence::gather(
+                                    images, &profile, hunter_o, t, prey,
+                                );
                                 evidence = Some(seen);
                                 if hunters.contains(t)
-                                    || !hunter::prey_is_eligible(profile, hunter_o, prey, headroom, e_r)
+                                    || !hunter::prey_is_eligible(
+                                        &profile, hunter_o, prey, headroom, e_r,
+                                    )
                                 {
                                     AttemptOutcome::Ineligible
                                 } else if !seen.measure.is_some_and(|c| c.in_contact()) {
@@ -1142,7 +1311,7 @@ impl World {
                                     AttemptOutcome::GraspUnmapped
                                 } else {
                                     let chance = hunter::capture_probability(
-                                        profile,
+                                        &profile,
                                         hunter_o.structure,
                                         prey.structure,
                                     );
@@ -1182,13 +1351,10 @@ impl World {
                             // and its escrow moved into the gut, energy included. This is an
                             // internal transfer with no source ledger and no detritus cap.
                             let prey = organisms.remove(prey_id).expect("the claim was checked");
-                            // Every other member drops the handle in the same breath, so no
-                            // hunter can chase (or claim) a body that has left the arena.
-                            for other in hunters.members.iter_mut() {
-                                if other.target == Some(prey_id) {
-                                    other.target = None;
-                                }
-                            }
+                            // Every other member invalidates the handle in the same breath, so
+                            // no unpaid hunt can chase a body that left the arena. A paid
+                            // contender remains in Strike and settles from the attempt snapshot.
+                            hunters.forget_target(prey_id, now + 1);
                             let member = &mut hunters.members[index];
                             member.gut_material += material;
                             member.gut_energy += energy;
@@ -1243,7 +1409,9 @@ impl World {
                 if d.fruit_effort <= 0.0 && d.graze_effort <= 0.0 && d.scavenge_effort <= 0.0 {
                     continue;
                 }
-                let Some(o) = organisms.get(*id) else { continue };
+                let Some(o) = organisms.get(*id) else {
+                    continue;
+                };
                 let cell = cell_of(&o.pos).index();
                 let headroom = (o.phenotype.reserve_max - o.reserve).max(0.0);
                 // Type-II intake: what a mouth can take falls off as the cell empties, so a
@@ -1261,8 +1429,18 @@ impl World {
                 // Fruit settles first and takes its headroom, grazing next, scavenging
                 // gets the rest, so intake alone can never push the reserve past `R_max`.
                 // All read the cell's pre-settlement stock.
-                let f = bite(o.phenotype.graze_rate, d.fruit_effort, headroom, fields.f[cell]);
-                let g = bite(o.phenotype.graze_rate, d.graze_effort, headroom - f, fields.p[cell]);
+                let f = bite(
+                    o.phenotype.graze_rate,
+                    d.fruit_effort,
+                    headroom,
+                    fields.f[cell],
+                );
+                let g = bite(
+                    o.phenotype.graze_rate,
+                    d.graze_effort,
+                    headroom - f,
+                    fields.p[cell],
+                );
                 let s = bite(
                     o.phenotype.scavenge_rate,
                     d.scavenge_effort,
@@ -1283,18 +1461,25 @@ impl World {
             contested.sort_unstable();
             contested.dedup();
             for &cell in &contested {
-                let (available_f, available_p, available_d) = (fields.f[cell], fields.p[cell], fields.d[cell]);
+                let (available_f, available_p, available_d) =
+                    (fields.f[cell], fields.p[cell], fields.d[cell]);
                 fruit[cell] = share(fruit[cell], available_f);
                 graze[cell] = share(graze[cell], available_p);
                 scavenge[cell] = share(scavenge[cell], available_d);
-                detritus_energy_density[cell] = if available_d > 0.0 { fields.de[cell] / available_d } else { 0.0 };
+                detritus_energy_density[cell] = if available_d > 0.0 {
+                    fields.de[cell] / available_d
+                } else {
+                    0.0
+                };
             }
 
             let eta_m = org_cfg.assimilation_material;
             let eta_e = org_cfg.assimilation_energy;
             let e_p = cfg.producer.energy_density;
             for &(cell, id, f, g, s) in &requests {
-                let Some(o) = organisms.get_mut(id) else { continue };
+                let Some(o) = organisms.get_mut(id) else {
+                    continue;
+                };
                 let mut eaten = 0.0;
                 if f > 0.0 {
                     // Frugivory: F -> reserve (η_m) and F -> D (the rest, energy-free). Fruit
@@ -1335,7 +1520,11 @@ impl World {
                     // Scavenging: poor detritus assimilates proportionally less material,
                     // so the reserve is never credited with energy the food did not hold.
                     let rho = detritus_energy_density[cell];
-                    let eta = if e_r > 0.0 { eta_m * (rho / e_r).min(1.0) } else { eta_m };
+                    let eta = if e_r > 0.0 {
+                        eta_m * (rho / e_r).min(1.0)
+                    } else {
+                        eta_m
+                    };
                     let q = (s * scavenge[cell]).clamp(0.0, fields.d[cell]);
                     if q > 0.0 && eta > 0.0 {
                         let to_reserve = eta * q;
@@ -1370,7 +1559,9 @@ impl World {
                     if !m.carrying() {
                         continue;
                     }
-                    let Some(o) = organisms.get_mut(m.id) else { continue };
+                    let Some(o) = organisms.get_mut(m.id) else {
+                        continue;
+                    };
                     let paid = handling.min(o.energy).max(0.0);
                     o.energy -= paid;
                     heat(paid);
@@ -1415,7 +1606,12 @@ impl World {
                             let episode = member.episode;
                             // Digestion is a post-movement pass too: the pause starts at the
                             // boundary this tick completes, and runs its whole advertised span.
-                            member.enter(HunterPhase::Recovering, now + 1, now + 1 + meal_ticks, episode);
+                            member.enter(
+                                HunterPhase::Recovering,
+                                now + 1,
+                                now + 1 + meal_ticks,
+                                episode,
+                            );
                         }
                     }
                 }
@@ -1436,7 +1632,9 @@ impl World {
             let mut births: Vec<OrganismId> = Vec::new();
             let mut deaths: Vec<(OrganismId, DeathCause)> = Vec::new();
             for (id, d) in &decisions {
-                let Some(o) = organisms.get_mut(*id) else { continue };
+                let Some(o) = organisms.get_mut(*id) else {
+                    continue;
+                };
                 // Membership, not `genome.form`, is what makes a predator.
                 let member = hunters.index_of(*id);
 
@@ -1484,8 +1682,9 @@ impl World {
                         (Some(_), Some(profile)) => profile.juvenile_growth_rate,
                         _ => org_cfg.growth_rate,
                     };
-                    let mut grown =
-                        (growth_rate * dt).min(o.phenotype.structure_adult - o.structure).min(o.reserve);
+                    let mut grown = (growth_rate * dt)
+                        .min(o.phenotype.structure_adult - o.structure)
+                        .min(o.reserve);
                     // Building is paid for up front: what the energy cannot cover is not built.
                     if org_cfg.build_cost > 0.0 {
                         grown = grown.min(o.energy / org_cfg.build_cost);
@@ -1500,8 +1699,15 @@ impl World {
                     }
                 }
 
-                let gestation = if member.is_some() { hunter_gestation_ticks } else { gestation_ticks };
-                let due = o.escrow.as_ref().is_some_and(|e| now.saturating_sub(e.started_tick) >= gestation);
+                let gestation = if member.is_some() {
+                    hunter_gestation_ticks
+                } else {
+                    gestation_ticks
+                };
+                let due = o
+                    .escrow
+                    .as_ref()
+                    .is_some_and(|e| now.saturating_sub(e.started_tick) >= gestation);
                 // A hunter's one paid offspring is gated by its profile and its own local
                 // state; the ordinary controller's `bud` never applies to a member.
                 let bud = match (member, hunters.profile.as_ref()) {
@@ -1514,7 +1720,8 @@ impl World {
                     births.push(*id);
                 } else if bud && o.escrow.is_none() {
                     if population + births.len() < cap {
-                        let structure = org_cfg.child_structure_fraction * o.phenotype.structure_adult;
+                        let structure =
+                            org_cfg.child_structure_fraction * o.phenotype.structure_adult;
                         let reserve = org_cfg.child_reserve_fraction * o.phenotype.reserve_max;
                         let energy = org_cfg.child_energy_fraction * o.phenotype.energy_max;
                         let build = org_cfg.build_cost * structure;
@@ -1526,13 +1733,22 @@ impl World {
                             o.energy -= build + energy;
                             heat(build);
                             let genome = o.genome.clone();
-                            o.escrow = Some(Escrow { structure, reserve, energy, started_tick: now, genome });
+                            o.escrow = Some(Escrow {
+                                structure,
+                                reserve,
+                                energy,
+                                started_tick: now,
+                                genome,
+                            });
                             if member.is_some() {
                                 hunter_events.push(HunterEvent::Reproduction {
                                     tick: now + 1,
                                     hunter: *id,
                                     record: hunter::Reproduction::Funded {
-                                        key: hunter::EscrowKey { parent: *id, started_tick: now },
+                                        key: hunter::EscrowKey {
+                                            parent: *id,
+                                            started_tick: now,
+                                        },
                                         parent_reserve_before: reserve_before,
                                         parent_reserve_after: o.reserve,
                                         parent_energy_before: energy_before,
@@ -1593,7 +1809,9 @@ impl World {
             // 9. Commit: remove the dead, then place births against the freed capacity.
             let e_d_max = cfg.detritus.energy_cap;
             for (id, cause) in &deaths {
-                let Some(o) = organisms.remove(*id) else { continue };
+                let Some(o) = organisms.remove(*id) else {
+                    continue;
+                };
                 let cell = cell_of(&o.pos).index();
                 // The body: structure carries no energy, the reserve carries `e_r` per unit.
                 let material = o.structure + o.reserve;
@@ -1617,7 +1835,10 @@ impl World {
                             tick: now + 1,
                             hunter: *id,
                             record: hunter::Reproduction::Miscarried {
-                                key: hunter::EscrowKey { parent: *id, started_tick: es.started_tick },
+                                key: hunter::EscrowKey {
+                                    parent: *id,
+                                    started_tick: es.started_tick,
+                                },
                                 cause: *cause,
                                 material,
                                 energy,
@@ -1634,27 +1855,26 @@ impl World {
                     // Predation never reaches this loop: a consumed prey is settled and
                     // removed by the hunter pass, which books it in the extension's own
                     // counter and leaves the three natural counters alone.
-                    DeathCause::Predation => unreachable!("predation is settled by the hunter pass"),
+                    DeathCause::Predation => {
+                        unreachable!("predation is settled by the hunter pass")
+                    }
                 };
                 counters.deaths[slot] += 1;
                 deaths_total[slot] += 1;
+                // Whether this was prey or another hunter, any unpaid pursuit ends at the
+                // removal boundary. A paid strike keeps its phase long enough to settle as a
+                // lost target on its own boundary.
+                hunters.forget_target(*id, now + 1);
                 // A member's carried meal goes where its body went: into the cell's detritus,
                 // keeping at most what the detritus cap allows and releasing the rest as heat.
                 // Nothing a hunter was holding disappears because its record was removed.
-                if let Some(index) = hunters.index_of(*id) {
-                    let gone = hunters.members[index];
+                if let Some(gone) = hunters.remove_member(*id, now + 1) {
                     let mut stored = 0.0;
                     if gone.gut_material > 0.0 || gone.gut_energy > 0.0 {
                         fields.d[cell] += gone.gut_material;
                         stored = gone.gut_energy.min(e_d_max * gone.gut_material);
                         fields.de[cell] += stored;
                         heat(gone.gut_energy - stored);
-                    }
-                    hunters.members.remove(index);
-                    for other in hunters.members.iter_mut() {
-                        if other.target == Some(*id) {
-                            other.target = None;
-                        }
                     }
                     hunters.hunter_deaths_total += 1;
                     hunter_events.push(HunterEvent::Death {
@@ -1682,8 +1902,12 @@ impl World {
                 // granted explicitly below, and its genome is copied exactly.
                 let hunter_parent = hunters.index_of(*parent_id);
                 let placement = {
-                    let Some(parent) = organisms.get_mut(*parent_id) else { continue };
-                    let Some(escrow) = parent.escrow.take() else { continue };
+                    let Some(parent) = organisms.get_mut(*parent_id) else {
+                        continue;
+                    };
+                    let Some(escrow) = parent.escrow.take() else {
+                        continue;
+                    };
                     if full {
                         // A refused birth returns its escrow to the parent untouched.
                         let (reserve_before, energy_before) = (parent.reserve, parent.energy);
@@ -1715,7 +1939,8 @@ impl World {
                         // …and the parent waits a gestation before trying again, so a world at
                         // its cap cannot spin a hunter through a free birth attempt per tick.
                         if let Some(index) = hunter_parent {
-                            hunters.members[index].next_reproduction_tick = now + 1 + hunter_gestation_ticks;
+                            hunters.members[index].next_reproduction_tick =
+                                now + 1 + hunter_gestation_ticks;
                         }
                         continue;
                     }
@@ -1725,15 +1950,39 @@ impl World {
                     // Each birth owns a block of `BIRTH_DRAWS` counters: placement first,
                     // then mutation, so neither can collide with the next birth's draws.
                     let base = index * BIRTH_DRAWS;
-                    let direction = Vec2::from_screen_angle(unit(seed, Stream::Birth, key, base) * TAU);
-                    let heading = Vec2::from_screen_angle(unit(seed, Stream::Birth, key, base + 1) * TAU);
-                    (parent.pos, direction, heading, escrow, parent.age_ticks(now + 1), parent.births, key, base + 2)
+                    let direction =
+                        Vec2::from_screen_angle(unit(seed, Stream::Birth, key, base) * TAU);
+                    let heading =
+                        Vec2::from_screen_angle(unit(seed, Stream::Birth, key, base + 1) * TAU);
+                    (
+                        parent.pos,
+                        direction,
+                        heading,
+                        escrow,
+                        parent.age_ticks(now + 1),
+                        parent.births,
+                        key,
+                        base + 2,
+                    )
                 };
-                let (from, direction, heading, escrow, parent_age_ticks, parent_births, key, mut counter) = placement;
+                let (
+                    from,
+                    direction,
+                    heading,
+                    escrow,
+                    parent_age_ticks,
+                    parent_births,
+                    key,
+                    mut counter,
+                ) = placement;
                 travel_into(from, direction * cfg.drives.birth_offset_px, travel_buf);
                 counters.travel_ties += travel_buf.ties;
                 counters.travel_fallbacks += u32::from(travel_buf.fallback);
-                let heading = travel_buf.map.apply(heading).normalized().unwrap_or(Vec2::new(1.0, 0.0));
+                let heading = travel_buf
+                    .map
+                    .apply(heading)
+                    .normalized()
+                    .unwrap_or(Vec2::new(1.0, 0.0));
                 let mut genome = escrow.genome.clone();
                 // Sparse mutation (`design/fauna-v2.md`): the draws follow the placement draws
                 // in the parent's birth stream; `form` never changes; an exact copy records
@@ -1863,12 +2112,20 @@ impl World {
                 - (self.state.care.clean_energy_out - cleaned)
                 + (self.state.hunters.imported_energy() - imported);
             let drift = (stored_energy(&self.state) - before) - booked;
-            assert!(drift.abs() < AUDIT_TOLERANCE, "energy audit drifted by {drift:e} in tick {}", self.state.tick);
+            assert!(
+                drift.abs() < AUDIT_TOLERANCE,
+                "energy audit drifted by {drift:e} in tick {}",
+                self.state.tick
+            );
             // The water budget is the same kind of identity: `Δ Σw == rain_in − evap_out`.
             let (w_before, rain, evap) = water_audit;
             let w_booked = (self.state.rain_in_total - rain) - (self.state.evap_out_total - evap);
             let w_drift = (self.state.fields.w.iter().sum::<f64>() - w_before) - w_booked;
-            assert!(w_drift.abs() < AUDIT_TOLERANCE, "water budget drifted by {w_drift:e} in tick {}", self.state.tick);
+            assert!(
+                w_drift.abs() < AUDIT_TOLERANCE,
+                "water budget drifted by {w_drift:e} in tick {}",
+                self.state.tick
+            );
         }
         &self.counters
     }
@@ -1877,7 +2134,8 @@ impl World {
     /// Zero to rounding for a world created dry; telemetry consumers check it like the
     /// mass residual.
     pub fn water_residual(&self) -> f64 {
-        self.state.fields.w.iter().sum::<f64>() - (self.state.rain_in_total - self.state.evap_out_total)
+        self.state.fields.w.iter().sum::<f64>()
+            - (self.state.rain_in_total - self.state.evap_out_total)
     }
 
     /// Mass invariant: `Σ fields + Σ organisms (incl. escrow) − external_material_in
@@ -1893,9 +2151,7 @@ impl World {
     /// `external_material_in`.
     pub fn mass_residual(&self) -> f64 {
         let organisms: f64 = self.state.organisms.iter().map(|(_, o)| o.material()).sum();
-        self.state.fields.total_material()
-            + organisms
-            + self.state.hunters.gut_material_total()
+        self.state.fields.total_material() + organisms + self.state.hunters.gut_material_total()
             - self.state.external_material_in
             - self.state.care.feed_material_in
             + self.state.care.clean_material_out
@@ -1932,7 +2188,11 @@ impl World {
     /// sample falls in the step `B → B + 1`.
     pub fn apply_care(&mut self, cmd: &CareCommand) -> CareReceipt {
         let tick = self.state.tick;
-        let receipt = |outcome| CareReceipt { seq: cmd.seq, tick, outcome };
+        let receipt = |outcome| CareReceipt {
+            seq: cmd.seq,
+            tick,
+            outcome,
+        };
         if cmd.seq != self.state.care.admitted_seq.wrapping_add(1) {
             return receipt(CareOutcome::Rejected("out of order".into()));
         }
@@ -2020,17 +2280,26 @@ impl World {
         }
         let founder = self.derive_hunter_founder(&profile)?;
         let Some(pos) = target.resolve() else {
-            return Err(format!("hunter founder target {target:?} is not on the surface"));
+            return Err(format!(
+                "hunter founder target {target:?} is not on the surface"
+            ));
         };
         let cap = self.state.config.capacity.max_organisms as usize;
         if self.state.organisms.len() >= cap {
-            return Err(format!("no organism capacity for a hunter founder (population {cap})"));
+            return Err(format!(
+                "no organism capacity for a hunter founder (population {cap})"
+            ));
         }
 
         // Everything above validates; only now does anything change.
         let tick = self.state.tick;
         let heading = Vec2::from_screen_angle(
-            unit(self.state.config.seed, Stream::Hunt, hunter::FOUNDER_DRAW_KEY, 0) * TAU,
+            unit(
+                self.state.config.seed,
+                Stream::Hunt,
+                hunter::FOUNDER_DRAW_KEY,
+                0,
+            ) * TAU,
         );
         let hunger_memory = (1.0 - founder.reserve / founder.phenotype.reserve_max).clamp(0.0, 1.0);
         let id = self.state.organisms.insert(Organism {
@@ -2075,13 +2344,18 @@ impl World {
             },
         };
         self.state.hunters.profile = Some(profile);
-        self.state.hunters.insert_member(hunter::HunterMember::new(id, tick));
+        self.state
+            .hunters
+            .insert_member(hunter::HunterMember::new(id, tick));
         self.state.hunters.founder_material_in += founder.material_in;
         self.state.hunters.founder_energy_in += founder.energy_in;
         self.state.hunters.founders_placed += 1;
         // The import is booked, so the closed box has not moved: a control run and a hunter
         // run are comparable on the same residual.
-        debug_assert!(self.mass_residual().abs() < 1e-9, "founding moved the mass residual");
+        debug_assert!(
+            self.mass_residual().abs() < 1e-9,
+            "founding moved the mass residual"
+        );
         Ok(receipt)
     }
 
@@ -2106,7 +2380,9 @@ impl World {
         }
         let founder = self.derive_hunter_founder(&profile)?;
         let Some(pos) = target.resolve() else {
-            return Err(format!("hunter control target {target:?} is not on the surface"));
+            return Err(format!(
+                "hunter control target {target:?} is not on the surface"
+            ));
         };
 
         let cell = cell_of(&pos);
@@ -2131,7 +2407,10 @@ impl World {
         self.state.hunters.control_material_in += material;
         self.state.hunters.control_energy_in += energy;
         self.state.hunters.control_deposited = true;
-        debug_assert!(self.mass_residual().abs() < 1e-9, "the control deposit moved the mass residual");
+        debug_assert!(
+            self.mass_residual().abs() < 1e-9,
+            "the control deposit moved the mass residual"
+        );
         Ok(HunterControlReceipt {
             tick: self.state.tick,
             cell: cell.0,
@@ -2174,9 +2453,18 @@ impl World {
             }
         }
         if structure < org_cfg.min_structure {
-            return Err(format!("derived hunter founder structure {structure} would collapse at once"));
+            return Err(format!(
+                "derived hunter founder structure {structure} would collapse at once"
+            ));
         }
-        Ok(HunterFounder { phenotype, structure, reserve, energy, material_in, energy_in })
+        Ok(HunterFounder {
+            phenotype,
+            structure,
+            reserve,
+            energy,
+            material_in,
+            energy_in,
+        })
     }
 
     /// One hunter per live member, keyed by full ID, with the transported jaw anchor contact
@@ -2228,7 +2516,8 @@ impl World {
                     juvenile: o.structure < 0.7 * o.phenotype.structure_adult,
                     gut_material: m.gut_material,
                     gut_energy: m.gut_energy,
-                    gut_fraction: (m.gut_material / profile.gut_capacity_material).clamp(0.0, 1.0) as f32,
+                    gut_fraction: (m.gut_material / profile.gut_capacity_material).clamp(0.0, 1.0)
+                        as f32,
                     gut_capacity: profile.gut_capacity_material,
                     gestation: o.escrow.as_ref().map(|e| {
                         if gestation_ticks == 0 {
@@ -2378,10 +2667,15 @@ impl World {
         // energy ledgers.
         self.state.care.validate(self.state.tick)?;
         self.state.energy_ledgers().validate()?;
-        self.state.hunters.validate(self.state.tick, &self.state.organisms, &self.state.config)?;
+        self.state
+            .hunters
+            .validate(self.state.tick, &self.state.organisms, &self.state.config)?;
         let cap = cfg.capacity.max_organisms as usize;
         if self.state.organisms.len() > cap {
-            return Err(format!("population {} exceeds cap {cap}", self.state.organisms.len()));
+            return Err(format!(
+                "population {} exceeds cap {cap}",
+                self.state.organisms.len()
+            ));
         }
         for (id, o) in self.state.organisms.iter() {
             let who = format!("organism {}:{}", id.slot, id.generation);
@@ -2401,7 +2695,10 @@ impl World {
                 return Err(format!("{who}: position {:?} is not canonical", o.pos));
             }
             if !o.heading.is_finite() || (o.heading.length() - 1.0).abs() > HEADING_TOLERANCE {
-                return Err(format!("{who}: heading {:?} is not a unit vector", o.heading));
+                return Err(format!(
+                    "{who}: heading {:?} is not a unit vector",
+                    o.heading
+                ));
             }
             if !o.ou.is_finite() {
                 return Err(format!("{who}: OU vector is not finite"));
@@ -2450,7 +2747,11 @@ impl World {
                             .clamp(0.0, 1.0) as f32
                     }
                 }),
-                moved: self.moved.get(id.slot as usize).cloned().unwrap_or_default(),
+                moved: self
+                    .moved
+                    .get(id.slot as usize)
+                    .cloned()
+                    .unwrap_or_default(),
             })
             .collect();
         RenderView {
@@ -2555,8 +2856,13 @@ impl World {
             detritus_by_face[face] += fields.d[cell.index()];
             water_by_face[face] += fields.w[cell.index()];
         }
-        let mean_height_by_form =
-            std::array::from_fn(|i| if population_by_form[i] > 0 { height_by_form[i] / f64::from(population_by_form[i]) } else { 0.0 });
+        let mean_height_by_form = std::array::from_fn(|i| {
+            if population_by_form[i] > 0 {
+                height_by_form[i] / f64::from(population_by_form[i])
+            } else {
+                0.0
+            }
+        });
         let sample = Telemetry {
             tick: self.state.tick,
             population: self.state.organisms.len() as u32,
@@ -2638,7 +2944,11 @@ impl World {
     }
 
     /// Death causes in `deaths_total` order.
-    pub const DEATH_CAUSES: [DeathCause; 3] = [DeathCause::Starvation, DeathCause::Age, DeathCause::Collapse];
+    pub const DEATH_CAUSES: [DeathCause; 3] = [
+        DeathCause::Starvation,
+        DeathCause::Age,
+        DeathCause::Collapse,
+    ];
 }
 
 /// The audited energy total of `design/m2-world-spec.md` "Units and quantities":
@@ -2662,7 +2972,9 @@ fn stored_energy(state: &WorldState) -> f64 {
         .map(|(_, o)| {
             o.energy
                 + e_r * o.reserve
-                + o.escrow.as_ref().map_or(0.0, |e| e_r * (e.structure + e.reserve) + e.energy)
+                + o.escrow
+                    .as_ref()
+                    .map_or(0.0, |e| e_r * (e.structure + e.reserve) + e.energy)
         })
         .sum();
     cells + organisms + state.hunters.gut_energy_total()
@@ -2677,7 +2989,11 @@ fn edible_detritus(detritus: f64, energy: f64, e_r: f64) -> f64 {
         return 0.0;
     }
     let rho = energy / detritus;
-    if e_r > 0.0 { detritus * (rho / e_r).min(1.0) } else { detritus }
+    if e_r > 0.0 {
+        detritus * (rho / e_r).min(1.0)
+    } else {
+        detritus
+    }
 }
 
 /// The unit chart direction of increasing embedded height at a point of `face`: the chart
@@ -2692,7 +3008,11 @@ fn up_direction(face: Face) -> Vec2 {
 /// most `SENSE_DEPTH_MAX` (`design/fauna-v2.md` "Controller v2").
 fn sense_depth(sense_radius: f64) -> usize {
     let hops = (sense_radius / cubarium_surface::CELL_PIXELS).ceil();
-    if hops.is_finite() { (hops as usize).clamp(1, SENSE_DEPTH_MAX) } else { 1 }
+    if hops.is_finite() {
+        (hops as usize).clamp(1, SENSE_DEPTH_MAX)
+    } else {
+        1
+    }
 }
 
 /// For every cell, the cells at graph distance exactly 1, 2 and 3 (breadth-first over the
@@ -2725,17 +3045,29 @@ fn sense_rings(graph: &FieldGraph) -> Vec<[Vec<CellId>; SENSE_DEPTH_MAX]> {
 
 /// Unit gradient, or zero when the gradient carries no direction.
 fn normalize_or_zero(v: Vec2) -> Vec2 {
-    if v.length() > GRADIENT_EPS { v.normalized().unwrap_or(Vec2::ZERO) } else { Vec2::ZERO }
+    if v.length() > GRADIENT_EPS {
+        v.normalized().unwrap_or(Vec2::ZERO)
+    } else {
+        Vec2::ZERO
+    }
 }
 
 /// The proportional share each request receives when the cell cannot serve them all.
 fn share(requested: f64, available: f64) -> f64 {
-    if requested > available && requested > 0.0 { available / requested } else { 1.0 }
+    if requested > available && requested > 0.0 {
+        available / requested
+    } else {
+        1.0
+    }
 }
 
 pub(crate) fn ticks_from_seconds(seconds: f64, dt: f64) -> u64 {
     let ticks = (seconds / dt).round();
-    if ticks.is_finite() && ticks > 0.0 { ticks as u64 } else { 0 }
+    if ticks.is_finite() && ticks > 0.0 {
+        ticks as u64
+    } else {
+        0
+    }
 }
 
 #[cfg(test)]
@@ -2780,10 +3112,17 @@ mod tests {
     fn founders_are_created_with_recorded_external_material() {
         let world = World::new(config()).expect("default config is valid");
         assert_eq!(world.population(), config().founders.count as usize);
-        let expected: f64 = world.state.organisms.iter().map(|(_, o)| o.structure + o.reserve).sum();
+        let expected: f64 = world
+            .state
+            .organisms
+            .iter()
+            .map(|(_, o)| o.structure + o.reserve)
+            .sum();
         assert!((world.state.external_material_in - expected).abs() < 1e-12);
         assert!(world.mass_residual().abs() < 1e-12);
-        world.check_invariants().expect("a fresh world is consistent");
+        world
+            .check_invariants()
+            .expect("a fresh world is consistent");
         // Founders land on every face: 72 draws over five faces effectively never miss one.
         let mut faces = [0u32; 5];
         for (_, o) in world.state.organisms.iter() {
@@ -2798,9 +3137,15 @@ mod tests {
         for _ in 0..600 {
             world.step();
         }
-        world.check_invariants().expect("invariants hold after 600 ticks");
+        world
+            .check_invariants()
+            .expect("invariants hold after 600 ticks");
         assert!(world.population() > 0, "the world died out");
-        assert!(world.mass_residual().abs() < 1e-9, "mass residual {}", world.mass_residual());
+        assert!(
+            world.mass_residual().abs() < 1e-9,
+            "mass residual {}",
+            world.mass_residual()
+        );
         let sample = world.telemetry();
         assert_eq!(sample.tick, 600);
         assert!(sample.light_in > 0.0 && sample.heat_out > 0.0);
@@ -2811,7 +3156,11 @@ mod tests {
     fn replay_is_deterministic_and_seed_sensitive() {
         let mut a = World::new(config()).expect("valid");
         let mut b = World::new(config()).expect("valid");
-        let mut c = World::new(WorldConfig { seed: config().seed + 1, ..config() }).expect("valid");
+        let mut c = World::new(WorldConfig {
+            seed: config().seed + 1,
+            ..config()
+        })
+        .expect("valid");
         for _ in 0..300 {
             a.step();
             b.step();
@@ -2839,19 +3188,38 @@ mod tests {
         let available = world.state.fields.p[cell.index()];
         world.step();
 
-        let gains: Vec<f64> = ids.iter().map(|id| world.state.organisms.get(*id).expect("alive").reserve).collect();
+        let gains: Vec<f64> = ids
+            .iter()
+            .map(|id| world.state.organisms.get(*id).expect("alive").reserve)
+            .collect();
         assert!(gains.iter().all(|&g| g > 0.0), "{gains:?}");
         for pair in gains.windows(2) {
-            assert!((pair[0] - pair[1]).abs() < 1e-15, "unequal shares {gains:?}");
+            assert!(
+                (pair[0] - pair[1]).abs() < 1e-15,
+                "unequal shares {gains:?}"
+            );
         }
         // The cell is emptied: the requests exceeded what it held.
         assert!(world.state.fields.p[cell.index()] >= 0.0);
-        assert!(world.state.fields.p[cell.index()] < 1e-12, "{}", world.state.fields.p[cell.index()]);
+        assert!(
+            world.state.fields.p[cell.index()] < 1e-12,
+            "{}",
+            world.state.fields.p[cell.index()]
+        );
         // Each organism assimilated η_m of its share; the rest became detritus in the cell.
         let taken: f64 = gains.iter().sum();
         let eta = world.config().organism.assimilation_material;
-        assert!((taken - eta * available).abs() < 1e-6, "{taken} vs {}", eta * available);
-        assert!((world.mass_residual() - before).abs() < 1e-12, "{} -> {}", before, world.mass_residual());
+        assert!(
+            (taken - eta * available).abs() < 1e-6,
+            "{taken} vs {}",
+            eta * available
+        );
+        assert!(
+            (world.mass_residual() - before).abs() < 1e-12,
+            "{} -> {}",
+            before,
+            world.mass_residual()
+        );
         for (_, o) in world.state.organisms.iter() {
             assert!(o.fed_this_tick);
         }
@@ -2862,9 +3230,18 @@ mod tests {
         let mut cfg = config();
         cfg.founders.count = 1;
         let gestation_ticks = ticks_from_seconds(cfg.organism.gestation_seconds, DT);
-        assert!(gestation_ticks > 1, "this test needs a multi-tick gestation");
+        assert!(
+            gestation_ticks > 1,
+            "this test needs a multi-tick gestation"
+        );
         let mut world = World::new(cfg).expect("valid");
-        let id = world.state.organisms.iter().map(|(id, _)| id).next().expect("one founder");
+        let id = world
+            .state
+            .organisms
+            .iter()
+            .map(|(id, _)| id)
+            .next()
+            .expect("one founder");
 
         // No escrow: nothing to show.
         assert_eq!(world.render_view().organisms[0].gestation, None);
@@ -2883,7 +3260,9 @@ mod tests {
 
         // Halfway through, to within a tick of rounding.
         world.state.tick = 100 + gestation_ticks / 2;
-        let half = world.render_view().organisms[0].gestation.expect("gestating");
+        let half = world.render_view().organisms[0]
+            .gestation
+            .expect("gestating");
         assert!((half - 0.5).abs() < 1.0 / gestation_ticks as f32, "{half}");
 
         // Exactly due, and then well past it: clamped at 1, never above.
@@ -2906,7 +3285,13 @@ mod tests {
         cfg.mechanisms.grazing = false;
         cfg.mechanisms.scavenging = false;
         let mut world = World::new(cfg).expect("valid");
-        let id = world.state.organisms.iter().map(|(id, _)| id).next().expect("one founder");
+        let id = world
+            .state
+            .organisms
+            .iter()
+            .map(|(id, _)| id)
+            .next()
+            .expect("one founder");
 
         // A gestation that finished long ago, so this tick is the birth tick.
         world.state.tick = 700;
@@ -2919,7 +3304,13 @@ mod tests {
                 started_tick: 0,
                 genome: o.genome.clone(),
             };
-            let snapshot = (escrow.structure, escrow.reserve, escrow.energy, o.reserve, o.energy);
+            let snapshot = (
+                escrow.structure,
+                escrow.reserve,
+                escrow.energy,
+                o.reserve,
+                o.energy,
+            );
             o.escrow = Some(escrow);
             snapshot
         };
@@ -2929,8 +3320,15 @@ mod tests {
         let o = world.state.organisms.get(id).expect("alive");
         assert!(o.escrow.is_none(), "the escrow must be released");
         assert_eq!(o.reserve, before_reserve + (structure + reserve));
-        assert!(o.energy > before_energy, "energy {} vs {before_energy}", o.energy);
-        assert!(o.energy < before_energy + energy, "movement still costs energy");
+        assert!(
+            o.energy > before_energy,
+            "energy {} vs {before_energy}",
+            o.energy
+        );
+        assert!(
+            o.energy < before_energy + energy,
+            "movement still costs energy"
+        );
         assert_eq!(world.population(), 1);
         assert_eq!(world.state.births_total, 0);
         assert_eq!(world.state.cap_rejections_total, 1);
@@ -2943,7 +3341,13 @@ mod tests {
         cfg.mechanisms.grazing = false;
         cfg.mechanisms.scavenging = false;
         let mut world = World::new(cfg).expect("valid");
-        let parent = world.state.organisms.iter().map(|(id, _)| id).next().expect("one founder");
+        let parent = world
+            .state
+            .organisms
+            .iter()
+            .map(|(id, _)| id)
+            .next()
+            .expect("one founder");
         world.state.tick = 700;
         {
             let o = world.state.organisms.get_mut(parent).expect("alive");
@@ -2973,7 +3377,8 @@ mod tests {
         assert_eq!(child.1.reserve, 0.2);
         assert!((child.1.heading.length() - 1.0).abs() < 1e-12);
         let parent_pos = world.state.organisms.get(parent).expect("alive").pos;
-        let offset = cubarium_surface::surface_distance(parent_pos, child.1.pos, 16.0).expect("nearby");
+        let offset =
+            cubarium_surface::surface_distance(parent_pos, child.1.pos, 16.0).expect("nearby");
         assert!((offset - 2.5).abs() < 0.1, "child placed {offset} px away");
         assert!((world.mass_residual() - residual).abs() < 1e-12);
     }
@@ -2988,15 +3393,24 @@ mod tests {
         assert_eq!(view.detritus.len(), CELL_COUNT);
         assert_eq!(view.organisms.len(), world.population());
         assert!(view.organisms.iter().all(|o| !o.lobes.is_empty()));
-        assert!(view.organisms.iter().any(|o| !o.moved.is_empty()), "resting still drifts a little");
+        assert!(
+            view.organisms.iter().any(|o| !o.moved.is_empty()),
+            "resting still drifts a little"
+        );
 
         let sample = world.telemetry();
         assert_eq!(sample.population, world.population() as u32);
-        assert_eq!(sample.population_by_face.iter().sum::<u32>(), sample.population);
+        assert_eq!(
+            sample.population_by_face.iter().sum::<u32>(),
+            sample.population
+        );
         assert!((sample.producer_by_face.iter().sum::<f64>() - sample.producer).abs() < 1e-9);
         assert!((sample.detritus_by_face.iter().sum::<f64>() - sample.detritus).abs() < 1e-9);
         assert!(sample.producer_by_face.iter().all(|&p| p > 0.0));
-        assert_eq!(sample.mode_resting + sample.mode_seeking + sample.mode_feeding, sample.population);
+        assert_eq!(
+            sample.mode_resting + sample.mode_seeking + sample.mode_feeding,
+            sample.population
+        );
         assert!(sample.pairs_considered > 0);
         // The sample resets the per-sample counters.
         let empty = world.telemetry();
@@ -3025,9 +3439,16 @@ mod tests {
         let booked = world.state.net_energy_in_corrected();
         let total = stored_energy(&world.state);
         let overall = (total - opening) - booked;
-        assert!(overall.abs() < 1e-9 * total.max(1.0), "cumulative energy drift {overall:e} over 6000 ticks");
+        assert!(
+            overall.abs() < 1e-9 * total.max(1.0),
+            "cumulative energy drift {overall:e} over 6000 ticks"
+        );
         // A real leak would be many orders larger than accumulated rounding.
-        assert!(overall.abs() / 6000.0 < 1e-10, "systematic energy drift {:e} per tick", overall.abs() / 6000.0);
+        assert!(
+            overall.abs() / 6000.0 < 1e-10,
+            "systematic energy drift {:e} per tick",
+            overall.abs() / 6000.0
+        );
         assert!(world.state.light_in_total > 0.0 && world.state.heat_out_total > 0.0);
     }
 
@@ -3046,7 +3467,13 @@ mod tests {
             cfg.fruit.ripen = 0.0;
             cfg.organism.intake_half_saturation = half_saturation;
             let mut world = World::new(cfg).expect("valid");
-            let id = world.state.organisms.iter().map(|(id, _)| id).next().expect("one founder");
+            let id = world
+                .state
+                .organisms
+                .iter()
+                .map(|(id, _)| id)
+                .next()
+                .expect("one founder");
             let cell = CellId::new(Face::Front, 0, 0);
             {
                 let o = world.state.organisms.get_mut(id).expect("alive");
@@ -3069,7 +3496,10 @@ mod tests {
         // the same factors in its own order).
         let linear = gain(0.0, k_p);
         let mouthful = org.assimilation_material * (org.mouth_rate * founder_diet()) * DT;
-        assert!((linear - mouthful).abs() < 1e-15 * mouthful, "{linear} vs {mouthful}");
+        assert!(
+            (linear - mouthful).abs() < 1e-15 * mouthful,
+            "{linear} vs {mouthful}"
+        );
 
         // At `P = K_P` the type-II term is exactly one half.
         let saturating = gain(k_p, k_p);
@@ -3078,7 +3508,11 @@ mod tests {
         // And it is monotone in the cell's stock: more food, bigger bite, never more than one.
         let richer = gain(k_p, 3.0 * k_p);
         assert!(saturating < richer && richer < linear);
-        assert!((richer - 0.75 * linear).abs() < 1e-15 * linear, "{richer} vs {}", 0.75 * linear);
+        assert!(
+            (richer - 0.75 * linear).abs() < 1e-15 * linear,
+            "{richer} vs {}",
+            0.75 * linear
+        );
     }
 
     #[test]
@@ -3098,7 +3532,10 @@ mod tests {
         let mut world = World::new(cfg).expect("valid");
         let ids: Vec<OrganismId> = world.state.organisms.iter().map(|(id, _)| id).collect();
         // Two cells with the same detritus but energy densities of e_r/8 and e_r/2.
-        let cells = [CellId::new(Face::Front, 0, 0), CellId::new(Face::Front, 4, 4)];
+        let cells = [
+            CellId::new(Face::Front, 0, 0),
+            CellId::new(Face::Front, 4, 4),
+        ];
         let densities = [e_r / 8.0, e_r / 2.0];
         // Enough detritus that even the poor cell's edible share clears `feed_min`.
         let detritus = 2.0;
@@ -3117,16 +3554,29 @@ mod tests {
         let (light, heat) = (world.state.light_in_total, world.state.heat_out_total);
         world.step();
 
-        let gains: Vec<f64> = ids.iter().map(|id| world.state.organisms.get(*id).expect("alive").reserve).collect();
+        let gains: Vec<f64> = ids
+            .iter()
+            .map(|id| world.state.organisms.get(*id).expect("alive").reserve)
+            .collect();
         assert!(gains[0] > 0.0 && gains[1] > 0.0, "{gains:?}");
         // Poor detritus loses twice: `η` scales with `ρ/e_r` (a factor of four here) and the
         // type-II request scales with `D_eff/(D_eff + K_P)` on top of it.
         let k_p = world.config().organism.intake_half_saturation;
-        let edible: Vec<f64> = densities.iter().map(|rho| detritus * (rho / e_r).min(1.0)).collect();
+        let edible: Vec<f64> = densities
+            .iter()
+            .map(|rho| detritus * (rho / e_r).min(1.0))
+            .collect();
         let bite = |food: f64| food / (food + k_p);
         let expected = 4.0 * bite(edible[1]) / bite(edible[0]);
-        assert!(expected > 4.0, "the saturating request must widen the gap, not close it");
-        assert!((gains[1] / gains[0] - expected).abs() < 1e-6, "ratio {} vs {expected}", gains[1] / gains[0]);
+        assert!(
+            expected > 4.0,
+            "the saturating request must widen the gap, not close it"
+        );
+        assert!(
+            (gains[1] / gains[0] - expected).abs() < 1e-6,
+            "ratio {} vs {expected}",
+            gains[1] / gains[0]
+        );
         // The poor detritus never credits more reserve energy than the food carried.
         for (k, id) in ids.iter().enumerate() {
             let o = world.state.organisms.get(*id).expect("alive");
@@ -3147,7 +3597,10 @@ mod tests {
         cfg.detritus.energy_cap = 2.0;
         let mut world = World::new(cfg).expect("valid");
         let ids: Vec<OrganismId> = world.state.organisms.iter().map(|(id, _)| id).collect();
-        let cells = [CellId::new(Face::Front, 0, 0), CellId::new(Face::Front, 8, 8)];
+        let cells = [
+            CellId::new(Face::Front, 0, 0),
+            CellId::new(Face::Front, 8, 8),
+        ];
         // Same detritus, no energy versus fully charged.
         let energies = [0.0, 2.0];
         for (k, id) in ids.iter().enumerate() {
@@ -3164,7 +3617,11 @@ mod tests {
         world.step();
 
         let spent = world.state.organisms.get(ids[0]).expect("alive");
-        assert_eq!(spent.mode, Mode::Seeking, "energy-free detritus must not read as food");
+        assert_eq!(
+            spent.mode,
+            Mode::Seeking,
+            "energy-free detritus must not read as food"
+        );
         assert_eq!(spent.reserve, 0.0);
         assert!(!spent.fed_this_tick);
 
@@ -3179,7 +3636,13 @@ mod tests {
         let mut cfg = config();
         cfg.founders.count = 1;
         let mut world = World::new(cfg).expect("valid");
-        let id = world.state.organisms.iter().map(|(id, _)| id).next().expect("one founder");
+        let id = world
+            .state
+            .organisms
+            .iter()
+            .map(|(id, _)| id)
+            .next()
+            .expect("one founder");
         let cell = CellId::new(Face::Front, 0, 0);
         // Headroom of 0.0014 m: more than grazing's saturated bite alone (about 0.0012 m at
         // `diet` 0.7), less than the two channels' bites together
@@ -3200,14 +3663,23 @@ mod tests {
         world.step();
 
         let o = world.state.organisms.get(id).expect("alive");
-        assert!(o.reserve <= reserve_max, "reserve {} exceeds {reserve_max}", o.reserve);
+        assert!(
+            o.reserve <= reserve_max,
+            "reserve {} exceeds {reserve_max}",
+            o.reserve
+        );
         assert!(o.reserve - before <= headroom + 1e-12);
         // Grazing alone could add at most η_m times its saturated request; more than that
         // proves the scavenging channel ran too.
         let org = &world.config().organism;
         let k_p = org.intake_half_saturation;
-        let grazing_only = org.assimilation_material * (0.0025 * founder_diet()) * (1.0 / (1.0 + k_p));
-        assert!(o.reserve - before > grazing_only, "{} vs {grazing_only}", o.reserve - before);
+        let grazing_only =
+            org.assimilation_material * (0.0025 * founder_diet()) * (1.0 / (1.0 + k_p));
+        assert!(
+            o.reserve - before > grazing_only,
+            "{} vs {grazing_only}",
+            o.reserve - before
+        );
         assert!(o.fed_this_tick);
     }
 
@@ -3235,12 +3707,18 @@ mod tests {
             }
         }
         assert_eq!(world.population(), 0, "a foodless world must empty out");
-        assert!(world.state.deaths_total[0] > 0, "starvation is the cause: {:?}", world.state.deaths_total);
+        assert!(
+            world.state.deaths_total[0] > 0,
+            "starvation is the cause: {:?}",
+            world.state.deaths_total
+        );
         assert!(world.mass_residual().abs() < 1e-9);
         let closing = stored_energy(&world.state);
         let booked = world.state.net_energy_in_corrected();
         let drift = (closing - opening) - booked;
-        println!("starvation audit: opening {opening:e} closing {closing:e} booked {booked:e} drift {drift:e}");
+        println!(
+            "starvation audit: opening {opening:e} closing {closing:e} booked {booked:e} drift {drift:e}"
+        );
         assert!(drift.abs() < 1e-9 * opening.max(1.0), "drift {drift:e}");
     }
 
@@ -3258,9 +3736,21 @@ mod tests {
         for _ in 0..12_000 {
             world.step();
             for event in world.drain_events() {
-                assert_eq!(event.tick(), world.tick(), "an event is dated off its commit tick");
+                assert_eq!(
+                    event.tick(),
+                    world.tick(),
+                    "an event is dated off its commit tick"
+                );
                 match event {
-                    LifeEvent::Birth { id, parent, parent_age_ticks, parent_births, origin, genome, .. } => {
+                    LifeEvent::Birth {
+                        id,
+                        parent,
+                        parent_age_ticks,
+                        parent_births,
+                        origin,
+                        genome,
+                        ..
+                    } => {
                         assert_ne!(id, parent);
                         assert_eq!(origin, Origin::Descendant, "founders emit no birth event");
                         assert!(parent_births >= 1, "the parent's own birth is counted");
@@ -3269,14 +3759,25 @@ mod tests {
                             "parent aged {parent_age_ticks} ticks cannot have gestated yet"
                         );
                         assert_ne!(genome, 0);
-                        assert_eq!(world.state.organisms.get(id).map(|o| o.parent), Some(Some(parent)));
+                        assert_eq!(
+                            world.state.organisms.get(id).map(|o| o.parent),
+                            Some(Some(parent))
+                        );
                         assert!(!seen.contains(&id), "organism id {id:?} was born twice");
                         seen.push(id);
                         births += 1;
                     }
-                    LifeEvent::Death { id, age_ticks, births: had, .. } => {
+                    LifeEvent::Death {
+                        id,
+                        age_ticks,
+                        births: had,
+                        ..
+                    } => {
                         assert!(age_ticks > 0);
-                        assert!(world.state.organisms.get(id).is_none(), "a dead organism is gone");
+                        assert!(
+                            world.state.organisms.get(id).is_none(),
+                            "a dead organism is gone"
+                        );
                         let _ = had;
                         deaths += 1;
                     }
@@ -3286,8 +3787,14 @@ mod tests {
             assert!(world.drain_events().is_empty());
         }
 
-        assert!(births > 0 && deaths > 0, "the run produced {births} births and {deaths} deaths");
-        assert_eq!(births, world.state.births_total, "birth events do not match births_total");
+        assert!(
+            births > 0 && deaths > 0,
+            "the run produced {births} births and {deaths} deaths"
+        );
+        assert_eq!(
+            births, world.state.births_total,
+            "birth events do not match births_total"
+        );
         assert_eq!(
             deaths,
             world.state.deaths_total.iter().sum::<u64>(),
@@ -3308,7 +3815,11 @@ mod tests {
         assert_eq!(dump.de, world.state.fields.de);
         assert_eq!(dump.organisms.len(), CELL_COUNT);
         let counted: u32 = dump.organisms.iter().map(|&c| u32::from(c)).sum();
-        assert_eq!(counted, world.population() as u32, "every organism is counted once");
+        assert_eq!(
+            counted,
+            world.population() as u32,
+            "every organism is counted once"
+        );
         for (_, o) in world.state.organisms.iter() {
             assert!(dump.organisms[cell_of(&o.pos).index()] > 0);
         }
@@ -3316,12 +3827,18 @@ mod tests {
         let neighbors = world.cell_neighbors();
         assert_eq!(neighbors.len(), CELL_COUNT);
         // The open rim leaves 64 cells with three neighbors; everyone else has four.
-        let rim = neighbors.iter().filter(|n| n.iter().any(Option::is_none)).count();
+        let rim = neighbors
+            .iter()
+            .filter(|n| n.iter().any(Option::is_none))
+            .count();
         assert_eq!(rim, 64);
         for (i, n) in neighbors.iter().enumerate() {
             for &there in n.iter().flatten() {
                 assert!(
-                    neighbors[usize::from(there)].iter().flatten().any(|&back| usize::from(back) == i),
+                    neighbors[usize::from(there)]
+                        .iter()
+                        .flatten()
+                        .any(|&back| usize::from(back) == i),
                     "cell {i} -> {there} is not reciprocal"
                 );
             }
@@ -3346,7 +3863,11 @@ mod tests {
     #[test]
     fn the_water_budget_closes_every_tick_and_cumulatively() {
         let mut world = World::new(config()).expect("valid");
-        assert_eq!(world.state.fields.w.iter().sum::<f64>(), 0.0, "a new world is dry");
+        assert_eq!(
+            world.state.fields.w.iter().sum::<f64>(),
+            0.0,
+            "a new world is dry"
+        );
         let mut worst: f64 = 0.0;
         for _ in 0..2000 {
             let before: f64 = world.state.fields.w.iter().sum();
@@ -3358,8 +3879,15 @@ mod tests {
         }
         assert!(worst < 1e-9, "worst per-tick water drift {worst:e}");
         let total: f64 = world.state.fields.w.iter().sum();
-        assert!(world.water_residual().abs() < 1e-9 * total.max(1.0), "residual {:e}", world.water_residual());
-        assert!(world.state.rain_in_total > 0.0, "it must have rained somewhere in 100 s");
+        assert!(
+            world.water_residual().abs() < 1e-9 * total.max(1.0),
+            "residual {:e}",
+            world.water_residual()
+        );
+        assert!(
+            world.state.rain_in_total > 0.0,
+            "it must have rained somewhere in 100 s"
+        );
         assert!(world.state.evap_out_total > 0.0);
         assert!(total > 0.0);
         // The view and telemetry carry the same water.
@@ -3382,7 +3910,13 @@ mod tests {
             cfg.water.flow = 0.0;
             cfg.water.evap = 0.0;
             let mut world = World::new(cfg).expect("valid");
-            let id = world.state.organisms.iter().map(|(id, _)| id).next().expect("founder");
+            let id = world
+                .state
+                .organisms
+                .iter()
+                .map(|(id, _)| id)
+                .next()
+                .expect("founder");
             let cell = {
                 let o = world.state.organisms.get_mut(id).expect("alive");
                 o.mode = Mode::Seeking;
@@ -3396,13 +3930,20 @@ mod tests {
             world.state.fields.d[cell.index()] = 0.0;
             world.step();
             let view = world.render_view();
-            view.organisms[0].moved.iter().map(|s| s.length()).sum::<f64>()
+            view.organisms[0]
+                .moved
+                .iter()
+                .map(|s| s.length())
+                .sum::<f64>()
         }
         let dry = traveled(0.0);
         let wading = traveled(1.0);
         let deep = traveled(3.0);
         assert!(dry > 0.0, "a seeking organism moves");
-        assert!((dry / wading - 2.0).abs() < 1e-9, "dry {dry} wading {wading}");
+        assert!(
+            (dry / wading - 2.0).abs() < 1e-9,
+            "dry {dry} wading {wading}"
+        );
         assert!((dry / deep - 4.0).abs() < 1e-9, "dry {dry} deep {deep}");
     }
 
@@ -3413,7 +3954,10 @@ mod tests {
     #[test]
     #[ignore]
     fn report_water_by_band_after_two_hours() {
-        let seed: u64 = std::env::var("CUBARIUM_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(1);
+        let seed: u64 = std::env::var("CUBARIUM_SEED")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1);
         let mut cfg = config();
         cfg.seed = seed;
         let mut world = World::new(cfg).expect("valid");
@@ -3428,7 +3972,11 @@ mod tests {
             if tick % 20 == 0 {
                 samples += 1;
                 let ponds = CellId::all()
-                    .filter(|c| c.face() == Face::Top && (1..15).contains(&c.cx()) && (1..15).contains(&c.cy()))
+                    .filter(|c| {
+                        c.face() == Face::Top
+                            && (1..15).contains(&c.cx())
+                            && (1..15).contains(&c.cy())
+                    })
                     .filter(|c| world.state.fields.w[c.index()] > 0.5)
                     .count();
                 if ponds > 0 {
@@ -3442,7 +3990,8 @@ mod tests {
             100.0 * top_pond_ticks as f64 / samples as f64
         );
         let w = &world.state.fields.w;
-        let (mut soil, mut foliage, mut canopy, mut floor) = ((0.0, 0), (0.0, 0), (0.0, 0), (0.0, 0));
+        let (mut soil, mut foliage, mut canopy, mut floor) =
+            ((0.0, 0), (0.0, 0), (0.0, 0), (0.0, 0));
         let mut top_cells: Vec<(f64, CellId)> = Vec::new();
         for cell in CellId::all() {
             let h = cell.center().embed()[1];
@@ -3467,7 +4016,10 @@ mod tests {
         top_cells.sort_by(|a, b| b.0.total_cmp(&a.0));
         let pools_floor = (0..64).filter(|_| true).count();
         let _ = pools_floor;
-        let floor_cells: Vec<f64> = CellId::all().filter(|c| c.face() != Face::Top && c.cy() == 15).map(|c| w[c.index()]).collect();
+        let floor_cells: Vec<f64> = CellId::all()
+            .filter(|c| c.face() != Face::Top && c.cy() == 15)
+            .map(|c| w[c.index()])
+            .collect();
         let floor_pools = floor_cells.iter().filter(|&&x| x > 0.5).count();
         let floor_dry = floor_cells.iter().filter(|&&x| x < 0.3).count();
         let floor_max = floor_cells.iter().cloned().fold(0.0, f64::max);
@@ -3475,21 +4027,34 @@ mod tests {
         let top_pools = top_cells.iter().filter(|(x, _)| *x > 0.5).count();
         println!(
             "water after 2 h (seed {seed}): total {total:.2}; soil {:.2} ({:.0}%), foliage {:.2} ({:.0}%), canopy {:.2} ({:.0}%)",
-            soil.0, 100.0 * soil.0 / total, foliage.0, 100.0 * foliage.0 / total, canopy.0, 100.0 * canopy.0 / total
+            soil.0,
+            100.0 * soil.0 / total,
+            foliage.0,
+            100.0 * foliage.0 / total,
+            canopy.0,
+            100.0 * canopy.0 / total
         );
         println!(
             "soil floor row (64 cells): {:.2} total, mean {:.3}, min {floor_min:.3}, max {floor_max:.3}, {floor_pools} cells deeper than 0.5, {floor_dry} cells under 0.3 (dry gaps)",
-            floor.0, floor.0 / floor.1 as f64
+            floor.0,
+            floor.0 / floor.1 as f64
         );
         println!("population: min {pop_min}, end {}", world.population());
         println!(
             "top face: mean {:.3}, {top_pools} cells deeper than 0.5, wettest {:?}",
             canopy.0 / canopy.1 as f64,
-            top_cells.iter().take(3).map(|(x, c)| (format!("{x:.3}"), c.cx(), c.cy())).collect::<Vec<_>>()
+            top_cells
+                .iter()
+                .take(3)
+                .map(|(x, c)| (format!("{x:.3}"), c.cx(), c.cy()))
+                .collect::<Vec<_>>()
         );
         println!(
             "budget: rain_in {:.2} evap_out {:.2} residual {:e}; population {}",
-            world.state.rain_in_total, world.state.evap_out_total, world.water_residual(), world.population()
+            world.state.rain_in_total,
+            world.state.evap_out_total,
+            world.water_residual(),
+            world.population()
         );
     }
 
@@ -3499,7 +4064,15 @@ mod tests {
     fn one_of_each_kind(world: &World) -> Vec<Organism> {
         let mut out = Vec::new();
         for form in [2u8, 0, 1, 3] {
-            out.push(world.state.organisms.iter().find(|(_, o)| o.phenotype.form == form).map(|(_, o)| o.clone()).expect("a founder of each kind"));
+            out.push(
+                world
+                    .state
+                    .organisms
+                    .iter()
+                    .find(|(_, o)| o.phenotype.form == form)
+                    .map(|(_, o)| o.clone())
+                    .expect("a founder of each kind"),
+            );
         }
         out
     }
@@ -3513,25 +4086,56 @@ mod tests {
             by_form[o.phenotype.form as usize] += 1;
             assert_eq!(o.genome.version, Genome::VERSION);
         }
-        assert_eq!(by_form[..4], [10, 5, 4, 5], "lantern 0 = grazer, sail 1 = glider, mossback 2 = burrower, skimmer 3");
-        let Ok([burrower, grazer, glider, skimmer]) = <[Organism; 4]>::try_from(one_of_each_kind(&world)) else {
+        assert_eq!(
+            by_form[..4],
+            [10, 5, 4, 5],
+            "lantern 0 = grazer, sail 1 = glider, mossback 2 = burrower, skimmer 3"
+        );
+        let Ok([burrower, grazer, glider, skimmer]) =
+            <[Organism; 4]>::try_from(one_of_each_kind(&world))
+        else {
             panic!("four kinds");
         };
-        let g = |o: &Organism| (o.genome.diet, o.genome.depth, o.genome.speed, o.genome.size, o.genome.swim, o.genome.hue);
+        let g = |o: &Organism| {
+            (
+                o.genome.diet,
+                o.genome.depth,
+                o.genome.speed,
+                o.genome.size,
+                o.genome.swim,
+                o.genome.hue,
+            )
+        };
         assert_eq!(g(&burrower), (0.10, 0.10, 0.6, 1.0, 0.0, 0.15));
         assert_eq!(g(&grazer), (0.85, 0.55, 1.0, 1.0, 0.0, 0.50));
         assert_eq!(g(&glider), (0.90, 1.00, 1.0, 1.0, 0.0, 0.85));
         assert_eq!(g(&skimmer), (0.60, 0.10, 0.9, 0.9, 1.0, 0.65));
         // Unnamed loci keep the v1 founder values, and the phenotype carries the kind.
-        assert_eq!((burrower.genome.metabolism, burrower.genome.mouth, burrower.genome.reserve), (0.7, 1.0, 1.0), "the burrower kind fixes metabolism; the rest stay v1");
+        assert_eq!(
+            (
+                burrower.genome.metabolism,
+                burrower.genome.mouth,
+                burrower.genome.reserve
+            ),
+            (0.7, 1.0, 1.0),
+            "the burrower kind fixes metabolism; the rest stay v1"
+        );
         assert_eq!(grazer.genome.metabolism, 1.0);
-        assert_eq!(burrower.genome.sense, WorldConfig::default().organism.sense_radius as f32);
+        assert_eq!(
+            burrower.genome.sense,
+            WorldConfig::default().organism.sense_radius as f32
+        );
         assert!((glider.phenotype.h_pref - 1.0).abs() < 1e-12);
         assert!((burrower.phenotype.h_pref + 0.8).abs() < 1e-6);
         assert_eq!(skimmer.phenotype.swim, 1.0);
-        assert!((grazer.phenotype.graze_rate - 0.85f32 as f64 * grazer.phenotype.mouth_rate).abs() < 1e-12);
+        assert!(
+            (grazer.phenotype.graze_rate - 0.85f32 as f64 * grazer.phenotype.mouth_rate).abs()
+                < 1e-12
+        );
         // The founders' material is booked and the world is consistent.
-        world.check_invariants().expect("a fresh kinds world is consistent");
+        world
+            .check_invariants()
+            .expect("a fresh kinds world is consistent");
         assert!(world.mass_residual().abs() < 1e-12);
     }
 
@@ -3540,22 +4144,42 @@ mod tests {
         let v1 = World::new(config()).expect("valid");
         assert_eq!(v1.population(), config().founders.count as usize);
         for (_, o) in v1.state.organisms.iter() {
-            assert_eq!((o.genome.diet, o.genome.depth, o.genome.swim), (0.7, 0.5, 0.0));
-            assert_eq!(o.genome.form, crate::genome::form_of_hue(o.genome.hue), "v1 founders take the hue tercile");
+            assert_eq!(
+                (o.genome.diet, o.genome.depth, o.genome.swim),
+                (0.7, 0.5, 0.0)
+            );
+            assert_eq!(
+                o.genome.form,
+                crate::genome::form_of_hue(o.genome.hue),
+                "v1 founders take the hue tercile"
+            );
         }
         let a = World::new(WorldConfig::default()).expect("valid");
         let b = World::new(WorldConfig::default()).expect("valid");
-        assert_eq!(a.state, b.state, "two kinds worlds from one seed are identical");
+        assert_eq!(
+            a.state, b.state,
+            "two kinds worlds from one seed are identical"
+        );
         // A kind's own draws do not move when another kind's count changes.
         let mut fewer = WorldConfig::default();
         fewer.founders.kinds[0].count = 2;
         let c = World::new(fewer).expect("valid");
         let gliders = |w: &World| {
-            let mut v: Vec<(u32, SurfacePoint)> = w.state.organisms.iter().filter(|(_, o)| o.phenotype.form == 1).map(|(id, o)| (id.slot, o.pos)).collect();
+            let mut v: Vec<(u32, SurfacePoint)> = w
+                .state
+                .organisms
+                .iter()
+                .filter(|(_, o)| o.phenotype.form == 1)
+                .map(|(id, o)| (id.slot, o.pos))
+                .collect();
             v.sort_by_key(|x| x.0);
             v.into_iter().map(|x| x.1).collect::<Vec<_>>()
         };
-        assert_eq!(gliders(&a), gliders(&c), "glider placements are their own stream");
+        assert_eq!(
+            gliders(&a),
+            gliders(&c),
+            "glider placements are their own stream"
+        );
     }
 
     #[test]
@@ -3569,11 +4193,15 @@ mod tests {
             o.genome.version = 1;
             o.genome.form = crate::genome::FORM_UNSET;
         }
-        let reloaded = World::from_state(state).expect("a v1-genome state is upgraded, not refused");
+        let reloaded =
+            World::from_state(state).expect("a v1-genome state is upgraded, not refused");
         for (_, o) in reloaded.state.organisms.iter() {
             assert_eq!(o.genome.version, Genome::VERSION);
             assert_eq!(o.genome.form, crate::genome::form_of_hue(o.genome.hue));
-            assert_eq!(o.phenotype.form, o.genome.form, "the phenotype is re-decoded");
+            assert_eq!(
+                o.phenotype.form, o.genome.form,
+                "the phenotype is re-decoded"
+            );
         }
     }
 
@@ -3592,7 +4220,13 @@ mod tests {
         cfg.water.rain_rate = 0.0;
         cfg.mechanisms.mutation = false;
         let mut world = World::new(cfg).expect("valid");
-        let id = world.state.organisms.iter().map(|(id, _)| id).next().expect("one founder");
+        let id = world
+            .state
+            .organisms
+            .iter()
+            .map(|(id, _)| id)
+            .next()
+            .expect("one founder");
         let cell = CellId::new(Face::Front, 4, 4);
         {
             let o = world.state.organisms.get_mut(id).expect("alive");
@@ -3622,7 +4256,11 @@ mod tests {
             let o = world.state.organisms.get_mut(id).expect("alive");
             o.reserve = o.phenotype.reserve_max - o.phenotype.graze_rate * DT;
         }
-        let (p0, f0, d0) = (world.state.fields.p[c], world.state.fields.f[c], world.state.fields.d[c]);
+        let (p0, f0, d0) = (
+            world.state.fields.p[c],
+            world.state.fields.f[c],
+            world.state.fields.d[c],
+        );
         // The hand-stocked cell moved the residual once; the step must not move it again.
         let residual = world.mass_residual();
         let before = stored_energy(&world.state);
@@ -3633,8 +4271,14 @@ mod tests {
         assert!(o.fed_this_tick);
         let q = f0 - world.state.fields.f[c];
         assert!(q > 0.0, "fruit was eaten");
-        assert!((q - o.phenotype.graze_rate * DT).abs() < 1e-12, "a full fruit mouthful {q}");
-        assert_eq!(world.state.fields.p[c], p0, "the producer waited its turn and got nothing");
+        assert!(
+            (q - o.phenotype.graze_rate * DT).abs() < 1e-12,
+            "a full fruit mouthful {q}"
+        );
+        assert_eq!(
+            world.state.fields.p[c], p0,
+            "the producer waited its turn and got nothing"
+        );
         // Frugivory: η_m of the bite to reserve, the rest to detritus; scavenging is gated off
         // for a pure grazer, so detritus only grew.
         let eta_m = world.config().organism.assimilation_material;
@@ -3642,15 +4286,28 @@ mod tests {
         assert!((o.reserve - (r0 + eta_m * q)).abs() < 1e-12);
         assert!((world.state.fields.d[c] - (d0 + q - eta_m * q)).abs() < 1e-12);
         let booked = (world.state.light_in_total - light) - (world.state.heat_out_total - heat);
-        assert!(((stored_energy(&world.state) - before) - booked).abs() < 1e-9, "fruit energy is audited");
-        assert!((world.mass_residual() - residual).abs() < 1e-12, "frugivory conserves material");
+        assert!(
+            ((stored_energy(&world.state) - before) - booked).abs() < 1e-9,
+            "fruit energy is audited"
+        );
+        assert!(
+            (world.mass_residual() - residual).abs() < 1e-12,
+            "frugivory conserves material"
+        );
 
         // A pure scavenger never grazes or eats fruit, however rich the cell.
         let (mut world, id, c) = frozen_feeder(0.0, 1.0, 1.0, 0.0, 0.0);
         world.step();
         let o = world.state.organisms.get(id).expect("alive");
-        assert_eq!(o.mode, Mode::Seeking, "no detritus, and leaf is not its food");
-        assert_eq!((world.state.fields.p[c], world.state.fields.f[c]), (1.0, 1.0));
+        assert_eq!(
+            o.mode,
+            Mode::Seeking,
+            "no detritus, and leaf is not its food"
+        );
+        assert_eq!(
+            (world.state.fields.p[c], world.state.fields.f[c]),
+            (1.0, 1.0)
+        );
         assert_eq!(o.reserve, 0.0);
 
         // A pure grazer never scavenges.
@@ -3681,14 +4338,27 @@ mod tests {
             world.step();
             let booked = world.state.energy_ledgers().net_since(ledgers);
             worst = worst.max(((stored_energy(&world.state) - before) - booked).abs());
-            assert!(world.mass_residual().abs() < 1e-9, "mass residual {}", world.mass_residual());
+            assert!(
+                world.mass_residual().abs() < 1e-9,
+                "mass residual {}",
+                world.mass_residual()
+            );
         }
-        assert!(worst < 1e-9, "worst per-tick energy drift {worst:e} with fruit in the sum");
+        assert!(
+            worst < 1e-9,
+            "worst per-tick energy drift {worst:e} with fruit in the sum"
+        );
         let total_fruit: f64 = world.state.fields.f.iter().sum();
-        assert!(total_fruit > 0.0, "a lit default world ripens some fruit in 100 s");
+        assert!(
+            total_fruit > 0.0,
+            "a lit default world ripens some fruit in 100 s"
+        );
         let booked = world.state.net_energy_in_corrected();
         let overall = (stored_energy(&world.state) - opening) - booked;
-        assert!(overall.abs() < 1e-9 * stored_energy(&world.state).max(1.0), "cumulative {overall:e}");
+        assert!(
+            overall.abs() < 1e-9 * stored_energy(&world.state).max(1.0),
+            "cumulative {overall:e}"
+        );
         // The view, the dump and telemetry all carry the same fruit.
         let view = world.render_view();
         assert_eq!(view.fruit, world.state.fields.f);
@@ -3702,7 +4372,10 @@ mod tests {
         assert_eq!(up_direction(Face::Top), Vec2::ZERO);
         for face in [Face::Front, Face::Right, Face::Back, Face::Left] {
             let up = up_direction(face);
-            assert!((up - Vec2::new(0.0, -1.0)).length() < 1e-12, "{face:?}: {up:?}");
+            assert!(
+                (up - Vec2::new(0.0, -1.0)).length() < 1e-12,
+                "{face:?}: {up:?}"
+            );
             // Moving along `up` really raises the embedded height.
             let low = SurfacePoint::new(face, 32.0, 40.0);
             let higher = SurfacePoint::new(face, 32.0 + up.x * 4.0, 40.0 + up.y * 4.0);
@@ -3720,7 +4393,13 @@ mod tests {
         cfg.drives.turn_noise = 0.0;
         for (depth, expect_dy_sign) in [(1.0f32, -1.0f64), (0.0, 1.0)] {
             let mut world = World::new(cfg.clone()).expect("valid");
-            let id = world.state.organisms.iter().map(|(id, _)| id).next().expect("founder");
+            let id = world
+                .state
+                .organisms
+                .iter()
+                .map(|(id, _)| id)
+                .next()
+                .expect("founder");
             let start = SurfacePoint::new(Face::Front, 32.0, 32.0);
             {
                 let o = world.state.organisms.get_mut(id).expect("alive");
@@ -3739,8 +4418,15 @@ mod tests {
             }
             let o = world.state.organisms.get(id).expect("alive");
             let dv = o.pos.v - start.v;
-            assert!(dv * expect_dy_sign > 0.5, "depth {depth}: moved {dv} in v on Front (expected sign {expect_dy_sign})");
-            assert!((o.heading.y * expect_dy_sign) > 0.9, "heading {:?} settled toward the band", o.heading);
+            assert!(
+                dv * expect_dy_sign > 0.5,
+                "depth {depth}: moved {dv} in v on Front (expected sign {expect_dy_sign})"
+            );
+            assert!(
+                (o.heading.y * expect_dy_sign) > 0.9,
+                "heading {:?} settled toward the band",
+                o.heading
+            );
         }
     }
 
@@ -3758,13 +4444,27 @@ mod tests {
         for (d, ring) in rings[origin.index()].iter().enumerate() {
             for c in ring {
                 let dist = (i32::from(c.cx()) - 8).abs() + (i32::from(c.cy()) - 8).abs();
-                assert_eq!(dist as usize, d + 1, "{c:?} is not at graph distance {}", d + 1);
+                assert_eq!(
+                    dist as usize,
+                    d + 1,
+                    "{c:?} is not at graph distance {}",
+                    d + 1
+                );
             }
         }
         // A seam-adjacent cell's rings cross onto the neighbouring face and never the rim.
         let corner = CellId::new(Face::Front, 15, 15);
-        assert!(rings[corner.index()][0].iter().any(|c| c.face() == Face::Right));
-        assert!(rings[corner.index()].iter().flatten().all(|c| c.face() != Face::Top));
+        assert!(
+            rings[corner.index()][0]
+                .iter()
+                .any(|c| c.face() == Face::Right)
+        );
+        assert!(
+            rings[corner.index()]
+                .iter()
+                .flatten()
+                .all(|c| c.face() != Face::Top)
+        );
 
         // Food two cells away, none adjacent: a 6 px sensor turns toward it; a 4 px one
         // sees a flat neighbourhood and holds its heading.
@@ -3782,7 +4482,13 @@ mod tests {
         cfg.water.rain_rate = 0.0;
         for (sense, turns) in [(6.0f32, true), (4.0, false)] {
             let mut world = World::new(cfg.clone()).expect("valid");
-            let id = world.state.organisms.iter().map(|(id, _)| id).next().expect("founder");
+            let id = world
+                .state
+                .organisms
+                .iter()
+                .map(|(id, _)| id)
+                .next()
+                .expect("founder");
             let here = CellId::new(Face::Front, 8, 8);
             {
                 let o = world.state.organisms.get_mut(id).expect("alive");
@@ -3803,9 +4509,17 @@ mod tests {
             world.step();
             let o = world.state.organisms.get(id).expect("alive");
             if turns {
-                assert!(o.heading.y < -0.05, "a 6 px sensor turned toward food two cells up: {:?}", o.heading);
+                assert!(
+                    o.heading.y < -0.05,
+                    "a 6 px sensor turned toward food two cells up: {:?}",
+                    o.heading
+                );
             } else {
-                assert!((o.heading - Vec2::new(1.0, 0.0)).length() < 1e-9, "a 4 px sensor saw nothing: {:?}", o.heading);
+                assert!(
+                    (o.heading - Vec2::new(1.0, 0.0)).length() < 1e-9,
+                    "a 4 px sensor saw nothing: {:?}",
+                    o.heading
+                );
             }
         }
     }
@@ -3819,7 +4533,13 @@ mod tests {
             cfg.water.flow = 0.0;
             cfg.water.evap = 0.0;
             let mut world = World::new(cfg).expect("valid");
-            let id = world.state.organisms.iter().map(|(id, _)| id).next().expect("founder");
+            let id = world
+                .state
+                .organisms
+                .iter()
+                .map(|(id, _)| id)
+                .next()
+                .expect("founder");
             let cell = {
                 let o = world.state.organisms.get_mut(id).expect("alive");
                 o.genome.swim = swim;
@@ -3834,13 +4554,26 @@ mod tests {
             world.state.fields.f[cell.index()] = 0.0;
             world.state.fields.d[cell.index()] = 0.0;
             world.step();
-            world.render_view().organisms[0].moved.iter().map(|s| s.length()).sum::<f64>()
+            world.render_view().organisms[0]
+                .moved
+                .iter()
+                .map(|s| s.length())
+                .sum::<f64>()
         }
         let dry = traveled(0.0, 0.0);
-        assert!((dry / traveled(0.0, 1.0) - 2.0).abs() < 1e-9, "a wader halves at unit depth");
-        assert!((traveled(1.0, 1.0) - dry).abs() < 1e-12, "a swimmer moves as if dry");
+        assert!(
+            (dry / traveled(0.0, 1.0) - 2.0).abs() < 1e-9,
+            "a wader halves at unit depth"
+        );
+        assert!(
+            (traveled(1.0, 1.0) - dry).abs() < 1e-12,
+            "a swimmer moves as if dry"
+        );
         assert!((traveled(1.0, 3.0) - dry).abs() < 1e-12);
-        assert!((dry / traveled(0.5, 1.0) - 1.5).abs() < 1e-9, "half a swimmer wades at 1 + w/2");
+        assert!(
+            (dry / traveled(0.5, 1.0) - 1.5).abs() < 1e-9,
+            "half a swimmer wades at 1 + w/2"
+        );
     }
 
     #[test]
@@ -3852,7 +4585,13 @@ mod tests {
         for _ in 0..24_000 {
             world.step();
             for event in world.drain_events() {
-                if let LifeEvent::Birth { id, parent, mutations, .. } = event {
+                if let LifeEvent::Birth {
+                    id,
+                    parent,
+                    mutations,
+                    ..
+                } = event
+                {
                     births += 1;
                     let child = world.state.organisms.get(id).expect("newborn").clone();
                     // Copies are exact where no mutation is recorded, and the parent (if it
@@ -3865,20 +4604,35 @@ mod tests {
                         mutated += 1;
                     }
                     for m in &mutations {
-                        assert!(crate::genome::MUTABLE_LOCI.contains(&m.locus), "{} is not mutable", m.locus);
+                        assert!(
+                            crate::genome::MUTABLE_LOCI.contains(&m.locus),
+                            "{} is not mutable",
+                            m.locus
+                        );
                         assert_ne!(m.from, m.to);
                         loci.insert(m.locus);
                     }
-                    assert!(mutations.len() <= 2, "at most two loci per birth: {mutations:?}");
+                    assert!(
+                        mutations.len() <= 2,
+                        "at most two loci per birth: {mutations:?}"
+                    );
                     let mut g = child.genome.clone();
                     assert!(!g.clamp(), "a mutated child is always in range");
                 }
             }
         }
         assert!(births >= 20, "the run produced {births} births");
-        assert!(mutated as f64 >= 0.8 * births as f64, "with p_mut = 1 nearly every child differs ({mutated}/{births})");
-        assert!(loci.len() >= 5, "many different loci were touched: {loci:?}");
-        world.check_invariants().expect("mutated worlds stay consistent");
+        assert!(
+            mutated as f64 >= 0.8 * births as f64,
+            "with p_mut = 1 nearly every child differs ({mutated}/{births})"
+        );
+        assert!(
+            loci.len() >= 5,
+            "many different loci were touched: {loci:?}"
+        );
+        world
+            .check_invariants()
+            .expect("mutated worlds stay consistent");
 
         // With mutation off every child is an exact copy of its parent's escrowed genome.
         let mut cfg = WorldConfig::default();
@@ -3888,10 +4642,19 @@ mod tests {
         for _ in 0..24_000 {
             world.step();
             for event in world.drain_events() {
-                if let LifeEvent::Birth { id, parent, mutations, .. } = event {
+                if let LifeEvent::Birth {
+                    id,
+                    parent,
+                    mutations,
+                    ..
+                } = event
+                {
                     assert!(mutations.is_empty());
                     if let Some(p) = world.state.organisms.get(parent) {
-                        assert_eq!(world.state.organisms.get(id).expect("newborn").genome, p.genome);
+                        assert_eq!(
+                            world.state.organisms.get(id).expect("newborn").genome,
+                            p.genome
+                        );
                         seen += 1;
                     }
                 }
@@ -3905,14 +4668,27 @@ mod tests {
         let mut world = World::new(WorldConfig::default()).expect("valid");
         world.step();
         let sample = world.telemetry();
-        assert_eq!(sample.population_by_form.iter().sum::<u32>(), sample.population);
+        assert_eq!(
+            sample.population_by_form.iter().sum::<u32>(),
+            sample.population
+        );
         assert_eq!(sample.population_by_form[..4], [10, 5, 4, 5]);
         for form in 0..4 {
-            let expected: f64 = world.state.organisms.iter().filter(|(_, o)| o.phenotype.form == form as u8).map(|(_, o)| o.pos.embed()[1]).sum::<f64>() / f64::from(sample.population_by_form[form]);
+            let expected: f64 = world
+                .state
+                .organisms
+                .iter()
+                .filter(|(_, o)| o.phenotype.form == form as u8)
+                .map(|(_, o)| o.pos.embed()[1])
+                .sum::<f64>()
+                / f64::from(sample.population_by_form[form]);
             assert!((sample.mean_height_by_form[form] - expected).abs() < 1e-12);
             assert!(sample.mean_height_by_form[form].abs() <= 1.0);
         }
-        assert_eq!(sample.mean_height_by_form[7], 0.0, "an empty form reports zero");
+        assert_eq!(
+            sample.mean_height_by_form[7], 0.0,
+            "an empty form reports zero"
+        );
         let view = world.render_view();
         assert!(view.organisms.iter().all(|o| o.form < 4));
     }
@@ -3923,18 +4699,35 @@ mod tests {
     #[test]
     #[ignore]
     fn report_fauna_by_form_after_a_short_run() {
-        let seed: u64 = std::env::var("CUBARIUM_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(1);
-        let hours: f64 = std::env::var("CUBARIUM_HOURS").ok().and_then(|s| s.parse().ok()).unwrap_or(2.0);
-        let mut cfg = WorldConfig { seed, ..WorldConfig::default() };
+        let seed: u64 = std::env::var("CUBARIUM_SEED")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1);
+        let hours: f64 = std::env::var("CUBARIUM_HOURS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(2.0);
+        let mut cfg = WorldConfig {
+            seed,
+            ..WorldConfig::default()
+        };
         // Diagnostic counterfactual only (never a default): `CUBARIUM_ENERGY_CAP` overrides
         // `detritus.energy_cap`, which sets how edible detritus can be.
-        if let Some(cap) = std::env::var("CUBARIUM_ENERGY_CAP").ok().and_then(|s| s.parse::<f64>().ok()) {
+        if let Some(cap) = std::env::var("CUBARIUM_ENERGY_CAP")
+            .ok()
+            .and_then(|s| s.parse::<f64>().ok())
+        {
             cfg.detritus.energy_cap = cap;
             println!("counterfactual: detritus.energy_cap = {cap}");
         }
         let e_r = cfg.organism.reserve_energy_density;
         let mut world = World::new(cfg).expect("valid");
-        let names = ["lantern/grazer", "sail/glider", "mossback/burrower", "skimmer"];
+        let names = [
+            "lantern/grazer",
+            "sail/glider",
+            "mossback/burrower",
+            "skimmer",
+        ];
         // Edible litter on the soil floor at tick 0, against the feeding threshold.
         {
             let f = &world.state.fields;
@@ -3952,13 +4745,20 @@ mod tests {
         }
         let (mut pop_min, mut pop_max) = (world.population(), world.population());
         let mut min_by_form = [u32::MAX; 4];
-        let mut form_of: std::collections::HashMap<OrganismId, u8> = world.state.organisms.iter().map(|(id, o)| (id, o.phenotype.form)).collect();
+        let mut form_of: std::collections::HashMap<OrganismId, u8> = world
+            .state
+            .organisms
+            .iter()
+            .map(|(id, o)| (id, o.phenotype.form))
+            .collect();
         let mut deaths_by_form = [[0u32; 3]; 4];
         let mut death_time_by_form = [0.0f64; 4];
         let mut death_age_by_form = [0.0f64; 4];
         // `CUBARIUM_TRACE_FORM=<form>` prints that kind's state once a simulated minute for
         // the first half hour: where it is, what it holds, what it stands on.
-        let trace: Option<u8> = std::env::var("CUBARIUM_TRACE_FORM").ok().and_then(|s| s.parse().ok());
+        let trace: Option<u8> = std::env::var("CUBARIUM_TRACE_FORM")
+            .ok()
+            .and_then(|s| s.parse().ok());
         let ticks = (hours * 3600.0 / DT) as u64;
         for tick in 0..ticks {
             if let Some(form) = trace
@@ -3966,12 +4766,24 @@ mod tests {
                 && tick <= 36_000
             {
                 let f = &world.state.fields;
-                let members: Vec<&Organism> = world.state.organisms.iter().filter(|(_, o)| o.phenotype.form == form).map(|(_, o)| o).collect();
+                let members: Vec<&Organism> = world
+                    .state
+                    .organisms
+                    .iter()
+                    .filter(|(_, o)| o.phenotype.form == form)
+                    .map(|(_, o)| o)
+                    .collect();
                 if !members.is_empty() {
                     let n = members.len() as f64;
-                    let mean = |g: &dyn Fn(&Organism) -> f64| members.iter().map(|o| g(o)).sum::<f64>() / n;
+                    let mean = |g: &dyn Fn(&Organism) -> f64| {
+                        members.iter().map(|o| g(o)).sum::<f64>() / n
+                    };
                     let modes = members.iter().fold([0; 3], |mut m, o| {
-                        m[match o.mode { Mode::Resting => 0, Mode::Seeking => 1, Mode::Feeding => 2 }] += 1;
+                        m[match o.mode {
+                            Mode::Resting => 0,
+                            Mode::Seeking => 1,
+                            Mode::Feeding => 2,
+                        }] += 1;
                         m
                     });
                     println!(
@@ -3983,7 +4795,10 @@ mod tests {
                         mean(&|o| o.energy / o.phenotype.energy_max),
                         mean(&|o| o.hunger_memory),
                         modes,
-                        mean(&|o| { let c = cell_of(&o.pos).index(); edible_detritus(f.d[c], f.de[c], e_r) }),
+                        mean(&|o| {
+                            let c = cell_of(&o.pos).index();
+                            edible_detritus(f.d[c], f.de[c], e_r)
+                        }),
                         mean(&|o| f.p[cell_of(&o.pos).index()]),
                         members.iter().filter(|o| o.fed_this_tick).count(),
                     );
@@ -3997,7 +4812,12 @@ mod tests {
                             form_of.insert(id, o.phenotype.form);
                         }
                     }
-                    LifeEvent::Death { id, cause, age_ticks, .. } => {
+                    LifeEvent::Death {
+                        id,
+                        cause,
+                        age_ticks,
+                        ..
+                    } => {
                         if let Some(&form) = form_of.get(&id)
                             && (form as usize) < 4
                         {
@@ -4030,14 +4850,31 @@ mod tests {
             }
         }
         let sample = world.telemetry();
-        println!("seed {seed}, {hours} h: population end {} min {pop_min} max {pop_max}; residual {:e}", sample.population, sample.mass_residual);
+        println!(
+            "seed {seed}, {hours} h: population end {} min {pop_min} max {pop_max}; residual {:e}",
+            sample.population, sample.mass_residual
+        );
         for f in 0..4 {
             let deaths: u32 = deaths_by_form[f].iter().sum();
-            let mean_death = if deaths > 0 { death_time_by_form[f] / f64::from(deaths) / 60.0 } else { 0.0 };
-            let mean_age = if deaths > 0 { death_age_by_form[f] / f64::from(deaths) / 60.0 } else { 0.0 };
+            let mean_death = if deaths > 0 {
+                death_time_by_form[f] / f64::from(deaths) / 60.0
+            } else {
+                0.0
+            };
+            let mean_age = if deaths > 0 {
+                death_age_by_form[f] / f64::from(deaths) / 60.0
+            } else {
+                0.0
+            };
             println!(
                 "  {:<18} end {:>3}  min {:>3}  mean height {:+.3}  starved {:>3} (age/collapse {} / {}), mean age at death {mean_age:.1} min, mean death time {mean_death:.1} min",
-                names[f], sample.population_by_form[f], min_by_form[f], sample.mean_height_by_form[f], deaths_by_form[f][0], deaths_by_form[f][1], deaths_by_form[f][2]
+                names[f],
+                sample.population_by_form[f],
+                min_by_form[f],
+                sample.mean_height_by_form[f],
+                deaths_by_form[f][0],
+                deaths_by_form[f][1],
+                deaths_by_form[f][2]
             );
         }
         let fields = &world.state.fields;
@@ -4053,12 +4890,23 @@ mod tests {
             }
         }
         let fruiting = fields.f.iter().filter(|&&x| x > 0.15).count();
-        let ripe_cells = fields.p.iter().filter(|&&p| p > world.config().fruit.fruit_min * world.config().producer.max).count();
+        let ripe_cells = fields
+            .p
+            .iter()
+            .filter(|&&p| p > world.config().fruit.fruit_min * world.config().producer.max)
+            .count();
         let max_f = fields.f.iter().cloned().fold(0.0, f64::max);
         let max_p = fields.p.iter().cloned().fold(0.0, f64::max);
         println!(
             "  fruit total {:.3} ({fruiting} cells above 0.15, max F {max_f:.3}; {ripe_cells} cells with P above fruit_min·P_max, max P {max_p:.3}): soil {:.3} foliage {:.3} canopy {:.3}; P {:.1} D {:.1} N {:.1} water {:.1}",
-            sample.fruit, soil, foliage, canopy, sample.producer, sample.detritus, sample.nutrient, sample.water
+            sample.fruit,
+            soil,
+            foliage,
+            canopy,
+            sample.producer,
+            sample.detritus,
+            sample.nutrient,
+            sample.water
         );
     }
 }
