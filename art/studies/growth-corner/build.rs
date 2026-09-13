@@ -1,8 +1,16 @@
-// Instrument the real private function without changing its production visibility.
+// Keep the historical failure reproducible after its production fix. Only the private
+// column body is frozen; this study still uses the current surface/render dependencies.
 fn main() {
     let source = "../../../crates/cubarium/src/art_present.rs";
-    println!("cargo:rerun-if-changed={source}");
-    let text = std::fs::read_to_string(source).unwrap();
+    println!("cargo:rerun-if-changed=build.rs");
+    let show = std::process::Command::new("git")
+        .args(["show", "a9eb064:crates/cubarium/src/art_present.rs"])
+        .current_dir(std::path::Path::new(source).parent().unwrap())
+        .output()
+        .expect("git show of the pinned pre-fix presenter");
+    assert!(show.status.success(), "git show a9eb064 failed: {}",
+        String::from_utf8_lossy(&show.stderr));
+    let text = String::from_utf8(show.stdout).unwrap();
     let start = text
         .find("fn draw_column(\n")
         .expect("private column entry");

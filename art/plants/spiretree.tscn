@@ -171,6 +171,7 @@ _data = {
 }
 
 [node name="Spiretree" type="Node2D"]
+metadata/corner_cap_owner = "final_position_v1"
 texture_filter = 1
 
 [node name="Base" type="Node2D" parent="."]

@@ -259,6 +259,10 @@ func bake() -> void:
 			continue
 		var rig := scene.instantiate() as Node2D
 		root.add_child(rig)
+		# Opt-in belongs to the authored cap, not merely a familiar plant name.
+		var cap_owner = rig.get_meta("corner_cap_owner") if rig.has_meta("corner_cap_owner") else null
+		if cap_owner != null and (cap_owner != "final_position_v1" or not tall_name in ["spiretree", "glasscane"]):
+			fail("Unsupported corner_cap_owner on " + tall_name)
 		var player := rig.get_node("AnimationPlayer") as AnimationPlayer
 		player.callback_mode_process = AnimationMixer.ANIMATION_CALLBACK_MODE_PROCESS_MANUAL
 		for part_name in TALL_PARTS:
@@ -281,6 +285,8 @@ func bake() -> void:
 			# Additive opt-in only: keep every authored atlas pixel intact for old readers.
 			if tall_name == "vinecoil" and part_name == "trunk":
 				tall_row["vine_strips"] = "period4_endpoint_v1"
+			if part_name == "crown" and cap_owner != null:
+				tall_row["corner_cap_owner"] = cap_owner
 			tall_rows.append(tall_row)
 		rig.queue_free()
 	var tall_atlas := Image.create(TILE * PLANT_FRAMES, TILE * maxi(tall_rows.size(), 1), false, Image.FORMAT_RGBA8)
