@@ -14,6 +14,12 @@ with root's explicit authorization; **the conversion or experimental policy was
 not changed**. Clean integration/build verification remains root-owned. This is
 readiness for a matched experiment, not biological acceptance or live permission.
 
+Checkpoint ownership: native Opus integrated the authorized core/reducer corrections
+as **3b06596**, alongside its own zero-rate regression. Astra committed only the two
+independent regression files and this review as **c2fd19e**. Scoped diff/status checks
+confirmed that no correction was lost; unrelated Fable art is not part of either
+of those commits. Use root's clean charging freeze rather than a moving checkout.
+
 ## Core and persistence findings
 
 - Default constructor/profile version remains 3; new validation accepts exactly
@@ -94,8 +100,8 @@ Original snapshots, smoke artifacts and the old executable were untouched.
 - Initial submitted tests: core charging **16 passed**, reducer **11 passed**.
 - After correction: independent core **2 passed**, submitted charging **16 passed**;
   complete `cargo test -p cubarium-core` exited 0. Native Opus subsequently added
-  its own zero-rate test to its original file; that concurrent edit is not mine
-  and is deliberately excluded from this checkpoint.
+  its own zero-rate test to its original file and committed it in 3b06596; that
+  edit is not mine and is excluded from Astra's three-file checkpoint.
 - Independent reducer **6 passed**, existing reducer **11 passed**, and focused
   core regression clippy with `-D warnings` passed. The independent funding test
   uses the unchanged 1200-second age gate, actual 0.80/0.75 stock gates, fixed
