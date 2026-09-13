@@ -46,3 +46,27 @@ oversized-file rejection without reading an unbounded allocation; a capacity
 refusal that leaves world ticks advancing; existing pending accepted records
 still replay correctly. Invalid history can legitimately refuse startup, unlike
 ordinary exhaustion of an otherwise valid care journal.
+
+## Worker must stop writes immediately on uncertainty
+
+The new runner can queue several diagnostic outcome jobs after an accepted batch
+is durable. In the inspected `JournalWorker::spawn`, an append error only sends
+an acknowledgement; the worker then processes the next already queued job. A
+short first outcome write can therefore be followed by another append before the
+runner notices the failure, turning a torn suffix into interior corruption even
+though the runner eventually holds. The same race can involve a subsequently
+queued accepted batch.
+
+Poison the journal writer at the first uncertain I/O failure, in the worker
+itself, and refuse later queued writes without touching the file. Capacity
+refusal before any write is distinct and need not poison it. Test queued jobs
+with a short-write hook: after the first failure the file must remain unchanged
+by every subsequent job, including during shutdown draining. Stopping only the
+simulation-side intake after its next acknowledgement poll is not sufficient.
+
+Also, an outcome error may arrive after the original acceptance hold was released.
+`CareRuntime::fail` currently logs `holding_at.unwrap_or_default()` (tick zero in
+that case) and does not set a new hold in service status. Record the actual world
+boundary where that failure is observed and report it consistently. The durable
+accepted command is recoverable; do not claim that the final snapshot is at its
+old boundary when the world has already advanced normally since acceptance.
