@@ -32,6 +32,6 @@ pub use multipart::{
 };
 pub use sprite::{
     Bend, Mask, Pose, Sprite, stamp_layers, stamp_layers_bent, stamp_layers_bent_with_radius,
-    stamp_pose, stamp_sprite,
+    stamp_pose, stamp_pose_in_chart, stamp_sprite,
 };
 pub use trail::{Trail, TrailSegment, draw_trail};
