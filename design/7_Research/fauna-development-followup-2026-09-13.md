@@ -102,3 +102,57 @@ compare a single mechanism only after locating the bottleneck. Do not conclude
 that larger care doses, extra starting animals or cheaper offspring are warranted
 from these counts. This report narrows the evidence needed; it does not discharge
 the goal's diversity, unattended viability or long-run lineage requirements.
+
+## Earlier-loss timing from retained preparation telemetry
+
+The read-only `scripts/reduce-fauna-early-loss.mjs` now checks all twelve original
+seed histories, not just their mature survivors. It verifies the frozen runner,
+initial/closing snapshot header and payload identities, both manifests, all
+17,280 chronological five-second telemetry samples, census/total-population
+flows, zero care ledgers, and exact closing telemetry. Four focused tests cover
+loss bracketing, initially absent forms, censoring/reappearance, malformed or
+incomplete samples, and lossless u64 hashes. All four passed; reduction of the
+real retained cohort exited zero. Reproduce with:
+
+```sh
+node scripts/reduce-fauna-early-loss.test.mjs
+node scripts/reduce-fauna-early-loss.mjs captures/hunter-openings-2026-09-13
+```
+
+This is **earlier evidence from the same experiment**, not an additional cohort
+or independent conservation audit. Snapshot checks here do not semantically
+decode the world. Form counts cannot identify individual juvenile deaths,
+food intake, or exact allocation transactions.
+
+All twelve first samples (tick100) contain five skimmers. Their sampled peaks
+are10–23, so an initial failure to produce any additional skimmers is not the
+observed pattern. First net declines occur in windows ending at ticks7500–12400
+(6.25–10.33 simulated minutes); these are net census changes, not first individual
+death times. The complete first-loss table is:
+
+| Seed | Peak skimmers | First zero-count bracket, ticks `(after, by]` | Count at2h |
+| --- | ---: | --- | ---: |
+| 1 | 13 | Not observed | 4 |
+| 2 | 11 | (88700,88800] | 0 |
+| 3 | 15 | Not observed | 1 |
+| 4 | 11 | (94700,94800] | 0 |
+| 5 | 23 | Not observed | 10 |
+| 6 | 16 | (85000,85100] | 0 |
+| 7 | 10 | (143700,143800] | 0 |
+| 8 | 19 | (142300,142400] | 0 |
+| 9 | 12 | (100600,100700] | 0 |
+| 10 | 23 | Not observed | 8 |
+| 11 | 11 | (103400,103500] | 0 |
+| 12 | 13 | (85900,86000] | 0 |
+
+The eight losses are first sampled at70.92–119.83 simulated minutes; none
+reappear in later samples. No sampled loss of the other three initially present
+forms occurs. Forms4–7 begin absent and are not counted as extinctions.
+
+This changes the next diagnostic's scope: retain **all twelve tick-zero inputs
+and follow through two hours**, with detailed early growth/parentage and later
+recruitment/resource histories. A ten-minute run can inspect initial recruitment
+but cannot cover these losses. Follow actual paid growth/intake/oxidation before
+choosing a mechanism to change; the telemetry alone does not establish which
+one causes the decline. No live reseeding or ecology change follows from this
+reduction.
