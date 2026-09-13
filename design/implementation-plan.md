@@ -93,6 +93,19 @@ and schema 9 compensated accounting; 854 tests passed. See the
 copied-world restart, exact cross-version continuation and matched rollback set.
 The in-progress Lanternjaw hunter extension is deliberately not deployed.
 
+Hunter screen, 2026-09-13: the frozen profile-3 comparison completed all twelve
+seeds × six arms × two elapsed hours with 72 passing numerical audits. Hunting
+produced 479 captures, but all introduced hunters starved and none reproduced;
+no self-replacing lineage is established. See the
+[complete screen](7_Research/hunter-profile3-two-hour-results-2026-09-13.md).
+Exact reproduction observation and end-of-step stock diagnostics now exist,
+with adversarial observer hardening still open. Fable's real-world Lanternjaw
+adapter and continuous bounded minification are committed; independent review
+found remaining runner-event drainage, repeated-observation/reset and unsupported
+profile-capability issues. None changes the frozen live checkpoint above. Paid
+adult descendants, longer matched runs, diversity and physical contact/readability
+remain requirements to verify, not achievements inferred from passing tests.
+
 ## M1 — prove the surface and presentation path
 
 Create the minimal Rust workspace, pin/reuse `cube-proto` from the existing shim,

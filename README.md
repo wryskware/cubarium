@@ -66,14 +66,23 @@ and the live mirror measured about 60 distinct frames/s in isolated Chromium.
 See the [schema 9 rollout and rollback record](design/7_Research/presentation-v9-rollout-2026-09-13.md).
 Nearby biological responses remain open; no hunter is live yet.
 
+The first complete [hunter screen](design/7_Research/hunter-profile3-two-hour-results-2026-09-13.md)
+ran all twelve seeds in six matched arms for two hours. All 72 numerical audits
+passed and the hunting variants made 479 captures, but every introduced hunter
+starved and none reproduced. Stock diagnostics and exact reproduction auditing
+are now implemented; observer hardening, profile viability, diversity and longer
+runs remain open. This is an unsuccessful lineage baseline, not a deployment gate passed.
+
 Wrysk prefers Fable's **Lanternjaw** megafauna body. The
 [comparison studio](art/studies/megafauna/README.md) retains Veilwarden as an
-alternate; neither is a live predator yet. The body now has a production renderer:
+alternate. Lanternjaw now has a world-driven multipart adapter, including scaled
+juveniles and real attack/gut/gestation state, but remains off the live cube while
+boundary, capability and runner-event handling issues are corrected. Its renderer:
 `cubarium::lanternjaw` draws it as a multipart rig through one root-owned surface query
 (`cubarium_render::stamp_rig`), exercised by `cargo run --release -p cubarium --example
 lanternjaw_study` (port 7399; `--sink png` for native captures, see
-`captures/lanternjaw/`). It is not in the atelier pack, selects no form and has no
-ecology; the [progress record](design/7_Research/living-world-next-progress-2026-09-13.md)
+`captures/lanternjaw/`). It is not in the atelier pack; hunter membership is explicit,
+not selected by form. The [progress record](design/7_Research/living-world-next-progress-2026-09-13.md)
 has the geometry, the tests and the measured cost. Every side-face plant also carries
 authored sprout-to-stalk and stalk-to-mature growth clips ([art/PLANTS.md](art/PLANTS.md)).
 
