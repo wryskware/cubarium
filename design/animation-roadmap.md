@@ -114,6 +114,20 @@ Remaining, in the order Fable would take them:
    foundation. Favor silhouette-scale changes at 64 px. Droplets on leaves and nibble
    marks remain specifically lower-priority, higher-resolution experiments.
 
+## Status after the living-world packages (2026-09-13)
+
+Landed (presentation only): authored growth for every side species (both steps of
+glowcap, rootveil, lanternstalk, tendrilfan, reedspire — item 2 above, except the canopy
+species); a flooded top-face reed now bends (item 3); and the selected Lanternjaw body as a
+production multipart rig drawn through one root-owned surface query, with an isolated
+study route, native captures and cost figures. Record:
+[Fable's progress note](7_Research/living-world-next-progress-2026-09-13.md); geometry:
+[Astra's plan](7_Research/astra-lanternjaw-production-plan-2026-09-13.md) and
+[review](7_Research/astra-lanternjaw-brief-review-2026-09-13.md).
+
+Still open from the list above: item 1 (wind readability of the art-limited families),
+the canopy species' top-down opening (item 2's remainder), item 4 (coverage-AA), item 5.
+
 ## New owner direction: optional care and megafauna
 
 Wrysk approved the next growth/articulation direction and requested feeding/watering,

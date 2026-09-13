@@ -62,9 +62,14 @@ are not deployed to the live cube yet. Nearby biological responses remain open.
 
 Wrysk prefers Fable's **Lanternjaw** megafauna body. The
 [comparison studio](art/studies/megafauna/README.md) retains Veilwarden as an
-alternate; neither is a live predator yet. The
-[next rendering slice](art/studies/megafauna/integration-notes.md) covers the long
-body's bounded multipart rendering and seam tests before an ecology experiment.
+alternate; neither is a live predator yet. The body now has a production renderer:
+`cubarium::lanternjaw` draws it as a multipart rig through one root-owned surface query
+(`cubarium_render::stamp_rig`), exercised by `cargo run --release -p cubarium --example
+lanternjaw_study` (port 7399; `--sink png` for native captures, see
+`captures/lanternjaw/`). It is not in the atelier pack, selects no form and has no
+ecology; the [progress record](design/7_Research/living-world-next-progress-2026-09-13.md)
+has the geometry, the tests and the measured cost. Every side-face plant also carries
+authored sprout-to-stalk and stalk-to-mature growth clips ([art/PLANTS.md](art/PLANTS.md)).
 
 Start with the [design overview](design/README.md), then the
 [implementation plan](design/implementation-plan.md). The
