@@ -1,15 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {existsSync, readFileSync} from 'node:fs';
+import {cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {
   ARMS, CLASSES, WINDOW_TICKS, SCREEN_TICKS, NO_CARE_LEDGER, HORIZON_TICKS,
   verifyArm, reduceBouts, reduceQuietEvents, reduceLife, reduceCensus, limitsFrom,
-  parseSnapshotHeader, crc32, pair, inspect, verifyClosingSnapshot, loadRun,
+  parseSnapshotHeader, crc32, pair, inspect, verifyClosingSnapshot, loadRun, compare,
   verifySeedOpening, verifyArmOpening, readOpeningIdentities, crossCheck,
+  verifyCohortSummary,
 } from './reduce-quiet-compare.mjs';
 
 const OPENING = 144000;
+/// The smoke this suite reads. A smoke certifies nothing; it is here because every check below
+/// has to meet real artifacts of the current shape, not only synthetic fixtures.
+const SMOKE = new URL('../captures/quiet-smoke-provenance-2026-09-13/', import.meta.url).pathname;
+/// The completed ten-minute screen. `loadRun`/`compare` are exercised end to end against it.
+const SCREEN =
+  new URL('../captures/quiet-ten-minute-provenance-2026-09-13/', import.meta.url).pathname;
+
+/// The run's own copy of the cohort manifest, which is the byte-faithful record of it.
+const cohortOf = root => JSON.parse(readFileSync(join(root, 'cohort-manifest.json'), 'utf8'));
 const TICKS = 12000;
 const CLOSING = OPENING + TICKS;
 const id = (slot, generation = 1) => ({slot, generation});
@@ -692,14 +703,11 @@ test('pairing reports every loss and reaches no verdict', () => {
 // --- the real smoke artifacts ---------------------------------------------------------------
 
 test('the smoke artifacts pass every per-arm check they are eligible for', () => {
-  const root = new URL('../captures/quiet-smoke-validated-2026-09-13c/', import.meta.url).pathname;
-  if (!existsSync(join(root, 'summary.json'))) {
-    // The smoke output is not present; the synthetic fixtures above carry the contract.
-    return;
-  }
+  const root = SMOKE;
   const m = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
   const s = JSON.parse(readFileSync(join(root, 'summary.json'), 'utf8'));
-  const opening = m.cohort.opening_tick, closing = opening + m.ticks;
+  const cohort = cohortOf(root);
+  const opening = cohort.opening_tick, closing = opening + m.ticks;
   let armsChecked = 0, recoveryBouts = 0, midPauseProofs = 0, lifeRecords = 0;
   for (const seed of s.seeds) {
     for (const [i, name] of ARMS.entries()) {
@@ -712,7 +720,7 @@ test('the smoke artifacts pass every per-arm check they are eligible for', () =>
       const events = reduceQuietEvents(lines('quiet-events.jsonl'), a, opening, closing);
       const identities = readOpeningIdentities(
         readFileSync(join(dir, 'opening-organisms.jsonl'), 'utf8'),
-        m.cohort.openings.find(o => o.seed === seed.seed).population, name, opening);
+        cohort.openings.find(o => o.seed === seed.seed).population, name, opening);
       const life = reduceLife(lines('life.jsonl'), a, opening, closing, identities);
       reduceCensus(lines('census.jsonl'), a, opening, m.ticks, m.sample_every);
       // The cross-file links the totals cannot make, through the same predicate the reduction
@@ -736,13 +744,13 @@ test('the smoke artifacts pass every per-arm check they are eligible for', () =>
 });
 
 test('an opening is fingerprinted from the cohort source, and every arm is held to it', () => {
-  const root = new URL('../captures/quiet-smoke-validated-2026-09-13c/', import.meta.url).pathname;
-  if (!existsSync(join(root, 'summary.json'))) return;
+  const root = SMOKE;
   const m = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
   const executable = join(root, 'quiet_compare.frozen');
-  const cohortRoot = new URL(`../${m.cohort_source}/`, import.meta.url).pathname;
-  const opening = m.cohort.opening_tick;
-  const row = m.cohort.openings.find(o => o.seed === 1);
+  const cohortRoot = new URL(`../${m.cohort_manifest.source}/`, import.meta.url).pathname;
+  const cohort = cohortOf(root);
+  const opening = cohort.opening_tick;
+  const row = cohort.openings.find(o => o.seed === 1);
   const path = join(cohortRoot, 'seed-1', 'world-144000.cubw');
   const bytes = readFileSync(path);
   const inspected = inspect(executable, path);
@@ -843,16 +851,16 @@ test('a substituted child generation is refused although every stream stays self
   // Astra's exact probe: in seed-1 candidate no-care, change the child of the Begin and its End
   // at boundary 144228 from 11/5 to 11/100005. Each stream still reconciles with itself and with
   // its summary; only the crosswalk between them can see that no such birth was ever paid for.
-  const root = new URL('../captures/quiet-smoke-validated-2026-09-13c/', import.meta.url).pathname;
-  if (!existsSync(join(root, 'summary.json'))) return;
+  const root = SMOKE;
   const m = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
   const dir = join(root, 'seed-1', 'candidate_nocare');
   const a = JSON.parse(readFileSync(join(dir, 'summary.json'), 'utf8'));
-  const opening = m.cohort.opening_tick, closing = opening + m.ticks;
+  const cohort = cohortOf(root);
+  const opening = cohort.opening_tick, closing = opening + m.ticks;
   const lines = p => readFileSync(join(dir, p), 'utf8').trim().split('\n')
     .filter(Boolean).map(JSON.parse);
   const identities = readOpeningIdentities(readFileSync(join(dir, 'opening-organisms.jsonl'),
-    'utf8'), m.cohort.openings.find(o => o.seed === 1).population, 'candidate_nocare', opening);
+    'utf8'), cohort.openings.find(o => o.seed === 1).population, 'candidate_nocare', opening);
   const boutRows = lines('bouts.jsonl');
   const eventRows = lines('quiet-events.jsonl');
   const life = reduceLife(lines('life.jsonl'), a, opening, closing, identities);
@@ -897,8 +905,7 @@ test('a substituted child generation is refused although every stream stays self
 });
 
 test('a closing snapshot is checked as bytes and then decoded for what is inside it', async () => {
-  const root = new URL('../captures/quiet-smoke-validated-2026-09-13c/', import.meta.url).pathname;
-  if (!existsSync(join(root, 'summary.json'))) return;
+  const root = SMOKE;
   const m = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
   const executable = join(root, 'quiet_compare.frozen');
   for (const name of ARMS) {
@@ -940,4 +947,162 @@ test('a closing snapshot is checked as bytes and then decoded for what is inside
   }
   // And the whole reduction still refuses a smoke, whatever its artifacts look like.
   await assert.rejects(loadRun(root), /not a prescribed horizon/);
+});
+
+// --- cohort provenance ------------------------------------------------------------------------
+
+test('a decimal that went through a parse is a different number, not a different spelling', () => {
+  // The exact values the first end-to-end reduction of the ten-minute screen tripped on. The run
+  // manifest held a copy of the cohort that had been parsed by `serde_json` (whose default
+  // decimal path may land one ULP away) and written again. These are not two spellings of one
+  // number, so accepting the difference would mean accepting a record that is quietly wrong.
+  const pairs = [['212.54356731997558', '212.5435673199756'],
+    ['0.9785584621020161', '0.978558462102016'],
+    ['60.830572942452996', '60.83057294245299']];
+  for (const [source, written] of pairs) {
+    assert.notEqual(Number(source), Number(written), `${source} and ${written} are one number?`);
+    const bits = x => new BigUint64Array(new Float64Array([x]).buffer)[0];
+    const apart = bits(Number(source)) - bits(Number(written));
+    assert.equal(apart === 1n || apart === -1n, true, `${source}: ${apart} ULP apart`);
+    // And the source text is already the shortest round-tripping form, so nothing here is a
+    // formatting preference.
+    assert.equal(String(Number(source)), source);
+  }
+});
+
+test('the run records its cohort as bytes, and every provenance field exactly', () => {
+  const m = JSON.parse(readFileSync(join(SMOKE, 'manifest.json'), 'utf8'));
+  const copy = readFileSync(join(SMOKE, 'cohort-manifest.json'));
+  const source = readFileSync(
+    new URL(`../${m.cohort_manifest.source}/manifest.json`, import.meta.url).pathname);
+  assert(copy.equals(source), 'the copy is the source, byte for byte');
+  assert.equal(m.cohort_manifest.bytes, copy.length);
+  assert.equal(m.cohort_manifest.copy, 'cohort-manifest.json');
+  const cohort = JSON.parse(copy.toString('utf8'));
+  verifyCohortSummary(m.cohort_summary, cohort);
+
+  // The summary reproduces only what can be reproduced exactly.
+  for (const seed of m.cohort_summary.seeds) {
+    assert.equal(typeof seed.telemetry, 'string');
+    for (const [key, value] of Object.entries(seed))
+      assert(!(typeof value === 'number' && !Number.isInteger(value)),
+        `${key} is a decimal written from a parse`);
+  }
+  // And every way it can disagree with the cohort is refused.
+  const refused = (mutate, says) => {
+    const s = structuredClone(m.cohort_summary); mutate(s);
+    assert.throws(() => verifyCohortSummary(s, cohort), says);
+  };
+  refused(s => s.seeds[0].seed = 99, /names a seed 99|not 1..12 in order/);
+  refused(s => s.seeds[0].sha256 = '0'.repeat(64), /recorded sha256 is not the cohort's/);
+  refused(s => s.seeds[0].population += 1, /recorded population is not the cohort's/);
+  refused(s => s.seeds[0].ecology_hash = '1', /recorded ecology_hash is not the cohort's/);
+  refused(s => s.seeds[0].state_hash = '1', /recorded state_hash is not the cohort's/);
+  refused(s => s.seeds.pop(), /not the twelve/);
+  refused(s => s.opening_tick += 1, /recorded cohort opening_tick/);
+  refused(s => s.runner_sha256 = 'x', /recorded cohort runner_sha256/);
+  refused(s => s.complete = false, /recorded cohort complete/);
+  // The exact shape that caused the failure: a preparation decimal written again from a parse.
+  refused(s => s.seeds[0].telemetry = {water: 0.978558462102016},
+    /point at the copied manifest/);
+  refused(s => s.seeds[0].preparation_water = 0.978558462102016,
+    /is a decimal written from a parse/);
+});
+
+// --- the whole reduction, end to end ------------------------------------------------------------
+
+/// The completed screen must be present: this is the only test that exercises `loadRun` and
+/// `compare` as a whole rather than one exported check at a time, and silently skipping it is how
+/// the first real reduction came to fail on glue nothing had ever run.
+const screenPresent = () => {
+  assert(existsSync(join(SCREEN, 'summary.json')),
+    `the completed ten-minute screen is required at ${SCREEN}. Produce it with:\n`
+      + '  quiet_compare captures/hunter-openings-2026-09-13 '
+      + 'captures/quiet-ten-minute-provenance-2026-09-13 --horizon ten-minute');
+};
+
+test('the whole reduction runs end to end on the completed ten-minute screen', async () => {
+  screenPresent();
+  const result = await compare(SCREEN);
+  assert.equal(result.kind, 'four-arm-ordinary-quiet-reduction');
+  assert.equal(result.artifact_checks_passed, true);
+  assert.equal(result.horizon, 'ten-minute');
+  assert.equal(result.ticks, HORIZON_TICKS['ten-minute']);
+  assert.equal(result.seeds.length, 12);
+  assert.equal(result.opportunity.length, 12);
+  for (const seed of result.seeds)
+    for (const key of ['nocare', 'feed'])
+      assert(seed[key].off && seed[key].candidate, `seed ${seed.seed}: ${key} is not a pair`);
+  // It reports the screen and reaches no verdict of its own.
+  assert.equal(typeof result.behavioural_screen.met, 'boolean');
+  assert(!('verdict' in result) && !('accepted' in result) && !('benefit' in result));
+  assert(/not inferred/.test(result.biological_acceptance));
+  // The raw legacy energy drift is carried per arm as a diagnostic beside the gated residuals.
+  const one = result.seeds[0].nocare.candidate;
+  assert(Number.isFinite(one.raw_energy_drift));
+  assert.equal(typeof one.raw_energy_within_opening_limit, 'boolean');
+  assert(Number.isFinite(one.corrected_energy_drift));
+});
+
+test('a tampered screen is refused for the exact thing that was tampered with', async () => {
+  screenPresent();
+  const work = mkdtempSync(join(tmpdir(), 'cubarium-quiet-tamper-'));
+  const run = join(work, 'run');
+  try {
+    cpSync(SCREEN, run, {recursive: true});
+    await loadRun(run);                       // the copy itself is still the screen
+    const path = {
+      manifest: join(run, 'manifest.json'),
+      cohort: join(run, 'cohort-manifest.json'),
+      opening: join(run, 'seed-1', 'candidate_feed', 'opening.json'),
+    };
+    const original = Object.fromEntries(
+      Object.entries(path).map(([k, p]) => [k, readFileSync(p, 'utf8')]));
+    const restore = () => {
+      for (const [k, p] of Object.entries(path)) writeFileSync(p, original[k]);
+    };
+    const tamper = async (file, mutate, says) => {
+      const value = JSON.parse(original[file]);
+      mutate(value);
+      writeFileSync(path[file], JSON.stringify(value, null, 2));
+      await assert.rejects(loadRun(run), says);
+      restore();
+    };
+    // The cohort copy, in the run, moved away from the cohort on disk — including by exactly the
+    // one ULP a re-encoded manifest would have moved it.
+    const drifted = JSON.parse(original.cohort);
+    drifted.openings[0].telemetry.water =
+      new Float64Array(new BigUint64Array(
+        [new BigUint64Array(new Float64Array([drifted.openings[0].telemetry.water]).buffer)[0]
+          + 1n]).buffer)[0];
+    writeFileSync(path.cohort, JSON.stringify(drifted, null, 2));
+    await assert.rejects(loadRun(run), /does not match its own recorded checksum/);
+    restore();
+
+    await tamper('cohort', c => c.openings[0].sha256 = '0'.repeat(64),
+      /does not match its own recorded checksum/);
+    await tamper('manifest', m => m.cohort_manifest.sha256 = '0'.repeat(64),
+      /does not match its own recorded checksum/);
+    await tamper('manifest', m => m.cohort_manifest.source = 'captures/nowhere',
+      /is not reachable/);
+    await tamper('manifest', m => m.cohort_summary.seeds[0].seed = 99,
+      /names a seed 99|not 1..12 in order/);
+    await tamper('manifest', m => m.cohort_summary.seeds[0].sha256 = '0'.repeat(64),
+      /recorded sha256 is not the cohort's/);
+    await tamper('manifest', m => delete m.cohort_manifest,
+      /does not record its cohort manifest by checksum/);
+    await tamper('manifest', m => m.horizon = 'two-hour',
+      /horizon two-hour is 144000 ticks, not 12000/);
+    await tamper('manifest', m => m.factors.care.recipe.dose_permille = 500, /dose_permille/);
+    await tamper('manifest', m => m.factors.care.recipe.elapsed_tick = 1200, /elapsed_tick/);
+    await tamper('opening', o => o.config_sha256 = 'x', /config identity/);
+    await tamper('opening', o => o.state_hash_before_choice = '1',
+      /did not start from this seed's opening/);
+    await tamper('opening', o => o.care.dose_permille = 500, /recorded recipe/);
+    await tamper('opening', o => o.care = null, /recorded recipe/);
+    // And the copy is still the screen after every restore.
+    await loadRun(run);
+  } finally {
+    rmSync(work, {recursive: true, force: true});
+  }
 });

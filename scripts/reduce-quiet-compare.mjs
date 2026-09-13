@@ -822,6 +822,34 @@ export function crossCheck(bouts, events, life, name) {
     `${name}: newborn bouts are not the births`);
 }
 
+/// The run manifest's own summary of the cohort, against the cohort. Every field here is an
+/// integer or a string — the float-bearing preparation telemetry is deliberately not reproduced
+/// in the run manifest, because writing a parsed decimal again can change it. So this comparison
+/// is exact, and the telemetry is covered byte for byte by the copied manifest instead.
+export function verifyCohortSummary(summary, cohort) {
+  assert(summary && typeof summary === 'object', 'the run records no cohort summary');
+  for (const key of ['kind', 'complete', 'opening_tick', 'prescribed_seeds', 'runner_sha256'])
+    assert.deepEqual(summary[key], cohort[key], `the recorded cohort ${key} is not the cohort's`);
+  assert.equal(summary.seeds.length, cohort.openings.length, 'the recorded seeds are not the twelve');
+  for (const [i, seed] of summary.seeds.entries()) {
+    // Sorted by seed in the run, as the openings are prepared.
+    const row = cohort.openings.find(o => o.seed === seed.seed);
+    assert(row, `the recorded cohort names a seed ${seed.seed} the cohort does not`);
+    assert.equal(seed.seed, i + 1, 'the recorded seeds are not 1..12 in order');
+    for (const key of ['population', 'snapshot', 'schema', 'build', 'payload_bytes', 'crc32',
+      'state_hash', 'sha256', 'ecology_hash', 'population_by_form', 'population_rank',
+      'population_stratum'])
+      assert.deepEqual(seed[key], row[key],
+        `seed ${seed.seed}: the recorded ${key} is not the cohort's`);
+    assert.equal(typeof seed.telemetry, 'string',
+      `seed ${seed.seed}: preparation telemetry must point at the copied manifest, not be `
+        + 'written again from a parse');
+    for (const [key, value] of Object.entries(seed))
+      assert(!(typeof value === 'number' && !Number.isInteger(value)),
+        `seed ${seed.seed}: the recorded ${key} is a decimal written from a parse`);
+  }
+}
+
 export async function loadRun(directory, options = {}) {
   const root = resolve(directory);
   const m = await json(join(root, 'manifest.json'));
@@ -835,14 +863,17 @@ export async function loadRun(directory, options = {}) {
     `horizon ${m.horizon} is ${HORIZON_TICKS[m.horizon]} ticks, not ${m.ticks}`);
   assert.equal(m.ticks % m.sample_every, 0, 'the horizon is not a whole number of windows');
   // The factor definition itself: one policy field, two levels, and exactly one Feed.
-  assert.equal(m.factors.policy.field, 'WorldState.quiet');
-  assert.deepEqual(m.factors.policy.levels, ['off', 'post_birth_pause_v1']);
-  assert.deepEqual(m.factors.care.levels, [null, 'one Standard Feed']);
-  assert.equal(m.factors.care.recipe.count, 1);
-  assert.equal(m.factors.care.recipe.kind, FEED.kind);
-  assert.equal(m.factors.care.recipe.elapsed_tick, FEED.elapsed);
-  assert.equal(m.factors.care.recipe.dose_permille, FEED.dose_permille);
-  assert.deepEqual(m.factors.care.recipe.target, FEED.target);
+  assert.equal(m.factors.policy.field, 'WorldState.quiet', 'the policy factor field');
+  assert.deepEqual(m.factors.policy.levels, ['off', 'post_birth_pause_v1'],
+    'the policy factor levels');
+  assert.deepEqual(m.factors.care.levels, [null, 'one Standard Feed'], 'the care factor levels');
+  assert.equal(m.factors.care.recipe.count, 1, 'the recipe count is not one Feed');
+  assert.equal(m.factors.care.recipe.kind, FEED.kind, 'the recipe kind is not a feed');
+  assert.equal(m.factors.care.recipe.elapsed_tick, FEED.elapsed,
+    'the recipe elapsed_tick is not the prescribed one');
+  assert.equal(m.factors.care.recipe.dose_permille, FEED.dose_permille,
+    'the recipe dose_permille is not the prescribed one');
+  assert.deepEqual(m.factors.care.recipe.target, FEED.target, 'the recipe target');
 
   const executable = join(root, 'quiet_compare.frozen');
   const executableBytes = await readFile(executable);
@@ -854,22 +885,40 @@ export async function loadRun(directory, options = {}) {
   assert.deepEqual(summary.seeds.map(s => s.seed).sort((a, b) => a - b),
     Array.from({length: 12}, (_, i) => i + 1), 'the prescribed twelve seeds are required');
 
-  // The cohort, from the directory it came from rather than from this run's copy of it. The
-  // recorded path is the one the run was given, so it is tried as written, against this process
-  // and against the run itself; an explicit argument always wins.
-  const recorded = [options.cohort, m.cohort_source].filter(Boolean);
+  // The cohort, as **bytes**. The run copies its source manifest verbatim, so provenance is
+  // checked by checksum and by byte equality against the directory it came from — never by
+  // comparing two parses of it. `serde_json` without `float_roundtrip` can land one ULP from the
+  // correctly rounded value, so a re-encoded manifest holds different numbers, and an exact
+  // reducer is right to refuse it. The answer is not a looser comparison; it is not re-encoding.
+  const record = m.cohort_manifest;
+  assert(record && typeof record === 'object',
+    'this run does not record its cohort manifest by checksum; it predates the byte-faithful '
+      + 'cohort record and cannot be certified — see the handoff');
+  assert.equal(record.copy, 'cohort-manifest.json');
+  const copied = await readFile(join(root, record.copy));
+  assert.equal(copied.length, record.bytes, 'the copied cohort manifest is not the recorded size');
+  assert.equal(sha256(copied), record.sha256,
+    'the copied cohort manifest does not match its own recorded checksum');
+  // The recorded path is the one the run was given, so it is tried as written, against this
+  // process and against the run itself; an explicit argument always wins.
+  const recorded = [options.cohort, record.source].filter(Boolean);
   assert(recorded.length > 0, 'the run does not record the cohort it came from');
   const cohortRoot = recorded
     .flatMap(p => [resolve(p), resolve(root, p), resolve(root, '..', p)])
     .find(p => existsSync(join(p, 'manifest.json')));
   assert(cohortRoot,
     `the cohort this run came from (${recorded[0]}) is not reachable; pass it as the second argument`);
-  const cohort = await json(join(cohortRoot, 'manifest.json'));
-  assert.deepEqual(cohort, m.cohort, 'the recorded cohort is not the cohort on disk');
+  const source = await readFile(join(cohortRoot, 'manifest.json'));
+  assert.equal(sha256(source), record.sha256,
+    'the cohort on disk is not the cohort this run read');
+  assert(source.equals(copied), 'the copied cohort manifest is not the source byte for byte');
+  // Parsed once, from the bytes both sides agree on.
+  const cohort = JSON.parse(copied.toString('utf8'));
   assert.equal(cohort.complete, true);
   assert.equal(cohort.kind, 'pre-hunter-cohort-preparation');
   assert.equal(cohort.opening_tick, OPENING_TICK);
   assert.equal(cohort.openings.length, 12);
+  verifyCohortSummary(m.cohort_summary, cohort);
 
   const opening = cohort.opening_tick;
   const closing = opening + m.ticks;

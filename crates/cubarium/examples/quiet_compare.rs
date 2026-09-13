@@ -167,8 +167,14 @@ struct Opening {
 /// hash, and that it carries no care and no hunter.
 ///
 /// The originals are read-only inputs. Nothing here writes into the cohort directory.
-fn load_cohort(dir: &Path) -> Result<(Value, Vec<Opening>)> {
-    let manifest: Value = serde_json::from_slice(&fs::read(dir.join("manifest.json"))?)?;
+///
+/// The manifest's **own bytes** come back with it. They are the provenance record: `serde_json`
+/// without its `float_roundtrip` feature can land one ULP from the correctly rounded value, so a
+/// decimal that goes through `Value` and out again is a different number, not a different
+/// spelling. Nothing re-serialized from this `Value` may stand in for the source.
+fn load_cohort(dir: &Path) -> Result<(Vec<u8>, Value, Vec<Opening>)> {
+    let raw = fs::read(dir.join("manifest.json"))?;
+    let manifest: Value = serde_json::from_slice(&raw)?;
     ensure!(
         manifest["complete"] == true && manifest["kind"] == "pre-hunter-cohort-preparation",
         "a complete unfiltered preparation manifest is required"
@@ -191,10 +197,21 @@ fn load_cohort(dir: &Path) -> Result<(Value, Vec<Opening>)> {
         );
         let (meta, state) = decode_snapshot(&bytes)?;
         validate_opening(meta.schema, &state, seed, row)?;
-        openings.push(Opening { state, source: row.clone() });
+        // The row's exact provenance only. `telemetry` is the one float-bearing part of it, and
+        // its unaltered form is the copied manifest, not a number written again from here.
+        let mut source = row.clone();
+        if let Some(row) = source.as_object_mut() {
+            row.remove("telemetry");
+            row.insert(
+                "telemetry".into(),
+                json!("in cohort-manifest.json, byte for byte; not re-serialized here because \
+                       serde_json's default decimal parse can move a value by one ULP"),
+            );
+        }
+        openings.push(Opening { state, source });
     }
     openings.sort_by_key(|o| o.state.config.seed);
-    Ok((manifest, openings))
+    Ok((raw, manifest, openings))
 }
 
 /// Everything an opening must be before a world is built from it, on the decoded state itself
@@ -1166,7 +1183,7 @@ fn main() -> Result<()> {
         planned.is_multiple_of(args.sample_every),
         "the horizon must be a whole number of census windows"
     );
-    let (cohort, openings) = load_cohort(&cohort_dir)?;
+    let (cohort_bytes, cohort, openings) = load_cohort(&cohort_dir)?;
     // A brand new directory, or nothing: `create_dir` fails on an existing path, so an accidental
     // rerun cannot overwrite or silently resume a completed screen.
     fs::create_dir(&out).context("output must be a NEW directory")?;
@@ -1177,13 +1194,30 @@ fn main() -> Result<()> {
         out.join("quiet_compare.frozen"),
         fs::metadata(executable_path)?.permissions(),
     )?;
+    // The cohort's own manifest, copied byte for byte. This is the provenance record: it is the
+    // source's exact bytes, it checksums to the same digest, and it carries the preparation
+    // telemetry unaltered — none of which survives a `Value` that was parsed and written again.
+    write_new(&out.join("cohort-manifest.json"), &cohort_bytes)?;
     json_new(
         &out.join("manifest.json"),
         &json!({
             "kind": "four-arm-ordinary-quiet-comparison",
             "build": BUILD, "executable_sha256": sha256(&executable)?,
-            "cohort": cohort,
-            "cohort_source": cohort_dir,
+            "cohort_manifest": {
+                "source": cohort_dir,
+                "copy": "cohort-manifest.json",
+                "sha256": sha256(&cohort_bytes)?,
+                "bytes": cohort_bytes.len(),
+                "basis": "the cohort's manifest as it is on disk, copied rather than re-encoded. serde_json without float_roundtrip can parse a decimal one ULP away from its correctly rounded value, so a re-serialized copy is a different number and no exact checker can accept it as the source",
+            },
+            "cohort_summary": {
+                "kind": cohort["kind"], "complete": cohort["complete"],
+                "opening_tick": cohort["opening_tick"],
+                "prescribed_seeds": cohort["prescribed_seeds"],
+                "runner_sha256": cohort["runner_sha256"],
+                "seeds": openings.iter().map(|o| o.source.clone()).collect::<Vec<_>>(),
+                "basis": "the exact, integer and string provenance every check here uses. The float-bearing preparation telemetry is deliberately not reproduced: read cohort-manifest.json for it",
+            },
             "horizon": args.horizon, "ticks": planned, "sample_every": args.sample_every,
             "arms": ARMS.map(|(n, _, _)| n),
             "factors": {
@@ -1489,10 +1523,30 @@ mod tests {
             eprintln!("skipping: the prescribed cohort is not present in this checkout");
             return;
         }
-        let (manifest, openings) = load_cohort(&real).expect("the prescribed cohort must load");
+        let (raw, manifest, openings) = load_cohort(&real).expect("the prescribed cohort must load");
         assert_eq!(openings.len(), 12);
         assert_eq!(manifest["opening_tick"], 144_000);
         assert!(openings.iter().enumerate().all(|(i, o)| o.state.config.seed == i as u64 + 1));
+        // The bytes come back unaltered, and the copy a run writes is those bytes.
+        assert_eq!(raw, fs::read(real.join("manifest.json")).unwrap());
+        assert_ne!(
+            raw,
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+            "a re-serialized manifest is not the source's bytes; the copy must not be one"
+        );
+        // And no opening row carries a decimal written again from a parsed one.
+        for opening in &openings {
+            assert!(
+                opening.source["telemetry"].is_string(),
+                "an opening row must point at the copied manifest for its telemetry"
+            );
+            for (key, value) in opening.source.as_object().expect("a row") {
+                assert!(
+                    !value.is_f64(),
+                    "the retained provenance field {key} is a decimal written from a parse"
+                );
+            }
+        }
 
         let dir = temp("cohort");
         let rows: Value =
@@ -1728,6 +1782,40 @@ mod tests {
             "the core re-derives the carried underlying mode every held tick"
         );
         assert_eq!(shadows[2].2, None, "and so this particular damage leaves no trace to step on");
+    }
+
+    /// **The reason the cohort manifest is copied byte for byte rather than re-serialized.**
+    ///
+    /// `serde_json` without its `float_roundtrip` feature parses decimals with a fast algorithm
+    /// that may land one ULP from the correctly rounded value. Re-emitting such a `Value` writes
+    /// a *different number* — not a different spelling of the same one — so a record built that
+    /// way silently disagrees with its own source, and every exact checker is right to refuse it.
+    ///
+    /// These are the literals the first end-to-end reduction of the ten-minute screen tripped on,
+    /// from `captures/hunter-openings-2026-09-13/manifest.json`.
+    #[test]
+    fn serde_json_can_move_a_cohort_decimal_by_one_ulp() {
+        let mut moved = 0;
+        for text in ["212.54356731997558", "0.9785584621020161", "60.830572942452996"] {
+            // Rust's own parser is correctly rounded; this is the value in the source bytes.
+            let exact: f64 = text.parse().expect("a decimal");
+            let through_json: f64 = serde_json::from_str(text).expect("a JSON number");
+            let drift = through_json.to_bits() as i64 - exact.to_bits() as i64;
+            assert!(drift.abs() <= 1, "{text}: {drift} ULP is more than the known fast path");
+            if drift != 0 {
+                moved += 1;
+                assert_ne!(
+                    serde_json::to_string(&json!(through_json)).unwrap(),
+                    text,
+                    "{text}: a moved value must also read back differently"
+                );
+            }
+        }
+        assert!(
+            moved > 0,
+            "the installed serde_json no longer moves these decimals; the byte-for-byte cohort \
+             copy stays either way, but this record of why should be updated"
+        );
     }
 
     /// The output directory is exclusive and every file inside it is written once: a rerun into a
