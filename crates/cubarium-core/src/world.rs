@@ -1640,6 +1640,33 @@ impl World {
         std::mem::take(&mut self.events)
     }
 
+    /// Attach a fresh [`devflow::DevFlowLedger`], opened at the current tick. Absent by
+    /// default and never attached by the world itself: only a diagnostic asks for one.
+    ///
+    /// The ledger is write-only from the tick's point of view — no branch, draw, clamp or
+    /// state transition reads it — so enabling it must not move a single bit of
+    /// [`World::state`]. That is an assertion, not a comment: the diagnostic runs the same
+    /// world with and without the ledger and compares the closing bytes, the event stream
+    /// and every tick's [`TickCounters`].
+    ///
+    /// Calling this twice discards the earlier ledger; the world holds at most one.
+    pub fn enable_dev_flow_ledger(&mut self) {
+        self.devflow = Some(Box::new(devflow::DevFlowLedger::new(self.state.tick)));
+    }
+
+    /// The attached ledger, or `None` when none was asked for. Read-only: the ledger's
+    /// [`devflow::DevFlowLedger::finalize`] needs ownership, so a consumer that wants the
+    /// derived means takes it with [`World::take_dev_flow_ledger`].
+    pub fn dev_flow(&self) -> Option<&devflow::DevFlowLedger> {
+        self.devflow.as_deref()
+    }
+
+    /// Detach the ledger and hand it over, leaving the world without one. Recording stops;
+    /// the world's behaviour is unchanged either way.
+    pub fn take_dev_flow_ledger(&mut self) -> Option<Box<devflow::DevFlowLedger>> {
+        self.devflow.take()
+    }
+
     /// Every cell's material fields plus its live organism count, for the observer's
     /// field dump. Cells are in `CellId` index order, 1,280 entries each.
     pub fn field_dump(&self) -> FieldDump {
