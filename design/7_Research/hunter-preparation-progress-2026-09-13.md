@@ -37,9 +37,9 @@ and initial archive provenance/completion guards. Node syntax check passes.
 The local Node26 `--test` invocation only displayed a file-level result, so the
 direct command above was also run and explicitly reported all six named tests.
 
-## Active jobs
+## Cohort preparation completed
 
-Preparation root exec67729:
+Preparation root exec67729 completed with exit0:
 
 ```text
 node scripts/prepare-hunter-worlds.mjs
@@ -51,9 +51,25 @@ Runner SHA256 `725305bc6bf8be924e5e46d5663b34bd6396855861af2933f671fb4ced421d0f`
 core `b47eacc`, host build `0.1.0+1d7b386`. This active invocation began before the
 initial-archive helper was added, so after it exits successfully root must run
 `node scripts/prepare-hunter-worlds.mjs --initials captures/hunter-openings-2026-09-13`.
-The manifest is authoritative for completed seeds; this note is not completion.
-First five endpoints were101/88/87/99/90organisms; all are retained, including
-seeds2/4 with zero skimmers. No founder ancestry map is claimed for these openings.
+The follow-up initial archive command also completed with exit0. Root reread
+all24aged/initial snapshots, independently checked schema/header/CRC/SHA256/full
+payload hashes, and matched every record to its manifest. Both manifests retain
+the frozen executable identity. All12aged populations survive at this endpoint,
+with78–101organisms; eight have already lost skimmers. No seed was replaced and
+no founder ancestry map is claimed for these aged openings.
+
+| Population stratum | Seeds in rank order | Opening populations |
+| --- | --- | --- |
+| Low | 11,10,3,2 | 78,86,87,88 |
+| Middle | 5,6,12,8 | 90,90,93,95 |
+| High | 9,4,1,7 | 97,99,101,101 |
+
+These are reporting strata, not a selection/filter. Exact form counts and all
+endpoint telemetry are in `captures/hunter-openings-2026-09-13/manifest.json`;
+initial seed identities are in `initial-manifest.json` beside it. The six-arm
+hunter harness and predator outcomes are not implemented/measured by preparation.
+
+## Delegated implementation still running
 
 Native Opus5 high core implementation: root exec9109, resumed session
 `f1579c62-fe40-4506-b0c7-94f064f5ab92`, output

@@ -190,3 +190,38 @@ Lanternjaw renderer/study and authored plant package, not finished merely becaus
 source files or tests now exist. Preserve its owned files and poll before restart.
 
 No new live care, state replacement or deployment was performed in this slice.
+
+## Subsequent completion and next experiment
+
+Corrected repeated-care12h jobs41258/74507 are now terminal exit0. All four arms
+pass the original fixed limits with corrected energy peaks below3.6e-10 and
+independent peaks below6.5e-10. Exact old/new comparison preserves every receipt,
+care ledger, raw flow/residual, census, demographic/ancestry/extinction metric and
+final telemetry except the expected schema9 full hash. The ecology hashes remain
+identical. Full evidence: `corrected-care-twelve-hour-results-2026-09-13.md`.
+Occasional-care followups now running: seed1exec98612 and seed2exec77787, same
+frozen binary,864000ticks, care-every12000, audit-window200. Poll before claims.
+
+Root prepared ALL12default prey seeds at exactly2h with a frozen pre-hunterv9
+runner and archived all12initial tick-zero worlds separately. Preparation67729
+is terminal exit0; all24snapshot identities validated. Populations78–101, eight
+seed endpoints without skimmers. No filtering or resampling. Exact paths, strata,
+tool tests and proof are in `hunter-preparation-progress-2026-09-13.md`.
+
+The next core package is actually delegated to Opus5high: exec9109, resumed
+native sessionf1579c62-fe40-4506-b0c7-94f064f5ab92, output
+`/tmp/cubarium-opus-hunter-core-2026-09-13.jsonl`. It implements opt-in paid
+Lanternjaw hunting/escape/digestion/singleoffspring in schema10, off by default.
+Genuine schema9+600tick fixtures were frozen/committed BEFORE it began (`1f0fc3a`).
+Root owns the pending six-arm harness, Fable still owns productionart integration.
+Astra contracts `5ad6bbc`/`2c8e90d` define experiment/recovery accounting and flag
+the6pxcontact placeholder as visibly wrong: actual grasp is~13.28pxforward.
+This must be resolved with sensing/phase/scale, not hidden by shortened artwork.
+
+Fable's side-family growth/topreed packages are committed5d7ea69/b8b8a11. Its
+Lanternjaw package/progress note is still being finalized; in-progresscore schema10
+edits can temporarily block whole-workspace builds. Do not assume uncommitted
+files are its final validated delivery or overwrite them. Root inspected actual
+`captures/lanternjaw/gallery.png` and `grounds.png`: recognizable chosenbody,
+clear articulated progression and alpha composition over distinct backgrounds.
+Those are art studies, not captures of biological hunting or physicalcube tests.
