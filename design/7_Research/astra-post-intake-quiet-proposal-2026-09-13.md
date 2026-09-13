@@ -127,9 +127,11 @@ Before any intervention, report this one rule's hypothetical opportunities on fi
 no-care and fixed-Feed histories: eligible adult exposure, normalized dose/episode
 durations, actual underlying modes, co-timed reserves/energy, all refusal reasons,
 predicted held duration, cooldown blocks, burst/overlap, per-form and per-seed zeros.
-Shadow output is an opportunity upper bound: policy-induced missed food/turns alter
-later credit and stocks, so it is not a predicted candidate trajectory or proof of
-successful repeated pauses. Keep full IDs, terminal-death timing and censoring.
+Shadow output is a non-intervening opportunity estimate, not a proven numerical
+upper bound: policy-induced missed food/turns and changed expenditure can alter
+later credit and stocks in either direction. It is not a predicted candidate
+trajectory or proof of successful repeated pauses. Keep full IDs, terminal-death
+timing and censoring.
 
 Proposed screen for whether implementation is worth discussing: materially exceed
 the birth mechanism's~.03% living/2.8% world-time coverage—e.g. ≥.2% eligible-adult

@@ -154,11 +154,13 @@ preceded the current vine update:
 1102 workspace tests passed; the same world resumed at tick633208, and the shared
 viewer measured59.9 distinct fps.
 
-Current live build **`0.1.0+1267e3b`** adds the reviewed near-corner crown-growth
-continuity fix on top of vine wind, with unchanged atlas pixels and ecology.
-It resumed the same world at tick775478 after1126 workspace tests passed;
-the existing care journal was preserved. Copied and live viewers each measured
-59.9 distinct fps. See the [crown rollout](design/7_Research/crown-live-update-2026-09-13.md);
+Current live build **`0.1.0+6d7a831`** adds reviewed calm sail fins on top of
+crown continuity and vine wind. Feeding fins stay braced around the existing chew;
+resting fins make one brief adjustment instead of continuous tip chatter.
+It resumed the same world at tick801935 after1130 workspace tests passed;
+the existing care journal and ecology were preserved. Copied and live viewers
+each measured59.9 distinct fps. See the [calm-fin rollout](design/7_Research/sail-calm-live-update-2026-09-13.md)
+and [earlier crown rollout](design/7_Research/crown-live-update-2026-09-13.md);
 the [earlier vine rollout](design/7_Research/vine-live-update-2026-09-13.md) retains its original measurements.
 Experimental quiet and hunter changes remain isolated.
 

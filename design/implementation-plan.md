@@ -19,19 +19,20 @@ in the current-status paragraph and the linked research reports below.
 
 ## Current release status
 
-Updated2026-09-13. Live build **`0.1.0+1267e3b`** resumes the same persistent world
+Updated2026-09-13. Live build **`0.1.0+6d7a831`** resumes the same persistent world
 and drives the cube and shared viewer on7393. It includes independent care doses,
 all seven plants' authored growth clips, spiretree wind, and actual-intake meal
-continuity, plus the stable sail swimming body, vine-covered spire sway and
-near-corner crown-growth continuity;1126 workspace tests and copied/live59.9fps
-measurements are recorded in the [rollout](7_Research/crown-live-update-2026-09-13.md). Neither hunters nor modified
+continuity, plus the stable sail swimming body, calm rest/feed fins, vine-covered
+spire sway and near-corner crown-growth continuity;1130 workspace tests and
+copied/live59.9fps measurements are recorded in the
+[rollout](7_Research/sail-calm-live-update-2026-09-13.md). Neither hunters nor modified
 ambient support nor a new rest policy is live.
 
 | Work | Verified state | Next gate |
 | --- | --- | --- |
-| Residual animation flicker | Stable sail body, intact-atlas vine wind and the [per-cap crown corner fix](7_Research/crown-live-update-2026-09-13.md) are deployed | [Calm sail study](7_Research/astra-sail-calm-study-2026-09-13.md) recommends crisp brace fins for independent Fable review; occasional rest gesture is stronger, not uniformly smoother. Settle rejected. Constrained glasscane sway remains; blanket fin coverage was not selected |
+| Residual animation flicker | Stable sail body, intact-atlas vine wind, per-cap crown corner fix and [calm sail fins](7_Research/sail-calm-live-update-2026-09-13.md) are deployed | Retain point-baked crispness; new rest gesture is stronger, not uniformly smoother, and physical-panel readability remains unverified. Settle rejected. Constrained glasscane sway remains; blanket fin coverage was not selected |
 | Local care responses | [108-case screen](7_Research/astra-care-response-results-2026-09-13.md): Feed usually increases local feeding, rain mixed, Clean usually reduces feeding; meal continuity deployed | [Rain temporal/drizzle/restart review](7_Research/fable-rain-response-playback-review-2026-09-13.md) prefers slower v3 without glowcap. [Root native held-frame review](7_Research/root-visual-and-ecology-disposition-2026-09-13.md) keeps it experimental: subtle readability, not a shipped flourish |
-| Quiet habits | [Full ten-minute interpretation](7_Research/astra-quiet-ten-minute-biological-review-2026-09-13.md): genuine but sparse recovery, modestly adverse no-care population/reproduction tendency; identity-aware reducer retains both ancestry directions | Unchanged all12×4-arm two-hour collection exited0 with all seeds, now undergoing reduction/biological interpretation; not a passed biological gate, no automatic24/72h. Separate calm-fin study preserves actual behavior. Original42faaa2 provenance failure retained. Off stays default; schema13 not deployed |
+| Quiet habits | [Complete two-hour interpretation](7_Research/astra-quiet-two-hour-biological-review-2026-09-13.md): all48 artifact gates pass; genuine recovery remains only0.03% of living time. No-care population-time−0.33%, pooled birth deficit does not persist; both ancestry directions and mixed seed outcomes retained | Close this candidate as functional but too sparse for everyday quiet, not proven ecological collapse. Off unchanged; no24/72h, timer expansion or schema13 deployment. [Separate post-intake proposal](7_Research/astra-post-intake-quiet-proposal-2026-09-13.md) needs joint intake/stock opportunity evidence; not implemented. Calm fin art does not substitute for biology |
 | Ambient support | [Complete two-hour results](7_Research/astra-ambient-support-results-2026-09-13.md): all72 arms pass recorded audits;90% no-care loses skimmers in two additional seeds | Unchanged frozen24h collection running; [explicit horizon reducer](7_Research/ambient-explicit-horizon-reducer-2026-09-13.md) plus independent review has19 passing tests and byte-identical two-hour output. Live default unchanged; manual dose separate |
 | Rare Lanternjaw lineage | [Size-aware gate seed-1 pilot](7_Research/hunter-size-gate-handoff-2026-09-13.md) produces paid juvenile growth to S=0.8485 but no adult descendants; both candidate lineages die while reference founders survive. Corrected mutation ledger and reference parity verified | [Root pre-cohort review](7_Research/root-size-gate-cohort-launch-2026-09-13.md) closes observer defects; unchanged12-seed ×6-arm ×2-recipe two-hour comparison running. Preserve adverse pilot; no hunter24/72h or live introduction yet |
 | Fragile fauna/diversity | [Early-life census](7_Research/fauna-development-followup-2026-09-13.md) locates eight skimmer losses after initial population growth, about71–120 simulated minutes | Isolated flow diagnostic foreground recovery underway after verified background-worker kill; smoke/baseline identity is not full pilot identity. Finish and independently review only seed1/2 pilots first; remaining ten histories still need growth/intake/allocation evidence before tuning |
