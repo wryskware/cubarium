@@ -27,6 +27,7 @@ use crate::hunter::{
 use crate::ids::{OrganismId, Slots};
 use crate::organism::{DeathCause, Escrow, Mode, Organism, Origin};
 use crate::pairs::{Body, NeighborLists};
+use crate::post_intake::{PostIntakeShadow, ShadowEvent};
 use crate::quiet::{QuietEvent, QuietOverride, QuietPause, QuietReason, QuietState};
 use crate::rng::{Counter, Stream, draw, normal, unit};
 use crate::telemetry::Telemetry;
@@ -466,6 +467,12 @@ pub struct World {
     /// [`ChargingDiagnostics`] documents: never checkpointed, never hashed, never read by the
     /// tick.
     charging: ChargingDiagnostics,
+    /// The opt-in, non-intervening post-intake opportunity shadow (`crate::post_intake`). `None`
+    /// in every ordinary world, including every world this repository ships: a world that never
+    /// enables it executes the pre-shadow tick operation for operation. Transient in exactly the
+    /// sense the other observers are — never checkpointed, never hashed, never read by the tick,
+    /// never consulted by a decision, a stock, a draw, a transport or a mode.
+    post_intake: Option<PostIntakeShadow>,
     initial_material: f64,
 }
 
@@ -791,6 +798,7 @@ impl World {
             quiet_events: Vec::new(),
             counters: TickCounters::default(),
             charging: ChargingDiagnostics::default(),
+            post_intake: None,
             initial_material,
         };
         // Make the derived light/moisture readable before the first tick advances weather.
@@ -853,6 +861,7 @@ impl World {
                 quiet_events,
                 counters,
                 charging,
+                post_intake,
                 initial_material: _,
             } = &mut *self;
             let WorldState {
@@ -1644,6 +1653,10 @@ impl World {
                     continue;
                 };
                 let mut eaten = 0.0;
+                // What this settlement really credits to the reserve, summed as the transfers are
+                // applied. Not a reserve difference and not a `fed` flag: the actual assimilated
+                // material, per channel, at the site that moves it (`crate::post_intake`).
+                let mut assimilated = 0.0;
                 if f > 0.0 {
                     // Frugivory: F -> reserve (η_m) and F -> D (the rest, energy-free). Fruit
                     // carries `e_f` per unit, richer than leaf.
@@ -1653,6 +1666,7 @@ impl World {
                         fields.f[cell] -= q;
                         fields.d[cell] += q - to_reserve;
                         o.reserve += to_reserve;
+                        assimilated += to_reserve;
                         let spare = (e_f - e_r * eta_m) * q;
                         let room = (o.phenotype.energy_max - o.energy).max(0.0);
                         let gained = (eta_e * spare).clamp(0.0, room);
@@ -1669,6 +1683,7 @@ impl World {
                         fields.p[cell] -= q;
                         fields.d[cell] += q - to_reserve;
                         o.reserve += to_reserve;
+                        assimilated += to_reserve;
                         // The food carried `e_p · q`; `e_r · η_m · q` of it is now stored in
                         // the reserve, and `η_e` of the difference is usable energy.
                         let spare = (e_p - e_r * eta_m) * q;
@@ -1693,6 +1708,7 @@ impl World {
                         let to_reserve = eta * q;
                         fields.d[cell] -= to_reserve;
                         o.reserve += to_reserve;
+                        assimilated += to_reserve;
                         let carried = (rho * q).min(fields.de[cell]);
                         fields.de[cell] -= carried;
                         let spare = carried - e_r * to_reserve;
@@ -1704,6 +1720,21 @@ impl World {
                     }
                 }
                 o.fed_this_tick = eaten > 0.0;
+                // The shadow's one settlement hook: read-only, after the transfers, and only in a
+                // world that explicitly enabled it. It writes nothing the step reads.
+                if let Some(shadow) = post_intake.as_mut()
+                    && assimilated > 0.0
+                {
+                    shadow.observe_settlement(
+                        id,
+                        o,
+                        org_cfg,
+                        cfg.mechanisms.grazing,
+                        cfg.mechanisms.scavenging,
+                        now + 1,
+                        assimilated,
+                    );
+                }
             }
 
             // 7b. Handling and digestion. A carried carcass is homogeneous: a portion `q`
@@ -1962,6 +1993,25 @@ impl World {
                 } else {
                     None
                 };
+                // The shadow's one boundary hook, deliberately the **last** thing this organism's
+                // physiology iteration does: every existing oxidation, growth, gestation, funding
+                // and death check has already run and is already booked, so nothing here can
+                // reorder them or delay a child this tick otherwise paid for. Read-only
+                // (`crate::post_intake`).
+                if let Some(shadow) = post_intake.as_mut() {
+                    shadow.observe_boundary(
+                        *id,
+                        o,
+                        org_cfg,
+                        cfg.mechanisms.grazing,
+                        cfg.mechanisms.scavenging,
+                        now + 1,
+                        dt,
+                        d.underlying_mode,
+                        cause.is_some(),
+                        member.is_some(),
+                    );
+                }
                 if let Some(cause) = cause {
                     deaths.push((*id, cause));
                     // A parent that dies this tick miscarries: the escrow goes to detritus.
@@ -2078,6 +2128,15 @@ impl World {
                     }
                 }
                 quiet.pauses = kept;
+            }
+
+            // Every removal path has now happened, so the shadow's per-ID map can be reconciled
+            // against the arena: a gone organism's entry is dropped and its open hypothetical
+            // window is closed with the baseline's own reason, and an entry tracking nothing at
+            // all is removed. Births below cannot inherit a slot's old entry: the key carries the
+            // generation (`crate::post_intake`).
+            if let Some(shadow) = post_intake.as_mut() {
+                shadow.prune_removed(organisms, now + 1);
             }
 
             for parent_id in &births {
@@ -2767,6 +2826,51 @@ impl World {
     /// The opt-in ordinary quiet extension: policy and any held pauses (`crate::quiet`).
     pub fn quiet(&self) -> &QuietState {
         &self.state.quiet
+    }
+
+    /// Turn on the transient post-intake opportunity shadow (`crate::post_intake`).
+    ///
+    /// Refused in a hunter world and in a world running an enabled quiet policy: this first
+    /// measurement's scope is ordinary, hunter-free, policy-Off worlds, and a shadow that silently
+    /// measured something else would be worse than no shadow. Refused twice over, so a caller
+    /// cannot restart it mid-run and present two partial histories as one.
+    ///
+    /// Enabling changes no config value, no stock, no draw and no persisted byte: the world takes
+    /// the identical trajectory either way, which is a property the harness tests rather than
+    /// assumes.
+    pub fn enable_post_intake_shadow(&mut self) -> Result<(), String> {
+        if self.post_intake.is_some() {
+            return Err("the post-intake shadow is already enabled".into());
+        }
+        if self.state.hunters != HunterState::default() {
+            return Err("the post-intake shadow refuses a hunter world".into());
+        }
+        if self.state.quiet.policy.enabled() {
+            return Err("the post-intake shadow refuses an enabled quiet policy".into());
+        }
+        let cap = self.state.config.capacity.max_organisms as usize;
+        self.post_intake = Some(PostIntakeShadow::new(cap));
+        Ok(())
+    }
+
+    /// The shadow's bounded state, when one is running.
+    pub fn post_intake(&self) -> Option<&PostIntakeShadow> {
+        self.post_intake.as_ref()
+    }
+
+    /// Post-intake opportunity records since the observer last drained them. Transient in exactly
+    /// the sense the life, hunter and quiet records are.
+    pub fn drain_post_intake_events(&mut self) -> Vec<ShadowEvent> {
+        self.post_intake.as_mut().map(PostIntakeShadow::drain_events).unwrap_or_default()
+    }
+
+    /// Close the measurement: every still-open hypothetical window is censored where it stands.
+    /// A censored interval is never reported as a release.
+    pub fn censor_post_intake_shadow(&mut self) {
+        let tick = self.state.tick;
+        if let Some(shadow) = self.post_intake.as_mut() {
+            shadow.censor(tick);
+        }
     }
 
     /// "Scatter food": charged organic crumbs into `D` and `De`. Per cell `D += m·w_c` and

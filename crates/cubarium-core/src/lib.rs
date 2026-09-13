@@ -20,6 +20,7 @@
 //! - [`controller`]: observation → decision (pure).
 //! - [`events`]: transient birth/death records for the observer.
 //! - [`pairs`]: chord-filtered all-pairs neighbor lists.
+//! - [`post_intake`]: the transient, non-intervening post-intake opportunity shadow (off by default).
 //! - [`world`]: the tick, invariants, births/deaths, telemetry.
 //! - [`snapshot`]: header + postcard encoding, validation.
 //! - [`view`]: immutable render view.
@@ -38,6 +39,7 @@ pub mod hunter;
 pub mod ids;
 pub mod organism;
 pub mod pairs;
+pub mod post_intake;
 pub mod quiet;
 pub mod rng;
 pub mod snapshot;
