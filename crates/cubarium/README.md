@@ -160,8 +160,9 @@ cubarium run [--config world.toml] [--state state/] [--sink preview|shim|png|web
 `--mirror-web` is one world watched twice, not two worlds: the loop still steps
 one `World`, observes it once, draws once and calls `Canvas::encode` once per
 rendered frame, and a fan-out sink hands that one `Frame` to the chosen sink
-*and* to the viewer, so the cube and the browser can never show different
-pixels. It is valid with `--sink shim`, `preview` and `png`; it is refused with
+*and* to the viewer. Each submitted frame has identical pixels in both paths;
+transport and display timing can still show different instants. It is valid with
+`--sink shim`, `preview` and `png`; it is refused with
 `--sink none` (nothing is rendered to mirror) and with `--sink web` (already the
 viewer). Without the flag every byte of the run is unchanged. The mirrored
 viewer's `/status` names the world's tick and the host behind it (pid, state

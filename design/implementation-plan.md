@@ -72,6 +72,19 @@ long-run properties are unmeasured for this world and M3's experiments must
 be rerun against it. Genome and config versions are 2 and 7; older
 snapshots are refused and start fresh.
 
+Status 2026-09-12, subsequent animation/care iteration: two presentation passes
+add interpolated motion, quieter accents, shared breeze and a lanternstalk growth
+pilot; broader authored growth remains open. The same owning runner now mirrors
+its frames to the web viewer, with optional feed/rain/litter-cleanup. Schema 8
+explicitly migrates schema 7; zero-care continuation matches the old executable's
+fixture byte-for-byte. The host adds ownership locking, guarded resume, bounded
+journaling and held-boundary crash replay. Final validation: 774 tests passed,
+11 ignored, plus actual browser target/button checks on a copied world. The
+[rollout record](7_Research/care-browser-rollout-review-2026-09-12.md) records
+the live checkpoint recovery and limitations; this is not proof of long-run
+ecological balance or complete M5 durability under real power loss. Fable's
+Lanternjaw is Wrysk's preferred megafauna art study, not yet a live predator.
+
 ## M1 — prove the surface and presentation path
 
 Create the minimal Rust workspace, pin/reuse `cube-proto` from the existing shim,

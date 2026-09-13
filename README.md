@@ -45,10 +45,11 @@ using `--sink shim --mirror-web`. It fans out one encoded frame, not a second
 simulation; `/status` identifies the process, state directory and world tick.
 See the [verified shared-viewer handover](design/7_Research/shared-viewer-rollout-2026-09-12.md).
 
-Optional feed/rain/litter-cleanup has a committed core and host API with explicit
-source/export accounting, schema-7 migration and journaled input. The visible
-care panel and final crash-recovery checks are still in progress; care has not
-yet been deployed to the live cube. See the
+Optional feed/rain/litter-cleanup is implemented and enabled on the shared live
+viewer at `http://127.0.0.1:7393/`. Open **Care (optional)**, select a location on
+the net, and use Feed, Rain or Clean. Inputs have explicit source/export
+accounting, schema-7 migration and a bounded durable journal. The final build
+passed 774 tests and real-browser checks on a copied world before rollout. See the
 [copied-world browser checks](design/7_Research/care-browser-rollout-review-2026-09-12.md)
 and [short matched numerical audit](design/7_Research/care-matched-audit-2026-09-12.md).
 Zero input preserves autonomous ecology; cleanup removes litter, not a new toxin
