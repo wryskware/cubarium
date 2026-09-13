@@ -55,6 +55,11 @@ and [short matched numerical audit](design/7_Research/care-matched-audit-2026-09
 Zero input preserves autonomous ecology; cleanup removes litter, not a new toxin
 pool, and no hands-on autonomy preset has been tuned.
 
+New source-only [care flourishes](design/7_Research/care-flourish-integration-2026-09-13.md)
+add smooth local feed crumbs and proportional cleanup flecks to the same shared
+frame. Durability/replay and native captures are checked; these visual changes
+are not deployed to the live cube yet. Nearby biological responses remain open.
+
 Wrysk prefers Fable's **Lanternjaw** megafauna body. The
 [comparison studio](art/studies/megafauna/README.md) retains Veilwarden as an
 alternate; neither is a live predator yet. The

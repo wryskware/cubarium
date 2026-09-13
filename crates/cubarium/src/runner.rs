@@ -36,6 +36,9 @@ use crate::present::Presenter;
 use crate::sink::{FanOutSink, FrameSink, PngSink, PreviewSink, ShimSink, WebSink, web};
 use crate::state::{self, Checkpointer};
 
+#[path = "care_effects.rs"]
+mod care_effects;
+
 /// What one `run` produced. Returned so tests can drive the host through the library
 /// instead of a subprocess.
 #[derive(Clone, Debug)]
@@ -593,6 +596,8 @@ fn applied_json(outcome: &CareOutcome) -> serde_json::Value {
 struct CareRuntime {
     service: care::CareService,
     worker: care::JournalWorker,
+    /// Receipt-driven presentation only; never persisted or consulted by ecology.
+    effects: care_effects::CareEffects,
     /// The next sequence number to allocate: after the journal's maximum, not after the
     /// snapshot's cursor. A record in the journal has reserved its sequence already.
     next_seq: u64,
@@ -764,6 +769,9 @@ impl CareRuntime {
 
     /// Hand a receipt to the waiting client and to the journal's diagnostic record.
     fn record(&mut self, command: &care::PlannedCommand, receipt: &CareReceipt) {
+        // Both fresh durable application and boundary-correct journal replay enter
+        // here. Snapshot history is not replayed, so old inputs do not retrigger.
+        self.effects.observe(&to_core(command), receipt);
         let reason = receipt.outcome.reason().unwrap_or_default().to_string();
         let applied = applied_json(&receipt.outcome);
         self.service.record_outcome(
@@ -847,6 +855,7 @@ fn open_care(
     Ok(CareRuntime {
         service,
         worker,
+        effects: care_effects::CareEffects::default(),
         next_seq,
         replay: plan.into(),
         inflight: Vec::new(),
@@ -1175,6 +1184,12 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
                                 false => f,
                             };
                             presenter.draw(v, f, &mut canvas);
+                            if let Some(rt) = care.as_mut() {
+                                // A brief local receipt flourish, not a persistent food
+                                // inventory or a second world. Use the same held-time
+                                // fraction as the bodies and encode it for every sink.
+                                rt.effects.draw(v.tick, f, &mut canvas);
+                            }
                             // Exactly one encode per rendered frame; the identical bytes
                             // reach whichever sink is active.
                             canvas.encode(&mut frame);
@@ -1268,6 +1283,193 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
 mod tests {
     use super::*;
     use clap::Parser;
+
+    /// Exercise the runner's receipt hook, not just the effect renderer. These
+    /// scratch journals have explicit private hooks, independent of process-wide
+    /// failure injection used by other tests.
+    #[test]
+    fn care_flourishes_follow_durable_application_and_boundary_replay_only() {
+        for route in ["durable", "replay", "uncertain"] {
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!(
+                "cubarium-receipt-visual-{}-{nonce}-{route}",
+                std::process::id()
+            ));
+            std::fs::create_dir(&dir).unwrap();
+            let hooks = care::JournalHooks::default();
+            if route == "uncertain" {
+                hooks.fail_after_sync.store(1, Ordering::Relaxed);
+            }
+            let journal =
+                care::Journal::open_with_hooks(&dir, "visual-test", "test", hooks).unwrap();
+            let service = care::CareService::new("visual-test".to_string(), journal.status());
+            let mut rt = CareRuntime {
+                service,
+                worker: care::JournalWorker::spawn(journal),
+                effects: care_effects::CareEffects::default(),
+                next_seq: 2,
+                replay: Default::default(),
+                inflight: Vec::new(),
+                holding_at: None,
+                failed: false,
+                intake_allowed: false,
+                released: false,
+            };
+            let mut world = World::new(WorldConfig::default()).unwrap();
+            world.step();
+            let opening_hash = cubarium_core::snapshot::state_hash(&world.state);
+            let command = care::PlannedCommand {
+                seq: 1,
+                apply_after_tick: world.tick(),
+                kind: care::CareKind::Feed,
+                target: care::CareTarget {
+                    face: 0,
+                    u: 32,
+                    v: 32,
+                },
+                client: "visual-test".to_string(),
+                request: 1,
+            };
+            let sample = |rt: &mut CareRuntime| {
+                let mut canvas = Canvas::new();
+                rt.effects
+                    .draw(command.apply_after_tick + 11, 0.5, &mut canvas);
+                let mut frame = Frame::black();
+                canvas.encode(&mut frame);
+                frame
+            };
+            assert!(sample(&mut rt).as_bytes().iter().all(|&b| b == 0));
+            if route == "replay" {
+                rt.replay.push_back(command.clone());
+                assert!(rt.apply_replay(&mut world).unwrap());
+            } else {
+                rt.holding_at = Some(world.tick());
+                rt.inflight.push(command.clone());
+                assert!(
+                    rt.worker
+                        .submit(care::JournalJob::Accept(vec![command.clone()]))
+                );
+                // Durable bytes alone do not paint: only the runner consuming a
+                // successful acknowledgement may apply the command and its visual.
+                assert!(sample(&mut rt).as_bytes().iter().all(|&b| b == 0));
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while rt.holding_at.is_some() && !rt.failed {
+                    assert!(
+                        Instant::now() < deadline,
+                        "journal acknowledgement timed out"
+                    );
+                    rt.drain_acks(&mut world).unwrap();
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            }
+            let after_application = cubarium_core::snapshot::state_hash(&world.state);
+            let frame = sample(&mut rt);
+            if route == "uncertain" {
+                assert!(rt.failed);
+                assert_eq!(after_application, opening_hash);
+                assert!(frame.as_bytes().iter().all(|&b| b == 0));
+            } else {
+                assert_ne!(after_application, opening_hash);
+                assert!(frame.as_bytes().iter().any(|&b| b != 0));
+                assert_eq!(
+                    frame.as_bytes(),
+                    sample(&mut rt).as_bytes(),
+                    "held visual changed"
+                );
+            }
+            assert_eq!(
+                cubarium_core::snapshot::state_hash(&world.state),
+                after_application
+            );
+            rt.worker.shutdown().unwrap();
+            // Only this test's unique scratch journal is removed; no live state.
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+    }
+
+    /// Reproducible native-resolution review images, using real applied care and
+    /// the actual art presenter. No HTTP, live state or display transport.
+    #[test]
+    #[ignore = "writes isolated native-resolution care review captures"]
+    fn capture_care_flourishes_on_the_authored_world() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let pack = ArtPack::load(&root.join("assets/atelier")).unwrap();
+        let mut presenter = ArtPresenter::new(pack);
+        let mut effects = care_effects::CareEffects::default();
+        let mut world = World::new(WorldConfig::default()).unwrap();
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("cubarium-care-flourishes-{nonce}"));
+        std::fs::create_dir(&dir).unwrap();
+        let mut receipt_log = Vec::new();
+        for _ in 0..510 {
+            if world.tick() == 400 || world.tick() == 470 {
+                let command = CareCommand {
+                    seq: if world.tick() == 400 { 1 } else { 2 },
+                    apply_after_tick: world.tick(),
+                    kind: if world.tick() == 400 {
+                        CareKind::Feed
+                    } else {
+                        CareKind::Clean
+                    },
+                    target: CareTarget {
+                        face: 0,
+                        u: 32.0,
+                        v: 48.0,
+                    },
+                };
+                let receipt = world.apply_care(&command);
+                effects.observe(&command, &receipt);
+                receipt_log.push(serde_json::json!({
+                    "seq":receipt.seq,"tick":receipt.tick,"kind":command.kind.as_str(),
+                    "outcome":receipt.outcome.as_str(),"applied":applied_json(&receipt.outcome),
+                }));
+            }
+            world.step();
+            world.drain_events();
+            let view = world.render_view();
+            presenter.observe(&view);
+            if ![
+                401, 403, 407, 411, 419, 431, 447, 455, 471, 475, 483, 495, 507,
+            ]
+            .contains(&world.tick())
+            {
+                continue;
+            }
+            let hash = cubarium_core::snapshot::state_hash(&world.state);
+            let mut canvas = Canvas::new();
+            presenter.draw(&view, 0.5, &mut canvas);
+            for variant in ["base", "flourish"] {
+                if variant == "flourish" {
+                    effects.draw(view.tick, 0.5, &mut canvas);
+                }
+                let mut frame = Frame::black();
+                canvas.encode(&mut frame);
+                let mut rgb = Vec::new();
+                crate::net::net_rgb8(&frame, &mut rgb);
+                crate::sink::png::write_net_png(
+                    &dir.join(format!("{}-{variant}.png", world.tick())),
+                    &rgb,
+                )
+                .unwrap();
+            }
+            assert_eq!(cubarium_core::snapshot::state_hash(&world.state), hash);
+        }
+        std::fs::write(
+            dir.join("receipts.json"),
+            serde_json::to_vec_pretty(&receipt_log).unwrap(),
+        )
+        .unwrap();
+        eprintln!(
+            "care-flourish captures: {} (Front32,48; base and flourish share ecology)",
+            dir.display()
+        );
+    }
 
     #[test]
     fn the_viewer_note_prints_the_speed_without_trailing_zeros() {
