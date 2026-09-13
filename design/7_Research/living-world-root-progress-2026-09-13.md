@@ -59,6 +59,26 @@ Artifacts/frozen executables live in ignored
 the ancestry binary is `4772302c184510cfd9df2a6afcc715e9ce31a30581d65a564a356a3b8b3d55c6`.
 Do not treat empty JSON files from failed pre-report runs as completed reports.
 
+### Independent diagnostic now running
+
+Commit `0c0fd46` adds short-window counter resets (default 200 ticks), compensated
+light/heat and receipt sums, care-boundary checks and signed closing ledger
+differences. The original persisted-counter gate still fails the command when
+exceeded. Observer counts are aggregated across resets rather than silently
+reporting only the final window. Four tests pass, including equal ecological
+hashes across 1/60/200/420-tick observation windows.
+
+The frozen diagnostic `care_compare-windowed` SHA256 is
+`1c13f02d8f355ede833ddedbe7e452dd7de54dea8df9a602ab338aafdffd891d`.
+Two fresh seed-1, repeated-care, 12-hour comparisons are running with windows
+200 and 20: root exec handles 63946 and 25247, respectively. Outputs are
+`seed1-repeated-window200.json` and `seed1-repeated-window20.json` in the artifact
+directory. Poll their actual handles; a nonzero strict audit exit now still emits
+the full JSON report. Compare both final full state hashes and signed energy
+evidence before attributing the original error to rounding. Astra's independent
+method and additional narrowing steps are in
+`astra-long-run-energy-diagnostic-2026-09-13.md`.
+
 ## Actual browser cadence
 
 Added `scripts/viewer-cadence.mjs`: a read-only diagnostic connecting to an
