@@ -143,3 +143,10 @@ Root studio is served on7400, files art/studies/megafauna/{index.html,gallery.js
 root.js,root.md,README.md}; your fable.js will be loaded automatically on page reload.
 Root visually reviewed its candidate with isolated Chromium. No art changes to live
 world. Fable should commit only its own candidate files; root handles gallery.
+
+Root added the read-only example crates/cubarium/examples/inspect_snapshot.rs and
+preserved its schema7 executable in captures/checkpoints/pre-care/inspect-snapshot-v7.
+It verifies the current-run55200 snapshot (95 organisms) and can emit full JSON state
+for ecological projection comparison. This is root-owned; do not stage it in worker
+commits. Schema7 genuine bytes are available in captures/checkpoints/pre-care/
+world-55200.cubw for migration tests; preserve a fixture before changing the schema.
