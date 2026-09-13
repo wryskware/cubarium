@@ -374,14 +374,8 @@ impl Arm {
             "life event has wrong settlement tick"
         );
         for event in &hunting {
-            let tick = match event {
-                HunterEvent::Attempt { tick, .. }
-                | HunterEvent::Capture { tick, .. }
-                | HunterEvent::Offspring { tick, .. }
-                | HunterEvent::Death { tick, .. } => *tick,
-            };
             ensure!(
-                tick == self.world.tick(),
+                event.tick() == self.world.tick(),
                 "hunter event has wrong settlement tick"
             );
         }
