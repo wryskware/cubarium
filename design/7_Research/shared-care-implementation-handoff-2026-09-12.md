@@ -6,6 +6,23 @@ decision_refs: []
 
 # Shared-instance viewer, optional care, and megafauna candidates
 
+## Fable: reread this handoff before host sign-off
+
+Several owner/reviewer updates landed while the candidate worker was running.
+The following are all current, not just the newest core review: Wrysk prefers
+Lanternjaw (`f6fb4c6`); the uncertain-write abort protocol has unresolved holes
+(`fbb351b`, appendix in `astra-care-contract-review-2026-09-12.md`); the core
+allowance/shower findings are in `26850f4`. Please forward the abort appendix to
+the host worker now, and apply the simple hold/stop alternative or the complete
+validated abort protocol before calling the host package ready. The appendix
+also covers opening durable checkpoints and gating new input during replay.
+
+Root independently ran the current core suite (180 passed, 2 ignored) before
+the final care-specific test additions, and Chromium confirms both native
+64×64 candidate canvases and the preferred-direction labels load correctly.
+The selected body's proposed next rendering step is saved in
+`art/studies/megafauna/integration-notes.md`; it is not a live integration.
+
 ## Owner update: preferred megafauna direction
 
 Wrysk now says “i prefer the fable creature” (2026-09-12). Continue with
