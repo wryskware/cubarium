@@ -72,15 +72,6 @@ impl ProfileVariant {
                 | ProfileVariant::ReserveTargetsCharge80SizeGateV1
         )
     }
-
-    /// Whether this recipe runs the paid-charging policy, under whichever version carries it.
-    fn charges(self) -> bool {
-        matches!(
-            self,
-            ProfileVariant::ReserveTargetsCharge80V1
-                | ProfileVariant::ReserveTargetsCharge80SizeGateV1
-        )
-    }
 }
 
 fn profile_for(
@@ -1198,7 +1189,11 @@ mod tests {
             assert_eq!(size, expected, "arm {index}: a field other than `version` moved");
             // Both recipes charge; the size-gate version must not silently drop the policy.
             assert_eq!(size.oxidation_policy(), charge.oxidation_policy());
-            assert!(ProfileVariant::ReserveTargetsCharge80SizeGateV1.charges());
+            assert_eq!(
+                size.oxidation_policy(),
+                cubarium_core::hunter::OxidationPolicy::Fixed(0.80),
+                "arm {index}: the size-gate recipe must still charge"
+            );
             // The background it runs on is unchanged.
             assert_eq!(size.seek_reserve_fraction, 0.80);
             assert_eq!(size.perch_reserve_fraction, 0.90);
