@@ -200,12 +200,13 @@ fn a_schema_ten_snapshot_without_a_trial_migrates_exactly() {
     assert_eq!(back.hunters, HunterState::default());
 }
 
-/// A schema 10 world carrying an **active trial** is refused by name. Its profile and members
-/// have a different shape in schema 11 — the measured capture effector, the ingestion mouth,
-/// the body scale, the transition origin — and there is no honest way to fill those in for a
-/// running experiment, so the load fails instead of quietly changing what the experiment meant.
+/// A schema 10 world carrying **any** hunter extension is refused by name — a running trial,
+/// but equally a budget-matched control or an extinct lineage's counters. Their profile and
+/// members have a different shape in schema 11 — the measured capture effector, the ingestion
+/// mouth, the body scale, the transition origin — and there is no honest way to fill those in,
+/// so the load fails instead of quietly changing what the experiment measured.
 #[test]
-fn a_schema_ten_snapshot_with_an_active_trial_is_refused_not_reinterpreted() {
+fn a_schema_ten_snapshot_with_any_hunter_history_is_refused_not_reinterpreted() {
     let mut world = World::new(WorldConfig::default()).expect("defaults are valid");
     for _ in 0..10 {
         world.step();
@@ -267,10 +268,40 @@ fn a_schema_ten_snapshot_with_an_active_trial_is_refused_not_reinterpreted() {
     let bytes = frame(SCHEMA_V10, &postcard::to_allocvec(&old).expect("encodable"), "schema-ten");
     match decode_snapshot(&bytes) {
         Err(SnapshotError::Invalid(why)) => {
-            assert!(why.contains("active hunter trial"), "{why}");
+            assert!(why.contains("non-empty hunter extension"), "{why}");
+            assert!(why.contains("schema 10"), "the refusal must name the schema: {why}");
             assert!(why.contains("refused"), "the refusal must say so: {why}");
         }
         other => panic!("an active schema 10 trial decoded as {other:?}"),
+    }
+
+    // The same refusal for history that is not a live hunt: a budget-matched control deposit,
+    // and a world whose hunters all died but whose counters remain.
+    /// One way to leave hunter history in an otherwise empty schema 10 extension.
+    type History = fn(&mut v10::HunterStateV10);
+    let cases: [(&str, History); 2] = [
+        ("a control deposit", |h| {
+            h.profile = None;
+            h.members.clear();
+            h.control_deposited = true;
+            h.control_material_in = 4.0;
+            h.control_energy_in = 7.0;
+        }),
+        ("an extinct lineage", |h| {
+            h.profile = None;
+            h.members.clear();
+            h.hunter_deaths_total = 1;
+            h.captures_total = 3;
+        }),
+    ];
+    for (what, poison) in cases {
+        let mut old = v10::project(&world.state).expect("an empty extension projects");
+        poison(&mut old.hunters);
+        let bytes = frame(SCHEMA_V10, &postcard::to_allocvec(&old).expect("encodable"), "schema-ten");
+        match decode_snapshot(&bytes) {
+            Err(SnapshotError::Invalid(why)) => assert!(why.contains("non-empty"), "{what}: {why}"),
+            other => panic!("{what} decoded as {other:?}"),
+        }
     }
 
     // And a current world with a trial has no honest schema 10 image either.

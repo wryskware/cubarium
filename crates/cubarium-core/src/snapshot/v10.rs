@@ -15,12 +15,13 @@
 //! 1. A schema 10 payload whose extension is **empty** — no profile, no members, no imports —
 //!    migrates exactly, like any other older world: it never had a hunter and never will get
 //!    one from a load.
-//! 2. A schema 10 payload carrying an **active trial** is refused with a named error. Its
-//!    profile cannot be reinterpreted in the new shape without inventing a capture geometry
-//!    and a scale mapping it never had, and quietly inventing them would silently change a
-//!    running experiment's meaning. Schema 10 was never deployed to the live world; the only
-//!    payloads that can hit this are archived smoke artifacts, which carry their own recipe
-//!    and can be re-created from it.
+//! 2. A schema 10 payload whose extension is **anything else** is refused with a named error.
+//!    That is the whole of it, not only a live hunt: a profile with no members, a
+//!    budget-matched control deposit, an extinct lineage's counters. None of it can be
+//!    reinterpreted in the new shape without inventing a capture geometry and a scale mapping
+//!    it never had, and inventing them would silently change what an experiment measured.
+//!    Schema 10 was never deployed to the live world; the only payloads that can hit this are
+//!    archived artifacts, which carry their own recipe and can be re-created from it.
 
 use serde::{Deserialize, Serialize};
 
@@ -181,10 +182,11 @@ pub fn project(state: &WorldState) -> Option<WorldStateV10> {
 pub fn migrate(old: WorldStateV10) -> Result<WorldState, String> {
     if !old.hunters.is_empty() {
         return Err(
-            "this schema 10 snapshot carries an active hunter trial, whose profile and member \
-             shape changed in schema 11 (measured capture effector, ingestion mouth, body \
-             scale, transition origin); it is refused rather than reinterpreted — re-create \
-             the trial from its recorded recipe"
+            "this schema 10 snapshot carries a non-empty hunter extension (a trial, a \
+             budget-matched control, or the history of one), whose profile and member shape \
+             changed in schema 11 (measured capture effector, ingestion mouth, body scale, \
+             transition origin); it is refused rather than reinterpreted — re-create it from \
+             its recorded recipe"
                 .into(),
         );
     }
