@@ -93,6 +93,7 @@ impl From<WorldStateV7> for WorldState {
             evap_out_total: old.evap_out_total,
             care: crate::care::CareState::default(),
             energy_correction: crate::accounting::EnergyCorrection::default(),
+            hunters: crate::hunter::HunterState::default(),
         }
     }
 }

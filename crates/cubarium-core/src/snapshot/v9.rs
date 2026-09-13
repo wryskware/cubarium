@@ -1,20 +1,19 @@
-//! The frozen schema 8 `WorldState`.
+//! The frozen schema 9 `WorldState`.
 //!
 //! This is the field list of [`crate::world::WorldState`] exactly as it stood at commit
-//! `c60241f`, the last pre-correction build, with the same serde attributes. **Never change
-//! it.** `postcard` is not self-describing: the bytes of a schema 8 payload are this struct's
-//! fields in this order, so editing it silently misreads every live snapshot the care builds
-//! wrote.
+//! `1f0fc3a`, the last pre-hunter build, with the same serde attributes. **Never change it.**
+//! `postcard` is not self-describing: the bytes of a schema 9 payload are this struct's
+//! fields in this order, so editing it silently misreads every live snapshot the accounting
+//! builds wrote.
 //!
-//! It has the same two jobs [`super::v7`] has:
+//! It has the same two jobs [`super::v7`] and [`super::v8`] have:
 //!
-//! 1. [`decode_snapshot`](super::decode_snapshot) reads a schema 8 payload into it and
-//!    converts to the current [`WorldState`] with `energy_correction =
-//!    EnergyCorrection::default()` — zero, because the low-order bits that world's raw
-//!    counters already lost cannot be recovered from a snapshot (`crate::accounting`).
-//! 2. [`project`] goes the other way, dropping only `energy_correction`, so a world that was
-//!    migrated from schema 8 and stepped forward re-encodes to exactly the bytes the
-//!    pre-correction build would have written, `care` included.
+//! 1. [`decode_snapshot`](super::decode_snapshot) reads a schema 9 payload into it and
+//!    converts to the current [`WorldState`] with `hunters = HunterState::default()` — an
+//!    empty, inert extension. Migration never introduces a predator.
+//! 2. [`project`] goes the other way, dropping only `hunters`, so a world migrated from
+//!    schema 9 and stepped forward with no hunters re-encodes to exactly the bytes the
+//!    pre-hunter build would have written: care, and the signed energy corrections, included.
 
 use serde::{Deserialize, Serialize};
 
@@ -23,16 +22,17 @@ use crate::care::CareState;
 use crate::config::WorldConfig;
 use crate::fields::Fields;
 use crate::habitat::Weather;
+use crate::hunter::HunterState;
 use crate::ids::Slots;
 use crate::organism::Organism;
 use crate::world::WorldState;
 
 /// The schema this mirror speaks.
-pub const SCHEMA_V8: u32 = 8;
+pub const SCHEMA_V9: u32 = 9;
 
-/// `WorldState` as of commit `c60241f`. Frozen; see the module docs.
+/// `WorldState` as of commit `1f0fc3a`. Frozen; see the module docs.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct WorldStateV8 {
+pub struct WorldStateV9 {
     pub config: WorldConfig,
     pub tick: u64,
     pub fields: Fields,
@@ -44,12 +44,10 @@ pub struct WorldStateV8 {
     pub cap_rejections_total: u64,
     /// Material admitted from outside (founders and any future stimuli), for the invariant.
     pub external_material_in: f64,
-    /// Running energy audit, uncompensated: these are the raw counters, and schema 9 keeps
-    /// them bit-identical.
+    /// Running energy audit: the raw, uncompensated counters.
     pub light_in_total: f64,
     pub heat_out_total: f64,
-    /// Running water budget (`design/water.md`): `Σw == rain_in_total − evap_out_total`
-    /// to rounding at every tick of a world created dry.
+    /// Running water budget (`design/water.md`).
     #[serde(default)]
     pub rain_in_total: f64,
     #[serde(default)]
@@ -57,11 +55,14 @@ pub struct WorldStateV8 {
     /// Optional care (`design/7_Research/care-contract-2026-09-12.md`).
     #[serde(default)]
     pub care: CareState,
+    /// The persisted signed energy corrections (`crate::accounting`).
+    #[serde(default)]
+    pub energy_correction: EnergyCorrection,
 }
 
-/// The schema 8 projection of a current state: every field but `energy_correction`.
-pub fn project(state: &WorldState) -> WorldStateV8 {
-    WorldStateV8 {
+/// The schema 9 projection of a current state: every field but `hunters`.
+pub fn project(state: &WorldState) -> WorldStateV9 {
+    WorldStateV9 {
         config: state.config.clone(),
         tick: state.tick,
         fields: state.fields.clone(),
@@ -76,14 +77,14 @@ pub fn project(state: &WorldState) -> WorldStateV8 {
         rain_in_total: state.rain_in_total,
         evap_out_total: state.evap_out_total,
         care: state.care.clone(),
+        energy_correction: state.energy_correction,
     }
 }
 
-/// Migration: the corrections of a schema 8 world open at **zero**. Its raw totals are kept
-/// exactly as saved and its care history is carried through untouched; compensation starts
-/// from this load, and no historical rounding repair is claimed (`crate::accounting`).
-impl From<WorldStateV8> for WorldState {
-    fn from(old: WorldStateV8) -> WorldState {
+/// Migration: a schema 9 world has never had a hunter, so the extension opens empty —
+/// no profile, no members, no imports, no counters. Nothing else is touched.
+impl From<WorldStateV9> for WorldState {
+    fn from(old: WorldStateV9) -> WorldState {
         WorldState {
             config: old.config,
             tick: old.tick,
@@ -99,8 +100,8 @@ impl From<WorldStateV8> for WorldState {
             rain_in_total: old.rain_in_total,
             evap_out_total: old.evap_out_total,
             care: old.care,
-            energy_correction: EnergyCorrection::default(),
-            hunters: crate::hunter::HunterState::default(),
+            energy_correction: old.energy_correction,
+            hunters: HunterState::default(),
         }
     }
 }

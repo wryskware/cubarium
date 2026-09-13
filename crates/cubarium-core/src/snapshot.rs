@@ -6,15 +6,19 @@ use crate::world::WorldState;
 
 pub mod v7;
 pub mod v8;
+pub mod v9;
 
 pub use v7::{SCHEMA_V7, WorldStateV7};
 pub use v8::{SCHEMA_V8, WorldStateV8};
+pub use v9::{SCHEMA_V9, WorldStateV9};
 
 /// Bumped whenever `WorldState` or any nested type changes shape. Version 8 appends
 /// `WorldState.care`; version 9 appends `WorldState.energy_correction`
-/// (`crate::accounting`). [`SCHEMA_V8`] and [`SCHEMA_V7`] payloads are still accepted through
-/// the frozen mirrors in [`v8`] and [`v7`], each migrating with zero corrections.
-pub const SCHEMA_VERSION: u32 = 9;
+/// (`crate::accounting`); version 10 appends `WorldState.hunters` (`crate::hunter`).
+/// [`SCHEMA_V9`], [`SCHEMA_V8`] and [`SCHEMA_V7`] payloads are still accepted through the
+/// frozen mirrors in [`v9`], [`v8`] and [`v7`], each migrating with an empty hunter
+/// extension, and the older two with zero corrections as well.
+pub const SCHEMA_VERSION: u32 = 10;
 pub const MAGIC: [u8; 4] = *b"CUBW";
 /// Fixed header length: magic 4, schema 4, build-id length 2, then the build id bytes,
 /// then payload length 8 and CRC32 4 (all little-endian).
@@ -72,8 +76,9 @@ pub fn encode_snapshot(state: &WorldState, build_id: &str) -> Vec<u8> {
 /// Validate magic, schema, length, CRC, decode, then `state.validate()`; every failure is a
 /// distinct error so the loader can report why an older snapshot was tried.
 ///
-/// Three schemas decode: the current [`SCHEMA_VERSION`]; [`SCHEMA_V8`] through the frozen
-/// [`WorldStateV8`] mirror with `energy_correction = EnergyCorrection::default()`; and
+/// Four schemas decode: the current [`SCHEMA_VERSION`]; [`SCHEMA_V9`] through the frozen
+/// [`WorldStateV9`] mirror with `hunters = HunterState::default()`; [`SCHEMA_V8`] through
+/// [`WorldStateV8`], which adds `energy_correction = EnergyCorrection::default()`; and
 /// [`SCHEMA_V7`] through [`WorldStateV7`], which adds `care = CareState::default()` as well.
 /// Anything else is [`SnapshotError::UnsupportedSchema`]. `SnapshotMeta.schema` reports what
 /// was read, not what the build writes.
@@ -89,7 +94,7 @@ pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), Snaps
         return Err(SnapshotError::BadMagic);
     }
     let schema = u32::from_le_bytes(take(4, 4)?.try_into().expect("4 bytes"));
-    if schema != SCHEMA_VERSION && schema != SCHEMA_V8 && schema != SCHEMA_V7 {
+    if schema != SCHEMA_VERSION && schema != SCHEMA_V9 && schema != SCHEMA_V8 && schema != SCHEMA_V7 {
         return Err(SnapshotError::UnsupportedSchema(schema));
     }
     let id_len = u16::from_le_bytes(take(8, 2)?.try_into().expect("2 bytes")) as usize;
@@ -112,6 +117,9 @@ pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), Snaps
             .map(WorldState::from)
             .map_err(|e| SnapshotError::Decode(e.to_string()))?,
         SCHEMA_V8 => postcard::from_bytes::<WorldStateV8>(payload)
+            .map(WorldState::from)
+            .map_err(|e| SnapshotError::Decode(e.to_string()))?,
+        SCHEMA_V9 => postcard::from_bytes::<WorldStateV9>(payload)
             .map(WorldState::from)
             .map_err(|e| SnapshotError::Decode(e.to_string()))?,
         _ => postcard::from_bytes(payload).map_err(|e| SnapshotError::Decode(e.to_string()))?,
@@ -171,6 +179,7 @@ mod tests {
             evap_out_total: 0.0,
             care: crate::care::CareState::default(),
             energy_correction: crate::accounting::EnergyCorrection::default(),
+            hunters: crate::hunter::HunterState::default(),
         }
     }
 
@@ -276,13 +285,45 @@ mod tests {
     }
 
     #[test]
+    fn the_schema_nine_projection_is_the_payload_without_the_hunters() {
+        let s = state();
+        // An empty hunter extension appends exactly `HunterState::default()`: no profile, an
+        // empty member vector, four zero f64 imports, the control flag, the founder count and
+        // five zero counters.
+        let full = postcard::to_allocvec(&s).unwrap();
+        let projected = postcard::to_allocvec(&v9::project(&s)).unwrap();
+        assert_eq!(&full[..projected.len()], &projected[..], "the projection is a prefix of the payload");
+        assert_eq!(full.len(), projected.len() + EMPTY_HUNTERS);
+
+        // A schema 9 payload round-trips through the mirror into an identical state, and an
+        // initialized extension is exactly what the projection drops.
+        let back: WorldState = postcard::from_bytes::<WorldStateV9>(&projected).unwrap().into();
+        assert_eq!(back, s);
+        let mut hunted = s.clone();
+        hunted.hunters.founder_material_in = 4.0;
+        hunted.hunters.captures_total = 3;
+        assert_eq!(
+            postcard::to_allocvec(&v9::project(&hunted)).unwrap(),
+            projected,
+            "a hunter extension must not move the schema 9 projection"
+        );
+        assert_ne!(state_hash(&hunted), state_hash(&s), "it is in the full-state hash");
+        assert_eq!(ecology_hash(&hunted), ecology_hash(&s));
+    }
+
+    /// Bytes an empty [`crate::hunter::HunterState`] appends to the payload: `Option::None`,
+    /// an empty member vector, four `f64` imports, the control flag, the founder count and
+    /// the five extension counters (all zero varints).
+    const EMPTY_HUNTERS: usize = 1 + 1 + 4 * 8 + 1 + 1 + 5;
+
+    #[test]
     fn the_schema_eight_projection_is_the_payload_without_the_corrections() {
         let s = state();
         // Zero corrections append exactly two zero f64: schema 9 is schema 8 plus 16 bytes.
         let full = postcard::to_allocvec(&s).unwrap();
         let projected = postcard::to_allocvec(&v8::project(&s)).unwrap();
         assert_eq!(&full[..projected.len()], &projected[..], "the projection is a prefix of the payload");
-        assert_eq!(full.len(), projected.len() + 2 * 8);
+        assert_eq!(full.len(), projected.len() + 2 * 8 + EMPTY_HUNTERS);
 
         // A schema 8 payload round-trips through the mirror into an identical state, and a
         // nonzero correction is exactly what the projection drops.
@@ -307,7 +348,7 @@ mod tests {
         let full = postcard::to_allocvec(&s).unwrap();
         let projected = postcard::to_allocvec(&v7::project(&s)).unwrap();
         assert_eq!(&full[..projected.len()], &projected[..], "the projection is a prefix of the payload");
-        assert_eq!(full.len(), projected.len() + 1 + 1 + 6 * 8 + 2 * 8);
+        assert_eq!(full.len(), projected.len() + 1 + 1 + 6 * 8 + 2 * 8 + EMPTY_HUNTERS);
         assert_eq!(ecology_hash(&s), super::fnv1a(&projected));
         // Care moves `state_hash` and never `ecology_hash`.
         let mut fed = s.clone();

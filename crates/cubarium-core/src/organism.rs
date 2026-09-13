@@ -26,6 +26,10 @@ pub enum DeathCause {
     Starvation,
     Age,
     Collapse,
+    /// Consumed by a hunter (`crate::hunter`). **Appended last**: the three natural causes
+    /// above keep their order and their index in the persisted `deaths_total` triple, and
+    /// predation is counted separately in `HunterState::predation_deaths_total`.
+    Predation,
 }
 
 /// Escrowed offspring material and energy held by a gestating parent.

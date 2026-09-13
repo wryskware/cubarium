@@ -24,13 +24,16 @@ fn stepped_world(ticks: u64) -> World {
 /// founder kinds, the fruit field and config, mutation config), version 8 the appended
 /// `WorldState.care` (`design/7_Research/care-contract-2026-09-12.md`), version 9 the
 /// appended `WorldState.energy_correction`
-/// (`design/7_Research/accounting-compensation-handoff-2026-09-13.md`). Version 8 was the
-/// first that migrates rather than refuses; version 9 migrates both of its predecessors
-/// through their frozen mirrors, with zero care and zero corrections respectively. Everything
-/// older is still rejected outright.
+/// (`design/7_Research/accounting-compensation-handoff-2026-09-13.md`), version 10 the
+/// appended `WorldState.hunters` (`design/7_Research/fixed-hunter-core-handoff-2026-09-13.md`).
+/// Version 8 was the first that migrates rather than refuses; version 10 migrates all three
+/// of its predecessors through their frozen mirrors, with an empty hunter extension, and zero
+/// care and zero corrections where those are missing too. Everything older is still rejected
+/// outright.
 #[test]
-fn the_schema_version_is_nine_and_eight_and_seven_still_load() {
-    assert_eq!(SCHEMA_VERSION, 9);
+fn the_schema_version_is_ten_and_nine_eight_and_seven_still_load() {
+    assert_eq!(SCHEMA_VERSION, 10);
+    assert_eq!(cubarium_core::SCHEMA_V9, 9);
     assert_eq!(cubarium_core::SCHEMA_V8, 8);
     assert_eq!(cubarium_core::SCHEMA_V7, 7);
     assert_eq!(MAGIC, *b"CUBW");

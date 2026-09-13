@@ -19,6 +19,11 @@ use crate::events::LifeEvent;
 use crate::fields::Fields;
 use crate::genome::{Genome, MAX_FORMS, decode};
 use crate::habitat::{Habitat, Weather};
+use crate::genome::Phenotype;
+use crate::hunter::{
+    self, FixedHunterProfile, HunterControlReceipt, HunterEvent, HunterFounderReceipt, HunterState,
+    HunterTarget, HunterView,
+};
 use crate::ids::{OrganismId, Slots};
 use crate::organism::{DeathCause, Escrow, Mode, Organism, Origin};
 use crate::pairs::{Body, NeighborLists};
@@ -68,6 +73,15 @@ pub struct WorldState {
     /// rounding already lost.
     #[serde(default)]
     pub energy_correction: EnergyCorrection,
+    /// The opt-in paid hunter extension (`crate::hunter`): the trial profile, its members and
+    /// their carried guts, the material and energy it imported, and its own counters.
+    ///
+    /// **Appended last**: schema 10 is schema 9 plus exactly this field, which is what makes
+    /// [`crate::snapshot::WorldStateV9`] a byte-exact projection. Empty and inert for a world
+    /// migrated from schema 9, 8 or 7 — a migration never introduces a predator — and empty
+    /// for every world that never opts in.
+    #[serde(default)]
+    pub hunters: HunterState,
 }
 
 impl WorldState {
@@ -104,6 +118,7 @@ impl WorldState {
         }
         self.fields.check(self.config.detritus.energy_cap)?;
         self.care.validate(self.tick)?;
+        self.hunters.validate(self.tick, &self.organisms, &self.config)?;
         // The corrections are signed, so they are checked as the *combined* totals they are
         // part of: finite corrections, and finite nonnegative corrected cumulative flows.
         // Nothing is clamped or reset — an unusable accounting state fails the load.
@@ -193,6 +208,27 @@ const HEADING_TOLERANCE: f64 = 1e-6;
 /// Drift below this is ordinary transport rounding and is left exactly as stored.
 const HEADING_REPAIR_FLOOR: f64 = 1e-12;
 
+/// The founder inventory a profile and a world config imply, derived once and validated
+/// before either hunter initializer changes anything.
+struct HunterFounder {
+    phenotype: Phenotype,
+    structure: f64,
+    reserve: f64,
+    energy: f64,
+    material_in: f64,
+    energy_in: f64,
+}
+
+/// The transported jaw anchor of a hunter: `jaw_offset_px` forward along its heading, swept
+/// over the surface with the same helper movement uses, so the anchor crosses seams and rims
+/// exactly as a body does.
+fn mouth_point(hunter: &Organism, profile: &FixedHunterProfile) -> SurfacePoint {
+    if profile.jaw_offset_px <= 0.0 {
+        return hunter.pos;
+    }
+    cubarium_surface::travel(hunter.pos, hunter.heading * profile.jaw_offset_px).end
+}
+
 /// Radius, in pixels, used to unfold the sensed cell centers. Sensing reaches
 /// `SENSE_DEPTH_MAX` graph hops (12 px of `sense_radius` at 4 px per cell), so the farthest
 /// sensed center is about 14.5 px from any point of the own cell.
@@ -213,7 +249,7 @@ const AUDIT_TOLERANCE: f64 = 1e-9;
 const GRADIENT_EPS: f64 = 1e-9;
 
 /// Bounds from `design/m2-world-spec.md` "Organism representation" and `genome`'s docs.
-fn check_genome(g: &Genome, who: &str) -> Result<(), String> {
+pub(crate) fn check_genome(g: &Genome, who: &str) -> Result<(), String> {
     let range = |name: &str, v: f32, lo: f32, hi: f32| -> Result<(), String> {
         if !v.is_finite() || v < lo || v > hi {
             Err(format!("{who}: genome {name} = {v}, expected [{lo}, {hi}]"))
@@ -283,6 +319,11 @@ pub struct TickCounters {
     pub evap_out: f64,
     pub travel_fallbacks: u32,
     pub travel_ties: u32,
+    /// Paid hunter attempts, successful captures and prey consumed this sample
+    /// (`crate::hunter`). Zero in every world that never opted in.
+    pub hunter_attacks: u32,
+    pub hunter_captures: u32,
+    pub deaths_predation: u32,
 }
 
 pub struct World {
@@ -314,6 +355,9 @@ pub struct World {
     /// Births and deaths committed since the observer last drained them. Transient: never
     /// checkpointed, never hashed, never read back by the tick.
     events: Vec<LifeEvent>,
+    /// Hunter attempts, captures, offspring and deaths since the observer last drained them.
+    /// Transient in exactly the same sense (`crate::hunter::HunterEvent`).
+    hunter_events: Vec<HunterEvent>,
     counters: TickCounters,
     initial_material: f64,
 }
@@ -421,6 +465,7 @@ impl World {
             evap_out_total: 0.0,
             care: CareState::default(),
             energy_correction: EnergyCorrection::default(),
+            hunters: HunterState::default(),
         };
         Ok(World::assemble(state, habitat, initial_material))
     }
@@ -452,11 +497,16 @@ impl World {
         let habitat = Habitat::new(&state.config.habitat, state.config.seed);
         let organism_material: f64 = state.organisms.iter().map(|(_, o)| o.material()).sum();
         // The same terms `mass_residual` subtracts, so a loaded world reads zero: care has
-        // imported `feed_material_in` and exported `clean_material_out` since creation.
-        let initial_material = state.fields.total_material() + organism_material
+        // imported `feed_material_in` and exported `clean_material_out` since creation, the
+        // hunter extension has imported its founders (and any budget-matched control deposit),
+        // and a carried carcass is material that is still in the world.
+        let initial_material = state.fields.total_material()
+            + organism_material
+            + state.hunters.gut_material_total()
             - state.external_material_in
             - state.care.feed_material_in
-            + state.care.clean_material_out;
+            + state.care.clean_material_out
+            - state.hunters.imported_material();
         Ok(World::assemble(state, habitat, initial_material))
     }
 
@@ -483,6 +533,7 @@ impl World {
             travel_buf: Travel::default(),
             moved: Vec::new(),
             events: Vec::new(),
+            hunter_events: Vec::new(),
             counters: TickCounters::default(),
             initial_material,
         };
@@ -513,6 +564,7 @@ impl World {
             self.state.energy_ledgers(),
             self.state.care.feed_energy_in,
             self.state.care.clean_energy_out,
+            self.state.hunters.imported_energy(),
         );
         #[cfg(debug_assertions)]
         let water_audit = (
@@ -539,6 +591,7 @@ impl World {
                 travel_buf,
                 moved,
                 events,
+                hunter_events,
                 counters,
                 initial_material: _,
             } = &mut *self;
@@ -561,6 +614,7 @@ impl World {
                 // borrow disjoint components.
                 energy_correction:
                     EnergyCorrection { light_in: light_in_correction, heat_out: heat_out_correction },
+                hunters,
             } = state;
             let cfg: &WorldConfig = config;
             let org_cfg = &cfg.organism;
@@ -969,6 +1023,10 @@ impl World {
                     DeathCause::Starvation => 0,
                     DeathCause::Age => 1,
                     DeathCause::Collapse => 2,
+                    // Predation never reaches this loop: a consumed prey is settled and
+                    // removed by the hunter pass, which books it in the extension's own
+                    // counter and leaves the three natural counters alone.
+                    DeathCause::Predation => unreachable!("predation is settled by the hunter pass"),
                 };
                 counters.deaths[slot] += 1;
                 deaths_total[slot] += 1;
@@ -1082,10 +1140,15 @@ impl World {
             // (with care) fed in or cleaned out. Feed and clean commit at a boundary, never
             // inside a step, so their terms are zero here; they are written out anyway so
             // the identity the contract states is the identity the code checks.
-            let (before, opening, fed, cleaned) = audit;
+            //
+            // The hunter founder and control imports are boundary commits for the same reason;
+            // a capture, a digestion and a hunter's death are all internal transfers and move
+            // no term of this identity except heat.
+            let (before, opening, fed, cleaned, imported) = audit;
             let booked = self.state.energy_ledgers().net_since(opening)
                 + (self.state.care.feed_energy_in - fed)
-                - (self.state.care.clean_energy_out - cleaned);
+                - (self.state.care.clean_energy_out - cleaned)
+                + (self.state.hunters.imported_energy() - imported);
             let drift = (stored_energy(&self.state) - before) - booked;
             assert!(drift.abs() < AUDIT_TOLERANCE, "energy audit drifted by {drift:e} in tick {}", self.state.tick);
             // The water budget is the same kind of identity: `Δ Σw == rain_in − evap_out`.
@@ -1109,12 +1172,21 @@ impl World {
     /// `1e-9 · initial` per hour of simulated time; telemetry reports it. Fed crumbs are
     /// material admitted from outside and cleaned litter is material exported, exactly like
     /// the founders in `external_material_in`.
+    ///
+    /// With the hunter extension the same rule applies to it: a carried carcass
+    /// (`Σ gut_material`) is material still inside the world, and the hunter founders and any
+    /// budget-matched control deposit are material admitted from outside
+    /// (`HunterState::imported_material`), booked once in the extension and never again in
+    /// `external_material_in`.
     pub fn mass_residual(&self) -> f64 {
         let organisms: f64 = self.state.organisms.iter().map(|(_, o)| o.material()).sum();
-        self.state.fields.total_material() + organisms
+        self.state.fields.total_material()
+            + organisms
+            + self.state.hunters.gut_material_total()
             - self.state.external_material_in
             - self.state.care.feed_material_in
             + self.state.care.clean_material_out
+            - self.state.hunters.imported_material()
             - self.initial_material
     }
 
@@ -1176,6 +1248,242 @@ impl World {
         }
         self.state.care.admitted_seq = seq;
         true
+    }
+
+    // ------------------------------------------------------------------ hunters
+
+    /// The hunter extension: profile, members, guts, imports and counters (`crate::hunter`).
+    pub fn hunters(&self) -> &HunterState {
+        &self.state.hunters
+    }
+
+    /// Start the opt-in hunter trial: validate everything, then place **exactly one** founder
+    /// of the fixed lineage at `target` and book what it imported.
+    ///
+    /// Refused, without changing a single value, when the extension is already initialized,
+    /// when this world is a budget-matched control, when the profile or the target is invalid,
+    /// when the body does not fit the world's own `body_extent_max`, or when there is no
+    /// organism capacity left. The founder inventory is **derived from this world's config**
+    /// (`S = S_adult`, `R = fraction · R_max`, `E = fraction · E_max`), never hardcoded, and
+    /// its material and energy are booked once in the extension's import ledgers — never again
+    /// in `external_material_in`, and never by resetting the world's opening history.
+    ///
+    /// One `Stream::Hunt` draw (key [`hunter::FOUNDER_DRAW_KEY`], counter 0) picks the founder
+    /// heading; nothing else in the world consumes a draw here.
+    pub fn start_hunter_trial(
+        &mut self,
+        profile: FixedHunterProfile,
+        target: HunterTarget,
+    ) -> Result<HunterFounderReceipt, String> {
+        if self.state.hunters.profile.is_some() || self.state.hunters.founders_placed > 0 {
+            return Err("the hunter extension is already initialized".into());
+        }
+        if self.state.hunters.control_deposited {
+            return Err("this world is a budget-matched control and must not gain a hunter".into());
+        }
+        let founder = self.derive_hunter_founder(&profile)?;
+        let Some(pos) = target.resolve() else {
+            return Err(format!("hunter founder target {target:?} is not on the surface"));
+        };
+        let cap = self.state.config.capacity.max_organisms as usize;
+        if self.state.organisms.len() >= cap {
+            return Err(format!("no organism capacity for a hunter founder (population {cap})"));
+        }
+
+        // Everything above validates; only now does anything change.
+        let tick = self.state.tick;
+        let heading = Vec2::from_screen_angle(
+            unit(self.state.config.seed, Stream::Hunt, hunter::FOUNDER_DRAW_KEY, 0) * TAU,
+        );
+        let hunger_memory = (1.0 - founder.reserve / founder.phenotype.reserve_max).clamp(0.0, 1.0);
+        let id = self.state.organisms.insert(Organism {
+            pos,
+            heading,
+            ou: Vec2::ZERO,
+            structure: founder.structure,
+            reserve: founder.reserve,
+            energy: founder.energy,
+            born_tick: tick,
+            hunger_memory,
+            mode: Mode::Resting,
+            escrow: None,
+            births: 0,
+            genome: profile.genome.clone(),
+            phenotype: founder.phenotype.clone(),
+            parent: None,
+            origin: Origin::Founder,
+            turn_counter: Counter::default(),
+            fed_this_tick: false,
+        });
+        let receipt = HunterFounderReceipt {
+            id,
+            tick,
+            pos,
+            structure: founder.structure,
+            reserve: founder.reserve,
+            energy: founder.energy,
+            material_in: founder.material_in,
+            energy_in: founder.energy_in,
+            extent: founder.phenotype.extent,
+            sense_radius: founder.phenotype.sense_radius,
+            jaw_offset_px: profile.jaw_offset_px,
+            jaw_reach_px: profile.jaw_reach_px,
+        };
+        self.state.hunters.profile = Some(profile);
+        self.state.hunters.insert_member(hunter::HunterMember::new(id, tick));
+        self.state.hunters.founder_material_in += founder.material_in;
+        self.state.hunters.founder_energy_in += founder.energy_in;
+        self.state.hunters.founders_placed += 1;
+        // The import is booked, so the closed box has not moved: a control run and a hunter
+        // run are comparable on the same residual.
+        debug_assert!(self.mass_residual().abs() < 1e-9, "founding moved the mass residual");
+        Ok(receipt)
+    }
+
+    /// The budget-matched control: deposit the **same derived founder inventory** as local
+    /// detritus at `target` and place no hunter, so a paired arm can separate "a predator was
+    /// added" from "this much material and energy was added".
+    ///
+    /// The deposit respects the per-cell `De ≤ energy_cap · D` bound; energy the cap cannot
+    /// hold leaves as real heat, compensated like every other heat payment, rather than
+    /// silently vanishing. Refused, without changing anything, for a world that already has a
+    /// profile or a previous deposit.
+    pub fn deposit_hunter_budget_control(
+        &mut self,
+        profile: FixedHunterProfile,
+        target: HunterTarget,
+    ) -> Result<HunterControlReceipt, String> {
+        if self.state.hunters.profile.is_some() || self.state.hunters.founders_placed > 0 {
+            return Err("the hunter extension is already initialized".into());
+        }
+        if self.state.hunters.control_deposited {
+            return Err("this world already holds a budget-matched control deposit".into());
+        }
+        let founder = self.derive_hunter_founder(&profile)?;
+        let Some(pos) = target.resolve() else {
+            return Err(format!("hunter control target {target:?} is not on the surface"));
+        };
+
+        let cell = cell_of(&pos);
+        let at = cell.index();
+        let cap = self.state.config.detritus.energy_cap;
+        let material = founder.material_in;
+        let energy = founder.energy_in;
+        // `De ≤ energy_cap · D` per cell, measured against the cell as it will be.
+        let room = (cap * (self.state.fields.d[at] + material) - self.state.fields.de[at]).max(0.0);
+        let stored = energy.min(room);
+        self.state.fields.d[at] += material;
+        self.state.fields.de[at] += stored;
+        let spilled = energy - stored;
+        if spilled > 0.0 {
+            accounting::accumulate(
+                &mut self.state.heat_out_total,
+                &mut self.state.energy_correction.heat_out,
+                spilled,
+            );
+        }
+        self.state.hunters.profile = Some(profile);
+        self.state.hunters.control_material_in += material;
+        self.state.hunters.control_energy_in += energy;
+        self.state.hunters.control_deposited = true;
+        debug_assert!(self.mass_residual().abs() < 1e-9, "the control deposit moved the mass residual");
+        Ok(HunterControlReceipt {
+            tick: self.state.tick,
+            cell: cell.0,
+            material_in: material,
+            energy_in: energy,
+            energy_stored: stored,
+            energy_heat: spilled,
+        })
+    }
+
+    /// The founder inventory this world's own config gives the profile, with every derived
+    /// number validated before anything is placed or deposited.
+    fn derive_hunter_founder(&self, profile: &FixedHunterProfile) -> Result<HunterFounder, String> {
+        profile.validate()?;
+        let org_cfg = &self.state.config.organism;
+        if profile.body_extent_px > org_cfg.body_extent_max {
+            return Err(format!(
+                "hunter body extent {} exceeds this world's body_extent_max {}",
+                profile.body_extent_px, org_cfg.body_extent_max
+            ));
+        }
+        let mut phenotype = decode(&profile.genome, org_cfg);
+        // The assembled body is longer than the decoded lobes: members carry the profile's
+        // tested support, and no other creature's radius moves.
+        phenotype.extent = profile.body_extent_px;
+        let structure = phenotype.structure_adult;
+        let reserve = profile.founder_reserve_fraction * phenotype.reserve_max;
+        let energy = profile.founder_energy_fraction * phenotype.energy_max;
+        let material_in = structure + reserve;
+        let energy_in = energy + org_cfg.reserve_energy_density * reserve;
+        for (name, v) in [
+            ("structure", structure),
+            ("reserve", reserve),
+            ("energy", energy),
+            ("material", material_in),
+            ("energy_in", energy_in),
+        ] {
+            if !v.is_finite() || v < 0.0 {
+                return Err(format!("derived hunter founder {name} = {v}"));
+            }
+        }
+        if structure < org_cfg.min_structure {
+            return Err(format!("derived hunter founder structure {structure} would collapse at once"));
+        }
+        Ok(HunterFounder { phenotype, structure, reserve, energy, material_in, energy_in })
+    }
+
+    /// One hunter per live member, keyed by full ID, with the transported jaw anchor contact
+    /// is actually tested at. Empty for every world without hunters, and published separately
+    /// from [`World::render_view`] so the existing view structs keep their fields.
+    pub fn hunter_view(&self) -> Vec<HunterView> {
+        let Some(profile) = self.state.hunters.profile() else {
+            return Vec::new();
+        };
+        let gestation_ticks = ticks_from_seconds(profile.gestation_seconds, DT);
+        let tick = self.state.tick;
+        self.state
+            .hunters
+            .members
+            .iter()
+            .filter_map(|m| {
+                let o = self.state.organisms.get(m.id)?;
+                Some(HunterView {
+                    id: m.id,
+                    role: profile.role,
+                    phase: m.phase,
+                    phase_progress: m.progress(tick),
+                    pos: o.pos,
+                    heading: o.heading,
+                    mouth: mouth_point(o, profile),
+                    mouth_reach_px: profile.jaw_reach_px,
+                    target: m.target.filter(|t| self.state.organisms.get(*t).is_some()),
+                    structure: o.structure,
+                    extent: o.phenotype.extent,
+                    juvenile: o.structure < 0.7 * o.phenotype.structure_adult,
+                    gut_material: m.gut_material,
+                    gut_energy: m.gut_energy,
+                    gut_fraction: (m.gut_material / profile.gut_capacity_material).clamp(0.0, 1.0) as f32,
+                    gestation: o.escrow.as_ref().map(|e| {
+                        if gestation_ticks == 0 {
+                            1.0
+                        } else {
+                            (tick.saturating_sub(e.started_tick) as f64 / gestation_ticks as f64)
+                                .clamp(0.0, 1.0) as f32
+                        }
+                    }),
+                })
+            })
+            .collect()
+    }
+
+    /// Take the hunter records committed since the last drain, in commit order. Transient:
+    /// nothing in the world reads them back, and a host that never drains simply lets the
+    /// buffer grow. Each consumed prey also produced one ordinary `LifeEvent::Death` with
+    /// [`DeathCause::Predation`].
+    pub fn drain_hunter_events(&mut self) -> Vec<HunterEvent> {
+        std::mem::take(&mut self.hunter_events)
     }
 
     /// "Scatter food": charged organic crumbs into `D` and `De`. Per cell `D += m·w_c` and
@@ -1421,6 +1729,15 @@ impl World {
     /// Produce a telemetry sample and reset the per-sample counters.
     pub fn telemetry(&mut self) -> Telemetry {
         let mass_residual = self.mass_residual();
+        let (mut hunters, mut hunter_juveniles) = (0u32, 0u32);
+        for m in &self.state.hunters.members {
+            if let Some(o) = self.state.organisms.get(m.id) {
+                hunters += 1;
+                if o.structure < 0.7 * o.phenotype.structure_adult {
+                    hunter_juveniles += 1;
+                }
+            }
+        }
         let mut population_by_face = [0u32; 5];
         let mut occupied = vec![false; CELL_COUNT];
         let mut occupied_cells = 0;
@@ -1508,6 +1825,20 @@ impl World {
             care_clean_material_out: self.state.care.clean_material_out,
             care_clean_energy_out: self.state.care.clean_energy_out,
             care_allowance_used: self.state.care.allowance_used,
+            hunters,
+            hunter_juveniles,
+            hunter_attacks: self.counters.hunter_attacks,
+            hunter_captures: self.counters.hunter_captures,
+            deaths_predation: self.counters.deaths_predation,
+            hunter_gut_material: self.state.hunters.gut_material_total(),
+            hunter_gut_energy: self.state.hunters.gut_energy_total(),
+            hunter_attacks_total: self.state.hunters.attacks_total,
+            hunter_captures_total: self.state.hunters.captures_total,
+            predation_deaths_total: self.state.hunters.predation_deaths_total,
+            hunter_births_total: self.state.hunters.hunter_births_total,
+            hunter_deaths_total: self.state.hunters.hunter_deaths_total,
+            hunter_material_in: self.state.hunters.imported_material(),
+            hunter_energy_in: self.state.hunters.imported_energy(),
         };
         self.counters = TickCounters::default();
         self.neighbors.pairs_considered = 0;
@@ -1535,6 +1866,10 @@ impl World {
 /// The audited energy total of `design/m2-world-spec.md` "Units and quantities":
 /// `Σ_cells (e_p·P + e_f·F + De) + Σ_organisms (E + e_r·R) + Σ_escrow (e_r·(S_c + R_c) + E_c)`.
 /// Reserve material carries chemical energy; structure does not; fruit carries `e_f`.
+///
+/// A hunter's carried carcass is stored energy too: `Σ gut_energy` is exactly the energy that
+/// was removed from the prey, held until it is digested, rejected or released by the hunter's
+/// own death (`crate::hunter`).
 #[cfg(any(debug_assertions, test))]
 fn stored_energy(state: &WorldState) -> f64 {
     let e_p = state.config.producer.energy_density;
@@ -1552,7 +1887,7 @@ fn stored_energy(state: &WorldState) -> f64 {
                 + o.escrow.as_ref().map_or(0.0, |e| e_r * (e.structure + e.reserve) + e.energy)
         })
         .sum();
-    cells + organisms
+    cells + organisms + state.hunters.gut_energy_total()
 }
 
 /// Edible detritus `D_eff = D · min(1, ρ / e_r)` with `ρ = De / D` (zero when `D == 0`),
@@ -1620,7 +1955,7 @@ fn share(requested: f64, available: f64) -> f64 {
     if requested > available && requested > 0.0 { available / requested } else { 1.0 }
 }
 
-fn ticks_from_seconds(seconds: f64, dt: f64) -> u64 {
+pub(crate) fn ticks_from_seconds(seconds: f64, dt: f64) -> u64 {
     let ticks = (seconds / dt).round();
     if ticks.is_finite() && ticks > 0.0 { ticks as u64 } else { 0 }
 }
@@ -2892,6 +3227,8 @@ mod tests {
                                 DeathCause::Starvation => 0,
                                 DeathCause::Age => 1,
                                 DeathCause::Collapse => 2,
+                                // This fixture runs no hunters.
+                                DeathCause::Predation => continue,
                             };
                             deaths_by_form[form as usize][slot] += 1;
                             death_time_by_form[form as usize] += (tick + 1) as f64 * DT;

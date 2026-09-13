@@ -17,6 +17,12 @@ pub enum Stream {
     Founders = 4,
     /// key = wave index, counter = attribute index (frequency, direction, phase).
     Habitat = 5,
+    /// The opt-in hunter extension (`crate::hunter`). key = the hunter's full ID packed as
+    /// `(slot << 32) | generation`, counter = `2 · attack_counter` for the contested-claim
+    /// priority and `2 · attack_counter + 1` for the capture roll of that paid attempt. An
+    /// unpaid refusal, a failed lookup, logging and rendering consume no draws. Appended
+    /// last: no existing stream value moved.
+    Hunt = 6,
 }
 
 /// A `u64` draw: SplitMix64 finalization applied to the mix of `(seed ^ stream, key, counter)`.
@@ -75,8 +81,14 @@ impl Counter {
 mod tests {
     use super::*;
 
-    const STREAMS: [Stream; 5] =
-        [Stream::Weather, Stream::OrganismTurn, Stream::Birth, Stream::Founders, Stream::Habitat];
+    const STREAMS: [Stream; 6] = [
+        Stream::Weather,
+        Stream::OrganismTurn,
+        Stream::Birth,
+        Stream::Founders,
+        Stream::Habitat,
+        Stream::Hunt,
+    ];
 
     #[test]
     fn draw_is_deterministic() {

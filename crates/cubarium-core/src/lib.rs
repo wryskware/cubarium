@@ -9,6 +9,7 @@
 //! Module map:
 //! - [`accounting`]: compensated accumulation for the persisted cumulative energy ledgers.
 //! - [`care`]: the optional bounded feed / rain / clean commands and their ledgers.
+//! - [`hunter`]: the opt-in paid hunter extension (off by default, empty and inert).
 //! - [`config`]: every rate and bound, serde-loadable, with the spec's initial values as defaults.
 //! - [`rng`]: counter-based keyed draws partitioned by stream.
 //! - [`ids`]: generation-checked organism slots.
@@ -33,6 +34,7 @@ pub mod events;
 pub mod fields;
 pub mod genome;
 pub mod habitat;
+pub mod hunter;
 pub mod ids;
 pub mod organism;
 pub mod pairs;
@@ -49,10 +51,14 @@ pub use care::{
 };
 pub use config::WorldConfig;
 pub use events::LifeEvent;
+pub use hunter::{
+    AttemptOutcome, FixedHunterProfile, HunterControlReceipt, HunterEvent, HunterFounderReceipt,
+    HunterMember, HunterPhase, HunterRole, HunterState, HunterTarget, HunterView,
+};
 pub use ids::OrganismId;
 pub use snapshot::{
-    SCHEMA_V7, SCHEMA_V8, SCHEMA_VERSION, SnapshotError, WorldStateV7, WorldStateV8,
-    decode_snapshot, ecology_hash, encode_snapshot,
+    SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_VERSION, SnapshotError, WorldStateV7, WorldStateV8,
+    WorldStateV9, decode_snapshot, ecology_hash, encode_snapshot,
 };
 pub use telemetry::Telemetry;
 pub use view::RenderView;

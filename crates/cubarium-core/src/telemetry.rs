@@ -73,4 +73,45 @@ pub struct Telemetry {
     pub care_clean_energy_out: f64,
     #[serde(default)]
     pub care_allowance_used: f64,
+
+    /// The opt-in hunter extension (`crate::hunter`). Every field is zero in a world that
+    /// never opted in, and every one of them defaults, so a reader of older telemetry is
+    /// unaffected.
+    ///
+    /// Live members, and how many of them are still juvenile.
+    #[serde(default)]
+    pub hunters: u32,
+    #[serde(default)]
+    pub hunter_juveniles: u32,
+    /// Paid attempts, captures and prey consumed **this sample**, like `births` and the three
+    /// death counters.
+    #[serde(default)]
+    pub hunter_attacks: u32,
+    #[serde(default)]
+    pub hunter_captures: u32,
+    #[serde(default)]
+    pub deaths_predation: u32,
+    /// Carried carcass material and energy right now, summed over the members. Part of the
+    /// world's stored totals.
+    #[serde(default)]
+    pub hunter_gut_material: f64,
+    #[serde(default)]
+    pub hunter_gut_energy: f64,
+    /// Cumulative extension counters since the trial started.
+    #[serde(default)]
+    pub hunter_attacks_total: u64,
+    #[serde(default)]
+    pub hunter_captures_total: u64,
+    #[serde(default)]
+    pub predation_deaths_total: u64,
+    #[serde(default)]
+    pub hunter_births_total: u64,
+    #[serde(default)]
+    pub hunter_deaths_total: u64,
+    /// Material and energy the extension admitted from outside (founders and any
+    /// budget-matched control deposit), for the paired-arm audits.
+    #[serde(default)]
+    pub hunter_material_in: f64,
+    #[serde(default)]
+    pub hunter_energy_in: f64,
 }
