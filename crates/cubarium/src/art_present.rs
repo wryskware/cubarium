@@ -1004,9 +1004,14 @@ pub fn canopy_heading(heading: Vec2, deg: f64, w: Vec2) -> Vec2 {
 ///
 /// * a species with no response ([`WindResponse::STILL`], e.g. `rootveil`) is
 ///   `(Bend::NONE, slot.heading)` without sampling the wind at all;
-/// * a slot on the **top face** is *radial*: `(Bend::NONE, `[`canopy_heading`]`(slot.heading,
-///   response.spin_deg · slot.wind, w))` — it turns in place and is never bent or moved;
-/// * any other slot bends: `(`[`plant_bend`]`(tip, w, slot.heading), slot.heading)`.
+/// * a slot on the **top face** whose species is *radial* (`response.spin_deg > 0`) turns in
+///   place: `(Bend::NONE, `[`canopy_heading`]`(slot.heading, response.spin_deg · slot.wind,
+///   w))` — never bent or moved;
+/// * any other slot bends: `(`[`plant_bend`]`(tip, w, slot.heading), slot.heading)`. This
+///   includes a **reed standing in a flooded top-face cell** (`reedspire` has a tip and no
+///   spin): its tile lies flat on the canopy face pointing along its own heading, and it
+///   bends along that tile's horizontal axis exactly as it would on a side face, rooted at
+///   its ripple row, so the root never skates and the breeze reads on the top face too.
 ///
 /// It is evaluated **once per slot per frame** and applies unchanged to the idle stamp, the
 /// fruit blend and both the fading lower and the revealing upper stamp of a growth step, so
@@ -1017,7 +1022,7 @@ pub fn slot_wind(slot: &Slot, name: &str, budget: f64, seconds: f64) -> (Bend, V
         return (Bend::NONE, slot.heading);
     }
     let w = wind_at(slot.at, seconds, response.lag_seconds);
-    if slot.at.face == Face::Top {
+    if slot.at.face == Face::Top && response.spin_deg > 0.0 {
         (Bend::NONE, canopy_heading(slot.heading, response.spin_deg * slot.wind, w))
     } else {
         let tip = effective_tip(response.tip_px, budget) * slot.wind;
