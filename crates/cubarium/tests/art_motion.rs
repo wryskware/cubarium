@@ -1391,6 +1391,26 @@ fn body_view(tick: u64, modes: &[(OrganismId, Mode)]) -> RenderView {
     v
 }
 
+/// Controller fade probes need distinguishable clips at every phase, independent of art
+/// revisions. The shipped sail's rest and move poses can legitimately coincide after its
+/// quantized body squash was removed. Keep animated samples, but give each state its own
+/// color channel so a missing blend cannot hide behind two identical production poses.
+fn body_fade_pack(distinct: bool) -> ArtPack {
+    let mut art = pack();
+    let rig = rig_of(u8::MAX, 0.5, art.creature_count());
+    for state in 0..3 {
+        let channel = if distinct { state } else { 0 };
+        let frames = [180, 255].into_iter().map(|value| {
+            let mut rgba = [0u8; 4];
+            rgba[channel] = value;
+            rgba[3] = 255;
+            Sprite::from_rgba(3, 3, Vec2::new(1.5, 1.5), &rgba.repeat(9)).unwrap()
+        }).collect();
+        art.clips[rig * 4 + state] = Clip { frames, seconds: 1.4, looping: true };
+    }
+    art
+}
+
 /// The body the presenter must be drawing: the states its memory says are on screen, each
 /// sampled from its own clip at this frame's presentation time, in one `stamp_layers`.
 fn expected_body(
@@ -1429,13 +1449,13 @@ fn expected_body(
 
 #[test]
 fn a_body_changing_state_cross_fades_from_the_pose_that_is_on_screen() {
-    let art = pack();
+    let art = body_fade_pack(true);
     let id = OrganismId { slot: 12, generation: 3 };
-    let mut p = ArtPresenter::new(pack());
+    let mut p = ArtPresenter::new(body_fade_pack(true));
     let t = 400u64;
 
     // A body first seen is drawn with no fade at all.
-    let mut fresh = ArtPresenter::new(pack());
+    let mut fresh = ArtPresenter::new(body_fade_pack(true));
     let seeking = body_view(t, &[(id, Mode::Seeking)]);
     let entered = observe_draw(&mut fresh, &seeking, 0.0);
     let memory = fresh.body_of(id).expect("the presenter must remember a body it has drawn");
@@ -1508,7 +1528,7 @@ const BODY_FADE_TICKS: u64 = (BODY_FADE_SECONDS / DT) as u64 + 1;
 
 #[test]
 fn a_body_that_changes_state_twice_inside_one_fade_stays_on_the_pose_it_is_showing() {
-    let art = pack();
+    let art = body_fade_pack(true);
     let id = OrganismId { slot: 5, generation: 1 };
     let t = 300u64;
     let background = {
@@ -1517,7 +1537,7 @@ fn a_body_that_changes_state_twice_inside_one_fade_stays_on_the_pose_it_is_showi
     };
 
     for (second, third, what) in [(Mode::Resting, 0usize, "back to the state it left"), (Mode::Feeding, 2, "on to a third state")] {
-        let mut p = ArtPresenter::new(pack());
+        let mut p = ArtPresenter::new(body_fade_pack(true));
         p.observe(&body_view(t, &[(id, Mode::Resting)]));
         p.observe(&body_view(t + 1, &[(id, Mode::Seeking)]));
         let half = t + 1 + BODY_FADE_TICKS / 2;
@@ -1549,6 +1569,32 @@ fn a_body_that_changes_state_twice_inside_one_fade_stays_on_the_pose_it_is_showi
         );
         // It is genuinely a blend, not one of the endpoints.
         assert!(!differing(&after, &rest).is_empty() && !differing(&after, &moving).is_empty());
+    }
+}
+
+#[test]
+fn coincident_body_poses_do_not_flash_during_interrupted_state_fades() {
+    let art = body_fade_pack(false);
+    let mut p = ArtPresenter::new(body_fade_pack(false));
+    let id = OrganismId { slot: 5, generation: 1 };
+    let t = 300u64;
+    let background = observe_draw(&mut ArtPresenter::new(pack()), &bare_view(t), 0.0);
+    p.observe(&body_view(t, &[(id, Mode::Resting)]));
+    for elapsed in 1..=3 * BODY_FADE_TICKS {
+        let mode = match elapsed {
+            1..=2 => Mode::Seeking,
+            3..=4 => Mode::Resting,
+            _ => Mode::Feeding,
+        };
+        let view = body_view(t + elapsed, &[(id, mode)]);
+        p.observe(&view);
+        assert_eq!(p.body_of(id).unwrap().state, state_of(&view.organisms[0]));
+        for frame in 0..FRAMES_PER_TICK {
+            let f = frame as f64 / FRAMES_PER_TICK as f64;
+            let expected = expected_body(&art, &background, &view.organisms[0], &[(0, 1.0)], view.tick, f);
+            assert_close_canvas(&draw(&mut p, &view, f), &expected, 1e-6,
+                "coincident animated poses must keep their light through state changes");
+        }
     }
 }
 
