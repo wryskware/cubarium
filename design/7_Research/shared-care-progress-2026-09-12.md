@@ -62,9 +62,33 @@ Root owns the live process, `state/`, the rollout, and the gallery.
   **Rollout note for root:** any build at or after `a909aa0` writes schema 8
   snapshots that the schema 7 binaries cannot read. Keep the schema 7 binary and a
   verified schema 7 snapshot for rollback; the new binary reads both.
-- Host package (lock, `--fresh` occupancy guard, `--require-resume`, journal,
-  held-boundary admission, HTTP care routes, panel, replay) still in progress; its
-  commits will be listed here. Nothing in `state/` is touched.
+- **Host landed:** `ff55aec` (OS advisory `flock` on `<state>/.lock` shared with
+  the checkpoint and journal workers, `occupancy()` and the `--fresh` refusal in
+  an occupied directory before any write, `--require-resume`, unloadable snapshot
+  files are a hard error, `care.jsonl` journal with torn-tail repair and 4 MiB
+  bound, care service with server-issued epoch-scoped client ids, `POST
+  /care/register`, `POST /care`, `GET /care/status`, held-boundary admission in
+  the runner, replay regardless of `--care`), `30c5ed6` (viewer care panel,
+  `tests/care_replay.rs`, ENOSPC treated as uncertain, parent-directory sync
+  barrier before the first acceptance, README), `c60241f` (panel registration
+  retry, bounded row map). Evidence (worker's run): `cargo test -p cubarium` 362
+  passed, 0 failed; delayed-ack hold keeps `world_tick` fixed at `B` for 2.5 s
+  and applies once; crash after fsync and crash after application both replay at
+  `B` with `ecology_hash` equal to an uninterrupted reference; mid-shower resume;
+  uncertain write holds, appends nothing further, replays after restart; two
+  concurrent launchers leave exactly one owner; `--fresh` beside eight higher-tick
+  snapshots leaves every byte unchanged; cross-origin, GET mutation, oversize
+  body, retired identity, journal full and replaying all refused over real
+  sockets. Root's own copied-world browser check (`care-browser-rollout-review`)
+  agrees on the accepted/duplicate/conflict/cooldown codes.
+- Runnable shared command (no `--fresh`; requires a build at or after `c60241f`):
+  `target/release/cubarium run --art assets/atelier --sink shim --mirror-web --web-port 7393 --state state --speed 1 --fps 60 --care`
+  Default zero input preserves the autonomous world (proven by the fixture
+  continuation test). Doses are the contract's constants; feed allowance 30 m per
+  world; one shower at a time; cooldowns feed 30 s, rain 60 s, clean 30 s.
+- Not verified: long-run ecology under repeated care (short runs only); the panel's
+  click mapping is checked at string level and by the net-layout test, not by a
+  synthetic browser click; `--sink preview` with care (no window here).
 
 ## C: Fable megafauna candidate — DELIVERED (commit `1e4a8e5`)
 
