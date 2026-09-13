@@ -26,22 +26,34 @@ harness, live state or care file was touched.
 | Tick behaviour: phases, escape, contact, capture, digestion, offspring | landed |
 | Root-chart contact geometry, measured claws, shared body scale | landed |
 | Settlement metadata on events, timing facts in the view | landed |
-| Deterministic test suite (25 behaviour + 6 geometry + 6 migration) | landed |
+| Astra review corrections: NaN bounds, settlement boundaries, authored claw | landed |
+| Deterministic test suite (26 behaviour + 8 geometry + 6 migration) | landed |
 | Paired experiment runs, ecological gates | **not started — root owns the harness** |
 
-**Read this section if you integrated against the first delivery.** The geometry correction
+**Read this section if you integrated against an earlier delivery.** The geometry correction
 of `lanternjaw-core-art-integration-gaps-2026-09-13.md` changed the profile's shape, so the
-profile is `PROFILE_VERSION 2` and the snapshot is **schema 11**. Nothing in root's harness
-broke — `cargo check --workspace --all-targets --offline` is clean, because the harness matches
-event variants with `..` — but three things changed meaning:
+snapshot is **schema 11**; Astra's `astra-hunter-geometry-review-2026-09-13.md` then found three
+defects, all now fixed, one of which moved a frozen constant. The profile is
+**`PROFILE_VERSION 3`**. Nothing in root's harness broke —
+`cargo check --workspace --all-targets --offline` is clean, because the harness matches event
+variants with `..` — but these changed meaning:
 
 - `profile.jaw_offset_px` / `jaw_reach_px` are gone. The capture effector is
   `capture_offset_body: Vec2` with `capture_reach_px`, and the ingestion mouth is its own
   `ingestion_offset_body`.
 - `HunterView.mouth` is gone. `capture_center` and `ingestion_center` are `Option`, and they
   are `None` exactly when the point cannot honestly be drawn there.
-- Any archived schema 10 artifact **carrying a trial** no longer loads: it is refused by name.
-  Archived smoke files with an empty extension still load and migrate exactly.
+- **Post-movement phases now open at the boundary their tick completes.** A capture's
+  `Handling` and a paid miss's `Recovering` start at `now + 1` — the same tick their event is
+  stamped with — instead of a tick earlier. Anything that interpolated a recoil from the
+  published entry was starting it before the contact.
+- **The capture effector's side coordinate is `1.1`,** Fable's authored value, not the
+  `1.162368` of the contract's earlier decorated-study measurement. That is why the profile is
+  version 3: a frozen experimental constant moved, so a saved version 2 trial is refused by
+  name rather than silently re-measured.
+- Any archived schema 10 artifact with a **non-empty** hunter extension — a trial, a
+  budget-matched control, or an extinct lineage's counters — no longer loads: it is refused by
+  name. Empty extensions still migrate exactly.
 
 ## Final API, for root and Fable
 
@@ -51,7 +63,7 @@ publishes.
 
 ```rust
 // crates/cubarium-core/src/hunter.rs  (re-exported from the crate root)
-pub const PROFILE_VERSION: u32 = 2;      // version 1 is refused, never reinterpreted
+pub const PROFILE_VERSION: u32 = 3;      // versions 1 and 2 are refused, never reinterpreted
 pub const GRASP_EPS: f64 = 1e-6;         // how exactly a grasp centre must round-trip
 
 pub enum HunterRole { Lanternjaw }       // semantic role; genome.form only picks a rig
@@ -62,7 +74,7 @@ pub struct FixedHunterProfile {
     // three extents, kept distinct on purpose
     body_extent_px,            // physical crowding extent (pair pass, repulsion) — 9.0
     visual_query_extent_px,    // artwork query support around the root — 16.0
-    capture_offset_body: Vec2, // MEASURED near claw, body-local (13.2794, 1.1624)
+    capture_offset_body: Vec2, // AUTHORED near claw, body-local (13.2794117647, 1.1)
     capture_reach_px,          // trial grasp tolerance — 1.5
     ingestion_offset_body: Vec2,   // the mouth, separately — (9.6, 0.0) at full extension
     body_scale_exponent, body_scale_min,   // scale = max(min, (S/S_adult)^exponent) — 0.5, 0.2
@@ -191,6 +203,25 @@ the body coordinate it was built from, within `GRASP_EPS`. Otherwise it is `None
 never publishes, and never captures from, a point the renderer would clip. Pass `body_scale`
 straight to `stamp_rig_scaled`; do not derive a second scale from `juvenile` or from `extent`.
 
+### What a phase boundary means
+
+`phase_started_tick` and `phase_ends_tick` are **completed-tick boundaries**, and which boundary
+a transition gets depends on where in the tick it was decided:
+
+- **Pre-movement decisions** — perch, stalk, the windup, and the strike entry that charges for
+  itself — are taken in the decision pass with `now` completed ticks, and are stamped `now`.
+  Their effect is first *observable* one step later, the same one-step lag every decision has.
+- **Post-movement settlements** — a capture's `Handling`, a paid miss's `Recovering`, and the
+  pause that opens when a gut empties during digestion — belong to the tick they complete and
+  are stamped `now + 1`, exactly the tick their `HunterEvent` carries. A newborn member joins at
+  `now + 1` for the same reason.
+
+A timed phase occupies the closed interval `[phase_started_tick, phase_ends_tick]`: the decision
+pass leaves it when the world has *reached* `ends`, so the member is still in it when observed
+at `ends` and has moved on one step later, and the next phase's `phase_started_tick` is exactly
+this one's `phase_ends_tick`. Interpolate a recoil from `phase_started_tick`, never from the
+first frame that happens to notice the phase.
+
 ### Sensing, stopping and admission, reconciled with the real reach
 
 The claws close `|capture_offset| + capture_reach ≈ 14.8` px from the root, so the profile now
@@ -258,13 +289,16 @@ swim 0.1, diet 0`, form 4, role `Lanternjaw`. At the default config that decodes
 structural unit per second, and the derived founder inventory is `S = 2, R = 2, E = 3` —
 **4 material and 7 energy**, derived from the config, never hardcoded.
 
-Geometry: capture effector `(13.2794, 1.1624)` with a `1.5` px tolerance, ingestion mouth
-`(9.6, 0)`, physical extent `9`, visual query extent `16`, scale `sqrt(S / S_adult)` floored at
-`0.2`. The effector is Fable's measured fully extended near claw, recomputed in the animation
-contract from the actual `ROWS`, `limb_pose`, `hunt_state` and column transforms; the arms were
-not shortened to keep the old six-pixel placeholder. The `1.5` px tolerance and the `16` px
-query extent are still **trial values**: the art worker must confirm that `HunterView`'s
-`capture_center` tracks the drawn claw and that the query radius covers the whole filtered rig.
+Geometry: capture effector `(13.279411764705882, 1.1)` with a `1.5` px tolerance, ingestion
+mouth `(9.6, 0)`, physical extent `9`, visual query extent `16`, scale `sqrt(S / S_adult)`
+floored at `0.2`. Both offsets are **Fable's authored** `Lanternjaw::effectors(1.0)`, recomputed
+in `hunter::CAPTURE_OFFSET_BODY` / `INGESTION_OFFSET_BODY` from the same source expressions
+(`head_dx = -0.3·(1 − 13/17) + 1.1·clamp((13 − 9)/8, 0, 1)`, near claw
+`(12.3 + head_dx + 0.5, 0.6 + 0.5)`, mouth `(8 + 1.1 + 0.5, 0)`), read from
+`crates/cubarium/src/lanternjaw.rs` read-only. A unit test re-evaluates those expressions rather
+than comparing copied decimals, so a moved claw fails the build instead of drifting; the arms
+are never shortened to fit core. The `1.5` px tolerance and the `16` px query extent remain
+**trial values** the art worker must confirm against the drawn rig.
 
 Behaviour: perch above 65 % reserve, hunt below 35 %; prey `0.15 <= S <= 0.75 · S_hunter` whose
 whole inventory fits the 4 m gut; 8 s stalk timeout; 0.6 s windup (no capture, and the hunter
@@ -340,7 +374,7 @@ moved.
 ## Evidence
 
 ```text
-cargo test -p cubarium-core --offline          # 257 passed, 0 failed, 2 ignored
+cargo test -p cubarium-core --offline          # 262 passed, 0 failed, 2 ignored
 cargo clippy -p cubarium-core --offline --all-targets   # clean
 cargo check --workspace --all-targets --offline         # clean, no host edit needed
 ```
@@ -358,7 +392,7 @@ recomputed from the files. Fields, organisms, weather, config, care, the signed 
 the raw counters are compared individually. The genuine schema 8 and schema 7 continuations in
 `care.rs` and `energy_correction.rs` still pass unchanged.
 
-### `tests/hunter.rs`, 25 deterministic tests
+### `tests/hunter.rs`, 26 deterministic tests
 
 Two trial parameters are replaced in these fixtures to make outcomes deterministic:
 `capture_min = capture_max = 1` for a certain capture and `= 0` for a certain miss.
@@ -408,13 +442,17 @@ Two trial parameters are replaced in these fixtures to make outcomes determinist
   after, and identical extensions at the end.
 - **Stale handles.** After a capture the freed slot is reused by a new animal; a replanted
   stale handle is cleared rather than resolved, and the new occupant is not harvested for it.
+- **Non-finite scale bounds.** NaN and both infinities on `body_scale_min`,
+  `body_scale_exponent` and `escape_speed_multiple` are refused by the profile, by both
+  initializers (which change nothing), by state validation and by the decoder — and three
+  legitimate points of the range still pass.
 - **Decode hardening.** Thirteen crafted extensions are refused by name: a member that is not
   a live organism, duplicates, a gut past capacity, energy in an empty gut, handling nothing,
   stalking nobody, a timed phase with no duration, an untimed phase that stores one, a hunter
   aiming at itself, members without a profile, a control world holding a hunter, a negative
   import, and an unknown profile version.
 
-### `tests/hunter_geometry.rs`, 6 tests on the corrected contact
+### `tests/hunter_geometry.rs`, 8 tests on the corrected contact
 
 - **Every published grasp centre round-trips through the root chart.** A sweep over five faces,
   twenty-five positions each, eight headings and both offsets: where a centre is published, the
@@ -436,14 +474,21 @@ Two trial parameters are replaced in these fixtures to make outcomes determinist
 - **Unpaid refusals carry no paid key**, so they can never alias a paid attempt, and a stale
   target carries no prey position.
 - **Phase timing and episode identity survive a restart.** The view's timing is the member's
-  timing; a checkpoint taken mid-strike reloads to the same hash and the same member record, and
-  the resumed run reproduces the event stream key for key.
+  timing; a checkpoint taken mid-strike reloads to the same hash and the same member record, the
+  resumed run reproduces the event stream key for key, and the phase opened by settlement starts
+  at the settlement tick in both worlds — checked at the settlement, not at the end of the run.
+- **A settled phase starts at the settlement tick and runs its whole span.** A capture opens
+  `Handling` exactly at its record's tick, from a fully extended strike; a paid miss opens
+  `Recovering` at its attempt tick, is still recovering when observed at its advertised end
+  boundary, and hands over to a contiguous next phase one step later.
+- **The pause after a meal opens at the tick the gut empties**, for the profile's whole span.
 
 ### `tests/hunter_migration.rs`, 6 tests
 
 The byte-exact schema 9 continuation above, the schema 8 and 7 projections, the inert
 never-opted-in world, plus: a schema 10 snapshot **without** a trial migrates exactly, and one
-**with** an active trial is refused by name while a running schema 11 trial refuses to project
+**with** any hunter history — a running trial, a budget-matched control deposit, or an extinct
+lineage's counters — is refused by name, while a running schema 11 trial refuses to project
 backwards.
 
 ## Open, and not claimed
@@ -458,11 +503,20 @@ backwards.
   `hunter-experiment-contract-2026-09-13.md`. Root's harness `5f27172` and its smokes exist; the
   biological screen was waiting on exactly the capture metadata and geometry this package now
   delivers.
-- **The art confirmation is still owed.** `capture_offset_body` is recomputed from Fable's
-  source in the animation contract, not measured against a rendered frame; the `1.5` px
-  tolerance and the `16` px query extent are trial values. Debug contact overlays and the
-  seam/vertex/rim visual comparison belong to the art package, which owns `lanternjaw.rs`,
-  `multipart.rs` and the whole-rig scaling this core hands `body_scale` to.
+- **The art confirmation is still owed.** `capture_offset_body` is now Fable's *authored*
+  `effectors(1.0).near_claw`, recomputed from the same source expressions — but it has still not
+  been measured against a rendered frame; the `1.5` px tolerance and the `16` px query extent
+  are trial values. Debug contact overlays and the seam/vertex/rim visual comparison belong to
+  the art package, which owns `lanternjaw.rs`, `multipart.rs` and the whole-rig scaling this
+  core hands `body_scale` to.
+- **The admitted scale ranges do not yet meet.** Core admits `body_scale_min = 0.2`, and a
+  perfectly valid config (`child_structure_fraction = 0.1`) yields `0.3162…`; Fable's
+  `Lanternjaw::draw_living` currently admits `SCALE_MIN..=SCALE_MAX = 0.5..=1.0` and panics
+  outside it, and is extending that range. Core tests the small end rather than clamping to the
+  renderer's: clamping only one side would separate the drawn claws from the contact geometry.
+  Until the art range covers `0.2`, a world whose children are born that small can be simulated
+  but not drawn — root should keep the default `child_structure_fraction = 0.4` (scale `0.632`)
+  for the screen.
 - **Untuned trial numbers with a known demand.** At the founder defaults, maintenance alone is
   about 18 e/hour before sensing and movement, and sensing now costs `0.0024 e/s`; how much prey
   turnover that actually requires is a measurement nobody has made yet.
@@ -485,8 +539,13 @@ backwards.
 
 - **Schema 11, and a refusal.** The geometry correction changed the persisted profile and member
   shape. Rather than smuggle a new meaning into the same wire version, the schema is bumped, the
-  old shape is frozen in `snapshot/v10.rs`, empty schema 10 worlds migrate exactly and an active
-  schema 10 trial is refused by name.
+  old shape is frozen in `snapshot/v10.rs`, empty schema 10 worlds migrate exactly and any
+  non-empty schema 10 extension is refused by name.
+- **`PROFILE_VERSION 3` for a value, not a shape.** Adopting Fable's authored claw moved a
+  frozen experimental constant by `0.062368` px. The wire shape is identical, so nothing forced
+  a version bump — but a saved version 2 trial would then silently mean something new, so it is
+  refused instead. Provenance for the new value lives in `hunter::CAPTURE_OFFSET_BODY` and its
+  test, which re-evaluates the art's own expressions.
 - **Two draws per paid attempt, not one.** The plan asks for "one draw per paid attempt" and
   also for a "dedicated seeded draw" for contested-claim priority. Deriving both from one draw
   would correlate a hunter's claim priority with its own capture roll, so priority and capture
@@ -503,3 +562,10 @@ backwards.
   `episode` are semantic facts the tick already knew; the adapter reads them instead of guessing
   a recoil's origin from durations. No pose, no timeline and no generic animation state entered
   the snapshot.
+
+## Corrections to earlier records
+
+- The commit message of `327862c` says "261 passed"; the actual count at that commit was **260**
+  (`139 + 5 + 13 + 6 + 6 + 7 + 26 + 8 + 6 + 2 + 32 + 2 + 8`). The tree was green either way; the
+  number in the message is one too high, and is corrected here rather than by rewriting a commit
+  other workers may already have built on.
