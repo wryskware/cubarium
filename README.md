@@ -146,9 +146,11 @@ Spiretree wind and actual-intake meal continuity are now live;
 glasscane/vine headroom remains limited. The
 [AA comparison](design/7_Research/astra-aa-comparison-2026-09-13.md) retains the
 current renderer default: blanket coverage baking steadied wings but softened
-small bodies too much. The [stable-sail candidate](design/7_Research/astra-sail-stable-body-2026-09-13.md)
-combines fin-only coverage with removal of an over-quantized body squash. It is
-committed at a88b15b and undergoing independent visual/release review, not live yet.
+small bodies too much. The [selected sail revision](design/7_Research/astra-sail-stable-body-2026-09-13.md)
+removes an over-quantized swimming-body squash while preserving the original crisp
+fins after a bounded comparison. It is [live in9cf0e1d](design/7_Research/sail-live-update-2026-09-13.md):
+1102 workspace tests passed; the same world resumed at tick633208, and the shared
+viewer measured59.9 distinct fps. Experimental quiet and hunter changes remain isolated.
 
 The [current release backlog](design/implementation-plan.md#current-release-status)
 is the concise source for remaining work; dated rollout reports preserve history.
