@@ -118,8 +118,9 @@ fn state_weight(w: f32) -> f32 {
 ///   opacity)`, with `opacity` clamped to 1; a pixel with `c.a == 0` is left untouched.
 ///
 /// Properties this guarantees, which the independent tests check: a rig of one state with
-/// one part at offset 0 draws bit for bit what [`crate::stamp_layers_bent_with_radius`]
-/// draws with that sprite at the rig's radius, and differs from [`crate::stamp_sprite`] only
+/// one part at offset 0 draws what [`crate::stamp_layers_bent_with_radius`] draws with that
+/// sprite at the rig's radius (bit for bit but for float reassociation — one configuration
+/// in the sweep differs by a single f32 ulp), and differs from [`crate::stamp_sprite`] only
 /// on the bilinear filter tail the sprite's own radial extent clipped (Astra's fixture: a
 /// 16×16 sprite with texel (12, 12) painted, root Front (32.05, 32.05), paints Front (37, 37)
 /// at 0.0025 where the plain stamp painted nothing — a pixel's owner does not depend on the

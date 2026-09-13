@@ -123,7 +123,8 @@ example if they are gone.
 (16), written by an independent worker from the doc comments and the brief, including
 Astra's retained fixtures: the marked-partition vertex case reads 0.5, not 0.75; the rim
 fixture keeps Front (32, 59) as the flat placement does and no part pops; a one-part rig
-equals `stamp_layers_bent_with_radius` at its own radius bit for bit (the plain
+equals `stamp_layers_bent_with_radius` at its own radius to within one f32 ulp — one
+configuration of the sweep differs by float reassociation, every other is bit-identical (the plain
 `stamp_sprite` differs only by the filter tail its legacy radius clipped — Astra §6.1);
 opaque and translucent materials cut into two and four aligned pieces draw the uncut
 sprite; layers order; state mixtures; seam light conservation to 1e-6 with matched lattice
@@ -134,6 +135,25 @@ periodicity; the warm accent only inside the strike envelope; blink steps; near 
 the hull and far limb under it at the strike; a per-frame bound in `move`; heading (−1, 0)
 is a half turn, not a mirror (Astra §5); sub-pixel anchor property; opacity applied once
 without ridging an overlap.
+
+Three properties the brief stated were corrected by the test pass rather than by the
+implementation: heading (−1, 0) is a half turn about the anchor, not a mirror about its
+column (Astra §5; the body is asymmetric about its mid-line, and the test asserts the mirror
+does *not* hold); the "each pixel between its two integer-anchor neighbours" bracketing
+bound is unsound because a half-pixel anchor lands on the body lattice's own breakpoint
+(tested instead: a whole-pixel shift is a bit-identical translation, a half-pixel shift
+changes the picture, and a single part changes by at most half its largest adjacent-texel
+step); and hunt periodicity is texel-exact at every 60 fps instant of the cycle but only to
+1e-6 at arbitrary decimals, because `seconds mod 6` is not exact in binary — the study's
+"pixel-identical at t and t + 6" was earned by rounding, which fractional motion gives up.
+Measured envelope of the suite: body x (−9.5, 13.5), y (−4.5, 4.5); worst part extent
+6.908 of 8; worst query radius 15.47 of 16; the warm accent 10 frames at 3.25–3.40 s and
+never outside `hunt`; the blink's largest per-frame step 0.275 of its swing; `move` mean
+|Δ| per painted pixel 0.005 against a derived bound of 0.25.
+
+Live-process host tests (`run_persistence`, `care_replay`) are load-flaky when several
+`cargo test` invocations contend for the state lock at once; each passes alone. Not a
+change of this session; noted for whoever runs the suite beside root's experiments.
 
 ## Package 2 — Authored growth expansion
 
@@ -166,8 +186,9 @@ like a side-face plant, rooted at its ripple row. `crates/cubarium/tests/art_win
 
 ## Commits, commands, artefacts
 
-- `b8b8a11` reed rule; `5d7ea69` growth pack; Package 1 and the design notes: see the
-  final entries appended below.
+- `b8b8a11` reed rule; `5d7ea69` growth pack; `5a59b8c` Lanternjaw rig, study route,
+  tests and cost test; `3f2182f` presenter doc qualifiers and the refined endpoint test;
+  `56cf476` this record, the brief, the roadmap status and the README pointer.
 - Validation: `cargo test -p cubarium-render -p cubarium` (every suite green at each
   commit); `./scripts/art-bake.sh` twice with `cmp`; the ignored cost test above; the PNG
   captures above.
