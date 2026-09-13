@@ -777,6 +777,87 @@ fn stamp_unfolded<const BENT: bool>(
     }
 }
 
+/// Stamp one unscaled pose about `center`, retaining `owner`'s surface unfolding.
+///
+/// A retiled patch can move its support center without changing which unfolding
+/// owns a pixel near a cube vertex. Both points must be canonical and on the same
+/// face; the heading is expressed in that shared chart. The queried disk is a
+/// superset about `owner`, but sampling is bounded by the normal nine-pixel
+/// footprint about `center` in the retained chart. This does not increase an
+/// asset's bend budget. Callers must validate their patch's material registration
+/// and physical support, including vertex placements, before opting in.
+///
+/// Invalid points, heading, opacity, empty masks/poses and queries beyond the
+/// surface helper's supported radius draw nothing. Opacity is capped at one;
+/// invalid/identity bends use the still pose, as in [`stamp_layers_bent`]. No
+/// existing stamp path or pixel-ownership rule is changed.
+#[allow(clippy::too_many_arguments)]
+pub fn stamp_pose_in_chart(
+    canvas: &mut Canvas,
+    owner: SurfacePoint,
+    center: SurfacePoint,
+    heading: Vec2,
+    pose: Pose,
+    opacity: f32,
+    mask: Mask,
+    bend: Bend,
+    scratch: &mut Vec<PixelImage>,
+) {
+    let extent = pose.extent();
+    if owner.face != center.face
+        || !owner.is_canonical()
+        || !center.is_canonical()
+        || !opacity.is_finite()
+        || opacity <= 0.0
+        || extent == 0.0
+        || extent > FOOTPRINT_RADIUS
+        || mask.is_empty()
+    {
+        return;
+    }
+    let Some(h) = heading.normalized() else { return };
+    let bend = if bend.is_identity() { Bend::NONE } else { bend };
+    let radius = (extent + bend.amplitude.abs()).min(FOOTPRINT_RADIUS);
+    let query = radius + (owner.chart() - center.chart()).length();
+    if query > cubarium_surface::MAX_LOCAL_RADIUS {
+        return;
+    }
+    let opacity = opacity.min(1.0);
+    let side = Vec2::new(-h.y, h.x);
+    let reference = pose.first;
+    unfold_pixels(owner, query, scratch);
+    for pixel in scratch.iter() {
+        let d = pixel.local - center.chart();
+        if d.length() > radius + cubarium_surface::GEOM_EPS {
+            continue;
+        }
+        let local = Vec2::new(h.dot(d), side.dot(d));
+        let at = Vec2::new(
+            local.x - bend.displacement(reference.height as f64, local.y + reference.pivot.y),
+            local.y,
+        );
+        let coverage = mask.coverage(at + reference.pivot, reference.height, reference.pivot);
+        if coverage <= 0.0 {
+            continue;
+        }
+        let mut rgba = pose.sample(at);
+        for c in &mut rgba {
+            *c *= coverage;
+        }
+        let alpha = rgba[3] * opacity;
+        if alpha <= 0.0 {
+            continue;
+        }
+        let background = canvas.get(pixel.face, pixel.x, pixel.y);
+        canvas.set(
+            pixel.face,
+            pixel.x,
+            pixel.y,
+            std::array::from_fn(|c| rgba[c] * opacity + background[c] * (1.0 - alpha)),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1198,5 +1279,117 @@ mod tests {
         assert!(Sprite::from_rgba(2, 2, Vec2::ZERO, &[0; 3]).is_err());
         assert!(Sprite::from_rgba(1, 1, Vec2::new(f64::NAN, 0.0), &[0; 4]).is_err());
         assert!(Sprite::from_rgba(32, 32, Vec2::ZERO, &vec![255; 32 * 32 * 4]).is_err());
+    }
+
+    #[test]
+    fn retained_chart_with_coincident_centers_matches_the_existing_stamp() {
+        let sprite = stem();
+        for face in Face::ALL {
+            for (u, v) in [(32.5, 32.5), (0.5, 0.5), (63.5, 0.5), (63.5, 63.5)] {
+                let anchor = SurfacePoint::new(face, u, v);
+                for amplitude in [0.0, -0.4, 0.4, f64::NAN, f64::INFINITY] {
+                    for mask in [Mask::None, Mask::Axial { reveal: 8.25 }, Mask::Strip { floor: 4.0, reveal: 12.0 }] {
+                        let mut original = Canvas::new();
+                        let mut retained = Canvas::new();
+                        let bend = bend_of(amplitude);
+                        stamp_layers_bent(&mut original, anchor, Vec2::new(0.0, -1.0),
+                            &[(Pose::still(&sprite), 1.0)], 1.0, 0.7, mask, bend, &mut Vec::new());
+                        stamp_pose_in_chart(&mut retained, anchor, anchor, Vec2::new(0.0, -1.0),
+                            Pose::still(&sprite), 0.7, mask, bend, &mut Vec::new());
+                        assert_eq!(still_vs(&original, &retained), 0, "{anchor:?} {amplitude} {mask:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn retained_chart_invalid_inputs_are_noops_and_opacity_is_bounded() {
+        let sprite = stem();
+        let good = SurfacePoint::new(Face::Front, 32.5, 32.5);
+        let draw = |owner, center, heading, opacity, bend| {
+            let mut canvas = Canvas::new();
+            stamp_pose_in_chart(&mut canvas, owner, center, heading, Pose::still(&sprite),
+                opacity, Mask::None, bend, &mut Vec::new());
+            canvas
+        };
+        let heading = Vec2::new(1.0, 0.0);
+        for point in [SurfacePoint::new(Face::Front, f64::NAN, 0.0),
+            SurfacePoint::new(Face::Front, 64.0, 2.0), SurfacePoint::new(Face::Front, -0.1, 2.0)] {
+            assert_eq!(total(&draw(point, good, heading, 1.0, Bend::NONE)), 0.0);
+            assert_eq!(total(&draw(good, point, heading, 1.0, Bend::NONE)), 0.0);
+        }
+        for h in [Vec2::ZERO, Vec2::new(f64::NAN, 1.0), Vec2::new(f64::INFINITY, 0.0)] {
+            assert_eq!(total(&draw(good, good, h, 1.0, Bend::NONE)), 0.0);
+        }
+        for opacity in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            assert_eq!(total(&draw(good, good, heading, opacity, Bend::NONE)), 0.0);
+        }
+        assert_eq!(total(&draw(good, SurfacePoint::new(Face::Top, 32.5, 32.5), heading, 1.0, Bend::NONE)), 0.0);
+        assert_eq!(total(&draw(SurfacePoint::new(Face::Front, 0.5, 0.5),
+            SurfacePoint::new(Face::Front, 63.5, 63.5), heading, 1.0, Bend::NONE)), 0.0);
+        let opaque = draw(good, good, heading, 1.0, Bend::NONE);
+        assert_eq!(still_vs(&opaque, &draw(good, good, heading, 4.0, Bend::NONE)), 0);
+        assert_eq!(still_vs(&opaque, &draw(good, good, heading, 1.0,
+            Bend { base: f64::NAN, ..bend_of(0.4) })), 0);
+    }
+
+    #[test]
+    fn retained_chart_offset_patch_has_bounded_physical_support_and_continuous_blending() {
+        let patch = |color: [u8; 3]| {
+            let mut bytes = vec![0; 16 * 16 * 4];
+            for y in 4..8 {
+                for x in 6..10 {
+                    bytes[(y * 16 + x) * 4..(y * 16 + x + 1) * 4]
+                        .copy_from_slice(&[color[0], color[1], color[2], 192]);
+                }
+            }
+            Sprite::from_rgba(16, 16, Vec2::new(8.0, 8.0), &bytes).unwrap()
+        };
+        let first = patch([255, 32, 0]);
+        let second = patch([0, 128, 255]);
+        let mut painted = 0;
+        for face in Face::ALL {
+            for (u, v) in [(2.0, 6.0), (62.0, 6.0), (32.0, 32.0), (2.0, 62.0)] {
+                let owner = SurfacePoint::new(face, u, v);
+                let center = SurfacePoint::new(face, u, v - 4.0);
+                let mut neighborhood = Vec::new();
+                unfold_pixels(center, FOOTPRINT_RADIUS, &mut neighborhood);
+                let mut allowed = vec![false; 5 * 64 * 64];
+                for p in neighborhood {
+                    allowed[p.face.index() * 4096 + usize::from(p.y) * 64 + usize::from(p.x)] = true;
+                }
+                for amplitude in [-0.9, 0.0, 0.9] {
+                    let draw = |mix| {
+                        let mut canvas = Canvas::new();
+                        stamp_pose_in_chart(&mut canvas, owner, center, Vec2::new(1.0, 0.0),
+                            Pose { first: &first, second: &second, mix }, 0.7,
+                            Mask::Axial { reveal: 11.75 },
+                            Bend { amplitude, base: 32.0, root: 1.0, length: 40.0 }, &mut Vec::new());
+                        canvas
+                    };
+                    let a = draw(0.0);
+                    let b = draw(1.0);
+                    let mixed = draw(0.37);
+                    assert!(still_vs(&a, &b) > 0, "empty test at {owner:?}");
+                    for f in Face::ALL {
+                        for y in 0..64 {
+                            for x in 0..64 {
+                                let (a, b, actual) = (a.get(f, x, y), b.get(f, x, y), mixed.get(f, x, y));
+                                if actual.iter().any(|v| *v > 0.0) {
+                                    assert!(allowed[f.index() * 4096 + usize::from(y) * 64 + usize::from(x)], "outside physical support: {owner:?} -> {f:?} {x},{y}");
+                                    painted += 1;
+                                }
+                                for c in 0..3 {
+                                    let expected = a[c] + (b[c] - a[c]) * 0.37;
+                                    assert!(actual[c].is_finite() && (actual[c] - expected).abs() < 1e-7);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(painted > 1000, "support/blending sweep must exercise visible patches");
     }
 }
