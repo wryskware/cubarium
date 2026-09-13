@@ -144,7 +144,7 @@ impl CareEffects {
             }
             let color = match event.kind {
                 CareKind::Feed => [255, 175, 91],
-                CareKind::Clean => [183, 117, 173],
+                CareKind::Clean => [205, 163, 195],
                 CareKind::Rain => continue,
             }
             .map(srgb_decode);
