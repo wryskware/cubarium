@@ -393,6 +393,133 @@ fn unpaid_refusals_and_stale_targets_carry_no_paid_key_or_borrowed_position() {
 
 // ---------------------------------------------------------------- timing across a restart
 
+/// **Regression.** Settlement runs after movement, so the phase it opens belongs to the
+/// boundary the tick completes. An earlier build entered Handling and Recovering at `now`
+/// while stamping their events `now + 1`: a capture at tick 33 published Handling as having
+/// started at 32, which starts a recoil before the contact it recoils from, and a failed
+/// strike lost one tick of its advertised recovery
+/// (`astra-hunter-geometry-review-2026-09-13.md`).
+#[test]
+fn a_settled_phase_starts_at_the_settlement_tick_and_runs_its_whole_span() {
+    // A capture: Handling opens exactly at the capture record's tick.
+    let mut world = quiet_world();
+    let profile = certain(&world);
+    let spot = SurfacePoint::new(Face::Top, 22.0, 34.0);
+    let hunter = world.start_hunter_trial(profile.clone(), target_of(spot)).expect("started").id;
+    aim(&mut world, hunter, Vec2::new(1.0, 0.0), 1.0);
+    let grasp = world.hunter_view()[0].capture_center.expect("a centre");
+    place_prey(&mut world, grasp, 0.5, 0.3, 0.4);
+
+    let mut capture_tick = None;
+    for _ in 0..400 {
+        world.step();
+        for event in world.drain_hunter_events() {
+            if let HunterEvent::Capture { tick, .. } = event {
+                capture_tick = Some(tick);
+            }
+        }
+        if capture_tick.is_some() {
+            break;
+        }
+    }
+    let capture_tick = capture_tick.expect("a capture");
+    let member = *world.hunters().member(hunter).expect("a member");
+    assert_eq!(capture_tick, world.tick(), "the record is stamped at the completed boundary");
+    assert_eq!(member.phase, HunterPhase::Handling);
+    assert_eq!(
+        member.phase_started_tick, capture_tick,
+        "Handling must open at the settlement, not a tick before it"
+    );
+    assert_eq!(member.phase_ends_tick, member.phase_started_tick, "Handling is untimed");
+    assert_eq!(member.entered_from, HunterPhase::Strike, "it recoils from a fully extended strike");
+    let view = world.hunter_view().into_iter().next().expect("a view");
+    assert_eq!(view.phase_started_tick, capture_tick);
+
+    // A paid miss: Recovering opens at the attempt's tick and runs its whole advertised span.
+    let mut missing = certain(&world);
+    missing.capture_min = 0.0;
+    missing.capture_max = 0.0;
+    let mut world = quiet_world();
+    let hunter = world.start_hunter_trial(missing.clone(), target_of(spot)).expect("started").id;
+    aim(&mut world, hunter, Vec2::new(1.0, 0.0), 1.0);
+    let grasp = world.hunter_view()[0].capture_center.expect("a centre");
+    place_prey(&mut world, grasp, 0.5, 0.3, 0.4);
+
+    let mut miss_tick = None;
+    for _ in 0..400 {
+        world.step();
+        for event in world.drain_hunter_events() {
+            if let HunterEvent::Attempt { tick, outcome: AttemptOutcome::Missed, .. } = event {
+                miss_tick = Some(tick);
+            }
+        }
+        if miss_tick.is_some() {
+            break;
+        }
+    }
+    let miss_tick = miss_tick.expect("a paid miss");
+    let member = *world.hunters().member(hunter).expect("a member");
+    assert_eq!(miss_tick, world.tick());
+    assert_eq!(member.phase, HunterPhase::Recovering);
+    assert_eq!(member.phase_started_tick, miss_tick, "the recoil starts where the strike ended");
+    let recovery_ticks = (missing.recovery_seconds / cubarium_core::DT).round() as u64;
+    assert_eq!(
+        member.phase_ends_tick - member.phase_started_tick,
+        recovery_ticks,
+        "a failed strike must recover for its whole advertised span"
+    );
+    // And it really waits that long. The phase occupies the boundaries `[started, ends]`: the
+    // decision pass leaves it when the world has reached `ends`, so the member is still
+    // recovering when observed *at* `ends` and has moved on one step later — the same one-step
+    // display lag every pre-step decision has.
+    for _ in 0..recovery_ticks {
+        world.step();
+    }
+    assert_eq!(world.tick(), member.phase_ends_tick);
+    assert_eq!(
+        world.hunters().member(hunter).expect("a member").phase,
+        HunterPhase::Recovering,
+        "the pause ended before its advertised boundary"
+    );
+    world.step();
+    let after = *world.hunters().member(hunter).expect("a member");
+    assert_ne!(after.phase, HunterPhase::Recovering, "the pause outlived its span");
+    assert_eq!(after.phase_started_tick, member.phase_ends_tick, "and the next phase is contiguous");
+}
+
+/// The pause after a finished meal is a post-movement transition too: it opens at the tick the
+/// gut empties and lasts the profile's whole `meal_recovery_seconds`.
+#[test]
+fn the_pause_after_a_meal_opens_at_the_tick_the_gut_empties() {
+    let mut world = quiet_world();
+    let mut profile = certain(&world);
+    // A short pause, so the test can watch the whole of it without a long run.
+    profile.meal_recovery_seconds = 1.0;
+    let spot = SurfacePoint::new(Face::Top, 22.0, 34.0);
+    let hunter = world.start_hunter_trial(profile.clone(), target_of(spot)).expect("started").id;
+    aim(&mut world, hunter, Vec2::new(1.0, 0.0), 1.0);
+    let grasp = world.hunter_view()[0].capture_center.expect("a centre");
+    // A small meal, so it is digested inside the test window.
+    place_prey(&mut world, grasp, 0.2, 0.05, 0.1);
+
+    let mut emptied_at = None;
+    for _ in 0..3_000 {
+        let carrying = world.hunters().member(hunter).map(|m| m.carrying()).unwrap_or(false);
+        world.step();
+        let member = *world.hunters().member(hunter).expect("a member");
+        if carrying && !member.carrying() {
+            emptied_at = Some((world.tick(), member));
+            break;
+        }
+    }
+    let (tick, member) = emptied_at.expect("the meal must finish inside the window");
+    assert_eq!(member.phase, HunterPhase::Recovering, "the pause starts as the gut empties");
+    assert_eq!(member.entered_from, HunterPhase::Handling, "and it knows it followed a meal");
+    assert_eq!(member.phase_started_tick, tick, "at the boundary the tick completed");
+    let meal_ticks = (profile.meal_recovery_seconds / cubarium_core::DT).round() as u64;
+    assert_eq!(member.phase_ends_tick - member.phase_started_tick, meal_ticks);
+}
+
 /// The view's timing is the member's timing, and both survive a checkpoint: a restart during a
 /// recoil still knows what it recoiled from, and the resumed world produces the very same
 /// event stream, key for key.
@@ -434,15 +561,40 @@ fn phase_timing_and_episode_identity_survive_a_restart() {
 
     let mut original_events = Vec::new();
     let mut reloaded_events = Vec::new();
+    let mut settled: Option<u64> = None;
     for _ in 0..200 {
         world.step();
         reloaded.step();
-        original_events.extend(world.drain_hunter_events());
+        let fresh = world.drain_hunter_events();
+        // The tick the paid attempt resolved on, checked *there* rather than at the end of the
+        // run: a restart must not shift the boundary the recoil is interpolated from.
+        if settled.is_none()
+            && let Some(tick) = fresh.iter().find_map(|e| match e {
+                HunterEvent::Capture { tick, .. } => Some(*tick),
+                HunterEvent::Attempt { tick, outcome, .. }
+                    if !matches!(outcome, AttemptOutcome::Unaffordable) =>
+                {
+                    Some(*tick)
+                }
+                _ => None,
+            })
+        {
+            settled = Some(tick);
+            let opened = *world.hunters().member(hunter).expect("a member");
+            assert_eq!(tick, world.tick());
+            assert_eq!(
+                opened.phase_started_tick, tick,
+                "the phase opened by settlement must start at the settlement tick"
+            );
+            assert_eq!(*reloaded.hunters().member(hunter).expect("a member"), opened);
+        }
+        original_events.extend(fresh);
         reloaded_events.extend(reloaded.drain_hunter_events());
         assert_eq!(state_hash(&reloaded.state), state_hash(&world.state), "diverged at {}", world.tick());
     }
     assert!(!original_events.is_empty(), "the strike must have resolved");
     assert_eq!(reloaded_events, original_events, "the resumed run told a different story");
+    assert!(settled.is_some(), "the paid attempt never resolved");
 
     // And the recoil that followed says what it followed.
     let after = *world.hunters().member(hunter).expect("a member");

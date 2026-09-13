@@ -1151,7 +1151,11 @@ impl World {
                             let member = &mut hunters.members[index];
                             member.gut_material += material;
                             member.gut_energy += energy;
-                            member.enter(HunterPhase::Handling, now, now, m.attack_counter);
+                            // Settlement happens *after* movement, so the phase it opens starts
+                            // at the boundary this tick completes — the same `now + 1` the
+                            // capture record is stamped with. Entering at `now` would publish a
+                            // recoil that began before the contact it recoils from.
+                            member.enter(HunterPhase::Handling, now + 1, now + 1, m.attack_counter);
                             hunters.captures_total += 1;
                             hunters.predation_deaths_total += 1;
                             counters.hunter_captures += 1;
@@ -1179,8 +1183,8 @@ impl World {
                             // `entered_from` and `episode` now say out loud.
                             hunters.members[index].enter(
                                 HunterPhase::Recovering,
-                                now,
-                                now + recovery_ticks,
+                                now + 1,
+                                now + 1 + recovery_ticks,
                                 m.attack_counter,
                             );
                         }
@@ -1368,7 +1372,9 @@ impl World {
                         // never left handling nothing, not even for the rest of the tick.
                         if member.phase == HunterPhase::Handling {
                             let episode = member.episode;
-                            member.enter(HunterPhase::Recovering, now, now + meal_ticks, episode);
+                            // Digestion is a post-movement pass too: the pause starts at the
+                            // boundary this tick completes, and runs its whole advertised span.
+                            member.enter(HunterPhase::Recovering, now + 1, now + 1 + meal_ticks, episode);
                         }
                     }
                 }
