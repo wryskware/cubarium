@@ -59,7 +59,7 @@ Artifacts/frozen executables live in ignored
 the ancestry binary is `4772302c184510cfd9df2a6afcc715e9ce31a30581d65a564a356a3b8b3d55c6`.
 Do not treat empty JSON files from failed pre-report runs as completed reports.
 
-### Independent diagnostic now running
+### Independent diagnostic (completed; follow-ups below)
 
 Commit `0c0fd46` adds short-window counter resets (default 200 ticks), compensated
 light/heat and receipt sums, care-boundary checks and signed closing ledger
@@ -70,7 +70,7 @@ hashes across 1/60/200/420-tick observation windows.
 
 The frozen diagnostic `care_compare-windowed` SHA256 is
 `1c13f02d8f355ede833ddedbe7e452dd7de54dea8df9a602ab338aafdffd891d`.
-Two fresh seed-1, repeated-care, 12-hour comparisons are running with windows
+Two fresh seed-1, repeated-care, 12-hour comparisons ran with windows
 200 and 20: root exec handles 63946 and 25247, respectively. Outputs are
 `seed1-repeated-window200.json` and `seed1-repeated-window20.json` in the artifact
 directory. Poll their actual handles; a nonzero strict audit exit now still emits
@@ -107,3 +107,43 @@ This does not measure Wrysk's own browser or physical display pacing. Report fil
 The actual cube remained on its frozen build throughout. A read-only check at
 tick 148,039 reported ready/no outstanding care; five user-originated receipts
 were present. Root has not submitted additional live inputs or reset that world.
+
+## Subsequent verified progress and active handles
+
+The two diagnostic runs completed with full reports and strict exit1 as designed.
+Their200/20-tick full hashes match; independent energy error stays below7e-10,
+while the persisted heat-counter excess explains the ~2e-5 failure. Seed2's
+repeated comparison completed successfully before its chained occasional arm
+failed the old pre-report gate. See
+[the twelve-hour findings](care-twelve-hour-results-2026-09-13.md), independently
+reviewed by Astra in `33be446`. No failed arm was relabeled passing.
+
+The event-driven Unix web accept fix is committed in `8fbabf7`:32 web tests,
+three mirror tests and actual A/B Chromium measurements. Distinct pattern frames
+rose from41–42/sec to59–60/sec; [full method/results](viewer-cadence-fix-2026-09-13.md).
+The two isolated orientation-pattern servers (PIDs2577585/2583198, ports7401/7402)
+were stopped after tests; their binaries/results remain. Live cube PID2511131
+still reported frozen `c60241f` at tick172095. No live rollout of this fix yet.
+
+Current work to revalidate on continuation:
+
+- Native Fable remains exec52101 / session135e2be2-1019-48c7-ab48-bab462bc4684.
+  It revised the multipart draft to one root-owned query after Astra's advice;
+  implementation is still incomplete, and placeholders are not delivery. Its
+  `living-world-next-progress` records the package boundaries. New review
+  `97470f4` contains concrete vertex/filter-tail fixtures; preserve valid art work.
+- Native Opus5 high now owns core compensated accounting: exec32477 / session
+  f1579c62-fe40-4506-b0c7-94f064f5ab92. Work order
+  `accounting-compensation-handoff-2026-09-13.md`; no hunter changes or live work.
+  Root committed genuine schema8 tick172800 and+600 fixtures before delegation
+  (`3f2900b`). Keep legacy raw additions exactly; append persisted corrections
+  and explicit migration. Root must integrate corrected comparison accessors and
+  repeat long-run/restart tests after the worker supplies its API.
+- Report-preserving old-binary comparisons: seed1 occasional (exec91436,
+  `seed1-occasional-window200.json`) and seed3 repeated (exec95652,
+  `seed3-repeated-window200.json`). Both run12h with200-tick observer windows.
+  They cannot validate the forthcoming core fix; they complete missing baseline
+  evidence and help distinguish care/seed effects. Poll actual handles first.
+
+All remaining tickets stay in `animation-roadmap.md`; none of these results
+completes growth, visible interactions, autonomy tuning or paid apex ecology.
