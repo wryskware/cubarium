@@ -27,8 +27,8 @@ pub use body::{BodyShape, Lobe, stamp_body};
 pub use canvas::{Canvas, srgb_decode, srgb_encode};
 pub use field::draw_field;
 pub use multipart::{
-    RIG_MARGIN, RigPart, SUPERSAMPLE_REACH, rig_radius, stamp_rig, stamp_rig_scaled,
-    stamp_rig_with_radius,
+    MAX_GRID, MIN_RIG_SCALE, RIG_MARGIN, RigPart, SUPERSAMPLE_REACH, grid_schedule, rig_radius,
+    stamp_rig, stamp_rig_scaled, stamp_rig_with_radius,
 };
 pub use sprite::{
     Bend, Mask, Pose, Sprite, stamp_layers, stamp_layers_bent, stamp_layers_bent_with_radius,

@@ -5,8 +5,9 @@
 //! The normative claims of `stamp_rig_scaled` are exactly three, and each is tested against a
 //! second, independent path or against arithmetic recomputed here:
 //!
-//! * **`scale` must be finite and positive**, anything else "panics in every build" — five
-//!   rejected scales, each its own `#[should_panic]`.
+//! * **`scale` must be finite and at least `MIN_RIG_SCALE`**, anything else "panics in every
+//!   build" — five rejected scales, each its own `#[should_panic]`, plus the bounded-grid
+//!   test at the end.
 //! * **every destination pixel's body coordinate is divided by `scale`**, so "a part at offset
 //!   `o` appears at `scale · o` from the root and its texels `scale` pixels apart". Measured two
 //!   ways: the light a half-scale body carries (a quarter of the adult's, exactly, for the
@@ -35,7 +36,8 @@
 //! (see `a_half_scale_body_carries_a_quarter_of_the_light`).
 
 use cubarium_render::{
-    Canvas, RigPart, Sprite, rig_radius, stamp_rig, stamp_rig_scaled, stamp_rig_with_radius,
+    Canvas, MAX_GRID, MIN_RIG_SCALE, RigPart, Sprite, grid_schedule, rig_radius, stamp_rig,
+    stamp_rig_scaled, stamp_rig_with_radius,
 };
 use cubarium_surface::{MAX_LOCAL_RADIUS, SurfacePoint, Vec2};
 use cube_proto::Face;
@@ -829,4 +831,179 @@ fn a_scaled_rig_straddling_a_seam_carries_the_same_light_as_mid_face() {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Astra's minification review (`astra-multipart-minification-review-2026-09-13.md`), as
+// owned regressions: continuity at the adult transition, the clipped corner tail, the
+// destination-aligned box, and the bounded grid.
+// ---------------------------------------------------------------------------
+
+fn one_texel(alpha: f32) -> Sprite {
+    Sprite::from_premultiplied(1, 1, Vec2::new(0.5, 0.5), vec![[alpha; 4]]).unwrap()
+}
+
+/// A centred opaque texel, optionally with a transparent far part that only widens the query.
+fn draw_texel(root: SurfacePoint, heading: Vec2, scale: f64, pad: bool) -> Canvas {
+    let sprite = one_texel(1.0);
+    let transparent = one_texel(0.0);
+    let mut parts = vec![RigPart {
+        sprite: &sprite,
+        offset: Vec2::ZERO,
+        layer: 0,
+    }];
+    if pad {
+        parts.push(RigPart {
+            sprite: &transparent,
+            offset: Vec2::new(5.0, 0.0),
+            layer: 0,
+        });
+    }
+    let states = [(&parts[..], 1.0f32)];
+    let mut canvas = Canvas::new();
+    stamp_rig_scaled(
+        &mut canvas,
+        root,
+        heading,
+        &states,
+        scale,
+        1.0,
+        &mut Vec::new(),
+    );
+    canvas
+}
+
+/// "The filter jumps at adult scale": `scale = 1` paints the centred texel at exactly 1 and
+/// `1 − 1e-9` must paint it within 1e-5 of that — the grid schedule blends the point grid
+/// toward the 2 × 2 grid by `q − 1`, which is `1e-9` there. Every other integer crossing of
+/// `q = 1 / scale` is continuous too: the image just below and just above `1 / k` differ by
+/// less than a thousandth per channel, whereas the two grids themselves differ by far more.
+#[test]
+fn the_filter_is_continuous_across_every_grid_transition() {
+    let root = SurfacePoint::new(Face::Front, 32.5, 32.5);
+    let adult = draw_texel(root, Vec2::new(1.0, 0.0), 1.0, false).get(Face::Front, 32, 32)[0];
+    let almost =
+        draw_texel(root, Vec2::new(1.0, 0.0), 1.0 - 1e-9, false).get(Face::Front, 32, 32)[0];
+    assert_eq!(adult, 1.0);
+    assert!(
+        (adult - almost).abs() < 1e-5,
+        "adult {adult} vs 1 − 1e-9 {almost}"
+    );
+    for k in 2..=5u32 {
+        let (lo, hi) = (1.0 / (f64::from(k) + 1e-6), 1.0 / (f64::from(k) - 1e-6));
+        let sub = SurfacePoint::new(Face::Front, 32.31, 32.77);
+        for heading in [Vec2::new(1.0, 0.0), Vec2::new(0.6, -0.8)] {
+            let a = draw_texel(sub, heading, lo, false);
+            let b = draw_texel(sub, heading, hi, false);
+            let worst = (28..37u8)
+                .flat_map(|y| (28..37u8).map(move |x| (x, y)))
+                .flat_map(|(x, y)| {
+                    let (p, q) = (a.get(Face::Front, x, y), b.get(Face::Front, x, y));
+                    (0..3).map(move |c| (p[c] - q[c]).abs())
+                })
+                .fold(0.0f32, f32::max);
+            assert!(
+                worst < 1e-3,
+                "grid {k}: the image steps by {worst} across 1/{k}"
+            );
+        }
+        let (n_lo, n_hi, w) = grid_schedule(1.0 / f64::from(k));
+        assert_eq!((n_lo, n_hi), (k as usize, k as usize));
+        assert_eq!(w, 0.0, "an integer q is one grid alone");
+    }
+    assert_eq!(grid_schedule(1.0), (1, 1, 0.0));
+    assert_eq!(grid_schedule(2.0), (1, 1, 0.0));
+    let (lo, hi, w) = grid_schedule(0.4);
+    assert_eq!((lo, hi), (2, 3));
+    assert!((w - 0.5).abs() < 1e-12);
+}
+
+/// "Actual query clipping despite the existing margin": at scale 0.2 the corner sample of the
+/// 5 × 5 grid sits 0.566 px from its pixel centre, past the old half-pixel reach. Astra's
+/// fixture — the texel at Front (31.902, 31.902) — paints pixel (32, 32) a tiny bilinear tail
+/// under a generous query; the automatic query must paint exactly the same, at every
+/// admitted grid.
+#[test]
+fn the_automatic_query_keeps_the_minified_corner_tail() {
+    for scale in [0.2, 1.0 / 3.0, 0.316, 0.25, MIN_RIG_SCALE] {
+        for (root, heading) in [
+            (
+                SurfacePoint::new(Face::Front, 31.902, 31.902),
+                Vec2::new(1.0, 0.0),
+            ),
+            (
+                SurfacePoint::new(Face::Front, 31.5, 31.625),
+                Vec2::new(1.0, 1.0),
+            ),
+            (
+                SurfacePoint::new(Face::Front, 31.99, 31.625),
+                Vec2::new(1.0, 0.0),
+            ),
+        ] {
+            let auto = draw_texel(root, heading, scale, false);
+            let wide = draw_texel(root, heading, scale, true);
+            for y in 28..37u8 {
+                for x in 28..37u8 {
+                    assert_eq!(
+                        auto.get(Face::Front, x, y),
+                        wide.get(Face::Front, x, y),
+                        "scale {scale} root {root:?}: pixel ({x}, {y}) lost to the query"
+                    );
+                }
+            }
+        }
+    }
+    let root = SurfacePoint::new(Face::Front, 31.902, 31.902);
+    let wide = draw_texel(root, Vec2::new(1.0, 0.0), 0.2, true);
+    assert!(
+        wide.get(Face::Front, 32, 32)[0] > 0.0,
+        "the fixture's tail is real"
+    );
+}
+
+/// "Body-axis square is not the destination pixel's square": the box is the pixel's own
+/// chart square. A texel at scale 0.2 heading (1, 1) rooted at Front (32.5, 31.68) has its
+/// whole rotated bilinear support below `y = 31.68 + √2 · 0.2 < 32`, so pixel (32, 32) — whose
+/// square starts at `y = 32` — must be exactly 0.
+#[test]
+fn the_box_is_aligned_with_the_destination_pixel_not_the_body() {
+    let root = SurfacePoint::new(Face::Front, 32.5, 31.68);
+    assert!(root.v + std::f64::consts::SQRT_2 * 0.2 < 32.0);
+    let canvas = draw_texel(root, Vec2::new(1.0, 1.0), 0.2, false);
+    assert_eq!(
+        canvas.get(Face::Front, 32, 32),
+        [0.0; 3],
+        "the box reached outside its pixel"
+    );
+    // And the pixel above, which the support does cross, is painted.
+    assert!(canvas.get(Face::Front, 32, 31)[0] > 0.0);
+}
+
+/// "Generic positive-scale API has no work bound": the grid is capped at `MAX_GRID`, so a
+/// scale below `MIN_RIG_SCALE` is refused before any sampling; the minimum itself draws.
+#[test]
+fn the_grid_is_bounded_and_a_smaller_scale_is_refused() {
+    assert_eq!(MIN_RIG_SCALE, 1.0 / MAX_GRID as f64);
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let refused = std::panic::catch_unwind(|| {
+        draw_texel(
+            SurfacePoint::new(Face::Front, 32.5, 32.5),
+            Vec2::new(1.0, 0.0),
+            MIN_RIG_SCALE * 0.999,
+            false,
+        );
+    })
+    .is_err();
+    std::panic::set_hook(previous);
+    assert!(refused, "a scale below MIN_RIG_SCALE must be refused");
+    let canvas = draw_texel(
+        SurfacePoint::new(Face::Front, 32.5, 32.5),
+        Vec2::new(1.0, 0.0),
+        MIN_RIG_SCALE,
+        false,
+    );
+    let (lo, hi, _) = grid_schedule(MIN_RIG_SCALE);
+    assert_eq!((lo, hi), (MAX_GRID, MAX_GRID));
+    assert!(canvas.get(Face::Front, 32, 32)[0] > 0.0);
 }

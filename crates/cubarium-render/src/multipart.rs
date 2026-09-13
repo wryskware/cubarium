@@ -56,10 +56,37 @@ pub struct RigPart<'a> {
 /// query can never paint a pixel the rig's own query did not enumerate.
 pub const RIG_MARGIN: f64 = 0.5;
 
-/// How far a box-filter sample can sit from its destination pixel's centre, in chart pixels:
-/// half a pixel. Added to a minified rig's query radius so the outermost sample of the
-/// outermost pixel is still inside the query.
-pub const SUPERSAMPLE_REACH: f64 = 0.5;
+/// How far a box-filter sample can sit from its destination pixel's centre, **radially**, in
+/// chart pixels: the corner of the pixel's square, `√2 · (0.5 − 0.5 / n) < 1/√2`. Added to a
+/// minified rig's query radius so the outermost sample of the outermost pixel is inside the
+/// query (a per-axis half pixel was not enough: at scale 0.2 a corner sample sits 0.566 px
+/// out, and Astra's fixture — a 1×1 sprite at Front (31.902, 31.902) — lost a real, if
+/// tiny, bilinear tail at pixel (32, 32)).
+pub const SUPERSAMPLE_REACH: f64 = std::f64::consts::FRAC_1_SQRT_2;
+
+/// The smallest whole-rig scale the box filter supports: `1 / MAX_GRID`. Below it a
+/// destination pixel would need more than [`MAX_GRID`]`²` samples, and the work grows as the
+/// square of `1 / scale` without bound, so a smaller scale is a **configuration error** that
+/// panics in every build before any sampling — never silently enlarged to fit, never
+/// point-sampled behind the caller's back. The Lanternjaw's admitted minimum (0.2) needs a
+/// grid of 5.
+pub const MIN_RIG_SCALE: f64 = 1.0 / MAX_GRID as f64;
+/// The largest box-filter grid per axis.
+pub const MAX_GRID: usize = 8;
+
+/// The box-filter schedule for a scale: the two grids whose blend a pixel takes and the
+/// weight of the finer one. **Normative**: `scale ≥ 1` ⇒ `(1, 1, 0)`, the point sample;
+/// otherwise with `q = 1 / scale`, `(⌊q⌋, ⌈q⌉, q − ⌊q⌋)`, so an integer `q` is one grid alone
+/// and the blend weight is continuous in the scale, reaching 0 exactly at every integer `q`
+/// (and so at scale 1, where the finer grid is the point sample too).
+pub fn grid_schedule(scale: f64) -> (usize, usize, f64) {
+    if !(scale < 1.0) {
+        return (1, 1, 0.0);
+    }
+    let q = 1.0 / scale;
+    let lo = q.floor();
+    (lo as usize, q.ceil() as usize, q - lo)
+}
 
 /// The query radius a rig needs: `max` over every part with a positive weight of
 /// `|offset| + sprite.extent()`, plus [`RIG_MARGIN`]; 0 for no parts. **Normative**, and a
@@ -156,16 +183,26 @@ pub fn stamp_rig(
 ///   (`b / scale`), so a part at offset `o` appears at `scale · o` from the root and its
 ///   texels `scale` pixels apart — offsets, pivots, the lattice, the lunge and every
 ///   attachment shrink together, and nothing detaches;
-/// * below scale 1 a destination pixel is **box-filtered**: with `n = ceil(1 / scale)`, its
-///   value is the mean of the `n × n` samples at chart offsets `((i + 0.5) / n − 0.5,
-///   (j + 0.5) / n − 0.5)` along the heading and its clockwise side, each sampled and
-///   depth-composited exactly as one pixel is, so a texel smaller than a pixel contributes
-///   its share of the pixel's area instead of being hit or missed by one point sample. The
-///   pixel over a 0.2-scale claw therefore carries about `0.2²` of the claw's light — present
-///   and geometrically honest, though far too faint to see on an LED;
-/// * the query radius is [`rig_radius`]` · scale`, plus [`SUPERSAMPLE_REACH`] when
-///   box-filtered (a sample sits up to half a pixel from its centre), validated against
-///   `MAX_LOCAL_RADIUS` after scaling.
+/// * below scale 1 a destination pixel is **box-filtered** over its own chart-aligned
+///   square: an `n × n` grid of samples at chart offsets `((i + 0.5) / n − 0.5, (j + 0.5) / n
+///   − 0.5)` **along the chart axes** (a pixel is a chart square whatever the body's heading;
+///   cube seams are right-angle chart permutations, so the square stays axis-aligned on the
+///   far side too), each sample depth-composited exactly as one pixel is, then averaged. The
+///   grid follows [`grid_schedule`]: with `q = 1 / scale` the value is the mean of the `⌊q⌋`
+///   grid blended toward the `⌈q⌉` grid by `q − ⌊q⌋`, so the filter is **continuous in the
+///   scale** — an integer `q` is one grid, and just below scale 1 the image is almost the
+///   point sample rather than a sudden full-width box (Astra's 43.75 % centre jump at
+///   `1 − 1e-9` is gone). This is an approximate, smoothly varying reconstruction filter,
+///   exact as a box integral only at integer `q`. A texel smaller than a pixel thereby
+///   contributes its share of the pixel's area instead of being hit or missed by one point
+///   sample: the pixel over a 0.2-scale claw carries about `0.2²` of the claw's light —
+///   present and geometrically honest, though far too faint to see on an LED;
+/// * the query radius is [`rig_radius`]` · scale`, plus [`SUPERSAMPLE_REACH`] (the radial
+///   corner reach of a box sample, `1/√2`) when box-filtered, validated against
+///   `MAX_LOCAL_RADIUS` after scaling;
+/// * the work is bounded: `scale` must be at least [`MIN_RIG_SCALE`] (`1 / MAX_GRID`, so at
+///   most `MAX_GRID²` samples per pixel); a smaller scale is a configuration error that panics
+///   before any sampling.
 ///
 /// `scale = 1` is [`stamp_rig`] bit for bit (`n = 1`, offset exactly zero). Above 1 the body
 /// is magnified by the plain bilinear sample and the caller's own radius bound must still
@@ -222,8 +259,9 @@ fn stamp_rig_query(
     scratch: &mut Vec<PixelImage>,
 ) {
     assert!(
-        scale.is_finite() && scale > 0.0,
-        "rig scale {scale} is not finite and positive: a rig configuration error"
+        scale.is_finite() && scale >= MIN_RIG_SCALE,
+        "rig scale {scale} is not finite and at least MIN_RIG_SCALE ({MIN_RIG_SCALE}): a rig \
+         configuration error, not a drawable frame"
     );
     let Some(h) = heading.normalized() else {
         return;
@@ -250,16 +288,15 @@ fn stamp_rig_query(
     }
     let side = Vec2::new(-h.y, h.x);
     let origin = root.chart();
-    // Minification: below scale 1 a destination pixel covers `1 / scale` art texels per
-    // axis, so its value is the box average of `n × n` samples spread over the pixel
-    // (`n = ceil(1 / scale)`), never one point sample that can miss a whole texel. At
-    // scale 1 (and above) `n = 1` with a zero offset: the ordinary point sample, bit for bit.
-    let n = if scale < 1.0 {
-        (1.0 / scale).ceil() as usize
-    } else {
-        1
-    };
-    let radius = if n > 1 {
+    // Minification: below scale 1 a destination pixel covers `q = 1 / scale` art texels per
+    // axis. Its value is the box average of an `n × n` grid of samples over the pixel's own
+    // (chart-aligned) square, and because `q` is rarely an integer the two neighbouring
+    // grids `⌊q⌋` and `⌈q⌉` are blended by `q − ⌊q⌋`, so the filter changes continuously
+    // with the scale — at scale 1 the blend is the point grid alone, bit for bit, and just
+    // below 1 it is almost that point sample rather than a sudden full-width box.
+    let (n_lo, n_hi, blend) = grid_schedule(scale);
+    let minified = n_hi > 1;
+    let radius = if minified {
         radius + SUPERSAMPLE_REACH
     } else {
         radius
@@ -268,42 +305,55 @@ fn stamp_rig_query(
         radius <= MAX_LOCAL_RADIUS,
         "rig radius {radius} with its minification reach exceeds MAX_LOCAL_RADIUS"
     );
-    let inv_samples = 1.0 / (n * n) as f32;
     unfold_pixels(root, radius, scratch);
     for pixel in scratch.iter() {
         let d = pixel.local - origin;
-        let mut body = [0.0f32; 4];
-        for i in 0..n {
-            for j in 0..n {
-                // The sample's offset inside the destination pixel, in chart pixels along
-                // the body axes; `(0, 0)` exactly when `n == 1`.
-                let d = if n == 1 {
-                    d
-                } else {
-                    let ox = (i as f64 + 0.5) / n as f64 - 0.5;
-                    let oy = (j as f64 + 0.5) / n as f64 - 0.5;
-                    d + h * ox + side * oy
-                };
-                // The body coordinate of this sample, shared by every part, in the rig's
-                // own (adult) units: a scaled rig reads its art `1 / scale` further out.
-                let b = Vec2::new(h.dot(d) / scale, side.dot(d) / scale);
-                for (parts, weight) in states {
-                    let weight = state_weight(*weight);
-                    if weight <= 0.0 {
-                        continue;
-                    }
-                    let sample = state_sample(parts, b);
-                    for c in 0..4 {
-                        body[c] += sample[c] * weight;
+        // The mean over one `n × n` grid of the complete depth-composited body sample, each
+        // sample at a chart offset inside the destination pixel (`(0, 0)` exactly for `n = 1`).
+        let grid = |n: usize| -> [f32; 4] {
+            let mut sum = [0.0f32; 4];
+            for i in 0..n {
+                for j in 0..n {
+                    let d = if n == 1 {
+                        d
+                    } else {
+                        let ox = (i as f64 + 0.5) / n as f64 - 0.5;
+                        let oy = (j as f64 + 0.5) / n as f64 - 0.5;
+                        d + Vec2::new(ox, oy)
+                    };
+                    // The body coordinate of this sample, shared by every part, in the
+                    // rig's own (adult) units: a scaled rig reads its art `1 / scale`
+                    // further out.
+                    let b = Vec2::new(h.dot(d) / scale, side.dot(d) / scale);
+                    for (parts, weight) in states {
+                        let weight = state_weight(*weight);
+                        if weight <= 0.0 {
+                            continue;
+                        }
+                        let sample = state_sample(parts, b);
+                        for c in 0..4 {
+                            sum[c] += sample[c] * weight;
+                        }
                     }
                 }
             }
-        }
-        if n > 1 {
-            for c in &mut body {
-                *c *= inv_samples;
+            if n > 1 {
+                let inv = 1.0 / (n * n) as f32;
+                for c in &mut sum {
+                    *c *= inv;
+                }
             }
-        }
+            sum
+        };
+        let body = if !minified {
+            grid(1)
+        } else if blend <= 0.0 || n_lo == n_hi {
+            grid(n_hi)
+        } else {
+            let (lo, hi) = (grid(n_lo), grid(n_hi));
+            let w = blend as f32;
+            std::array::from_fn(|c| lo[c] + (hi[c] - lo[c]) * w)
+        };
         let a = body[3] * opacity;
         if a <= 0.0 {
             continue;
