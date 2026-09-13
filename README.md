@@ -154,11 +154,12 @@ preceded the current vine update:
 1102 workspace tests passed; the same world resumed at tick633208, and the shared
 viewer measured59.9 distinct fps.
 
-Current live build **`0.1.0+3147775`** adds the reviewed vine wind integration,
-with unchanged atlas pixels and ecology. It resumed the same world at tick707292
-after1115 workspace tests passed. The copied viewer measured59.9 distinct fps;
-live samples measured58.9 then59.95, with the first sample's delivery stalls
-retained in the [rollout record](design/7_Research/vine-live-update-2026-09-13.md).
+Current live build **`0.1.0+1267e3b`** adds the reviewed near-corner crown-growth
+continuity fix on top of vine wind, with unchanged atlas pixels and ecology.
+It resumed the same world at tick775478 after1126 workspace tests passed;
+the existing care journal was preserved. Copied and live viewers each measured
+59.9 distinct fps. See the [crown rollout](design/7_Research/crown-live-update-2026-09-13.md);
+the [earlier vine rollout](design/7_Research/vine-live-update-2026-09-13.md) retains its original measurements.
 Experimental quiet and hunter changes remain isolated.
 
 The [current release backlog](design/implementation-plan.md#current-release-status)

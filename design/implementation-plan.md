@@ -19,17 +19,17 @@ in the current-status paragraph and the linked research reports below.
 
 ## Current release status
 
-Updated2026-09-13. Live build **`0.1.0+3147775`** resumes the same persistent world
+Updated2026-09-13. Live build **`0.1.0+1267e3b`** resumes the same persistent world
 and drives the cube and shared viewer on7393. It includes independent care doses,
 all seven plants' authored growth clips, spiretree wind, and actual-intake meal
-continuity, plus the stable sail swimming body and vine-covered spire sway;
-1115 workspace tests and copied/live cadence measurements are recorded in the
-[rollout](7_Research/vine-live-update-2026-09-13.md). Neither hunters nor modified
+continuity, plus the stable sail swimming body, vine-covered spire sway and
+near-corner crown-growth continuity;1126 workspace tests and copied/live59.9fps
+measurements are recorded in the [rollout](7_Research/crown-live-update-2026-09-13.md). Neither hunters nor modified
 ambient support nor a new rest policy is live.
 
 | Work | Verified state | Next gate |
 | --- | --- | --- |
-| Residual animation flicker | [Stable sail body](7_Research/astra-sail-stable-body-2026-09-13.md) and [intact-atlas vine wind](7_Research/vine-wind-integration-2026-09-13.md) are deployed; [crown corner fix](7_Research/fable-growth-corner-review-2026-09-13.md) independently reviewed for bounded integration | Fable integrating the tested crown-owner choice with per-cap opt-in; production/copy-world checks precede deployment. Rest/feed fin twinkle and constrained glasscane sway remain; blanket fin coverage was not selected |
+| Residual animation flicker | Stable sail body, intact-atlas vine wind and the [per-cap crown corner fix](7_Research/crown-live-update-2026-09-13.md) are deployed | [Calm sail study](7_Research/astra-sail-calm-study-2026-09-13.md) recommends crisp brace fins for independent Fable review; occasional rest gesture is stronger, not uniformly smoother. Settle rejected. Constrained glasscane sway remains; blanket fin coverage was not selected |
 | Local care responses | [108-case screen](7_Research/astra-care-response-results-2026-09-13.md): Feed usually increases local feeding, rain mixed, Clean usually reduces feeding; meal continuity deployed | [Rain temporal/drizzle/restart review](7_Research/fable-rain-response-playback-review-2026-09-13.md) prefers slower v3 without glowcap. [Root native held-frame review](7_Research/root-visual-and-ecology-disposition-2026-09-13.md) keeps it experimental: subtle readability, not a shipped flourish |
 | Quiet habits | [Full ten-minute interpretation](7_Research/astra-quiet-ten-minute-biological-review-2026-09-13.md): genuine but sparse recovery, modestly adverse no-care population/reproduction tendency; identity-aware reducer retains both ancestry directions | One unchanged all12×4-arm two-hour diagnostic running, not a passed biological gate; no automatic24/72h. Separate calm-fin study preserves actual behavior. Original42faaa2 provenance failure retained. Off stays default; schema13 not deployed |
 | Ambient support | [Complete two-hour results](7_Research/astra-ambient-support-results-2026-09-13.md): all72 arms pass recorded audits;90% no-care loses skimmers in two additional seeds | Unchanged frozen24h collection running; [explicit horizon reducer](7_Research/ambient-explicit-horizon-reducer-2026-09-13.md) plus independent review has19 passing tests and byte-identical two-hour output. Live default unchanged; manual dose separate |
