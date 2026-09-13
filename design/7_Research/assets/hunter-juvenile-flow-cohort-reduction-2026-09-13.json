@@ -1,0 +1,3467 @@
+{
+ "kind": "juvenile-flow-cohort-reduction",
+ "pinned_binary": {
+  "path": "/home/wrysk/wryskware/cubarium/captures/build-cache/juvenile-flow/release/examples/juvenile_flow",
+  "expected_sha256": "35943316416a947b6fedc42eaa973f787d2140f6fc53b95ca5360d6c52032977",
+  "actual_sha256": "35943316416a947b6fedc42eaa973f787d2140f6fc53b95ca5360d6c52032977",
+  "verified": true
+ },
+ "sources": {
+  "ledger_dirs": [
+   "/home/wrysk/wryskware/cubarium/captures/juvenile-flow-2026-09-13",
+   "/home/wrysk/wryskware/cubarium/captures/juvenile-flow-cohort-2026-09-13"
+  ],
+  "retained_cohort": "/home/wrysk/wryskware/cubarium/captures/hunter-charge-candidate-two-hour-512ee52",
+  "census_reduction": "/home/wrysk/wryskware/cubarium/design/7_Research/assets/hunter-charge-rerun-reduction-2026-09-13.json"
+ },
+ "arms_reduced": 11,
+ "arms_with_gate_failures": 0,
+ "gate_failures": [],
+ "boundary_identity_holds": true,
+ "cross_check_vs_census_reduction": {
+  "children_compared": 18,
+  "disagreements": [],
+  "unaffordable_attempts_total": 12,
+  "children_with_unaffordable_attempts": [
+   {
+    "child": "12/facultative_on/35:8",
+    "unaffordable": 12,
+    "of_attempts": 17
+   }
+  ],
+  "rows": [
+   {
+    "child": "1/facultative_on/17:3",
+    "agreed": true,
+    "why": null,
+    "census_attempts": 8,
+    "census_unaffordable_attempts": 0,
+    "census_payable_attempts": 8,
+    "census_captures": 2,
+    "census_lifespan_ticks": 9582,
+    "ledger_gate_observation_ticks": 9582,
+    "ledger_paid_strikes": 8,
+    "ledger_digestion_ticks": 217
+   },
+   {
+    "child": "1/facultative_on/27:11",
+    "agreed": true,
+    "why": null,
+    "census_attempts": 0,
+    "census_unaffordable_attempts": 0,
+    "census_payable_attempts": 0,
+    "census_captures": 0,
+    "census_lifespan_ticks": 7150,
+    "ledger_gate_observation_ticks": 7150,
+    "ledger_paid_strikes": 0,
+    "ledger_digestion_ticks": 0
+   },
+   {
+    "child": "1/facultative_on/73:5",
+    "agreed": true,
+    "why": null,
+    "census_attempts": 4,
+    "census_unaffordable_attempts": 0,
+    "census_payable_attempts": 4,
+    "census_captures": 0,
+    "census_lifespan_ticks": 5609,
+    "ledger_gate_observation_ticks": 5609,
+    "ledger_paid_strikes": 4,
+    "ledger_digestion_ticks": 0
+   },
+   {
+    "child": "1/specialist_on/17:3",
+    "agreed": true,
+    "why": null,
+    "census_attempts": 8,
+    "census_unaffordable_attempts": 0,
+    "census_payable_attempts": 8,
+    "census_captures": 2,
+    "census_lifespan_ticks": 9582,
+    "ledger_gate_observation_ticks": 9582,
+    "ledger_paid_strikes": 8,
+    "ledger_digestion_ticks": 217
+   },
+   {
+    "child": "1/specialist_on/27:11",
+    "agreed": true,
+    "why": null,
+    "census_attempts": 0,
+    "census_unaffordable_attempts": 0,
+    "census_payable_attempts": 0,
+    "census_captures": 0,
+    "census_lifespan_ticks": 7124,
+    "ledger_gate_observation_ticks": 7124,
+    "ledger_paid_strikes": 0,
+    "ledger_digestion_ticks": 0
+   },
+   {
+    "child": "1/specialist_on/73:5",
+    "agreed": true,
+    "why": null,
+    "census_attempts": 4,
+    "census_unaffordable_attempts": 0,
+    "census_payable_attempts": 4,
+    "census_captures": 0,
+    "census_lifespan_ticks": 5609,
+    "ledger_gate_observation_ticks": 5609,
+    "ledger_paid_strikes": 4,
+    "ledger_digestion_ticks": 0
+   },
+   {
+    "child": "2/facultative_on/15:6",
+    "agreed": true,
+    "why": null,
+    "census_attempts": 5,
+    "census_unaffordable_attempts": 0,
+    "census_payable_attempts": 5,
+    "census_captures": 2,
+    "census_lifespan_ticks": 11085,
+    "ledger_gate_observation_ticks": 11085,
+    "ledger_paid_strikes": 5,
+    "ledger_digestion_ticks": 216
+   },
+   {
+    "child": "2/facultative_on/86:7",
+    "agreed": true,
+    "why": null,
+    "census_attempts": 7,
+    "census_unaffordable_attempts": 0,
+    "census_payable_attempts": 7,
+    "census_captures": 2,
+    "census_lifespan_ticks": 9233,
+    "ledger_gate_observation_ticks": 9233,
+    "ledger_paid_strikes": 7,
+    "ledger_digestion_ticks": 167
+   },
+   {
+    "child": "2/facultative_on/94:5",
+    "agreed": true,
+    "why": null,
+    "census_attempts": 2,
+    "census_unaffordable_attempts": 0,
+    "census_payable_attempts": 2,
+    "census_captures": 2,
+    "census_lifespan_ticks": null,
+    "ledger_gate_observation_ticks": 2893,
+    "ledger_paid_strikes": 2,
+    "ledger_digestion_ticks": 175
+   },
+   {
+    "child": "5/facultative_on/108:1",
+    "agreed": true,
+    "why": null,
+    "census_attempts": 0,
+    "census_unaffordable_attempts": 0,
+    "census_payable_attempts": 0,
+    "census_captures": 0,
+    "census_lifespan_ticks": 8699,
+    "ledger_gate_observation_ticks": 8699,
+    "ledger_paid_strikes": 0,
+    "ledger_digestion_ticks": 0
+   },
+   {
+    "child": "5/specialist_on/76:5",
+    "agreed": true,
+    "why": null,
+    "census_attempts": 8,
+    "census_unaffordable_attempts": 0,
+    "census_payable_attempts": 8,
+    "census_captures": 1,
+    "census_lifespan_ticks": 5877,
+    "ledger_gate_observation_ticks": 5877,
+    "ledger_paid_strikes": 8,
+    "ledger_digestion_ticks": 80
+   },
+   {
+    "child": "6/facultative_on/74:5",
+    "agreed": true,
+    "why": null,
+    "census_attempts": 2,
+    "census_unaffordable_attempts": 0,
+    "census_payable_attempts": 2,
+    "census_captures": 1,
+    "census_lifespan_ticks": 8659,
+    "ledger_gate_observation_ticks": 8659,
+    "ledger_paid_strikes": 2,
+    "ledger_digestion_ticks": 121
+   },
+   {
+    "child": "7/facultative_on/86:7",
+    "agreed": true,
+    "why": null,
+    "census_attempts": 7,
+    "census_unaffordable_attempts": 0,
+    "census_payable_attempts": 7,
+    "census_captures": 4,
+    "census_lifespan_ticks": 11901,
+    "ledger_gate_observation_ticks": 11901,
+    "ledger_paid_strikes": 7,
+    "ledger_digestion_ticks": 350
+   },
+   {
+    "child": "7/specialist_on/15:4",
+    "agreed": true,
+    "why": null,
+    "census_attempts": 8,
+    "census_unaffordable_attempts": 0,
+    "census_payable_attempts": 8,
+    "census_captures": 0,
+    "census_lifespan_ticks": 4526,
+    "ledger_gate_observation_ticks": 4526,
+    "ledger_paid_strikes": 8,
+    "ledger_digestion_ticks": 0
+   },
+   {
+    "child": "8/facultative_on/53:6",
+    "agreed": true,
+    "why": null,
+    "census_attempts": 3,
+    "census_unaffordable_attempts": 0,
+    "census_payable_attempts": 3,
+    "census_captures": 0,
+    "census_lifespan_ticks": 6731,
+    "ledger_gate_observation_ticks": 6731,
+    "ledger_paid_strikes": 3,
+    "ledger_digestion_ticks": 0
+   },
+   {
+    "child": "8/specialist_on/41:5",
+    "agreed": true,
+    "why": null,
+    "census_attempts": 30,
+    "census_unaffordable_attempts": 0,
+    "census_payable_attempts": 30,
+    "census_captures": 13,
+    "census_lifespan_ticks": 22630,
+    "ledger_gate_observation_ticks": 22630,
+    "ledger_paid_strikes": 30,
+    "ledger_digestion_ticks": 1189
+   },
+   {
+    "child": "12/facultative_on/11:9",
+    "agreed": true,
+    "why": null,
+    "census_attempts": 18,
+    "census_unaffordable_attempts": 0,
+    "census_payable_attempts": 18,
+    "census_captures": 5,
+    "census_lifespan_ticks": 13191,
+    "ledger_gate_observation_ticks": 13191,
+    "ledger_paid_strikes": 18,
+    "ledger_digestion_ticks": 498
+   },
+   {
+    "child": "12/facultative_on/35:8",
+    "agreed": true,
+    "why": null,
+    "census_attempts": 17,
+    "census_unaffordable_attempts": 12,
+    "census_payable_attempts": 5,
+    "census_captures": 4,
+    "census_lifespan_ticks": 11555,
+    "ledger_gate_observation_ticks": 11555,
+    "ledger_paid_strikes": 5,
+    "ledger_digestion_ticks": 387
+   }
+  ],
+  "basis": "the census/transaction reduction reads events and 200-tick boundaries; the ledger reads mutation sites during a replay. Independent paths, same identities."
+ },
+ "cohort": {
+  "children": 18,
+  "censored_alive": 1,
+  "ended_by_cause": {
+   "Starvation": 17,
+   "censored_alive": 1
+  },
+  "children_with_zero_reserve_intake": 7,
+  "children_that_entered_growth": 0,
+  "children_that_gained_structure": 0,
+  "children_ever_adult": 0,
+  "children_whose_reserve_ever_cleared_gate": 0,
+  "total_gate_observation_ticks": 161636,
+  "total_reconciliation_checks": 161654,
+  "total_structure_gained": 0,
+  "smallest_reserve_deficit": 0.11295566424316772,
+  "largest_reserve_seen": 1.0870443357568322,
+  "reserve_in_total": 8.710103516253374,
+  "reserve_out_oxidation": 23.041833344968303,
+  "reserve_out_growth": 0,
+  "reserve_out_funding": 0,
+  "energy_out_upkeep_paid": 42.49049759445865,
+  "energy_out_strike_paid": 9.520000000000001,
+  "energy_out_handling_paid": 0.3617000000000025,
+  "energy_in_oxidation": 36.86693335194888,
+  "energy_in_digestion": 6.396263875929745,
+  "upkeep_demanded_sense": 19.396319999997605,
+  "upkeep_demanded_maintenance": 16.1635999999991,
+  "upkeep_demanded_move": 6.933358128336893,
+  "upkeep_shortfall_ticks": 17,
+  "oxidation_ticks": 46815,
+  "oxidation_ticks_recorded_above_reference": 1674,
+  "oxidation_burn": 23.041833344968303,
+  "oxidation_burn_recorded_above_reference": 0.8186878479625084,
+  "worst_reserve_closure_residual": 4.263256414560601e-13
+ },
+ "arms": [
+  {
+   "seed": 6,
+   "arm": "facultative_on",
+   "ledger": "/home/wrysk/wryskware/cubarium/captures/juvenile-flow-2026-09-13/seed-6-facultative_on.json",
+   "ledger_sha256": "67006a63c0af7d67404cc6ee1b023fb067c17c8837c244f14815e2c2e7c8b6d8",
+   "gates_passed": true,
+   "gate_failures": [],
+   "identity": {
+    "opening_sha256": "ee5f3497c2a3be1dcf82a86c3449e631fc70d34449a014f69922e25b6b238042",
+    "opening_state_hash": "6873749331658897442",
+    "closing_sha256": "68edef57caebba3c36f34b4320d3c12f2686f4fa2bb4d7a6110b562635505aeb",
+    "closing_state_hash": "11174133049431148431",
+    "event_ticks_compared": 757,
+    "event_stream_sha256": "4c229bde677a7478e048355b551fd0decc7485632b864d946c560fcfb6f23fda",
+    "reconciliation_violations": 0
+   },
+   "members": [
+    {
+     "id": "29:6",
+     "origin": "Founder",
+     "end_tick": 176886,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 32887,
+     "reconciliation_checks": 32887,
+     "newborn_boundary_checks": 0,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 0,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 6.093216209368535e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 17487,
+     "oxidation_ticks_recorded_above_reference": 16191,
+     "share_of_burn_recorded_above_reference": 0.925936112755861
+    },
+    {
+     "id": "74:5",
+     "origin": "Descendant",
+     "end_tick": 179397,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 8659,
+     "reconciliation_checks": 8660,
+     "newborn_boundary_checks": 1,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 1,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 1.5525775109992423e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 2208,
+     "oxidation_ticks_recorded_above_reference": 0,
+     "share_of_burn_recorded_above_reference": 0
+    }
+   ]
+  },
+  {
+   "seed": 8,
+   "arm": "specialist_on",
+   "ledger": "/home/wrysk/wryskware/cubarium/captures/juvenile-flow-2026-09-13/seed-8-specialist_on.json",
+   "ledger_sha256": "4e19a529e2dbd4a16750b7c63ec1ee29d0c3576fd66e419fdb37578d5aa352ea",
+   "gates_passed": true,
+   "gate_failures": [],
+   "identity": {
+    "opening_sha256": "81cc5909aded672bc4271021c94fdddf649149b88c67f85463f02d75afc078e5",
+    "opening_state_hash": "13859516448854398358",
+    "closing_sha256": "e567279199bf9c246113373c2e37f8c7ffa1277eb63f81f65ba0cd1fe5c546bd",
+    "closing_state_hash": "6145446113726102027",
+    "event_ticks_compared": 997,
+    "event_stream_sha256": "d85386efde0d1cf866a2b539098aac4d87f5162cc7492e73bc87b1cb1146b2a8",
+    "reconciliation_violations": 0
+   },
+   "members": [
+    {
+     "id": "6:6",
+     "origin": "Founder",
+     "end_tick": 183648,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 39649,
+     "reconciliation_checks": 39649,
+     "newborn_boundary_checks": 0,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 0,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 7.229460086133344e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 21883,
+     "oxidation_ticks_recorded_above_reference": 21883,
+     "share_of_burn_recorded_above_reference": 1
+    },
+    {
+     "id": "41:5",
+     "origin": "Descendant",
+     "end_tick": 196434,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 22630,
+     "reconciliation_checks": 22631,
+     "newborn_boundary_checks": 1,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 1,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 4.666406150377611e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 7050,
+     "oxidation_ticks_recorded_above_reference": 846,
+     "share_of_burn_recorded_above_reference": 0.11993219141136237
+    }
+   ]
+  },
+  {
+   "seed": 1,
+   "arm": "facultative_on",
+   "ledger": "/home/wrysk/wryskware/cubarium/captures/juvenile-flow-cohort-2026-09-13/seed-1-facultative_on.json",
+   "ledger_sha256": "4c3aacdb3037e3fb58fe1eeecec163c3709b7a5c337b6c82e1804e9467b0f105",
+   "gates_passed": true,
+   "gate_failures": [],
+   "identity": {
+    "opening_sha256": "64a4b9abf57123ac700dd5bc57700b19e95b38e58289309512a6fff89010d092",
+    "opening_state_hash": "7476954363294224820",
+    "closing_sha256": "98af371919316fe37e73561e67ed084a348157b351504a5874cc0734e333e820",
+    "closing_state_hash": "4368534544087259037",
+    "event_ticks_compared": 1130,
+    "event_stream_sha256": "58771a16406efa104b7af187537df77f2f56a29f675dbc93f7e37a0f62fa981e",
+    "reconciliation_violations": 0
+   },
+   "members": [
+    {
+     "id": "11:5",
+     "origin": "Founder",
+     "end_tick": null,
+     "end_cause": null,
+     "gate_observation_ticks": 144000,
+     "reconciliation_checks": 144000,
+     "newborn_boundary_checks": 0,
+     "removal_boundary_checks": 0,
+     "checks_minus_gate_ticks": 0,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 6.74427961394608e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 80116,
+     "oxidation_ticks_recorded_above_reference": 77021,
+     "share_of_burn_recorded_above_reference": 0.9613860591149792
+    },
+    {
+     "id": "17:3",
+     "origin": "Descendant",
+     "end_tick": 179982,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 9582,
+     "reconciliation_checks": 9583,
+     "newborn_boundary_checks": 1,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 1,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 1.3682631416767066e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 2635,
+     "oxidation_ticks_recorded_above_reference": 0,
+     "share_of_burn_recorded_above_reference": 0
+    },
+    {
+     "id": "27:11",
+     "origin": "Descendant",
+     "end_tick": 283153,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 7150,
+     "reconciliation_checks": 7151,
+     "newborn_boundary_checks": 1,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 1,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 6.23416249179165e-17,
+     "growth_steps": 0,
+     "oxidation_ticks": 1601,
+     "oxidation_ticks_recorded_above_reference": 0,
+     "share_of_burn_recorded_above_reference": 0
+    },
+    {
+     "id": "73:5",
+     "origin": "Descendant",
+     "end_tick": 214410,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 5609,
+     "reconciliation_checks": 5610,
+     "newborn_boundary_checks": 1,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 1,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 1.1839487723541708e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 1601,
+     "oxidation_ticks_recorded_above_reference": 0,
+     "share_of_burn_recorded_above_reference": 0
+    }
+   ]
+  },
+  {
+   "seed": 1,
+   "arm": "specialist_on",
+   "ledger": "/home/wrysk/wryskware/cubarium/captures/juvenile-flow-cohort-2026-09-13/seed-1-specialist_on.json",
+   "ledger_sha256": "94049042e7fe3f20bdc27cc0427901d466453b14422878f2fc80cec8dd34bdfa",
+   "gates_passed": true,
+   "gate_failures": [],
+   "identity": {
+    "opening_sha256": "e2e897f80486265354bfc67b3ae1a89afee320a1dcbdd2d3c5b4208985401fb6",
+    "opening_state_hash": "9127337083127124541",
+    "closing_sha256": "cb45d216520582ee1301ca45f489adf7bf889854d70fbd72cf4c84ed0d8f5543",
+    "closing_state_hash": "13499101884866940145",
+    "event_ticks_compared": 1135,
+    "event_stream_sha256": "f91a5965b3624bd5954b3b104f9e588a29f818764df24a24c635bde78817b6dc",
+    "reconciliation_violations": 0
+   },
+   "members": [
+    {
+     "id": "11:5",
+     "origin": "Founder",
+     "end_tick": null,
+     "end_cause": null,
+     "gate_observation_ticks": 144000,
+     "reconciliation_checks": 144000,
+     "newborn_boundary_checks": 0,
+     "removal_boundary_checks": 0,
+     "checks_minus_gate_ticks": 0,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 6.74427961394608e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 80286,
+     "oxidation_ticks_recorded_above_reference": 77191,
+     "share_of_burn_recorded_above_reference": 0.9614678250281928
+    },
+    {
+     "id": "17:3",
+     "origin": "Descendant",
+     "end_tick": 179982,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 9582,
+     "reconciliation_checks": 9583,
+     "newborn_boundary_checks": 1,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 1,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 1.3682631416767066e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 2635,
+     "oxidation_ticks_recorded_above_reference": 0,
+     "share_of_burn_recorded_above_reference": 0
+    },
+    {
+     "id": "27:11",
+     "origin": "Descendant",
+     "end_tick": 283127,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 7124,
+     "reconciliation_checks": 7125,
+     "newborn_boundary_checks": 1,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 1,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 6.23416249179165e-17,
+     "growth_steps": 0,
+     "oxidation_ticks": 1601,
+     "oxidation_ticks_recorded_above_reference": 0,
+     "share_of_burn_recorded_above_reference": 0
+    },
+    {
+     "id": "73:5",
+     "origin": "Descendant",
+     "end_tick": 214410,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 5609,
+     "reconciliation_checks": 5610,
+     "newborn_boundary_checks": 1,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 1,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 1.1839487723541708e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 1601,
+     "oxidation_ticks_recorded_above_reference": 0,
+     "share_of_burn_recorded_above_reference": 0
+    }
+   ]
+  },
+  {
+   "seed": 12,
+   "arm": "facultative_on",
+   "ledger": "/home/wrysk/wryskware/cubarium/captures/juvenile-flow-cohort-2026-09-13/seed-12-facultative_on.json",
+   "ledger_sha256": "a04197221f41547c8995cd7c50ec216362c3a84fc0441d7fe08bd558f2e5f3f9",
+   "gates_passed": true,
+   "gate_failures": [],
+   "identity": {
+    "opening_sha256": "a7ca3fad651ff0041fd3c54a847f1fbb9db96a04e25b664ef65d16c60f6397a9",
+    "opening_state_hash": "8703639863161343993",
+    "closing_sha256": "4762d100726ef3b47f78471a241cbe08c0f99414a9c81fed487e8a07f340891c",
+    "closing_state_hash": "6978909987671925436",
+    "event_ticks_compared": 1101,
+    "event_stream_sha256": "feb75d7e254b9ca1e028c51e83166cb2b5e09c697df912b9af4e2e227045c541",
+    "reconciliation_violations": 0
+   },
+   "members": [
+    {
+     "id": "11:9",
+     "origin": "Descendant",
+     "end_tick": 197113,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 13191,
+     "reconciliation_checks": 13192,
+     "newborn_boundary_checks": 1,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 1,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 3.0018847650692404e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 4514,
+     "oxidation_ticks_recorded_above_reference": 433,
+     "share_of_burn_recorded_above_reference": 0.10127916790260269
+    },
+    {
+     "id": "35:8",
+     "origin": "Descendant",
+     "end_tick": 233878,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 11555,
+     "reconciliation_checks": 11556,
+     "newborn_boundary_checks": 1,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 1,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 1.2457482961858446e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 3045,
+     "oxidation_ticks_recorded_above_reference": 0,
+     "share_of_burn_recorded_above_reference": 0
+    },
+    {
+     "id": "38:4",
+     "origin": "Founder",
+     "end_tick": 235372,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 91373,
+     "reconciliation_checks": 91373,
+     "newborn_boundary_checks": 0,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 0,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 6.556170537019845e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 54586,
+     "oxidation_ticks_recorded_above_reference": 53315,
+     "share_of_burn_recorded_above_reference": 0.9767385675429996
+    }
+   ]
+  },
+  {
+   "seed": 2,
+   "arm": "facultative_on",
+   "ledger": "/home/wrysk/wryskware/cubarium/captures/juvenile-flow-cohort-2026-09-13/seed-2-facultative_on.json",
+   "ledger_sha256": "bae663cf15ee3065e170f66805eb3d65abee8ac103ec002cbaf0eb439d47d332",
+   "gates_passed": true,
+   "gate_failures": [],
+   "identity": {
+    "opening_sha256": "99a81e0a03f20fc4771107c8afad41883869d7524a69f51e6cba682767cf6646",
+    "opening_state_hash": "6614659848736982132",
+    "closing_sha256": "4394f34e81a2839f70eec08f41f8166405a0fb71da22d88605d9432c6d146847",
+    "closing_state_hash": "5933048838115379527",
+    "event_ticks_compared": 1221,
+    "event_stream_sha256": "1579fce100449ae410cda15a09dc19b12133ba19f346cca51bd56b4e5116791f",
+    "reconciliation_violations": 0
+   },
+   "members": [
+    {
+     "id": "15:6",
+     "origin": "Descendant",
+     "end_tick": 197235,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 11085,
+     "reconciliation_checks": 11086,
+     "newborn_boundary_checks": 1,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 1,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 1.4560835176480325e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 2630,
+     "oxidation_ticks_recorded_above_reference": 0,
+     "share_of_burn_recorded_above_reference": 0
+    },
+    {
+     "id": "52:5",
+     "origin": "Founder",
+     "end_tick": null,
+     "end_cause": null,
+     "gate_observation_ticks": 144000,
+     "reconciliation_checks": 144000,
+     "newborn_boundary_checks": 0,
+     "removal_boundary_checks": 0,
+     "checks_minus_gate_ticks": 0,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 7.099355825435083e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 87021,
+     "oxidation_ticks_recorded_above_reference": 84582,
+     "share_of_burn_recorded_above_reference": 0.9783455153654337
+    },
+    {
+     "id": "86:7",
+     "origin": "Descendant",
+     "end_tick": 233784,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 9233,
+     "reconciliation_checks": 9234,
+     "newborn_boundary_checks": 1,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 1,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 2.8763883636040433e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 2608,
+     "oxidation_ticks_recorded_above_reference": 0,
+     "share_of_burn_recorded_above_reference": 0
+    },
+    {
+     "id": "94:5",
+     "origin": "Descendant",
+     "end_tick": null,
+     "end_cause": null,
+     "gate_observation_ticks": 2893,
+     "reconciliation_checks": 2894,
+     "newborn_boundary_checks": 1,
+     "removal_boundary_checks": 0,
+     "checks_minus_gate_ticks": 1,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 4.401860820291148e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 2441,
+     "oxidation_ticks_recorded_above_reference": 299,
+     "share_of_burn_recorded_above_reference": 0.12184268542874441
+    }
+   ]
+  },
+  {
+   "seed": 5,
+   "arm": "facultative_on",
+   "ledger": "/home/wrysk/wryskware/cubarium/captures/juvenile-flow-cohort-2026-09-13/seed-5-facultative_on.json",
+   "ledger_sha256": "5ef91552ef91a72020d39245b8c1309548c0ae72f362fc04a5440e416da9dde7",
+   "gates_passed": true,
+   "gate_failures": [],
+   "identity": {
+    "opening_sha256": "1c6dc8cc2adb6afb44aebe0eb48f6a415217dfefa6be44769d49d4d1131e2547",
+    "opening_state_hash": "3521827239814976949",
+    "closing_sha256": "6bab65fd7e3610ceba3e83e36a15286318efde8d43f559060575d9b1955ec870",
+    "closing_state_hash": "4104354672679949253",
+    "event_ticks_compared": 942,
+    "event_stream_sha256": "1653352e867bb729c8e994ceac2dd10d3c06f4d333aaaf6c259970de6ea57768",
+    "reconciliation_violations": 0
+   },
+   "members": [
+    {
+     "id": "9:4",
+     "origin": "Founder",
+     "end_tick": 209362,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 65363,
+     "reconciliation_checks": 65363,
+     "newborn_boundary_checks": 0,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 0,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 6.487865800153259e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 37240,
+     "oxidation_ticks_recorded_above_reference": 37209,
+     "share_of_burn_recorded_above_reference": 0.9991675422489504
+    },
+    {
+     "id": "108:1",
+     "origin": "Descendant",
+     "end_tick": 186234,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 8699,
+     "reconciliation_checks": 8700,
+     "newborn_boundary_checks": 1,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 1,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 2.9652929417478546e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 2115,
+     "oxidation_ticks_recorded_above_reference": 0,
+     "share_of_burn_recorded_above_reference": 0
+    }
+   ]
+  },
+  {
+   "seed": 5,
+   "arm": "specialist_on",
+   "ledger": "/home/wrysk/wryskware/cubarium/captures/juvenile-flow-cohort-2026-09-13/seed-5-specialist_on.json",
+   "ledger_sha256": "1fd586ccae629a5056ae6bcfe5357eeed0f242864647b4ae8b1b07127becfb4f",
+   "gates_passed": true,
+   "gate_failures": [],
+   "identity": {
+    "opening_sha256": "dbd9baa31ecc1306b9ab573a393d1ab11c54e3435bcebef205594ef06fc7b84a",
+    "opening_state_hash": "15793269884504259668",
+    "closing_sha256": "fe67662e8a182985459b72fedfc52f739780ec2c929ba8fceca9f9c397a1c3c1",
+    "closing_state_hash": "7270444243861935269",
+    "event_ticks_compared": 948,
+    "event_stream_sha256": "1de0e204f5a83a0a1f3cfee762150a411ef42ba3d740d8819fbf591974d8b432",
+    "reconciliation_violations": 0
+   },
+   "members": [
+    {
+     "id": "9:4",
+     "origin": "Founder",
+     "end_tick": 187105,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 43106,
+     "reconciliation_checks": 43106,
+     "newborn_boundary_checks": 0,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 0,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 7.051650929845721e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 24841,
+     "oxidation_ticks_recorded_above_reference": 24809,
+     "share_of_burn_recorded_above_reference": 0.9987117907881813
+    },
+    {
+     "id": "76:5",
+     "origin": "Descendant",
+     "end_tick": 176277,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 5877,
+     "reconciliation_checks": 5878,
+     "newborn_boundary_checks": 1,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 1,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 1.3682631416767066e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 1926,
+     "oxidation_ticks_recorded_above_reference": 0,
+     "share_of_burn_recorded_above_reference": 0
+    }
+   ]
+  },
+  {
+   "seed": 7,
+   "arm": "facultative_on",
+   "ledger": "/home/wrysk/wryskware/cubarium/captures/juvenile-flow-cohort-2026-09-13/seed-7-facultative_on.json",
+   "ledger_sha256": "58f32e6f3aa1ee3e07365e7a65ee8dd1925a9f81f5d13aa8581cff8d47c6b7ba",
+   "gates_passed": true,
+   "gate_failures": [],
+   "identity": {
+    "opening_sha256": "4ac6a0a8016fd41747afa0a909dd0616f89b3757372ea37638a6398bcf72973d",
+    "opening_state_hash": "3289310951638127480",
+    "closing_sha256": "2e0f5e73c6863def9144cfe1f256395656f43313c0bdda700c2cbf5901d03d99",
+    "closing_state_hash": "220827326707644528",
+    "event_ticks_compared": 984,
+    "event_stream_sha256": "5ae69877db2c83a6c8c3cad77171fd9cf26d22b7682192775f999691305f0ff0",
+    "reconciliation_violations": 0
+   },
+   "members": [
+    {
+     "id": "54:5",
+     "origin": "Founder",
+     "end_tick": 214018,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 70019,
+     "reconciliation_checks": 70019,
+     "newborn_boundary_checks": 0,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 0,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 7.194765616613807e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 38670,
+     "oxidation_ticks_recorded_above_reference": 36159,
+     "share_of_burn_recorded_above_reference": 0.938300280709319
+    },
+    {
+     "id": "86:7",
+     "origin": "Descendant",
+     "end_tick": 184194,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 11901,
+     "reconciliation_checks": 11902,
+     "newborn_boundary_checks": 1,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 1,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 5.048587416178751e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 3344,
+     "oxidation_ticks_recorded_above_reference": 96,
+     "share_of_burn_recorded_above_reference": 0.020852142467157112
+    }
+   ]
+  },
+  {
+   "seed": 7,
+   "arm": "specialist_on",
+   "ledger": "/home/wrysk/wryskware/cubarium/captures/juvenile-flow-cohort-2026-09-13/seed-7-specialist_on.json",
+   "ledger_sha256": "5c850b5fa6d1eaca01f60cc3d0e06a9fc9b82fdcccefa04c9c32146e6fd42211",
+   "gates_passed": true,
+   "gate_failures": [],
+   "identity": {
+    "opening_sha256": "78676c08f61bab74a2d3f97bcff4ab62c699b4c13fe50835e1d0c68a599b8894",
+    "opening_state_hash": "13709451189124088409",
+    "closing_sha256": "bd08cac7afdf67a1691ca61bd58ce2d87f06f730c5973d9f93d5b7568e9e5d1c",
+    "closing_state_hash": "1493101246684685307",
+    "event_ticks_compared": 935,
+    "event_stream_sha256": "a85b7a2b6b3899b4fe990a93cae12c5f9a97b0c5c5a6566f6a6f713643e9adc0",
+    "reconciliation_violations": 0
+   },
+   "members": [
+    {
+     "id": "15:4",
+     "origin": "Descendant",
+     "end_tick": 176819,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 4526,
+     "reconciliation_checks": 4527,
+     "newborn_boundary_checks": 1,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 1,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 1.9905951886833861e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 1601,
+     "oxidation_ticks_recorded_above_reference": 0,
+     "share_of_burn_recorded_above_reference": 0
+    },
+    {
+     "id": "54:5",
+     "origin": "Founder",
+     "end_tick": 187578,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 43579,
+     "reconciliation_checks": 43579,
+     "newborn_boundary_checks": 0,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 0,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 7.055987738535663e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 23864,
+     "oxidation_ticks_recorded_above_reference": 23864,
+     "share_of_burn_recorded_above_reference": 1
+    }
+   ]
+  },
+  {
+   "seed": 8,
+   "arm": "facultative_on",
+   "ledger": "/home/wrysk/wryskware/cubarium/captures/juvenile-flow-cohort-2026-09-13/seed-8-facultative_on.json",
+   "ledger_sha256": "4c9ca9250bd17661574631a378584fe331662d465919988ba372beae2b751a80",
+   "gates_passed": true,
+   "gate_failures": [],
+   "identity": {
+    "opening_sha256": "e6b21cf0dba3df02a04b6aac8844cea36eb9f5ce7493395c5e9b30c772091164",
+    "opening_state_hash": "16484682055919169479",
+    "closing_sha256": "e58434b8d2412c4d2f1f9aca6f031295cd1085e822987eadcbcb74ea0fbec7a9",
+    "closing_state_hash": "17347053404537593331",
+    "event_ticks_compared": 925,
+    "event_stream_sha256": "db7e0b49141bb90f0001a53ca15a98e6dd08539bf1c00232b3b5054b84018f68",
+    "reconciliation_violations": 0
+   },
+   "members": [
+    {
+     "id": "6:6",
+     "origin": "Founder",
+     "end_tick": 178271,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 34272,
+     "reconciliation_checks": 34272,
+     "newborn_boundary_checks": 0,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 0,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 6.83481049534862e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 18983,
+     "oxidation_ticks_recorded_above_reference": 17882,
+     "share_of_burn_recorded_above_reference": 0.9569085938396538
+    },
+    {
+     "id": "53:6",
+     "origin": "Descendant",
+     "end_tick": 178000,
+     "end_cause": "Starvation",
+     "gate_observation_ticks": 6731,
+     "reconciliation_checks": 6732,
+     "newborn_boundary_checks": 1,
+     "removal_boundary_checks": 1,
+     "checks_minus_gate_ticks": 1,
+     "identity_holds": true,
+     "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check",
+     "worst_residual": 2.015802889193674e-16,
+     "growth_steps": 0,
+     "oxidation_ticks": 1659,
+     "oxidation_ticks_recorded_above_reference": 0,
+     "share_of_burn_recorded_above_reference": 0
+    }
+   ]
+  }
+ ],
+ "children": [
+  {
+   "seed": 1,
+   "arm": "facultative_on",
+   "id": "17:3",
+   "parent": "11:5",
+   "birth_tick": 170401,
+   "end_tick": 179982,
+   "end_cause": "Starvation",
+   "censored_alive": false,
+   "observed_seconds": 479.1,
+   "juvenile_ticks": 9582,
+   "adult_ticks": 0,
+   "open_stocks": {
+    "energy": 0.6,
+    "reserve": 0.8,
+    "structure": 0.8,
+    "tick": 170401
+   },
+   "close_stocks": {
+    "energy": 0.00008863339552993928,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 179981
+   },
+   "death_stocks": {
+    "energy": 0,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 179982
+   },
+   "boundaries": {
+    "gate_observation_ticks": 9582,
+    "reconciliation_checks": 9583,
+    "newborn_boundary_checks": 1,
+    "removal_boundary_checks": 1,
+    "checks_minus_gate_ticks": 1,
+    "identity_holds": true,
+    "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check"
+   },
+   "residual": {
+    "checked_ticks": 9583,
+    "first_violation_tick": null,
+    "max_energy": 1.3682631416767066e-16,
+    "max_reserve": 5.5077470362263625e-17,
+    "max_structure": 0,
+    "violations": 0
+   },
+   "growth": {
+    "branch_entered_ticks": 0,
+    "steps_taken": 0,
+    "structure_gained": 0,
+    "reserve_spent": 0,
+    "energy_cost": 0,
+    "cap_attribution": {
+     "rate": 0,
+     "remaining_structure": 0,
+     "reserve": 0,
+     "energy": 0
+    }
+   },
+   "gate": {
+    "observed_ticks": 9582,
+    "structure_below_adult_ticks": 9582,
+    "reserve_above_min_ticks": 0,
+    "gate_reserve": 1.2,
+    "min_reserve_deficit": 0.40049999999999986,
+    "max_reserve": 0.7995000000000001,
+    "mean_reserve": 0.07853184680217061,
+    "max_energy": 1.5231564365759225,
+    "mean_energy": 0.8966181351033623,
+    "reserve_zero_ticks": 6950
+   },
+   "reserve": {
+    "opening": 0.8,
+    "in_by_source": {
+     "digestion": 0.5165486163182722,
+     "frugivory": 0,
+     "grazing": 0,
+     "scavenging": 0
+    },
+    "in_total": 0.5165486163182722,
+    "out_oxidation": 1.3165486163182147,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 1.3165486163182147,
+    "closure_residual": 5.750955267558311e-14
+   },
+   "energy": {
+    "opening": 0.6,
+    "in_digestion": 0.44426744469682256,
+    "in_field": 0,
+    "in_oxidation": 2.1064777861091857,
+    "in_total": 2.550745230806008,
+    "out_upkeep_paid": 2.4890452308060924,
+    "out_strike_paid": 0.64,
+    "out_handling_paid": 0.021699999999999924,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 3.1507452308060926
+   },
+   "upkeep": {
+    "ticks": 9582,
+    "demanded_maintenance": 0.9581999999999108,
+    "demanded_move": 0.3811971419522947,
+    "demanded_sense": 1.149839999999936,
+    "demanded_total": 2.4892371419524606,
+    "paid_lump": 2.4890452308060924,
+    "shortfall": 0.00019191114636832822,
+    "shortfall_ticks": 1,
+    "per_tick_maintenance": 0.0000999999999999907,
+    "per_tick_sense": 0.00011999999999999332,
+    "note": "the paid lump is not divided across the demanded terms"
+   },
+   "strike": {
+    "demanded": 0.64,
+    "paid": 0.64,
+    "shortfall": 0,
+    "ticks": 8
+   },
+   "handling": {
+    "demanded": 0.021699999999999924,
+    "paid": 0.021699999999999924,
+    "ticks": 217,
+    "unaffordable_ticks": 0
+   },
+   "oxidation_recorded": {
+    "ticks": 2635,
+    "reserve_burned": 1.3165486163182147,
+    "energy_gained": 2.1064777861091857,
+    "ticks_recorded_above_reference": 0,
+    "reserve_burned_above_reference": 0,
+    "share_of_burn_recorded_above_reference": 0
+   },
+   "digestion_ticks": 217
+  },
+  {
+   "seed": 1,
+   "arm": "facultative_on",
+   "id": "27:11",
+   "parent": "11:5",
+   "birth_tick": 276004,
+   "end_tick": 283153,
+   "end_cause": "Starvation",
+   "censored_alive": false,
+   "observed_seconds": 357.5,
+   "juvenile_ticks": 7150,
+   "adult_ticks": 0,
+   "open_stocks": {
+    "energy": 0.6,
+    "reserve": 0.8,
+    "structure": 0.8,
+    "tick": 276004
+   },
+   "close_stocks": {
+    "energy": 0.0001774373455644306,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 283152
+   },
+   "death_stocks": {
+    "energy": 0,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 283153
+   },
+   "boundaries": {
+    "gate_observation_ticks": 7150,
+    "reconciliation_checks": 7151,
+    "newborn_boundary_checks": 1,
+    "removal_boundary_checks": 1,
+    "checks_minus_gate_ticks": 1,
+    "identity_holds": true,
+    "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check"
+   },
+   "residual": {
+    "checked_ticks": 7151,
+    "first_violation_tick": null,
+    "max_energy": 6.23416249179165e-17,
+    "max_reserve": 5.5077470362263625e-17,
+    "max_structure": 0,
+    "violations": 0
+   },
+   "growth": {
+    "branch_entered_ticks": 0,
+    "steps_taken": 0,
+    "structure_gained": 0,
+    "reserve_spent": 0,
+    "energy_cost": 0,
+    "cap_attribution": {
+     "rate": 0,
+     "remaining_structure": 0,
+     "reserve": 0,
+     "energy": 0
+    }
+   },
+   "gate": {
+    "observed_ticks": 7150,
+    "structure_below_adult_ticks": 7150,
+    "reserve_above_min_ticks": 0,
+    "gate_reserve": 1.2,
+    "min_reserve_deficit": 0.40049999999999986,
+    "max_reserve": 0.7995000000000001,
+    "mean_reserve": 0.08945454545455143,
+    "max_energy": 1.5090646944601571,
+    "mean_energy": 0.8354749046846802,
+    "reserve_zero_ticks": 5550
+   },
+   "reserve": {
+    "opening": 0.8,
+    "in_by_source": {
+     "digestion": 0,
+     "frugivory": 0,
+     "grazing": 0,
+     "scavenging": 0
+    },
+    "in_total": 0,
+    "out_oxidation": 0.7999999999999999,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 0.7999999999999999,
+    "closure_residual": 1.1102230246251565e-16
+   },
+   "energy": {
+    "opening": 0.6,
+    "in_digestion": 0,
+    "in_field": 0,
+    "in_oxidation": 1.2800000000000418,
+    "in_total": 1.2800000000000418,
+    "out_upkeep_paid": 1.880000000000137,
+    "out_strike_paid": 0,
+    "out_handling_paid": 0,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 1.880000000000137
+   },
+   "upkeep": {
+    "ticks": 7150,
+    "demanded_maintenance": 0.7149999999999376,
+    "demanded_move": 0.30710310719631917,
+    "demanded_sense": 0.8580000000000527,
+    "demanded_total": 1.8801031071964707,
+    "paid_lump": 1.880000000000137,
+    "shortfall": 0.0001031071963338369,
+    "shortfall_ticks": 1,
+    "per_tick_maintenance": 0.00009999999999999126,
+    "per_tick_sense": 0.00012000000000000738,
+    "note": "the paid lump is not divided across the demanded terms"
+   },
+   "strike": {
+    "demanded": 0,
+    "paid": 0,
+    "shortfall": 0,
+    "ticks": 0
+   },
+   "handling": {
+    "demanded": 0,
+    "paid": 0,
+    "ticks": 0,
+    "unaffordable_ticks": 0
+   },
+   "oxidation_recorded": {
+    "ticks": 1601,
+    "reserve_burned": 0.7999999999999999,
+    "energy_gained": 1.2800000000000418,
+    "ticks_recorded_above_reference": 0,
+    "reserve_burned_above_reference": 0,
+    "share_of_burn_recorded_above_reference": 0
+   },
+   "digestion_ticks": 0
+  },
+  {
+   "seed": 1,
+   "arm": "facultative_on",
+   "id": "73:5",
+   "parent": "11:5",
+   "birth_tick": 208802,
+   "end_tick": 214410,
+   "end_cause": "Starvation",
+   "censored_alive": false,
+   "observed_seconds": 280.45,
+   "juvenile_ticks": 5609,
+   "adult_ticks": 0,
+   "open_stocks": {
+    "energy": 0.6,
+    "reserve": 0.8,
+    "structure": 0.8,
+    "tick": 208802
+   },
+   "close_stocks": {
+    "energy": 0.00013063541455001664,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 214409
+   },
+   "death_stocks": {
+    "energy": 0,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 214410
+   },
+   "boundaries": {
+    "gate_observation_ticks": 5609,
+    "reconciliation_checks": 5610,
+    "newborn_boundary_checks": 1,
+    "removal_boundary_checks": 1,
+    "checks_minus_gate_ticks": 1,
+    "identity_holds": true,
+    "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check"
+   },
+   "residual": {
+    "checked_ticks": 5610,
+    "first_violation_tick": null,
+    "max_energy": 1.1839487723541708e-16,
+    "max_reserve": 5.5077470362263625e-17,
+    "max_structure": 0,
+    "violations": 0
+   },
+   "growth": {
+    "branch_entered_ticks": 0,
+    "steps_taken": 0,
+    "structure_gained": 0,
+    "reserve_spent": 0,
+    "energy_cost": 0,
+    "cap_attribution": {
+     "rate": 0,
+     "remaining_structure": 0,
+     "reserve": 0,
+     "energy": 0
+    }
+   },
+   "gate": {
+    "observed_ticks": 5609,
+    "structure_below_adult_ticks": 5609,
+    "reserve_above_min_ticks": 0,
+    "gate_reserve": 1.2,
+    "min_reserve_deficit": 0.40049999999999986,
+    "max_reserve": 0.7995000000000001,
+    "mean_reserve": 0.11403102157248043,
+    "max_energy": 1.4315888714807343,
+    "mean_energy": 0.7145137076873915,
+    "reserve_zero_ticks": 4009
+   },
+   "reserve": {
+    "opening": 0.8,
+    "in_by_source": {
+     "digestion": 0,
+     "frugivory": 0,
+     "grazing": 0,
+     "scavenging": 0
+    },
+    "in_total": 0,
+    "out_oxidation": 0.7999999999999999,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 0.7999999999999999,
+    "closure_residual": 1.1102230246251565e-16
+   },
+   "energy": {
+    "opening": 0.6,
+    "in_digestion": 0,
+    "in_field": 0,
+    "in_oxidation": 1.2800000000000418,
+    "in_total": 1.2800000000000418,
+    "out_upkeep_paid": 1.5600000000000414,
+    "out_strike_paid": 0.32,
+    "out_handling_paid": 0,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 1.8800000000000414
+   },
+   "upkeep": {
+    "ticks": 5609,
+    "demanded_maintenance": 0.5608999999999545,
+    "demanded_move": 0.3261699091272684,
+    "demanded_sense": 0.6730800000000389,
+    "demanded_total": 1.5601499091273896,
+    "paid_lump": 1.5600000000000414,
+    "shortfall": 0.00014990912734825086,
+    "shortfall_ticks": 1,
+    "per_tick_maintenance": 0.0000999999999999919,
+    "per_tick_sense": 0.00012000000000000693,
+    "note": "the paid lump is not divided across the demanded terms"
+   },
+   "strike": {
+    "demanded": 0.32,
+    "paid": 0.32,
+    "shortfall": 0,
+    "ticks": 4
+   },
+   "handling": {
+    "demanded": 0,
+    "paid": 0,
+    "ticks": 0,
+    "unaffordable_ticks": 0
+   },
+   "oxidation_recorded": {
+    "ticks": 1601,
+    "reserve_burned": 0.7999999999999999,
+    "energy_gained": 1.2800000000000418,
+    "ticks_recorded_above_reference": 0,
+    "reserve_burned_above_reference": 0,
+    "share_of_burn_recorded_above_reference": 0
+   },
+   "digestion_ticks": 0
+  },
+  {
+   "seed": 1,
+   "arm": "specialist_on",
+   "id": "17:3",
+   "parent": "11:5",
+   "birth_tick": 170401,
+   "end_tick": 179982,
+   "end_cause": "Starvation",
+   "censored_alive": false,
+   "observed_seconds": 479.1,
+   "juvenile_ticks": 9582,
+   "adult_ticks": 0,
+   "open_stocks": {
+    "energy": 0.6,
+    "reserve": 0.8,
+    "structure": 0.8,
+    "tick": 170401
+   },
+   "close_stocks": {
+    "energy": 0.00008863339552993928,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 179981
+   },
+   "death_stocks": {
+    "energy": 0,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 179982
+   },
+   "boundaries": {
+    "gate_observation_ticks": 9582,
+    "reconciliation_checks": 9583,
+    "newborn_boundary_checks": 1,
+    "removal_boundary_checks": 1,
+    "checks_minus_gate_ticks": 1,
+    "identity_holds": true,
+    "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check"
+   },
+   "residual": {
+    "checked_ticks": 9583,
+    "first_violation_tick": null,
+    "max_energy": 1.3682631416767066e-16,
+    "max_reserve": 5.5077470362263625e-17,
+    "max_structure": 0,
+    "violations": 0
+   },
+   "growth": {
+    "branch_entered_ticks": 0,
+    "steps_taken": 0,
+    "structure_gained": 0,
+    "reserve_spent": 0,
+    "energy_cost": 0,
+    "cap_attribution": {
+     "rate": 0,
+     "remaining_structure": 0,
+     "reserve": 0,
+     "energy": 0
+    }
+   },
+   "gate": {
+    "observed_ticks": 9582,
+    "structure_below_adult_ticks": 9582,
+    "reserve_above_min_ticks": 0,
+    "gate_reserve": 1.2,
+    "min_reserve_deficit": 0.40049999999999986,
+    "max_reserve": 0.7995000000000001,
+    "mean_reserve": 0.07853184680217061,
+    "max_energy": 1.5231564365759225,
+    "mean_energy": 0.8966181351033623,
+    "reserve_zero_ticks": 6950
+   },
+   "reserve": {
+    "opening": 0.8,
+    "in_by_source": {
+     "digestion": 0.5165486163182722,
+     "frugivory": 0,
+     "grazing": 0,
+     "scavenging": 0
+    },
+    "in_total": 0.5165486163182722,
+    "out_oxidation": 1.3165486163182147,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 1.3165486163182147,
+    "closure_residual": 5.750955267558311e-14
+   },
+   "energy": {
+    "opening": 0.6,
+    "in_digestion": 0.44426744469682256,
+    "in_field": 0,
+    "in_oxidation": 2.1064777861091857,
+    "in_total": 2.550745230806008,
+    "out_upkeep_paid": 2.4890452308060924,
+    "out_strike_paid": 0.64,
+    "out_handling_paid": 0.021699999999999924,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 3.1507452308060926
+   },
+   "upkeep": {
+    "ticks": 9582,
+    "demanded_maintenance": 0.9581999999999108,
+    "demanded_move": 0.3811971419522947,
+    "demanded_sense": 1.149839999999936,
+    "demanded_total": 2.4892371419524606,
+    "paid_lump": 2.4890452308060924,
+    "shortfall": 0.00019191114636832822,
+    "shortfall_ticks": 1,
+    "per_tick_maintenance": 0.0000999999999999907,
+    "per_tick_sense": 0.00011999999999999332,
+    "note": "the paid lump is not divided across the demanded terms"
+   },
+   "strike": {
+    "demanded": 0.64,
+    "paid": 0.64,
+    "shortfall": 0,
+    "ticks": 8
+   },
+   "handling": {
+    "demanded": 0.021699999999999924,
+    "paid": 0.021699999999999924,
+    "ticks": 217,
+    "unaffordable_ticks": 0
+   },
+   "oxidation_recorded": {
+    "ticks": 2635,
+    "reserve_burned": 1.3165486163182147,
+    "energy_gained": 2.1064777861091857,
+    "ticks_recorded_above_reference": 0,
+    "reserve_burned_above_reference": 0,
+    "share_of_burn_recorded_above_reference": 0
+   },
+   "digestion_ticks": 217
+  },
+  {
+   "seed": 1,
+   "arm": "specialist_on",
+   "id": "27:11",
+   "parent": "11:5",
+   "birth_tick": 276004,
+   "end_tick": 283127,
+   "end_cause": "Starvation",
+   "censored_alive": false,
+   "observed_seconds": 356.20000000000005,
+   "juvenile_ticks": 7124,
+   "adult_ticks": 0,
+   "open_stocks": {
+    "energy": 0.6,
+    "reserve": 0.8,
+    "structure": 0.8,
+    "tick": 276004
+   },
+   "close_stocks": {
+    "energy": 0.0002244137753836418,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 283126
+   },
+   "death_stocks": {
+    "energy": 0,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 283127
+   },
+   "boundaries": {
+    "gate_observation_ticks": 7124,
+    "reconciliation_checks": 7125,
+    "newborn_boundary_checks": 1,
+    "removal_boundary_checks": 1,
+    "checks_minus_gate_ticks": 1,
+    "identity_holds": true,
+    "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check"
+   },
+   "residual": {
+    "checked_ticks": 7125,
+    "first_violation_tick": null,
+    "max_energy": 6.23416249179165e-17,
+    "max_reserve": 5.5077470362263625e-17,
+    "max_structure": 0,
+    "violations": 0
+   },
+   "growth": {
+    "branch_entered_ticks": 0,
+    "steps_taken": 0,
+    "structure_gained": 0,
+    "reserve_spent": 0,
+    "energy_cost": 0,
+    "cap_attribution": {
+     "rate": 0,
+     "remaining_structure": 0,
+     "reserve": 0,
+     "energy": 0
+    }
+   },
+   "gate": {
+    "observed_ticks": 7124,
+    "structure_below_adult_ticks": 7124,
+    "reserve_above_min_ticks": 0,
+    "gate_reserve": 1.2,
+    "min_reserve_deficit": 0.40049999999999986,
+    "max_reserve": 0.7995000000000001,
+    "mean_reserve": 0.08978102189781623,
+    "max_energy": 1.5018175128006206,
+    "mean_energy": 0.831577701422072,
+    "reserve_zero_ticks": 5524
+   },
+   "reserve": {
+    "opening": 0.8,
+    "in_by_source": {
+     "digestion": 0,
+     "frugivory": 0,
+     "grazing": 0,
+     "scavenging": 0
+    },
+    "in_total": 0,
+    "out_oxidation": 0.7999999999999999,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 0.7999999999999999,
+    "closure_residual": 1.1102230246251565e-16
+   },
+   "energy": {
+    "opening": 0.6,
+    "in_digestion": 0,
+    "in_field": 0,
+    "in_oxidation": 1.2800000000000418,
+    "in_total": 1.2800000000000418,
+    "out_upkeep_paid": 1.8800000000001422,
+    "out_strike_paid": 0,
+    "out_handling_paid": 0,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 1.8800000000001422
+   },
+   "upkeep": {
+    "ticks": 7124,
+    "demanded_maintenance": 0.7123999999999379,
+    "demanded_move": 0.31277613076650057,
+    "demanded_sense": 0.8548800000000525,
+    "demanded_total": 1.8800561307666568,
+    "paid_lump": 1.8800000000001422,
+    "shortfall": 0.00005613076651462569,
+    "shortfall_ticks": 1,
+    "per_tick_maintenance": 0.00009999999999999128,
+    "per_tick_sense": 0.00012000000000000736,
+    "note": "the paid lump is not divided across the demanded terms"
+   },
+   "strike": {
+    "demanded": 0,
+    "paid": 0,
+    "shortfall": 0,
+    "ticks": 0
+   },
+   "handling": {
+    "demanded": 0,
+    "paid": 0,
+    "ticks": 0,
+    "unaffordable_ticks": 0
+   },
+   "oxidation_recorded": {
+    "ticks": 1601,
+    "reserve_burned": 0.7999999999999999,
+    "energy_gained": 1.2800000000000418,
+    "ticks_recorded_above_reference": 0,
+    "reserve_burned_above_reference": 0,
+    "share_of_burn_recorded_above_reference": 0
+   },
+   "digestion_ticks": 0
+  },
+  {
+   "seed": 1,
+   "arm": "specialist_on",
+   "id": "73:5",
+   "parent": "11:5",
+   "birth_tick": 208802,
+   "end_tick": 214410,
+   "end_cause": "Starvation",
+   "censored_alive": false,
+   "observed_seconds": 280.45,
+   "juvenile_ticks": 5609,
+   "adult_ticks": 0,
+   "open_stocks": {
+    "energy": 0.6,
+    "reserve": 0.8,
+    "structure": 0.8,
+    "tick": 208802
+   },
+   "close_stocks": {
+    "energy": 0.00013063541455001664,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 214409
+   },
+   "death_stocks": {
+    "energy": 0,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 214410
+   },
+   "boundaries": {
+    "gate_observation_ticks": 5609,
+    "reconciliation_checks": 5610,
+    "newborn_boundary_checks": 1,
+    "removal_boundary_checks": 1,
+    "checks_minus_gate_ticks": 1,
+    "identity_holds": true,
+    "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check"
+   },
+   "residual": {
+    "checked_ticks": 5610,
+    "first_violation_tick": null,
+    "max_energy": 1.1839487723541708e-16,
+    "max_reserve": 5.5077470362263625e-17,
+    "max_structure": 0,
+    "violations": 0
+   },
+   "growth": {
+    "branch_entered_ticks": 0,
+    "steps_taken": 0,
+    "structure_gained": 0,
+    "reserve_spent": 0,
+    "energy_cost": 0,
+    "cap_attribution": {
+     "rate": 0,
+     "remaining_structure": 0,
+     "reserve": 0,
+     "energy": 0
+    }
+   },
+   "gate": {
+    "observed_ticks": 5609,
+    "structure_below_adult_ticks": 5609,
+    "reserve_above_min_ticks": 0,
+    "gate_reserve": 1.2,
+    "min_reserve_deficit": 0.40049999999999986,
+    "max_reserve": 0.7995000000000001,
+    "mean_reserve": 0.11403102157248043,
+    "max_energy": 1.4315888714807343,
+    "mean_energy": 0.7145137076873915,
+    "reserve_zero_ticks": 4009
+   },
+   "reserve": {
+    "opening": 0.8,
+    "in_by_source": {
+     "digestion": 0,
+     "frugivory": 0,
+     "grazing": 0,
+     "scavenging": 0
+    },
+    "in_total": 0,
+    "out_oxidation": 0.7999999999999999,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 0.7999999999999999,
+    "closure_residual": 1.1102230246251565e-16
+   },
+   "energy": {
+    "opening": 0.6,
+    "in_digestion": 0,
+    "in_field": 0,
+    "in_oxidation": 1.2800000000000418,
+    "in_total": 1.2800000000000418,
+    "out_upkeep_paid": 1.5600000000000414,
+    "out_strike_paid": 0.32,
+    "out_handling_paid": 0,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 1.8800000000000414
+   },
+   "upkeep": {
+    "ticks": 5609,
+    "demanded_maintenance": 0.5608999999999545,
+    "demanded_move": 0.3261699091272684,
+    "demanded_sense": 0.6730800000000389,
+    "demanded_total": 1.5601499091273896,
+    "paid_lump": 1.5600000000000414,
+    "shortfall": 0.00014990912734825086,
+    "shortfall_ticks": 1,
+    "per_tick_maintenance": 0.0000999999999999919,
+    "per_tick_sense": 0.00012000000000000693,
+    "note": "the paid lump is not divided across the demanded terms"
+   },
+   "strike": {
+    "demanded": 0.32,
+    "paid": 0.32,
+    "shortfall": 0,
+    "ticks": 4
+   },
+   "handling": {
+    "demanded": 0,
+    "paid": 0,
+    "ticks": 0,
+    "unaffordable_ticks": 0
+   },
+   "oxidation_recorded": {
+    "ticks": 1601,
+    "reserve_burned": 0.7999999999999999,
+    "energy_gained": 1.2800000000000418,
+    "ticks_recorded_above_reference": 0,
+    "reserve_burned_above_reference": 0,
+    "share_of_burn_recorded_above_reference": 0
+   },
+   "digestion_ticks": 0
+  },
+  {
+   "seed": 2,
+   "arm": "facultative_on",
+   "id": "15:6",
+   "parent": "52:5",
+   "birth_tick": 186151,
+   "end_tick": 197235,
+   "end_cause": "Starvation",
+   "censored_alive": false,
+   "observed_seconds": 554.25,
+   "juvenile_ticks": 11085,
+   "adult_ticks": 0,
+   "open_stocks": {
+    "energy": 0.6,
+    "reserve": 0.8,
+    "structure": 0.8,
+    "tick": 186151
+   },
+   "close_stocks": {
+    "energy": 0.00008110978008031382,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 197234
+   },
+   "death_stocks": {
+    "energy": 0,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 197235
+   },
+   "boundaries": {
+    "gate_observation_ticks": 11085,
+    "reconciliation_checks": 11086,
+    "newborn_boundary_checks": 1,
+    "removal_boundary_checks": 1,
+    "checks_minus_gate_ticks": 1,
+    "identity_holds": true,
+    "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check"
+   },
+   "residual": {
+    "checked_ticks": 11086,
+    "first_violation_tick": null,
+    "max_energy": 1.4560835176480325e-16,
+    "max_reserve": 1.0863705768304754e-16,
+    "max_structure": 0,
+    "violations": 0
+   },
+   "growth": {
+    "branch_entered_ticks": 0,
+    "steps_taken": 0,
+    "structure_gained": 0,
+    "reserve_spent": 0,
+    "energy_cost": 0,
+    "cap_attribution": {
+     "rate": 0,
+     "remaining_structure": 0,
+     "reserve": 0,
+     "energy": 0
+    }
+   },
+   "gate": {
+    "observed_ticks": 11085,
+    "structure_below_adult_ticks": 11085,
+    "reserve_above_min_ticks": 0,
+    "gate_reserve": 1.2,
+    "min_reserve_deficit": 0.40049999999999986,
+    "max_reserve": 0.7995000000000001,
+    "mean_reserve": 0.06475798751591245,
+    "max_energy": 1.5239855414515617,
+    "mean_energy": 0.7609802024662159,
+    "reserve_zero_ticks": 8585
+   },
+   "reserve": {
+    "opening": 0.8,
+    "in_by_source": {
+     "digestion": 0.4499886728445533,
+     "frugivory": 0,
+     "grazing": 0,
+     "scavenging": 0.008299503834862047
+    },
+    "in_total": 0.45828817667941535,
+    "out_oxidation": 1.2582881766793668,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 1.2582881766793668,
+    "closure_residual": 4.8627768478581856e-14
+   },
+   "energy": {
+    "opening": 0.6,
+    "in_digestion": 0.29999244856303553,
+    "in_field": 0.005533002556574704,
+    "in_oxidation": 2.0132610826870265,
+    "in_total": 2.318786533806637,
+    "out_upkeep_paid": 2.4971865338068873,
+    "out_strike_paid": 0.4,
+    "out_handling_paid": 0.021599999999999925,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 2.918786533806887
+   },
+   "upkeep": {
+    "ticks": 11085,
+    "demanded_maintenance": 1.1084999999998943,
+    "demanded_move": 0.0586284512538263,
+    "demanded_sense": 1.3301999999997827,
+    "demanded_total": 2.497328451253947,
+    "paid_lump": 2.4971865338068873,
+    "shortfall": 0.00014191744705970878,
+    "shortfall_ticks": 1,
+    "per_tick_maintenance": 0.00009999999999999046,
+    "per_tick_sense": 0.00011999999999998039,
+    "note": "the paid lump is not divided across the demanded terms"
+   },
+   "strike": {
+    "demanded": 0.4,
+    "paid": 0.4,
+    "shortfall": 0,
+    "ticks": 5
+   },
+   "handling": {
+    "demanded": 0.021599999999999925,
+    "paid": 0.021599999999999925,
+    "ticks": 216,
+    "unaffordable_ticks": 0
+   },
+   "oxidation_recorded": {
+    "ticks": 2630,
+    "reserve_burned": 1.2582881766793668,
+    "energy_gained": 2.0132610826870265,
+    "ticks_recorded_above_reference": 0,
+    "reserve_burned_above_reference": 0,
+    "share_of_burn_recorded_above_reference": 0
+   },
+   "digestion_ticks": 216
+  },
+  {
+   "seed": 2,
+   "arm": "facultative_on",
+   "id": "86:7",
+   "parent": "52:5",
+   "birth_tick": 224552,
+   "end_tick": 233784,
+   "end_cause": "Starvation",
+   "censored_alive": false,
+   "observed_seconds": 461.65000000000003,
+   "juvenile_ticks": 9233,
+   "adult_ticks": 0,
+   "open_stocks": {
+    "energy": 0.6,
+    "reserve": 0.8,
+    "structure": 0.8,
+    "tick": 224552
+   },
+   "close_stocks": {
+    "energy": 0.000034000448031644404,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 233783
+   },
+   "death_stocks": {
+    "energy": 0,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 233784
+   },
+   "boundaries": {
+    "gate_observation_ticks": 9233,
+    "reconciliation_checks": 9234,
+    "newborn_boundary_checks": 1,
+    "removal_boundary_checks": 1,
+    "checks_minus_gate_ticks": 1,
+    "identity_holds": true,
+    "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check"
+   },
+   "residual": {
+    "checked_ticks": 9234,
+    "first_violation_tick": null,
+    "max_energy": 2.8763883636040433e-16,
+    "max_reserve": 1.1053441148489718e-16,
+    "max_structure": 0,
+    "violations": 0
+   },
+   "growth": {
+    "branch_entered_ticks": 0,
+    "steps_taken": 0,
+    "structure_gained": 0,
+    "reserve_spent": 0,
+    "energy_cost": 0,
+    "cap_attribution": {
+     "rate": 0,
+     "remaining_structure": 0,
+     "reserve": 0,
+     "energy": 0
+    }
+   },
+   "gate": {
+    "observed_ticks": 9233,
+    "structure_below_adult_ticks": 9233,
+    "reserve_above_min_ticks": 0,
+    "gate_reserve": 1.2,
+    "min_reserve_deficit": 0.2102593937181042,
+    "max_reserve": 0.9897406062818958,
+    "mean_reserve": 0.12784622731277492,
+    "max_energy": 1.9267949210839013,
+    "mean_energy": 1.0434641922247658,
+    "reserve_zero_ticks": 6627
+   },
+   "reserve": {
+    "opening": 0.8,
+    "in_by_source": {
+     "digestion": 0.4692865433584906,
+     "frugivory": 0,
+     "grazing": 0,
+     "scavenging": 0.03425806560778589
+    },
+    "in_total": 0.5035446089662765,
+    "out_oxidation": 1.3035446089662537,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 1.3035446089662537,
+    "closure_residual": 2.2870594307278225e-14
+   },
+   "energy": {
+    "opening": 0.6,
+    "in_digestion": 0.39490050563900364,
+    "in_field": 0.022838710405190598,
+    "in_oxidation": 2.0856713743460475,
+    "in_total": 2.5034105903902417,
+    "out_upkeep_paid": 2.526710590390087,
+    "out_strike_paid": 0.56,
+    "out_handling_paid": 0.016699999999999954,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 3.1034105903900873
+   },
+   "upkeep": {
+    "ticks": 9233,
+    "demanded_maintenance": 0.9232999999999146,
+    "demanded_move": 0.49569713448379094,
+    "demanded_sense": 1.1079599999999716,
+    "demanded_total": 2.5269571344839536,
+    "paid_lump": 2.526710590390087,
+    "shortfall": 0.0002465440938666231,
+    "shortfall_ticks": 1,
+    "per_tick_maintenance": 0.00009999999999999075,
+    "per_tick_sense": 0.00011999999999999693,
+    "note": "the paid lump is not divided across the demanded terms"
+   },
+   "strike": {
+    "demanded": 0.56,
+    "paid": 0.56,
+    "shortfall": 0,
+    "ticks": 7
+   },
+   "handling": {
+    "demanded": 0.016699999999999954,
+    "paid": 0.016699999999999954,
+    "ticks": 167,
+    "unaffordable_ticks": 0
+   },
+   "oxidation_recorded": {
+    "ticks": 2608,
+    "reserve_burned": 1.3035446089662537,
+    "energy_gained": 2.0856713743460475,
+    "ticks_recorded_above_reference": 0,
+    "reserve_burned_above_reference": 0,
+    "share_of_burn_recorded_above_reference": 0
+   },
+   "digestion_ticks": 167
+  },
+  {
+   "seed": 2,
+   "arm": "facultative_on",
+   "id": "94:5",
+   "parent": "52:5",
+   "birth_tick": 285107,
+   "end_tick": null,
+   "end_cause": null,
+   "censored_alive": true,
+   "observed_seconds": 144.65,
+   "juvenile_ticks": 2893,
+   "adult_ticks": 0,
+   "open_stocks": {
+    "energy": 0.6,
+    "reserve": 0.8,
+    "structure": 0.8,
+    "tick": 285107
+   },
+   "close_stocks": {
+    "energy": 2.0255898929421927,
+    "reserve": 0.06827017128499863,
+    "structure": 0.8,
+    "tick": 287999
+   },
+   "death_stocks": null,
+   "boundaries": {
+    "gate_observation_ticks": 2893,
+    "reconciliation_checks": 2894,
+    "newborn_boundary_checks": 1,
+    "removal_boundary_checks": 0,
+    "checks_minus_gate_ticks": 1,
+    "identity_holds": true,
+    "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check"
+   },
+   "residual": {
+    "checked_ticks": 2894,
+    "first_violation_tick": null,
+    "max_energy": 4.401860820291148e-16,
+    "max_reserve": 1.6544925152128798e-16,
+    "max_structure": 0,
+    "violations": 0
+   },
+   "growth": {
+    "branch_entered_ticks": 0,
+    "steps_taken": 0,
+    "structure_gained": 0,
+    "reserve_spent": 0,
+    "energy_cost": 0,
+    "cap_attribution": {
+     "rate": 0,
+     "remaining_structure": 0,
+     "reserve": 0,
+     "energy": 0
+    }
+   },
+   "gate": {
+    "observed_ticks": 2893,
+    "structure_below_adult_ticks": 2893,
+    "reserve_above_min_ticks": 0,
+    "gate_reserve": 1.2,
+    "min_reserve_deficit": 0.11295566424316772,
+    "max_reserve": 1.0870443357568322,
+    "mean_reserve": 0.4770371619488167,
+    "max_energy": 2.1465377488007555,
+    "mean_energy": 1.6065223599753031,
+    "reserve_zero_ticks": 455
+   },
+   "reserve": {
+    "opening": 0.8,
+    "in_by_source": {
+     "digestion": 0.45881450704182486,
+     "frugivory": 0,
+     "grazing": 0,
+     "scavenging": 0.029054911700134634
+    },
+    "in_total": 0.4878694187419595,
+    "out_oxidation": 1.219599247456952,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 1.219599247456952,
+    "closure_residual": 8.93729534823251e-15
+   },
+   "energy": {
+    "opening": 0.6,
+    "in_digestion": 0.41928105990750497,
+    "in_field": 0.019369941133423114,
+    "in_oxidation": 1.9513587959311647,
+    "in_total": 2.390009796972093,
+    "out_upkeep_paid": 0.7869199040297055,
+    "out_strike_paid": 0.16,
+    "out_handling_paid": 0.01749999999999995,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 0.9644199040297055
+   },
+   "upkeep": {
+    "ticks": 2893,
+    "demanded_maintenance": 0.28929999999998446,
+    "demanded_move": 0.15045990402969847,
+    "demanded_sense": 0.34716000000001446,
+    "demanded_total": 0.7869199040297055,
+    "paid_lump": 0.7869199040297055,
+    "shortfall": 0,
+    "shortfall_ticks": 0,
+    "per_tick_maintenance": 0.00009999999999999462,
+    "per_tick_sense": 0.000120000000000005,
+    "note": "the paid lump is not divided across the demanded terms"
+   },
+   "strike": {
+    "demanded": 0.16,
+    "paid": 0.16,
+    "shortfall": 0,
+    "ticks": 2
+   },
+   "handling": {
+    "demanded": 0.01749999999999995,
+    "paid": 0.01749999999999995,
+    "ticks": 175,
+    "unaffordable_ticks": 0
+   },
+   "oxidation_recorded": {
+    "ticks": 2441,
+    "reserve_burned": 1.219599247456952,
+    "energy_gained": 1.9513587959311647,
+    "ticks_recorded_above_reference": 299,
+    "reserve_burned_above_reference": 0.1485992474570308,
+    "share_of_burn_recorded_above_reference": 0.12184268542874441
+   },
+   "digestion_ticks": 175
+  },
+  {
+   "seed": 5,
+   "arm": "facultative_on",
+   "id": "108:1",
+   "parent": "9:4",
+   "birth_tick": 177536,
+   "end_tick": 186234,
+   "end_cause": "Starvation",
+   "censored_alive": false,
+   "observed_seconds": 434.95000000000005,
+   "juvenile_ticks": 8699,
+   "adult_ticks": 0,
+   "open_stocks": {
+    "energy": 0.6,
+    "reserve": 0.8,
+    "structure": 0.8,
+    "tick": 177536
+   },
+   "close_stocks": {
+    "energy": 0.00010268619209805767,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 186233
+   },
+   "death_stocks": {
+    "energy": 0,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 186234
+   },
+   "boundaries": {
+    "gate_observation_ticks": 8699,
+    "reconciliation_checks": 8700,
+    "newborn_boundary_checks": 1,
+    "removal_boundary_checks": 1,
+    "checks_minus_gate_ticks": 1,
+    "identity_holds": true,
+    "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check"
+   },
+   "residual": {
+    "checked_ticks": 8700,
+    "first_violation_tick": null,
+    "max_energy": 2.9652929417478546e-16,
+    "max_reserve": 5.5077470362263625e-17,
+    "max_structure": 0,
+    "violations": 0
+   },
+   "growth": {
+    "branch_entered_ticks": 0,
+    "steps_taken": 0,
+    "structure_gained": 0,
+    "reserve_spent": 0,
+    "energy_cost": 0,
+    "cap_attribution": {
+     "rate": 0,
+     "remaining_structure": 0,
+     "reserve": 0,
+     "energy": 0
+    }
+   },
+   "gate": {
+    "observed_ticks": 8699,
+    "structure_below_adult_ticks": 8699,
+    "reserve_above_min_ticks": 0,
+    "gate_reserve": 1.2,
+    "min_reserve_deficit": 0.40049999999999986,
+    "max_reserve": 0.7995000000000001,
+    "mean_reserve": 0.08355993810301517,
+    "max_energy": 1.791376348128113,
+    "mean_energy": 0.9940207252527209,
+    "reserve_zero_ticks": 6797
+   },
+   "reserve": {
+    "opening": 0.8,
+    "in_by_source": {
+     "digestion": 0,
+     "frugivory": 0,
+     "grazing": 0,
+     "scavenging": 0.1827216171559611
+    },
+    "in_total": 0.1827216171559611,
+    "out_oxidation": 0.9827216171559441,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 0.9827216171559441,
+    "closure_residual": 1.709743457922741e-14
+   },
+   "energy": {
+    "opening": 0.6,
+    "in_digestion": 0,
+    "in_field": 0.12181441143730731,
+    "in_oxidation": 1.572354587449552,
+    "in_total": 1.6941689988868593,
+    "out_upkeep_paid": 2.294168998886805,
+    "out_strike_paid": 0,
+    "out_handling_paid": 0,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 2.294168998886805
+   },
+   "upkeep": {
+    "ticks": 8699,
+    "demanded_maintenance": 0.8698999999999205,
+    "demanded_move": 0.38056685723646405,
+    "demanded_sense": 1.0438800000000261,
+    "demanded_total": 2.2943468572366053,
+    "paid_lump": 2.294168998886805,
+    "shortfall": 0.00017785834980020982,
+    "shortfall_ticks": 1,
+    "per_tick_maintenance": 0.00009999999999999086,
+    "per_tick_sense": 0.000120000000000003,
+    "note": "the paid lump is not divided across the demanded terms"
+   },
+   "strike": {
+    "demanded": 0,
+    "paid": 0,
+    "shortfall": 0,
+    "ticks": 0
+   },
+   "handling": {
+    "demanded": 0,
+    "paid": 0,
+    "ticks": 0,
+    "unaffordable_ticks": 0
+   },
+   "oxidation_recorded": {
+    "ticks": 2115,
+    "reserve_burned": 0.9827216171559441,
+    "energy_gained": 1.572354587449552,
+    "ticks_recorded_above_reference": 0,
+    "reserve_burned_above_reference": 0,
+    "share_of_burn_recorded_above_reference": 0
+   },
+   "digestion_ticks": 0
+  },
+  {
+   "seed": 5,
+   "arm": "specialist_on",
+   "id": "76:5",
+   "parent": "9:4",
+   "birth_tick": 170401,
+   "end_tick": 176277,
+   "end_cause": "Starvation",
+   "censored_alive": false,
+   "observed_seconds": 293.85,
+   "juvenile_ticks": 5877,
+   "adult_ticks": 0,
+   "open_stocks": {
+    "energy": 0.6,
+    "reserve": 0.8,
+    "structure": 0.8,
+    "tick": 170401
+   },
+   "close_stocks": {
+    "energy": 0.000026763946561896804,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 176276
+   },
+   "death_stocks": {
+    "energy": 0,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 176277
+   },
+   "boundaries": {
+    "gate_observation_ticks": 5877,
+    "reconciliation_checks": 5878,
+    "newborn_boundary_checks": 1,
+    "removal_boundary_checks": 1,
+    "checks_minus_gate_ticks": 1,
+    "identity_holds": true,
+    "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check"
+   },
+   "residual": {
+    "checked_ticks": 5878,
+    "first_violation_tick": null,
+    "max_energy": 1.3682631416767066e-16,
+    "max_reserve": 5.5077470362263625e-17,
+    "max_structure": 0,
+    "violations": 0
+   },
+   "growth": {
+    "branch_entered_ticks": 0,
+    "steps_taken": 0,
+    "structure_gained": 0,
+    "reserve_spent": 0,
+    "energy_cost": 0,
+    "cap_attribution": {
+     "rate": 0,
+     "remaining_structure": 0,
+     "reserve": 0,
+     "energy": 0
+    }
+   },
+   "gate": {
+    "observed_ticks": 5877,
+    "structure_below_adult_ticks": 5877,
+    "reserve_above_min_ticks": 0,
+    "gate_reserve": 1.2,
+    "min_reserve_deficit": 0.40049999999999986,
+    "max_reserve": 0.7995000000000001,
+    "mean_reserve": 0.11221100014782465,
+    "max_energy": 1.4330623181862028,
+    "mean_energy": 0.8107601555369083,
+    "reserve_zero_ticks": 3953
+   },
+   "reserve": {
+    "opening": 0.8,
+    "in_by_source": {
+     "digestion": 0.162351662104474,
+     "frugivory": 0,
+     "grazing": 0,
+     "scavenging": 0
+    },
+    "in_total": 0.162351662104474,
+    "out_oxidation": 0.962351662104456,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 0.962351662104456,
+    "closure_residual": 1.8096635301390052e-14
+   },
+   "energy": {
+    "opening": 0.6,
+    "in_digestion": 0.1082344414029828,
+    "in_field": 0,
+    "in_oxidation": 1.5397626593671714,
+    "in_total": 1.6479971007701542,
+    "out_upkeep_paid": 1.5999971007700518,
+    "out_strike_paid": 0.64,
+    "out_handling_paid": 0.008000000000000007,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 2.2479971007700517
+   },
+   "upkeep": {
+    "ticks": 5877,
+    "demanded_maintenance": 0.5876999999999516,
+    "demanded_move": 0.3073108771948592,
+    "demanded_sense": 0.7052400000000413,
+    "demanded_total": 1.6002508771948745,
+    "paid_lump": 1.5999971007700518,
+    "shortfall": 0.00025377642482265816,
+    "shortfall_ticks": 1,
+    "per_tick_maintenance": 0.00009999999999999176,
+    "per_tick_sense": 0.00012000000000000702,
+    "note": "the paid lump is not divided across the demanded terms"
+   },
+   "strike": {
+    "demanded": 0.64,
+    "paid": 0.64,
+    "shortfall": 0,
+    "ticks": 8
+   },
+   "handling": {
+    "demanded": 0.008000000000000007,
+    "paid": 0.008000000000000007,
+    "ticks": 80,
+    "unaffordable_ticks": 0
+   },
+   "oxidation_recorded": {
+    "ticks": 1926,
+    "reserve_burned": 0.962351662104456,
+    "energy_gained": 1.5397626593671714,
+    "ticks_recorded_above_reference": 0,
+    "reserve_burned_above_reference": 0,
+    "share_of_burn_recorded_above_reference": 0
+   },
+   "digestion_ticks": 80
+  },
+  {
+   "seed": 6,
+   "arm": "facultative_on",
+   "id": "74:5",
+   "parent": "29:6",
+   "birth_tick": 170739,
+   "end_tick": 179397,
+   "end_cause": "Starvation",
+   "censored_alive": false,
+   "observed_seconds": 432.95000000000005,
+   "juvenile_ticks": 8659,
+   "adult_ticks": 0,
+   "open_stocks": {
+    "energy": 0.6,
+    "reserve": 0.8,
+    "structure": 0.8,
+    "tick": 170739
+   },
+   "close_stocks": {
+    "energy": 0.000047799573702769055,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 179396
+   },
+   "death_stocks": {
+    "energy": 0,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 179397
+   },
+   "boundaries": {
+    "gate_observation_ticks": 8659,
+    "reconciliation_checks": 8660,
+    "newborn_boundary_checks": 1,
+    "removal_boundary_checks": 1,
+    "checks_minus_gate_ticks": 1,
+    "identity_holds": true,
+    "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check"
+   },
+   "residual": {
+    "checked_ticks": 8660,
+    "first_violation_tick": null,
+    "max_energy": 1.3682631416767066e-16,
+    "max_reserve": 1.5525775109992423e-16,
+    "max_structure": 0,
+    "violations": 0
+   },
+   "growth": {
+    "branch_entered_ticks": 0,
+    "steps_taken": 0,
+    "structure_gained": 0,
+    "reserve_spent": 0,
+    "energy_cost": 0,
+    "cap_attribution": {
+     "rate": 0,
+     "remaining_structure": 0,
+     "reserve": 0,
+     "energy": 0
+    }
+   },
+   "gate": {
+    "observed_ticks": 8659,
+    "structure_below_adult_ticks": 8659,
+    "reserve_above_min_ticks": 0,
+    "gate_reserve": 1.2,
+    "min_reserve_deficit": 0.17281015652457143,
+    "max_reserve": 1.0271898434754285,
+    "mean_reserve": 0.13739261988189105,
+    "max_energy": 1.8073169195420753,
+    "mean_energy": 0.989873473559889,
+    "reserve_zero_ticks": 6452
+   },
+   "reserve": {
+    "opening": 0.8,
+    "in_by_source": {
+     "digestion": 0.3036898434754238,
+     "frugivory": 0,
+     "grazing": 0,
+     "scavenging": 0
+    },
+    "in_total": 0.3036898434754238,
+    "out_oxidation": 1.10368984347542,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 1.10368984347542,
+    "closure_residual": 3.774758283725532e-15
+   },
+   "energy": {
+    "opening": 0.6,
+    "in_digestion": 0.2024598956502822,
+    "in_field": 0,
+    "in_oxidation": 1.765903749560714,
+    "in_total": 1.968363645210996,
+    "out_upkeep_paid": 2.396263645210929,
+    "out_strike_paid": 0.16,
+    "out_handling_paid": 0.012099999999999982,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 2.568363645210929
+   },
+   "upkeep": {
+    "ticks": 8659,
+    "demanded_maintenance": 0.865899999999921,
+    "demanded_move": 0.49145887286410733,
+    "demanded_sense": 1.0390800000000302,
+    "demanded_total": 2.3964388728643664,
+    "paid_lump": 2.396263645210929,
+    "shortfall": 0.00017522765343725355,
+    "shortfall_ticks": 1,
+    "per_tick_maintenance": 0.00009999999999999087,
+    "per_tick_sense": 0.00012000000000000349,
+    "note": "the paid lump is not divided across the demanded terms"
+   },
+   "strike": {
+    "demanded": 0.16,
+    "paid": 0.16,
+    "shortfall": 0,
+    "ticks": 2
+   },
+   "handling": {
+    "demanded": 0.012099999999999982,
+    "paid": 0.012099999999999982,
+    "ticks": 121,
+    "unaffordable_ticks": 0
+   },
+   "oxidation_recorded": {
+    "ticks": 2208,
+    "reserve_burned": 1.10368984347542,
+    "energy_gained": 1.765903749560714,
+    "ticks_recorded_above_reference": 0,
+    "reserve_burned_above_reference": 0,
+    "share_of_burn_recorded_above_reference": 0
+   },
+   "digestion_ticks": 121
+  },
+  {
+   "seed": 7,
+   "arm": "facultative_on",
+   "id": "86:7",
+   "parent": "54:5",
+   "birth_tick": 172294,
+   "end_tick": 184194,
+   "end_cause": "Starvation",
+   "censored_alive": false,
+   "observed_seconds": 595.0500000000001,
+   "juvenile_ticks": 11901,
+   "adult_ticks": 0,
+   "open_stocks": {
+    "energy": 0.6,
+    "reserve": 0.8,
+    "structure": 0.8,
+    "tick": 172294
+   },
+   "close_stocks": {
+    "energy": 0.0002021155327455174,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 184193
+   },
+   "death_stocks": {
+    "energy": 0,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 184194
+   },
+   "boundaries": {
+    "gate_observation_ticks": 11901,
+    "reconciliation_checks": 11902,
+    "newborn_boundary_checks": 1,
+    "removal_boundary_checks": 1,
+    "checks_minus_gate_ticks": 1,
+    "identity_holds": true,
+    "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check"
+   },
+   "residual": {
+    "checked_ticks": 11902,
+    "first_violation_tick": null,
+    "max_energy": 5.048587416178751e-16,
+    "max_reserve": 8.548934130048202e-17,
+    "max_structure": 0,
+    "violations": 0
+   },
+   "growth": {
+    "branch_entered_ticks": 0,
+    "steps_taken": 0,
+    "structure_gained": 0,
+    "reserve_spent": 0,
+    "energy_cost": 0,
+    "cap_attribution": {
+     "rate": 0,
+     "remaining_structure": 0,
+     "reserve": 0,
+     "energy": 0
+    }
+   },
+   "gate": {
+    "observed_ticks": 11901,
+    "structure_below_adult_ticks": 11901,
+    "reserve_above_min_ticks": 0,
+    "gate_reserve": 1.2,
+    "min_reserve_deficit": 0.40049999999999986,
+    "max_reserve": 0.7995000000000001,
+    "mean_reserve": 0.06479995860567972,
+    "max_energy": 2.037418320576069,
+    "mean_energy": 1.048343548091038,
+    "reserve_zero_ticks": 8741
+   },
+   "reserve": {
+    "opening": 0.8,
+    "in_by_source": {
+     "digestion": 0.7363737846022693,
+     "frugivory": 0,
+     "grazing": 0,
+     "scavenging": 0.05291646736116771
+    },
+    "in_total": 0.789290251963437,
+    "out_oxidation": 1.589290251963345,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 1.589290251963345,
+    "closure_residual": 9.214851104388799e-14
+   },
+   "energy": {
+    "opening": 0.6,
+    "in_digestion": 0.5844841892519016,
+    "in_field": 0.03527764490744513,
+    "in_oxidation": 2.542864403141395,
+    "in_total": 3.162626237300742,
+    "out_upkeep_paid": 3.167626237300912,
+    "out_strike_paid": 0.56,
+    "out_handling_paid": 0.034999999999999976,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 3.7626262373009123
+   },
+   "upkeep": {
+    "ticks": 11901,
+    "demanded_maintenance": 1.1900999999998854,
+    "demanded_move": 0.5494846663098321,
+    "demanded_sense": 1.4281199999996994,
+    "demanded_total": 3.167704666310065,
+    "paid_lump": 3.167626237300912,
+    "shortfall": 0.0000784290091527501,
+    "shortfall_ticks": 1,
+    "per_tick_maintenance": 0.00009999999999999037,
+    "per_tick_sense": 0.00011999999999997474,
+    "note": "the paid lump is not divided across the demanded terms"
+   },
+   "strike": {
+    "demanded": 0.56,
+    "paid": 0.56,
+    "shortfall": 0,
+    "ticks": 7
+   },
+   "handling": {
+    "demanded": 0.034999999999999976,
+    "paid": 0.034999999999999976,
+    "ticks": 350,
+    "unaffordable_ticks": 0
+   },
+   "oxidation_recorded": {
+    "ticks": 3344,
+    "reserve_burned": 1.589290251963345,
+    "energy_gained": 2.542864403141395,
+    "ticks_recorded_above_reference": 96,
+    "reserve_burned_above_reference": 0.03314010675560369,
+    "share_of_burn_recorded_above_reference": 0.020852142467157112
+   },
+   "digestion_ticks": 350
+  },
+  {
+   "seed": 7,
+   "arm": "specialist_on",
+   "id": "15:4",
+   "parent": "54:5",
+   "birth_tick": 172294,
+   "end_tick": 176819,
+   "end_cause": "Starvation",
+   "censored_alive": false,
+   "observed_seconds": 226.3,
+   "juvenile_ticks": 4526,
+   "adult_ticks": 0,
+   "open_stocks": {
+    "energy": 0.6,
+    "reserve": 0.8,
+    "structure": 0.8,
+    "tick": 172294
+   },
+   "close_stocks": {
+    "energy": 0.00004153856561406376,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 176818
+   },
+   "death_stocks": {
+    "energy": 0,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 176819
+   },
+   "boundaries": {
+    "gate_observation_ticks": 4526,
+    "reconciliation_checks": 4527,
+    "newborn_boundary_checks": 1,
+    "removal_boundary_checks": 1,
+    "checks_minus_gate_ticks": 1,
+    "identity_holds": true,
+    "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check"
+   },
+   "residual": {
+    "checked_ticks": 4527,
+    "first_violation_tick": null,
+    "max_energy": 1.9905951886833861e-16,
+    "max_reserve": 5.5077470362263625e-17,
+    "max_structure": 0,
+    "violations": 0
+   },
+   "growth": {
+    "branch_entered_ticks": 0,
+    "steps_taken": 0,
+    "structure_gained": 0,
+    "reserve_spent": 0,
+    "energy_cost": 0,
+    "cap_attribution": {
+     "rate": 0,
+     "remaining_structure": 0,
+     "reserve": 0,
+     "energy": 0
+    }
+   },
+   "gate": {
+    "observed_ticks": 4526,
+    "structure_below_adult_ticks": 4526,
+    "reserve_above_min_ticks": 0,
+    "gate_reserve": 1.2,
+    "min_reserve_deficit": 0.40049999999999986,
+    "max_reserve": 0.7995000000000001,
+    "mean_reserve": 0.1413168360583391,
+    "max_energy": 1.363028250857027,
+    "mean_energy": 0.8972145985636623,
+    "reserve_zero_ticks": 2926
+   },
+   "reserve": {
+    "opening": 0.8,
+    "in_by_source": {
+     "digestion": 0,
+     "frugivory": 0,
+     "grazing": 0,
+     "scavenging": 0
+    },
+    "in_total": 0,
+    "out_oxidation": 0.7999999999999999,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 0.7999999999999999,
+    "closure_residual": 1.1102230246251565e-16
+   },
+   "energy": {
+    "opening": 0.6,
+    "in_digestion": 0,
+    "in_field": 0,
+    "in_oxidation": 1.2800000000000418,
+    "in_total": 1.2800000000000418,
+    "out_upkeep_paid": 1.2399999999999471,
+    "out_strike_paid": 0.64,
+    "out_handling_paid": 0,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 1.879999999999947
+   },
+   "upkeep": {
+    "ticks": 4526,
+    "demanded_maintenance": 0.4525999999999665,
+    "demanded_move": 0.2444614886614913,
+    "demanded_sense": 0.5431200000000291,
+    "demanded_total": 1.240181488661473,
+    "paid_lump": 1.2399999999999471,
+    "shortfall": 0.00018148866152595884,
+    "shortfall_ticks": 1,
+    "per_tick_maintenance": 0.00009999999999999259,
+    "per_tick_sense": 0.00012000000000000644,
+    "note": "the paid lump is not divided across the demanded terms"
+   },
+   "strike": {
+    "demanded": 0.64,
+    "paid": 0.64,
+    "shortfall": 0,
+    "ticks": 8
+   },
+   "handling": {
+    "demanded": 0,
+    "paid": 0,
+    "ticks": 0,
+    "unaffordable_ticks": 0
+   },
+   "oxidation_recorded": {
+    "ticks": 1601,
+    "reserve_burned": 0.7999999999999999,
+    "energy_gained": 1.2800000000000418,
+    "ticks_recorded_above_reference": 0,
+    "reserve_burned_above_reference": 0,
+    "share_of_burn_recorded_above_reference": 0
+   },
+   "digestion_ticks": 0
+  },
+  {
+   "seed": 8,
+   "arm": "facultative_on",
+   "id": "53:6",
+   "parent": "6:6",
+   "birth_tick": 171270,
+   "end_tick": 178000,
+   "end_cause": "Starvation",
+   "censored_alive": false,
+   "observed_seconds": 336.55,
+   "juvenile_ticks": 6731,
+   "adult_ticks": 0,
+   "open_stocks": {
+    "energy": 0.6,
+    "reserve": 0.8,
+    "structure": 0.8,
+    "tick": 171270
+   },
+   "close_stocks": {
+    "energy": 0.000024607608643638693,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 177999
+   },
+   "death_stocks": {
+    "energy": 0,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 178000
+   },
+   "boundaries": {
+    "gate_observation_ticks": 6731,
+    "reconciliation_checks": 6732,
+    "newborn_boundary_checks": 1,
+    "removal_boundary_checks": 1,
+    "checks_minus_gate_ticks": 1,
+    "identity_holds": true,
+    "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check"
+   },
+   "residual": {
+    "checked_ticks": 6732,
+    "first_violation_tick": null,
+    "max_energy": 2.015802889193674e-16,
+    "max_reserve": 1.0907073855204175e-16,
+    "max_structure": 0,
+    "violations": 0
+   },
+   "growth": {
+    "branch_entered_ticks": 0,
+    "steps_taken": 0,
+    "structure_gained": 0,
+    "reserve_spent": 0,
+    "energy_cost": 0,
+    "cap_attribution": {
+     "rate": 0,
+     "remaining_structure": 0,
+     "reserve": 0,
+     "energy": 0
+    }
+   },
+   "gate": {
+    "observed_ticks": 6731,
+    "structure_below_adult_ticks": 6731,
+    "reserve_above_min_ticks": 0,
+    "gate_reserve": 1.2,
+    "min_reserve_deficit": 0.40049999999999986,
+    "max_reserve": 0.7995000000000001,
+    "mean_reserve": 0.10142456837624819,
+    "max_energy": 1.247092298364846,
+    "mean_energy": 0.6795339350972528,
+    "reserve_zero_ticks": 5075
+   },
+   "reserve": {
+    "opening": 0.8,
+    "in_by_source": {
+     "digestion": 0,
+     "frugivory": 0,
+     "grazing": 0,
+     "scavenging": 0.028475757119234727
+    },
+    "in_total": 0.028475757119234727,
+    "out_oxidation": 0.8284757571192343,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 0.8284757571192343,
+    "closure_residual": 5.551115123125783e-16
+   },
+   "energy": {
+    "opening": 0.6,
+    "in_digestion": 0,
+    "in_field": 0.01898383807948982,
+    "in_oxidation": 1.3255612113908168,
+    "in_total": 1.3445450494703066,
+    "out_upkeep_paid": 1.704545049470129,
+    "out_strike_paid": 0.24,
+    "out_handling_paid": 0,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 1.944545049470129
+   },
+   "upkeep": {
+    "ticks": 6731,
+    "demanded_maintenance": 0.6730999999999422,
+    "demanded_move": 0.22398098640338587,
+    "demanded_sense": 0.807720000000049,
+    "demanded_total": 1.7048009864033837,
+    "paid_lump": 1.704545049470129,
+    "shortfall": 0.0002559369332546288,
+    "shortfall_ticks": 1,
+    "per_tick_maintenance": 0.00009999999999999141,
+    "per_tick_sense": 0.00012000000000000727,
+    "note": "the paid lump is not divided across the demanded terms"
+   },
+   "strike": {
+    "demanded": 0.24,
+    "paid": 0.24,
+    "shortfall": 0,
+    "ticks": 3
+   },
+   "handling": {
+    "demanded": 0,
+    "paid": 0,
+    "ticks": 0,
+    "unaffordable_ticks": 0
+   },
+   "oxidation_recorded": {
+    "ticks": 1659,
+    "reserve_burned": 0.8284757571192343,
+    "energy_gained": 1.3255612113908168,
+    "ticks_recorded_above_reference": 0,
+    "reserve_burned_above_reference": 0,
+    "share_of_burn_recorded_above_reference": 0
+   },
+   "digestion_ticks": 0
+  },
+  {
+   "seed": 8,
+   "arm": "specialist_on",
+   "id": "41:5",
+   "parent": "6:6",
+   "birth_tick": 173805,
+   "end_tick": 196434,
+   "end_cause": "Starvation",
+   "censored_alive": false,
+   "observed_seconds": 1131.5,
+   "juvenile_ticks": 22630,
+   "adult_ticks": 0,
+   "open_stocks": {
+    "energy": 0.6,
+    "reserve": 0.8,
+    "structure": 0.8,
+    "tick": 173805
+   },
+   "close_stocks": {
+    "energy": 0.00014161183767076216,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 196433
+   },
+   "death_stocks": {
+    "energy": 0,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 196434
+   },
+   "boundaries": {
+    "gate_observation_ticks": 22630,
+    "reconciliation_checks": 22631,
+    "newborn_boundary_checks": 1,
+    "removal_boundary_checks": 1,
+    "checks_minus_gate_ticks": 1,
+    "identity_holds": true,
+    "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check"
+   },
+   "residual": {
+    "checked_ticks": 22631,
+    "first_violation_tick": null,
+    "max_energy": 4.666406150377611e-16,
+    "max_reserve": 8.695301423333746e-17,
+    "max_structure": 0,
+    "violations": 0
+   },
+   "growth": {
+    "branch_entered_ticks": 0,
+    "steps_taken": 0,
+    "structure_gained": 0,
+    "reserve_spent": 0,
+    "energy_cost": 0,
+    "cap_attribution": {
+     "rate": 0,
+     "remaining_structure": 0,
+     "reserve": 0,
+     "energy": 0
+    }
+   },
+   "gate": {
+    "observed_ticks": 22630,
+    "structure_below_adult_ticks": 22630,
+    "reserve_above_min_ticks": 0,
+    "gate_reserve": 1.2,
+    "min_reserve_deficit": 0.3455238019695215,
+    "max_reserve": 0.8544761980304785,
+    "mean_reserve": 0.07058804230358363,
+    "max_energy": 2.2234873308030387,
+    "mean_energy": 1.4014733822194267,
+    "reserve_zero_ticks": 15590
+   },
+   "reserve": {
+    "opening": 0.8,
+    "in_by_source": {
+     "digestion": 2.7227482300302928,
+     "frugivory": 0,
+     "grazing": 0,
+     "scavenging": 0
+    },
+    "in_total": 2.7227482300302928,
+    "out_oxidation": 3.522748230030719,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 3.522748230030719,
+    "closure_residual": -4.263256414560601e-13
+   },
+   "energy": {
+    "opening": 0.6,
+    "in_digestion": 2.1493534350156835,
+    "in_field": 0,
+    "in_oxidation": 5.636397168048113,
+    "in_total": 7.785750603063796,
+    "out_upkeep_paid": 5.866850603064017,
+    "out_strike_paid": 2.400000000000001,
+    "out_handling_paid": 0.11890000000000238,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 8.38575060306402
+   },
+   "upkeep": {
+    "ticks": 22630,
+    "demanded_maintenance": 2.263000000000351,
+    "demanded_move": 0.8883580284222756,
+    "demanded_sense": 2.715599999998605,
+    "demanded_total": 5.866958028422494,
+    "paid_lump": 5.866850603064017,
+    "shortfall": 0.00010742535847649103,
+    "shortfall_ticks": 1,
+    "per_tick_maintenance": 0.00010000000000001552,
+    "per_tick_sense": 0.00011999999999993835,
+    "note": "the paid lump is not divided across the demanded terms"
+   },
+   "strike": {
+    "demanded": 2.400000000000001,
+    "paid": 2.400000000000001,
+    "shortfall": 0,
+    "ticks": 30
+   },
+   "handling": {
+    "demanded": 0.11890000000000238,
+    "paid": 0.11890000000000238,
+    "ticks": 1189,
+    "unaffordable_ticks": 0
+   },
+   "oxidation_recorded": {
+    "ticks": 7050,
+    "reserve_burned": 3.522748230030719,
+    "energy_gained": 5.636397168048113,
+    "ticks_recorded_above_reference": 846,
+    "reserve_burned_above_reference": 0.42249091501808217,
+    "share_of_burn_recorded_above_reference": 0.11993219141136237
+   },
+   "digestion_ticks": 1189
+  },
+  {
+   "seed": 12,
+   "arm": "facultative_on",
+   "id": "11:9",
+   "parent": "38:4",
+   "birth_tick": 183923,
+   "end_tick": 197113,
+   "end_cause": "Starvation",
+   "censored_alive": false,
+   "observed_seconds": 659.5500000000001,
+   "juvenile_ticks": 13191,
+   "adult_ticks": 0,
+   "open_stocks": {
+    "energy": 0.6,
+    "reserve": 0.8,
+    "structure": 0.8,
+    "tick": 183923
+   },
+   "close_stocks": {
+    "energy": 0.00005750033814316683,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 197112
+   },
+   "death_stocks": {
+    "energy": 0,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 197113
+   },
+   "boundaries": {
+    "gate_observation_ticks": 13191,
+    "reconciliation_checks": 13192,
+    "newborn_boundary_checks": 1,
+    "removal_boundary_checks": 1,
+    "checks_minus_gate_ticks": 1,
+    "identity_holds": true,
+    "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check"
+   },
+   "residual": {
+    "checked_ticks": 13192,
+    "first_violation_tick": null,
+    "max_energy": 3.0018847650692404e-16,
+    "max_reserve": 5.5077470362263625e-17,
+    "max_structure": 0,
+    "violations": 0
+   },
+   "growth": {
+    "branch_entered_ticks": 0,
+    "steps_taken": 0,
+    "structure_gained": 0,
+    "reserve_spent": 0,
+    "energy_cost": 0,
+    "cap_attribution": {
+     "rate": 0,
+     "remaining_structure": 0,
+     "reserve": 0,
+     "energy": 0
+    }
+   },
+   "gate": {
+    "observed_ticks": 13191,
+    "structure_below_adult_ticks": 13191,
+    "reserve_above_min_ticks": 0,
+    "gate_reserve": 1.2,
+    "min_reserve_deficit": 0.40049999999999986,
+    "max_reserve": 0.7995000000000001,
+    "mean_reserve": 0.07897902740558818,
+    "max_energy": 2.251618628465004,
+    "mean_energy": 1.2017333829382233,
+    "reserve_zero_ticks": 9063
+   },
+   "reserve": {
+    "opening": 0.8,
+    "in_by_source": {
+     "digestion": 1.1514349128613857,
+     "frugivory": 0,
+     "grazing": 0,
+     "scavenging": 0.16605462791010944
+    },
+    "in_total": 1.317489540771495,
+    "out_oxidation": 2.1174895407714005,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 2.1174895407714005,
+    "closure_residual": 9.459100169806334e-14
+   },
+   "energy": {
+    "opening": 0.6,
+    "in_digestion": 0.8687345190952571,
+    "in_field": 0.11070308527340621,
+    "in_oxidation": 3.3879832652341983,
+    "in_total": 4.367420869602862,
+    "out_upkeep_paid": 3.477620869603001,
+    "out_strike_paid": 1.4400000000000002,
+    "out_handling_paid": 0.0498000000000004,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 4.967420869603002
+   },
+   "upkeep": {
+    "ticks": 13191,
+    "demanded_maintenance": 1.3190999999998712,
+    "demanded_move": 0.575823913806481,
+    "demanded_sense": 1.5829199999995678,
+    "demanded_total": 3.477843913806756,
+    "paid_lump": 3.477620869603001,
+    "shortfall": 0.00022304420375510067,
+    "shortfall_ticks": 1,
+    "per_tick_maintenance": 0.00009999999999999023,
+    "per_tick_sense": 0.00011999999999996723,
+    "note": "the paid lump is not divided across the demanded terms"
+   },
+   "strike": {
+    "demanded": 1.4400000000000002,
+    "paid": 1.4400000000000002,
+    "shortfall": 0,
+    "ticks": 18
+   },
+   "handling": {
+    "demanded": 0.0498000000000004,
+    "paid": 0.0498000000000004,
+    "ticks": 498,
+    "unaffordable_ticks": 0
+   },
+   "oxidation_recorded": {
+    "ticks": 4514,
+    "reserve_burned": 2.1174895407714005,
+    "energy_gained": 3.3879832652341983,
+    "ticks_recorded_above_reference": 433,
+    "reserve_burned_above_reference": 0.21445757873179175,
+    "share_of_burn_recorded_above_reference": 0.10127916790260269
+   },
+   "digestion_ticks": 498
+  },
+  {
+   "seed": 12,
+   "arm": "facultative_on",
+   "id": "35:8",
+   "parent": "38:4",
+   "birth_tick": 222324,
+   "end_tick": 233878,
+   "end_cause": "Starvation",
+   "censored_alive": false,
+   "observed_seconds": 577.75,
+   "juvenile_ticks": 11555,
+   "adult_ticks": 0,
+   "open_stocks": {
+    "energy": 0.6,
+    "reserve": 0.8,
+    "structure": 0.8,
+    "tick": 222324
+   },
+   "close_stocks": {
+    "energy": 0.000184537306318773,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 233877
+   },
+   "death_stocks": {
+    "energy": 0,
+    "reserve": 0,
+    "structure": 0.8,
+    "tick": 233878
+   },
+   "boundaries": {
+    "gate_observation_ticks": 11555,
+    "reconciliation_checks": 11556,
+    "newborn_boundary_checks": 1,
+    "removal_boundary_checks": 1,
+    "checks_minus_gate_ticks": 1,
+    "identity_holds": true,
+    "basis": "a mid-replay birth is registered after the physiology pass, so its birth tick is probed but not gate-observed; a death replaces that tick's probe with one removal-site check"
+   },
+   "residual": {
+    "checked_ticks": 11556,
+    "first_violation_tick": null,
+    "max_energy": 1.2457482961858446e-16,
+    "max_reserve": 5.5077470362263625e-17,
+    "max_structure": 0,
+    "violations": 0
+   },
+   "growth": {
+    "branch_entered_ticks": 0,
+    "steps_taken": 0,
+    "structure_gained": 0,
+    "reserve_spent": 0,
+    "energy_cost": 0,
+    "cap_attribution": {
+     "rate": 0,
+     "remaining_structure": 0,
+     "reserve": 0,
+     "energy": 0
+    }
+   },
+   "gate": {
+    "observed_ticks": 11555,
+    "structure_below_adult_ticks": 11555,
+    "reserve_above_min_ticks": 0,
+    "gate_reserve": 1.2,
+    "min_reserve_deficit": 0.40049999999999986,
+    "max_reserve": 0.7995000000000001,
+    "mean_reserve": 0.07200175840507678,
+    "max_energy": 1.6525356749388136,
+    "mean_energy": 0.9308165527151329,
+    "reserve_zero_ticks": 8515
+   },
+   "reserve": {
+    "opening": 0.8,
+    "in_by_source": {
+     "digestion": 0.720432738015666,
+     "frugivory": 0,
+     "grazing": 0,
+     "scavenging": 0.0001044385931927979
+    },
+    "in_total": 0.7205371766088587,
+    "out_oxidation": 1.5205371766087854,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 1.5205371766087854,
+    "closure_residual": 7.327471962526033e-14
+   },
+   "energy": {
+    "opening": 0.6,
+    "in_digestion": 0.4802884920104494,
+    "in_field": 0.00006962572879519861,
+    "in_oxidation": 2.432859482574099,
+    "in_total": 2.9132176003133434,
+    "out_upkeep_paid": 3.0745176003136336,
+    "out_strike_paid": 0.4,
+    "out_handling_paid": 0.03870000000000008,
+    "out_growth": 0,
+    "out_funding": 0,
+    "out_total": 3.5132176003136335
+   },
+   "upkeep": {
+    "ticks": 11555,
+    "demanded_maintenance": 1.1554999999998892,
+    "demanded_move": 0.5325136075487358,
+    "demanded_sense": 1.3865999999997347,
+    "demanded_total": 3.074613607549213,
+    "paid_lump": 3.0745176003136336,
+    "shortfall": 0.0000960072355794945,
+    "shortfall_ticks": 1,
+    "per_tick_maintenance": 0.00009999999999999041,
+    "per_tick_sense": 0.00011999999999997705,
+    "note": "the paid lump is not divided across the demanded terms"
+   },
+   "strike": {
+    "demanded": 0.4,
+    "paid": 0.4,
+    "shortfall": 0,
+    "ticks": 5
+   },
+   "handling": {
+    "demanded": 0.03870000000000008,
+    "paid": 0.03870000000000008,
+    "ticks": 387,
+    "unaffordable_ticks": 0
+   },
+   "oxidation_recorded": {
+    "ticks": 3045,
+    "reserve_burned": 1.5205371766087854,
+    "energy_gained": 2.432859482574099,
+    "ticks_recorded_above_reference": 0,
+    "reserve_burned_above_reference": 0,
+    "share_of_burn_recorded_above_reference": 0
+   },
+   "digestion_ticks": 387
+  }
+ ],
+ "limits": "Every quantity is a recorded flow or identity on the realized path of a retained arm. The above-reference oxidation counts classify recorded states. They are not a counterfactual: a different threshold can change the adult, its funding and birth timing, prey interactions and the juvenile's own later stocks, so nothing here shows what a background-policy juvenile would have done. The clamped upkeep payment is never divided across its three demanded terms. Gate observation ticks and reconciliation checks are separate counts; a mid-replay birth adds one check at its birth boundary and a death replaces that tick's probe with a removal-site check. Reconciliation proves completeness only for stock movements a replay actually exercised. The growth branch did not run, so its cap-attribution counters remain unit-test evidence. Encounter and approach are not measured here. Paid strikes and digestion ticks are counted; reachable-but-unstruck prey is not."
+}
