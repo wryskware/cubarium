@@ -103,8 +103,10 @@ review is complete. Both full matched jobs have now terminated: the background
 completed, but the candidate retained a seed6 state-invariant failure. That
 failure prevents a full-cohort pass. The
 [retained results and exact replay](design/7_Research/astra-hunter-charging-results-2026-09-13.md)
-show real paid births but zero adult descendants; the isolated cleanup fix is
-under review before an unchanged rerun. No live introduction follows from these results.
+show real paid births but zero adult descendants. The
+[reviewed cleanup fix](design/7_Research/astra-hunter-target-cleanup-review-2026-09-13.md)
+is frozen at512ee52; both unchanged full twelve-seed jobs are now running again
+in new directories. No live introduction follows from these results.
 
 Wrysk prefers Fable's **Lanternjaw** megafauna body. The
 [comparison studio](art/studies/megafauna/README.md) retains Veilwarden as an

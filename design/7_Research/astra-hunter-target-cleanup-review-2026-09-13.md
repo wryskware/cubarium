@@ -84,3 +84,25 @@ No new scientific parameter family is warranted by the repair: freeze the fixed
 code, rerun the original background/charging recipe on all twelve inputs in new
 directories, retain the prior failure, and require the unchanged full-comparison
 gate before drawing whole-cohort biological conclusions.
+
+## Subsequent root integration and collection
+
+Root froze production correction512ee52 in `/tmp/cubarium-charge-rerun-512ee52`.
+Fresh hunter/charging/migration tests passed51/0/0; release build exited0.
+Logs: `/tmp/cubarium-charge-rerun-{tests,build}.log`.
+Executable SHA256 `65d42d78ecc3fc6fff4e9f5490d5e78df61f7f275ee8584e45221c3177b02828`.
+
+Both original recipes are now collecting all twelve original inputs and all six
+arms for144000 ticks, audit window200, with no care or parameter retuning:
+
+- `captures/hunter-charge-background-two-hour-512ee52`, root handle30321,
+  profile `reserve-targets-v1`.
+- `captures/hunter-charge-candidate-two-hour-512ee52`, root handle47116,
+  profile `reserve-targets-charge80-v1`.
+
+Both manifests confirm build `0.1.0+512ee52`, the same recorded executable and
+fixed horizon. Logs are `/tmp/cubarium-hunter-charge-{background,candidate}-two-hour-512ee52.log`.
+These are running jobs, not completed results. Original3b06596 failures remain
+untouched; the unchanged strict `charge80` comparison remains the complete-cohort
+gate. Live meal buildd55d8af does not contain this experimental hunter correction
+and still carries no hunter profile/member.

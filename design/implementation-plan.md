@@ -156,8 +156,9 @@ reviewed natural-rainfall harness's isolated3e9bc2f two-hour collection now runn
 Both paid-charging jobs terminated; candidate seed6 retained an invariant failure,
 so the full matched screen cannot pass. The
 [complete retained interpretation](7_Research/astra-hunter-charging-results-2026-09-13.md)
-finds paid births but no adult descendants; a separate cleanup fix is under
-review before repeating the unchanged recipe. The [AA study](7_Research/astra-aa-comparison-2026-09-13.md) rejects
+finds paid births but no adult descendants; the separately reviewed512ee52 cleanup
+fix is now in a fresh full twelve-seed paired rerun of the unchanged recipe.
+The [AA study](7_Research/astra-aa-comparison-2026-09-13.md) rejects
 blanket coverage baking as a default and proposes only a selective wing follow-up.
 All earlier failures and the broader goal/backlog above remain open.
 
