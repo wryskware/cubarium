@@ -2947,6 +2947,25 @@ impl World {
         Ok(())
     }
 
+    /// The segments this organism was **actually transported along** during the last step,
+    /// borrowed rather than cloned.
+    ///
+    /// This is the same data [`World::render_view`] publishes in
+    /// [`crate::view::OrganismView::moved`], reachable without building a whole view — that call
+    /// clones four full fields and every organism's lobes, which is right for a renderer and
+    /// wrong for an observer that wants one number every tick. Read-only: it borrows what the
+    /// tick already computed, consumes no draw, and changes nothing.
+    ///
+    /// A seam crossing appears here as the several straight pieces it really was, which is why
+    /// an endpoint difference in chart coordinates is not a substitute: at a seam it is
+    /// meaningless, and at a reflective rim it is not even the distance travelled.
+    ///
+    /// Indexed by **slot**, exactly as the view is: a handle whose generation has been retired
+    /// resolves to whatever now occupies that slot. Callers iterate live organisms.
+    pub fn moved_segments(&self, id: OrganismId) -> &[cubarium_surface::PathSegment] {
+        self.moved.get(id.slot as usize).map_or(&[], Vec::as_slice)
+    }
+
     pub fn render_view(&self) -> RenderView {
         // The same derivation the tick uses for the escrow's due date, so what a renderer
         // shows as "nearly born" is the tick the world will actually commit the birth on.
@@ -3645,6 +3664,38 @@ mod tests {
         let empty = world.telemetry();
         assert_eq!(empty.pairs_considered, 0);
         assert_eq!(empty.light_in, 0.0);
+    }
+
+    /// `moved_segments` is the same data the render view publishes, borrowed instead of cloned.
+    /// An observer that wants one number per tick must not have to build a whole view, and must
+    /// not get a different answer for taking the cheaper door.
+    #[test]
+    fn moved_segments_is_exactly_what_the_render_view_publishes() {
+        let mut world = World::new(config()).expect("valid");
+        for _ in 0..40 {
+            world.step();
+            let view = world.render_view();
+            assert_eq!(view.organisms.len(), world.population());
+            for o in &view.organisms {
+                assert_eq!(
+                    world.moved_segments(o.id),
+                    o.moved.as_slice(),
+                    "the borrowed segments differ from the published ones for {:?}",
+                    o.id
+                );
+            }
+        }
+        // Some organism really did move, so the equality above is not two empty slices.
+        let view = world.render_view();
+        assert!(view.organisms.iter().any(|o| !o.moved.is_empty()));
+        // A handle the arena never issued has no segments rather than panicking.
+        assert!(world.moved_segments(OrganismId { slot: u32::MAX, generation: 1 }).is_empty());
+        // And reading them changes nothing at all.
+        let before = crate::snapshot::state_hash(&world.state);
+        for (id, _) in world.state.organisms.iter() {
+            let _ = world.moved_segments(id);
+        }
+        assert_eq!(crate::snapshot::state_hash(&world.state), before);
     }
 
     #[test]

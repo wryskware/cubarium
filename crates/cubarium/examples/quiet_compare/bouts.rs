@@ -22,24 +22,30 @@
 //! existed and `holds(T)` was true, but the world abandoned the pause before the decision, so
 //! that interval is not recovery either — the `Abort` record at `T` is what says so.
 //!
-//! ## What is exact and what is not
+//! ## Transported path length is exact, every tick
+//!
+//! An earlier draft accumulated the endpoint difference in chart coordinates whenever an
+//! organism stayed on one face, and counted the seam-crossing ticks it had to skip. That was
+//! wrong twice over: a chart delta is not the distance travelled at a **reflective rim**, where
+//! the path turns around inside the tick, and a held parent's tiny drift *can* cross a seam if
+//! it starts next to one — so "a pause cannot reach a seam" was an assumption, not a fact.
+//!
+//! This module now reads [`World::moved_segments`], the world's own per-tick transported
+//! segments, and sums their lengths. A seam crossing is the several straight pieces it really
+//! was. The accessor borrows what the tick already computed, so the exact measure costs no more
+//! than the wrong one did.
+//!
+//! ## What is exact, and the one thing that is not
 //!
 //! Exact: every bout with full generational IDs, every admission, refusal, abort reason and
-//! completed duration, organism-ticks by class and by mode, intake ticks, births, deaths by
-//! cause, and same-face transported displacement.
+//! completed duration, the lifecycle link from each close back to its own admission,
+//! organism-ticks by class and by mode, intake ticks, and transported path length.
 //!
-//! **Not exact, and labelled as such in the output:** total transported path length. The world's
-//! own per-tick segments are only reachable through `World::render_view`, which clones four
-//! whole fields per call — affordable at a census cadence, not 5.18 million times per arm. So
-//! this module accumulates same-face chart displacement every tick (exact, and the only kind a
-//! held parent's 0.0126 px drift can be), counts the ticks where an organism changed face
-//! instead of accumulating a meaningless chart delta, and separately records the world's exact
-//! transported length on the census cadence alone. A reader gets an exact partial total, an
-//! exact count of what it omits, and an exact sampled rate — never a fabricated whole.
-//!
-//! Nothing here infers funding or oxidation from post-step deltas.
+//! Not available, and labelled so rather than approximated: exact **funding and oxidation
+//! amounts** attributed to their mutation sites. The ordinary API offers no such evidence, so
+//! nothing here infers either from a post-step delta or calls one causal.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use cubarium_core::organism::Mode;
 use cubarium_core::quiet::{POST_BIRTH_PAUSE_TICKS, QuietEvent, QuietPause, QuietReason};
@@ -121,6 +127,10 @@ impl BoutEnd {
         }
     }
 
+    fn is_recovery_terminal(self) -> bool {
+        matches!(self, BoutEnd::Released | BoutEnd::Aborted(_))
+    }
+
     fn detail(self) -> Value {
         match self {
             BoutEnd::Aborted(reason) => json!(reason.as_str()),
@@ -140,6 +150,13 @@ struct Open {
 }
 
 /// One completed rest bout, with the full generational identity of whoever had it.
+///
+/// A recovery bout carries **two** truths about how it stopped, because they are two different
+/// facts and an earlier draft lost one of them. `end` is what the *pause* did — the world's own
+/// `End` or `Abort` record — and `next_class` is what the organism went on doing. A parent that
+/// releases and then keeps resting on ordinary hunger used to be filed as
+/// `Reclassified(Satiated)`, which silently discarded a legitimate release and left the reducer
+/// unable to match it to its admission.
 pub struct Bout {
     pub id: OrganismId,
     pub class: RestClass,
@@ -148,6 +165,9 @@ pub struct Bout {
     pub ticks: u64,
     pub origin: Option<(OrganismId, u64)>,
     pub end: BoutEnd,
+    /// What the organism was classified as on the very next completed interval, when it went on
+    /// resting for a different reason. `None` when it woke, died or was censored.
+    pub next_class: Option<RestClass>,
 }
 
 impl Bout {
@@ -158,16 +178,20 @@ impl Bout {
             "origin_child": self.origin.map(|(c, _)| c),
             "origin_boundary": self.origin.map(|(_, b)| b),
             "end": self.end.as_str(), "end_detail": self.end.detail(),
+            "next_class": self.next_class.map(RestClass::as_str),
         })
     }
 }
 
-/// Exact per-class organism-tick accounting.
+/// Exact per-class organism-tick accounting, including the world's own transported path.
 #[derive(Clone, Copy, Default)]
 pub struct ClassTotals {
     pub organism_ticks: u64,
     pub bouts: u64,
-    pub same_face_px: Sum,
+    /// Summed lengths of the actual segments the world transported these organisms along.
+    pub transported_px: Sum,
+    /// Ticks whose transport crossed at least one face seam, kept as evidence that the measure
+    /// covers them rather than as an excuse for omitting them.
     pub seam_ticks: u64,
 }
 
@@ -178,7 +202,6 @@ pub struct Pre {
     pauses: BTreeMap<OrganismId, QuietPause>,
     /// Only for parents whose decision this step may hold: escrow presence and turn counter.
     held_before: BTreeMap<OrganismId, (bool, Counter)>,
-    positions: BTreeMap<OrganismId, (u8, f64, f64)>,
     alive: u64,
 }
 
@@ -195,13 +218,27 @@ pub struct Observer {
     pub mode_ticks: [u64; 3],
     pub intake_ticks: u64,
     pub held_intake_ticks: u64,
+    /// Every organism's actual transported path, every tick, resting or not: the per-class
+    /// totals cover only classified rest, and a comparison of how much a world *moved* needs
+    /// the active ticks too.
+    pub transported_px: Sum,
+    pub seam_ticks: u64,
     pub admissions: u64,
     pub refusals: BTreeMap<&'static str, u64>,
     pub aborts: BTreeMap<&'static str, u64>,
     pub releases: u64,
     pub completed_held_ticks: Sum,
-    pub sampled_transported_px: Sum,
-    pub sampled_path_ticks: u64,
+    /// Admissions that have not yet been closed by an `End` or an `Abort`, keyed by parent, so
+    /// every close can be matched to exactly one earlier begin with the same child and boundary.
+    live_admissions: BTreeMap<OrganismId, (OrganismId, u64)>,
+    pub unmatched_closes: u64,
+    /// Aborts whose parent died on its fortieth held interval — a full window, legitimately.
+    pub deaths_on_final_held_interval: u64,
+    /// Held intervals whose organism died in the very step that completed them. The interval
+    /// really happened — the decision was held and the organism lived through it — but the
+    /// world's own resting census at that tick cannot contain a body that is no longer there,
+    /// so it is carried here rather than added to a class total it would contradict.
+    pub held_intervals_ended_by_death: u64,
     violations: Vec<Value>,
     violation_count: u64,
 }
@@ -219,13 +256,17 @@ impl Observer {
             mode_ticks: [0; 3],
             intake_ticks: 0,
             held_intake_ticks: 0,
+            transported_px: Sum::default(),
+            seam_ticks: 0,
             admissions: 0,
             refusals: BTreeMap::new(),
             aborts: BTreeMap::new(),
             releases: 0,
             completed_held_ticks: Sum::default(),
-            sampled_transported_px: Sum::default(),
-            sampled_path_ticks: 0,
+            live_admissions: BTreeMap::new(),
+    unmatched_closes: 0,
+            deaths_on_final_held_interval: 0,
+            held_intervals_ended_by_death: 0,
             violations: Vec::new(),
             violation_count: 0,
         }
@@ -252,6 +293,47 @@ impl Observer {
         self.violation_count == 0
     }
 
+    /// Match one close back to exactly one earlier admission, by parent, child **and** boundary.
+    ///
+    /// A close with no open admission, or one naming a different child or a different boundary
+    /// — including the same slot at another generation — is a violation rather than a number
+    /// that happens to balance. Global counts alone cannot see any of those.
+    fn close_admission(
+        &mut self,
+        kind: &str,
+        parent: OrganismId,
+        child: OrganismId,
+        tick: u64,
+        completed_ticks: u64,
+    ) {
+        match self.live_admissions.remove(&parent) {
+            None => {
+                self.unmatched_closes += 1;
+                self.violation(
+                    "a close with no open admission",
+                    json!({"kind": kind, "parent": parent, "child": child, "tick": tick}),
+                );
+            }
+            Some((open_child, boundary)) => {
+                if open_child != child {
+                    self.unmatched_closes += 1;
+                    self.violation(
+                        "a close naming a different child than its admission",
+                        json!({"kind": kind, "parent": parent, "closed_child": child,
+                            "admitted_child": open_child}),
+                    );
+                }
+                if tick != boundary + completed_ticks {
+                    self.violation(
+                        "a close whose tick does not follow its admission boundary",
+                        json!({"kind": kind, "parent": parent, "boundary": boundary,
+                            "tick": tick, "completed_ticks": completed_ticks}),
+                    );
+                }
+            }
+        }
+    }
+
     /// Capture the world **before** `step`, which is the only moment the pause set and the
     /// pre-decision stocks are the ones the decision will actually see.
     pub fn before(&mut self, world: &World) -> Pre {
@@ -266,16 +348,10 @@ impl Observer {
                 held_before.insert(p.parent, (o.escrow.is_some(), o.turn_counter));
             }
         }
-        let positions = state
-            .organisms
-            .iter()
-            .map(|(id, o)| (id, (o.pos.face.index() as u8, o.pos.u, o.pos.v)))
-            .collect();
         Pre {
             tick: state.tick,
             pauses,
             held_before,
-            positions,
             alive: state.organisms.len() as u64,
         }
     }
@@ -301,10 +377,15 @@ impl Observer {
 
         // --- the records, reconciled against the world that published them -----------------
         let mut aborted_at_pre: BTreeMap<OrganismId, QuietReason> = BTreeMap::new();
+        // The world's own pause set is the ground truth the published records have to account
+        // for, both ways round.
+        let mut begun: BTreeSet<(OrganismId, u64)> = BTreeSet::new();
+        let mut closed: BTreeSet<OrganismId> = BTreeSet::new();
         for event in quiet {
             match *event {
                 QuietEvent::Begin { tick, parent, child, end_tick, .. } => {
                     self.admissions += 1;
+                    begun.insert((parent, tick));
                     // An admission must correspond to a real paid insertion committed at this
                     // very boundary, by this very parent.
                     let matched = life.iter().any(|e| {
@@ -326,27 +407,100 @@ impl Observer {
                     if parent == child {
                         self.violation("admission naming its own child", json!({"parent": parent}));
                     }
+                    // Exactly one live admission per parent: a second `Begin` before the first
+                    // closes would leave a close with two candidates to match.
+                    if let Some((old_child, old_boundary)) =
+                        self.live_admissions.insert(parent, (child, tick))
+                    {
+                        self.violation(
+                            "a second admission opened before the first closed",
+                            json!({"parent": parent, "open_child": old_child,
+                                "open_boundary": old_boundary, "new_boundary": tick}),
+                        );
+                    }
                 }
-                QuietEvent::Refuse { reason, .. } => {
+                QuietEvent::Refuse { tick, parent, child, reason } => {
                     *self.refusals.entry(reason.as_str()).or_default() += 1;
+                    // A refusal is an offer that a real paid insertion made and the rule
+                    // declined. One with no birth behind it would inflate the opportunity
+                    // denominator with an opportunity that never existed.
+                    let matched = life.iter().any(|e| {
+                        matches!(e, LifeEvent::Birth { tick: t, id, parent: p, .. }
+                            if *t == tick && *id == child && *p == parent)
+                    });
+                    if !matched {
+                        self.violation(
+                            "a refusal without a matching paid birth",
+                            json!({"tick": tick, "parent": parent, "child": child,
+                                "reason": reason.as_str()}),
+                        );
+                    }
                 }
-                QuietEvent::End { tick, parent, completed_ticks, .. } => {
+                QuietEvent::End { tick, parent, child, completed_ticks, .. } => {
                     self.releases += 1;
+                    closed.insert(parent);
                     self.completed_held_ticks.add(completed_ticks as f64);
                     if completed_ticks != POST_BIRTH_PAUSE_TICKS {
                         self.violation("a release did not complete the window", json!({"parent": parent, "completed_ticks": completed_ticks, "tick": tick}));
                     }
+                    self.close_admission("release", parent, child, tick, completed_ticks);
                 }
-                QuietEvent::Abort { tick, parent, completed_ticks, reason, .. } => {
+                QuietEvent::Abort { tick, parent, child, completed_ticks, reason, .. } => {
                     *self.aborts.entry(reason.as_str()).or_default() += 1;
+                    closed.insert(parent);
                     self.completed_held_ticks.add(completed_ticks as f64);
-                    if completed_ticks >= POST_BIRTH_PAUSE_TICKS {
-                        self.violation("an abort completed the whole window", json!({"parent": parent, "completed_ticks": completed_ticks}));
+                    // A whole window of held intervals is legitimate for exactly one reason: the
+                    // parent died *during* its fortieth held interval, so the interval really was
+                    // held and the pause then had no parent to release. That is a different event
+                    // from an abort taken before a decision, and conflating them would either
+                    // lose a real held tick or let a genuine over-run pass.
+                    let death_on_the_last_interval =
+                        completed_ticks == POST_BIRTH_PAUSE_TICKS && reason == QuietReason::ParentGone;
+                    if completed_ticks > POST_BIRTH_PAUSE_TICKS
+                        || (completed_ticks == POST_BIRTH_PAUSE_TICKS && !death_on_the_last_interval)
+                    {
+                        self.violation(
+                            "an abort completed the whole window without dying on it",
+                            json!({"parent": parent, "completed_ticks": completed_ticks,
+                                "reason": reason.as_str()}),
+                        );
                     }
+                    if death_on_the_last_interval {
+                        self.deaths_on_final_held_interval += 1;
+                    }
+                    self.close_admission("abort", parent, child, tick, completed_ticks);
                     if tick == pre.tick {
                         aborted_at_pre.insert(parent, reason);
                     }
                 }
+            }
+        }
+
+        // A pause that appeared without an admission record, or vanished without a release or an
+        // abort, is a lost record even when every published count balances. The pause set is the
+        // world's; the records are the harness's claim about it.
+        for p in &state.quiet.pauses {
+            let carried = pre.pauses.get(&p.parent).is_some_and(|q| q.start_tick == p.start_tick);
+            if !carried && !begun.contains(&(p.parent, p.start_tick)) {
+                self.violation(
+                    "a pause appeared with no admission record",
+                    json!({"parent": p.parent, "child": p.child, "start_tick": p.start_tick,
+                        "tick": now}),
+                );
+            }
+        }
+        for (parent, p) in &pre.pauses {
+            let kept = state
+                .quiet
+                .pauses
+                .iter()
+                .any(|q| q.parent == *parent && q.start_tick == p.start_tick);
+            if !kept && !closed.contains(parent) {
+                self.violation(
+                    "a pause vanished with no release or abort record",
+                    json!({"parent": parent, "child": p.child, "start_tick": p.start_tick,
+                        "tick": now}),
+                );
             }
         }
 
@@ -401,75 +555,118 @@ impl Observer {
                 None
             };
 
-            // Real motion, as far as the public API can state it exactly.
-            let moved_px = match pre.positions.get(&id) {
-                Some((face, u, v)) if *face == o.pos.face.index() as u8 => {
-                    Some(((o.pos.u - u).powi(2) + (o.pos.v - v).powi(2)).sqrt())
+            // Real motion, exactly: the world's own transported segments for this tick. A seam
+            // crossing is the pieces it really was, and a reflective rim's turn is inside them.
+            let segments = world.moved_segments(id);
+            let mut moved_px = 0.0;
+            let mut faces: Option<cube_proto::Face> = None;
+            let mut crossed = false;
+            for s in segments {
+                moved_px += s.length();
+                match faces {
+                    None => faces = Some(s.face),
+                    Some(f) if f != s.face => crossed = true,
+                    _ => {}
                 }
-                Some(_) => None,
-                None => Some(0.0),
-            };
+            }
+            self.transported_px.add(moved_px);
+            if crossed {
+                self.seam_ticks += 1;
+            }
 
             match class {
                 Some(class) => {
                     let slot = Self::slot(class);
                     self.totals[slot].organism_ticks += 1;
-                    match moved_px {
-                        Some(px) => self.totals[slot].same_face_px.add(px),
-                        None => self.totals[slot].seam_ticks += 1,
+                    self.totals[slot].transported_px.add(moved_px);
+                    if crossed {
+                        self.totals[slot].seam_ticks += 1;
                     }
                     let origin = if class == RestClass::PostBirthRecovery {
                         pre.pauses.get(&id).map(|p| (p.child, p.start_tick))
                     } else {
                         None
                     };
-                    match self.open.get_mut(&id) {
-                        Some(open) if open.class == class => open.last_tick = now,
-                        Some(_) => {
-                            self.close(id, BoutEnd::Reclassified(class));
+                    match self.open.get(&id).map(|open| open.class) {
+                        Some(open_class) if open_class == class => {
+                            self.open.get_mut(&id).expect("just observed").last_tick = now;
+                        }
+                        Some(open_class) => {
+                            // Still resting, for a different reason. Two facts, both kept: how
+                            // the old bout stopped — which for a recovery bout is the world's
+                            // own release or abort record, not "it was reclassified" — and what
+                            // it became.
+                            let end = self
+                                .recovery_terminal(open_class, id, quiet)
+                                .unwrap_or(BoutEnd::Reclassified(class));
+                            self.close_with(id, end, Some(class));
                             self.begin(id, class, now, origin);
                         }
                         None => self.begin(id, class, now, origin),
                     }
                 }
                 None => {
-                    if self.open.contains_key(&id) {
-                        // A recovery bout that ended because the pause released is labelled by
-                        // the world's own record, not by the mode change.
+                    if let Some(open_class) = self.open.get(&id).map(|open| open.class) {
                         let end = self
-                            .open
-                            .get(&id)
-                            .filter(|o| o.class == RestClass::PostBirthRecovery)
-                            .and_then(|_| {
-                                quiet.iter().find_map(|e| match *e {
-                                    QuietEvent::End { parent, .. } if parent == id => {
-                                        Some(BoutEnd::Released)
-                                    }
-                                    QuietEvent::Abort { parent, reason, .. } if parent == id => {
-                                        Some(BoutEnd::Aborted(reason))
-                                    }
-                                    _ => None,
-                                })
-                            })
+                            .recovery_terminal(open_class, id, quiet)
                             .unwrap_or(BoutEnd::Woke);
-                        self.close(id, end);
+                        self.close_with(id, end, None);
                     }
                 }
             }
         }
 
-        // Anyone whose bout was open and who is no longer here died this tick.
-        let gone: Vec<OrganismId> = self
+        // Anyone whose bout was open and who is no longer here died this tick. A recovery bout
+        // that the world closed with its own record on the very same tick keeps that record:
+        // "the pause was aborted because the parent is gone" is what happened, and `died` alone
+        // would lose the reason.
+        let gone: Vec<(OrganismId, RestClass)> = self
             .open
-            .keys()
-            .copied()
-            .filter(|id| state.organisms.get(*id).is_none())
+            .iter()
+            .filter(|(id, _)| state.organisms.get(**id).is_none())
+            .map(|(id, open)| (*id, open.class))
             .collect();
-        for id in gone {
-            self.close(id, BoutEnd::Died);
+        for (id, open_class) in gone {
+            // The interval this organism died *in* still happened: its decision was held, it
+            // rested through the interval, and it died in the same step that completed it. The
+            // bout covers it, so a parent that dies on its fortieth held interval has a bout of
+            // forty and an abort that completed forty — the same number, not two different ones.
+            let held_to_the_end = open_class == RestClass::PostBirthRecovery
+                && pre
+                    .pauses
+                    .get(&id)
+                    .is_some_and(|p| p.holds(pre.tick) && !aborted_at_pre.contains_key(&id))
+                && life.iter().any(|e| matches!(e, LifeEvent::Death { id: d, tick: t, .. }
+                    if *d == id && *t == now));
+            if held_to_the_end && let Some(open) = self.open.get_mut(&id) {
+                open.last_tick = now;
+                self.held_intervals_ended_by_death += 1;
+            }
+            let end = self.recovery_terminal(open_class, id, quiet).unwrap_or(BoutEnd::Died);
+            self.close_with(id, end, None);
         }
         let _ = (pre.alive, seen);
         Ok(())
+    }
+
+    /// The world's own terminal record for a recovery bout ending on this tick, if there is one.
+    /// `None` for any other class, and for a recovery bout the world did not close here.
+    fn recovery_terminal(
+        &self,
+        open_class: RestClass,
+        id: OrganismId,
+        quiet: &[QuietEvent],
+    ) -> Option<BoutEnd> {
+        if open_class != RestClass::PostBirthRecovery {
+            return None;
+        }
+        quiet.iter().find_map(|e| match *e {
+            QuietEvent::End { parent, .. } if parent == id => Some(BoutEnd::Released),
+            QuietEvent::Abort { parent, reason, .. } if parent == id => {
+                Some(BoutEnd::Aborted(reason))
+            }
+            _ => None,
+        })
     }
 
     fn begin(&mut self, id: OrganismId, class: RestClass, now: u64, origin: Option<(OrganismId, u64)>) {
@@ -477,9 +674,24 @@ impl Observer {
     }
 
     fn close(&mut self, id: OrganismId, end: BoutEnd) {
+        self.close_with(id, end, None);
+    }
+
+    fn close_with(&mut self, id: OrganismId, end: BoutEnd, next_class: Option<RestClass>) {
         let Some(open) = self.open.remove(&id) else { return };
         let slot = Self::slot(open.class);
         self.totals[slot].bouts += 1;
+        if open.class == RestClass::PostBirthRecovery && !end.is_recovery_terminal() {
+            // A recovery bout must be closed by the world's own record. Anything else means the
+            // pause ended without saying so, which is exactly the loss this reconciliation
+            // exists to catch — except at the horizon, where censoring is the honest answer.
+            if end != BoutEnd::Censored {
+                self.violation(
+                    "a recovery bout ended without a release or abort record",
+                    json!({"id": id, "end": end.as_str(), "end_tick": open.last_tick}),
+                );
+            }
+        }
         self.completed.push(Bout {
             id,
             class: open.class,
@@ -488,6 +700,7 @@ impl Observer {
             ticks: open.last_tick - open.start_tick + 1,
             origin: open.origin,
             end,
+            next_class,
         });
     }
 
@@ -504,27 +717,13 @@ impl Observer {
         }
     }
 
-    /// The world's own exact transported path length at this instant, on the census cadence.
-    /// Called rarely on purpose: `render_view` clones four whole fields.
-    pub fn sample_transported(&mut self, world: &World) {
-        let view = world.render_view();
-        let mut total = 0.0;
-        for o in &view.organisms {
-            for segment in &o.moved {
-                total += segment.length();
-            }
-        }
-        self.sampled_transported_px.add(total);
-        self.sampled_path_ticks += 1;
-    }
-
     pub fn summary(&self) -> Value {
         let class = |c: RestClass| {
             let t = &self.totals[Self::slot(c)];
             json!({
                 "organism_ticks": t.organism_ticks,
                 "bouts": t.bouts,
-                "same_face_path_px": t.same_face_px.value(),
+                "transported_path_px": t.transported_px.value(),
                 "seam_ticks": t.seam_ticks,
             })
         };
@@ -542,16 +741,21 @@ impl Observer {
             "mode_ticks": {"resting": self.mode_ticks[0], "seeking": self.mode_ticks[1], "feeding": self.mode_ticks[2]},
             "intake_ticks": self.intake_ticks,
             "held_intake_ticks": self.held_intake_ticks,
+            "transported_path_px": self.transported_px.value(),
+            "seam_ticks": self.seam_ticks,
             "quiet_records": {
                 "admissions": self.admissions,
                 "releases": self.releases,
                 "refusals": self.refusals,
                 "aborts": self.aborts,
                 "completed_held_ticks": self.completed_held_ticks.value(),
+                "unmatched_closes": self.unmatched_closes,
+                "open_admissions_at_close": self.live_admissions.len(),
+                "deaths_on_final_held_interval": self.deaths_on_final_held_interval,
+                "held_intervals_ended_by_death": self.held_intervals_ended_by_death,
+                "lifecycle_basis": "every release and abort is matched back to exactly one earlier admission by parent, child and boundary; a close with no open admission, a different child, or a tick that does not follow its boundary is a violation, not a number that happens to balance",
             },
-            "path_basis": "same_face_path_px is the exact per-tick chart displacement of organisms that stayed on one face; seam_ticks counts the ticks omitted from it because the organism changed face and a chart delta would be meaningless. sampled_transported_px is the world's own exact transported length, summed only on the census cadence — a rate, never a total.",
-            "sampled_transported_px": self.sampled_transported_px.value(),
-            "sampled_path_ticks": self.sampled_path_ticks,
+            "path_basis": "transported_path_px is the summed length of the world's own per-tick movement segments (World::moved_segments), every tick and for every organism, so a seam crossing is the pieces it really was and a reflective rim's turn is inside them. The top-level total covers every organism-tick, active ones included; the per-class totals cover that class's classified rest only. seam_ticks counts how many of those ticks crossed a face boundary — evidence that they are covered, not an excuse for omitting them.",
         })
     }
 }
@@ -584,6 +788,53 @@ mod tests {
         observer.close_censored();
         bouts.extend(observer.drain_bouts());
         (world, observer, bouts)
+    }
+
+    /// The transported path really is the path the world published, tick for tick, and the
+    /// classified totals are a part of it rather than a different measurement. The old chart
+    /// delta is gone: this is the world's own segments, seam crossings included.
+    #[test]
+    fn the_transported_path_is_the_worlds_own_published_movement() {
+        let mut state = mature();
+        state.quiet = QuietState::post_birth_pause_v1();
+        let mut world = World::from_state(state).expect("valid");
+        let mut observer = Observer::new(&world.state);
+        // The independent reference: `render_view`, which is what everything else draws from.
+        let mut reference = 0.0f64;
+        let mut reference_seam_ticks = 0u64;
+        for _ in 0..600 {
+            let pre = observer.before(&world);
+            world.step();
+            let life = world.drain_events();
+            let quiet = world.drain_quiet_events();
+            observer.after(&world, pre, &life, &quiet).expect("observed");
+            let _ = observer.drain_bouts();
+            for o in &world.render_view().organisms {
+                let mut faces = None;
+                let mut crossed = false;
+                for s in &o.moved {
+                    reference += s.length();
+                    match faces {
+                        None => faces = Some(s.face),
+                        Some(f) if f != s.face => crossed = true,
+                        _ => {}
+                    }
+                }
+                reference_seam_ticks += u64::from(crossed);
+            }
+        }
+        let measured = observer.transported_px.value();
+        assert!(measured > 0.0, "a live world transports its organisms somewhere");
+        assert!(
+            (measured - reference).abs() <= 1e-9 * reference.max(1.0),
+            "the accumulated path {measured} is not the published path {reference}"
+        );
+        assert_eq!(observer.seam_ticks, reference_seam_ticks);
+        let classified: f64 = observer.totals.iter().map(|t| t.transported_px.value()).sum();
+        assert!(
+            classified <= measured + 1e-9,
+            "classified rest moved more than the whole world did"
+        );
     }
 
     /// An Off world has no recovery at all, and its newborn rest is still counted separately from

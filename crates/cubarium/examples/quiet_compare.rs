@@ -31,10 +31,11 @@ use clap::{Parser, ValueEnum};
 use cubarium_core::quiet::{QuietEvent, QuietPolicy, QuietState};
 use cubarium_core::organism::DeathCause;
 use cubarium_core::{
-    CareCommand, CareDose, CareKind, CareTarget, LifeEvent, World, WorldState, decode_snapshot,
+    CareCommand, CareDose, CareKind, CareTarget, LifeEvent, OrganismId, World, WorldState,
+    decode_snapshot,
 };
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -53,6 +54,11 @@ const BUILD: &str = concat!(env!("CARGO_PKG_VERSION"), "+", env!("CUBARIUM_GIT_H
 const FEED_TARGET: CareTarget = CareTarget { face: 0, u: 32.0, v: 48.0 };
 const FEED_ELAPSED: u64 = 600;
 const FEED_DOSE_PERMILLE: u16 = 1000;
+
+/// The restart proof compares this many ticks, and falls back to this elapsed boundary when the
+/// arm has no pause to be interrupted in the first place.
+const RESUME_WINDOW: u64 = 60;
+const RESUME_FALLBACK_ELAPSED: u64 = 400;
 
 /// `(name, candidate policy, one Standard Feed)`. Four arms, fixed, in this order.
 const ARMS: [(&str, bool, bool); 4] = [
@@ -94,15 +100,21 @@ impl Horizon {
 #[derive(Parser)]
 struct Args {
     /// Completed prepare-hunter-worlds cohort directory (all seeds 1–12).
-    cohort: PathBuf,
+    #[arg(required_unless_present = "inspect")]
+    cohort: Option<PathBuf>,
     /// Brand-new directory; existing output is never overwritten or resumed.
-    out: PathBuf,
+    #[arg(required_unless_present = "inspect")]
+    out: Option<PathBuf>,
     /// The prescribed horizon to run.
     #[arg(long, value_enum, default_value_t = Horizon::TenMinute)]
     horizon: Horizon,
     /// Census cadence, and the independent energy window with it.
     #[arg(long, default_value_t = 200, value_parser = clap::value_parser!(u64).range(1..=12000))]
     sample_every: u64,
+    /// Read-only: decode one `.cubw` and print what it actually contains, as JSON, on stdout.
+    /// Nothing is stepped, nothing is written, and no world is constructed.
+    #[arg(long, conflicts_with_all = ["cohort", "out", "horizon", "sample_every"])]
+    inspect: Option<PathBuf>,
 }
 
 fn sha256(bytes: &[u8]) -> Result<String> {
@@ -178,31 +190,150 @@ fn load_cohort(dir: &Path) -> Result<(Value, Vec<Opening>)> {
             "seed{seed} checksum changed"
         );
         let (meta, state) = decode_snapshot(&bytes)?;
-        ensure!(
-            meta.schema == 9 && state.tick == 144_000 && state.config.seed == seed,
-            "seed{seed} is not its frozen pre-hunter two-hour opening"
-        );
-        ensure!(
-            state.hunters == Default::default() && state.care == Default::default(),
-            "opening contains hunter/care state"
-        );
-        ensure!(
-            state.quiet == QuietState::default(),
-            "opening already carries an ordinary quiet extension"
-        );
-        ensure!(
-            state.organisms.len() as u64 == row["population"].as_u64().context("population")?,
-            "opening census mismatch"
-        );
-        ensure!(
-            cubarium_core::ecology_hash(&state).to_string()
-                == row["ecology_hash"].as_str().context("ecology hash")?,
-            "opening ecology hash mismatch"
-        );
+        validate_opening(meta.schema, &state, seed, row)?;
         openings.push(Opening { state, source: row.clone() });
     }
     openings.sort_by_key(|o| o.state.config.seed);
     Ok((manifest, openings))
+}
+
+/// Everything an opening must be before a world is built from it, on the decoded state itself
+/// rather than on the manifest's description of it.
+fn validate_opening(schema: u32, state: &WorldState, seed: u64, row: &Value) -> Result<()> {
+    ensure!(
+        schema == 9 && state.tick == 144_000 && state.config.seed == seed,
+        "seed{seed} is not its frozen pre-hunter two-hour opening"
+    );
+    ensure!(
+        state.hunters == Default::default() && state.care == Default::default(),
+        "opening contains hunter/care state"
+    );
+    ensure!(
+        state.quiet == QuietState::default(),
+        "opening already carries an ordinary quiet extension"
+    );
+    ensure!(
+        state.organisms.len() as u64 == row["population"].as_u64().context("population")?,
+        "opening census mismatch"
+    );
+    ensure!(
+        cubarium_core::ecology_hash(state).to_string()
+            == row["ecology_hash"].as_str().context("ecology hash")?,
+        "opening ecology hash mismatch"
+    );
+    Ok(())
+}
+
+/// One organism's opening identity, in the harness's own flat shape: who it is, what form it
+/// wears, how old it is and what it is carrying. Recruitment and loss are claims about
+/// individuals, and a surviving-cohort count cannot support either.
+fn organism_row(id: OrganismId, o: &cubarium_core::organism::Organism, now: u64) -> Value {
+    json!({
+        "id": id,
+        "parent": o.parent,
+        "form": o.phenotype.form,
+        "genome_digest": o.genome.digest(),
+        "origin": format!("{:?}", o.origin),
+        "born_tick": o.born_tick,
+        "age_ticks": o.age_ticks(now),
+        "births": o.births,
+        "mode": format!("{:?}", o.mode),
+        "structure": o.structure,
+        "reserve": o.reserve,
+        "energy": o.energy,
+        "material": o.material(),
+        "gestating": o.escrow.is_some(),
+        "face": o.pos.face.index(),
+        "u": o.pos.u,
+        "v": o.pos.v,
+    })
+}
+
+/// **Read-only.** Decode one snapshot and report what it actually contains — header, identity,
+/// semantic inventories, ledgers, care, quiet — without constructing a `World`, stepping
+/// anything, drawing any RNG, or writing a byte.
+///
+/// This exists so an external checker can derive an arm's audit limits and its opening identities
+/// from the snapshot itself rather than from the arm's own description of it. A JSON reader
+/// parsing a header proves the bytes are a snapshot; it cannot say what is inside the payload.
+fn inspect(path: &Path) -> Result<Value> {
+    let bytes = fs::read(path)?;
+    let (meta, s) = decode_snapshot(&bytes).map_err(|e| anyhow!("{e:?}"))?;
+    let mut population_by_form = [0u64; 8];
+    let mut population_by_face = [0u64; 6];
+    let mut escrows = 0u64;
+    let (mut organism_material, mut organism_energy) = (0.0, 0.0);
+    let reserve_density = s.config.organism.reserve_energy_density;
+    for (_, o) in s.organisms.iter() {
+        population_by_form[(o.phenotype.form as usize).min(7)] += 1;
+        population_by_face[o.pos.face.index()] += 1;
+        escrows += u64::from(o.escrow.is_some());
+        organism_material += o.material();
+        organism_energy += o.energy
+            + reserve_density * o.reserve
+            + o.escrow
+                .as_ref()
+                .map_or(0.0, |e| e.energy + reserve_density * (e.structure + e.reserve));
+    }
+    let (material_total, energy_total) = (material(&s), energy(&s));
+    let water_total = s.fields.w.iter().sum::<f64>();
+    Ok(json!({
+        "kind": "quiet-compare-snapshot-inspection",
+        "inspector_build": BUILD,
+        "path": path,
+        "bytes": bytes.len(),
+        "sha256": sha256(&bytes)?,
+        "header": {
+            "schema": meta.schema, "build_id": meta.build_id,
+            "payload_len": meta.payload_len, "crc32": meta.crc32,
+            "fixed_header_bytes": cubarium_core::snapshot::HEADER_FIXED_BYTES,
+            "current_schema": cubarium_core::snapshot::SCHEMA_VERSION,
+        },
+        "tick": s.tick,
+        "seed": s.config.seed,
+        "config_sha256": sha256(&serde_json::to_vec(&s.config)?)?,
+        "state_hash": cubarium_core::snapshot::state_hash(&s).to_string(),
+        "ecology_hash": cubarium_core::ecology_hash(&s).to_string(),
+        "population": s.organisms.len(),
+        "population_by_form": population_by_form,
+        "population_by_face": population_by_face,
+        "gestating": escrows,
+        "inventories": {
+            "material": material_total,
+            "energy": energy_total,
+            "water": water_total,
+            "organism_material": organism_material,
+            "organism_energy": organism_energy,
+            "producer": s.fields.p.iter().sum::<f64>(),
+            "fruit": s.fields.f.iter().sum::<f64>(),
+            "detritus": s.fields.d.iter().sum::<f64>(),
+            "detritus_energy": s.fields.de.iter().sum::<f64>(),
+            "nutrient": s.fields.n.iter().sum::<f64>(),
+        },
+        "audit_limits": {
+            "material": 1e-8 * material_total.max(1.0),
+            "energy": 1e-8 * energy_total.max(1.0),
+            "water": 1e-8 * water_total.max(1.0),
+            "rule": "1e-8 * max(opening inventory, 1.0), the unchanged paired-experiment rule",
+        },
+        "ledgers": {
+            "external_material_in": s.external_material_in,
+            "light_in_total": s.light_in_total,
+            "heat_out_total": s.heat_out_total,
+            "rain_in_total": s.rain_in_total,
+            "evap_out_total": s.evap_out_total,
+            "births_total": s.births_total,
+        },
+        "care": s.care,
+        "quiet": {
+            "version": s.quiet.version,
+            "policy": s.quiet.policy.as_str(),
+            "open_pauses": s.quiet.pauses.len(),
+            "pauses": s.quiet.pauses,
+        },
+        "hunters_present": s.hunters != Default::default(),
+        "scope": "a read-only decode of one file: no World is constructed, no tick is taken, no RNG is drawn and nothing is written. Inventories are the semantic totals the audit itself uses, not a header parse.",
+    }))
 }
 
 /// One transient record, in the harness's own flat shape.
@@ -283,6 +414,92 @@ fn arm_state(opening: &WorldState, candidate: bool) -> WorldState {
     state
 }
 
+/// A decoded copy of an arm, stepped **along the arm's own timeline** rather than in place of it.
+///
+/// The primary world is the uninterrupted one: it takes exactly the steps the experiment
+/// prescribes, draws exactly the RNG it would have drawn, and is never rebuilt from its own bytes
+/// to serve as its own oracle. The shadow is built once from a snapshot taken at `start_tick`,
+/// receives the identical prescribed care if the window crosses it, and is compared against the
+/// primary tick for tick. So the proof is uninterrupted-against-restarted, not restarted-against-
+/// restarted: two copies decoded from the same bytes would agree even if the bytes had lost a
+/// pause.
+struct Shadow {
+    world: World,
+    /// `mid_pause` only when a pause really was open at `start_tick`; `fixed_boundary` otherwise,
+    /// and it never claims to have interrupted a pause it did not.
+    trigger: &'static str,
+    start_tick: u64,
+    window: u64,
+    compared: u64,
+    pauses_carried: usize,
+    failure: Option<String>,
+}
+
+impl Shadow {
+    fn complete(&self) -> bool {
+        self.failure.is_none() && self.compared == self.window
+    }
+
+    fn json(&self, finish_tick: u64) -> Value {
+        json!({
+            "trigger": self.trigger,
+            "start_tick": self.start_tick,
+            "finish_tick": finish_tick,
+            "planned_window_ticks": self.window,
+            "compared_ticks": self.compared,
+            "complete": self.complete(),
+            "open_pauses_carried_into_the_shadow": self.pauses_carried,
+            "failure": self.failure,
+            "scope": "one snapshot decoded at start_tick and stepped along the primary's own timeline, receiving the identical prescribed care if the window crosses it, compared every tick on the whole persisted WorldState and on the exact LifeEvent and QuietEvent streams. The primary is uninterrupted: it is never rebuilt from its own bytes and takes no extra step or RNG draw for this proof.",
+        })
+    }
+}
+
+/// The single comparison the restart proof makes. Factored out so an adversarial test can feed it
+/// a deliberately damaged shadow — a dropped pause, a rewritten underlying mode — instead of two
+/// copies of one decode that would agree however wrong they both were.
+fn shadow_disagreement(
+    shadow: &WorldState,
+    primary: &WorldState,
+    shadow_life: &[LifeEvent],
+    primary_life: &[LifeEvent],
+    shadow_quiet: &[QuietEvent],
+    primary_quiet: &[QuietEvent],
+) -> Option<String> {
+    let at = primary.tick;
+    if shadow.quiet.policy != primary.quiet.policy {
+        return Some(format!(
+            "tick {at}: the shadow's policy is {} where the primary's is {}",
+            shadow.quiet.policy.as_str(),
+            primary.quiet.policy.as_str()
+        ));
+    }
+    if shadow.quiet.pauses != primary.quiet.pauses {
+        return Some(format!(
+            "tick {at}: the persisted pause set differs — the shadow holds {:?}, the primary {:?}",
+            shadow.quiet.pauses, primary.quiet.pauses
+        ));
+    }
+    if shadow != primary {
+        return Some(format!(
+            "tick {at}: the persisted state differs (state hashes {} and {})",
+            cubarium_core::snapshot::state_hash(shadow),
+            cubarium_core::snapshot::state_hash(primary)
+        ));
+    }
+    if format!("{shadow_quiet:?}") != format!("{primary_quiet:?}") {
+        return Some(format!(
+            "tick {at}: the quiet records differ — {shadow_quiet:?} against {primary_quiet:?}"
+        ));
+    }
+    if format!("{shadow_life:?}") != format!("{primary_life:?}") {
+        return Some(format!(
+            "tick {at}: the life records differ — {shadow_life:?} against {primary_life:?}"
+        ));
+    }
+    None
+}
+
 struct Arm {
     world: World,
     base: Baseline,
@@ -307,12 +524,32 @@ struct Arm {
     /// carried so a nonzero value would be visible rather than silently folded into another.
     deaths: [u64; 4],
     births: u64,
-    resume_check: Option<bool>,
+    /// Who each living organism is, kept so a **death** can still be reported with the form,
+    /// age and opening lineage it had — a terminal record written after the body is gone.
+    lineage: BTreeMap<OrganismId, Lineage>,
+    life_written: u64,
+    planned: u64,
+    shadow: Option<Shadow>,
+    resume_proofs: Vec<Value>,
+    /// A pause was open at a tick with room for a whole comparison window, so a genuine mid-pause
+    /// proof was possible and is therefore required.
+    mid_pause_opportunity: bool,
     bouts_written: u64,
     bout_stream: BufWriter<File>,
+    life_stream: BufWriter<File>,
     quiet_stream: BufWriter<File>,
     census_stream: BufWriter<File>,
     receipts: Vec<Value>,
+}
+
+#[derive(Clone, Copy)]
+struct Lineage {
+    /// The opening organism this one descends from — itself, for an opening organism.
+    cohort: OrganismId,
+    /// Generations from that opening organism.
+    depth: u64,
+    form: u8,
+    born_tick: u64,
 }
 
 impl Arm {
@@ -322,6 +559,7 @@ impl Arm {
         name: &str,
         candidate: bool,
         feed: bool,
+        planned: u64,
         dir: &Path,
     ) -> Result<Self> {
         fs::create_dir(dir)?;
@@ -365,6 +603,20 @@ impl Arm {
                 "pre_intervention_baseline": base.json(),
             }),
         )?;
+        // The opening identity census: every organism that was here before anything was chosen,
+        // by full generational ID, form, age and structure. Written once, from the arm's own
+        // opening state.
+        let mut opening_census = stream(&dir.join("opening-organisms.jsonl"))?;
+        let mut lineage = BTreeMap::new();
+        for (id, o) in state.organisms.iter() {
+            line(&mut opening_census, &organism_row(id, o, state.tick))?;
+            lineage.insert(
+                id,
+                Lineage { cohort: id, depth: 0, form: o.phenotype.form, born_tick: o.born_tick },
+            );
+        }
+        opening_census.flush()?;
+        opening_census.get_ref().sync_all()?;
         Ok(Self {
             population_min: world.population(),
             population_max: world.population(),
@@ -387,47 +639,103 @@ impl Arm {
             population_ticks: 0,
             deaths: [0; 4],
             births: 0,
-            resume_check: None,
+            lineage,
+            life_written: 0,
+            planned,
+            shadow: None,
+            resume_proofs: Vec::new(),
+            mid_pause_opportunity: false,
             bouts_written: 0,
             bout_stream: stream(&dir.join("bouts.jsonl"))?,
+            life_stream: stream(&dir.join("life.jsonl"))?,
             quiet_stream: stream(&dir.join("quiet-events.jsonl"))?,
             census_stream: stream(&dir.join("census.jsonl"))?,
             receipts: Vec::new(),
         })
     }
 
-    /// A bounded, once-per-arm proof that this exact world resumes identically: snapshot, decode,
-    /// rebuild, and step both sides in lockstep for a short window. Performed at the first
-    /// admitted pause where there is one, so it covers a mid-pause restart, and at a fixed early
-    /// boundary otherwise.
-    fn verify_resume(&mut self, window: u64) -> Result<()> {
+    /// Open a shadow at the primary's current tick, before the primary takes its next step, so the
+    /// two are on the same tick and the primary gains nothing for the proof's sake.
+    fn begin_shadow(&mut self, trigger: &'static str, window: u64) -> Result<()> {
         let bytes = cubarium_core::encode_snapshot(&self.world.state, BUILD);
         let (_, state) = decode_snapshot(&bytes).map_err(|e| anyhow!("{e:?}"))?;
+        // The decoded copy has to *be* this world — pause set and underlying modes included —
+        // before it is allowed to stand in for it for sixty ticks.
         ensure!(state == self.world.state, "the snapshot did not round trip");
-        let mut resumed = World::from_state(state).map_err(|e| anyhow!(e))?;
-        let mut mirror = World::from_state(
-            decode_snapshot(&bytes).map_err(|e| anyhow!("{e:?}"))?.1,
-        )
-        .map_err(|e| anyhow!(e))?;
-        for _ in 0..window {
-            resumed.step();
-            mirror.step();
-            let (a, b) = (resumed.drain_quiet_events(), mirror.drain_quiet_events());
-            let (c, d) = (resumed.drain_events(), mirror.drain_events());
-            if cubarium_core::snapshot::state_hash(&resumed.state)
-                != cubarium_core::snapshot::state_hash(&mirror.state)
-                || format!("{a:?}") != format!("{b:?}")
-                || format!("{c:?}") != format!("{d:?}")
-            {
-                self.resume_check = Some(false);
-                return Ok(());
-            }
-        }
-        self.resume_check = Some(true);
+        ensure!(
+            state.quiet == self.world.state.quiet,
+            "the decoded copy lost the persisted quiet state"
+        );
+        let pauses_carried = state.quiet.pauses.len();
+        ensure!(
+            trigger != "mid_pause" || pauses_carried > 0,
+            "a mid-pause proof was claimed with no pause open"
+        );
+        let world = World::from_state(state).map_err(|e| anyhow!(e))?;
+        self.shadow = Some(Shadow {
+            world,
+            trigger,
+            start_tick: self.world.tick(),
+            window,
+            compared: 0,
+            pauses_carried,
+            failure: None,
+        });
         Ok(())
     }
 
+    /// Step the open shadow alongside the primary's own step, and compare the two. The proof
+    /// closes at the end of its window or at the first disagreement, whichever comes first.
+    fn advance_shadow(&mut self, life: &[LifeEvent], quiet: &[QuietEvent]) {
+        let Some(shadow) = self.shadow.as_mut() else { return };
+        shadow.world.step();
+        let shadow_life = shadow.world.drain_events();
+        let shadow_quiet = shadow.world.drain_quiet_events();
+        shadow.compared += 1;
+        shadow.failure = shadow_disagreement(
+            &shadow.world.state,
+            &self.world.state,
+            &shadow_life,
+            life,
+            &shadow_quiet,
+            quiet,
+        );
+        if shadow.failure.is_some() || shadow.compared == shadow.window {
+            let proof = shadow.json(self.world.state.tick);
+            self.resume_proofs.push(proof);
+            self.shadow = None;
+        }
+    }
+
+    /// Every proof this arm made is complete and equal, an interrupted pause was really proved
+    /// wherever one could be, and nothing was left open. An unfinished proof is a failed one.
+    fn restart_proofs_pass(&self) -> bool {
+        !self.resume_proofs.is_empty()
+            && self.shadow.is_none()
+            && self.resume_proofs.iter().all(|p| p["complete"] == true)
+            && (!self.mid_pause_opportunity
+                || self.resume_proofs.iter().any(|p| p["trigger"] == "mid_pause"))
+    }
+
     fn step(&mut self, elapsed: u64, sample_every: u64) -> Result<()> {
+        // The restart proof opens here, before the primary's own step, so both worlds stand on
+        // the same tick. A genuine mid-pause proof is preferred wherever a pause is open; the
+        // fixed boundary is a labelled fallback for an arm that has not paused yet, and a
+        // candidate arm that pauses later still owes — and takes — the mid-pause one.
+        let open_pauses = self.world.quiet().pauses.len();
+        let room = elapsed + RESUME_WINDOW <= self.planned;
+        if open_pauses > 0 && room {
+            self.mid_pause_opportunity = true;
+        }
+        if self.shadow.is_none() && room {
+            let mid_pause_done = self.resume_proofs.iter().any(|p| p["trigger"] == "mid_pause");
+            if open_pauses > 0 && !mid_pause_done {
+                self.begin_shadow("mid_pause", RESUME_WINDOW)?;
+            } else if elapsed == RESUME_FALLBACK_ELAPSED && self.resume_proofs.is_empty() {
+                self.begin_shadow("fixed_boundary", RESUME_WINDOW)?;
+            }
+        }
+
         // The one controlled input, at the held boundary, exactly as the runner admits one.
         if self.feed && elapsed == FEED_ELAPSED {
             let before_energy = energy(&self.world.state);
@@ -437,13 +745,20 @@ impl Arm {
                 .admitted_seq
                 .checked_add(1)
                 .context("care seq exhausted")?;
-            let receipt = self.world.apply_care(&CareCommand {
+            let command = CareCommand {
                 seq,
                 apply_after_tick: self.world.tick(),
                 kind: CareKind::Feed,
                 target: FEED_TARGET,
                 dose: CareDose::new(FEED_DOSE_PERMILLE).map_err(|e| anyhow!(e))?,
-            });
+            };
+            // A shadow on the primary's timeline receives the identical prescribed care, or it
+            // would be comparing a fed world against an unfed one and calling the difference a
+            // restart failure.
+            if let Some(shadow) = self.shadow.as_mut() {
+                shadow.world.apply_care(&command);
+            }
+            let receipt = self.world.apply_care(&command);
             let booked = receipt.outcome.applied().map_or(0.0, |q| q.energy_in - q.energy_out);
             if let Some(q) = receipt.outcome.applied() {
                 self.receipt_energy_in.add(q.energy_in);
@@ -470,22 +785,86 @@ impl Arm {
             .map_err(|e| anyhow!("tick {}: {e}", self.world.tick()))?;
         let life = self.world.drain_events();
         let quiet = self.world.drain_quiet_events();
+        // The shadow follows the step the primary just took; the primary took it for the
+        // experiment, not for the proof.
+        self.advance_shadow(&life, &quiet);
         // Births and deaths are counted from the world's own per-tick life records, with their
         // full IDs and causes. `TickCounters` accumulate since the last telemetry reset rather
         // than describing one tick, so adding them every tick would multiply every event by the
         // census cadence.
+        // Births before deaths, because a parent can die on its child's own tick: the child's
+        // lineage must be resolved while the parent is still on the books.
         for event in &life {
-            match event {
-                LifeEvent::Birth { .. } => self.births += 1,
-                LifeEvent::Death { cause, .. } => {
-                    self.deaths[match cause {
-                        DeathCause::Starvation => 0,
-                        DeathCause::Age => 1,
-                        DeathCause::Collapse => 2,
-                        DeathCause::Predation => 3,
-                    }] += 1;
-                }
+            let LifeEvent::Birth {
+                tick,
+                id,
+                parent,
+                parent_age_ticks,
+                parent_births,
+                genome,
+                origin,
+                mutations,
+            } = event
+            else {
+                continue;
+            };
+            self.births += 1;
+            let born = self.world.state.organisms.get(*id);
+            let form = born.map(|o| o.phenotype.form);
+            let ancestor = self.lineage.get(parent).copied();
+            let row = json!({
+                "kind": "birth", "tick": tick, "id": id, "parent": parent,
+                "parent_age_ticks": parent_age_ticks, "parent_births": parent_births,
+                "genome_digest": genome, "origin": format!("{origin:?}"),
+                "mutated_loci": mutations.len(),
+                "mutations": mutations.iter().map(|m| format!("{m:?}")).collect::<Vec<_>>(),
+                "form": form,
+                "opening_cohort": ancestor.map(|a| a.cohort),
+                "descendant_depth": ancestor.map(|a| a.depth + 1),
+                "structure": born.map(|o| o.structure),
+                "reserve": born.map(|o| o.reserve),
+                "energy": born.map(|o| o.energy),
+                "face": born.map(|o| o.pos.face.index()),
+            });
+            line(&mut self.life_stream, &row)?;
+            self.life_written += 1;
+            if let (Some(ancestor), Some(form)) = (ancestor, form) {
+                self.lineage.insert(
+                    *id,
+                    Lineage {
+                        cohort: ancestor.cohort,
+                        depth: ancestor.depth + 1,
+                        form,
+                        born_tick: *tick,
+                    },
+                );
             }
+        }
+        for event in &life {
+            let LifeEvent::Death { tick, id, age_ticks, cause, births, genome } = event else {
+                continue;
+            };
+            self.deaths[match cause {
+                DeathCause::Starvation => 0,
+                DeathCause::Age => 1,
+                DeathCause::Collapse => 2,
+                DeathCause::Predation => 3,
+            }] += 1;
+            // The terminal record keeps what the body carried: the event itself has no form and
+            // no lineage, and a form that vanishes entirely would otherwise leave no trace.
+            let was = self.lineage.remove(id);
+            let row = json!({
+                "kind": "death", "tick": tick, "id": id,
+                "cause": format!("{cause:?}"), "age_ticks": age_ticks, "births": births,
+                "genome_digest": genome,
+                "form": was.map(|l| l.form),
+                "born_tick": was.map(|l| l.born_tick),
+                "opening_cohort": was.map(|l| l.cohort),
+                "descendant_depth": was.map(|l| l.depth),
+                "was_an_opening_organism": was.is_some_and(|l| l.depth == 0),
+            });
+            line(&mut self.life_stream, &row)?;
+            self.life_written += 1;
         }
         self.ancestry.observe(&life)?;
         self.observer.after(&self.world, pre, &life, &quiet)?;
@@ -543,19 +922,9 @@ impl Arm {
             *peak = peak.max(residual.abs());
         }
 
-        // The restart proof, once per arm: at the first admitted pause if there is one, so it is
-        // a genuine mid-pause restart, and at a fixed early boundary otherwise.
-        if self.resume_check.is_none()
-            && (quiet.iter().any(|e| matches!(e, QuietEvent::Begin { .. }))
-                || elapsed + 1 == 400)
-        {
-            self.verify_resume(60)?;
-        }
-
         if (elapsed + 1).is_multiple_of(sample_every) {
             // One telemetry reset per window serves both the independent energy audit and the
             // streamed census: calling it twice would hand one of them an empty window.
-            self.observer.sample_transported(&self.world);
             let raw = self.world.telemetry();
             let census = json!({
                 "tick": raw.tick, "elapsed": elapsed + 1,
@@ -591,11 +960,22 @@ impl Arm {
         reason: Option<String>,
     ) -> Result<Value> {
         self.observer.close_censored();
+        // An unfinished proof is retained as the incomplete proof it is, never dropped so the
+        // arm can look clean.
+        if let Some(shadow) = self.shadow.take() {
+            let tick = self.world.state.tick;
+            self.resume_proofs.push(shadow.json(tick));
+        }
         for bout in self.observer.drain_bouts() {
             self.bouts_written += 1;
             line(&mut self.bout_stream, &bout.json())?;
         }
-        for s in [&mut self.bout_stream, &mut self.quiet_stream, &mut self.census_stream] {
+        for s in [
+            &mut self.bout_stream,
+            &mut self.life_stream,
+            &mut self.quiet_stream,
+            &mut self.census_stream,
+        ] {
             s.flush()?;
             s.get_ref().sync_all()?;
         }
@@ -617,7 +997,7 @@ impl Arm {
         // as disqualifying as a conservation drift: the harness never presents an arm whose own
         // records disagree with the world as a completed measurement.
         let reconciled = self.observer.reconciled();
-        let resumed = self.resume_check.unwrap_or(false);
+        let resumed = self.restart_proofs_pass();
         let passed = audits && reconciled && resumed;
         let summary = json!({
             "arm": dir.file_name().and_then(|n| n.to_str()),
@@ -631,9 +1011,12 @@ impl Arm {
             "gates": {
                 "conservation_and_flow_audits": audits,
                 "records_reconcile_to_the_world": reconciled,
-                "snapshot_resume_equality": self.resume_check,
+                "restart_proofs_complete_and_equal": resumed,
                 "legacy_raw_energy": legacy_passed,
             },
+            "restart_proofs": self.resume_proofs,
+            "a_pause_was_open_with_room_for_a_full_window": self.mid_pause_opportunity,
+            "restart_proof_requirement": "every proof recorded must be complete and equal, none may be left open at the close, and an arm that ever held a pause with a full window of ticks remaining must carry a completed mid_pause proof; the fixed_boundary fallback alone never certifies a mid-pause restart",
             "max_absolute_drift": {"material": self.worst[0], "energy": self.worst[1], "water": self.worst[2]},
             "corrected_energy_drift": self.worst_corrected_energy,
             "independent_windowed_energy_drift": self.worst_windowed_energy,
@@ -658,11 +1041,13 @@ impl Arm {
             "surviving_opening_cohorts": self.ancestry.surviving_cohorts(),
             "maximum_descendant_depth": self.ancestry.maximum_depth,
             "bouts_written": self.bouts_written,
+            "life_records_written": self.life_written,
+            "living_lineages_at_close": self.lineage.len(),
+            "lineage_basis": "every Birth and Death is streamed to life.jsonl with full generational IDs, the parent, the cause, the age, the genome digest, the form and the opening organism it descends from; the opening identities themselves are in opening-organisms.jsonl. A death keeps the form it wore, so a form that disappears entirely still has a record.",
             "closing_state_hash": cubarium_core::snapshot::state_hash(s).to_string(),
             "closing_ecology_hash": cubarium_core::ecology_hash(s).to_string(),
             "closing_snapshot_sha256": sha256(&bytes)?,
             "unsupported_measurements": [
-                "total transported path length at full tick resolution: World::render_view clones four whole fields per call, so it is sampled on the census cadence and reported as a rate; same-face displacement is accumulated exactly every tick and the omitted seam ticks are counted",
                 "exact funding and oxidation amounts: the ordinary API offers no mutation-site evidence, so no post-step delta here is presented as either"
             ],
         });
@@ -725,7 +1110,8 @@ fn run_seed(
     let mut failure: Option<String> = None;
     for (name, candidate, feed) in ARMS {
         let arm_dir = dir.join(name);
-        let mut arm = match Arm::new(&opening.state, base, name, candidate, feed, &arm_dir) {
+        let mut arm = match Arm::new(&opening.state, base, name, candidate, feed, planned, &arm_dir)
+        {
             Ok(arm) => arm,
             Err(error) => {
                 let text = format!("{name}: initialization_failure: {error:#}");
@@ -767,28 +1153,37 @@ fn run_seed(
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    // The read-only mode returns before anything else exists: no cohort is loaded, no output
+    // directory is created, no world is built.
+    if let Some(path) = &args.inspect {
+        println!("{}", serde_json::to_string_pretty(&inspect(path)?)?);
+        return Ok(());
+    }
+    let cohort_dir = args.cohort.clone().context("a cohort directory is required")?;
+    let out = args.out.clone().context("an output directory is required")?;
     let planned = args.horizon.ticks();
     ensure!(
         planned.is_multiple_of(args.sample_every),
         "the horizon must be a whole number of census windows"
     );
-    let (cohort, openings) = load_cohort(&args.cohort)?;
+    let (cohort, openings) = load_cohort(&cohort_dir)?;
     // A brand new directory, or nothing: `create_dir` fails on an existing path, so an accidental
     // rerun cannot overwrite or silently resume a completed screen.
-    fs::create_dir(&args.out).context("output must be a NEW directory")?;
+    fs::create_dir(&out).context("output must be a NEW directory")?;
     let executable_path = std::env::current_exe()?;
     let executable = fs::read(&executable_path)?;
-    write_new(&args.out.join("quiet_compare.frozen"), &executable)?;
+    write_new(&out.join("quiet_compare.frozen"), &executable)?;
     fs::set_permissions(
-        args.out.join("quiet_compare.frozen"),
+        out.join("quiet_compare.frozen"),
         fs::metadata(executable_path)?.permissions(),
     )?;
     json_new(
-        &args.out.join("manifest.json"),
+        &out.join("manifest.json"),
         &json!({
             "kind": "four-arm-ordinary-quiet-comparison",
             "build": BUILD, "executable_sha256": sha256(&executable)?,
             "cohort": cohort,
+            "cohort_source": cohort_dir,
             "horizon": args.horizon, "ticks": planned, "sample_every": args.sample_every,
             "arms": ARMS.map(|(n, _, _)| n),
             "factors": {
@@ -812,7 +1207,7 @@ fn main() -> Result<()> {
         let seed = opening.state.config.seed;
         let result = match run_seed(
             opening,
-            &args.out.join(format!("seed-{seed}")),
+            &out.join(format!("seed-{seed}")),
             planned,
             args.horizon,
             args.sample_every,
@@ -846,8 +1241,8 @@ fn main() -> Result<()> {
         "seeds": all,
         "retention": "every seed is retained, extinction, empty form, rejected pause and technical failure included; nothing is filtered, retried or reseeded",
     });
-    json_new(&args.out.join("summary.json"), &summary)?;
-    println!("{}", args.out.display());
+    json_new(&out.join("summary.json"), &summary)?;
+    println!("{}", out.display());
     ensure!(
         numerical_passed,
         "retained quiet cohort contains technical or numerical failures; see summary.json"
@@ -858,8 +1253,6 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cubarium_core::WorldConfig;
-
     fn opening() -> WorldState {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../cubarium-core/tests/fixtures/quiet-v12-plain-3000.cubw");
@@ -953,7 +1346,7 @@ mod tests {
             let base = Baseline::read(&o).unwrap();
             let dir = temp(if feed { "off-feed" } else { "off-nocare" });
             let name = if feed { "off_feed" } else { "off_nocare" };
-            let mut arm = Arm::new(&o, base, name, false, feed, &dir.join("arm")).unwrap();
+            let mut arm = Arm::new(&o, base, name, false, feed, 900, &dir.join("arm")).unwrap();
             let mut plain = World::from_state(o.clone()).unwrap();
             for elapsed in 0..900 {
                 arm.step(elapsed, 200).unwrap();
@@ -987,7 +1380,15 @@ mod tests {
             } else {
                 assert_eq!(arm.world.state.care, o.care, "a no-care arm received nothing");
             }
-            assert_eq!(arm.resume_check, Some(true), "{name}: the restart proof must run and pass");
+            // An Off arm never pauses, so its proof is the labelled fallback — and it says so
+            // rather than claiming a mid-pause restart it never made.
+            assert!(arm.shadow.is_none(), "{name}: the proof closed inside the run");
+            assert!(arm.restart_proofs_pass(), "{name}: the restart proof must run and pass");
+            assert_eq!(arm.resume_proofs.len(), 1, "{name}: exactly one proof");
+            assert_eq!(arm.resume_proofs[0]["trigger"], "fixed_boundary");
+            assert_eq!(arm.resume_proofs[0]["compared_ticks"], RESUME_WINDOW);
+            assert_eq!(arm.resume_proofs[0]["open_pauses_carried_into_the_shadow"], 0);
+            assert!(!arm.mid_pause_opportunity, "{name}: an Off arm has no pause to interrupt");
             fs::remove_dir_all(&dir).ok();
         }
     }
@@ -999,14 +1400,23 @@ mod tests {
         let base = Baseline::read(&o).unwrap();
         let dir = temp("candidate");
         let mut arm =
-            Arm::new(&o, base, "candidate_nocare", true, false, &dir.join("arm")).unwrap();
+            Arm::new(&o, base, "candidate_nocare", true, false, 3000, &dir.join("arm")).unwrap();
         for elapsed in 0..3000 {
             arm.step(elapsed, 200).unwrap();
         }
         assert!(arm.observer.admissions > 0, "the fixture must admit a pause in 3000 ticks");
         assert!(arm.observer.reconciled(), "{}", arm.observer.summary());
         assert_eq!(arm.observer.held_intake_ticks, 0);
-        assert_eq!(arm.resume_check, Some(true), "the mid-pause restart proof must pass");
+        assert!(arm.restart_proofs_pass(), "the mid-pause restart proof must pass");
+        assert!(arm.mid_pause_opportunity, "a pause was open with a whole window to spare");
+        let mid = arm
+            .resume_proofs
+            .iter()
+            .find(|p| p["trigger"] == "mid_pause")
+            .expect("a candidate arm that pauses owes a genuine mid-pause proof");
+        assert!(mid["open_pauses_carried_into_the_shadow"].as_u64().unwrap() > 0);
+        assert_eq!(mid["compared_ticks"], RESUME_WINDOW);
+        assert_eq!(mid["failure"], Value::Null);
         assert!(arm.bouts_written > 0);
         // Recovery really is separated from the other two classes.
         let rest = arm.observer.summary();
@@ -1043,7 +1453,8 @@ mod tests {
             let o = opening();
             let base = Baseline::read(&o).unwrap();
             let dir = temp(&format!("adversarial-{name}"));
-            let mut arm = Arm::new(&o, base, "off_nocare", false, false, &dir.join("arm")).unwrap();
+            let mut arm =
+                Arm::new(&o, base, "off_nocare", false, false, 2400, &dir.join("arm")).unwrap();
             arm.step(0, 200).unwrap();
             let bump = base.limits[damage];
             match damage {
@@ -1142,18 +1553,181 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
     }
 
-    /// A cohort opening that already carries a quiet extension is refused: the policy is chosen
-    /// here, once, and never inherited from an input nobody inspected.
+    /// A cohort opening that already carries a quiet extension, a pause, hunter or care state, a
+    /// wrong tick, seed, schema, population or ecology hash is refused by the loader's own
+    /// per-opening check — the one `load_cohort` runs, on a decoded state, not on a description
+    /// of one.
     #[test]
     fn an_opening_that_already_carries_a_policy_is_refused() {
-        let mut cfg = WorldConfig::default();
-        cfg.founders.count = 4;
-        let mut state = World::new(cfg).unwrap().state;
-        assert_eq!(state.quiet, QuietState::default());
-        state.quiet = QuietState::post_birth_pause_v1();
-        assert_ne!(state.quiet, QuietState::default());
-        // `load_cohort`'s own guard, exercised on the value it checks.
-        assert!(state.quiet != QuietState::default());
+        let real = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../captures/hunter-openings-2026-09-13");
+        if !real.join("manifest.json").exists() {
+            eprintln!("skipping: the prescribed cohort is not present in this checkout");
+            return;
+        }
+        let manifest: Value =
+            serde_json::from_str(&fs::read_to_string(real.join("manifest.json")).unwrap()).unwrap();
+        let row = manifest["openings"][0].clone();
+        let seed = row["seed"].as_u64().unwrap();
+        let bytes = fs::read(real.join(format!("seed-{seed}/world-144000.cubw"))).unwrap();
+        let (meta, state) = decode_snapshot(&bytes).unwrap();
+        assert_eq!(meta.schema, 9);
+        validate_opening(meta.schema, &state, seed, &row).expect("the real opening must pass");
+
+        // The guard that matters here: a policy, or a pause, already present in the input.
+        let mut policied = state.clone();
+        policied.quiet = QuietState::post_birth_pause_v1();
+        let error = validate_opening(meta.schema, &policied, seed, &row)
+            .expect_err("an opening carrying a policy must be refused")
+            .to_string();
+        assert!(error.contains("quiet extension"), "{error}");
+
+        // And the rest of the same check, each on its own.
+        type Damage = fn(&mut WorldState);
+        let cases: [(&str, Damage); 4] = [
+            ("schema-and-tick", |s| s.tick += 1),
+            ("seed", |s| s.config.seed += 1),
+            ("care", |s| s.care.admitted_seq += 1),
+            ("ecology", |s| {
+                s.fields.n[0] += 1.0;
+            }),
+        ];
+        for (name, damage) in cases {
+            let mut damaged = state.clone();
+            damage(&mut damaged);
+            assert!(
+                validate_opening(meta.schema, &damaged, seed, &row).is_err(),
+                "{name}: a damaged opening must be refused"
+            );
+        }
+        // A census the manifest does not agree with, and a population claim with nothing behind it.
+        let mut miscounted = row.clone();
+        miscounted["population"] = json!(state.organisms.len() as u64 + 1);
+        assert!(validate_opening(meta.schema, &state, seed, &miscounted).is_err());
+        let mut absent = row.clone();
+        absent["population"] = Value::Null;
+        assert!(validate_opening(meta.schema, &state, seed, &absent).is_err());
+        assert!(
+            validate_opening(13, &state, seed, &row).is_err(),
+            "an opening at another schema is not the frozen pre-hunter one"
+        );
+    }
+
+    /// The restart proof has to be able to fail. A shadow that lost its persisted pause, or whose
+    /// retained underlying mode was rewritten, diverges from the **uninterrupted** primary — while
+    /// two copies decoded from those same damaged bytes agree with each other perfectly for the
+    /// whole window. That agreement is exactly what a mirror-against-mirror proof would have
+    /// certified, and exactly why this one compares against the world that was never restarted.
+    #[test]
+    fn a_damaged_shadow_is_caught_where_two_identical_decodes_agree() {
+        use cubarium_core::organism::Mode;
+        let o = opening();
+        let mut primary = World::from_state(arm_state(&o, true)).unwrap();
+        let mut ticks = 0;
+        while primary.quiet().pauses.is_empty() {
+            primary.step();
+            primary.drain_events();
+            primary.drain_quiet_events();
+            ticks += 1;
+            assert!(ticks < 3000, "the fixture must admit a pause to interrupt");
+        }
+
+        let bytes = cubarium_core::encode_snapshot(&primary.state, BUILD);
+        let (_, faithful) = decode_snapshot(&bytes).unwrap();
+        assert!(!faithful.quiet.pauses.is_empty(), "the snapshot must carry the open pause");
+        let mut dropped = faithful.clone();
+        dropped.quiet.pauses.clear();
+        let mut rewritten = faithful.clone();
+        let original = rewritten.quiet.pauses[0].underlying;
+        // Deliberately `Resting`: the retained underlying mode is re-derived through the ordinary
+        // hysteresis every held tick, and `Seeking` and `Feeding` converge on the next tick from
+        // the same food and hunger, so swapping those two is absorbed. `Resting` is the one the
+        // hysteresis keeps, so a shadow given it stays quiet where the primary went back to work.
+        let swapped = if original == Mode::Resting { Mode::Seeking } else { Mode::Resting };
+        rewritten.quiet.pauses[0].underlying = swapped;
+
+        // Two decodes of the damaged bytes, to stand in for the mirror the proof used to build.
+        let damaged_bytes = cubarium_core::encode_snapshot(&dropped, BUILD);
+        let mut mirror_a = World::from_state(decode_snapshot(&damaged_bytes).unwrap().1).unwrap();
+        let mut mirror_b = World::from_state(decode_snapshot(&damaged_bytes).unwrap().1).unwrap();
+
+        // Before a shadow is allowed to stand in for the primary it must *be* the primary, and
+        // that check is this comparison on the decoded state itself — where a lost pause, a
+        // rewritten underlying mode and a flipped policy are all visible, whatever the next step
+        // would have done with them.
+        assert_eq!(
+            shadow_disagreement(&faithful, &primary.state, &[], &[], &[], &[]),
+            None,
+            "the faithful decode is the primary"
+        );
+        for (name, damaged) in [("dropped", &dropped), ("rewritten", &rewritten)] {
+            let seen = shadow_disagreement(damaged, &primary.state, &[], &[], &[], &[])
+                .unwrap_or_else(|| panic!("{name}: damage to the persisted pause must be seen"));
+            assert!(seen.contains("pause set"), "{name}: {seen}");
+        }
+        let mut off_policy = faithful.clone();
+        off_policy.quiet = QuietState::default();
+        let seen = shadow_disagreement(&off_policy, &primary.state, &[], &[], &[], &[]).unwrap();
+        assert!(seen.contains("policy"), "{seen}");
+
+        let mut shadows = [
+            ("faithful", World::from_state(faithful).unwrap(), None::<String>),
+            ("dropped_pause", World::from_state(dropped).unwrap(), None),
+            ("rewritten_underlying", World::from_state(rewritten).unwrap(), None),
+        ];
+        for _ in 0..RESUME_WINDOW {
+            primary.step();
+            let life = primary.drain_events();
+            let quiet = primary.drain_quiet_events();
+            for (_, world, failure) in shadows.iter_mut() {
+                world.step();
+                let shadow_life = world.drain_events();
+                let shadow_quiet = world.drain_quiet_events();
+                if failure.is_none() {
+                    *failure = shadow_disagreement(
+                        &world.state,
+                        &primary.state,
+                        &shadow_life,
+                        &life,
+                        &shadow_quiet,
+                        &quiet,
+                    );
+                }
+            }
+            mirror_a.step();
+            mirror_b.step();
+            assert_eq!(
+                format!("{:?}", mirror_a.drain_quiet_events()),
+                format!("{:?}", mirror_b.drain_quiet_events())
+            );
+            assert_eq!(
+                format!("{:?}", mirror_a.drain_events()),
+                format!("{:?}", mirror_b.drain_events())
+            );
+            assert_eq!(
+                cubarium_core::snapshot::state_hash(&mirror_a.state),
+                cubarium_core::snapshot::state_hash(&mirror_b.state),
+                "two decodes of the same damaged bytes agree: a mirror proves nothing about loss"
+            );
+        }
+
+        assert_eq!(shadows[0].2, None, "an undamaged shadow must track the primary exactly");
+        let dropped_failure = shadows[1].2.clone().expect("a lost pause must be caught");
+        assert!(dropped_failure.contains("pause set"), "{dropped_failure}");
+
+        // And the measured truth about the third one, stated rather than assumed either way:
+        // `QuietPause::underlying` is a **carry**, rewritten from the ordinary hysteresis on every
+        // held decision, so for this hungry parent `Resting`, `Seeking` and `Feeding` all resolve
+        // to the same next ordinary mode and the damage is absorbed within one step. It is caught
+        // where it is persisted — at the decode compared above, which is what `begin_shadow`
+        // runs — and a stepped comparison is not a general detector of it.
+        assert_ne!(swapped, original, "the rewrite must really change the carried mode");
+        assert_eq!(
+            shadows[2].1.quiet().pauses,
+            primary.quiet().pauses,
+            "the core re-derives the carried underlying mode every held tick"
+        );
+        assert_eq!(shadows[2].2, None, "and so this particular damage leaves no trace to step on");
     }
 
     /// The output directory is exclusive and every file inside it is written once: a rerun into a
