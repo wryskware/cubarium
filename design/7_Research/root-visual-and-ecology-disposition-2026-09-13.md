@@ -66,6 +66,10 @@ re-encoded cohort manifest changed some floating-point values. The replacement
 equality. Root reran the actual whole reducer on
 `captures/quiet-ten-minute-provenance-2026-09-13/`: exit 0, artifact checks passed.
 This covers twelve seeds, four arms and 12,000 elapsed ticks per arm.
+Root also reran all 31 reducer tests successfully, including the end-to-end
+screen and tampered-artifact cases. The initial sandbox run denied inspector
+subprocesses with EPERM; the permitted rerun passed. That was an execution
+permission failure, not an ecological or artifact-validation failure.
 
 All twelve no-care seeds show genuine non-newborn recovery: 3–16 bouts per seed,
 each lasting 40 ticks (two seconds). Recovery occupies only about 0.011–0.056% of
@@ -98,3 +102,10 @@ Read-only check at roughly 13:23 UTC: PID 3940022 serves the shared cube/viewer
 on 7393, build `0.1.0+3147775`, same world resumed from tick 707292 and advancing
 through tick 742130. Ports 7395–7396 have no listeners; nothing was killed there.
 The current vine release stays live while these next changes are verified.
+
+A fresh ten-second isolated-viewer sample measured 59.9 distinct frames/s,
+60 host submissions/draws/rAF callbacks per second, p95 new-frame interval
+16.8 ms, maximum 17 ms and zero intervals over 25 ms. The JSON is retained in
+`captures/root-visual-review-2026-09-13/cubarium-vine-3147775-periodic-cadence.json`.
+These are browser delivery measurements, not physical scanout or proof that
+every animated material is visually smooth.
