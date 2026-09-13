@@ -4,17 +4,17 @@
 
 #[path = "hunter_compare/audit.rs"]
 mod audit;
-#[path = "hunter_compare/recovery.rs"]
-mod recovery;
-#[path = "hunter_compare/spatial.rs"]
-mod spatial;
 #[path = "hunter_compare/eligibility.rs"]
 mod eligibility;
+#[path = "hunter_compare/recovery.rs"]
+mod recovery;
 #[path = "hunter_compare/reproduction.rs"]
 mod reproduction;
+#[path = "hunter_compare/spatial.rs"]
+mod spatial;
 
 use anyhow::{Context, Result, anyhow, ensure};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use cubarium_core::organism::DeathCause;
 use cubarium_core::{
     FixedHunterProfile, HunterEvent, HunterTarget, LifeEvent, OrganismId, World, WorldState,
@@ -39,6 +39,35 @@ const NAMES: [&str; 6] = [
 ];
 const BUILD: &str = concat!(env!("CARGO_PKG_VERSION"), "+", env!("CUBARIUM_GIT_HASH"));
 
+/// Named, immutable experiment recipes. Never changes the owning runner's defaults.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum ProfileVariant {
+    #[default]
+    Baseline,
+    /// Only the reserve targets for acquiring/ending a hunt change to .80/.90.
+    ReserveTargetsV1,
+}
+
+fn profile_for(
+    config: &cubarium_core::WorldConfig,
+    index: usize,
+    variant: ProfileVariant,
+) -> FixedHunterProfile {
+    let mut profile = FixedHunterProfile::lanternjaw_trial(config);
+    if variant == ProfileVariant::ReserveTargetsV1 {
+        profile.seek_reserve_fraction = 0.80;
+        profile.perch_reserve_fraction = 0.90;
+    }
+    if index >= 4 {
+        profile = profile.facultative();
+    }
+    if index == 2 || index == 4 {
+        profile = profile.without_attacks();
+    }
+    profile
+}
+
 #[derive(Parser)]
 struct Args {
     /// Completed prepare-hunter-worlds cohort directory (all seeds1–12).
@@ -50,6 +79,9 @@ struct Args {
     ticks: u64,
     #[arg(long, default_value_t = 200, value_parser = clap::value_parser!(u64).range(1..=200))]
     audit_window: u64,
+    /// Explicit experiment recipe; baseline preserves the original fixed profile.
+    #[arg(long, value_enum, default_value_t = ProfileVariant::Baseline)]
+    profile: ProfileVariant,
 }
 
 fn sha256(bytes: &[u8]) -> Result<String> {
@@ -93,6 +125,18 @@ fn stream(path: &Path) -> Result<BufWriter<File>> {
     Ok(BufWriter::new(
         OpenOptions::new().write(true).create_new(true).open(path)?,
     ))
+}
+
+fn measurement_complete(
+    planned: u64,
+    elapsed: u64,
+    uninterrupted: bool,
+    observers_current: bool,
+) -> bool {
+    // A short smoke can pass technically without completing even the first
+    // prescribed biological observation horizon. This flag certifies data,
+    // never viability, parameter selection, or approval to deploy.
+    planned >= 144000 && elapsed == planned && uninterrupted && observers_current
 }
 
 struct Opening {
@@ -228,18 +272,22 @@ fn placement(seed: u64) -> HunterTarget {
 }
 
 impl Arm {
+    #[cfg(test)]
     fn new(opening: &WorldState, index: usize, dir: &Path) -> Result<Self> {
+        Self::new_with_profile(opening, index, dir, ProfileVariant::Baseline)
+    }
+
+    fn new_with_profile(
+        opening: &WorldState,
+        index: usize,
+        dir: &Path,
+        variant: ProfileVariant,
+    ) -> Result<Self> {
         fs::create_dir(dir)?;
         let mut world = World::from_state(opening.clone()).map_err(|e| anyhow!(e))?;
         let mut audit = audit::Audit::new(opening)?;
         let target = placement(opening.config.seed);
-        let mut profile = FixedHunterProfile::lanternjaw_trial(world.config());
-        if index >= 4 {
-            profile = profile.facultative();
-        }
-        if index == 2 || index == 4 {
-            profile = profile.without_attacks();
-        }
+        let profile = profile_for(world.config(), index, variant);
         let mut founder = None;
         let initialized: Result<Value> = (|| {
             Ok(match index {
@@ -305,7 +353,7 @@ impl Arm {
         write_new(&dir.join("post-initialization.cubw"), &snapshot)?;
         json_new(
             &dir.join("opening.json"),
-            &json!({"arm":NAMES[index], "target":target,
+            &json!({"arm":NAMES[index], "target":target,"profile_recipe":variant,
             "heading":founder.and_then(|id|world.state.organisms.get(id).map(|o|o.heading)),
             "config":world.config(), "profile":world.hunters().profile(),
             "profile_sha256":sha256(&serde_json::to_vec(&world.hunters().profile())?)?,
@@ -369,7 +417,8 @@ impl Arm {
         self.audit.observe(&self.world.state, flows.0, flows.1)?;
         let life = self.world.drain_events();
         let hunting = self.world.drain_hunter_events();
-        self.reproduction.observe(&hunting, &life, &self.world.state)?;
+        self.reproduction
+            .observe(&hunting, &life, &self.world.state)?;
         let captures = self
             .capture_audit
             .observe(index, &hunting, &self.world.state)?;
@@ -572,10 +621,26 @@ impl Arm {
             .filter(|l| !l.hunter)
             .map(|l| l.root)
             .collect();
+        let measured = measurement_complete(
+            planned,
+            self.world
+                .tick()
+                .saturating_sub(self.audit.report.opening_tick),
+            reason.is_none() && self.audit.report.passed,
+            self.last_complete_observer_tick == self.world.tick()
+                && self.reproduction.last_complete_tick() == self.world.tick(),
+        );
+        let remaining = if measured {
+            Vec::new()
+        } else {
+            vec![
+                "requires at least two elapsed hours with uninterrupted, audited observer coverage",
+            ]
+        };
         let summary = json!({"planned_ticks":planned,"closing_tick":self.world.tick(),
             "termination":reason.as_deref().unwrap_or("planned_horizon"),
-            "technical_complete":reason.is_none(),"complete_experiment_measurement":false,
-            "remaining_measurements":["integrated reproduction audit awaits independent review and frozen cohort verification"],
+            "technical_complete":reason.is_none(),"complete_experiment_measurement":measured,
+            "remaining_measurements":remaining,"biological_acceptance":"not assessed by the measurement flag",
             "local_recovery":"paired seed-level local-recovery.jsonl; exact settlement prey position and paid attempt key",
             "whole_recovery_channels":"total prey, then forms0–7",
             "whole_recovery":self.whole_recovery.summary(reason.as_deref().unwrap_or("planned_horizon")),
@@ -743,8 +808,11 @@ fn main() -> Result<()> {
         &json!({"kind":"six-arm-hunter-comparison",
         "build":BUILD,"executable_sha256":sha256(&executable)?,"cohort":cohort,
         "ticks":args.ticks,"audit_window":args.audit_window,"arms":NAMES,
+        "profile_recipe":args.profile,
+        "observer_contract":"exact-reproduction-v2; bounded branch-checked transactions and boundary-stock diagnostics",
+        "profile_recipe_scope":"reserve-targets-v1 changes only seek/perch reserve fractions to .80/.90; all costs, reproductive gates, geometry, imports and placements unchanged",
         "care":false,"resume_supported":false,"ancestry_basis":"aged opening cohorts, not original founders",
-        "notes":"All twelve seeds retained. Exact paid capture evidence drives paired local recovery. Missing funding metrics and unvalidated biology are not claimed. Renderer is not part of this headless trial."}),
+        "notes":"All twelve seeds retained. Exact paid capture evidence drives paired local recovery; reproduction quantities come from core mutation records with independently checked identities. Measurement completion never implies biological acceptance. Renderer is not part of this headless trial."}),
     )?;
     let mut all = Vec::new();
     let mut failed = false;
@@ -755,7 +823,7 @@ fn main() -> Result<()> {
         let mut arms: Vec<Arm> = Vec::new();
         let mut reason = None;
         for (i, name) in NAMES.iter().enumerate() {
-            match Arm::new(&opening.state, i, &dir.join(name)) {
+            match Arm::new_with_profile(&opening.state, i, &dir.join(name), args.profile) {
                 Ok(arm) => arms.push(arm),
                 Err(error) => {
                     reason = Some(format!("initialization_failure: {name}: {error:#}"));
@@ -834,10 +902,19 @@ fn main() -> Result<()> {
             reason.as_deref().unwrap_or("planned horizon")
         );
     }
+    let measured = !failed
+        && all.iter().all(|seed| {
+            seed["arms"].as_array().is_some_and(|arms| {
+                arms.len() == 6
+                    && arms
+                        .iter()
+                        .all(|arm| arm["complete_experiment_measurement"] == true)
+            })
+        });
     json_new(
         &args.out.join("summary.json"),
         &json!({"technical_complete":!failed,
-        "complete_experiment_measurement":false,"seeds":all}),
+        "complete_experiment_measurement":measured,"seeds":all}),
     )?;
     ensure!(
         !failed,
@@ -849,6 +926,89 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn measurement_flag_requires_the_full_horizon_and_uninterrupted_observers() {
+        assert!(!measurement_complete(6000, 6000, true, true));
+        assert!(!measurement_complete(144000, 6000, true, true));
+        assert!(!measurement_complete(144000, 144000, false, true));
+        assert!(!measurement_complete(144000, 144000, true, false));
+        assert!(measurement_complete(144000, 144000, true, true));
+        assert!(measurement_complete(5184000, 5184000, true, true));
+    }
+    #[test]
+    fn reserve_target_recipe_changes_only_its_two_named_fields() {
+        let config = cubarium_core::WorldConfig::default();
+        for index in 0..6 {
+            let baseline = profile_for(&config, index, ProfileVariant::Baseline);
+            let candidate = profile_for(&config, index, ProfileVariant::ReserveTargetsV1);
+            assert_eq!(baseline.seek_reserve_fraction, 0.35);
+            assert_eq!(baseline.perch_reserve_fraction, 0.65);
+            let mut expected = baseline.clone();
+            expected.seek_reserve_fraction = 0.80;
+            expected.perch_reserve_fraction = 0.90;
+            assert_eq!(candidate, expected);
+            baseline.validate().unwrap();
+            candidate.validate().unwrap();
+            assert_eq!(candidate.attacks_enabled, index != 2 && index != 4);
+            assert_eq!(
+                candidate.scavenge_fraction,
+                if index >= 4 { 0.25 } else { 0.0 }
+            );
+        }
+    }
+
+    #[test]
+    fn recipe_selection_is_explicit_and_unknown_variants_are_refused() {
+        let baseline = Args::try_parse_from(["compare", "cohort", "out"]).unwrap();
+        assert_eq!(baseline.profile, ProfileVariant::Baseline);
+        let candidate = Args::try_parse_from([
+            "compare",
+            "cohort",
+            "out",
+            "--profile",
+            "reserve-targets-v1",
+        ])
+        .unwrap();
+        assert_eq!(candidate.profile, ProfileVariant::ReserveTargetsV1);
+        assert!(Args::try_parse_from(["compare", "cohort", "out", "--profile", "rescue"]).is_err());
+    }
+
+    #[test]
+    fn candidate_initializer_does_not_add_extra_food_or_change_any_opening_body() {
+        let opening = World::new(cubarium_core::WorldConfig::default())
+            .unwrap()
+            .state;
+        let dir = temp_parent();
+        for index in 0..6 {
+            let baseline =
+                Arm::new(&opening, index, &dir.join(format!("baseline-{index}"))).unwrap();
+            let candidate = Arm::new_with_profile(
+                &opening,
+                index,
+                &dir.join(format!("candidate-{index}")),
+                ProfileVariant::ReserveTargetsV1,
+            )
+            .unwrap();
+            assert_eq!(
+                baseline.world.state.organisms,
+                candidate.world.state.organisms
+            );
+            assert_eq!(baseline.world.state.fields, candidate.world.state.fields);
+            assert_eq!(
+                baseline.audit.report.actual_receipt_material,
+                candidate.audit.report.actual_receipt_material
+            );
+            assert_eq!(
+                baseline.audit.report.actual_receipt_energy,
+                candidate.audit.report.actual_receipt_energy
+            );
+            assert_eq!(
+                baseline.audit.report.actual_receipt_heat,
+                candidate.audit.report.actual_receipt_heat
+            );
+            assert_eq!(baseline.world.state.config, candidate.world.state.config);
+        }
+    }
     fn birth(parent: OrganismId, id: OrganismId) -> LifeEvent {
         LifeEvent::Birth {
             tick: 1,

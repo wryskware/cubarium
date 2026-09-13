@@ -79,6 +79,10 @@ pub struct Eligibility {
     member_samples: u64,
     gate_open: u64,
     gate_and_stocks_open: u64,
+    age_and_size_ready: u64,
+    ready_reserve_open: u64,
+    ready_energy_open: u64,
+    ready_both_open: u64,
     blockers: [u64; 11],
     max_reserve_fraction: Option<f64>,
     max_energy_fraction: Option<f64>,
@@ -100,6 +104,14 @@ impl Eligibility {
             self.member_samples += 1;
             self.gate_open += u64::from(!blockers[..9].iter().any(|b| *b));
             self.gate_and_stocks_open += u64::from(!blockers.iter().any(|b| *b));
+            // Age and adult structure are distinct from stocks, quiet behavior,
+            // and an actual funding. Keep this conditional denominator explicit.
+            if !blockers[4] && !blockers[7] {
+                self.age_and_size_ready += 1;
+                self.ready_reserve_open += u64::from(!blockers[5]);
+                self.ready_energy_open += u64::from(!blockers[6]);
+                self.ready_both_open += u64::from(!blockers[5] && !blockers[6]);
+            }
             for (i, b) in blockers.iter().enumerate() {
                 self.blockers[i] += u64::from(*b);
             }
@@ -127,6 +139,10 @@ impl Eligibility {
         json!({"basis":"end-of-step member-ticks; simultaneous blockers overlap; not mutation-site attempts; cap and queued births excluded",
             "member_ticks":self.member_samples,"local_gate_open_member_ticks":self.gate_open,
             "gate_and_stocks_open_member_ticks":self.gate_and_stocks_open,
+            "age_and_size_ready_member_ticks":self.age_and_size_ready,
+            "age_and_size_ready_reserve_gate_open_member_ticks":self.ready_reserve_open,
+            "age_and_size_ready_energy_gate_open_member_ticks":self.ready_energy_open,
+            "age_and_size_ready_both_stock_gates_open_member_ticks":self.ready_both_open,
             "blocker_member_ticks":BLOCKERS.iter().zip(self.blockers).map(|(k,v)|(k.to_string(),json!(v))).collect::<serde_json::Map<_,_>>(),
             "max_reserve_fraction":self.max_reserve_fraction,"max_energy_fraction":self.max_energy_fraction})
     }
@@ -217,5 +233,45 @@ mod tests {
         stats.observe(&world.state);
         assert_eq!(stats.summary()["blocker_member_ticks"]["gut"], 1);
         assert_eq!(stats.summary()["blocker_member_ticks"]["target"], 1);
+        assert_eq!(stats.summary()["age_and_size_ready_member_ticks"], 1);
+        assert_eq!(
+            stats.summary()["age_and_size_ready_both_stock_gates_open_member_ticks"],
+            1
+        );
+        assert_eq!(stats.summary()["local_gate_open_member_ticks"], 0);
+    }
+
+    #[test]
+    fn youthful_stock_success_does_not_count_as_reproductive_age_opportunity() {
+        let mut world = World::new(WorldConfig::default()).unwrap();
+        let profile = FixedHunterProfile::lanternjaw_trial(world.config());
+        world
+            .start_hunter_trial(
+                profile,
+                HunterTarget {
+                    face: 4,
+                    u: 22.0,
+                    v: 32.0,
+                },
+            )
+            .unwrap();
+        let id = world.hunters().members[0].id;
+        let o = world.state.organisms.get_mut(id).unwrap();
+        o.reserve = o.phenotype.reserve_max;
+        o.energy = o.phenotype.energy_max;
+        let mut stats = Eligibility::default();
+        stats.observe(&world.state);
+        assert_eq!(stats.summary()["age_and_size_ready_member_ticks"], 0);
+        assert_eq!(
+            stats.summary()["age_and_size_ready_both_stock_gates_open_member_ticks"],
+            0
+        );
+        world.state.tick = 24000; // Boundary fixture: exactly1200s, not a balance run.
+        stats.observe(&world.state);
+        assert_eq!(stats.summary()["age_and_size_ready_member_ticks"], 1);
+        assert_eq!(
+            stats.summary()["age_and_size_ready_both_stock_gates_open_member_ticks"],
+            1
+        );
     }
 }
