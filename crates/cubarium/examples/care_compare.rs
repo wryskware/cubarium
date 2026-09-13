@@ -25,6 +25,69 @@ struct Args {
     /// Care cycle in ticks: feed at 0, rain at +60, clean at +300. Minimum 60 s.
     #[arg(long, default_value_t = 2400, value_parser = clap::value_parser!(u64).range(1200..=72000))]
     care_every: u64,
+    /// Reset observer counters at this cadence for an independent energy audit.
+    #[arg(long, default_value_t = 200, value_parser = clap::value_parser!(u64).range(1..=12000))]
+    audit_window: u64,
+}
+
+#[derive(Default)]
+struct AccurateSum {
+    sum: f64,
+    correction: f64,
+}
+impl AccurateSum {
+    fn add(&mut self, value: f64) {
+        let next = self.sum + value;
+        self.correction += if self.sum.abs() >= value.abs() {
+            (self.sum - next) + value
+        } else {
+            (value - next) + self.sum
+        };
+        self.sum = next;
+    }
+    fn value(&self) -> f64 {
+        self.sum + self.correction
+    }
+}
+
+#[derive(Default)]
+struct WindowAudit {
+    light: AccurateSum,
+    heat: AccurateSum,
+    rain: AccurateSum,
+    evap: AccurateSum,
+    counts: cubarium_core::Telemetry,
+}
+impl WindowAudit {
+    fn observe(&mut self, mut sample: cubarium_core::Telemetry) -> cubarium_core::Telemetry {
+        self.light.add(sample.light_in);
+        self.heat.add(sample.heat_out);
+        self.rain.add(sample.rain_in);
+        self.evap.add(sample.evap_out);
+        macro_rules! counters {
+            ($($field:ident),*) => { $(
+                self.counts.$field += sample.$field;
+                sample.$field = self.counts.$field;
+            )* };
+        }
+        counters!(
+            births,
+            deaths_starvation,
+            deaths_age,
+            deaths_collapse,
+            cap_rejections,
+            travel_fallbacks,
+            travel_ties,
+            pairs_considered,
+            pairs_unfolded,
+            neighbor_truncations
+        );
+        sample.light_in = self.light.value();
+        sample.heat_out = self.heat.value();
+        sample.rain_in = self.rain.value();
+        sample.evap_out = self.evap.value();
+        sample
+    }
 }
 
 fn material(s: &WorldState) -> f64 {
@@ -117,12 +180,23 @@ fn scheduled_kind(elapsed: u64, period: u64) -> Option<CareKind> {
     }
 }
 
-fn run(initial: &WorldState, ticks: u64, care: bool, period: u64) -> Result<Value> {
+fn run(
+    initial: &WorldState,
+    ticks: u64,
+    care: bool,
+    period: u64,
+    audit_window: u64,
+) -> Result<Value> {
     let mut world = World::from_state(initial.clone()).map_err(|e| anyhow!(e))?;
     let opening_mass = material(initial);
     let opening_energy = energy(initial);
     let opening_water: f64 = initial.fields.w.iter().sum();
     let mut worst = [0.0_f64; 3];
+    let mut windowed = WindowAudit::default();
+    let mut worst_windowed_energy = 0.0_f64;
+    let mut worst_care_energy = 0.0_f64;
+    let mut receipt_energy_in = AccurateSum::default();
+    let mut receipt_energy_out = AccurateSum::default();
     let mut population_min = world.population();
     let mut population_max = population_min;
     let mut receipts = Vec::new();
@@ -157,6 +231,7 @@ fn run(initial: &WorldState, ticks: u64, care: bool, period: u64) -> Result<Valu
             // bypass is needed to reproduce this schedule through the real controls.
             let kind = scheduled_kind(elapsed, period);
             if let Some(kind) = kind {
+                let before_energy = energy(&world.state);
                 let receipt = world.apply_care(&CareCommand {
                     seq: world
                         .care()
@@ -167,10 +242,22 @@ fn run(initial: &WorldState, ticks: u64, care: bool, period: u64) -> Result<Valu
                     kind,
                     target: targets[(elapsed / period) as usize % targets.len()],
                 });
+                let booked = receipt
+                    .outcome
+                    .applied()
+                    .map_or(0.0, |q| q.energy_in - q.energy_out);
+                if let Some(q) = receipt.outcome.applied() {
+                    receipt_energy_in.add(q.energy_in);
+                    receipt_energy_out.add(q.energy_out);
+                }
+                worst_care_energy =
+                    worst_care_energy.max((energy(&world.state) - before_energy - booked).abs());
                 receipts.push(json!({"elapsed":elapsed,"kind":kind.as_str(),"receipt":receipt}));
             }
         }
-        world.step();
+        let counters = world.step();
+        let transient_light = counters.light_in;
+        let transient_heat = counters.heat_out;
         world
             .check_invariants()
             .map_err(|e| anyhow!("tick {}: {e}", world.tick()))?;
@@ -190,6 +277,13 @@ fn run(initial: &WorldState, ticks: u64, care: bool, period: u64) -> Result<Valu
             samples.push(census(&world.state, &ancestry));
         }
         let s = &world.state;
+        let windowed_residual =
+            energy(s) - opening_energy - (windowed.light.value() + transient_light)
+                + (windowed.heat.value() + transient_heat)
+                - receipt_energy_in.value()
+                + receipt_energy_out.value();
+        ensure!(windowed_residual.is_finite(), "nonfinite windowed audit");
+        worst_windowed_energy = worst_windowed_energy.max(windowed_residual.abs());
         let delta_feed = s.care.feed_material_in - initial.care.feed_material_in;
         let delta_clean = s.care.clean_material_out - initial.care.clean_material_out;
         let residuals = [
@@ -215,6 +309,9 @@ fn run(initial: &WorldState, ticks: u64, care: bool, period: u64) -> Result<Valu
             );
             *peak = peak.max(residual.abs());
         }
+        if (elapsed + 1) % audit_window == 0 {
+            windowed.observe(world.telemetry());
+        }
     }
     // Relative tolerances scale with the opening inventory, not with cumulative
     // inputs, so additional care cannot relax the audit.
@@ -224,7 +321,16 @@ fn run(initial: &WorldState, ticks: u64, care: bool, period: u64) -> Result<Valu
         .zip(limits)
         .all(|(drift, limit)| *drift < limit);
     let ledgers = world.care().clone();
-    let mut sample = serde_json::to_value(world.telemetry())?;
+    let mut sample = serde_json::to_value(windowed.observe(world.telemetry()))?;
+    let s = &world.state;
+    let stored_delta = energy(s) - opening_energy;
+    let persisted_residual = stored_delta - (s.light_in_total - initial.light_in_total)
+        + (s.heat_out_total - initial.heat_out_total)
+        - (s.care.feed_energy_in - initial.care.feed_energy_in)
+        + (s.care.clean_energy_out - initial.care.clean_energy_out);
+    let measured_residual = stored_delta - windowed.light.value() + windowed.heat.value()
+        - receipt_energy_in.value()
+        + receipt_energy_out.value();
     // Hashes are strings so browser/JSON consumers do not round u64 values.
     sample["state_hash"] = json!(cubarium_core::snapshot::state_hash(&world.state).to_string());
     sample["ecology_hash"] = json!(cubarium_core::ecology_hash(&world.state).to_string());
@@ -232,6 +338,15 @@ fn run(initial: &WorldState, ticks: u64, care: bool, period: u64) -> Result<Valu
         json!({"care":care,"population_min":population_min,"population_max":population_max,
         "max_absolute_drift":{"material":worst[0],"energy":worst[1],"water":worst[2]},
         "audit_passed":audit_passed,
+        "windowed_energy_audit":{"max_absolute_drift":worst_windowed_energy,
+            "passed":worst_windowed_energy<limits[1],"max_care_boundary_drift":worst_care_energy,
+            "note":"Compensated sum of short-lived observer counters; does not change persistent ledgers or relax their gate."},
+        "closing_signed_energy_evidence":{"tick":s.tick,
+            "persisted_residual":persisted_residual,"windowed_residual":measured_residual,
+            "windowed_minus_persisted_light":windowed.light.value()-(s.light_in_total-initial.light_in_total),
+            "persisted_minus_windowed_heat":(s.heat_out_total-initial.heat_out_total)-windowed.heat.value(),
+            "receipt_minus_persisted_feed":receipt_energy_in.value()-(s.care.feed_energy_in-initial.care.feed_energy_in),
+            "persisted_minus_receipt_clean":(s.care.clean_energy_out-initial.care.clean_energy_out)-receipt_energy_out.value()},
         "audit_limits":{"material":limits[0],"energy":limits[1],"water":limits[2]},
         "opening_inventory":{"material":opening_mass,"energy":opening_energy,"water":opening_water},
         "cumulative_energy_delta":{"light":world.state.light_in_total-initial.light_in_total,
@@ -264,8 +379,20 @@ fn main() -> Result<()> {
         initial.tick.checked_add(args.ticks).is_some(),
         "tick overflow"
     );
-    let baseline = run(&initial, args.ticks, false, args.care_every)?;
-    let cared = run(&initial, args.ticks, true, args.care_every)?;
+    let baseline = run(
+        &initial,
+        args.ticks,
+        false,
+        args.care_every,
+        args.audit_window,
+    )?;
+    let cared = run(
+        &initial,
+        args.ticks,
+        true,
+        args.care_every,
+        args.audit_window,
+    )?;
     let audit_passed = baseline["audit_passed"] == true && cared["audit_passed"] == true;
     println!(
         "{}",
@@ -273,6 +400,7 @@ fn main() -> Result<()> {
             "input":args.path,"seed":initial.config.seed,"input_schema":input_schema,"start_tick":initial.tick,
             "ticks":args.ticks,"simulated_seconds":args.ticks as f64 * cubarium_core::DT,
             "care_every_ticks":args.care_every,
+            "audit_window_ticks":args.audit_window,
             "ancestry_basis":if args.seed.is_some() { "original founders" } else { "individuals alive at opening checkpoint; earlier ancestry unknown" },
             "note":"Matched in-memory numerical scenario; forms are not lineages. No host durability or visual-response proof; survival is censored at the reported duration.",
             "baseline":baseline,"cared":cared
@@ -362,11 +490,20 @@ mod tests {
     #[test]
     fn short_matched_audit_is_repeatable_and_observation_is_inert() {
         let initial = World::new(WorldConfig::default()).unwrap().state;
-        let first = run(&initial, 420, true, 2400).unwrap();
-        assert_eq!(first, run(&initial, 420, true, 2400).unwrap());
+        let first = run(&initial, 420, true, 2400, 200).unwrap();
+        assert_eq!(first, run(&initial, 420, true, 2400, 200).unwrap());
+        for window in [1, 60, 420] {
+            let other = run(&initial, 420, true, 2400, window).unwrap();
+            assert_eq!(
+                first["final"]["ecology_hash"],
+                other["final"]["ecology_hash"]
+            );
+            assert_eq!(first["final"]["births"], other["final"]["births"]);
+            assert_eq!(other["windowed_energy_audit"]["passed"], true);
+        }
         assert_eq!(first["receipts"].as_array().unwrap().len(), 3);
         assert_eq!(first["samples"].as_array().unwrap().len(), 2);
-        let baseline = run(&initial, 420, false, 2400).unwrap();
+        let baseline = run(&initial, 420, false, 2400, 200).unwrap();
         let mut reference = World::from_state(initial.clone()).unwrap();
         for _ in 0..420 {
             reference.step();
