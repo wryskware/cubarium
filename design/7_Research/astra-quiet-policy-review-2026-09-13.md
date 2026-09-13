@@ -174,3 +174,19 @@ rollout. It does not justify tuning quiet biology or rerunning valid old fixture
 The ordinary quiet policy is ready for its separately authorized copied-world
 measurement, subject to that measurement's own complete numerical and observer
 gates; no biological acceptance or live rollout approval is given here.
+
+### Checked-in rejection regression
+
+At the parent's explicit request, the forensic case is now also preserved as
+`current_schema_rejects_a_crc_valid_unconsumed_payload_tail` in the independent
+test file. Unlike the isolated demonstration, it asserts the desired rejection
+and is intentionally red against `0980eab`. The original eight probes remain
+unchanged. This test/report-only commit precedes the parent's separately scoped
+core correction; it must not be reported as a passing nine-test package until
+that correction is rerun.
+
+The checked-in rejection test was executed in the separate workspace cache
+`captures/build-cache/astra-quiet-review-current`: **0 passed, 1 failed, 8
+filtered out**, exit 101, with the expected assertion about a correct envelope
+not legitimizing an unconsumed tail. An earlier invocation reused the isolated
+copy's binary and selected zero tests; that invocation is not counted as evidence.

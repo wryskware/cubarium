@@ -363,3 +363,19 @@ fn off_ecology_hash_remains_the_bare_legacy_payload_not_an_option_wrapper() {
         "changing a projection API to Option must not add its tag to legacy ecology hashing"
     );
 }
+
+#[test]
+fn current_schema_rejects_a_crc_valid_unconsumed_payload_tail() {
+    let state = breeder().state;
+    let mut bytes = encode_snapshot(&state, "astra");
+    let at = 10 + u16::from_le_bytes(bytes[8..10].try_into().unwrap()) as usize;
+    bytes.push(0x7f);
+    let length = (bytes.len() - at - 12) as u64;
+    bytes[at..at + 8].copy_from_slice(&length.to_le_bytes());
+    let crc = crc32fast::hash(&bytes[at + 12..]);
+    bytes[at + 8..at + 12].copy_from_slice(&crc.to_le_bytes());
+    assert!(
+        decode_snapshot(&bytes).is_err(),
+        "a correct envelope cannot legitimize an unconsumed current-schema payload tail"
+    );
+}
