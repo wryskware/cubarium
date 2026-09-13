@@ -25,7 +25,7 @@ itemised answer.
 
 ## Commit
 
-`<this commit>` — `crates/cubarium/examples/quiet_compare.rs`,
+`6d4ac7b` (first build) and `2fbd092` (this revision) — `crates/cubarium/examples/quiet_compare.rs`,
 `crates/cubarium/examples/quiet_compare/bouts.rs`, `scripts/reduce-quiet-compare.mjs` and its
 test, this report, and **one additive read-only core accessor**
 (`World::moved_segments`, `crates/cubarium-core/src/world.rs`) authorized by the review. Nothing
