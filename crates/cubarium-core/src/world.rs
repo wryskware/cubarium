@@ -1319,6 +1319,7 @@ impl World {
             {
                 let metabolism = hunter::Metabolism::of(cfg);
                 let handling = profile.handling_cost_per_second * dt;
+                let meal_ticks = ticks_from_seconds(profile.meal_recovery_seconds, dt).max(1);
                 for index in 0..hunters.members.len() {
                     let m = hunters.members[index];
                     if !m.carrying() {
@@ -1362,6 +1363,12 @@ impl World {
                         member.gut_energy = 0.0;
                         if residue > 0.0 {
                             heat(residue);
+                        }
+                        // The meal ended *this* tick, so the pause starts now: a member is
+                        // never left handling nothing, not even for the rest of the tick.
+                        if member.phase == HunterPhase::Handling {
+                            let episode = member.episode;
+                            member.enter(HunterPhase::Recovering, now, now + meal_ticks, episode);
                         }
                     }
                 }

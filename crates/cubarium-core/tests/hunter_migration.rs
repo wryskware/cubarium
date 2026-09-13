@@ -10,10 +10,14 @@
 
 use std::path::PathBuf;
 
-use cubarium_core::hunter::HunterState;
-use cubarium_core::snapshot::{HEADER_FIXED_BYTES, state_hash, v7, v8, v9};
+use cubarium_core::genome::Genome;
+use cubarium_core::hunter::{HunterPhase, HunterRole, HunterState};
+use cubarium_core::snapshot::{
+    HEADER_FIXED_BYTES, MAGIC, SnapshotError, state_hash, v7, v8, v9, v10,
+};
 use cubarium_core::{
-    SCHEMA_V9, SCHEMA_VERSION, World, WorldConfig, decode_snapshot, ecology_hash, encode_snapshot,
+    SCHEMA_V9, SCHEMA_V10, SCHEMA_VERSION, World, WorldConfig, decode_snapshot, ecology_hash,
+    encode_snapshot,
 };
 
 fn fixture(name: &str) -> PathBuf {
@@ -161,4 +165,117 @@ fn a_world_that_never_opts_in_carries_an_empty_extension() {
     let (meta, back) = decode_snapshot(&bytes).expect("round trip");
     assert_eq!(meta.schema, SCHEMA_VERSION);
     assert_eq!(back, world.state);
+}
+
+// ---------------------------------------------------------------- schema 10
+
+/// Frame a payload as a snapshot of `schema`, the way `encode_snapshot` frames the current one.
+fn frame(schema: u32, payload: &[u8], build: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&MAGIC);
+    out.extend_from_slice(&schema.to_le_bytes());
+    out.extend_from_slice(&(build.len() as u16).to_le_bytes());
+    out.extend_from_slice(build.as_bytes());
+    out.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+    out.extend_from_slice(&crc32fast::hash(payload).to_le_bytes());
+    out.extend_from_slice(payload);
+    out
+}
+
+/// A schema 10 world that never opted in migrates exactly, like every other older schema: the
+/// extension it did not use opens empty and nothing else moves.
+#[test]
+fn a_schema_ten_snapshot_without_a_trial_migrates_exactly() {
+    let mut world = World::new(WorldConfig::default()).expect("defaults are valid");
+    for _ in 0..60 {
+        world.step();
+    }
+    let old = v10::project(&world.state).expect("an empty extension has a schema 10 image");
+    let bytes = frame(SCHEMA_V10, &postcard::to_allocvec(&old).expect("encodable"), "schema-ten");
+
+    let (meta, back) = decode_snapshot(&bytes).expect("an empty schema 10 world loads");
+    assert_eq!(meta.schema, SCHEMA_V10);
+    assert_eq!(back, world.state, "the migration moved something it should not have");
+    assert_eq!(state_hash(&back), state_hash(&world.state));
+    assert_eq!(back.hunters, HunterState::default());
+}
+
+/// A schema 10 world carrying an **active trial** is refused by name. Its profile and members
+/// have a different shape in schema 11 — the measured capture effector, the ingestion mouth,
+/// the body scale, the transition origin — and there is no honest way to fill those in for a
+/// running experiment, so the load fails instead of quietly changing what the experiment meant.
+#[test]
+fn a_schema_ten_snapshot_with_an_active_trial_is_refused_not_reinterpreted() {
+    let mut world = World::new(WorldConfig::default()).expect("defaults are valid");
+    for _ in 0..10 {
+        world.step();
+    }
+    let mut old = v10::project(&world.state).expect("an empty extension projects");
+    let founder = world.state.organisms.iter().next().expect("founders exist").0;
+    old.hunters.profile = Some(v10::FixedHunterProfileV10 {
+        version: 1,
+        role: HunterRole::Lanternjaw,
+        genome: Genome::founder(0.08, &world.config().drives),
+        attacks_enabled: true,
+        body_extent_px: 9.0,
+        jaw_offset_px: 6.0,
+        jaw_reach_px: 1.5,
+        founder_reserve_fraction: 0.5,
+        founder_energy_fraction: 0.75,
+        perch_reserve_fraction: 0.65,
+        seek_reserve_fraction: 0.35,
+        prey_structure_min: 0.15,
+        prey_structure_fraction_max: 0.75,
+        stalk_timeout_seconds: 8.0,
+        windup_seconds: 0.6,
+        strike_seconds: 1.0,
+        strike_speed_px_s: 1.0,
+        strike_energy_cost: 0.08,
+        recovery_seconds: 5.0,
+        capture_base: 0.65,
+        capture_min: 0.1,
+        capture_max: 0.75,
+        escape_speed_multiple: 2.0,
+        escape_turn_rate_deg: 240.0,
+        gut_capacity_material: 4.0,
+        handling_cost_per_second: 0.002,
+        digest_rate: 0.1,
+        meal_recovery_seconds: 20.0,
+        scavenge_fraction: 0.0,
+        reproduce_min_age_seconds: 1200.0,
+        reproduce_reserve_fraction: 0.8,
+        reproduce_energy_fraction: 0.75,
+        reproduce_interval_seconds: 1800.0,
+        gestation_seconds: 120.0,
+        juvenile_growth_rate: 0.002,
+    });
+    old.hunters.members.push(v10::HunterMemberV10 {
+        id: founder,
+        phase: HunterPhase::Perched,
+        phase_started_tick: old.tick,
+        phase_ends_tick: old.tick,
+        target: None,
+        attack_counter: 0,
+        next_reproduction_tick: 0,
+        gut_material: 0.0,
+        gut_energy: 0.0,
+    });
+    old.hunters.founder_material_in = 4.0;
+    old.hunters.founder_energy_in = 7.0;
+    old.hunters.founders_placed = 1;
+
+    let bytes = frame(SCHEMA_V10, &postcard::to_allocvec(&old).expect("encodable"), "schema-ten");
+    match decode_snapshot(&bytes) {
+        Err(SnapshotError::Invalid(why)) => {
+            assert!(why.contains("active hunter trial"), "{why}");
+            assert!(why.contains("refused"), "the refusal must say so: {why}");
+        }
+        other => panic!("an active schema 10 trial decoded as {other:?}"),
+    }
+
+    // And a current world with a trial has no honest schema 10 image either.
+    let profile = cubarium_core::FixedHunterProfile::lanternjaw_trial(world.config());
+    let target = cubarium_core::HunterTarget { face: 4, u: 22.0, v: 34.0 };
+    world.start_hunter_trial(profile, target).expect("the trial starts");
+    assert!(v10::project(&world.state).is_none(), "a running trial must not project backwards");
 }
