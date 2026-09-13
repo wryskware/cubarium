@@ -55,6 +55,12 @@ same state directory and resumed opening tick 633208; observed current tick
 660932. Port 7393 has that sole listener; 7395 and 7396 have none. This tooling
 change needs no cube restart and deploys no experimental ecology.
 
+An isolated ten-second Chromium check afterward measured 60.0006 host submitted
+fps and 59.9006 distinct canvas frames/s, with 16.8 ms p95 and 17 ms maximum
+distinct-frame intervals, none over 25 ms. Source identity remained the same.
+Artifact: `/tmp/cubarium-c569f41-live-cadence.json`. This is shared-viewer
+callback/canvas timing, not physical panel scanout or personal-browser pacing.
+
 Previous turn classification: the requested goal rewrite was delivered, but
 made no implementation progress. This turn changes the reducer, completes its
 tests and real two-hour identity check, and verifies the ongoing wait. Next:
