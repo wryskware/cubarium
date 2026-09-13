@@ -83,3 +83,21 @@ preserves the in-progress distinction. No full-cohort results or biological
 acceptance are inferred here. The reducer remains a convenience for retained
 evidence, not a replacement for the core audits, transaction reconciliation or
 contact reconstruction already performed by the experiment.
+
+## Closure against f0ad8ef
+
+All three findings are **resolved** by `f0ad8ef`. Reran the unchanged historical
+bug demonstrations against the corrected source: they exit 1 with all three
+former false-accept assertions failing for the intended validation reasons.
+These are deliberately preserved bug demonstrations, not expected passing
+regression tests on the corrected version. A separate inverse-assertion check
+confirmed all three malformed inputs now throw, while the unchanged actual
+seed-1 specialist-on summary still passes.
+
+Foreground regression suites now report **9 reducer tests and 6 preparation
+tests passed**, both exit 0. The new tests cover strict equality, the missing
+intersection lower bound, and absent/null/nonnumeric/nonfinite axial coordinates
+on both sides. No existing test was removed. This closes the bounded reducer
+review; it does not advance the still-pending full-cohort completion or biological
+acceptance gates. Production and trial files remain root-owned and untouched by
+this review.
