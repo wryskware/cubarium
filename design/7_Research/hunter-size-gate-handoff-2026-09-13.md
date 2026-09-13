@@ -165,9 +165,13 @@ grew at the cap from its first tick. And all three stopped at **0.8485**, which 
 where the proposal's own arithmetic illustration said a juvenile converting its
 birth endowment under continuous maximum oxidation would meet the rising gate
 ("approximately S=.8485"). The mechanism behaved as its arithmetic predicted, and
-the stopping point is set by the endowment, not by the gate being shut.
+the stopping point is where a depleting endowment meets a rising gate. Which of
+the two "caused" it is not separable — the illustration is defined by both at
+once, and the mutation-site section below reports what was actually observed
+rather than which term to credit.
 
-**Every other outcome in this seed moved the wrong way.**
+**The hunter outcomes in this seed moved the wrong way; the prey outcomes did
+not.**
 
 | Seed-1 hunting arm | captures | offspring | closing hunters | founder extinction | adult occupancy 0 / 1 |
 | --- | ---: | ---: | ---: | ---: | --- |
@@ -199,18 +203,53 @@ paired seed-1 pilot run in new exclusive directories**; the earlier pilot and it
 
 | | |
 | --- | --- |
-| Instrumentation commit | `ae866a5` (branch head) |
-| Pinned executable SHA256 | `27c138c5843eb58ab78355e1440e57c600380c53ac64f3a99731cf8c554b5846` |
-| Build id | `0.1.0+ae866a5` |
-| Outputs | `captures/hunter-size-gate-pilot-flow-2026-09-13/` |
+| Instrumentation commit | `ae866a5` |
+| Boundary correction | `40a98b6` (branch head) |
+| Pinned executable SHA256 | `dcf0fab351e7f6f34b6e54a58bbead5db1fb1c89376e7165fc89f523aaff3afe` |
+| Build id | `0.1.0+40a98b6` |
+| Outputs | `captures/hunter-size-gate-pilot-boundary-2026-09-13/` |
+
+### One more independent failure, found and fixed
+
+An [independent review](astra-hunter-size-gate-review-2026-09-13.md) reported
+three failures, not two. The first package fixed its two JavaScript ones and
+**overlooked its Rust one**: the ledger updated `max_structure` and
+`first_adult_tick` only at the *pre-growth* observation, so a completed increment
+was noticed a tick late and one landing on a death or horizon tick vanished from
+the record entirely. Its fixture is installed unchanged as
+`crates/cubarium-core/tests/astra_size_gate_review.rs`; it reproduced **1 passed,
+2 failed** at `ae866a5` and passes **3/3** at `40a98b6`.
+
+The fix is observer metadata only. `record_growth` now takes the post-growth
+structure and the adult structure, read at the assignment that completed the
+increment, and updates the completed size and adult boundary there; the
+pre-growth size and threshold of the first growth stay separate in
+`structure_last`. `first_growth_tick` is when the transaction happened;
+`first_adult_tick` is the boundary from which the member is adult, the `now + 1`
+the core stamps its own events with.
+
+**It changed no number in this pilot**, which is the point: the corrected build
+reproduces the previous instrumented pilot's payloads, state hashes and event
+streams on all 12 arms. In this trajectory growth stopped thousands of ticks
+before death, so a later observation did see the final size. The defect only
+shows on a final-tick increment, which is why it needed a synthetic fixture.
 
 ### Three identity gates, all 6 of 6
 
 | Comparison | Result | What it establishes |
 | --- | --- | --- |
-| New reference vs retained `512ee52` | **6/6** | the instrumented build still reproduces the original charge80 artifacts |
-| New reference vs the earlier pilot's reference | **6/6** | — |
-| New candidate vs the earlier pilot's candidate | **6/6** | **the observer changes biology by zero at full horizon**: the earlier run had no ledger in the loop at all, and 144000 ticks × 6 arms come out with identical payloads, state hashes and event streams |
+| Reference vs retained `512ee52` | **6/6** | the instrumented build still reproduces the original charge80 artifacts |
+| `ae866a5` reference vs the pre-ledger pilot's reference | **6/6** | — |
+| `ae866a5` candidate vs the pre-ledger pilot's candidate | **6/6** | **the observer changes biology by zero at full horizon**: that run had no ledger in the loop at all, and 144000 ticks × 6 arms come out with identical payloads, state hashes and event streams |
+| `40a98b6` vs `ae866a5`, both recipes | **6/6 each** | the boundary correction is observer-only: identical payloads, state hashes and event streams |
+
+### Exact adult records, all 12 arms
+
+`first_adult_tick` is 144000 for every placed founder — adult at its first
+observation — and **`null` for every descendant in both recipes**. No child
+reached adult structure. Maximum descendant structure is exactly 0.800000 in the
+reference and 0.848500 for the three candidate growers. Adult occupancy never
+exceeded one in any arm.
 
 Each arm additionally ran a bounded in-run probe — its own opening stepped 2000
 ticks twice, with and without recording — and all six report identical state and
@@ -247,11 +286,13 @@ altered growth transaction was at tick **170401** — the child's own birth tick
 Three facts follow from the records rather than from arithmetic about them.
 
 **Every one of the 485 steps was rate-limited.** Not one was bound by reserve, by
-the battery or by remaining structure. The plateau at 0.8485 is therefore not a
-cap biting: growth simply stopped being permitted, as the rising gate (0.48 →
-0.5091) met the falling reserve. The earlier report's "the proposal's arithmetic
-predicted 0.8485" is now replaced by the measurement — 485 × 0.0001 from 0.8, with
-the gate at the last permitted step recorded.
+the battery or by remaining structure. So the plateau at 0.8485 is not an
+increment cap biting — the branch simply stopped being entered. What the record
+shows is the state at that point: the gate had risen 0.48 → 0.5091 while the
+reserve fell. It does not separate "the endowment ran out" from "the gate rose to
+meet it"; those are the two sides of the same predicate, and the ledger reports
+both rather than crediting one. The earlier report's appeal to the proposal's
+illustrative arithmetic is replaced by these observations.
 
 **`17:3` grew entirely on its birth escrow and never ate at all.** Its recorded
 intake is 0.000000 across digestion, frugivory, grazing and scavenging. In the
@@ -303,11 +344,11 @@ node scripts/hunter-size-gate-parity.mjs \
   --seeds 1 --binary-sha256 90d30b8b1b7f2f7e34a8bcc25d5785144b51f84ed24b80b317d4234c15e82a4f
 ```
 
-### The instrumented pilot, at `ae866a5`
+### The instrumented pilot, at `40a98b6`
 
 ```
-BIN=captures/build-cache/size-gate/release/examples/hunter_compare   # 27c138c5…
-N=captures/hunter-size-gate-pilot-flow-2026-09-13
+BIN=captures/build-cache/size-gate/release/examples/hunter_compare   # dcf0fab3…
+N=captures/hunter-size-gate-pilot-boundary-2026-09-13
 $BIN captures/hunter-openings-2026-09-13 $N/reference-charge80-seed1 \
   --profile reserve-targets-charge80-v1 --seeds 1 --ticks 144000
 $BIN captures/hunter-openings-2026-09-13 $N/candidate-size-gate-seed1 \
@@ -316,35 +357,47 @@ $BIN captures/hunter-openings-2026-09-13 $N/candidate-size-gate-seed1 \
 node scripts/hunter-size-gate-parity.mjs \
   --reference $N/reference-charge80-seed1 --candidate $N/candidate-size-gate-seed1 \
   --retained captures/hunter-charge-candidate-two-hour-512ee52 \
-  --prior-reference captures/hunter-size-gate-pilot-2026-09-13/reference-charge80-seed1 \
-  --prior-candidate captures/hunter-size-gate-pilot-2026-09-13/candidate-size-gate-seed1 \
-  --seeds 1 --binary-sha256 27c138c5843eb58ab78355e1440e57c600380c53ac64f3a99731cf8c554b5846
+  --prior-reference captures/hunter-size-gate-pilot-flow-2026-09-13/reference-charge80-seed1 \
+  --prior-candidate captures/hunter-size-gate-pilot-flow-2026-09-13/candidate-size-gate-seed1 \
+  --seeds 1 --binary-sha256 dcf0fab351e7f6f34b6e54a58bbead5db1fb1c89376e7165fc89f523aaff3afe
 ```
 
-Artifacts, retained unchanged: `captures/hunter-size-gate-pilot-2026-09-13/` (the
-first pilot, with its own `90d30b8b…` frozen binary) and
-`captures/hunter-size-gate-pilot-flow-2026-09-13/` (the instrumented one, 77 MB).
-Committed copies:
+Three pilots are retained unchanged, each with its own frozen binary:
+`captures/hunter-size-gate-pilot-2026-09-13/` (`90d30b8b…`, pre-ledger; its census
+is a census and is not reinterpreted as per-tick evidence),
+`captures/hunter-size-gate-pilot-flow-2026-09-13/` (`27c138c5…`, first
+instrumented) and `captures/hunter-size-gate-pilot-boundary-2026-09-13/`
+(`dcf0fab3…`, current). Committed copies:
 [`assets/hunter-size-gate-pilot-parity-2026-09-13.json`](assets/hunter-size-gate-pilot-parity-2026-09-13.json)
-and [`assets/hunter-size-gate-flow-pilot-2026-09-13.json`](assets/hunter-size-gate-flow-pilot-2026-09-13.json).
+and [`assets/hunter-size-gate-flow-pilot-2026-09-13.json`](assets/hunter-size-gate-flow-pilot-2026-09-13.json)
+(the current reduction).
 
-`node --test scripts/hunter-size-gate-parity.test.mjs` — **14 passed, 0 failed**
-(9 before; the 5 new cover the flow-record checks, per-source identity, the actual
-first growth, and two error paths an
-[independent review](astra-hunter-size-gate-review-2026-09-13.md) reported: two
-unreadable snapshots certifying each other as identical, and a matching census
-prefix passing as full stream identity. Both were real defects in this reducer and
-are fixed; that review's two probes now pass.)
+### All suites, independent and own
 
-Branch tests at `ae866a5`: `cargo test -p cubarium-core` — **153 lib** (16 in
-`hunter_size_gate`, one new for `FlowLedger::validate`) plus every integration
-suite, 0 failures. `cargo test --release -p cubarium --example hunter_compare` —
-**78**, 0 failures.
+| Suite | Result |
+| --- | --- |
+| `cargo test -p cubarium-core --test astra_size_gate_review` (independent, installed unchanged) | **3 passed** — was 1 passed / 2 failed at `ae866a5` |
+| `node --test scripts/astra-hunter-size-gate-review.test.mjs` (independent) | **2 passed** |
+| `node --test scripts/hunter-size-gate-parity.test.mjs` | **14 passed** |
+| `cargo test -p cubarium-core --test hunter_size_gate` | **16 passed** |
+| `cargo test -p cubarium-core` (whole crate) | **154 lib** plus every integration suite, 0 failures |
+| `cargo test --release -p cubarium --example hunter_compare` | **78 passed** |
 
-### Launch-ready for all twelve
+The reducer's 14 include the two error paths the independent review reported —
+two unreadable snapshots certifying each other as identical, and a matching census
+prefix passing as full stream identity. Both were real defects here and are fixed.
+
+The unsupported-version test is a **stand-in**: it runs in this build with version
+6, and does not execute a genuine pre-change binary against a version 5 payload.
+That a real old reader refuses version 5 follows from its `[3, 4]` supported set
+by source inspection, not from an executed test.
+
+### Ready to launch all twelve, pending root's review
 
 The same two commands with `--seeds` omitted collect all twelve seeds under both
-recipes. That is **not** started and needs root's review of this package first.
+recipes with the `dcf0fab3…` binary. Every gate this package can check is green,
+so nothing further is blocking on my side — but it is **not started**, and root's
+review of this package is the remaining precondition.
 
 ## What I did not do
 

@@ -5,15 +5,15 @@
  "seeds": [
   1
  ],
- "pinned_binary_sha256": "27c138c5843eb58ab78355e1440e57c600380c53ac64f3a99731cf8c554b5846",
+ "pinned_binary_sha256": "dcf0fab351e7f6f34b6e54a58bbead5db1fb1c89376e7165fc89f523aaff3afe",
  "runs": {
-  "reference": "/home/wrysk/wryskware/cubarium/captures/hunter-size-gate-pilot-flow-2026-09-13/reference-charge80-seed1",
-  "candidate": "/home/wrysk/wryskware/cubarium/captures/hunter-size-gate-pilot-flow-2026-09-13/candidate-size-gate-seed1",
+  "reference": "/home/wrysk/wryskware/cubarium/captures/hunter-size-gate-pilot-boundary-2026-09-13/reference-charge80-seed1",
+  "candidate": "/home/wrysk/wryskware/cubarium/captures/hunter-size-gate-pilot-boundary-2026-09-13/candidate-size-gate-seed1",
   "retained_reference": "/home/wrysk/wryskware/cubarium/captures/hunter-charge-candidate-two-hour-512ee52"
  },
  "builds": {
-  "reference": "0.1.0+ae866a5",
-  "candidate": "0.1.0+ae866a5",
+  "reference": "0.1.0+40a98b6",
+  "candidate": "0.1.0+40a98b6",
   "retained": "0.1.0+512ee52"
  },
  "manifests": {
@@ -53,9 +53,9 @@
       "crc32": 1297928872,
       "payload_bytes": 107919,
       "retained_sha256": "e50a070f40ada9ec7302f51a4784dd77ad30220a65a1657f38137abf53ca1b91",
-      "rerun_sha256": "197b1b972b5b46e861e21493119c78d2c05ddbafd5e3303af8cff71448b1bff2",
+      "rerun_sha256": "d2a622e09bd1e99f8afe2c2a80e09f83415402d9226a22b27f7dc4a34b3ec6c8",
       "retained_build": "0.1.0+512ee52",
-      "rerun_build": "0.1.0+ae866a5",
+      "rerun_build": "0.1.0+40a98b6",
       "header_differs_by_build_id": true
      },
      "closing.cubw": {
@@ -66,9 +66,9 @@
       "crc32": 464783660,
       "payload_bytes": 111038,
       "retained_sha256": "19e42776255306e819a0b9d37350bed0cc8ac3b614241bfc852eb104c4a3bb78",
-      "rerun_sha256": "e9b9025f1dd9644a1a355705ec4c83e6d0674b578d4097e95848d1f43a45e80a",
+      "rerun_sha256": "d652a31d44bfc91d474847eab58fe076f75289345dd07bed609e620ba8e471a9",
       "retained_build": "0.1.0+512ee52",
-      "rerun_build": "0.1.0+ae866a5",
+      "rerun_build": "0.1.0+40a98b6",
       "header_differs_by_build_id": true
      }
     }
@@ -90,9 +90,9 @@
       "crc32": 580971026,
       "payload_bytes": 108324,
       "retained_sha256": "36f27ef90ef45690107c5fc29aee7cbcd048f84ff6d6f988f2527a71fc30dac4",
-      "rerun_sha256": "ebd3ea99dc174d1f4a9e847a1390ec042f57a2991ef2e5a0ff5b2c36ca23ab1a",
+      "rerun_sha256": "55e2de8d3fc93cab7764539dd9bd128a4b8dde9d9172ccdeb4e4c2d655cc1e62",
       "retained_build": "0.1.0+512ee52",
-      "rerun_build": "0.1.0+ae866a5",
+      "rerun_build": "0.1.0+40a98b6",
       "header_differs_by_build_id": true
      },
      "closing.cubw": {
@@ -103,9 +103,9 @@
       "crc32": 344162417,
       "payload_bytes": 106534,
       "retained_sha256": "24fa95a76bde7ee2521c258861c524f7305d3b534f0855ad55df031286c8d29f",
-      "rerun_sha256": "78f54891490eabc5bede1527443a6888c9691986242ffd2c066d6d3fd310b4ef",
+      "rerun_sha256": "332a36b6f071327d1aee1a10c7a1231e7269470ee270c321c51a18600a04cf03",
       "retained_build": "0.1.0+512ee52",
-      "rerun_build": "0.1.0+ae866a5",
+      "rerun_build": "0.1.0+40a98b6",
       "header_differs_by_build_id": true
      }
     }
@@ -127,9 +127,9 @@
       "crc32": 889067194,
       "payload_bytes": 108796,
       "retained_sha256": "e412e05e486ece54fafd2126b47d4787f44590ef5cb2eaa4ba798d74d93b6edb",
-      "rerun_sha256": "123f7aba965bc32a51691de78f6c1682500a657e1a7240405953b15918552632",
+      "rerun_sha256": "e6096a4211150ab7c2ddc2dadfaa98d770c4ee06a0a006f20e70c66ae71c0a4c",
       "retained_build": "0.1.0+512ee52",
-      "rerun_build": "0.1.0+ae866a5",
+      "rerun_build": "0.1.0+40a98b6",
       "header_differs_by_build_id": true
      },
      "closing.cubw": {
@@ -140,9 +140,9 @@
       "crc32": 2985607755,
       "payload_bytes": 108002,
       "retained_sha256": "d447930563fe37ac37afb52ece69d10ebbb74919719a1f7eb44f758fb4d4872f",
-      "rerun_sha256": "ca8e6bb324628eb4efec5abf7d3d3d767a63335d7da02b685b00dc5e68641c17",
+      "rerun_sha256": "a481e0c13aff35274c5e7c6402d9e31923fb91eddc5547903735d0dab8cd2620",
       "retained_build": "0.1.0+512ee52",
-      "rerun_build": "0.1.0+ae866a5",
+      "rerun_build": "0.1.0+40a98b6",
       "header_differs_by_build_id": true
      }
     }
@@ -164,9 +164,9 @@
       "crc32": 726895031,
       "payload_bytes": 108796,
       "retained_sha256": "e2e897f80486265354bfc67b3ae1a89afee320a1dcbdd2d3c5b4208985401fb6",
-      "rerun_sha256": "296ceef7a7712e8f5f4f8585190928c885fa73c914ea7823d6c82e079ba984ae",
+      "rerun_sha256": "1752c6a5fa05acaa60ee5901126366a667469980ca7fcc4131f62499c98ec294",
       "retained_build": "0.1.0+512ee52",
-      "rerun_build": "0.1.0+ae866a5",
+      "rerun_build": "0.1.0+40a98b6",
       "header_differs_by_build_id": true
      },
      "closing.cubw": {
@@ -177,9 +177,9 @@
       "crc32": 2851197473,
       "payload_bytes": 105397,
       "retained_sha256": "cb45d216520582ee1301ca45f489adf7bf889854d70fbd72cf4c84ed0d8f5543",
-      "rerun_sha256": "0dbf9ea1a916ffcb7975474d7dc38a41d13d74193e64e83aeb7193e06a60a0a0",
+      "rerun_sha256": "780e5684d8d37f8ad46f0ca943c85ab2488136919d91d0ae6a8a4fcbfe5719c5",
       "retained_build": "0.1.0+512ee52",
-      "rerun_build": "0.1.0+ae866a5",
+      "rerun_build": "0.1.0+40a98b6",
       "header_differs_by_build_id": true
      }
     }
@@ -201,9 +201,9 @@
       "crc32": 1606122372,
       "payload_bytes": 108796,
       "retained_sha256": "3108a7070f91a6a7ddcdd4000d2c7e9391017041ad2a2200d3075c88aaf84dd7",
-      "rerun_sha256": "5647afd689004e31983953531c0ba1a9b83bf6770fe109a91573edc553fccded",
+      "rerun_sha256": "6dfe7429362d15c0566770d436eb07c090aeb3bc109923d17c34aa3d9f457614",
       "retained_build": "0.1.0+512ee52",
-      "rerun_build": "0.1.0+ae866a5",
+      "rerun_build": "0.1.0+40a98b6",
       "header_differs_by_build_id": true
      },
      "closing.cubw": {
@@ -214,9 +214,9 @@
       "crc32": 3604896261,
       "payload_bytes": 105978,
       "retained_sha256": "40f81bd344abb3c3aed999509edd675025ba3cbfeb6ce9a3c98ba53af162b180",
-      "rerun_sha256": "cc72da69d0312921baf378edcf7ee718b21bde25ddd11b0dd3ef209e88ba49b8",
+      "rerun_sha256": "1b6149da909167ab3ca66c3c60db563751f04608fe99d48dd6649398c86fb23c",
       "retained_build": "0.1.0+512ee52",
-      "rerun_build": "0.1.0+ae866a5",
+      "rerun_build": "0.1.0+40a98b6",
       "header_differs_by_build_id": true
      }
     }
@@ -238,9 +238,9 @@
       "crc32": 1075242121,
       "payload_bytes": 108796,
       "retained_sha256": "64a4b9abf57123ac700dd5bc57700b19e95b38e58289309512a6fff89010d092",
-      "rerun_sha256": "44a8600e40dd094e8d84658255cfd14d88a41a7a7be462205d15669333e0ab34",
+      "rerun_sha256": "0285091690a27d9d7910ba7b4fd7024c70ff114b064e64ce1837ca3763bb9aef",
       "retained_build": "0.1.0+512ee52",
-      "rerun_build": "0.1.0+ae866a5",
+      "rerun_build": "0.1.0+40a98b6",
       "header_differs_by_build_id": true
      },
      "closing.cubw": {
@@ -251,9 +251,9 @@
       "crc32": 1263408298,
       "payload_bytes": 104951,
       "retained_sha256": "98af371919316fe37e73561e67ed084a348157b351504a5874cc0734e333e820",
-      "rerun_sha256": "500d63207427e4e2cca74b3d5a3614f003fe189c5972367e2c9e801c6e77caf4",
+      "rerun_sha256": "94ce1d252a2c2987485e7f04cdc989a741dc26d52ea6ccce7c57db553e30cdbe",
       "retained_build": "0.1.0+512ee52",
-      "rerun_build": "0.1.0+ae866a5",
+      "rerun_build": "0.1.0+40a98b6",
       "header_differs_by_build_id": true
      }
     }
@@ -1821,9 +1821,9 @@
  },
  "observer_neutrality_at_full_horizon": {
   "reference": {
-   "prior_root": "/home/wrysk/wryskware/cubarium/captures/hunter-size-gate-pilot-2026-09-13/reference-charge80-seed1",
-   "prior_build": "0.1.0+9f4cf7d",
-   "prior_executable_sha256": "90d30b8b1b7f2f7e34a8bcc25d5785144b51f84ed24b80b317d4234c15e82a4f",
+   "prior_root": "/home/wrysk/wryskware/cubarium/captures/hunter-size-gate-pilot-flow-2026-09-13/reference-charge80-seed1",
+   "prior_build": "0.1.0+ae866a5",
+   "prior_executable_sha256": "27c138c5843eb58ab78355e1440e57c600380c53ac64f3a99731cf8c554b5846",
    "arms": 6,
    "arms_reproduced": 6,
    "rows": [
@@ -1843,10 +1843,10 @@
        "state_hash": "8827557633189694280",
        "crc32": 1297928872,
        "payload_bytes": 107919,
-       "retained_sha256": "5238a2aaa81c694d444c15bbffb078e72408d28d012ee38bae00af4fc03c8597",
-       "rerun_sha256": "197b1b972b5b46e861e21493119c78d2c05ddbafd5e3303af8cff71448b1bff2",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "197b1b972b5b46e861e21493119c78d2c05ddbafd5e3303af8cff71448b1bff2",
+       "rerun_sha256": "d2a622e09bd1e99f8afe2c2a80e09f83415402d9226a22b27f7dc4a34b3ec6c8",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       },
       "closing.cubw": {
@@ -1856,10 +1856,10 @@
        "state_hash": "16863221843856013449",
        "crc32": 464783660,
        "payload_bytes": 111038,
-       "retained_sha256": "336652275e7c3fc9f8bd18a142c6a811be4540ad6d9902724228fe10e8461ed9",
-       "rerun_sha256": "e9b9025f1dd9644a1a355705ec4c83e6d0674b578d4097e95848d1f43a45e80a",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "e9b9025f1dd9644a1a355705ec4c83e6d0674b578d4097e95848d1f43a45e80a",
+       "rerun_sha256": "d652a31d44bfc91d474847eab58fe076f75289345dd07bed609e620ba8e471a9",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       }
      }
@@ -1880,10 +1880,10 @@
        "state_hash": "9917134089846720639",
        "crc32": 580971026,
        "payload_bytes": 108324,
-       "retained_sha256": "a7e835ac53d955f4f826e2989b87e5cc922545f6176d8e5e44db37f1fe6134fd",
-       "rerun_sha256": "ebd3ea99dc174d1f4a9e847a1390ec042f57a2991ef2e5a0ff5b2c36ca23ab1a",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "ebd3ea99dc174d1f4a9e847a1390ec042f57a2991ef2e5a0ff5b2c36ca23ab1a",
+       "rerun_sha256": "55e2de8d3fc93cab7764539dd9bd128a4b8dde9d9172ccdeb4e4c2d655cc1e62",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       },
       "closing.cubw": {
@@ -1893,10 +1893,10 @@
        "state_hash": "17192407377813742119",
        "crc32": 344162417,
        "payload_bytes": 106534,
-       "retained_sha256": "b574e4764f97899c7b31ecf4a871f76076e35ad13b021ed587e7b6edb3750d04",
-       "rerun_sha256": "78f54891490eabc5bede1527443a6888c9691986242ffd2c066d6d3fd310b4ef",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "78f54891490eabc5bede1527443a6888c9691986242ffd2c066d6d3fd310b4ef",
+       "rerun_sha256": "332a36b6f071327d1aee1a10c7a1231e7269470ee270c321c51a18600a04cf03",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       }
      }
@@ -1917,10 +1917,10 @@
        "state_hash": "16454917678005303022",
        "crc32": 889067194,
        "payload_bytes": 108796,
-       "retained_sha256": "ea249a255e5dc69782895519c1b15b0aa95859f60fc063ae85a7c8f0b8315629",
-       "rerun_sha256": "123f7aba965bc32a51691de78f6c1682500a657e1a7240405953b15918552632",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "123f7aba965bc32a51691de78f6c1682500a657e1a7240405953b15918552632",
+       "rerun_sha256": "e6096a4211150ab7c2ddc2dadfaa98d770c4ee06a0a006f20e70c66ae71c0a4c",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       },
       "closing.cubw": {
@@ -1930,10 +1930,10 @@
        "state_hash": "13223481950156629204",
        "crc32": 2985607755,
        "payload_bytes": 108002,
-       "retained_sha256": "83336c05bcb1326fdaf0d39a49c3d722b15797caf70d435db3aaa42947ac207e",
-       "rerun_sha256": "ca8e6bb324628eb4efec5abf7d3d3d767a63335d7da02b685b00dc5e68641c17",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "ca8e6bb324628eb4efec5abf7d3d3d767a63335d7da02b685b00dc5e68641c17",
+       "rerun_sha256": "a481e0c13aff35274c5e7c6402d9e31923fb91eddc5547903735d0dab8cd2620",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       }
      }
@@ -1954,10 +1954,10 @@
        "state_hash": "9127337083127124541",
        "crc32": 726895031,
        "payload_bytes": 108796,
-       "retained_sha256": "ccdbf3dbbbec843e1f14434f050336cadc2fb00baef8e011b1ec273f4464698d",
-       "rerun_sha256": "296ceef7a7712e8f5f4f8585190928c885fa73c914ea7823d6c82e079ba984ae",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "296ceef7a7712e8f5f4f8585190928c885fa73c914ea7823d6c82e079ba984ae",
+       "rerun_sha256": "1752c6a5fa05acaa60ee5901126366a667469980ca7fcc4131f62499c98ec294",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       },
       "closing.cubw": {
@@ -1967,10 +1967,10 @@
        "state_hash": "13499101884866940145",
        "crc32": 2851197473,
        "payload_bytes": 105397,
-       "retained_sha256": "ce0bc18a93e3c8fe4f76f19e21345c42376745d9bf5beee03891f2547826a817",
-       "rerun_sha256": "0dbf9ea1a916ffcb7975474d7dc38a41d13d74193e64e83aeb7193e06a60a0a0",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "0dbf9ea1a916ffcb7975474d7dc38a41d13d74193e64e83aeb7193e06a60a0a0",
+       "rerun_sha256": "780e5684d8d37f8ad46f0ca943c85ab2488136919d91d0ae6a8a4fcbfe5719c5",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       }
      }
@@ -1991,10 +1991,10 @@
        "state_hash": "13569971266348239755",
        "crc32": 1606122372,
        "payload_bytes": 108796,
-       "retained_sha256": "4b8c16093a7f98d3c5176addc6dfa30019918c463662f1d708145778956fa50b",
-       "rerun_sha256": "5647afd689004e31983953531c0ba1a9b83bf6770fe109a91573edc553fccded",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "5647afd689004e31983953531c0ba1a9b83bf6770fe109a91573edc553fccded",
+       "rerun_sha256": "6dfe7429362d15c0566770d436eb07c090aeb3bc109923d17c34aa3d9f457614",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       },
       "closing.cubw": {
@@ -2004,10 +2004,10 @@
        "state_hash": "16646122203596988084",
        "crc32": 3604896261,
        "payload_bytes": 105978,
-       "retained_sha256": "5e01e223a9b9a891ffb4d910de75586179201c89b3c7af7a35550cf2dff3238c",
-       "rerun_sha256": "cc72da69d0312921baf378edcf7ee718b21bde25ddd11b0dd3ef209e88ba49b8",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "cc72da69d0312921baf378edcf7ee718b21bde25ddd11b0dd3ef209e88ba49b8",
+       "rerun_sha256": "1b6149da909167ab3ca66c3c60db563751f04608fe99d48dd6649398c86fb23c",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       }
      }
@@ -2028,10 +2028,10 @@
        "state_hash": "7476954363294224820",
        "crc32": 1075242121,
        "payload_bytes": 108796,
-       "retained_sha256": "d34bff8d3c36ddbb5c0a3f828fa2a482bafcc33d187222725401ade21918fcc8",
-       "rerun_sha256": "44a8600e40dd094e8d84658255cfd14d88a41a7a7be462205d15669333e0ab34",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "44a8600e40dd094e8d84658255cfd14d88a41a7a7be462205d15669333e0ab34",
+       "rerun_sha256": "0285091690a27d9d7910ba7b4fd7024c70ff114b064e64ce1837ca3763bb9aef",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       },
       "closing.cubw": {
@@ -2041,10 +2041,10 @@
        "state_hash": "4368534544087259037",
        "crc32": 1263408298,
        "payload_bytes": 104951,
-       "retained_sha256": "f8d4c864eb83699e0499e62d117ca319330be5a62f6ae12167f2a85192c2a54e",
-       "rerun_sha256": "500d63207427e4e2cca74b3d5a3614f003fe189c5972367e2c9e801c6e77caf4",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "500d63207427e4e2cca74b3d5a3614f003fe189c5972367e2c9e801c6e77caf4",
+       "rerun_sha256": "94ce1d252a2c2987485e7f04cdc989a741dc26d52ea6ccce7c57db553e30cdbe",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       }
      }
@@ -2052,9 +2052,9 @@
    ]
   },
   "candidate": {
-   "prior_root": "/home/wrysk/wryskware/cubarium/captures/hunter-size-gate-pilot-2026-09-13/candidate-size-gate-seed1",
-   "prior_build": "0.1.0+9f4cf7d",
-   "prior_executable_sha256": "90d30b8b1b7f2f7e34a8bcc25d5785144b51f84ed24b80b317d4234c15e82a4f",
+   "prior_root": "/home/wrysk/wryskware/cubarium/captures/hunter-size-gate-pilot-flow-2026-09-13/candidate-size-gate-seed1",
+   "prior_build": "0.1.0+ae866a5",
+   "prior_executable_sha256": "27c138c5843eb58ab78355e1440e57c600380c53ac64f3a99731cf8c554b5846",
    "arms": 6,
    "arms_reproduced": 6,
    "rows": [
@@ -2074,10 +2074,10 @@
        "state_hash": "8827557633189694280",
        "crc32": 1297928872,
        "payload_bytes": 107919,
-       "retained_sha256": "5238a2aaa81c694d444c15bbffb078e72408d28d012ee38bae00af4fc03c8597",
-       "rerun_sha256": "197b1b972b5b46e861e21493119c78d2c05ddbafd5e3303af8cff71448b1bff2",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "197b1b972b5b46e861e21493119c78d2c05ddbafd5e3303af8cff71448b1bff2",
+       "rerun_sha256": "d2a622e09bd1e99f8afe2c2a80e09f83415402d9226a22b27f7dc4a34b3ec6c8",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       },
       "closing.cubw": {
@@ -2087,10 +2087,10 @@
        "state_hash": "16863221843856013449",
        "crc32": 464783660,
        "payload_bytes": 111038,
-       "retained_sha256": "336652275e7c3fc9f8bd18a142c6a811be4540ad6d9902724228fe10e8461ed9",
-       "rerun_sha256": "e9b9025f1dd9644a1a355705ec4c83e6d0674b578d4097e95848d1f43a45e80a",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "e9b9025f1dd9644a1a355705ec4c83e6d0674b578d4097e95848d1f43a45e80a",
+       "rerun_sha256": "d652a31d44bfc91d474847eab58fe076f75289345dd07bed609e620ba8e471a9",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       }
      }
@@ -2111,10 +2111,10 @@
        "state_hash": "15119259307688662920",
        "crc32": 2594221322,
        "payload_bytes": 108324,
-       "retained_sha256": "8d6c2edd99581f609adc606977c651c809c8e7839f3fac113e52ea6e13d15d5f",
-       "rerun_sha256": "a55107a0e360fe1c0701e6d4184b8fc200737eaf299ee5fceb2a288cf98d22ec",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "a55107a0e360fe1c0701e6d4184b8fc200737eaf299ee5fceb2a288cf98d22ec",
+       "rerun_sha256": "20c6b6e4e331aedc68e9ad0bfc0ec071167e4788e76ca584b7593fcc6ef75b06",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       },
       "closing.cubw": {
@@ -2124,10 +2124,10 @@
        "state_hash": "6092097967040123824",
        "crc32": 2894317417,
        "payload_bytes": 106534,
-       "retained_sha256": "7db996f77fcc164057abf18207236c45c8fda53b4f1b25de0d816a74fd0c483f",
-       "rerun_sha256": "385682fefcd528e164aeb33ec4deb5e9613ad92e93ef2a19162f25fca804ceca",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "385682fefcd528e164aeb33ec4deb5e9613ad92e93ef2a19162f25fca804ceca",
+       "rerun_sha256": "f0585832052b8bcbca9113fb6460a06faa132308c4cdc437a3eb5af2d57a0f6a",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       }
      }
@@ -2148,10 +2148,10 @@
        "state_hash": "4586037057056519917",
        "crc32": 1184528589,
        "payload_bytes": 108796,
-       "retained_sha256": "d987b2a0b084f7b72ce4118006ecf0109e043e8e2b521bd1445895981d386bfb",
-       "rerun_sha256": "61c276326f17034d29c6e27888ed51b6a519a25bb76f0b98c054a3f3fc8b178e",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "61c276326f17034d29c6e27888ed51b6a519a25bb76f0b98c054a3f3fc8b178e",
+       "rerun_sha256": "3fa6f1ade239d6eeca33a29bd28a2ec207f9b92b4629dd84e6739f8e7fe70149",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       },
       "closing.cubw": {
@@ -2161,10 +2161,10 @@
        "state_hash": "13507766475391618963",
        "crc32": 167019859,
        "payload_bytes": 108002,
-       "retained_sha256": "350bba47d01cc638ca57e2fd1708b6b8341c339916c687ebedef857de84eb85b",
-       "rerun_sha256": "fde306766c02ffd197d1a6ec4bd4081abc65b0b46d13b79bce65ca12b7e94815",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "fde306766c02ffd197d1a6ec4bd4081abc65b0b46d13b79bce65ca12b7e94815",
+       "rerun_sha256": "25d61abb84729c0aaa00a3ef561cdd6af03e2ecff058a53bfba44abcbf6e58d8",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       }
      }
@@ -2185,10 +2185,10 @@
        "state_hash": "463298784316725918",
        "crc32": 1496836032,
        "payload_bytes": 108796,
-       "retained_sha256": "8da3cab50647866d700e7419a239e8d21abe49012f2adeb73a4bceb6eadf1d83",
-       "rerun_sha256": "92f1ab7931ff1842853415ec4cc024c0273bc202584ea72f58671e958862acb7",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "92f1ab7931ff1842853415ec4cc024c0273bc202584ea72f58671e958862acb7",
+       "rerun_sha256": "365ee6e3b51d1757d73136f4cd3b9c7a1d8896557d67c0fcf12b66314fa93ef1",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       },
       "closing.cubw": {
@@ -2198,10 +2198,10 @@
        "state_hash": "11318993488284330598",
        "crc32": 3747946689,
        "payload_bytes": 107157,
-       "retained_sha256": "1096a4a19f8c920b0bc39d1e08e5a577f658a25b77b4e6114e86c532f749d186",
-       "rerun_sha256": "41e0d7ccaf2f33a33c2aa64efdfdeaf655f04654a34855152c3a219045c0dcc2",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "41e0d7ccaf2f33a33c2aa64efdfdeaf655f04654a34855152c3a219045c0dcc2",
+       "rerun_sha256": "ab6908f7a740c916e0de1547468156552e1d8725ba0bf494ae0854bd6cb0e18d",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       }
      }
@@ -2222,10 +2222,10 @@
        "state_hash": "12410896136635793508",
        "crc32": 769594867,
        "payload_bytes": 108796,
-       "retained_sha256": "160f116440685db078e2d34e42348df48a883e14bd8c3efa2c7b21063fa93e3e",
-       "rerun_sha256": "e06b9be043ab1f3b73ea271151db45bd9dac7382368b03a88487c3b92c5e0e2d",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "e06b9be043ab1f3b73ea271151db45bd9dac7382368b03a88487c3b92c5e0e2d",
+       "rerun_sha256": "0803c27871514b85ecf2f8dc3f2abea096f19625286a6f98f6b1d6d50cd54225",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       },
       "closing.cubw": {
@@ -2235,10 +2235,10 @@
        "state_hash": "2930867977343670219",
        "crc32": 1860050205,
        "payload_bytes": 105978,
-       "retained_sha256": "65b95804205074ad8285f1ded7666d43bf99f3664d5e1ade9ac15b5c5ecaa65d",
-       "rerun_sha256": "b247f63b969cb0b0e82cf8c5ded35141cdef1e12502f74a13c1cc93c8363f426",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "b247f63b969cb0b0e82cf8c5ded35141cdef1e12502f74a13c1cc93c8363f426",
+       "rerun_sha256": "144a8f1c8e48a29b0442fc0b4de187904d6b7fc37570c25aeb056429ce44baa6",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       }
      }
@@ -2259,10 +2259,10 @@
        "state_hash": "15179528218647899707",
        "crc32": 846367486,
        "payload_bytes": 108796,
-       "retained_sha256": "2f26674fc3a20cff0ef5fb948505c740d43860078c3de95b957026c76b26579b",
-       "rerun_sha256": "29d722696a448035e31809bf2c1ae4b98550301a81ac1c8f49625a4217acbc39",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "29d722696a448035e31809bf2c1ae4b98550301a81ac1c8f49625a4217acbc39",
+       "rerun_sha256": "86e637a9490e646034fadbf6f3d514aa9bd37aba47c0297801067b7b02ce6c3b",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       },
       "closing.cubw": {
@@ -2272,10 +2272,10 @@
        "state_hash": "16454193366263640455",
        "crc32": 1698869502,
        "payload_bytes": 107504,
-       "retained_sha256": "54589f2d51955012505c6e7bff3069a8418fcb88a070c3c1816effbfa873df87",
-       "rerun_sha256": "0969783f13c84d65a1396860fd6048c978490f359fbda557a168fb02f9b1d7d2",
-       "retained_build": "0.1.0+9f4cf7d",
-       "rerun_build": "0.1.0+ae866a5",
+       "retained_sha256": "0969783f13c84d65a1396860fd6048c978490f359fbda557a168fb02f9b1d7d2",
+       "rerun_sha256": "81fe7b7effc4a1da87cfad39be232bd78393b05417cc09ddff4afad8a62bc0f9",
+       "retained_build": "0.1.0+ae866a5",
+       "rerun_build": "0.1.0+40a98b6",
        "header_differs_by_build_id": true
       }
      }

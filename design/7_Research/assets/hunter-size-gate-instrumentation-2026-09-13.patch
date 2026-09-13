@@ -1,7 +1,7 @@
 From 8390cdd97e4629e31951c8c290f2cd3a29ab6018 Mon Sep 17 00:00:00 2001
 From: Wrysk <wrysk@wryskware.dev>
 Date: Sun, 13 Sep 2026 06:15:33 -0700
-Subject: [PATCH 1/3] Add semantic profile version 5: size-aware permission for
+Subject: [PATCH 1/4] Add semantic profile version 5: size-aware permission for
  paid hunter growth
 
 Experiment branch only, based on the reviewed diagnostic 0d867f1 so the bounded
@@ -1153,7 +1153,7 @@ index 430619f..cce3d83 100644
 From 9f4cf7de260167b61a14f7b0035cc35eb13e0993 Mon Sep 17 00:00:00 2001
 From: Wrysk <wrysk@wryskware.dev>
 Date: Sun, 13 Sep 2026 06:16:25 -0700
-Subject: [PATCH 2/3] Drop an unused recipe helper in favour of asserting the
+Subject: [PATCH 2/4] Drop an unused recipe helper in favour of asserting the
  policy directly
 
 The size-gate recipe test now checks OxidationPolicy::Fixed(0.80) at the source
@@ -1205,7 +1205,7 @@ index cce3d83..92a8f65 100644
 From ae866a556a9d7032963cf80a8f4574f9f5611929 Mon Sep 17 00:00:00 2001
 From: Wrysk <wrysk@wryskware.dev>
 Date: Sun, 13 Sep 2026 06:34:14 -0700
-Subject: [PATCH 3/3] Wire the bounded flow ledger into hunter_compare
+Subject: [PATCH 3/4] Wire the bounded flow ledger into hunter_compare
 
 Closes the named gap from the seed-1 handoff: the runner recorded structure only
 at 200-tick census boundaries, which bounds when a change is first seen and cannot
@@ -1575,6 +1575,367 @@ index 92a8f65..764a67e 100644
          let cohorts: BTreeSet<_> = self
              .live
              .values()
+-- 
+2.55.0
+
+
+From 40a98b6dabbb1a04c09e57ca67d32a1b161b2dd1 Mon Sep 17 00:00:00 2001
+From: Wrysk <wrysk@wryskware.dev>
+Date: Sun, 13 Sep 2026 06:50:10 -0700
+Subject: [PATCH 4/4] Record completed growth size and adulthood at the
+ mutation boundary
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Astra's independent Rust fixture (8e5b52b) found a third failure this branch had
+not addressed: FlowLedger updated max_structure and first_adult_tick only at the
+pre-growth observation, so a completed increment was noticed a tick late, and one
+on a death or horizon tick vanished from the record entirely. Installed her
+fixture unchanged as crates/cubarium-core/tests/astra_size_gate_review.rs and
+reproduced it at ae866a5: 1 passed, 2 failed, matching root's diff inspection.
+
+This is observer metadata only. No threshold, rate, cost, gate, ordering or
+payment changed, and the passing third case — the unchanged paid reserve and
+battery debits and cost + e_r * grown heat — still passes untouched.
+
+record_growth now takes the post-growth structure and the adult structure, read
+at the assignment that completed the increment rather than derived from a delta,
+and updates the completed size and the adult boundary there. The pre-growth size
+and threshold of the first growth are kept separate: GrowthGate gains
+structure_last for the most recent predicate evaluation, which is what
+structure_at_first_growth needs, and max_structure is now seeded by the first
+structure sample of either kind.
+
+The two boundaries use two conventions because they are two quantities.
+first_growth_tick is when the transaction happened, the tick being stepped.
+first_adult_tick is the boundary from which the member is adult, which is the
+boundary that tick completes — the same now+1 the core stamps its own life and
+hunter events with. A member already adult when the predicate ran records that
+observation tick, and the two agree wherever both could fire.
+
+One existing expectation moved because it encoded the defect: the moving-gate
+test read max_structure 1.0, the last pre-growth observation, and now reads
+1.0001, the size the last increment left behind.
+
+Also marks the unsupported-version test honestly. It runs in this build with
+version 6 as the stand-in; it is not an executed genuine-old-reader test against
+a version 5 payload, and only a different binary could establish that.
+
+cargo test -p cubarium-core: 154 lib plus every integration suite, 0 failures,
+including astra_size_gate_review 3/3 and hunter_size_gate 16/16.
+cargo test --release -p cubarium --example hunter_compare: 78, 0 failures.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+---
+ crates/cubarium-core/src/flow.rs              | 83 +++++++++++++++++--
+ crates/cubarium-core/src/world.rs             |  5 ++
+ .../tests/astra_size_gate_review.rs           | 78 +++++++++++++++++
+ .../cubarium-core/tests/hunter_size_gate.rs   |  6 ++
+ 4 files changed, 166 insertions(+), 6 deletions(-)
+ create mode 100644 crates/cubarium-core/tests/astra_size_gate_review.rs
+
+diff --git a/crates/cubarium-core/src/flow.rs b/crates/cubarium-core/src/flow.rs
+index 1317f16..5b5e79b 100644
+--- a/crates/cubarium-core/src/flow.rs
++++ b/crates/cubarium-core/src/flow.rs
+@@ -190,7 +190,13 @@ pub struct GrowthGate {
+     pub reserve_zero_ticks: u64,
+     /// Size as seen at this site: the largest structure observed, and the boundaries at which
+     /// the member first grew and first reached adult structure.
++    ///
++    /// `max_structure` includes the size a completed increment left behind, so it covers a
++    /// growth step on a death or horizon tick that no later pre-growth observation would see.
++    /// `structure_last` is the *pre-growth* size at the most recent predicate evaluation, which
++    /// is what `structure_at_first_growth` needs; the two are separate on purpose.
+     pub max_structure: f64,
++    pub structure_last: f64,
+     pub first_growth_tick: Option<u64>,
+     pub first_adult_tick: Option<u64>,
+ }
+@@ -281,6 +287,10 @@ pub struct MemberFlow {
+     /// this is the reconciliation's working state, not a result.
+     #[serde(skip)]
+     pending: Pending,
++    /// Whether any structure sample has been taken yet, from either the pre-growth observation
++    /// or a completed increment. Working state for seeding `max_structure`, not a result.
++    #[serde(skip)]
++    structure_seen: bool,
+ }
+ 
+ #[derive(Clone, Copy, Debug, Default)]
+@@ -333,6 +343,7 @@ impl MemberFlow {
+             residual: Residual::default(),
+             bins: Vec::new(),
+             pending: Pending::default(),
++            structure_seen: false,
+         }
+     }
+ 
+@@ -518,7 +529,14 @@ impl FlowLedger {
+         g.legacy_gate_reserve_last = legacy_gate_reserve;
+         g.gate_reserve_min = if first { gate_reserve } else { g.gate_reserve_min.min(gate_reserve) };
+         g.gate_reserve_max = if first { gate_reserve } else { g.gate_reserve_max.max(gate_reserve) };
+-        g.max_structure = if first { structure } else { g.max_structure.max(structure) };
++        g.structure_last = structure;
++        // `record_growth` may already have recorded a completed increment on an earlier tick,
++        // so the maximum is only ever seeded by the first structure sample of *either* kind.
++        let seen = m.structure_seen;
++        let g = &mut m.gate;
++        g.max_structure = if seen { g.max_structure.max(structure) } else { structure };
++        m.structure_seen = true;
++        let g = &mut m.gate;
+         if structure + f64::EPSILON >= adult_structure {
+             g.first_adult_tick.get_or_insert(tick);
+         }
+@@ -555,6 +573,13 @@ impl FlowLedger {
+     }
+ 
+     /// A growth step that actually moved structure, with the four caps the core minimised over.
++    ///
++    /// `structure_after` and `adult_structure` are read at the assignment that completed the
++    /// increment, so the completed size and the adult boundary are recorded on the tick they
++    /// actually happen. Waiting for the next pre-growth observation would notice adulthood a
++    /// tick late, and a member that reaches it on its death tick or on the horizon would never
++    /// be seen to reach it at all. The *pre-growth* size and threshold of the first growth are
++    /// separate fields and are deliberately not touched here.
+     #[allow(clippy::too_many_arguments)]
+     pub fn record_growth(
+         &mut self,
+@@ -563,6 +588,8 @@ impl FlowLedger {
+         grown: f64,
+         energy_cost: f64,
+         heat: f64,
++        structure_after: f64,
++        adult_structure: f64,
+         rate_term: f64,
+         remaining_structure_term: f64,
+         reserve_term: f64,
+@@ -575,7 +602,20 @@ impl FlowLedger {
+         if m.growth.ticks == 0 {
+             m.gate.first_growth_tick = Some(tick);
+             m.gate.gate_reserve_at_first_growth = Some(m.gate.gate_reserve_last);
+-            m.gate.structure_at_first_growth = Some(m.gate.max_structure);
++            m.gate.structure_at_first_growth = Some(m.gate.structure_last);
++        }
++        // The completed increment, recorded at the boundary that completed it rather than at
++        // whatever the next pre-growth observation happens to see.
++        m.structure_seen = true;
++        m.gate.max_structure = m.gate.max_structure.max(structure_after);
++        // Two different quantities, deliberately on two conventions. `first_growth_tick` is
++        // *when the transaction happened*, the tick being stepped. `first_adult_tick` is the
++        // boundary from which the member *is* adult, which is the boundary this tick completes
++        // — the same `now + 1` the core stamps its own life and hunter events with. A member
++        // that was already adult when the predicate was evaluated records that observation
++        // tick instead, and the two agree wherever both could fire.
++        if structure_after + f64::EPSILON >= adult_structure {
++            m.gate.first_adult_tick.get_or_insert(tick + 1);
+         }
+         m.growth.ticks += 1;
+         m.growth.reserve_spent += grown;
+@@ -990,9 +1030,9 @@ mod tests {
+         // 0.6 · S under the size-aware profile, as the body grows 0.8 -> 0.9 -> 1.0.
+         l.record_growth_gate(id(1), 101, 0.8, 2.0, 0.10, 0.48, 1.2, 0.6);
+         l.record_growth_gate(id(1), 102, 0.9, 2.0, 0.60, 0.54, 1.2, 0.6);
+-        l.record_growth(id(1), 102, 0.0001, 0.00005, 0.00025, 0.0001, 1.1, 0.60, Some(1.2));
++        l.record_growth(id(1), 102, 0.0001, 0.00005, 0.00025, 0.9001, 2.0, 0.0001, 1.1, 0.60, Some(1.2));
+         l.record_growth_gate(id(1), 103, 1.0, 2.0, 0.70, 0.60, 1.2, 0.6);
+-        l.record_growth(id(1), 103, 0.0001, 0.00005, 0.00025, 0.0001, 1.0, 0.70, Some(1.4));
++        l.record_growth(id(1), 103, 0.0001, 0.00005, 0.00025, 1.0001, 2.0, 0.0001, 1.0, 0.70, Some(1.4));
+         let g = l.members[&id(1)].gate;
+         assert!((g.gate_reserve_last - 0.60).abs() < 1e-12);
+         assert!((g.gate_reserve_min - 0.48).abs() < 1e-12);
+@@ -1002,11 +1042,36 @@ mod tests {
+         assert_eq!(g.first_growth_tick, Some(102));
+         assert!((g.gate_reserve_at_first_growth.unwrap() - 0.54).abs() < 1e-12);
+         assert!((g.structure_at_first_growth.unwrap() - 0.9).abs() < 1e-12);
+-        assert!((g.max_structure - 1.0).abs() < 1e-12);
++        // The maximum includes the size the *last* increment left behind, 1.0001, not the last
++        // pre-growth observation of 1.0. Before the boundary correction this read 1.0 and a
++        // final increment on a death or horizon tick vanished from the record entirely.
++        assert!((g.max_structure - 1.0001).abs() < 1e-12, "got {}", g.max_structure);
++        assert!((g.structure_last - 1.0).abs() < 1e-12, "the pre-growth size stays separate");
+         assert_eq!(g.first_adult_tick, None, "it never reached adult structure");
+         assert_eq!(l.members[&id(1)].growth.ticks, 2);
+     }
+ 
++    /// The boundary correction, on its own terms: a completed increment that reaches adult
++    /// structure is recorded on the boundary it completes, with no later observation needed.
++    #[test]
++    fn a_completed_increment_records_its_size_and_adulthood_without_a_later_observation() {
++        let mut l = ledger();
++        // One remaining-structure-capped step from 1.99998 lands exactly on adult 2.0.
++        l.record_growth_gate(id(1), 500, 1.99998, 2.0, 3.0, 0.6, 1.2, 3.5);
++        l.record_growth(id(1), 500, 0.00002, 0.00001, 0.00005, 2.0, 2.0, 0.0001, 0.00002, 3.0,
++            Some(7.0));
++        let g = l.members[&id(1)].gate;
++        assert!((g.max_structure - 2.0).abs() < 1e-12, "the completed size must be the maximum");
++        assert_eq!(g.first_adult_tick, Some(501),
++            "adulthood is the boundary the tick completes, the core's own now+1 event stamp");
++        assert_eq!(g.first_growth_tick, Some(500), "the transaction happened during tick 500");
++        assert!((g.structure_at_first_growth.unwrap() - 1.99998).abs() < 1e-12,
++            "the first-growth record keeps the pre-growth size");
++        assert!((g.gate_reserve_at_first_growth.unwrap() - 0.6).abs() < 1e-12,
++            "and the pre-growth threshold");
++        assert_eq!(l.members[&id(1)].growth.bound_by_remaining_structure, 1);
++    }
++
+     /// A member that never grows says so, rather than reporting a fabricated threshold.
+     #[test]
+     fn a_member_that_never_grew_has_no_first_growth_threshold() {
+@@ -1044,6 +1109,8 @@ mod tests {
+             0.0001,
+             0.00005,
+             0.0003,
++            0.8001,
++            2.0,
+             0.0001,
+             1.2,
+             1.3,
+@@ -1056,6 +1123,8 @@ mod tests {
+             0.00002,
+             0.00001,
+             0.0001,
++            0.80012,
++            2.0,
+             0.0001,
+             1.2,
+             0.00002,
+@@ -1068,6 +1137,8 @@ mod tests {
+             0.000005,
+             0.0000025,
+             0.00002,
++            0.800125,
++            2.0,
+             0.0001,
+             1.2,
+             1.3,
+@@ -1117,7 +1188,7 @@ mod tests {
+         let sound = || {
+             let mut l = ledger();
+             l.record_growth_gate(id(1), 101, 0.8, 2.0, 0.6, 0.48, 1.2, 0.6);
+-            l.record_growth(id(1), 101, 0.0001, 0.00005, 0.00025, 0.0001, 1.2, 0.6, Some(1.2));
++            l.record_growth(id(1), 101, 0.0001, 0.00005, 0.00025, 0.8001, 2.0, 0.0001, 1.2, 0.6, Some(1.2));
+             // The member opened at S=0.8, R=0.8, E=0.6; one rate-limited step moves all three.
+             l.probe(id(1), 101, 0.8 + 0.0001, 0.8 - 0.0001, 0.6 - 0.00005);
+             l
+diff --git a/crates/cubarium-core/src/world.rs b/crates/cubarium-core/src/world.rs
+index f640219..63ed439 100644
+--- a/crates/cubarium-core/src/world.rs
++++ b/crates/cubarium-core/src/world.rs
+@@ -1823,6 +1823,11 @@ impl World {
+                                 grown,
+                                 cost,
+                                 cost + e_r * grown,
++                                // The size this increment actually left behind, read here and
++                                // not on the next tick's predicate: an increment on a death or
++                                // horizon tick has no next tick to be noticed on.
++                                o.structure,
++                                o.phenotype.structure_adult,
+                                 rate_term,
+                                 remaining_term,
+                                 reserve_term,
+diff --git a/crates/cubarium-core/tests/astra_size_gate_review.rs b/crates/cubarium-core/tests/astra_size_gate_review.rs
+new file mode 100644
+index 0000000..0254792
+--- /dev/null
++++ b/crates/cubarium-core/tests/astra_size_gate_review.rs
+@@ -0,0 +1,78 @@
++// Independent regression for frozen 9f4cf7d. Install unchanged as
++// crates/cubarium-core/tests/astra_size_gate_review.rs in that source archive.
++// This is a synthetic one-step boundary fixture, not an ecology experiment.
++use cubarium_core::{World, WorldConfig};
++use cubarium_core::hunter::{FixedHunterProfile, HunterTarget};
++use cubarium_core::ids::OrganismId;
++
++fn final_increment() -> (World, OrganismId, f64) {
++    let mut cfg = WorldConfig::default();
++    cfg.founders.kinds.clear();
++    cfg.founders.count = 0;
++    cfg.weather.amplitude = 0.0;
++    cfg.water.rain_rate = 0.0;
++    cfg.habitat.light_base = 0.0;
++    cfg.habitat.light_height_gain = 0.0;
++    cfg.habitat.light_noise_gain = 0.0;
++    cfg.detritus.initial_dark = 0.0;
++    cfg.detritus.decomposition = 0.0;
++    cfg.detritus.fall = 0.0;
++    cfg.organism.maintenance = 0.0;
++    cfg.organism.move_cost = 0.0;
++    cfg.organism.sense_cost = 0.0;
++    let mut world = World::new(cfg).unwrap();
++    let profile = FixedHunterProfile::lanternjaw_trial(world.config()).size_gate();
++    let id = world.start_hunter_trial(profile, HunterTarget {
++        face: 0, u: 22.0, v: 34.0,
++    }).unwrap().id;
++    let o = world.state.organisms.get_mut(id).unwrap();
++    let before = o.structure + o.reserve;
++    let adult = o.phenotype.structure_adult;
++    o.structure = adult - 0.00002;
++    o.reserve = 3.0;
++    o.energy = 3.5; // Above charge80: no oxidation before the growth site.
++    world.state.external_material_in += o.structure + o.reserve - before;
++    world.enable_flow_ledger();
++    (world, id, adult)
++}
++
++#[test]
++fn adulthood_is_recorded_on_the_actual_final_increment_even_at_horizon() {
++    let (mut world, id, adult) = final_increment();
++    let boundary = world.state.tick + 1;
++    world.step();
++    assert_eq!(world.state.organisms.get(id).unwrap().structure, adult);
++    let m = &world.flow_ledger().unwrap().members[&id];
++    assert_eq!(m.growth.ticks, 1);
++    assert_eq!(m.gate.first_adult_tick, Some(boundary),
++        "Do not wait for another pre-growth observation to notice a completed increment");
++}
++
++#[test]
++fn maximum_structure_includes_the_final_post_growth_stock() {
++    let (mut world, id, adult) = final_increment();
++    world.step();
++    let m = &world.flow_ledger().unwrap().members[&id];
++    assert_eq!(m.gate.max_structure, adult,
++        "The last growth before horizon/death must not disappear from the maximum");
++}
++
++#[test]
++fn actual_growth_ledger_records_the_unchanged_paid_transfer_and_heat() {
++    let (mut world, id, adult) = final_increment();
++    let before = world.state.organisms.get(id).unwrap().clone();
++    let build = world.config().organism.build_cost;
++    let e_r = world.config().organism.reserve_energy_density;
++    world.step();
++    let after = world.state.organisms.get(id).unwrap();
++    let m = &world.flow_ledger().unwrap().members[&id];
++    let ds = adult - before.structure;
++    assert_eq!(m.growth.bound_by_remaining_structure, 1);
++    assert!((m.growth.structure_gained - ds).abs() < 1e-12);
++    assert!((before.reserve - after.reserve - ds).abs() < 1e-12);
++    assert!((m.growth.reserve_spent - ds).abs() < 1e-12);
++    assert!((m.growth.energy_cost - build * ds).abs() < 1e-12);
++    assert!((before.energy - after.energy - build * ds).abs() < 1e-12);
++    assert!((m.growth.heat - (build + e_r) * ds).abs() < 1e-12);
++    assert_eq!(m.residual.violations, 0);
++}
+diff --git a/crates/cubarium-core/tests/hunter_size_gate.rs b/crates/cubarium-core/tests/hunter_size_gate.rs
+index bee164a..69ee5b7 100644
+--- a/crates/cubarium-core/tests/hunter_size_gate.rs
++++ b/crates/cubarium-core/tests/hunter_size_gate.rs
+@@ -421,6 +421,12 @@ fn a_restart_while_growing_preserves_the_state_the_selector_and_the_events() {
+ 
+ /// An unsupported version is refused by name rather than resumed under another policy. This is
+ /// the same contract version 4 relies on, and it is what makes reusing the shape safe.
++///
++/// **This is a stand-in, not an old-reader test.** It runs in *this* build, where version 6 is
++/// the unsupported one; it does not execute a genuine pre-change executable against a version 5
++/// payload. That a real old reader refuses version 5 follows from its `[3, 4]` supported set by
++/// source inspection, and only a different binary could establish it — exactly as the version 4
++/// package recorded for its own case.
+ #[test]
+ fn an_unsupported_version_is_refused_rather_than_reinterpreted() {
+     let (mut world, id) = founded(PROFILE_VERSION_SIZE_GATE, still_config());
 -- 
 2.55.0
 
