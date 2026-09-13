@@ -1,0 +1,1370 @@
+{
+ "kind": "hunter-size-gate-pilot-parity",
+ "pilot": true,
+ "pilot_note": "A SEED SUBSET. Not a cohort result and not a viability claim: the unrun seeds were never started, and one seed cannot answer maturation or recruitment.",
+ "seeds": [
+  1
+ ],
+ "pinned_binary_sha256": "90d30b8b1b7f2f7e34a8bcc25d5785144b51f84ed24b80b317d4234c15e82a4f",
+ "runs": {
+  "reference": "/home/wrysk/wryskware/cubarium/captures/hunter-size-gate-pilot-2026-09-13/reference-charge80-seed1",
+  "candidate": "/home/wrysk/wryskware/cubarium/captures/hunter-size-gate-pilot-2026-09-13/candidate-size-gate-seed1",
+  "retained_reference": "/home/wrysk/wryskware/cubarium/captures/hunter-charge-candidate-two-hour-512ee52"
+ },
+ "builds": {
+  "reference": "0.1.0+9f4cf7d",
+  "candidate": "0.1.0+9f4cf7d",
+  "retained": "0.1.0+512ee52"
+ },
+ "manifests": {
+  "reference_recipe": "reserve-targets-charge80-v1",
+  "candidate_recipe": "reserve-targets-charge80-size-gate-v1",
+  "reference_scope": "reserve-targets-charge80-v1 is reserve-targets-v1 (seek/perch .80/.90) with semantic profile version 3 raised to 4 and nothing else; version 4's one meaning is a fixed 0.80 E_max oxidation activation threshold for authoritative members at every age and phase. The conversion block, costs, reproductive gates, geometry, imports and placements are unchanged, and ordinary organisms keep the world's configured threshold",
+  "candidate_scope": "reserve-targets-charge80-size-gate-v1 is reserve-targets-charge80-v1 with semantic profile version 4 raised to 5 and nothing else; version 5 keeps charge80's fixed 0.80 E_max oxidation activation for authoritative members AND scales their growth permission threshold by actual size, gate = growth_reserve_min * reserve_max * clamp(structure/structure_adult, 0, 1), at the existing post-oxidation growth site. The gate is a precondition only: the increment's rate, remaining-structure, reserve and battery caps, its reserve and battery debits and its construction heat are unchanged, nothing is capped to reserve minus gate, no reserve floor is protected, and ordinary organisms and profile versions 3 and 4 keep the original growth_reserve_min * reserve_max expression",
+  "member_oxidation": {
+   "reference": 0.8,
+   "candidate": 0.8
+  },
+  "seed_subset_pilot": {
+   "reference": true,
+   "candidate": true
+  }
+ },
+ "problems": [],
+ "reference_parity": {
+  "arms": 6,
+  "arms_reproduced": 6,
+  "projection": "the CUBW header embeds the build id, so the file SHA256 differs by construction and is recorded rather than asserted. Parity is the payload: schema, CRC32, FNV state hash and length, plus the recorded event and census streams line for line.",
+  "rows": [
+   {
+    "arm": "1/untouched",
+    "payload_identical": true,
+    "events_identical": true,
+    "census_identical": true,
+    "retained_closing_state_hash": "16863221843856013449",
+    "rerun_closing_state_hash": "16863221843856013449",
+    "closing_state_hash_equal": true,
+    "snapshots": {
+     "post-initialization.cubw": {
+      "identical_payload": true,
+      "differences": [],
+      "schema": 12,
+      "state_hash": "8827557633189694280",
+      "crc32": 1297928872,
+      "payload_bytes": 107919,
+      "retained_sha256": "e50a070f40ada9ec7302f51a4784dd77ad30220a65a1657f38137abf53ca1b91",
+      "rerun_sha256": "5238a2aaa81c694d444c15bbffb078e72408d28d012ee38bae00af4fc03c8597",
+      "retained_build": "0.1.0+512ee52",
+      "rerun_build": "0.1.0+9f4cf7d",
+      "header_differs_by_build_id": true
+     },
+     "closing.cubw": {
+      "identical_payload": true,
+      "differences": [],
+      "schema": 12,
+      "state_hash": "16863221843856013449",
+      "crc32": 464783660,
+      "payload_bytes": 111038,
+      "retained_sha256": "19e42776255306e819a0b9d37350bed0cc8ac3b614241bfc852eb104c4a3bb78",
+      "rerun_sha256": "336652275e7c3fc9f8bd18a142c6a811be4540ad6d9902724228fe10e8461ed9",
+      "retained_build": "0.1.0+512ee52",
+      "rerun_build": "0.1.0+9f4cf7d",
+      "header_differs_by_build_id": true
+     }
+    }
+   },
+   {
+    "arm": "1/budget_control",
+    "payload_identical": true,
+    "events_identical": true,
+    "census_identical": true,
+    "retained_closing_state_hash": "17192407377813742119",
+    "rerun_closing_state_hash": "17192407377813742119",
+    "closing_state_hash_equal": true,
+    "snapshots": {
+     "post-initialization.cubw": {
+      "identical_payload": true,
+      "differences": [],
+      "schema": 12,
+      "state_hash": "9917134089846720639",
+      "crc32": 580971026,
+      "payload_bytes": 108324,
+      "retained_sha256": "36f27ef90ef45690107c5fc29aee7cbcd048f84ff6d6f988f2527a71fc30dac4",
+      "rerun_sha256": "a7e835ac53d955f4f826e2989b87e5cc922545f6176d8e5e44db37f1fe6134fd",
+      "retained_build": "0.1.0+512ee52",
+      "rerun_build": "0.1.0+9f4cf7d",
+      "header_differs_by_build_id": true
+     },
+     "closing.cubw": {
+      "identical_payload": true,
+      "differences": [],
+      "schema": 12,
+      "state_hash": "17192407377813742119",
+      "crc32": 344162417,
+      "payload_bytes": 106534,
+      "retained_sha256": "24fa95a76bde7ee2521c258861c524f7305d3b534f0855ad55df031286c8d29f",
+      "rerun_sha256": "b574e4764f97899c7b31ecf4a871f76076e35ad13b021ed587e7b6edb3750d04",
+      "retained_build": "0.1.0+512ee52",
+      "rerun_build": "0.1.0+9f4cf7d",
+      "header_differs_by_build_id": true
+     }
+    }
+   },
+   {
+    "arm": "1/specialist_off",
+    "payload_identical": true,
+    "events_identical": true,
+    "census_identical": true,
+    "retained_closing_state_hash": "13223481950156629204",
+    "rerun_closing_state_hash": "13223481950156629204",
+    "closing_state_hash_equal": true,
+    "snapshots": {
+     "post-initialization.cubw": {
+      "identical_payload": true,
+      "differences": [],
+      "schema": 12,
+      "state_hash": "16454917678005303022",
+      "crc32": 889067194,
+      "payload_bytes": 108796,
+      "retained_sha256": "e412e05e486ece54fafd2126b47d4787f44590ef5cb2eaa4ba798d74d93b6edb",
+      "rerun_sha256": "ea249a255e5dc69782895519c1b15b0aa95859f60fc063ae85a7c8f0b8315629",
+      "retained_build": "0.1.0+512ee52",
+      "rerun_build": "0.1.0+9f4cf7d",
+      "header_differs_by_build_id": true
+     },
+     "closing.cubw": {
+      "identical_payload": true,
+      "differences": [],
+      "schema": 12,
+      "state_hash": "13223481950156629204",
+      "crc32": 2985607755,
+      "payload_bytes": 108002,
+      "retained_sha256": "d447930563fe37ac37afb52ece69d10ebbb74919719a1f7eb44f758fb4d4872f",
+      "rerun_sha256": "83336c05bcb1326fdaf0d39a49c3d722b15797caf70d435db3aaa42947ac207e",
+      "retained_build": "0.1.0+512ee52",
+      "rerun_build": "0.1.0+9f4cf7d",
+      "header_differs_by_build_id": true
+     }
+    }
+   },
+   {
+    "arm": "1/specialist_on",
+    "payload_identical": true,
+    "events_identical": true,
+    "census_identical": true,
+    "retained_closing_state_hash": "13499101884866940145",
+    "rerun_closing_state_hash": "13499101884866940145",
+    "closing_state_hash_equal": true,
+    "snapshots": {
+     "post-initialization.cubw": {
+      "identical_payload": true,
+      "differences": [],
+      "schema": 12,
+      "state_hash": "9127337083127124541",
+      "crc32": 726895031,
+      "payload_bytes": 108796,
+      "retained_sha256": "e2e897f80486265354bfc67b3ae1a89afee320a1dcbdd2d3c5b4208985401fb6",
+      "rerun_sha256": "ccdbf3dbbbec843e1f14434f050336cadc2fb00baef8e011b1ec273f4464698d",
+      "retained_build": "0.1.0+512ee52",
+      "rerun_build": "0.1.0+9f4cf7d",
+      "header_differs_by_build_id": true
+     },
+     "closing.cubw": {
+      "identical_payload": true,
+      "differences": [],
+      "schema": 12,
+      "state_hash": "13499101884866940145",
+      "crc32": 2851197473,
+      "payload_bytes": 105397,
+      "retained_sha256": "cb45d216520582ee1301ca45f489adf7bf889854d70fbd72cf4c84ed0d8f5543",
+      "rerun_sha256": "ce0bc18a93e3c8fe4f76f19e21345c42376745d9bf5beee03891f2547826a817",
+      "retained_build": "0.1.0+512ee52",
+      "rerun_build": "0.1.0+9f4cf7d",
+      "header_differs_by_build_id": true
+     }
+    }
+   },
+   {
+    "arm": "1/facultative_off",
+    "payload_identical": true,
+    "events_identical": true,
+    "census_identical": true,
+    "retained_closing_state_hash": "16646122203596988084",
+    "rerun_closing_state_hash": "16646122203596988084",
+    "closing_state_hash_equal": true,
+    "snapshots": {
+     "post-initialization.cubw": {
+      "identical_payload": true,
+      "differences": [],
+      "schema": 12,
+      "state_hash": "13569971266348239755",
+      "crc32": 1606122372,
+      "payload_bytes": 108796,
+      "retained_sha256": "3108a7070f91a6a7ddcdd4000d2c7e9391017041ad2a2200d3075c88aaf84dd7",
+      "rerun_sha256": "4b8c16093a7f98d3c5176addc6dfa30019918c463662f1d708145778956fa50b",
+      "retained_build": "0.1.0+512ee52",
+      "rerun_build": "0.1.0+9f4cf7d",
+      "header_differs_by_build_id": true
+     },
+     "closing.cubw": {
+      "identical_payload": true,
+      "differences": [],
+      "schema": 12,
+      "state_hash": "16646122203596988084",
+      "crc32": 3604896261,
+      "payload_bytes": 105978,
+      "retained_sha256": "40f81bd344abb3c3aed999509edd675025ba3cbfeb6ce9a3c98ba53af162b180",
+      "rerun_sha256": "5e01e223a9b9a891ffb4d910de75586179201c89b3c7af7a35550cf2dff3238c",
+      "retained_build": "0.1.0+512ee52",
+      "rerun_build": "0.1.0+9f4cf7d",
+      "header_differs_by_build_id": true
+     }
+    }
+   },
+   {
+    "arm": "1/facultative_on",
+    "payload_identical": true,
+    "events_identical": true,
+    "census_identical": true,
+    "retained_closing_state_hash": "4368534544087259037",
+    "rerun_closing_state_hash": "4368534544087259037",
+    "closing_state_hash_equal": true,
+    "snapshots": {
+     "post-initialization.cubw": {
+      "identical_payload": true,
+      "differences": [],
+      "schema": 12,
+      "state_hash": "7476954363294224820",
+      "crc32": 1075242121,
+      "payload_bytes": 108796,
+      "retained_sha256": "64a4b9abf57123ac700dd5bc57700b19e95b38e58289309512a6fff89010d092",
+      "rerun_sha256": "d34bff8d3c36ddbb5c0a3f828fa2a482bafcc33d187222725401ade21918fcc8",
+      "retained_build": "0.1.0+512ee52",
+      "rerun_build": "0.1.0+9f4cf7d",
+      "header_differs_by_build_id": true
+     },
+     "closing.cubw": {
+      "identical_payload": true,
+      "differences": [],
+      "schema": 12,
+      "state_hash": "4368534544087259037",
+      "crc32": 1263408298,
+      "payload_bytes": 104951,
+      "retained_sha256": "98af371919316fe37e73561e67ed084a348157b351504a5874cc0734e333e820",
+      "rerun_sha256": "f8d4c864eb83699e0499e62d117ca319330be5a62f6ae12167f2a85192c2a54e",
+      "retained_build": "0.1.0+512ee52",
+      "rerun_build": "0.1.0+9f4cf7d",
+      "header_differs_by_build_id": true
+     }
+    }
+   }
+  ]
+ },
+ "candidate_divergence": {
+  "projection": "census rows compared after removing exactly [\"hunter_state.profile.version\"]; no raw state hash is claimed equal while the selector differs",
+  "rows": [
+   {
+    "arm": "1/untouched",
+    "census_rows_compared": 720,
+    "reference_rows": 720,
+    "candidate_rows": 720,
+    "first_projected_row_difference": null,
+    "first_member_structure_difference": null,
+    "identical_under_projection": true,
+    "basis": "census rows compared after removing exactly the selector-derived fields; structure is compared per member by full slot:generation identity",
+    "event_streams_identical": true,
+    "reference_events": 749,
+    "candidate_events": 749
+   },
+   {
+    "arm": "1/budget_control",
+    "census_rows_compared": 720,
+    "reference_rows": 720,
+    "candidate_rows": 720,
+    "first_projected_row_difference": null,
+    "first_member_structure_difference": null,
+    "identical_under_projection": true,
+    "basis": "census rows compared after removing exactly the selector-derived fields; structure is compared per member by full slot:generation identity",
+    "event_streams_identical": true,
+    "reference_events": 788,
+    "candidate_events": 788
+   },
+   {
+    "arm": "1/specialist_off",
+    "census_rows_compared": 720,
+    "reference_rows": 720,
+    "candidate_rows": 720,
+    "first_projected_row_difference": null,
+    "first_member_structure_difference": null,
+    "identical_under_projection": true,
+    "basis": "census rows compared after removing exactly the selector-derived fields; structure is compared per member by full slot:generation identity",
+    "event_streams_identical": true,
+    "reference_events": 791,
+    "candidate_events": 791
+   },
+   {
+    "arm": "1/specialist_on",
+    "census_rows_compared": 720,
+    "reference_rows": 720,
+    "candidate_rows": 720,
+    "first_projected_row_difference": {
+     "tick": 170600,
+     "why": "projected census rows differ"
+    },
+    "first_member_structure_difference": {
+     "tick": 170600,
+     "member": "17:3",
+     "reference": {
+      "structure": 0.8,
+      "reserve": 0.700500000000011,
+      "energy": 0.7148175817991304
+     },
+     "candidate": {
+      "structure": 0.8198999999999979,
+      "reserve": 0.6806000000000132,
+      "energy": 0.7046138643739054
+     }
+    },
+    "identical_under_projection": false,
+    "basis": "census rows compared after removing exactly the selector-derived fields; structure is compared per member by full slot:generation identity",
+    "event_streams_identical": false,
+    "reference_events": 1378,
+    "candidate_events": 1096
+   },
+   {
+    "arm": "1/facultative_off",
+    "census_rows_compared": 720,
+    "reference_rows": 720,
+    "candidate_rows": 720,
+    "first_projected_row_difference": null,
+    "first_member_structure_difference": null,
+    "identical_under_projection": true,
+    "basis": "census rows compared after removing exactly the selector-derived fields; structure is compared per member by full slot:generation identity",
+    "event_streams_identical": true,
+    "reference_events": 733,
+    "candidate_events": 733
+   },
+   {
+    "arm": "1/facultative_on",
+    "census_rows_compared": 720,
+    "reference_rows": 720,
+    "candidate_rows": 720,
+    "first_projected_row_difference": {
+     "tick": 170600,
+     "why": "projected census rows differ"
+    },
+    "first_member_structure_difference": {
+     "tick": 170600,
+     "member": "17:3",
+     "reference": {
+      "structure": 0.8,
+      "reserve": 0.700500000000011,
+      "energy": 0.7148175817991304
+     },
+     "candidate": {
+      "structure": 0.8198999999999979,
+      "reserve": 0.6806000000000132,
+      "energy": 0.7046138643739054
+     }
+    },
+    "identical_under_projection": false,
+    "basis": "census rows compared after removing exactly the selector-derived fields; structure is compared per member by full slot:generation identity",
+    "event_streams_identical": false,
+    "reference_events": 1374,
+    "candidate_events": 1283
+   }
+  ]
+ },
+ "outcomes": {
+  "reference": {
+   "1/untouched": {
+    "closing_tick": 288000,
+    "technical_complete": true,
+    "complete_experiment_measurement": true,
+    "termination": "planned_horizon",
+    "audit_passed": true,
+    "audit_failure": null,
+    "audit_peak_over_fixed_limit": [
+     0.000010240755857940611,
+     0.0000018240415136468775,
+     0.00000860653059123493,
+     0.000835510850450105
+    ],
+    "captures": 0,
+    "offspring": 0,
+    "reproduction": {
+     "born": 0,
+     "closed": 0,
+     "funded": 0,
+     "miscarried": 0,
+     "not_funded_cap": 0,
+     "not_funded_stocks": 0,
+     "open_at_horizon": 0,
+     "refunded": 0
+    },
+    "closing_hunters": 0,
+    "adult_max": 0,
+    "adult_descendants": 0,
+    "descendants_that_reproduced": 0,
+    "adult_occupancy_ticks_0_1_2_over2": [
+     144000,
+     0,
+     0,
+     0
+    ],
+    "founder_extinction_tick": null,
+    "lineage_extinction_tick": null,
+    "member_ticks": 0,
+    "mature_member_ticks": 0,
+    "max_reserve_fraction": null,
+    "max_energy_fraction": null,
+    "charging": {
+     "conversion_heat": 0,
+     "energy_gained": 0,
+     "reserve_burned": 0,
+     "transactions": 0
+    },
+    "closing_prey": 108,
+    "prey_min": 78,
+    "prey_tick_integral": 14277900,
+    "closing_state_hash": "16863221843856013449",
+    "members": []
+   },
+   "1/budget_control": {
+    "closing_tick": 288000,
+    "technical_complete": true,
+    "complete_experiment_measurement": true,
+    "termination": "planned_horizon",
+    "audit_passed": true,
+    "audit_failure": null,
+    "audit_peak_over_fixed_limit": [
+     0.000009723122023591155,
+     0.0000013625370342904387,
+     0.000028011673666652427,
+     0.000835510850450105
+    ],
+    "captures": 0,
+    "offspring": 0,
+    "reproduction": {
+     "born": 0,
+     "closed": 0,
+     "funded": 0,
+     "miscarried": 0,
+     "not_funded_cap": 0,
+     "not_funded_stocks": 0,
+     "open_at_horizon": 0,
+     "refunded": 0
+    },
+    "closing_hunters": 0,
+    "adult_max": 0,
+    "adult_descendants": 0,
+    "descendants_that_reproduced": 0,
+    "adult_occupancy_ticks_0_1_2_over2": [
+     144000,
+     0,
+     0,
+     0
+    ],
+    "founder_extinction_tick": null,
+    "lineage_extinction_tick": null,
+    "member_ticks": 0,
+    "mature_member_ticks": 0,
+    "max_reserve_fraction": null,
+    "max_energy_fraction": null,
+    "charging": {
+     "conversion_heat": 0,
+     "energy_gained": 0,
+     "reserve_burned": 0,
+     "transactions": 0
+    },
+    "closing_prey": 97,
+    "prey_min": 80,
+    "prey_tick_integral": 14221572,
+    "closing_state_hash": "17192407377813742119",
+    "members": []
+   },
+   "1/specialist_off": {
+    "closing_tick": 288000,
+    "technical_complete": true,
+    "complete_experiment_measurement": true,
+    "termination": "planned_horizon",
+    "audit_passed": true,
+    "audit_failure": null,
+    "audit_peak_over_fixed_limit": [
+     0.00001017080533978528,
+     0.0000032964605668317067,
+     0.00002107786073843462,
+     0.000835510850450105
+    ],
+    "captures": 0,
+    "offspring": 0,
+    "reproduction": {
+     "born": 0,
+     "closed": 0,
+     "funded": 0,
+     "miscarried": 0,
+     "not_funded_cap": 0,
+     "not_funded_stocks": 0,
+     "open_at_horizon": 0,
+     "refunded": 0
+    },
+    "closing_hunters": 0,
+    "adult_max": 1,
+    "adult_descendants": 0,
+    "descendants_that_reproduced": 0,
+    "adult_occupancy_ticks_0_1_2_over2": [
+     127580,
+     16420,
+     0,
+     0
+    ],
+    "founder_extinction_tick": 160421,
+    "lineage_extinction_tick": 160421,
+    "member_ticks": 16420,
+    "mature_member_ticks": 0,
+    "max_reserve_fraction": 0.499875,
+    "max_energy_fraction": 0.8001999774505391,
+    "charging": {
+     "conversion_heat": 0.8000000000000105,
+     "energy_gained": 3.200000000000042,
+     "reserve_burned": 2,
+     "transactions": 4001
+    },
+    "closing_prey": 100,
+    "prey_min": 74,
+    "prey_tick_integral": 14124414,
+    "closing_state_hash": "13223481950156629204",
+    "members": [
+     {
+      "id": "11:5",
+      "samples": 82,
+      "first_tick": 144200,
+      "adult_structure": 2,
+      "opening_structure": 2,
+      "min_structure": 2,
+      "max_structure": 2,
+      "first_increase_tick": null,
+      "distinct_structure_values": [
+       2
+      ],
+      "last_tick": 160400,
+      "structure_ever_increased": false,
+      "reached_adult_structure": true
+     }
+    ]
+   },
+   "1/specialist_on": {
+    "closing_tick": 288000,
+    "technical_complete": true,
+    "complete_experiment_measurement": true,
+    "termination": "planned_horizon",
+    "audit_passed": true,
+    "audit_failure": null,
+    "audit_peak_over_fixed_limit": [
+     0.000009121547567455299,
+     0.000004658997601122145,
+     0.000022328112084667353,
+     0.000835510850450105
+    ],
+    "captures": 114,
+    "offspring": 3,
+    "reproduction": {
+     "born": 3,
+     "closed": 3,
+     "funded": 3,
+     "miscarried": 0,
+     "not_funded_cap": 0,
+     "not_funded_stocks": 0,
+     "open_at_horizon": 0,
+     "refunded": 0
+    },
+    "closing_hunters": 1,
+    "adult_max": 1,
+    "adult_descendants": 0,
+    "descendants_that_reproduced": 0,
+    "adult_occupancy_ticks_0_1_2_over2": [
+     0,
+     144000,
+     0,
+     0
+    ],
+    "founder_extinction_tick": null,
+    "lineage_extinction_tick": null,
+    "member_ticks": 166315,
+    "mature_member_ticks": 120001,
+    "max_reserve_fraction": 0.9501237915336437,
+    "max_energy_fraction": 0.8860992366766265,
+    "charging": {
+     "conversion_heat": 15.43780348292022,
+     "energy_gained": 61.75121393168088,
+     "reserve_burned": 38.594508707326064,
+     "transactions": 77191
+    },
+    "closing_prey": 93,
+    "prey_min": 66,
+    "prey_tick_integral": 13226617,
+    "closing_state_hash": "13499101884866940145",
+    "members": [
+     {
+      "id": "11:5",
+      "samples": 720,
+      "first_tick": 144200,
+      "adult_structure": 2,
+      "opening_structure": 2,
+      "min_structure": 2,
+      "max_structure": 2,
+      "first_increase_tick": null,
+      "distinct_structure_values": [
+       2
+      ],
+      "last_tick": 288000,
+      "structure_ever_increased": false,
+      "reached_adult_structure": true
+     },
+     {
+      "id": "17:3",
+      "samples": 47,
+      "first_tick": 170600,
+      "adult_structure": 2,
+      "opening_structure": 0.8,
+      "min_structure": 0.8,
+      "max_structure": 0.8,
+      "first_increase_tick": null,
+      "distinct_structure_values": [
+       0.8
+      ],
+      "last_tick": 179800,
+      "structure_ever_increased": false,
+      "reached_adult_structure": false
+     },
+     {
+      "id": "73:5",
+      "samples": 28,
+      "first_tick": 209000,
+      "adult_structure": 2,
+      "opening_structure": 0.8,
+      "min_structure": 0.8,
+      "max_structure": 0.8,
+      "first_increase_tick": null,
+      "distinct_structure_values": [
+       0.8
+      ],
+      "last_tick": 214400,
+      "structure_ever_increased": false,
+      "reached_adult_structure": false
+     },
+     {
+      "id": "27:11",
+      "samples": 35,
+      "first_tick": 276200,
+      "adult_structure": 2,
+      "opening_structure": 0.8,
+      "min_structure": 0.8,
+      "max_structure": 0.8,
+      "first_increase_tick": null,
+      "distinct_structure_values": [
+       0.8
+      ],
+      "last_tick": 283000,
+      "structure_ever_increased": false,
+      "reached_adult_structure": false
+     }
+    ]
+   },
+   "1/facultative_off": {
+    "closing_tick": 288000,
+    "technical_complete": true,
+    "complete_experiment_measurement": true,
+    "termination": "planned_horizon",
+    "audit_passed": true,
+    "audit_failure": null,
+    "audit_peak_over_fixed_limit": [
+     0.000009960953785319284,
+     0.0000033184369706105845,
+     0.000043915378995070186,
+     0.000835510850450105
+    ],
+    "captures": 0,
+    "offspring": 0,
+    "reproduction": {
+     "born": 0,
+     "closed": 0,
+     "funded": 0,
+     "miscarried": 0,
+     "not_funded_cap": 0,
+     "not_funded_stocks": 0,
+     "open_at_horizon": 0,
+     "refunded": 0
+    },
+    "closing_hunters": 0,
+    "adult_max": 1,
+    "adult_descendants": 0,
+    "descendants_that_reproduced": 0,
+    "adult_occupancy_ticks_0_1_2_over2": [
+     127245,
+     16755,
+     0,
+     0
+    ],
+    "founder_extinction_tick": 160756,
+    "lineage_extinction_tick": 160756,
+    "member_ticks": 16755,
+    "mature_member_ticks": 0,
+    "max_reserve_fraction": 0.499875,
+    "max_energy_fraction": 0.8001999774505391,
+    "charging": {
+     "conversion_heat": 0.8162783427131761,
+     "energy_gained": 3.2651133708527045,
+     "reserve_burned": 2.040695856782922,
+     "transactions": 4143
+    },
+    "closing_prey": 96,
+    "prey_min": 74,
+    "prey_tick_integral": 14531249,
+    "closing_state_hash": "16646122203596988084",
+    "members": [
+     {
+      "id": "11:5",
+      "samples": 83,
+      "first_tick": 144200,
+      "adult_structure": 2,
+      "opening_structure": 2,
+      "min_structure": 2,
+      "max_structure": 2,
+      "first_increase_tick": null,
+      "distinct_structure_values": [
+       2
+      ],
+      "last_tick": 160600,
+      "structure_ever_increased": false,
+      "reached_adult_structure": true
+     }
+    ]
+   },
+   "1/facultative_on": {
+    "closing_tick": 288000,
+    "technical_complete": true,
+    "complete_experiment_measurement": true,
+    "termination": "planned_horizon",
+    "audit_passed": true,
+    "audit_failure": null,
+    "audit_peak_over_fixed_limit": [
+     0.000009163517878348498,
+     0.000004505162774669999,
+     0.000022328112084667353,
+     0.000835510850450105
+    ],
+    "captures": 114,
+    "offspring": 3,
+    "reproduction": {
+     "born": 3,
+     "closed": 3,
+     "funded": 3,
+     "miscarried": 0,
+     "not_funded_cap": 0,
+     "not_funded_stocks": 0,
+     "open_at_horizon": 0,
+     "refunded": 0
+    },
+    "closing_hunters": 1,
+    "adult_max": 1,
+    "adult_descendants": 0,
+    "descendants_that_reproduced": 0,
+    "adult_occupancy_ticks_0_1_2_over2": [
+     0,
+     144000,
+     0,
+     0
+    ],
+    "founder_extinction_tick": null,
+    "lineage_extinction_tick": null,
+    "member_ticks": 166341,
+    "mature_member_ticks": 120001,
+    "max_reserve_fraction": 0.9501237915336437,
+    "max_energy_fraction": 0.8860992366766265,
+    "charging": {
+     "conversion_heat": 15.4038034829203,
+     "energy_gained": 61.6152139316812,
+     "reserve_burned": 38.50950870732566,
+     "transactions": 77021
+    },
+    "closing_prey": 92,
+    "prey_min": 66,
+    "prey_tick_integral": 13225286,
+    "closing_state_hash": "4368534544087259037",
+    "members": [
+     {
+      "id": "11:5",
+      "samples": 720,
+      "first_tick": 144200,
+      "adult_structure": 2,
+      "opening_structure": 2,
+      "min_structure": 2,
+      "max_structure": 2,
+      "first_increase_tick": null,
+      "distinct_structure_values": [
+       2
+      ],
+      "last_tick": 288000,
+      "structure_ever_increased": false,
+      "reached_adult_structure": true
+     },
+     {
+      "id": "17:3",
+      "samples": 47,
+      "first_tick": 170600,
+      "adult_structure": 2,
+      "opening_structure": 0.8,
+      "min_structure": 0.8,
+      "max_structure": 0.8,
+      "first_increase_tick": null,
+      "distinct_structure_values": [
+       0.8
+      ],
+      "last_tick": 179800,
+      "structure_ever_increased": false,
+      "reached_adult_structure": false
+     },
+     {
+      "id": "73:5",
+      "samples": 28,
+      "first_tick": 209000,
+      "adult_structure": 2,
+      "opening_structure": 0.8,
+      "min_structure": 0.8,
+      "max_structure": 0.8,
+      "first_increase_tick": null,
+      "distinct_structure_values": [
+       0.8
+      ],
+      "last_tick": 214400,
+      "structure_ever_increased": false,
+      "reached_adult_structure": false
+     },
+     {
+      "id": "27:11",
+      "samples": 35,
+      "first_tick": 276200,
+      "adult_structure": 2,
+      "opening_structure": 0.8,
+      "min_structure": 0.8,
+      "max_structure": 0.8,
+      "first_increase_tick": null,
+      "distinct_structure_values": [
+       0.8
+      ],
+      "last_tick": 283000,
+      "structure_ever_increased": false,
+      "reached_adult_structure": false
+     }
+    ]
+   }
+  },
+  "candidate": {
+   "1/untouched": {
+    "closing_tick": 288000,
+    "technical_complete": true,
+    "complete_experiment_measurement": true,
+    "termination": "planned_horizon",
+    "audit_passed": true,
+    "audit_failure": null,
+    "audit_peak_over_fixed_limit": [
+     0.000010240755857940611,
+     0.0000018240415136468775,
+     0.00000860653059123493,
+     0.000835510850450105
+    ],
+    "captures": 0,
+    "offspring": 0,
+    "reproduction": {
+     "born": 0,
+     "closed": 0,
+     "funded": 0,
+     "miscarried": 0,
+     "not_funded_cap": 0,
+     "not_funded_stocks": 0,
+     "open_at_horizon": 0,
+     "refunded": 0
+    },
+    "closing_hunters": 0,
+    "adult_max": 0,
+    "adult_descendants": 0,
+    "descendants_that_reproduced": 0,
+    "adult_occupancy_ticks_0_1_2_over2": [
+     144000,
+     0,
+     0,
+     0
+    ],
+    "founder_extinction_tick": null,
+    "lineage_extinction_tick": null,
+    "member_ticks": 0,
+    "mature_member_ticks": 0,
+    "max_reserve_fraction": null,
+    "max_energy_fraction": null,
+    "charging": {
+     "conversion_heat": 0,
+     "energy_gained": 0,
+     "reserve_burned": 0,
+     "transactions": 0
+    },
+    "closing_prey": 108,
+    "prey_min": 78,
+    "prey_tick_integral": 14277900,
+    "closing_state_hash": "16863221843856013449",
+    "members": []
+   },
+   "1/budget_control": {
+    "closing_tick": 288000,
+    "technical_complete": true,
+    "complete_experiment_measurement": true,
+    "termination": "planned_horizon",
+    "audit_passed": true,
+    "audit_failure": null,
+    "audit_peak_over_fixed_limit": [
+     0.000009723122023591155,
+     0.0000013625370342904387,
+     0.000028011673666652427,
+     0.000835510850450105
+    ],
+    "captures": 0,
+    "offspring": 0,
+    "reproduction": {
+     "born": 0,
+     "closed": 0,
+     "funded": 0,
+     "miscarried": 0,
+     "not_funded_cap": 0,
+     "not_funded_stocks": 0,
+     "open_at_horizon": 0,
+     "refunded": 0
+    },
+    "closing_hunters": 0,
+    "adult_max": 0,
+    "adult_descendants": 0,
+    "descendants_that_reproduced": 0,
+    "adult_occupancy_ticks_0_1_2_over2": [
+     144000,
+     0,
+     0,
+     0
+    ],
+    "founder_extinction_tick": null,
+    "lineage_extinction_tick": null,
+    "member_ticks": 0,
+    "mature_member_ticks": 0,
+    "max_reserve_fraction": null,
+    "max_energy_fraction": null,
+    "charging": {
+     "conversion_heat": 0,
+     "energy_gained": 0,
+     "reserve_burned": 0,
+     "transactions": 0
+    },
+    "closing_prey": 97,
+    "prey_min": 80,
+    "prey_tick_integral": 14221572,
+    "closing_state_hash": "6092097967040123824",
+    "members": []
+   },
+   "1/specialist_off": {
+    "closing_tick": 288000,
+    "technical_complete": true,
+    "complete_experiment_measurement": true,
+    "termination": "planned_horizon",
+    "audit_passed": true,
+    "audit_failure": null,
+    "audit_peak_over_fixed_limit": [
+     0.00001017080533978528,
+     0.0000032964605668317067,
+     0.00002107786073843462,
+     0.000835510850450105
+    ],
+    "captures": 0,
+    "offspring": 0,
+    "reproduction": {
+     "born": 0,
+     "closed": 0,
+     "funded": 0,
+     "miscarried": 0,
+     "not_funded_cap": 0,
+     "not_funded_stocks": 0,
+     "open_at_horizon": 0,
+     "refunded": 0
+    },
+    "closing_hunters": 0,
+    "adult_max": 1,
+    "adult_descendants": 0,
+    "descendants_that_reproduced": 0,
+    "adult_occupancy_ticks_0_1_2_over2": [
+     127580,
+     16420,
+     0,
+     0
+    ],
+    "founder_extinction_tick": 160421,
+    "lineage_extinction_tick": 160421,
+    "member_ticks": 16420,
+    "mature_member_ticks": 0,
+    "max_reserve_fraction": 0.499875,
+    "max_energy_fraction": 0.8001999774505391,
+    "charging": {
+     "conversion_heat": 0.8000000000000105,
+     "energy_gained": 3.200000000000042,
+     "reserve_burned": 2,
+     "transactions": 4001
+    },
+    "closing_prey": 100,
+    "prey_min": 74,
+    "prey_tick_integral": 14124414,
+    "closing_state_hash": "13507766475391618963",
+    "members": [
+     {
+      "id": "11:5",
+      "samples": 82,
+      "first_tick": 144200,
+      "adult_structure": 2,
+      "opening_structure": 2,
+      "min_structure": 2,
+      "max_structure": 2,
+      "first_increase_tick": null,
+      "distinct_structure_values": [
+       2
+      ],
+      "last_tick": 160400,
+      "structure_ever_increased": false,
+      "reached_adult_structure": true
+     }
+    ]
+   },
+   "1/specialist_on": {
+    "closing_tick": 288000,
+    "technical_complete": true,
+    "complete_experiment_measurement": true,
+    "termination": "planned_horizon",
+    "audit_passed": true,
+    "audit_failure": null,
+    "audit_peak_over_fixed_limit": [
+     0.000009681151712697956,
+     0.00000292286170259078,
+     0.000015011600687518929,
+     0.000835510850450105
+    ],
+    "captures": 49,
+    "offspring": 1,
+    "reproduction": {
+     "born": 1,
+     "closed": 1,
+     "funded": 1,
+     "miscarried": 0,
+     "not_funded_cap": 0,
+     "not_funded_stocks": 0,
+     "open_at_horizon": 0,
+     "refunded": 0
+    },
+    "closing_hunters": 0,
+    "adult_max": 1,
+    "adult_descendants": 0,
+    "descendants_that_reproduced": 0,
+    "adult_occupancy_ticks_0_1_2_over2": [
+     75450,
+     68550,
+     0,
+     0
+    ],
+    "founder_extinction_tick": 212551,
+    "lineage_extinction_tick": 212551,
+    "member_ticks": 73013,
+    "mature_member_ticks": 44551,
+    "max_reserve_fraction": 0.920924457350945,
+    "max_energy_fraction": 0.8708016296009226,
+    "charging": {
+     "conversion_heat": 7.855180880573932,
+     "energy_gained": 31.420723522295727,
+     "reserve_burned": 19.637952201415278,
+     "transactions": 39280
+    },
+    "closing_prey": 99,
+    "prey_min": 70,
+    "prey_tick_integral": 13898931,
+    "closing_state_hash": "11318993488284330598",
+    "members": [
+     {
+      "id": "11:5",
+      "samples": 342,
+      "first_tick": 144200,
+      "adult_structure": 2,
+      "opening_structure": 2,
+      "min_structure": 2,
+      "max_structure": 2,
+      "first_increase_tick": null,
+      "distinct_structure_values": [
+       2
+      ],
+      "last_tick": 212400,
+      "structure_ever_increased": false,
+      "reached_adult_structure": true
+     },
+     {
+      "id": "17:3",
+      "samples": 22,
+      "first_tick": 170600,
+      "adult_structure": 2,
+      "opening_structure": 0.8198999999999979,
+      "min_structure": 0.8198999999999979,
+      "max_structure": 0.8484999999999947,
+      "first_increase_tick": 170800,
+      "distinct_structure_values": [
+       0.8198999999999979,
+       0.8398999999999957,
+       0.8484999999999947
+      ],
+      "last_tick": 174800,
+      "structure_ever_increased": true,
+      "reached_adult_structure": false
+     }
+    ]
+   },
+   "1/facultative_off": {
+    "closing_tick": 288000,
+    "technical_complete": true,
+    "complete_experiment_measurement": true,
+    "termination": "planned_horizon",
+    "audit_passed": true,
+    "audit_failure": null,
+    "audit_peak_over_fixed_limit": [
+     0.000009960953785319284,
+     0.0000033184369706105845,
+     0.000043915378995070186,
+     0.000835510850450105
+    ],
+    "captures": 0,
+    "offspring": 0,
+    "reproduction": {
+     "born": 0,
+     "closed": 0,
+     "funded": 0,
+     "miscarried": 0,
+     "not_funded_cap": 0,
+     "not_funded_stocks": 0,
+     "open_at_horizon": 0,
+     "refunded": 0
+    },
+    "closing_hunters": 0,
+    "adult_max": 1,
+    "adult_descendants": 0,
+    "descendants_that_reproduced": 0,
+    "adult_occupancy_ticks_0_1_2_over2": [
+     127245,
+     16755,
+     0,
+     0
+    ],
+    "founder_extinction_tick": 160756,
+    "lineage_extinction_tick": 160756,
+    "member_ticks": 16755,
+    "mature_member_ticks": 0,
+    "max_reserve_fraction": 0.499875,
+    "max_energy_fraction": 0.8001999774505391,
+    "charging": {
+     "conversion_heat": 0.8162783427131761,
+     "energy_gained": 3.2651133708527045,
+     "reserve_burned": 2.040695856782922,
+     "transactions": 4143
+    },
+    "closing_prey": 96,
+    "prey_min": 74,
+    "prey_tick_integral": 14531249,
+    "closing_state_hash": "2930867977343670219",
+    "members": [
+     {
+      "id": "11:5",
+      "samples": 83,
+      "first_tick": 144200,
+      "adult_structure": 2,
+      "opening_structure": 2,
+      "min_structure": 2,
+      "max_structure": 2,
+      "first_increase_tick": null,
+      "distinct_structure_values": [
+       2
+      ],
+      "last_tick": 160600,
+      "structure_ever_increased": false,
+      "reached_adult_structure": true
+     }
+    ]
+   },
+   "1/facultative_on": {
+    "closing_tick": 288000,
+    "technical_complete": true,
+    "complete_experiment_measurement": true,
+    "termination": "planned_horizon",
+    "audit_passed": true,
+    "audit_failure": null,
+    "audit_peak_over_fixed_limit": [
+     0.000009443319950969826,
+     0.000002637168453465365,
+     0.000006592406061699845,
+     0.000835510850450105
+    ],
+    "captures": 90,
+    "offspring": 2,
+    "reproduction": {
+     "born": 2,
+     "closed": 2,
+     "funded": 2,
+     "miscarried": 0,
+     "not_funded_cap": 0,
+     "not_funded_stocks": 0,
+     "open_at_horizon": 0,
+     "refunded": 0
+    },
+    "closing_hunters": 0,
+    "adult_max": 1,
+    "adult_descendants": 0,
+    "descendants_that_reproduced": 0,
+    "adult_occupancy_ticks_0_1_2_over2": [
+     20477,
+     123523,
+     0,
+     0
+    ],
+    "founder_extinction_tick": 267524,
+    "lineage_extinction_tick": 267524,
+    "member_ticks": 136729,
+    "mature_member_ticks": 99524,
+    "max_reserve_fraction": 0.920924457350945,
+    "max_energy_fraction": 0.8741972541914949,
+    "charging": {
+     "conversion_heat": 13.878494241873568,
+     "energy_gained": 55.51397696749427,
+     "reserve_burned": 34.69623560468192,
+     "transactions": 69397
+    },
+    "closing_prey": 99,
+    "prey_min": 70,
+    "prey_tick_integral": 13512900,
+    "closing_state_hash": "16454193366263640455",
+    "members": [
+     {
+      "id": "11:5",
+      "samples": 617,
+      "first_tick": 144200,
+      "adult_structure": 2,
+      "opening_structure": 2,
+      "min_structure": 2,
+      "max_structure": 2,
+      "first_increase_tick": null,
+      "distinct_structure_values": [
+       2
+      ],
+      "last_tick": 267400,
+      "structure_ever_increased": false,
+      "reached_adult_structure": true
+     },
+     {
+      "id": "17:3",
+      "samples": 22,
+      "first_tick": 170600,
+      "adult_structure": 2,
+      "opening_structure": 0.8198999999999979,
+      "min_structure": 0.8198999999999979,
+      "max_structure": 0.8484999999999947,
+      "first_increase_tick": 170800,
+      "distinct_structure_values": [
+       0.8198999999999979,
+       0.8398999999999957,
+       0.8484999999999947
+      ],
+      "last_tick": 174800,
+      "structure_ever_increased": true,
+      "reached_adult_structure": false
+     },
+     {
+      "id": "90:4",
+      "samples": 44,
+      "first_tick": 231400,
+      "adult_structure": 2,
+      "opening_structure": 0.8077999999999992,
+      "min_structure": 0.8077999999999992,
+      "max_structure": 0.8484999999999947,
+      "first_increase_tick": 231600,
+      "distinct_structure_values": [
+       0.8077999999999992,
+       0.827799999999997,
+       0.8477999999999948,
+       0.8484999999999947
+      ],
+      "last_tick": 240000,
+      "structure_ever_increased": true,
+      "reached_adult_structure": false
+     }
+    ]
+   }
+  }
+ },
+ "growth_observed": {
+  "members_whose_structure_increased": 3,
+  "detail": [
+   {
+    "id": "17:3",
+    "samples": 22,
+    "first_tick": 170600,
+    "adult_structure": 2,
+    "opening_structure": 0.8198999999999979,
+    "min_structure": 0.8198999999999979,
+    "max_structure": 0.8484999999999947,
+    "first_increase_tick": 170800,
+    "distinct_structure_values": [
+     0.8198999999999979,
+     0.8398999999999957,
+     0.8484999999999947
+    ],
+    "last_tick": 174800,
+    "structure_ever_increased": true,
+    "reached_adult_structure": false
+   },
+   {
+    "id": "17:3",
+    "samples": 22,
+    "first_tick": 170600,
+    "adult_structure": 2,
+    "opening_structure": 0.8198999999999979,
+    "min_structure": 0.8198999999999979,
+    "max_structure": 0.8484999999999947,
+    "first_increase_tick": 170800,
+    "distinct_structure_values": [
+     0.8198999999999979,
+     0.8398999999999957,
+     0.8484999999999947
+    ],
+    "last_tick": 174800,
+    "structure_ever_increased": true,
+    "reached_adult_structure": false
+   },
+   {
+    "id": "90:4",
+    "samples": 44,
+    "first_tick": 231400,
+    "adult_structure": 2,
+    "opening_structure": 0.8077999999999992,
+    "min_structure": 0.8077999999999992,
+    "max_structure": 0.8484999999999947,
+    "first_increase_tick": 231600,
+    "distinct_structure_values": [
+     0.8077999999999992,
+     0.827799999999997,
+     0.8477999999999948,
+     0.8484999999999947
+    ],
+    "last_tick": 240000,
+    "structure_ever_increased": true,
+    "reached_adult_structure": false
+   }
+  ],
+  "basis": "the 200-tick census. It bounds when a change is first seen, never whether a mutation-site transaction happened between boundaries.",
+  "instrument_gap": "the per-member flow ledger (cubarium_core::flow) is adapted for the moving gate and unit-tested, but is not yet wired into hunter_compare, so this pilot has no per-tick growth record."
+ },
+ "limits": "Read-only over recorded artifacts. It does not re-run the executable, decode semantic WorldState, or judge biology. A pilot that grows nothing is a recorded result. Identity after the first altered growth transaction is not expected and is not checked."
+}
