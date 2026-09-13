@@ -1,13 +1,13 @@
 //! Six matched, care-free arms over every prescribed aged seed. Never touches
 //! the owning runner, live state, web endpoints or display transport.
-//! Local recovery integration is a separate observer module; until exact capture
-//! positions are exposed, summaries explicitly refuse to claim that measurement.
+//! Recovery uses exact pre-removal capture evidence and six worlds in lockstep.
 
 #[path = "hunter_compare/audit.rs"]
 mod audit;
 #[path = "hunter_compare/recovery.rs"]
-#[allow(dead_code)] // Local observer is integrated after exact core capture positions land.
 mod recovery;
+#[path = "hunter_compare/spatial.rs"]
+mod spatial;
 
 use anyhow::{Context, Result, anyhow, ensure};
 use clap::Parser;
@@ -184,6 +184,7 @@ struct Arm {
     descendant_parents: u64,
     last_complete_observer_tick: u64,
     whole_recovery: recovery::WholeRecovery,
+    capture_audit: spatial::CaptureAudit,
     events: BufWriter<File>,
     census: BufWriter<File>,
 }
@@ -327,6 +328,7 @@ impl Arm {
                 )
             })
             .collect();
+        let capture_audit = spatial::CaptureAudit::new(&world.state);
         Ok(Self {
             world,
             audit,
@@ -351,18 +353,22 @@ impl Arm {
             last_complete_observer_tick: opening.tick,
             whole_recovery: recovery::WholeRecovery::new(opening.tick, &prey_counts(opening))
                 .map_err(|e| anyhow!(e))?,
+            capture_audit,
             events: stream(&dir.join("events.jsonl"))?,
             census: stream(&dir.join("census.jsonl"))?,
         })
     }
 
-    fn step(&mut self, elapsed: u64, window: u64) -> Result<()> {
+    fn step(&mut self, index: usize, elapsed: u64, window: u64) -> Result<Vec<recovery::Capture>> {
         let counters = self.world.step();
         let flows = (counters.light_in, counters.heat_out);
         self.world.check_invariants().map_err(|e| anyhow!(e))?;
         self.audit.observe(&self.world.state, flows.0, flows.1)?;
         let life = self.world.drain_events();
         let hunting = self.world.drain_hunter_events();
+        let captures = self
+            .capture_audit
+            .observe(index, &hunting, &self.world.state)?;
         ensure!(
             life.iter().all(|e| e.tick() == self.world.tick()),
             "life event has wrong settlement tick"
@@ -593,7 +599,7 @@ impl Arm {
             )?;
         }
         self.last_complete_observer_tick = self.world.tick();
-        Ok(())
+        Ok(captures)
     }
 
     fn finish(&mut self, dir: &Path, reason: &Option<String>, planned: u64) -> Result<Value> {
@@ -616,8 +622,8 @@ impl Arm {
         let summary = json!({"planned_ticks":planned,"closing_tick":self.world.tick(),
             "termination":reason.as_deref().unwrap_or("planned_horizon"),
             "technical_complete":reason.is_none(),"complete_experiment_measurement":false,
-            "remaining_measurements":["exact capture-position local recovery",
-                "exact reproduction funding debits/heat and escrow closure cause (core evidence required)"],
+            "remaining_measurements":["exact reproduction funding debits/heat and escrow closure cause (core evidence required)"],
+            "local_recovery":"paired seed-level local-recovery.jsonl; exact settlement prey position and paid attempt key",
             "whole_recovery_channels":"total prey, then forms0–7",
             "whole_recovery":self.whole_recovery.summary(reason.as_deref().unwrap_or("planned_horizon")),
             "audit":self.audit.report,"prey_min":self.prey_min,"prey_tick_integral":self.prey_sum,
@@ -638,6 +644,126 @@ impl Arm {
             "closing_snapshot_sha256":sha256(&bytes)?});
         json_new(&dir.join("summary.json"), &summary)?;
         Ok(summary)
+    }
+}
+
+/// One bounded local observer per six-arm seed, never six unrelated local histories.
+struct PairedLocal {
+    recovery: recovery::LocalRecovery,
+    neighborhoods: Vec<Vec<usize>>,
+    opening: u64,
+    last_entered_tick: u64,
+    last_complete_tick: u64,
+    records: BufWriter<File>,
+    exposures: BufWriter<File>,
+}
+
+fn paired_states(arms: &[Arm]) -> Result<[&WorldState; recovery::ARMS]> {
+    ensure!(
+        arms.len() == recovery::ARMS,
+        "local recovery requires all six arms"
+    );
+    let states: [&WorldState; recovery::ARMS] = std::array::from_fn(|a| &arms[a].world.state);
+    ensure!(
+        states.iter().all(|s| s.tick == states[0].tick),
+        "paired local census has unequal world ticks"
+    );
+    Ok(states)
+}
+
+impl PairedLocal {
+    fn new(arms: &[Arm], dir: &Path) -> Result<Self> {
+        let states = paired_states(arms)?;
+        let tick = states[0].tick;
+        let neighborhoods = spatial::neighborhoods();
+        let mut recovery =
+            recovery::LocalRecovery::new(tick, neighborhoods.clone(), spatial::ON_ARMS.to_vec())
+                .map_err(|e| anyhow!(e))?;
+        recovery
+            .observe_sample(tick, &spatial::counts(states))
+            .map_err(|e| anyhow!(e))?;
+        Ok(Self {
+            recovery,
+            neighborhoods,
+            opening: tick,
+            last_entered_tick: tick,
+            last_complete_tick: tick,
+            records: stream(&dir.join("local-recovery.jsonl"))?,
+            exposures: stream(&dir.join("local-exposures.jsonl"))?,
+        })
+    }
+
+    fn emit(&mut self, records: Vec<recovery::LocalRecord>) -> Result<()> {
+        for record in records {
+            line(&mut self.records, &serde_json::to_value(record)?)?;
+        }
+        Ok(())
+    }
+
+    fn observe(&mut self, arms: &[Arm], captures: &[recovery::Capture]) -> Result<()> {
+        let states = paired_states(arms)?;
+        let tick = states[0].tick;
+        ensure!(
+            tick == self.last_complete_tick + 1,
+            "paired local observation skipped a tick"
+        );
+        self.last_entered_tick = tick;
+        if !captures.is_empty() || (tick - self.opening) % recovery::CADENCE == 0 {
+            let counts = spatial::counts(states);
+            if !captures.is_empty() {
+                for capture in captures {
+                    let cells = &self.neighborhoods[capture.cell];
+                    let forms = spatial::local_forms(states, cells);
+                    let totals = forms.map(|f| f.iter().sum::<u32>());
+                    line(
+                        &mut self.exposures,
+                        &json!({"tick":tick,"capture":capture,"cells":cells,
+                        "post_step_prey":totals,"post_step_prey_by_form":forms,
+                        "basis":"same cells in all six arms at end of settlement tick; not instantaneous pre/post-removal counts"}),
+                    )?;
+                }
+                let records = self
+                    .recovery
+                    .record_captures(tick, captures, &counts)
+                    .map_err(|e| anyhow!(e))?;
+                self.emit(records)?;
+            }
+            // Strictly after all captures, including a capture on the census boundary.
+            if (tick - self.opening) % recovery::CADENCE == 0 {
+                let records = self
+                    .recovery
+                    .observe_sample(tick, &counts)
+                    .map_err(|e| anyhow!(e))?;
+                self.emit(records)?;
+            }
+        }
+        self.last_complete_tick = tick;
+        Ok(())
+    }
+
+    fn finish(&mut self, reason: Option<&str>) -> Result<Value> {
+        let records = self
+            .recovery
+            .finish(self.last_entered_tick, reason.unwrap_or("planned_horizon"))
+            .map_err(|e| anyhow!(e))?;
+        self.emit(records)?;
+        for file in [&mut self.records, &mut self.exposures] {
+            file.flush()?;
+            file.get_ref().sync_all()?;
+        }
+        Ok(
+            json!({"available":true,"technical_complete":reason.is_none(),
+            "last_complete_paired_tick":self.last_complete_tick,"last_entered_tick":self.last_entered_tick,
+            "statistics_trusted_through_closing_tick":reason.is_none(),
+            "termination":reason.unwrap_or("planned_horizon"),
+            "captures_seen":self.recovery.captures_seen,"selected_captures":self.recovery.selected_captures,
+            "unselected_captures":std::array::from_fn::<_,6,_>(|a|self.recovery.captures_seen[a]-self.recovery.selected_captures[a]),
+            "graph_radius":3,"sample_ticks":recovery::CADENCE,"capture_bin_ticks":recovery::CAPTURE_BIN,
+            "window_horizon_ticks":recovery::LOCAL_HORIZON,"retained_samples":self.recovery.retained_samples(),
+            "active_windows_after_close":self.recovery.active_windows(),
+            "records":"local-recovery.jsonl","all_capture_exposures":"local-exposures.jsonl",
+            "limits":"Treatment-selected locations. Milestone counts are cadence-observed total prey; per-form counts are immediate end-of-step exposure counts, not per-form recovery windows. Any failed observer step may have partially updated statistics."}),
+        )
     }
 }
 
@@ -662,7 +788,7 @@ fn main() -> Result<()> {
         "build":BUILD,"executable_sha256":sha256(&executable)?,"cohort":cohort,
         "ticks":args.ticks,"audit_window":args.audit_window,"arms":NAMES,
         "care":false,"resume_supported":false,"ancestry_basis":"aged opening cohorts, not original founders",
-        "notes":"All twelve seeds retained. Initial implementation: resource/event/occupancy measurement; missing recovery/funding metrics are not claimed. Profile geometry remains unintegrated with art."}),
+        "notes":"All twelve seeds retained. Exact paid capture evidence drives paired local recovery. Missing funding metrics and unvalidated biology are not claimed. Renderer is not part of this headless trial."}),
     )?;
     let mut all = Vec::new();
     let mut failed = false;
@@ -682,18 +808,53 @@ fn main() -> Result<()> {
                 }
             }
         }
-        'ticks: for elapsed in 1..=if reason.is_none() { args.ticks } else { 0 } {
-            for (index, arm) in arms.iter_mut().enumerate() {
-                if let Err(e) = arm.step(elapsed, args.audit_window) {
-                    reason = Some(format!(
-                        "technical_failure: {} elapsed{elapsed}: {e:#}",
-                        NAMES[index]
-                    ));
+        let mut local = if reason.is_none() {
+            match PairedLocal::new(&arms, &dir) {
+                Ok(local) => Some(local),
+                Err(error) => {
+                    reason = Some(format!("local_initialization_failure: {error:#}"));
                     failed = true;
-                    break 'ticks;
+                    None
                 }
             }
+        } else {
+            None
+        };
+        'ticks: for elapsed in 1..=if reason.is_none() { args.ticks } else { 0 } {
+            let mut captures = Vec::new();
+            for (index, arm) in arms.iter_mut().enumerate() {
+                match arm.step(index, elapsed, args.audit_window) {
+                    Ok(batch) => captures.extend(batch),
+                    Err(e) => {
+                        reason = Some(format!(
+                            "technical_failure: {} elapsed{elapsed}: {e:#}",
+                            NAMES[index]
+                        ));
+                        failed = true;
+                        break 'ticks;
+                    }
+                }
+            }
+            if let Err(e) = local
+                .as_mut()
+                .expect("initialized paired observer")
+                .observe(&arms, &captures)
+            {
+                reason = Some(format!("local_observer_failure: elapsed{elapsed}: {e:#}"));
+                failed = true;
+                break;
+            }
         }
+        let local_summary = match local.as_mut().map(|l| l.finish(reason.as_deref())) {
+            None => json!({"available":false,"technical_complete":false,"reason":reason}),
+            Some(Ok(summary)) => summary,
+            Some(Err(error)) => {
+                failed = true;
+                let error = format!("local_finalization_failure: {error:#}");
+                reason.get_or_insert(error.clone());
+                json!({"available":false,"technical_complete":false,"error":error})
+            }
+        };
         let mut summaries = Vec::new();
         for (i, arm) in arms.iter_mut().enumerate() {
             match arm.finish(&dir.join(NAMES[i]), &reason, args.ticks) {
@@ -708,7 +869,8 @@ fn main() -> Result<()> {
                 }
             }
         }
-        let result = json!({"seed":seed,"arms":summaries,"failure":reason});
+        let result =
+            json!({"seed":seed,"arms":summaries,"local_recovery":local_summary,"failure":reason});
         json_new(&dir.join("result.json"), &result)?;
         all.push(result);
         eprintln!(
@@ -754,6 +916,92 @@ mod tests {
         ));
         fs::create_dir(&path).unwrap();
         path
+    }
+    #[test]
+    fn paired_local_rejects_a_partly_advanced_seed_and_preserves_coverage() {
+        let opening = World::new(cubarium_core::WorldConfig::default())
+            .unwrap()
+            .state;
+        let dir = temp_parent();
+        let mut arms: Vec<_> = NAMES
+            .iter()
+            .enumerate()
+            .map(|(i, name)| Arm::new(&opening, i, &dir.join(name)).unwrap())
+            .collect();
+        let mut local = PairedLocal::new(&arms, &dir).unwrap();
+        arms[0].step(0, 1, 200).unwrap();
+        assert!(local.observe(&arms, &[]).is_err());
+        assert_eq!(local.last_entered_tick, opening.tick);
+        let summary = local.finish(Some("synthetic partial-arm failure")).unwrap();
+        assert_eq!(summary["last_complete_paired_tick"], opening.tick);
+        assert_eq!(summary["technical_complete"], false);
+        assert_eq!(summary["statistics_trusted_through_closing_tick"], false);
+    }
+
+    #[test]
+    fn paired_local_streams_capture_boundary_forms_and_censored_followup() {
+        let opening = World::new(cubarium_core::WorldConfig::default())
+            .unwrap()
+            .state;
+        let dir = temp_parent();
+        let mut arms: Vec<_> = NAMES
+            .iter()
+            .enumerate()
+            .map(|(i, name)| Arm::new(&opening, i, &dir.join(name)).unwrap())
+            .collect();
+        let mut local = PairedLocal::new(&arms, &dir).unwrap();
+        let cell =
+            cubarium_surface::cell_of(&opening.organisms.iter().next().unwrap().1.pos).index();
+        // Deliberate synthetic exposure to test orchestration/file ordering at
+        // exactly a census boundary; spatial's separate fixture uses a REAL kill.
+        let capture = recovery::Capture {
+            arm: 3,
+            cell,
+            id: recovery::CaptureId {
+                hunter_slot: 123,
+                hunter_generation: 4,
+                attempt: 5,
+            },
+        };
+        for elapsed in 1..=400 {
+            let mut batch = Vec::new();
+            for (i, arm) in arms.iter_mut().enumerate() {
+                batch.extend(arm.step(i, elapsed, 200).unwrap());
+            }
+            assert!(batch.is_empty(), "this stream fixture unexpectedly hunted");
+            if elapsed == 200 {
+                batch.push(capture.clone());
+            }
+            local.observe(&arms, &batch).unwrap();
+        }
+        let summary = local.finish(None).unwrap();
+        assert_eq!(summary["last_complete_paired_tick"], 400);
+        assert_eq!(summary["captures_seen"][3], 1);
+        assert_eq!(summary["selected_captures"][3], 1);
+        assert_eq!(summary["active_windows_after_close"], 0);
+        let exposures = fs::read_to_string(dir.join("local-exposures.jsonl")).unwrap();
+        let exposure: Value = serde_json::from_str(exposures.trim()).unwrap();
+        assert_eq!(exposure["tick"], 200);
+        assert_eq!(exposure["capture"]["id"]["hunter_generation"], 4);
+        for i in 0..6 {
+            let total: u64 = exposure["post_step_prey_by_form"][i]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_u64().unwrap())
+                .sum();
+            assert_eq!(exposure["post_step_prey"][i], total);
+        }
+        let output = fs::read_to_string(dir.join("local-recovery.jsonl")).unwrap();
+        let record: Value = serde_json::from_str(output.trim()).unwrap();
+        assert_eq!(record["capture_tick"], 200);
+        assert_eq!(
+            record["pre_samples"], 1,
+            "same-tick census must not enter prehistory"
+        );
+        assert_eq!(record["status"], "insufficient_pre");
+        assert_eq!(record["closed_tick"], 400);
+        assert_eq!(record["termination_reason"], "planned_horizon");
     }
     #[test]
     fn offspring_reconciliation_rejects_duplicates_and_wrong_parents() {

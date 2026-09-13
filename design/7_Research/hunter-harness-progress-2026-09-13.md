@@ -95,9 +95,8 @@ Astra's independent reviews are `ca1a0b7` and
 
 ## Still required before the biological screen
 
-- Wire local recovery using exact post-movement capture positions and the real
-  paid-attempt key. Astra's module is implemented/tested, but current core Capture
-  lacks those fields. Never substitute a previous-tick position and call it exact.
+- Local recovery is now wired; see the subsequent integration below. Its paired
+  short smoke still needs a frozen-build run before claiming end-to-end evidence.
 - Complete/review actual hunting, digestion, paid escape and offspring core tests;
   link exact funding identities to the observer evidence. Current smoke duration
   does not establish successful predation or paid lineage replacement.
@@ -114,3 +113,52 @@ Astra's independent reviews are `ca1a0b7` and
 The longer presentation backlog (canopy authored growth, quiet habits, biological
 care responses, tunable ambient support/doses and higher-resolution detail) remains
 open in the animation roadmap. No new package was deployed to the live cube here.
+
+## Subsequent exact-position local recovery integration
+
+Core `22d8dba` supplies the actual pre-removal post-movement prey/root pose,
+scaled contact geometry and the same paid key on Attempt/Capture. Root added
+`hunter_compare/spatial.rs` and paired orchestration. Each Capture must match a
+same-tick paid successful Attempt in full identity, target, key and evidence.
+The living-ID-bounded counter map rejects repeated/regressing settled keys; it
+does not pretend that every paid entry settles (a hunter can die in flight).
+Successful attempts without captures, captures without attempts, control-arm
+captures, malformed positions/inventories and duplicated prey/keys fail.
+
+The adapter also recomputes the reported contact measure and both physical centers
+from recorded root/heading/geometry, checking the latter against the scaled saved
+profile. This uses shared read-only geometry helpers: it verifies internal event
+consistency, not an independent reimplementation of the topology algorithm.
+Astra found that matching copies of corrupted evidence previously passed;
+the regression changes both events' prey position while retaining their cached
+measure and proves refusal without consuming the good event's key.
+
+One LocalRecovery observer receives all six worlds at the same completed tick.
+It maps the prey's capture position, not the hunter/previous view, into the existing
+FieldGraph. Neighborhoods contain every cell at graph distance <=3, crossing seams
+and respecting the open rim. Captures precede that tick's census. Six strictly
+prior 200-tick samples, first capture per 12000-tick elapsed bin per on-arm,
+bounded follow-up and explicit censoring remain Astra's implemented rules.
+
+Per-seed `local-exposures.jsonl` streams every capture's full paid key, cells and
+six-arm immediate end-of-step total/form counts. `local-recovery.jsonl` streams
+selected follow-up windows and paired total-prey changes. The seed result records
+seen/selected/unselected denominators, last complete paired tick and failure trust
+flags. Per-form exposure counts are not per-form recovery windows. If an arm fails
+mid-step, the paired observer closes at its last fully shared tick, not a mixture
+of early/late arm positions. Failed writes/observations remain technical failures.
+
+Targeted example suite: **36 passed, 0 failed** (the original28 plus eight bridge/
+orchestration checks). New coverage includes seam/rim/vertex graph neighborhoods,
+real certain-probability capture at the prey cell, missing/mismatched/duplicate
+paid evidence, jointly corrupted poses, hunter-excluding form census, a saved
+post-capture world continued for1200ticks with matching event streams and full
+hashes under20/200tick extra read-only observations, and paired partial-step/
+same-census-boundary streaming and censoring. The latter exposure is deliberately
+synthetic to isolate file/cadence order; the separate contact fixture uses actual
+controller payment and settlement. Neither is a default-profile balance trial.
+
+The generic observer target still repeats22 of these tests. The new restart test
+does not include reproduction. Exact funding transactions/escrow closure causes,
+full biological stages and current core/art phase/scale review findings remain
+open. No hunter was deployed by this observer package.
