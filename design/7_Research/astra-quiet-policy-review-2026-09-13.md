@@ -101,3 +101,76 @@ migration tests. This review does not replace the separate real-world ten-minute
 twelve-seed no-care/fixed-Feed experiment or its required longer horizons. Passing
 unit/migration tests cannot establish adequate quiet opportunity, improved
 viability, paid offspring recruitment, or permission to change the Off default.
+
+## Final committed-package review: `0980eab`
+
+Reviewed commit `0980eabe8727372cf277b440b000807ede201132` from an isolated
+`git archive`, not the moving working tree. Retained source is
+`captures/build-cache/astra-quiet-review/source-0980eab-FPZ40r`.
+Before adding any forensic probe, the exact committed sources passed:
+
+```text
+CARGO_TARGET_DIR=/home/wrysk/wryskware/cubarium/captures/build-cache/astra-quiet-review \
+  cargo test --locked -p cubarium-core --test astra_quiet_policy \
+  --test quiet_pause --test quiet_migration --test snapshot_hardening -- --nocapture
+```
+
+**34 passed, 0 failed, exit 0:** 8 independent tests, 12 quiet behavior tests,
+6 migration tests, and 8 snapshot hardening tests. The exact B+40 restart fix
+remains resolved in this committed package. Additional package tests verify
+actual remaining upkeep, bounded movement, unchanged paid-child accounting,
+refusal/refund/dead-parent non-admission and atomic hunter-initialization refusal.
+This is targeted package evidence, not a full workspace test claim or a biological
+screen. No core or independent committed test source changed during this pass.
+
+### Genuine fixture provenance confirmed
+
+All four committed schema-12 fixture envelopes, CRCs, payload hashes and SHA-256s
+match `tests/fixtures/quiet-v12-provenance.md`; header build ID is
+`pre-quiet-fixture`. The committed generator's SHA-256 is
+`ce76719bde869c0413dfb556e24b6f17429e4417d5df01a6cee0c35d579842d2`.
+The retained pre-quiet generator executable also exists and matches its recorded
+SHA-256 `d48c81b2c015d5d952214aaddd25cc9cc6d10d8f25be16e3415fb2dbd0ba66e5`.
+The generator explicitly requires schema 12 and resumes the fixed mature seed-1
+opening; the plain and actual Standard-Feed histories both contain paid births.
+This review verified those retained artifacts and their 600-tick continuation;
+it did not rebuild or rerun the old generator, or rewrite any fixture.
+
+### One remaining narrow decoder-hardening gap
+
+`snapshot.rs::decode_snapshot` now uses `decode_exact` for every legacy mirror
+(schemas 7–12). This correctly refuses a schema-13 payload relabelled schema 12
+instead of silently dropping its appended quiet extension. The existing relabel
+and migration tests pass. However, the current-schema branch still calls
+`postcard::from_bytes`, which tolerates unconsumed bytes.
+
+Reproduced on frozen `0980eab`: encode a valid schema-13 state, append byte `0x7f`,
+update the envelope's payload length and CRC, then decode. It succeeds and returns
+the original state, silently discarding the tail. The CRC and length are valid,
+so the outer envelope checks cannot catch this shape mismatch. The isolated
+forensic test `astra_current_schema_still_accepts_a_crc_valid_unconsumed_tail`
+was added only to the retained review copy's independent test file, after the
+34-test run; it passed by demonstrating that acceptance. It is not a passing
+strict-rejection regression and was not added to production test sources.
+
+Minimal fixture steps, sufficient to preserve the reproduction:
+
+```rust
+let mut bytes = encode_snapshot(&state, "astra");
+let at = 10 + u16::from_le_bytes(bytes[8..10].try_into().unwrap()) as usize;
+bytes.push(0x7f);
+let length = (bytes.len() - at - 12) as u64;
+bytes[at..at+8].copy_from_slice(&length.to_le_bytes());
+let crc = crc32fast::hash(&bytes[at+12..]);
+bytes[at+8..at+12].copy_from_slice(&crc.to_le_bytes());
+assert!(decode_snapshot(&bytes).is_ok()); // observed gap, not desired behavior
+```
+
+Recommendation: use `decode_exact::<WorldState>(payload, schema)` in the current
+branch too, and add a rejection test with a correct length and CRC. This is not
+evidence that normal quiet snapshots or the measured continuation fail; it is an
+incomplete fail-closed shape check that should be fixed before a schema-13 live
+rollout. It does not justify tuning quiet biology or rerunning valid old fixtures.
+The ordinary quiet policy is ready for its separately authorized copied-world
+measurement, subject to that measurement's own complete numerical and observer
+gates; no biological acceptance or live rollout approval is given here.
