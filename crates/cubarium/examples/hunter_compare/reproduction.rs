@@ -67,6 +67,25 @@ struct Sizes {
     energy_max: f64,
 }
 
+/// A compensated running total, so a seventy-two-hour arm's aggregates do not drift the way a
+/// naive `+=` of many small transfers does. The accumulation rule is core's own
+/// (`cubarium_core::accounting::accumulate`), not a second implementation of it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+struct Sum {
+    raw: f64,
+    correction: f64,
+}
+
+impl Sum {
+    fn add(&mut self, x: f64) {
+        cubarium_core::accounting::accumulate(&mut self.raw, &mut self.correction, x);
+    }
+
+    fn value(self) -> f64 {
+        self.raw + self.correction
+    }
+}
+
 /// Counts and aggregates, by transaction. Every quantity is core's reported one; the audit adds
 /// only the arithmetic that checks it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
@@ -78,20 +97,20 @@ struct Totals {
     not_funded_cap: u64,
     not_funded_stocks: u64,
     /// `escrow S + R` summed over fundings, and the energy the parent gave up with it.
-    funded_material: f64,
-    funded_energy: f64,
+    funded_material: Sum,
+    funded_energy: Sum,
     /// `build_cost · S` at funding, and `e_r · S` at birth.
-    build_heat: f64,
-    birth_heat: f64,
-    born_material: f64,
-    born_energy: f64,
-    refunded_material: f64,
-    refunded_energy: f64,
+    build_heat: Sum,
+    birth_heat: Sum,
+    born_material: Sum,
+    born_energy: Sum,
+    refunded_material: Sum,
+    refunded_energy: Sum,
     /// The escrow terms exported to the litter, and how the detritus cap split them.
-    miscarried_material: f64,
-    miscarried_energy: f64,
-    miscarried_stored: f64,
-    miscarried_heat: f64,
+    miscarried_material: Sum,
+    miscarried_energy: Sum,
+    miscarried_stored: Sum,
+    miscarried_heat: Sum,
 }
 
 /// The configured quantities a transaction is checked against, read once at the opening.
@@ -418,9 +437,9 @@ impl ReproductionAudit {
         }
 
         totals.funded += 1;
-        totals.funded_material += material;
-        totals.funded_energy += held;
-        totals.build_heat += build_heat;
+        totals.funded_material.add(material);
+        totals.funded_energy.add(held);
+        totals.build_heat.add(build_heat);
         open.insert(
             key.parent,
             Open {
@@ -495,9 +514,9 @@ impl ReproductionAudit {
         );
 
         totals.born += 1;
-        totals.born_material += child_structure + child_reserve;
-        totals.born_energy += self.rates.reserve_energy_density * child_reserve + child_energy;
-        totals.birth_heat += birth_heat;
+        totals.born_material.add(child_structure + child_reserve);
+        totals.born_energy.add(self.rates.reserve_energy_density * child_reserve + child_energy);
+        totals.birth_heat.add(birth_heat);
         Ok(child)
     }
 
@@ -550,8 +569,8 @@ impl ReproductionAudit {
         );
 
         totals.refunded += 1;
-        totals.refunded_material += material;
-        totals.refunded_energy += self.rates.reserve_energy_density * material + refunded_energy;
+        totals.refunded_material.add(material);
+        totals.refunded_energy.add(self.rates.reserve_energy_density * material + refunded_energy);
         Ok(())
     }
 
@@ -605,10 +624,10 @@ impl ReproductionAudit {
         );
 
         totals.miscarried += 1;
-        totals.miscarried_material += material;
-        totals.miscarried_energy += energy;
-        totals.miscarried_stored += energy_stored;
-        totals.miscarried_heat += energy_heat;
+        totals.miscarried_material.add(material);
+        totals.miscarried_energy.add(energy);
+        totals.miscarried_stored.add(energy_stored);
+        totals.miscarried_heat.add(energy_heat);
         Ok(())
     }
 
@@ -681,20 +700,20 @@ impl ReproductionAudit {
                 "open_at_horizon": self.open.len(),
             },
             "material": {
-                "funded": t.funded_material,
-                "born": t.born_material,
-                "refunded": t.refunded_material,
-                "miscarried": t.miscarried_material,
+                "funded": t.funded_material.value(),
+                "born": t.born_material.value(),
+                "refunded": t.refunded_material.value(),
+                "miscarried": t.miscarried_material.value(),
             },
             "energy": {
-                "funded": t.funded_energy,
-                "born": t.born_energy,
-                "refunded": t.refunded_energy,
-                "miscarried": t.miscarried_energy,
-                "miscarried_retained_as_detritus": t.miscarried_stored,
-                "miscarried_as_heat": t.miscarried_heat,
+                "funded": t.funded_energy.value(),
+                "born": t.born_energy.value(),
+                "refunded": t.refunded_energy.value(),
+                "miscarried": t.miscarried_energy.value(),
+                "miscarried_retained_as_detritus": t.miscarried_stored.value(),
+                "miscarried_as_heat": t.miscarried_heat.value(),
             },
-            "heat": { "build": t.build_heat, "birth": t.birth_heat },
+            "heat": { "build": t.build_heat.value(), "birth": t.birth_heat.value() },
             "open_censored": self.open.iter().map(|(parent, e)| json!({
                 "parent": id_json(*parent),
                 "started_tick": e.started_tick,
