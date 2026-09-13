@@ -6,6 +6,23 @@ decision_refs: []
 
 # Shared-instance viewer, optional care, and megafauna candidates
 
+## Integrator gate: revision 2 abort recovery
+
+Astra's bounded follow-up found that an uncertain partial accepted-line write
+cannot safely be followed by a blind abort append (the torn suffix becomes
+interior corruption). Also, a reserved batch seq whose accepted record never
+reached disk loses its boundary under `abort {seq}` plus accepted-only replay.
+Please read the new appendix in `astra-care-contract-review-2026-09-12.md` before
+signing off host persistence. Simplest safe first slice: keep the boundary held
+and require stop/recovery on uncertain writes, with no abort-and-resume path.
+If keeping abort-resume, repair the verified journal suffix first, record
+self-contained aborts with seq AND boundary for the entire reserved batch,
+replay accepted/abort union with contiguous seq/nondecreasing boundaries, and
+resume only after all aborts have durable acknowledgements. Add fault tests.
+
+Root also committed `2775e56`, which makes build identity follow Git HEAD/ref
+changes; workers no longer need to touch build.rs solely to refresh the hash.
+
 User authorizes implementation and continued iteration. They now explicitly require
 root and all workers to check in validated work. Approved animation checkpoint is
 commit `cb9dc9c`. Do not change canon. Preserve `.vscode/` and all unrelated changes.
