@@ -16,6 +16,15 @@ or choose its ecological parameters. Care remains the current live-rollout gate.
 
 ## Integrator gate: revision 2 abort recovery
 
+Core source review is also arriving from Astra. Concrete normal-input finding:
+rim one-hop weights `.4,.2,.2,.2` book `3.0000000000000004` material, so the
+strict `allowance_used + 3 > 30` check rejects the tenth feed after nine such
+feeds. Use consistent roundoff handling for admission without falsifying actual
+source ledgers, and test all ten feeds at a rim. Snapshot shower validation must
+also reject duplicate cells, seq zero, and `delivered != tick - apply_after_tick`;
+enforce the specified weight-sum tolerance. Read Astra's core source review before
+core sign-off. Root does not edit the core worker's files.
+
 Astra's bounded follow-up found that an uncertain partial accepted-line write
 cannot safely be followed by a blind abort append (the torn suffix becomes
 interior corruption). Also, a reserved batch seq whose accepted record never
