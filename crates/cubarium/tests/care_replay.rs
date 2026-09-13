@@ -563,7 +563,15 @@ fn a_delayed_acknowledgement_holds_the_world_at_b_and_applies_once() {
     assert_eq!(receipt["apply_after_tick"], held_at);
     assert!(receipt["applied"]["material_in"].as_f64().unwrap() > 0.0, "{receipt}");
 
-    let after = live.get("/care/status");
+    // An applied receipt is published at the held boundary, before the next
+    // simulation tick is due. Observe actual resumption rather than assuming
+    // the first HTTP response after that publication is already a later tick.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut after = live.get("/care/status");
+    while after["world_tick"].as_u64().unwrap() <= held_at && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+        after = live.get("/care/status");
+    }
     assert_eq!(after["care"], "ready", "the hold must end: {after}");
     assert!(after["world_tick"].as_u64().unwrap() > held_at, "the world must resume: {after}");
 
