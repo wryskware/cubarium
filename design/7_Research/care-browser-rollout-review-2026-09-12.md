@@ -51,3 +51,22 @@ the final journal durability review; run the replay/failure-injection tests and
 final regression pass. Preserve a fresh exact schema-7 handover checkpoint from
 the actual cube runner before migrating it. The shared viewer is already live;
 care remains isolated until these gates pass.
+
+## Panel source-review corrections before sign-off
+
+In the first panel implementation, `register()` can return 503 while historical
+care is replaying, leaving `careClient` and `careEpoch` null. Once status becomes
+ready, `pollCare` never retries registration (its only registration branch
+requires a previous non-null epoch). The controls therefore remain disabled
+until the page is manually reloaded. Retry registration when the host transitions
+to ready and no client exists, with an in-flight guard and bounded retry cadence.
+Handle a page opened against a temporarily disabled/offline host similarly; do
+not spin registrations each frame or race duplicate initial registrations. Verify
+an initial replaying response followed by ready enables the buttons without reload.
+
+`rowFor` limits DOM rows to 24 but never removes their entries from `careRows`,
+so the Map retains every removed element and grows with clicks, including
+cooldown-rejected requests. Bound the Map as well as the DOM. Verify more than
+24 request rows keeps both bounded and retains the newest useful receipts.
+
+These are frontend state/lifetime fixes, not changes to ecological admission.
