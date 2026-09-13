@@ -144,11 +144,20 @@ the shared viewer measured59.9 distinctfps. See the
 [same-world rollout](7_Research/spiretree-live-update-2026-09-13.md).
 The108-case isolated care screen is complete: Feed usually increases real local
 feeding, rain is mixed, cleanup usually reduces feeding; sustained Resting is
-not demonstrated. Actual-intake meal animation, ordinary quiet-gate diagnosis
-and isolated natural-rainfall experiment implementation proceed separately.
-The reviewed, frozen paid-charging12-seed/six-arm comparison is now running;
-it is not a viability result. All earlier ecological failures remain retained,
-and the broader goal/backlog above remains open.
+not demonstrated. The [meal-continuity candidate](7_Research/meal-onset-continuity-2026-09-13.md)
+is committed and under matched visual/boundary review, not deployed. The completed
+[quiet diagnosis](7_Research/astra-quiet-results-2026-09-13.md) explains why existing
+rest gates never open in the observed cohort; the
+[post-birth pause](7_Research/astra-ordinary-quiet-experiment-proposal-2026-09-13.md)
+is a proposal, not implemented biology. The
+[developmental follow-up](7_Research/fauna-development-followup-2026-09-13.md)
+requires earlier-life evidence for fragile skimmers. Keep this distinct from the
+reviewed natural-rainfall harness's isolated3e9bc2f two-hour collection now running.
+Both paid-charging jobs terminated; candidate seed6 retained an invariant failure,
+so the full matched screen cannot pass. Exact failure replay and interpretation
+are underway. The [AA study](7_Research/astra-aa-comparison-2026-09-13.md) rejects
+blanket coverage baking as a default and proposes only a selective wing follow-up.
+All earlier failures and the broader goal/backlog above remain open.
 
 ## M1 — prove the surface and presentation path
 
