@@ -26,11 +26,39 @@ nothing.
 | | |
 | --- | --- |
 | Base | `1d7b386` — the revision that produced the retained cohort |
-| Branch | `diagnostic/fauna-development-flow-2026-09-13`, commit `4f00121` |
+| Branch | `diagnostic/fauna-development-flow-2026-09-13`, head `cdeeb55` |
 | Worktree | `captures/diagnostic-source/fauna-development-flow-2026-09-13` (gitignored) |
 | Build cache | `captures/build-cache/fauna-development-flow` |
-| Diagnostic binary SHA256 | `3e5891a77869acd3174b2b158bdd6b6d0344bcf4aeccbc46fb34e7df21664512` |
-| Patch on `main` | [`assets/fauna-development-flow-instrumentation-2026-09-13.patch`](assets/fauna-development-flow-instrumentation-2026-09-13.patch) |
+| Patch on `main` | [`assets/fauna-development-flow-instrumentation-2026-09-13.patch`](assets/fauna-development-flow-instrumentation-2026-09-13.patch), refreshed from `cdeeb55` |
+
+### Which binary produced which artifact
+
+Three executables exist. They are **not** byte-identical to one another, and no
+claim here says they are: the release profile carries debug info, whose line
+tables embed a per-source-file checksum, so editing any source file — even a
+`#[cfg(test)]` block that the release build excludes — changes the executable's
+hash while changing no compiled behaviour.
+
+| Source commit | Binary SHA256 | Produced |
+| --- | --- | --- |
+| `3868fdc` | `3e5891a7…664512` | the retained smoke `smoke-seed-1-20000.json` **and both full pilots** `seed-1.json`, `seed-2.json` |
+| `4f00121` (adds test-only corrections) | `dba771ee…27596` | a seed-2 regeneration used only for comparison |
+| `cdeeb55` (adds the output reservation) | `7289398d…b89e2` | a smoke regeneration used only for comparison, and the I/O-guard evidence |
+
+The comparison scope is exact, and it is the artifacts rather than the
+executables:
+
+- `4f00121`'s seed-2 artifact equals the retained `seed-2.json` after removing
+  **only** the `diagnostic_binary_sha256` field. Every other key, including all
+  455/428 member records and all five gate blocks, compares equal. Astra
+  reproduced this independently.
+- `cdeeb55`'s 20000-tick smoke artifact equals the retained
+  `smoke-seed-1-20000.json` after removing **only** that same field.
+
+So the two edits after `3868fdc` are behaviour-preserving as measured, and the
+retained pilots continue to stand for the committed head. They were not rerun,
+because neither edit touches the step, the ledger or the gates; an I/O-only
+change is established by a short smoke, not by two more full replays.
 
 **Why `1d7b386` and not `512ee52`.** The retained cohort
 `captures/hunter-openings-2026-09-13` is schema 9, build label `0.1.0+1d7b386`.
@@ -259,14 +287,58 @@ an **artifact reduction, not a replay**: the runtime gates were asserted inside
 the harness against the retained snapshots, and the reducer restates rather than
 re-derives them.
 
+Astra's independent review found four malformed artifacts that the first version
+accepted. Each is now a refusal with its own regression, and Astra's probe runs
+unchanged against the fixed reducer:
+
+| Accepted before | Now refused because |
+| --- | --- |
+| `forms[3].reached_adult_target` inflated 27 → 38 | every form-row count is rebuilt from the member records — members, founders, descendants, recruitments, survivors and deaths by cause — not just the member total |
+| `samples_compared = 1440` with an empty `reconstructed_series` | the series is the evidence behind the count: it must be present, match the count, rise strictly, keep all eight form slots, sum to its own population, and end at the horizon |
+| a child with `parent_energy_debit = -1` | every birth-payment amount must be finite and non-negative, and the energy debit must equal `build_heat + escrow.energy` exactly, as the funding site computes it |
+| a member missing `worst_residual.energy` | a residual must carry exactly the three stocks; a dropped key previously read as a clean reconciliation for a stock nothing checked |
+
+The general lesson is that a summary is only evidence if it is derivable from
+the records it summarises. The first version checked several summaries against
+themselves.
+
 ```sh
 node --test scripts/fauna-development-flow.test.mjs
+node --test scripts/astra-fauna-flow-pilot-review.test.mjs
 node scripts/fauna-development-flow.mjs \
   captures/fauna-development-flow-pilots-2026-09-13/seed-1.json \
   captures/fauna-development-flow-pilots-2026-09-13/seed-2.json
 ```
 
-19 reducer tests and the reduction of both real pilots passed on 2026-09-13.
+23 reducer tests, Astra's 4 independent probes run unchanged, and the reduction
+of both real pilots all passed on 2026-09-13.
+
+## Outputs are reserved before anything is read
+
+`cdeeb55` makes the harness reserve its output path with `create_new` **before**
+it opens the cohort or replays anything, and write through that retained handle.
+An existing file, a directory, a symlink, or the empty reservation left by an
+interrupted run are all refused. Its seven example tests pass.
+
+The ordering is what protects retained evidence, so it is verified rather than
+assumed. Pointing the harness at an occupied output *and* a nonexistent cohort
+fails on the reservation, never reaching the cohort:
+
+```
+Error: output must be a NEW file: …/occupied.json
+Caused by: File exists (os error 17)
+```
+
+The control run — the same nonexistent cohort with a free output path — fails
+instead on the cohort read (`initial-manifest.json`, os error 2), which is what
+shows the cohort read would genuinely have happened and that the refusal above
+really is ordered ahead of it. The occupied file's bytes were unchanged
+throughout. Evidence is retained under
+`captures/fauna-development-flow-io-guard-2026-09-13/`.
+
+One operational consequence: a run interrupted after reservation leaves a
+zero-byte output that blocks a retry at the same path, by design. Choose a new
+path rather than deleting the reservation, so an interrupted run stays visible.
 
 To reproduce a pilot:
 

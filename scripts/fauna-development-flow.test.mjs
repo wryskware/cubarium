@@ -173,6 +173,8 @@ function deathOf(decision_tick, over = {}) {
 
 function formRow(form, members) {
   const mine = members.filter((m) => m.form === form);
+  const deaths_by_cause = {};
+  for (const m of mine) if (m.death) deaths_by_cause[m.death.cause] = (deaths_by_cause[m.death.cause] ?? 0) + 1;
   return {
     form,
     name: ORDINARY_FORMS[form] ?? `form-${form}`,
@@ -181,7 +183,7 @@ function formRow(form, members) {
     descendants: mine.filter((m) => m.origin === 'descendant').length,
     reached_adult_target: mine.filter((m) => m.structure.adult_recruitment_tick !== null).length,
     alive_at_horizon: mine.filter((m) => !m.death).length,
-    deaths_by_cause: {},
+    deaths_by_cause,
   };
 }
 
@@ -227,7 +229,11 @@ function goodArtifact(members = [member(), descendant(1, 1, { slot: 0, generatio
       census_cross_check: {
         passed: true,
         label: 'census cross-check',
-        samples_compared: 1440,
+        samples_compared: 1,
+        // The series IS the evidence behind samples_compared; the reducer refuses a count
+        // that carries no series, or one that stops short of the horizon.
+        reconstructed_series: [[HORIZON_TICKS, byForm, alive]],
+        reconstructed_series_note: '[tick, population_by_form (8 slots), population]',
         first_disagreeing_sample: null,
         closing: {
           tick: HORIZON_TICKS,
@@ -394,15 +400,70 @@ test('the growth gate must be an observation, open or shut', () => {
 });
 
 test('the closing census must reconstruct from the members themselves', () => {
-  refuses((a) => { a.gates.census_cross_check.closing.reconstructed_by_form[3] = 99; }, /!= retained/);
-  refuses((a) => { a.gates.census_cross_check.closing.reconstructed_population = 99; }, /!= retained/);
+  // Perturb the RETAINED side so the reconstruction stays consistent with its own series
+  // and the reconstructed-vs-retained comparison is what refuses.
+  refuses((a) => { a.gates.census_cross_check.closing.retained_by_form[3] = 99; }, /!= retained/);
+  refuses((a) => { a.gates.census_cross_check.closing.retained_population = 99; }, /!= retained/);
   refuses((a) => { a.gates.census_cross_check.first_disagreeing_sample = 88700; }, /first disagrees at sample 88700/);
   refuses((a) => { a.gates.census_cross_check.samples_compared = 0; }, /compared no samples/);
   // The censored members and the reconstructed closing population are the same fact.
   refuses((a) => {
-    a.gates.census_cross_check.closing.reconstructed_population = 1;
-    a.gates.census_cross_check.closing.retained_population = 1;
+    const g = a.gates.census_cross_check;
+    const byForm = new Array(FORM_SLOTS).fill(0);
+    byForm[3] = 1;
+    g.closing.reconstructed_population = 1;
+    g.closing.retained_population = 1;
+    g.closing.reconstructed_by_form = [...byForm];
+    g.closing.retained_by_form = [...byForm];
+    g.reconstructed_series = [[HORIZON_TICKS, byForm, 1]];
   }, /censored at the horizon but the closing census reconstructs/);
+});
+
+test('a sample count is only as good as the series behind it', () => {
+  // Astra's independent probe: a full horizon cannot certify a one-sample empty series.
+  refuses((a) => {
+    a.gates.census_cross_check.samples_compared = 1440;
+    a.gates.census_cross_check.reconstructed_series = [];
+  }, /carries no reconstructed series/);
+  refuses((a) => { a.gates.census_cross_check.samples_compared = 1440; }, /claims 1440 samples but carries 1/);
+  refuses((a) => { delete a.gates.census_cross_check.reconstructed_series; }, /carries no reconstructed series/);
+  refuses((a) => { a.gates.census_cross_check.reconstructed_series[0][0] = 1000; }, /short of the horizon/);
+  refuses((a) => { a.gates.census_cross_check.reconstructed_series[0][1].pop(); }, /drops form slots/);
+  refuses((a) => { a.gates.census_cross_check.reconstructed_series[0][2] = 7; }, /does not sum to its population/);
+  refuses((a) => {
+    const g = a.gates.census_cross_check;
+    g.reconstructed_series = [g.reconstructed_series[0], g.reconstructed_series[0]];
+    g.samples_compared = 2;
+  }, /not strictly increasing/);
+});
+
+test('a form summary must be derivable from the members it summarises', () => {
+  // Astra's independent probe inflated reached_adult_target past the member records. Both
+  // members here recruited, so understating it exercises the same derivability check
+  // without first tripping the coarser "more adults than members" bound.
+  refuses((a) => { a.forms[3].reached_adult_target = 1; }, /claims reached_adult_target = 1, the member records give 2/);
+  refuses((a) => { a.forms[3].reached_adult_target = 38; }, /recruited more adults than it ever had members/);
+  refuses((a) => { a.forms[3].alive_at_horizon = 0; }, /claims alive_at_horizon = 0/);
+  refuses((a) => { a.forms[3].deaths_by_cause = { starvation: 9 }; }, /claims deaths/);
+});
+
+test('a birth never credits its parent', () => {
+  // Astra's independent probe: a negative parental energy debit was previously accepted.
+  refuses((a) => { a.members[1].birth_payment.parent_energy_debit = -1; }, /is negative/);
+  refuses((a) => { a.members[1].birth_payment.escrow.energy = -0.5; }, /is negative/);
+  refuses((a) => { a.members[1].birth_payment.build_heat = Number.NaN; }, /not a finite number/);
+  // energy debit is exactly the build heat plus the escrowed battery.
+  refuses((a) => { a.members[1].birth_payment.build_heat = 0.2; }, /!= build heat \+ escrow energy/);
+});
+
+test('a residual must carry all three stocks, never a silent subset', () => {
+  // Astra's independent probe: dropping a stock read as a clean reconciliation for it.
+  refuses((a) => { delete a.members[0].reconciliation.worst_residual.energy; }, /expected exactly/);
+  refuses((a) => { delete a.members[0].reconciliation.worst_residual.structure; }, /expected exactly/);
+  refuses((a) => { a.members[0].reconciliation.worst_residual.mass = 0; }, /expected exactly/);
+  refuses((a) => {
+    delete a.gates.gate_4_flow_stock_reconciliation.checks[3].computed.reserve;
+  }, /expected exactly/);
 });
 
 test('the envelope pins the baseline, the schema and the identities', () => {

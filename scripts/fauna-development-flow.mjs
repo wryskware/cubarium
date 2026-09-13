@@ -51,6 +51,17 @@ const refuse = (m) => {
 
 const isFiniteNumber = (v) => typeof v === 'number' && Number.isFinite(v);
 const isCount = (v) => Number.isInteger(v) && v >= 0;
+/// The three stocks are a closed set. A residual that silently omits one would read as a
+/// clean reconciliation for a stock nothing ever checked, so the keys are pinned exactly
+/// rather than iterated over whatever happens to be present.
+export const STOCKS = ['structure', 'reserve', 'energy'];
+const requireStockKeys = (o, where) => {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) refuse(`${where} is not a stock triple`);
+  const keys = Object.keys(o).sort();
+  const want = [...STOCKS].sort();
+  if (keys.length !== want.length || keys.some((k, i) => k !== want[i]))
+    refuse(`${where} carries [${keys.join(', ')}], expected exactly [${want.join(', ')}]`);
+};
 /// u64 hashes are carried as decimal strings; a JS number cannot hold them losslessly, so a
 /// numeric hash in an artifact is a defect and not a formatting preference.
 const isU64String = (v) => typeof v === 'string' && /^\d{1,20}$/.test(v);
@@ -142,6 +153,7 @@ function checkGates(a) {
   }
   const worst = g4.checks.find((c) => c.field === 'worst_residual_per_stock');
   if (!worst) refuse('gate 4 does not report the worst residual per stock');
+  requireStockKeys(worst.computed, 'gate 4 worst_residual_per_stock');
   for (const [stock, value] of Object.entries(worst.computed)) {
     if (!isFiniteNumber(value) || value < 0) refuse(`gate 4 worst residual for ${stock} is not a magnitude`);
     if (value > RESIDUAL_TOLERANCE) refuse(`gate 4 worst ${stock} residual ${value} exceeds ${RESIDUAL_TOLERANCE}`);
@@ -150,7 +162,35 @@ function checkGates(a) {
   if (census.first_disagreeing_sample !== null)
     refuse(`census reconstruction first disagrees at sample ${census.first_disagreeing_sample}`);
   if (!isCount(census.samples_compared) || census.samples_compared < 1) refuse('census cross-check compared no samples');
+  // The reconstructed series is the evidence behind samples_compared. A count without the
+  // series it summarises, or a series that stops short of the horizon, is not two-hour
+  // coverage however large the number claims to be.
+  const series = census.reconstructed_series;
+  if (!Array.isArray(series) || series.length === 0) refuse('census cross-check carries no reconstructed series');
+  if (series.length !== census.samples_compared)
+    refuse(`census claims ${census.samples_compared} samples but carries ${series.length}`);
+  let previousTick = -1;
+  for (const sample of series) {
+    if (!Array.isArray(sample) || sample.length !== 3)
+      refuse('each census sample must be [tick, population_by_form, population]');
+    const [tick, byForm, population] = sample;
+    if (!isCount(tick) || tick <= previousTick) refuse(`census sample tick ${tick} is not strictly increasing`);
+    previousTick = tick;
+    if (!Array.isArray(byForm) || byForm.length !== FORM_SLOTS)
+      refuse(`census sample at tick ${tick} drops form slots; all ${FORM_SLOTS} are kept`);
+    if (byForm.reduce((s, n) => s + n, 0) !== population)
+      refuse(`census sample at tick ${tick} has a form census that does not sum to its population`);
+  }
+  if (previousTick !== a.horizon_ticks)
+    refuse(`census series ends at tick ${previousTick}, short of the horizon ${a.horizon_ticks}`);
   const c = census.closing;
+  // The last sample and the closing reconstruction are the same fact stated twice.
+  const last = series[series.length - 1];
+  if (last[2] !== c.reconstructed_population)
+    refuse(`final census sample population ${last[2]} != reconstructed closing ${c.reconstructed_population}`);
+  for (let f = 0; f < FORM_SLOTS; f++)
+    if (last[1][f] !== c.reconstructed_by_form[f])
+      refuse(`final census sample form ${f} disagrees with the reconstructed closing census`);
   if (c.reconstructed_population !== c.retained_population)
     refuse(`reconstructed closing population ${c.reconstructed_population} != retained ${c.retained_population}`);
   if (c.reconstructed_by_form.length !== FORM_SLOTS || c.retained_by_form.length !== FORM_SLOTS)
@@ -219,8 +259,24 @@ function checkMembers(a) {
       if (!m.birth_payment) refuse(`descendant ${k} has no birth payment; its parent's debit is unaccounted`);
       const p = m.birth_payment;
       const e = p.escrow;
+      // A paid birth moves stock one way. A negative debit or escrow would be the parent
+      // gaining from the birth, which no mutation site can produce.
+      for (const [field, value] of [
+        ['parent_reserve_debit', p.parent_reserve_debit],
+        ['parent_energy_debit', p.parent_energy_debit],
+        ['build_heat', p.build_heat],
+        ['escrow.structure', e.structure],
+        ['escrow.reserve', e.reserve],
+        ['escrow.energy', e.energy],
+      ]) {
+        if (!isFiniteNumber(value)) refuse(`descendant ${k}: ${field} is not a finite number`);
+        if (value < 0) refuse(`descendant ${k}: ${field} is negative (${value}); a birth never credits its parent`);
+      }
       if (Math.abs(p.parent_reserve_debit - (e.structure + e.reserve)) > RESIDUAL_TOLERANCE)
         refuse(`descendant ${k}: parent reserve debit ${p.parent_reserve_debit} != escrow structure + reserve`);
+      // The core debits `build + energy` from the battery at the funding site.
+      if (Math.abs(p.parent_energy_debit - (p.build_heat + e.energy)) > RESIDUAL_TOLERANCE)
+        refuse(`descendant ${k}: parent energy debit ${p.parent_energy_debit} != build heat + escrow energy`);
       if (p.funded_tick > m.born_tick) refuse(`descendant ${k} was funded at ${p.funded_tick}, after it was born`);
       if (p.refunded) refuse(`descendant ${k} was placed from a refunded escrow`);
     }
@@ -237,6 +293,7 @@ function checkMembers(a) {
     const r = m.reconciliation;
     if (!isCount(r.checks) || r.checks < 1) refuse(`member ${k} was never reconciled`);
     if (r.violations !== 0) refuse(`member ${k} has ${r.violations} reconciliation violations`);
+    requireStockKeys(r.worst_residual, `member ${k} worst_residual`);
     for (const [stock, v] of Object.entries(r.worst_residual))
       if (!isFiniteNumber(v) || v < 0 || v > RESIDUAL_TOLERANCE)
         refuse(`member ${k} worst ${stock} residual ${v} exceeds ${RESIDUAL_TOLERANCE}`);
@@ -305,10 +362,34 @@ function checkMembers(a) {
     if (!dead || !dead.death || key(dead.death.slot_reused_same_boundary_by || {}) !== key(m.id))
       refuse(`birth ${key(m.id)} claims a freed slot the death does not confirm`);
   }
-  // The per-member records must reproduce the form table and the closing census on their own.
+  // The per-member records must reproduce the whole form table, not only its member count.
+  // A summary row is only evidence if it is derivable from the records it summarises.
+  const rebuilt = Array.from({ length: FORM_SLOTS }, () => ({
+    members_ever: 0,
+    founders: 0,
+    descendants: 0,
+    reached_adult_target: 0,
+    alive_at_horizon: 0,
+    deaths_by_cause: {},
+  }));
+  for (const m of a.members) {
+    const row = rebuilt[m.form];
+    row.members_ever++;
+    row[m.origin === 'founder' ? 'founders' : 'descendants']++;
+    if (m.structure.adult_recruitment_tick !== null) row.reached_adult_target++;
+    if (m.death) row.deaths_by_cause[m.death.cause] = (row.deaths_by_cause[m.death.cause] ?? 0) + 1;
+    else row.alive_at_horizon++;
+  }
   a.forms.forEach((f, i) => {
-    if (f.members_ever !== byForm[i]) refuse(`form ${i} claims ${f.members_ever} members, ${byForm[i]} are recorded`);
+    for (const field of ['members_ever', 'founders', 'descendants', 'reached_adult_target', 'alive_at_horizon'])
+      if (f[field] !== rebuilt[i][field])
+        refuse(`form ${i} claims ${field} = ${f[field]}, the member records give ${rebuilt[i][field]}`);
+    const claimed = JSON.stringify(f.deaths_by_cause ?? {}, Object.keys(f.deaths_by_cause ?? {}).sort());
+    const actual = JSON.stringify(rebuilt[i].deaths_by_cause, Object.keys(rebuilt[i].deaths_by_cause).sort());
+    if (claimed !== actual)
+      refuse(`form ${i} claims deaths ${claimed}, the member records give ${actual}`);
   });
+  if (byForm.some((n, i) => n !== rebuilt[i].members_ever)) refuse('internal form tally disagreement');
   const alive = a.gates.census_cross_check.closing.reconstructed_population;
   if (tally.censored !== alive)
     refuse(`${tally.censored} members are censored at the horizon but the closing census reconstructs ${alive}`);
