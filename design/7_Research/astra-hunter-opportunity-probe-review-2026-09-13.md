@@ -90,3 +90,27 @@ table compares the first nine blockers to `may_reproduce` across age/cooldown,
 adult tolerance, stock fractions and all phases. These are coverage improvements,
 not claims that the current source has failed them. No live operations or worker
 source edits were performed.
+
+## Subsequent actual CLI evidence
+
+Root supplied `/tmp/cubarium-hunter-seed6-opportunity.json`; I read it and checked
+the archived arm's opening/summary. The care-free seed-6 facultative-on replay
+runs tick 144000→288000 and its reported closing hash `8365334319777227972`
+matches the frozen trial summary. It records 96 captures, 117 misses, 120
+out-of-reach attempts, no offspring/reproduction records and one starvation death.
+Both reserve and energy gates are blocked for all 138121 observed member-ticks;
+maximum reserve fraction is 0.5 against the profile gate 0.8, and maximum energy
+fraction 0.7499056079830375 against 0.75. This explains the measured end-of-step
+opportunity absence for THIS arm, not a universal conclusion about hunter biology.
+
+I independently hashed the input snapshot:
+`f1c604f28f6aeb093438913d31fdb759144e676cbe2eaf5b450c94b6f8b3dd41`,
+matching the archived opening record. Root reports replay exit 0 and a separate
+one-tick `--expect-state-hash 0` run returning false/exit 1 with input unchanged;
+I did not rerun those CLI processes. This supplies practical coverage beyond the
+three unit tests while retaining attribution of process exit evidence.
+
+Root also changed the current source label to `closing_state_matches_frozen_trial`,
+which removes the intermediate-trajectory implication. I read that one-field
+diff; it was uncommitted at this follow-up. The earlier saved replay JSON retains
+the old field name and should not be silently rewritten as if it used the new one.
