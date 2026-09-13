@@ -10,6 +10,8 @@ mod recovery;
 mod spatial;
 #[path = "hunter_compare/eligibility.rs"]
 mod eligibility;
+#[path = "hunter_compare/reproduction.rs"]
+mod reproduction;
 
 use anyhow::{Context, Result, anyhow, ensure};
 use clap::Parser;
@@ -179,9 +181,7 @@ struct Arm {
     zero_hunter_ticks: u64,
     captures: u64,
     offspring: u64,
-    escrows: BTreeMap<OrganismId, cubarium_core::organism::Escrow>,
-    escrow_starts: u64,
-    escrows_closed_without_birth: u64,
+    reproduction: reproduction::ReproductionAudit,
     adult_descendants: u64,
     descendant_parents: u64,
     last_complete_observer_tick: u64,
@@ -332,6 +332,7 @@ impl Arm {
             })
             .collect();
         let capture_audit = spatial::CaptureAudit::new(&world.state);
+        let reproduction = reproduction::ReproductionAudit::new(&world.state)?;
         Ok(Self {
             world,
             audit,
@@ -348,9 +349,7 @@ impl Arm {
             zero_hunter_ticks: 0,
             captures: 0,
             offspring: 0,
-            escrows: BTreeMap::new(),
-            escrow_starts: 0,
-            escrows_closed_without_birth: 0,
+            reproduction,
             adult_descendants: 0,
             descendant_parents: 0,
             last_complete_observer_tick: opening.tick,
@@ -370,6 +369,7 @@ impl Arm {
         self.audit.observe(&self.world.state, flows.0, flows.1)?;
         let life = self.world.drain_events();
         let hunting = self.world.drain_hunter_events();
+        self.reproduction.observe(&hunting, &life, &self.world.state)?;
         let captures = self
             .capture_audit
             .observe(index, &hunting, &self.world.state)?;
@@ -399,17 +399,9 @@ impl Arm {
                     "hunter offspring/life birth mismatch"
                 );
                 if p.hunter {
-                    let escrow = self
-                        .escrows
-                        .get(parent)
-                        .context("hunter child lacks previously observed escrow")?;
                     ensure!(hunting.iter().any(|e|matches!(e,HunterEvent::Offspring{parent:p,child,..} if p==parent&&child==id)), "hunter parent/event mismatch");
-                    line(
-                        &mut self.events,
-                        &json!({"stream":"observed_escrow_birth_link",
-                        "tick":self.world.tick(),"parent":parent,"child":id,"prior_escrow":escrow,
-                        "funding_evidence":"observed escrow-to-child linkage; exact parent debits and heat require core transfer tests"}),
-                    )?;
+                    // The reproduction audit already matched this exact child
+                    // to its funded key, both event streams and closing stocks.
                     if p.depth > 0 && !p.reproduced {
                         self.descendant_parents += 1;
                     }
@@ -484,45 +476,6 @@ impl Arm {
                 "lineage membership changed"
             );
         }
-        let current_escrows: BTreeMap<_, _> = self
-            .world
-            .hunters()
-            .members
-            .iter()
-            .filter_map(|m| {
-                self.world
-                    .state
-                    .organisms
-                    .get(m.id)
-                    .and_then(|o| o.escrow.clone().map(|e| (m.id, e)))
-            })
-            .collect();
-        for (parent, e) in &current_escrows {
-            if self.escrows.get(parent).map(|old| old.started_tick) != Some(e.started_tick) {
-                self.escrow_starts += 1;
-                line(
-                    &mut self.events,
-                    &json!({"stream":"observed_escrow_start","tick":self.world.tick(),
-                    "parent":parent,"escrow":e,"evidence":"post-step stored escrow, not isolated funding transaction"}),
-                )?;
-            }
-        }
-        for (parent, e) in &self.escrows {
-            if current_escrows.get(parent).map(|now| now.started_tick) != Some(e.started_tick)
-                && !hunting
-                    .iter()
-                    .any(|event| matches!(event,HunterEvent::Offspring{parent:p,..} if p==parent))
-            {
-                self.escrows_closed_without_birth += 1;
-                line(
-                    &mut self.events,
-                    &json!({"stream":"observed_escrow_closed_without_birth",
-                    "tick":self.world.tick(),"parent":parent,"prior_escrow":e,
-                    "cause":"not separately exposed; may include death, cancellation or cap refusal"}),
-                )?;
-            }
-        }
-        self.escrows = current_escrows;
         self.eligibility.observe(&self.world.state);
         let hunters = self.world.hunters().members.len();
         let prey = self.live.len() - hunters;
@@ -622,7 +575,7 @@ impl Arm {
         let summary = json!({"planned_ticks":planned,"closing_tick":self.world.tick(),
             "termination":reason.as_deref().unwrap_or("planned_horizon"),
             "technical_complete":reason.is_none(),"complete_experiment_measurement":false,
-            "remaining_measurements":["exact reproduction funding debits/heat and escrow closure cause (core evidence required)"],
+            "remaining_measurements":["integrated reproduction audit awaits independent review and frozen cohort verification"],
             "local_recovery":"paired seed-level local-recovery.jsonl; exact settlement prey position and paid attempt key",
             "whole_recovery_channels":"total prey, then forms0–7",
             "whole_recovery":self.whole_recovery.summary(reason.as_deref().unwrap_or("planned_horizon")),
@@ -632,7 +585,9 @@ impl Arm {
             "adult_occupancy_ticks_0_1_2_over2":self.adult_bins,"adult_max":self.adults_max,
             "longest_over_two_ticks":self.over_two_longest,"zero_hunter_ticks":self.zero_hunter_ticks,
             "captures":self.captures,"offspring":self.offspring,"founder_extinction_tick":self.founder_extinction,
-            "observed_escrow_starts":self.escrow_starts,"escrows_closed_without_birth":self.escrows_closed_without_birth,
+            "reproduction_audit":self.reproduction.summary(),
+            "open_gestations":self.reproduction.open_gestations(),
+            "last_complete_reproduction_tick":self.reproduction.last_complete_tick(),
             "adult_descendants":self.adult_descendants,"descendants_that_reproduced":self.descendant_parents,
             "lineage_extinction_tick":self.lineage_extinction,"surviving_opening_prey_cohorts":cohorts.len(),
             "maximum_live_descendant_depth":self.live.values().map(|l|l.depth).max().unwrap_or(0),
