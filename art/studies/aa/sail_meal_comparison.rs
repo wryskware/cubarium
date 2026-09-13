@@ -8,7 +8,9 @@ use serde_json::json;
 
 fn main() {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    assert_eq!(args.len(), 4, "WORLD ORIGINAL_PACK CANDIDATE_PACK NEW_OUTPUT");
+    assert!((4..=5).contains(&args.len()), "WORLD ORIGINAL_PACK CANDIDATE_PACK NEW_OUTPUT [CANDIDATE_NAME]");
+    let candidate = args.get(4).map(String::as_str).unwrap_or("stable-body-plus-fin4");
+    assert!(["stable-body-plus-fin4", "body-hold-only"].contains(&candidate));
     let out = PathBuf::from(&args[3]);
     fs::create_dir(&out).expect("new output directory");
     for mode in ["old", "new"] { fs::create_dir(out.join(mode)).unwrap(); }
@@ -65,7 +67,7 @@ fn main() {
     assert!(fed_sail_ticks > 0, "fixture must include actual sail intake");
     fs::write(out.join("sails.json"), serde_json::to_vec(&evidence).unwrap()).unwrap();
     fs::write(out.join("report.json"), serde_json::to_vec_pretty(&json!({
-        "candidate":"stable-body-plus-fin4", "world":args[0],"original_pack":args[1],"candidate_pack":args[2],
+        "candidate":candidate, "world":args[0],"original_pack":args[1],"candidate_pack":args[2],
         "input_schema":meta.schema,"opening_hash":format!("{opening_hash:016x}"),
         "closing_hash":format!("{:016x}",cubarium_core::snapshot::state_hash(&world.state)),
         "ticks":1000,"feed_at":600,"receipt":receipt,"frame_pairs":frame_pairs,

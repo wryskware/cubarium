@@ -187,6 +187,7 @@ pub(crate) fn measure_scaled(clip: &Clip, scene: &str, scale_override: Option<f6
     let mut energy = Vec::new();
     let mut areas = Vec::new();
     let mut opaque_areas = Vec::new();
+    let mut solid_areas = Vec::new();
     let mut root_coverage = Vec::new();
     let mut peaks = Vec::new();
     for frame in 0..FRAMES {
@@ -199,6 +200,7 @@ pub(crate) fn measure_scaled(clip: &Clip, scene: &str, scale_override: Option<f6
         let a = linear(&alpha);
         areas.push(a.iter().sum());
         opaque_areas.push(a.iter().filter(|v| **v >= 0.5).count() as f64);
+        solid_areas.push(a.iter().filter(|v| **v >= 0.9).count() as f64);
         // Bottom two source rows plus bilinear support at the fixed native root.
         root_coverage.push(
             (38..41)
@@ -225,7 +227,7 @@ pub(crate) fn measure_scaled(clip: &Clip, scene: &str, scale_override: Option<f6
         assert_eq!(a.as_bytes(), b.as_bytes());
     }
     assert!(areas.iter().all(|a| *a > 0.));
-    json!({"linear_luma_sum":stats(&energy), "alpha_area":stats(&areas), "alpha_ge_half_pixels":stats(&opaque_areas),
+    json!({"linear_luma_sum":stats(&energy), "alpha_area":stats(&areas), "alpha_ge_half_pixels":stats(&opaque_areas), "alpha_ge_nine_tenths_pixels":stats(&solid_areas),
         "peak_luma":stats(&peaks), "frame_l1":stats(&deltas), "second_difference_l1":stats(&acceleration),
         "fixed_front_root_band_alpha":stats(&root_coverage)})
 }

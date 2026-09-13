@@ -482,7 +482,7 @@ _data = {
 
 [node name="Sail" type="Node2D"]
 texture_filter = 1
-metadata/sail_fin_coverage4 = true
+metadata/sail_fin_coverage4 = false
 
 [node name="LeftFin" type="Node2D" parent="."]
 position = Vector2(-1, -1)

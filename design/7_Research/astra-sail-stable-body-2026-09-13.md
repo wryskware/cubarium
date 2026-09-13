@@ -6,6 +6,11 @@ decision_refs: []
 
 # Sail candidate: stable moving body + fin4
 
+**Updated disposition after the bounded ablation below: use body hold only.**
+Production now keeps move's constant body scale but sets the fin-coverage metadata
+false; the optional kernel remains available and inactive. The initial combined
+candidate and evidence below are retained as history, not the final recommendation.
+
 Recommend this bounded candidate for root's visual review. It removes the moving
 body's accidental 19↔37-texel point-bake pulse while retaining the recognizable
 crisp cyan face and opposing fin articulation. It is not a blanket AA default,
@@ -117,3 +122,85 @@ Candidate creature PNG SHA256:
 `fcc5079f17d7f7d5d9e30524b511274dd255bfdac8dbc1ab9f3dc3a0aa7091ad`.
 No host/core/schema/live operation belongs to this candidate. Root owns deployment
 and should still review the actual64px world preview and full-frame budget.
+
+## Bounded body-hold-only ablation and final art revision
+
+Following [Fable's independent review](fable-sail-candidate-review-2026-09-13.md),
+compared exactly one ablation: the same constant-body rig with fin metadata off
+on an isolated loaded instance. No2× kernel, palette adjustment or parameter sweep.
+The original and combined recordings remain untouched. The completed three-way
+viewer is `captures/sail-body-only-2026-09-13-ablation/viewer.html`; black-background
+16-pose source strips are in the sibling `-ablation-black/` directory.
+
+**Choose body hold only for the current production candidate.** The fixed-size face
+no longer inflates, while the angular purple/gold fin shape remains clearly
+articulated. In the three-way native/enlarged still sequences, body-only keeps the
+rest/feed fin definition consistent with bud and the established art. Combined
+coverage visibly changes those quiet fins into gradients, with no clear advantage
+in the two crowded actual meal worlds. This is an aesthetic trade informed by
+images and measurements, not a conclusion that the smallest area SD must win.
+Rest/feed point-bake twinkle is deliberately retained; it is not claimed solved.
+
+At the fixed anchor, original / body-only / combined:
+
+| State | Native alpha-area SD | .6-scale alpha-area SD | Native pixels at alpha≥.9 (time mean) |
+| --- | --- | --- | --- |
+| Rest | 1.203 / 1.203 / .189 | .535 / .535 / .052 | 50.675 / 50.675 / 41.000 |
+| Move | 4.375 / 1.272 / 1.070 | 1.381 / .282 / .381 | 47.861 / 48.750 / 42.722 |
+| Feed | 1.540 / 1.540 / .349 | .335 / .335 / .060 | 48.800 / 48.800 / 39.850 |
+| Bud | .967 / .967 / .967 | .376 / .376 / .376 | 50.783 / 50.783 / 50.783 |
+
+Body-only reduces native move area SD70.9% and79.6% at .6 scale, relative to the
+original (combined75.5%/72.4%). Its native move temporal second difference
+is .03904 versus original.08213 and combined.02354: the filter still provides
+additional temporal smoothing, but that is not automatically preferable character.
+Body-only and combined have the **same fixed-anchor mean peak** in every state
+at both scales. The moving face is stable and peaks at the original maximum.
+
+Important attribution correction: original/body-only/combined juvenile move mean
+luma is3.63900 /3.36929 /3.33940. The body correction alone is−7.41%; adding fin4
+is another−.89% relative to body-only. Thus most of the earlier combined−8.23%
+does **not** come from fin softness. Native move luma is10.19827 /10.01500 /9.89131.
+There is still no brightness compensation.
+
+The source partition uses the actual point-baked Body+Bud mask, not color matching.
+Outside it, rest solid-fin pixels average23.375→13 and feed27.5→17.375 for body-only
+versus combined (−44%/−37%); fin alpha sums are23.375→23.194 and27.5→27.982.
+These differ from Fable's heuristic absolute counts but support its real definition
+concern. Original move's fin-only partition is intentionally omitted because its
+body mask differs. Whole-sprite source counts and all16 per-pose partitions are
+saved in `source-solid.json`; no source alpha sum is called light output.
+
+Validation and evidence:
+
+- `reduce_sail_ablation.mjs` checks all48 state/scale/scene triples, exact shared
+  original metrics, and exact body-only non-move output before saving `comparison.json`.
+  No scene subset is silently selected. Body-only's96 clip and288 handoff endpoint
+  checks pass; all six unique study tests pass (11 executions). Quiet frames remain
+  byte-exact; rooted/seam/rim/vertex use unchanged production geometry.
+- Actual meal helper linked against **frozen a88b15b host/core** under
+  `/tmp/cubarium-sail-rollout-a88b15b`, not Opus's changing main. Both seeds again
+  produce933 pairs,7794/7977 actual fed sail member-ticks, and the same closing hashes.
+  Original PNG streams reproduce their earlier concatenated hashes exactly. Both
+  triple meal contact sheets assert identical selected IDs/positions/meal histories
+  and identical original crops before assembling original/body-only/combined.
+- Body-only new-stream SHA256 (filename-sorted933 PNGs): seed1
+  `43ba9895573f8beacc25c06d95c0553b93fcccbfacc95bd0d9a97e73d75443ca`, seed8
+  `6de7029b48a5e72443bf872fe58762cbd6afc9c56eff4e6ec0db724824958b77`.
+  Full streams remain local in `captures/sail-body-only-2026-09-13-meal-seed{1,8}/`;
+  reports, selections and contact evidence are committed, not duplicated raw streams.
+- Three-way browser playback60.0027 callbacks/s, p9516.7ms/max16.8ms,360 distinct
+  source indices in the six-second probe. Reviewed still captures, not a human
+  continuous-motion or physical LED observation. Initial transparent source-sheet
+  draft uses the image viewer's white background; the explicit black-composite
+  `-ablation-black` sheets are the meaningful source-art review.
+- The authorized production revision changes only `sail.tscn` metadata true→false
+  and regenerated `creatures.png`, retaining all body-hold keys and the inactive
+  kernel. Normal exporter now reproduces the isolated body-only pack byte-exactly.
+  Against the original, **only row5 (sail move) differs**; all other rows and pack
+  files are byte-exact. `-final-verification.json` enforces that narrower condition.
+  Final PNG SHA256 `21ee9b341238304d1e8972f4b104d3325d595b0e431ebd22592a1721e12285de`.
+
+No host/core/schema/live changes in this revision. Root owns deployment and the
+whole-world copied-preview budget check. The combined option remains preserved
+for future display-specific judgment, not adopted by this revision.

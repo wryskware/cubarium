@@ -1,0 +1,30 @@
+{
+  "actual_fed_sail_member_ticks": 7977,
+  "candidate": "body-hold-only",
+  "candidate_pack": "captures/sail-body-only-2026-09-13-pack",
+  "closing_hash": "dda40aa87ac237fe",
+  "draw_ecology_unchanged": true,
+  "feed_at": 600,
+  "frame_pairs": 933,
+  "input_schema": 9,
+  "note": "Same world trajectory and current real meal controller in both. fed means actual intake, not proof of manually supplied crumb origin. No creature form is forced.",
+  "opening_hash": "c6b5e8f078a671ac",
+  "original_pack": "captures/sail-stable-2026-09-13-original-pack",
+  "receipt": {
+    "outcome": {
+      "Applied": {
+        "cells": 5,
+        "ends_tick": null,
+        "energy_in": 6.0,
+        "energy_out": 0.0,
+        "material_in": 3.0,
+        "material_out": 0.0,
+        "water_depth": 0.0
+      }
+    },
+    "seq": 1,
+    "tick": 144600
+  },
+  "ticks": 1000,
+  "world": "captures/hunter-openings-2026-09-13/seed-8/world-144000.cubw"
+}

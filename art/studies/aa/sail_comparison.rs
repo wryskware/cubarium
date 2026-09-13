@@ -187,6 +187,10 @@ fn main() {
         viewer = viewer.replace("unchanged point-sampled body and bud", "point-sampled body and bud; move body held at scale 1 instead of its tiny squash")
             .replace("Sail: coverage on fins, crisp body", "Sail: stable moving body + fin coverage")
             .replace("Current / fin coverage", "Original / stable body + fin coverage");
+    } else if candidate == "body-hold-only" {
+        viewer = viewer.replace("4×4 coverage on LeftFin/RightFin only; unchanged point-sampled body and bud", "original point bake throughout; only move body held at scale 1")
+            .replace("Sail: coverage on fins, crisp body", "Sail ablation: body hold only")
+            .replace("Current / fin coverage", "Original / body hold only");
     }
     fs::write(output.join("viewer.html"), viewer).unwrap();
 }

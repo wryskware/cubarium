@@ -1,0 +1,15 @@
+{
+  "all_other_rows_byte_exact": true,
+  "body_only": true,
+  "changed_creature_rows": [
+    5
+  ],
+  "other_files_byte_exact": [
+    "ground.png",
+    "habitat.png",
+    "pack.json",
+    "plants.png",
+    "tall.png"
+  ],
+  "passed": true
+}

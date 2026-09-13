@@ -5,6 +5,7 @@ func _initialize() -> void:
 	var args := OS.get_cmdline_user_args()
 	assert(args.size() == 1, "CAPTURE_DIRECTORY")
 	var dir: String = args[0]
+	var candidate: String = JSON.parse_string(FileAccess.get_file_as_string(dir.path_join("report.json"))).candidate
 	var rows: Array = JSON.parse_string(FileAccess.get_file_as_string(dir.path_join("sails.json")))
 	var bouts := rows.filter(func(r): return r.elapsed >= 600 and r.meal != null and r.meal.weight_prev == 0 and r.meal.weight > 0)
 	assert(not bouts.is_empty(), "No actual sail meal onset after care boundary")
@@ -31,5 +32,5 @@ func _initialize() -> void:
 		selected.append({"frame":frame,"row":r})
 	assert(sheet.save_png(dir.path_join("meal-contact.png")) == OK)
 	var report := FileAccess.open(dir.path_join("meal-contact.json"),FileAccess.WRITE)
-	report.store_string(JSON.stringify({"selection":"First actual sail meal onset at/after elapsed600; no forced form or action","columns":["original","stable-body-plus-fin4"],"row_frame_offsets":offsets,"selected":selected,"crop":"24px face-clipped neighborhood, native plus nearest4x; not seam-unfolded"},"  "))
+	report.store_string(JSON.stringify({"selection":"First actual sail meal onset at/after elapsed600; no forced form or action","columns":["original",candidate],"row_frame_offsets":offsets,"selected":selected,"crop":"24px face-clipped neighborhood, native plus nearest4x; not seam-unfolded"},"  "))
 	quit()

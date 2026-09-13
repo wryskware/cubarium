@@ -5,9 +5,12 @@ extends "res://studies/aa/bake_sail.gd"
 func study() -> void:
 	var output := ""
 	var baseline_path := ""
+	var body_only := false
 	for argument in OS.get_cmdline_user_args():
 		if argument.begins_with("--out="): output = argument.trim_prefix("--out=")
 		if argument.begins_with("--baseline="): baseline_path = argument.trim_prefix("--baseline=")
+		if argument == "--body-only": body_only = true
+	var candidate_name := "body-hold-only" if body_only else "stable-body-plus-fin4"
 	if baseline_path.is_empty():
 		push_error("Explicit original --baseline=creatures.png required")
 		quit(1)
@@ -17,6 +20,8 @@ func study() -> void:
 		quit(1)
 		return
 	var rig := (load("res://creatures/sail.tscn") as PackedScene).instantiate() as Node2D
+	# Explicit experimental choice on this clone; independent of production opt-in.
+	rig.set_meta("sail_fin_coverage4", not body_only)
 	root.add_child(rig)
 	var sprites: Array[Sprite2D] = []
 	collect(rig, sprites)
@@ -81,13 +86,13 @@ func study() -> void:
 		if mode == "move" and body_alpha.any(func(a): return a != 28.0): fail("Moving body is not constant 28 texels")
 		if mode != "move" and new_point.get_data() != baseline.get_data(): fail(mode + ": unchanged point-bake source changed")
 		metadata.append({"name":"sail-"+mode,"clip":mode,"seconds":clip.length,"loop":mode!="bud","frames":FRAMES,
-			"point_body_exact":true,"protected_opaque_pixels":protected,"shipped_baseline_exact":true,"candidate":"stable-body-plus-fin4",
+			"point_body_exact":true,"protected_opaque_pixels":protected,"shipped_baseline_exact":true,"candidate":candidate_name,
 			"point_body_and_bud_alpha_by_frame":body_alpha,"authored_endpoint_exact":true,"bake_us_nearest":timing[0],"bake_us_fin4":timing[1]})
 	var file := FileAccess.open(output.path_join("cases.json"), FileAccess.WRITE)
 	if file == null:
 		push_error("Cannot save metadata")
 		quit(1)
 		return
-	file.store_string(JSON.stringify({"candidate":"stable-body-plus-fin4","passed":not failed,"coverage_layers":PATHS.slice(0,2),"point_layers":PATHS.slice(2),"cases":metadata},"  "))
+	file.store_string(JSON.stringify({"candidate":candidate_name,"passed":not failed,"coverage_layers":[] if body_only else PATHS.slice(0,2),"point_layers":PATHS if body_only else PATHS.slice(2),"cases":metadata},"  "))
 	print(JSON.stringify(metadata))
 	quit(1 if failed else 0)

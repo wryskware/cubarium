@@ -76,9 +76,10 @@ for the mixed disposition, including the remaining point-baked body squash.
 ## Stable sail source candidate
 
 See [the stable-body + fin4 report](../../../design/7_Research/astra-sail-stable-body-2026-09-13.md).
-This is an explicit source change plus the measured fin-only policy, not another
-filter candidate. Original pack is preserved at `captures/sail-stable-2026-09-13-original-pack`.
-The historical fin-only script now rejects an opted-in new rig rather than
+The initial combined candidate is preserved; the bounded ablation now recommends
+body hold only, with production fin coverage inactive. Original pack is preserved
+at `captures/sail-stable-2026-09-13-original-pack`.
+The historical fin-only script now rejects a revised rig (metadata present) rather than
 mislabeling its candidate output as an original baseline.
 
 ```sh
@@ -91,3 +92,12 @@ godot --headless --path art --script studies/aa/sail_meal_sheet.gd -- NEW_MEAL_C
 node art/studies/aa/package_sail_meals.mjs NEW_MEAL_CAPTURE
 node art/studies/aa/browser_capture.mjs NEW_MEAL_CAPTURE
 ```
+
+For the one body-only ablation, pass `--body-only` to `bake_sail_stable.gd`;
+it explicitly sets metadata on its isolated rig, so both historical combined and
+body-only comparisons remain reproducible independent of the production flag.
+`bake_sail_body_only_pack.gd` also requires a new output directory and never edits
+the source scene. `verify_sail_pack.gd ... --body-only` enforces that only sail move
+row5 changed. `sail_meal_comparison` accepts final argument `body-hold-only` to label
+the same-world paired capture correctly. The three-way source/meal sheet helpers
+and `sail_ablation_viewer.html` reuse those two fixed comparisons; no kernel sweep.

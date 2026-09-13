@@ -1,0 +1,1546 @@
+{
+  "frames": [
+    {
+      "frame": 0,
+      "state": "rest",
+      "variants": [
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.9450981765985,
+          "fin_half": 20,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 1,
+      "state": "rest",
+      "variants": [
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 23.0078432559967,
+          "fin_half": 19,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 2,
+      "state": "rest",
+      "variants": [
+        {
+          "fin_area": 26.0,
+          "fin_half": 26,
+          "fin_solid": 26,
+          "whole_solid": 54
+        },
+        {
+          "fin_area": 26.0,
+          "fin_half": 26,
+          "fin_solid": 26,
+          "whole_solid": 54
+        },
+        {
+          "fin_area": 23.1921569742262,
+          "fin_half": 19,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 3,
+      "state": "rest",
+      "variants": [
+        {
+          "fin_area": 23.0,
+          "fin_half": 23,
+          "fin_solid": 23,
+          "whole_solid": 51
+        },
+        {
+          "fin_area": 23.0,
+          "fin_half": 23,
+          "fin_solid": 23,
+          "whole_solid": 51
+        },
+        {
+          "fin_area": 23.568627577275,
+          "fin_half": 19,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 4,
+      "state": "rest",
+      "variants": [
+        {
+          "fin_area": 23.0,
+          "fin_half": 23,
+          "fin_solid": 23,
+          "whole_solid": 51
+        },
+        {
+          "fin_area": 23.0,
+          "fin_half": 23,
+          "fin_solid": 23,
+          "whole_solid": 51
+        },
+        {
+          "fin_area": 23.0666668228805,
+          "fin_half": 19,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 5,
+      "state": "rest",
+      "variants": [
+        {
+          "fin_area": 23.0,
+          "fin_half": 23,
+          "fin_solid": 23,
+          "whole_solid": 51
+        },
+        {
+          "fin_area": 23.0,
+          "fin_half": 23,
+          "fin_solid": 23,
+          "whole_solid": 51
+        },
+        {
+          "fin_area": 23.568627577275,
+          "fin_half": 19,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 6,
+      "state": "rest",
+      "variants": [
+        {
+          "fin_area": 26.0,
+          "fin_half": 26,
+          "fin_solid": 26,
+          "whole_solid": 54
+        },
+        {
+          "fin_area": 26.0,
+          "fin_half": 26,
+          "fin_solid": 26,
+          "whole_solid": 54
+        },
+        {
+          "fin_area": 23.1921569742262,
+          "fin_half": 19,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 7,
+      "state": "rest",
+      "variants": [
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 23.0078432559967,
+          "fin_half": 19,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 8,
+      "state": "rest",
+      "variants": [
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.9450981765985,
+          "fin_half": 20,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 9,
+      "state": "rest",
+      "variants": [
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 23.0078432559967,
+          "fin_half": 19,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 10,
+      "state": "rest",
+      "variants": [
+        {
+          "fin_area": 26.0,
+          "fin_half": 26,
+          "fin_solid": 26,
+          "whole_solid": 54
+        },
+        {
+          "fin_area": 26.0,
+          "fin_half": 26,
+          "fin_solid": 26,
+          "whole_solid": 54
+        },
+        {
+          "fin_area": 23.1921569742262,
+          "fin_half": 19,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 11,
+      "state": "rest",
+      "variants": [
+        {
+          "fin_area": 23.0,
+          "fin_half": 23,
+          "fin_solid": 23,
+          "whole_solid": 51
+        },
+        {
+          "fin_area": 23.0,
+          "fin_half": 23,
+          "fin_solid": 23,
+          "whole_solid": 51
+        },
+        {
+          "fin_area": 23.568627577275,
+          "fin_half": 19,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 12,
+      "state": "rest",
+      "variants": [
+        {
+          "fin_area": 23.0,
+          "fin_half": 23,
+          "fin_solid": 23,
+          "whole_solid": 51
+        },
+        {
+          "fin_area": 23.0,
+          "fin_half": 23,
+          "fin_solid": 23,
+          "whole_solid": 51
+        },
+        {
+          "fin_area": 23.0666668228805,
+          "fin_half": 19,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 13,
+      "state": "rest",
+      "variants": [
+        {
+          "fin_area": 23.0,
+          "fin_half": 23,
+          "fin_solid": 23,
+          "whole_solid": 51
+        },
+        {
+          "fin_area": 23.0,
+          "fin_half": 23,
+          "fin_solid": 23,
+          "whole_solid": 51
+        },
+        {
+          "fin_area": 23.568627577275,
+          "fin_half": 19,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 14,
+      "state": "rest",
+      "variants": [
+        {
+          "fin_area": 26.0,
+          "fin_half": 26,
+          "fin_solid": 26,
+          "whole_solid": 54
+        },
+        {
+          "fin_area": 26.0,
+          "fin_half": 26,
+          "fin_solid": 26,
+          "whole_solid": 54
+        },
+        {
+          "fin_area": 23.1921569742262,
+          "fin_half": 19,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 15,
+      "state": "rest",
+      "variants": [
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 23.0078432559967,
+          "fin_half": 19,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 0,
+      "state": "move",
+      "variants": [
+        {
+          "fin_area": null,
+          "fin_half": null,
+          "fin_solid": null,
+          "whole_solid": 46
+        },
+        {
+          "fin_area": 23.0,
+          "fin_half": 23,
+          "fin_solid": 23,
+          "whole_solid": 51
+        },
+        {
+          "fin_area": 19.8274511918426,
+          "fin_half": 19,
+          "fin_solid": 9,
+          "whole_solid": 37
+        }
+      ]
+    },
+    {
+      "frame": 1,
+      "state": "move",
+      "variants": [
+        {
+          "fin_area": null,
+          "fin_half": null,
+          "fin_solid": null,
+          "whole_solid": 46
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 21.0901962667704,
+          "fin_half": 22,
+          "fin_solid": 12,
+          "whole_solid": 40
+        }
+      ]
+    },
+    {
+      "frame": 2,
+      "state": "move",
+      "variants": [
+        {
+          "fin_area": null,
+          "fin_half": null,
+          "fin_solid": null,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        }
+      ]
+    },
+    {
+      "frame": 3,
+      "state": "move",
+      "variants": [
+        {
+          "fin_area": null,
+          "fin_half": null,
+          "fin_solid": null,
+          "whole_solid": 54
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.8901962414384,
+          "fin_half": 22,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 4,
+      "state": "move",
+      "variants": [
+        {
+          "fin_area": null,
+          "fin_half": null,
+          "fin_solid": null,
+          "whole_solid": 60
+        },
+        {
+          "fin_area": 27.0,
+          "fin_half": 27,
+          "fin_solid": 27,
+          "whole_solid": 55
+        },
+        {
+          "fin_area": 23.5686276480556,
+          "fin_half": 21,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 5,
+      "state": "move",
+      "variants": [
+        {
+          "fin_area": null,
+          "fin_half": null,
+          "fin_solid": null,
+          "whole_solid": 54
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.8901962414384,
+          "fin_half": 22,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 6,
+      "state": "move",
+      "variants": [
+        {
+          "fin_area": null,
+          "fin_half": null,
+          "fin_solid": null,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        }
+      ]
+    },
+    {
+      "frame": 7,
+      "state": "move",
+      "variants": [
+        {
+          "fin_area": null,
+          "fin_half": null,
+          "fin_solid": null,
+          "whole_solid": 46
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 21.0901962667704,
+          "fin_half": 22,
+          "fin_solid": 12,
+          "whole_solid": 40
+        }
+      ]
+    },
+    {
+      "frame": 8,
+      "state": "move",
+      "variants": [
+        {
+          "fin_area": null,
+          "fin_half": null,
+          "fin_solid": null,
+          "whole_solid": 46
+        },
+        {
+          "fin_area": 23.0,
+          "fin_half": 23,
+          "fin_solid": 23,
+          "whole_solid": 51
+        },
+        {
+          "fin_area": 19.8274511918426,
+          "fin_half": 19,
+          "fin_solid": 9,
+          "whole_solid": 37
+        }
+      ]
+    },
+    {
+      "frame": 9,
+      "state": "move",
+      "variants": [
+        {
+          "fin_area": null,
+          "fin_half": null,
+          "fin_solid": null,
+          "whole_solid": 46
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 21.0901962667704,
+          "fin_half": 22,
+          "fin_solid": 12,
+          "whole_solid": 40
+        }
+      ]
+    },
+    {
+      "frame": 10,
+      "state": "move",
+      "variants": [
+        {
+          "fin_area": null,
+          "fin_half": null,
+          "fin_solid": null,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        }
+      ]
+    },
+    {
+      "frame": 11,
+      "state": "move",
+      "variants": [
+        {
+          "fin_area": null,
+          "fin_half": null,
+          "fin_solid": null,
+          "whole_solid": 54
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.8901962414384,
+          "fin_half": 22,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 12,
+      "state": "move",
+      "variants": [
+        {
+          "fin_area": null,
+          "fin_half": null,
+          "fin_solid": null,
+          "whole_solid": 60
+        },
+        {
+          "fin_area": 27.0,
+          "fin_half": 27,
+          "fin_solid": 27,
+          "whole_solid": 55
+        },
+        {
+          "fin_area": 23.5686276480556,
+          "fin_half": 21,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 13,
+      "state": "move",
+      "variants": [
+        {
+          "fin_area": null,
+          "fin_half": null,
+          "fin_solid": null,
+          "whole_solid": 54
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.8901962414384,
+          "fin_half": 22,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 14,
+      "state": "move",
+      "variants": [
+        {
+          "fin_area": null,
+          "fin_half": null,
+          "fin_solid": null,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        }
+      ]
+    },
+    {
+      "frame": 15,
+      "state": "move",
+      "variants": [
+        {
+          "fin_area": null,
+          "fin_half": null,
+          "fin_solid": null,
+          "whole_solid": 46
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 21.0901962667704,
+          "fin_half": 22,
+          "fin_solid": 12,
+          "whole_solid": 40
+        }
+      ]
+    },
+    {
+      "frame": 0,
+      "state": "feed",
+      "variants": [
+        {
+          "fin_area": 27.0,
+          "fin_half": 27,
+          "fin_solid": 27,
+          "whole_solid": 55
+        },
+        {
+          "fin_area": 27.0,
+          "fin_half": 27,
+          "fin_solid": 27,
+          "whole_solid": 55
+        },
+        {
+          "fin_area": 23.5686276480556,
+          "fin_half": 21,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 1,
+      "state": "feed",
+      "variants": [
+        {
+          "fin_area": 28.0,
+          "fin_half": 28,
+          "fin_solid": 28,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 28.0,
+          "fin_half": 28,
+          "fin_solid": 28,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 28.6901962310076,
+          "fin_half": 24,
+          "fin_solid": 18,
+          "whole_solid": 40
+        }
+      ]
+    },
+    {
+      "frame": 2,
+      "state": "feed",
+      "variants": [
+        {
+          "fin_area": 28.0,
+          "fin_half": 28,
+          "fin_solid": 28,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 28.0,
+          "fin_half": 28,
+          "fin_solid": 28,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 29.0039216987789,
+          "fin_half": 24,
+          "fin_solid": 18,
+          "whole_solid": 40
+        }
+      ]
+    },
+    {
+      "frame": 3,
+      "state": "feed",
+      "variants": [
+        {
+          "fin_area": 27.0,
+          "fin_half": 27,
+          "fin_solid": 27,
+          "whole_solid": 49
+        },
+        {
+          "fin_area": 27.0,
+          "fin_half": 27,
+          "fin_solid": 27,
+          "whole_solid": 49
+        },
+        {
+          "fin_area": 28.3176471889019,
+          "fin_half": 24,
+          "fin_solid": 18,
+          "whole_solid": 40
+        }
+      ]
+    },
+    {
+      "frame": 4,
+      "state": "feed",
+      "variants": [
+        {
+          "fin_area": 27.0,
+          "fin_half": 27,
+          "fin_solid": 27,
+          "whole_solid": 49
+        },
+        {
+          "fin_area": 27.0,
+          "fin_half": 27,
+          "fin_solid": 27,
+          "whole_solid": 49
+        },
+        {
+          "fin_area": 28.2627452686429,
+          "fin_half": 27,
+          "fin_solid": 18,
+          "whole_solid": 40
+        }
+      ]
+    },
+    {
+      "frame": 5,
+      "state": "feed",
+      "variants": [
+        {
+          "fin_area": 27.0,
+          "fin_half": 27,
+          "fin_solid": 27,
+          "whole_solid": 49
+        },
+        {
+          "fin_area": 27.0,
+          "fin_half": 27,
+          "fin_solid": 27,
+          "whole_solid": 49
+        },
+        {
+          "fin_area": 28.3176471889019,
+          "fin_half": 24,
+          "fin_solid": 18,
+          "whole_solid": 40
+        }
+      ]
+    },
+    {
+      "frame": 6,
+      "state": "feed",
+      "variants": [
+        {
+          "fin_area": 28.0,
+          "fin_half": 28,
+          "fin_solid": 28,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 28.0,
+          "fin_half": 28,
+          "fin_solid": 28,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 29.0039216987789,
+          "fin_half": 24,
+          "fin_solid": 18,
+          "whole_solid": 40
+        }
+      ]
+    },
+    {
+      "frame": 7,
+      "state": "feed",
+      "variants": [
+        {
+          "fin_area": 28.0,
+          "fin_half": 28,
+          "fin_solid": 28,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 28.0,
+          "fin_half": 28,
+          "fin_solid": 28,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 28.6901962310076,
+          "fin_half": 24,
+          "fin_solid": 18,
+          "whole_solid": 40
+        }
+      ]
+    },
+    {
+      "frame": 8,
+      "state": "feed",
+      "variants": [
+        {
+          "fin_area": 27.0,
+          "fin_half": 27,
+          "fin_solid": 27,
+          "whole_solid": 55
+        },
+        {
+          "fin_area": 27.0,
+          "fin_half": 27,
+          "fin_solid": 27,
+          "whole_solid": 55
+        },
+        {
+          "fin_area": 23.5686276480556,
+          "fin_half": 21,
+          "fin_solid": 13,
+          "whole_solid": 41
+        }
+      ]
+    },
+    {
+      "frame": 9,
+      "state": "feed",
+      "variants": [
+        {
+          "fin_area": 28.0,
+          "fin_half": 28,
+          "fin_solid": 28,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 28.0,
+          "fin_half": 28,
+          "fin_solid": 28,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 28.6901962310076,
+          "fin_half": 24,
+          "fin_solid": 18,
+          "whole_solid": 40
+        }
+      ]
+    },
+    {
+      "frame": 10,
+      "state": "feed",
+      "variants": [
+        {
+          "fin_area": 28.0,
+          "fin_half": 28,
+          "fin_solid": 28,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 28.0,
+          "fin_half": 28,
+          "fin_solid": 28,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 29.0039216987789,
+          "fin_half": 24,
+          "fin_solid": 18,
+          "whole_solid": 40
+        }
+      ]
+    },
+    {
+      "frame": 11,
+      "state": "feed",
+      "variants": [
+        {
+          "fin_area": 27.0,
+          "fin_half": 27,
+          "fin_solid": 27,
+          "whole_solid": 49
+        },
+        {
+          "fin_area": 27.0,
+          "fin_half": 27,
+          "fin_solid": 27,
+          "whole_solid": 49
+        },
+        {
+          "fin_area": 28.3176471889019,
+          "fin_half": 24,
+          "fin_solid": 18,
+          "whole_solid": 40
+        }
+      ]
+    },
+    {
+      "frame": 12,
+      "state": "feed",
+      "variants": [
+        {
+          "fin_area": 27.0,
+          "fin_half": 27,
+          "fin_solid": 27,
+          "whole_solid": 49
+        },
+        {
+          "fin_area": 27.0,
+          "fin_half": 27,
+          "fin_solid": 27,
+          "whole_solid": 49
+        },
+        {
+          "fin_area": 28.2627452686429,
+          "fin_half": 27,
+          "fin_solid": 18,
+          "whole_solid": 40
+        }
+      ]
+    },
+    {
+      "frame": 13,
+      "state": "feed",
+      "variants": [
+        {
+          "fin_area": 27.0,
+          "fin_half": 27,
+          "fin_solid": 27,
+          "whole_solid": 49
+        },
+        {
+          "fin_area": 27.0,
+          "fin_half": 27,
+          "fin_solid": 27,
+          "whole_solid": 49
+        },
+        {
+          "fin_area": 28.3176471889019,
+          "fin_half": 24,
+          "fin_solid": 18,
+          "whole_solid": 40
+        }
+      ]
+    },
+    {
+      "frame": 14,
+      "state": "feed",
+      "variants": [
+        {
+          "fin_area": 28.0,
+          "fin_half": 28,
+          "fin_solid": 28,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 28.0,
+          "fin_half": 28,
+          "fin_solid": 28,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 29.0039216987789,
+          "fin_half": 24,
+          "fin_solid": 18,
+          "whole_solid": 40
+        }
+      ]
+    },
+    {
+      "frame": 15,
+      "state": "feed",
+      "variants": [
+        {
+          "fin_area": 28.0,
+          "fin_half": 28,
+          "fin_solid": 28,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 28.0,
+          "fin_half": 28,
+          "fin_solid": 28,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 28.6901962310076,
+          "fin_half": 24,
+          "fin_solid": 18,
+          "whole_solid": 40
+        }
+      ]
+    },
+    {
+      "frame": 0,
+      "state": "bud",
+      "variants": [
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        }
+      ]
+    },
+    {
+      "frame": 1,
+      "state": "bud",
+      "variants": [
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        }
+      ]
+    },
+    {
+      "frame": 2,
+      "state": "bud",
+      "variants": [
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        }
+      ]
+    },
+    {
+      "frame": 3,
+      "state": "bud",
+      "variants": [
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        }
+      ]
+    },
+    {
+      "frame": 4,
+      "state": "bud",
+      "variants": [
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        }
+      ]
+    },
+    {
+      "frame": 5,
+      "state": "bud",
+      "variants": [
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        }
+      ]
+    },
+    {
+      "frame": 6,
+      "state": "bud",
+      "variants": [
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 22.0,
+          "fin_half": 22,
+          "fin_solid": 22,
+          "whole_solid": 50
+        }
+      ]
+    },
+    {
+      "frame": 7,
+      "state": "bud",
+      "variants": [
+        {
+          "fin_area": 20.0,
+          "fin_half": 20,
+          "fin_solid": 20,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 20.0,
+          "fin_half": 20,
+          "fin_solid": 20,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 20.0,
+          "fin_half": 20,
+          "fin_solid": 20,
+          "whole_solid": 50
+        }
+      ]
+    },
+    {
+      "frame": 8,
+      "state": "bud",
+      "variants": [
+        {
+          "fin_area": 20.0,
+          "fin_half": 20,
+          "fin_solid": 20,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 20.0,
+          "fin_half": 20,
+          "fin_solid": 20,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 20.0,
+          "fin_half": 20,
+          "fin_solid": 20,
+          "whole_solid": 50
+        }
+      ]
+    },
+    {
+      "frame": 9,
+      "state": "bud",
+      "variants": [
+        {
+          "fin_area": 20.0,
+          "fin_half": 20,
+          "fin_solid": 20,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 20.0,
+          "fin_half": 20,
+          "fin_solid": 20,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 20.0,
+          "fin_half": 20,
+          "fin_solid": 20,
+          "whole_solid": 50
+        }
+      ]
+    },
+    {
+      "frame": 10,
+      "state": "bud",
+      "variants": [
+        {
+          "fin_area": 20.0,
+          "fin_half": 20,
+          "fin_solid": 20,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 20.0,
+          "fin_half": 20,
+          "fin_solid": 20,
+          "whole_solid": 50
+        },
+        {
+          "fin_area": 20.0,
+          "fin_half": 20,
+          "fin_solid": 20,
+          "whole_solid": 50
+        }
+      ]
+    },
+    {
+      "frame": 11,
+      "state": "bud",
+      "variants": [
+        {
+          "fin_area": 16.0,
+          "fin_half": 16,
+          "fin_solid": 16,
+          "whole_solid": 52
+        },
+        {
+          "fin_area": 16.0,
+          "fin_half": 16,
+          "fin_solid": 16,
+          "whole_solid": 52
+        },
+        {
+          "fin_area": 16.0,
+          "fin_half": 16,
+          "fin_solid": 16,
+          "whole_solid": 52
+        }
+      ]
+    },
+    {
+      "frame": 12,
+      "state": "bud",
+      "variants": [
+        {
+          "fin_area": 16.0,
+          "fin_half": 16,
+          "fin_solid": 16,
+          "whole_solid": 52
+        },
+        {
+          "fin_area": 16.0,
+          "fin_half": 16,
+          "fin_solid": 16,
+          "whole_solid": 52
+        },
+        {
+          "fin_area": 16.0,
+          "fin_half": 16,
+          "fin_solid": 16,
+          "whole_solid": 52
+        }
+      ]
+    },
+    {
+      "frame": 13,
+      "state": "bud",
+      "variants": [
+        {
+          "fin_area": 16.0,
+          "fin_half": 16,
+          "fin_solid": 16,
+          "whole_solid": 52
+        },
+        {
+          "fin_area": 16.0,
+          "fin_half": 16,
+          "fin_solid": 16,
+          "whole_solid": 52
+        },
+        {
+          "fin_area": 16.0,
+          "fin_half": 16,
+          "fin_solid": 16,
+          "whole_solid": 52
+        }
+      ]
+    },
+    {
+      "frame": 14,
+      "state": "bud",
+      "variants": [
+        {
+          "fin_area": 16.0,
+          "fin_half": 16,
+          "fin_solid": 16,
+          "whole_solid": 52
+        },
+        {
+          "fin_area": 16.0,
+          "fin_half": 16,
+          "fin_solid": 16,
+          "whole_solid": 52
+        },
+        {
+          "fin_area": 16.0,
+          "fin_half": 16,
+          "fin_solid": 16,
+          "whole_solid": 52
+        }
+      ]
+    },
+    {
+      "frame": 15,
+      "state": "bud",
+      "variants": [
+        {
+          "fin_area": 16.0,
+          "fin_half": 16,
+          "fin_solid": 16,
+          "whole_solid": 52
+        },
+        {
+          "fin_area": 16.0,
+          "fin_half": 16,
+          "fin_solid": 16,
+          "whole_solid": 52
+        },
+        {
+          "fin_area": 16.0,
+          "fin_half": 16,
+          "fin_solid": 16,
+          "whole_solid": 52
+        }
+      ]
+    }
+  ],
+  "mask": "Pixels outside the actual point-baked Body+Bud image at this pose. No RGB-color heuristic. Original move partition omitted because its body differs.",
+  "order": [
+    "original",
+    "body-hold-only",
+    "stable-body-plus-fin4"
+  ]
+}

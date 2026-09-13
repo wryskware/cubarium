@@ -55,7 +55,7 @@ func study() -> void:
 		return
 	var rig := (load("res://creatures/sail.tscn") as PackedScene).instantiate() as Node2D
 	root.add_child(rig)
-	if rig.get_meta("sail_fin_coverage4", false):
+	if rig.has_meta("sail_fin_coverage4"):
 		push_error("Historical fin-only study requires the original sail rig (8c0b40a). Use bake_sail_stable.gd for the stable-body candidate.")
 		quit(1)
 		return
