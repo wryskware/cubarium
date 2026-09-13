@@ -197,7 +197,10 @@ const STEER_EPS: f64 = 1e-9;
 /// Rotate `heading` toward `steer` by at most `max_turn` radians, returning a unit vector.
 /// A budget of zero (a fully gated mode) returns the heading untouched rather than a
 /// round trip through its angle, so a held heading is held exactly.
-fn turn_toward(heading: Vec2, steer: Vec2, max_turn: f64) -> Vec2 {
+///
+/// The hunter extension's escape term reuses this with its own, larger budget
+/// (`crate::hunter`), so a fleeing prey turns by the same rule the controller turns by.
+pub(crate) fn turn_toward(heading: Vec2, steer: Vec2, max_turn: f64) -> Vec2 {
     if max_turn <= 0.0 || steer.length() < STEER_EPS {
         return heading;
     }

@@ -14,20 +14,20 @@ use crate::care::{
     ActiveShower, CareApplied, CareCommand, CareKind, CareOutcome, CareReceipt, CareState,
 };
 use crate::config::{FounderKind, WorldConfig};
-use crate::controller::{Decision, Observation, TurnGate, decide};
+use crate::controller::{Decision, Observation, TurnGate, decide, turn_toward};
 use crate::events::LifeEvent;
 use crate::fields::Fields;
 use crate::genome::{Genome, MAX_FORMS, decode};
 use crate::habitat::{Habitat, Weather};
 use crate::genome::Phenotype;
 use crate::hunter::{
-    self, FixedHunterProfile, HunterControlReceipt, HunterEvent, HunterFounderReceipt, HunterState,
-    HunterTarget, HunterView,
+    self, AttemptOutcome, FixedHunterProfile, HunterControlReceipt, HunterEvent,
+    HunterFounderReceipt, HunterPhase, HunterState, HunterTarget, HunterView,
 };
 use crate::ids::{OrganismId, Slots};
 use crate::organism::{DeathCause, Escrow, Mode, Organism, Origin};
 use crate::pairs::{Body, NeighborLists};
-use crate::rng::{Counter, Stream, normal, unit};
+use crate::rng::{Counter, Stream, draw, normal, unit};
 use crate::telemetry::Telemetry;
 use crate::view::{FieldDump, OrganismView, RenderView};
 use crate::water;
@@ -764,6 +764,201 @@ impl World {
                 decisions.push((id, decide(o, &obs, now, dt, cfg.mechanisms.grazing, cfg.mechanisms.scavenging, gate)));
             }
 
+            // 5b. Hunters (`crate::hunter`), when any member exists: advance each member's
+            //     local phase from the pre-movement world, charge a strike in full at its
+            //     entry, and turn the phase into a movement intent. Prey that actually senses
+            //     a hunter pursuing *it* gets an escape term. Both are skipped whole when the
+            //     extension is empty, so a world without hunters runs the pre-hunter tick
+            //     operation for operation, with no additional draws.
+            //
+            //     A boost is an absolute speed ceiling in px/s, still divided by wading and
+            //     still capped by the movement energy the creature actually has.
+            let mut boosts: Vec<(OrganismId, f64)> = Vec::new();
+            if !hunters.members.is_empty()
+                && let Some(profile) = hunters.profile.as_ref()
+            {
+                let windup_ticks = ticks_from_seconds(profile.windup_seconds, dt).max(1);
+                let strike_ticks = ticks_from_seconds(profile.strike_seconds, dt).max(1);
+                let _recovery_ticks = ticks_from_seconds(profile.recovery_seconds, dt).max(1);
+                let meal_ticks = ticks_from_seconds(profile.meal_recovery_seconds, dt).max(1);
+                let stalk_ticks = ticks_from_seconds(profile.stalk_timeout_seconds, dt).max(1);
+                let mut charges: Vec<(OrganismId, f64)> = Vec::new();
+                let mut threats: Vec<(OrganismId, OrganismId)> = Vec::new();
+
+                for index in 0..hunters.members.len() {
+                    // The record is `Copy`: the whole phase machine runs on this copy, so the
+                    // arena and the member list can be read freely, and only the finished
+                    // member is written back.
+                    let mut m = hunters.members[index];
+                    let Some(o) = organisms.get(m.id) else { continue };
+                    let headroom = profile.gut_capacity_material - m.gut_material;
+                    let empty: &[pairs::Neighbor] = &[];
+                    let sensed = neighbors.lists.get(m.id.slot as usize).map_or(empty, |l| l.as_slice());
+                    let eligible = |id: OrganismId| -> bool {
+                        !hunters.contains(id)
+                            && organisms
+                                .get(id)
+                                .is_some_and(|prey| hunter::prey_is_eligible(profile, o, prey, headroom, e_r))
+                    };
+
+                    // A target that died, had its slot reused, became a hunter, grew out of
+                    // the window or no longer fits the gut is dropped deterministically. A
+                    // strike that has already been paid for keeps its (now empty) handle and
+                    // resolves as a failed attempt after movement.
+                    if let Some(t) = m.target
+                        && !eligible(t)
+                    {
+                        m.target = None;
+                        if matches!(m.phase, HunterPhase::Stalking | HunterPhase::Windup) {
+                            m.enter(HunterPhase::Perched, now, now);
+                        }
+                    }
+                    // Losing local sensing of the target ends a stalk or a windup too.
+                    if matches!(m.phase, HunterPhase::Stalking | HunterPhase::Windup)
+                        && m.target.is_some_and(|t| !sensed.iter().any(|n| n.id == t))
+                    {
+                        m.enter(HunterPhase::Perched, now, now);
+                    }
+
+                    // Timed phases expire; a finished meal becomes a pause.
+                    match m.phase {
+                        HunterPhase::Handling if !m.carrying() => {
+                            m.enter(HunterPhase::Recovering, now, now + meal_ticks);
+                        }
+                        HunterPhase::Recovering if now >= m.phase_ends_tick => {
+                            m.enter(HunterPhase::Perched, now, now);
+                        }
+                        _ => {}
+                    }
+
+                    // Satiety and a carried meal both end a hunt: the hysteresis is between
+                    // `seek_reserve_fraction` and `perch_reserve_fraction` of `R_max`.
+                    let full = o.reserve > profile.perch_reserve_fraction * o.phenotype.reserve_max;
+                    if m.phase.hunting() && (m.carrying() || full) {
+                        m.enter(HunterPhase::Perched, now, now);
+                    }
+
+                    let hungry = o.reserve < profile.seek_reserve_fraction * o.phenotype.reserve_max;
+                    let may_hunt = profile.attacks_enabled && !m.carrying() && hungry;
+                    // The nearest eligible prey this hunter actually senses; the neighbour
+                    // list is already sorted by `(distance, id)`, so this is "nearest, ties by
+                    // full ID" and never a global population scan.
+                    let nearest = || sensed.iter().find(|n| eligible(n.id)).map(|n| n.id);
+
+                    match m.phase {
+                        HunterPhase::Perched => {
+                            if may_hunt && let Some(t) = nearest() {
+                                m.enter(HunterPhase::Stalking, now, now);
+                                m.target = Some(t);
+                            }
+                        }
+                        HunterPhase::Stalking => {
+                            if now.saturating_sub(m.phase_started_tick) >= stalk_ticks {
+                                m.enter(HunterPhase::Perched, now, now);
+                            } else if m.target.is_none() {
+                                match nearest() {
+                                    Some(t) => m.target = Some(t),
+                                    None => m.enter(HunterPhase::Perched, now, now),
+                                }
+                            }
+                            // The gesture starts only when the jaw is actually in reach.
+                            if m.phase == HunterPhase::Stalking
+                                && let Some(t) = m.target
+                                && let Some(prey) = organisms.get(t)
+                                && hunter::jaw_in_reach(profile, mouth_point(o, profile), prey, images)
+                            {
+                                m.enter(HunterPhase::Windup, now, now + windup_ticks);
+                                m.target = Some(t);
+                            }
+                        }
+                        HunterPhase::Windup if now >= m.phase_ends_tick => {
+                            // The whole strike cost must be available *before* attempting.
+                            if let Some(t) = m.target
+                                && o.energy >= profile.strike_energy_cost
+                            {
+                                charges.push((m.id, profile.strike_energy_cost));
+                                m.attack_counter += 1;
+                                hunters.attacks_total += 1;
+                                counters.hunter_attacks += 1;
+                                m.enter(HunterPhase::Strike, now, now + strike_ticks);
+                                m.target = Some(t);
+                            } else {
+                                // Refused before payment: no energy, no draw, no attempt.
+                                hunter_events.push(HunterEvent::Attempt {
+                                    tick: now + 1,
+                                    hunter: m.id,
+                                    target: m.target,
+                                    outcome: hunter::AttemptOutcome::Unaffordable,
+                                    energy_paid: 0.0,
+                                });
+                                m.enter(HunterPhase::Perched, now, now);
+                            }
+                        }
+                        _ => {}
+                    }
+
+                    // The intent: chase at ordinary effort, burst during a strike, hold still
+                    // otherwise. Steering uses the neighbour list's own unfolded position.
+                    if let Some(t) = m.target
+                        && m.phase.hunting()
+                        && let Some(n) = sensed.iter().find(|n| n.id == t)
+                        && let Some(toward) = (n.local - o.pos.chart()).normalized()
+                        && let Some(d) = decisions.iter_mut().find(|(id, _)| *id == m.id)
+                    {
+                        d.1.heading = toward;
+                        d.1.effort = 1.0;
+                        if m.phase == HunterPhase::Strike {
+                            boosts.push((m.id, profile.strike_speed_px_s));
+                        }
+                        threats.push((t, m.id));
+                    }
+                    // A member never grazes and never eats fruit; detritus scavenging is the
+                    // profile's explicit allocation of its handling capacity, and only with no
+                    // meal and no hunt in progress. Budding is the profile's own gate, applied
+                    // in the physiology pass, so the controller's request never stands.
+                    if let Some(d) = decisions.iter_mut().find(|(id, _)| *id == m.id) {
+                        let may_scavenge = profile.scavenge_fraction > 0.0
+                            && !m.carrying()
+                            && m.target.is_none()
+                            && !m.phase.hunting();
+                        d.1.fruit_effort = 0.0;
+                        d.1.graze_effort = 0.0;
+                        d.1.scavenge_effort =
+                            if may_scavenge { d.1.scavenge_effort * profile.scavenge_fraction } else { 0.0 };
+                        d.1.bud = false;
+                        if !m.phase.hunting() && d.1.scavenge_effort <= 0.0 {
+                            // Perched, recovering or handling with nothing to forage: rest in
+                            // place rather than wander at seeking effort.
+                            d.1.mode = Mode::Resting;
+                            d.1.effort = f64::from(o.phenotype.drives.rest_effort);
+                        }
+                    }
+                    hunters.members[index] = m;
+                }
+
+                // The strike cost, charged in full at entry, before any outcome is known.
+                for (id, cost) in charges {
+                    if let Some(o) = organisms.get_mut(id) {
+                        let paid = cost.min(o.energy).max(0.0);
+                        o.energy -= paid;
+                        heat(paid);
+                    }
+                }
+
+                // 5c. Escape: only prey that is actually being pursued and actually senses
+                //     its pursuer turns away, within a documented escape turn limit, and may
+                //     briefly ask for more speed than its own maximum.
+                let escape_turn = profile.escape_turn_rate_deg.to_radians() * dt;
+                for (prey_id, hunter_id) in threats {
+                    let Some(prey) = organisms.get(prey_id) else { continue };
+                    let Some(list) = neighbors.lists.get(prey_id.slot as usize) else { continue };
+                    let Some(n) = list.iter().find(|n| n.id == hunter_id) else { continue };
+                    let Some(d) = decisions.iter_mut().find(|(id, _)| *id == prey_id) else { continue };
+                    d.1.heading = turn_toward(d.1.heading, prey.pos.chart() - n.local, escape_turn);
+                    boosts.push((prey_id, profile.escape_speed_multiple * prey.phenotype.speed_max));
+                }
+            }
+
             // 6. Move, transport tangents, and pay for motion, sensing and maintenance.
             moved.resize_with(organisms.slot_count(), Vec::new);
             for segments in moved.iter_mut() {
@@ -778,7 +973,15 @@ impl World {
                 // `1 + w · (1 − swim)` of the cell the organism stands in before it moves; a
                 // swimmer ignores the pool.
                 let wading = 1.0 + fields.w[cell_of(&o.pos).index()] * (1.0 - o.phenotype.swim);
-                let speed = d.effort * o.phenotype.speed_max / wading;
+                let mut speed = d.effort * o.phenotype.speed_max / wading;
+                // A hunter's burst and a threatened prey's dash are the only boosts, and both
+                // are limited by the movement energy the creature has *before* it moves. The
+                // list is empty in every world without hunters, so ordinary movement keeps its
+                // arithmetic exactly.
+                if let Some((_, wanted)) = boosts.iter().find(|(b, _)| *b == *id) {
+                    let bill = hunter::MoveBill::of(o, cfg);
+                    speed = bill.affordable_speed(o.energy, dt, speed, wanted / wading);
+                }
                 travel_into(o.pos, d.heading * (speed * dt), travel_buf);
                 o.pos = travel_buf.end;
                 o.heading = travel_buf.map.apply(d.heading).normalized().unwrap_or(d.heading);
@@ -796,6 +999,127 @@ impl World {
                 let paid = cost.min(o.energy).max(0.0);
                 o.energy -= paid;
                 heat(paid);
+            }
+
+            // 6b. Capture settlement, from the common post-movement state and before any
+            //     field feeding or physiology: every paid attempt that ends this tick is
+            //     resolved once, at most one hunter claims each prey, and a claimed prey is
+            //     removed exactly once with exactly one death event. Losing contenders paid
+            //     at strike entry and are not refunded.
+            if !hunters.members.is_empty()
+                && let Some(profile) = hunters.profile.as_ref()
+            {
+                let recovery_ticks = ticks_from_seconds(profile.recovery_seconds, dt).max(1);
+                // Attempt priority is its own seeded draw, so a contested prey is not decided
+                // by slot order; the full ID breaks a tie. Each attempt carries the target it
+                // was made against, so a settlement earlier in this loop cannot turn a
+                // contender's claim into "the target was lost".
+                let mut attempts: Vec<(u64, OrganismId, usize, Option<OrganismId>)> = Vec::new();
+                for (index, m) in hunters.members.iter().enumerate() {
+                    if m.phase == HunterPhase::Strike && now + 1 >= m.phase_ends_tick {
+                        let key = hunter::draw_key(m.id);
+                        let counter = hunter::priority_counter(m.attack_counter);
+                        attempts.push((draw(seed, Stream::Hunt, key, counter), m.id, index, m.target));
+                    }
+                }
+                attempts.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+                let mut claimed: Vec<OrganismId> = Vec::new();
+                for (_, hunter_id, index, aimed_at) in attempts {
+                    let m = hunters.members[index];
+                    let Some(hunter_o) = organisms.get(hunter_id) else { continue };
+                    let headroom = profile.gut_capacity_material - m.gut_material;
+                    let mut caught: Option<(OrganismId, f64, f64)> = None;
+                    let outcome = match aimed_at {
+                        None => AttemptOutcome::TargetLost,
+                        Some(t) if claimed.contains(&t) => AttemptOutcome::TargetClaimed,
+                        Some(t) => match organisms.get(t) {
+                            None => AttemptOutcome::TargetLost,
+                            Some(prey)
+                                if hunters.contains(t)
+                                    || !hunter::prey_is_eligible(profile, hunter_o, prey, headroom, e_r) =>
+                            {
+                                AttemptOutcome::Ineligible
+                            }
+                            Some(prey) => {
+                                // Contact is re-evaluated here, from the transported jaw
+                                // anchor, after *both* creatures have moved.
+                                if hunter::jaw_in_reach(profile, mouth_point(hunter_o, profile), prey, images) {
+                                    let chance = hunter::capture_probability(
+                                        profile,
+                                        hunter_o.structure,
+                                        prey.structure,
+                                    );
+                                    let roll = unit(
+                                        seed,
+                                        Stream::Hunt,
+                                        hunter::draw_key(hunter_id),
+                                        hunter::capture_counter(m.attack_counter),
+                                    );
+                                    if roll < chance {
+                                        let (material, energy) = hunter::prey_inventory(prey, e_r);
+                                        caught = Some((t, material, energy));
+                                        claimed.push(t);
+                                        AttemptOutcome::Captured
+                                    } else {
+                                        AttemptOutcome::Missed
+                                    }
+                                } else {
+                                    AttemptOutcome::OutOfReach
+                                }
+                            }
+                        },
+                    };
+                    hunter_events.push(HunterEvent::Attempt {
+                        tick: now + 1,
+                        hunter: hunter_id,
+                        target: aimed_at,
+                        outcome,
+                        energy_paid: profile.strike_energy_cost,
+                    });
+
+                    match caught {
+                        Some((prey_id, material, energy)) => {
+                            // One removal, one death event, and no detritus: the whole body
+                            // and its escrow moved into the gut, energy included. This is an
+                            // internal transfer with no source ledger and no detritus cap.
+                            let prey = organisms.remove(prey_id).expect("the claim was checked");
+                            // Every other member drops the handle in the same breath, so no
+                            // hunter can chase (or claim) a body that has left the arena.
+                            for other in hunters.members.iter_mut() {
+                                if other.target == Some(prey_id) {
+                                    other.target = None;
+                                }
+                            }
+                            let member = &mut hunters.members[index];
+                            member.gut_material += material;
+                            member.gut_energy += energy;
+                            member.enter(HunterPhase::Handling, now, now);
+                            hunters.captures_total += 1;
+                            hunters.predation_deaths_total += 1;
+                            counters.hunter_captures += 1;
+                            counters.deaths_predation += 1;
+                            events.push(LifeEvent::Death {
+                                tick: now + 1,
+                                id: prey_id,
+                                age_ticks: prey.age_ticks(now + 1),
+                                cause: DeathCause::Predation,
+                                births: prey.births,
+                                genome: prey.genome.digest(),
+                            });
+                            hunter_events.push(HunterEvent::Capture {
+                                tick: now + 1,
+                                hunter: hunter_id,
+                                prey: prey_id,
+                                material,
+                                energy,
+                            });
+                        }
+                        None => {
+                            hunters.members[index].enter(HunterPhase::Recovering, now, now + recovery_ticks);
+                        }
+                    }
+                }
             }
 
             // 7. Settle feeding once per cell, proportionally, from the pre-transfer fields.
@@ -919,8 +1243,73 @@ impl World {
                 o.fed_this_tick = eaten > 0.0;
             }
 
+            // 7b. Handling and digestion. A carried carcass is homogeneous: a portion `q`
+            //     leaves the gut with exactly the energy it was carrying, stores what its
+            //     density pays for, rejects the rest as energy-free detritus, and sends the
+            //     spare energy to the battery or to heat. Handling is paid first and in full,
+            //     or nothing is digested this tick.
+            if !hunters.members.is_empty()
+                && let Some(profile) = hunters.profile.as_ref()
+            {
+                let metabolism = hunter::Metabolism::of(cfg);
+                let handling = profile.handling_cost_per_second * dt;
+                for index in 0..hunters.members.len() {
+                    let m = hunters.members[index];
+                    if !m.carrying() {
+                        continue;
+                    }
+                    let Some(o) = organisms.get_mut(m.id) else { continue };
+                    let paid = handling.min(o.energy).max(0.0);
+                    o.energy -= paid;
+                    heat(paid);
+                    if paid < handling {
+                        // It could not carry its meal this tick; the gut keeps everything and
+                        // ordinary oxidation may refill the battery for the next one.
+                        continue;
+                    }
+                    let reserve_room = (o.phenotype.reserve_max - o.reserve).max(0.0);
+                    let energy_room = (o.phenotype.energy_max - o.energy).max(0.0);
+                    let step = hunter::digest_step(
+                        profile,
+                        dt,
+                        m.gut_material,
+                        m.gut_energy,
+                        metabolism,
+                        reserve_room,
+                        energy_room,
+                    );
+                    if step.material > 0.0 {
+                        o.reserve += step.to_reserve;
+                        o.energy += step.energy_gain;
+                        fields.d[cell_of(&o.pos).index()] += step.to_detritus;
+                        heat(step.heat);
+                        let member = &mut hunters.members[index];
+                        member.gut_material -= step.material;
+                        member.gut_energy -= step.carried;
+                    }
+                    // A finished meal ends exactly empty: the last few ulps of energy leave as
+                    // heat rather than sitting in a gut with no material to carry them.
+                    let member = &mut hunters.members[index];
+                    if member.gut_material <= hunter::GUT_RESIDUE {
+                        let residue = member.gut_energy;
+                        member.gut_material = 0.0;
+                        member.gut_energy = 0.0;
+                        if residue > 0.0 {
+                            heat(residue);
+                        }
+                    }
+                }
+            }
+
             // 8. Physiology: oxidation, growth, gestation, budding, death checks.
             let gestation_ticks = ticks_from_seconds(org_cfg.gestation_seconds, dt);
+            // A member gestates on its own, much longer clock and grows on its own, much
+            // slower ceiling; every other creature keeps the world config's.
+            let hunter_gestation_ticks = hunters
+                .profile
+                .as_ref()
+                .map(|p| ticks_from_seconds(p.gestation_seconds, dt))
+                .unwrap_or(gestation_ticks);
             let max_age_ticks = ticks_from_seconds(org_cfg.max_age_seconds, dt);
             let cap = cfg.capacity.max_organisms as usize;
             let population = organisms.len();
@@ -928,6 +1317,8 @@ impl World {
             let mut deaths: Vec<(OrganismId, DeathCause)> = Vec::new();
             for (id, d) in &decisions {
                 let Some(o) = organisms.get_mut(*id) else { continue };
+                // Membership, not `genome.form`, is what makes a predator.
+                let member = hunters.index_of(*id);
 
                 if o.energy < org_cfg.oxidation_threshold * o.phenotype.energy_max && o.reserve > 0.0 {
                     let burned = (org_cfg.oxidation_rate * dt).min(o.reserve);
@@ -944,8 +1335,12 @@ impl World {
                 if o.structure < o.phenotype.structure_adult
                     && o.reserve > org_cfg.growth_reserve_min * o.phenotype.reserve_max
                 {
+                    let growth_rate = match (member, hunters.profile.as_ref()) {
+                        (Some(_), Some(profile)) => profile.juvenile_growth_rate,
+                        _ => org_cfg.growth_rate,
+                    };
                     let mut grown =
-                        (org_cfg.growth_rate * dt).min(o.phenotype.structure_adult - o.structure).min(o.reserve);
+                        (growth_rate * dt).min(o.phenotype.structure_adult - o.structure).min(o.reserve);
                     // Building is paid for up front: what the energy cannot cover is not built.
                     if org_cfg.build_cost > 0.0 {
                         grown = grown.min(o.energy / org_cfg.build_cost);
@@ -960,10 +1355,19 @@ impl World {
                     }
                 }
 
-                let due = o.escrow.as_ref().is_some_and(|e| now.saturating_sub(e.started_tick) >= gestation_ticks);
+                let gestation = if member.is_some() { hunter_gestation_ticks } else { gestation_ticks };
+                let due = o.escrow.as_ref().is_some_and(|e| now.saturating_sub(e.started_tick) >= gestation);
+                // A hunter's one paid offspring is gated by its profile and its own local
+                // state; the ordinary controller's `bud` never applies to a member.
+                let bud = match (member, hunters.profile.as_ref()) {
+                    (Some(index), Some(profile)) => {
+                        hunter::may_reproduce(profile, o, &hunters.members[index], now, dt)
+                    }
+                    _ => d.bud,
+                };
                 if due {
                     births.push(*id);
-                } else if d.bud && o.escrow.is_none() {
+                } else if bud && o.escrow.is_none() {
                     if population + births.len() < cap {
                         let structure = org_cfg.child_structure_fraction * o.phenotype.structure_adult;
                         let reserve = org_cfg.child_reserve_fraction * o.phenotype.reserve_max;
@@ -1030,6 +1434,34 @@ impl World {
                 };
                 counters.deaths[slot] += 1;
                 deaths_total[slot] += 1;
+                // A member's carried meal goes where its body went: into the cell's detritus,
+                // keeping at most what the detritus cap allows and releasing the rest as heat.
+                // Nothing a hunter was holding disappears because its record was removed.
+                if let Some(index) = hunters.index_of(*id) {
+                    let gone = hunters.members[index];
+                    let mut stored = 0.0;
+                    if gone.gut_material > 0.0 || gone.gut_energy > 0.0 {
+                        fields.d[cell] += gone.gut_material;
+                        stored = gone.gut_energy.min(e_d_max * gone.gut_material);
+                        fields.de[cell] += stored;
+                        heat(gone.gut_energy - stored);
+                    }
+                    hunters.members.remove(index);
+                    for other in hunters.members.iter_mut() {
+                        if other.target == Some(*id) {
+                            other.target = None;
+                        }
+                    }
+                    hunters.hunter_deaths_total += 1;
+                    hunter_events.push(HunterEvent::Death {
+                        tick: now + 1,
+                        id: *id,
+                        cause: *cause,
+                        gut_material: gone.gut_material,
+                        gut_energy: gone.gut_energy,
+                        gut_energy_stored: stored,
+                    });
+                }
                 events.push(LifeEvent::Death {
                     tick: now + 1,
                     id: *id,
@@ -1042,6 +1474,9 @@ impl World {
 
             for parent_id in &births {
                 let full = organisms.len() >= cap;
+                // A member's child inherits the lineage, not the appearance: membership is
+                // granted explicitly below, and its genome is copied exactly.
+                let hunter_parent = hunters.index_of(*parent_id);
                 let placement = {
                     let Some(parent) = organisms.get_mut(*parent_id) else { continue };
                     let Some(escrow) = parent.escrow.take() else { continue };
@@ -1051,6 +1486,11 @@ impl World {
                         parent.energy += escrow.energy;
                         counters.cap_rejections += 1;
                         *cap_rejections_total += 1;
+                        // …and the parent waits a gestation before trying again, so a world at
+                        // its cap cannot spin a hunter through a free birth attempt per tick.
+                        if let Some(index) = hunter_parent {
+                            hunters.members[index].next_reproduction_tick = now + 1 + hunter_gestation_ticks;
+                        }
                         continue;
                     }
                     let index = u64::from(parent.births);
@@ -1072,7 +1512,9 @@ impl World {
                 // Sparse mutation (`design/fauna-v2.md`): the draws follow the placement draws
                 // in the parent's birth stream; `form` never changes; an exact copy records
                 // nothing.
-                let mutations = if cfg.mechanisms.mutation {
+                // Hunter mutation is outside this experiment: a member's child carries the
+                // profile's fixed genome exactly, even where ordinary prey mutate.
+                let mutations = if cfg.mechanisms.mutation && hunter_parent.is_none() {
                     let draws = genome.mutate(cfg.mutation.probability, cfg.mutation.step, || {
                         let u = unit(seed, Stream::Birth, key, counter);
                         counter += 1;
@@ -1083,7 +1525,13 @@ impl World {
                 } else {
                     Vec::new()
                 };
-                let phenotype = decode(&genome, org_cfg);
+                let mut phenotype = decode(&genome, org_cfg);
+                if hunter_parent.is_some()
+                    && let Some(profile) = hunters.profile.as_ref()
+                {
+                    // The assembled body's tested support, exactly as the founder got it.
+                    phenotype.extent = profile.body_extent_px;
+                }
                 // The escrowed material that becomes structure gives up its reserve energy.
                 heat(e_r * escrow.structure);
                 let child = Organism {
@@ -1108,6 +1556,27 @@ impl World {
                 let genome_digest = child.genome.digest();
                 let origin = child.origin;
                 let child_id = organisms.insert(child);
+                if let Some(index) = hunter_parent {
+                    // The funded descendant joins the lineage with no target, an empty gut and
+                    // a fresh attack counter, and the parent starts its recovery interval.
+                    hunters.insert_member(hunter::HunterMember::new(child_id, now + 1));
+                    hunters.hunter_births_total += 1;
+                    let interval = hunters
+                        .profile
+                        .as_ref()
+                        .map(|p| ticks_from_seconds(p.reproduce_interval_seconds, dt))
+                        .unwrap_or(0);
+                    // `insert_member` may have shifted the parent's row; find it again.
+                    let _ = index;
+                    if let Some(parent_index) = hunters.index_of(*parent_id) {
+                        hunters.members[parent_index].next_reproduction_tick = now + 1 + interval;
+                    }
+                    hunter_events.push(HunterEvent::Offspring {
+                        tick: now + 1,
+                        parent: *parent_id,
+                        child: child_id,
+                    });
+                }
                 events.push(LifeEvent::Birth {
                     tick: now + 1,
                     id: child_id,
@@ -1275,11 +1744,11 @@ impl World {
         profile: FixedHunterProfile,
         target: HunterTarget,
     ) -> Result<HunterFounderReceipt, String> {
-        if self.state.hunters.profile.is_some() || self.state.hunters.founders_placed > 0 {
-            return Err("the hunter extension is already initialized".into());
-        }
         if self.state.hunters.control_deposited {
             return Err("this world is a budget-matched control and must not gain a hunter".into());
+        }
+        if self.state.hunters.profile.is_some() || self.state.hunters.founders_placed > 0 {
+            return Err("the hunter extension is already initialized".into());
         }
         let founder = self.derive_hunter_founder(&profile)?;
         let Some(pos) = target.resolve() else {
@@ -1601,6 +2070,7 @@ impl World {
         // energy ledgers.
         self.state.care.validate(self.state.tick)?;
         self.state.energy_ledgers().validate()?;
+        self.state.hunters.validate(self.state.tick, &self.state.organisms, &self.state.config)?;
         let cap = cfg.capacity.max_organisms as usize;
         if self.state.organisms.len() > cap {
             return Err(format!("population {} exceeds cap {cap}", self.state.organisms.len()));

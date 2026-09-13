@@ -21,7 +21,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use cubarium_surface::{FACE_EXTENT, Face, MAX_LOCAL_RADIUS, SurfacePoint, Vec2};
+use cubarium_surface::{ChartImage, FACE_EXTENT, Face, MAX_LOCAL_RADIUS, SurfacePoint, Vec2, unfold_with};
 
 use crate::config::WorldConfig;
 use crate::genome::Genome;
@@ -390,7 +390,7 @@ impl HunterPhase {
 
 /// One member of the lineage. The organism itself is an ordinary [`Organism`] in the arena;
 /// this record is everything the hunt adds.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HunterMember {
     /// Slot **and** generation: a stale handle never resolves to a reused slot.
     pub id: OrganismId,
@@ -892,6 +892,61 @@ pub fn prey_is_eligible(
     }
     let (material, _) = prey_inventory(prey, e_r);
     material <= gut_headroom + TOLERANCE
+}
+
+/// The surface distance from `from` to `to` through the shortest valid unfolding, or `None`
+/// when the target is past `max_distance` or not reachable without leaving the surface.
+///
+/// This is the same local unfolding the pair pass and the controller use: it crosses seams,
+/// never a face-local straight line that would miss one, and never the open rim.
+pub fn surface_reach(
+    images: &[Vec<ChartImage>; 5],
+    from: SurfacePoint,
+    to: SurfacePoint,
+    max_distance: f64,
+) -> Option<f64> {
+    let max = max_distance.min(MAX_LOCAL_RADIUS);
+    if max <= 0.0 {
+        return None;
+    }
+    unfold_with(&images[from.face.index()], from, to, max).map(|u| u.distance)
+}
+
+/// True when a hunter's transported jaw anchor is within reach of `prey`: the distance from
+/// the anchor to the prey's position is at most `jaw_reach_px` plus the prey's own extent.
+///
+/// `mouth` is the anchor the caller transported (`jaw_offset_px` forward along the heading),
+/// so a jaw that crossed a seam is tested from where it actually ended up.
+pub fn jaw_in_reach(
+    profile: &FixedHunterProfile,
+    mouth: SurfacePoint,
+    prey: &Organism,
+    images: &[Vec<ChartImage>; 5],
+) -> bool {
+    let reach = profile.jaw_reach_px + prey.phenotype.extent;
+    // A small slack on the unfolding limit so a target exactly at the edge is still found.
+    matches!(surface_reach(images, mouth, prey.pos, reach + 1.0), Some(d) if d <= reach)
+}
+
+/// The one paid-offspring gate, on **local parent state only**: no world population is
+/// consulted, and the ordinary organism thresholds are overridden by the saved profile rather
+/// than changed for every creature.
+pub fn may_reproduce(
+    profile: &FixedHunterProfile,
+    parent: &Organism,
+    member: &HunterMember,
+    now: u64,
+    dt: f64,
+) -> bool {
+    parent.escrow.is_none()
+        && !member.carrying()
+        && member.target.is_none()
+        && !member.phase.hunting()
+        && parent.structure >= parent.phenotype.structure_adult - TOLERANCE
+        && parent.reserve >= profile.reproduce_reserve_fraction * parent.phenotype.reserve_max
+        && parent.energy >= profile.reproduce_energy_fraction * parent.phenotype.energy_max
+        && parent.age_ticks(now) as f64 * dt >= profile.reproduce_min_age_seconds
+        && now >= member.next_reproduction_tick
 }
 
 /// One tick of digestion of homogeneous gut contents, in the world's own currencies.

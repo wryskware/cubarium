@@ -23,12 +23,14 @@ harness, live state or care file was touched.
 | Initializers (`start_hunter_trial`, budget-matched control) | landed |
 | Observer API (`hunter_view`, `drain_hunter_events`, telemetry) | landed |
 | Gut in stored totals, invariants and both energy audits | landed |
-| Tick behaviour: phases, escape, contact, capture, digestion, offspring | in progress |
+| Tick behaviour: phases, escape, contact, capture, digestion, offspring | landed |
+| Deterministic test suite (25 behaviour tests + 4 migration tests) | landed |
+| Paired experiment runs, ecological gates | **not started — root owns the harness** |
 
 ## API, frozen for the paired harness
 
 This is the surface root can build the experiment entrypoint against. It compiles today
-(`cargo check --workspace --all-targets --offline` is clean) and the behaviour slice adds no
+(`cargo check --workspace --all-targets --offline` is clean) and the behaviour slice added no
 new signature to it.
 
 ```rust
@@ -178,31 +180,176 @@ structure, 1200 s age, 80 % reserve, 75 % energy, no gut, no hunt, 1800 s since 
 **placeholders the art worker must confirm against the visible jaw**; `HunterView.mouth` is the
 transported anchor contact is actually tested at.
 
-## Evidence so far
+## What a tick actually does now
+
+All of it is skipped whole when the member list is empty, so a world without hunters runs the
+pre-hunter tick operation for operation, with no additional draws. The proof is the byte-exact
+continuation below.
+
+1. **Phases (after the ordinary decisions, before movement).** Each member runs its own local
+   machine on a copy of its record: drop a target that died, had its slot reused, became a
+   hunter, grew out of the window or stopped fitting the gut; drop a stalk or a windup that
+   lost local sensing of its target; expire timed phases; perch when satiated or carrying.
+   A hungry hunter with attacks enabled takes the **nearest eligible prey its own neighbour
+   list already holds** — sorted by `(distance, id)`, never a global scan. When the
+   transported jaw is in reach it winds up (0.6 s, no capture). At the end of the windup it
+   strikes **only if the whole strike cost is available**, and that cost is charged there and
+   then, before any outcome is known; otherwise the attempt is refused with an explicit
+   `Unaffordable` record, no draw and no attack counted. A member never grazes or eats fruit;
+   detritus scavenging is the profile's explicit fraction of its own rate, and only with no
+   meal and no hunt in progress.
+2. **Escape (still before movement).** Only a prey that is actually being pursued *and*
+   actually senses its pursuer turns: its decided heading is rotated away within the profile's
+   escape turn limit, and it may ask for up to `escape_speed_multiple` of its own maximum
+   speed.
+3. **Movement.** Unchanged, except that a strike burst and an escape dash are capped by
+   `MoveBill::affordable_speed` — the movement energy the creature has *before* it moves —
+   and never below the speed it would ordinarily have had.
+4. **Capture settlement (after both creatures moved, before feeding and physiology).** Every
+   paid attempt ending this tick is collected, ordered by its own seeded priority draw with
+   the full ID as the tiebreak, and resolved once. Contact is re-evaluated from the
+   transported jaw anchor. At most one hunter claims each prey; a contender whose target was
+   claimed is told so and keeps its payment. A claimed prey is removed exactly once, with one
+   ordinary `LifeEvent::Death` carrying `DeathCause::Predation`, and its whole body **and
+   escrow** move into the gut — an internal transfer with no source ledger and no detritus
+   cap. The three persisted natural-death counters never move.
+5. **Handling and digestion (before physiology).** The handling cost is paid first and in
+   full, or nothing is digested that tick. A portion leaves the gut with exactly the energy it
+   was carrying, stores `eta_m · min(1, rho/e_r) · q` as reserve, rejects the rest as
+   energy-free litter in the hunter's own cell, and sends the spare energy to the battery or
+   to heat. Reserve headroom shrinks the **portion**, not the assimilation. A finished meal
+   ends exactly empty; a satiated hunter keeps its meal, counted and checkpointed, with no
+   hidden discard timer.
+6. **Physiology.** A member gestates on the profile's clock, grows at the profile's juvenile
+   ceiling, and buds only through the profile's own gate — local parent state only, never a
+   world population count.
+7. **Commit.** A member's death hands its carried gut to the cell like a body (detritus cap
+   applied, remainder as heat), removes its record and every other member's handle on it. A
+   funded child joins the lineage explicitly, with the fixed genome copied exactly even where
+   ordinary prey mutate, an empty gut, no target and a fresh attack counter; the parent then
+   waits its recovery interval. A birth the cap refuses returns the escrow through the
+   existing path and makes the parent wait a gestation, so a full world cannot loop on it.
+
+Two draws per **paid** attempt, both on the new `Stream::Hunt` keyed by the packed full hunter
+ID: `2·attack_counter` for the contested-claim priority and `2·attack_counter + 1` for the
+capture roll. Refusals, lookups, rendering and logging consume none. No existing stream value
+moved.
+
+## Evidence
 
 ```text
-cargo test -p cubarium-core --offline          # 224 passed, 0 failed, 2 ignored
+cargo test -p cubarium-core --offline          # 249 passed, 0 failed, 2 ignored
 cargo clippy -p cubarium-core --offline --all-targets   # clean
 cargo check --workspace --all-targets --offline         # clean, no host edit needed
 ```
 
-- `tests/hunter_migration.rs`: root's genuine `pre-hunter-v9-173400.cubw` migrates with an
-  empty extension; 600 stepped ticks re-encode to `pre-hunter-v9-173400-plus600.cubw`
-  **byte for byte**, with the provenance's own hashes (`134f4db0135d8a0a`,
-  `854dce1766d905d3`) recomputed from the files; care, the signed corrections and the raw
-  counters are compared individually. The genuine schema 8 and schema 7 continuations in
-  `care.rs` and `energy_correction.rs` still pass unchanged.
-- `src/hunter.rs` unit tests: profile validation rejects ten separate defects; capture
-  probability is bounded and falls with prey size; digestion conserves material and energy
-  exactly, stores proportionally less from energy-poor prey, reduces the portion rather than
-  the assimilation under reserve headroom, and sends spare energy to heat with a full battery;
-  the boost speed cap never slows ordinary movement; member bookkeeping stays sorted, is
-  generation-checked and forgets removed IDs.
+Every hunter test runs in debug, so the world's own per-tick energy audit and invariant check
+ran on every tick of every capture, digestion, birth and death below — the identity is checked
+by the world itself, not only by the assertions.
+
+### The continuation that gates everything else
+
+`tests/hunter_migration.rs` — root's genuine `pre-hunter-v9-173400.cubw` migrates with an
+empty, inert extension; 600 stepped ticks re-encode to `pre-hunter-v9-173400-plus600.cubw`
+**byte for byte**, with the provenance's own hashes (`134f4db0135d8a0a`, `854dce1766d905d3`)
+recomputed from the files. Fields, organisms, weather, config, care, the signed corrections and
+the raw counters are compared individually. The genuine schema 8 and schema 7 continuations in
+`care.rs` and `energy_correction.rs` still pass unchanged.
+
+### `tests/hunter.rs`, 25 deterministic tests
+
+Two trial parameters are replaced in these fixtures to make outcomes deterministic:
+`capture_min = capture_max = 1` for a certain capture and `= 0` for a certain miss.
+
+- **Founding.** The derived inventory is the world's own decode (`S = 2, R = 2, E = 3`, 4 m and
+  7 e), booked once in the extension and never in `external_material_in`; the closed box and
+  the stored energy move by exactly the import. Repeats, an invalid profile, a body too big for
+  the world's `body_extent_max` and an unresolvable target are each refused **without changing
+  anything**.
+- **Budget-matched control.** The same derived inventory deposited as local `D`/`De`, no
+  hunter, mutually exclusive with the trial arm, no repeat. With a detritus cap too small to
+  hold it, the excess becomes real heat and the energy identity still closes.
+- **The hunt.** Perch → stalk → windup (which captures nothing) → paid strike → settlement.
+  The strike cost is charged at entry; an unaffordable strike is refused before payment and
+  consumes no draw and no counter; a miss still pays and leaves the prey alive.
+- **Capture.** The whole prey **and its escrow** move into the gut (material exact, energy
+  within the tick's own movement cost), the body does not also become detritus, material is
+  closed, the energy identity holds, exactly one `Death` event with `DeathCause::Predation` is
+  emitted and the three natural counters stay at zero.
+- **Eligibility.** Prey too big, too small, or whose body does not fit the remaining gut is
+  never stalked and never attempted.
+- **Contested claim.** Two hunters, one prey: one `Captured`, one `TargetClaimed`, two paid
+  attempts, one carried body, one death. (This test found a real defect: the loser was
+  originally told `TargetLost` because the winner's settlement had already cleared its handle.)
+- **Escape.** A stalked prey turns away from its pursuer and exceeds its own maximum speed.
+- **Digestion.** The split matches the plan's formula exactly, tick by tick, in a quiet world
+  where nothing else can move the litter; material and the energy identity hold on every tick
+  of the meal. A full reserve stops digestion and the gut keeps the meal; a hunter that cannot
+  pay the handling cost digests nothing.
+- **Scavenging.** A facultative hunter gains reserve from litter at its allocated fraction; a
+  specialist gains nothing. Neither ever grazes or eats fruit.
+- **Attacks disabled.** The same living hunter is still maintained and still spends, attempts
+  nothing and logs nothing.
+- **Death.** A hunter that starves hands its carried meal to the cell with its body, capped
+  like a body with the remainder as heat, leaves the member list, and closes both identities.
+- **Geometry.** The jaw reaches **across a seam** onto a face the body is not on, and
+  **reflects off the open rim**, and captures in both cases; `HunterView.mouth` is the
+  transported anchor.
+- **One funded offspring.** The escrow is funded at the world's own child fractions out of the
+  parent; the child is a member with the fixed genome copied exactly **with mutation on**, the
+  profile's extent, a fresh attack counter, and the parent starts its recovery interval;
+  material and energy identities hold across the birth. A parent that dies miscarries once and
+  leaves the lineage; a birth refused by the cap returns the escrow and waits a gestation.
+- **Restart.** Checkpoint and reload mid-windup, mid-paid-strike, with a part-filled gut and
+  mid-gestation: identical full-state hashes at the boundary and at every tick for 120 ticks
+  after, and identical extensions at the end.
+- **Stale handles.** After a capture the freed slot is reused by a new animal; a replanted
+  stale handle is cleared rather than resolved, and the new occupant is not harvested for it.
+- **Decode hardening.** Thirteen crafted extensions are refused by name: a member that is not
+  a live organism, duplicates, a gut past capacity, energy in an empty gut, handling nothing,
+  stalking nobody, a timed phase with no duration, an untimed phase that stores one, a hunter
+  aiming at itself, members without a profile, a control world holding a hunter, a negative
+  import, and an unknown profile version.
 
 ## Open, and not claimed
 
-- The tick behaviour is not finished yet; nothing hunts in this slice.
-- No ecological claim at all. Long-run prey margins are **not** validated: the twelve-hour
-  comparisons retain total population but lose skimmers and founder diversity, so a passing
-  unit test is not evidence that this lineage belongs in the live world.
-- The jaw geometry is unconfirmed by the art worker.
+- **No ecological claim at all.** These are unit and integration tests of mechanism, not
+  evidence about balance. Long-run prey margins are *not* validated: the twelve-hour
+  comparisons retain total population but lose skimmers and founder diversity, so a green
+  suite is not a reason to put this lineage anywhere near the live world.
+- **The paired experiment has not been run.** Root owns the harness and the runs: twelve
+  paired seeds from documented mature snapshots, stratified by initial prey population, with
+  the four arms the plan names (untouched baseline, budget-matched deposit, attack-disabled
+  living hunter, specialist and facultative hunters), two hours per seed before anything
+  longer.
+- **The jaw geometry is unconfirmed.** Six pixels forward with 1.5 px reach are placeholders;
+  the art worker must confirm that `HunterView.mouth` tracks the visible jaw before any
+  integration. The 9 px body extent is the world's own `body_extent_max`, not a measurement of
+  the assembled silhouette.
+- **Untuned trial numbers with a known demand.** At the founder defaults, maintenance alone is
+  about 18 e/hour before sensing and movement; how much prey turnover that actually requires
+  is a measurement nobody has made yet.
+
+## Remaining gates before this lineage goes anywhere
+
+1. Root's paired runs pass their accounting checks and do not universally collapse the prey.
+2. Fable confirms the jaw anchor and maps `HunterRole::Lanternjaw` to the body; only then does
+   the render integration land.
+3. Wrysk's explicit authorization for any live introduction or any default change. Nothing in
+   this package alters a default: an untouched world has no profile, no members and no
+   imports, and steps exactly as the pre-hunter build did.
+
+## Deviations from the plan, and why
+
+- **Schema 10, not the plan's schema 9.** The accounting correction took 9 (`b47eacc`), as the
+  work order says; the hunter extension is appended after `energy_correction`, and the frozen
+  `WorldStateV9` mirror preserves the whole schema 9 prefix.
+- **Two draws per paid attempt, not one.** The plan asks for "one draw per paid attempt" and
+  also for a "dedicated seeded draw" for contested-claim priority. Deriving both from one draw
+  would correlate a hunter's claim priority with its own capture roll, so the priority and the
+  capture roll are separate counters in the same stream. Nothing else consumes a draw.
+- **`RenderView` and `OrganismView` untouched.** Per the work order, the hunter view is
+  published separately so Fable's concurrent host work is not forced to change.
+- **A refused birth waits one gestation**, not the full reproduction interval: long enough that
+  a world at its cap cannot retry every tick, short enough that a refusal is not a de facto
+  half-hour ban. The plan asks only for "a retry/recovery interval".
