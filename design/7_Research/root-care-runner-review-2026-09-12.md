@@ -55,3 +55,19 @@ threads (without reopening/relocking the inode), or guarantee joining on every
 path. Preserve the lock during a checkpoint timeout if retaining bounded shutdown.
 Verify a delayed writer outliving the runner cannot be overlapped by a second
 launcher. This is specifically the contract's one-writer guarantee.
+
+## Replay-test hook isolation
+
+The new `tests/care_replay.rs` installs process-global journal hooks, but only
+three of its eight tests take `hook_guard`. The other five also open journals
+and can inherit or consume the delayed/failing hook under Rust's default
+parallel test execution. A normal unlimited replay accidentally receiving an
+uncertain write can hold indefinitely because it has no external stop signal.
+Serialize every test that can open a journal against this global hook, or scope
+the hook to a particular test runner/state directory. Use cleanup that uninstalls
+the hook even after a test failure. Rerun the suite at default parallelism.
+
+The automatic capture test also removes/writes a shared fixed
+`/tmp/cubarium-care-captures` directory. Use the test's unique scratch root (or an
+explicit opt-in capture path) so concurrent Cargo processes cannot erase each
+other's captures. Root and the native worker may validate independently.
