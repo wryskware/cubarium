@@ -6,6 +6,11 @@ decision_refs: []
 
 # Post-intake opportunity shadow: implementation and four-arm pilot
 
+Retention update, 2026-09-13: this isolated study is not deployed. Raw captures
+and its worktree were removed at Wrysk's request; tagged source and saved review
+probes remain. The [current handoff](../handoffs/02-quiet-habits.md) identifies the
+unresolved review boundary. Do not resume commands against the old input paths.
+
 Implements and runs exactly the check
 [root authorised](root-post-intake-shadow-scope-2026-09-13.md): a bounded,
 non-intervening opportunity measurement built from

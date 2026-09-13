@@ -1,6 +1,6 @@
 ---
 design_status: leaning
-last_reviewed: 2026-09-11
+last_reviewed: 2026-09-13
 decision_refs: []
 ---
 
@@ -17,33 +17,39 @@ reasoning and qualifications; the [experiment plan](experiments.md) gives E1–E
 protocols. These revisions remain `leaning`; completed experiments are recorded
 in the current-status paragraph and the linked research reports below.
 
-## Current release status
+## Current development status
 
-Updated2026-09-13. Wrysk authorized discarding the old collapsed world and generated
-captures. The development launcher `scripts/run-cube.sh` builds current main with
-normal assets and drives the cube and shared viewer on7393; the prior6d7a831
-release is historical, not the deployment target. The implementation includes independent care doses,
-all seven plants' authored growth clips, spiretree wind, and actual-intake meal
-continuity, plus the stable sail swimming body, calm rest/feed fins, vine-covered
-spire sway and near-corner crown-growth continuity;1130 workspace tests and
-historical copied/live59.9fps measurements are recorded in the
-[rollout](7_Research/sail-calm-live-update-2026-09-13.md). Neither hunters nor modified
-ambient support nor a new rest policy is live.
+Updated 2026-09-13 after the owner-authorized cleanup and fresh-world restart.
+Use the [progress and fresh-thread task index](handoffs/README.md) for the current
+baseline, delivered features, evidence availability and six bounded work briefs.
 
-| Work | Verified state | Next gate |
-| --- | --- | --- |
-| Residual animation flicker | Stable sail body, intact-atlas vine wind, per-cap crown corner fix and [calm sail fins](7_Research/sail-calm-live-update-2026-09-13.md) are deployed | Retain point-baked crispness; new rest gesture is stronger, not uniformly smoother, and physical-panel readability remains unverified. Settle rejected. Fable is studying one glasscane art-headroom candidate; no production edit yet. Blanket fin coverage was not selected |
-| Local care responses | [108-case screen](7_Research/astra-care-response-results-2026-09-13.md): Feed usually increases local feeding, rain mixed, Clean usually reduces feeding; meal continuity deployed | [Rain temporal/drizzle/restart review](7_Research/fable-rain-response-playback-review-2026-09-13.md) prefers slower v3 without glowcap. [Root native held-frame review](7_Research/root-visual-and-ecology-disposition-2026-09-13.md) keeps it experimental: subtle readability, not a shipped flourish |
-| Quiet habits | [Complete two-hour interpretation](7_Research/astra-quiet-two-hour-biological-review-2026-09-13.md): all48 artifact gates pass; genuine recovery remains only0.03% of living time. No-care population-time−0.33%, pooled birth deficit does not persist; both ancestry directions and mixed seed outcomes retained | Birth-only candidate closed as too sparse, not proven ecological collapse. Off unchanged; no24/72h, timer expansion or schema13 deployment. [Bounded post-intake shadow](7_Research/root-post-intake-shadow-scope-2026-09-13.md) implementation underway: actual intake and affordability, no behavioral intervention; four-arm pilot review before broader collection. Calm fin art does not substitute for biology |
-| Ambient support | [Complete two-hour results](7_Research/astra-ambient-support-results-2026-09-13.md): all72 arms pass recorded audits;90% no-care loses skimmers in two additional seeds | Unchanged frozen24h collection running; [explicit horizon reducer](7_Research/ambient-explicit-horizon-reducer-2026-09-13.md) plus independent review has19 passing tests and byte-identical two-hour output. Live default unchanged; manual dose separate |
-| Rare Lanternjaw lineage | [Size-aware gate seed-1 pilot](7_Research/hunter-size-gate-handoff-2026-09-13.md) produces paid juvenile growth to S=0.8485 but no adult descendants; both candidate lineages die while reference founders survive. Corrected mutation ledger and reference parity verified | [Unchanged full comparison](7_Research/root-size-gate-cohort-launch-2026-09-13.md) has terminated exit0 for both12-seed ×6-arm recipes. Astra is verifying full biological outcomes; successful execution is not viable recruitment. Preserve adverse outcomes; no hunter24/72h or live introduction |
-| Fragile fauna/diversity | [Independently reviewed seed1/2 flow pilots](7_Research/astra-fauna-flow-pilot-review-2026-09-13.md): actual skimmer descendant maturation22/33 and6/12; seed2 recruitment stops before extinction. Root closed the remaining census coverage hole;25+4 tests and both real reductions pass | [Remaining ten unchanged replays](7_Research/root-fauna-remaining-launch-2026-09-13.md) running with a frozen binary and exclusive outputs. Funding-site success does not rule out controller stock eligibility; one extinction does not explain all8. Preserve interrupted smoke history; no tuning yet |
-| Later ideas | Persistent plant age/senescence/regrowth, tiny foliage details and possible LCD presentation remain recorded in the [animation roadmap](animation-roadmap.md) | Lower priority; not an authorized hardware migration |
+The cube was restarted on `0825d8b` using the current-checkout launcher,
+normal assets, care and the shared viewer on port 7393. Future runtime/asset
+changes should be rebuilt and deployed through `scripts/run-cube.sh`; this is
+not a frozen release or an automatic rebuild watcher. Docs-only changes do not
+need a world restart. See [working policy](../WORKING_POLICY.md).
 
-Ship verified visible slices without waiting for unrelated long experiments.
-Retain failed seeds and comparisons; tests and total surviving population alone
-do not establish ecology or whole-goal completion. Commit scoped work, use local
-checkpoint tags, and preserve the running world and care journal. No pushes.
+The former collapsed world and generated captures were deleted as requested.
+Source, tags and committed compact reports remain; historical raw-input paths
+and removed worktree paths are not usable. Resetting does not fix the unresolved
+ecology. No modified rest policy, lower ambient support or live hunters have been
+deployed.
+
+| Remaining direction | Current disposition / next bounded gate |
+| --- | --- |
+| [Ordinary ecosystem health](handoffs/01-ecosystem-health.md) | Reviewed flow pilots exist; remaining cohort interpretation was interrupted and raw outputs deleted. Diagnose one replacement or plant-readability mechanism before tuning |
+| [Quiet habits](handoffs/02-quiet-habits.md) | Birth-only candidate too sparse. Shadow instrumentation exists in isolated source; reconcile saved probes against its final checkpoint before new experiments |
+| [Rare Lanternjaw lineage](handoffs/03-lanternjaw-lineage.md) | Selected body implemented. Saved full-cohort size-gate review does not establish adult recruitment; choose one juvenile acquisition/allocation question |
+| [Glasscane / residual flicker](handoffs/04-glasscane-motion.md) | Other growth/wind/sail packages shipped; glasscane study interrupted, no production candidate selected. One native-size comparison, not blanket AA |
+| [Care and rain response](handoffs/05-care-and-rain.md) | Actual care and meal continuity shipped. Slower rain v3 remains experimental; demonstrate one restrained readable improvement |
+| [Autonomy](handoffs/06-autonomy.md) | Manual dose independent; default support unchanged. Two-hour lower-support results include extra losses; 24-hour execution finished but no completed interpretation survives |
+
+Wrysk requested commits, checkpoint tags and pushes, not backup copies or frozen
+deployments. Keep task scope and evidence generation bounded. Do not restart old
+cohorts merely because a historical note says they were running. Later plant life
+history and high-resolution ideas remain in the [task index](handoffs/README.md)
+and [animation roadmap](animation-roadmap.md); their existence is not a mandate
+to implement everything.
 
 ## Historical implementation record — not current deployment status
 
@@ -364,7 +370,7 @@ fitness function or appear in the normal display.
 | Recovery hides stagnation | E9 separates dormancy and reseeding; reset frequency and no-assistance controls | Repair feedback; observer archive never recruits |
 | Simulation survives but feels repetitive | Hours-apart footage and inherited behavior samples | Add one missing interaction, not undirected visual noise |
 
-## Next implementation action
+## Original M1 starting action — historical
 
 Begin M1 by confirming the shim dependency revision and creating a minimal
 surface crate with continuous transport, pure rim reflection, the 3D oracle,

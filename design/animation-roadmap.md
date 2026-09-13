@@ -6,6 +6,9 @@ decision_refs: []
 
 # Animation and living-world ideas
 
+Current progress and bounded next tasks are in the [handoff index](handoffs/README.md).
+The dated slice notes below retain history and ideas, not a live work queue.
+
 Working backlog from Wrysk's review and authorization to begin the animation work.
 This is implementation direction and a record of possibilities, not new canon.
 
@@ -138,35 +141,20 @@ records candidate mechanics, single-offspring reproduction, resource-accounting
 risks, and isolated validation steps. Optional care has since landed and is live;
 predation remains a separate experiment before changing the approved world.
 
-## Active backlog after shared care (2026-09-13)
+## Current backlog after cleanup (2026-09-13)
 
-Wrysk requested continued work across the discussed open items. This list keeps
-their full scope visible; a completed package is not completion of the whole list.
-The dated slice notes above are historical evidence, not current status promises.
+The [progress and fresh-thread task index](handoffs/README.md) supersedes the
+former active-work table here. It separates delivered animation/care work from
+unfinished ecology, quiet behavior, Lanternjaw recruitment, glasscane motion,
+rain response and autonomy tuning.
 
-Delivered: shared owning runner for cube/web, optional bounded Feed/Rain/Clean,
-durable input replay and guarded snapshot migration, two smoothing/wind passes,
-one authored growth pilot, and two megafauna body studies. Wrysk chose Fable's
-Lanternjaw; Veilwarden remains an alternate. Live care rollout and 774-test/browser
-evidence are in [the rollout record](7_Research/care-browser-rollout-review-2026-09-12.md).
+All earlier slice notes in this document are historical. In particular, canopy
+growth, actual-intake meal continuity, sail stabilization/calm fins, vine sway
+and crown continuity have since shipped. Glasscane and rain candidates remain
+experimental; no hunters or new rest/autonomy policy are live. The previous
+studies are not still running, and discarded raw captures are not available.
 
-| Open item | Current work / evidence needed |
-| --- | --- |
-| Lanternjaw production body | Multipart rig and real-world adapter implemented and reviewed, including juveniles and capture-boundary continuity; remains off the live world pending viable ecology; restart/path reconstruction limitations remain documented |
-| Broader authored plant growth | Delivered and live: both transitions for all seven species, including centred canopy opening; fixed anchors, reversal, wind support and seam playback tested; not persistent individual plant age |
-| Wind readability | Flooded-top reed and stronger bare-spiretree sway delivered/live; native comparison, strip registration and footprint checks passed; glasscane/vine headroom remains limited |
-| Residual flicker / AA | Compare native temporal captures; coverage-AA remains conditional on visible thin-stalk benefit, not indiscriminate blur |
-| Care flourish | Acknowledgements live; completed108-case isolated screen confirms real but heterogeneous feeding responses. Fable comparing actual-intake meal onset; no global wakeup or fake satiation |
-| Calm creature habits | Mature care screen shows nearly no real Resting; copied-world stock/gate diagnosis separates biology from presentation. No controller change yet; fin folding/pauses remain candidates |
-| Care balance / autonomy | Twelve-hour accounting evidence and independent manual doses delivered; isolated natural-rainfall comparison implementation underway, defaults unchanged; diversity remains weak |
-| Rare apex lineage | Earlier screens failed self-replacement; reviewed paid-charging experiment now running on the fixed12-seed six-arm cohort. No live hunters; lineage and prey outcomes remain gates |
-| Richer plant history | Senescence/wilt/collapse/regrowth and persistent individual age/flowering are a later biological extension, beyond resource-driven presentation history |
-| Fine detail / higher resolution | Droplets and nibble detail remain lower priority as requested; possible LCD cube is exploration, not an authorized hardware migration |
-
-The two current production packages and ownership boundaries are in
-[the work order](7_Research/living-world-next-handoff-2026-09-13.md).
-`care_compare` now accepts either an exact checkpoint or `--seed`, up to 24 hours,
-and `--care-every` for occasional/repeated input schedules. It records opening-
-cohort ancestry, forms, extinction and conservation separately. Twelve-hour
-seeded runs are being measured; do not infer their results or lineage survival
-from the previously completed ten-minute single-checkpoint audit.
+Keep the larger ideas above as exploration. Persistent individual plant history
+is still distinct from the seven species' delivered growth clips. Tiny foliage
+details and possible LCD presentation remain lower priority than native 64 px
+readability and an unattended ecosystem that retains diversity.

@@ -1,10 +1,14 @@
 ---
 design_status: leaning
-last_reviewed: 2026-09-11
+last_reviewed: 2026-09-13
 decision_refs: []
 ---
 
 # A living skin for the cube
+
+For current progress and remaining work, start with the
+[fresh-thread task handoffs](handoffs/README.md). This page retains the original
+design direction; it is not the implementation inventory.
 
 The preferred direction is a small, resource-limited world with memory. Its
 inhabitants inherit bodies and behavior, consume and redistribute material,
@@ -12,8 +16,8 @@ change the patches they occupy, and eventually leave descendants and paid
 dormant spores.
 Their success changes the conditions that made them successful.
 
-This is a design proposal. The [brief](brief.md) is accepted; the mechanisms
-below are not yet implemented or validated. Read the
+This is a design proposal. The [brief](brief.md) is accepted; implementation and
+validation vary by mechanism, as recorded in the current task index. Read the
 [canon rules](0_Canon/README.md) and [ledger](0_Canon/DECISIONS.md) for authority.
 
 The [review response](7_Research/plan-review-response-2026-09-11.md) records why

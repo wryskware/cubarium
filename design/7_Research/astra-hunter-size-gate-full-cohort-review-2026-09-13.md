@@ -6,6 +6,11 @@ decision_refs: []
 
 # Size-aware hunter growth: complete two-hour cohort
 
+Retention update, 2026-09-13: this is a saved historical interpretation, not a
+new rollout acceptance. Raw captures and frozen worktrees cited below were deleted
+at Wrysk's request. See the [current handoff](../handoffs/03-lanternjaw-lineage.md);
+do not assume the old revalidation commands still have their inputs.
+
 **Reject size-gate-only as a rollout/longer-run candidate.** It unlocks correctly
 paid juvenile growth, but all15 candidate offspring stop below46% of adult
 structure and starve. There is still no adult descendant or descendant reproduction,

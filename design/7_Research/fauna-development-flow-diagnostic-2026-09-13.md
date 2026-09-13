@@ -6,6 +6,11 @@ decision_refs: []
 
 # Ordinary-fauna development flow: the skimmer grows, then is not replaced
 
+Retention update, 2026-09-13: these are historical pilot findings. Raw captures
+were deleted at Wrysk's request; the remaining ten replays finished without a
+completed interpretation before cleanup. Source and committed compact reports
+remain. Use the [current handoff](../handoffs/01-ecosystem-health.md).
+
 Two full two-hour replays of the retained pre-hunter cohort, instrumented at the
 mutation sites, examine a question the
 [census follow-up](fauna-development-followup-2026-09-13.md) could only bound:

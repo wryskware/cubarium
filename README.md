@@ -1,5 +1,9 @@
 # Cubarium
 
+Resuming development? Start with the [progress and task handoffs](design/handoffs/README.md).
+They distinguish shipped work, unresolved ecology, preserved study source and
+deleted raw evidence. Choose one bounded task for a fresh thread.
+
 Development launch: `./scripts/run-cube.sh` rebuilds the current checkout and
 drives the cube plus shared viewer at `http://127.0.0.1:7393/`, using normal
 `assets/atelier` and `state/`. Stop the existing runner before relaunching.

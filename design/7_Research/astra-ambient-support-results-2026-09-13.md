@@ -6,6 +6,11 @@ decision_refs: []
 
 # Ambient rainfall: complete two-hour screen
 
+Retention update, 2026-09-13: raw captures and frozen worktrees cited below were
+deleted at Wrysk's request. The subsequent 24-hour collection finished, but was
+not fully interpreted before deletion. This report establishes no 24-hour result.
+Use the [current handoff](../handoffs/06-autonomy.md), not old launch instructions.
+
 **Disposition:** the isolated rainfall experiment is technically consistent. It
 does not establish that 90% rainfall improves unattended ecology or that care is
 needed. Keep the production default unchanged. The same frozen recipe is eligible
