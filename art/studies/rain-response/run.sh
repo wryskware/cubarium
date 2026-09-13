@@ -24,7 +24,11 @@ opening=${RAIN_STUDY_WORLD:-$repo/captures/hunter-openings-2026-09-13/seed-1/wor
 
 case "${1:-}" in
   prepare)
-    rm -rf "$src"; mkdir -p "$src"
+    mkdir -p -- "$(dirname -- "$src")"
+    if ! mkdir -- "$src"; then
+      echo "refusing existing source path; choose a fresh RAIN_STUDY_SRC" >&2
+      exit 1
+    fi
     git -C "$repo" archive "$base" | tar -x -C "$src"
     patch -p1 -d "$src" < "$study/$patch_file"
     cp "$study/rain_response_capture.rs" "$src/crates/cubarium/examples/rain_response_capture.rs"
@@ -35,6 +39,11 @@ case "${1:-}" in
     cd "$src" && cargo test --offline -p cubarium --test rain_response -- --nocapture
     ;;
   capture)
+    mkdir -p -- "$(dirname -- "$out")"
+    if ! mkdir -- "$out"; then
+      echo "refusing existing capture path; choose a fresh RAIN_STUDY_OUT" >&2
+      exit 1
+    fi
     cd "$src" && cargo build --offline --release -p cubarium --example rain_response_capture
     bin="$CARGO_TARGET_DIR/release/examples/rain_response_capture"
     seed8=${RAIN_STUDY_WORLD8:-$repo/captures/hunter-openings-2026-09-13/seed-8/world-144000.cubw}

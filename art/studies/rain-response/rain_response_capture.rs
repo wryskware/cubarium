@@ -136,7 +136,7 @@ fn main() {
         let p: Vec<u8> = s.split(',').map(|x| x.trim().parse().expect("--synthetic FACE,CX,CY")).collect();
         let from: u64 = arg("--from").map_or(580, |s| s.parse().expect("--from"));
         let to: u64 = arg("--to").map_or(800, |s| s.parse().expect("--to"));
-        std::fs::create_dir_all(&out).expect("out dir");
+        std::fs::create_dir(&out).expect("out must be a fresh directory with an existing parent");
         synthetic(&out, (p[0], p[1], p[2]), from, to);
         return;
     }
@@ -165,7 +165,7 @@ fn main() {
     let atelier = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/atelier");
     let mut new = ArtPresenter::new(ArtPack::load(&atelier).expect("pack"));
     let mut old = ArtPresenter::new(ArtPack::load(&atelier).expect("pack")).without_rain_response();
-    std::fs::create_dir_all(&out).expect("out dir");
+    std::fs::create_dir(&out).expect("out must be a fresh directory with an existing parent");
     for label in ["old", "new"] {
         std::fs::create_dir_all(out.join(label)).expect("out dir");
     }

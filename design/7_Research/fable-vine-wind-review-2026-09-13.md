@@ -99,11 +99,13 @@ endpoint or vertex pop.
 
 ## Constraints for integration
 
-1. Derive and cache a separately named vine endpoint from the trunk clip at pack
-   load; never borrow `cap`. Reject the retiled path unless every trunk frame has
-   clear rows 0 and 15 **and** image rows 0..3 equal rows 4..7 (the periodicity the
-   ownership argument depends on), with the same clip clock; otherwise keep the
-   old strips bit for bit.
+1. Derive and cache separately named vine trunk/endpoint clips at pack load;
+   never borrow `cap`. For the intact-atlas integration, validate exact four-row
+   periodicity on the original frames **before** clearing any rows. Then derive
+   the clear-ended trunk and rows4..7 endpoint with the exact original clock.
+   Missing opt-in metadata retains old strips bit for bit; malformed explicit
+   opt-ins are errors. Root corrected this wording: requiring an already-cleared
+   row0 to equal its painted periodic counterpart would reject the intended art.
 2. Keep the endpoint's bend budget in the column minimum at base 32, as the study's
    `tall_bend_budget` cap slot already does.
 3. Keep the query superset bounded (owner-to-centre distance + 9 ≤ 32) and the

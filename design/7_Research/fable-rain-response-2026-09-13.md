@@ -18,7 +18,13 @@ release `9cf0e1d`; no production source, atlas, core, UI, live process or state 
   256×128 nets, `timeline.json`, `stages.json`, sheets). Build tree
   `captures/build-cache/{rain-study-src,fable-rain}`.
 - Reproduce: `art/studies/rain-response/run.sh prepare && run.sh test && run.sh capture
-  && run.sh sheets` (foreground; all output under `captures/`).
+    && run.sh sheets` (foreground; all output under `captures/`).
+
+Root's subsequent safety correction makes `prepare` and `capture` refuse existing
+source/output directories instead of replacing prior evidence. Select fresh
+`RAIN_STUDY_SRC` and `RAIN_STUDY_OUT` paths for a new reproduction; `test` may
+reuse an existing source. The capture example also refuses an existing output
+directory. Original study captures and source copies were not changed.
 
 ## Current implementation (what rain already does on screen)
 
@@ -62,8 +68,9 @@ outlasts it by a couple of seconds.
   species and tall columns are untouched, so nothing turns, nothing slides.
 - Budget: `rain_tip = min(asked, budget/(1 + 0.10) − effective wind tip)` per family, from
   the measured art headroom. Asked: lanternstalk 0.9 px (budget 3.23, wind 0.45),
-  reedspire 0.9 (4.38, 0.70), glowcap 0.7 (2.40, 0.12). Wind plus rain stays under a third
-  of every budget.
+    reedspire 0.9 (4.38, 0.70), glowcap 0.7 (2.40, 0.12). From these rounded figures,
+    the worst-slot wind-plus-rain bounds are about46%,40%,38% of those budgets,
+    respectively—not under one third. The measured budget-safety gate is unchanged.
 - At level 0 the call is `slot_wind` bit for bit, so a quiet cube takes the identity path.
 
 Excluded families and why: **tendrilfan** (0.31 px art budget, the wind already takes
@@ -118,9 +125,11 @@ Everything above is native-frame and 4× nearest-neighbour inspection plus pixel
 measurement. Nothing was shown on the cube or on a live viewer; an edge pixel moving by
 a fifth of its brightness at 3–4 Hz may read as a shimmer or vanish on LEDs at room
 distance. The natural-rain case also matters for ambient quiet: a seed-8 drizzle would
-keep its stalks quivering at level ~0.8 for minutes under visible streaks. If that is too
-busy, the one-constant gate is `RAIN_RESPONSE_RATE` (0.15 halves the natural level and
-leaves a shower's centre and first hop at full).
+keep its stalks quivering at level ~0.8 for minutes under visible streaks. A possible
+later comparison is `RAIN_RESPONSE_RATE=0.15`: below saturation that makes the target
+level two thirds of the current one, not one half. The0.235 centre still saturates;
+the0.118 first hop asks for about0.79, not full level. This arithmetic correction is
+not a parameter change or a measured result for that unrun alternative.
 
 ## Visual tradeoffs
 
