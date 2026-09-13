@@ -92,3 +92,47 @@ deleted-inode executables, separate from the owning cube. SIGINT stopped both;
 process and socket checks confirmed exit. The temporary dose preview also exited;
 only 7393 remained listening among those three ports. No state files were deleted.
 The display shim was never stopped or edited.
+
+## Subsequent same-schema canopy update
+
+Fable's `3ca510d` added both opening clips for umbrellafrond and bloomcrown;
+[Astra's independent review](astra-canopy-integration-review-2026-09-13.md)
+passed 64 focused tests and verified all 34 existing plant rows and the other
+four atlases unchanged. Root inspected the native growth/wilting sheet and the
+actual temporary viewer. Root's full workspace run then exited 0: **1057 passed,
+0 failed, 18 ignored**, 68 summaries, followed by a successful release build.
+Logs: `/tmp/cubarium-canopy-root-tests.log`, `/tmp/cubarium-canopy-root-build.log`.
+The source's only concurrent changes during this run were research documents;
+production code/assets were committed and unchanged. Binary build ID is
+`0.1.0+9598044` (the later paired-results documentation commit).
+
+Old care owner PID 3283671 stopped with exit 0 at **457013**, population 94,
+17372 shim frames, zero errors. Its validated schema-12 final snapshot retains
+care sequence 5 and every live care ledger unchanged. No additional recovery
+copy was made: this update changes only art and retains schema/semantics.
+
+Current live PID **3296401**, root handle **6281**:
+
+```sh
+target/release/cubarium run --art assets/atelier --sink shim --mirror-web \
+  --web-port 7393 --state state --fps 60 --speed 1 --care --require-resume
+```
+
+Tag: `checkpoint/live-canopy-growth-2026-09-13` → `9598044`.
+Executable SHA256:
+`4694d34958f3a64e16ea137b48d8ea20abac8fc764362c2af946ed27d7ea4b6b`.
+Log: `/tmp/cubarium-canopy-live.log`. The pack is loaded at startup; subsequent
+authoring edits are not claimed deployed until another tested handover.
+
+HTTP and actual Chromium confirmed the expected build, shim sink, exact start
+tick 457013 / `state/world-457013.cubw`, care ready and dose capability. Browser
+ticks 457534→457554 / render sequence 1559→1619 advanced over one second; the
+care panel remains collapsed by default. Inspected capture:
+`/tmp/cubarium-canopy-live.png`. No live inputs were submitted, no hunters added.
+Both temporary previews finished cleanly and 7395–7396 are closed.
+
+A ten-second cadence measurement on the immediately preceding care build found
+59.8994 distinct net frames/s, p95 16.8 ms, max 17.4 ms, zero intervals over 25 ms.
+That is isolated Chromium evidence, not LED scanout or a benchmark of the later
+canopy build. The canopy clips still follow resource-driven presentation history,
+not newly persistent individual plant age or a new ecological growth law.

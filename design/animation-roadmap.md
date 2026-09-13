@@ -152,14 +152,14 @@ evidence are in [the rollout record](7_Research/care-browser-rollout-review-2026
 
 | Open item | Current work / evidence needed |
 | --- | --- |
-| Lanternjaw production body | Fable implementing reusable shared-root multipart rendering; Astra's [geometry plan](7_Research/astra-lanternjaw-production-plan-2026-09-13.md); native animation, edge/vertex/rim and performance checks before integration |
-| Broader authored plant growth | Fable implementing lanternstalk 1→2 and side-family transitions; canopy opening, fixed roots, reversals and matched endpoints must be demonstrated, not implied by the pilot |
-| Wind readability | Tall-plant headroom/registration improvements and flooded-top reed response; preserve quiet intervals and rooted contact |
+| Lanternjaw production body | Multipart rig and real-world adapter implemented and reviewed, including juveniles and capture-boundary continuity; remains off the live world pending viable ecology; restart/path reconstruction limitations remain documented |
+| Broader authored plant growth | Delivered and live: both transitions for all seven species, including centred canopy opening; fixed anchors, reversal, wind support and seam playback tested; not persistent individual plant age |
+| Wind readability | Flooded-top reed response delivered; Fable now improving one art-limited tall family, with native before/after and registration checks; preserve quiet intervals and rooted contact |
 | Residual flicker / AA | Compare native temporal captures; coverage-AA remains conditional on visible thin-stalk benefit, not indiscriminate blur |
 | Care flourish | Food-deposit and cleanup acknowledgement, rain aftermath, locally grounded creature/plant reactions; no global wakeup or fake feeding |
 | Calm creature habits | Antenna testing, feeding gestures, fin folding and pool-edge pauses; distinct, eased and not continuous synchronized activity |
-| Care balance / autonomy | Root's longer seeded matched runs in progress; separate ambient support and dose tuning without changing unattended defaults; cumulative accounting and rejection outcomes remain visible |
-| Rare apex lineage | Paid founder, local hunting/escape, failed hunts, digestion, maturation and costly single offspring; schema/replay and paired prey-recovery tests before live introduction |
+| Care balance / autonomy | Twelve-hour care evidence completed with corrected accounting; independently adjustable doses now live; natural-rainfall support experiment still proposed, defaults unchanged; diversity remains weak |
+| Rare apex lineage | Paid hunt/digestion/offspring mechanics implemented; complete baseline and reserve-target screens failed self-replacement despite captures; investigate the mature energy bottleneck separately from strike geometry before live introduction |
 | Richer plant history | Senescence/wilt/collapse/regrowth and persistent individual age/flowering are a later biological extension, beyond resource-driven presentation history |
 | Fine detail / higher resolution | Droplets and nibble detail remain lower priority as requested; possible LCD cube is exploration, not an authorized hardware migration |
 

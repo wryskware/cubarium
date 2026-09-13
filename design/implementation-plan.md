@@ -122,6 +122,21 @@ responses, quiet habits, stronger tall-plant wind, the AA comparison, and
 lower-priority persistent plant age/LCD details open rather than treating these
 packages as completion of the full iteration goal.
 
+Latest live update, 2026-09-13: **`0.1.0+9598044`** now runs on the shared cube/web
+owner, exactly resumed at tick 457013. Adjustable care doses and all seven plants'
+authored growth clips are deployed; 1057 workspace tests passed, with independent
+care and canopy checks plus copied-world browser/shower-restart evidence. See the
+[update record](7_Research/care-dose-live-update-2026-09-13.md). No hunter or changed
+ambient setting is live. Both reserve-target cohorts completed: more acquisition
+and longer average survival, but zero funded gestations and all founders starved
+([full result](7_Research/astra-hunter-reserve-complete-results-2026-09-13.md)).
+Paid energy storage is the next bottleneck to investigate separately from strike
+geometry. Tall-plant wind work continues; biological care responses, quiet habits,
+AA comparison, autonomous-support tuning, lineage viability/diversity and the
+lower-priority plant-history/LCD ideas remain open. Use lightweight Git tags for
+code checkpoints and regularly ship verified visible improvements, per Wrysk's
+updated working preference; do not hold ready packages for unrelated backlog work.
+
 ## M1 — prove the surface and presentation path
 
 Create the minimal Rust workspace, pin/reuse `cube-proto` from the existing shim,
