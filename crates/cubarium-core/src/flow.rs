@@ -190,7 +190,13 @@ pub struct GrowthGate {
     pub reserve_zero_ticks: u64,
     /// Size as seen at this site: the largest structure observed, and the boundaries at which
     /// the member first grew and first reached adult structure.
+    ///
+    /// `max_structure` includes the size a completed increment left behind, so it covers a
+    /// growth step on a death or horizon tick that no later pre-growth observation would see.
+    /// `structure_last` is the *pre-growth* size at the most recent predicate evaluation, which
+    /// is what `structure_at_first_growth` needs; the two are separate on purpose.
     pub max_structure: f64,
+    pub structure_last: f64,
     pub first_growth_tick: Option<u64>,
     pub first_adult_tick: Option<u64>,
 }
@@ -281,6 +287,10 @@ pub struct MemberFlow {
     /// this is the reconciliation's working state, not a result.
     #[serde(skip)]
     pending: Pending,
+    /// Whether any structure sample has been taken yet, from either the pre-growth observation
+    /// or a completed increment. Working state for seeding `max_structure`, not a result.
+    #[serde(skip)]
+    structure_seen: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -333,6 +343,7 @@ impl MemberFlow {
             residual: Residual::default(),
             bins: Vec::new(),
             pending: Pending::default(),
+            structure_seen: false,
         }
     }
 
@@ -518,7 +529,14 @@ impl FlowLedger {
         g.legacy_gate_reserve_last = legacy_gate_reserve;
         g.gate_reserve_min = if first { gate_reserve } else { g.gate_reserve_min.min(gate_reserve) };
         g.gate_reserve_max = if first { gate_reserve } else { g.gate_reserve_max.max(gate_reserve) };
-        g.max_structure = if first { structure } else { g.max_structure.max(structure) };
+        g.structure_last = structure;
+        // `record_growth` may already have recorded a completed increment on an earlier tick,
+        // so the maximum is only ever seeded by the first structure sample of *either* kind.
+        let seen = m.structure_seen;
+        let g = &mut m.gate;
+        g.max_structure = if seen { g.max_structure.max(structure) } else { structure };
+        m.structure_seen = true;
+        let g = &mut m.gate;
         if structure + f64::EPSILON >= adult_structure {
             g.first_adult_tick.get_or_insert(tick);
         }
@@ -555,6 +573,13 @@ impl FlowLedger {
     }
 
     /// A growth step that actually moved structure, with the four caps the core minimised over.
+    ///
+    /// `structure_after` and `adult_structure` are read at the assignment that completed the
+    /// increment, so the completed size and the adult boundary are recorded on the tick they
+    /// actually happen. Waiting for the next pre-growth observation would notice adulthood a
+    /// tick late, and a member that reaches it on its death tick or on the horizon would never
+    /// be seen to reach it at all. The *pre-growth* size and threshold of the first growth are
+    /// separate fields and are deliberately not touched here.
     #[allow(clippy::too_many_arguments)]
     pub fn record_growth(
         &mut self,
@@ -563,6 +588,8 @@ impl FlowLedger {
         grown: f64,
         energy_cost: f64,
         heat: f64,
+        structure_after: f64,
+        adult_structure: f64,
         rate_term: f64,
         remaining_structure_term: f64,
         reserve_term: f64,
@@ -575,7 +602,20 @@ impl FlowLedger {
         if m.growth.ticks == 0 {
             m.gate.first_growth_tick = Some(tick);
             m.gate.gate_reserve_at_first_growth = Some(m.gate.gate_reserve_last);
-            m.gate.structure_at_first_growth = Some(m.gate.max_structure);
+            m.gate.structure_at_first_growth = Some(m.gate.structure_last);
+        }
+        // The completed increment, recorded at the boundary that completed it rather than at
+        // whatever the next pre-growth observation happens to see.
+        m.structure_seen = true;
+        m.gate.max_structure = m.gate.max_structure.max(structure_after);
+        // Two different quantities, deliberately on two conventions. `first_growth_tick` is
+        // *when the transaction happened*, the tick being stepped. `first_adult_tick` is the
+        // boundary from which the member *is* adult, which is the boundary this tick completes
+        // — the same `now + 1` the core stamps its own life and hunter events with. A member
+        // that was already adult when the predicate was evaluated records that observation
+        // tick instead, and the two agree wherever both could fire.
+        if structure_after + f64::EPSILON >= adult_structure {
+            m.gate.first_adult_tick.get_or_insert(tick + 1);
         }
         m.growth.ticks += 1;
         m.growth.reserve_spent += grown;
@@ -990,9 +1030,9 @@ mod tests {
         // 0.6 · S under the size-aware profile, as the body grows 0.8 -> 0.9 -> 1.0.
         l.record_growth_gate(id(1), 101, 0.8, 2.0, 0.10, 0.48, 1.2, 0.6);
         l.record_growth_gate(id(1), 102, 0.9, 2.0, 0.60, 0.54, 1.2, 0.6);
-        l.record_growth(id(1), 102, 0.0001, 0.00005, 0.00025, 0.0001, 1.1, 0.60, Some(1.2));
+        l.record_growth(id(1), 102, 0.0001, 0.00005, 0.00025, 0.9001, 2.0, 0.0001, 1.1, 0.60, Some(1.2));
         l.record_growth_gate(id(1), 103, 1.0, 2.0, 0.70, 0.60, 1.2, 0.6);
-        l.record_growth(id(1), 103, 0.0001, 0.00005, 0.00025, 0.0001, 1.0, 0.70, Some(1.4));
+        l.record_growth(id(1), 103, 0.0001, 0.00005, 0.00025, 1.0001, 2.0, 0.0001, 1.0, 0.70, Some(1.4));
         let g = l.members[&id(1)].gate;
         assert!((g.gate_reserve_last - 0.60).abs() < 1e-12);
         assert!((g.gate_reserve_min - 0.48).abs() < 1e-12);
@@ -1002,9 +1042,34 @@ mod tests {
         assert_eq!(g.first_growth_tick, Some(102));
         assert!((g.gate_reserve_at_first_growth.unwrap() - 0.54).abs() < 1e-12);
         assert!((g.structure_at_first_growth.unwrap() - 0.9).abs() < 1e-12);
-        assert!((g.max_structure - 1.0).abs() < 1e-12);
+        // The maximum includes the size the *last* increment left behind, 1.0001, not the last
+        // pre-growth observation of 1.0. Before the boundary correction this read 1.0 and a
+        // final increment on a death or horizon tick vanished from the record entirely.
+        assert!((g.max_structure - 1.0001).abs() < 1e-12, "got {}", g.max_structure);
+        assert!((g.structure_last - 1.0).abs() < 1e-12, "the pre-growth size stays separate");
         assert_eq!(g.first_adult_tick, None, "it never reached adult structure");
         assert_eq!(l.members[&id(1)].growth.ticks, 2);
+    }
+
+    /// The boundary correction, on its own terms: a completed increment that reaches adult
+    /// structure is recorded on the boundary it completes, with no later observation needed.
+    #[test]
+    fn a_completed_increment_records_its_size_and_adulthood_without_a_later_observation() {
+        let mut l = ledger();
+        // One remaining-structure-capped step from 1.99998 lands exactly on adult 2.0.
+        l.record_growth_gate(id(1), 500, 1.99998, 2.0, 3.0, 0.6, 1.2, 3.5);
+        l.record_growth(id(1), 500, 0.00002, 0.00001, 0.00005, 2.0, 2.0, 0.0001, 0.00002, 3.0,
+            Some(7.0));
+        let g = l.members[&id(1)].gate;
+        assert!((g.max_structure - 2.0).abs() < 1e-12, "the completed size must be the maximum");
+        assert_eq!(g.first_adult_tick, Some(501),
+            "adulthood is the boundary the tick completes, the core's own now+1 event stamp");
+        assert_eq!(g.first_growth_tick, Some(500), "the transaction happened during tick 500");
+        assert!((g.structure_at_first_growth.unwrap() - 1.99998).abs() < 1e-12,
+            "the first-growth record keeps the pre-growth size");
+        assert!((g.gate_reserve_at_first_growth.unwrap() - 0.6).abs() < 1e-12,
+            "and the pre-growth threshold");
+        assert_eq!(l.members[&id(1)].growth.bound_by_remaining_structure, 1);
     }
 
     /// A member that never grows says so, rather than reporting a fabricated threshold.
@@ -1044,6 +1109,8 @@ mod tests {
             0.0001,
             0.00005,
             0.0003,
+            0.8001,
+            2.0,
             0.0001,
             1.2,
             1.3,
@@ -1056,6 +1123,8 @@ mod tests {
             0.00002,
             0.00001,
             0.0001,
+            0.80012,
+            2.0,
             0.0001,
             1.2,
             0.00002,
@@ -1068,6 +1137,8 @@ mod tests {
             0.000005,
             0.0000025,
             0.00002,
+            0.800125,
+            2.0,
             0.0001,
             1.2,
             1.3,
@@ -1117,7 +1188,7 @@ mod tests {
         let sound = || {
             let mut l = ledger();
             l.record_growth_gate(id(1), 101, 0.8, 2.0, 0.6, 0.48, 1.2, 0.6);
-            l.record_growth(id(1), 101, 0.0001, 0.00005, 0.00025, 0.0001, 1.2, 0.6, Some(1.2));
+            l.record_growth(id(1), 101, 0.0001, 0.00005, 0.00025, 0.8001, 2.0, 0.0001, 1.2, 0.6, Some(1.2));
             // The member opened at S=0.8, R=0.8, E=0.6; one rate-limited step moves all three.
             l.probe(id(1), 101, 0.8 + 0.0001, 0.8 - 0.0001, 0.6 - 0.00005);
             l

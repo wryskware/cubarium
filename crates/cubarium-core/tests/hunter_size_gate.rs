@@ -421,6 +421,12 @@ fn a_restart_while_growing_preserves_the_state_the_selector_and_the_events() {
 
 /// An unsupported version is refused by name rather than resumed under another policy. This is
 /// the same contract version 4 relies on, and it is what makes reusing the shape safe.
+///
+/// **This is a stand-in, not an old-reader test.** It runs in *this* build, where version 6 is
+/// the unsupported one; it does not execute a genuine pre-change executable against a version 5
+/// payload. That a real old reader refuses version 5 follows from its `[3, 4]` supported set by
+/// source inspection, and only a different binary could establish it — exactly as the version 4
+/// package recorded for its own case.
 #[test]
 fn an_unsupported_version_is_refused_rather_than_reinterpreted() {
     let (mut world, id) = founded(PROFILE_VERSION_SIZE_GATE, still_config());

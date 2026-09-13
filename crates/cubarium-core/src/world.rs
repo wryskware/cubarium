@@ -1823,6 +1823,11 @@ impl World {
                                 grown,
                                 cost,
                                 cost + e_r * grown,
+                                // The size this increment actually left behind, read here and
+                                // not on the next tick's predicate: an increment on a death or
+                                // horizon tick has no next tick to be noticed on.
+                                o.structure,
+                                o.phenotype.structure_adult,
                                 rate_term,
                                 remaining_term,
                                 reserve_term,
