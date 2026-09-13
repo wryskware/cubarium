@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 use cubarium_core::hunter::{
     CHARGE80_OXIDATION_THRESHOLD, FixedHunterProfile, HunterEvent, HunterTarget, OxidationPolicy,
-    PROFILE_VERSION, PROFILE_VERSION_CHARGE80, SUPPORTED_PROFILE_VERSIONS,
+    PROFILE_VERSION, PROFILE_VERSION_CHARGE80, PROFILE_VERSION_SIZE_GATE, SUPPORTED_PROFILE_VERSIONS,
 };
 use cubarium_core::ids::OrganismId;
 use cubarium_core::snapshot::{HEADER_FIXED_BYTES, SnapshotError, state_hash};
@@ -90,6 +90,9 @@ fn founded(version: u32, cfg: WorldConfig) -> (World, OrganismId) {
     if version == PROFILE_VERSION_CHARGE80 {
         profile = profile.charge80();
     }
+    if version == PROFILE_VERSION_SIZE_GATE {
+        profile = profile.size_gate();
+    }
     assert_eq!(profile.version, version);
     let receipt = world
         .start_hunter_trial(profile, target_of(SPOT))
@@ -149,7 +152,9 @@ fn close(a: f64, b: f64) -> bool {
 fn version_three_remains_the_default_and_defers_to_the_world() {
     assert_eq!(PROFILE_VERSION, 3);
     assert_eq!(PROFILE_VERSION_CHARGE80, 4);
-    assert_eq!(SUPPORTED_PROFILE_VERSIONS, [3, 4]);
+    // The size-gate experiment added version 5 to this build; 3 is still what the constructor
+    // writes, and 5 still resolves the fixed charging threshold rather than falling back.
+    assert_eq!(SUPPORTED_PROFILE_VERSIONS, [3, 4, 5]);
     assert_eq!(CHARGE80_OXIDATION_THRESHOLD, 0.80);
 
     let mut cfg = WorldConfig::default();
@@ -212,10 +217,12 @@ fn version_four_differs_from_version_three_only_in_its_version_number() {
     assert_eq!(off.oxidation_policy(), OxidationPolicy::Fixed(0.80));
 }
 
-/// Exactly two versions load. Everything else is refused by name, at `validate` and therefore
-/// at every door that calls it — including the snapshot decoder.
+/// Only the listed versions load. Everything else is refused by name, at `validate` and
+/// therefore at every door that calls it — including the snapshot decoder. Version 5 joined
+/// the list with the size-gate experiment; the refusal contract for everything else is
+/// unchanged.
 #[test]
-fn only_versions_three_and_four_are_supported() {
+fn only_the_supported_versions_are_supported() {
     let cfg = WorldConfig::default();
     let base = FixedHunterProfile::lanternjaw_trial(&cfg);
     for ok in SUPPORTED_PROFILE_VERSIONS {
@@ -223,19 +230,20 @@ fn only_versions_three_and_four_are_supported() {
         p.version = ok;
         p.validate().unwrap_or_else(|e| panic!("version {ok} must validate: {e}"));
     }
-    for bad in [0u32, 1, 2, 5, 6, 40, u32::MAX] {
+    for bad in [0u32, 1, 2, 6, 7, 40, u32::MAX] {
         let mut p = base.clone();
         p.version = bad;
         let err = p.validate().expect_err("an unsupported version must be refused");
         assert!(err.contains(&format!("version {bad}")), "{err}");
-        assert!(err.contains("[3, 4]"), "the refusal names what is supported: {err}");
+        assert!(err.contains("[3, 4, 5]"), "the refusal names what is supported: {err}");
     }
 
     // A world carrying an unsupported version does not decode, whatever its shape.
     let (mut world, _) = founded(PROFILE_VERSION_CHARGE80, quiet_config());
-    world.state.hunters.profile.as_mut().expect("a profile").version = 5;
+    // 6, not 5: 5 is this build's size-gate experiment and now loads by name.
+    world.state.hunters.profile.as_mut().expect("a profile").version = 6;
     match decode_snapshot(&encode_snapshot(&world.state, "bad-version")) {
-        Err(SnapshotError::Invalid(reason)) => assert!(reason.contains("version 5"), "{reason}"),
+        Err(SnapshotError::Invalid(reason)) => assert!(reason.contains("version 6"), "{reason}"),
         other => panic!("an unsupported profile version decoded as {other:?}"),
     }
 }

@@ -163,8 +163,21 @@ pub struct GrowthGate {
     pub reserve_above_min_ticks: u64,
     /// Ticks where both sides held, i.e. the branch body ran (it may still have stepped zero).
     pub branch_entered_ticks: u64,
-    /// The constant threshold `growth_reserve_min · reserve_max` for this member.
-    pub gate_reserve: f64,
+    /// The threshold observed on the **most recent** tick. Under a size-aware profile the gate
+    /// moves with the body, so this is emphatically not a constant lifetime requirement and is
+    /// named to stop it being read as one; `gate_reserve_min`/`_max` bound the range actually
+    /// observed and `gate_reserve_at_first_growth` records the one that was actually crossed.
+    pub gate_reserve_last: f64,
+    pub gate_reserve_min: f64,
+    pub gate_reserve_max: f64,
+    /// The threshold in force on the first tick this member actually gained structure, and the
+    /// size it had then. `None` until that happens, which is the honest answer for a member
+    /// that never grew.
+    pub gate_reserve_at_first_growth: Option<f64>,
+    pub structure_at_first_growth: Option<f64>,
+    /// The gate the legacy expression would have produced on the most recent tick, recorded
+    /// beside the one actually used so the two policies are comparable without re-deriving it.
+    pub legacy_gate_reserve_last: f64,
     /// Closest the member ever came to the gate from below: `min(gate − reserve)` over ticks
     /// where it was below. `f64::INFINITY` if it was never below.
     pub min_reserve_deficit: f64,
@@ -175,6 +188,11 @@ pub struct GrowthGate {
     pub energy_sum: f64,
     /// Ticks with the reserve stock at exactly zero when the predicate was evaluated.
     pub reserve_zero_ticks: u64,
+    /// Size as seen at this site: the largest structure observed, and the boundaries at which
+    /// the member first grew and first reached adult structure.
+    pub max_structure: f64,
+    pub first_growth_tick: Option<u64>,
+    pub first_adult_tick: Option<u64>,
 }
 
 /// Per-tick reconciliation of recorded flows against the stocks the world actually holds.
@@ -476,6 +494,11 @@ impl FlowLedger {
 
     /// The growth predicate, read before the branch. `reserve` and `energy` are the stocks the
     /// core is about to test, not values recovered afterwards.
+    ///
+    /// `gate_reserve` is the threshold actually in force this tick, which a size-aware profile
+    /// moves as the body grows; `legacy_gate_reserve` is what the original expression would
+    /// have produced from the same stocks. Both are kept so the policies stay comparable.
+    #[allow(clippy::too_many_arguments)]
     pub fn record_growth_gate(
         &mut self,
         id: OrganismId,
@@ -484,12 +507,21 @@ impl FlowLedger {
         adult_structure: f64,
         reserve: f64,
         gate_reserve: f64,
+        legacy_gate_reserve: f64,
         energy: f64,
     ) {
         let Some(m) = self.at(id) else { return };
         let g = &mut m.gate;
+        let first = g.observed_ticks == 0;
         g.observed_ticks += 1;
-        g.gate_reserve = gate_reserve;
+        g.gate_reserve_last = gate_reserve;
+        g.legacy_gate_reserve_last = legacy_gate_reserve;
+        g.gate_reserve_min = if first { gate_reserve } else { g.gate_reserve_min.min(gate_reserve) };
+        g.gate_reserve_max = if first { gate_reserve } else { g.gate_reserve_max.max(gate_reserve) };
+        g.max_structure = if first { structure } else { g.max_structure.max(structure) };
+        if structure + f64::EPSILON >= adult_structure {
+            g.first_adult_tick.get_or_insert(tick);
+        }
         let structure_open = structure < adult_structure;
         let reserve_open = reserve > gate_reserve;
         if structure_open {
@@ -537,6 +569,14 @@ impl FlowLedger {
         energy_term: Option<f64>,
     ) {
         let Some(m) = self.at(id) else { return };
+        // `record_growth_gate` runs earlier in this same tick, before the branch, so its last
+        // values are this step's pre-growth threshold and size. Structure only ever rises, so
+        // `max_structure` is exactly the size the crossing happened at.
+        if m.growth.ticks == 0 {
+            m.gate.first_growth_tick = Some(tick);
+            m.gate.gate_reserve_at_first_growth = Some(m.gate.gate_reserve_last);
+            m.gate.structure_at_first_growth = Some(m.gate.max_structure);
+        }
         m.growth.ticks += 1;
         m.growth.reserve_spent += grown;
         m.growth.structure_gained += grown;
@@ -838,10 +878,10 @@ mod tests {
     #[test]
     fn the_gate_records_both_sides_before_the_branch() {
         let mut l = ledger();
-        // Below the gate by 0.4, then by 0.1, then above it.
-        l.record_growth_gate(id(1), 101, 0.8, 2.0, 0.8, 1.2, 0.6);
-        l.record_growth_gate(id(1), 102, 0.8, 2.0, 1.1, 1.2, 0.6);
-        l.record_growth_gate(id(1), 103, 0.8, 2.0, 1.3, 1.2, 0.6);
+        // Below the gate by 0.4, then by 0.1, then above it. Legacy and actual agree here.
+        l.record_growth_gate(id(1), 101, 0.8, 2.0, 0.8, 1.2, 1.2, 0.6);
+        l.record_growth_gate(id(1), 102, 0.8, 2.0, 1.1, 1.2, 1.2, 0.6);
+        l.record_growth_gate(id(1), 103, 0.8, 2.0, 1.3, 1.2, 1.2, 0.6);
         let g = l.members[&id(1)].gate;
         assert_eq!(g.observed_ticks, 3);
         assert_eq!(g.structure_below_adult_ticks, 3);
@@ -851,6 +891,58 @@ mod tests {
         assert!((g.max_reserve - 1.3).abs() < 1e-12);
         assert_eq!(l.members[&id(1)].juvenile_ticks, 3);
         assert_eq!(l.members[&id(1)].adult_ticks, 0);
+    }
+
+    /// A moving gate is summarised as a range, never as one constant. The retained
+    /// `gate_reserve_last` is the most recent observation and is named to say so.
+    #[test]
+    fn a_moving_gate_keeps_its_range_and_the_threshold_it_was_actually_crossed_at() {
+        let mut l = ledger();
+        // 0.6 · S under the size-aware profile, as the body grows 0.8 -> 0.9 -> 1.0.
+        l.record_growth_gate(id(1), 101, 0.8, 2.0, 0.10, 0.48, 1.2, 0.6);
+        l.record_growth_gate(id(1), 102, 0.9, 2.0, 0.60, 0.54, 1.2, 0.6);
+        l.record_growth(id(1), 102, 0.0001, 0.00005, 0.00025, 0.0001, 1.1, 0.60, Some(1.2));
+        l.record_growth_gate(id(1), 103, 1.0, 2.0, 0.70, 0.60, 1.2, 0.6);
+        l.record_growth(id(1), 103, 0.0001, 0.00005, 0.00025, 0.0001, 1.0, 0.70, Some(1.4));
+        let g = l.members[&id(1)].gate;
+        assert!((g.gate_reserve_last - 0.60).abs() < 1e-12);
+        assert!((g.gate_reserve_min - 0.48).abs() < 1e-12);
+        assert!((g.gate_reserve_max - 0.60).abs() < 1e-12);
+        assert!((g.legacy_gate_reserve_last - 1.2).abs() < 1e-12, "the legacy gate is kept beside it");
+        // The crossing happened on tick 102, at that tick's pre-growth gate and size.
+        assert_eq!(g.first_growth_tick, Some(102));
+        assert!((g.gate_reserve_at_first_growth.unwrap() - 0.54).abs() < 1e-12);
+        assert!((g.structure_at_first_growth.unwrap() - 0.9).abs() < 1e-12);
+        assert!((g.max_structure - 1.0).abs() < 1e-12);
+        assert_eq!(g.first_adult_tick, None, "it never reached adult structure");
+        assert_eq!(l.members[&id(1)].growth.ticks, 2);
+    }
+
+    /// A member that never grows says so, rather than reporting a fabricated threshold.
+    #[test]
+    fn a_member_that_never_grew_has_no_first_growth_threshold() {
+        let mut l = ledger();
+        l.record_growth_gate(id(1), 101, 0.8, 2.0, 0.1, 0.48, 1.2, 0.6);
+        let g = l.members[&id(1)].gate;
+        assert_eq!(g.first_growth_tick, None);
+        assert_eq!(g.gate_reserve_at_first_growth, None);
+        assert_eq!(g.structure_at_first_growth, None);
+        assert_eq!(g.first_adult_tick, None);
+    }
+
+    /// Reaching adult structure is recorded at the boundary it happens on.
+    #[test]
+    fn the_first_adult_boundary_is_recorded_once() {
+        let mut l = ledger();
+        l.record_growth_gate(id(1), 101, 1.9, 2.0, 1.3, 1.14, 1.2, 0.6);
+        l.record_growth_gate(id(1), 102, 2.0, 2.0, 1.3, 1.20, 1.2, 0.6);
+        l.record_growth_gate(id(1), 103, 2.0, 2.0, 1.3, 1.20, 1.2, 0.6);
+        let g = l.members[&id(1)].gate;
+        assert_eq!(g.first_adult_tick, Some(102));
+        assert_eq!(g.structure_below_adult_ticks, 1);
+        assert_eq!(l.members[&id(1)].adult_ticks, 2);
+        // At adult structure the size-aware gate equals the legacy one.
+        assert!((g.gate_reserve_last - g.legacy_gate_reserve_last).abs() < 1e-12);
     }
 
     #[test]

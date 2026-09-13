@@ -53,12 +53,33 @@ enum ProfileVariant {
     /// (`design/7_Research/astra-hunter-paid-charging-proposal-2026-09-13.md`). Its profile
     /// diff from `reserve-targets-v1` is the version number and nothing else.
     ReserveTargetsCharge80V1,
+    /// [`ProfileVariant::ReserveTargetsCharge80V1`] and the size-aware growth-permission
+    /// experiment on top of it: semantic profile version 5, which carries charge80's fixed
+    /// 0.80 `E_max` oxidation activation *and* scales the growth permission threshold by the
+    /// member's actual size
+    /// (`design/7_Research/astra-hunter-size-aware-growth-proposal-2026-09-13.md`). Its profile
+    /// diff from `reserve-targets-charge80-v1` is the version number and nothing else.
+    ReserveTargetsCharge80SizeGateV1,
 }
 
 impl ProfileVariant {
     /// The reserve-target background this recipe runs on, if any.
     fn raises_reserve_targets(self) -> bool {
-        matches!(self, ProfileVariant::ReserveTargetsV1 | ProfileVariant::ReserveTargetsCharge80V1)
+        matches!(
+            self,
+            ProfileVariant::ReserveTargetsV1
+                | ProfileVariant::ReserveTargetsCharge80V1
+                | ProfileVariant::ReserveTargetsCharge80SizeGateV1
+        )
+    }
+
+    /// Whether this recipe runs the paid-charging policy, under whichever version carries it.
+    fn charges(self) -> bool {
+        matches!(
+            self,
+            ProfileVariant::ReserveTargetsCharge80V1
+                | ProfileVariant::ReserveTargetsCharge80SizeGateV1
+        )
     }
 }
 
@@ -76,6 +97,11 @@ fn profile_for(
         // The only change, and the only one there is: the semantic version. Every geometry,
         // cost, gate, target and stock is the one `reserve-targets-v1` already carried.
         profile = profile.charge80();
+    }
+    if variant == ProfileVariant::ReserveTargetsCharge80SizeGateV1 {
+        // Likewise: version 5 is charge80's fixed activation plus the size-aware growth
+        // permission, and no other serialized field moves.
+        profile = profile.size_gate();
     }
     if index >= 4 {
         profile = profile.facultative();
@@ -103,6 +129,11 @@ struct Args {
     /// Explicit experiment recipe; baseline preserves the original fixed profile.
     #[arg(long, value_enum, default_value_t = ProfileVariant::Baseline)]
     profile: ProfileVariant,
+    /// Restrict the run to these cohort seeds, for a pilot. Omitted means all twelve, which is
+    /// the only form that can be a cohort result: a restricted run records the seeds it ran and
+    /// marks itself `seed_subset_pilot`, so a partial collection can never be read as one.
+    #[arg(long, value_delimiter = ',')]
+    seeds: Vec<u64>,
 }
 
 fn sha256(bytes: &[u8]) -> Result<String> {
@@ -850,6 +881,7 @@ fn recipe_scope(variant: ProfileVariant) -> &'static str {
         ProfileVariant::Baseline => "baseline preserves the original fixed profile exactly",
         ProfileVariant::ReserveTargetsV1 => "reserve-targets-v1 changes only seek/perch reserve fractions to .80/.90; all costs, reproductive gates, geometry, imports and placements unchanged",
         ProfileVariant::ReserveTargetsCharge80V1 => "reserve-targets-charge80-v1 is reserve-targets-v1 (seek/perch .80/.90) with semantic profile version 3 raised to 4 and nothing else; version 4's one meaning is a fixed 0.80 E_max oxidation activation threshold for authoritative members at every age and phase. The conversion block, costs, reproductive gates, geometry, imports and placements are unchanged, and ordinary organisms keep the world's configured threshold",
+        ProfileVariant::ReserveTargetsCharge80SizeGateV1 => "reserve-targets-charge80-size-gate-v1 is reserve-targets-charge80-v1 with semantic profile version 4 raised to 5 and nothing else; version 5 keeps charge80's fixed 0.80 E_max oxidation activation for authoritative members AND scales their growth permission threshold by actual size, gate = growth_reserve_min * reserve_max * clamp(structure/structure_adult, 0, 1), at the existing post-oxidation growth site. The gate is a precondition only: the increment's rate, remaining-structure, reserve and battery caps, its reserve and battery debits and its construction heat are unchanged, nothing is capped to reserve minus gate, no reserve floor is protected, and ordinary organisms and profile versions 3 and 4 keep the original growth_reserve_min * reserve_max expression",
     }
 }
 
@@ -879,6 +911,21 @@ fn main() -> Result<()> {
         let p = profile_for(config, 3, args.profile);
         (p.oxidation_policy().as_str(), p.oxidation_threshold(&config.organism))
     };
+    // A seed restriction is a pilot, and the manifest says so in its own field rather than
+    // leaving a reader to infer completeness from how many directories exist.
+    let all_seeds: Vec<u64> = openings.iter().map(|o| o.state.config.seed).collect();
+    for seed in &args.seeds {
+        ensure!(all_seeds.contains(seed), "seed {seed} is not in this cohort");
+    }
+    let ran_seeds: Vec<u64> =
+        if args.seeds.is_empty() { all_seeds.clone() } else { args.seeds.clone() };
+    let openings: Vec<Opening> = openings
+        .into_iter()
+        .filter(|o| ran_seeds.contains(&o.state.config.seed))
+        .collect();
+    ensure!(!openings.is_empty(), "no seed selected");
+    let seed_subset_pilot = ran_seeds.len() != all_seeds.len();
+
     fs::create_dir(&args.out).context("output must be a NEW directory")?;
     let executable_path = std::env::current_exe()?;
     let executable = fs::read(&executable_path)?;
@@ -899,7 +946,9 @@ fn main() -> Result<()> {
         "world_oxidation_threshold":world_threshold,
         "oxidation_observer":"charging_above_reference; per-arm running totals of the member oxidation transactions the world's configured threshold would not have permitted, over that arm's whole run from its post-initialization state to its closing tick. Counts transactions, reserve burned, battery gained and conversion heat only; no per-tick history, no RNG draw, no world state read or written for measurement. Zero by construction under any recipe whose resolved member threshold equals the configured one.",
         "care":false,"resume_supported":false,"ancestry_basis":"aged opening cohorts, not original founders",
-        "notes":"All twelve seeds retained. Exact paid capture evidence drives paired local recovery; reproduction quantities come from core mutation records with independently checked identities. Measurement completion never implies biological acceptance. Renderer is not part of this headless trial."}),
+        "cohort_seeds":all_seeds,"ran_seeds":ran_seeds,"seed_subset_pilot":seed_subset_pilot,
+        "seed_subset_note":if seed_subset_pilot {"A SEED SUBSET. This is a pilot, not a cohort result: the unrun seeds are not absent observations, they were never started."} else {"every cohort seed ran"},
+        "notes":"All selected seeds retained. Exact paid capture evidence drives paired local recovery; reproduction quantities come from core mutation records with independently checked identities. Measurement completion never implies biological acceptance. Renderer is not part of this headless trial."}),
     )?;
     let mut all = Vec::new();
     let mut failed = false;
@@ -1118,8 +1167,87 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(charge.profile, ProfileVariant::ReserveTargetsCharge80V1);
+        let size = Args::try_parse_from([
+            "compare",
+            "cohort",
+            "out",
+            "--profile",
+            "reserve-targets-charge80-size-gate-v1",
+        ])
+        .unwrap();
+        assert_eq!(size.profile, ProfileVariant::ReserveTargetsCharge80SizeGateV1);
         assert!(Args::try_parse_from(["compare", "cohort", "out", "--profile", "rescue"]).is_err());
         assert!(Args::try_parse_from(["compare", "cohort", "out", "--profile", "charge80"]).is_err());
+        assert!(
+            Args::try_parse_from(["compare", "cohort", "out", "--profile", "size-gate"]).is_err()
+        );
+    }
+
+    /// The size-gate recipe's profile diff from charge80 is the version and nothing else, in
+    /// every arm — including the attack-disabled controls, which take the policy too.
+    #[test]
+    fn the_size_gate_recipe_differs_from_charge80_only_by_its_semantic_version() {
+        let config = cubarium_core::WorldConfig::default();
+        for index in 0..6 {
+            let charge = profile_for(&config, index, ProfileVariant::ReserveTargetsCharge80V1);
+            let size = profile_for(&config, index, ProfileVariant::ReserveTargetsCharge80SizeGateV1);
+            assert_eq!(charge.version, cubarium_core::hunter::PROFILE_VERSION_CHARGE80);
+            assert_eq!(size.version, cubarium_core::hunter::PROFILE_VERSION_SIZE_GATE);
+            let mut expected = charge.clone();
+            expected.version = size.version;
+            assert_eq!(size, expected, "arm {index}: a field other than `version` moved");
+            // Both recipes charge; the size-gate version must not silently drop the policy.
+            assert_eq!(size.oxidation_policy(), charge.oxidation_policy());
+            assert!(ProfileVariant::ReserveTargetsCharge80SizeGateV1.charges());
+            // The background it runs on is unchanged.
+            assert_eq!(size.seek_reserve_fraction, 0.80);
+            assert_eq!(size.perch_reserve_fraction, 0.90);
+        }
+    }
+
+    /// Installing the size-gate recipe changes no opening body, field or import: the recipe is
+    /// a policy selector, not a different world.
+    #[test]
+    fn the_size_gate_recipe_changes_no_founder_inventory_or_opening_body() {
+        let opening = World::new(cubarium_core::WorldConfig::default())
+            .unwrap()
+            .state;
+        let dir = temp_parent();
+        for index in 0..6 {
+            let charge = Arm::new_with_profile(
+                &opening,
+                index,
+                &dir.join(format!("charge-{index}")),
+                ProfileVariant::ReserveTargetsCharge80V1,
+            )
+            .unwrap();
+            let size = Arm::new_with_profile(
+                &opening,
+                index,
+                &dir.join(format!("size-{index}")),
+                ProfileVariant::ReserveTargetsCharge80SizeGateV1,
+            )
+            .unwrap();
+            assert_eq!(
+                charge.world.state.organisms, size.world.state.organisms,
+                "arm {index}: a body differs at the opening"
+            );
+            assert_eq!(charge.world.state.fields, size.world.state.fields, "arm {index}");
+            assert_eq!(
+                charge.world.state.external_material_in, size.world.state.external_material_in,
+                "arm {index}: imported material differs"
+            );
+            assert_eq!(
+                charge.world.state.hunters.founder_energy_in,
+                size.world.state.hunters.founder_energy_in,
+                "arm {index}: imported energy differs"
+            );
+            assert_eq!(
+                charge.world.state.hunters.founder_material_in,
+                size.world.state.hunters.founder_material_in,
+                "arm {index}"
+            );
+        }
     }
 
     #[test]

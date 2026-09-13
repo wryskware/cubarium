@@ -1765,8 +1765,20 @@ impl World {
                     }
                 }
 
+                // The permission threshold. Ordinary organisms and every profile version but
+                // the size-gate experiment's take `legacy_gate` unchanged, so their expression
+                // and its arithmetic are the original ones (`hunter::FixedHunterProfile::
+                // growth_gate`). The increment below is untouched either way.
+                let legacy_gate = org_cfg.growth_reserve_min * o.phenotype.reserve_max;
+                let growth_gate = match (member, hunters.profile.as_ref()) {
+                    (Some(_), Some(profile)) => {
+                        profile.growth_gate(legacy_gate, o.structure, o.phenotype.structure_adult)
+                    }
+                    _ => legacy_gate,
+                };
                 // The predicate's two sides, read here rather than recovered from the step
                 // that follows: a closed gate must be an observation, not the absence of one.
+                // The gate itself is now a per-tick value, so it is recorded per tick too.
                 if let Some(ledger) = flow.as_deref_mut()
                     && member.is_some()
                 {
@@ -1776,13 +1788,12 @@ impl World {
                         o.structure,
                         o.phenotype.structure_adult,
                         o.reserve,
-                        org_cfg.growth_reserve_min * o.phenotype.reserve_max,
+                        growth_gate,
+                        legacy_gate,
                         o.energy,
                     );
                 }
-                if o.structure < o.phenotype.structure_adult
-                    && o.reserve > org_cfg.growth_reserve_min * o.phenotype.reserve_max
-                {
+                if o.structure < o.phenotype.structure_adult && o.reserve > growth_gate {
                     let growth_rate = match (member, hunters.profile.as_ref()) {
                         (Some(_), Some(profile)) => profile.juvenile_growth_rate,
                         _ => org_cfg.growth_rate,

@@ -69,8 +69,35 @@ pub const PROFILE_VERSION: u32 = 3;
 /// not more combinations encoded in version numbers.
 pub const PROFILE_VERSION_CHARGE80: u32 = 4;
 
+/// The semantic version of the size-aware growth-permission experiment: **charge80 plus one
+/// change to the growth gate, and nothing else**
+/// (`design/7_Research/astra-hunter-size-aware-growth-proposal-2026-09-13.md`).
+///
+/// Version 4 already means "fixed 0.80 `E_max` oxidation activation". Version 5 means that
+/// *and* that an authoritative member's growth permission threshold is scaled by its actual
+/// size, [`FixedHunterProfile::growth_gate`]. Both meanings are carried, deliberately: raising
+/// the version while leaving [`FixedHunterProfile::oxidation_policy`] matching only version 4
+/// would silently drop the charging policy back to Configured and make this two changes
+/// instead of one. The experiment's reference is the charge80 recipe, so the charging policy
+/// has to survive the bump.
+///
+/// It shares version 3 and 4's serialized shape exactly, so it is a semantic version, not a
+/// schema change: an old reader decodes the bytes and then refuses them at
+/// [`FixedHunterProfile::validate`] rather than resuming a version 5 experiment as though it
+/// were a configured-threshold version 3 world. Nothing about the increment itself changes —
+/// the rate, remaining-structure, reserve and battery caps, the debits and the heat are the
+/// ones every other version already pays.
+///
+/// This is an experimental selector, not an accepted biological default:
+/// [`FixedHunterProfile::lanternjaw_trial`] still writes [`PROFILE_VERSION`].
+pub const PROFILE_VERSION_SIZE_GATE: u32 = 5;
+
 /// Every profile version this build will load. Anything else is refused by name.
-pub const SUPPORTED_PROFILE_VERSIONS: [u32; 2] = [PROFILE_VERSION, PROFILE_VERSION_CHARGE80];
+pub const SUPPORTED_PROFILE_VERSIONS: [u32; 3] = [
+    PROFILE_VERSION,
+    PROFILE_VERSION_CHARGE80,
+    PROFILE_VERSION_SIZE_GATE,
+];
 
 /// The fixed oxidation activation threshold, as a fraction of `E_max`, that version 4 carries.
 ///
@@ -425,9 +452,58 @@ impl FixedHunterProfile {
     /// unvalidated profile could only ever behave like the world's own creatures.
     pub fn oxidation_policy(&self) -> OxidationPolicy {
         match self.version {
-            PROFILE_VERSION_CHARGE80 => OxidationPolicy::Fixed(CHARGE80_OXIDATION_THRESHOLD),
+            // Version 5 is charge80 *plus* the size-aware growth gate. It must keep the fixed
+            // threshold explicitly: falling through to Configured here would make the size-gate
+            // experiment two changes instead of one.
+            PROFILE_VERSION_CHARGE80 | PROFILE_VERSION_SIZE_GATE => {
+                OxidationPolicy::Fixed(CHARGE80_OXIDATION_THRESHOLD)
+            }
             _ => OxidationPolicy::Configured,
         }
+    }
+
+    /// The reserve an authoritative member must exceed before one paid growth increment is
+    /// even considered, at the existing post-oxidation site.
+    ///
+    /// Every version except [`PROFILE_VERSION_SIZE_GATE`] returns `legacy_gate` unchanged —
+    /// the exact `growth_reserve_min · reserve_max` the caller computed — so ordinary
+    /// organisms and legacy profiles keep the original expression and its arithmetic.
+    ///
+    /// Version 5 scales that same threshold by the member's actual size,
+    /// `clamp(structure / structure_adult, 0, 1)`. Actual structure at this site, never age,
+    /// art scale, a rendered juvenile flag, the birth escrow or a resized reserve capacity. At
+    /// adult structure the two agree exactly, and growth is finished anyway.
+    ///
+    /// This is a **precondition only**. It is not a protected reserve floor: the increment
+    /// that follows is still capped by rate, remaining structure, the whole reserve and the
+    /// battery, and still pays every debit and heat term. Nothing here caps the step to
+    /// `reserve − gate`.
+    ///
+    /// A degenerate adult denominator cannot arrive through a validated profile or state, but
+    /// it is refused rather than propagated: a NaN ratio would silently make `R > gate` false
+    /// forever, which is a different mechanism wearing this one's name. On any non-finite or
+    /// non-positive input the legacy gate is returned, which is never more permissive.
+    pub fn growth_gate(&self, legacy_gate: f64, structure: f64, structure_adult: f64) -> f64 {
+        if self.version != PROFILE_VERSION_SIZE_GATE {
+            return legacy_gate;
+        }
+        if !legacy_gate.is_finite()
+            || !structure.is_finite()
+            || !structure_adult.is_finite()
+            || structure_adult <= 0.0
+        {
+            return legacy_gate;
+        }
+        let scaled = legacy_gate * (structure / structure_adult).clamp(0.0, 1.0);
+        if scaled.is_finite() { scaled } else { legacy_gate }
+    }
+
+    /// The size-aware growth-permission experiment: charge80 with
+    /// [`PROFILE_VERSION_SIZE_GATE`]. Like [`FixedHunterProfile::charge80`], the version is the
+    /// entire diff — every geometry, cost, gate, target and stock is untouched.
+    pub fn size_gate(mut self) -> FixedHunterProfile {
+        self.version = PROFILE_VERSION_SIZE_GATE;
+        self
     }
 
     /// [`FixedHunterProfile::oxidation_policy`] resolved against a world's organism config.
@@ -1850,7 +1926,7 @@ mod tests {
         let err = old
             .validate()
             .expect_err("a version 2 trial must be refused");
-        assert!(err.contains("version 2 is not one of [3, 4]"), "{err}");
+        assert!(err.contains("version 2 is not one of [3, 4, 5]"), "{err}");
     }
 
     /// The smallest admitted scale and a below-art-minimum juvenile both produce a coherent,
