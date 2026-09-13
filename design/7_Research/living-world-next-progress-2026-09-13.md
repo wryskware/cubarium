@@ -382,15 +382,18 @@ pass as owned tests). Still study-side; nothing deployed, the live cube untouche
    on a free prey in a quiet world: at the boundary the drawn prey is within the core's own
    reach of the drawn near claw carried from the hunter's interpolated root; a capture
    across the Front/Right seam draws the prey on the Right face with the body on both; a
-   capture heading into the open rim leaves every off-Front pixel exactly the hunter-free
-   image's and reflects nothing; a vertex-bound hunt draws one owner per pixel and never
-   panics; held time (`f = 1`) freezes attack and ambient alike.
+   capture heading into the open rim leaves every off-Front pixel exactly the comparison
+   image's; a vertex-bound hunt renders without panic and with bounded pixel channels.
+   Those adapter smoke checks do not independently prove absence of same-face reflection
+   or unique pixel ownership; those geometry properties rely on the separately tested
+   root-owned multipart path. Held-time repeated draws (`f = 1`) freeze attack and ambient.
 
 Evidence: `crates/cubarium/tests/hunter_present.rs` now 21 tests + 2 ignored (the eight
 above added), `crates/cubarium-render/tests/multipart_scale.rs` 16; whole render + host
-library and test suites: **584 passed, 0 failed, exit 0** (`--lib --tests`; root's
-`hunter_compare` example is mid-edit against the new core API at this moment and does not
-build, which root owns). Captures: `captures/lanternjaw/world-contact.png`, assembled from
+library and test suites: **584 passed, 0 failed, exit 0** (`--lib --tests`). The earlier
+example-build blocker is not current: root reports the `hunter_compare` example target
+passes **74/74** at `b547ad0`; that separate run is not included in the 584 count.
+Captures: `captures/lanternjaw/world-contact.png`, assembled from
 480 native frames of a quiet-world (no plants) free-prey capture (frames in
 `/tmp/hunter-contact-93MeN7/`): an unobstructed Lanternjaw, the prey in its claws through
 the strike, still there for the capture tick's three frames and gone the tick after, the

@@ -136,10 +136,9 @@ pub const COCKED: Reach = Reach {
 };
 
 /// Whether the rig can draw a hunter at this authoritative `body_scale`. **Normative**: finite
-/// and within [`SCALE_MIN`]`..=`[`SCALE_MAX`]. A profile outside it is not clamped and not
-/// drawn as a Lanternjaw: the presenter reports it ([`crate::art_present::ArtPresenter::unsupported_hunters`])
-/// and draws that organism with its ordinary rig, so a saved world never panics mid-frame
-/// and never shows claws that disagree with the core's contact geometry.
+/// and within [`SCALE_MIN`]`..=`[`SCALE_MAX`]. The runner checks the profile's supported
+/// range with [`validate_profile`] before stepping; [`validate_view`] rejects an unsupported
+/// published member with a named error. No scale is clamped and no ordinary rig is substituted.
 pub fn hunter_scale_supported(scale: f64) -> bool {
     scale.is_finite() && (SCALE_MIN..=SCALE_MAX).contains(&scale)
 }

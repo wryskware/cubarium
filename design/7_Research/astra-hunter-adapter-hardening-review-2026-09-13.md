@@ -119,8 +119,8 @@ ecological success, or evidence of the untested cross-face final movement.
   reciprocal-grid continuity/work-bound sweep and profile-range sweep also pass.
 - Read `/tmp/lw-full4.log`: 39 successful summaries, **584 passed, 0 failed,
   13 ignored**. That is recorded `--lib --tests` evidence, not a freshly rerun
-  whole repository or examples suite. Root-owned experiment sources are currently
-  dirty and outside this review; no present example-build claim is made here.
+  whole repository or examples suite. Root subsequently reports the example target
+  **74/74 passed at `b547ad0`**, separate from that 584 count; I did not rerun it.
 
 Reproduce the isolated fixture:
 
@@ -131,3 +131,8 @@ cargo test --offline --manifest-path /tmp/cubarium-astra-adapter-closed-vFQ7gw/C
 Nothing here authorizes live predator introduction or signs off the separate
 complete-audit ecological experiment. Keep the fixes and selected body; retain
 the endpoint/restart limitations as visible follow-up work.
+
+After the review, root authorized a docs-only correction: removed the stale
+`hunter_scale_supported` fallback description and qualified the progress record's
+topology proof and stale example-build claims. No behavior changed. The remaining
+filter `MAX_GRID²` bullet and historical remainder wording are still noted above.
