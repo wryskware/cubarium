@@ -10,8 +10,8 @@ Two full two-hour replays of the retained pre-hunter cohort, instrumented at the
 mutation sites, examine a question the
 [census follow-up](fauna-development-followup-2026-09-13.md) could only bound:
 whether late skimmer losses reflect failure to develop. **In these two pilots**
-the skimmer's growth branch runs, most
-skimmers reach their adult target, and every death is starvation at exactly zero
+the skimmer's growth branch runs, some descendants reach their adult target,
+and every death is starvation at exactly zero
 reserve and zero energy. What ends the seed-2 population is that budding stops
 and the standing adults are not replaced. Seed2 is only one of the eight known
 losses; the other seven loss histories are not certified by these two pilots.
@@ -91,7 +91,8 @@ integration suite, 0 failures; 195 tests in the full workspace run.
 
 ## The skimmer develops
 
-This is the finding that displaces the working assumption. Counts are
+This rules out a universal developmental stall in these pilots, not a resource
+constraint on juvenile development. Counts are
 individuals over the whole two hours, both pilots, from the per-member records.
 
 | Seed 1 | grazer | glider | burrower | skimmer |
@@ -108,7 +109,16 @@ individuals over the whole two hours, both pilots, from the per-member records.
 | Died (all starvation) | 154 | 118 | 51 | **17** |
 | Censored at 144000 | 48 | 17 | 23 | **0** |
 
-**The growth branch runs, and it is rate-limited, not resource-limited.** Across
+The adult totals include five already-adult skimmer founders in each seed.
+Actual descendants reaching the target are **22/33 in seed1 and6/12 in seed2**;
+11/17 is not the seed2 juvenile maturation fraction. The independent review also
+reconstructs the reserve prerequisite closed on571704/600586 juvenile ticks
+(95.191%) in seed1 and213785/223348 (95.718%) in seed2. Resource permission still
+limits when development can happen, even though admitted increments are paid.
+
+**Entered growth steps are rate-limited, not resource-cap-limited.** This does
+not show that the resource prerequisite never withholds entry on other juvenile
+ticks. Across
 both pilots the branch was entered on every single tick on which both gate sides
 were open — 28,882 of 1,148,136 skimmer member-ticks in seed 1, 9,563 of 474,615
 in seed 2 — and every entry gained structure. Of those entries, the binding cap
@@ -133,7 +143,7 @@ Same-boundary slot reuse occurs once, in seed 1: member `39:4` dies at boundary
 generation-bearing ID keeps them distinct, and the pair is recorded on both the
 death and the birth. Seed 2 has no such case.
 
-**Seed 2's extinction is a replacement failure, not a development failure.** The
+**Seed2's extinction follows a recruitment gap, not a universal failure to mature.** The
 last skimmer birth is at tick 57135 (47.6 min). No skimmer is born afterwards.
 The five remaining animals die over the next 26.3 minutes, the last at tick
 **88708** (73.9 min) — inside the retained telemetry's first-zero bracket
@@ -157,7 +167,7 @@ before a request exists, nor explain why those requests become less frequent:
 | Seed 1 budding decisions | 36.7 | 36.3 | 23.6 | **28.7** |
 | Seed 2 budding decisions | 37.0 | 38.3 | 21.6 | **25.3** |
 
-## Food is available; the skimmer simply takes less of it
+## Lower assimilated intake without downstream contention
 
 The own-cell measurements are **potential access**, recorded at the cell the
 member occupies. They are not intake, and an occupancy count identifies no
@@ -170,14 +180,18 @@ cause.
 | Access class `both` | 99.89% | — | **99.39%** |
 | Contested ticks | 0.00% | 0.00% | **0.00%** |
 | Actual ÷ requested intake | 1.000 | 1.000 | **1.000** |
-| Actual intake per 1000 member-ticks | 0.169 | 0.116 | **0.118** |
+| Assimilated reserve per 1000 member-ticks | 0.169 | 0.116 | **0.118** |
 
 The skimmer stands in a cell holding producer on 99.4% of its ticks, at
 essentially the grazer's density, and loses **nothing** to contention: its share
 multiplier never falls below 1 and it always receives exactly what it requested.
-Its realized intake is nonetheless about 30% below the grazer's per member-tick.
-On these paths the shortfall is on the request side, not the supply side. Seed 2
-is the same picture at 0.110 per 1000 member-ticks.
+Its assimilated reserve intake is nonetheless about30% below the grazer's per
+member-tick. Seed2 records0.110 assimilated reserve per1000 member-ticks.
+Skimmer raw actual intake is0.19977/0.18636 per1000 member-ticks in seeds1/2;
+do not conflate that with credited reserve. A sharing multiplier of1 excludes
+downstream contention loss, not supply effects on the request: the bite formula
+already multiplies by `food/(food+K)`. These observations therefore do not
+separate intrinsic request rate, effort and density-dependent saturation.
 
 Frugivory is exactly zero for every skimmer in both pilots; its intake is
 grazing with a small scavenging tail.
@@ -219,7 +233,7 @@ with growth ~10% and reproduction funding ~12% for both.
   attributes the decline to sensing cost, to intake rate, to budding rate, or to
   anything else. These are two realized paths, described.
 - **Two seeds are not a cohort.** Seed 1 retains skimmers and seed 2 loses them;
-  ten seeds remain unrun, including six of the eight known losses.
+  ten seeds remain unrun, including seven of the eight known losses.
 - **A small population is a weak statistic.** The skimmer starts from 5 founders
   against the grazer's 10, and 17 members over two hours is a thin basis for any
   rate comparison. The difference between the two pilots' budding rates (28.7 vs
@@ -269,7 +283,7 @@ runs a prefix and says in its own output that closing identity was not asserted.
 `--from-seed` constructs the world from the seed instead of loading the retained
 tick-zero snapshot, as an investigation lever.
 
-The ten remaining seeds are **launch-ready and deliberately not launched**. Six
+The ten remaining seeds are **not launched**. Seven
 of the eight known losses are among them, and the replacement-failure reading
 above rests on one extinction. Running them is the obvious next step and needs
 root's review of this pilot and harness first. No parameter change is authorized
