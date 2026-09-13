@@ -1,7 +1,7 @@
 From 8390cdd97e4629e31951c8c290f2cd3a29ab6018 Mon Sep 17 00:00:00 2001
 From: Wrysk <wrysk@wryskware.dev>
 Date: Sun, 13 Sep 2026 06:15:33 -0700
-Subject: [PATCH 1/2] Add semantic profile version 5: size-aware permission for
+Subject: [PATCH 1/3] Add semantic profile version 5: size-aware permission for
  paid hunter growth
 
 Experiment branch only, based on the reviewed diagnostic 0d867f1 so the bounded
@@ -1153,7 +1153,7 @@ index 430619f..cce3d83 100644
 From 9f4cf7de260167b61a14f7b0035cc35eb13e0993 Mon Sep 17 00:00:00 2001
 From: Wrysk <wrysk@wryskware.dev>
 Date: Sun, 13 Sep 2026 06:16:25 -0700
-Subject: [PATCH 2/2] Drop an unused recipe helper in favour of asserting the
+Subject: [PATCH 2/3] Drop an unused recipe helper in favour of asserting the
  policy directly
 
 The size-gate recipe test now checks OxidationPolicy::Fixed(0.80) at the source
@@ -1198,6 +1198,383 @@ index cce3d83..92a8f65 100644
              // The background it runs on is unchanged.
              assert_eq!(size.seek_reserve_fraction, 0.80);
              assert_eq!(size.perch_reserve_fraction, 0.90);
+-- 
+2.55.0
+
+
+From ae866a556a9d7032963cf80a8f4574f9f5611929 Mon Sep 17 00:00:00 2001
+From: Wrysk <wrysk@wryskware.dev>
+Date: Sun, 13 Sep 2026 06:34:14 -0700
+Subject: [PATCH 3/3] Wire the bounded flow ledger into hunter_compare
+
+Closes the named gap from the seed-1 handoff: the runner recorded structure only
+at 200-tick census boundaries, which bounds when a change is first seen and cannot
+show a per-tick transaction, its binding cap or the gate it crossed.
+
+Each arm now enables the ledger after its post-initialization snapshot and writes
+one flow.json at close. It is one record per member for the whole run plus
+fixed-width bins, never a per-tick world dump: a member that died is retained with
+its removal-site stocks and one alive at the horizon is right-censored, so
+birth/death same-tick and last-interval accounting survive. The records carry
+source-specific intake, the actual post-oxidation gate as a range with the
+threshold and size at the first growth, the binding cap of every step, and the
+reserve, battery and heat each increment paid.
+
+FlowLedger::validate is the run's gate and the reducer's. It fails the arm on a
+member the arm knows it held but the ledger did not record, on a record for an
+unregistered member, on any non-finite or negative amount, on payment
+reconciliation judged against the ledger's own frozen 1e-9 tolerance rather than
+one supplied by a reader, on structure built without matching reserve spent, and
+on a first-growth boundary that disagrees with whether anything was built. The
+arm also records whether it reached the planned horizon.
+
+Observer neutrality is checked in-run: before the ledger is switched on, each arm
+steps its own opening twice for 2000 ticks, with and without recording, and the
+run fails unless the state hash and every event record agree. That is a bounded
+prefix; the full-horizon statement comes from comparing this build against the
+earlier pilot, which ran the identical recipe with no ledger in the loop.
+
+No threshold, rate, cost, food or ecology changed. Original tolerances are
+unchanged and the raw legacy energy diagnostic is untouched and still not an audit.
+
+cargo test -p cubarium-core: 153 lib (one new for validate) plus every integration
+suite, 0 failures. cargo test --example hunter_compare: 78, 0 failures.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+---
+ crates/cubarium-core/src/flow.rs           | 144 +++++++++++++++++++++
+ crates/cubarium/examples/hunter_compare.rs | 114 ++++++++++++++++
+ 2 files changed, 258 insertions(+)
+
+diff --git a/crates/cubarium-core/src/flow.rs b/crates/cubarium-core/src/flow.rs
+index dbeae13..1317f16 100644
+--- a/crates/cubarium-core/src/flow.rs
++++ b/crates/cubarium-core/src/flow.rs
+@@ -786,6 +786,95 @@ impl FlowLedger {
+             .sum::<u64>()
+             + self.unregistered_records
+     }
++
++    /// Everything a caller must be able to assert before treating these records as evidence.
++    ///
++    /// Payment reconciliation is judged against [`RESIDUAL_TOLERANCE`], this module's own frozen
++    /// constant — never a looser one supplied by whoever reads the output. `expected` names the
++    /// members the caller already knows must be present; a missing record is a failure rather
++    /// than a shorter list, because an unrecorded member is exactly the evidence gap this
++    /// ledger exists to close.
++    pub fn validate(&self, expected: &[OrganismId]) -> Result<(), String> {
++        if self.unregistered_records != 0 {
++            return Err(format!(
++                "{} flow records for members the ledger never registered",
++                self.unregistered_records
++            ));
++        }
++        for id in expected {
++            if !self.members.contains_key(id) {
++                return Err(format!(
++                    "no flow record for member {}:{}",
++                    id.slot, id.generation
++                ));
++            }
++        }
++        for (id, m) in &self.members {
++            let who = format!("{}:{}", id.slot, id.generation);
++            if m.residual.violations != 0 {
++                return Err(format!(
++                    "member {who}: {} payment reconciliation violations, first at tick {:?}",
++                    m.residual.violations, m.residual.first_violation_tick
++                ));
++            }
++            for (name, value) in [
++                ("structure", m.residual.max_structure),
++                ("reserve", m.residual.max_reserve),
++                ("energy", m.residual.max_energy),
++            ] {
++                if !value.is_finite() || value < 0.0 {
++                    return Err(format!("member {who}: {name} residual is {value}"));
++                }
++                if value > RESIDUAL_TOLERANCE {
++                    return Err(format!(
++                        "member {who}: {name} residual {value:e} exceeds the frozen tolerance {RESIDUAL_TOLERANCE:e}"
++                    ));
++                }
++            }
++            // Every recorded amount must be finite and nonnegative. A source total that is NaN
++            // or negative is a malformed record, not a small anomaly to average over.
++            for (name, value) in [
++                ("digestion.to_reserve", m.digestion.to_reserve),
++                ("frugivory.to_reserve", m.frugivory.to_reserve),
++                ("grazing.to_reserve", m.grazing.to_reserve),
++                ("scavenging.to_reserve", m.scavenging.to_reserve),
++                ("oxidation.reserve_burned", m.oxidation.reserve_burned),
++                ("growth.reserve_spent", m.growth.reserve_spent),
++                ("growth.structure_gained", m.growth.structure_gained),
++                ("growth.energy_cost", m.growth.energy_cost),
++                ("growth.heat", m.growth.heat),
++                ("upkeep.paid", m.upkeep.paid),
++                ("strike.paid", m.strike.paid),
++                ("handling.paid", m.handling.paid),
++                ("funding.reserve_debit", m.funding.reserve_debit),
++            ] {
++                if !value.is_finite() || value < 0.0 {
++                    return Err(format!("member {who}: {name} is {value}"));
++                }
++            }
++            // Growth is the site under test: what it built, it paid for out of reserve, one for
++            // one. The two sides are accumulated separately at the mutation site, so checking
++            // them here means a run cannot emit a record that silently built unpaid structure.
++            let built = m.growth.structure_gained;
++            if (built - m.growth.reserve_spent).abs() > RESIDUAL_TOLERANCE {
++                return Err(format!(
++                    "member {who}: built {built:e} structure but spent {:e} reserve",
++                    m.growth.reserve_spent
++                ));
++            }
++            if built > 0.0 && m.gate.first_growth_tick.is_none() {
++                return Err(format!(
++                    "member {who}: grew {built:e} with no recorded first growth"
++                ));
++            }
++            if built == 0.0 && m.gate.first_growth_tick.is_some() {
++                return Err(format!(
++                    "member {who}: recorded a first growth having gained nothing"
++                ));
++            }
++        }
++        Ok(())
++    }
+ }
+ 
+ fn members_as_list<S: Serializer>(
+@@ -1023,6 +1112,61 @@ mod tests {
+         assert_eq!(l.members[&id(1)].bins.len(), MAX_BINS);
+     }
+ 
++    #[test]
++    fn validate_accepts_a_sound_ledger_and_names_every_way_it_can_fail() {
++        let sound = || {
++            let mut l = ledger();
++            l.record_growth_gate(id(1), 101, 0.8, 2.0, 0.6, 0.48, 1.2, 0.6);
++            l.record_growth(id(1), 101, 0.0001, 0.00005, 0.00025, 0.0001, 1.2, 0.6, Some(1.2));
++            // The member opened at S=0.8, R=0.8, E=0.6; one rate-limited step moves all three.
++            l.probe(id(1), 101, 0.8 + 0.0001, 0.8 - 0.0001, 0.6 - 0.00005);
++            l
++        };
++        sound().validate(&[id(1)]).expect("a sound ledger validates");
++
++        // A member the caller knows must be there and is not.
++        let missing = sound().validate(&[id(1), id(7)]).expect_err("a missing member must fail");
++        assert!(missing.contains("no flow record for member 7:1"), "{missing}");
++
++        // A record for a member that was never registered.
++        let mut stray = sound();
++        stray.record_oxidation(id(9), 101, 0.1, 0.1, 0.0, false);
++        assert!(stray.validate(&[id(1)]).unwrap_err().contains("never registered"));
++
++        // Payment reconciliation, judged against the frozen tolerance and not a looser one.
++        let mut violated = sound();
++        violated.members.get_mut(&id(1)).unwrap().residual.violations = 1;
++        assert!(violated.validate(&[id(1)]).unwrap_err().contains("reconciliation violations"));
++        let mut wide = sound();
++        wide.members.get_mut(&id(1)).unwrap().residual.max_reserve = 1e-6;
++        assert!(wide.validate(&[id(1)]).unwrap_err().contains("exceeds the frozen tolerance"));
++
++        // Malformed amounts.
++        for mutate in [
++            |m: &mut MemberFlow| m.digestion.to_reserve = f64::NAN,
++            |m: &mut MemberFlow| m.scavenging.to_reserve = -1.0,
++            |m: &mut MemberFlow| m.upkeep.paid = f64::INFINITY,
++            |m: &mut MemberFlow| m.residual.max_energy = -1.0,
++        ] {
++            let mut bad = sound();
++            mutate(bad.members.get_mut(&id(1)).unwrap());
++            assert!(bad.validate(&[id(1)]).is_err(), "a malformed amount must fail");
++        }
++
++        // Structure built without reserve spent for it, one for one.
++        let mut unpaid = sound();
++        unpaid.members.get_mut(&id(1)).unwrap().growth.reserve_spent = 0.0;
++        assert!(unpaid.validate(&[id(1)]).unwrap_err().contains("but spent"));
++
++        // A first-growth boundary that disagrees with whether anything was built.
++        let mut phantom = ledger();
++        phantom.members.get_mut(&id(1)).unwrap().gate.first_growth_tick = Some(5);
++        assert!(phantom.validate(&[id(1)]).unwrap_err().contains("having gained nothing"));
++        let mut silent = sound();
++        silent.members.get_mut(&id(1)).unwrap().gate.first_growth_tick = None;
++        assert!(silent.validate(&[id(1)]).unwrap_err().contains("no recorded first growth"));
++    }
++
+     #[test]
+     fn a_record_for_an_unregistered_member_is_counted_not_silently_dropped() {
+         let mut l = ledger();
+diff --git a/crates/cubarium/examples/hunter_compare.rs b/crates/cubarium/examples/hunter_compare.rs
+index 92a8f65..764a67e 100644
+--- a/crates/cubarium/examples/hunter_compare.rs
++++ b/crates/cubarium/examples/hunter_compare.rs
+@@ -74,6 +74,53 @@ impl ProfileVariant {
+     }
+ }
+ 
++/// How many ticks the in-run observer-neutrality probe advances each arm's opening, twice.
++///
++/// Bounded on purpose: it costs about 1.4% of an arm's horizon and answers "does switching the
++/// ledger on move this world" on this arm's own opening. Whether it moves the world over a
++/// whole two hours is answered at full scale by comparing this run against the earlier pilot,
++/// which ran without the ledger.
++const NEUTRALITY_PROBE_TICKS: u64 = 2000;
++
++/// Step one opening twice, differing only in whether the flow ledger records, and report
++/// whether the world and both event streams came out identical.
++fn neutrality_probe(opening: &WorldState, ticks: u64) -> Result<Value> {
++    let mut hashes = Vec::new();
++    let mut streams = Vec::new();
++    for record in [false, true] {
++        let mut world = World::from_state(opening.clone()).map_err(|e| anyhow!(e))?;
++        if record {
++            world.enable_flow_ledger();
++        }
++        let mut stream = String::new();
++        for _ in 0..ticks {
++            world.step();
++            let life = world.drain_events();
++            let hunter = world.drain_hunter_events();
++            if !life.is_empty() || !hunter.is_empty() {
++                stream.push_str(&format!("{} {life:?} {hunter:?}\n", world.tick()));
++            }
++        }
++        hashes.push(cubarium_core::snapshot::state_hash(&world.state).to_string());
++        streams.push(stream);
++    }
++    let state_equal = hashes[0] == hashes[1];
++    let events_equal = streams[0] == streams[1];
++    ensure!(
++        state_equal && events_equal,
++        "the flow ledger moved this arm's world within {ticks} ticks (state_equal={state_equal}, events_equal={events_equal})"
++    );
++    Ok(json!({
++        "ticks": ticks,
++        "state_hash_without_ledger": hashes[0],
++        "state_hash_with_ledger": hashes[1],
++        "state_equal": state_equal,
++        "event_records_equal": events_equal,
++        "event_record_bytes": streams[0].len(),
++        "basis": "this arm's own post-initialization opening, stepped twice, differing only in enable_flow_ledger()",
++    }))
++}
++
+ fn profile_for(
+     config: &cubarium_core::WorldConfig,
+     index: usize,
+@@ -275,6 +322,11 @@ struct Arm {
+     whole_recovery: recovery::WholeRecovery,
+     capture_audit: spatial::CaptureAudit,
+     eligibility: eligibility::Eligibility,
++    /// This arm's bounded observer-neutrality probe, taken before the ledger was switched on.
++    neutrality: Value,
++    /// Every member this arm ever held, including ones that died: the flow ledger must carry a
++    /// record for each, or the run fails.
++    member_ids: BTreeSet<OrganismId>,
+     events: BufWriter<File>,
+     census: BufWriter<File>,
+ }
+@@ -418,6 +470,13 @@ impl Arm {
+         };
+         let snapshot = encode_snapshot(&world.state, BUILD);
+         write_new(&dir.join("post-initialization.cubw"), &snapshot)?;
++        // The flow ledger is an observer, so before it is switched on for the real run this
++        // arm's own opening is stepped twice — once without it and once with it — and the two
++        // must agree on the state and on every event record. It is a bounded prefix, not the
++        // whole horizon: the full-scale statement is the paired comparison against the earlier
++        // pilot, which ran the identical recipe with no ledger compiled into the loop at all.
++        let neutrality = neutrality_probe(&world.state, NEUTRALITY_PROBE_TICKS)?;
++        world.enable_flow_ledger();
+         json_new(
+             &dir.join("opening.json"),
+             &json!({"arm":NAMES[index], "target":target,"profile_recipe":variant,
+@@ -481,6 +540,8 @@ impl Arm {
+                 .map_err(|e| anyhow!(e))?,
+             capture_audit,
+             eligibility: eligibility::Eligibility::default(),
++            neutrality,
++            member_ids: founder.into_iter().collect(),
+             events: stream(&dir.join("events.jsonl"))?,
+             census: stream(&dir.join("census.jsonl"))?,
+         })
+@@ -489,6 +550,11 @@ impl Arm {
+     fn step(&mut self, index: usize, elapsed: u64, window: u64) -> Result<Vec<recovery::Capture>> {
+         let counters = self.world.step();
+         let flows = (counters.light_in, counters.heat_out);
++        // Every member this arm ever held, so `finish` can demand a flow record for each of
++        // them rather than accepting whatever the ledger happens to contain.
++        for m in &self.world.state.hunters.members {
++            self.member_ids.insert(m.id);
++        }
+         self.world.check_invariants().map_err(|e| anyhow!(e))?;
+         self.audit.observe(&self.world.state, flows.0, flows.1)?;
+         let life = self.world.drain_events();
+@@ -680,6 +746,53 @@ impl Arm {
+         Ok(captures)
+     }
+ 
++    /// The bounded mutation-site flow record for this arm.
++    ///
++    /// One record per member for the whole run, not a per-tick dump of the world: the ledger's
++    /// members survive their own death, so a member that died mid-run is here with its removal
++    /// -site closing stocks, and a member alive at the horizon is here right-censored. What it
++    /// carries is what the growth question needs — source-specific intake, the actual
++    /// post-oxidation gate as a range with the threshold and size at the first growth, the
++    /// binding cap of each step, and the reserve, battery and heat each increment paid.
++    ///
++    /// The run fails here rather than emitting an unusable record: a missing member, a
++    /// malformed amount, a payment that does not reconcile within the ledger's own frozen
++    /// tolerance, or structure built without reserve spent all stop the arm.
++    fn write_flow(&mut self, dir: &Path, reason: &Option<String>, planned: u64) -> Result<()> {
++        let ledger = self
++            .world
++            .flow_ledger()
++            .context("the flow ledger was not recording for this arm")?;
++        let expected: Vec<OrganismId> = self.member_ids.iter().copied().collect();
++        ledger
++            .validate(&expected)
++            .map_err(|e| anyhow!("flow ledger: {e}"))?;
++        let elapsed = self.world.tick().saturating_sub(ledger.opened_tick);
++        let complete = reason.is_none() && elapsed == planned;
++        json_new(
++            &dir.join("flow.json"),
++            &json!({
++                "kind":"per-member-mutation-site-flow",
++                "arm":dir.file_name().and_then(|n|n.to_str()),
++                "opened_tick":ledger.opened_tick,
++                "closing_tick":self.world.tick(),
++                "planned_ticks":planned,
++                "elapsed_ticks":elapsed,
++                "complete_horizon":complete,
++                "incomplete_reason":reason,
++                "expected_members":expected.len(),
++                "recorded_members":ledger.members.len(),
++                "residual_tolerance":cubarium_core::flow::RESIDUAL_TOLERANCE,
++                "bin_ticks":cubarium_core::flow::BIN_TICKS,
++                "observer_neutrality_probe":self.neutrality,
++                "scope":"one record per member for the whole run, plus fixed-width time bins. Never a per-tick world dump. A member that died is retained with its removal-site stocks; one alive at the horizon is right-censored.",
++                "gate_note":"gate_reserve_last is the most recent observation of a threshold that moves with the body under a size-aware profile, not a constant lifetime requirement; gate_reserve_min/max bound the observed range and gate_reserve_at_first_growth is the one actually crossed.",
++                "ledger":ledger,
++            }),
++        )?;
++        Ok(())
++    }
++
+     fn finish(&mut self, dir: &Path, reason: &Option<String>, planned: u64) -> Result<Value> {
+         self.audit.close_window(&self.world.telemetry());
+         if reason.is_none() {
+@@ -691,6 +804,7 @@ impl Arm {
+         self.census.get_ref().sync_all()?;
+         let bytes = encode_snapshot(&self.world.state, BUILD);
+         write_new(&dir.join("closing.cubw"), &bytes)?;
++        self.write_flow(dir, reason, planned)?;
+         let cohorts: BTreeSet<_> = self
+             .live
+             .values()
 -- 
 2.55.0
 

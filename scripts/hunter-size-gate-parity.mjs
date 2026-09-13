@@ -44,11 +44,101 @@ export const SELECTOR_PROJECTED_FIELDS = [
   'hunter_state.profile.version',
 ];
 
+/// The ledger's own frozen reconciliation tolerance, restated here so a run cannot widen the
+/// bar its evidence is judged against by reporting a looser number.
+export const RESIDUAL_TOLERANCE = 1e-9;
+/// The four reserve intake channels, named so no single one can stand in for the total.
+export const INTAKE_SOURCES = ['digestion', 'frugivory', 'grazing', 'scavenging'];
+
+/// Validate one arm's per-member flow record.
+///
+/// This is the evidence the census could not give, so it is checked rather than relayed: a
+/// member the arm held and the ledger missed, a source total that is not actually recorded per
+/// source, an incomplete horizon, or a payment that does not reconcile all fail the arm.
+export function checkFlow(flow, summary) {
+  const problems = [];
+  const need = (ok, detail) => {if (!ok) problems.push(detail);};
+  if (!flow) return ['no flow.json: the run produced no mutation-site record for this arm'];
+
+  need(flow.kind === 'per-member-mutation-site-flow', `unexpected flow record kind ${flow.kind}`);
+  need(flow.complete_horizon === true,
+    `incomplete horizon: ${flow.elapsed_ticks} of ${flow.planned_ticks} ticks (${flow.incomplete_reason ?? 'no reason recorded'})`);
+  need(flow.closing_tick === summary.closing_tick,
+    `flow closing tick ${flow.closing_tick} disagrees with the summary's ${summary.closing_tick}`);
+  need(flow.residual_tolerance === RESIDUAL_TOLERANCE,
+    `the run reported tolerance ${flow.residual_tolerance}, not the frozen ${RESIDUAL_TOLERANCE}`);
+  need(flow.recorded_members >= flow.expected_members,
+    `${flow.recorded_members} records for ${flow.expected_members} members the arm held`);
+
+  const probe = flow.observer_neutrality_probe;
+  need(probe?.state_equal === true && probe?.event_records_equal === true,
+    'the in-run observer-neutrality probe did not report both modes agreeing');
+  need(Number.isSafeInteger(probe?.ticks) && probe.ticks > 0, 'the neutrality probe ran no ticks');
+
+  const members = flow.ledger?.members ?? [];
+  need(members.length === flow.recorded_members, 'the member list disagrees with its own count');
+  for (const m of members) {
+    const who = `${m.id.slot}:${m.id.generation}`;
+    // Source identity: every channel individually present, finite and non-negative, and the
+    // total is their sum rather than any one of them.
+    let total = 0;
+    for (const source of INTAKE_SOURCES) {
+      const v = m[source]?.to_reserve;
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) {
+        problems.push(`${who}: ${source}.to_reserve is ${v}`);
+        continue;
+      }
+      total += v;
+    }
+    need(Number.isFinite(total), `${who}: intake sources do not sum to a finite total`);
+    need(m.residual?.violations === 0, `${who}: ${m.residual?.violations} reconciliation violations`);
+    for (const field of ['max_structure', 'max_reserve', 'max_energy']) {
+      const v = m.residual?.[field];
+      need(Number.isFinite(v) && v >= 0 && v <= RESIDUAL_TOLERANCE,
+        `${who}: residual ${field} is ${v}`);
+    }
+    // Paid construction: what was built came out of reserve one for one.
+    const built = m.growth?.structure_gained ?? 0, spent = m.growth?.reserve_spent ?? 0;
+    need(Math.abs(built - spent) <= RESIDUAL_TOLERANCE,
+      `${who}: built ${built} structure against ${spent} reserve spent`);
+    need((built > 0) === (m.gate?.first_growth_tick !== null && m.gate?.first_growth_tick !== undefined),
+      `${who}: growth ${built} disagrees with first_growth_tick ${m.gate?.first_growth_tick}`);
+    // The binding caps must account for exactly the steps taken.
+    const caps = m.growth?.bound_by_rate + m.growth?.bound_by_remaining_structure
+      + m.growth?.bound_by_reserve + m.growth?.bound_by_energy;
+    need(caps === m.growth?.ticks,
+      `${who}: ${caps} attributed caps for ${m.growth?.ticks} growth steps`);
+  }
+  return problems;
+}
+
+/// The actual first altered growth transaction, from the mutation-site record rather than from
+/// the 200-tick census, which can only bound it.
+export function firstGrowthFromFlow(flow) {
+  let first = null;
+  for (const m of flow?.ledger?.members ?? []) {
+    const tick = m.gate?.first_growth_tick;
+    if (tick === null || tick === undefined) continue;
+    if (first === null || tick < first.tick)
+      first = {tick, member: `${m.id.slot}:${m.id.generation}`,
+        gate_at_first_growth: m.gate.gate_reserve_at_first_growth,
+        structure_at_first_growth: m.gate.structure_at_first_growth};
+  }
+  return first;
+}
+
 /// Compare two snapshots through the payload, which is the world; the header is not.
 export function compareSnapshot(a, b) {
   const differences = [];
-  for (const key of ['schema', 'crc32', 'state_hash', 'payload_bytes'])
-    if (a[key] !== b[key]) differences.push({field: key, retained: a[key], rerun: b[key]});
+  // A snapshot that could not be read has no payload facts at all. Two such records agree on
+  // every field by being equally absent, so without this they would certify each other as
+  // identical — an unreadable pair is missing evidence, not matching evidence.
+  for (const [side, s] of [['retained', a], ['rerun', b]])
+    if (s?.error || s?.unreadable || !Number.isFinite(s?.crc32))
+      differences.push({field: 'readable', side, why: s?.error ?? 'no payload facts recorded'});
+  if (differences.length === 0)
+    for (const key of ['schema', 'crc32', 'state_hash', 'payload_bytes'])
+      if (a[key] !== b[key]) differences.push({field: key, retained: a[key], rerun: b[key]});
   return {
     identical_payload: differences.length === 0,
     differences,
@@ -117,13 +207,20 @@ export function divergence(referenceRows, candidateRows) {
     }
     if (firstRowDifference !== null && firstStructureDifference !== null) break;
   }
+  // A matching prefix is not identity. Two streams of different length agree on every row
+  // they share and still describe different runs, so the lengths are part of the claim.
+  const sameLength = referenceRows.length === candidateRows.length;
+  if (!sameLength)
+    firstRowDifference ??= {tick: null,
+      why: `census streams differ in length (${referenceRows.length} vs ${candidateRows.length})`};
   return {
     census_rows_compared: n,
     reference_rows: referenceRows.length,
     candidate_rows: candidateRows.length,
+    same_length: sameLength,
     first_projected_row_difference: firstRowDifference,
     first_member_structure_difference: firstStructureDifference,
-    identical_under_projection: firstRowDifference === null,
+    identical_under_projection: firstRowDifference === null && sameLength,
     basis: 'census rows compared after removing exactly the selector-derived fields; structure is compared per member by full slot:generation identity',
   };
 }
@@ -208,7 +305,7 @@ export function structureObservations(rows) {
     reached_adult_structure: m.max_structure + 1e-9 >= m.adult_structure}));
 }
 
-async function loadRun(root, seeds) {
+async function loadRun(root, seeds, {flow = true} = {}) {
   const dir = resolve(root);
   const manifest = await json(join(dir, 'manifest.json'));
   const frozen = await sha256File(join(dir, 'hunter_compare.frozen'));
@@ -224,12 +321,41 @@ async function loadRun(root, seeds) {
         snapshots: await armSnapshots(armDir),
         events: await lines(join(armDir, 'events.jsonl')),
         census: (await lines(join(armDir, 'census.jsonl'))).map(JSON.parse),
+        // The earlier pilot predates the ledger, so its arms legitimately carry none.
+        flow: flow ? await json(join(armDir, 'flow.json')).catch(() => null) : null,
       });
     }
   return {dir, manifest, frozen, seed_dirs: present, arms};
 }
 
-export async function reduce({reference, candidate, retained, seeds, binarySha256}) {
+/// Compare a run against an earlier one of the same recipe, through the payload and the event
+/// stream. Used to show at full horizon that switching the observer on moved nothing: the
+/// earlier pilot ran the identical recipe with no ledger in the loop at all.
+async function comparePriorRun(run, priorRoot, seeds) {
+  const prior = await loadRun(priorRoot, seeds, {flow: false});
+  const rows = [];
+  for (const [key, now] of run.arms) {
+    const before = prior.arms.get(key);
+    if (!before) {rows.push({arm: key, reproduced: false, why: 'absent from the earlier run'}); continue;}
+    const snapshots = {};
+    for (const file of SNAPSHOT_FILES)
+      snapshots[file] = compareSnapshot(before.snapshots[file], now.snapshots[file]);
+    const eventsEqual = before.events.length === now.events.length
+      && before.events.every((l, i) => l === now.events[i]);
+    const payload = SNAPSHOT_FILES.every(f => snapshots[f].identical_payload);
+    const stateHashEqual = before.summary.closing_state_hash === now.summary.closing_state_hash;
+    rows.push({arm: key, reproduced: payload && eventsEqual && stateHashEqual,
+      payload_identical: payload, events_identical: eventsEqual,
+      closing_state_hash_equal: stateHashEqual,
+      prior_events: before.events.length, current_events: now.events.length, snapshots});
+  }
+  return {prior_root: prior.dir, prior_build: prior.manifest.build,
+    prior_executable_sha256: prior.frozen,
+    arms: rows.length, arms_reproduced: rows.filter(r => r.reproduced).length, rows};
+}
+
+export async function reduce({reference, candidate, retained, seeds, binarySha256,
+  priorReference, priorCandidate}) {
   const seedList = seeds.map(Number);
   const ref = await loadRun(reference, seedList);
   const cand = await loadRun(candidate, seedList);
@@ -304,6 +430,63 @@ export async function reduce({reference, candidate, retained, seeds, binarySha25
         reference_events: a.events.length, candidate_events: b.events.length});
     }
 
+  // ---- the mutation-site flow records, which the census could only bound
+  const flow = {};
+  for (const [label, run] of [['reference', ref], ['candidate', cand]]) {
+    flow[label] = {};
+    for (const [key, a] of run.arms) {
+      const found = checkFlow(a.flow, a.summary);
+      if (found.length)
+        problems.push({what: `${label} flow ${key}`, detail: found.join('; ')});
+      flow[label][key] = {
+        present: a.flow !== null,
+        complete_horizon: a.flow?.complete_horizon ?? null,
+        expected_members: a.flow?.expected_members ?? null,
+        recorded_members: a.flow?.recorded_members ?? null,
+        neutrality_probe: a.flow?.observer_neutrality_probe ?? null,
+        first_growth: a.flow ? firstGrowthFromFlow(a.flow) : null,
+        problems: found,
+        members: (a.flow?.ledger?.members ?? []).map(m => ({
+          id: `${m.id.slot}:${m.id.generation}`, origin: m.origin,
+          born_tick: m.born_tick, end_tick: m.end_tick, end_cause: m.end_cause,
+          censored_alive: m.end_tick === null,
+          open_stocks: m.open_stocks, close_stocks: m.close_stocks, death_stocks: m.death_stocks,
+          intake_by_source: Object.fromEntries(
+            INTAKE_SOURCES.map(s => [s, m[s].to_reserve])),
+          intake_total: INTAKE_SOURCES.reduce((a2, s) => a2 + m[s].to_reserve, 0),
+          growth: {ticks: m.growth.ticks, structure_gained: m.growth.structure_gained,
+            reserve_spent: m.growth.reserve_spent, energy_cost: m.growth.energy_cost,
+            heat: m.growth.heat,
+            bound_by: {rate: m.growth.bound_by_rate,
+              remaining_structure: m.growth.bound_by_remaining_structure,
+              reserve: m.growth.bound_by_reserve, energy: m.growth.bound_by_energy}},
+          gate: {last: m.gate.gate_reserve_last, min: m.gate.gate_reserve_min,
+            max: m.gate.gate_reserve_max, legacy_last: m.gate.legacy_gate_reserve_last,
+            at_first_growth: m.gate.gate_reserve_at_first_growth,
+            structure_at_first_growth: m.gate.structure_at_first_growth,
+            first_growth_tick: m.gate.first_growth_tick,
+            first_adult_tick: m.gate.first_adult_tick,
+            max_structure: m.gate.max_structure,
+            observed_ticks: m.gate.observed_ticks,
+            branch_entered_ticks: m.gate.branch_entered_ticks},
+          oxidation_reserve_burned: m.oxidation.reserve_burned,
+          upkeep_paid: m.upkeep.paid, strike_paid: m.strike.paid,
+          residual: m.residual, bins: m.bins.length})),
+      };
+    }
+  }
+
+  // ---- the same recipe, run before the observer existed
+  const priorRuns = {};
+  for (const [label, root, run] of [['reference', priorReference, ref],
+    ['candidate', priorCandidate, cand]]) {
+    if (!root) continue;
+    priorRuns[label] = await comparePriorRun(run, root, seedList);
+    if (priorRuns[label].arms_reproduced !== priorRuns[label].arms)
+      problems.push({what: `${label} vs its earlier pilot`,
+        detail: 'the instrumented build did not reproduce the pre-observer run'});
+  }
+
   const outcomes = {};
   for (const [label, run] of [['reference', ref], ['candidate', cand]]) {
     outcomes[label] = {};
@@ -341,8 +524,11 @@ export async function reduce({reference, candidate, retained, seeds, binarySha25
     },
     candidate_divergence: {
       projection: `census rows compared after removing exactly ${JSON.stringify(SELECTOR_PROJECTED_FIELDS)}; no raw state hash is claimed equal while the selector differs`,
+      census_only_bounds_it: 'the 200-tick census bounds when a divergence is first visible; the actual first altered growth transaction is the mutation-site record in flow_records',
       rows: divergences,
     },
+    flow_records: flow,
+    observer_neutrality_at_full_horizon: priorRuns,
     outcomes,
     growth_observed: {
       members_whose_structure_increased: grew.length,
@@ -362,10 +548,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       assert(i >= 0 && argv[i + 1], `missing ${name}`);
       return argv[i + 1];
     };
+    const optional = name => {
+      const i = argv.indexOf(name);
+      return i >= 0 ? argv[i + 1] : undefined;
+    };
     const result = await reduce({
       reference: flag('--reference'), candidate: flag('--candidate'),
       retained: flag('--retained'), binarySha256: flag('--binary-sha256'),
       seeds: flag('--seeds').split(','),
+      priorReference: optional('--prior-reference'),
+      priorCandidate: optional('--prior-candidate'),
     });
     console.log(JSON.stringify(result, null, 1));
     if (result.problems.length) {
