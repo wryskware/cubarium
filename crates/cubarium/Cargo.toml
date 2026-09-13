@@ -25,6 +25,6 @@ png = { workspace = true }
 toml = "0.8"
 serde_json = "1"
 ctrlc = "3"
-# Only for `flock(2)` on the state directory's `.lock`: an OS advisory lock is the one
-# mechanism that makes "exactly one owner" atomic (see `state::StateLock`).
+# OS advisory `flock(2)` for state ownership, and Unix `poll(2)` to accept viewer
+# connections promptly without a periodic 10ms request delay.
 libc = "0.2"

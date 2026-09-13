@@ -10,7 +10,8 @@
 //! The 8-byte prefix on `/frame` is the *render sequence* — how many frames this sink has
 //! been handed — not the world's tick. The world's tick arrives separately through
 //! [`FrameSink::observe_tick`] and is reported, with a read-only description of the host
-//! process, at `GET /status`. Nothing served here can change the world.
+//! process, at `GET /status`. Optional care routes separately admit bounded, journaled
+//! input through the owning runner; frame and status reads cannot change the world.
 //!
 //! `std::net` only — no HTTP crate. The surface is five routes and `Connection: close`
 //! per request, which is all a `fetch` loop from one page on the loopback needs.
@@ -35,8 +36,7 @@ pub const INDEX_HTML: &str = include_str!("web/index.html");
 /// frame.
 pub const FRAME_BODY_BYTES: usize = 8 + FRAME_BYTES;
 
-/// How long the accept loop sleeps between polls of a non-blocking listener. Bounds how
-/// long `finish` waits for the server thread to notice the stop flag.
+/// Backoff on resource/socket errors, and the non-Unix fallback wait.
 const ACCEPT_POLL: Duration = Duration::from_millis(10);
 /// Read and write timeout on one socket operation.
 const CONN_TIMEOUT: Duration = Duration::from_secs(5);
@@ -382,11 +382,40 @@ fn accept_loop(shared: &Arc<Shared>, listener: &TcpListener) {
                     std::thread::sleep(ACCEPT_POLL);
                 }
             }
-            Err(e) if e.kind() == ErrorKind::WouldBlock => std::thread::sleep(ACCEPT_POLL),
+            Err(e) if e.kind() == ErrorKind::WouldBlock => wait_for_connection(listener),
             Err(e) if e.kind() == ErrorKind::Interrupted => {}
             Err(_) => std::thread::sleep(ACCEPT_POLL),
         }
     }
+}
+
+/// Wait for readiness rather than quantizing every browser request to a 10ms poll.
+/// The listener stays nonblocking: readiness is only a hint, and the next accept
+/// can still return WouldBlock. A finite idle timeout bounds shutdown even if no
+/// client ever connects, without allocating a wakeup socket or spinning at 1kHz.
+#[cfg(unix)]
+#[allow(unsafe_code)] // Audited poll(2) wrapper only; all HTTP handling stays safe Rust.
+fn wait_for_connection(listener: &TcpListener) {
+    use std::os::fd::AsRawFd;
+    let mut descriptor = libc::pollfd {
+        fd: listener.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: one initialized pollfd remains exclusively borrowed for the call;
+    // its descriptor is owned by the listener, which outlives this wait. poll
+    // neither takes ownership nor reads beyond the one-element array. The finite
+    // 100ms timeout keeps the thread responsive to its atomic shutdown flag.
+    let result = unsafe { libc::poll(&mut descriptor, 1, 100) };
+    if result < 0 || (result > 0 && descriptor.revents & libc::POLLIN == 0) {
+        // Avoid a busy loop on an OS error, including POLLNVAL/POLLERR/POLLHUP.
+        std::thread::sleep(ACCEPT_POLL);
+    }
+}
+
+#[cfg(not(unix))]
+fn wait_for_connection(_listener: &TcpListener) {
+    std::thread::sleep(ACCEPT_POLL);
 }
 
 /// Answer exactly one request, then close.
@@ -1012,6 +1041,23 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(failed, "the port is still accepting after finish()");
+    }
+
+    #[test]
+    fn idle_and_connected_shutdowns_do_not_need_a_wakeup_client() {
+        for with_client in [false, true] {
+            let mut sink = WebSink::new(0).unwrap();
+            let client = with_client.then(|| TcpStream::connect(sink.addr()).unwrap());
+            // Let the accept thread enter its idle readiness wait (or handle a
+            // partial request); no incoming connection is needed to release it.
+            std::thread::sleep(Duration::from_millis(30));
+            let start = std::time::Instant::now();
+            sink.finish().unwrap();
+            assert!(start.elapsed() < Duration::from_secs(1));
+            // Existing partial handlers are separately bounded by their deadline.
+            drop(client);
+            sink.finish().unwrap();
+        }
     }
 
     #[test]
