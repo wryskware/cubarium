@@ -27,7 +27,8 @@ harness, live state or care file was touched.
 | Root-chart contact geometry, measured claws, shared body scale | landed |
 | Settlement metadata on events, timing facts in the view | landed |
 | Astra review corrections: NaN bounds, settlement boundaries, authored claw | landed |
-| Deterministic test suite (26 behaviour + 8 geometry + 6 migration) | landed |
+| Exact reproduction transaction evidence (`5ee8fee`) | landed |
+| Deterministic test suite (27 behaviour + 8 geometry + 6 migration + 7 reproduction) | landed |
 | Paired experiment runs, ecological gates | **not started — root owns the harness** |
 
 **Read this section if you integrated against an earlier delivery.** The geometry correction
@@ -54,6 +55,13 @@ variants with `..` — but these changed meaning:
 - Any archived schema 10 artifact with a **non-empty** hunter extension — a trial, a
   budget-matched control, or an extinct lineage's counters — no longer loads: it is refused by
   name. Empty extensions still migrate exactly.
+- **`HunterEvent` gained one variant**, `Reproduction { tick, hunter, record }` (`5ee8fee`).
+  That is a deliberate, temporary host break at exactly one place:
+  `crates/cubarium/examples/hunter_compare.rs:377`, whose `match event { … }` exists only to
+  read a tick. `HunterEvent::tick()` now answers that for every variant, so the whole match can
+  become `event.tick()`; `HunterEvent::hunter()` does the same for the member. Root owns that
+  file and this worker did not touch it. Nothing else in the workspace is affected, and no
+  existing variant or field changed.
 
 ## Final API, for root and Fable
 
@@ -178,7 +186,46 @@ pub enum HunterEvent {
     Capture { tick, hunter, prey, material, energy,
               attack_counter: u64, evidence: ContactEvidence },
     Offspring { tick, parent, child },              // unchanged
+    Reproduction { tick, hunter, record: Reproduction },   // new in 5ee8fee
     Death { tick, id, cause, gut_material, gut_energy, gut_energy_stored },
+}
+impl HunterEvent {
+    pub fn tick(&self) -> u64;            // every variant, so no host-side exhaustive match
+    pub fn hunter(&self) -> OrganismId;   // attacker / captor / parent / deceased
+}
+
+// ---- the reproduction transaction, recorded at the mutation that moved it
+pub struct EscrowKey { parent: OrganismId, started_tick: u64 }   // the world's own Escrow.started_tick
+pub enum FundingBlocked { Cap, Stocks }
+
+pub enum Reproduction {
+    Funded {
+        key: EscrowKey,
+        parent_reserve_before, parent_reserve_after,
+        parent_energy_before, parent_energy_after,
+        escrow_structure, escrow_reserve, escrow_energy,
+        build_heat,                       // build_cost · escrow_structure
+    },
+    Born {
+        key: EscrowKey, child: OrganismId,
+        child_structure, child_reserve, child_energy,
+        birth_heat,                       // e_r · escrow_structure
+    },
+    Refunded {                            // a due birth the cap refused: nothing burned
+        key: EscrowKey,
+        refunded_structure, refunded_reserve, refunded_energy,
+        parent_reserve_before, parent_reserve_after,
+        parent_energy_before, parent_energy_after,
+    },
+    Miscarried {                          // the parent died holding it; body and gut are separate
+        key: EscrowKey, cause: DeathCause,
+        material, energy, energy_stored, energy_heat,
+    },
+    NotFunded { parent: OrganismId, reason: FundingBlocked },   // no escrow ever existed
+}
+impl Reproduction {
+    pub fn key(&self) -> Option<EscrowKey>;   // None only for NotFunded
+    pub fn parent(&self) -> OrganismId;
 }
 pub enum AttemptOutcome {
     Captured, Missed, OutOfReach, TargetLost, TargetClaimed, Ineligible,
@@ -189,6 +236,43 @@ pub enum AttemptOutcome {
 
 `Telemetry` is unchanged from the first delivery. `RenderView`, `OrganismView` and `LifeEvent`
 still have exactly their old fields.
+
+### The reproduction transactions, and what closes what
+
+A gestation is named by `EscrowKey { parent, started_tick }` — the parent's full ID and the
+`started_tick` the world already persists in its `Escrow`. A parent holds at most one escrow, so
+the key names exactly one transaction from its funding to whichever way it ends, and a reader
+can close every transaction it opens:
+
+```text
+Funded  ──▶ Born       the escrow became the child (also: Offspring, LifeEvent::Birth)
+        ──▶ Refunded   a due birth the cap refused; everything went back, nothing burned
+        ──▶ Miscarried the parent died holding it; the escrow alone went to the litter
+NotFunded              no escrow ever existed — a non-transaction, no key, nothing to close
+```
+
+Identities the records satisfy exactly, by construction and by test:
+
+```text
+Funded:     reserve_before − reserve_after = escrow_structure + escrow_reserve
+            (e_r·reserve + energy)_before − (e_r·reserve + energy)_after
+                = e_r·(escrow_structure + escrow_reserve) + escrow_energy + build_heat
+Born:       child S/R/E = the escrow's own S/R/E;  birth_heat = e_r · escrow_structure
+Refunded:   reserve_after − reserve_before = refunded_structure + refunded_reserve
+            energy_after − energy_before  = refunded_energy
+Miscarried: material = escrow S + R;  energy = e_r·material + escrow E
+            energy_stored + energy_heat = energy;  energy_stored ≤ energy_cap · material
+```
+
+Two things worth saying plainly. **A funding and its loss can happen in the same tick** — the
+bud gate runs before the death check in the same physiology pass — and both records are emitted,
+so a reader never sees a gestation end that it never saw begin. And **a miscarriage is not the
+corpse**: `Miscarried` carries the escrow's own terms only; the body's material and energy and
+any carried gut are separate terms of the same death, the gut reported in `HunterEvent::Death`.
+
+Every number is read on either side of the assignment that moved it. A post-step difference
+cannot substitute: oxidation, growth, movement and a death can all touch the same parent in the
+same tick.
 
 ### The geometry contract, in one paragraph
 
@@ -374,7 +458,7 @@ moved.
 ## Evidence
 
 ```text
-cargo test -p cubarium-core --offline          # 262 passed, 0 failed, 2 ignored
+cargo test -p cubarium-core --offline          # 270 passed, 0 failed, 2 ignored
 cargo clippy -p cubarium-core --offline --all-targets   # clean
 cargo check --workspace --all-targets --offline         # clean, no host edit needed
 ```
@@ -392,7 +476,7 @@ recomputed from the files. Fields, organisms, weather, config, care, the signed 
 the raw counters are compared individually. The genuine schema 8 and schema 7 continuations in
 `care.rs` and `energy_correction.rs` still pass unchanged.
 
-### `tests/hunter.rs`, 26 deterministic tests
+### `tests/hunter.rs`, 27 deterministic tests
 
 Two trial parameters are replaced in these fixtures to make outcomes deterministic:
 `capture_min = capture_max = 1` for a certain capture and `= 0` for a certain miss.
@@ -491,6 +575,31 @@ never-opted-in world, plus: a schema 10 snapshot **without** a trial migrates ex
 lineage's counters — is refused by name, while a running schema 11 trial refuses to project
 backwards.
 
+### `tests/hunter_reproduction.rs`, 7 tests on the transactions
+
+- **Funded, then born.** The debit equals the escrow plus its build heat, in material and in
+  energy; the build heat is the world's own `build_cost · S`; the escrow is the world's own child
+  fractions; the child's actual opening inventory is the escrow's; `birth_heat = e_r · S`; and the
+  `Offspring` and `LifeEvent::Birth` records reconcile one-for-one. Exactly one record closes the
+  key.
+- **Refused at the cap.** Every unit goes back to the parent, the parent's post-step stocks match
+  the record, no child exists, and no `Born` or `Miscarried` is emitted for that key.
+- **Funding blocked by the cap** is a `NotFunded` non-transaction: no escrow, no key, no funding
+  record, and the world's own `cap_rejections_total` agrees.
+- **Miscarried at the parent's death.** The escrow's own material and energy only, the cap split
+  accounted, the escrow strictly smaller than the corpse, and — in a quiet world — the litter
+  gaining exactly body plus escrow. The member's `Death` record carries its gut terms separately.
+- **Funded and lost in one tick.** Both records, same key, same tick, cause `Age`.
+- **A saved gestation replays the same transaction stream**, event for event, beside identical
+  state hashes.
+- **`tick()` and `hunter()` agree with every variant**, and the stream stays in commit order.
+
+Beside them, in `tests/hunter.rs`: **observations do not move a profile-3 hunter world.** Two
+fixed scenarios — one that hunts, captures and digests, one that funds an escrow and gives birth
+— are pinned by full-state hash recorded from `9eacb7e`, *before* any of this evidence code
+existed. Both hashes are unchanged, which is the proof that adding these records changed nothing
+root's twelve-seed screen is measuring.
+
 ## Open, and not claimed
 
 - **No ecological claim at all.** These are unit and integration tests of mechanism, not
@@ -520,8 +629,15 @@ backwards.
 - **Untuned trial numbers with a known demand.** At the founder defaults, maintenance alone is
   about 18 e/hour before sensing and movement, and sensing now costs `0.0024 e/s`; how much prey
   turnover that actually requires is a measurement nobody has made yet.
-- **Events are not history.** The hunter event stream is transient. Root must journal what it
-  wants to keep: a reloaded snapshot does not replay old captures.
+- **Events are not history.** The hunter event stream is transient, including the new
+  transaction records. Root must journal what it wants to keep: a reloaded snapshot replays the
+  same records going forward, but does not reproduce the ones drained before the checkpoint.
+- **One host change is outstanding and is root's.** `hunter_compare.rs:377` matches
+  `HunterEvent` exhaustively to read a tick and no longer compiles; `event.tick()` replaces the
+  whole match. Until root adapts it, `cargo check --workspace` fails there and only there —
+  `cargo test -p cubarium-core --offline` is green.
+- **Nothing here measures reproduction rates.** These records say what each transaction moved;
+  how often a lineage funds one, and whether it replaces itself, is what root's screen is for.
 
 ## Remaining gates before this lineage goes anywhere
 
