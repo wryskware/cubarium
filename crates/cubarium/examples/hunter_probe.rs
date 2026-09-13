@@ -79,7 +79,7 @@ fn main() -> Result<()> {
             "input":args.snapshot,"schema":meta.schema,"opening_tick":opening_tick,
             "opening_state_hash":opening_hash,"opening_members":opening_members,
             "ticks":args.ticks,"closing_tick":world.tick(),"closing_state_hash":closing_hash,
-            "expected_closing_state_hash":args.expect_state_hash,"trajectory_matches_frozen_trial":identity,
+        "expected_closing_state_hash":args.expect_state_hash,"closing_state_matches_frozen_trial":identity,
             "closing_members":eligibility::members(&world.state),"reproductive_opportunity":stats.summary(),
             "attempt_outcomes":attempts,"captures":captures,"offspring":offspring,
             "hunter_death_causes":deaths,"reproduction_record_counts":reproduction,
