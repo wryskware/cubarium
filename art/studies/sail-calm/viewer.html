@@ -1,0 +1,13 @@
+<!doctype html><meta charset="utf-8"><title>Sail calm: original / brace / settle</title>
+<style>body{background:#14151a;color:#ddd;font:16px system-ui;margin:24px}canvas{image-rendering:pixelated;display:block;margin:12px 0;background:#000}#large{width:1152px;max-width:100%}button,select,input{font:inherit}</style>
+<h1>Original / brace / settle</h1><p>Point-sampled fins, unchanged body/move/bud. Native faces above, enlarged below. Scripted art trajectories, not core rest or a biological experiment. The six-second excerpt repeats with a cut.</p>
+<select id="state" aria-label="State"><option>rest</option><option>feed</option><option>move</option><option>bud</option></select>
+<select id="scale" aria-label="Scale"><option value="1">Adult1×</option><option value="0.6">Juvenile.6×</option></select>
+<select id="scene" aria-label="Placement"><option>rooted</option><option>seam</option><option>rim</option></select>
+<button id="play">Pause</button><input id="frame" aria-label="Frame" type="range" min="0" max="359" value="0"><output id="status"></output>
+<canvas id="native"></canvas><canvas id="large"></canvas><script>
+let image,playing=true,index=0,start=performance.now();const $=id=>document.querySelector('#'+id);
+async function load(){playing=false;image=new Image();image.src=`${$('state').value}-${$('scale').value}-${$('scene').value}.png`;await image.decode();start=performance.now();playing=true;}
+for(const s of document.querySelectorAll('select'))s.onchange=load;$('play').onclick=()=>{playing=!playing;start=performance.now()-index/60*1000};$('frame').oninput=()=>{playing=false;index=+$('frame').value};
+function draw(now){if(playing)index=Math.floor((now-start)*.06)%360;$('frame').value=index;$('status').textContent=index+'/359';if(image?.complete&&image.naturalWidth){const w=$('scene').value==='rooted'?192:768,h=$('scene').value==='rooted'?64:128;for(const c of document.querySelectorAll('canvas')){c.width=w;c.height=h;c.getContext('2d').drawImage(image,(index%12)*w,Math.floor(index/12)*h,w,h,0,0,w,h)}}requestAnimationFrame(draw)}load();requestAnimationFrame(draw);
+</script>

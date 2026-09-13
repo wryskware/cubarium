@@ -1,0 +1,27 @@
+[package]
+name = "cubarium-sail-calm-study"
+version = "0.0.0"
+edition = "2024"
+publish = false
+default-run = "sail_calm"
+[workspace]
+[[bin]]
+name = "sail_calm"
+path = "main.rs"
+[[bin]]
+name = "sail_calm_meals"
+path = "meals.rs"
+required-features = ["meals"]
+[[bin]]
+name = "sail_calm_contacts"
+path = "contacts.rs"
+[features]
+meals = ["dep:cubarium", "dep:cubarium-core"]
+[dependencies]
+cubarium = { path = "../../../captures/release-source/vine-endpoint-2026-09-13/crates/cubarium", optional = true }
+cubarium-core = { path = "../../../captures/release-source/vine-endpoint-2026-09-13/crates/cubarium-core", optional = true }
+cubarium-render = { path = "../../../captures/release-source/vine-endpoint-2026-09-13/crates/cubarium-render" }
+cubarium-surface = { path = "../../../captures/release-source/vine-endpoint-2026-09-13/crates/cubarium-surface" }
+cube-proto = { path = "../../../captures/release-source/vine-endpoint-2026-09-13/vendor/cube-proto" }
+png = "0.18"
+serde_json = "1"

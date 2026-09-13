@@ -1,0 +1,14 @@
+<!doctype html><meta charset="utf-8"><title>Sail calm — actual meals</title>
+<style>body{background:#14131c;color:#ddd;font:15px system-ui;margin:24px}canvas{display:block;image-rendering:pixelated;background:#000;margin:12px 0}button,input{margin:8px}#detail{width:768px;height:256px}small{display:block;max-width:900px}</style>
+<h1>Actual meal: original / brace / settle</h1>
+<small>Frozen schema12 host 3147775; identical world, receipts and old frames across both comparisons. First actual sail intake onset at/after the care boundary is selected, not attributed to those crumbs. Position tracking is only a diagnostic crop; world positions and ordinary motion are untouched. Native net below, 8× crop detail. Playback loops cut; pause/slider can hold any frame.</small>
+<button id="play">Play at 1×</button><input id="frame" type="range" min="1770" max="2702" value="1802" style="width:550px"><span id="label"></span>
+<canvas id="net" width="768" height="128"></canvas><canvas id="detail" width="96" height="32"></canvas>
+<script src="data.js"></script><script>
+const D=window.STUDY,slider=document.querySelector('#frame'),label=document.querySelector('#label'),net=document.querySelector('#net').getContext('2d'),detail=document.querySelector('#detail').getContext('2d');
+const byTick=new Map(D.rows.filter(r=>r.slot===D.first.slot&&r.generation===D.first.generation).map(r=>[r.elapsed,r]));
+const images=new Map(); let running=false,start=0,initial=0,last=-1;
+function show(frame){const roots=[`${D.brace}/old`,`${D.brace}/new`,`${D.settle}/new`],r=byTick.get(Math.floor(frame/3));if(!r)return;const cells=[[1,1],[2,1],[3,1],[0,1],[1,0]],cell=cells[r.face],x=cell[0]*64+Math.floor(r.u)-16,y=cell[1]*64+Math.floor(r.v)-16;net.clearRect(0,0,768,128);detail.clearRect(0,0,96,32);roots.forEach((root,i)=>{let key=`${root}/frame_${String(frame).padStart(5,'0')}.png`,img=images.get(key);if(!img){img=new Image;images.set(key,img);img.src=key;img.onload=()=>{if(+slider.value===frame)show(frame)}}if(img.complete&&img.naturalWidth){net.drawImage(img,i*256,0);detail.drawImage(img,x,y,32,32,i*32,0,32,32)}});label.textContent=`elapsed ${(frame/60).toFixed(2)}s · ${r.slot}:${r.generation} · ${r.juvenile?'juvenile':'adult'} · fed ${r.fed}`;}
+function loop(now){if(running){let f=1770+(initial-1770+Math.floor((now-start)*.06))%933;slider.value=f;if(f!==last){show(f);last=f}}requestAnimationFrame(loop)}
+slider.value=D.first.elapsed*3+2;slider.oninput=()=>{running=false;document.querySelector('#play').textContent='Play at 1×';show(+slider.value)};document.querySelector('#play').onclick=e=>{running=!running;start=performance.now();initial=+slider.value;e.target.textContent=running?'Pause':'Play at 1×'};show(+slider.value);requestAnimationFrame(loop);
+</script>
