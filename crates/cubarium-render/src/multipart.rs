@@ -56,6 +56,11 @@ pub struct RigPart<'a> {
 /// query can never paint a pixel the rig's own query did not enumerate.
 pub const RIG_MARGIN: f64 = 0.5;
 
+/// How far a box-filter sample can sit from its destination pixel's centre, in chart pixels:
+/// half a pixel. Added to a minified rig's query radius so the outermost sample of the
+/// outermost pixel is still inside the query.
+pub const SUPERSAMPLE_REACH: f64 = 0.5;
+
 /// The query radius a rig needs: `max` over every part with a positive weight of
 /// `|offset| + sprite.extent()`, plus [`RIG_MARGIN`]; 0 for no parts. **Normative**, and a
 /// pure function of the parts, so a caller can check a rig's bound in a test rather than at
@@ -137,7 +142,46 @@ pub fn stamp_rig(
     opacity: f32,
     scratch: &mut Vec<PixelImage>,
 ) {
-    stamp_rig_query(canvas, root, heading, states, opacity, None, scratch);
+    stamp_rig_query(canvas, root, heading, states, opacity, 1.0, None, scratch);
+}
+
+/// [`stamp_rig`] with the **whole rig** scaled about the root: a juvenile is the same rig,
+/// every part at the same relative place, `scale` times smaller.
+///
+/// **Normative.** `scale` must be finite and positive — anything else is a rig
+/// configuration error that panics in every build, exactly like an illegal radius. Three
+/// things change against [`stamp_rig`] and nothing else:
+///
+/// * every sample's body coordinate is divided by `scale` before the parts are sampled
+///   (`b / scale`), so a part at offset `o` appears at `scale · o` from the root and its
+///   texels `scale` pixels apart — offsets, pivots, the lattice, the lunge and every
+///   attachment shrink together, and nothing detaches;
+/// * below scale 1 a destination pixel is **box-filtered**: with `n = ceil(1 / scale)`, its
+///   value is the mean of the `n × n` samples at chart offsets `((i + 0.5) / n − 0.5,
+///   (j + 0.5) / n − 0.5)` along the heading and its clockwise side, each sampled and
+///   depth-composited exactly as one pixel is, so a texel smaller than a pixel contributes
+///   its share of the pixel's area instead of being hit or missed by one point sample. The
+///   pixel over a 0.2-scale claw therefore carries about `0.2²` of the claw's light — present
+///   and geometrically honest, though far too faint to see on an LED;
+/// * the query radius is [`rig_radius`]` · scale`, plus [`SUPERSAMPLE_REACH`] when
+///   box-filtered (a sample sits up to half a pixel from its centre), validated against
+///   `MAX_LOCAL_RADIUS` after scaling.
+///
+/// `scale = 1` is [`stamp_rig`] bit for bit (`n = 1`, offset exactly zero). Above 1 the body
+/// is magnified by the plain bilinear sample and the caller's own radius bound must still
+/// hold. The root, heading, ownership and depth rules are those of [`stamp_rig`]. Every
+/// painted pixel centre lies within `scale · (r + 1) + 0.5` of the root when `r` bounds the
+/// painted texel centres, the `+ 0.5` only below scale 1.
+pub fn stamp_rig_scaled(
+    canvas: &mut Canvas,
+    root: SurfacePoint,
+    heading: Vec2,
+    states: &[(&[RigPart<'_>], f32)],
+    scale: f64,
+    opacity: f32,
+    scratch: &mut Vec<PixelImage>,
+) {
+    stamp_rig_query(canvas, root, heading, states, opacity, scale, None, scratch);
 }
 
 /// [`stamp_rig`] with an explicit query radius in place of [`rig_radius`]. Test support only:
@@ -154,18 +198,33 @@ pub fn stamp_rig_with_radius(
     radius: f64,
     scratch: &mut Vec<PixelImage>,
 ) {
-    stamp_rig_query(canvas, root, heading, states, opacity, Some(radius), scratch);
+    stamp_rig_query(
+        canvas,
+        root,
+        heading,
+        states,
+        opacity,
+        1.0,
+        Some(radius),
+        scratch,
+    );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn stamp_rig_query(
     canvas: &mut Canvas,
     root: SurfacePoint,
     heading: Vec2,
     states: &[(&[RigPart<'_>], f32)],
     opacity: f32,
+    scale: f64,
     override_radius: Option<f64>,
     scratch: &mut Vec<PixelImage>,
 ) {
+    assert!(
+        scale.is_finite() && scale > 0.0,
+        "rig scale {scale} is not finite and positive: a rig configuration error"
+    );
     let Some(h) = heading.normalized() else {
         return;
     };
@@ -177,7 +236,7 @@ fn stamp_rig_query(
         // Test support: `unfold_pixels` itself rejects an illegal radius, as documented.
         Some(radius) => radius,
         None => {
-            let radius = rig_radius(states);
+            let radius = rig_radius(states) * scale;
             assert!(
                 radius.is_finite() && radius <= MAX_LOCAL_RADIUS,
                 "rig radius {radius} is not finite and at most MAX_LOCAL_RADIUS \
@@ -191,20 +250,58 @@ fn stamp_rig_query(
     }
     let side = Vec2::new(-h.y, h.x);
     let origin = root.chart();
+    // Minification: below scale 1 a destination pixel covers `1 / scale` art texels per
+    // axis, so its value is the box average of `n × n` samples spread over the pixel
+    // (`n = ceil(1 / scale)`), never one point sample that can miss a whole texel. At
+    // scale 1 (and above) `n = 1` with a zero offset: the ordinary point sample, bit for bit.
+    let n = if scale < 1.0 {
+        (1.0 / scale).ceil() as usize
+    } else {
+        1
+    };
+    let radius = if n > 1 {
+        radius + SUPERSAMPLE_REACH
+    } else {
+        radius
+    };
+    assert!(
+        radius <= MAX_LOCAL_RADIUS,
+        "rig radius {radius} with its minification reach exceeds MAX_LOCAL_RADIUS"
+    );
+    let inv_samples = 1.0 / (n * n) as f32;
     unfold_pixels(root, radius, scratch);
     for pixel in scratch.iter() {
         let d = pixel.local - origin;
-        // The body coordinate of this destination pixel, shared by every part.
-        let b = Vec2::new(h.dot(d), side.dot(d));
         let mut body = [0.0f32; 4];
-        for (parts, weight) in states {
-            let weight = state_weight(*weight);
-            if weight <= 0.0 {
-                continue;
+        for i in 0..n {
+            for j in 0..n {
+                // The sample's offset inside the destination pixel, in chart pixels along
+                // the body axes; `(0, 0)` exactly when `n == 1`.
+                let d = if n == 1 {
+                    d
+                } else {
+                    let ox = (i as f64 + 0.5) / n as f64 - 0.5;
+                    let oy = (j as f64 + 0.5) / n as f64 - 0.5;
+                    d + h * ox + side * oy
+                };
+                // The body coordinate of this sample, shared by every part, in the rig's
+                // own (adult) units: a scaled rig reads its art `1 / scale` further out.
+                let b = Vec2::new(h.dot(d) / scale, side.dot(d) / scale);
+                for (parts, weight) in states {
+                    let weight = state_weight(*weight);
+                    if weight <= 0.0 {
+                        continue;
+                    }
+                    let sample = state_sample(parts, b);
+                    for c in 0..4 {
+                        body[c] += sample[c] * weight;
+                    }
+                }
             }
-            let sample = state_sample(parts, b);
-            for c in 0..4 {
-                body[c] += sample[c] * weight;
+        }
+        if n > 1 {
+            for c in &mut body {
+                *c *= inv_samples;
             }
         }
         let a = body[3] * opacity;
@@ -270,8 +367,8 @@ fn state_sample(parts: &[RigPart<'_>], b: Vec2) -> [f32; 4] {
 mod tests {
     use super::*;
     use crate::{Sprite, stamp_sprite};
-    use cube_proto::Face;
     use cubarium_surface::Face as SurfaceFace;
+    use cube_proto::Face;
 
     fn total_light(canvas: &Canvas) -> f64 {
         SurfaceFace::ALL
@@ -298,17 +395,40 @@ mod tests {
     #[test]
     fn the_rig_paints_a_filter_tail_the_legacy_extent_radius_clipped() {
         let sprite = one_texel();
-        let parts = [RigPart { sprite: &sprite, offset: Vec2::ZERO, layer: 0 }];
+        let parts = [RigPart {
+            sprite: &sprite,
+            offset: Vec2::ZERO,
+            layer: 0,
+        }];
         let root = cubarium_surface::SurfacePoint::new(Face::Front, 32.05, 32.05);
         let heading = Vec2::new(1.0, 0.0);
         let mut rig = Canvas::new();
         let mut legacy = Canvas::new();
-        stamp_rig(&mut rig, root, heading, &[(&parts, 1.0)], 1.0, &mut Vec::new());
-        stamp_sprite(&mut legacy, root, heading, &sprite, 1.0, 1.0, &mut Vec::new());
+        stamp_rig(
+            &mut rig,
+            root,
+            heading,
+            &[(&parts, 1.0)],
+            1.0,
+            &mut Vec::new(),
+        );
+        stamp_sprite(
+            &mut legacy,
+            root,
+            heading,
+            &sprite,
+            1.0,
+            1.0,
+            &mut Vec::new(),
+        );
         // Astra's fixture: the pixel's body coordinate is (5.45, 5.45), its surface distance
         // 7.70746 — past the legacy extent 7.57107, inside the rig's 8.07107 — and the
         // bilinear weight there is 0.05 · 0.05.
-        assert_eq!(legacy.get(Face::Front, 37, 37), [0.0; 3], "the legacy radius clipped it");
+        assert_eq!(
+            legacy.get(Face::Front, 37, 37),
+            [0.0; 3],
+            "the legacy radius clipped it"
+        );
         let tail = rig.get(Face::Front, 37, 37);
         for c in 0..3 {
             assert!(
@@ -342,7 +462,11 @@ mod tests {
     #[test]
     fn a_rotated_rig_conserves_its_light_across_a_seam_at_the_same_phase() {
         let sprite = one_texel();
-        let parts = [RigPart { sprite: &sprite, offset: Vec2::new(3.0, 0.0), layer: 0 }];
+        let parts = [RigPart {
+            sprite: &sprite,
+            offset: Vec2::new(3.0, 0.0),
+            layer: 0,
+        }];
         let heading = Vec2::new(1.0, 1.0);
         let light_at = |u: f64, v: f64| {
             let mut canvas = Canvas::new();
@@ -362,7 +486,10 @@ mod tests {
         assert!(centre > 0.5, "the fixture must carry real light");
         let seam_error = (seam - centre).abs() / centre;
         let phase_error = (other_phase - centre).abs() / centre;
-        assert!(seam_error < 1e-6, "the seam lost light: {seam_error} ({seam} vs {centre})");
+        assert!(
+            seam_error < 1e-6,
+            "the seam lost light: {seam_error} ({seam} vs {centre})"
+        );
         assert!(
             phase_error > seam_error,
             "a different sub-pixel phase should move more light than a seam does: \
@@ -376,7 +503,11 @@ mod tests {
     #[should_panic(expected = "rig radius")]
     fn a_non_finite_offset_panics_instead_of_drawing_part_of_the_rig() {
         let sprite = one_texel();
-        let parts = [RigPart { sprite: &sprite, offset: Vec2::new(f64::NAN, 0.0), layer: 0 }];
+        let parts = [RigPart {
+            sprite: &sprite,
+            offset: Vec2::new(f64::NAN, 0.0),
+            layer: 0,
+        }];
         assert!(rig_radius(&[(&parts, 1.0)]).is_nan());
         stamp_rig(
             &mut Canvas::new(),

@@ -26,7 +26,10 @@ mod trail;
 pub use body::{BodyShape, Lobe, stamp_body};
 pub use canvas::{Canvas, srgb_decode, srgb_encode};
 pub use field::draw_field;
-pub use multipart::{RIG_MARGIN, RigPart, rig_radius, stamp_rig, stamp_rig_with_radius};
+pub use multipart::{
+    RIG_MARGIN, RigPart, SUPERSAMPLE_REACH, rig_radius, stamp_rig, stamp_rig_scaled,
+    stamp_rig_with_radius,
+};
 pub use sprite::{
     Bend, Mask, Pose, Sprite, stamp_layers, stamp_layers_bent, stamp_layers_bent_with_radius,
     stamp_pose, stamp_sprite,
