@@ -28,7 +28,7 @@ export function verifyArm(a, ticks, opening) {
   for (const [key, index] of [['material', 0], ['corrected_energy', 1], ['independent_energy', 1], ['water', 2]]) {
     const peak = a.audit[key], limit = a.audit.fixed_limits[index];
     assert(Number.isFinite(limit) && limit > 0);
-    assert(Number.isFinite(peak.magnitude) && peak.magnitude >= 0 && peak.magnitude <= limit, `${key} exceeds limit`);
+    assert(Number.isFinite(peak.magnitude) && peak.magnitude >= 0 && peak.magnitude < limit, `${key} reaches/exceeds limit`);
     assert.equal(peak.first_crossing, null);
     assert.equal(peak.nonfinite_at, null);
   }
@@ -48,7 +48,8 @@ export function verifyArm(a, ticks, opening) {
     q.age_and_size_ready_reserve_gate_open_member_ticks, q.age_and_size_ready_energy_gate_open_member_ticks,
     q.age_and_size_ready_both_stock_gates_open_member_ticks];
   [members, mature, reserve, energy, both].forEach(safeCount);
-  assert(mature <= members && reserve <= mature && energy <= mature && both <= Math.min(reserve, energy), 'stock denominators');
+  assert(mature <= members && reserve <= mature && energy <= mature
+    && both <= Math.min(reserve, energy) && both >= Math.max(0, reserve + energy - mature), 'stock denominators');
   assert.equal(a.whole_recovery.length, 9);
 }
 
@@ -73,7 +74,9 @@ export function reduceEvents(rows, opening, closing) {
         out.paid_energy += e.energy_paid;
         if (e.outcome === 'OutOfReach') {
           assert(e.evidence?.measure && e.evidence.geometry, 'missing out-of-reach evidence');
-          count(out, e.evidence.measure.body.x < e.evidence.geometry.capture_offset_body.x
+          const bodyX = e.evidence.measure.body?.x, clawX = e.evidence.geometry.capture_offset_body?.x;
+          assert(Number.isFinite(bodyX) && Number.isFinite(clawX), 'invalid out-of-reach axial coordinates');
+          count(out, bodyX < clawX
             ? 'near_out_of_reach' : 'far_out_of_reach');
         }
         break;

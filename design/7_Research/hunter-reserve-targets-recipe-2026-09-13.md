@@ -160,3 +160,11 @@ artifacts using the helper checks, including CRC/SHA/full-state hashes, events,
 coverage and paired opening recipes. The full-report command correctly refused
 the still-incomplete cohort (global summary absent); no completed aggregate or
 candidate acceptance is inferred from those partial checks.
+
+Astra's bounded reduction review found three consistency gaps, now corrected:
+the audit peak must be strictly below its limit (equality fails); joint stock
+counts must also meet the set-intersection lower bound `max(0, R + E - mature)`;
+and missing/nonfinite axial contact coordinates cannot be classified as a far
+miss. The reduction target now passes nine tests, with all six preparation tests
+still passing. These changes affect only the read-only report, not the frozen
+simulations or their results.

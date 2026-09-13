@@ -48,6 +48,21 @@ test('zero mature observations are null, not zero-percent stock success', () => 
   assert.equal(metrics(b).paid_energy_per_capture,null);
 });
 
+test('audit limits are strict and joint stock counts obey the intersection lower bound', () => {
+  const a=arm();
+  a.audit.material.magnitude=a.audit.fixed_limits[0];
+  assert.throws(()=>verifyArm(a,144000,144000),/reaches\/exceeds/);
+  a.audit.material.magnitude=1e-12;
+  const q=a.reproductive_opportunity;
+  q.member_ticks=100;q.age_and_size_ready_member_ticks=100;
+  q.age_and_size_ready_reserve_gate_open_member_ticks=80;
+  q.age_and_size_ready_energy_gate_open_member_ticks=70;
+  q.age_and_size_ready_both_stock_gates_open_member_ticks=49;
+  assert.throws(()=>verifyArm(a,144000,144000),/stock denominators/);
+  q.age_and_size_ready_both_stock_gates_open_member_ticks=50;
+  verifyArm(a,144000,144000);
+});
+
 test('recipe pair permits only the two reserve fields, not hidden costs or imports', () => {
   const a={profile_recipe:'baseline',profile:{seek_reserve_fraction:.35,perch_reserve_fraction:.65,cost:1},receipt:{material:4}};
   const b={...structuredClone(a),profile_recipe:'reserve-targets-v1'};
@@ -77,6 +92,18 @@ test('funding, births and maturity stay separate from unrelated prey lineage dep
   assert.equal(r.reproduction.funded,1);assert.equal(r.offspring,1);assert.equal(r.observed_adult_descendants,1);
   assert.throws(()=>reduceEvents([record('offspring')],144000,288000),/offspring/);
   assert.throws(()=>reduceEvents([record('capture',{material:1,energy:2})],144000,288000),/capture/);
+});
+
+test('missing or nonfinite axial contact coordinates are not counted as far misses', () => {
+  for (const bad of [undefined,null,NaN,Infinity,'10']) {
+    for (const side of ['body','claw']) {
+      const e=record('attempt',{outcome:'OutOfReach',energy_paid:.08,
+        evidence:{measure:{body:{x:10}},geometry:{capture_offset_body:{x:13}}}});
+      if(side==='body')e.event.evidence.measure.body.x=bad;
+      else e.event.evidence.geometry.capture_offset_body.x=bad;
+      assert.throws(()=>reduceEvents([e],144000,288000),/axial coordinates/);
+    }
+  }
 });
 
 test('event reduction refuses malformed time, unknown variants and nonfinite quantities', () => {
