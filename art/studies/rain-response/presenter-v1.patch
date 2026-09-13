@@ -1,0 +1,208 @@
+--- a/crates/cubarium/src/art_present.rs
++++ b/crates/cubarium/src/art_present.rs
+@@ -1064,6 +1064,115 @@
+     }
+ }
+ 
++// --- Rain response (study prototype, art/studies/rain-response) ------------------------
++//
++// A plant standing in rain quivers: falling drops knock its stalk and leaves sideways a
++// fraction of a pixel, irregularly, and the quiver dies away when the rain stops. This is
++// a *presentation* of the world's published per-cell rain rate (`RenderView::rain`, what
++// actually falls this tick, natural weather and an applied shower alike), never of a
++// requested dose, and it changes no field, no growth pacing and no creature. It rides the
++// same rooted horizontal `Bend` the breeze uses, so the root row stays bit-identical,
++// joins hold, and the family's measured nine-pixel headroom bounds wind and rain together.
++
++/// Per-family desired rain quiver at full rain, in tile pixels of tip travel. Families not
++/// listed do not answer rain. Small side plants only in this first candidate: the two
++/// canopy species turn rather than bend and tall columns are excluded so a vine can never
++/// slide against its trunk; `rootveil` is a crust and `glowcap` a squat shelf, both kept
++/// still; `tendrilfan`'s own art leaves no headroom beyond its wind (0.31 px budget), so
++/// it is not listed — listing it would be a request `rain_tip` clamps to 0.
++pub const RAIN_RESPONSE: [(&str, f64); 2] = [("lanternstalk", 0.5), ("reedspire", 0.55)];
++
++/// The published rain rate (d/s) at and above which a slot's quiver is at full level: a
++/// Standard shower's centre cells and a moderate natural shower both reach it.
++pub const RAIN_RESPONSE_RATE: f64 = 0.2;
++/// Seconds for the quiver level to rise toward its target once rain arrives (first-order),
++/// and to fall once it stops: quick to answer, slow to settle, never a cut.
++pub const RAIN_ATTACK_SECONDS: f64 = 0.3;
++pub const RAIN_RELEASE_SECONDS: f64 = 0.8;
++/// Below this level, with no rain, the level is exactly 0, so a settled slot takes the
++/// renderer's identity path and its image is the windless one bit for bit.
++pub const RAIN_SETTLE_FLOOR: f32 = 0.02;
++/// The two non-harmonic patter frequencies (Hz) and their weights: an irregular quiver
++/// rather than a metronome, with a per-slot phase so a patch does not move as one object.
++pub const RAIN_PATTER_HZ: [f64; 2] = [2.7, 4.3];
++pub const RAIN_PATTER_WEIGHT: [f64; 2] = [0.62, 0.38];
++
++/// The rain quiver a family asks for, in tile pixels; 0 for a family that does not answer.
++pub fn rain_response(name: &str) -> f64 {
++    RAIN_RESPONSE.iter().find(|(n, _)| *n == name).map_or(0.0, |(_, px)| *px)
++}
++
++/// The rain tip a family is admitted, so that wind and rain together never exceed the
++/// family's measured budget for the windiest slot: `min(desired, budget / (1 +
++/// WIND_SLOT_VARIATION) − effective wind tip)`, never negative.
++pub fn rain_tip(name: &str, budget: f64) -> f64 {
++    let desired = rain_response(name);
++    if desired <= 0.0 {
++        return 0.0;
++    }
++    let room = budget / (1.0 + WIND_SLOT_VARIATION) - effective_tip(wind_response(name).tip_px, budget);
++    desired.min(room).max(0.0)
++}
++
++/// The quiver level a published rain rate asks for: `clamp(rate / RAIN_RESPONSE_RATE, 0, 1)`;
++/// a non-finite or negative rate is 0.
++pub fn rain_level_target(rate: f32) -> f32 {
++    if !(rate.is_finite() && rate > 0.0) {
++        return 0.0;
++    }
++    (f64::from(rate) / RAIN_RESPONSE_RATE).min(1.0) as f32
++}
++
++/// One observed tick of a slot's quiver level: first-order toward `target` with
++/// [`RAIN_ATTACK_SECONDS`] when rising and [`RAIN_RELEASE_SECONDS`] when falling over `dt`
++/// seconds, and exactly 0 once no rain falls and the level is under [`RAIN_SETTLE_FLOOR`].
++/// No time (`dt` ≤ 0: a held or repeated observation) moves nothing, so a duplicate
++/// observation is idempotent; a non-positive time constant is an immediate snap.
++pub fn advance_rain_level(level: f32, target: f32, dt: f64) -> f32 {
++    let tau = if target > level { RAIN_ATTACK_SECONDS } else { RAIN_RELEASE_SECONDS };
++    let k = if !(dt > 0.0) {
++        0.0
++    } else if tau > 0.0 {
++        1.0 - (-dt / tau).exp()
++    } else {
++        1.0
++    };
++    let next = level + (target - level) * k as f32;
++    if target <= 0.0 && next < RAIN_SETTLE_FLOOR { 0.0 } else { next.clamp(0.0, 1.0) }
++}
++
++/// The irregular patter, in `[−1, 1]`, at presentation `seconds` for a slot whose phase is
++/// `phase` (radians): the two weighted sines of [`RAIN_PATTER_HZ`]. A pure function of time,
++/// so a frame is repeatable at any cadence and nothing drifts between frames.
++pub fn rain_patter(seconds: f64, phase: f64) -> f64 {
++    let t = std::f64::consts::TAU * seconds;
++    RAIN_PATTER_WEIGHT[0] * (RAIN_PATTER_HZ[0] * t + phase).sin()
++        + RAIN_PATTER_WEIGHT[1] * (RAIN_PATTER_HZ[1] * t + 2.1 * phase + 0.7).sin()
++}
++
++/// A slot's patter phase: hashed from its cell like the sway phase, in `[0, 2π)`.
++pub fn rain_phase_of(slot: &Slot) -> f64 {
++    plant_phase_of(cubarium_surface::cell_of(&slot.at), std::f64::consts::TAU)
++}
++
++/// [`slot_wind`] with the rain quiver added: at quiver `level` in `[0, 1]` a side-face
++/// plant's bend amplitude gains `rain_tip · slot.wind · level · rain_patter(seconds,
++/// phase)`, on the same rooted shape; a radial top-face plant and a family with no rain
++/// response are exactly [`slot_wind`]. At level 0 this is [`slot_wind`] bit for bit.
++pub fn slot_wind_rain(slot: &Slot, name: &str, budget: f64, seconds: f64, level: f32) -> (Bend, Vec2) {
++    let (bend, heading) = slot_wind(slot, name, budget, seconds);
++    if !(level > 0.0) {
++        return (bend, heading);
++    }
++    let tip = rain_tip(name, budget);
++    if tip <= 0.0 || (slot.at.face == Face::Top && wind_response(name).spin_deg > 0.0) {
++        return (bend, heading);
++    }
++    let quiver = tip * slot.wind * f64::from(level) * rain_patter(seconds, rain_phase_of(slot));
++    let shaped = if bend.length > 0.0 { bend } else { plant_bend(0.0, Vec2::ZERO, heading) };
++    (Bend { amplitude: shaped.amplitude + quiver, ..shaped }, heading)
++}
++
+ /// The one bend amplitude a whole tall column takes at a presentation instant, in tile pixels.
+ ///
+ /// **Normative**: `effective_tip(response.tip_px, budget) · `[`tall_wind_of`]` ·
+@@ -2333,6 +2442,14 @@
+     /// draws [`growth_between`] the two: growth is then continuous at the render rate, not
+     /// stepped at 20 Hz. Equal to `growth` after a snap.
+     growth_prev: Vec<Growth>,
++    /// Each slot's rain quiver level ([`advance_rain_level`]) as the last `observe` left
++    /// it, and as the observe before left it; a frame at `f` draws their mix. Study
++    /// prototype (art/studies/rain-response).
++    rain_level: Vec<f32>,
++    rain_level_prev: Vec<f32>,
++    /// Whether the rain quiver is drawn; off, plants are drawn exactly as before (the
++    /// "before" half of a paired study capture). Observation tracks the level either way.
++    rain_response_on: bool,
+     /// The water field, seam-filtered per pixel when drawn.
+     water: ScalarField,
+     /// The pack's tall species resolved once.
+@@ -2410,6 +2527,9 @@
+             bands,
+             growth: vec![Growth::snapped(None, false); CELL_COUNT],
+             growth_prev: vec![Growth::snapped(None, false); CELL_COUNT],
++            rain_level: vec![0.0; CELL_COUNT],
++            rain_level_prev: vec![0.0; CELL_COUNT],
++            rain_response_on: true,
+             bodies: std::collections::HashMap::new(),
+             budgets,
+             last_tick: None,
+@@ -2426,6 +2546,19 @@
+     /// bodies use their original shared clip clock: the "before" half of a paired capture.
+     /// Both halves retain an outgoing prey's body fade through capture. Observation still
+     /// tracks meals, so the switch can be compared frame for frame.
++    /// This presenter with the rain quiver switched off: plants are drawn exactly as they
++    /// were before it (the "before" half of the rain-response study's paired capture).
++    pub fn without_rain_response(mut self) -> ArtPresenter {
++        self.rain_response_on = false;
++        self
++    }
++
++    /// A cell's rain quiver level as the previous and the last `observe` left it.
++    pub fn rain_level_of(&self, cell: CellId) -> (f32, f32) {
++        let i = cell.index();
++        (self.rain_level_prev[i], self.rain_level[i])
++    }
++
+     pub fn without_meal_onset(mut self) -> ArtPresenter {
+         self.meal_onset = false;
+         self
+@@ -2703,6 +2836,19 @@
+             if snap {
+                 self.growth_prev[index] = self.growth[index];
+             }
++            // The rain quiver level: toward what actually falls on this cell this tick.
++            let rain_target = rain_level_target(view.rain.get(index).copied().unwrap_or(0.0));
++            if new_tick {
++                self.rain_level_prev[index] = self.rain_level[index];
++            }
++            self.rain_level[index] = if snap {
++                rain_target
++            } else {
++                advance_rain_level(self.rain_level[index], rain_target, dt)
++            };
++            if snap {
++                self.rain_level_prev[index] = self.rain_level[index];
++            }
+         }
+         for (i, column) in self.columns.iter().enumerate() {
+             let t_col = column_density(view, column.face, column.cx);
+@@ -2938,6 +3084,9 @@
+         let species = &self.species;
+         let budgets = &self.budgets;
+         let scratch = &mut self.scratch;
++        let (rain_prev, rain_cur) = (&self.rain_level_prev, &self.rain_level);
++        let rain_on = self.rain_response_on;
++        let ff = if f.is_finite() { f.clamp(0.0, 1.0) as f32 } else { 0.0 };
+         for (index, cell) in CellId::all().enumerate() {
+             // The growth this frame shows: between the last two observed states, at `f`.
+             let growth = growth_between(self.growth_prev[index], self.growth[index], f);
+@@ -2964,8 +3113,13 @@
+             // The shared breeze, once for this slot this frame: a side-face plant bends
+             // along its own tile's horizontal axis, a radial top-face plant turns in place,
+             // and a species with no response takes neither.
++            let level = if rain_on {
++                rain_prev[index] + (rain_cur[index] - rain_prev[index]) * ff
++            } else {
++                0.0
++            };
+             let (bend, heading) =
+-                slot_wind(slot, &plant.name, budget_in(budgets, &plant.name), seconds);
++                slot_wind_rain(slot, &plant.name, budget_in(budgets, &plant.name), seconds, level);
+             if growth.from == growth.to {
+                 // Idle: one stage, whole, with the fruit accent blended in where it holds.
+                 let stage = growth.to.expect("an idle bare slot was skipped above");
