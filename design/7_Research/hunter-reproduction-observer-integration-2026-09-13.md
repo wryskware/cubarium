@@ -42,3 +42,20 @@ uses its earlier frozen executable, not this new observer. It will not acquire
 new evidence retroactively. The [opportunity replay](hunter-opportunity-probe-2026-09-13.md)
 independently matches one arm's closing full-state hash but is not a substitute
 for the full paired measurement. No claim of balance or live-readiness is made.
+
+## Subsequent independent checks
+
+Astra's [adversarial review](astra-reproduction-observer-review-2026-09-13.md),
+committed `bf3407b`, reproduced seven observer validation gaps plus a membership
+gap already caught by the enclosing harness. Root resumed the native Opus worker
+on those concrete fixtures; the false completion flag remains appropriate.
+
+Root independently ran `cargo test --workspace` after Fable's adapter delivery.
+The sandbox invocation failed because 22 web tests could not bind ephemeral
+loopback sockets (`Operation not permitted`), not because of test assertions.
+Repeating the same command with host loopback access completed with terminal
+exit **0: 1005 passed, 0 failed, 16 ignored**. Log:
+`/tmp/cubarium-post-adapter-workspace-host-tests.log`. This was the shared tree
+around `a6a3b89`/`bf3407b`, before the new hardening changes. It does not erase the
+independently reproduced gaps absent from that suite. Explicit example tests
+remain separately reported above.
