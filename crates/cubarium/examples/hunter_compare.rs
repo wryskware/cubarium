@@ -8,6 +8,8 @@ mod audit;
 mod recovery;
 #[path = "hunter_compare/spatial.rs"]
 mod spatial;
+#[path = "hunter_compare/eligibility.rs"]
+mod eligibility;
 
 use anyhow::{Context, Result, anyhow, ensure};
 use clap::Parser;
@@ -185,6 +187,7 @@ struct Arm {
     last_complete_observer_tick: u64,
     whole_recovery: recovery::WholeRecovery,
     capture_audit: spatial::CaptureAudit,
+    eligibility: eligibility::Eligibility,
     events: BufWriter<File>,
     census: BufWriter<File>,
 }
@@ -354,6 +357,7 @@ impl Arm {
             whole_recovery: recovery::WholeRecovery::new(opening.tick, &prey_counts(opening))
                 .map_err(|e| anyhow!(e))?,
             capture_audit,
+            eligibility: eligibility::Eligibility::default(),
             events: stream(&dir.join("events.jsonl"))?,
             census: stream(&dir.join("census.jsonl"))?,
         })
@@ -519,6 +523,7 @@ impl Arm {
             }
         }
         self.escrows = current_escrows;
+        self.eligibility.observe(&self.world.state);
         let hunters = self.world.hunters().members.len();
         let prey = self.live.len() - hunters;
         let prey_census = prey_counts(&self.world.state);
@@ -589,7 +594,8 @@ impl Arm {
                 &json!({"tick":self.world.tick(),"elapsed":elapsed,
                 "prey":prey,"prey_by_form":&prey_census[1..],"hunters":hunters,"adults":adults,
                 "juveniles":hunters-adults,"inventory":audit::Inventory::read(&self.world.state),
-                "hunter_state":self.world.hunters(),"audit":self.audit.report}),
+                "hunter_state":self.world.hunters(),"hunter_stocks":eligibility::members(&self.world.state),
+                "audit":self.audit.report}),
             )?;
         }
         self.last_complete_observer_tick = self.world.tick();
@@ -622,6 +628,7 @@ impl Arm {
             "whole_recovery":self.whole_recovery.summary(reason.as_deref().unwrap_or("planned_horizon")),
             "audit":self.audit.report,"prey_min":self.prey_min,"prey_tick_integral":self.prey_sum,
             "adult_definition":"structure + core TOLERANCE >= decoded structure_adult",
+            "reproductive_opportunity":self.eligibility.summary(),
             "adult_occupancy_ticks_0_1_2_over2":self.adult_bins,"adult_max":self.adults_max,
             "longest_over_two_ticks":self.over_two_longest,"zero_hunter_ticks":self.zero_hunter_ticks,
             "captures":self.captures,"offspring":self.offspring,"founder_extinction_tick":self.founder_extinction,
