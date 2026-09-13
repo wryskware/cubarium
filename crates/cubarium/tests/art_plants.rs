@@ -18,7 +18,7 @@ use cubarium::art_present::{
     stalk_heading, up_of, column_density, ground_pose, ground_opacity, ground_phase_of,
     ground_points, ground_weight, tall_anchor, tall_columns, tall_heading,
     tall_phase_of, tall_target, algae_water_color, water_brightness, water_coverage, water_phase,
-    TALL_PLANTS, VINE_PLANT, present_seconds, tall_grown_px, TALL_FIRST_JOIN, TALL_JOIN,
+    TALL_PLANTS, VINE_PLANT, present_seconds, tall_grown_px, trunk_strip, TALL_FIRST_JOIN,
     TALL_MAX_SEGMENTS, TALL_OPACITY, TALL_VINE_FLOOR, TALL_VINE_TOP, TILE_ROWS,
     plant_bend_budget, slot_wind, tall_amplitude, tall_bend_base, tall_bend_budget, wind_strength,
     WIND_QUIET_TICK,
@@ -268,9 +268,11 @@ fn stamp_tall(canvas: &mut Canvas, v: &RenderView, pack: &ArtPack) {
         if let Some(base) = &plant.base {
             stamp(base, 0, Mask::None);
         }
+        let (strip_floor, strip_top) = trunk_strip(plant);
         for i in 1..=n {
-            let floor = if i == 1 { TALL_FIRST_JOIN } else { TALL_JOIN };
-            stamp(&plant.trunk, i, Mask::Strip { floor, reveal: local(i).min(TILE_ROWS) });
+            let floor = if i == 1 { TALL_FIRST_JOIN } else { strip_floor };
+            let top = if i == TALL_MAX_SEGMENTS { TILE_ROWS } else { strip_top };
+            stamp(&plant.trunk, i, Mask::Strip { floor, reveal: local(i).min(top) });
         }
         if let Some(cap) = &plant.cap {
             stamp(cap, n + 1, Mask::None);

@@ -830,9 +830,22 @@ mod tests {
             }
             for frame in 0..art.plant_frames() {
                 let x0 = frame * 16;
-                // A trunk segment is periodic in y with period 4, so any two segments
-                // stacked a whole number of cells apart draw identical overlapping pixels.
-                for y in 0..12 {
+                // A trunk segment is periodic in y with period 4 over rows 1..=14, so any
+                // two segments stacked a whole number of cells apart draw identical
+                // overlapping pixels. Rows 0 and 15 are never drawn by a trunk strip
+                // (`art_present::TALL_STRIP_FLOOR`), so a family may leave them unpainted
+                // to earn wind headroom; if painted they must carry the pattern too.
+                for y in [0usize, 15] {
+                    for x in 0..16 {
+                        let end = pixel(&rgba, width, x0 + x, trunk_row * 16 + y);
+                        let inner = if y == 0 { y + 4 } else { y - 4 };
+                        assert!(
+                            end[3] == 0 || end == pixel(&rgba, width, x0 + x, trunk_row * 16 + inner),
+                            "{name} trunk frame {frame} row {y} is neither empty nor the pattern at ({x},{y})"
+                        );
+                    }
+                }
+                for y in 1..11 {
                     for x in 0..16 {
                         assert_eq!(
                             pixel(&rgba, width, x0 + x, trunk_row * 16 + y),

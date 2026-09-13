@@ -21,13 +21,14 @@ use cubarium::art::{ArtPack, Band, Clip, TallPlant};
 use cubarium::art_present::{
     ArtPresenter, Growth, MOTIF_OPACITY, PLANT_BEND_LENGTH, PLANT_BEND_ROOT, SOIL_SCALE,
     TALL_BEND_LENGTH, TALL_BEND_ROOT, TALL_FIRST_JOIN, TALL_JOIN, TALL_MAX_SEGMENTS, TALL_OPACITY,
-    TALL_PLANTS, TALL_VINE_FLOOR, TALL_VINE_TOP, TILE_ROWS, TallColumn, VINE_PLANT,
+    TALL_PLANTS, TALL_STRIP_FLOOR, TALL_STRIP_TOP, TALL_VINE_FLOOR, TALL_VINE_TOP, TILE_ROWS,
+    TallColumn, VINE_PLANT,
     WIND_CHART_MAX, WIND_FALL, WIND_FLUTTER, WIND_FLUTTER_SECONDS, WIND_HOLD, WIND_PEAK_SECONDS,
     WIND_PEAK_VARY, WIND_PERIOD, WIND_QUIET_SECONDS, WIND_RISE, WIND_SLOT_VARIATION,
-    WIND_TRAVEL_SECONDS, band_of, canopy_heading, effective_tip, placement_of, plant_bend,
+    WIND_QUIET_TICK, WIND_TRAVEL_SECONDS, band_of, canopy_heading, effective_tip, placement_of, plant_bend,
     plant_bend_budget, plant_cap, plant_phase_of, present_seconds, slot_of, slot_wind,
     species_of, tall_amplitude, tall_anchor_at, tall_bend_base, tall_bend_budget, tall_columns,
-    tall_grown_px, tall_heading, tall_wind_of, wind_at, wind_chart, wind_phase,
+    tall_grown_px, tall_heading, tall_wind_of, trunk_strip, wind_at, wind_chart, wind_phase,
     wind_response, wind_strength,
 };
 use cubarium::clock::DT;
@@ -753,7 +754,8 @@ fn every_shipped_plant_and_column_frame_draws_completely_at_its_own_budget() {
 /// exactly **once**: a gap reads as a dark row, a doubled row as a bright one, and a
 /// half-tile registration error as the wrong stripe colour. Built by hand from the documented
 /// geometry — the base drawn whole, trunk tile `i` owning `Strip { floor: TALL_FIRST_JOIN or
-/// TALL_JOIN, reveal: min(16, grown − (4i − 8)) }`, the cap gliding at the fractional index
+/// TALL_STRIP_FLOOR, reveal: min(TALL_STRIP_TOP, grown − (4i − 8)) }`, the cap gliding at the
+/// fractional index
 /// `height + 1` — and stamped with one shared amplitude and [`tall_bend_base`] per tile.
 ///
 /// The rows are checked at fractional heights and at both wind extrema, which is where a
@@ -976,9 +978,11 @@ fn draw_striped_column(
         );
     };
     part(&plant.base.as_ref().unwrap().frames[0], 0.0, Mask::None);
+    let (strip_floor, strip_top) = trunk_strip(plant);
     for i in 1..=(height.ceil() as u8) {
-        let floor = if i == 1 { TALL_FIRST_JOIN } else { TALL_JOIN };
-        let reveal = TILE_ROWS.min(grown - tall_bend_base(f64::from(i)));
+        let floor = if i == 1 { TALL_FIRST_JOIN } else { strip_floor };
+        let top = if i == TALL_MAX_SEGMENTS { TILE_ROWS } else { strip_top };
+        let reveal = top.min(grown - tall_bend_base(f64::from(i)));
         if reveal <= floor {
             continue;
         }
@@ -1485,6 +1489,263 @@ fn frame_image(sprite: &Sprite) -> Canvas {
 /// [`PLANT_BEND_ROOT`] and saturates at [`PLANT_BEND_ROOT`]` + `[`PLANT_BEND_LENGTH`], and the
 /// amplitude is the breeze projected onto the tile's own horizontal axis. A plant turned away
 /// from the wind answers less than its neighbour; one facing across it does not move at all.
+// ---------------------------------------------------------------------------
+// trunk strips: the end rows a tile never owns (the spiretree's earned wind room)
+// ---------------------------------------------------------------------------
+
+/// Paint the given rows of every trunk frame of a tall plant solid magenta, in place.
+fn make_end_rows_loud(plant: &mut TallPlant, rows: &[usize]) {
+    for frame in &mut plant.trunk.frames {
+        let (w, h) = (frame.width(), frame.height());
+        let mut pixels: Vec<[f32; 4]> = (0..h as i32)
+            .flat_map(|y| (0..w as i32).map(move |x| (x, y)))
+            .map(|(x, y)| frame.texel(x, y))
+            .collect();
+        // Only the trunk's own columns (those its pattern paints), so the loud tile keeps
+        // the footprint the loader admits.
+        let columns: Vec<usize> = (0..w).filter(|&x| (0..h).any(|y| pixels[y * w + x][3] > 0.0)).collect();
+        for &row in rows {
+            for &x in &columns {
+                pixels[row * w + x] = [1.0, 0.0, 1.0, 1.0];
+            }
+        }
+        *frame = Sprite::from_premultiplied(w, h, frame.pivot(), pixels).expect("a loud trunk");
+    }
+}
+
+/// One real column hand-built from the documented geometry with an explicit strip rule:
+/// base whole, trunk strips `floor2..top(i)` (the first segment from `TALL_FIRST_JOIN`), the
+/// cap at the fractional index, one shared amplitude.
+fn build_column(
+    plant: &TallPlant,
+    column: &TallColumn,
+    height: f64,
+    amplitude: f64,
+    floor2: f64,
+    top: &dyn Fn(u8) -> f64,
+) -> Canvas {
+    let mut canvas = Canvas::new();
+    let heading = tall_heading(column.face, column.cx);
+    let grown = tall_grown_px(height);
+    let mut part = |sprite: &Sprite, i: f64, mask: Mask| {
+        stamp(
+            &mut canvas,
+            sprite,
+            tall_anchor_at(column.face, column.cx, i),
+            heading,
+            TALL_OPACITY,
+            mask,
+            Bend { amplitude, base: tall_bend_base(i), root: TALL_BEND_ROOT, length: TALL_BEND_LENGTH },
+        );
+    };
+    part(&plant.base.as_ref().unwrap().frames[0], 0.0, Mask::None);
+    for i in 1..=TALL_MAX_SEGMENTS {
+        let floor = if i == 1 { TALL_FIRST_JOIN } else { floor2 };
+        let reveal = top(i).min(grown - tall_bend_base(f64::from(i)));
+        if reveal <= floor {
+            break;
+        }
+        part(&plant.trunk.frames[0], f64::from(i), Mask::Strip { floor, reveal });
+    }
+    part(&plant.cap.as_ref().unwrap().frames[0], height + 1.0, Mask::None);
+    canvas
+}
+
+/// A trunk tile's row 15 is **never drawn** for any family, at any height of a column: a
+/// pack whose trunk tiles carry row 15 in solid magenta draws every calm column identically
+/// to the shipped pack all the way up from bare ground to the rim. And on the shifted
+/// strips a tile's row 0 is drawn only by the last possible segment: the spiretree column
+/// hand-built on those strips (the art-derived rule cannot be forced through the presenter,
+/// because painting row 0 is exactly what opts a family *out*) with its trunk's row 0 in
+/// magenta is the shipped column, bit for bit and under a live bend, until the ninth segment
+/// stands — where the loud row shows under the cap (non-vacuity). That is what lets the
+/// spiretree leave those rows unpainted to earn wind room, with its dome over the top.
+#[test]
+fn a_trunk_tiles_end_rows_are_never_drawn_below_the_top_segment() {
+    // Row 15, through the presenter, every family, growing from bare ground.
+    let mut loud_bottom = pack();
+    for plant in &mut loud_bottom.tall {
+        make_end_rows_loud(plant, &[15]);
+    }
+    for (a, b) in loud_bottom.tall.iter().zip(&pack().tall) {
+        assert!(
+            max_diff(&frame_image(&a.trunk.frames[0]), &frame_image(&b.trunk.frames[0])) > 0.5,
+            "{}: the loud row changed nothing",
+            a.name
+        );
+    }
+    let mut shipped = ArtPresenter::new(pack());
+    let mut bottom = ArtPresenter::new(loud_bottom);
+    let first = WIND_QUIET_TICK;
+    shipped.observe(&bare_view(first));
+    bottom.observe(&bare_view(first));
+    let mut compared = 0;
+    for tick in first + 1..=first + 720 {
+        let v = rich_view(tick);
+        shipped.observe(&v);
+        bottom.observe(&v);
+        if tick % 5 != 0 {
+            continue;
+        }
+        for f in [0.0, 0.5] {
+            // Calm at every column: the shared packet is delayed at each root, so ask each
+            // column's own amplitude (any budget: zero wind is zero whatever the room).
+            let seconds = present_seconds(tick, f);
+            if tall_columns().iter().any(|c| tall_amplitude(c, 1.0, seconds) != 0.0) {
+                continue;
+            }
+            let a = draw(&mut shipped, &v, f);
+            let b = draw(&mut bottom, &v, f);
+            assert_same_canvas(&a, &b, &format!("tick {tick} f {f}: a trunk row 15 was drawn"));
+            compared += 1;
+        }
+    }
+    assert!(compared > 100, "only {compared} calm frames were compared");
+    for i in 0..tall_columns().len() {
+        assert!(shipped.tall_growth_of(i).height >= f64::from(TALL_MAX_SEGMENTS) - 1e-9, "column {i} is not full");
+    }
+
+    // Row 0, hand-built on the shifted strips, the spiretree with and without a loud row 0.
+    let art = pack();
+    let spire = art.tall_plant("spiretree").expect("spiretree");
+    let mut loud = pack();
+    let loud_spire = loud.tall.iter_mut().find(|p| p.name == "spiretree").unwrap();
+    make_end_rows_loud(loud_spire, &[0]);
+    let column = tall_columns().into_iter().find(|c| !c.vine && TALL_PLANTS[c.pick] == "spiretree").expect("a bare spiretree column");
+    let top = |i: u8| if i == TALL_MAX_SEGMENTS { TILE_ROWS } else { TALL_STRIP_TOP };
+    let mut below = 0;
+    for height in [0.5, 1.0, 1.3, 2.75, 4.5, 6.1, 7.9] {
+        for amplitude in [0.0, 0.9, -0.9] {
+            let a = build_column(spire, &column, height, amplitude, TALL_STRIP_FLOOR, &top);
+            let b = build_column(loud_spire, &column, height, amplitude, TALL_STRIP_FLOOR, &top);
+            assert_same_canvas(&a, &b, &format!("height {height}, amplitude {amplitude}: a trunk row 0 was drawn below the top"));
+            below += 1;
+        }
+    }
+    let a = build_column(spire, &column, 9.0, 0.0, TALL_STRIP_FLOOR, &top);
+    let b = build_column(loud_spire, &column, 9.0, 0.0, TALL_STRIP_FLOOR, &top);
+    assert!(!differing(&a, &b).is_empty(), "the ninth segment's row 0 is never drawn");
+    println!("  {compared} calm frames: row 15 never drawn; row 0 hidden over {below} hand-built columns below the top, shown by the ninth segment");
+}
+
+/// The shifted strips are a per-family opt-in read from the art: a trunk that paints its
+/// tile row 0 (glasscane, the vine, the synthetic stripes) keeps the original
+/// `TALL_JOIN..TILE_ROWS` strips, so its image is untouched growth and all; one that leaves
+/// row 0 clear (the spiretree) is stacked on `TALL_STRIP_FLOOR..TALL_STRIP_TOP`. And the
+/// shifted strips still composite every row of a column **exactly once**: the striped
+/// synthetic column with its trunk's rows 0 and 15 cleared carries one stamp of green in
+/// every interior row, the stripe the global height asks for, at fractional heights and
+/// both wind extrema — the same check the original strips pass.
+#[test]
+fn the_shifted_strips_are_opted_into_by_the_art_and_still_composite_each_row_once() {
+    let art = pack();
+    assert_eq!(trunk_strip(art.tall_plant("glasscane").unwrap()), (TALL_JOIN, TILE_ROWS));
+    assert_eq!(trunk_strip(art.tall_plant(VINE_PLANT).unwrap()), (TALL_JOIN, TILE_ROWS));
+    assert_eq!(trunk_strip(art.tall_plant("spiretree").unwrap()), (TALL_STRIP_FLOOR, TALL_STRIP_TOP));
+    assert_eq!((TALL_STRIP_FLOOR, TALL_STRIP_TOP), (TALL_JOIN - 1.0, TILE_ROWS - 1.0));
+    assert_eq!(trunk_strip(&striped_tall()), (TALL_JOIN, TILE_ROWS), "the stripes paint row 0");
+
+    let column = TallColumn { face: Face::Front, cx: 7, pick: 0, vine: false };
+    let v0 = tall_anchor_at(column.face, column.cx, 0.0).v;
+    let mut plant = striped_tall();
+    plant.trunk = one_frame(striped_tile(1..15, TRUNK_COLUMN, STRIPE_WIDTH));
+    assert_eq!(trunk_strip(&plant), (TALL_STRIP_FLOOR, TALL_STRIP_TOP), "row 0 clear opts in");
+    let budget = tall_bend_budget(&plant);
+    // The trunk itself earns room (the stripes' 4-row cap stays the column's bound).
+    let top = tall_bend_base(f64::from(TALL_MAX_SEGMENTS));
+    let room = |p: &TallPlant| p.trunk.frames[0].bend_headroom(TALL_BEND_ROOT, TALL_BEND_LENGTH, top);
+    assert!(room(&plant) > room(&striped_tall()) + 1.0, "clearing the end rows must earn trunk room: {} vs {}", room(&plant), room(&striped_tall()));
+    let tallest = ((v0 - 13.0) / 4.0).floor().min(f64::from(TALL_MAX_SEGMENTS));
+    let green = f64::from(srgb_decode(STRIPE_GREEN)) * f64::from(TALL_OPACITY) * STRIPE_WIDTH as f64;
+    let mut exact_rows = 0;
+    for height in [1.0, 2.5, 3.0, 3.25, 3.5, 3.75, 4.0, tallest] {
+        for amplitude in [0.0, budget, -budget] {
+            let image = draw_striped_column(&plant, &column, height, amplitude, false);
+            let grown = tall_grown_px(height);
+            let whole = height.fract() == 0.0;
+            let span = -7.5..=(4.0 * height + 11.5);
+            for y in 0..FACE_SIZE as u8 {
+                let h = v0 - 0.5 - f64::from(y);
+                if !span.contains(&h) {
+                    continue;
+                }
+                let (mut red, mut lit, mut blue) = (0.0f64, 0.0f64, 0.0f64);
+                for x in 0..FACE_SIZE as u8 {
+                    let p = image.get(column.face, x, y);
+                    red += f64::from(p[0]);
+                    lit += f64::from(p[1]);
+                    blue += f64::from(p[2]);
+                }
+                assert!(lit <= green + 1e-5, "H = {h}: {lit} green, a row composited twice (height {height}, amplitude {amplitude})");
+                let interior = h <= grown - 1.5 || (whole && h >= grown + 0.5);
+                if !interior {
+                    continue;
+                }
+                exact_rows += 1;
+                assert!((lit - green).abs() < 1e-5, "H = {h}: {lit} green, not one stamp (height {height}, amplitude {amplitude}): a gap");
+                let k = stripe_of(v0, y);
+                for (channel, want) in [(red, STRIPE_RED[k]), (blue, STRIPE_BLUE[k])] {
+                    let expect = f64::from(srgb_decode(want)) * f64::from(TALL_OPACITY) * STRIPE_WIDTH as f64;
+                    assert!((channel - expect).abs() < 1e-5, "H = {h}: stripe {k} expected (height {height}, amplitude {amplitude}): the column slipped a row");
+                }
+            }
+        }
+    }
+    assert!(exact_rows > 200, "only {exact_rows} rows were checked exactly");
+    println!("  shifted strips: {exact_rows} interior rows composited exactly once, budget {budget:.3} vs {:.3}", tall_bend_budget(&striped_tall()));
+}
+
+/// The spiretree earns its authored tip. Its dome is centred on the pivot and its trunk
+/// leaves the two never-drawn end rows unpainted, so the family's measured budget now
+/// admits the whole desired 0.9 px even for the windiest slot, where the shipped art of
+/// 2026-09-12 admitted 0.27 (cap bound 0.30, trunk bound 0.47). A vined column is still
+/// held to the vine's own budget.
+#[test]
+fn the_spiretree_column_is_admitted_its_whole_desired_tip() {
+    let art = pack();
+    let spire = art.tall_plant("spiretree").expect("spiretree");
+    let vine = art.tall_plant(VINE_PLANT).expect("vine");
+    let desired = wind_response("spiretree").tip_px;
+    assert_eq!(desired, 0.9, "the authored response this test is about");
+    let budget = tall_bend_budget(spire);
+    println!("  spiretree budget {budget:.3} px, vine {:.3} px", tall_bend_budget(vine));
+    assert!(
+        budget >= desired * (1.0 + WIND_SLOT_VARIATION),
+        "the spiretree's budget {budget} still clips its desired {desired} px"
+    );
+    assert_eq!(effective_tip(desired, budget), desired);
+    // Where the room comes from: the cap's headroom and the trunk's, each above the tip.
+    let cap = spire.cap.as_ref().unwrap();
+    let top = f64::from(TALL_MAX_SEGMENTS);
+    for (what, clip, base) in [
+        ("cap", cap, tall_bend_base(top + 1.0)),
+        ("trunk", &spire.trunk, tall_bend_base(top)),
+    ] {
+        let room = clip
+            .frames
+            .iter()
+            .map(|f| f.bend_headroom(TALL_BEND_ROOT, TALL_BEND_LENGTH, base))
+            .fold(f64::INFINITY, f64::min);
+        println!("  spiretree {what} headroom {room:.3} px");
+        assert!(room >= desired * (1.0 + WIND_SLOT_VARIATION), "{what} headroom {room}");
+    }
+    // The trunk's end rows are unpainted and the rest is the 4-periodic pattern.
+    for frame in &spire.trunk.frames {
+        for x in 0..frame.width() as i32 {
+            assert_eq!(frame.texel(x, 0)[3], 0.0, "trunk row 0 painted");
+            assert_eq!(frame.texel(x, 15)[3], 0.0, "trunk row 15 painted");
+            for y in 1..11 {
+                assert_eq!(frame.texel(x, y), frame.texel(x, y + 4), "not periodic at ({x}, {y})");
+            }
+        }
+    }
+    let presenter = ArtPresenter::new(pack());
+    for column in tall_columns().into_iter().filter(|c| TALL_PLANTS[c.pick] == "spiretree") {
+        let want = if column.vine { budget.min(tall_bend_budget(vine)) } else { budget };
+        assert_eq!(presenter.column_budget(&column), want, "{column:?}");
+    }
+}
+
 #[test]
 fn a_small_plants_bend_is_the_breeze_projected_onto_its_own_heading() {
     let w = Vec2::new(-0.8, 0.3);

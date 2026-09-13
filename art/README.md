@@ -233,13 +233,22 @@ every painted texel inside the footprint, and the family's budget is the smalles
 A column's budget is the minimum over its base, trunk and cap at their highest placements and
 over its vine's. `ArtPresenter::bend_budget` exposes the table. The admitted amplitude is
 `min(desired, budget / (1 + WIND_SLOT_VARIATION))`, so even the windiest slot at full wind
-stays inside the measured room. On the shipped pack (2026-09-12) the budgets are lanternstalk
-3.23, tendrilfan 0.31, reedspire 4.38, glowcap 2.40, rootveil 5.43, umbrellafrond 0.33,
-bloomcrown 2.07, spiretree 0.30, glasscane 0.47, vinecoil 0.47 — so tendrilfan moves 0.29
-rather than 0.55 and a spiretree column 0.27 rather than 0.9. Widening those is an *art*
-change (a narrower tip or leaf), never a larger footprint. A quiet interval, a zero
-amplitude or a nonsense wind takes the renderer's identity path, which draws the windless
-image bit for bit and costs exactly what it cost before the wind existed.
+stays inside the measured room. On the shipped pack the budgets are lanternstalk 3.23,
+tendrilfan 0.31, reedspire 4.38, glowcap 2.40, rootveil 5.43, umbrellafrond 0.33,
+bloomcrown 2.07, spiretree 1.31 (0.30 until 2026-09-13), glasscane 0.47, vinecoil 0.47 — so
+tendrilfan moves 0.29 rather than 0.55, a bare spiretree column its whole 0.9, and a
+spiretree carrying a vine 0.42 (the vine's own room). Widening those is an *art* change (a
+narrower tip or leaf), never a larger footprint. The spiretree earned its room two ways
+(`art/plants/author_spire_wind.py`): its dome is drawn centred on the pivot (it was one
+pixel right of the trunk, so its far edge bound the cap to 0.30), and its trunk tile leaves
+its top and bottom rows unpainted — those rows sit 7.5 px from the pivot, where the
+footprint circle is only ±1.96 px wide, and a 4-wide trunk painting them is bound to 0.47.
+A trunk that leaves its row 0 clear is stacked on strips one row lower
+(`art_present::trunk_strip`: tile rows 1–4 instead of 0–3, the last segment still cut at
+the tile top under its cap), which paints the same column; glasscane and the vine paint
+their row 0 and keep the original strips, so their images are unchanged. A quiet interval,
+a zero amplitude or a nonsense wind takes the renderer's identity path, which draws the
+windless image bit for bit and costs exactly what it cost before the wind existed.
 
 ### Bands
 

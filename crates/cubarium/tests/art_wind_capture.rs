@@ -73,6 +73,85 @@ fn a_column(face: Face, vine: bool) -> TallColumn {
         .expect("a column")
 }
 
+/// Before/after capture for the spiretree's earned wind room (2026-09-13): a bare and a
+/// vined full-grown spiretree column on Front (each fed alone, so nothing else stands near
+/// it), crossing onto Top at the rim, drawn from the shipped pack and from the pack in
+/// `CUBARIUM_OLD_PACK` (the previous `assets/atelier`), every second frame at 60 fps over
+/// 20 s from calm through a packet's rise and hold, at native resolution, into
+/// `$CUBARIUM_CAPTURE_DIR/{old,new}-{bare,vine}`.
+#[test]
+#[ignore = "review capture, not behaviour"]
+fn spiretree_before_after_capture() {
+    let dir = PathBuf::from(
+        std::env::var("CUBARIUM_CAPTURE_DIR").unwrap_or_else(|_| "/tmp/cubarium-spire".into()),
+    );
+    let old_dir = PathBuf::from(std::env::var("CUBARIUM_OLD_PACK").expect("CUBARIUM_OLD_PACK"));
+    let spires: Vec<TallColumn> = tall_columns()
+        .into_iter()
+        .filter(|c| TALL_PLANTS[c.pick] == "spiretree" && c.face == Face::Front)
+        .collect();
+    let bare = *spires.iter().find(|c| !c.vine).expect("a bare spiretree column on Front");
+    let vined = *spires.iter().find(|c| c.vine).expect("a vined spiretree column on Front");
+    let mut report = String::new();
+    for (kind, column) in [("bare", bare), ("vine", vined)] {
+        let view_at = |tick: u64| {
+            let mut v = bare_view(tick);
+            for cell in CellId::all() {
+                if cell.face() == column.face && cell.cx() == column.cx && band_of(cell) == Band::Foliage {
+                    v.producer[cell.index()] = saturation();
+                }
+            }
+            v
+        };
+        for (label, art) in [("old", ArtPack::load(&old_dir).expect("the old pack")), ("new", pack())] {
+            let out = dir.join(format!("{label}-{kind}"));
+            std::fs::create_dir_all(&out).expect("writable capture dir");
+            let mut p = ArtPresenter::new(art);
+            for (name, budget) in p.bend_budgets() {
+                if name == "spiretree" || name == "vinecoil" {
+                    report.push_str(&format!("{label} budget {name}: {budget:.3}\n"));
+                }
+            }
+            report.push_str(&format!(
+                "{label}-{kind}: column {:?} cx {} vine {}: budget {:.3}\n",
+                column.face, column.cx, column.vine, p.column_budget(&column)
+            ));
+            // Grow in with no capture (columns take 24 s to reach the rim), starting inside
+            // the quiet interval so the capture's first seconds are exactly calm.
+            let warm_ticks: u64 = 600;
+            for tick in 1..=warm_ticks {
+                p.observe(&view_at(tick));
+            }
+            let mut canvas = Canvas::new();
+            let mut frame = Frame::black();
+            let mut rgb = Vec::new();
+            let frames = (20.0 * 60.0) as u64;
+            for i in 0..frames {
+                let tick = warm_ticks + i / FRAMES_PER_TICK + 1;
+                let f = (i % FRAMES_PER_TICK) as f64 / FRAMES_PER_TICK as f64;
+                let v = view_at(tick);
+                if i % FRAMES_PER_TICK == 0 {
+                    p.observe(&v);
+                }
+                canvas.clear();
+                p.draw(&v, f, &mut canvas);
+                if i % 2 == 0 {
+                    canvas.encode(&mut frame);
+                    rgb.clear();
+                    net_rgb8(&frame, &mut rgb);
+                    write_net_png(&out.join(format!("frame_{i:05}.png")), &rgb).expect("write png");
+                }
+            }
+        }
+    }
+    report.push_str(&format!(
+        "columns: bare Front cx {}, vined Front cx {}; 600 warm-up ticks then 20 s at 60 fps, every second frame\n",
+        bare.cx, vined.cx
+    ));
+    std::fs::write(dir.join("report.txt"), &report).expect("report");
+    print!("{report}");
+}
+
 #[test]
 #[ignore = "review capture, not behaviour"]
 fn wind_and_growth_capture() {

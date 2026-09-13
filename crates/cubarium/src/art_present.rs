@@ -184,10 +184,40 @@ pub const TALL_BASE_FADE: f64 = 0.25;
 pub const TALL_OPACITY: f32 = 0.95;
 /// Rows of a 16-row tile.
 pub const TILE_ROWS: f64 = 16.0;
-/// The tile row (counted from the bottom edge, in tile pixels) from which a trunk tile
-/// above another trunk owns its rows: the trunk is 4-periodic and the tile below already
-/// paints everything under this line. Review-tunable only together with the art.
+/// The tile row (counted from the bottom edge, in tile pixels) up to which the trunk below a
+/// trunk tile has already painted the 4-periodic pattern: the column's grown height advances
+/// [`tall_grown_px`] by one such segment per unit of height. Review-tunable only together
+/// with the art.
 pub const TALL_JOIN: f64 = 12.0;
+/// The strip of tile rows a trunk tile above another trunk **owns and draws** when its family
+/// **opts in** by leaving the tile's row 0 unpainted ([`trunk_strip`]), from the bottom edge:
+/// `TALL_STRIP_FLOOR..TALL_STRIP_TOP`, i.e. tile rows 1–4 from the top rather than the
+/// original 0–3 (`TALL_JOIN..TILE_ROWS`). A trunk tile is 4-periodic, so the drawn column is
+/// the same set of painted heights either way — the strips still partition the column
+/// exactly, each row composited once, meeting at the same heights — but a tile's **top row
+/// is drawn only by the last possible segment** (whose cap sits over it) and its bottom row
+/// by none, which is what lets the family leave those two rows unpainted: they sit 7.5 px
+/// from the tile pivot, where the 9 px footprint circle is only ±1.96 px wide, and a 4-wide
+/// trunk painting them is bound to 0.47 px of wind. The spiretree's trunk leaves them clear
+/// (2026-09-13) and is bound by its dome instead; glasscane and the vine paint them and keep
+/// the original strips, so their images are untouched, growth included. The first trunk
+/// keeps [`TALL_FIRST_JOIN`] as its floor. Review-tunable only together with the art.
+pub const TALL_STRIP_FLOOR: f64 = TALL_JOIN - 1.0;
+/// See [`TALL_STRIP_FLOOR`]: the row an opted-in trunk strip is cut at, one below the tile's
+/// top, for every segment but the last possible one (`TALL_MAX_SEGMENTS`), cut at the top.
+pub const TALL_STRIP_TOP: f64 = TILE_ROWS - 1.0;
+
+/// The `(floor, top)` in tile rows from the bottom edge that a family's trunk tiles above the
+/// first own: `(TALL_STRIP_FLOOR, TALL_STRIP_TOP)` when **every** trunk frame leaves its top
+/// row (tile row 0) wholly unpainted — the family has opted into the shifted strips to earn
+/// wind room — and the original `(TALL_JOIN, TILE_ROWS)` otherwise. **Normative**; pure in
+/// the art, so a pack decides it once. The last possible segment is always cut at the top.
+pub fn trunk_strip(plant: &TallPlant) -> (f64, f64) {
+    let clear = plant.trunk.frames.iter().all(|frame| {
+        (0..frame.width() as i32).all(|x| frame.texel(x, 0)[3] <= 0.0)
+    });
+    if clear { (TALL_STRIP_FLOOR, TALL_STRIP_TOP) } else { (TALL_JOIN, TILE_ROWS) }
+}
 /// [`TALL_JOIN`] for the first trunk, which stands over the base whose join rows reach
 /// 5 px above the horizon center (the base paints the trunk pattern up to there).
 pub const TALL_FIRST_JOIN: f64 = 9.0;
@@ -1965,12 +1995,16 @@ pub fn tall_grown_px(height: f64) -> f64 {
 /// `[`TALL_BASE_FADE`]`, 0, 1)` and `grown = `[`tall_grown_px`]`(height)`:
 ///
 /// - the base (tile 0) is drawn whole at `TALL_OPACITY · fade`;
-/// - trunk tile `i ≥ 1` at [`tall_anchor`]`(i)` owns the rows from `floor` up to the tile's
-///   top, `floor = `[`TALL_FIRST_JOIN`] for `i = 1` and [`TALL_JOIN`] above (below that
-///   line the tile below has already painted the 4-periodic pattern), and is drawn with
-///   `Mask::Strip { floor, reveal }`, `reveal = min(16, grown − (4i − 8))` in tile rows: the
-///   strip of rows it owns, cut at the grown height, so the newest segment grows out of the
-///   one below one row-fraction at a time and a tile whose strip is empty is not drawn;
+/// - trunk tile `i ≥ 1` at [`tall_anchor`]`(i)` owns the rows from `floor` up to `top`,
+///   `floor = `[`TALL_FIRST_JOIN`] for `i = 1` and the family's [`trunk_strip`] floor above
+///   (below that line the tile below has already painted the 4-periodic pattern), `top` the
+///   family's [`trunk_strip`] top except for the last possible segment `i =
+///   TALL_MAX_SEGMENTS`, which owns up to the tile's top since nothing above can repaint it;
+///   drawn with `Mask::Strip { floor, reveal }`, `reveal = min(top, grown − (4i − 8))` in
+///   tile rows: the strip of rows it owns, cut at the grown height, so the newest segment
+///   grows out of the one below one row-fraction at a time and a tile whose strip is empty
+///   is not drawn. A tile's row 15 is never drawn; for a family on the shifted strips its
+///   row 0 is drawn only by that last segment, where its cap's dome covers the trunk columns;
 /// - the cap ([`TallPlant::cap`], never `crown`) glides at [`tall_anchor_at`]`(height + 1)`
 ///   at `TALL_OPACITY · fade`; at rest on a whole cell it sits where the crown used to;
 /// - vine tiles at odd `i` own rows [`TALL_VINE_FLOOR`]`..`[`TALL_VINE_TOP`] (the topmost
@@ -2031,9 +2065,11 @@ fn draw_column(
     if let Some(base) = &plant.base {
         stamp(base, 0.0, Mask::None, TALL_OPACITY * fade);
     }
+    let (strip_floor, strip_top) = trunk_strip(plant);
     for i in 1..=TALL_MAX_SEGMENTS {
-        let floor = if i == 1 { TALL_FIRST_JOIN } else { TALL_JOIN };
-        let reveal = local(i).min(TILE_ROWS);
+        let floor = if i == 1 { TALL_FIRST_JOIN } else { strip_floor };
+        let top = if i == TALL_MAX_SEGMENTS { TILE_ROWS } else { strip_top };
+        let reveal = local(i).min(top);
         if reveal <= floor {
             break;
         }
