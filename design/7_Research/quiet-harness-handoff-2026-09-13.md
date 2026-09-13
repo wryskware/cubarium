@@ -11,9 +11,12 @@ Implementation record for the comparison required by
 the committed `post_birth_pause_v1` core package (`0980eab`, handoff
 [here](quiet-post-birth-pause-handoff-2026-09-13.md)). Evidence, not decisions.
 
-**The study is not launched.** This is the frozen harness and its tests only. The 48-arm
-ten-minute collection and every longer horizon wait on root/Astra review. No live deployment, no
-art, no README or implementation-plan edit.
+**The ten-minute screen has now been collected and reduced; nothing longer has.** Root ran the
+first 48-arm ten-minute collection from a frozen `42faaa2`, and its reduction **failed** on
+cohort provenance. That defect is fixed here, and a corrected collection was run and reduced end
+to end (below). Every horizon beyond ten minutes still waits on root/Astra review, and no
+completion flag in any of it is evidence that the candidate helps anything. No live deployment,
+no art, no README or implementation-plan edit.
 
 **Second and third passes.** The first build (`6d4ac7b`) was reviewed by root and by Astra, who
 between them proved five validation defects with read-only probes and six independent boundary
@@ -26,7 +29,8 @@ below are the itemised answer.
 
 ## Commit
 
-`6d4ac7b` (first build), `2fbd092` (first correction) and `fe114f9` (second correction) —
+`6d4ac7b` (first build), `2fbd092` (first correction), `fe114f9` (second correction) and
+`9fc29eb` (cohort provenance) —
 `crates/cubarium/examples/quiet_compare.rs`,
 `crates/cubarium/examples/quiet_compare/bouts.rs`, `scripts/reduce-quiet-compare.mjs` and its
 test, this report, and **one additive read-only core accessor**
@@ -232,17 +236,71 @@ defects (`5479e11`). All four are fixed here.
 Astra's review also corrected a wording slip here: all **six** of its first-package regressions
 pass, three of which were failing before `2fbd092`. That is what the table above now says.
 
+## What the first real reduction found, and what changed
+
+Root froze `42faaa2`, built it, ran all 48 arms of the ten-minute screen into
+`captures/quiet-ten-minute-42faaa2` — every arm complete and audited — and the **reduction
+refused it**. It was right to.
+
+`load_cohort` parsed the cohort manifest with `serde_json`, and `main` wrote that parsed `Value`
+back out as the run's record of its cohort. `serde_json` 1.0.151 gates its exact decimal path
+behind the opt-in `float_roundtrip` feature, which this workspace does not enable, so its default
+fast path can land **one ULP** from the correctly rounded value. Three preparation telemetry
+decimals came out changed:
+
+| in the cohort on disk | in the run's copy of it | apart |
+| --- | --- | ---: |
+| `212.54356731997558` | `212.5435673199756` | 1 ULP |
+| `0.9785584621020161` | `0.978558462102016` | 1 ULP |
+| `60.830572942452996` | `60.83057294245299` | 1 ULP |
+
+These are **different doubles**, not different spellings of one — `Number(a) !== Number(b)` for
+each pair, and each source text is already the shortest round-tripping form. So the run's own
+record disagreed with its source, and an exact checker had to refuse it. The cause is proven from
+the installed crate rather than assumed: `serde_json_can_move_a_cohort_decimal_by_one_ulp` parses
+each literal through `serde_json` and through Rust's correctly rounded parser and measures the
+drift. Nothing in the science moved: worlds are built from the `.cubw` snapshots, whose bytes are
+checksummed against the manifest, and every value the screen uses — seed, population, SHA256,
+ecology hash, schema, tick — is an integer or a string.
+
+The fix is to stop re-encoding:
+
+* the run copies the cohort manifest **byte for byte** to `cohort-manifest.json` and records its
+  `sha256` and length in `cohort_manifest`;
+* `cohort_summary` reproduces only what can be reproduced exactly — the integers and strings the
+  screen uses — and each opening row points at the copy for the float-bearing preparation
+  telemetry rather than writing it again from a parse;
+* the reducer checks the copy against its recorded checksum and length, against the source
+  directory **byte for byte**, then parses that one set of bytes and checks `cohort_summary`
+  field by field; a decimal in it is refused outright.
+
+No tolerance was introduced anywhere and no metadata was dropped — the preparation telemetry is
+present and unaltered in the copied manifest, which is more than the re-encoded record held.
+
+**Root's 48-arm run stays exactly as it is, and stays failed.** Its embedded cohort copy holds
+numbers that are not its source's, so no exact route certifies it. A labelled scratch
+reconstruction — `captures/scratch-quiet-ten-minute-42faaa2-diagnostic`, those same artifacts with
+a byte-faithful cohort record added — passes every other check in the reduction. That says the
+provenance record was the only defect in it. It is a diagnostic, not a certification: it contains
+a file the run did not write.
+
 ## Tests and results
 
 | Command | Result |
 | --- | --- |
-| `cargo test -p cubarium --example quiet_compare` | **19 passed, 0 failed** |
+| `cargo test -p cubarium --example quiet_compare` | **20 passed, 0 failed** |
 | `cargo test -p cubarium --example astra_quiet_observer` | **16 passed, 0 failed** — all **seven** independent observer fixtures, including the new first-held-interval death |
 | `cargo test -p cubarium-core` (whole crate) | **349 passed, 0 failed** |
 | `cargo test -p cubarium-core --test astra_quiet_policy` | **9 passed, 0 failed** |
-| `node scripts/reduce-quiet-compare.test.mjs` | **27 passed, 0 failed** |
-| `node scripts/astra-quiet-correction-review.test.mjs` | **2 passed, 0 failed** (both were red) |
+| `node scripts/reduce-quiet-compare.test.mjs` | **31 passed, 0 failed** — including the whole reduction end to end and thirteen tampered copies of it |
+| `node scripts/astra-quiet-correction-review.test.mjs` | **4 passed, 0 failed** (all were red when written) |
 | `cargo clippy -p cubarium --example quiet_compare` | no findings in any file touched here |
+
+The JS suite now **requires** two artifacts and says so instead of skipping: the smoke it reads
+(`captures/quiet-smoke-provenance-2026-09-13`) and the completed ten-minute screen
+(`captures/quiet-ten-minute-provenance-2026-09-13`). Silently skipping the end-to-end path is how
+the first real reduction came to fail on glue nothing had ever run; a missing artifact now fails
+with the command that produces it.
 
 The example's tests cover the preregistered family and the named horizons; an arm changing the
 policy and nothing else; both Off arms as ordinary continuations **including** the Standard Feed,
@@ -260,13 +318,62 @@ hand-assembled snapshot, and then run all **48 real smoke arms** through every e
 including the life stream, the census, the opening identity census and the decoded closing
 snapshots.
 
+### The corrected ten-minute screen, collected and reduced
+
+One collection, from a pinned build, into an exclusive new directory. Nothing longer was run.
+
+| | |
+| --- | --- |
+| frozen source | `captures/experimental-source/quiet-screen-provenance-2026-09-13`, `git archive 9fc29eb` |
+| build | `0.1.0+9fc29eb`, release, `CARGO_TARGET_DIR=captures/build-cache/quiet-screen-provenance` |
+| executable SHA256 | `876b9ade000f33cc03761e0c5547bc648b237ca91288a4b62ccfaa681e4540db` |
+| cohort | `captures/hunter-openings-2026-09-13`, manifest SHA256 `f6f8ff36c23d75d1bd5fc1c4d3ab245dc969a74a37900c31d2a4e215f2a5bf8d`, copied byte for byte into the run |
+| run | `captures/quiet-ten-minute-provenance-2026-09-13`, 48 arms, 12000 ticks each, 1 min 43 s, exit 0 |
+| run gates | `technical_complete` true, `audit_passed` true, `complete_experiment_measurement` true |
+| reduction | `captures/quiet-ten-minute-provenance-2026-09-13/reduction.json`, exit 0, `artifact_checks_passed` true |
+
+**This is the first end-to-end reduction of a prescribed horizon that completed.** It means the
+artifacts are internally consistent and faithful to their inputs. It is not a biological result,
+and `complete_experiment_measurement` is a statement about audited numerical coverage, not about
+the candidate being good for anything.
+
+What the reduction *reports*, for root and Astra to interpret — not interpreted here:
+
+| seed | births | admissions | refusals | recovery bouts | bouts ≥ 1 s | longest | held-interval deaths |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 33 | 11 | 22 | 11 | 11 | 40 | 0 |
+| 2 | 39 | 16 | 23 | 16 | 16 | 40 | 0 |
+| 3 | 33 | 6 | 27 | 6 | 6 | 40 | 0 |
+| 4 | 37 | 10 | 27 | 10 | 10 | 40 | 0 |
+| 5 | 27 | 4 | 23 | 4 | 4 | 40 | 0 |
+| 6 | 38 | 12 | 26 | 12 | 12 | 40 | 0 |
+| 7 | 32 | 4 | 28 | 4 | 4 | 40 | 0 |
+| 8 | 21 | 3 | 18 | 3 | 3 | 40 | 0 |
+| 9 | 42 | 14 | 28 | 14 | 14 | 40 | 0 |
+| 10 | 39 | 8 | 31 | 8 | 8 | 40 | 0 |
+| 11 | 21 | 4 | 17 | 4 | 4 | 40 | 0 |
+| 12 | 41 | 14 | 27 | 14 | 14 | 40 | 0 |
+
+The proposal's behavioural screen reads 12 of 12 no-care seeds, and the reducer reports it
+without gating on it, exactly as before. Recovery is between 1.1e-4 and 5.6e-4 of organism time
+in the candidate no-care arms.
+
+**Paired losses are present and are the thing to look at.** Counting seeds where the candidate
+lost something its matched reference kept: in the no-care pairs, 6 seeds lost opening ancestry,
+8 had fewer births and 5 had more opening-organism deaths; in the fed pairs, 5, 6 and 4. No seed
+went extinct and no form was lost in either. Whether that is acceptable is a biological judgement
+for root and Astra from the per-seed pairs in `reduction.json`; this record does not make it, and
+a passing artifact check is not an argument in either direction.
+
 ### Smoke (technical only, 2400 ticks, certifies nothing)
 
 `captures/quiet-smoke-validated-2026-09-13c`, from the release build, exit 0, all 48 arms
 `technical_complete` and `audit_passed`, every gate true, `complete_experiment_measurement` false
 because a smoke is not a prescribed horizon. Earlier runs of this build are kept beside it
 (`captures/quiet-smoke-validated-2026-09-13`, `…-13b`) and the original pre-review smoke
-(`captures/quiet-smoke-probe`) is untouched.
+(`captures/quiet-smoke-probe`) is untouched. Astra's own validator fixtures read `…-13c`, so it
+stays exactly where it is; the suite's own smoke-backed checks moved to
+`captures/quiet-smoke-provenance-2026-09-13`, which carries the byte-faithful cohort record.
 
 | arm | admissions | releases | aborts | refusals | recovery ticks | recovery bouts | newborn bouts | satiated bouts | transported px | seam ticks |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -338,11 +445,13 @@ written in the harness's own flat shape with a `kind` field and the same labels 
 * **Twelve seeds cannot prove universal noninferiority**, at any horizon.
 * **The runtime and storage figures are linear extrapolations** from a short smoke on a
   roughly-stable population.
-* **The whole-cohort reduction has not been run end to end**, because the only thing it will
-  accept is a prescribed horizon and the ten-minute collection is not launched. Every one of its
-  parts — each per-arm check, the snapshot inspection, the opening fingerprint, the life stream,
-  the census, the closing snapshots — is exercised against the real 48 smoke arms, and the smoke
-  is verified to be *refused* as a horizon. The glue that joins them is not.
+* **The reduction has now run end to end, once, on one horizon.** That closes the gap this record
+  used to name — and the first attempt at it is exactly what found the cohort provenance defect.
+  Nothing longer than ten minutes has been collected or reduced.
+* **A completed reduction is an artifact statement.** It says the records are internally
+  consistent, faithful to the cohort they came from, and cover the horizon they claim. It says
+  nothing about quiet opportunity, viability or benefit, and no flag in it should be read as
+  approval to change the Off default.
 * **Mutation-site attribution stays unsupported.** Funding and oxidation amounts are not derivable
   from the ordinary API, and no post-step delta here is presented as either.
 * **The carried underlying mode is not detectable by a stepped restart comparison**, as measured
@@ -365,6 +474,10 @@ written in the harness's own flat shape with a `kind` field and the same labels 
   receipt and the ledger it produced; the snapshot checks verify a decode of bytes this run
   wrote. Neither re-runs the world, and no test passing here is evidence of ecological benefit,
   adequate quiet opportunity or a reason to change the Off default.
+* **Cohort provenance is byte equality, and it needs the cohort directory.** A run whose cohort
+  directory has moved cannot be reduced until it is pointed at again (second argument). Runs
+  written before `9fc29eb` have no byte-faithful cohort record at all and are refused by name —
+  including root's `captures/quiet-ten-minute-42faaa2`, which stays as it is.
 
 ## Independent review artifacts
 
@@ -378,19 +491,26 @@ written in the harness's own flat shape with a `kind` field and the same labels 
   with the second (`5479e11`) and were failing against `2fbd092`. All nine pass now, and Astra's
   files are unmodified.
 
-## Next command, when review clears it
+## Running a collection
+
+This is what produced the ten-minute screen above, and what a longer horizon would use — from a
+frozen source so the binary is tied to a reviewable tree:
 
 ```text
-CARGO_TARGET_DIR=captures/build-cache/quiet-harness \
+git archive <commit> | tar -x -C captures/experimental-source/<name>
+cd captures/experimental-source/<name>
+CARGO_TARGET_DIR=<repo>/captures/build-cache/<name> \
   cargo build --release -p cubarium --example quiet_compare
-captures/build-cache/quiet-harness/release/examples/quiet_compare \
-  captures/hunter-openings-2026-09-13 captures/quiet-ten-minute-<hash> --horizon ten-minute
-node scripts/reduce-quiet-compare.mjs captures/quiet-ten-minute-<hash>
+cd <repo>
+captures/build-cache/<name>/release/examples/quiet_compare \
+  captures/hunter-openings-2026-09-13 captures/quiet-<horizon>-<name> --horizon ten-minute
+node scripts/reduce-quiet-compare.mjs captures/quiet-<horizon>-<name>
 ```
 
 The reducer refuses anything short of a prescribed horizon **named as what it is**, a 200-tick
-cadence, twelve seeds, four arms, a frozen executable matching its manifest, and a reachable
-cohort directory whose manifest is identical to the one the run recorded. It takes the cohort
-directory as an optional second argument when the recorded path is no longer where it was. It
-cannot be pointed at a smoke by mistake: `node scripts/reduce-quiet-compare.mjs
-captures/quiet-smoke-validated-2026-09-13c` exits 1 with `smoke is not a prescribed horizon`.
+cadence, twelve seeds, four arms, a frozen executable matching its manifest, a byte-faithful copy
+of the cohort manifest matching its recorded checksum, and a reachable cohort directory whose
+manifest is that copy byte for byte. It takes the cohort directory as an optional second argument
+when the recorded path is no longer where it was. It cannot be pointed at a smoke by mistake:
+`node scripts/reduce-quiet-compare.mjs captures/quiet-smoke-provenance-2026-09-13` exits 1 with
+`smoke is not a prescribed horizon`.

@@ -1068,19 +1068,18 @@ test('a tampered screen is refused for the exact thing that was tampered with', 
       await assert.rejects(loadRun(run), says);
       restore();
     };
-    // The cohort copy, in the run, moved away from the cohort on disk — including by exactly the
-    // one ULP a re-encoded manifest would have moved it.
-    const drifted = JSON.parse(original.cohort);
-    drifted.openings[0].telemetry.water =
-      new Float64Array(new BigUint64Array(
-        [new BigUint64Array(new Float64Array([drifted.openings[0].telemetry.water]).buffer)[0]
-          + 1n]).buffer)[0];
-    writeFileSync(path.cohort, JSON.stringify(drifted, null, 2));
-    await assert.rejects(loadRun(run), /does not match its own recorded checksum/);
+    // The cohort copy moved away from the cohort on disk by exactly the one ULP a re-encoded
+    // manifest moved it — the literal, and the substitution, from the failed reduction.
+    const drifted = original.cohort.replace('0.9785584621020161', '0.978558462102016');
+    assert.notEqual(drifted, original.cohort, 'the cohort really carries that decimal');
+    assert.notEqual(Number('0.9785584621020161'), Number('0.978558462102016'));
+    writeFileSync(path.cohort, drifted);
+    await assert.rejects(loadRun(run), /recorded size|recorded checksum/,
+      'a cohort record one ULP from its source is refused on its bytes, not tolerated');
     restore();
 
     await tamper('cohort', c => c.openings[0].sha256 = '0'.repeat(64),
-      /does not match its own recorded checksum/);
+      /recorded size|recorded checksum/);
     await tamper('manifest', m => m.cohort_manifest.sha256 = '0'.repeat(64),
       /does not match its own recorded checksum/);
     await tamper('manifest', m => m.cohort_manifest.source = 'captures/nowhere',
