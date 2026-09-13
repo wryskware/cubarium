@@ -44,12 +44,27 @@ Root owns the live process, `state/`, the rollout, and the gallery.
   adopting root's gate and Astra's contract review: held-boundary admission with
   `apply_after_tick = B`, uncertain fsync holds at `B`, OS advisory lock, 4 MiB journal
   bound with epoch-scoped server-issued client ids, total-footprint rain dose.
-- Two workers running: core (`cubarium-core`: care module, schema 8, schema 7
-  migration through a frozen mirror, `ecology_hash`, fixtures copied from root's
-  `captures/checkpoints/pre-care/world-55200.cubw` and its 600-tick continuation by
-  the schema 7 build) and host (lock, `--fresh` occupancy guard, `--require-resume`,
-  journal, HTTP care routes, panel, replay). Commits will be listed here when they
-  land. Nothing in `state/` is touched by either.
+- Revision 3 (`7ec73ac`) drops abort-and-resume after Astra's follow-up: an
+  uncertain journal write holds the world at its boundary until a clean stop.
+- **Core landed:** fixtures `01d8b73` (byte copy of root's genuine
+  `captures/checkpoints/pre-care/world-55200.cubw`, plus its 600-tick continuation
+  written by the schema 7 build `/tmp/cubarium-viewer-v7-e3ad20f/cubarium`) and
+  implementation `a909aa0` (`cubarium-core`: `care.rs`, `WorldState.care` appended
+  last, `SCHEMA_VERSION = 8`, schema 7 decoded through a frozen `WorldStateV7`
+  mirror, `ecology_hash`, manual rain inside the water stage, ledgers in the mass,
+  energy and water identities, Astra's allowance/shower-validation findings applied).
+  Decisive proof, re-run by Fable: migrating the live schema 7 snapshot and stepping
+  600 ticks with zero care reproduces the old binary's next snapshot payload
+  byte-for-byte (`zero_care_reproduces_the_pre_change_binarys_next_600_ticks`).
+  `cargo test -p cubarium-core`: 193 passed, 0 failed, 2 ignored (worker run);
+  `--test care`: 13 passed (Fable's run). Rain footprints: interior 13 cells,
+  seam 13, rim 9, each delivering the total dose.
+  **Rollout note for root:** any build at or after `a909aa0` writes schema 8
+  snapshots that the schema 7 binaries cannot read. Keep the schema 7 binary and a
+  verified schema 7 snapshot for rollback; the new binary reads both.
+- Host package (lock, `--fresh` occupancy guard, `--require-resume`, journal,
+  held-boundary admission, HTTP care routes, panel, replay) still in progress; its
+  commits will be listed here. Nothing in `state/` is touched.
 
 ## C: Fable megafauna candidate — DELIVERED (commit `1e4a8e5`)
 
