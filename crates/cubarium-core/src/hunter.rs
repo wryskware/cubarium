@@ -21,7 +21,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use cubarium_surface::{ChartImage, FACE_EXTENT, Face, MAX_LOCAL_RADIUS, SurfacePoint, Vec2, unfold_with};
+use cubarium_surface::{
+    ChartImage, FACE_EXTENT, Face, MAX_LOCAL_RADIUS, SurfacePoint, Vec2, travel, unfold_with,
+};
 
 use crate::config::WorldConfig;
 use crate::genome::Genome;
@@ -30,10 +32,21 @@ use crate::organism::{DeathCause, Organism};
 
 /// Wire version of [`FixedHunterProfile`]. A saved profile with any other version is
 /// rejected rather than reinterpreted.
-pub const PROFILE_VERSION: u32 = 1;
+///
+/// Version 2 replaced the single forward `jaw_offset_px` placeholder with the measured
+/// two-component capture effector, a separate ingestion mouth, the visual query extent and
+/// the body-scale mapping (`design/7_Research/lanternjaw-ecology-animation-contract-2026-09-13.md`).
+/// The shape changed, so schema 10 payloads carrying a version 1 profile are **refused**, not
+/// reinterpreted (`crate::snapshot::v10`).
+pub const PROFILE_VERSION: u32 = 2;
 
 /// Rounding slack for the persisted gut bound and the adult-structure gate.
 pub const TOLERANCE: f64 = 1e-9;
+
+/// How exactly a transported grasp centre must round-trip back to its intended body
+/// coordinate before it is published or allowed to capture. Transport rounding is far below
+/// this; a different shortest image is far above it.
+pub const GRASP_EPS: f64 = 1e-6;
 
 /// The gut residue below which the remainder is flushed as heat rather than carried: the
 /// last few ulps of a finished meal, never a hidden discard of real food.
@@ -113,14 +126,32 @@ pub struct FixedHunterProfile {
     /// may reproduce: the control that isolates predation from mere presence.
     pub attacks_enabled: bool,
 
-    /// Collision and crowding extent of the assembled body, in pixels. Overrides the decoded
-    /// lobe extent for members only; every other creature keeps its own.
+    /// **Physical crowding extent** of the assembled body, in pixels: what the pair pass and
+    /// the repulsion term use. Overrides the decoded lobe extent for members only; every other
+    /// creature keeps its own. This is *not* the artwork's query radius and *not* the capture
+    /// region — the contract keeps the three separate.
     pub body_extent_px: f64,
-    /// Jaw anchor: pixels forward of the body center along the heading, transported over the
-    /// surface like any other offset.
-    pub jaw_offset_px: f64,
-    /// Contact radius at that anchor, in pixels.
-    pub jaw_reach_px: f64,
+    /// **Visual query support** the renderer needs around the root to sample the whole
+    /// assembled rig, in pixels, at scale 1. Published for the art adapter; the world never
+    /// senses or collides with it.
+    pub visual_query_extent_px: f64,
+    /// **Capture effector**: the body-local centre of the grasp, `(forward, side)` in the same
+    /// basis `stamp_rig` uses (+x along the heading, +y its clockwise side). The trial value is
+    /// the measured centre of Fable's fully extended near claw, `(13.2794, 1.1624)`; the arms
+    /// are never shortened to keep an unconfirmed placeholder.
+    pub capture_offset_body: Vec2,
+    /// Contact tolerance around that centre, in pixels at scale 1. A trial tolerance, not a
+    /// balanced value.
+    pub capture_reach_px: f64,
+    /// **Ingestion mouth**, body-local, where a captured body is swallowed — the head, not the
+    /// claws. The art's mouth runs from `(8.5, 0)` at rest to `(9.6, 0)` at full extension;
+    /// this is the extended position, the one that exists at settlement.
+    pub ingestion_offset_body: Vec2,
+    /// Body scale mapping, owned here so core and art cannot disagree:
+    /// `scale = max(body_scale_min, (S / S_adult)^body_scale_exponent)`. The trial exponent
+    /// `0.5` is the area-preserving candidate of the animation contract.
+    pub body_scale_exponent: f64,
+    pub body_scale_min: f64,
 
     /// Founder inventory as fractions of the decoded maxima: `S = S_adult`,
     /// `R = fraction · R_max`, `E = fraction · E_max`. Derived from the world's own config,
@@ -195,7 +226,12 @@ impl FixedHunterProfile {
         genome.reserve = 2.0;
         genome.mouth = 1.0;
         genome.speed = 1.0;
-        genome.sense = 8.0;
+        // Sensing reconciled with the capture effector: the claws close about 14.8 px from the
+        // root (`|capture_offset| + capture_reach`), so an eight-pixel gene could neither
+        // acquire nor retain prey it could actually grasp. Twelve is the genome's own maximum,
+        // and the extra sensing is paid for like anyone else's (`sense_cost · sense_radius`
+        // every tick) — increased in the world, never in the presenter.
+        genome.sense = 12.0;
         genome.metabolism = 0.5;
         genome.depth = 0.85;
         genome.swim = 0.1;
@@ -208,8 +244,12 @@ impl FixedHunterProfile {
             genome,
             attacks_enabled: true,
             body_extent_px: 9.0,
-            jaw_offset_px: 6.0,
-            jaw_reach_px: 1.5,
+            visual_query_extent_px: 16.0,
+            capture_offset_body: Vec2::new(13.279_411_764_705_882, 1.162_368_0),
+            capture_reach_px: 1.5,
+            ingestion_offset_body: Vec2::new(9.6, 0.0),
+            body_scale_exponent: 0.5,
+            body_scale_min: 0.2,
             founder_reserve_fraction: 0.5,
             founder_energy_fraction: 0.75,
             perch_reserve_fraction: 0.65,
@@ -307,20 +347,49 @@ impl FixedHunterProfile {
                 self.escape_speed_multiple
             ));
         }
-        if self.jaw_offset_px + self.jaw_reach_px + self.body_extent_px >= MAX_LOCAL_RADIUS {
+        for (name, v) in [
+            ("capture_offset_body.x", self.capture_offset_body.x),
+            ("capture_offset_body.y", self.capture_offset_body.y),
+            ("ingestion_offset_body.x", self.ingestion_offset_body.x),
+            ("ingestion_offset_body.y", self.ingestion_offset_body.y),
+        ] {
+            if !v.is_finite() {
+                return Err(format!("hunter profile {name} = {v}"));
+            }
+        }
+        if self.body_scale_min <= 0.0 || self.body_scale_min > 1.0 {
+            return Err(format!("hunter profile body_scale_min {} is not in (0, 1]", self.body_scale_min));
+        }
+        if !(0.0..=2.0).contains(&self.body_scale_exponent) {
             return Err(format!(
-                "hunter profile jaw reach {} + {} and extent {} do not fit the local unfolding limit {MAX_LOCAL_RADIUS}",
-                self.jaw_offset_px, self.jaw_reach_px, self.body_extent_px
+                "hunter profile body_scale_exponent {} is not in [0, 2]",
+                self.body_scale_exponent
+            ));
+        }
+        if self.visual_query_extent_px < self.body_extent_px {
+            return Err(format!(
+                "hunter profile visual_query_extent_px {} is smaller than its physical extent {}",
+                self.visual_query_extent_px, self.body_extent_px
+            ));
+        }
+        // Everything the local unfolding has to reach at scale 1: the grasp centre, its
+        // tolerance, and the artwork the renderer queries around the same root.
+        let reach = self.capture_offset_body.length() + self.capture_reach_px;
+        if reach.max(self.visual_query_extent_px) >= MAX_LOCAL_RADIUS {
+            return Err(format!(
+                "hunter profile capture reach {reach} / query extent {} do not fit the local unfolding limit {MAX_LOCAL_RADIUS}",
+                self.visual_query_extent_px
             ));
         }
         crate::world::check_genome(&self.genome, "hunter profile")?;
         Ok(())
     }
 
-    fn positive_numbers(&self) -> [(&'static str, f64); 12] {
+    fn positive_numbers(&self) -> [(&'static str, f64); 13] {
         [
             ("body_extent_px", self.body_extent_px),
-            ("jaw_reach_px", self.jaw_reach_px),
+            ("capture_reach_px", self.capture_reach_px),
+            ("visual_query_extent_px", self.visual_query_extent_px),
             ("stalk_timeout_seconds", self.stalk_timeout_seconds),
             ("windup_seconds", self.windup_seconds),
             ("strike_seconds", self.strike_seconds),
@@ -334,9 +403,8 @@ impl FixedHunterProfile {
         ]
     }
 
-    fn nonnegative_numbers(&self) -> [(&'static str, f64); 7] {
+    fn nonnegative_numbers(&self) -> [(&'static str, f64); 6] {
         [
-            ("jaw_offset_px", self.jaw_offset_px),
             ("strike_energy_cost", self.strike_energy_cost),
             ("prey_structure_min", self.prey_structure_min),
             ("escape_turn_rate_deg", self.escape_turn_rate_deg),
@@ -407,6 +475,18 @@ pub struct HunterMember {
     /// The carried carcass: material and the energy actually removed with it.
     pub gut_material: f64,
     pub gut_energy: f64,
+    /// The phase this member was in when it entered its current one.
+    ///
+    /// Persisted because durations alone cannot tell a recoil apart: `Recovering` entered from
+    /// `Strike` follows a fully extended miss, from `Handling` a finished meal, and `Perched`
+    /// entered from `Windup` an aborted or unaffordable attempt. The adapter reads a fact, it
+    /// does not guess one from clocks that happen to differ (`lanternjaw-core-art-integration
+    /// -gaps-2026-09-13.md`). This is a semantic transition origin, not an animation state.
+    pub entered_from: HunterPhase,
+    /// The attack episode the current phase belongs to: the `attack_counter` of the paid
+    /// attempt that produced it, or 0 when it belongs to no paid attempt. Windup is not yet a
+    /// paid attempt and carries 0 until the strike is charged.
+    pub episode: u64,
 }
 
 impl HunterMember {
@@ -422,14 +502,19 @@ impl HunterMember {
             next_reproduction_tick: 0,
             gut_material: 0.0,
             gut_energy: 0.0,
+            entered_from: HunterPhase::Perched,
+            episode: 0,
         }
     }
 
-    /// Enter `phase` at `tick`, ending at `ends` (pass `tick` for an untimed phase).
-    pub fn enter(&mut self, phase: HunterPhase, tick: u64, ends: u64) {
+    /// Enter `phase` at `tick`, ending at `ends` (pass `tick` for an untimed phase), recording
+    /// the phase it came from and the attack episode it belongs to.
+    pub fn enter(&mut self, phase: HunterPhase, tick: u64, ends: u64, episode: u64) {
+        self.entered_from = self.phase;
         self.phase = phase;
         self.phase_started_tick = tick;
         self.phase_ends_tick = ends.max(tick);
+        self.episode = episode;
         if !phase.hunting() {
             self.target = None;
         }
@@ -629,6 +714,20 @@ impl HunterState {
             if m.gut_material <= 0.0 && m.gut_energy > TOLERANCE {
                 return Err(format!("{who}: an empty gut carries {} energy", m.gut_energy));
             }
+            if m.episode > m.attack_counter {
+                return Err(format!(
+                    "{who}: phase episode {} is ahead of its attack counter {}",
+                    m.episode, m.attack_counter
+                ));
+            }
+            if m.episode > 0 && !matches!(m.phase, HunterPhase::Strike | HunterPhase::Recovering | HunterPhase::Handling)
+            {
+                return Err(format!(
+                    "{who}: phase {} claims attack episode {}",
+                    m.phase.as_str(),
+                    m.episode
+                ));
+            }
             if m.phase_started_tick > tick {
                 return Err(format!("{who}: phase started at {} after tick {tick}", m.phase_started_tick));
             }
@@ -681,8 +780,9 @@ pub struct HunterFounderReceipt {
     pub energy_in: f64,
     pub extent: f64,
     pub sense_radius: f64,
-    pub jaw_offset_px: f64,
-    pub jaw_reach_px: f64,
+    /// The founder's contact geometry at its own scale: what the art adapter must draw and
+    /// what the world will test contact against.
+    pub geometry: ContactGeometry,
 }
 
 /// What [`crate::World::deposit_hunter_budget_control`] actually did: the same derived
@@ -715,6 +815,10 @@ pub enum AttemptOutcome {
     TargetClaimed,
     /// The target no longer fits the eligibility window or the remaining gut.
     Ineligible,
+    /// The grasp centre was off the surface or could not be mapped consistently — an off-rim
+    /// reach the static artwork clips, or a vertex whose images disagree. The strike is still
+    /// paid for; no capture is made from a point the renderer cannot draw.
+    GraspUnmapped,
     /// Refused before payment: the full strike cost was not available.
     Unaffordable,
 }
@@ -728,8 +832,69 @@ impl AttemptOutcome {
             AttemptOutcome::TargetLost => "target_lost",
             AttemptOutcome::TargetClaimed => "target_claimed",
             AttemptOutcome::Ineligible => "ineligible",
+            AttemptOutcome::GraspUnmapped => "grasp_unmapped",
             AttemptOutcome::Unaffordable => "unaffordable",
         }
+    }
+}
+
+/// Everything the settlement actually used, recorded from the **common post-movement state
+/// before the prey is removed or any target is cleared**. The later render view cannot
+/// recover it: the prey is gone and the hunter has moved on.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct ContactEvidence {
+    pub prey: OrganismId,
+    /// The prey's own post-movement position, before removal.
+    pub prey_pos: SurfacePoint,
+    pub prey_extent: f64,
+    /// The hunter's post-movement root and heading, the ones the contact test used.
+    pub hunter_pos: SurfacePoint,
+    pub hunter_heading: Vec2,
+    /// The scaled geometry the test used.
+    pub geometry: ContactGeometry,
+    /// The validated physical grasp centre, when one exists — never a reflected point.
+    pub capture_center: Option<SurfacePoint>,
+    /// The validated ingestion mouth, named separately from the grasp.
+    pub ingestion_center: Option<SurfacePoint>,
+    /// The measurement itself; `None` when the prey could not be unfolded from the root at all.
+    pub measure: Option<ContactMeasure>,
+}
+
+impl ContactEvidence {
+    /// Gather the evidence for this pairing. Pure, and safe to call before or instead of a
+    /// capture: it never mutates anything.
+    pub fn gather(
+        images: &[Vec<ChartImage>; 5],
+        profile: &FixedHunterProfile,
+        hunter: &Organism,
+        prey_id: OrganismId,
+        prey: &Organism,
+    ) -> ContactEvidence {
+        let geometry = ContactGeometry::of(profile, hunter);
+        ContactEvidence {
+            prey: prey_id,
+            prey_pos: prey.pos,
+            prey_extent: prey.phenotype.extent,
+            hunter_pos: hunter.pos,
+            hunter_heading: hunter.heading,
+            geometry,
+            capture_center: body_point(images, hunter.pos, hunter.heading, geometry.capture_offset_body),
+            ingestion_center: body_point(images, hunter.pos, hunter.heading, geometry.ingestion_offset_body),
+            measure: measure_contact(
+                images,
+                hunter.pos,
+                hunter.heading,
+                &geometry,
+                prey.pos,
+                prey.phenotype.extent,
+            ),
+        }
+    }
+
+    /// The bounded first policy: a capture needs the prey inside the scaled grasp **and** a
+    /// grasp centre the renderer can actually draw there.
+    pub fn grants_capture(&self) -> bool {
+        self.capture_center.is_some() && self.measure.is_some_and(|m| m.in_contact())
     }
 }
 
@@ -747,9 +912,27 @@ pub enum HunterEvent {
         outcome: AttemptOutcome,
         /// Strike cost actually charged (zero for `Unaffordable`).
         energy_paid: f64,
+        /// The paid attempt's stable key: the member's `attack_counter` **after** the
+        /// increment that opened this attempt, unique with the full hunter ID. `None` for an
+        /// unpaid refusal, which consumes no counter and can never alias a paid attempt.
+        attack_counter: Option<u64>,
+        /// The post-movement contact evidence, when the target still resolved. A missing or
+        /// stale target has none; it is never filled in from a reused slot.
+        evidence: Option<ContactEvidence>,
     },
     /// A capture, with the material and energy actually transferred into the gut.
-    Capture { tick: u64, hunter: OrganismId, prey: OrganismId, material: f64, energy: f64 },
+    Capture {
+        tick: u64,
+        hunter: OrganismId,
+        prey: OrganismId,
+        material: f64,
+        energy: f64,
+        /// The same key as this attempt's `Attempt` record.
+        attack_counter: u64,
+        /// The pre-removal settlement geometry: where the prey was, where the hunter was, and
+        /// the grasp that took it.
+        evidence: ContactEvidence,
+    },
     /// A funded descendant was placed.
     Offspring { tick: u64, parent: OrganismId, child: OrganismId },
     /// A member died; its carried gut went to the local fields.
@@ -774,21 +957,46 @@ pub struct HunterView {
     pub role: HunterRole,
     pub phase: HunterPhase,
     /// Progress through a timed phase; `None` while perched, stalking or handling.
+    ///
+    /// A convenience only. Fractional playback belongs to `phase_started_tick` /
+    /// `phase_ends_tick` and the presenter's own `present_seconds`.
     pub phase_progress: Option<f32>,
+    /// The persisted phase boundary, in completed ticks: the phase was entered at the boundary
+    /// `phase_started_tick` (the world had exactly that many completed ticks) and a timed
+    /// phase ends at `phase_ends_tick`. Untimed phases store `ends == started`.
+    pub phase_started_tick: u64,
+    pub phase_ends_tick: u64,
+    /// The phase this one was entered from, persisted, so a restart during the recoil knows
+    /// whether it followed a fully extended strike, an aborted windup or a finished meal.
+    pub entered_from: HunterPhase,
+    /// The attack episode this phase belongs to: the `attack_counter` of the paid attempt that
+    /// produced it, or 0 when the phase belongs to no paid attempt.
+    pub episode: u64,
+    /// The member's paid-attempt counter, the key its events carry.
+    pub attack_counter: u64,
     pub pos: SurfacePoint,
     pub heading: Vec2,
-    /// The transported jaw anchor: where contact is actually tested.
-    pub mouth: SurfacePoint,
-    pub mouth_reach_px: f64,
+    /// The authoritative scaled contact geometry — the same numbers the world tests contact
+    /// with, and the scale the whole rig must be drawn at.
+    pub geometry: ContactGeometry,
+    /// `geometry.scale`, published on its own because the rig needs exactly this number.
+    pub body_scale: f64,
+    /// The physical grasp centre, **`None` when it cannot be drawn there** (off the open rim,
+    /// a vertex whose images disagree, a fallback sweep). Never a reflected point.
+    pub capture_center: Option<SurfacePoint>,
+    /// The physical ingestion mouth, under the same rule and named separately.
+    pub ingestion_center: Option<SurfacePoint>,
     /// The prey being pursued, when the handle still resolves.
     pub target: Option<OrganismId>,
     pub structure: f64,
+    pub structure_adult: f64,
     pub extent: f64,
     pub juvenile: bool,
     pub gut_material: f64,
     pub gut_energy: f64,
     /// `gut_material / gut_capacity_material`.
     pub gut_fraction: f32,
+    pub gut_capacity: f64,
     /// Gestation progress while an escrow is held, on the hunter's own gestation time.
     pub gestation: Option<f32>,
 }
@@ -912,20 +1120,147 @@ pub fn surface_reach(
     unfold_with(&images[from.face.index()], from, to, max).map(|u| u.distance)
 }
 
-/// True when a hunter's transported jaw anchor is within reach of `prey`: the distance from
-/// the anchor to the prey's position is at most `jaw_reach_px` plus the prey's own extent.
+/// The body basis `stamp_rig` uses: `+x` along the heading, `+y` its clockwise side.
+/// Returns `None` for a heading that is not a direction.
+pub fn body_basis(heading: Vec2) -> Option<(Vec2, Vec2)> {
+    let h = heading.normalized()?;
+    Some((h, Vec2::new(-h.y, h.x)))
+}
+
+/// One member's contact geometry at one instant, in the renderer's own body basis. Core owns
+/// this: the art adapter is handed the same numbers rather than deriving its own.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct ContactGeometry {
+    /// `max(body_scale_min, (S / S_adult)^body_scale_exponent)`, the authoritative whole-rig
+    /// scale. Everything below is already multiplied by it.
+    pub scale: f64,
+    /// Scaled body-local centre of the grasp, `(forward, side)`.
+    pub capture_offset_body: Vec2,
+    /// Scaled contact tolerance around that centre.
+    pub capture_reach_px: f64,
+    /// Scaled body-local ingestion mouth, named separately from the capture effector.
+    pub ingestion_offset_body: Vec2,
+    /// Scaled query support the renderer needs around the root.
+    pub visual_query_extent_px: f64,
+}
+
+impl ContactGeometry {
+    /// The geometry of this member right now: the profile's measured offsets scaled by the
+    /// body scale its actual structure implies.
+    pub fn of(profile: &FixedHunterProfile, organism: &Organism) -> ContactGeometry {
+        let scale = body_scale(profile, organism.structure, organism.phenotype.structure_adult);
+        ContactGeometry {
+            scale,
+            capture_offset_body: profile.capture_offset_body * scale,
+            capture_reach_px: profile.capture_reach_px * scale,
+            ingestion_offset_body: profile.ingestion_offset_body * scale,
+            visual_query_extent_px: profile.visual_query_extent_px * scale,
+        }
+    }
+
+    /// How far the local unfolding has to reach to decide contact with a body of `extent`.
+    fn window(&self, extent: f64) -> f64 {
+        (self.capture_offset_body.length() + self.capture_reach_px + extent + 1.0).min(MAX_LOCAL_RADIUS)
+    }
+}
+
+/// The whole-rig scale of a member: `max(min, (S / S_adult)^exponent)`, the mapping the
+/// profile selected. A juvenile is the same rig, every part in the same relative place,
+/// `scale` times smaller — which is exactly what `stamp_rig_scaled` does with the same number.
+pub fn body_scale(profile: &FixedHunterProfile, structure: f64, structure_adult: f64) -> f64 {
+    if !structure_adult.is_finite() || structure_adult <= 0.0 || !structure.is_finite() || structure <= 0.0 {
+        return profile.body_scale_min;
+    }
+    let ratio = (structure / structure_adult).clamp(0.0, 1.0);
+    let scale = ratio.powf(profile.body_scale_exponent);
+    if scale.is_finite() { scale.max(profile.body_scale_min) } else { profile.body_scale_min }
+}
+
+/// Where a prey actually sits relative to the claws, measured the way the renderer draws them.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct ContactMeasure {
+    /// The prey's position in the hunter's body basis, unfolded from the hunter **root**.
+    pub body: Vec2,
+    /// Surface distance from the root to the prey.
+    pub root_distance: f64,
+    /// Distance from the scaled capture effector centre to the prey.
+    pub effector_distance: f64,
+    /// `capture_reach_px · scale + prey extent`: what `effector_distance` must not exceed.
+    pub tolerance: f64,
+}
+
+impl ContactMeasure {
+    pub fn in_contact(&self) -> bool {
+        self.effector_distance <= self.tolerance
+    }
+}
+
+/// Measure a prey against a hunter's claws **from the hunter root**, with the same shortest
+/// image the rig is drawn through, then rotated into the same body basis.
 ///
-/// `mouth` is the anchor the caller transported (`jaw_offset_px` forward along the heading),
-/// so a jaw that crossed a seam is tested from where it actually ended up.
-pub fn jaw_in_reach(
-    profile: &FixedHunterProfile,
-    mouth: SurfacePoint,
-    prey: &Organism,
+/// This is the contact authority. A separately transported mouth point has its own chart and
+/// can pick a different shortest image at a vertex, so distance from *that* chart is not proof
+/// of contact with the drawn claw — which is why the old `mouth_point` helper is gone.
+/// `None` means the prey is not reachable inside the local unfolding at all.
+pub fn measure_contact(
     images: &[Vec<ChartImage>; 5],
-) -> bool {
-    let reach = profile.jaw_reach_px + prey.phenotype.extent;
-    // A small slack on the unfolding limit so a target exactly at the edge is still found.
-    matches!(surface_reach(images, mouth, prey.pos, reach + 1.0), Some(d) if d <= reach)
+    root: SurfacePoint,
+    heading: Vec2,
+    geometry: &ContactGeometry,
+    prey: SurfacePoint,
+    prey_extent: f64,
+) -> Option<ContactMeasure> {
+    let (forward, side) = body_basis(heading)?;
+    let window = geometry.window(prey_extent);
+    let u = unfold_with(&images[root.face.index()], root, prey, window)?;
+    let delta = u.local - root.chart();
+    let body = Vec2::new(forward.dot(delta), side.dot(delta));
+    Some(ContactMeasure {
+        body,
+        root_distance: u.distance,
+        effector_distance: (body - geometry.capture_offset_body).length(),
+        tolerance: geometry.capture_reach_px + prey_extent,
+    })
+}
+
+/// The physical surface point of a scaled body-local offset, **or `None`**.
+///
+/// `None` whenever the point is not honestly on the surface where the artwork draws it: the
+/// sweep reflected off the open rim (static art clips there — only actual root travel
+/// reflects), hit the forward-progress fallback, resolved a vertex tie, or does not round-trip
+/// through the root-owned unfolding back to the body coordinate it was built from. A
+/// fabricated reflected point is never published and never captures.
+pub fn body_point(
+    images: &[Vec<ChartImage>; 5],
+    root: SurfacePoint,
+    heading: Vec2,
+    offset_body: Vec2,
+) -> Option<SurfacePoint> {
+    let (forward, side) = body_basis(heading)?;
+    if !offset_body.is_finite() {
+        return None;
+    }
+    let chart_offset = forward * offset_body.x + side * offset_body.y;
+    let reach = chart_offset.length();
+    if reach <= GRASP_EPS {
+        return Some(root);
+    }
+    if reach + 1.0 >= MAX_LOCAL_RADIUS {
+        return None;
+    }
+    let swept = travel(root, chart_offset);
+    if swept.reflections > 0 || swept.fallback || swept.ties > 0 {
+        return None;
+    }
+    // The round trip: the root's own shortest image of that point must be the body coordinate
+    // it was built from, or the renderer and the world disagree about where the claw is.
+    let u = unfold_with(&images[root.face.index()], root, swept.end, reach + 1.0)?;
+    let delta = u.local - root.chart();
+    let back = Vec2::new(forward.dot(delta), side.dot(delta));
+    if (back - offset_body).length() > GRASP_EPS {
+        return None;
+    }
+    Some(swept.end)
 }
 
 /// The one paid-offspring gate, on **local parent state only**: no world population is
@@ -1052,15 +1387,18 @@ mod tests {
 
     #[test]
     fn an_invalid_profile_is_rejected_one_property_at_a_time() {
-        let cases: [(&str, Break); 10] = [
-            ("version", |p| p.version = 2),
+        let cases: [(&str, Break); 12] = [
+            // Version 1 is the schema 10 profile shape: it is refused, never reinterpreted.
+            ("version", |p| p.version = 1),
             ("gut_capacity_material", |p| p.gut_capacity_material = 0.0),
             ("digest_rate", |p| p.digest_rate = f64::NAN),
             ("strike_energy_cost", |p| p.strike_energy_cost = -1.0),
             ("capture_min", |p| p.capture_min = 0.9),
             ("seek_reserve_fraction", |p| p.seek_reserve_fraction = 0.9),
             ("escape_speed_multiple", |p| p.escape_speed_multiple = 0.5),
-            ("jaw", |p| p.jaw_offset_px = 40.0),
+            ("capture reach", |p| p.capture_offset_body = Vec2::new(40.0, 0.0)),
+            ("query extent", |p| p.visual_query_extent_px = 1.0),
+            ("body scale", |p| p.body_scale_min = 0.0),
             ("genome", |p| p.genome.size = 9.0),
             ("scavenge_fraction", |p| p.scavenge_fraction = 2.0),
         ];
@@ -1189,15 +1527,20 @@ mod tests {
     fn phase_bookkeeping_reports_progress_and_drops_targets() {
         let mut m = HunterMember::new(OrganismId { slot: 0, generation: 1 }, 100);
         m.target = Some(OrganismId { slot: 1, generation: 1 });
-        m.enter(HunterPhase::Windup, 100, 112);
+        m.enter(HunterPhase::Windup, 100, 112, 0);
         assert_eq!(m.target, Some(OrganismId { slot: 1, generation: 1 }), "a hunting phase keeps it");
+        assert_eq!(m.entered_from, HunterPhase::Perched, "the transition origin is recorded");
         assert_eq!(m.progress(100), Some(0.0));
         assert_eq!(m.progress(106), Some(0.5));
         assert_eq!(m.progress(999), Some(1.0));
-        m.enter(HunterPhase::Recovering, 112, 212);
+        m.enter(HunterPhase::Recovering, 112, 212, 7);
         assert_eq!(m.target, None, "a non-hunting phase drops the target");
-        m.enter(HunterPhase::Perched, 212, 212);
+        assert_eq!(m.entered_from, HunterPhase::Windup, "a recoil knows what it recoiled from");
+        assert_eq!(m.episode, 7, "and which attack episode it belongs to");
+        m.enter(HunterPhase::Perched, 212, 212, 0);
         assert_eq!(m.progress(300), None);
+        assert_eq!(m.entered_from, HunterPhase::Recovering);
+        assert_eq!(m.episode, 0);
     }
 
     #[test]

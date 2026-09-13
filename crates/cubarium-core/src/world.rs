@@ -219,14 +219,13 @@ struct HunterFounder {
     energy_in: f64,
 }
 
-/// The transported jaw anchor of a hunter: `jaw_offset_px` forward along its heading, swept
-/// over the surface with the same helper movement uses, so the anchor crosses seams and rims
-/// exactly as a body does.
-fn mouth_point(hunter: &Organism, profile: &FixedHunterProfile) -> SurfacePoint {
-    if profile.jaw_offset_px <= 0.0 {
-        return hunter.pos;
-    }
-    cubarium_surface::travel(hunter.pos, hunter.heading * profile.jaw_offset_px).end
+/// The gap a paid strike can still close, in pixels: its burst ceiling over its whole
+/// duration. A windup is admitted when the prey is within the grasp tolerance **plus** this,
+/// so the strike has something to close and the hunter does not cock at a prey it can never
+/// reach (`design/7_Research/lanternjaw-ecology-animation-contract-2026-09-13.md`: sensing,
+/// stopping distance, windup admission and end-of-strike contact are reconciled together).
+fn strike_closing_px(profile: &FixedHunterProfile) -> f64 {
+    profile.strike_speed_px_s * profile.strike_seconds
 }
 
 /// Radius, in pixels, used to unfold the sensed cell centers. Sensing reaches
@@ -810,23 +809,26 @@ impl World {
                     {
                         m.target = None;
                         if matches!(m.phase, HunterPhase::Stalking | HunterPhase::Windup) {
-                            m.enter(HunterPhase::Perched, now, now);
+                            m.enter(HunterPhase::Perched, now, now, 0);
                         }
                     }
                     // Losing local sensing of the target ends a stalk or a windup too.
                     if matches!(m.phase, HunterPhase::Stalking | HunterPhase::Windup)
                         && m.target.is_some_and(|t| !sensed.iter().any(|n| n.id == t))
                     {
-                        m.enter(HunterPhase::Perched, now, now);
+                        m.enter(HunterPhase::Perched, now, now, 0);
                     }
 
                     // Timed phases expire; a finished meal becomes a pause.
                     match m.phase {
                         HunterPhase::Handling if !m.carrying() => {
-                            m.enter(HunterPhase::Recovering, now, now + meal_ticks);
+                            // The meal is over: the recoil that follows is a *finished meal*,
+                            // which `entered_from` now records for the adapter.
+                            let episode = m.episode;
+                            m.enter(HunterPhase::Recovering, now, now + meal_ticks, episode);
                         }
                         HunterPhase::Recovering if now >= m.phase_ends_tick => {
-                            m.enter(HunterPhase::Perched, now, now);
+                            m.enter(HunterPhase::Perched, now, now, 0);
                         }
                         _ => {}
                     }
@@ -835,7 +837,7 @@ impl World {
                     // `seek_reserve_fraction` and `perch_reserve_fraction` of `R_max`.
                     let full = o.reserve > profile.perch_reserve_fraction * o.phenotype.reserve_max;
                     if m.phase.hunting() && (m.carrying() || full) {
-                        m.enter(HunterPhase::Perched, now, now);
+                        m.enter(HunterPhase::Perched, now, now, 0);
                     }
 
                     let hungry = o.reserve < profile.seek_reserve_fraction * o.phenotype.reserve_max;
@@ -844,30 +846,41 @@ impl World {
                     // list is already sorted by `(distance, id)`, so this is "nearest, ties by
                     // full ID" and never a global population scan.
                     let nearest = || sensed.iter().find(|n| eligible(n.id)).map(|n| n.id);
+                    // The geometry this member hunts with right now, at its own body scale.
+                    let geometry = hunter::ContactGeometry::of(profile, o);
+                    // How far from the grasp centre a prey may be and still be worth cocking
+                    // at: the tolerance plus the gap the paid strike can close.
+                    let admission = |prey: &Organism| -> Option<hunter::ContactMeasure> {
+                        hunter::measure_contact(images, o.pos, o.heading, &geometry, prey.pos, prey.phenotype.extent)
+                    };
+                    let closing = strike_closing_px(profile);
 
                     match m.phase {
                         HunterPhase::Perched => {
                             if may_hunt && let Some(t) = nearest() {
-                                m.enter(HunterPhase::Stalking, now, now);
+                                m.enter(HunterPhase::Stalking, now, now, 0);
                                 m.target = Some(t);
                             }
                         }
                         HunterPhase::Stalking => {
                             if now.saturating_sub(m.phase_started_tick) >= stalk_ticks {
-                                m.enter(HunterPhase::Perched, now, now);
+                                m.enter(HunterPhase::Perched, now, now, 0);
                             } else if m.target.is_none() {
                                 match nearest() {
                                     Some(t) => m.target = Some(t),
-                                    None => m.enter(HunterPhase::Perched, now, now),
+                                    None => m.enter(HunterPhase::Perched, now, now, 0),
                                 }
                             }
-                            // The gesture starts only when the jaw is actually in reach.
+                            // The gesture starts only when the prey is inside the grasp the
+                            // paid strike can actually close on — measured from the hunter
+                            // root in the renderer's own body basis, never from a separately
+                            // transported anchor's chart.
                             if m.phase == HunterPhase::Stalking
                                 && let Some(t) = m.target
                                 && let Some(prey) = organisms.get(t)
-                                && hunter::jaw_in_reach(profile, mouth_point(o, profile), prey, images)
+                                && admission(prey).is_some_and(|c| c.effector_distance <= c.tolerance + closing)
                             {
-                                m.enter(HunterPhase::Windup, now, now + windup_ticks);
+                                m.enter(HunterPhase::Windup, now, now + windup_ticks, 0);
                                 m.target = Some(t);
                             }
                         }
@@ -880,7 +893,10 @@ impl World {
                                 m.attack_counter += 1;
                                 hunters.attacks_total += 1;
                                 counters.hunter_attacks += 1;
-                                m.enter(HunterPhase::Strike, now, now + strike_ticks);
+                                // The episode key: the counter this attempt's draws and its
+                                // events all carry, after the increment that opened it.
+                                let episode = m.attack_counter;
+                                m.enter(HunterPhase::Strike, now, now + strike_ticks, episode);
                                 m.target = Some(t);
                             } else {
                                 // Refused before payment: no energy, no draw, no attempt.
@@ -890,25 +906,42 @@ impl World {
                                     target: m.target,
                                     outcome: hunter::AttemptOutcome::Unaffordable,
                                     energy_paid: 0.0,
+                                    attack_counter: None,
+                                    evidence: m
+                                        .target
+                                        .and_then(|t| organisms.get(t).map(|prey| (t, prey)))
+                                        .map(|(t, prey)| {
+                                            hunter::ContactEvidence::gather(images, profile, o, t, prey)
+                                        }),
                                 });
-                                m.enter(HunterPhase::Perched, now, now);
+                                m.enter(HunterPhase::Perched, now, now, 0);
                             }
                         }
                         _ => {}
                     }
 
-                    // The intent: chase at ordinary effort, burst during a strike, hold still
-                    // otherwise. Steering uses the neighbour list's own unfolded position.
+                    // The intent: face the target, close the distance while the grasp is still
+                    // ahead of the prey, hold while cocking, and burst during the strike.
+                    // Steering uses the neighbour list's own unfolded position.
                     if let Some(t) = m.target
                         && m.phase.hunting()
                         && let Some(n) = sensed.iter().find(|n| n.id == t)
                         && let Some(toward) = (n.local - o.pos.chart()).normalized()
-                        && let Some(d) = decisions.iter_mut().find(|(id, _)| *id == m.id)
                     {
-                        d.1.heading = toward;
-                        d.1.effort = 1.0;
-                        if m.phase == HunterPhase::Strike {
-                            boosts.push((m.id, profile.strike_speed_px_s));
+                        // The pursuit stopping distance, reconciled with the effector rather
+                        // than left implicit: a prey already *inside* the reach envelope is not
+                        // approached further — walking onto it would put it behind the claws.
+                        let inside = organisms.get(t).and_then(admission).is_some_and(|c| {
+                            c.body.x < geometry.capture_offset_body.x - c.tolerance - closing
+                        });
+                        let hold = inside || m.phase == HunterPhase::Windup;
+                        if let Some(d) = decisions.iter_mut().find(|(id, _)| *id == m.id) {
+                            d.1.heading = toward;
+                            d.1.effort =
+                                if hold { f64::from(o.phenotype.drives.rest_effort) } else { 1.0 };
+                            if m.phase == HunterPhase::Strike && !inside {
+                                boosts.push((m.id, profile.strike_speed_px_s));
+                            }
                         }
                         threats.push((t, m.id));
                     }
@@ -1030,21 +1063,43 @@ impl World {
                     let Some(hunter_o) = organisms.get(hunter_id) else { continue };
                     let headroom = profile.gut_capacity_material - m.gut_material;
                     let mut caught: Option<(OrganismId, f64, f64)> = None;
+                    // The settlement evidence is gathered here, from the common post-movement
+                    // state, **before** anything is removed or any target is cleared: once the
+                    // prey is gone no later view can recover where it stood.
+                    let mut evidence: Option<hunter::ContactEvidence> = None;
                     let outcome = match aimed_at {
                         None => AttemptOutcome::TargetLost,
-                        Some(t) if claimed.contains(&t) => AttemptOutcome::TargetClaimed,
-                        Some(t) => match organisms.get(t) {
-                            None => AttemptOutcome::TargetLost,
-                            Some(prey)
-                                if hunters.contains(t)
-                                    || !hunter::prey_is_eligible(profile, hunter_o, prey, headroom, e_r) =>
-                            {
-                                AttemptOutcome::Ineligible
+                        Some(t) if claimed.contains(&t) => {
+                            // A contender that lost the claim still records what it saw.
+                            if let Some(prey) = organisms.get(t) {
+                                evidence =
+                                    Some(hunter::ContactEvidence::gather(images, profile, hunter_o, t, prey));
                             }
+                            AttemptOutcome::TargetClaimed
+                        }
+                        Some(t) => match organisms.get(t) {
+                            // A stale handle has no prey position: it is never filled in from
+                            // whoever reused the slot.
+                            None => AttemptOutcome::TargetLost,
                             Some(prey) => {
-                                // Contact is re-evaluated here, from the transported jaw
-                                // anchor, after *both* creatures have moved.
-                                if hunter::jaw_in_reach(profile, mouth_point(hunter_o, profile), prey, images) {
+                                let seen = hunter::ContactEvidence::gather(images, profile, hunter_o, t, prey);
+                                evidence = Some(seen);
+                                if hunters.contains(t)
+                                    || !hunter::prey_is_eligible(profile, hunter_o, prey, headroom, e_r)
+                                {
+                                    AttemptOutcome::Ineligible
+                                } else if !seen.measure.is_some_and(|c| c.in_contact()) {
+                                    // Contact is re-evaluated here, from the hunter root in the
+                                    // renderer's body basis, after *both* creatures moved.
+                                    AttemptOutcome::OutOfReach
+                                } else if seen.capture_center.is_none() {
+                                    // In reach of a grasp that is not on the surface where the
+                                    // artwork draws it: off the open rim, or a vertex whose
+                                    // images disagree. The strike is paid; no capture is made
+                                    // from a point that cannot be drawn (the safe first policy
+                                    // of the animation contract).
+                                    AttemptOutcome::GraspUnmapped
+                                } else {
                                     let chance = hunter::capture_probability(
                                         profile,
                                         hunter_o.structure,
@@ -1064,8 +1119,6 @@ impl World {
                                     } else {
                                         AttemptOutcome::Missed
                                     }
-                                } else {
-                                    AttemptOutcome::OutOfReach
                                 }
                             }
                         },
@@ -1076,6 +1129,10 @@ impl World {
                         target: aimed_at,
                         outcome,
                         energy_paid: profile.strike_energy_cost,
+                        // The paid attempt's key: this member's counter after the increment
+                        // that opened the attempt, the same one its draws used.
+                        attack_counter: Some(m.attack_counter),
+                        evidence,
                     });
 
                     match caught {
@@ -1094,7 +1151,7 @@ impl World {
                             let member = &mut hunters.members[index];
                             member.gut_material += material;
                             member.gut_energy += energy;
-                            member.enter(HunterPhase::Handling, now, now);
+                            member.enter(HunterPhase::Handling, now, now, m.attack_counter);
                             hunters.captures_total += 1;
                             hunters.predation_deaths_total += 1;
                             counters.hunter_captures += 1;
@@ -1113,10 +1170,19 @@ impl World {
                                 prey: prey_id,
                                 material,
                                 energy,
+                                attack_counter: m.attack_counter,
+                                evidence: evidence.expect("a capture always measured its prey"),
                             });
                         }
                         None => {
-                            hunters.members[index].enter(HunterPhase::Recovering, now, now + recovery_ticks);
+                            // The recoil that follows came from a fully extended strike, which
+                            // `entered_from` and `episode` now say out loud.
+                            hunters.members[index].enter(
+                                HunterPhase::Recovering,
+                                now,
+                                now + recovery_ticks,
+                                m.attack_counter,
+                            );
                         }
                     }
                 }
@@ -1795,8 +1861,16 @@ impl World {
             energy_in: founder.energy_in,
             extent: founder.phenotype.extent,
             sense_radius: founder.phenotype.sense_radius,
-            jaw_offset_px: profile.jaw_offset_px,
-            jaw_reach_px: profile.jaw_reach_px,
+            geometry: hunter::ContactGeometry {
+                // The founder is an adult, so this is the profile's own geometry at scale 1;
+                // it is published here so the art adapter and the harness read the same
+                // numbers the world will test contact with.
+                scale: 1.0,
+                capture_offset_body: profile.capture_offset_body,
+                capture_reach_px: profile.capture_reach_px,
+                ingestion_offset_body: profile.ingestion_offset_body,
+                visual_query_extent_px: profile.visual_query_extent_px,
+            },
         };
         self.state.hunters.profile = Some(profile);
         self.state.hunters.insert_member(hunter::HunterMember::new(id, tick));
@@ -1918,22 +1992,42 @@ impl World {
             .iter()
             .filter_map(|m| {
                 let o = self.state.organisms.get(m.id)?;
+                let geometry = hunter::ContactGeometry::of(profile, o);
                 Some(HunterView {
                     id: m.id,
                     role: profile.role,
                     phase: m.phase,
                     phase_progress: m.progress(tick),
+                    phase_started_tick: m.phase_started_tick,
+                    phase_ends_tick: m.phase_ends_tick,
+                    entered_from: m.entered_from,
+                    episode: m.episode,
+                    attack_counter: m.attack_counter,
                     pos: o.pos,
                     heading: o.heading,
-                    mouth: mouth_point(o, profile),
-                    mouth_reach_px: profile.jaw_reach_px,
+                    geometry,
+                    body_scale: geometry.scale,
+                    capture_center: hunter::body_point(
+                        &self.images,
+                        o.pos,
+                        o.heading,
+                        geometry.capture_offset_body,
+                    ),
+                    ingestion_center: hunter::body_point(
+                        &self.images,
+                        o.pos,
+                        o.heading,
+                        geometry.ingestion_offset_body,
+                    ),
                     target: m.target.filter(|t| self.state.organisms.get(*t).is_some()),
                     structure: o.structure,
+                    structure_adult: o.phenotype.structure_adult,
                     extent: o.phenotype.extent,
                     juvenile: o.structure < 0.7 * o.phenotype.structure_adult,
                     gut_material: m.gut_material,
                     gut_energy: m.gut_energy,
                     gut_fraction: (m.gut_material / profile.gut_capacity_material).clamp(0.0, 1.0) as f32,
+                    gut_capacity: profile.gut_capacity_material,
                     gestation: o.escrow.as_ref().map(|e| {
                         if gestation_ticks == 0 {
                             1.0

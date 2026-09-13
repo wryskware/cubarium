@@ -7,18 +7,26 @@ use crate::world::WorldState;
 pub mod v7;
 pub mod v8;
 pub mod v9;
+pub mod v10;
 
 pub use v7::{SCHEMA_V7, WorldStateV7};
 pub use v8::{SCHEMA_V8, WorldStateV8};
 pub use v9::{SCHEMA_V9, WorldStateV9};
+pub use v10::{SCHEMA_V10, WorldStateV10};
 
 /// Bumped whenever `WorldState` or any nested type changes shape. Version 8 appends
 /// `WorldState.care`; version 9 appends `WorldState.energy_correction`
 /// (`crate::accounting`); version 10 appends `WorldState.hunters` (`crate::hunter`).
+/// Version 11 changes the *shape* of that extension: the measured capture effector, the
+/// ingestion mouth, the body-scale mapping, and each member's persisted transition origin and
+/// attack episode.
+///
 /// [`SCHEMA_V9`], [`SCHEMA_V8`] and [`SCHEMA_V7`] payloads are still accepted through the
-/// frozen mirrors in [`v9`], [`v8`] and [`v7`], each migrating with an empty hunter
-/// extension, and the older two with zero corrections as well.
-pub const SCHEMA_VERSION: u32 = 10;
+/// frozen mirrors in [`v9`], [`v8`] and [`v7`], each migrating with an empty hunter extension,
+/// and the older two with zero corrections as well. [`SCHEMA_V10`] is accepted only when its
+/// extension is empty: an active schema 10 trial is refused by name rather than reinterpreted
+/// in the new profile shape (see [`v10`]).
+pub const SCHEMA_VERSION: u32 = 11;
 pub const MAGIC: [u8; 4] = *b"CUBW";
 /// Fixed header length: magic 4, schema 4, build-id length 2, then the build id bytes,
 /// then payload length 8 and CRC32 4 (all little-endian).
@@ -76,12 +84,14 @@ pub fn encode_snapshot(state: &WorldState, build_id: &str) -> Vec<u8> {
 /// Validate magic, schema, length, CRC, decode, then `state.validate()`; every failure is a
 /// distinct error so the loader can report why an older snapshot was tried.
 ///
-/// Four schemas decode: the current [`SCHEMA_VERSION`]; [`SCHEMA_V9`] through the frozen
-/// [`WorldStateV9`] mirror with `hunters = HunterState::default()`; [`SCHEMA_V8`] through
-/// [`WorldStateV8`], which adds `energy_correction = EnergyCorrection::default()`; and
-/// [`SCHEMA_V7`] through [`WorldStateV7`], which adds `care = CareState::default()` as well.
-/// Anything else is [`SnapshotError::UnsupportedSchema`]. `SnapshotMeta.schema` reports what
-/// was read, not what the build writes.
+/// Five schemas decode: the current [`SCHEMA_VERSION`]; [`SCHEMA_V10`], **only with an empty
+/// hunter extension** (an active schema 10 trial is [`SnapshotError::Invalid`] with the reason,
+/// never silently reinterpreted); [`SCHEMA_V9`] through the frozen [`WorldStateV9`] mirror with
+/// `hunters = HunterState::default()`; [`SCHEMA_V8`] through [`WorldStateV8`], which adds
+/// `energy_correction = EnergyCorrection::default()`; and [`SCHEMA_V7`] through
+/// [`WorldStateV7`], which adds `care = CareState::default()` as well. Anything else is
+/// [`SnapshotError::UnsupportedSchema`]. `SnapshotMeta.schema` reports what was read, not what
+/// the build writes.
 pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), SnapshotError> {
     let take = |at: usize, n: usize| -> Result<&[u8], SnapshotError> {
         bytes.get(at..at + n).ok_or(SnapshotError::Truncated)
@@ -94,7 +104,12 @@ pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), Snaps
         return Err(SnapshotError::BadMagic);
     }
     let schema = u32::from_le_bytes(take(4, 4)?.try_into().expect("4 bytes"));
-    if schema != SCHEMA_VERSION && schema != SCHEMA_V9 && schema != SCHEMA_V8 && schema != SCHEMA_V7 {
+    if schema != SCHEMA_VERSION
+        && schema != SCHEMA_V10
+        && schema != SCHEMA_V9
+        && schema != SCHEMA_V8
+        && schema != SCHEMA_V7
+    {
         return Err(SnapshotError::UnsupportedSchema(schema));
     }
     let id_len = u16::from_le_bytes(take(8, 2)?.try_into().expect("2 bytes")) as usize;
@@ -122,6 +137,9 @@ pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), Snaps
         SCHEMA_V9 => postcard::from_bytes::<WorldStateV9>(payload)
             .map(WorldState::from)
             .map_err(|e| SnapshotError::Decode(e.to_string()))?,
+        SCHEMA_V10 => postcard::from_bytes::<WorldStateV10>(payload)
+            .map_err(|e| SnapshotError::Decode(e.to_string()))
+            .and_then(|old| v10::migrate(old).map_err(SnapshotError::Invalid))?,
         _ => postcard::from_bytes(payload).map_err(|e| SnapshotError::Decode(e.to_string()))?,
     };
     state.validate().map_err(SnapshotError::Invalid)?;

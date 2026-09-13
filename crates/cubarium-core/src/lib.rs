@@ -57,8 +57,8 @@ pub use hunter::{
 };
 pub use ids::OrganismId;
 pub use snapshot::{
-    SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_VERSION, SnapshotError, WorldStateV7, WorldStateV8,
-    WorldStateV9, decode_snapshot, ecology_hash, encode_snapshot,
+    SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_VERSION, SnapshotError, WorldStateV7,
+    WorldStateV8, WorldStateV9, WorldStateV10, decode_snapshot, ecology_hash, encode_snapshot,
 };
 pub use telemetry::Telemetry;
 pub use view::RenderView;

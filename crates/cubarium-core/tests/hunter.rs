@@ -151,7 +151,21 @@ fn total_material(state: &WorldState) -> f64 {
     cells + organisms + state.hunters.gut_material_total()
 }
 
-/// A hunter and one frozen prey exactly in front of its jaw, both hungry enough to act.
+/// The chart offset of a body-local offset for a hunter with this heading, in the same basis
+/// `stamp_rig` uses: `+x` along the heading, `+y` its clockwise side. Transcribed here rather
+/// than imported, so a test places prey where the *renderer* would draw the claws.
+fn body_offset(heading: Vec2, offset: Vec2, scale: f64) -> Vec2 {
+    let h = heading.normalized().expect("a heading");
+    let side = Vec2::new(-h.y, h.x);
+    (h * offset.x + side * offset.y) * scale
+}
+
+/// The surface point of a hunter's capture effector, swept the way any offset is swept.
+fn effector_point(root: SurfacePoint, heading: Vec2, profile: &FixedHunterProfile, scale: f64) -> SurfacePoint {
+    travel(root, body_offset(heading, profile.capture_offset_body, scale)).end
+}
+
+/// A hunter and one frozen prey exactly inside its claws, both hungry enough to act.
 fn staged(profile: FixedHunterProfile) -> (World, OrganismId, OrganismId) {
     staged_in(empty_world(), profile)
 }
@@ -162,8 +176,10 @@ fn staged_in(mut world: World, profile: FixedHunterProfile) -> (World, OrganismI
     let receipt = world.start_hunter_trial(profile.clone(), target_of(spot)).expect("the trial starts");
     let hunter = receipt.id;
     aim(&mut world, hunter, Vec2::new(1.0, 0.0), 1.0);
-    let mouth = travel(spot, Vec2::new(1.0, 0.0) * profile.jaw_offset_px).end;
-    let prey = place_prey(&mut world, mouth, 0.5, 0.3, 0.4, true);
+    // In the grasp, not in front of the thorax: an adult's claws close 13.28 px ahead and
+    // 1.16 px to its clockwise side.
+    let grasp = effector_point(spot, Vec2::new(1.0, 0.0), &profile, 1.0);
+    let prey = place_prey(&mut world, grasp, 0.5, 0.3, 0.4, true);
     (world, hunter, prey)
 }
 
@@ -281,7 +297,13 @@ fn the_founder_inventory_is_derived_from_the_config_and_booked_once() {
     assert_eq!(r.material_in, 4.0);
     assert_eq!(r.energy_in, 7.0);
     assert_eq!(r.extent, profile.body_extent_px, "the assembled body's tested support");
-    assert_eq!(r.sense_radius, 8.0);
+    // Sensing is reconciled with the capture effector: the claws close about 14.8 px from the
+    // root, so the profile senses at the genome's maximum and pays for it.
+    assert_eq!(r.sense_radius, 12.0);
+    assert!(
+        r.sense_radius + r.extent > profile.capture_offset_body.length() + profile.capture_reach_px,
+        "a hunter must be able to sense what it could grasp"
+    );
 
     // Booked once, in the extension, and never in `external_material_in`.
     assert_eq!(world.hunters().founder_material_in, 4.0);
@@ -299,12 +321,25 @@ fn the_founder_inventory_is_derived_from_the_config_and_booked_once() {
     assert!(world.mass_residual().abs() < 1e-12, "residual {}", world.mass_residual());
     world.check_invariants().expect("a founded world is consistent");
 
-    // One hunter in the view, with a transported jaw anchor and its semantic role.
+    // One hunter in the view, with its scaled contact geometry and semantic role.
     let view = world.hunter_view();
     assert_eq!(view.len(), 1);
     assert_eq!(view[0].id, r.id);
     assert_eq!(view[0].role, cubarium_core::HunterRole::Lanternjaw);
-    assert_eq!(view[0].mouth_reach_px, profile.jaw_reach_px);
+    assert_eq!(view[0].body_scale, 1.0, "a founder is an adult at scale 1");
+    assert_eq!(view[0].geometry.capture_offset_body, profile.capture_offset_body);
+    assert_eq!(view[0].geometry.capture_reach_px, profile.capture_reach_px);
+    assert_eq!(view[0].geometry.ingestion_offset_body, profile.ingestion_offset_body);
+    assert_eq!(view[0].geometry, r.geometry, "the receipt published the same geometry");
+    assert_eq!(view[0].phase_started_tick, world.tick());
+    assert_eq!(view[0].phase_ends_tick, world.tick());
+    assert_eq!(view[0].entered_from, HunterPhase::Perched);
+    assert_eq!(view[0].episode, 0);
+    assert_eq!(view[0].attack_counter, 0);
+    assert_eq!(view[0].structure_adult, phenotype.structure_adult);
+    assert_eq!(view[0].gut_capacity, profile.gut_capacity_material);
+    // On the open top face both anchors map honestly.
+    assert!(view[0].capture_center.is_some() && view[0].ingestion_center.is_some());
     assert!(!view[0].juvenile);
 }
 
@@ -583,8 +618,8 @@ fn prey_outside_the_window_or_too_big_for_the_gut_is_never_attempted() {
         let hunter =
             world.start_hunter_trial(profile.clone(), target_of(spot)).expect("the trial starts").id;
         aim(&mut world, hunter, Vec2::new(1.0, 0.0), 1.0);
-        let mouth = travel(spot, Vec2::new(1.0, 0.0) * profile.jaw_offset_px).end;
-        let prey = place_prey(&mut world, mouth, structure, 0.3, 0.4, true);
+        let grasp = effector_point(spot, Vec2::new(1.0, 0.0), &profile, 1.0);
+        let prey = place_prey(&mut world, grasp, structure, 0.3, 0.4, true);
 
         for _ in 0..200 {
             world.step();
@@ -619,15 +654,18 @@ fn attacks_disabled_keeps_the_same_living_hunter_and_never_attempts_a_capture() 
 fn two_hunters_contesting_one_prey_produce_exactly_one_capture_and_two_paid_attempts() {
     let profile = certain(trial(&empty_world()));
     let mut world = empty_world();
-    // Two hunters facing each other with the prey between them, at the same jaw distance, so
+    // Two hunters facing each other with the prey between them, in both grasps at once, so
     // both reach the same phase on the same tick and contest the same body.
     let left = SurfacePoint::new(Face::Front, 20.0, 32.0);
-    let right = SurfacePoint::new(Face::Front, 20.0 + 2.0 * profile.jaw_offset_px, 32.0);
+    let reach = profile.capture_offset_body;
+    // Mirrored about the prey: the second hunter faces −x, so its clockwise side is −y, and
+    // the same body offset lands on the same point.
+    let right = SurfacePoint::new(Face::Front, 20.0 + 2.0 * reach.x, 32.0);
     let a = world.start_hunter_trial(profile.clone(), target_of(left)).expect("started").id;
     let b = add_hunter(&mut world, &profile, right, Vec2::new(-1.0, 0.0));
     aim(&mut world, a, Vec2::new(1.0, 0.0), 1.0);
     aim(&mut world, b, Vec2::new(-1.0, 0.0), 1.0);
-    let middle = travel(left, Vec2::new(1.0, 0.0) * profile.jaw_offset_px).end;
+    let middle = effector_point(left, Vec2::new(1.0, 0.0), &profile, 1.0);
     let prey = place_prey(&mut world, middle, 0.5, 0.3, 0.4, true);
 
     let material_before = total_material(&world.state);
@@ -722,16 +760,16 @@ fn a_hunter_that_dies_hands_its_gut_to_the_cell_and_leaves_the_member_list() {
 }
 
 #[test]
-fn the_jaw_reaches_across_a_seam_where_the_body_is_not() {
+fn the_grasp_reaches_across_a_seam_where_the_body_is_not() {
     let profile = certain(trial(&empty_world()));
     let mut world = empty_world();
-    // Close enough to the edge that six pixels of jaw land on the next face.
-    let spot = SurfacePoint::new(Face::Front, 61.0, 32.0);
+    // Close enough to the edge that the claws land on the next face.
+    let spot = SurfacePoint::new(Face::Front, 55.0, 32.0);
     let hunter = world.start_hunter_trial(profile.clone(), target_of(spot)).expect("started").id;
     aim(&mut world, hunter, Vec2::new(1.0, 0.0), 1.0);
-    let mouth = travel(spot, Vec2::new(1.0, 0.0) * profile.jaw_offset_px).end;
-    assert_ne!(mouth.face, spot.face, "this fixture needs the jaw to cross a seam");
-    let prey = place_prey(&mut world, mouth, 0.5, 0.3, 0.4, true);
+    let grasp = effector_point(spot, Vec2::new(1.0, 0.0), &profile, 1.0);
+    assert_ne!(grasp.face, spot.face, "this fixture needs the grasp to cross a seam");
+    let prey = place_prey(&mut world, grasp, 0.5, 0.3, 0.4, true);
     assert_ne!(
         world.state.organisms.get(prey).expect("alive").pos.face,
         world.state.organisms.get(hunter).expect("alive").pos.face,
@@ -740,28 +778,46 @@ fn the_jaw_reaches_across_a_seam_where_the_body_is_not() {
 
     run_until(&mut world, 300, |w| w.hunters().captures_total == 1);
     assert!(world.state.organisms.get(prey).is_none(), "contact across the seam failed");
-    // And the published anchor is the transported point, not a face-local offset.
+    // And the published anchor is the transported, round-tripped point on the other face.
     let view = world.hunter_view();
     assert_eq!(view.len(), 1);
-    assert_ne!(view[0].mouth.face, view[0].pos.face);
+    let centre = view[0].capture_center.expect("an ordinary seam maps honestly");
+    assert_ne!(centre.face, view[0].pos.face);
 }
 
+/// **Regression.** An earlier build swept the contact anchor with `travel` and used wherever it
+/// landed, so a reach aimed past the open rim folded back onto the world and killed a prey
+/// behind the hunter. Static artwork clips at the rim; only actual root travel reflects. The
+/// grasp centre must now refuse to map, no capture may happen there, and the view must publish
+/// `None` rather than a fabricated point.
 #[test]
-fn the_jaw_reflects_off_the_open_rim_and_still_finds_its_prey() {
+fn a_grasp_past_the_open_rim_never_captures_and_is_never_published() {
     let profile = certain(trial(&empty_world()));
     let mut world = empty_world();
-    // Close to the open rim of a side face, aimed at it: the jaw sweep reflects.
-    let spot = SurfacePoint::new(Face::Front, 30.0, 61.0);
+    // The integration report's own fixture, scaled to the real effector: a hunter near the
+    // open rim of a side face, aimed at it.
+    let spot = SurfacePoint::new(Face::Front, 32.0, 63.0);
     let heading = Vec2::new(0.0, 1.0);
-    let sweep = travel(spot, heading * profile.jaw_offset_px);
-    assert!(sweep.reflections > 0, "this fixture needs the jaw to meet the rim");
+    let sweep = travel(spot, body_offset(heading, profile.capture_offset_body, 1.0));
+    assert!(sweep.reflections > 0, "this fixture needs the reach to meet the rim");
+    assert_eq!(sweep.end.face, spot.face, "and to fold back onto the same face");
+
     let hunter = world.start_hunter_trial(profile.clone(), target_of(spot)).expect("started").id;
     aim(&mut world, hunter, heading, 1.0);
+    // Exactly where the old build would have grasped: the reflected point.
     let prey = place_prey(&mut world, sweep.end, 0.5, 0.3, 0.4, true);
 
-    run_until(&mut world, 300, |w| w.hunters().captures_total == 1);
-    assert!(world.state.organisms.get(prey).is_none(), "contact at the rim failed");
-    world.check_invariants().expect("consistent after a capture at the rim");
+    // Nothing is published there, because nothing is drawn there.
+    let view = world.hunter_view();
+    assert_eq!(view.len(), 1);
+    assert_eq!(view[0].capture_center, None, "a reflected grasp centre must not be published");
+
+    for _ in 0..400 {
+        world.step();
+    }
+    assert_eq!(world.hunters().captures_total, 0, "a reflected reach captured something");
+    assert!(world.state.organisms.get(prey).is_some(), "the prey behind the rim was eaten");
+    world.check_invariants().expect("consistent after a refused off-rim reach");
 }
 
 // ---------------------------------------------------------------- escape
@@ -1222,8 +1278,8 @@ fn a_stale_target_never_resolves_to_the_slot_it_used_to_name() {
     assert_eq!(world.hunters().members[0].target, None, "the eaten handle was dropped");
 
     // The freed slot is reused by a new animal with a new generation.
-    let mouth = world.hunter_view()[0].mouth;
-    let fresh = place_prey(&mut world, mouth, 0.5, 0.3, 0.4, true);
+    let grasp = world.hunter_view()[0].capture_center.expect("an open-face grasp maps");
+    let fresh = place_prey(&mut world, grasp, 0.5, 0.3, 0.4, true);
     assert_eq!(fresh.slot, prey.slot, "this fixture needs the slot to be reused");
     assert_ne!(fresh.generation, prey.generation);
     assert!(world.state.organisms.get(prey).is_none(), "the old ID still resolves to nobody");
@@ -1236,6 +1292,7 @@ fn a_stale_target_never_resolves_to_the_slot_it_used_to_name() {
         member.phase = HunterPhase::Stalking;
         member.phase_started_tick = world.state.tick;
         member.phase_ends_tick = world.state.tick;
+        member.episode = 0;
         member.target = Some(prey);
     }
     world.state.validate().expect("a stale handle is a valid state, not a corrupt one");

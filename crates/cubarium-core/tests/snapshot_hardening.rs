@@ -26,13 +26,19 @@ fn stepped_world(ticks: u64) -> World {
 /// appended `WorldState.energy_correction`
 /// (`design/7_Research/accounting-compensation-handoff-2026-09-13.md`), version 10 the
 /// appended `WorldState.hunters` (`design/7_Research/fixed-hunter-core-handoff-2026-09-13.md`).
-/// Version 8 was the first that migrates rather than refuses; version 10 migrates all three
-/// of its predecessors through their frozen mirrors, with an empty hunter extension, and zero
-/// care and zero corrections where those are missing too. Everything older is still rejected
-/// outright.
+/// Version 11 changed the *shape* of that extension — the measured capture effector, the
+/// ingestion mouth, the body scale and each member's transition origin
+/// (`design/7_Research/lanternjaw-core-art-integration-gaps-2026-09-13.md`).
+///
+/// Version 8 was the first that migrates rather than refuses; version 11 migrates all four of
+/// its predecessors through their frozen mirrors, with an empty hunter extension, and zero
+/// care and zero corrections where those are missing too — except that a schema 10 payload
+/// carrying an *active* trial is refused by name rather than reinterpreted. Everything older is
+/// still rejected outright.
 #[test]
-fn the_schema_version_is_ten_and_nine_eight_and_seven_still_load() {
-    assert_eq!(SCHEMA_VERSION, 10);
+fn the_schema_version_is_eleven_and_its_four_predecessors_still_load() {
+    assert_eq!(SCHEMA_VERSION, 11);
+    assert_eq!(cubarium_core::SCHEMA_V10, 10);
     assert_eq!(cubarium_core::SCHEMA_V9, 9);
     assert_eq!(cubarium_core::SCHEMA_V8, 8);
     assert_eq!(cubarium_core::SCHEMA_V7, 7);
