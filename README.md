@@ -82,8 +82,12 @@ is now deployed after matched visual and boundary review. The
 [quiet diagnosis](design/7_Research/astra-quiet-results-2026-09-13.md) found no
 active-to-rest transitions; an affordable post-birth pause remains a separate
 [experimental proposal](design/7_Research/astra-ordinary-quiet-experiment-proposal-2026-09-13.md).
-The quiet policy is now being implemented as an isolated opt-in experiment; it is
-not yet reviewed, validated, or deployed. No hunter is live.
+The [complete two-hour review](design/7_Research/astra-quiet-two-hour-biological-review-2026-09-13.md)
+finds that post-birth recovery is real but too sparse for everyday quiet (about
+0.03% of living time). It stays Off. A separate
+[post-intake opportunity check](design/7_Research/root-post-intake-shadow-scope-2026-09-13.md)
+is being implemented in isolation to measure affordable meal-earned pauses
+without changing baseline behavior. Neither that behavior nor hunters are live.
 
 The first complete [hunter screen](design/7_Research/hunter-profile3-two-hour-results-2026-09-13.md)
 ran all twelve seeds in six matched arms for two hours. All 72 numerical audits
