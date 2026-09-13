@@ -2023,7 +2023,7 @@ pub fn tall_grown_px(height: f64) -> f64 {
 /// height coordinate: no tile join opens, the cap stays on the stem's curve even where its
 /// pixels are owned by Top, and a vine cannot slide against its trunk. An amplitude of 0 is
 /// [`Bend::NONE`] and the column is drawn exactly as it was before the wind existed.
-fn draw_column(
+pub fn draw_column(
     canvas: &mut Canvas,
     column: &TallColumn,
     height: f64,
@@ -2080,8 +2080,10 @@ fn draw_column(
         stamp(cap, height + 1.0, Mask::None, TALL_OPACITY * fade);
     }
     if let (true, Some(vine)) = (column.vine, vine) {
+        // STUDY ONLY: cleared ends + a separately derived phase-registered endpoint.
+        let retiled = vine.cap.is_some() && trunk_strip(vine).1 == TALL_STRIP_TOP;
         for i in (1..=TALL_MAX_SEGMENTS).step_by(2) {
-            let top = if i + 2 > TALL_MAX_SEGMENTS { TILE_ROWS } else { TALL_VINE_TOP };
+            let top = if i + 2 > TALL_MAX_SEGMENTS && !retiled { TILE_ROWS } else { TALL_VINE_TOP };
             let reveal = local(i).min(top);
             if reveal <= TALL_VINE_FLOOR {
                 break;
@@ -2092,6 +2094,19 @@ fn draw_column(
                 Mask::Strip { floor: TALL_VINE_FLOOR, reveal },
                 TALL_OPACITY * fade,
             );
+        }
+        if retiled {
+            let i = f64::from(TALL_MAX_SEGMENTS) + 1.0;
+            // Do not introduce a new Strip start-envelope at global height40.
+            // The source patch itself owns rows4..7, while Axial keeps the old
+            // grown ceiling and the original already-complete start envelope.
+            let clip = vine.cap.as_ref().unwrap();
+            let pose = clip.sample(seconds + tall_phase_of(column.face, column.cx, clip.seconds));
+            cubarium_render::stamp_pose_in_chart(canvas,
+                tall_anchor(column.face, column.cx, TALL_MAX_SEGMENTS),
+                tall_anchor_at(column.face, column.cx, i), heading, pose, TALL_OPACITY * fade,
+                Mask::Axial { reveal: grown - tall_bend_base(i) },
+                Bend { amplitude, base: tall_bend_base(i), root: TALL_BEND_ROOT, length: TALL_BEND_LENGTH }, scratch);
         }
     }
 }

@@ -777,6 +777,37 @@ fn stamp_unfolded<const BENT: bool>(
     }
 }
 
+/// STUDY ONLY: a recentered patch retaining a same-face original tile's chart ownership.
+/// Query radius is a candidate superset, not a larger stamp: each sample is rejected
+/// outside nine pixels of the patch center in that owning chart.
+pub fn stamp_pose_in_chart(
+    canvas: &mut Canvas, owner: SurfacePoint, center: SurfacePoint, heading: Vec2,
+    pose: Pose, opacity: f32, mask: Mask, bend: Bend, scratch: &mut Vec<PixelImage>,
+) {
+    assert_eq!(owner.face, center.face);
+    let h = heading.normalized().unwrap();
+    let side = Vec2::new(-h.y, h.x);
+    let radius = (pose.extent() + bend.amplitude.abs()).min(FOOTPRINT_RADIUS);
+    assert!(pose.extent() <= FOOTPRINT_RADIUS);
+    let query = radius + (owner.chart() - center.chart()).length();
+    unfold_pixels(owner, query, scratch);
+    let reference = pose.first;
+    for pixel in scratch.iter() {
+        let d = pixel.local - center.chart();
+        if d.length() > radius + 1e-9 { continue; }
+        let local = Vec2::new(h.dot(d), side.dot(d));
+        let at = Vec2::new(local.x - bend.displacement(reference.height as f64, local.y + reference.pivot.y), local.y);
+        let coverage = mask.coverage(at + reference.pivot, reference.height, reference.pivot);
+        let mut rgba = pose.sample(at);
+        for c in &mut rgba { *c *= coverage; }
+        let a = rgba[3] * opacity;
+        if a <= 0.0 { continue; }
+        let background = canvas.get(pixel.face, pixel.x, pixel.y);
+        canvas.set(pixel.face, pixel.x, pixel.y,
+            std::array::from_fn(|c| rgba[c] * opacity + background[c] * (1.0-a)));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
