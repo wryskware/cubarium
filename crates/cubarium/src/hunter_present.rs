@@ -12,7 +12,7 @@
 
 use cubarium_core::hunter::{FixedHunterProfile, HunterPhase, HunterRole, HunterView};
 use cubarium_core::view::OrganismView;
-use cubarium_surface::{PathSegment, SurfacePoint, Vec2};
+use cubarium_surface::{MAX_LOCAL_RADIUS, PathSegment, SurfacePoint, Vec2, travel, unfold};
 
 use crate::art_present::present_seconds;
 use crate::clock::DT;
@@ -336,25 +336,50 @@ impl HunterMemory {
     }
 
     /// Where the retained prey is drawn at fraction `f` of the capture tick, and with which
-    /// heading. **Normative**: with `p` its last published view and `q` the settlement position
-    /// from the `Capture` event: no `q` ⇒ `p.pos`; `q` on the same face as `p.pos` ⇒ the chart
-    /// point `p.pos + f · (q − p.pos)` (a straight chart path from where the prey was last
-    /// published to where it was taken — an **approximation** of its unpublished capture-tick
-    /// movement, which the event does not carry); `q` on another face ⇒ `q` itself. The heading
-    /// is always the last published one (the event carries none). `None` without a retained prey.
+    /// heading.
+    ///
+    /// **Normative.** With `p` its last published view and `q` the settlement position from
+    /// the `Capture` event: no `q` ⇒ `(p.pos, p.heading)` throughout. Otherwise the prey
+    /// walks the **shortest valid surface chord** from `p.pos` to `q`: `u = unfold(p.pos, q,
+    /// MAX_LOCAL_RADIUS)` gives `q`'s image in `p`'s chart, `d = u.local − p.pos.chart()`, and
+    /// the pose at `f` is `t = travel(p.pos, f · d)` — `t.end` on whichever chart the point
+    /// falls, crossing seams exactly as a moving body does (chart transport, never a
+    /// reflection: a valid unfolding never crosses the open rim), with the heading
+    /// `t.map.apply(p.heading)`, the last published heading carried through the seams the
+    /// chord crosses. The endpoints are exact: `f = 0` is `p.pos` with `p.heading`, `f = 1`
+    /// is `q` itself with the heading carried the whole way. This is an **approximation**
+    /// and is labelled one: the event carries neither the capture-tick path nor a final
+    /// heading, so a straight surface chord and the old heading stand in for both. Fallback,
+    /// also documented: when no valid unfolding exists within `MAX_LOCAL_RADIUS`, or the
+    /// sweep reflects or falls back (neither can happen for a chord the unfolding validated),
+    /// the prey is drawn at `q` with `p.heading` for the whole interval. `None` without a
+    /// retained prey.
     pub fn retained_prey_pose(&self, f: f64) -> Option<(SurfacePoint, Vec2)> {
         let p = self.prey.as_ref()?;
-        let f = if f.is_finite() { f.clamp(0.0, 1.0) } else { 0.0 };
-        let pos = match self.prey_at {
-            None => p.pos,
-            Some(q) if q.face == p.pos.face => {
-                let (a, b) = (p.pos.chart(), q.chart());
-                SurfacePoint::new(p.pos.face, a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f)
-                    .canonicalize()
-            }
-            Some(q) => q,
+        let f = if f.is_finite() {
+            f.clamp(0.0, 1.0)
+        } else {
+            0.0
         };
-        Some((pos, p.heading))
+        let Some(q) = self.prey_at else {
+            return Some((p.pos, p.heading));
+        };
+        let Some(u) = unfold(p.pos, q, MAX_LOCAL_RADIUS) else {
+            return Some((q, p.heading));
+        };
+        if f <= 0.0 {
+            return Some((p.pos, p.heading));
+        }
+        let d = u.local - p.pos.chart();
+        let t = travel(p.pos, d * f);
+        if t.reflections > 0 || t.fallback {
+            return Some((q, p.heading));
+        }
+        let heading = t.map.apply(p.heading);
+        if f >= 1.0 {
+            return Some((q, heading));
+        }
+        Some((t.end, heading))
     }
 
     /// The frame and entry reach in effect at fraction `f` of `tick`'s presentation interval.
@@ -370,23 +395,78 @@ impl HunterMemory {
         }
     }
 
+    /// The body state — gut fraction, gestation, whole-rig scale — in effect at fraction `f`
+    /// of `tick`'s interval, between the previous published frame and the current one.
+    ///
+    /// **Normative.** With `p = prev` (when it exists and is an earlier tick) and `c = cur`,
+    /// and `f` clamped to `[0, 1]` (NaN ⇒ 0):
+    ///
+    /// * **scale** is continuous biology and interpolates linearly, `p.scale + (c.scale −
+    ///   p.scale) · f`, exactly `p.scale` at 0 and `c.scale` at 1;
+    /// * **gut** is a tick-boundary fact when the phase changed at this boundary (a capture
+    ///   fills it, a finished meal empties it): while `c.started == tick` and `c.key() ≠
+    ///   p.key()` it is `p.gut` for `f < 1` and `c.gut` at `f = 1`; otherwise (digestion
+    ///   inside one phase) it interpolates linearly;
+    /// * **gestation** interpolates linearly while both frames carry one; a start or an end
+    ///   (`None ↔ Some`) is a boundary fact, `p.gestation` for `f < 1` and `c.gestation` at 1.
+    ///
+    /// Without a previous frame the current values hold throughout. Nothing here reads the
+    /// attack phase's own timing; the `Capture` that fills the gut therefore shows on the
+    /// abdomen exactly at the settlement boundary the strike is held to, not one interval early.
+    pub fn state_at(&self, tick: u64, f: f64) -> (f64, Option<f64>, f64) {
+        let f = if f.is_finite() {
+            f.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let c = &self.cur;
+        let Some(p) = self.prev.as_ref().filter(|p| p.tick < c.tick) else {
+            return (f64::from(c.gut), c.gestation.map(f64::from), c.scale);
+        };
+        let lerp = |a: f64, b: f64| if f >= 1.0 { b } else { a + (b - a) * f };
+        let boundary_event = c.started == tick && c.key() != p.key();
+        let gut = if boundary_event {
+            if f >= 1.0 {
+                f64::from(c.gut)
+            } else {
+                f64::from(p.gut)
+            }
+        } else {
+            lerp(f64::from(p.gut), f64::from(c.gut))
+        };
+        let cocoon = match (p.gestation, c.gestation) {
+            (Some(a), Some(b)) => Some(lerp(f64::from(a), f64::from(b))),
+            (a, b) => {
+                if f >= 1.0 {
+                    b.map(f64::from)
+                } else {
+                    a.map(f64::from)
+                }
+            }
+        };
+        (gut, cocoon, lerp(p.scale, c.scale))
+    }
+
     /// The living pose and whole-rig scale at fraction `f` of `tick`, for a root that
     /// travelled `moved` during the last tick.
     ///
     /// **Normative**: `ambient = present_seconds(tick, f)`, `movement = movement_of(moved)`,
-    /// `attack = episode_of(frame_at(tick, f))` at that same instant, `gut = cur.gut`,
-    /// `cocoon = cur.gestation` (only a funded escrow has one), `scale = cur.scale`. Pure: the
-    /// same inputs give the same pose at any frame rate, and nothing here advances anything.
+    /// `attack = episode_of(frame_at(tick, f))` at that same instant, and `(gut, cocoon,
+    /// scale) = state_at(tick, f)` — the published body state interpolated across the same
+    /// interval the root is, with boundary events (a meal taken, a meal finished, an escrow
+    /// begun or ended) stepping exactly at the boundary. Pure: the same inputs give the same
+    /// pose at any frame rate, and nothing here advances anything.
     pub fn living_pose(&self, tick: u64, f: f64, moved: &[PathSegment]) -> (LivingPose, f64) {
         let seconds = present_seconds(tick, f);
         let (frame, from) = self.frame_at(tick, f);
+        let (gut, cocoon, scale) = self.state_at(tick, f);
         let pose = LivingPose {
             ambient: seconds,
             movement: movement_of(moved),
             attack: episode_of(frame, from, seconds),
-            gut: f64::from(self.cur.gut),
-            cocoon: self.cur.gestation.map(f64::from),
+            gut,
+            cocoon,
         };
-        (pose, self.cur.scale)
+        (pose, scale)
     }
 }

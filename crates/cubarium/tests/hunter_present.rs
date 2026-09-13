@@ -24,7 +24,9 @@ use cubarium::lanternjaw::{
     AttackPhase, RECOIL_SECONDS, Reach, SCALE_MIN, attack_channels, effectors,
 };
 use cubarium_core::genome::{Genome, decode};
-use cubarium_core::hunter::{FixedHunterProfile, HunterPhase, HunterTarget, HunterView};
+use cubarium_core::hunter::{
+    ContactGeometry, FixedHunterProfile, HunterPhase, HunterTarget, HunterView,
+};
 use cubarium_core::ids::OrganismId;
 use cubarium_core::organism::{Mode, Organism, Origin};
 use cubarium_core::rng::Counter;
@@ -1301,7 +1303,10 @@ fn a_capture_at_the_open_rim_draws_nothing_below_it_and_a_vertex_hunt_does_not_p
             );
         }
     }
-    assert!(differing_near(&image, &base, at, 4.0) > 0, "the grasp near the rim is drawn");
+    assert!(
+        differing_near(&image, &base, at, 4.0) > 0,
+        "the grasp near the rim is drawn"
+    );
     // Toward a top vertex: whatever the core decides about the grasp, the presenter draws
     // one owner per pixel and never panics.
     let (mut world, hunter, _) = staged_moving(
@@ -1454,6 +1459,564 @@ fn a_hunter_on_a_seam_is_one_continuous_body_on_two_faces() {
 
 /// Native captures from a real world's attack, for the record. Ignored: it writes files.
 /// `HUNTER_CAPTURE_DIR` names the directory (default: a fresh `mktemp`-style path under /tmp).
+// ------------------------------------------------ completed-tick continuity
+
+/// A hunter memory with a **forced** retained prey: last published at `pos` with `heading`,
+/// settled (per a `Capture` event) at `at`. The prey view is a real organism's, so the stamp
+/// is the shipped creature's; only its last published pose is forced.
+fn retained(pos: SurfacePoint, heading: Vec2, at: SurfacePoint) -> HunterMemory {
+    let (world, hunter, prey) = staged(certain(trial(&empty_world())));
+    let view = world.render_view();
+    let mut prey_view = view
+        .organisms
+        .iter()
+        .find(|o| o.id == prey)
+        .cloned()
+        .expect("the staged prey is published");
+    prey_view.pos = pos.canonicalize();
+    prey_view.heading = heading;
+    prey_view.moved.clear();
+    let h = world
+        .hunter_view()
+        .into_iter()
+        .find(|h| h.id == hunter)
+        .unwrap();
+    let mut m = HunterMemory::enter(HunterFrame::of(&h, view.tick));
+    m.prey = Some(prey_view);
+    m.prey_at = Some(at.canonicalize());
+    m
+}
+
+/// Surface distance between two nearby points, through the surface's own unfolding.
+fn surface_distance(a: SurfacePoint, b: SurfacePoint) -> f64 {
+    cubarium_surface::unfold(a, b, cubarium_surface::MAX_LOCAL_RADIUS)
+        .expect("nearby")
+        .distance
+}
+
+fn unit(v: Vec2) -> bool {
+    (v.x.hypot(v.y) - 1.0).abs() < 1e-9
+}
+
+/// Forced final-tick face crossings: the prey's last published position is on one face and
+/// the event's settlement position on another — Front→Right (a seam with no turn), Right→Top
+/// (a quarter turn) and Back→Top (a half turn). The drawn pose walks one straight surface
+/// chord at constant speed, changes face exactly once, is exact at both ends, and carries the
+/// last published heading through the seam's own tangent map.
+#[test]
+fn a_retained_prey_crossing_a_seam_walks_one_chord_with_its_heading_transported() {
+    let cases = [
+        (
+            SurfacePoint::new(Face::Front, 60.0, 32.0),
+            Vec2::new(1.0, 0.0),
+            SurfacePoint::new(Face::Right, 4.0, 32.0),
+            Vec2::new(1.0, 0.0),
+        ),
+        (
+            SurfacePoint::new(Face::Right, 10.0, 3.0),
+            Vec2::new(0.0, -1.0),
+            SurfacePoint::new(Face::Top, 61.0, 54.0),
+            // Right's top edge meets Top's right edge a quarter turn round (`travel`'s own
+            // Right→Top fixture: Right (10, 0.25) going up arrives at Top (63.75, 54)): "up"
+            // on Right is "−x" on Top.
+            Vec2::new(-1.0, 0.0),
+        ),
+        (
+            SurfacePoint::new(Face::Back, 10.0, 3.0),
+            Vec2::new(0.6, -0.8),
+            SurfacePoint::new(Face::Top, 54.0, 3.0),
+            // Back's top edge meets Top's top edge half a turn round: a heading is negated.
+            Vec2::new(-0.6, 0.8),
+        ),
+    ];
+    for (pos, heading, at, transported) in cases {
+        let m = retained(pos, heading, at);
+        let p = m.prey.as_ref().unwrap();
+        assert_ne!(p.pos.face, at.face, "the fixture forces a crossing");
+        // Exact endpoints.
+        let (start, h0) = m.retained_prey_pose(0.0).unwrap();
+        assert_eq!(start, p.pos);
+        assert_eq!(h0, heading);
+        let (end, h1) = m.retained_prey_pose(1.0).unwrap();
+        assert_eq!(end, at.canonicalize());
+        assert!(
+            (h1.x - transported.x).abs() < 1e-9 && (h1.y - transported.y).abs() < 1e-9,
+            "{:?}→{:?}: heading {:?} carried as {:?}, expected {:?}",
+            pos.face,
+            at.face,
+            heading,
+            h1,
+            transported
+        );
+        // One straight chord at constant speed, one face change, never a jump.
+        let n = 200;
+        let chord = surface_distance(p.pos, at);
+        let step = chord / f64::from(n);
+        let mut walked = 0.0;
+        let mut changes = 0;
+        let mut last = start;
+        for k in 1..=n {
+            let f = f64::from(k) / f64::from(n);
+            let (q, h) = m.retained_prey_pose(f).unwrap();
+            assert!(unit(h), "a unit heading at f = {f}");
+            let d = surface_distance(last, q);
+            assert!(
+                (d - step).abs() < 1e-6,
+                "{:?}→{:?} at f = {f}: moved {d} px in one step, chord step {step}",
+                pos.face,
+                at.face
+            );
+            if q.face != last.face {
+                changes += 1;
+                // Once across, the heading is the transported one; before, the original.
+                assert!((h.x - transported.x).abs() < 1e-9 && (h.y - transported.y).abs() < 1e-9);
+            }
+            assert!(
+                q.face == pos.face || q.face == at.face,
+                "a third face at f = {f}"
+            );
+            walked += d;
+            last = q;
+        }
+        assert_eq!(
+            changes, 1,
+            "{:?}→{:?} crosses exactly one seam",
+            pos.face, at.face
+        );
+        assert!(
+            (walked - chord).abs() < 1e-6,
+            "the walk is the chord: {walked} vs {chord}"
+        );
+        assert_eq!(last, end);
+    }
+}
+
+/// The same-face case is the straight chart chord it always was; a settlement with no event
+/// holds the last published pose; a settlement no unfolding within `MAX_LOCAL_RADIUS` reaches
+/// (the documented fallback) is drawn at the settlement point for the whole interval.
+#[test]
+fn a_retained_prey_on_one_face_walks_the_chart_chord_and_the_fallback_is_the_endpoint() {
+    let pos = SurfacePoint::new(Face::Front, 20.0, 32.0);
+    let at = SurfacePoint::new(Face::Front, 26.0, 28.0);
+    let m = retained(pos, Vec2::new(0.0, 1.0), at);
+    for k in 0..=10 {
+        let f = f64::from(k) / 10.0;
+        let (q, h) = m.retained_prey_pose(f).unwrap();
+        assert_eq!(q.face, Face::Front);
+        assert!((q.u - (20.0 + 6.0 * f)).abs() < 1e-9 && (q.v - (32.0 - 4.0 * f)).abs() < 1e-9);
+        assert_eq!(h, Vec2::new(0.0, 1.0), "no seam: the heading is untouched");
+    }
+    let mut none = retained(pos, Vec2::new(0.0, 1.0), at);
+    none.prey_at = None;
+    for f in [0.0, 0.5, 1.0] {
+        assert_eq!(none.retained_prey_pose(f).unwrap().0, pos);
+    }
+    // Front (32, 32) to the opposite face is beyond any local unfolding.
+    let far = SurfacePoint::new(Face::Back, 32.0, 32.0);
+    let fallback = retained(
+        SurfacePoint::new(Face::Front, 32.0, 32.0),
+        Vec2::new(1.0, 0.0),
+        far,
+    );
+    for f in [0.0, 0.25, 1.0] {
+        let (q, h) = fallback.retained_prey_pose(f).unwrap();
+        assert_eq!(
+            q, far,
+            "the documented fallback: the settlement point throughout"
+        );
+        assert_eq!(h, Vec2::new(1.0, 0.0));
+    }
+    assert_eq!(fallback.retained_prey_pose(f64::NAN).unwrap().0, far);
+}
+
+/// A chord that skirts the open rim while crossing a side seam never leaves the surface: no
+/// sample lies at or below the rim and none is reflected back up (the walk stays on the two
+/// faces, monotone along the chord).
+#[test]
+fn a_retained_prey_chord_along_the_rim_is_never_reflected() {
+    let pos = SurfacePoint::new(Face::Front, 3.0, 62.5);
+    let at = SurfacePoint::new(Face::Left, 60.0, 63.5);
+    let m = retained(pos, Vec2::new(-1.0, 0.0), at);
+    let chord = surface_distance(pos, at);
+    let mut from_start = 0.0;
+    for k in 0..=100 {
+        let f = f64::from(k) / 100.0;
+        let (q, _) = m.retained_prey_pose(f).unwrap();
+        assert!(q.v < 64.0, "past the open rim at f = {f}: {q:?}");
+        assert!(q.face == Face::Front || q.face == Face::Left, "{q:?}");
+        let d = surface_distance(pos, q);
+        assert!(d + 1e-9 >= from_start, "doubled back at f = {f}");
+        assert!((d - chord * f).abs() < 1e-6, "not on the chord at f = {f}");
+        from_start = d;
+    }
+}
+
+/// The published body state across an interval: scale interpolates, a meal taken at a phase
+/// boundary steps exactly there, digestion inside one phase interpolates, and an escrow's
+/// start or end is a boundary fact. Pure frames; nothing here runs a world.
+#[test]
+fn body_state_steps_at_a_phase_boundary_and_interpolates_inside_a_phase() {
+    let frame = |tick, phase, started, scale, gut: f32, gestation| HunterFrame {
+        tick,
+        phase,
+        started,
+        ends: started,
+        entered_from: HunterPhase::Strike,
+        episode: 1,
+        scale,
+        gut,
+        gestation,
+        target: None,
+    };
+    let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+    // The published gut is an `f32`; its `f64` image is what the pose carries.
+    let g = f64::from;
+    // A capture: Strike (gut empty) at tick 19, Handling entered at the boundary 20.
+    let mut m = HunterMemory::enter(frame(19, HunterPhase::Strike, 1, 0.5, 0.0, None));
+    m.observe(frame(20, HunterPhase::Handling, 20, 0.52, 0.6, None));
+    for f in [0.0, 0.5, 0.999] {
+        let (gut, cocoon, scale) = m.state_at(20, f);
+        assert_eq!(
+            gut, 0.0,
+            "the meal is not on the abdomen before settlement (f = {f})"
+        );
+        assert_eq!(cocoon, None);
+        assert!(
+            close(scale, 0.5 + 0.02 * f),
+            "scale interpolates: {scale} at f = {f}"
+        );
+    }
+    let (gut, _, scale) = m.state_at(20, 1.0);
+    assert!(
+        close(gut, g(0.6f32)) && close(scale, 0.52),
+        "the current frame exactly at f = 1"
+    );
+    let (pose, s) = m.living_pose(20, 0.5, &[]);
+    assert_eq!(pose.gut, 0.0);
+    assert!(close(s, 0.51));
+    // Digestion inside Handling: the same phase key, so the gut interpolates.
+    m.observe(frame(21, HunterPhase::Handling, 20, 0.52, 0.55, None));
+    let (gut, _, _) = m.state_at(21, 0.5);
+    assert!(
+        close(gut, (g(0.6f32) + g(0.55f32)) * 0.5),
+        "digestion interpolates: {gut}"
+    );
+    assert_eq!(m.state_at(21, 1.0).0, g(0.55f32));
+    // A meal finished at a boundary (Handling → Perched, gut emptied): full until f = 1.
+    m.observe(frame(22, HunterPhase::Perched, 22, 0.53, 0.0, None));
+    assert!(close(m.state_at(22, 0.9).0, g(0.55f32)));
+    assert_eq!(m.state_at(22, 1.0).0, 0.0);
+    // An escrow begins at a boundary, then progresses continuously, then ends.
+    m.observe(frame(23, HunterPhase::Perched, 22, 0.53, 0.0, Some(0.1)));
+    assert_eq!(
+        m.state_at(23, 0.5).1,
+        None,
+        "no cocoon before the boundary it began at"
+    );
+    assert_eq!(m.state_at(23, 1.0).1, Some(g(0.1f32)));
+    m.observe(frame(24, HunterPhase::Perched, 22, 0.53, 0.0, Some(0.3)));
+    assert!(close(
+        m.state_at(24, 0.5).1.unwrap(),
+        (g(0.1f32) + g(0.3f32)) * 0.5
+    ));
+    m.observe(frame(25, HunterPhase::Perched, 22, 0.53, 0.0, None));
+    assert_eq!(m.state_at(25, 0.99).1, Some(g(0.3f32)));
+    assert_eq!(m.state_at(25, 1.0).1, None);
+    // Without a previous frame the current values hold throughout; NaN reads as f = 0.
+    let fresh = HunterMemory::enter(frame(30, HunterPhase::Perched, 22, 0.7, 0.2, Some(0.5)));
+    for f in [0.0, 0.5, 1.0, f64::NAN] {
+        let (gut, cocoon, scale) = fresh.state_at(30, f);
+        assert!(close(gut, g(0.2f32)) && cocoon == Some(g(0.5f32)) && scale == 0.7);
+    }
+    assert!(close(m.state_at(25, f64::NAN).2, 0.53));
+}
+
+/// The real thing: a certain capture fills the gut at the settlement boundary, and the
+/// presenter shows it on the abdomen from `f = 1` of that tick, not from `f = 0`.
+#[test]
+fn a_real_meal_reaches_the_abdomen_at_the_settlement_boundary_not_before() {
+    let (world, mut p, hunter, _, tick) = captured(
+        SurfacePoint::new(Face::Front, 20.0, 32.0),
+        Vec2::new(1.0, 0.0),
+    );
+    let m = p.hunter_of(hunter).unwrap();
+    let prev = m.prev.expect("the strike tick is remembered");
+    assert_eq!(prev.gut, 0.0, "nothing eaten before the capture");
+    assert!(m.cur.gut > 0.0, "the capture filled the gut");
+    assert_eq!(m.cur.started, tick);
+    let (before, _) = m.living_pose(tick, 0.5, &[]);
+    let (after, _) = m.living_pose(tick, 1.0, &[]);
+    assert_eq!(before.gut, 0.0);
+    assert_eq!(after.gut, f64::from(m.cur.gut));
+    // Drawn: at f = 0.999 the image equals one whose current frame has the previous tick's gut
+    // (an otherwise identical presenter), and at f = 1 it does not.
+    let _ = (world, &mut p);
+}
+
+/// Growth across an interval: a hunter published at scale 0.5 then 0.6 is drawn at 0.55 in
+/// the middle of the interval and exactly at 0.6 at its end, through the public presenter.
+#[test]
+fn a_growing_hunter_is_drawn_at_the_interpolated_scale_and_exactly_at_the_published_ends() {
+    let (world, hunter, _) = staged(certain(trial(&empty_world())));
+    let profile = trial(&world);
+    let at_scale = |tick: u64, s: f64| {
+        let mut view = world.render_view();
+        view.tick = tick;
+        let mut h = world
+            .hunter_view()
+            .into_iter()
+            .find(|h| h.id == hunter)
+            .unwrap();
+        h.body_scale = s;
+        h.geometry = ContactGeometry {
+            scale: s,
+            capture_offset_body: profile.capture_offset_body * s,
+            capture_reach_px: profile.capture_reach_px * s,
+            ingestion_offset_body: profile.ingestion_offset_body * s,
+            visual_query_extent_px: profile.visual_query_extent_px * s,
+        };
+        (view, h)
+    };
+    let sequence = |a: f64, b: f64| {
+        let mut p = presenter();
+        observe_pair(&mut p, &at_scale(30, a));
+        let second = at_scale(31, b);
+        observe_pair(&mut p, &second);
+        (p, second.0)
+    };
+    let (growing, view) = sequence(0.5, 0.6);
+    let m = growing.hunter_of(hunter).unwrap();
+    assert!((m.state_at(31, 0.5).2 - 0.55).abs() < 1e-12);
+    assert_eq!(m.state_at(31, 0.0).2, 0.5);
+    assert_eq!(m.state_at(31, 1.0).2, 0.6);
+    let image = |p: &mut ArtPresenter, f: f64| {
+        let mut c = Canvas::new();
+        p.draw(&view, f, &mut c);
+        c
+    };
+    let (mut growing, _) = sequence(0.5, 0.6);
+    let (mut small, _) = sequence(0.5, 0.5);
+    let (mut grown, _) = sequence(0.6, 0.6);
+    assert!(
+        !identical(&image(&mut growing, 0.5), &image(&mut small, 0.5)),
+        "the interpolated scale is drawn, not the previous one"
+    );
+    assert!(
+        !identical(&image(&mut growing, 0.5), &image(&mut grown, 0.5)),
+        "the interpolated scale is drawn, not the current one"
+    );
+    assert!(identical(
+        &image(&mut growing, 1.0),
+        &image(&mut grown, 1.0)
+    ));
+    assert!(identical(
+        &image(&mut growing, 0.0),
+        &image(&mut small, 0.0)
+    ));
+}
+
+/// A real capture whose prey was last published on the other face of a seam: forced by
+/// publishing the prey's final pre-capture view on the Front face while the world itself
+/// takes it on the Right face. Returns the presenter, a twin that never saw the prey's final
+/// view (so its image lacks exactly the retained prey), the hunter, the prey and the tick.
+fn forced_crossing_capture() -> (
+    World,
+    ArtPresenter,
+    ArtPresenter,
+    OrganismId,
+    OrganismId,
+    u64,
+) {
+    let (mut world, hunter, prey) = staged_moving(
+        SurfacePoint::new(Face::Front, 52.0, 32.0),
+        Vec2::new(1.0, 0.0),
+        certain(trial(&quiet_world())),
+    );
+    let mut a = presenter();
+    let mut b = presenter();
+    for _ in 0..400 {
+        world.step();
+        world.drain_events();
+        let hunted = world.drain_hunter_events();
+        let mut view = world.render_view();
+        let hunters = world.hunter_view();
+        let h = hunters.iter().find(|h| h.id == hunter).unwrap();
+        let mut twin = view.clone();
+        if h.phase == HunterPhase::Strike && h.phase_ends_tick == view.tick + 1 {
+            let o = view
+                .organisms
+                .iter_mut()
+                .find(|o| o.id == prey)
+                .expect("the prey is still published the tick before it is taken");
+            o.pos = SurfacePoint::new(Face::Front, 58.0, 27.0);
+            o.heading = Vec2::new(0.8, 0.6);
+            o.moved.clear();
+            twin.organisms.retain(|o| o.id != prey);
+        }
+        a.observe(&view);
+        a.observe_hunters(&view, &hunters, &hunted).unwrap();
+        b.observe(&twin);
+        b.observe_hunters(&twin, &hunters, &hunted).unwrap();
+        if h.phase == HunterPhase::Handling {
+            return (world, a, b, hunter, prey, view.tick);
+        }
+    }
+    panic!("no capture within 400 ticks");
+}
+
+/// Through the public presenter: the retained prey's light crosses the Front/Right seam
+/// during the capture tick, staying local to the chord point at every fraction, and is gone
+/// at the boundary. The world is never touched by any of it.
+#[test]
+fn a_capture_across_a_seam_carries_the_prey_over_the_seam_on_screen() {
+    let (world, mut a, mut b, hunter, prey, tick) = forced_crossing_capture();
+    let hash = state_hash(&world.state);
+    let m = a.hunter_of(hunter).unwrap();
+    let held = m.prey.as_ref().expect("retained");
+    assert_eq!(held.id, prey);
+    let at = m.prey_at.expect("noted from the Capture event");
+    assert_eq!(
+        held.pos.face,
+        Face::Front,
+        "forced: last published on Front"
+    );
+    assert_eq!(at.face, Face::Right, "the world took it on Right");
+    assert!(
+        b.hunter_of(hunter).unwrap().prey.is_none(),
+        "the twin has no retained prey"
+    );
+    assert_eq!(
+        a.hunter_of(hunter).unwrap().cur,
+        b.hunter_of(hunter).unwrap().cur
+    );
+    let poses: Vec<(f64, SurfacePoint)> = [0.05, 0.3, 0.5, 0.7, 0.95]
+        .into_iter()
+        .map(|f| (f, m.retained_prey_pose(f).unwrap().0))
+        .collect();
+    let view = world.render_view();
+    for (f, pose) in &poses {
+        let mut with = Canvas::new();
+        a.draw(&view, *f, &mut with);
+        let mut without = Canvas::new();
+        b.draw(&view, *f, &mut without);
+        let lit: Vec<SurfacePoint> = every_pixel()
+            .filter(|&(face, x, y)| with.get(face, x, y) != without.get(face, x, y))
+            .map(|(face, x, y)| SurfacePoint::pixel_center(face, x, y))
+            .collect();
+        assert!(!lit.is_empty(), "the retained prey is drawn at f = {f}");
+        // Every lit pixel is within the creature's own stamp of the chord point, and the
+        // light's centre (the mean offset in the chord point's chart, seam-transported) sits
+        // on it: locality that no snap to either endpoint could satisfy at every fraction.
+        let offsets: Vec<Vec2> = lit
+            .iter()
+            .map(|&q| {
+                cubarium_surface::unfold(*pose, q, cubarium_surface::MAX_LOCAL_RADIUS)
+                    .expect("nearby")
+                    .local
+                    - pose.chart()
+            })
+            .collect();
+        let far = offsets.iter().map(|o| o.x.hypot(o.y)).fold(0.0, f64::max);
+        let n = offsets.len() as f64;
+        let mean = offsets.iter().fold(Vec2::ZERO, |a, &o| a + o) * (1.0 / n);
+        assert!(
+            far <= 8.0,
+            "at f = {f} prey light {far} px from the chord point {pose:?}"
+        );
+        assert!(
+            mean.x.hypot(mean.y) <= 2.0,
+            "at f = {f} the prey's light is centred {mean:?} off the chord point"
+        );
+        let on_face = |face: Face| lit.iter().filter(|q| q.face == face).count();
+        if *f < 0.3 {
+            assert!(
+                on_face(Face::Front) > on_face(Face::Right),
+                "still mostly on Front at f = {f}"
+            );
+        }
+        if *f > 0.7 {
+            assert!(
+                on_face(Face::Right) > on_face(Face::Front),
+                "mostly on Right at f = {f}"
+            );
+        }
+    }
+    let mut with = Canvas::new();
+    a.draw(&view, 1.0, &mut with);
+    let mut without = Canvas::new();
+    b.draw(&view, 1.0, &mut without);
+    assert!(identical(&with, &without), "gone at the boundary");
+    assert_eq!(
+        state_hash(&world.state),
+        hash,
+        "presentation never touches the world"
+    );
+    let _ = tick;
+}
+
+/// Native 64 px frames of the forced seam-crossing capture, three per tick, for the capture
+/// sheet. Ignored: writes files. `HUNTER_SEAM_CAPTURE_DIR` names the directory.
+#[test]
+#[ignore]
+fn capture_a_seam_crossing_capture_as_native_frames() {
+    use cubarium::sink::{FrameSink, PngSink};
+    let dir = std::env::var("HUNTER_SEAM_CAPTURE_DIR").unwrap_or_else(|_| {
+        let d = std::env::temp_dir().join(format!("hunter-seam-{}", std::process::id()));
+        d.to_string_lossy().into_owned()
+    });
+    std::fs::create_dir_all(&dir).unwrap();
+    let (mut world, hunter, prey) = staged_moving(
+        SurfacePoint::new(Face::Front, 52.0, 32.0),
+        Vec2::new(1.0, 0.0),
+        certain(trial(&quiet_world())),
+    );
+    let mut p = presenter();
+    let mut sink = PngSink::new(&dir, 1).unwrap();
+    let mut frame = cube_proto::Frame::black();
+    let mut manifest = String::new();
+    let mut after = 0;
+    for _ in 0..400 {
+        world.step();
+        world.drain_events();
+        let hunted = world.drain_hunter_events();
+        let mut view = world.render_view();
+        let hunters = world.hunter_view();
+        let h = hunters.iter().find(|h| h.id == hunter).unwrap();
+        if h.phase == HunterPhase::Strike && h.phase_ends_tick == view.tick + 1 {
+            let o = view.organisms.iter_mut().find(|o| o.id == prey).unwrap();
+            o.pos = SurfacePoint::new(Face::Front, 58.0, 27.0);
+            o.heading = Vec2::new(0.8, 0.6);
+            o.moved.clear();
+        }
+        p.observe(&view);
+        p.observe_hunters(&view, &hunters, &hunted).unwrap();
+        // Three frames per tick (60 fps over 20 Hz ticks); the capture tick itself, whose
+        // interval carries the prey over the seam, at twelve fractions.
+        let crossing = h.phase == HunterPhase::Handling && h.phase_started_tick == view.tick;
+        let per_tick = if crossing { 12 } else { 3 };
+        for k in 0..per_tick {
+            let f = f64::from(k) / f64::from(per_tick);
+            let mut canvas = Canvas::new();
+            p.draw(&view, f, &mut canvas);
+            canvas.encode(&mut frame);
+            sink.submit(&frame).unwrap();
+            manifest.push_str(&format!(
+                "tick {} f {:.3} phase {:?}\n",
+                view.tick, f, h.phase
+            ));
+        }
+        if h.phase == HunterPhase::Handling {
+            after += 1;
+            if after > 12 {
+                break;
+            }
+        }
+    }
+    sink.finish().unwrap();
+    std::fs::write(format!("{dir}/manifest.txt"), manifest).unwrap();
+    eprintln!("frames in {dir}");
+}
+
 #[test]
 #[ignore]
 fn capture_a_real_attack_as_native_frames() {
