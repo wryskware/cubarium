@@ -69,7 +69,12 @@ authored canopy growth; it resumed the same world at tick 457013. Root's full
 workspace check passed 1057 tests, and the new clips passed independent
 preservation/integration review. See the
 [current update record](design/7_Research/care-dose-live-update-2026-09-13.md).
-Nearby biological responses remain open; no hunter is live yet.
+An isolated [local care screen](design/7_Research/local-care-observation-2026-09-13.md)
+now measures existing biological responses across all twelve mature worlds and
+three fixed targets. Feed increased local feeding in 27 of 36 patches; cleanup
+usually reduced it and rain was mixed. Actual Resting was nearly absent in this
+short screen. Meal-onset legibility and quiet habits remain work to do; no hunter
+is live yet.
 
 The first complete [hunter screen](design/7_Research/hunter-profile3-two-hour-results-2026-09-13.md)
 ran all twelve seeds in six matched arms for two hours. All 72 numerical audits
@@ -82,6 +87,12 @@ but mature energy readiness and funded gestations remained zero. The
 [complete paired result](design/7_Research/astra-hunter-reserve-complete-results-2026-09-13.md)
 retains every seed and prey-form outcome. Profile viability, diversity and longer
 runs remain open; neither screen is a passed live-introduction gate.
+
+The next [paid-charging experiment](design/7_Research/astra-hunter-paid-charging-proposal-2026-09-13.md)
+is implemented as an explicit opt-in hunter policy, leaving the existing policy
+and ordinary fauna unchanged. It raises only the battery threshold for spending
+reserve on charge, not available energy or reproduction subsidies. Independent
+review and a full matched screen remain gates before judging its ecological value.
 
 Wrysk prefers Fable's **Lanternjaw** megafauna body. The
 [comparison studio](art/studies/megafauna/README.md) retains Veilwarden as an

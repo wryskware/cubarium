@@ -78,8 +78,48 @@ legacy ecology hashes. Logs/artifacts: `/tmp/cubarium-care-local-tests.log`,
 `/tmp/cubarium-care-new-default.json`, `/tmp/cubarium-care-old-default.json`.
 That short executable comparison is not multi-seed response evidence.
 
-Next: freeze this committed tool, use all twelve already-prescribed aged openings,
-and retain all three fixed targets and all three isolated Standard actions with
-30 seconds pre-input / 120 seconds post-input. Compare paired actual-fed and quiet
-occupancy as well as water/food stocks, including zero-opportunity and negative
-responses. Only then choose the smallest next behavioral/presentation change.
+## Completed fixed-cohort screen
+
+The tool was frozen at `4d10351` in `/tmp/cubarium-care-response-4d10351`, where
+all nine example tests and the release build completed successfully. Runner
+`scripts/run-care-response.mjs` (`a348b90`) then completed **108 comparisons**:
+all twelve prescribed mature openings × three fixed targets × three isolated
+Standard actions, each against its own untreated copy. The process exited zero;
+all artifact checks passed. Raw output and executable/input/script hashes remain
+in `captures/care-response-single-pulse-4d10351/{manifest,summary}.json` and its
+per-case JSON files. Existing outputs are refused, not overwritten. Log:
+`/tmp/cubarium-care-response-single-pulse.log`.
+
+Each comparison has 30 seconds before the pulse and 120 seconds after it. All
+nine untreated arm reports for each seed are exactly equal, and both arms are
+identical through the pre-pulse boundary. This is a short response screen, not
+a new care mechanism, a long-run balance test, or a live intervention.
+
+Root's independent target-region reduction subtracts cumulative counters at
+elapsed 600 from those at 3000; it does not include the pre-input interval:
+
+| Action | More / less / unchanged actual-fed member-ticks, cared versus untreated |
+| --- | --- |
+| Feed | 27 / 7 / 2 of 36 fixed seed-target pairs |
+| Rain | 14 / 16 / 6 |
+| Clean | 9 / 25 / 2 |
+
+Seven of the 36 pre-pulse local cohorts are empty, retained for every action.
+These signs describe local organism-time, not causal intake of manually deposited
+food or a motion measurement. Cleanup's frequent feeding reduction is consistent
+with exporting edible substrate; rain's mixed result is not a growth benefit.
+
+The quiet-habit gap is now measured rather than merely hypothetical: summed over
+the 36 target regions, untreated post-pulse Resting is only **6 member-ticks**,
+versus Feed 13, Rain 6 and Clean 6. This overlapping-region count is not unique
+world-population time. At the pre-pulse boundary the 69 region-member records
+(not necessarily distinct individuals across regions) contain 42 Feeding and
+27 Seeking, none Resting; hunger-memory median is approximately 0.829. Do not
+manufacture satiated rest in presentation or claim existing rest hysteresis
+commonly produces long quiet bouts in these mature worlds.
+
+Next: independent per-seed/fixed-ID interpretation, then a presentation-only
+meal-onset/settling prototype if the actual intake is visually hard to recognize.
+Preserve ordinary ecology while evaluating that prototype. Longer-lived quiet
+habits need separate resource/drive evidence, not simply relabeling Feeding as
+Resting or forcing a crowd response after every input.
