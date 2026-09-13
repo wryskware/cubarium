@@ -22,12 +22,16 @@ fn stepped_world(ticks: u64) -> World {
 /// half-saturation `K_P`, version 4 `capacity.event_log`, version 5 `detritus.fall`,
 /// version 6 the water field, config and budget totals, version 7 fauna v2 (genome v2,
 /// founder kinds, the fruit field and config, mutation config), version 8 the appended
-/// `WorldState.care` (`design/7_Research/care-contract-2026-09-12.md`). Version 8 is the
-/// first that migrates rather than refuses: a schema 7 payload decodes through the frozen
-/// `WorldStateV7` mirror with zero care. Everything older is still rejected outright.
+/// `WorldState.care` (`design/7_Research/care-contract-2026-09-12.md`), version 9 the
+/// appended `WorldState.energy_correction`
+/// (`design/7_Research/accounting-compensation-handoff-2026-09-13.md`). Version 8 was the
+/// first that migrates rather than refuses; version 9 migrates both of its predecessors
+/// through their frozen mirrors, with zero care and zero corrections respectively. Everything
+/// older is still rejected outright.
 #[test]
-fn the_schema_version_is_eight_and_seven_still_loads() {
-    assert_eq!(SCHEMA_VERSION, 8);
+fn the_schema_version_is_nine_and_eight_and_seven_still_load() {
+    assert_eq!(SCHEMA_VERSION, 9);
+    assert_eq!(cubarium_core::SCHEMA_V8, 8);
     assert_eq!(cubarium_core::SCHEMA_V7, 7);
     assert_eq!(MAGIC, *b"CUBW");
 }

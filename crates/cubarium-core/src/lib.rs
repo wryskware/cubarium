@@ -7,6 +7,7 @@
 //! explicit schema version.
 //!
 //! Module map:
+//! - [`accounting`]: compensated accumulation for the persisted cumulative energy ledgers.
 //! - [`care`]: the optional bounded feed / rain / clean commands and their ledgers.
 //! - [`config`]: every rate and bound, serde-loadable, with the spec's initial values as defaults.
 //! - [`rng`]: counter-based keyed draws partitioned by stream.
@@ -24,6 +25,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod accounting;
 pub mod care;
 pub mod config;
 pub mod controller;
@@ -41,6 +43,7 @@ pub mod view;
 pub mod water;
 pub mod world;
 
+pub use accounting::{EnergyCorrection, EnergyLedgers, Ledger};
 pub use care::{
     ActiveShower, CareApplied, CareCommand, CareKind, CareOutcome, CareReceipt, CareState, CareTarget,
 };
@@ -48,8 +51,8 @@ pub use config::WorldConfig;
 pub use events::LifeEvent;
 pub use ids::OrganismId;
 pub use snapshot::{
-    SCHEMA_V7, SCHEMA_VERSION, SnapshotError, WorldStateV7, decode_snapshot, ecology_hash,
-    encode_snapshot,
+    SCHEMA_V7, SCHEMA_V8, SCHEMA_VERSION, SnapshotError, WorldStateV7, WorldStateV8,
+    decode_snapshot, ecology_hash, encode_snapshot,
 };
 pub use telemetry::Telemetry;
 pub use view::RenderView;

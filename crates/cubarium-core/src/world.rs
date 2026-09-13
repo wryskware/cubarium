@@ -9,6 +9,7 @@ use cubarium_surface::{
     Vec2, cell_of, chart_images, face_frame, travel_into, unfold_with,
 };
 
+use crate::accounting::{self, EnergyCorrection, EnergyLedgers, Ledger};
 use crate::care::{
     ActiveShower, CareApplied, CareCommand, CareKind, CareOutcome, CareReceipt, CareState,
 };
@@ -52,10 +53,21 @@ pub struct WorldState {
     pub evap_out_total: f64,
     /// Optional care (`design/7_Research/care-contract-2026-09-12.md`): the sequence cursor,
     /// any shower in progress, and the six ledgers the mass, energy and water identities
-    /// carry. **Appended last**: schema 8 is schema 7 plus exactly this field, which is what
-    /// makes [`crate::snapshot::WorldStateV7`] a byte-exact projection.
+    /// carry. Schema 8 is schema 7 plus exactly this field, which is what makes
+    /// [`crate::snapshot::WorldStateV7`] a byte-exact projection.
     #[serde(default)]
     pub care: CareState,
+    /// Persisted signed Neumaier corrections for `light_in_total` and `heat_out_total`
+    /// (`crate::accounting`, `design/7_Research/accounting-compensation-handoff-2026-09-13.md`).
+    /// The raw counters above are written exactly as before; the corrected cumulative total
+    /// of either ledger is `raw + correction`, read through [`WorldState::energy_ledgers`].
+    ///
+    /// **Appended last**: schema 9 is schema 8 plus exactly this field, which is what makes
+    /// [`crate::snapshot::WorldStateV8`] a byte-exact projection. Zero for a world migrated
+    /// from schema 7 or 8: the correction begins at migration and claims no repair of
+    /// rounding already lost.
+    #[serde(default)]
+    pub energy_correction: EnergyCorrection,
 }
 
 impl WorldState {
@@ -92,6 +104,10 @@ impl WorldState {
         }
         self.fields.check(self.config.detritus.energy_cap)?;
         self.care.validate(self.tick)?;
+        // The corrections are signed, so they are checked as the *combined* totals they are
+        // part of: finite corrections, and finite nonnegative corrected cumulative flows.
+        // Nothing is clamped or reset — an unusable accounting state fails the load.
+        self.energy_ledgers().validate()?;
 
         for blob in self.weather.light.iter().chain(self.weather.moisture.iter()) {
             if !blob.center.iter().chain(blob.axis.iter()).all(|c| c.is_finite()) || !blob.rate.is_finite() {
@@ -138,6 +154,36 @@ impl WorldState {
             check_genome(&o.genome, &who)?;
         }
         Ok(())
+    }
+
+    /// Both compensated cumulative energy ledgers: the raw counters paired with their
+    /// persisted corrections (`crate::accounting`).
+    ///
+    /// This is the accurate cumulative representation. `light_in_total` and `heat_out_total`
+    /// on their own remain exactly what every earlier build wrote and are kept as explicit
+    /// diagnostics and wire values, not as fully accurate totals.
+    pub fn energy_ledgers(&self) -> EnergyLedgers {
+        EnergyLedgers {
+            light_in: Ledger { raw: self.light_in_total, correction: self.energy_correction.light_in },
+            heat_out: Ledger { raw: self.heat_out_total, correction: self.energy_correction.heat_out },
+        }
+    }
+
+    /// Corrected cumulative light admitted, `light_in_total + correction`.
+    pub fn light_in_corrected(&self) -> f64 {
+        self.energy_ledgers().light_in.total()
+    }
+
+    /// Corrected cumulative heat dissipated, `heat_out_total + correction`.
+    pub fn heat_out_corrected(&self) -> f64 {
+        self.energy_ledgers().heat_out.total()
+    }
+
+    /// Corrected cumulative `light_in − heat_out`. For an interval, hold an
+    /// [`EnergyLedgers`] reading and use [`EnergyLedgers::net_since`] instead: differencing
+    /// two corrected totals rounds the interval's flow away again.
+    pub fn net_energy_in_corrected(&self) -> f64 {
+        self.energy_ledgers().net()
     }
 }
 
@@ -374,6 +420,7 @@ impl World {
             rain_in_total: 0.0,
             evap_out_total: 0.0,
             care: CareState::default(),
+            energy_correction: EnergyCorrection::default(),
         };
         Ok(World::assemble(state, habitat, initial_material))
     }
@@ -458,11 +505,12 @@ impl World {
     /// Returns the per-tick counters (also accumulated internally for telemetry).
     pub fn step(&mut self) -> &TickCounters {
         let dt = DT;
+        // The audit reads the *corrected* ledgers: the identity it checks is the one the
+        // world actually books, and over a long run the raw counters no longer are.
         #[cfg(debug_assertions)]
         let audit = (
             stored_energy(&self.state),
-            self.state.light_in_total,
-            self.state.heat_out_total,
+            self.state.energy_ledgers(),
             self.state.care.feed_energy_in,
             self.state.care.clean_energy_out,
         );
@@ -509,6 +557,10 @@ impl World {
                 rain_in_total,
                 evap_out_total,
                 care,
+                // Destructured field by field so the heat closure and the light accumulation
+                // borrow disjoint components.
+                energy_correction:
+                    EnergyCorrection { light_in: light_in_correction, heat_out: heat_out_correction },
             } = state;
             let cfg: &WorldConfig = config;
             let org_cfg = &cfg.organism;
@@ -518,9 +570,13 @@ impl World {
             let gate = TurnGate::from_config(org_cfg);
             let now = *tick;
             let seed = cfg.seed;
+            // Every heat payment of the tick goes through here: the transient counter keeps
+            // its existing arithmetic and reset semantics, and the persisted raw total gets
+            // exactly the addition it always got, with the bits it drops booked into the
+            // correction (`crate::accounting`).
             let mut heat = |amount: f64| {
                 counters.heat_out += amount;
-                *heat_out_total += amount;
+                accounting::accumulate(heat_out_total, heat_out_correction, amount);
             };
 
             // 1. Admit due stimuli. The queue is empty in M2; the hook is the journal.
@@ -575,7 +631,7 @@ impl World {
             // 3. Field reactions (growth, mortality, decomposition, N diffusion).
             let ledger = fields.react(cfg, light, moisture, graph, scratch);
             counters.light_in += ledger.light_in;
-            *light_in_total += ledger.light_in;
+            accounting::accumulate(light_in_total, light_in_correction, ledger.light_in);
             heat(ledger.heat_out);
 
             // 4. Pair pass.
@@ -1026,8 +1082,8 @@ impl World {
             // (with care) fed in or cleaned out. Feed and clean commit at a boundary, never
             // inside a step, so their terms are zero here; they are written out anyway so
             // the identity the contract states is the identity the code checks.
-            let (before, light, heat, fed, cleaned) = audit;
-            let booked = (self.state.light_in_total - light) - (self.state.heat_out_total - heat)
+            let (before, opening, fed, cleaned) = audit;
+            let booked = self.state.energy_ledgers().net_since(opening)
                 + (self.state.care.feed_energy_in - fed)
                 - (self.state.care.clean_energy_out - cleaned);
             let drift = (stored_energy(&self.state) - before) - booked;
@@ -1065,6 +1121,14 @@ impl World {
     /// The care ledgers, the sequence cursor, and any shower in progress.
     pub fn care(&self) -> &CareState {
         &self.state.care
+    }
+
+    /// The compensated cumulative energy ledgers
+    /// ([`WorldState::energy_ledgers`], `crate::accounting`). Hold a reading before an
+    /// interval and call [`EnergyLedgers::net_since`] to get the energy booked over it
+    /// without re-rounding the two large totals.
+    pub fn energy_ledgers(&self) -> EnergyLedgers {
+        self.state.energy_ledgers()
     }
 
     /// Apply one care command at a held boundary
@@ -1225,8 +1289,10 @@ impl World {
         let cfg = &self.state.config;
         self.state.fields.check(cfg.detritus.energy_cap)?;
         // The care ledgers and any shower's progress are runtime invariants too: catching a
-        // defect here stops a checkpoint that would not load back.
+        // defect here stops a checkpoint that would not load back. So are the compensated
+        // energy ledgers.
         self.state.care.validate(self.state.tick)?;
+        self.state.energy_ledgers().validate()?;
         let cap = cfg.capacity.max_organisms as usize;
         if self.state.organisms.len() > cap {
             return Err(format!("population {} exceeds cap {cap}", self.state.organisms.len()));
@@ -1832,16 +1898,18 @@ mod tests {
         let mut worst: f64 = 0.0;
         for _ in 0..6000 {
             let before = stored_energy(&world.state);
-            let (light, heat) = (world.state.light_in_total, world.state.heat_out_total);
+            let ledgers = world.state.energy_ledgers();
             world.step();
-            let booked = (world.state.light_in_total - light) - (world.state.heat_out_total - heat);
+            let booked = world.state.energy_ledgers().net_since(ledgers);
             let drift = (stored_energy(&world.state) - before) - booked;
             worst = worst.max(drift.abs());
         }
         assert!(worst < 1e-9, "worst per-tick energy drift {worst:e}");
         // The per-tick identity is exact to rounding; the cumulative sum of 6000 ticks of
-        // rounding is bounded relative to the energy being differenced, not absolutely.
-        let booked = world.state.light_in_total - world.state.heat_out_total;
+        // rounding is bounded relative to the energy being differenced, not absolutely. The
+        // cumulative side reads the compensated ledgers (`crate::accounting`), which for a
+        // world created here (corrections open at zero) is the whole history.
+        let booked = world.state.net_energy_in_corrected();
         let total = stored_energy(&world.state);
         let overall = (total - opening) - booked;
         assert!(overall.abs() < 1e-9 * total.max(1.0), "cumulative energy drift {overall:e} over 6000 ticks");
@@ -2057,7 +2125,7 @@ mod tests {
         assert!(world.state.deaths_total[0] > 0, "starvation is the cause: {:?}", world.state.deaths_total);
         assert!(world.mass_residual().abs() < 1e-9);
         let closing = stored_energy(&world.state);
-        let booked = world.state.light_in_total - world.state.heat_out_total;
+        let booked = world.state.net_energy_in_corrected();
         let drift = (closing - opening) - booked;
         println!("starvation audit: opening {opening:e} closing {closing:e} booked {booked:e} drift {drift:e}");
         assert!(drift.abs() < 1e-9 * opening.max(1.0), "drift {drift:e}");
@@ -2496,16 +2564,16 @@ mod tests {
         let mut worst: f64 = 0.0;
         for _ in 0..2000 {
             let before = stored_energy(&world.state);
-            let (light, heat) = (world.state.light_in_total, world.state.heat_out_total);
+            let ledgers = world.state.energy_ledgers();
             world.step();
-            let booked = (world.state.light_in_total - light) - (world.state.heat_out_total - heat);
+            let booked = world.state.energy_ledgers().net_since(ledgers);
             worst = worst.max(((stored_energy(&world.state) - before) - booked).abs());
             assert!(world.mass_residual().abs() < 1e-9, "mass residual {}", world.mass_residual());
         }
         assert!(worst < 1e-9, "worst per-tick energy drift {worst:e} with fruit in the sum");
         let total_fruit: f64 = world.state.fields.f.iter().sum();
         assert!(total_fruit > 0.0, "a lit default world ripens some fruit in 100 s");
-        let booked = world.state.light_in_total - world.state.heat_out_total;
+        let booked = world.state.net_energy_in_corrected();
         let overall = (stored_energy(&world.state) - opening) - booked;
         assert!(overall.abs() < 1e-9 * stored_energy(&world.state).max(1.0), "cumulative {overall:e}");
         // The view, the dump and telemetry all carry the same fruit.

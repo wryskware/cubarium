@@ -1,21 +1,25 @@
-//! The frozen schema 7 `WorldState`.
+//! The frozen schema 8 `WorldState`.
 //!
 //! This is the field list of [`crate::world::WorldState`] exactly as it stood at commit
-//! `e3ad20f`, the last pre-care build, with the same serde attributes. **Never change it.**
-//! `postcard` is not self-describing: the bytes of a schema 7 payload are this struct's
-//! fields in this order, so editing it silently misreads every live snapshot.
+//! `c60241f`, the last pre-correction build, with the same serde attributes. **Never change
+//! it.** `postcard` is not self-describing: the bytes of a schema 8 payload are this struct's
+//! fields in this order, so editing it silently misreads every live snapshot the care builds
+//! wrote.
 //!
-//! It has two jobs:
+//! It has the same two jobs [`super::v7`] has:
 //!
-//! 1. [`decode_snapshot`](super::decode_snapshot) reads a schema 7 payload into it and
-//!    converts to the current [`WorldState`] with `care = CareState::default()`.
-//! 2. [`project`] goes the other way, dropping the fields appended since (`care`, and the
-//!    schema 9 `energy_correction`), so [`ecology_hash`](super::ecology_hash) hashes exactly
-//!    the bytes the old build would have written. For a migrated world with zero care that
-//!    hash equals the old `state_hash` of the same world.
+//! 1. [`decode_snapshot`](super::decode_snapshot) reads a schema 8 payload into it and
+//!    converts to the current [`WorldState`] with `energy_correction =
+//!    EnergyCorrection::default()` — zero, because the low-order bits that world's raw
+//!    counters already lost cannot be recovered from a snapshot (`crate::accounting`).
+//! 2. [`project`] goes the other way, dropping only `energy_correction`, so a world that was
+//!    migrated from schema 8 and stepped forward re-encodes to exactly the bytes the
+//!    pre-correction build would have written, `care` included.
 
 use serde::{Deserialize, Serialize};
 
+use crate::accounting::EnergyCorrection;
+use crate::care::CareState;
 use crate::config::WorldConfig;
 use crate::fields::Fields;
 use crate::habitat::Weather;
@@ -24,11 +28,11 @@ use crate::organism::Organism;
 use crate::world::WorldState;
 
 /// The schema this mirror speaks.
-pub const SCHEMA_V7: u32 = 7;
+pub const SCHEMA_V8: u32 = 8;
 
-/// `WorldState` as of commit `e3ad20f`. Frozen; see the module docs.
+/// `WorldState` as of commit `c60241f`. Frozen; see the module docs.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct WorldStateV7 {
+pub struct WorldStateV8 {
     pub config: WorldConfig,
     pub tick: u64,
     pub fields: Fields,
@@ -40,7 +44,8 @@ pub struct WorldStateV7 {
     pub cap_rejections_total: u64,
     /// Material admitted from outside (founders and any future stimuli), for the invariant.
     pub external_material_in: f64,
-    /// Running energy audit.
+    /// Running energy audit, uncompensated: these are the raw counters, and schema 9 keeps
+    /// them bit-identical.
     pub light_in_total: f64,
     pub heat_out_total: f64,
     /// Running water budget (`design/water.md`): `Σw == rain_in_total − evap_out_total`
@@ -49,12 +54,14 @@ pub struct WorldStateV7 {
     pub rain_in_total: f64,
     #[serde(default)]
     pub evap_out_total: f64,
+    /// Optional care (`design/7_Research/care-contract-2026-09-12.md`).
+    #[serde(default)]
+    pub care: CareState,
 }
 
-/// The schema 7 projection of a current state: every field but `care` and
-/// `energy_correction`.
-pub fn project(state: &WorldState) -> WorldStateV7 {
-    WorldStateV7 {
+/// The schema 8 projection of a current state: every field but `energy_correction`.
+pub fn project(state: &WorldState) -> WorldStateV8 {
+    WorldStateV8 {
         config: state.config.clone(),
         tick: state.tick,
         fields: state.fields.clone(),
@@ -68,15 +75,15 @@ pub fn project(state: &WorldState) -> WorldStateV7 {
         heat_out_total: state.heat_out_total,
         rain_in_total: state.rain_in_total,
         evap_out_total: state.evap_out_total,
+        care: state.care.clone(),
     }
 }
 
-/// Migration: a schema 7 world has never been given care, so its ledgers open at zero and
-/// its sequence cursor at zero, and it carries no energy corrections either, so those open at
-/// zero too (`crate::accounting`: compensation begins at migration and repairs no history).
-/// No ecological value is touched.
-impl From<WorldStateV7> for WorldState {
-    fn from(old: WorldStateV7) -> WorldState {
+/// Migration: the corrections of a schema 8 world open at **zero**. Its raw totals are kept
+/// exactly as saved and its care history is carried through untouched; compensation starts
+/// from this load, and no historical rounding repair is claimed (`crate::accounting`).
+impl From<WorldStateV8> for WorldState {
+    fn from(old: WorldStateV8) -> WorldState {
         WorldState {
             config: old.config,
             tick: old.tick,
@@ -91,8 +98,8 @@ impl From<WorldStateV7> for WorldState {
             heat_out_total: old.heat_out_total,
             rain_in_total: old.rain_in_total,
             evap_out_total: old.evap_out_total,
-            care: crate::care::CareState::default(),
-            energy_correction: crate::accounting::EnergyCorrection::default(),
+            care: old.care,
+            energy_correction: EnergyCorrection::default(),
         }
     }
 }

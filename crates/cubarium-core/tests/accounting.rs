@@ -139,11 +139,23 @@ fn the_energy_audit_balances_every_tick() {
          differ by {cumulative_error:e}, expected < 1e-9"
     );
 
-    // The world's own running audit must tell the same story as the per-tick samples.
-    let running = world.state.light_in_total - world.state.heat_out_total;
+    // The world's own running audit must tell the same story as the per-tick samples. The
+    // cumulative audit reads the *corrected* ledgers
+    // (`design/7_Research/accounting-compensation-handoff-2026-09-13.md`): `light_in_total`
+    // and `heat_out_total` alone are the uncompensated counters every build has written and
+    // are an explicit diagnostic, not an accurate cumulative total.
+    let running = world.state.net_energy_in_corrected();
     assert!(
         (running - cumulative_net).abs() < 1e-9,
         "running audit {running} disagrees with the summed samples {cumulative_net}"
+    );
+    // Over 2,000 ticks the raw counters have not yet drifted far enough to fail that bound,
+    // so their disagreement is reported rather than asserted on.
+    let raw = world.state.light_in_total - world.state.heat_out_total;
+    println!(
+        "corrected running audit is {:e} from the summed samples; the raw counters are {:e}",
+        running - cumulative_net,
+        raw - cumulative_net
     );
 }
 
