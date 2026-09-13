@@ -60,8 +60,10 @@ crowded picture, not an isolated rig):
 | 8, juvenile 5:3 | brace | 67 → 54 | 0.0045 → 0.0046 | 106 → 106 |
 | 8, juvenile 5:3 | settle | 67 → 68 | 0.0045 → 0.0047 | 106 → 106 |
 
-In both real worlds brace lowers the count of large frame steps around the sail and does
-not raise the worst step; settle does neither. Organism clip phase is hashed per organism,
+In both real worlds brace lowers the count of large frame steps around the sail.
+The worst crop step rises slightly in seed1 (120 → 123) and is unchanged in seed8
+(106); seed8's mean also rises slightly. Settle does not consistently improve
+the count and has a larger seed1 worst step (134). Organism clip phase is hashed per organism,
 so resting sails do not gesture in unison.
 
 Judgement of the crops: at 8× the original rest row visibly jitters fin tips every frame
