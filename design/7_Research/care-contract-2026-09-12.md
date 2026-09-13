@@ -4,15 +4,18 @@ last_reviewed: 2026-09-12
 decision_refs: []
 ---
 
-# Optional care: implementation contract (feed, rain, clean), revision 2
+# Optional care: implementation contract (feed, rain, clean), revision 3
 
 Implementation contract for the bounded Feed / Rain / Clean interaction authorized
-in `shared-care-implementation-handoff-2026-09-12.md`. Revision 2 resolves the
-review gate root recorded there and adopts every correction in
+in `shared-care-implementation-handoff-2026-09-12.md`. Revision 2 resolved the
+review gate root recorded there and adopted every correction in
 `astra-care-contract-review-2026-09-12.md`: admission commits at a held simulation
 boundary, an uncertain journal write never lets ecology advance past that boundary,
 state ownership is an OS advisory lock, the journal has a hard bound with
 server-issued client identities, and the rain dose is the total over the footprint.
+Revision 3 adopts Astra's follow-up on abort recovery: there is no abort-and-resume
+path; an uncertain write holds the world at its boundary until a clean stop, and
+recovery validates the whole replay schedule before stepping (host steps 4, 6, 7).
 It binds the core and host packages to one interface. It is not canon and changes
 no default ecology: with zero input the world executes the old operations in the
 old order with no new RNG draws.
@@ -174,13 +177,18 @@ bytes through the projection.
    order at `B`, hand the receipts back for diagnostic `outcome` records, answer the
    waiting HTTP clients with `202 {seq, apply_after_tick}`, and resume stepping. The
    clock re-bases after the hold instead of fast-forwarding.
-4. An append or `fsync` error is ambiguous: the record may survive. The runner then
-   holds at `B`, disables further care, and reports on stderr and in `/care/status`
-   (`"care": "failed", "holding_at": B, "reason": …`). It attempts a durable `abort`
-   record for each unacknowledged `seq` (append + `fsync`, retried for up to 10 s).
-   If that succeeds the runner calls `void_care(seq)` for them and resumes. If it
-   does not, the world stays held at `B` until a clean stop (Ctrl-C writes the final
-   snapshot at `B`); a timeout is never treated as proof the record is absent.
+4. An append or `fsync` error after a scheduled write was attempted is ambiguous:
+   the record may survive. **Revision 3 (after Astra's follow-up on abort recovery):
+   there is no abort-and-resume path in this slice.** The runner holds at `B`,
+   refuses further care, reports on stderr and in `/care/status`
+   (`"care": "failed", "holding_at": B, "reason": …`), keeps rendering and serving,
+   and permits only a clean stop at `B` (Ctrl-C writes the final snapshot at `B`).
+   Nothing is ever appended after an uncertain write in the same process, and a
+   timeout is never proof that a record is absent. Failures before any scheduled
+   write is attempted (the journal-full precheck) reject care and keep running.
+   This is an explicit availability trade: a disk failure pauses the world until a
+   clean stop and recovery. `World::void_care` remains available for tests and
+   future protocols but is not used on the live path.
 5. Journal `<state>/care.jsonl`, append-only JSON lines. Records:
    `{"rec":"epoch","epoch":"<process start stamp>","build":"…"}` at every start,
    `{"rec":"accepted","seq":N,"apply_after_tick":B,"client":"…","request":R,"kind":"feed","target":{…}}`,
@@ -192,15 +200,26 @@ bytes through the projection.
    outcome record, would exceed it, further care is refused with `503 journal
    full` while autonomous life continues; the bound and usage are in `/care/status`.
    No compaction in this slice.
-6. Replay on start: read the journal, group `accepted` records with `seq >
-   care.admitted_seq` of the loaded snapshot (skipping any with a matching `abort`,
-   which are voided at their boundary), sort by `apply_after_tick` then `seq`. With
-   the snapshot at tick `S`: an entry with `B < S` is an inconsistent recovery state
-   and refuses to start; entries with `B ≥ S` are applied when the world reaches
-   `B`, before advancing to `B + 1`, each exactly once. A shower already in the
-   snapshot is not restarted by replay.
-7. Crash points that must be tested: before the accepted `fsync` (no acceptance,
-   no application), after `fsync` before application (replayed at `B`), after
+6. Replay on start: verify the journal prefix (truncate only a torn final suffix,
+   logged; interior corruption refuses to start), take the `accepted` records with
+   `seq > care.admitted_seq` of the loaded snapshot, and validate the whole schedule
+   before stepping: contiguous `seq` after the cursor, nondecreasing `B` in `seq`
+   order, no `B` below the snapshot tick `S`. Entries are applied when the world
+   reaches `B`, before advancing to `B + 1`, each exactly once; any unexpected core
+   rejection during replay is a recovery error that stops the process. Reserved
+   sequences absent from the surviving journal were never applied and are not
+   consumed; after replay, new allocations start after the surviving journal's
+   maximum `seq`. While the recovered schedule still holds future commands,
+   `POST /care` answers `503 {"care": "replaying"}`. A shower already in the
+   snapshot is not restarted by replay. A newly created world enables care only
+   after its opening checkpoint is durably written; a journal-only directory is
+   occupied and never silently creates a world from defaults.
+7. Crash points that must be tested: before the accepted `fsync` returns (no
+   application in the original process; a complete record that survived is applied
+   at `B` on recovery even though the client never saw acceptance), injected short
+   writes mid-record and between two batch records (the world stays held at `B`;
+   restart replays exactly the surviving complete records), a new request during
+   replay (`503 replaying`), after `fsync` before application (replayed at `B`), after
    application before any outcome record or checkpoint (replayed at `B` from an
    older snapshot and ecology matches an uninterrupted run at the same final tick),
    mid-shower (resumes from the snapshot's delivered samples), and an injected

@@ -51,8 +51,19 @@ Root owns the live process, `state/`, the rollout, and the gallery.
   journal, HTTP care routes, panel, replay). Commits will be listed here when they
   land. Nothing in `state/` is touched by either.
 
-## C: Fable megafauna candidate — IN PROGRESS
+## C: Fable megafauna candidate — DELIVERED (commit `1e4a8e5`)
 
-- Worker authoring `art/studies/megafauna/fable.js` + `fable.md` (Lanternjaw); the
-  anti-blinking art gate (smooth 150–300 ms accents, no hard cuts) was forwarded and
-  Fable will review the rendered sheet before sign-off. Commit hash to follow.
+- `art/studies/megafauna/fable.js` + `fable.md` (Lanternjaw): 18×5 px segmented
+  ambusher, cyan lantern chain, folded raptorial forelimbs, tail fan; modes rest /
+  move / hunt / bud. Art gate applied: blink 280 ms and strike accent 240 ms raised
+  cosine envelopes (largest single-frame step 0.23 and 0.30 of full swing; a hard
+  cut would be 1.0), orange only as a 45 % tint at the strike peak, only in `hunt`.
+  Harness: painted extent x−9…x+12, y−4…y+4; save/restore balanced; deterministic;
+  `hunt` loops exactly at 6 s. Contact sheet `/tmp/cubarium-megafauna-fable/sheet.png`.
+- Fable's art review of the sheet: the silhouette, segmentation and lantern crest
+  read at 3× and 6× and the strike is legible without a flash; at native 1× the
+  tail fan reads as a detached tab and the resting hull as a dark slab with lit
+  points, which is acceptable for a study but worth a pass in root's production
+  rendering slice (`art/studies/megafauna/integration-notes.md`). Motion is
+  deliberately stepped to whole pixels; `fable.md` states this as a limitation.
+  Wrysk's preference for Lanternjaw is recorded by root in `f6fb4c6`.
