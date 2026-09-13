@@ -1,0 +1,22 @@
+[package]
+name = "cubarium-growth-corner-fable-review"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Review-only cost probe for the growth-corner study (art/studies/growth-corner): times the
+# actual private `draw_column` against the study's retained-owner variant on the same
+# columns. Same extraction as the study's build script; no production source is edited.
+
+[workspace]
+
+[[bin]]
+name = "growth_corner_cost"
+path = "main.rs"
+
+[dependencies]
+cubarium = { path = "../../../crates/cubarium" }
+cubarium-render = { path = "../../../crates/cubarium-render" }
+cubarium-surface = { path = "../../../crates/cubarium-surface" }
+cube-proto = { path = "../../../vendor/cube-proto" }
+serde_json = "1"
