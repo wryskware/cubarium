@@ -129,3 +129,21 @@ Preserve that result and complete the unchanged all-twelve histories rather than
 selecting a mechanism from the two examples. No biological default, core policy,
 live world or diagnostic implementation was changed by this review; no long run
 was started.
+
+## Follow-up: output guard closed; reducer regressions preserved
+
+Independently inspected isolated **cdeeb55** after the review above. It atomically
+reserves the final output with `create_new` immediately after argument parsing,
+before cohort reads or replay, and writes/syncs through the held handle. Existing
+files, directories, symlinks and an interrupted empty reservation are refused.
+Re-ran the example suite against this correction: **7 passed, exit 0**. This
+closes the no-overwrite finding; it does not change the original pilots' binary
+provenance or certify a later release executable.
+
+The four reducer probes are now runnable, independently owned regressions in
+[astra-fauna-flow-pilot-review.test.mjs](../../scripts/astra-fauna-flow-pilot-review.test.mjs).
+`node scripts/astra-fauna-flow-pilot-review.test.mjs` against the unchanged
+reducer reports **0 passed, 4 failed, exit 1**, each a missing expected refusal.
+They read the original seed-1 JSON and mutate clones only. Preserve these red
+results until the narrow reducer corrections land. Root's `62f0eb8` narrows the
+report's inference claims; no further seed launch was performed by this review.
