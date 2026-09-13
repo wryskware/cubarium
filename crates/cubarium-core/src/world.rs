@@ -15,6 +15,7 @@ use crate::care::{
 };
 use crate::config::{FounderKind, WorldConfig};
 use crate::controller::{Decision, Observation, TurnGate, decide};
+use crate::devflow;
 use crate::events::LifeEvent;
 use crate::fields::Fields;
 use crate::genome::{Genome, MAX_FORMS, decode};
@@ -315,6 +316,12 @@ pub struct World {
     /// checkpointed, never hashed, never read back by the tick.
     events: Vec<LifeEvent>,
     counters: TickCounters,
+    /// The optional read-only per-member developmental flow ledger (`crate::devflow`), absent
+    /// unless a diagnostic asks for it. Transient in exactly the sense [`World::events`] is —
+    /// never checkpointed, never hashed — and additionally **write-only**: no branch, draw,
+    /// clamp or state transition in the tick ever reads it. When it is `None` every recording
+    /// site is a null check.
+    devflow: Option<Box<devflow::DevFlowLedger>>,
     initial_material: f64,
 }
 
@@ -484,6 +491,7 @@ impl World {
             moved: Vec::new(),
             events: Vec::new(),
             counters: TickCounters::default(),
+            devflow: None,
             initial_material,
         };
         // Make the derived light/moisture readable before the first tick advances weather.
@@ -540,6 +548,7 @@ impl World {
                 moved,
                 events,
                 counters,
+                devflow,
                 initial_material: _,
             } = &mut *self;
             let WorldState {
@@ -717,6 +726,26 @@ impl World {
             }
             for (id, d) in &decisions {
                 let Some(o) = organisms.get_mut(*id) else { continue };
+                // devflow: open the member's tick before anything moves a stock. This is also
+                // where a member the ledger has not seen is registered, which is how the
+                // founders enter it.
+                if let Some(ledger) = devflow.as_deref_mut() {
+                    ledger.open_tick(
+                        *id,
+                        now,
+                        o.phenotype.form,
+                        match o.origin {
+                            Origin::Founder => "founder",
+                            Origin::Descendant => "descendant",
+                        },
+                        o.parent,
+                        o.born_tick,
+                        devflow::Stocks { structure: o.structure, reserve: o.reserve, energy: o.energy },
+                        o.phenotype.structure_adult,
+                        o.phenotype.reserve_max,
+                        o.phenotype.energy_max,
+                    );
+                }
                 o.mode = d.mode;
                 o.hunger_memory = d.hunger_memory;
                 o.fed_this_tick = false;
@@ -742,6 +771,33 @@ impl World {
                 let paid = cost.min(o.energy).max(0.0);
                 o.energy -= paid;
                 heat(paid);
+                if let Some(ledger) = devflow.as_deref_mut() {
+                    // The three terms of the core's own expression, recorded as *demanded*
+                    // beside the single clamped debit it actually paid. `cost` is the core's
+                    // own value; the three terms are formed as `term * dt` for reporting and
+                    // are never used to split `paid`.
+                    ledger.record_upkeep(
+                        *id,
+                        o.phenotype.maintenance * o.structure * dt,
+                        org_cfg.move_cost * o.structure * speed * dt,
+                        org_cfg.sense_cost * o.phenotype.sense_radius * dt,
+                        cost,
+                        paid,
+                        speed,
+                        wading,
+                        d.effort,
+                    );
+                    // POTENTIAL access: the member's own cell after it moved, read from the
+                    // same pre-settlement fields the intake request in step 7 will read.
+                    let here = cell_of(&o.pos).index();
+                    ledger.record_local_cell(
+                        *id,
+                        fields.w[here],
+                        fields.p[here],
+                        fields.f[here],
+                        edible_detritus(fields.d[here], fields.de[here], e_r),
+                    );
+                }
             }
 
             // 7. Settle feeding once per cell, proportionally, from the pre-transfer fields.
@@ -780,6 +836,12 @@ impl World {
                     headroom - f - g,
                     edible_detritus(fields.d[cell], fields.de[cell], e_r),
                 );
+                // devflow: the POTENTIAL request, recorded here — before contention, before a
+                // single transfer, and before the early return below discards a request that
+                // came to nothing. What actually transfers is recorded at the settlement.
+                if let Some(ledger) = devflow.as_deref_mut() {
+                    ledger.record_intake_request(*id, headroom, f, g, s);
+                }
                 if f <= 0.0 && g <= 0.0 && s <= 0.0 {
                     continue;
                 }
@@ -807,6 +869,11 @@ impl World {
             for &(cell, id, f, g, s) in &requests {
                 let Some(o) = organisms.get_mut(id) else { continue };
                 let mut eaten = 0.0;
+                // devflow: a share multiplier below 1 on a channel this member actually
+                // requested is contention it experienced.
+                let contested = (f > 0.0 && fruit[cell] < 1.0)
+                    || (g > 0.0 && graze[cell] < 1.0)
+                    || (s > 0.0 && scavenge[cell] < 1.0);
                 if f > 0.0 {
                     // Frugivory: F -> reserve (η_m) and F -> D (the rest, energy-free). Fruit
                     // carries `e_f` per unit, richer than leaf.
@@ -821,6 +888,17 @@ impl World {
                         let gained = (eta_e * spare).clamp(0.0, room);
                         o.energy += gained;
                         heat(spare - gained);
+                        if let Some(ledger) = devflow.as_deref_mut() {
+                            ledger.record_intake_settlement(
+                                id,
+                                devflow::FeedingChannel::Frugivory,
+                                fruit[cell],
+                                q,
+                                to_reserve,
+                                gained,
+                                spare - gained,
+                            );
+                        }
                         eaten += q;
                     }
                 }
@@ -839,6 +917,17 @@ impl World {
                         let gained = (eta_e * spare).clamp(0.0, room);
                         o.energy += gained;
                         heat(spare - gained);
+                        if let Some(ledger) = devflow.as_deref_mut() {
+                            ledger.record_intake_settlement(
+                                id,
+                                devflow::FeedingChannel::Grazing,
+                                graze[cell],
+                                q,
+                                to_reserve,
+                                gained,
+                                spare - gained,
+                            );
+                        }
                         eaten += q;
                     }
                 }
@@ -859,10 +948,26 @@ impl World {
                         let gained = (eta_e * spare).clamp(0.0, room);
                         o.energy += gained;
                         heat(spare - gained);
+                        if let Some(ledger) = devflow.as_deref_mut() {
+                            // Scavenging moves `eta * q` into the reserve and takes `to_reserve`
+                            // (not `q`) out of `D`; both are recorded as the core computes them.
+                            ledger.record_intake_settlement(
+                                id,
+                                devflow::FeedingChannel::Scavenging,
+                                scavenge[cell],
+                                q,
+                                to_reserve,
+                                gained,
+                                spare - gained,
+                            );
+                        }
                         eaten += q;
                     }
                 }
                 o.fed_this_tick = eaten > 0.0;
+                if let Some(ledger) = devflow.as_deref_mut() {
+                    ledger.record_intake_close(id, eaten > 0.0, contested);
+                }
             }
 
             // 8. Physiology: oxidation, growth, gestation, budding, death checks.
@@ -875,6 +980,11 @@ impl World {
             for (id, d) in &decisions {
                 let Some(o) = organisms.get_mut(*id) else { continue };
 
+                // devflow: the oxidation predicate's two sides, read before the branch, so a
+                // burn that did not happen is distinguishable from a threshold that never
+                // opened.
+                let oxidation_threshold_open =
+                    devflow.is_some() && o.energy < org_cfg.oxidation_threshold * o.phenotype.energy_max;
                 if o.energy < org_cfg.oxidation_threshold * o.phenotype.energy_max && o.reserve > 0.0 {
                     let burned = (org_cfg.oxidation_rate * dt).min(o.reserve);
                     o.reserve -= burned;
@@ -885,16 +995,43 @@ impl World {
                     let gained = (released * org_cfg.oxidation_efficiency).min(room);
                     o.energy += gained;
                     heat(released - gained);
+                    if let Some(ledger) = devflow.as_deref_mut() {
+                        ledger.record_oxidation(*id, true, true, burned, gained, released - gained);
+                    }
+                } else if let Some(ledger) = devflow.as_deref_mut() {
+                    ledger.record_oxidation(*id, oxidation_threshold_open, false, 0.0, 0.0, 0.0);
                 }
 
+                // devflow: the growth predicate's two sides, read here rather than recovered
+                // from the step that follows. A closed gate must be an observation, not the
+                // absence of one.
+                if let Some(ledger) = devflow.as_deref_mut() {
+                    ledger.record_growth_gate(
+                        *id,
+                        o.structure,
+                        o.phenotype.structure_adult,
+                        o.reserve,
+                        org_cfg.growth_reserve_min * o.phenotype.reserve_max,
+                    );
+                }
                 if o.structure < o.phenotype.structure_adult
                     && o.reserve > org_cfg.growth_reserve_min * o.phenotype.reserve_max
                 {
-                    let mut grown =
-                        (org_cfg.growth_rate * dt).min(o.phenotype.structure_adult - o.structure).min(o.reserve);
+                    if let Some(ledger) = devflow.as_deref_mut() {
+                        ledger.record_growth_entered(*id);
+                    }
+                    // The four caps, named so the binding one can be identified. Same operands,
+                    // same order, same `min` chain: `let` bindings of f64 subexpressions change
+                    // neither the values nor the order they are combined in.
+                    let cap_rate = org_cfg.growth_rate * dt;
+                    let cap_headroom = o.phenotype.structure_adult - o.structure;
+                    let cap_reserve = o.reserve;
+                    let mut grown = cap_rate.min(cap_headroom).min(cap_reserve);
                     // Building is paid for up front: what the energy cannot cover is not built.
-                    if org_cfg.build_cost > 0.0 {
-                        grown = grown.min(o.energy / org_cfg.build_cost);
+                    let cap_energy =
+                        if org_cfg.build_cost > 0.0 { Some(o.energy / org_cfg.build_cost) } else { None };
+                    if let Some(cap_energy) = cap_energy {
+                        grown = grown.min(cap_energy);
                     }
                     if grown > 0.0 {
                         o.reserve -= grown;
@@ -903,10 +1040,26 @@ impl World {
                         o.energy -= cost;
                         // Structure holds no chemical energy: the reserve's energy is released.
                         heat(cost + e_r * grown);
+                        if let Some(ledger) = devflow.as_deref_mut() {
+                            ledger.record_growth(
+                                *id,
+                                grown,
+                                cost,
+                                cost + e_r * grown,
+                                cap_rate,
+                                cap_headroom,
+                                cap_reserve,
+                                cap_energy,
+                            );
+                        }
                     }
                 }
 
                 let due = o.escrow.as_ref().is_some_and(|e| now.saturating_sub(e.started_tick) >= gestation_ticks);
+                // devflow: the gestation state as the branch below reads it.
+                if let Some(ledger) = devflow.as_deref_mut() {
+                    ledger.record_gestation_observation(*id, d.bud, o.escrow.is_some());
+                }
                 if due {
                     births.push(*id);
                 } else if d.bud && o.escrow.is_none() {
@@ -915,16 +1068,31 @@ impl World {
                         let reserve = org_cfg.child_reserve_fraction * o.phenotype.reserve_max;
                         let energy = org_cfg.child_energy_fraction * o.phenotype.energy_max;
                         let build = org_cfg.build_cost * structure;
-                        if o.reserve >= structure + reserve && o.energy >= build + energy {
+                        // The two sides of the affordability predicate, named so the blocking
+                        // one can be identified. Both are side-effect-free comparisons of
+                        // already-computed values; naming them removes the `&&`'s short circuit
+                        // on the second comparison but changes neither operand, neither result,
+                        // nor the branch taken (`reserve_ok && energy_ok` is the same test).
+                        let reserve_ok = o.reserve >= structure + reserve;
+                        let energy_ok = o.energy >= build + energy;
+                        if reserve_ok && energy_ok {
                             o.reserve -= structure + reserve;
                             o.energy -= build + energy;
                             heat(build);
+                            if let Some(ledger) = devflow.as_deref_mut() {
+                                ledger.record_funding(*id, now, structure, reserve, energy, build);
+                            }
                             let genome = o.genome.clone();
                             o.escrow = Some(Escrow { structure, reserve, energy, started_tick: now, genome });
+                        } else if let Some(ledger) = devflow.as_deref_mut() {
+                            ledger.record_bud_unaffordable(*id, reserve_ok, energy_ok);
                         }
                     } else {
                         counters.cap_rejections += 1;
                         *cap_rejections_total += 1;
+                        if let Some(ledger) = devflow.as_deref_mut() {
+                            ledger.record_bud_cap_rejection(*id);
+                        }
                     }
                 }
 
@@ -941,11 +1109,23 @@ impl World {
                     deaths.push((*id, cause));
                     // A parent that dies this tick miscarries: the escrow goes to detritus.
                     births.retain(|b| b != id);
+                    // devflow: a gestation that was due this tick is what `retain` just dropped.
+                    if let Some(ledger) = devflow.as_deref_mut()
+                        && due
+                    {
+                        ledger.record_miscarriage(*id);
+                    }
                 }
             }
 
             // 9. Commit: remove the dead, then place births against the freed capacity.
             let e_d_max = cfg.detritus.energy_cap;
+            // devflow: deaths are removed before births are placed at this same boundary, so
+            // `organisms.insert` can hand a birth a slot a death just freed. The boundary is
+            // opened here so both sides of such a reuse can be linked.
+            if let Some(ledger) = devflow.as_deref_mut() {
+                ledger.open_boundary();
+            }
             for (id, cause) in &deaths {
                 let Some(o) = organisms.remove(*id) else { continue };
                 let cell = cell_of(&o.pos).index();
@@ -957,13 +1137,42 @@ impl World {
                 fields.de[cell] += kept;
                 heat(energy - kept);
                 // A gestation that never finished decays with its own clamp.
-                if let Some(es) = &o.escrow {
+                // The dispersal triple is bound here so devflow reads the amounts at the
+                // assignments that move them rather than recomputing them; the block's own
+                // statements and their order are untouched.
+                let escrow_dispersal = if let Some(es) = &o.escrow {
                     let material = es.structure + es.reserve;
                     let energy = e_r * material + es.energy;
                     fields.d[cell] += material;
                     let kept = energy.min(e_d_max * material);
                     fields.de[cell] += kept;
                     heat(energy - kept);
+                    Some(devflow::ToDetritus { material, energy_kept: kept, heat: energy - kept })
+                } else {
+                    None
+                };
+                if let Some(ledger) = devflow.as_deref_mut() {
+                    // The last stocks, read at the removal site: no end-of-tick sweep reaches
+                    // the tick a member dies on, so this closes its reconciliation. The
+                    // decision tick is `now`; the core stamps the event at `now + 1`.
+                    ledger.record_death(
+                        *id,
+                        now,
+                        match cause {
+                            DeathCause::Starvation => "starvation",
+                            DeathCause::Age => "age",
+                            DeathCause::Collapse => "collapse",
+                        },
+                        o.age_ticks(now + 1),
+                        devflow::Stocks { structure: o.structure, reserve: o.reserve, energy: o.energy },
+                        o.escrow.as_ref().map(|es| devflow::EscrowAmounts {
+                            structure: es.structure,
+                            reserve: es.reserve,
+                            energy: es.energy,
+                        }),
+                        devflow::ToDetritus { material, energy_kept: kept, heat: energy - kept },
+                        escrow_dispersal,
+                    );
                 }
                 let slot = match cause {
                     DeathCause::Starvation => 0,
@@ -991,6 +1200,15 @@ impl World {
                         // A refused birth returns its escrow to the parent untouched.
                         parent.reserve += escrow.structure + escrow.reserve;
                         parent.energy += escrow.energy;
+                        if let Some(ledger) = devflow.as_deref_mut() {
+                            ledger.record_refund(
+                                *parent_id,
+                                now,
+                                escrow.structure,
+                                escrow.reserve,
+                                escrow.energy,
+                            );
+                        }
                         counters.cap_rejections += 1;
                         *cap_rejections_total += 1;
                         continue;
@@ -1049,7 +1267,29 @@ impl World {
                 };
                 let genome_digest = child.genome.digest();
                 let origin = child.origin;
+                // devflow: the child's opening stocks and its phenotype's targets, read before
+                // the organism is moved into the arena.
+                let opening = devflow::Stocks {
+                    structure: child.structure,
+                    reserve: child.reserve,
+                    energy: child.energy,
+                };
+                let child_form = child.phenotype.form;
+                let child_targets =
+                    (child.phenotype.structure_adult, child.phenotype.reserve_max, child.phenotype.energy_max);
                 let child_id = organisms.insert(child);
+                if let Some(ledger) = devflow.as_deref_mut() {
+                    ledger.record_birth(
+                        child_id,
+                        *parent_id,
+                        now + 1,
+                        child_form,
+                        opening,
+                        child_targets.0,
+                        child_targets.1,
+                        child_targets.2,
+                    );
+                }
                 events.push(LifeEvent::Birth {
                     tick: now + 1,
                     id: child_id,
@@ -1067,6 +1307,20 @@ impl World {
                 moved[slot].clear();
                 counters.births += 1;
                 *births_total += 1;
+            }
+
+            // devflow: close every member still alive, reconciling the tick's recorded flows
+            // against the stocks the world actually holds. Members removed at this boundary
+            // were already closed at their removal site; members placed at it were never
+            // stepped this tick and `close_tick` skips them.
+            if let Some(ledger) = devflow.as_deref_mut() {
+                for (id, o) in organisms.iter() {
+                    ledger.close_tick(
+                        id,
+                        now,
+                        devflow::Stocks { structure: o.structure, reserve: o.reserve, energy: o.energy },
+                    );
+                }
             }
 
             *tick += 1;

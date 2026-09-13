@@ -17,6 +17,7 @@
 //! - [`fields`]: `N`, `P`, `D`, `De` and their reactions.
 //! - [`organism`]: organism state, modes, escrow.
 //! - [`controller`]: observation → decision (pure).
+//! - [`devflow`]: an optional, transient, write-only per-member developmental flow ledger.
 //! - [`events`]: transient birth/death records for the observer.
 //! - [`pairs`]: chord-filtered all-pairs neighbor lists.
 //! - [`world`]: the tick, invariants, births/deaths, telemetry.
@@ -29,6 +30,7 @@ pub mod accounting;
 pub mod care;
 pub mod config;
 pub mod controller;
+pub mod devflow;
 pub mod events;
 pub mod fields;
 pub mod genome;
