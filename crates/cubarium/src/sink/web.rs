@@ -1578,6 +1578,30 @@ mod tests {
         );
     }
 
+    /// Two lifetime bugs the browser rollout review caught: registration that fails once
+    /// (the world was replaying, or the host was not listening yet) must be retried rather
+    /// than leaving the controls dead until a reload, and the request-row map must be
+    /// bounded alongside the DOM rather than retaining every detached element.
+    #[test]
+    fn the_page_retries_registration_and_bounds_its_row_map() {
+        assert!(
+            INDEX_HTML.contains("if (careRegistering || careClient !== null) return;"),
+            "registration must guard against racing itself"
+        );
+        assert!(
+            INDEX_HTML.contains("careRetryAt = performance.now() + CARE_RETRY_MS;"),
+            "a failed registration must become retryable at a bounded cadence"
+        );
+        assert!(
+            INDEX_HTML
+                .contains("if (careClient === null && s.care !== \"failed\" && performance.now() >= careRetryAt)"),
+            "the status poll must retry registration once the host is reachable"
+        );
+        // The row map is trimmed with the DOM, keyed by the request number on the element.
+        assert!(INDEX_HTML.contains("careRows.delete(Number(gone.dataset.request));"), "unbounded row map");
+        assert!(INDEX_HTML.contains("careRowsEl.children.length > CARE_ROWS_MAX"));
+    }
+
     /// Guard the page's other load-bearing constants and its one external dependency.
     #[test]
     fn the_page_declares_the_expected_sizes_and_one_external_script() {

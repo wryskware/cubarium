@@ -526,6 +526,14 @@ let careEnabled = false;
 let careRequest = 0;        // this page's monotonic request number
 let careTarget = null;      // { face, u, v }
 const careRows = new Map(); // request number -> row element
+const CARE_ROWS_MAX = 24;
+// Registration is retried, because the first attempt can legitimately fail: the
+// host may still be listening-but-not-ready, or the page may have loaded during
+// a restart. Without a retry the buttons would stay disabled until someone
+// reloaded. Guarded so it never races itself and never spins.
+let careRegistering = false;
+let careRetryAt = 0;
+const CARE_RETRY_MS = 2000;
 
 // A click on the net, in chart coordinates. The net is NET_COLS x NET_ROWS cells
 // of FACE_SIZE pixels at NET_SCALE, laid out by NET_CELL -- the same table the
@@ -590,9 +598,17 @@ function rowFor(request) {
   let el = careRows.get(request);
   if (!el) {
     el = document.createElement("div");
+    el.dataset.request = String(request);
     careRowsEl.prepend(el);
     careRows.set(request, el);
-    while (careRowsEl.children.length > 24) careRowsEl.lastChild.remove();
+    // Both the DOM and the Map are bounded. Trimming only the DOM would leave
+    // this Map holding every detached element for the life of the page, and a
+    // run of cooldown-rejected clicks would grow it without limit.
+    while (careRowsEl.children.length > CARE_ROWS_MAX) {
+      const gone = careRowsEl.lastChild;
+      careRowsEl.removeChild(gone);
+      careRows.delete(Number(gone.dataset.request));
+    }
   }
   return el;
 }
@@ -604,14 +620,17 @@ function setRow(request, state, text) {
 }
 
 function register() {
+  if (careRegistering || careClient !== null) return;
+  careRegistering = true;
   fetch("/care/register", { method: "POST", headers: CARE_HEADERS, body: "{}" })
     .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
     .then(function (res) {
       if (!res.ok) {
-        careEnabled = false;
+        // Not permanent: `/care/status` decides whether this world offers care at
+        // all, and pollCare will ask again once the host says it is ready.
         careSay(res.j.error === "care disabled"
           ? "this world is not offering care"
-          : ("care is unavailable: " + (res.j.error || "")), true);
+          : ("care is not available yet: " + (res.j.error || "")), true);
       } else {
         careClient = res.j.client;
         careEpoch = res.j.epoch;
@@ -620,7 +639,11 @@ function register() {
       }
       refreshButtons();
     })
-    .catch(function () { careSay("this host does not offer care", true); });
+    .catch(function () { careSay("waiting for the host", true); })
+    .finally(function () {
+      careRegistering = false;
+      careRetryAt = performance.now() + CARE_RETRY_MS;
+    });
 }
 
 // Quantities come from the receipt. Nothing here inspects the picture.
@@ -687,14 +710,22 @@ function pollCare() {
         if (careEnabled) { careEnabled = false; careSay("care was turned off", true); refreshButtons(); }
         return;
       }
+      careEnabled = true;
       // A restart changes the epoch and retires every identity issued before it.
       if (careEpoch !== null && s.epoch !== careEpoch) {
         careEpoch = s.epoch;
         careClient = null;
         careSay("the host restarted \u00B7 earlier requests are unknown, check the receipts", true);
         refreshButtons();
+        careRetryAt = 0;
         register();
         return;
+      }
+      // No identity yet, because the first attempt landed while the world was
+      // opening or replaying, or before the host was listening. Ask again, at a
+      // bounded cadence, until it takes.
+      if (careClient === null && s.care !== "failed" && performance.now() >= careRetryAt) {
+        register();
       }
       if (s.care === "failed") {
         careSay("care failed at tick " + s.holding_at + " \u00B7 " +
