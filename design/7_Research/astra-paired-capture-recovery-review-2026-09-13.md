@@ -47,7 +47,7 @@ live/preview process or worker-owned source was changed.
   stream written before a later failure is not independently valid merely because
   its JSON parses: retain its enclosing failed seed summary.
 
-## Concrete geometry-validation gap in the reviewed draft
+## Geometry-validation gap in the reviewed draft — resolved in `6bc725c`
 
 `CaptureAudit::observe` calls `evidence.grants_capture()`. The current core method
 only requires a present capture center and a stored measure whose `in_contact()`
@@ -75,6 +75,19 @@ regression. This will establish internal evidence consistency using shared core
 helpers, not independently prove those helpers' geometry implementation. The fix
 was not yet reviewed or included in the passing counts below.
 
+Follow-up: read the exact committed source at `6bc725c`. The fix checks the
+reported scale against the admitted range, requires offsets/reach/query extent
+to equal the immutable trial profile scaled by that value, validates finite
+heading/prey extent, and recomputes contact measurement plus grasp and ingestion
+centers from the recorded root basis. A stale cached measure can no longer
+authorize a different reported prey cell. The new
+`matching_but_corrupted_pose_records_do_not_authorize_a_wrong_recovery_cell`
+regression changes both evidence copies by four pixels, confirms refusal, then
+successfully submits the original batch: rejection preserved the dedup state.
+The specific finding is closed. This is **shared-helper consistency verification**,
+not an independent geometry algorithm or proof the event positions reproduce
+unrecorded historical ground truth.
+
 ## Deduplication is not complete attempt telemetry
 
 Do not replace the monotonic check with equality to persisted `attack_counter`:
@@ -95,3 +108,26 @@ observer failure summaries. Root's additional paired-orchestration tests and
 72 short arm runs were still being added/running and are not claimed here.
 No long-horizon ecological success, reproduction-funding completeness or live
 Lanternjaw deployment follows from these technical observer checks.
+
+Follow-up test run: the same command now passes **22 observer-target tests and
+36 example tests**, with no failures/ignored tests. Newly included scope:
+
+- The paired-copy geometry corruption regression above.
+- Genuine capture followed by checkpoint/reload in handling and 1200 ticks of
+  continuation: hunter events match every tick and full-state hashes match every
+  200 ticks despite observer reads at 20 versus 200 ticks. This tests nonmutation
+  and continuation, not full paired-recovery restart support.
+- A partly advanced six-arm seed is refused without advancing paired coverage;
+  finalization truthfully marks the resulting statistics incomplete.
+- A deliberately synthetic capture at census tick 200 checks streamed exposure
+  form totals, full key serialization, strict-prior history (`pre_samples = 1`,
+  not 2), insufficient-pre labeling and horizon closure at tick 400. This
+  orchestration fixture is not mislabeled a real capture or confirmed recovery.
+
+The harness and observer sources used in this rerun are identical to `6bc725c`,
+checked with Git. The shared worktree already includes concurrent uncommitted
+core post-settlement timing changes, so the run is current integration evidence,
+not verification of an isolated `6bc725c` binary. Root's detached release build
+at `/tmp/cubarium-hunter-spatial-frozen-DIZmNc` and its 72-arm smoke output were
+not touched or claimed. No additional source-level blocker was found within
+this bounded follow-up.
