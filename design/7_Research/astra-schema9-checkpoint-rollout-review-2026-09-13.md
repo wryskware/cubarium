@@ -109,3 +109,44 @@ test-only change that waits for advancement while retaining boundary/journal
 checks. This review does not validate that patch or claim the rerun passed. If
 the candidate gains that commit, record its actual revision and confirm its
 production and asset paths remain identical to `0725040`.
+
+## Independent verification appendix: tested candidate `a44dc98`
+
+Later read-only verification supersedes the pending-test status above:
+
+- Detached HEAD is `a44dc9834f8b5211fcbed606e72c55db5d8fdf25`. Its entire tracked
+  diff from `0725040` is the ten-line delayed-ack test change; production and art
+  are identical. I read that change: it waits at most 20 seconds for the world
+  to advance, preserving the ready, later-tick and journal assertions. Tracked
+  worktree files are clean; only the three isolated state directories are untracked.
+- Independently hashing its release binary produced
+  `342ff6a86fc3d0bf2ec4b49cd43b583d0abcc94289342f60e2ca72cdc45030d8`.
+  The final suite log `/tmp/cubarium-rollout-v9-tests-final.log` contains 63
+  successful summaries totaling **854 passed, 0 failed, 14 ignored**, with no
+  failure markers. Root reports process exit 0; this review inspected the log,
+  not the completed process's exit status. Ignored captures/timing checks are
+  not counted as passing tests.
+- `/tmp/cubarium-rollout-v{8,9}-continuation.json` both describe tick 262200,
+  care cursor 5, population 87 and ecology hash `9293057068819118678`. I compared
+  the full decoded states using Python's arbitrary-precision JSON integers,
+  excluding only `energy_correction`: exact equality. More strongly, I read
+  both referenced snapshot binaries, independently verified magic, schema,
+  build identity, length and CRC, then compared payloads: **schema 9 minus its
+  final 16 correction bytes is byte-identical to schema 8**. Thus this check
+  does not depend on JavaScript rounding 64-bit RNG/ID integers. Candidate
+  corrections are light `-6.2705118875072685e-12`, heat `6.33329920691663e-9`;
+  the old projected corrections are zero. Root identifies the common opening
+  as copied-live tick 261600, making this a 600-tick continuation window.
+- The recorded 10-second cadence files show old live unique-net cadence
+  52.2 fps versus candidate preview 59.988 fps; p95 new-frame intervals improve
+  from 33.4 to 16.8 ms, and intervals over 25 ms fall from 77 to zero. Both
+  browser RAF streams stay near 60 fps. This supports the readiness fix, with
+  a limitation: old live used shim plus viewer, candidate used copied-world
+  web-only output, at different world moments. It is not a strictly controlled
+  output-cost comparison, personal-browser guarantee or physical scanout test.
+
+At this review point, root's copied-preview shower 8 restart/completion check
+is still in progress; I have not independently verified that result. The matched
+backup, exact final artifact/art pin and latest-snapshot checks remain operational
+gates. These stronger test/continuation results do not remove schema 9's rollback
+asymmetry or authorize importing the unrelated in-progress schema 10 work.
