@@ -1,0 +1,57 @@
+--- a/crates/cubarium/src/art_present.rs
++++ b/crates/cubarium/src/art_present.rs
+@@ -1100,9 +1100,17 @@
+ /// Below this level, with no rain, the level is exactly 0, so a settled slot takes the
+ /// renderer's identity path and its image is the windless one bit for bit.
+ pub const RAIN_SETTLE_FLOOR: f32 = 0.02;
+-/// The two non-harmonic patter frequencies (Hz) and their weights: an irregular quiver
++/// Review alternative (v3, `art/studies/rain-response-review`): the response is mostly a
++/// *steady deflection* — a wet plant leans by [`RAIN_LEAN_SHARE`] of its rain tip to its
++/// own hashed side for as long as rain falls, and settles upright when it stops — with
++/// only the remainder as a slow sway. v2's 2.7/4.3 Hz quiver at most of a pixel moved an
++/// edge pixel's light several times a second for as long as a drizzle lasted, which is
++/// the shimmer the reviewer asked to reduce; a lean is read as a changed pose in a still
++/// frame and adds little motion between frames.
++pub const RAIN_LEAN_SHARE: f64 = 0.6;
++/// The two non-harmonic sway frequencies (Hz) and their weights: slow and irregular
+ /// rather than a metronome, with a per-slot phase so a patch does not move as one object.
+-pub const RAIN_PATTER_HZ: [f64; 2] = [2.7, 4.3];
++pub const RAIN_PATTER_HZ: [f64; 2] = [0.9, 1.4];
+ pub const RAIN_PATTER_WEIGHT: [f64; 2] = [0.62, 0.38];
+ 
+ /// The rain quiver a family asks for, in tile pixels; 0 for a family that does not answer.
+@@ -1163,10 +1171,19 @@
+     plant_phase_of(cubarium_surface::cell_of(&slot.at), std::f64::consts::TAU)
+ }
+ 
+-/// [`slot_wind`] with the rain quiver added: at quiver `level` in `[0, 1]` a side-face
+-/// plant's bend amplitude gains `rain_tip · slot.wind · level · rain_patter(seconds,
+-/// phase)`, on the same rooted shape; a radial top-face plant and a family with no rain
+-/// response are exactly [`slot_wind`]. At level 0 this is [`slot_wind`] bit for bit.
++/// The side a wet slot leans to, `+1` or `−1` along its tile's horizontal axis: from the
++/// same hashed phase, so neighbours split between the two and a rained patch does not
++/// lean as one object.
++pub fn rain_lean_of(slot: &Slot) -> f64 {
++    if rain_phase_of(slot) < std::f64::consts::PI { 1.0 } else { -1.0 }
++}
++
++/// [`slot_wind`] with the rain response added: at level `level` in `[0, 1]` a side-face
++/// plant's bend amplitude gains `rain_tip · slot.wind · level · (RAIN_LEAN_SHARE · lean +
++/// (1 − RAIN_LEAN_SHARE) · rain_patter(seconds, phase))`, on the same rooted shape; a
++/// radial top-face plant and a family with no rain response are exactly [`slot_wind`].
++/// At level 0 this is [`slot_wind`] bit for bit. The sum of the two shares is at most
++/// 1, so the budget bound of the pure quiver still holds.
+ pub fn slot_wind_rain(slot: &Slot, name: &str, budget: f64, seconds: f64, level: f32) -> (Bend, Vec2) {
+     let (bend, heading) = slot_wind(slot, name, budget, seconds);
+     if !(level > 0.0) {
+@@ -1176,7 +1193,9 @@
+     if tip <= 0.0 || (slot.at.face == Face::Top && wind_response(name).spin_deg > 0.0) {
+         return (bend, heading);
+     }
+-    let quiver = tip * slot.wind * f64::from(level) * rain_patter(seconds, rain_phase_of(slot));
++    let shape = RAIN_LEAN_SHARE * rain_lean_of(slot)
++        + (1.0 - RAIN_LEAN_SHARE) * rain_patter(seconds, rain_phase_of(slot));
++    let quiver = tip * slot.wind * f64::from(level) * shape;
+     let shaped = if bend.length > 0.0 { bend } else { plant_bend(0.0, Vec2::ZERO, heading) };
+     (Bend { amplitude: shaped.amplitude + quiver, ..shaped }, heading)
+ }
