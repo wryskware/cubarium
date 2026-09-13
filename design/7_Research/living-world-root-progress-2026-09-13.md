@@ -125,7 +125,7 @@ The two isolated orientation-pattern servers (PIDs2577585/2583198, ports7401/740
 were stopped after tests; their binaries/results remain. Live cube PID2511131
 still reported frozen `c60241f` at tick172095. No live rollout of this fix yet.
 
-Current work to revalidate on continuation:
+Work handles recorded at that checkpoint (superseded by the update below):
 
 - Native Fable remains exec52101 / session135e2be2-1019-48c7-ab48-bab462bc4684.
   It revised the multipart draft to one root-owned query after Astra's advice;
@@ -147,3 +147,46 @@ Current work to revalidate on continuation:
 
 All remaining tickets stay in `animation-roadmap.md`; none of these results
 completes growth, visible interactions, autonomy tuning or paid apex ecology.
+
+## Latest verified integration and running work
+
+Root now integrated the first care-response flourish into the shared frame
+(`0324098`), following Astra's module and cleanup-only palette refinement
+(`e84df49`, `3112ae1`). Nine runner tests, eight module tests and eight care replay
+integration tests pass; the ignored native capture test was also run explicitly.
+See [implementation and actual-world visual review](care-flourish-integration-2026-09-13.md).
+This is receipt feedback, not the full biological response ticket, and not live.
+
+Opus accounting exec32477 is terminal exit0, delivered `b47eacc`. Root reran the
+entire core suite:208passed/2ignored. Genuine schema7/8 continuation and schema9
+mid-shower restart tests pass. Root integrated corrected interval readouts and
+independent/legacy reports in `57408c4`; five harness tests pass. Astra's additional
+source review found no rollout-blocking defect in its initial report. No historical
+ledger repair is claimed, and the live binary still cannot read schema9 snapshots.
+
+The frozen corrected diagnostic is
+`captures/care-longitudinal-2026-09-13/care_compare-compensated`, SHA256
+`9f317241c96865c13a8532eab2c76fc47fc9737843b484e76f212e97ae0058e6`.
+Built against core `b47eacc` and harness `57408c4`; concurrent art edits are not
+used by this in-memory numerical example. New matched12h jobs, to poll by handle:
+
+- Seed1 repeated: exec41258 → `seed1-repeated-compensated-window200.json`.
+- Seed3 repeated: exec74507 → `seed3-repeated-compensated-window200.json`.
+
+Both use864000ticks, care-every2400, audit-window200. Main acceptance uses the
+persisted corrected AND independent checks under the original fixed limits;
+raw failures remain separately reported. Compare ecology hashes and raw counters
+against the old runs, not schema9 full hashes against schema8 full hashes.
+Old diagnostic seed1 occasional and seed3 repeated jobs are both terminal exit1
+with complete reports, independently documented in `aaa730b`; old empty reports
+are not evidence. Their form losses reinforce the remaining prey-recovery gate.
+
+Fable's first orchestrator exec52101 terminated at its600second background-worker
+ceiling before delivery; root verified its PID gone and resumed the SAME native
+session135e2be2-1019-48c7-ab48-bab462bc4684 with
+`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`. New active exec69674; filtered output is
+`/tmp/cubarium-fable-resumed-2026-09-13.jsonl`. It is recovering/completing the
+Lanternjaw renderer/study and authored plant package, not finished merely because
+source files or tests now exist. Preserve its owned files and poll before restart.
+
+No new live care, state replacement or deployment was performed in this slice.

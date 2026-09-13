@@ -6,7 +6,7 @@ decision_refs: []
 
 # Twelve-hour care comparisons: accounting and ecological evidence
 
-Fresh default seeds1 and2 each completed matched untreated/repeated-care
+Fresh default seeds1,2 and3 each completed matched untreated/repeated-care
 comparisons over864000 ticks (12h). These are not copies of the live world.
 Care cycles every2400 ticks: feed, then rain at+60, clean at+300, rotating targets
 between ordinary face, seam and rim. All rejected requests remain in the record;
@@ -18,10 +18,13 @@ the net material allowance is never bypassed. Opening population24 in every arm.
 | 1 repeated care | 114 | 175 | 2 | 46 | 0/84/30/0 |
 | 2 untreated | 120 | 171 | 3 | 49 | 6/93/21/0 |
 | 2 repeated care | 129 | 166 | 4 | 39 | 22/83/24/0 |
+| 3 untreated | 125 | 173 | 3 | 41 | 100/0/25/0 |
+| 3 repeated care | 119 | 164 | 4 | 38 | 64/27/28/0 |
+| 1 occasional care (12000-tick cycle) | 93 | 146 | 5 | 38 | 64/7/22/0 |
 
 No arm reached whole-world extinction; all had a minimum population24 including
 startup. This does not establish a useful mature-population lower bound. Forms
-are counted separately from actual founder ancestry. Both seeds lose skimmers;
+are counted separately from actual founder ancestry. All three seeds lose skimmers;
 seed1 retains different dominant forms with care. Survival through12h therefore
 does not establish preservation of the intended diversity, longer-term stability,
 or sufficient prey recovery for predators. No reseeding was used.
@@ -55,10 +58,20 @@ simulation accounting/default change was made here.
 Seed1 material drift stays below9.36e-10 and water below2.15e-9. Seed2's original
 repeated comparison passed its gates (untreated energy1.802956103347242e-5;
 cared9.666980304245953e-6), but it lacks the later independent-window diagnostic.
-Seed1 occasional, seed2 occasional and seed3 repeated attempts failed the earlier
-pre-report harness's energy gate. Their empty JSON outputs cannot support survival
-claims; those arms remain incomplete evidence and should be rerun with the
-report-preserving harness. Two seeds are not a multi-seed balance acceptance gate.
+Seed1 occasional and seed3 repeated have now completed under the report-preserving
+old-core diagnostic. Seed3's baseline AND cared raw energy gates fail (maxima
+1.9809653e-5 /2.1090723e-5, limit1.9735379e-5); seed1 occasional cared fails
+(2.2022608e-5, limit1.9563931e-5). Their independent windowed errors stay below
+1.22e-9, and immediate care boundaries below4.55e-13. This extends the heat-counter
+rounding evidence to untreated ecology, without passing any failed raw gate.
+The seed1 occasional baseline exactly matches the earlier seed1 baseline hash.
+See [Astra's four-arm audit and outcomes](astra-long-run-energy-diagnostic-2026-09-13.md).
+Seed2 occasional still lacks a complete report. Three seeds and combined care
+inputs do not establish general diversity protection or predator balance.
+
+Core compensation is now implemented in `b47eacc` with explicit schema9 migration;
+root's harness integration is `57408c4`. Corrected twelve-hour repeats have started
+but are not results yet. Preserve the old diagnostic executables/reports above.
 
 Artifacts: ignored `captures/care-longitudinal-2026-09-13/`, especially
 `seed1-repeated-window200.json`, `seed1-repeated-window20.json`, and
