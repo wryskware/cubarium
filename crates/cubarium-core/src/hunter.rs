@@ -31,14 +31,46 @@ use crate::ids::{OrganismId, Slots};
 use crate::organism::{DeathCause, Organism};
 
 /// Wire version of [`FixedHunterProfile`]. A saved profile with any other version is
-/// rejected rather than reinterpreted.
+/// rejected rather than reinterpreted — including one whose *shape* still matches.
 ///
-/// Version 2 replaced the single forward `jaw_offset_px` placeholder with the measured
-/// two-component capture effector, a separate ingestion mouth, the visual query extent and
-/// the body-scale mapping (`design/7_Research/lanternjaw-ecology-animation-contract-2026-09-13.md`).
-/// The shape changed, so schema 10 payloads carrying a version 1 profile are **refused**, not
-/// reinterpreted (`crate::snapshot::v10`).
-pub const PROFILE_VERSION: u32 = 2;
+/// - **1** (schema 10): a single forward `jaw_offset_px` placeholder.
+/// - **2**: replaced it with the measured two-component capture effector, a separate ingestion
+///   mouth, the visual query extent and the body-scale mapping
+///   (`design/7_Research/lanternjaw-ecology-animation-contract-2026-09-13.md`). The shape
+///   changed, so schema 10 payloads carrying a version 1 profile are refused
+///   (`crate::snapshot::v10`).
+/// - **3**: the capture effector's side coordinate is now Fable's *authored*
+///   `Lanternjaw::effectors(1.0).near_claw`, `1.1`, in place of the `1.162368` the contract's
+///   earlier decorated-study measurement reported ([`CAPTURE_OFFSET_BODY`]). The shape is
+///   unchanged, but a frozen experimental constant moved, so the version moves with it: a
+///   saved version 2 trial is refused by name rather than quietly re-measured. Schema 11 was
+///   never deployed, so no live world carries one.
+pub const PROFILE_VERSION: u32 = 3;
+
+/// The **capture effector**: Fable's authored `Lanternjaw::effectors(1.0).near_claw`, the near
+/// raptorial claw's painted centre at full extension, in adult body pixels.
+///
+/// Recomputed here from the same expressions in `crates/cubarium/src/lanternjaw.rs`
+/// (`LIMB_STRIKE.1 = [12.3, 0.6]`, `CELL_CENTRE = 0.5`), read-only and never edited by this
+/// crate:
+///
+/// ```text
+/// head_dx = -0.3 · (1 - 13/17) + 1.1 · clamp((13 - 9)/8, 0, 1)     // the clamp is a no-op: 0.5
+/// near_claw = (12.3 + head_dx + 0.5,  0.6 + 0.5) = (13.2794117647…, 1.1)
+/// ```
+///
+/// The art is never shortened to fit a core constant; the constant follows the art. The `y`
+/// moved by 0.062368 px against the profile's version 2 value — well inside the trial reach,
+/// but a frozen experimental value, so [`PROFILE_VERSION`] moved with it.
+pub const CAPTURE_OFFSET_BODY: Vec2 = {
+    let head_dx = -0.3 * (1.0 - 13.0 / 17.0) + 1.1 * 0.5;
+    Vec2::new(12.3 + head_dx + 0.5, 0.6 + 0.5)
+};
+
+/// The **ingestion mouth**: Fable's authored `effectors(1.0).mouth`, the outer jaw column's
+/// centre at full lunge, `(8 + 1.1 + 0.5, 0)`. Folded it sits at `(8.5, 0)`; this is the
+/// extended position, the one that exists at a settlement.
+pub const INGESTION_OFFSET_BODY: Vec2 = Vec2::new(8.0 + 1.1 + 0.5, 0.0);
 
 /// Rounding slack for the persisted gut bound and the adult-structure gate.
 pub const TOLERANCE: f64 = 1e-9;
@@ -248,9 +280,9 @@ impl FixedHunterProfile {
             attacks_enabled: true,
             body_extent_px: 9.0,
             visual_query_extent_px: 16.0,
-            capture_offset_body: Vec2::new(13.279_411_764_705_882, 1.162_368_0),
+            capture_offset_body: CAPTURE_OFFSET_BODY,
             capture_reach_px: 1.5,
-            ingestion_offset_body: Vec2::new(9.6, 0.0),
+            ingestion_offset_body: INGESTION_OFFSET_BODY,
             body_scale_exponent: 0.5,
             body_scale_min: 0.2,
             founder_reserve_fraction: 0.5,
@@ -1399,11 +1431,62 @@ mod tests {
         assert_eq!(p.version, PROFILE_VERSION);
     }
 
+    /// The trial's effectors are Fable's authored ones, to the bit: the same expressions
+    /// `Lanternjaw::effectors(1.0)` evaluates, recomputed here rather than copied as decimals.
+    /// If the art moves a claw, this fails and the constant follows it — with a new
+    /// [`PROFILE_VERSION`], never a silent re-measurement of a frozen trial.
+    #[test]
+    fn the_capture_effector_is_the_authored_near_claw_and_the_mouth_is_the_authored_jaw() {
+        let head_dx = -0.3 * (1.0 - 13.0 / 17.0) + 1.1 * ((13.0 - 9.0) / 8.0f64).clamp(0.0, 1.0);
+        let near = Vec2::new(12.3 + head_dx + 0.5, 0.6 + 0.5);
+        assert_eq!(CAPTURE_OFFSET_BODY, near);
+        assert_eq!(CAPTURE_OFFSET_BODY.x, 13.279_411_764_705_882, "the documented x");
+        assert_eq!(CAPTURE_OFFSET_BODY.y, 1.1, "the authored y, not the decorated study's 1.162368");
+        assert_eq!(INGESTION_OFFSET_BODY, Vec2::new(9.6, 0.0));
+        assert_ne!(CAPTURE_OFFSET_BODY, INGESTION_OFFSET_BODY, "grasp and mouth are not one point");
+
+        let p = profile();
+        assert_eq!(p.capture_offset_body, CAPTURE_OFFSET_BODY);
+        assert_eq!(p.ingestion_offset_body, INGESTION_OFFSET_BODY);
+        // The version moved with the constant, so a saved version 2 trial cannot be re-read as
+        // if it had always meant this.
+        assert_eq!(PROFILE_VERSION, 3);
+        let mut old = p.clone();
+        old.version = 2;
+        let err = old.validate().expect_err("a version 2 trial must be refused");
+        assert!(err.contains("version 2 is not 3"), "{err}");
+    }
+
+    /// The smallest admitted scale and a below-art-minimum juvenile both produce a coherent,
+    /// finite geometry: core admits `body_scale_min = 0.2`, while Fable's renderer currently
+    /// admits `0.5..=1.0` and is extending it — the two ranges are reconciled by the art
+    /// worker, never by clamping the world's contact geometry
+    /// (`astra-hunter-geometry-review-2026-09-13.md`).
+    #[test]
+    fn the_smallest_admitted_scale_still_produces_a_coherent_geometry() {
+        let p = profile();
+        let adult = 2.0;
+        // The review's own fixture: `child_structure_fraction = 0.1` of a 2.0 adult.
+        let small = body_scale(&p, 0.2, adult);
+        assert!((small - 0.316_227_766_016_837_94).abs() < 1e-15, "{small}");
+        assert!(small < 0.5, "this fixture is below the renderer's current minimum on purpose");
+        // The floor holds, and nothing below it is ever published.
+        assert_eq!(body_scale(&p, 1e-9, adult), p.body_scale_min);
+        assert_eq!(body_scale(&p, 0.0, adult), p.body_scale_min);
+        assert_eq!(body_scale(&p, adult, adult), 1.0, "an adult is scale 1");
+        for structure in [0.2, 0.4, 0.8, 1.6, adult] {
+            let scale = body_scale(&p, structure, adult);
+            assert!(scale.is_finite() && (p.body_scale_min..=1.0).contains(&scale), "{structure}: {scale}");
+        }
+    }
+
     #[test]
     fn an_invalid_profile_is_rejected_one_property_at_a_time() {
-        let cases: [(&str, Break); 12] = [
-            // Version 1 is the schema 10 profile shape: it is refused, never reinterpreted.
+        let cases: [(&str, Break); 13] = [
+            // Version 1 is the schema 10 profile shape and version 2 the earlier decorated
+            // effector: both are refused, never reinterpreted.
             ("version", |p| p.version = 1),
+            ("version", |p| p.version = 2),
             ("gut_capacity_material", |p| p.gut_capacity_material = 0.0),
             ("digest_rate", |p| p.digest_rate = f64::NAN),
             ("strike_energy_cost", |p| p.strike_energy_cost = -1.0),
