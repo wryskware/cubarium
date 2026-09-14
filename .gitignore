@@ -15,3 +15,14 @@
 !.env.example
 .DS_Store
 .obsidian/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
+
+# Editor and agent settings that are machine-local, not project source.
+.vscode/
+.claude/settings.local.json
+.claude/*.bak
+
+# Python bytecode from study scripts.
+__pycache__/
