@@ -7,6 +7,7 @@ members = [
     "crates/cubarium-render",
     "crates/cubarium-core",
     "crates/cubarium",
+    "crates/cubarium-search",
 ]
 
 [workspace.package]
@@ -20,6 +21,7 @@ cubarium-surface = { path = "crates/cubarium-surface" }
 cubarium-surface-oracle = { path = "crates/cubarium-surface-oracle" }
 cubarium-render = { path = "crates/cubarium-render" }
 cubarium-core = { path = "crates/cubarium-core" }
+cubarium-search = { path = "crates/cubarium-search" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 minifb = "0.28"

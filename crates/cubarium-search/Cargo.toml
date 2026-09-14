@@ -1,0 +1,21 @@
+[package]
+name = "cubarium-search"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Headless whole-ecosystem parameter search over the real cubarium-core tick loop"
+
+[lib]
+name = "cubarium_search"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cubarium-search"
+path = "src/main.rs"
+
+[dependencies]
+cubarium-core = { workspace = true }
+cubarium-surface = { workspace = true }
+clap = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
