@@ -4,6 +4,12 @@
       "type": "stdio",
       "command": "/home/wrysk/.cargo/bin/lore-mcp",
       "args": []
+    },
+    "graft": {
+      "command": "graft",
+      "args": [
+        "mcp"
+      ]
     }
   }
 }

@@ -1,0 +1,12 @@
+# Project-level ignore rules. `.loreignore` is sovereign over what Lore
+# indexes (D-0020), so it can re-include paths that .gitignore excludes.
+
+# graft's context graph. /graft/ is git-ignored (regenerable local cache),
+# but its markdown nodes are exactly what we want semantic search over:
+# graft supplies exact file:line wiring, lore supplies the semantic recall.
+!graft/
+!graft/**/*.md
+
+# ...except the machinery, which is bulk, not meaning.
+graft/.cache/
+graft/.graph/
