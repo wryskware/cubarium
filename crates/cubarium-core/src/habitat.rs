@@ -211,10 +211,13 @@ impl Weather {
         moisture_min: f64,
     ) {
         let radius = cfg.blob_radius_deg.to_radians();
+        // Hoisted out of the 1280-cell loop: `cap` needs `cos(radius)` to reject a cell
+        // without an `acos`, and the radius is fixed for the whole sample.
+        let cos_radius = radius.cos();
         for i in 0..CELL_COUNT {
             let dir = normalize_or(habitat.positions[i], [0.0, 1.0, 0.0]);
             let sum = |blobs: &[Blob]| -> f64 {
-                blobs.iter().map(|b| cfg.amplitude * cap(dot(b.center, dir), radius)).sum()
+                blobs.iter().map(|b| cfg.amplitude * cap(dot(b.center, dir), radius, cos_radius)).sum()
             };
             let wet = sum(&self.moisture);
             light[i] = (habitat.light_base[i] + sum(&self.light)).clamp(0.0, 1.0);
@@ -224,9 +227,27 @@ impl Weather {
     }
 }
 
-/// The raised-cosine cap value for a center–sample dot product and an angular radius.
-fn cap(dot: f64, radius: f64) -> f64 {
+/// The raised-cosine cap value for a center–sample dot product and an angular radius:
+/// `cap(θ) = ½(1 + cos(π θ / radius))` for `θ ≤ radius`, else 0, with `θ = acos(dot)`.
+///
+/// `cos_radius` is `radius.cos()`, hoisted by the caller. `acos` is monotone decreasing on
+/// `[-1, 1]`, so `acos(dot) > radius` is exactly `dot < cos(radius)`, and the cheap test
+/// rejects a cell outside the cap without ever calling `acos` — at the default 55° radius that
+/// is about four cells in five, and this is the hottest arithmetic in the world (1 280 cells ×
+/// every blob, every tick). The `acos` test below remains the authority for a cell the cheap
+/// test admits, so the two can only disagree inside one ulp of the rim, where the raised cosine
+/// is quadratically flat and worth about `1e-33` either way.
+///
+/// Deliberately still `libm`, not a polynomial approximation. A degree-8 `acos` plus a
+/// factored cap shape was built and measured: accurate to `2.1e-9`, but worth only 2–3% on the
+/// batched configurations once the rejection above has already removed four calls in five, and
+/// slower on a small world. It would have cost the seven `…_reproduces_the_pre_change_binarys_
+/// next_600_ticks` fixture tests, whose whole value is that a *previous* binary wrote them.
+fn cap(dot: f64, radius: f64, cos_radius: f64) -> f64 {
     if radius <= 0.0 {
+        return 0.0;
+    }
+    if dot < cos_radius {
         return 0.0;
     }
     let theta = dot.clamp(-1.0, 1.0).acos();
@@ -494,14 +515,76 @@ mod tests {
 
     #[test]
     fn a_cap_centered_on_the_cell_is_the_full_amplitude() {
-        assert_eq!(cap(1.0, 1.0), 1.0);
-        assert!(cap(0.0_f64.cos(), 1.0) == 1.0);
+        let at = |d: f64, r: f64| cap(d, r, r.cos());
+        assert_eq!(at(1.0, 1.0), 1.0);
+        assert!(at(0.0_f64.cos(), 1.0) == 1.0);
         // Exactly on the radius the cap is zero, and beyond it stays zero.
         let r = 55.0f64.to_radians();
-        assert!(cap(r.cos(), r).abs() < 1e-15);
-        assert_eq!(cap((r + 0.1).cos(), r), 0.0);
+        assert!(at(r.cos(), r).abs() < 1e-15);
+        assert_eq!(at((r + 0.1).cos(), r), 0.0);
         // Half way out, the raised cosine is one half.
-        assert!((cap((r / 2.0).cos(), r) - 0.5).abs() < 1e-12);
+        assert!((at((r / 2.0).cos(), r) - 0.5).abs() < 1e-12);
+    }
+
+    /// The dot-product rejection is an optimization, not a change of shape: over a dense sweep
+    /// of the dot-product domain and a walk around each rim it must return **bit for bit** what
+    /// the `acos` definition in `design/m2-world-spec.md` returns.
+    ///
+    /// This is what lets the seven `…_reproduces_the_pre_change_binarys_next_600_ticks` fixture
+    /// tests stay green: those replay snapshots written by earlier binaries, and any change to
+    /// the weather forcing — however small — would put them on a different trajectory.
+    #[test]
+    fn the_dot_product_rejection_is_bit_identical_to_the_acos_definition() {
+        /// The definition, straight from `design/m2-world-spec.md`, with no fast path.
+        fn definition(dot: f64, radius: f64) -> f64 {
+            if radius <= 0.0 {
+                return 0.0;
+            }
+            let theta = dot.clamp(-1.0, 1.0).acos();
+            if theta > radius {
+                0.0
+            } else {
+                0.5 * (1.0 + (std::f64::consts::PI * theta / radius).cos())
+            }
+        }
+
+        for degrees in [0.0, 1.0, 15.0, 55.0, 90.0, 179.0, 180.0] {
+            let radius = f64::to_radians(degrees);
+            let rim = radius.cos();
+            for k in -20_000..=20_000 {
+                let dot = f64::from(k) / 20_000.0;
+                assert_eq!(
+                    cap(dot, radius, rim).to_bits(),
+                    definition(dot, radius).to_bits(),
+                    "cap({dot}, {radius}) diverged from the definition"
+                );
+            }
+            // The rim itself, walked ulp by ulp from both sides: the only place the cheap test
+            // and the `acos` test could ever disagree.
+            for step in 0..64u64 {
+                for dot in [
+                    f64::from_bits(rim.to_bits().wrapping_sub(step)),
+                    f64::from_bits(rim.to_bits().wrapping_add(step)),
+                ] {
+                    if dot.is_finite() {
+                        assert_eq!(
+                            cap(dot, radius, rim).to_bits(),
+                            definition(dot, radius).to_bits(),
+                            "cap({dot}, {radius}) diverged {step} ulp from the rim"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// A radius of zero is no blob at all, and the guard must come before the arithmetic.
+    #[test]
+    fn a_zero_radius_cap_is_always_zero() {
+        for dot in [-1.0, -0.5, 0.0, 0.5, 1.0] {
+            assert_eq!(cap(dot, 0.0, 1.0), 0.0);
+            assert_eq!(cap(dot, -1.0, 1.0), 0.0);
+        }
     }
 
     #[test]
