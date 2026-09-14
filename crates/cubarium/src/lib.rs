@@ -16,6 +16,7 @@
 pub mod art;
 pub mod art_present;
 pub mod care;
+pub(crate) mod care_effects;
 pub mod cli;
 pub mod clock;
 pub mod hunter_present;
