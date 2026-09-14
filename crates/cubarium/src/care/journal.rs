@@ -733,6 +733,16 @@ fn take_one(counter: &AtomicU64) -> bool {
 /// `accepted_dose_v1` with an explicit `dose_permille`, which an older binary refuses by name
 /// rather than misreading. See the module documentation.
 fn accepted_line(c: &PlannedCommand) -> String {
+    if c.kind == CareKind::SpawnApex {
+        let second = c.second_target.map_or_else(String::new, |target| {
+            format!(r#",{{"face":{},"u":{},"v":{}}}"#, target.face, target.u, target.v)
+        });
+        return format!(
+            r#"{{"rec":"accepted_apex_v1","seq":{},"apply_after_tick":{},"client":{},"request":{},"kind":"spawn_apex","targets":[{{"face":{},"u":{},"v":{}}}{}]}}"#,
+            c.seq, c.apply_after_tick, serde_json::Value::from(c.client.as_str()), c.request,
+            c.target.face, c.target.u, c.target.v, second,
+        );
+    }
     if c.dose.is_standard() {
         return format!(
             r#"{{"rec":"accepted","seq":{},"apply_after_tick":{},"client":{},"request":{},"kind":"{}","target":{{"face":{},"u":{},"v":{}}}}}"#,
@@ -850,7 +860,7 @@ fn parse_record(line: &[u8]) -> std::result::Result<Record, String> {
             object.get("epoch").and_then(|v| v.as_str()).ok_or("no `epoch` string")?;
             Ok(Record::Epoch)
         }
-        "accepted" | "accepted_dose_v1" => {
+        "accepted" | "accepted_dose_v1" | "accepted_apex_v1" => {
             let dose = match rec {
                 // The legacy record has no amount, and must not: an `accepted` line carrying
                 // `dose_permille` would mean somebody wrote an amount under a name older
@@ -869,7 +879,7 @@ fn parse_record(line: &[u8]) -> std::result::Result<Record, String> {
                 }
                 // The new record must state its amount. Missing never defaults to standard: a
                 // dropped field would silently turn a Generous command into an ordinary one.
-                _ => {
+                "accepted_dose_v1" => {
                     let raw = object
                         .get("dose_permille")
                         .ok_or("an `accepted_dose_v1` record must carry `dose_permille`")?;
@@ -880,24 +890,49 @@ fn parse_record(line: &[u8]) -> std::result::Result<Record, String> {
                         .map_err(|_| format!("`dose_permille` is out of range: {n}"))?;
                     CareDose::new(n)?
                 }
+                "accepted_apex_v1" => {
+                    if object.contains_key("dose_permille") || object.contains_key("target") {
+                        return Err("an `accepted_apex_v1` record carries `targets` and no care dose or singular target".to_string());
+                    }
+                    CareDose::STANDARD
+                }
+                _ => unreachable!(),
             };
             let kind = object.get("kind").and_then(|v| v.as_str()).ok_or("no `kind` string")?;
             let kind = CareKind::parse(kind).ok_or_else(|| format!("unknown kind `{kind}`"))?;
-            let target = object.get("target").ok_or("no `target`")?;
-            let component = |key: &str| -> std::result::Result<u8, String> {
+            if (rec == "accepted_apex_v1") != (kind == CareKind::SpawnApex) {
+                return Err("the record kind and command kind disagree".to_string());
+            }
+            let component = |target: &serde_json::Value, key: &str| -> std::result::Result<u8, String> {
                 let n = target
                     .get(key)
                     .and_then(serde_json::Value::as_u64)
                     .ok_or_else(|| format!("target has no `{key}`"))?;
                 u8::try_from(n).map_err(|_| format!("target `{key}` is out of range: {n}"))
             };
-            let target = CareTarget { face: component("face")?, u: component("u")?, v: component("v")? };
-            target.validate().map_err(|e| e.to_string())?;
+            let read_target = |target: &serde_json::Value| -> std::result::Result<CareTarget, String> {
+                let target = CareTarget {
+                    face: component(target, "face")?, u: component(target, "u")?, v: component(target, "v")?,
+                };
+                target.validate().map_err(|e| e.to_string())?;
+                Ok(target)
+            };
+            let (target, second_target) = if rec == "accepted_apex_v1" {
+                let targets = object.get("targets").and_then(serde_json::Value::as_array)
+                    .ok_or("an `accepted_apex_v1` record must carry a `targets` array")?;
+                if !(1..=2).contains(&targets.len()) {
+                    return Err("an apex command must carry one or two targets".to_string());
+                }
+                (read_target(&targets[0])?, targets.get(1).map(read_target).transpose()?)
+            } else {
+                (read_target(object.get("target").ok_or("no `target`")?)?, None)
+            };
             Ok(Record::Accepted(PlannedCommand {
                 seq: u64_field("seq")?,
                 apply_after_tick: u64_field("apply_after_tick")?,
                 kind,
                 target,
+                second_target,
                 dose,
                 client: object
                     .get("client")
@@ -1650,5 +1685,23 @@ mod tests {
             serde_json::from_str(&accepted_line(&command(1, 100, CareKind::Feed))).unwrap();
         assert!(PRE_DOSE_RECORD_KINDS.contains(&legacy["rec"].as_str().unwrap()));
         assert!(legacy.get("dose_permille").is_none());
+    }
+
+    #[test]
+    fn an_atomic_apex_pair_round_trips_as_one_replay_command() {
+        let dir = scratch("apex-pair");
+        let mut apex = command(1, 77, CareKind::SpawnApex);
+        apex.target = CareTarget { face: 0, u: 3, v: 61 };
+        apex.second_target = Some(CareTarget { face: 4, u: 52, v: 8 });
+        {
+            let mut journal = Journal::open(&dir, "s", "b").unwrap();
+            journal.append_accepted(&[apex.clone()]).unwrap();
+        }
+        let raw = contents(&dir);
+        assert!(raw.contains(r#""rec":"accepted_apex_v1""#), "{raw}");
+        let reopened = Journal::open(&dir, "s2", "b").unwrap();
+        assert_eq!(reopened.accepted_records(), &[apex]);
+        assert_eq!(reopened.replay_plan(0, 77).unwrap().len(), 1);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

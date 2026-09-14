@@ -65,7 +65,7 @@ pub const MAX_BODY_BYTES: usize = 4 * 1024;
 pub const ACCEPT_WAIT: Duration = Duration::from_secs(5);
 
 /// Per-kind cooldown in simulated seconds: feed 30 s, rain 60 s, clean 30 s.
-const COOLDOWN_SECONDS: [u64; 3] = [30, 60, 30];
+const COOLDOWN_SECONDS: [u64; 4] = [30, 60, 30, 0];
 
 /// What a viewer can ask for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -73,6 +73,7 @@ pub enum CareKind {
     Feed,
     Rain,
     Clean,
+    SpawnApex,
 }
 
 impl CareKind {
@@ -82,6 +83,7 @@ impl CareKind {
             CareKind::Feed => "feed",
             CareKind::Rain => "rain",
             CareKind::Clean => "clean",
+            CareKind::SpawnApex => "spawn_apex",
         }
     }
 
@@ -92,6 +94,7 @@ impl CareKind {
             "feed" => Some(CareKind::Feed),
             "rain" => Some(CareKind::Rain),
             "clean" => Some(CareKind::Clean),
+            "spawn_apex" => Some(CareKind::SpawnApex),
             _ => None,
         }
     }
@@ -102,6 +105,7 @@ impl CareKind {
             CareKind::Feed => 0,
             CareKind::Rain => 1,
             CareKind::Clean => 2,
+            CareKind::SpawnApex => 3,
         }
     }
 
@@ -111,7 +115,8 @@ impl CareKind {
     }
 
     /// All three, in wire order.
-    pub const ALL: [CareKind; 3] = [CareKind::Feed, CareKind::Rain, CareKind::Clean];
+    pub const ALL: [CareKind; 4] =
+        [CareKind::Feed, CareKind::Rain, CareKind::Clean, CareKind::SpawnApex];
 }
 
 /// A canonical surface point: which face and which pixel of its 64×64 chart.
@@ -146,6 +151,7 @@ pub struct PlannedCommand {
     pub apply_after_tick: u64,
     pub kind: CareKind,
     pub target: CareTarget,
+    pub second_target: Option<CareTarget>,
     /// How much of the standard amount was asked for. Journaled with the command, so a replay
     /// applies the amount the original history applied rather than a default.
     pub dose: CareDose,
@@ -170,6 +176,7 @@ impl PlannedCommand {
             apply_after_tick,
             kind,
             target,
+            second_target: None,
             dose: CareDose::STANDARD,
             client: client.into(),
             request,
@@ -263,6 +270,7 @@ struct Row {
     request: u64,
     kind: CareKind,
     target: CareTarget,
+    second_target: Option<CareTarget>,
     /// The amount this request asked for. Part of its identity, and reported in every
     /// `/care/status` row so the viewer can say what was actually requested.
     dose: CareDose,
@@ -278,14 +286,16 @@ impl Row {
         let number = |v: Option<u64>| {
             v.map_or("null".to_string(), |n| n.to_string())
         };
+        let count = 1 + usize::from(self.second_target.is_some());
         format!(
-            r#"{{"client":{},"request":{},"kind":"{}","target":{{"face":{},"u":{},"v":{}}},"dose_permille":{},"seq":{},"apply_after_tick":{},"state":"{}","reason":{},"applied":{},"duplicate":{duplicate}}}"#,
+            r#"{{"client":{},"request":{},"kind":"{}","target":{{"face":{},"u":{},"v":{}}},"count":{},"dose_permille":{},"seq":{},"apply_after_tick":{},"state":"{}","reason":{},"applied":{},"duplicate":{duplicate}}}"#,
             serde_json::Value::from(self.client.as_str()),
             self.request,
             self.kind.as_str(),
             self.target.face,
             self.target.u,
             self.target.v,
+            count,
             self.dose.permille(),
             number(self.seq),
             number(self.apply_after_tick),
@@ -303,6 +313,7 @@ struct Prepared {
     request: u64,
     kind: CareKind,
     target: CareTarget,
+    second_target: Option<CareTarget>,
     dose: CareDose,
 }
 
@@ -412,7 +423,7 @@ struct Inner {
     clients: HashMap<String, ClientEntry>,
     issued: u64,
     rows: VecDeque<Row>,
-    last_kind_tick: [Option<u64>; 3],
+    last_kind_tick: [Option<u64>; 4],
     outstanding: usize,
 }
 
@@ -498,7 +509,65 @@ impl CareShared {
         target: CareTarget,
         dose: CareDose,
     ) -> SubmitOutcome {
+        if kind == CareKind::SpawnApex {
+            return SubmitOutcome::Invalid("spawn_apex requires count 1 or 2");
+        }
+        self.submit_command(client, request, kind, target, None, dose)
+    }
+
+    pub fn submit_apex(&self, client: &str, request: u64, count: u8) -> SubmitOutcome {
+        if !(1..=2).contains(&count) {
+            return SubmitOutcome::Invalid("`count` must be 1 or 2");
+        }
+        let (target, second_target) = self.apex_targets(client, request, count);
+        self.submit_command(client, request, CareKind::SpawnApex, target, second_target, CareDose::STANDARD)
+    }
+
+    fn apex_targets(&self, client: &str, request: u64, count: u8) -> (CareTarget, Option<CareTarget>) {
+        // Stable placement entropy: the explicit results are journaled, so replay never
+        // regenerates them, while a retry of the same request keeps the same payload.
+        let mut state = 0xcbf2_9ce4_8422_2325u64;
+        for byte in self.epoch.bytes().chain(client.bytes()) {
+            state ^= u64::from(byte);
+            state = state.wrapping_mul(0x100_0000_01b3);
+        }
+        state ^= request.rotate_left(17) ^ u64::from(count);
+        let mut next = || {
+            state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            let mut z = state;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            z ^ (z >> 31)
+        };
+        let mut draw_target = || CareTarget {
+            face: (next() % 5) as u8,
+            u: (next() % 64) as u8,
+            v: (next() % 64) as u8,
+        };
+        let first = draw_target();
+        let second = if count == 2 {
+            let mut candidate = draw_target();
+            if candidate == first { candidate.u = candidate.u.wrapping_add(1) % 64; }
+            Some(candidate)
+        } else { None };
+        (first, second)
+    }
+
+    fn submit_command(
+        &self,
+        client: &str,
+        request: u64,
+        kind: CareKind,
+        target: CareTarget,
+        second_target: Option<CareTarget>,
+        dose: CareDose,
+    ) -> SubmitOutcome {
         if let Err(reason) = target.validate() {
+            return SubmitOutcome::Invalid(reason);
+        }
+        if let Some(target) = second_target
+            && let Err(reason) = target.validate()
+        {
             return SubmitOutcome::Invalid(reason);
         }
         // A dose that reached this far out of range would be a host defect rather than a bad
@@ -524,7 +593,7 @@ impl CareShared {
         // The retained receipt answers a retry; a different payload under the same request
         // number is a genuine conflict and must not silently become a second command.
         if let Some(row) = inner.find(client, request) {
-            if row.kind == kind && row.target == target && row.dose == dose {
+            if row.kind == kind && row.target == target && row.second_target == second_target && row.dose == dose {
                 let receipt = row.to_json(true);
                 return SubmitOutcome::Duplicate(receipt);
             }
@@ -549,7 +618,7 @@ impl CareShared {
             return SubmitOutcome::Limited("cooldown");
         }
 
-        let prepared = Prepared { client: client.to_string(), request, kind, target, dose };
+        let prepared = Prepared { client: client.to_string(), request, kind, target, second_target, dose };
         match self.tx.try_send(prepared) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => return SubmitOutcome::Unavailable("intake full"),
@@ -570,6 +639,7 @@ impl CareShared {
             request,
             kind,
             target,
+            second_target,
             dose,
             seq: None,
             apply_after_tick: None,
@@ -686,7 +756,7 @@ impl CareService {
                 clients: HashMap::new(),
                 issued: 0,
                 rows: VecDeque::new(),
-                last_kind_tick: [None; 3],
+                last_kind_tick: [None; 4],
                 outstanding: 0,
             }),
             cv: Condvar::new(),
@@ -721,6 +791,7 @@ impl CareService {
                 apply_after_tick: boundary,
                 kind: prepared.kind,
                 target: prepared.target,
+                second_target: prepared.second_target,
                 dose: prepared.dose,
                 client: prepared.client,
                 request: prepared.request,
@@ -1271,6 +1342,7 @@ mod tests {
                 request: i,
                 kind: CareKind::Feed,
                 target: target(),
+                second_target: None,
                 dose: CareDose::STANDARD,
                 seq: Some(i),
                 apply_after_tick: Some(0),
@@ -1424,5 +1496,36 @@ mod tests {
             care.commit_accepted(&planned);
             let _ = waiter.join();
         }
+    }
+
+    #[test]
+    fn apex_requests_choose_replayable_locations_on_all_five_faces() {
+        let care = service();
+        let shared = care.shared();
+        let RegisterOutcome::Registered { client, .. } = shared.register() else { panic!() };
+        let mut faces = [false; 5];
+        for request in 1..=256 {
+            let a = shared.apex_targets(&client, request, 2);
+            assert_eq!(a, shared.apex_targets(&client, request, 2));
+            assert_ne!(a.0, a.1.unwrap());
+            for target in [Some(a.0), a.1].into_iter().flatten() {
+                target.validate().unwrap();
+                faces[target.face as usize] = true;
+            }
+        }
+        assert!(faces.into_iter().all(|seen| seen));
+        let waiter = {
+            let shared = Arc::clone(&shared);
+            let client = client.clone();
+            std::thread::spawn(move || shared.submit_apex(&client, 300, 2))
+        };
+        let planned = wait_for_planned(&care, 17);
+        assert_eq!(planned[0].kind, CareKind::SpawnApex);
+        assert!(planned[0].second_target.is_some());
+        care.commit_accepted(&planned);
+        assert!(matches!(waiter.join().unwrap(), SubmitOutcome::Accepted { .. }));
+        assert!(matches!(shared.submit_apex(&client, 300, 2), SubmitOutcome::Duplicate(_)));
+        assert!(matches!(shared.submit_apex(&client, 301, 0), SubmitOutcome::Invalid(_)));
+        assert!(matches!(shared.submit_apex(&client, 301, 3), SubmitOutcome::Invalid(_)));
     }
 }

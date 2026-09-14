@@ -615,8 +615,12 @@ fn care_route(
         }
         CareRoute::Submit => match parse_care_request(&body) {
             Err(message) => json_error(stream, "400 Bad Request", message),
-            Ok(CareRequest { client, request, kind, target, dose }) => {
+            Ok(CareRequest::Care { client, request, kind, target, dose }) => {
                 let outcome = care.submit_dosed(&client, request, kind, target, dose);
+                json(stream, outcome.http_status(), &outcome.body())
+            }
+            Ok(CareRequest::SpawnApex { client, request, count }) => {
+                let outcome = care.submit_apex(&client, request, count);
                 json(stream, outcome.http_status(), &outcome.body())
             }
         },
@@ -624,12 +628,9 @@ fn care_route(
 }
 
 /// One parsed `POST /care` body.
-struct CareRequest {
-    client: String,
-    request: u64,
-    kind: CareKind,
-    target: CareTarget,
-    dose: care::CareDose,
+enum CareRequest {
+    Care { client: String, request: u64, kind: CareKind, target: CareTarget, dose: care::CareDose },
+    SpawnApex { client: String, request: u64, count: u8 },
 }
 
 /// `{"client": "...", "request": N, "kind": "feed", "target": {"face": f, "u": u, "v": v}}`,
@@ -657,8 +658,17 @@ fn parse_care_request(body: &[u8]) -> Result<CareRequest, &'static str> {
         .get("request")
         .and_then(serde_json::Value::as_u64)
         .ok_or("`request` must be this client's monotonic request number")?;
-    let kind = value.get("kind").and_then(|v| v.as_str()).ok_or("`kind` must be a string")?;
-    let kind = CareKind::parse(kind).ok_or("`kind` must be feed, rain or clean")?;
+    let kind_name = value.get("kind").and_then(|v| v.as_str()).ok_or("`kind` must be a string")?;
+    if kind_name == "spawn_apex" {
+        let count = value.get("count").and_then(serde_json::Value::as_u64)
+            .and_then(|n| u8::try_from(n).ok()).filter(|n| (1..=2).contains(n))
+            .ok_or("`count` must be 1 or 2 for spawn_apex")?;
+        if value.get("target").is_some() || value.get("dose_permille").is_some() {
+            return Err("spawn_apex chooses random locations and accepts no target or dose");
+        }
+        return Ok(CareRequest::SpawnApex { client, request, count });
+    }
+    let kind = CareKind::parse(kind_name).ok_or("`kind` must be feed, rain, clean or spawn_apex")?;
     let target = value.get("target").ok_or("`target` must be {face, u, v}")?;
     let component = |key: &str| -> Result<u8, &'static str> {
         target
@@ -681,7 +691,7 @@ fn parse_care_request(body: &[u8]) -> Result<CareRequest, &'static str> {
                 .map_err(|_| "`dose_permille` must be an integer from 250 to 2000")?
         }
     };
-    Ok(CareRequest { client, request, kind, target, dose })
+    Ok(CareRequest::Care { client, request, kind, target, dose })
 }
 
 /// The `/frame` body: 8-byte little-endian render sequence then the frame bytes. With no
@@ -1210,6 +1220,35 @@ mod tests {
     }
 
     #[test]
+    fn apex_count_reaches_the_control_fifo_and_invalid_counts_are_400() {
+        let (sink, service) = care_sink();
+        let addr = sink.addr();
+        let (_, _, body) = care_post(addr, "/care/register", "{}");
+        let client = serde_json::from_str::<serde_json::Value>(&body).unwrap()["client"]
+            .as_str().unwrap().to_string();
+        for count in [0, 3] {
+            let payload = format!(r#"{{"client":"{client}","request":1,"kind":"spawn_apex","count":{count}}}"#);
+            let (status, _, body) = care_post(addr, "/care", &payload);
+            assert_eq!(status, "HTTP/1.1 400 Bad Request");
+            assert!(body.contains("count"), "{body}");
+        }
+        let payload = format!(r#"{{"client":"{client}","request":1,"kind":"spawn_apex","count":2}}"#);
+        let posted = std::thread::spawn(move || care_post(addr, "/care", &payload));
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let planned = loop {
+            let planned = service.drain_prepared(1, 90);
+            if !planned.is_empty() { break planned; }
+            assert!(std::time::Instant::now() < deadline, "the apex request never arrived");
+            std::thread::sleep(Duration::from_millis(2));
+        };
+        assert_eq!(planned.len(), 1);
+        assert_eq!(planned[0].kind, CareKind::SpawnApex);
+        assert!(planned[0].second_target.is_some());
+        service.commit_accepted(&planned);
+        assert_eq!(posted.join().unwrap().0, "HTTP/1.1 202 Accepted");
+    }
+
+    #[test]
     fn a_cross_origin_page_is_refused_and_so_is_a_missing_custom_header() {
         let (sink, _service) = care_sink();
         let addr = sink.addr();
@@ -1730,9 +1769,10 @@ mod tests {
             "the care panel must be closed by default"
         );
         assert!(INDEX_HTML.contains("<summary>Care (optional)</summary>"));
-        for label in ["Scatter food", "Shower", "Clean up litter"] {
+        for label in ["Scatter food", "Shower", "Clean up litter", "Spawn 1 apex", "Spawn 2 apex"] {
             assert!(INDEX_HTML.contains(label), "the panel is missing the button {label:?}");
         }
+        assert!(INDEX_HTML.contains(r#"kind: "spawn_apex", count: count"#));
         assert!(INDEX_HTML.contains(r#""X-Cubarium-Care": "1""#), "the custom header is the lock");
         assert!(INDEX_HTML.contains(r#"fetch("/care/register""#), "the page registers on load");
         assert!(INDEX_HTML.contains(r#"fetch("/care", { method: "POST""#));

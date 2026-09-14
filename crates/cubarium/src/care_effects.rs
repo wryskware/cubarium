@@ -8,12 +8,12 @@
 
 use std::collections::VecDeque;
 
-use cubarium_core::DT;
 use cubarium_core::care::{
-    CLEAN_MATERIAL, CareApplied, CareCommand, CareKind, CareReceipt, FEED_MATERIAL,
+    CareApplied, CareCommand, CareKind, CareReceipt, CLEAN_MATERIAL, FEED_MATERIAL,
 };
-use cubarium_render::{Canvas, srgb_decode};
-use cubarium_surface::{CELL_COUNT, Face, PixelImage, SurfacePoint, Vec2, unfold_pixels};
+use cubarium_core::DT;
+use cubarium_render::{srgb_decode, Canvas};
+use cubarium_surface::{unfold_pixels, Face, PixelImage, SurfacePoint, Vec2, CELL_COUNT};
 
 use crate::art_present::present_seconds;
 
@@ -409,18 +409,14 @@ mod tests {
             let (command, receipt) = pair(kind, 1, 20);
             let mut effects = CareEffects::default();
             effects.observe(&command, &receipt);
-            assert!(
-                frame(&mut effects, 20, 1.0)
-                    .as_bytes()
-                    .iter()
-                    .all(|&b| b == 0)
-            );
-            assert!(
-                frame(&mut effects, 21, 0.0)
-                    .as_bytes()
-                    .iter()
-                    .all(|&b| b == 0)
-            );
+            assert!(frame(&mut effects, 20, 1.0)
+                .as_bytes()
+                .iter()
+                .all(|&b| b == 0));
+            assert!(frame(&mut effects, 21, 0.0)
+                .as_bytes()
+                .iter()
+                .all(|&b| b == 0));
             let mut tiny = Canvas::new();
             effects.draw(21, 1e-4, &mut tiny);
             assert!(light(&tiny) < 1e-7);
@@ -432,12 +428,10 @@ mod tests {
             let mut almost = Canvas::new();
             effects.draw(last, 1.0 - 1e-4, &mut almost);
             assert!(light(&almost) < 1e-7);
-            assert!(
-                frame(&mut effects, last, 1.0)
-                    .as_bytes()
-                    .iter()
-                    .all(|&b| b == 0)
-            );
+            assert!(frame(&mut effects, last, 1.0)
+                .as_bytes()
+                .iter()
+                .all(|&b| b == 0));
         }
         let (command, receipt) = pair(CareKind::Feed, 1, 0);
         let mut effects = CareEffects::default();
@@ -503,12 +497,10 @@ mod tests {
                     for f in Face::ALL {
                         for y in 0..64 {
                             for x in 0..64 {
-                                assert!(
-                                    canvas
-                                        .get(f, x, y)
-                                        .iter()
-                                        .all(|c| c.is_finite() && (0.0..=1.0).contains(c))
-                                );
+                                assert!(canvas
+                                    .get(f, x, y)
+                                    .iter()
+                                    .all(|c| c.is_finite() && (0.0..=1.0).contains(c)));
                             }
                         }
                     }

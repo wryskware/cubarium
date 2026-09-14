@@ -53,8 +53,8 @@ successful juvenile feeding and maturation remain necessary.
 
 Use fresh workhorse contexts with concise delta reports. One targeted review
 after integration, at most two repair cycles. Do not commission review of
-reviews or read historical agent transcripts. Preserve unrelated work. Keep
-the new ecology opt-in pending the screen; no new art, captures, or animations.
+reviews or read historical agent transcripts. Preserve unrelated work. No new
+art, captures, or animations. The screen informs tuning, not access to features.
 
 ## Progress
 
@@ -67,7 +67,7 @@ the new ecology opt-in pending the screen; no new art, captures, or animations.
 - Enable dormancy separately with
   `world.state.apex_dormancy = ApexDormancyState::underground_v1()`.
 - Both additions share the unreleased schema-14 snapshot extension. Older saves
-  migrate with both policies Off. No live enablement.
+  migrate with both policies Off; live spawn controls enable both automatically.
 - One focused integrated review found no substantive defects.
 - `cargo test --workspace --all-targets` passed with localhost binding permitted.
   The full run found one stale schema-13 assertion, corrected to schema 14;
@@ -84,3 +84,34 @@ the new ecology opt-in pending the screen; no new art, captures, or animations.
 - Stop balance work at this checkpoint. The next bounded ecology question is
   whether emerged juveniles can feed and mature while enough prey survive to
   recover; changing seeds or thresholds repeatedly is not part of this pass.
+
+## Live spawn controls — Wrysk's follow-up
+
+Wrysk explicitly wants the implemented lifecycle available to try, regardless
+of incomplete ecological balance. The viewer now offers **Spawn 1 apex** and
+**Spawn 2 apex** in its existing control panel. They add active mature predators
+at random positions across the five faces and enable dormancy and encounters
+automatically. Subsequent clicks add predators without resetting earlier
+founders or descendants. Pair admission is atomic at the organism cap.
+
+The existing `/care` command queue journals the count and resolved placements
+for exact replay. Founder material and energy are explicit external inputs;
+spawning does not masquerade as reproduction. The normal launcher already
+enables this control lane. No automatic founder placement is required: users
+can introduce predators when they want to perturb the world.
+
+The earlier stationary-prey screen remains limited mechanism evidence. The next
+search should evaluate the complete evolving ecology together, as scoped in the
+[Claude Code handoff](handoffs/ecology-search-2026-09-14.md).
+
+Control validation: repeated founder/accounting/capacity tests, command and
+journal tests, existing care-service tests, and the viewer declaration test pass.
+Opus's one targeted review found a release-only sequence-admission bug and a
+repeat-spawn lifecycle reset; both were fixed before deployment. A release-mode
+spawn/spawn/feed replay test passes, as does a real gestation-to-buried-offspring
+test that introduces more founders at both lifecycle stages.
+
+The two completed Opus CLI calls reported 68 input, 93,976 cache-creation input,
+987,404 cache-read input, and 20,407 output tokens. This includes the restricted
+repair attempt that made no edits; the earlier canceled ecology run and the
+Sol worker did not expose measured usage. No agent transcripts were reviewed.

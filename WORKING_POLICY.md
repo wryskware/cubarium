@@ -11,8 +11,9 @@ independent reviews, or a permanently pinned release workflow.
 - The cube is a development display: run the latest development checkout with
   normal `assets/atelier`, not art or executables from `captures/` release copies.
   Rebuild/restart after relevant checks when shipping changes. Keep an accurate
-  build ID, but do not use it to justify retaining an old program. Unfinished
-  experimental switches can remain off without freezing the entire deployment.
+  build ID, but do not use it to justify retaining an old program. Expose usable
+  new behavior through ordinary development controls; ecological balance is not
+  a gate for access to features on this development display.
 - Source history belongs in Git commits and lightweight tags. Old captures,
   disposable experiment data, frozen binaries and redundant build caches are not
   archival deliverables. Use one normal build cache; clean task-owned temporary
@@ -30,3 +31,19 @@ Wrysk subsequently authorized the cleanup and fresh-world deployment. Use
 stop the existing owner first. It does not silently erase state or auto-watch
 source files. Old raw captures are deliberately discarded, not missing backups;
 historical reports must not imply they can still be revalidated from local data.
+
+## Development access and ecology — correction, 2026-09-14
+
+Wrysk wants new features available to try as this young project evolves. Add
+ordinary controls when an action should be explicit: apex spawning should offer
+one or two predators at random locations and enable their complete lifecycle.
+Do not require users to discover internal experimental policies before using
+implemented features. Ecological failures are evidence for iteration, not a
+reason to hide the feature. Preserve meaningful correctness checks and use Git
+for recovery; do not invent production-release gates.
+
+Tune the whole ecosystem together. The next research direction is fast headless
+simulation with genetic search over ecological parameters, evaluated on
+sustainability and variety across the world. Keep search work bounded and
+measure throughput before selecting a compute budget; do not launch an
+unbounded parameter search or tune predators against a frozen ecology alone.

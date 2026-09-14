@@ -119,6 +119,8 @@
         <button id="careFeed" disabled>Scatter food</button>
         <button id="careRain" disabled>Shower</button>
         <button id="careClean" disabled>Clean up litter</button>
+        <button id="spawnApex1" disabled>Spawn 1 apex</button>
+        <button id="spawnApex2" disabled>Spawn 2 apex</button>
       </div>
       <div id="careDoseNote">Standard amount · waiting for host capabilities. Ambient conditions are unchanged.</div>
       <div id="careNote">&nbsp;</div>
@@ -528,6 +530,10 @@ const careButtons = {
   rain: document.getElementById("careRain"),
   clean: document.getElementById("careClean")
 };
+const apexButtons = [
+  document.getElementById("spawnApex1"),
+  document.getElementById("spawnApex2")
+];
 const markCanvas = document.getElementById("netMark");
 markCanvas.width = netCanvas.width;
 markCanvas.height = netCanvas.height;
@@ -599,8 +605,10 @@ netCanvas.addEventListener("click", function (ev) {
 });
 
 function refreshButtons() {
-  const ready = careEnabled && careClient !== null && careTarget !== null;
-  for (const k in careButtons) careButtons[k].disabled = !ready;
+  const connected = careEnabled && careClient !== null;
+  const aimed = connected && careTarget !== null;
+  for (const k in careButtons) careButtons[k].disabled = !aimed;
+  for (const button of apexButtons) button.disabled = !connected;
   careDoseEl.disabled = !careEnabled || careClient === null || careDoseRange === null;
 }
 
@@ -635,6 +643,7 @@ function doseLabel(permille) {
 }
 
 function requestedAction(kind, permille) {
+  if (kind === "spawn_apex") return "spawn " + permille + " apex";
   return kind + " (" + doseLabel(permille === undefined ? 1000 : permille) + ")";
 }
 
@@ -684,7 +693,7 @@ function register() {
         careClient = res.j.client;
         careEpoch = res.j.epoch;
         careEnabled = true;
-        careSay("registered \u00B7 click the net, then choose an action");
+        careSay("registered \u00B7 choose an apex spawn, or click the net for care");
       }
       refreshButtons();
     })
@@ -704,6 +713,7 @@ function describe(row) {
     if (q.water_depth) parts.push(q.water_depth.toFixed(2) + " d of water");
     if (q.material_out) parts.push(q.material_out.toFixed(2) + " m removed");
     if (q.cells) parts.push(q.cells + " cells");
+    if (q.founders) parts.push(q.founders + " apex introduced");
     if (q.ends_tick) parts.push("until tick " + q.ends_tick);
   }
   if (row.reason) parts.push(row.reason);
@@ -756,6 +766,35 @@ careButtons.feed.addEventListener("click", function () { send("feed"); });
 careButtons.rain.addEventListener("click", function () { send("rain"); });
 careButtons.clean.addEventListener("click", function () { send("clean"); });
 
+function spawnApex(count) {
+  if (!careEnabled || careClient === null || ![1, 2].includes(count)) return;
+  careRequest += 1;
+  const request = careRequest;
+  const action = requestedAction("spawn_apex", count);
+  const payload = { client: careClient, request: request, kind: "spawn_apex", count: count };
+  setRow(request, "queued", action + " \u2192 queued");
+  fetch("/care", { method: "POST", headers: CARE_HEADERS, body: JSON.stringify(payload) })
+    .then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j }; }); })
+    .then(function (res) {
+      if (res.s === 202 && res.j.seq !== undefined) {
+        setRow(request, "accepted",
+          action + " \u2192 accepted as seq " + res.j.seq + " at boundary " + res.j.apply_after_tick);
+      } else if (res.s === 202) {
+        setRow(request, "queued", action + " \u2192 still committing, watching for the receipt");
+      } else if (res.s === 200) {
+        setRow(request, res.j.state || "accepted", action + " \u2192 already sent \u00B7 " + describe(res.j));
+      } else {
+        setRow(request, "rejected", action + " \u2192 " + res.s + " " +
+          (res.j.error || res.j.care || "unavailable"));
+      }
+    })
+    .catch(function () {
+      setRow(request, "failed", action + " \u2192 unknown after a lost connection, check the receipts");
+    });
+}
+apexButtons[0].addEventListener("click", function () { spawnApex(1); });
+apexButtons[1].addEventListener("click", function () { spawnApex(2); });
+
 let careInFlight = false;
 function pollCare() {
   if (careInFlight) return;
@@ -804,7 +843,8 @@ function pollCare() {
       (s.receipts || []).forEach(function (row) {
         if (row.client !== careClient) return;
         const at = row.apply_after_tick === null ? "?" : row.apply_after_tick;
-        const action = requestedAction(row.kind, row.dose_permille);
+        const action = requestedAction(row.kind,
+          row.kind === "spawn_apex" ? row.count : row.dose_permille);
         if (row.state === "accepted") {
           setRow(row.request, "accepted",
             action + " \u2192 accepted as seq " + row.seq + " at boundary " + at);

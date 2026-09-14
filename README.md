@@ -12,13 +12,16 @@ development changes should be deployed by relaunching this script.
 Old captures and duplicate build trees are disposable; dated reports below
 describe historical runs, not promises that their raw artifacts are retained.
 
-The [apex lifecycle extension](design/apex-dormancy-plan.md) adds opt-in buried
-offspring dormancy and adult mating/combat. Offspring retain their paid inventory
-underground and emerge after sustained nearby prey availability. Paired mating
-requires contributions and inheritance from both adults. Both policies default
-to Off; schema-14 saves retain their state and older saves migrate with them Off.
-New visual design is deferred. Ecological balance and recurring viable
-generations still need evidence; implementation alone does not establish them.
+Use **Spawn 1 apex** or **Spawn 2 apex** in the viewer's controls to introduce
+active mature predators at random surface locations. Each successful spawn
+enables the complete [apex lifecycle](design/apex-dormancy-plan.md): mating,
+combat, and offspring that wait underground for suitable prey conditions.
+Repeated spawns preserve the existing lineage. The command and its placements
+are journaled for replay; schema-14 saves retain the lifecycle state.
+New creature visual design is deferred. Ecology is still being tuned, and the
+controls are available for live experimentation while that work continues.
+The [Claude Code ecology-search handoff](design/handoffs/ecology-search-2026-09-14.md)
+scopes whole-ecosystem genetic search and a GPU feasibility path.
 
 A persistent artificial ecosystem living on the five visible surfaces of a
 64×64 LED cube. Small organisms should acquire recognizable habits and shapes,

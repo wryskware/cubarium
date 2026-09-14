@@ -24,7 +24,7 @@ use anyhow::{Context, Result};
 use cube_proto::Frame;
 use cubarium_core::view::{FieldDump, RenderView};
 use cubarium_core::care::{CareCommand, CareKind, CareOutcome, CareReceipt, CareTarget};
-use cubarium_core::{LifeEvent, Telemetry, World, WorldConfig, encode_snapshot};
+use cubarium_core::{CareApplied, FixedHunterProfile, HunterTarget, LifeEvent, Telemetry, World, WorldConfig, encode_snapshot};
 use cubarium_render::Canvas;
 
 use crate::art::ArtPack;
@@ -595,6 +595,7 @@ fn to_core(command: &care::PlannedCommand) -> CareCommand {
             care::CareKind::Feed => CareKind::Feed,
             care::CareKind::Rain => CareKind::Rain,
             care::CareKind::Clean => CareKind::Clean,
+            care::CareKind::SpawnApex => unreachable!("apex introductions use apply_planned"),
         },
         target: CareTarget {
             face: command.target.face,
@@ -607,11 +608,54 @@ fn to_core(command: &care::PlannedCommand) -> CareCommand {
     }
 }
 
+fn apply_planned(world: &mut World, command: &care::PlannedCommand) -> CareReceipt {
+    if command.kind != care::CareKind::SpawnApex {
+        return world.apply_care(&to_core(command));
+    }
+    let tick = world.tick();
+    let receipt = |outcome| CareReceipt { seq: command.seq, tick, outcome };
+    if command.seq != world.care().admitted_seq.wrapping_add(1) {
+        return receipt(CareOutcome::Rejected("out of order".into()));
+    }
+    if tick != command.apply_after_tick {
+        return receipt(CareOutcome::Rejected("wrong boundary".into()));
+    }
+    // Sequence admission must run in release builds too, even when spawning is refused.
+    let admitted = world.void_care(command.seq);
+    debug_assert!(admitted);
+    let to_target = |target: care::CareTarget| HunterTarget {
+        face: target.face, u: f64::from(target.u), v: f64::from(target.v),
+    };
+    let mut targets = vec![to_target(command.target)];
+    if let Some(target) = command.second_target { targets.push(to_target(target)); }
+    let mut profile = FixedHunterProfile::lanternjaw_trial(world.config());
+    profile.seek_reserve_fraction = 0.80;
+    profile.perch_reserve_fraction = 0.90;
+    profile = profile.charge80();
+    match world.introduce_hunters(profile, &targets) {
+        Ok(founders) => receipt(CareOutcome::Applied(CareApplied {
+            material_in: founders.iter().map(|r| r.material_in).sum(),
+            energy_in: founders.iter().map(|r| r.energy_in).sum(),
+            cells: founders.len() as u32,
+            ..CareApplied::default()
+        })),
+        Err(reason) => receipt(CareOutcome::Rejected(reason)),
+    }
+}
+
 /// The receipt's quantities, for the journal's diagnostic record and for the viewer.
-fn applied_json(outcome: &CareOutcome) -> serde_json::Value {
+fn applied_json(command: &care::PlannedCommand, outcome: &CareOutcome) -> serde_json::Value {
     match outcome.applied() {
         None => serde_json::Value::Null,
-        Some(q) => serde_json::json!({
+        Some(q) if command.kind == care::CareKind::SpawnApex => serde_json::json!({
+            "material_in": q.material_in, "energy_in": q.energy_in, "founders": q.cells,
+        }),
+        Some(q) => care_applied_json(q),
+    }
+}
+
+fn care_applied_json(q: &CareApplied) -> serde_json::Value {
+    serde_json::json!({
             "material_in": q.material_in,
             "energy_in": q.energy_in,
             "water_depth": q.water_depth,
@@ -619,8 +663,7 @@ fn applied_json(outcome: &CareOutcome) -> serde_json::Value {
             "energy_out": q.energy_out,
             "cells": q.cells,
             "ends_tick": q.ends_tick,
-        }),
-    }
+    })
 }
 
 /// Everything `--care` adds to the loop: the service the HTTP server talks to, the journal
@@ -721,7 +764,7 @@ impl CareRuntime {
                 world.tick()
             );
             let command = self.replay.pop_front().expect("just inspected");
-            let receipt = world.apply_care(&to_core(&command));
+            let receipt = apply_planned(world, &command);
             if let Some(reason) = receipt.outcome.reason()
                 && (reason == "out of order" || reason == "wrong boundary")
             {
@@ -758,7 +801,7 @@ impl CareRuntime {
                     // Durable. Only now does anything reach the world.
                     self.service.commit_accepted(&commands);
                     for command in &commands {
-                        let receipt = world.apply_care(&to_core(command));
+                        let receipt = apply_planned(world, command);
                         self.record(command, &receipt);
                     }
                     self.inflight.clear();
@@ -808,9 +851,11 @@ impl CareRuntime {
     fn record(&mut self, command: &care::PlannedCommand, receipt: &CareReceipt) {
         // Both fresh durable application and boundary-correct journal replay enter
         // here. Snapshot history is not replayed, so old inputs do not retrigger.
-        self.effects.observe(&to_core(command), receipt);
+        if command.kind != care::CareKind::SpawnApex {
+            self.effects.observe(&to_core(command), receipt);
+        }
         let reason = receipt.outcome.reason().unwrap_or_default().to_string();
-        let applied = applied_json(&receipt.outcome);
+        let applied = applied_json(command, &receipt.outcome);
         self.service.record_outcome(
             command.seq,
             receipt.outcome.as_str(),
@@ -1333,6 +1378,40 @@ mod tests {
     use super::*;
     use clap::Parser;
 
+    #[test]
+    fn apex_commands_apply_and_replay_exactly_at_the_journaled_locations() {
+        let command = care::PlannedCommand {
+            seq: 1, apply_after_tick: 0, kind: care::CareKind::SpawnApex,
+            target: care::CareTarget { face: 0, u: 4, v: 5 },
+            second_target: Some(care::CareTarget { face: 3, u: 60, v: 42 }),
+            dose: care::CareDose::STANDARD, client: "test.1".into(), request: 1,
+        };
+        let mut live = World::new(WorldConfig::default()).unwrap();
+        let mut replay = World::new(WorldConfig::default()).unwrap();
+        assert_eq!(apply_planned(&mut live, &command), apply_planned(&mut replay, &command));
+        assert_eq!(live.hunters().founders_placed, 2);
+        assert_eq!(cubarium_core::snapshot::state_hash(&live.state), cubarium_core::snapshot::state_hash(&replay.state));
+        let repeated = care::PlannedCommand {
+            seq: 2, second_target: None,
+            target: care::CareTarget { face: 4, u: 20, v: 21 }, request: 2,
+            ..command
+        };
+        let repeated_receipt = apply_planned(&mut live, &repeated);
+        assert_eq!(repeated_receipt.outcome.as_str(), "applied");
+        assert_eq!(repeated_receipt, apply_planned(&mut replay, &repeated));
+        assert_eq!(live.hunters().founders_placed, 3);
+        let feed = care::PlannedCommand {
+            seq: 3, kind: care::CareKind::Feed, request: 3,
+            ..repeated
+        };
+        let feed_receipt = apply_planned(&mut live, &feed);
+        assert_eq!(feed_receipt.outcome.as_str(), "applied");
+        assert_eq!(feed_receipt, apply_planned(&mut replay, &feed));
+        assert_eq!(live.care().admitted_seq, 3);
+        assert_eq!(replay.care().admitted_seq, 3);
+        assert_eq!(cubarium_core::snapshot::state_hash(&live.state), cubarium_core::snapshot::state_hash(&replay.state));
+    }
+
     /// Exercise the runner's receipt hook, not just the effect renderer. These
     /// scratch journals have explicit private hooks, independent of process-wide
     /// failure injection used by other tests.
@@ -1464,7 +1543,7 @@ mod tests {
                 effects.observe(&command, &receipt);
                 receipt_log.push(serde_json::json!({
                     "seq":receipt.seq,"tick":receipt.tick,"kind":command.kind.as_str(),
-                    "outcome":receipt.outcome.as_str(),"applied":applied_json(&receipt.outcome),
+                    "outcome":receipt.outcome.as_str(),"applied":receipt.outcome.applied().map(care_applied_json),
                 }));
             }
             world.step();

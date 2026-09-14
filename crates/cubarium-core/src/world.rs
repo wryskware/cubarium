@@ -16,12 +16,12 @@ use crate::care::{
 use crate::config::{FounderKind, WorldConfig};
 use crate::controller::{Decision, Observation, TurnGate, decide_quiet, turn_toward};
 use crate::dormancy::{
-    ApexDormancyEvent, ApexDormancyState, EMERGENCE_ENERGY_FRACTION, EMERGENCE_RESERVE_FRACTION,
+    ApexDormancyEvent, ApexDormancyPolicy, ApexDormancyState, EMERGENCE_ENERGY_FRACTION, EMERGENCE_RESERVE_FRACTION,
     MAINTENANCE_PER_STRUCTURE_SECOND, PREY_RADIUS_PX, PREY_REQUIRED, RECHECK_TICKS, SUSTAIN_TICKS,
 };
 use crate::events::LifeEvent;
 use crate::encounter::{
-    self, ApexContribution, ApexEncounterEvent, ApexEncounterState, CombatResponse,
+    self, ApexContribution, ApexEncounterEvent, ApexEncounterPolicy, ApexEncounterState, CombatResponse,
     PairedGestation, PairedParentage,
 };
 use crate::fields::Fields;
@@ -3121,6 +3121,101 @@ impl World {
             "founding moved the mass residual"
         );
         Ok(receipt)
+    }
+
+    /// Add one or two mature founders to an existing or new hunter lineage.
+    ///
+    /// Unlike the singleton trial initializer, this permits repeated introductions. All
+    /// targets, profile compatibility and capacity are validated before any state changes,
+    /// so a two-founder request is never partially applied. Successful introductions enable
+    /// paired encounters and underground offspring; the new adults remain active on surface.
+    pub fn introduce_hunters(
+        &mut self,
+        profile: FixedHunterProfile,
+        targets: &[HunterTarget],
+    ) -> Result<Vec<HunterFounderReceipt>, String> {
+        if !(1..=2).contains(&targets.len()) {
+            return Err("an interactive hunter introduction must contain one or two founders".into());
+        }
+        if self.state.hunters.control_deposited {
+            return Err("this world is a budget-matched control and must not gain a hunter".into());
+        }
+        if let Some(installed) = self.state.hunters.profile.as_ref()
+            && installed != &profile
+        {
+            return Err("the requested hunter profile does not match the installed lineage".into());
+        }
+        let founder = self.derive_hunter_founder(&profile)?;
+        let positions = targets.iter().map(|target| {
+            target.resolve().ok_or_else(|| format!("hunter founder target {target:?} is not on the surface"))
+        }).collect::<Result<Vec<_>, _>>()?;
+        let cap = self.state.config.capacity.max_organisms as usize;
+        if self.state.organisms.len().saturating_add(positions.len()) > cap {
+            return Err(format!(
+                "no organism capacity for {} hunter founder(s) (population {}, capacity {cap})",
+                positions.len(), self.state.organisms.len()
+            ));
+        }
+
+        let tick = self.state.tick;
+        let first_draw = u64::from(self.state.hunters.founders_placed);
+        let mut receipts = Vec::with_capacity(positions.len());
+        for (offset, pos) in positions.into_iter().enumerate() {
+            let heading = Vec2::from_screen_angle(unit(
+                self.state.config.seed, Stream::Hunt, hunter::FOUNDER_DRAW_KEY,
+                first_draw + offset as u64,
+            ) * TAU);
+            let hunger_memory = (1.0 - founder.reserve / founder.phenotype.reserve_max).clamp(0.0, 1.0);
+            let id = self.state.organisms.insert(Organism {
+                pos,
+                heading,
+                ou: Vec2::ZERO,
+                structure: founder.structure,
+                reserve: founder.reserve,
+                energy: founder.energy,
+                born_tick: tick,
+                hunger_memory,
+                mode: Mode::Resting,
+                escrow: None,
+                births: 0,
+                genome: profile.genome.clone(),
+                phenotype: founder.phenotype.clone(),
+                parent: None,
+                origin: Origin::Founder,
+                turn_counter: Counter::default(),
+                fed_this_tick: false,
+            });
+            self.state.hunters.insert_member(hunter::HunterMember::new(id, tick));
+            receipts.push(HunterFounderReceipt {
+                id,
+                tick,
+                pos,
+                structure: founder.structure,
+                reserve: founder.reserve,
+                energy: founder.energy,
+                material_in: founder.material_in,
+                energy_in: founder.energy_in,
+                extent: founder.phenotype.extent,
+                sense_radius: founder.phenotype.sense_radius,
+                geometry: hunter::ContactGeometry {
+                    scale: 1.0,
+                    capture_offset_body: profile.capture_offset_body,
+                    capture_reach_px: profile.capture_reach_px,
+                    ingestion_offset_body: profile.ingestion_offset_body,
+                    visual_query_extent_px: profile.visual_query_extent_px,
+                },
+            });
+        }
+        let count = receipts.len() as u32;
+        self.state.hunters.profile = Some(profile);
+        self.state.hunters.founder_material_in += founder.material_in * f64::from(count);
+        self.state.hunters.founder_energy_in += founder.energy_in * f64::from(count);
+        self.state.hunters.founders_placed += count;
+        // Adding founders enables behavior without resetting existing offspring or escrows.
+        self.state.apex_dormancy.policy = ApexDormancyPolicy::UndergroundV1;
+        self.state.apex_encounters.policy = ApexEncounterPolicy::PairedV1;
+        debug_assert!(self.mass_residual().abs() < 1e-9, "founding moved the mass residual");
+        Ok(receipts)
     }
 
     /// The budget-matched control: deposit the **same derived founder inventory** as local
