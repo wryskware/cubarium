@@ -13,6 +13,19 @@ entries, then **one** task brief. Do not ingest the whole research archive.
 
 ## Where we landed
 
+**2026-09-14 planning update:** Wrysk has requested recurrent organism control
+directly, without an MLP comparison. Review the research-backed
+[recurrent-organism plan](../recurrent-organism-plan.md) and its
+[movement/foraging overview](../movement-and-foraging-plan.md). The proposed next
+handoff is R0: physical movement, local depletion/recovery and the senses/actions
+contract. Implementation/delegation follows review; M1 sustainability-search
+changes follow the behavioral redesign. The status below is historical.
+
+For an early Opus thread while Fable's review is pending, use the narrower
+[R0a movement-foundation handoff](r0a-movement-foundation-2026-09-14.md).
+It separates physical movement fixes and food measurements from the remaining
+design choices.
+
 Source baseline: `0825d8b`, tagged `checkpoint/current-checkout-fresh-world-2026-09-13`.
 The cube was restarted from tick zero with that build, normal `assets/atelier`,
 speed 1, care enabled, and the same-instance viewer at `http://127.0.0.1:7393/`.
