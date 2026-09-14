@@ -118,6 +118,8 @@ impl From<WorldStateV12> for WorldState {
             hunters: old.hunters,
             // No retroactive pauses: that build never ran one.
             quiet: QuietState::default(),
+            apex_dormancy: crate::dormancy::ApexDormancyState::default(),
+            apex_encounters: crate::encounter::ApexEncounterState::default(),
         }
     }
 }

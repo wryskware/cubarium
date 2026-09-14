@@ -15,7 +15,15 @@ use crate::care::{
 };
 use crate::config::{FounderKind, WorldConfig};
 use crate::controller::{Decision, Observation, TurnGate, decide_quiet, turn_toward};
+use crate::dormancy::{
+    ApexDormancyEvent, ApexDormancyState, EMERGENCE_ENERGY_FRACTION, EMERGENCE_RESERVE_FRACTION,
+    MAINTENANCE_PER_STRUCTURE_SECOND, PREY_RADIUS_PX, PREY_REQUIRED, RECHECK_TICKS, SUSTAIN_TICKS,
+};
 use crate::events::LifeEvent;
+use crate::encounter::{
+    self, ApexContribution, ApexEncounterEvent, ApexEncounterState, CombatResponse,
+    PairedGestation, PairedParentage,
+};
 use crate::fields::Fields;
 use crate::genome::Phenotype;
 use crate::genome::{Genome, MAX_FORMS, decode};
@@ -88,6 +96,14 @@ pub struct WorldState {
     /// Off world never enters a quiet code path.
     #[serde(default)]
     pub quiet: QuietState,
+    /// Opt-in underground dormancy for paid apex offspring. Appended in schema 14 so every
+    /// earlier organism, hunter and quiet payload retains its exact wire shape.
+    #[serde(default)]
+    pub apex_dormancy: ApexDormancyState,
+    /// Independently opt-in adult apex pairing and combat. Schema 14 is still unreleased and
+    /// carries both milestone extensions; schema 13 migrates each one Off.
+    #[serde(default)]
+    pub apex_encounters: ApexEncounterState,
 }
 
 impl WorldState {
@@ -132,6 +148,10 @@ impl WorldState {
         self.care.validate(self.tick)?;
         self.hunters
             .validate(self.tick, &self.organisms, &self.config)?;
+        self.apex_dormancy
+            .validate(self.tick, cap, &self.organisms, &self.hunters)?;
+        self.apex_encounters
+            .validate(self.tick, cap, &self.organisms, &self.hunters)?;
         // The ordinary quiet extension, against this world's own clock, capacity and live
         // organisms — and against the hunter extension, which this slice refuses to combine
         // with an enabled policy (`crate::quiet`).
@@ -461,6 +481,10 @@ pub struct World {
     /// Ordinary-quiet begin/refuse/end/abort records since the observer last drained them.
     /// Transient in exactly the same sense (`crate::quiet::QuietEvent`).
     quiet_events: Vec<QuietEvent>,
+    /// Underground entry/emergence/exhaustion records. Transient, never checkpointed.
+    apex_dormancy_events: Vec<ApexDormancyEvent>,
+    /// Adult pairing/combat facts, transient and separate from one-parent hunter records.
+    apex_encounter_events: Vec<ApexEncounterEvent>,
     counters: TickCounters,
     /// Bounded read-only totals for the paid-charging policy. Transient in exactly the sense
     /// [`ChargingDiagnostics`] documents: never checkpointed, never hashed, never read by the
@@ -490,7 +514,10 @@ fn quiet_hold(
 ) -> Option<QuietOverride> {
     let index = quiet.pauses.iter().position(|p| p.parent == id)?;
     let p = quiet.pauses[index];
-    let released = Some(QuietOverride { underlying: p.underlying, hold: false });
+    let released = Some(QuietOverride {
+        underlying: p.underlying,
+        hold: false,
+    });
     if !p.holds(now) {
         // The promised window is over. Release at its exact end, not one tick late.
         quiet.pauses.remove(index);
@@ -514,7 +541,10 @@ fn quiet_hold(
             completed_ticks: p.completed(now),
             reason,
         });
-        Some(QuietOverride { underlying: p.underlying, hold: false })
+        Some(QuietOverride {
+            underlying: p.underlying,
+            hold: false,
+        })
     };
     let Some(horizon) = crate::quiet::horizon_seconds(p.remaining(now), dt) else {
         return abort(events, quiet, QuietReason::Overflow);
@@ -525,7 +555,10 @@ fn quiet_hold(
     if !budget.affordable(o) {
         return abort(events, quiet, QuietReason::UnaffordableRemaining);
     }
-    Some(QuietOverride { underlying: p.underlying, hold: true })
+    Some(QuietOverride {
+        underlying: p.underlying,
+        hold: true,
+    })
 }
 
 /// Offer a pause to the parent of an actual paid insertion at completed boundary `birth_tick`.
@@ -546,7 +579,12 @@ fn quiet_admit(
     hunter_parent: bool,
 ) {
     let mut refuse = |reason: QuietReason| {
-        events.push(QuietEvent::Refuse { tick: birth_tick, parent, child, reason });
+        events.push(QuietEvent::Refuse {
+            tick: birth_tick,
+            parent,
+            child,
+            reason,
+        });
     };
     if hunter_parent {
         // `QuietState::validate` already refuses this combination outright; the record exists so
@@ -577,10 +615,16 @@ fn quiet_admit(
     }
     // The mode the parent is actually in as this tick closes: the ordinary value release will
     // resume from.
-    let pause = QuietPause { parent, child, start_tick: birth_tick, end_tick, underlying: o.mode };
-    let at = quiet
-        .pauses
-        .partition_point(|p| (p.parent.slot, p.parent.generation) < (parent.slot, parent.generation));
+    let pause = QuietPause {
+        parent,
+        child,
+        start_tick: birth_tick,
+        end_tick,
+        underlying: o.mode,
+    };
+    let at = quiet.pauses.partition_point(|p| {
+        (p.parent.slot, p.parent.generation) < (parent.slot, parent.generation)
+    });
     quiet.pauses.insert(at, pause);
     events.push(QuietEvent::Begin {
         tick: birth_tick,
@@ -717,6 +761,8 @@ impl World {
             energy_correction: EnergyCorrection::default(),
             hunters: HunterState::default(),
             quiet: QuietState::default(),
+            apex_dormancy: ApexDormancyState::default(),
+            apex_encounters: ApexEncounterState::default(),
         };
         Ok(World::assemble(state, habitat, initial_material))
     }
@@ -789,6 +835,8 @@ impl World {
             events: Vec::new(),
             hunter_events: Vec::new(),
             quiet_events: Vec::new(),
+            apex_dormancy_events: Vec::new(),
+            apex_encounter_events: Vec::new(),
             counters: TickCounters::default(),
             charging: ChargingDiagnostics::default(),
             initial_material,
@@ -851,6 +899,8 @@ impl World {
                 events,
                 hunter_events,
                 quiet_events,
+                apex_dormancy_events,
+                apex_encounter_events,
                 counters,
                 charging,
                 initial_material: _,
@@ -879,6 +929,8 @@ impl World {
                     },
                 hunters,
                 quiet,
+                apex_dormancy,
+                apex_encounters,
             } = state;
             let cfg: &WorldConfig = config;
             let org_cfg = &cfg.organism;
@@ -888,6 +940,10 @@ impl World {
             let gate = TurnGate::from_config(org_cfg);
             // One boolean, read once: an Off world never touches a quiet code path again.
             let quiet_on = quiet.active();
+            // Read once. Off remains a branch-free no-op at every lifecycle mutation site.
+            let apex_dormancy_on = apex_dormancy.active();
+            // Independent from offspring dormancy: either policy can be screened alone.
+            let apex_encounters_on = apex_encounters.active();
             let now = *tick;
             let seed = cfg.seed;
             // Every heat payment of the tick goes through here: the transient counter keeps
@@ -972,6 +1028,9 @@ impl World {
             // 4. Pair pass.
             let mut bodies: Vec<Body> = Vec::with_capacity(organisms.len());
             for (id, o) in organisms.iter() {
+                if apex_dormancy_on && apex_dormancy.contains(id) {
+                    continue;
+                }
                 bodies.push(Body {
                     id,
                     pos: o.pos,
@@ -989,6 +1048,11 @@ impl World {
             // 5. Observe and decide (pure per organism, from the pre-movement world).
             let mut decisions: Vec<(OrganismId, Decision)> = Vec::with_capacity(organisms.len());
             for (id, o) in organisms.iter_mut() {
+                // A concealed offspring has no surface observation, controller draw, movement,
+                // intake or ordinary physiology. Its dedicated paid lifecycle runs below.
+                if apex_dormancy_on && apex_dormancy.contains(id) {
+                    continue;
+                }
                 let cell = cell_of(&o.pos);
                 let here = cell.index();
                 let chart = o.pos.chart();
@@ -1095,6 +1159,269 @@ impl World {
             //     A boost is an absolute speed ceiling in px/s, still divided by wading and
             //     still capped by the movement energy the creature actually has.
             let mut boosts: Vec<(OrganismId, f64)> = Vec::new();
+
+            // 5a. Adult apex encounters. Work from canonical unordered neighbor pairs and mark
+            // both participants used before applying an action: no self-pair, reverse duplicate,
+            // distant mating, or second partner reuse can occur in this tick. The ordinary
+            // hunter reproduction stream remains strictly one-parent; joint transactions are
+            // published only through `ApexEncounterEvent`.
+            if apex_encounters_on
+                && !hunters.members.is_empty()
+                && let Some(profile) = hunters.profile.clone()
+            {
+                let mut pairs = Vec::new();
+                for m in &hunters.members {
+                    if m.phase != HunterPhase::Perched
+                        || (apex_dormancy_on && apex_dormancy.contains(m.id))
+                        || apex_encounters
+                            .gestations
+                            .iter()
+                            .any(|g| g.carrier == m.id || g.partner == m.id)
+                    {
+                        continue;
+                    }
+                    let Some(a) = organisms.get(m.id) else {
+                        continue;
+                    };
+                    if a.structure < a.phenotype.structure_adult - hunter::TOLERANCE {
+                        continue;
+                    }
+                    if let Some(sensed) = neighbors.lists.get(m.id.slot as usize) {
+                        for n in sensed {
+                            if m.id >= n.id || !hunters.contains(n.id) {
+                                continue;
+                            }
+                            let Some(other) = hunters.member(n.id) else {
+                                continue;
+                            };
+                            if other.phase != HunterPhase::Perched
+                                || (apex_dormancy_on && apex_dormancy.contains(n.id))
+                                || apex_encounters
+                                    .gestations
+                                    .iter()
+                                    .any(|g| g.carrier == n.id || g.partner == n.id)
+                            {
+                                continue;
+                            }
+                            let Some(b) = organisms.get(n.id) else {
+                                continue;
+                            };
+                            if b.structure < b.phenotype.structure_adult - hunter::TOLERANCE {
+                                continue;
+                            }
+                            pairs.push((n.distance, m.id, n.id));
+                        }
+                    }
+                }
+                pairs.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+                let mut used: Vec<OrganismId> = Vec::new();
+                let gestation_ticks = ticks_from_seconds(profile.gestation_seconds, dt);
+                let interval_ticks = ticks_from_seconds(profile.reproduce_interval_seconds, dt);
+                let encounter_cooldown = gestation_ticks.saturating_add(interval_ticks);
+                let recovery_ticks = ticks_from_seconds(profile.recovery_seconds, dt).max(1);
+
+                for (distance, a_id, b_id) in pairs {
+                    if used.contains(&a_id) || used.contains(&b_id) {
+                        continue;
+                    }
+                    let (Some(a_index), Some(b_index)) =
+                        (hunters.index_of(a_id), hunters.index_of(b_id))
+                    else {
+                        continue;
+                    };
+                    let (Some(a), Some(b)) = (organisms.get(a_id), organisms.get(b_id)) else {
+                        continue;
+                    };
+                    let a_ready = hunters.members[a_index].phase == HunterPhase::Perched
+                        && hunter::may_reproduce(&profile, a, &hunters.members[a_index], now, dt)
+                        && !apex_encounters.gestations.iter().any(|g| g.partner == a_id);
+                    let b_ready = hunters.members[b_index].phase == HunterPhase::Perched
+                        && hunter::may_reproduce(&profile, b, &hunters.members[b_index], now, dt)
+                        && !apex_encounters.gestations.iter().any(|g| g.partner == b_id);
+
+                    if distance <= encounter::MATING_RADIUS_PX
+                        && a_ready
+                        && b_ready
+                        && organisms.len() < cfg.capacity.max_organisms as usize
+                    {
+                        let genome = encounter::recombine(&a.genome, &b.genome, a_id, b_id);
+                        let phenotype = decode(&genome, org_cfg);
+                        let structure = org_cfg.child_structure_fraction * phenotype.structure_adult;
+                        let reserve = org_cfg.child_reserve_fraction * phenotype.reserve_max;
+                        let energy = org_cfg.child_energy_fraction * phenotype.energy_max;
+                        let build = org_cfg.build_cost * structure;
+                        let paid = ApexContribution {
+                            structure: structure * 0.5,
+                            reserve: reserve * 0.5,
+                            energy: energy * 0.5,
+                            build_heat: build * 0.5,
+                        };
+                        let material_due = paid.material();
+                        let energy_due = paid.energy + paid.build_heat;
+                        if a.reserve >= material_due
+                            && b.reserve >= material_due
+                            && a.energy >= energy_due
+                            && b.energy >= energy_due
+                        {
+                            // End the immutable reads before mutating the two distinct slots.
+                            let child_genome = genome.digest();
+                            let a = organisms.get_mut(a_id).expect("paired adult remained alive");
+                            a.reserve -= material_due;
+                            a.energy -= energy_due;
+                            a.escrow = Some(Escrow {
+                                structure,
+                                reserve,
+                                energy,
+                                started_tick: now,
+                                genome,
+                            });
+                            let b = organisms.get_mut(b_id).expect("paired adult remained alive");
+                            b.reserve -= material_due;
+                            b.energy -= energy_due;
+                            hunters.members[a_index].next_reproduction_tick =
+                                now.saturating_add(encounter_cooldown);
+                            hunters.members[b_index].next_reproduction_tick =
+                                now.saturating_add(encounter_cooldown);
+                            let record = PairedGestation {
+                                carrier: a_id,
+                                partner: b_id,
+                                started_tick: now,
+                                carrier_paid: paid,
+                                partner_paid: paid,
+                            };
+                            assert!(apex_encounters.insert_gestation(record));
+                            apex_encounters.matings_total += 1;
+                            heat(build);
+                            apex_encounter_events.push(ApexEncounterEvent::Mated {
+                                tick: now + 1,
+                                carrier: a_id,
+                                partner: b_id,
+                                carrier_paid: paid,
+                                partner_paid: paid,
+                                child_genome,
+                            });
+                            used.extend([a_id, b_id]);
+                            continue;
+                        }
+                    }
+
+                    // A failed mutual funding is not a free attack. Combat is an alternative
+                    // only when mating itself was unavailable and the profile permits attacks.
+                    if distance > encounter::COMBAT_RADIUS_PX
+                        || !profile.attacks_enabled
+                        || (a_ready && b_ready)
+                    {
+                        continue;
+                    }
+                    let a_hungry = a.reserve
+                        < profile.seek_reserve_fraction * a.phenotype.reserve_max;
+                    let b_hungry = b.reserve
+                        < profile.seek_reserve_fraction * b.phenotype.reserve_max;
+                    let (attacker, defender, attacker_index, defender_index) =
+                        if a_hungry || (!b_hungry && !a_ready) {
+                            (a_id, b_id, a_index, b_index)
+                        } else {
+                            (b_id, a_id, b_index, a_index)
+                        };
+                    let Some(attacker_o) = organisms.get(attacker) else {
+                        continue;
+                    };
+                    if attacker_o.energy < profile.strike_energy_cost {
+                        continue;
+                    }
+                    let defender_o = organisms.get(defender).expect("paired defender is live");
+                    let retreat_cost = profile.strike_energy_cost * 0.5;
+                    let retreats = defender_o.structure < attacker_o.structure
+                        && defender_o.energy >= retreat_cost;
+                    let retaliates = !retreats && defender_o.energy >= profile.strike_energy_cost;
+                    let attack_injury = encounter::INJURY_ADULT_FRACTION
+                        * attacker_o.phenotype.structure_adult;
+                    let defend_injury = encounter::INJURY_ADULT_FRACTION
+                        * defender_o.phenotype.structure_adult;
+                    let mut attacker_injury = 0.0;
+                    let mut defender_injury = 0.0;
+                    let defender_energy_paid;
+                    let response;
+
+                    {
+                        let o = organisms.get_mut(attacker).expect("attacker remained alive");
+                        o.energy -= profile.strike_energy_cost;
+                    }
+                    heat(profile.strike_energy_cost);
+                    if retreats {
+                        let o = organisms.get_mut(defender).expect("defender remained alive");
+                        o.energy -= retreat_cost;
+                        heat(retreat_cost);
+                        defender_energy_paid = retreat_cost;
+                        response = CombatResponse::Retreated;
+                        apex_encounters.retreats_total += 1;
+                        if let Some(n) = neighbors
+                            .lists
+                            .get(defender.slot as usize)
+                            .and_then(|list| list.iter().find(|n| n.id == attacker))
+                            && let Some(d) = decisions.iter_mut().find(|(id, _)| *id == defender)
+                        {
+                            d.1.heading = (organisms
+                                .get(defender)
+                                .expect("defender")
+                                .pos
+                                .chart()
+                                - n.local)
+                                .normalized()
+                                .unwrap_or(d.1.heading);
+                            boosts.push((
+                                defender,
+                                profile.escape_speed_multiple
+                                    * organisms.get(defender).expect("defender").phenotype.speed_max,
+                            ));
+                        }
+                    } else {
+                        let o = organisms.get_mut(defender).expect("defender remained alive");
+                        defender_injury = defend_injury.min(o.structure);
+                        o.structure -= defender_injury;
+                        fields.d[cell_of(&o.pos).index()] += defender_injury;
+                        if retaliates {
+                            o.energy -= profile.strike_energy_cost;
+                            heat(profile.strike_energy_cost);
+                            defender_energy_paid = profile.strike_energy_cost;
+                            response = CombatResponse::Retaliated;
+                            apex_encounters.retaliations_total += 1;
+                            let o = organisms.get_mut(attacker).expect("attacker remained alive");
+                            attacker_injury = attack_injury.min(o.structure);
+                            o.structure -= attacker_injury;
+                            fields.d[cell_of(&o.pos).index()] += attacker_injury;
+                        } else {
+                            defender_energy_paid = 0.0;
+                            response = CombatResponse::Injured;
+                        }
+                    }
+                    hunters.members[attacker_index].enter(
+                        HunterPhase::Recovering,
+                        now,
+                        now + recovery_ticks,
+                        0,
+                    );
+                    hunters.members[defender_index].enter(
+                        HunterPhase::Recovering,
+                        now,
+                        now + recovery_ticks,
+                        0,
+                    );
+                    apex_encounters.combats_total += 1;
+                    apex_encounters.injury_material_total += attacker_injury + defender_injury;
+                    apex_encounter_events.push(ApexEncounterEvent::Combat {
+                        tick: now + 1,
+                        attacker,
+                        defender,
+                        response,
+                        attacker_energy_paid: profile.strike_energy_cost,
+                        defender_energy_paid,
+                        attacker_injury,
+                        defender_injury,
+                    });
+                    used.extend([a_id, b_id]);
+                }
+            }
             if !hunters.members.is_empty()
                 && let Some(profile) = hunters.profile.as_ref()
             {
@@ -1111,6 +1438,9 @@ impl World {
                     // arena and the member list can be read freely, and only the finished
                     // member is written back.
                     let mut m = hunters.members[index];
+                    if apex_dormancy_on && apex_dormancy.contains(m.id) {
+                        continue;
+                    }
                     let Some(o) = organisms.get(m.id) else {
                         continue;
                     };
@@ -1719,6 +2049,9 @@ impl World {
                 let meal_ticks = ticks_from_seconds(profile.meal_recovery_seconds, dt).max(1);
                 for index in 0..hunters.members.len() {
                     let m = hunters.members[index];
+                    if apex_dormancy_on && apex_dormancy.contains(m.id) {
+                        continue;
+                    }
                     if !m.carrying() {
                         continue;
                     }
@@ -1794,6 +2127,110 @@ impl World {
             let population = organisms.len();
             let mut births: Vec<OrganismId> = Vec::new();
             let mut deaths: Vec<(OrganismId, DeathCause)> = Vec::new();
+
+            // Dormancy is a paid lifecycle, not free storage. Count suitable juvenile prey at
+            // the concealed organism's persisted surface location, charge the low upkeep first,
+            // then recheck both the current abundance and post-payment reserves before waking.
+            if apex_dormancy_on {
+                let evaluations: Vec<(OrganismId, u32)> = apex_dormancy
+                    .dormant
+                    .iter()
+                    .map(|d| {
+                        let suitable = organisms.get(d.id).map_or(0, |buried| {
+                            organisms
+                                .iter()
+                                .filter(|(prey_id, prey)| {
+                                    !hunters.contains(*prey_id)
+                                        && prey.structure < 0.7 * prey.phenotype.structure_adult
+                                        && hunter::prey_is_eligible(
+                                            hunters.profile.as_ref().expect(
+                                                "validated active dormancy has a hunter profile",
+                                            ),
+                                            buried,
+                                            prey,
+                                            hunters
+                                                .profile
+                                                .as_ref()
+                                                .expect("profile")
+                                                .gut_capacity_material,
+                                            e_r,
+                                        )
+                                        && hunter::surface_reach(
+                                            images,
+                                            buried.pos,
+                                            prey.pos,
+                                            PREY_RADIUS_PX,
+                                        )
+                                        .is_some()
+                                })
+                                .count()
+                        });
+                        (d.id, u32::try_from(suitable).unwrap_or(u32::MAX))
+                    })
+                    .collect();
+                let mut emerged = Vec::new();
+                for (id, suitable_prey) in evaluations {
+                    let Some(index) = apex_dormancy.index_of(id) else {
+                        continue;
+                    };
+                    let Some(o) = organisms.get_mut(id) else {
+                        continue;
+                    };
+                    let cost = MAINTENANCE_PER_STRUCTURE_SECOND * o.structure * dt;
+                    let paid = cost.min(o.energy).max(0.0);
+                    o.energy -= paid;
+                    heat(paid);
+                    apex_dormancy.maintenance_energy_paid_total += paid;
+                    let record = &mut apex_dormancy.dormant[index];
+                    record.maintenance_energy_paid += paid;
+                    record.suitable_prey_ticks = if suitable_prey >= PREY_REQUIRED {
+                        record.suitable_prey_ticks.saturating_add(1)
+                    } else {
+                        0
+                    };
+
+                    if o.energy <= 0.0 {
+                        deaths.push((id, DeathCause::Starvation));
+                        apex_dormancy.exhausted_total += 1;
+                        apex_dormancy_events.push(ApexDormancyEvent::Exhausted {
+                            tick: now + 1,
+                            id,
+                            dormant_ticks: (now + 1).saturating_sub(record.entered_tick),
+                            maintenance_energy_paid: record.maintenance_energy_paid,
+                        });
+                        continue;
+                    }
+
+                    if now + 1 >= record.next_check_tick {
+                        let stocks_ready = o.reserve
+                            >= EMERGENCE_RESERVE_FRACTION * o.phenotype.reserve_max
+                            && o.energy >= EMERGENCE_ENERGY_FRACTION * o.phenotype.energy_max;
+                        if record.suitable_prey_ticks >= SUSTAIN_TICKS && stocks_ready {
+                            emerged.push((id, suitable_prey));
+                        } else {
+                            record.next_check_tick = (now + 1).saturating_add(RECHECK_TICKS);
+                        }
+                    }
+                }
+                for (id, suitable_prey) in emerged {
+                    let record = apex_dormancy
+                        .remove(id)
+                        .expect("an emergence candidate is still dormant");
+                    let dormant_ticks = (now + 1).saturating_sub(record.entered_tick);
+                    if let Some(o) = organisms.get_mut(id) {
+                        // Pause the active age clock exactly as long as development was paused.
+                        o.born_tick = o.born_tick.saturating_add(dormant_ticks).min(now + 1);
+                    }
+                    apex_dormancy.emerged_total += 1;
+                    apex_dormancy_events.push(ApexDormancyEvent::Emerged {
+                        tick: now + 1,
+                        id,
+                        dormant_ticks,
+                        suitable_prey,
+                        maintenance_energy_paid: record.maintenance_energy_paid,
+                    });
+                }
+            }
             for (id, d) in &decisions {
                 let Some(o) = organisms.get_mut(*id) else {
                     continue;
@@ -1874,9 +2311,10 @@ impl World {
                 // A hunter's one paid offspring is gated by its profile and its own local
                 // state; the ordinary controller's `bud` never applies to a member.
                 let bud = match (member, hunters.profile.as_ref()) {
-                    (Some(index), Some(profile)) => {
+                    (Some(index), Some(profile)) if !apex_encounters_on => {
                         hunter::may_reproduce(profile, o, &hunters.members[index], now, dt)
                     }
+                    (Some(_), Some(_)) => false,
                     _ => d.bud,
                 };
                 if due {
@@ -1985,6 +2423,11 @@ impl World {
                 heat(energy - kept);
                 // A gestation that never finished decays with its own clamp.
                 if let Some(es) = &o.escrow {
+                    let paired = if apex_encounters_on {
+                        apex_encounters.gestation(*id).copied()
+                    } else {
+                        None
+                    };
                     let material = es.structure + es.reserve;
                     let energy = e_r * material + es.energy;
                     fields.d[cell] += material;
@@ -1993,7 +2436,20 @@ impl World {
                     heat(energy - kept);
                     // The escrow's own terms, kept apart from the body above and the gut below:
                     // a miscarriage is not the whole corpse.
-                    if hunters.contains(*id) {
+                    if let Some(pair) = paired {
+                        apex_encounters.miscarriages_total += 1;
+                        apex_encounter_events.push(ApexEncounterEvent::Miscarried {
+                            tick: now + 1,
+                            carrier: pair.carrier,
+                            partner: pair.partner,
+                            cause: *cause,
+                            material,
+                            energy,
+                            energy_stored: kept,
+                            energy_heat: energy - kept,
+                        });
+                        let _ = apex_encounters.take_gestation(*id);
+                    } else if hunters.contains(*id) {
                         hunter_events.push(HunterEvent::Reproduction {
                             tick: now + 1,
                             hunter: *id,
@@ -2049,6 +2505,8 @@ impl World {
                         gut_energy_stored: stored,
                     });
                 }
+                apex_dormancy.remove(*id);
+                apex_encounters.remove_parentage(*id);
                 events.push(LifeEvent::Death {
                     tick: now + 1,
                     id: *id,
@@ -2085,6 +2543,70 @@ impl World {
                 // A member's child inherits the lineage, not the appearance: membership is
                 // granted explicitly below, and its genome is copied exactly.
                 let hunter_parent = hunters.index_of(*parent_id);
+                let paired = if apex_encounters_on {
+                    apex_encounters.gestation(*parent_id).copied()
+                } else {
+                    None
+                };
+                if full && let Some(pair) = paired {
+                    let Some(escrow) = organisms
+                        .get_mut(*parent_id)
+                        .and_then(|parent| parent.escrow.take())
+                    else {
+                        continue;
+                    };
+                    // Each surviving contributor receives its own inventory share. A partner
+                    // that died after paying cannot safely be addressed; only that stale share
+                    // falls back to the carrier. Build heat is already in the heat ledger.
+                    {
+                        let carrier = organisms
+                            .get_mut(*parent_id)
+                            .expect("a due paired carrier is alive");
+                        carrier.reserve += pair.carrier_paid.material();
+                        carrier.energy += pair.carrier_paid.energy;
+                    }
+                    let partner_refund_to = if organisms.get(pair.partner).is_some() {
+                        let partner = organisms.get_mut(pair.partner).expect("checked live partner");
+                        partner.reserve += pair.partner_paid.material();
+                        partner.energy += pair.partner_paid.energy;
+                        pair.partner
+                    } else {
+                        let carrier = organisms
+                            .get_mut(*parent_id)
+                            .expect("a due paired carrier is alive");
+                        carrier.reserve += pair.partner_paid.material();
+                        carrier.energy += pair.partner_paid.energy;
+                        *parent_id
+                    };
+                    debug_assert!((escrow.structure
+                        - pair.carrier_paid.structure
+                        - pair.partner_paid.structure)
+                        .abs()
+                        < hunter::TOLERANCE);
+                    debug_assert!((escrow.reserve
+                        - pair.carrier_paid.reserve
+                        - pair.partner_paid.reserve)
+                        .abs()
+                        < hunter::TOLERANCE);
+                    debug_assert!((escrow.energy
+                        - pair.carrier_paid.energy
+                        - pair.partner_paid.energy)
+                        .abs()
+                        < hunter::TOLERANCE);
+                    counters.cap_rejections += 1;
+                    *cap_rejections_total += 1;
+                    apex_encounters.refunds_total += 1;
+                    let _ = apex_encounters.take_gestation(*parent_id);
+                    apex_encounter_events.push(ApexEncounterEvent::Refunded {
+                        tick: now + 1,
+                        carrier: pair.carrier,
+                        partner: pair.partner,
+                        carrier_refund: pair.carrier_paid,
+                        partner_refund: pair.partner_paid,
+                        partner_refund_to,
+                    });
+                    continue;
+                }
                 let placement = {
                     let Some(parent) = organisms.get_mut(*parent_id) else {
                         continue;
@@ -2099,7 +2621,7 @@ impl World {
                         parent.energy += escrow.energy;
                         counters.cap_rejections += 1;
                         *cap_rejections_total += 1;
-                        if hunter_parent.is_some() {
+                        if hunter_parent.is_some() && paired.is_none() {
                             // A refund, not a miscarriage: every unit went back where it came
                             // from, and nothing was burned or dropped.
                             hunter_events.push(HunterEvent::Reproduction {
@@ -2219,6 +2741,13 @@ impl World {
                     // The funded descendant joins the lineage with no target, an empty gut and
                     // a fresh attack counter, and the parent starts its recovery interval.
                     hunters.insert_member(hunter::HunterMember::new(child_id, now + 1));
+                    if apex_dormancy_on
+                        && let Some(child) = organisms.get(child_id)
+                        && let Some(event) =
+                            apex_dormancy.admit(*parent_id, child_id, now + 1, child)
+                    {
+                        apex_dormancy_events.push(event);
+                    }
                     hunters.hunter_births_total += 1;
                     let interval = hunters
                         .profile
@@ -2230,29 +2759,56 @@ impl World {
                     if let Some(parent_index) = hunters.index_of(*parent_id) {
                         hunters.members[parent_index].next_reproduction_tick = now + 1 + interval;
                     }
-                    hunter_events.push(HunterEvent::Offspring {
-                        tick: now + 1,
-                        parent: *parent_id,
-                        child: child_id,
-                    });
-                    // The transaction beside the identity link: the child's actual opening
-                    // inventory is the escrow's, and the structural material gave up its
-                    // reserve energy as heat on the way.
-                    hunter_events.push(HunterEvent::Reproduction {
-                        tick: now + 1,
-                        hunter: *parent_id,
-                        record: hunter::Reproduction::Born {
-                            key: hunter::EscrowKey {
-                                parent: *parent_id,
-                                started_tick: escrow.started_tick,
-                            },
+                    if let Some(pair) = paired {
+                        // Both identities remain attached to the living child. The ordinary
+                        // life record keeps its established primary-parent shape; this event is
+                        // the reconciling two-parent identity and inventory record.
+                        apex_encounters.insert_parentage(PairedParentage {
                             child: child_id,
-                            child_structure: escrow.structure,
-                            child_reserve: escrow.reserve,
-                            child_energy: escrow.energy,
+                            carrier: pair.carrier,
+                            partner: pair.partner,
+                        });
+                        let _ = apex_encounters.take_gestation(*parent_id);
+                        apex_encounters.births_total += 1;
+                        if let Some(partner_index) = hunters.index_of(pair.partner) {
+                            hunters.members[partner_index].next_reproduction_tick =
+                                now + 1 + interval;
+                        }
+                        apex_encounter_events.push(ApexEncounterEvent::Born {
+                            tick: now + 1,
+                            carrier: pair.carrier,
+                            partner: pair.partner,
+                            child: child_id,
+                            structure: escrow.structure,
+                            reserve: escrow.reserve,
+                            energy: escrow.energy,
                             birth_heat: e_r * escrow.structure,
-                        },
-                    });
+                        });
+                    } else {
+                        hunter_events.push(HunterEvent::Offspring {
+                            tick: now + 1,
+                            parent: *parent_id,
+                            child: child_id,
+                        });
+                        // The transaction beside the identity link: the child's actual opening
+                        // inventory is the escrow's, and the structural material gave up its
+                        // reserve energy as heat on the way.
+                        hunter_events.push(HunterEvent::Reproduction {
+                            tick: now + 1,
+                            hunter: *parent_id,
+                            record: hunter::Reproduction::Born {
+                                key: hunter::EscrowKey {
+                                    parent: *parent_id,
+                                    started_tick: escrow.started_tick,
+                                },
+                                child: child_id,
+                                child_structure: escrow.structure,
+                                child_reserve: escrow.reserve,
+                                child_energy: escrow.energy,
+                                birth_heat: e_r * escrow.structure,
+                            },
+                        });
+                    }
                 }
                 // The trigger is this successful core commit, not an observer's post-step
                 // inference: the child is in the arena and the parent survived to see it.
@@ -2697,6 +3253,9 @@ impl World {
             .members
             .iter()
             .filter_map(|m| {
+                if self.state.apex_dormancy.contains(m.id) {
+                    return None;
+                }
                 let o = self.state.organisms.get(m.id)?;
                 let geometry = hunter::ContactGeometry::of(profile, o);
                 Some(HunterView {
@@ -2754,6 +3313,26 @@ impl World {
     /// [`DeathCause::Predation`].
     pub fn drain_hunter_events(&mut self) -> Vec<HunterEvent> {
         std::mem::take(&mut self.hunter_events)
+    }
+
+    /// Underground entry, emergence and exhaustion records since the last drain.
+    pub fn drain_apex_dormancy_events(&mut self) -> Vec<ApexDormancyEvent> {
+        std::mem::take(&mut self.apex_dormancy_events)
+    }
+
+    /// The persisted opt-in policy, dormant identities and accounting totals.
+    pub fn apex_dormancy(&self) -> &ApexDormancyState {
+        &self.state.apex_dormancy
+    }
+
+    /// Paid pairing, birth/refund/loss, and combat records since the last drain.
+    pub fn drain_apex_encounter_events(&mut self) -> Vec<ApexEncounterEvent> {
+        std::mem::take(&mut self.apex_encounter_events)
+    }
+
+    /// The independently opt-in adult apex encounter state.
+    pub fn apex_encounters(&self) -> &ApexEncounterState {
+        &self.state.apex_encounters
     }
 
     /// Ordinary-quiet begin/refuse/end/abort records since the last drain (`crate::quiet`).
@@ -2975,6 +3554,7 @@ impl World {
             .state
             .organisms
             .iter()
+            .filter(|(id, _)| !self.state.apex_dormancy.contains(*id))
             .map(|(id, o)| OrganismView {
                 id,
                 pos: o.pos,
@@ -3689,7 +4269,14 @@ mod tests {
         let view = world.render_view();
         assert!(view.organisms.iter().any(|o| !o.moved.is_empty()));
         // A handle the arena never issued has no segments rather than panicking.
-        assert!(world.moved_segments(OrganismId { slot: u32::MAX, generation: 1 }).is_empty());
+        assert!(
+            world
+                .moved_segments(OrganismId {
+                    slot: u32::MAX,
+                    generation: 1
+                })
+                .is_empty()
+        );
         // And reading them changes nothing at all.
         let before = crate::snapshot::state_hash(&world.state);
         for (id, _) in world.state.organisms.iter() {

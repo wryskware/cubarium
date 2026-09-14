@@ -114,6 +114,8 @@ impl From<WorldStateV9> for WorldState {
             // Off, with no retroactive pauses: a world written before the ordinary quiet
             // extension existed never ran one (`crate::quiet`).
             quiet: crate::quiet::QuietState::default(),
+            apex_dormancy: crate::dormancy::ApexDormancyState::default(),
+            apex_encounters: crate::encounter::ApexEncounterState::default(),
         }
     }
 }

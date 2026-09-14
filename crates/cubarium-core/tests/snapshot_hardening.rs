@@ -45,9 +45,12 @@ fn stepped_world(ticks: u64) -> World {
 /// hunter extension, and the oldest two zero corrections and zero care besides. The one
 /// exception stands: a schema 10 payload carrying an *active* trial is refused by name rather
 /// than reinterpreted. Everything older is still rejected outright.
+/// Version 14 appends apex dormancy and encounters; all seven predecessor schemas
+/// migrate with both policies Off, preserving the existing migration restrictions.
 #[test]
-fn the_schema_version_is_thirteen_and_its_six_predecessors_still_load() {
-    assert_eq!(SCHEMA_VERSION, 13);
+fn the_schema_version_is_fourteen_and_its_seven_predecessors_still_load() {
+    assert_eq!(SCHEMA_VERSION, 14);
+    assert_eq!(cubarium_core::SCHEMA_V13, 13);
     assert_eq!(cubarium_core::SCHEMA_V12, 12);
     assert_eq!(cubarium_core::SCHEMA_V11, 11);
     assert_eq!(cubarium_core::SCHEMA_V10, 10);

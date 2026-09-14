@@ -30,6 +30,8 @@ pub mod accounting;
 pub mod care;
 pub mod config;
 pub mod controller;
+pub mod dormancy;
+pub mod encounter;
 pub mod events;
 pub mod fields;
 pub mod genome;
@@ -52,6 +54,11 @@ pub use care::{
     CareState, CareTarget,
 };
 pub use config::WorldConfig;
+pub use dormancy::{ApexDormancyEvent, ApexDormancyPolicy, ApexDormancyState, DormantApex};
+pub use encounter::{
+    ApexContribution, ApexEncounterEvent, ApexEncounterPolicy, ApexEncounterState, CombatResponse,
+    PairedGestation, PairedParentage,
+};
 pub use events::LifeEvent;
 pub use hunter::{
     AttemptOutcome, EscrowKey, FixedHunterProfile, FundingBlocked, HunterControlReceipt,
@@ -60,9 +67,9 @@ pub use hunter::{
 };
 pub use ids::OrganismId;
 pub use snapshot::{
-    SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_VERSION, SnapshotError,
-    WorldStateV7, WorldStateV8, WorldStateV9, WorldStateV10, WorldStateV11, WorldStateV12, decode_snapshot,
-    ecology_hash, encode_snapshot,
+    SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13,
+    SCHEMA_VERSION, SnapshotError, WorldStateV7, WorldStateV8, WorldStateV9, WorldStateV10,
+    WorldStateV11, WorldStateV12, WorldStateV13, decode_snapshot, ecology_hash, encode_snapshot,
 };
 pub use telemetry::Telemetry;
 pub use view::RenderView;

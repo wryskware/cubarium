@@ -12,6 +12,14 @@ development changes should be deployed by relaunching this script.
 Old captures and duplicate build trees are disposable; dated reports below
 describe historical runs, not promises that their raw artifacts are retained.
 
+The [apex lifecycle extension](design/apex-dormancy-plan.md) adds opt-in buried
+offspring dormancy and adult mating/combat. Offspring retain their paid inventory
+underground and emerge after sustained nearby prey availability. Paired mating
+requires contributions and inheritance from both adults. Both policies default
+to Off; schema-14 saves retain their state and older saves migrate with them Off.
+New visual design is deferred. Ecological balance and recurring viable
+generations still need evidence; implementation alone does not establish them.
+
 A persistent artificial ecosystem living on the five visible surfaces of a
 64×64 LED cube. Small organisms should acquire recognizable habits and shapes,
 alter their surroundings, leave descendants, and sometimes disappear. The world

@@ -280,6 +280,10 @@ impl ReproductionAudit {
     /// Ticks must arrive strictly consecutively. Nothing is committed until the whole tick
     /// validates, so a rejected tick leaves the audit exactly as it was.
     pub fn observe(&mut self, events: &[HunterEvent], life: &[LifeEvent], state: &WorldState) -> Result<()> {
+        ensure!(
+            !state.apex_encounters.active(),
+            "the legacy hunter reproduction audit is one-parent only; paired apex encounters require the ApexEncounterEvent stream"
+        );
         // Checked, so a world at the end of the `u64` range is an error and not a panic.
         let expected = self
             .last_tick
