@@ -1376,17 +1376,41 @@ fn a_grasp_past_the_open_rim_never_captures_and_is_never_published() {
         "a reflected grasp centre must not be published"
     );
 
+    // The window in which the defect could occur is exactly the window in which the grasp
+    // still points past the rim, so the loop runs for precisely that long.
+    //
+    // R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`) made turning physical:
+    // this member is 14.8 px from root to claw tip, so it comes round at about 15 degrees a
+    // second instead of instantly, and after a couple of hundred ticks it is facing back
+    // across its own face. A capture *then* is an ordinary on-chart grasp — the view publishes
+    // a real `capture_center` for it — and is not the reflected reach this regression guards.
+    // The previous form of this test ran 400 free ticks and asserted no capture at all, which
+    // held only because the pre-R0a trajectory happened never to bring the two together.
+    let mut refused_ticks = 0u32;
     for _ in 0..400 {
+        if world
+            .hunter_view()
+            .first()
+            .and_then(|v| v.capture_center)
+            .is_some()
+        {
+            break;
+        }
+        refused_ticks += 1;
         world.step();
+        assert_eq!(
+            world.hunters().captures_total,
+            0,
+            "a reflected reach captured something"
+        );
+        assert!(
+            world.state.organisms.get(prey).is_some(),
+            "the prey behind the rim was eaten"
+        );
     }
-    assert_eq!(
-        world.hunters().captures_total,
-        0,
-        "a reflected reach captured something"
-    );
     assert!(
-        world.state.organisms.get(prey).is_some(),
-        "the prey behind the rim was eaten"
+        refused_ticks > 0,
+        "the fixture never actually held a reflected reach"
     );
     world
         .check_invariants()
@@ -2235,16 +2259,21 @@ fn observations_do_not_move_a_profile_three_hunter_world() {
         "scenario B must actually give birth"
     );
 
-    // Recorded from `9eacb7e`, before any reproduction-evidence code existed, when the live
-    // `state_hash` and the schema 12 payload were the same bytes. Schema 13 appends the inert
-    // ordinary-quiet extension, so the recorded numbers are read off the schema 12 projection —
-    // which is every field they ever described (`snapshot::v12`).
+    // Re-recorded at R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`). The
+    // numbers these replace were recorded from `9eacb7e`, before any reproduction-evidence code
+    // existed; every change between then and R0a left them standing, which is the point of the
+    // test. R0a does not: a lanternjaw reaches 14.8 px from root to claw tip, and rotating that
+    // body is now paid physical work sharing one budget with translation, so both of these
+    // worlds legitimately move. The claim — that *observing* a world never moves it — is
+    // unchanged, and is now anchored to this build's own numbers, still read off the schema 12
+    // projection (`snapshot::v12`).
     assert_eq!(
-        hunt_hash, 15_771_965_630_209_811_797,
+        hunt_hash, 17_178_231_192_231_228_771,
         "a hunt-and-digest world moved"
     );
     assert_eq!(
-        birth_hash, 3_410_443_867_288_973_882,
+        birth_hash, 14_113_552_108_754_948_888,
         "a funded-birth world moved"
     );
 }
+

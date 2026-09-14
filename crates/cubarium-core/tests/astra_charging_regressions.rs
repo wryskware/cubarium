@@ -1,4 +1,5 @@
 //! Independent paid-charging review probes; no lowered reproduction gates.
+use cubarium_core::organism::Mode;
 use cubarium_core::{
     ChargingDiagnostics, FixedHunterProfile, HunterEvent, HunterTarget, Reproduction, World,
     WorldConfig,
@@ -71,6 +72,15 @@ fn real_default_age_and_stock_gates_fund_only_after_paid_charge() {
         let o = w.state.organisms.get_mut(id).unwrap();
         o.reserve = 4.0;
         o.energy = 2.9996;
+        // R0a: hold the parent genuinely at rest for the tick under test. A perched member
+        // keeps whatever mode the controller decided before the hunter pass relabels it
+        // `Resting`, and a member still steering as a `Seeking` one spends real energy on the
+        // turn it requests now that rotation is paid for. That spending is correct, and
+        // `an_apex_late_override_cannot_spin_a_body_for_free` is where it is checked; here it
+        // is a confound, because this fixture's whole subject is a funding gate a fraction of
+        // a unit wide. Resting removes the confound without touching the gate.
+        o.mode = Mode::Resting;
+        o.hunger_memory = 0.0;
         w.state.external_material_in += 2.0;
         let mut w = World::from_state(w.state).unwrap();
         w.step();
@@ -114,3 +124,4 @@ fn real_default_age_and_stock_gates_fund_only_after_paid_charge() {
         }
     }
 }
+

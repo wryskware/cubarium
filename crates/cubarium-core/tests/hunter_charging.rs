@@ -525,6 +525,24 @@ fn a_version_three_member_reproduces_the_pre_change_binarys_next_600_ticks() {
     );
     assert!(o.reserve > 0.0);
 
+
+    // R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`) made body rotation a
+    // physical act paid out of the same budget as translation, so this build's tick is
+    // deliberately not the pre-change binary's. The pre-change payload is still decoded and
+    // still proved different; the continuation is re-anchored to this build's own recording
+    // (`tests/r0a_fixtures.rs`).
+    let recorded =
+        std::fs::read(fixture("hunter-v3-charge-active-plus600-r0a.cubw")).expect("the fixture");
+    let (_, expected) = decode_snapshot(&recorded).expect("this build's recording loads");
+    let as_v12 = |s: &cubarium_core::WorldState| {
+        postcard::to_allocvec(
+            &cubarium_core::snapshot::v12::project(s).expect("an Off world projects"),
+        )
+        .expect("encodable")
+    };
+    let expected_payload = as_v12(&expected);
+    assert_ne!(expected_payload, payload(&plus600), "R0a must actually move this world");
+
     let mut world = World::from_state(state).expect("valid");
     world.check_invariants().expect("invariants hold on the pre-change world");
     for _ in 0..600 {
@@ -532,16 +550,11 @@ fn a_version_three_member_reproduces_the_pre_change_binarys_next_600_ticks() {
     }
     assert_eq!(world.tick(), 6170);
     assert_eq!(
-        // The fixture is a schema 12 payload, so the comparison is against this world's schema
-        // 12 projection. Schema 13 appends the inert ordinary-quiet extension beside it; the
-        // claim — that 600 ticks reproduce the pre-change binary's bytes — is unchanged
-        // (`snapshot::v12`).
-        postcard::to_allocvec(
-            &cubarium_core::snapshot::v12::project(&world.state).expect("an Off world projects")
-        )
-        .expect("encodable"),
-        payload(&plus600),
-        "600 ticks of the policy build diverged from the pre-change binary"
+        // The comparison is against the schema 12 projection, which is the shape both the
+        // pre-change fixture and this build's recording share (`snapshot::v12`).
+        as_v12(&world.state),
+        expected_payload,
+        "600 ticks of the policy build diverged from this build's recorded continuation"
     );
     // The policy build made no extra transaction at all in a version 3 world.
     assert_eq!(world.charging_diagnostics(), ChargingDiagnostics::default());

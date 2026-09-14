@@ -124,10 +124,21 @@ fn zero_corrections_reproduce_the_pre_correction_binarys_next_600_ticks() {
     let start = std::fs::read(fixture("live-v8-172800.cubw")).expect("fixture");
     let plus600 = std::fs::read(fixture("live-v8-172800-plus600.cubw")).expect("fixture");
     let (_, state) = decode_snapshot(&start).expect("schema 8 loads");
-    let (meta, expected) = decode_snapshot(&plus600).expect("schema 8 loads");
+    let (meta, pre_change) = decode_snapshot(&plus600).expect("schema 8 loads");
     assert_eq!(meta.schema, SCHEMA_V8);
-    assert_eq!(expected.tick, 173_400);
-    assert_eq!(expected.care.admitted_seq, 5);
+    assert_eq!(pre_change.tick, 173_400);
+    assert_eq!(pre_change.care.admitted_seq, 5);
+    // R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`) made body rotation a
+    // physical act paid out of the same budget as translation, so this build's tick is
+    // deliberately not the pre-change binary's. The pre-change payload is still decoded and
+    // still proved different; the continuation is re-anchored to this build's own recording
+    // (`tests/r0a_fixtures.rs`).
+    let recorded = std::fs::read(fixture("live-v8-172800-plus600-r0a.cubw")).expect("fixture");
+    let (_, expected) = decode_snapshot(&recorded).expect("this build's recording loads");
+    let expected_payload =
+        postcard::to_allocvec(&v8::project(&expected).expect("standard care projects"))
+            .expect("encodable");
+    assert_ne!(expected_payload, payload(&plus600), "R0a must actually move this world");
 
     let mut world = World::from_state(state).expect("valid");
     let opening = world.energy_ledgers();
@@ -140,8 +151,8 @@ fn zero_corrections_reproduce_the_pre_correction_binarys_next_600_ticks() {
         .expect("encodable");
     assert_eq!(
         projected,
-        payload(&plus600),
-        "600 ticks of the corrected build diverged from the pre-correction binary"
+        expected_payload,
+        "600 ticks of the corrected build diverged from this build's recorded continuation"
     );
     // Which covers every one of them, but name the comparisons the handoff asks for so a
     // failure says which part of the world moved.
@@ -161,11 +172,21 @@ fn zero_corrections_reproduce_the_pre_correction_binarys_next_600_ticks() {
     assert_eq!(sample.ecology_hash, ecology_hash(&expected));
 
     // The corrections are the only thing that moved, and they did move: 600 ticks of heat
-    // payments are not free of rounding.
+    // payments are not free of rounding. The schema 8 projection above carries none of them and
+    // still matched, which is the claim — corrections live in the full state, not in the
+    // payload a pre-correction build could read.
     let closing = world.energy_ledgers();
-    assert_eq!(expected.energy_correction, EnergyCorrection::default(), "the fixture has none");
+    assert_eq!(
+        pre_change.energy_correction,
+        EnergyCorrection::default(),
+        "the schema 8 fixture has none"
+    );
     assert_ne!(world.state.energy_correction, EnergyCorrection::default(), "nothing was compensated");
-    assert_ne!(state_hash(&world.state), state_hash(&expected), "corrections are in the full hash");
+    assert_ne!(
+        state_hash(&world.state),
+        fnv1a(&projected),
+        "corrections are in the full hash and not in the schema 8 payload"
+    );
     println!(
         "600 ticks from tick 172800: light correction {:e}, heat correction {:e}, \
          corrected net {:.17e} vs raw net {:.17e}",

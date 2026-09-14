@@ -37,6 +37,12 @@ pub struct FieldLedger {
     pub light_in: f64,
     /// Energy dissipated by mortality clamping and decomposition.
     pub heat_out: f64,
+    /// **Gross** producer material grown this tick, summed over cells, before any mortality,
+    /// ripening or grazing removes it. Transient: returned to the step, never persisted and
+    /// never hashed. It exists because production is otherwise only visible as a net change,
+    /// and a net change cannot separate a patch that is not growing from one that is growing
+    /// and being eaten at the same rate (`crate::world::IntakeDiagnostics`).
+    pub producer_growth: f64,
 }
 
 impl Fields {
@@ -158,6 +164,7 @@ impl Fields {
             ledger.heat_out += de_removed;
 
             ledger.light_in += pc.energy_density * grow;
+            ledger.producer_growth += grow;
             self.n[i] = n0 - grow + decay;
             self.p[i] = p0 + grow - die - ripen;
             self.d[i] = d_after_death - decay;

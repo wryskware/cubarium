@@ -26,6 +26,7 @@ use crate::encounter::{
 };
 use crate::fields::Fields;
 use crate::genome::Phenotype;
+use crate::motor::{self, MotorBill, MotorLimits, MotorRequest};
 use crate::genome::{Genome, MAX_FORMS, decode};
 use crate::habitat::{Habitat, Weather};
 use crate::hunter::{
@@ -413,6 +414,41 @@ pub struct TickCounters {
     pub deaths_predation: u32,
 }
 
+/// Read-only stock/flow diagnostics for the R0a food measurement
+/// (`design/handoffs/r0a-movement-foundation-2026-09-14.md`, part B): what the world's
+/// producers actually made and what its mouths actually took, as opposed to what a reserve
+/// delta or a `Feeding` label suggests.
+///
+/// **Scope.** Totals over every cell and every organism, in material units, accumulated inside
+/// the passes that already compute them. Intake is the material that actually left a field,
+/// after the per-cell proportional share and after every clamp — never a request, never an
+/// assimilated fraction, never a reserve difference.
+///
+/// **Time.** From the moment this `World` value was constructed to now, exactly as
+/// [`ChargingDiagnostics`] documents. Transient: never persisted, never hashed, never read
+/// back by the tick, and zero again after a reload.
+///
+/// **Cost.** Seven running scalars written inside branches the step already takes. No per-tick
+/// history, no RNG, nothing read or written that the step did not already touch, so recording
+/// this cannot move the simulation.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct IntakeDiagnostics {
+    /// Gross producer material grown, before mortality, ripening or grazing.
+    pub producer_growth: f64,
+    /// Material that actually left `P`, `F` and `D` through a mouth.
+    pub producer_eaten: f64,
+    pub fruit_eaten: f64,
+    pub detritus_eaten: f64,
+    /// What the mouths asked their cells for, before the proportional share. Larger than the
+    /// three totals above exactly when a cell could not serve everyone standing in it, which
+    /// is what makes competition visible rather than inferred.
+    pub requested: f64,
+    /// Organism-ticks that asked for food, and the subset that got none of what they asked
+    /// for because their reserve was already full.
+    pub request_ticks: u64,
+    pub reserve_saturated_ticks: u64,
+}
+
 /// Read-only diagnostics for the paid-charging experiment: what the member oxidation policy
 /// did that the world's own configured threshold would **not** have done
 /// (`design/7_Research/astra-hunter-paid-charging-proposal-2026-09-13.md`).
@@ -490,6 +526,9 @@ pub struct World {
     /// [`ChargingDiagnostics`] documents: never checkpointed, never hashed, never read by the
     /// tick.
     charging: ChargingDiagnostics,
+    /// Bounded read-only stock/flow totals; transient in the sense [`IntakeDiagnostics`]
+    /// documents.
+    intake: IntakeDiagnostics,
     initial_material: f64,
 }
 
@@ -839,6 +878,7 @@ impl World {
             apex_encounter_events: Vec::new(),
             counters: TickCounters::default(),
             charging: ChargingDiagnostics::default(),
+            intake: IntakeDiagnostics::default(),
             initial_material,
         };
         // Make the derived light/moisture readable before the first tick advances weather.
@@ -903,6 +943,7 @@ impl World {
                 apex_encounter_events,
                 counters,
                 charging,
+                intake,
                 initial_material: _,
             } = &mut *self;
             let WorldState {
@@ -1021,6 +1062,7 @@ impl World {
 
             // 3. Field reactions (growth, mortality, decomposition, N diffusion).
             let ledger = fields.react(cfg, light, moisture, graph, scratch);
+            intake.producer_growth += ledger.producer_growth;
             counters.light_in += ledger.light_in;
             accounting::accumulate(light_in_total, light_in_correction, ledger.light_in);
             heat(ledger.heat_out);
@@ -1361,6 +1403,9 @@ impl World {
                             .and_then(|list| list.iter().find(|n| n.id == attacker))
                             && let Some(d) = decisions.iter_mut().find(|(id, _)| *id == defender)
                         {
+                            // A *request* to face away from the attacker. It is resolved,
+                            // paid for and bounded by the same envelope as every other
+                            // motion in section 6; a retreat is not a free instant turn.
                             d.1.heading = (organisms
                                 .get(defender)
                                 .expect("defender")
@@ -1369,6 +1414,8 @@ impl World {
                                 - n.local)
                                 .normalized()
                                 .unwrap_or(d.1.heading);
+                            d.1.turn_rate_max =
+                                d.1.turn_rate_max.max(profile.escape_turn_rate_deg.to_radians());
                             boosts.push((
                                 defender,
                                 profile.escape_speed_multiple
@@ -1604,6 +1651,11 @@ impl World {
                         });
                         let hold = inside || m.phase == HunterPhase::Windup;
                         if let Some(d) = decisions.iter_mut().find(|(id, _)| *id == m.id) {
+                            // The intent to face the target, **not** the heading it ends the
+                            // tick with. This late override used to write the heading
+                            // directly, so a member could spin to any bearing in one tick
+                            // however large its body was; section 6 now turns it by what its
+                            // own geometry and energy allow.
                             d.1.heading = toward;
                             d.1.effort = if hold {
                                 f64::from(o.phenotype.drives.rest_effort)
@@ -1669,7 +1721,11 @@ impl World {
                     let Some(d) = decisions.iter_mut().find(|(id, _)| *id == prey_id) else {
                         continue;
                     };
+                    // Away from the sensed pursuer, at the profile's escape angular ceiling
+                    // rather than the prey's ordinary one. Still only a request: section 6
+                    // decides how much of it the body and its energy actually deliver.
                     d.1.heading = turn_toward(d.1.heading, prey.pos.chart() - n.local, escape_turn);
+                    d.1.turn_rate_max = d.1.turn_rate_max.max(escape_turn / dt);
                     boosts.push((
                         prey_id,
                         profile.escape_speed_multiple * prey.phenotype.speed_max,
@@ -1677,12 +1733,35 @@ impl World {
                 }
             }
 
-            // 6. Move, transport tangents, and pay for motion, sensing and maintenance.
+            // 6. Resolve every motor request, move, transport tangents, and pay for the
+            //    motion, the sensing and the maintenance.
+            //
+            //    This is the single boundary of `crate::motor` (milestone R0a): whatever the
+            //    controller, apex pursuit, escape or an encounter retreat asked for above is
+            //    an *intent*, and nothing downstream of here may assign a heading. The body's
+            //    own radius, its angular ceiling and the movement energy left after upkeep
+            //    decide how much of the intent is delivered, under `|v| + r · |ω| ≤ u`.
+            //
+            //    Payment order matches the physiology the world already used: unavoidable
+            //    upkeep (`maintenance · S + sense_cost · r_sense`) is reserved first, and only
+            //    the remainder buys motion. Translation and turning are charged exactly once,
+            //    through the one `|v| + r · |ω|` term the envelope bounds, so a body that only
+            //    translates pays the pre-R0a bill to the bit — and a body with no movement
+            //    energy left now holds still instead of moving for free.
             moved.resize_with(organisms.slot_count(), Vec::new);
             for segments in moved.iter_mut() {
                 segments.clear();
             }
             for (id, d) in &decisions {
+                // The apex contact geometry, read before the mutable borrow: a member's claws
+                // reach well past its lobes and are the part of it that actually sweeps.
+                let apex_geometry = hunters.profile.as_ref().filter(|_| hunters.contains(*id)).and_then(
+                    |profile| {
+                        organisms
+                            .get(*id)
+                            .map(|o| hunter::ContactGeometry::of(profile, o))
+                    },
+                );
                 let Some(o) = organisms.get_mut(*id) else {
                     continue;
                 };
@@ -1693,33 +1772,41 @@ impl World {
                 // `1 + w · (1 − swim)` of the cell the organism stands in before it moves; a
                 // swimmer ignores the pool.
                 let wading = 1.0 + fields.w[cell_of(&o.pos).index()] * (1.0 - o.phenotype.swim);
-                let mut speed = d.effort * o.phenotype.speed_max / wading;
+                let mut speed_cap = d.effort * o.phenotype.speed_max / wading;
                 // A hunter's burst and a threatened prey's dash are the only boosts, and both
-                // are limited by the movement energy the creature has *before* it moves. The
-                // list is empty in every world without hunters, so ordinary movement keeps its
-                // arithmetic exactly.
+                // raise the translation ceiling only; the envelope and the energy still bind.
+                // The list is empty in every world without hunters.
                 if let Some((_, wanted)) = boosts.iter().find(|(b, _)| *b == *id) {
-                    let bill = hunter::MoveBill::of(o, cfg);
-                    speed = bill.affordable_speed(o.energy, dt, speed, wanted / wading);
+                    speed_cap = speed_cap.max(wanted / wading);
                 }
-                travel_into(o.pos, d.heading * (speed * dt), travel_buf);
+                let bill = MotorBill::of(o, cfg);
+                let limits = MotorLimits {
+                    radius_px: motor::turn_radius_px(o, apex_geometry.as_ref()),
+                    turn_rate_max: d.turn_rate_max,
+                    speed_cap,
+                    motor_budget: bill.affordable_motor(o.energy, dt),
+                    dt,
+                };
+                let request = MotorRequest { heading: d.heading, speed: speed_cap };
+                let motion = motor::resolve(o.heading, &request, &limits);
+                travel_into(o.pos, motion.heading * (motion.speed * dt), travel_buf);
                 o.pos = travel_buf.end;
+                // Transport is a change of chart, applied to the *resolved* heading: it costs
+                // nothing and consumes no turn budget.
                 o.heading = travel_buf
                     .map
-                    .apply(d.heading)
+                    .apply(motion.heading)
                     .normalized()
-                    .unwrap_or(d.heading);
+                    .unwrap_or(motion.heading);
                 o.ou = travel_buf.map.apply(d.ou);
                 counters.travel_ties += travel_buf.ties;
                 counters.travel_fallbacks += u32::from(travel_buf.fallback);
                 if let Some(segments) = moved.get_mut(id.slot as usize) {
                     segments.extend_from_slice(&travel_buf.segments);
                 }
-                // `paid = min(cost · dt, E)`: an organism that cannot pay simply runs out.
-                let cost = (o.phenotype.maintenance * o.structure
-                    + org_cfg.move_cost * o.structure * speed
-                    + org_cfg.sense_cost * o.phenotype.sense_radius)
-                    * dt;
+                // The bill is now affordable by construction; `min` stays as a guard against
+                // floating-point overshoot, not as the mechanism that lets a body move broke.
+                let cost = bill.total_cost(motion.swept, dt);
                 let paid = cost.min(o.energy).max(0.0);
                 o.energy -= paid;
                 heat(paid);
@@ -1940,9 +2027,15 @@ impl World {
                     headroom - f - g,
                     edible_detritus(fields.d[cell], fields.de[cell], e_r),
                 );
+                intake.request_ticks += 1;
                 if f <= 0.0 && g <= 0.0 && s <= 0.0 {
+                    // Asked, got nothing. A full reserve is the one refusal the organism is
+                    // carrying rather than the cell: name it, so an empty patch and a full
+                    // animal are not reported as the same outcome.
+                    intake.reserve_saturated_ticks += u64::from(headroom <= 0.0);
                     continue;
                 }
+                intake.requested += f + g + s;
                 fruit[cell] += f;
                 graze[cell] += g;
                 scavenge[cell] += s;
@@ -1979,6 +2072,7 @@ impl World {
                     // carries `e_f` per unit, richer than leaf.
                     let q = (f * fruit[cell]).clamp(0.0, fields.f[cell]);
                     if q > 0.0 {
+                        intake.fruit_eaten += q;
                         let to_reserve = eta_m * q;
                         fields.f[cell] -= q;
                         fields.d[cell] += q - to_reserve;
@@ -1995,6 +2089,7 @@ impl World {
                     // Grazing: P -> reserve (η_m) and P -> D (the rest, energy-free).
                     let q = (g * graze[cell]).clamp(0.0, fields.p[cell]);
                     if q > 0.0 {
+                        intake.producer_eaten += q;
                         let to_reserve = eta_m * q;
                         fields.p[cell] -= q;
                         fields.d[cell] += q - to_reserve;
@@ -2021,6 +2116,11 @@ impl World {
                     let q = (s * scavenge[cell]).clamp(0.0, fields.d[cell]);
                     if q > 0.0 && eta > 0.0 {
                         let to_reserve = eta * q;
+                        // Scavenging removes only what it assimilates: the material that
+                        // actually left `D` is `to_reserve`, not the bite `q` that was
+                        // requested against it. Reporting `q` would overstate the flow out of
+                        // a poor-quality patch.
+                        intake.detritus_eaten += to_reserve;
                         fields.d[cell] -= to_reserve;
                         o.reserve += to_reserve;
                         let carried = (rho * q).min(fields.de[cell]);
@@ -2991,6 +3091,13 @@ impl World {
     /// see [`ChargingDiagnostics`] for the exact transaction scope and time window.
     pub fn charging_diagnostics(&self) -> ChargingDiagnostics {
         self.charging
+    }
+
+    /// What this world's producers actually made and its mouths actually took, since this
+    /// `World` value was built. Read-only, transient and process-scoped; see
+    /// [`IntakeDiagnostics`] for the exact scope and time window.
+    pub fn intake_diagnostics(&self) -> IntakeDiagnostics {
+        self.intake
     }
 
     /// The oxidation activation threshold, as a fraction of `E_max`, that an **authoritative

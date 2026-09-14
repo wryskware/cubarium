@@ -109,18 +109,34 @@ fn the_live_schema_seven_snapshot_migrates_without_touching_its_ecology() {
     assert!(world.mass_residual().abs() < 1e-9, "residual {}", world.mass_residual());
 }
 
-/// The cross-version proof. Both fixtures were produced by the pre-change schema 7 release
-/// binary; stepping the migrated world 600 ticks with zero care must land on the second
-/// fixture's payload exactly. If this fails, the new code changed an operation somewhere in
-/// the tick and nothing else in this file means anything.
+/// The cross-version proof. The start fixture was produced by the pre-change schema 7 release
+/// binary; stepping the migrated world 600 ticks with zero care must land on the recorded
+/// continuation exactly. If this fails, the new code changed an operation somewhere in the
+/// tick and nothing else in this file means anything.
+///
+/// The oracle moved once, at R0a: the pre-change binary's own `-plus600` payload is still read
+/// and still proved different, but paid rotation means this build cannot reproduce it, so the
+/// continuation is compared against this build's recording instead.
 #[test]
 fn zero_care_reproduces_the_pre_change_binarys_next_600_ticks() {
     let start = std::fs::read(fixture("live-v7-55200.cubw")).expect("fixture");
     let plus600 = std::fs::read(fixture("live-v7-55200-plus600.cubw")).expect("fixture");
     let (_, state) = decode_snapshot(&start).expect("schema 7 loads");
-    let (meta, expected) = decode_snapshot(&plus600).expect("schema 7 loads");
+    let (meta, pre_change) = decode_snapshot(&plus600).expect("schema 7 loads");
     assert_eq!(meta.schema, SCHEMA_V7);
-    assert_eq!(expected.tick, 55_800);
+    assert_eq!(pre_change.tick, 55_800);
+    // R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`) made body rotation a
+    // physical act, paid for out of the same budget as translation, so this build's tick is
+    // deliberately not the pre-change binary's: a body wider than `motor::REFERENCE_RADIUS_PX`
+    // now trades speed against turning instead of pivoting for free. The pre-change payload is
+    // still read and still hashed above, because the migration claim it anchors is unchanged;
+    // what is re-anchored is the continuation, to this build's own recording
+    // (`tests/r0a_fixtures.rs`, which also proves the recording is current).
+    let recorded = std::fs::read(fixture("live-v7-55200-plus600-r0a.cubw")).expect("fixture");
+    let (_, expected) = decode_snapshot(&recorded).expect("this build's recording loads");
+    let expected_payload =
+        postcard::to_allocvec(&v7::project(&expected)).expect("encodable");
+    assert_ne!(expected_payload, payload(&plus600), "R0a must actually move this world");
 
     let mut world = World::from_state(state).expect("valid");
     for _ in 0..600 {
@@ -132,12 +148,12 @@ fn zero_care_reproduces_the_pre_change_binarys_next_600_ticks() {
     let projected = postcard::to_allocvec(&v7::project(&world.state)).expect("encodable");
     assert_eq!(
         projected,
-        payload(&plus600),
-        "600 ticks of the new build diverged from the pre-change binary"
+        expected_payload,
+        "600 ticks of the new build diverged from this build's recorded continuation"
     );
-    assert_eq!(ecology_hash(&world.state), fnv1a(payload(&plus600)));
+    assert_eq!(ecology_hash(&world.state), fnv1a(&expected_payload));
     let sample = world.telemetry();
-    assert_eq!(sample.ecology_hash, fnv1a(payload(&plus600)));
+    assert_eq!(sample.ecology_hash, fnv1a(&expected_payload));
     assert_eq!(sample.care_admitted_seq, 0);
 }
 

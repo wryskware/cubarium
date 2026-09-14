@@ -86,9 +86,22 @@ fn an_empty_extension_reproduces_the_pre_hunter_binarys_next_600_ticks() {
     let start = std::fs::read(fixture("pre-hunter-v9-173400.cubw")).expect("fixture");
     let plus600 = std::fs::read(fixture("pre-hunter-v9-173400-plus600.cubw")).expect("fixture");
     let (_, state) = decode_snapshot(&start).expect("schema 9 loads");
-    let (meta, expected) = decode_snapshot(&plus600).expect("schema 9 loads");
+    let (meta, pre_change) = decode_snapshot(&plus600).expect("schema 9 loads");
     assert_eq!(meta.schema, SCHEMA_V9);
-    assert_eq!(expected.tick, 174_000);
+    assert_eq!(pre_change.tick, 174_000);
+    assert_eq!(format!("{:x}", fnv1a(payload(&plus600))), "854dce1766d905d3", "the provenance hash");
+    // R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`) made body rotation a
+    // physical act paid out of the same budget as translation, so this build's tick is
+    // deliberately not the pre-change binary's. The pre-change payload is still decoded and
+    // still proved different; the continuation is re-anchored to this build's own recording
+    // (`tests/r0a_fixtures.rs`).
+    let recorded =
+        std::fs::read(fixture("pre-hunter-v9-173400-plus600-r0a.cubw")).expect("fixture");
+    let (_, expected) = decode_snapshot(&recorded).expect("this build's recording loads");
+    let expected_payload =
+        postcard::to_allocvec(&v9::project(&expected).expect("standard care projects"))
+            .expect("encodable");
+    assert_ne!(expected_payload, payload(&plus600), "R0a must actually move this world");
 
     let mut world = World::from_state(state).expect("valid");
     for _ in 0..600 {
@@ -100,10 +113,9 @@ fn an_empty_extension_reproduces_the_pre_hunter_binarys_next_600_ticks() {
         .expect("encodable");
     assert_eq!(
         projected,
-        payload(&plus600),
-        "600 zero-hunter ticks diverged from the pre-hunter binary"
+        expected_payload,
+        "600 zero-hunter ticks diverged from this build's recorded continuation"
     );
-    assert_eq!(format!("{:x}", fnv1a(payload(&plus600))), "854dce1766d905d3", "the provenance hash");
     // Named individually so a failure says what moved.
     assert_eq!(world.state.fields, expected.fields, "field stocks");
     assert_eq!(world.state.organisms, expected.organisms, "organisms");
@@ -119,8 +131,8 @@ fn an_empty_extension_reproduces_the_pre_hunter_binarys_next_600_ticks() {
     assert_eq!(world.state.deaths_total, expected.deaths_total);
     assert_eq!(world.state.hunters, HunterState::default(), "no hunter appeared");
     assert_eq!(ecology_hash(&world.state), ecology_hash(&expected), "legacy ecology projection");
-    // And the whole schema 10 state hashes as the schema 9 payload plus the empty extension.
-    assert_ne!(state_hash(&world.state), fnv1a(payload(&plus600)));
+    // And the whole state hashes as more than the schema 9 payload: the extension is in it.
+    assert_ne!(state_hash(&world.state), fnv1a(&expected_payload));
 }
 
 /// The schema 8 and schema 7 mirrors still project through the two appended fields.

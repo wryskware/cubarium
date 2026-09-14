@@ -232,14 +232,20 @@ fn depletion_aborts_before_the_same_tick_controller_and_cannot_be_rearmed_by_dra
 
 #[test]
 fn genuine_schema12_off_plain_and_care_continue_as_recorded() {
+    // R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`) made body rotation a
+    // physical act paid out of the same budget as translation, so this build's tick is
+    // deliberately not the pre-quiet binary's and its `-plus600` payload is unreachable. The
+    // migration claim this test makes is untouched — a genuine schema 12 payload decodes, runs
+    // Off, publishes no record and re-projects to schema 12 — so only the continuation oracle
+    // moves, to this build's own recording (`tests/r0a_fixtures.rs`).
     for (start, end) in [
         (
             &include_bytes!("fixtures/quiet-v12-plain-3000.cubw")[..],
-            &include_bytes!("fixtures/quiet-v12-plain-3000-plus600.cubw")[..],
+            &include_bytes!("fixtures/quiet-v12-plain-3000-plus600-r0a.cubw")[..],
         ),
         (
             &include_bytes!("fixtures/quiet-v12-care-3000.cubw")[..],
-            &include_bytes!("fixtures/quiet-v12-care-3000-plus600.cubw")[..],
+            &include_bytes!("fixtures/quiet-v12-care-3000-plus600-r0a.cubw")[..],
         ),
     ] {
         let (m, s) = decode_snapshot(start).unwrap();

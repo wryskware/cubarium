@@ -45,8 +45,19 @@ pub struct Decision {
     /// controller would otherwise have chosen — the value the pause carries forward so release
     /// resumes ordinary hysteresis instead of latching in the rest band (`crate::quiet`).
     pub underlying_mode: Mode,
-    /// New unit heading after the bounded turn.
+    /// The unit heading this tick **requests**, in the organism's own pre-transport chart.
+    ///
+    /// Since R0a this is an intent, not a result: `crate::motor::resolve` turns the body
+    /// toward it by as much as the shared physical envelope and the movement energy allow,
+    /// and `crate::world` stores *that*. The controller still rate-limits its own request by
+    /// the mode's turn gate, which is a behavioural choice; the envelope is the physical one.
     pub heading: Vec2,
+    /// The angular ceiling this tick, rad/s, handed to the motor resolver.
+    ///
+    /// Ordinarily the genome's `turn_rate_max_deg`. An override may raise it — a prey that
+    /// actually senses its pursuer turns at the hunter profile's escape rate — but no
+    /// override may bypass the resolver, so this is a ceiling, never a granted turn.
+    pub turn_rate_max: f64,
     /// Updated OU vector.
     pub ou: Vec2,
     /// Movement effort in `[0, 1]`.
@@ -239,6 +250,7 @@ pub fn decide_quiet(
         mode,
         underlying_mode,
         heading,
+        turn_rate_max: f64::from(d.turn_rate_max_deg).to_radians(),
         ou,
         effort,
         fruit_effort,

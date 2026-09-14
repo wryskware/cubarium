@@ -18,6 +18,7 @@
 //! - [`fields`]: `N`, `P`, `D`, `De` and their reactions.
 //! - [`organism`]: organism state, modes, escrow.
 //! - [`controller`]: observation → decision (pure).
+//! - [`motor`]: the shared motor boundary — request in, resolved and paid motion out.
 //! - [`events`]: transient birth/death records for the observer.
 //! - [`pairs`]: chord-filtered all-pairs neighbor lists.
 //! - [`world`]: the tick, invariants, births/deaths, telemetry.
@@ -38,6 +39,7 @@ pub mod genome;
 pub mod habitat;
 pub mod hunter;
 pub mod ids;
+pub mod motor;
 pub mod organism;
 pub mod pairs;
 pub mod quiet;
@@ -66,6 +68,7 @@ pub use hunter::{
     HunterTarget, HunterView, OxidationPolicy, Reproduction,
 };
 pub use ids::OrganismId;
+pub use motor::{MotorBill, MotorLimits, MotorRequest, ResolvedMotion};
 pub use snapshot::{
     SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13,
     SCHEMA_VERSION, SnapshotError, WorldStateV7, WorldStateV8, WorldStateV9, WorldStateV10,
@@ -73,7 +76,7 @@ pub use snapshot::{
 };
 pub use telemetry::Telemetry;
 pub use view::RenderView;
-pub use world::{ChargingDiagnostics, World, WorldState};
+pub use world::{ChargingDiagnostics, IntakeDiagnostics, World, WorldState};
 
 /// Simulation ticks per second.
 pub const TICK_HZ: u32 = 20;

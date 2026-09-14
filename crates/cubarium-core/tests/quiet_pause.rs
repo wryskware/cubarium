@@ -182,15 +182,20 @@ fn the_paid_child_accounting_is_unchanged() {
     let c = world.state.organisms.get(child).expect("the child is alive");
     assert_eq!(c.born_tick, b);
     assert_eq!(c.parent, Some(parent));
-    assert_eq!(c.structure, cfg.child_structure_fraction * c.phenotype.structure_adult);
-    assert_eq!(c.reserve, cfg.child_reserve_fraction * c.phenotype.reserve_max);
-    assert_eq!(c.energy, cfg.child_energy_fraction * c.phenotype.energy_max);
+    // The opening stores are the escrow's, and the escrow was sized from the **parent's**
+    // phenotype before the child's genome was mutated (`world.rs`, the budding branch). Read
+    // against the child's own decoded phenotype these three equalities hold only when the size
+    // locus happened not to mutate, which is a property of whichever birth the search landed
+    // on, not of the accounting. Stating them against the parent says what is actually meant.
+    let p = world.state.organisms.get(parent).expect("the parent survived");
+    assert_eq!(c.structure, cfg.child_structure_fraction * p.phenotype.structure_adult);
+    assert_eq!(c.reserve, cfg.child_reserve_fraction * p.phenotype.reserve_max);
+    assert_eq!(c.energy, cfg.child_energy_fraction * p.phenotype.energy_max);
     assert_eq!(c.mode, Mode::Resting, "a newborn's own one-tick initialization, unchanged");
     // And the newborn is not itself given a pause.
     assert!(world.quiet().find(child).is_none(), "the newborn was paused");
     assert_eq!(world.quiet().pauses.len(), 1);
     // The parent's escrow was spent, not refunded, and it is not carrying a new one.
-    let p = world.state.organisms.get(parent).expect("the parent survived");
     assert!(p.escrow.is_none());
 }
 

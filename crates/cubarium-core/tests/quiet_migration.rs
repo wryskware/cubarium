@@ -91,21 +91,32 @@ fn the_genuine_pre_quiet_worlds_migrate_off_and_project_back_exactly() {
 /// for the default care one alike.
 #[test]
 fn an_off_world_reproduces_the_pre_quiet_binarys_next_600_ticks() {
-    for (open, plus600, hash) in [
+    for (open, plus600, hash, recorded) in [
         (
             "quiet-v12-plain-3000.cubw",
             "quiet-v12-plain-3000-plus600.cubw",
             0x7729_2b3e_79cc_fcd1u64,
+            "quiet-v12-plain-3000-plus600-r0a.cubw",
         ),
         (
             "quiet-v12-care-3000.cubw",
             "quiet-v12-care-3000-plus600.cubw",
             0x19ef_5ad1_afd0_2b2bu64,
+            "quiet-v12-care-3000-plus600-r0a.cubw",
         ),
     ] {
         let start = std::fs::read(fixture(open)).expect("fixture");
         let after = std::fs::read(fixture(plus600)).expect("fixture");
         assert_eq!(fnv1a(payload(&after)), hash, "{plus600}: the provenance's own hash");
+    // R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`) made body rotation a
+    // physical act paid out of the same budget as translation, so this build's tick is
+    // deliberately not the pre-change binary's. The pre-change payload is still read and still
+    // hashed above; the continuation is re-anchored to this build's own recording
+    // (`tests/r0a_fixtures.rs`).
+        let bytes = std::fs::read(fixture(recorded)).expect("fixture");
+        let (_, expected) = decode_snapshot(&bytes).expect("this build's recording loads");
+        let expected_payload = as_v12(&expected);
+        assert_ne!(expected_payload, payload(&after), "R0a must actually move {open}");
 
         let (_, state) = decode_snapshot(&start).expect("schema 12 loads");
         let mut world = World::from_state(state).expect("the migrated state is a valid world");
@@ -118,8 +129,8 @@ fn an_off_world_reproduces_the_pre_quiet_binarys_next_600_ticks() {
         assert_eq!(world.tick(), 147_600);
         assert_eq!(
             as_v12(&world.state),
-            payload(&after),
-            "{open}: 600 ticks of the quiet build diverged from the pre-quiet binary"
+            expected_payload,
+            "{open}: 600 ticks of the quiet build diverged from this build's recorded continuation"
         );
         assert!(world.quiet().pauses.is_empty());
     }

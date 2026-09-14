@@ -102,10 +102,19 @@ fn a_standard_dose_reproduces_the_pre_dose_binarys_next_600_ticks() {
     assert_eq!(world.tick(), 960);
     assert!(world.care().showers.is_empty(), "the migrated shower ran out its 120 samples");
 
+    // R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`) made body rotation a
+    // physical act paid out of the same budget as translation, so this build's tick is
+    // deliberately not the pre-change binary's. The pre-change payload is still read and still
+    // hashed above; the continuation is re-anchored to this build's own recording
+    // (`tests/r0a_fixtures.rs`).
+    let recorded =
+        std::fs::read(fixture("care-v11-shower-360-plus600-r0a.cubw")).expect("fixture");
+    let (_, expected) = decode_snapshot(&recorded).expect("this build's recording loads");
+    assert_ne!(as_v11(&expected), payload(&plus600), "R0a must actually move this world");
     assert_eq!(
         as_v11(&world.state),
-        payload(&plus600),
-        "600 ticks of the dose build diverged from the pre-dose binary"
+        as_v11(&expected),
+        "600 ticks of the dose build diverged from this build's recorded continuation"
     );
     // The ecology projection is unmoved too, so a care run stays comparable to a no-care one.
     assert_eq!(
@@ -142,10 +151,19 @@ fn a_genuine_schema_eleven_hunter_world_migrates_and_continues_exactly() {
         world.step();
     }
     assert_eq!(world.tick(), 800);
+    // R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`) made body rotation a
+    // physical act paid out of the same budget as translation, so this build's tick is
+    // deliberately not the pre-change binary's. The pre-change payload is still read and still
+    // hashed above; the continuation is re-anchored to this build's own recording
+    // (`tests/r0a_fixtures.rs`).
+    let recorded =
+        std::fs::read(fixture("care-v11-hunters-200-plus600-r0a.cubw")).expect("fixture");
+    let (_, expected) = decode_snapshot(&recorded).expect("this build's recording loads");
+    assert_ne!(as_v11(&expected), payload(&plus600), "R0a must actually move this world");
     assert_eq!(
         as_v11(&world.state),
-        payload(&plus600),
-        "600 ticks with a live hunter diverged from the pre-dose binary"
+        as_v11(&expected),
+        "600 ticks with a live hunter diverged from this build's recorded continuation"
     );
 }
 

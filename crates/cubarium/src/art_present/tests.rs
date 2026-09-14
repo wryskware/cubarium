@@ -1599,3 +1599,48 @@ fn plant_and_body_draw_cost() {
         per * 1e3
     );
 }
+
+/// **R0a.** A body that pivots without translating publishes no path
+/// (`travel_into` emits no segment for a zero displacement), so the presenter reads both ends
+/// of the tick from the resolved heading itself. The turn must still be spent over the tick's
+/// frames rather than popping at the boundary.
+///
+/// This is the narrow integration the milestone touches: the world now turns bodies by a
+/// bounded, paid amount, and pure pivoting is legal, so "no travel" and "no turn" stopped being
+/// the same thing.
+#[test]
+fn a_pivot_with_no_travel_is_spent_over_the_ticks_frames() {
+    let before = Vec2::new(1.0, 0.0);
+    let after = Vec2::from_screen_angle(0.4);
+    let moved: [cubarium_surface::PathSegment; 0] = [];
+    let pos = SurfacePoint::new(Face::Front, 32.0, 32.0);
+
+    // With no path, interpolation reports the resolved heading at every instant.
+    let start = crate::present::interpolate(&moved, pos, after, 0.0).1;
+    let end = crate::present::interpolate(&moved, pos, after, 1.0).1;
+    assert_eq!((start, end), (after, after));
+
+    let mut memory = BodyMemory::entered(0);
+    memory.end_heading = before;
+    memory.observe_heading(start, end);
+    assert!(
+        (memory.turn - 0.4).abs() < 1e-12,
+        "the pivot itself is what the frames have to spend: {}",
+        memory.turn
+    );
+
+    // And spending it sweeps continuously from the previous tick's heading onto the new one.
+    let angle_at = |f: f64| turn_heading(after, memory.turn, f).screen_angle();
+    assert!((angle_at(0.0) - before.screen_angle()).abs() < 1e-12, "{}", angle_at(0.0));
+    assert!((angle_at(1.0) - after.screen_angle()).abs() < 1e-12, "{}", angle_at(1.0));
+    let mut previous = angle_at(0.0);
+    for step in 1..=20 {
+        let now = angle_at(f64::from(step) / 20.0);
+        assert!(now > previous, "the sweep reversed at {step}: {previous} -> {now}");
+        assert!(
+            now - previous < 0.4,
+            "the sweep popped at {step}: {previous} -> {now}"
+        );
+        previous = now;
+    }
+}
