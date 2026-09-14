@@ -1744,10 +1744,11 @@ impl World {
             //
             //    Payment order matches the physiology the world already used: unavoidable
             //    upkeep (`maintenance · S + sense_cost · r_sense`) is reserved first, and only
-            //    the remainder buys motion. Translation and turning are charged exactly once,
-            //    through the one `|v| + r · |ω|` term the envelope bounds, so a body that only
-            //    translates pays the pre-R0a bill to the bit — and a body with no movement
-            //    energy left now holds still instead of moving for free.
+            //    the remainder buys motion. Translation and turning are charged exactly once
+            //    each, through one term at the world's existing `move_cost`, with rotation
+            //    priced at `motor::ROTATION_COST_SCALE` — so a body that only translates pays
+            //    the pre-R0a bill to the bit, and a body with no movement energy left now
+            //    holds still instead of moving for free.
             moved.resize_with(organisms.slot_count(), Vec::new);
             for segments in moved.iter_mut() {
                 segments.clear();
@@ -1806,7 +1807,7 @@ impl World {
                 }
                 // The bill is now affordable by construction; `min` stays as a guard against
                 // floating-point overshoot, not as the mechanism that lets a body move broke.
-                let cost = bill.total_cost(motion.swept, dt);
+                let cost = bill.total_cost(motion.speed, motion.sweep, dt);
                 let paid = cost.min(o.energy).max(0.0);
                 o.energy -= paid;
                 heat(paid);

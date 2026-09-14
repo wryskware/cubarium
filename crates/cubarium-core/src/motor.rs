@@ -73,6 +73,28 @@ use crate::organism::Organism;
 /// far ahead of its root — trades speed against turning.
 pub const REFERENCE_RADIUS_PX: f64 = 2.5;
 
+/// What one pixel of outer-body sweep costs, relative to one pixel of centre travel.
+///
+/// The envelope and the bill answer different questions and need not use the same radius.
+/// The *constraint* is on the fastest-moving part of the body, so [`turn_radius_px`] is the
+/// outermost point. The *cost* is work done by the whole body, and an extended body's mean
+/// sweep radius is well under its outer one — half, for a uniform rod about its centre; two
+/// thirds, for a uniform disc. This scale carries that difference, at the world's one
+/// `move_cost`, so translation and rotation are still billed once each through one term.
+///
+/// **This is the knob for the price of turning, and it is deliberately separate from
+/// [`REFERENCE_RADIUS_PX`], which is the knob for how fast a body may turn.** Before R0a
+/// rotation was free; at 1.0 a unit adult turning at its genome's full rate sweeps 3.9 px/s
+/// against a top centre speed of 0.3 px/s, so turning would cost an order of magnitude more
+/// than going — a change to the world's energy economy far larger than the kinematic one this
+/// milestone is about. 0.5 is the rod figure: honest, conservative against the mean, and still
+/// a real price. The measured ecological consequence of each setting is in
+/// `design/7_Research/r0a-motor-cost-ecology-2026-09-14.md`; the balance itself is Fable's.
+pub const ROTATION_COST_SCALE: f64 = 0.5;
+
+/// Free rotation is the defect R0a fixes, so a zero scale is not a tuning option.
+const _: () = assert!(ROTATION_COST_SCALE > 0.0);
+
 /// What a body asks the world for this tick, in its own (pre-transport) chart.
 ///
 /// `heading` is a *target orientation*, not a result: the resolver turns toward it by as much
@@ -139,9 +161,9 @@ pub struct ResolvedMotion {
     /// The signed physical turn actually performed this tick, radians in `(−π, π]`. This —
     /// never the request, never a chart jump — is what the angular cost is charged on.
     pub turn: f64,
-    /// `|v| + r · |ω|`, px/s: the motor magnitude that was granted, and the quantity
-    /// [`MotorBill::motor_cost`] bills. Always `≤ MotorLimits::available()`.
-    pub swept: f64,
+    /// `r · |ω|`, px/s: how fast the outermost point of the body swept. The envelope bounds
+    /// `speed + sweep`; the bill prices `sweep` at [`ROTATION_COST_SCALE`].
+    pub sweep: f64,
 }
 
 impl ResolvedMotion {
@@ -150,9 +172,14 @@ impl ResolvedMotion {
         if dt > 0.0 { self.turn / dt } else { 0.0 }
     }
 
+    /// `|v| + r · |ω|`: the quantity the envelope bounds. Always `≤ MotorLimits::available()`.
+    pub fn motor_magnitude(&self) -> f64 {
+        self.speed + self.sweep
+    }
+
     /// A body that neither moved nor turned.
     pub fn still(heading: Vec2) -> ResolvedMotion {
-        ResolvedMotion { heading, speed: 0.0, turn: 0.0, swept: 0.0 }
+        ResolvedMotion { heading, speed: 0.0, turn: 0.0, sweep: 0.0 }
     }
 }
 
@@ -218,8 +245,8 @@ pub fn resolve(
             .normalized()
             .unwrap_or(current)
     };
-    let swept = speed + radius * (turn / dt).abs();
-    ResolvedMotion { heading, speed, turn, swept }
+    let sweep = radius * (turn / dt).abs();
+    ResolvedMotion { heading, speed, turn, sweep }
 }
 
 /// How far the resolved turn may sit from the requested one and still count as *unbound*.
@@ -311,21 +338,32 @@ impl MotorBill {
     /// The largest `|v| + r · |ω|` this `energy` can pay for once upkeep is reserved, px/s.
     /// `f64::INFINITY` when motion is free (`move_cost` or `S` is zero), which is the only
     /// case the envelope's `capability` alone decides.
+    ///
+    /// The envelope bounds one magnitude while the bill prices its two halves differently, so
+    /// this prices the whole magnitude at whichever half is dearer. The budget is then never
+    /// larger than the body can actually pay for, whatever split the resolver lands on.
     pub fn affordable_motor(&self, energy: f64, dt: f64) -> f64 {
-        let per_motor = self.per_motor(dt);
+        let per_motor = self.per_motor(dt) * ROTATION_COST_SCALE.max(1.0);
         if per_motor <= 0.0 || !per_motor.is_finite() {
             return f64::INFINITY;
         }
         (energy - self.upkeep(dt)).max(0.0) / per_motor
     }
 
-    /// `move_cost · S · swept · dt`: the cost of the motion that was actually resolved.
+    /// `move_cost · S · (|v| + k · r|ω|) · dt`, with `k` = [`ROTATION_COST_SCALE`]: the cost of
+    /// the motion that was actually resolved.
     ///
-    /// Charged on the same `|v| + r · |ω|` the envelope bounds, so translation and turning
-    /// are billed **once each**, through one term, at the world's existing `move_cost`. A
-    /// body that only translates pays exactly what it paid before this milestone.
-    pub fn motor_cost(&self, swept: f64, dt: f64) -> f64 {
-        self.per_motor(dt) * finite_non_negative(swept)
+    /// Translation and turning are billed **once each**, through one term, at the world's
+    /// existing `move_cost`. A body that only translates pays exactly what it paid before this
+    /// milestone.
+    pub fn motor_cost(&self, speed: f64, sweep: f64, dt: f64) -> f64 {
+        self.per_motor(dt) * self.billed_motion(speed, sweep)
+    }
+
+    /// `|v| + k · r|ω|`: the motion the bill actually prices, as opposed to the motion the
+    /// envelope bounds.
+    fn billed_motion(&self, speed: f64, sweep: f64) -> f64 {
+        finite_non_negative(speed) + ROTATION_COST_SCALE * finite_non_negative(sweep)
     }
 
     /// The whole tick's bill: upkeep plus the resolved motion, in the world's own
@@ -336,9 +374,9 @@ impl MotorBill {
     /// move, this to bill it afterwards — which is why `crate::world` still clamps the charge
     /// to the energy on hand. Keeping the original association means a body that only
     /// translates pays the pre-R0a bill bit for bit.
-    pub fn total_cost(&self, swept: f64, dt: f64) -> f64 {
+    pub fn total_cost(&self, speed: f64, sweep: f64, dt: f64) -> f64 {
         (self.maintenance * self.structure
-            + self.move_cost * self.structure * finite_non_negative(swept)
+            + self.move_cost * self.structure * self.billed_motion(speed, sweep)
             + self.sense_cost * self.sense_radius)
             * dt
     }
@@ -424,7 +462,7 @@ mod tests {
         let h = Vec2::new(1.0, 0.0);
         let m = resolve(h, &MotorRequest::still(h), &limits(2.5, 1.5, 0.3));
         assert_eq!(m, ResolvedMotion::still(h));
-        assert_eq!(m.swept, 0.0);
+        assert_eq!(m.motor_magnitude(), 0.0);
     }
 
     /// Translation alone is never reduced: `speed_cap ≤ capability` by construction.
@@ -436,7 +474,8 @@ mod tests {
             let m = resolve(h, &MotorRequest { heading: h, speed: cap }, &l);
             assert_eq!(m.speed, cap, "radius {r}");
             assert_eq!(m.turn, 0.0);
-            assert_eq!(m.swept, cap);
+            assert_eq!(m.sweep, 0.0);
+            assert_eq!(m.motor_magnitude(), cap);
             assert_eq!(m.heading, h);
         }
     }
@@ -476,7 +515,11 @@ mod tests {
         let s = u / demand;
         assert!((m.speed - 0.3 * s).abs() < 1e-12, "{}", m.speed);
         assert!((m.turn.abs() - omega_max * DT * s).abs() < 1e-15, "{}", m.turn);
-        assert!((m.swept - u).abs() < 1e-12, "the envelope is met exactly: {}", m.swept);
+        assert!(
+            (m.motor_magnitude() - u).abs() < 1e-12,
+            "the envelope is met exactly: {}",
+            m.motor_magnitude()
+        );
         // The ratio the caller asked for is what it got.
         assert!(((m.speed / m.turn.abs()) - (0.3 / (omega_max * DT))).abs() < 1e-9);
     }
@@ -517,10 +560,14 @@ mod tests {
         assert_eq!(m, ResolvedMotion::still(h), "no free movement once energy is gone");
 
         // A sliver of movement energy buys a proportional sliver of motion.
-        l.motor_budget = bill.affordable_motor(upkeep + bill.motor_cost(0.1, DT), DT);
+        l.motor_budget = bill.affordable_motor(upkeep + bill.motor_cost(0.1, 0.0, DT), DT);
         assert!((l.motor_budget - 0.1).abs() < 1e-12, "{}", l.motor_budget);
         let m = resolve(h, &MotorRequest { heading: Vec2::new(0.0, 1.0), speed: 0.3 }, &l);
-        assert!((m.swept - 0.1).abs() < 1e-12, "{}", m.swept);
+        assert!(
+            (m.motor_magnitude() - 0.1).abs() < 1e-12,
+            "{}",
+            m.motor_magnitude()
+        );
     }
 
     /// Charging a pure translation is arithmetically what the world charged before R0a.
@@ -538,10 +585,49 @@ mod tests {
             + bill.move_cost * bill.structure * speed
             + bill.sense_cost * bill.sense_radius)
             * DT;
-        assert_eq!(bill.total_cost(speed, DT), legacy);
+        assert_eq!(bill.total_cost(speed, 0.0, DT), legacy);
         // The budget split reconciles with the charge to within association.
-        let split = bill.upkeep(DT) + bill.motor_cost(speed, DT);
+        let split = bill.upkeep(DT) + bill.motor_cost(speed, 0.0, DT);
         assert!((split - legacy).abs() <= 4.0 * f64::EPSILON * legacy, "{split} vs {legacy}");
+    }
+
+    /// The price of turning is a separate, named number from the radius that bounds it, and
+    /// the bill uses it while the envelope does not.
+    #[test]
+    fn rotation_is_priced_by_its_own_scale_and_the_envelope_is_not() {
+        let bill = MotorBill {
+            structure: 1.0,
+            maintenance: 0.005,
+            sense_radius: 6.0,
+            move_cost: 0.006,
+            sense_cost: 0.0002,
+        };
+        let (speed, sweep) = (0.2, 1.4);
+        let expected = bill.upkeep(DT)
+            + bill.move_cost * bill.structure * (speed + ROTATION_COST_SCALE * sweep) * DT;
+        assert!((bill.total_cost(speed, sweep, DT) - expected).abs() < 1e-15);
+
+        // The envelope still bounds the unpriced magnitude, so lowering the price cannot let a
+        // body turn faster than its geometry allows.
+        let l = limits(6.0, 90.0f64.to_radians(), 0.3);
+        let m = resolve(
+            Vec2::new(1.0, 0.0),
+            &MotorRequest { heading: Vec2::new(-1.0, 0.0), speed: 0.3 },
+            &l,
+        );
+        assert!((m.motor_magnitude() - l.capability()).abs() < 1e-12);
+
+        // And the budget is never generous: whatever split lands, the charge fits the energy.
+        let energy = bill.upkeep(DT) + bill.motor_cost(0.0, 1.0, DT);
+        let budget = bill.affordable_motor(energy, DT);
+        for split in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let (v, w) = (budget * split, budget * (1.0 - split));
+            assert!(
+                bill.total_cost(v, w, DT) <= energy + 1e-15,
+                "split {split} billed {} against {energy}",
+                bill.total_cost(v, w, DT)
+            );
+        }
     }
 
     /// Juvenile and adult apex bodies read their radius from real geometry, and the claws

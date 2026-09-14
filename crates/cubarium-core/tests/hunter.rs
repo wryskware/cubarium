@@ -2268,11 +2268,11 @@ fn observations_do_not_move_a_profile_three_hunter_world() {
     // unchanged, and is now anchored to this build's own numbers, still read off the schema 12
     // projection (`snapshot::v12`).
     assert_eq!(
-        hunt_hash, 17_178_231_192_231_228_771,
+        hunt_hash, 17_048_296_123_627_909_541,
         "a hunt-and-digest world moved"
     );
     assert_eq!(
-        birth_hash, 14_113_552_108_754_948_888,
+        birth_hash, 12_867_226_482_697_264_888,
         "a funded-birth world moved"
     );
 }

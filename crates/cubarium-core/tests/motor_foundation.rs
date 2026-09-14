@@ -263,15 +263,15 @@ fn a_turning_body_pays_for_the_distance_it_sweeps() {
             };
             let paid = energy - o.energy;
             assert!(
-                (paid - bill.total_cost(speed + extent * rate, DT)).abs() < 1e-12,
-                "{id:?} paid {paid}, not the bill for sweeping {} px/s",
-                speed + extent * rate
+                (paid - bill.total_cost(speed, extent * rate, DT)).abs() < 1e-12,
+                "{id:?} paid {paid}, not the bill for travelling {speed} px/s and sweeping {} px/s",
+                extent * rate
             );
             billed += 1;
             if rate > 0.0 {
                 turning += 1;
                 assert!(
-                    paid > bill.total_cost(speed, DT),
+                    paid > bill.total_cost(speed, 0.0, DT),
                     "{id:?} turned at {rate} rad/s for free"
                 );
             }
