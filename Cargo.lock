@@ -290,6 +290,7 @@ dependencies = [
  "cubarium-surface",
  "serde",
  "serde_json",
+ "toml",
 ]
 
 [[package]]

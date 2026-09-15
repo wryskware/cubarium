@@ -1,8 +1,13 @@
 //! `cubarium-search` — measure the real core's headless throughput, then search it.
 //!
-//! Four subcommands: `params` prints the searched box, `baseline` measures one actual-core run
+//! M1 subcommands: `params` prints the searched box, `baseline` measures one actual-core run
 //! (and optional independent-world CPU batching), `search` runs the bounded genetic search, and
 //! `replay` re-runs one recorded row and checks that it reproduces bit for bit.
+//!
+//! The ecology v1 calibration adds three: `calibrate-candidates` prints the declared screen,
+//! `calibrate` runs one stage of the candidate × seed × apex-arm matrix, and
+//! `calibrate-export` writes a selected candidate as a `cubarium run --config` TOML. Their
+//! rows carry the same `param_bits` shape, so `replay` reads them too.
 
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Write};
@@ -10,6 +15,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use clap::{Parser, Subcommand};
+use cubarium_search::calibrate;
 use cubarium_search::es;
 use cubarium_search::evaluate::{BUILD_ID, Protocol, Status, evaluate};
 use cubarium_search::metrics::Scoring;
@@ -163,6 +169,57 @@ enum Command {
         #[arg(long)]
         out: PathBuf,
     },
+    /// Print every declared ecology v1 calibration candidate and what it moves.
+    CalibrateCandidates,
+    /// Run one stage of the ecology v1 calibration matrix: declared candidates × seeds ×
+    /// matched zero/one/two-apex arms, one JSONL row per run.
+    Calibrate {
+        /// A name for this stage, and the subdirectory it writes into.
+        #[arg(long, default_value = "screen")]
+        stage: String,
+        /// Comma-separated candidate names, or `all`.
+        #[arg(long, default_value = "all")]
+        candidates: String,
+        /// `training` or `holdout`. The held-out set is for the final validation only.
+        #[arg(long, default_value = "training")]
+        seed_set: String,
+        /// How many seeds of that set, from the front.
+        #[arg(long, default_value_t = 6)]
+        seeds: usize,
+        /// Comma-separated apex arms: how many adults are introduced.
+        #[arg(long, default_value = "0,1,2")]
+        arms: String,
+        #[arg(long, default_value_t = 125_000)]
+        ticks: u64,
+        #[arg(long, default_value_t = 500)]
+        sample_every: u64,
+        /// The tick every arm introduces its cohort on.
+        #[arg(long, default_value_t = 6_000)]
+        introduce_tick: u64,
+        #[arg(long, default_value_t = 8)]
+        workers: usize,
+        /// Hard wall cap. Trials not started by then are recorded as skipped, never extended.
+        #[arg(long, default_value_t = 1_800)]
+        wall_seconds: u64,
+        #[arg(long, default_value = "runs/ecology-v1-calibration")]
+        out: PathBuf,
+    },
+    /// Export one candidate as a complete `WorldConfig` TOML `cubarium run --config` accepts.
+    CalibrateExport {
+        #[arg(long)]
+        candidate: String,
+        /// The seed written into the exported config.
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+        /// Whether this is the calibration's selected configuration or a fallback export.
+        #[arg(long, default_value_t = false)]
+        selected: bool,
+        /// One line saying why, recorded beside the config.
+        #[arg(long, default_value = "")]
+        why: String,
+        #[arg(long, default_value = "runs/ecology-v1-calibration/selected")]
+        out: PathBuf,
+    },
     /// Re-run one recorded row and check it reproduces.
     Replay {
         /// The `evals.jsonl` written by a search.
@@ -216,6 +273,67 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             search_seed,
             out,
         ),
+        Command::CalibrateCandidates => {
+            calibrate::print_candidates();
+            Ok(())
+        }
+        Command::Calibrate {
+            stage,
+            candidates,
+            seed_set,
+            seeds,
+            arms,
+            ticks,
+            sample_every,
+            introduce_tick,
+            workers,
+            wall_seconds,
+            out,
+        } => {
+            let names: Vec<String> = if candidates == "all" {
+                calibrate::CANDIDATES.iter().map(|c| c.name.to_string()).collect()
+            } else {
+                candidates.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+            };
+            let arms: Vec<u32> = arms
+                .split(',')
+                .map(|s| s.trim().parse::<u32>())
+                .collect::<Result<_, _>>()?;
+            let set = calibrate::SeedSet::parse(&seed_set)?;
+            let dir = out.join(&stage);
+            let report = calibrate::run_stage(
+                &stage,
+                &names,
+                set,
+                seeds,
+                &arms,
+                ticks,
+                sample_every,
+                introduce_tick,
+                workers,
+                wall_seconds,
+                &dir,
+            )?;
+            calibrate::print_report(&report);
+            println!("\nrows    {}", dir.join("evals.jsonl").display());
+            println!("summary {}", dir.join("summary.json").display());
+            println!(
+                "replay  cargo run --release -p cubarium-search -- replay --record {} --index 0",
+                dir.join("evals.jsonl").display()
+            );
+            Ok(())
+        }
+        Command::CalibrateExport { candidate, seed, selected, why, out } => {
+            let path = calibrate::export(&candidate, seed, &out, selected, &why)?;
+            let config = calibrate::candidate(&candidate)
+                .ok_or_else(|| format!("{candidate} is not a declared candidate"))?
+                .config(seed)?;
+            println!("exported {}", path.display());
+            println!("config hash {:016x}", calibrate::config_hash(&config));
+            println!("build {BUILD_ID}");
+            println!("load with: cubarium run --config {}", path.display());
+            Ok(())
+        }
         Command::Replay { record, index } => replay(&record, index),
         Command::EsProtocol => {
             es::commands::protocol();
@@ -264,9 +382,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn print_params() -> Result<(), Box<dyn std::error::Error>> {
     println!("build {BUILD_ID}");
     println!("\n{} searched parameters\n", params::PARAMS.len());
-    println!("{:<34} {:>10} {:>10} {:>10}  why", "field", "default", "lo", "hi");
+    println!("{:<34} {:>10} {:>10} {:>10}  unit / why", "field", "default", "lo", "hi");
     for p in params::PARAMS {
-        println!("{:<34} {:>10} {:>10} {:>10}  {}", p.name, p.default, p.lo, p.hi, p.why);
+        println!("{:<34} {:>10} {:>10} {:>10}  {}", p.name, p.default, p.lo, p.hi, p.unit);
+        println!("{:<34} {:>10} {:>10} {:>10}    {}", "", "", "", "", p.why);
     }
     println!("\nidentified but not searched in this milestone\n");
     for (what, why) in params::EXCLUDED {

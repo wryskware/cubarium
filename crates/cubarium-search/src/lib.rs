@@ -6,6 +6,8 @@
 //! the same conservation audits the host does.
 //!
 //! - [`params`]: the joint parameter vector, its bounds, and what is deliberately excluded.
+//! - [`calibrate`]: the ecology v1 calibration matrix — declared candidates × seeds × matched
+//!   zero/one/two-apex arms, with the ecology v1 component vector and a config export.
 //! - [`evaluate`]: one candidate on one seed, to a hard tick horizon, with component metrics.
 //! - [`metrics`]: the component metrics and the scalar rank derived from them.
 //! - [`search`]: the bounded genetic search and every limit it runs under.
@@ -20,6 +22,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod calibrate;
 pub mod es;
 pub mod evaluate;
 pub mod metrics;

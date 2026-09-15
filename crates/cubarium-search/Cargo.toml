@@ -21,3 +21,5 @@ serde = { version = "1", features = ["derive"] }
 # `float_roundtrip`: the default parser is not correctly rounded (about one value in nine
 # comes back one ULP off), which would make `replay` and any exact-weights claim unsafe.
 serde_json = { version = "1", features = ["float_roundtrip"] }
+# The calibration exports its selected configuration as the TOML `cubarium run --config` reads.
+toml = "0.8"

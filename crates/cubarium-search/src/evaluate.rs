@@ -11,14 +11,47 @@ use std::panic::AssertUnwindSafe;
 use std::time::Instant;
 
 use cubarium_core::encounter::ApexEncounterEvent;
+use cubarium_core::fields::CellClass;
 use cubarium_core::hunter::{FixedHunterProfile, HunterEvent, HunterTarget};
 use cubarium_core::organism::{DeathCause, Mode};
 use cubarium_core::{ApexDormancyEvent, LifeEvent, OrganismId, World, WorldConfig};
+use cubarium_surface::cell_of;
 use serde::{Deserialize, Serialize};
 
-use crate::metrics::{Components, FORMS_POSSIBLE, Sample};
+use crate::metrics::{Components, EcoMeasures, FORMS_POSSIBLE, Sample, guild_of};
 use crate::params;
 use crate::rng;
+
+/// How often the recorder walks the cells for foliage depletion and the organisms for their
+/// position. One second of simulated time: a body cruising at the calibrated 1 BL/s crosses
+/// about a quarter of a 4 × 4 px cell in that time, so a probe this often cannot miss a cell
+/// a body actually occupied. Cheap next to the step: 1,280 comparisons and one position read
+/// per body every twenty ticks.
+pub const PROBE_EVERY: u64 = 20;
+
+/// How many equal windows the horizon is cut into for the spatial measure. The last one is
+/// also the **late window** every `Components::late` figure is taken over, so "last 20 % of
+/// the horizon" and "the last spatial window" are the same interval.
+pub const WINDOWS: u64 = 5;
+
+/// A cell counts as **depleted** when its foliage falls below this fraction of what it held
+/// at tick 0, and as **recovered** when it later climbs back above [`RECOVERY_FRACTION`] of
+/// the same reference.
+///
+/// The reference is the cell's own opening foliage, `P_0 = initial_fraction · min(P_max, α·W_0)`
+/// with `W_0 ∝ L_0·μ_0` (`design/ecology-v1-contract.md` §11), so it is already proportional
+/// to the cell's light band and needs no separate per-band baseline run. It is **not** a
+/// steady state — B0 measured bright stands still climbing at the 30-minute horizon — so a
+/// depletion event means "this cell lost three quarters of the foliage it was given", which
+/// is what a grazed-out cell looks like, and not "this cell fell below its equilibrium".
+/// Cells that opened bare are not watched; they are counted as bare cells instead.
+pub const DEPLETION_FRACTION: f64 = 0.25;
+/// See [`DEPLETION_FRACTION`].
+pub const RECOVERY_FRACTION: f64 = 0.5;
+
+/// A body is counted in a spatial window only if it was seen on at least this fraction of the
+/// window's probes, so the measure is a foraging range and not a lifespan.
+pub const SPATIAL_COVERAGE: f64 = 0.9;
 
 /// The build that produced a row, stamped by `build.rs`.
 pub const BUILD_ID: &str = env!("CUBARIUM_SEARCH_BUILD");
@@ -352,6 +385,33 @@ struct Recorder {
     apex_emergences: u64,
     apex_exhausted: u64,
 
+    // --- ecology v1: guild census, depletion, foraging range ------------------------
+    /// A body's guild, recorded when it is first seen and never revised: `diet` mutates at
+    /// conception and never afterwards, so `births = deaths + Δpopulation` holds per guild.
+    guild_of_id: BTreeMap<OrganismId, u8>,
+    prey_births_guild: [u64; 3],
+    prey_deaths_guild: [u64; 3],
+    /// Per cell: the opening foliage the depletion threshold is read against, and whether the
+    /// cell is currently below it.
+    p_ref: Vec<f64>,
+    depleted: Vec<bool>,
+    depletion_events: u64,
+    recovery_events: u64,
+    opening_foliage: f64,
+    opening_wood: f64,
+    opening_litter: f64,
+    opening_alive_cells: u32,
+    watched_cells: u32,
+    /// The spatial measure: distinct cells each prey body stood in inside the current window,
+    /// and how many probes it was seen on.
+    visited: BTreeMap<OrganismId, (BTreeSet<u16>, u64)>,
+    probes_this_window: u64,
+    window_ticks: u64,
+    window_index: u64,
+    /// `(Σ distinct cells, qualifying bodies)` for each completed window.
+    spatial_windows: Vec<(f64, u64)>,
+    spatial_bodies: u64,
+
     first_predation_tick: Option<u64>,
     prey_before_first_predation: u32,
     prey_min_after_predation: u32,
@@ -370,7 +430,47 @@ impl Recorder {
     fn new(world: &World, protocol: Protocol, apex_introduced: u32) -> Self {
         let founders: BTreeSet<_> = world.state.organisms.iter().map(|(id, _)| id).collect();
         let apex_ids: BTreeSet<_> = world.hunters().members.iter().map(|m| m.id).collect();
+        // Every body alive at tick 0 is classified now, so a founder's death is attributed to
+        // the guild it was born into rather than to "unknown".
+        let mut guild_of_id = BTreeMap::new();
+        for (id, o) in world.state.organisms.iter() {
+            if !apex_ids.contains(&id) {
+                guild_of_id.insert(
+                    id,
+                    guild_of(o.phenotype.cap_foliage, o.phenotype.cap_detrital) as u8,
+                );
+            }
+        }
+        let alive_min = world.config().plant.alive_min;
+        let p_ref: Vec<f64> = world.state.fields.p.clone();
+        let watched_cells = p_ref.iter().filter(|p| **p > 1e-9).count() as u32;
+        let opening_alive_cells = world
+            .state
+            .ecology
+            .wood
+            .iter()
+            .filter(|w| CellClass::of(**w, alive_min) == CellClass::Alive)
+            .count() as u32;
+        let depleted = vec![false; p_ref.len()];
         Recorder {
+            guild_of_id,
+            prey_births_guild: [0; 3],
+            prey_deaths_guild: [0; 3],
+            opening_foliage: p_ref.iter().sum(),
+            opening_wood: world.state.ecology.wood.iter().sum(),
+            opening_litter: world.state.fields.d.iter().sum(),
+            opening_alive_cells,
+            watched_cells,
+            p_ref,
+            depleted,
+            depletion_events: 0,
+            recovery_events: 0,
+            visited: BTreeMap::new(),
+            probes_this_window: 0,
+            window_ticks: (protocol.horizon_ticks / WINDOWS).max(1),
+            window_index: 0,
+            spatial_windows: Vec::new(),
+            spatial_bodies: 0,
             protocol,
             samples: Vec::new(),
             apex_introduced,
@@ -454,6 +554,17 @@ impl Recorder {
                         if self.born_in_run.contains(&parent) {
                             self.reproduced.insert(parent);
                         }
+                        // The child's guild is read from the phenotype the world just
+                        // decoded, not from the parent's: `diet` mutates at conception, and
+                        // that is exactly how a guild census changes.
+                        let guild = world
+                            .state
+                            .organisms
+                            .get(id)
+                            .map(|o| guild_of(o.phenotype.cap_foliage, o.phenotype.cap_detrital))
+                            .unwrap_or(2);
+                        self.guild_of_id.insert(id, guild as u8);
+                        self.prey_births_guild[guild] += 1;
                     }
                 }
                 LifeEvent::Death { id, cause, tick, .. } => {
@@ -468,6 +579,11 @@ impl Recorder {
                         self.apex_deaths += 1;
                     } else {
                         self.prey_deaths += 1;
+                        // A body removed in step 9 is already gone from the slot map, so the
+                        // guild comes from the record made when it was first seen.
+                        if let Some(guild) = self.guild_of_id.get(&id) {
+                            self.prey_deaths_guild[usize::from(*guild)] += 1;
+                        }
                     }
                     if cause == DeathCause::Predation && self.first_predation_tick.is_none() {
                         self.first_predation_tick = Some(tick);
@@ -477,6 +593,69 @@ impl Recorder {
                 }
             }
         }
+
+        if world.tick() % PROBE_EVERY == 0 {
+            self.probe(world);
+        }
+        // A window closes the first time the tick crosses its boundary. A partial final
+        // window — the world collapsed inside it — is deliberately not closed: a foraging
+        // range measured over part of a window is not the same quantity.
+        let index = world.tick() / self.window_ticks;
+        if index > self.window_index {
+            self.close_window();
+            self.window_index = index;
+        }
+    }
+
+    /// One second of simulated time: foliage depletion and recovery per cell, and where each
+    /// prey body is standing. Reads only; writes nothing the world can see.
+    fn probe(&mut self, world: &World) {
+        let p = &world.state.fields.p;
+        for i in 0..self.p_ref.len() {
+            let reference = self.p_ref[i];
+            if reference <= 1e-9 {
+                continue;
+            }
+            let now = p[i];
+            if self.depleted[i] {
+                if now > RECOVERY_FRACTION * reference {
+                    self.depleted[i] = false;
+                    self.recovery_events += 1;
+                }
+            } else if now < DEPLETION_FRACTION * reference {
+                self.depleted[i] = true;
+                self.depletion_events += 1;
+            }
+        }
+
+        self.probes_this_window += 1;
+        for (id, o) in world.state.organisms.iter() {
+            if self.apex_ids.contains(&id) {
+                continue;
+            }
+            let cell = cell_of(&o.pos).index() as u16;
+            let entry = self.visited.entry(id).or_default();
+            entry.0.insert(cell);
+            entry.1 += 1;
+        }
+    }
+
+    /// Close one spatial window: the mean distinct cells visited by every body that was
+    /// present for [`SPATIAL_COVERAGE`] of its probes.
+    fn close_window(&mut self) {
+        let need = ((self.probes_this_window as f64) * SPATIAL_COVERAGE).ceil() as u64;
+        let mut sum = 0.0;
+        let mut bodies = 0u64;
+        for (cells, seen) in self.visited.values() {
+            if *seen >= need.max(1) {
+                sum += cells.len() as f64;
+                bodies += 1;
+            }
+        }
+        self.spatial_windows.push((sum, bodies));
+        self.spatial_bodies += bodies;
+        self.visited.clear();
+        self.probes_this_window = 0;
     }
 
     fn sample(&mut self, world: &World) {
@@ -494,9 +673,15 @@ impl Recorder {
         let (mut feeding, mut seeking, mut resting) = (0u32, 0u32, 0u32);
         let mut hunger = 0.0;
         let mut population = 0u32;
-        for (_, o) in state.organisms.iter() {
+        let mut guild = [0u32; 3];
+        let mut form_counts = [0u32; 5];
+        for (id, o) in state.organisms.iter() {
             population += 1;
             forms[(o.phenotype.form as usize).min(7)] += 1;
+            form_counts[(o.phenotype.form as usize).min(4)] += 1;
+            if !live_apex.contains(&id) {
+                guild[guild_of(o.phenotype.cap_foliage, o.phenotype.cap_detrital)] += 1;
+            }
             match o.mode {
                 Mode::Feeding => feeding += 1,
                 Mode::Seeking => seeking += 1,
@@ -545,6 +730,16 @@ impl Recorder {
             self.prey_min_after_predation = self.prey_min_after_predation.min(prey);
         }
 
+        let alive_min = state.config.plant.alive_min;
+        let (mut alive_cells, mut establishing_cells, mut bare_cells) = (0u32, 0u32, 0u32);
+        for w in &state.ecology.wood {
+            match CellClass::of(*w, alive_min) {
+                CellClass::Alive => alive_cells += 1,
+                CellClass::Establishing => establishing_cells += 1,
+                CellClass::Bare => bare_cells += 1,
+            }
+        }
+
         self.samples.push(Sample {
             tick: state.tick,
             population,
@@ -565,6 +760,40 @@ impl Recorder {
             mass_residual: mass,
             water_residual: water,
             energy_residual: energy,
+
+            wood: state.ecology.wood.iter().sum(),
+            plant_reserve: state.ecology.plant_reserve.iter().sum(),
+            dead_wood: state.ecology.dead_wood.iter().sum(),
+            carrion: state.ecology.carrion.iter().sum(),
+            carrion_energy: state.ecology.carrion_energy.iter().sum(),
+
+            alive_cells,
+            establishing_cells,
+            bare_cells,
+            depleted_cells: self.depleted.iter().filter(|d| **d).count() as u32,
+
+            guild,
+            forms: form_counts,
+
+            cum_prey_births: self.prey_births,
+            cum_prey_births_guild: self.prey_births_guild,
+            cum_prey_deaths: self.prey_deaths,
+            cum_prey_deaths_guild: self.prey_deaths_guild,
+            cum_deaths_cause: self.deaths_by_cause,
+            cum_apex: [
+                self.apex_attacks,
+                self.apex_captures,
+                self.apex_births,
+                self.apex_deaths,
+                self.apex_matings,
+                self.apex_emergences,
+                self.apex_exhausted,
+            ],
+            cum_plant_deaths: state.ecology.plant_deaths_total,
+            cum_recolonisations: state.ecology.recolonisations_total,
+            cum_depletion_events: self.depletion_events,
+            cum_recovery_events: self.recovery_events,
+            intake: world.intake_diagnostics(),
         });
     }
 
@@ -623,6 +852,39 @@ impl Recorder {
             .map(|id| self.depth(*id))
             .max()
             .unwrap_or(0);
+
+        // The ecology v1 windows. The late window is the last `1/WINDOWS` of the **declared**
+        // horizon, not of the ticks actually run, so a collapsed world reports `None` rather
+        // than a late window measured over its own death throes.
+        let late_start = self
+            .protocol
+            .horizon_ticks
+            .saturating_sub(self.protocol.horizon_ticks / WINDOWS);
+        let eco = EcoMeasures::from_samples(&self.samples).unwrap_or_default();
+        let late_slice: Vec<Sample> = self
+            .samples
+            .iter()
+            .copied()
+            .filter(|s| s.tick >= late_start)
+            .collect();
+        let late = (late_slice.len() >= 2)
+            .then(|| EcoMeasures::from_samples(&late_slice))
+            .flatten();
+
+        let spatial_mean = |windows: &[(f64, u64)]| {
+            let bodies: u64 = windows.iter().map(|(_, n)| n).sum();
+            if bodies == 0 {
+                0.0
+            } else {
+                windows.iter().map(|(s, _)| s).sum::<f64>() / bodies as f64
+            }
+        };
+        let cells_per_body_window = spatial_mean(&self.spatial_windows);
+        let cells_per_body_window_late = self
+            .spatial_windows
+            .last()
+            .map(|w| spatial_mean(std::slice::from_ref(w)))
+            .unwrap_or(0.0);
 
         let apex_active_samples = self.samples.iter().filter(|s| s.apex_active > 0).count() as f64;
         let recovery = if self.first_predation_tick.is_some()
@@ -712,6 +974,18 @@ impl Recorder {
 
             final_ecology_hash: cubarium_core::ecology_hash(&world.state),
             final_state_hash: cubarium_core::snapshot::state_hash(&world.state),
+
+            eco,
+            late,
+            opening_foliage: self.opening_foliage,
+            opening_wood: self.opening_wood,
+            opening_litter: self.opening_litter,
+            opening_alive_cells: self.opening_alive_cells,
+            depletion_cells_watched: self.watched_cells,
+            cells_per_body_window,
+            cells_per_body_window_late,
+            spatial_windows_observed: self.spatial_windows.len() as u64,
+            spatial_bodies_observed: self.spatial_bodies,
         }
     }
 }
