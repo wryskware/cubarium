@@ -357,9 +357,11 @@ y  = W_o h' + b_o
 Tensor layout: `W_i: [3H × I]`, `W_h: [3H × H]`, `b_i, b_h: [3H]`, rows in gate order,
 row-major, little-endian `f64`. `W_o: [O × H]`, `b_o: [O]`. Loop order is fixed: for
 each animal in slot order, gates in the order above, no reordering by the trainer.
-Initialisation (a Cubarium choice, not an imported result): `b_hz` drawn so that
-`σ(b_hz)` spans retention timescales of 1–100 updates, all weights small and
-non-saturating; verified by the two-history check, not assumed.
+Initialisation (a Cubarium choice, not an imported result), as implemented in R2a:
+matrix weights `N(0, (0.5/√fan_in)²)`; all biases zero except `b_hz`, set in four
+**fixed** groups of 8 units at retention timescales `τ = 10, 30, 100, 300` controller
+updates via `b_hz = logit(exp(−1/τ))`. Retention is a starting structure, not a
+verified property; whether a trained policy uses memory is a later diagnostic.
 
 **Cadence.** `phase ∈ {0, 1}` per animal. The controller runs on ticks where
 `(tick + phase) % 2 == 0`, so the population's inference load is split across both
@@ -504,7 +506,14 @@ Remaining choices, with the preferred option first:
   cannot mate (preferred, simple); versus allowing it and taking the carrier's policy.
 - Mutation of `phase`: never; it is not heritable.
 
-**Evaluation is lineage-based and lifecycle-derived.** Reproducing descendants are the
+**Two evaluations, kept apart.** *Capability fitness* is scored inside an isolated,
+births-disabled episode (R2a: `score = t_min + 0.25 · mean normalized usable terminal
+stores`, survival first, stores only as a bounded tiebreak). *Lineage evaluation* is
+scored in a living world with reproduction on. A capability score must never be
+reported as lineage evidence, and terminal stores are never the objective of the
+lineage evaluation.
+
+**Lineage evaluation is lifecycle-derived.** Reproducing descendants are the
 required evidence later. The horizon for a diet is at least three generations of *that*
 diet's lifecycle: ordinary bodies `gestation 30 s + bud_min_age 120 s + growth to adult`,
 on the order of 1,000 s; apex bodies from the profile's `reproduce_min_age_seconds`,
@@ -617,7 +626,10 @@ survival, depletion, travel and cycle-yield bounds (§9); wading and bursts act 
 whole budget (§1 index 63, §3). Legacy fixture changes in R0b (widened windows,
 re-anchored continuation oracles) do not constrain the adapter's tests.
 
-**Status after R1a (2026-09-14).** Steps 1–6 of §9 are implemented
+**Status after R2a (2026-09-15).** The antithetic-ES trainer, frozen foraging
+fixtures (four training, eight held-out), controls and plumbing smoke exist
+(`2331ae8`..`613da47`; [result](7_Research/r2a-trainer-result-2026-09-15.md)). No
+policy has been trained. **Status after R1a (2026-09-14).** Steps 1–6 of §9 are implemented
 (`6b9e255`..`7614bef`, repair cycle 1 `2055a9b`..`73fbd33` after
 [Astra's review](7_Research/r1a-runtime-review-2026-09-14.md);
 [result](7_Research/r1a-runtime-result-2026-09-14.md)). Step zero
