@@ -81,7 +81,7 @@ only; never population statistics. "Absent" encodings are listed per family.
 | 64–66 | 3 | `ate` = (graze, fruit, scavenge) | [0, 1] | material actually removed from fields by this mouth since the last controller update, each `/ (mouth_rate · Δt_c)` | settlement (`requests`) | 0 |
 | 67 | 1 | `moved` | [0, 1] | mean resolved speed since last update `/ v_max`, clamped | `ResolvedMotion.speed` | 0 |
 | 68 | 1 | `turned` | [−1, 1] | signed physical turn since last update `/ (v_max/r · Δt_c)`, clamped: the fixed per-body scale of a full-budget pivot, so the channel uses its range at native pace | `ResolvedMotion.turn` (transport excluded) | 0 |
-| 69 | 1 | `delivered` | [0, 1] | resolved motor magnitude ÷ requested magnitude, summed over the interval; 1 when nothing was requested | resolver | 1 |
+| 69 | 1 | `delivered` | [0, 1] | Σ resolved motor magnitude ÷ Σ requested magnitude over the interval's ticks; exactly 1 when the requested sum is 0 (nothing asked, or an empty interval) | resolver | 1 |
 
 **Total: 70.** Grouped: food 39, bodies 14, surroundings 5, internal 5, capability 1,
 feedback 6. Parameter count with the §5 network: `3·32·(70 + 32 + 2) + 7·(32 + 1) = 10,215`.
@@ -159,6 +159,10 @@ presence[k] = max_n  w_k(θ_n) · max(0, 1 − d_n / r_sense)
 rel_size[k] = extent_n* / (extent_self + extent_n*)   for the n* attaining that max, else 0
 ```
 
+Ties for `n*` (equal weighted presence) resolve to the neighbour earlier in the list,
+which is already ordered by `(distance, id)`, so the choice is deterministic across
+runs and platforms.
+
 `extent_n` is the neighbour's physical crowding extent, which for an apex member is the
 profile's `body_extent_px`, not the artwork support. Disclosure: when more than 16
 bodies are in range, the farthest are not sensed at all; that truncation is the world's
@@ -211,9 +215,20 @@ allowance. Confirmed against R0b: `Decision.effort` is the only policy-side term
 **Why the turn request is scaled to `ω_attain`, not `ω_max`.** Under the shared budget
 `r · ω_max` is 3.9 px/s for a unit adult against a 0.3 px/s budget, so a request in
 genome units would saturate at `|a₁| ≈ 0.08` and the rest of the channel would be dead
-range. Scaling to the attainable pivot rate makes `(a₀, a₁)` a direct split of the
-budget: demand is `a₀ · v_max/wading + |a₁| · u_full`, which is at most `2 · u_full`,
-and the resolver's common factor only bites when `a₀ + |a₁| > 1` (energy permitting).
+range. Scaling to the attainable pivot rate makes `(a₀, a₁)` close to a direct split of the
+budget. The requested magnitude, stated exactly, is
+
+```
+demand = a₀ · v_max / wading  +  r · |a₁| · min(ω_max, u_full / r)
+```
+
+and the resolver scales both terms by `u / demand` whenever `demand > u`. Two regimes
+matter and both must be tested: with ample energy and a small body (current pace,
+`ω_max` binds) the second term is `r·|a₁|·ω_max < u_full`, so demand stays inside the
+budget even at `a₀ + |a₁| > 1` for moderate turns; with low energy `u_full` falls
+below `v_max / wading`, so full thrust alone already exceeds the budget and any turn
+is scaled with it. `a₀ + |a₁| > 1` is therefore not the universal scaling condition;
+the resolver's own comparison is. Requested and resolved quantities stay distinct.
 `ω_attain` is recomputed every tick from the body's current `r` and `u_full`, so growth,
 wading and low energy all pass through it honestly; it grants nothing the resolver
 would not.
@@ -269,7 +284,9 @@ The resolver already treats pivot as legal at zero speed (`motor.rs:191-250`; te
 - Availability is never derived from the translation that happened: a body that resolved
   `v = 0` while pivoting still had `u_full` available and spent it on sweep.
 
-Worked examples for a unit adult with R0b's shipped semantics: `v_max = 0.3 px/s`,
+Worked examples for a unit adult with R0b's shipped semantics at the **historical
+R0b pace** (`v_max = 0.3 px/s`; the current default after R0d is 5.0 px/s = 1 BL/s, see
+the second table): `v_max = 0.3 px/s`,
 `r = 2.5 px`, `ω_max = π/2 rad/s`, `wading = 1`, `move_cost = 0.006`, `S = 1`, rotation
 price `k = 0.5`, `dt = 0.05`. With ample energy `u_full = 0.30` and
 `ω_attain = min(1.571, 0.30/2.5) = 0.120 rad/s` (6.9°/s).
@@ -285,12 +302,24 @@ price `k = 0.5`, `dt = 0.05`. With ample energy `u_full = 0.30` and
 | (0, 1) with 0.10 px/s affordable | yes | 0.10 | (0, 0.040) | 0.10 | (0, 0.040 rad/s = 2.3°/s) | `1.5e-5` |
 | (0, 1) energy below upkeep | yes | 0 | (0, 0) | 0 | (0, 0): still, unpaid | upkeep to exhaustion |
 
-Read plainly: the policy's `(a₀, a₁)` is a split of one budget, a pure pivot at the
-full budget costs exactly half of full travel, and every radian of turning gives up
-`r` px of travel. R0b measured the native consequences: a unit adult pivots at most
-6.88°/s (a half turn in 26 s) and travels one 4 px cell in about 13 s; an adult
-lanternjaw at full effort pivots at 0.97°/s; a threatened prey's 240°/s escape ceiling
-is pure slack (≤ 13.8°/s attainable). This contract does not tune that pace; §10.
+At the **current default pace** (R0d, `v_max = 5.0 px/s`, `move_cost = 0.00036`, same
+body): `u_full = 5.0`, `u_full / r = 2.0 rad/s`, so `ω_attain = ω_max = 1.571 rad/s`
+(90°/s) and the genome ceiling binds.
+
+| Action `(a₀, a₁)` | `u` | Request `(v_req, ω_req)` | Demand | Resolved `(v, ω)` | Bill per tick (e) |
+| --- | --- | --- | --- | --- | --- |
+| (1, 0) | 5.0 | (5.0, 0) | 5.0 | (5.0, 0) | `0.00036·5.0·0.05 = 9.0e-5` |
+| (0, 1) pure pivot | 5.0 | (0, 1.571) | 3.93 | (0, 1.571 = 90°/s), unscaled | `0.00036·(0.5·3.93)·0.05 = 3.5e-5` |
+| (1, 1) both full | 5.0 | (5.0, 1.571) | 8.93 | scale 0.56 → (2.80, 0.880 = 50°/s) | `0.00036·(2.80 + 0.5·2.20)·0.05 = 7.0e-5` |
+| (1, 0.5) | 5.0 | (5.0, 0.785) | 6.96 | scale 0.72 → (3.59, 0.564) | |
+| (1, 0) with 1.0 px/s affordable | 1.0 | (5.0, 0) | 5.0 | (1.0, 0) | `1.8e-5` |
+| (0, 1) with 1.0 px/s affordable | 1.0 | (0, 0.4) | 1.0 | (0, 0.4 = 23°/s) | `0.9e-5` |
+
+Read plainly: `(a₀, a₁)` is a split of one budget, a pure pivot at the full budget
+costs half of full travel per px of magnitude, and every radian of turning gives up
+`r` px of travel. Historical R0b consequences (6.88°/s unit-adult pivot, 13 s per cell)
+were what prompted the R0d recalibration; at 1 BL/s a unit adult turns at its genome
+ceiling and an adult lanternjaw at about 16°/s (65°/s during a paid strike).
 
 ## 5. Recurrence state, cadence and persistence
 
@@ -316,8 +345,15 @@ non-saturating; verified by the two-history check, not assumed.
 **Cadence.** `phase ∈ {0, 1}` per animal. The controller runs on ticks where
 `(tick + phase) % 2 == 0`, so the population's inference load is split across both
 ticks and each animal sees `Δt_c = 0.1 s`. Feedback (indices 64–69) accumulates
-every tick and is consumed and zeroed at the animal's controller tick. Motor
-resolution, costs, intake and physiology run every tick as now.
+every tick from that tick's resolved motion and settled intake, and is read then
+zeroed at the animal's next controller tick, *before* that tick's motion is resolved.
+The first interval after birth may hold fewer than two ticks (`feedback.ticks` says
+how many); its means divide by the ticks actually accumulated, and an interval with
+zero ticks reads as zero intake, zero motion and `delivered = 1`. Motor resolution,
+costs, intake and physiology run every tick as now. `motor_avail` is sampled at the
+controller tick from the same `affordable_motor` call the motor stage uses that tick,
+in tick order, never from a duplicated approximate bill; a zero-capacity or
+zero-rate case encodes as 0, never NaN.
 
 **Per-animal mutable state** (exact values, all persisted):
 
@@ -333,8 +369,14 @@ resolution, costs, intake and physiology run every tick as now.
 style as care/hunter/quiet/apex (`world/state.rs:22-82`): a version, a `Vec<Policy>` of
 exact weights (each with its `schema_digest`), and a sorted `Vec<(OrganismId, AnimalState)>`.
 Identical weights are stored once and referenced; hidden state is never shared.
-Snapshot schema becomes 15; decoding 14 yields an empty extension, so **every existing
-world loads with every organism legacy-controlled**, byte-for-byte the current tick.
+The snapshot schema advances by one from whatever is current when the extension is
+added (15 if nothing else has moved), with the previous schema frozen as a mirror
+decoder per repository practice; decoding the previous schema yields an empty
+extension, so **every existing world loads with every organism legacy-controlled**,
+and continues on the same trajectory (tests compare trajectories and state hashes,
+not serialized bytes across formats). The digest is computed over exactly serialized
+bytes of the canonical schema text and field lists, and `validate` checks every
+weight and state value is finite and every policy reference resolves.
 An animal is neural iff it has an entry; the world's step dispatches on that per
 animal. Migration of a legacy world is an explicit development command that inserts
 entries with chosen policies; loading never does it.
@@ -466,9 +508,11 @@ Fixtures that must exist before step 4 is called done:
 
 - **Sampler geometry.** Partition of unity of `w_k`; a lone food cell dead ahead lands in
   sector 0 only; rotating the observer by 60° shifts every sector by one index exactly;
-  a body straddling a seam senses the same 70 values as the equivalent flat layout; a
-  1-hop body has an all-zero far ring; presence decays to 0 at `r_sense`; 17 neighbours
-  disclose the truncation.
+  a body straddling a seam senses the same *food and body* values as a physically
+  equivalent flat layout with the same stocks and neighbours, and its body frame is the
+  transported one (habitat inputs such as `light`, `height` and `up` legitimately differ
+  across faces and are not asserted equal); a 1-hop body has an all-zero far ring;
+  presence decays to 0 at `r_sense`; 17 neighbours disclose the truncation.
 - **Action adapter.** The six §4 rows through `motor::resolve` with R0b's limits; mouth
   normalisation caps total handling at one mouth-tick; masked channels never reach the
   `Decision`; deadband gives exact stillness and a zero bill beyond upkeep; a held turn
