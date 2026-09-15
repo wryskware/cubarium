@@ -605,7 +605,9 @@ mod tests {
         let l = limits(REFERENCE_RADIUS_PX, 90.0f64.to_radians(), cap);
         let m = resolve(h, &MotorRequest { heading: Vec2::new(-1.0, 0.0), speed: cap }, &l);
         assert!(m.sweep <= cap, "{} px/s of sweep on a {cap} px/s budget", m.sweep);
-        assert!(m.sweep < 0.02, "a resting body swept {} px/s", m.sweep);
+        // R0d pace calibration: the same 5% resting share of a 16.667x larger cruise.
+        // Measured 0.2350 px/s = 0.047 BL/s of the unit adult — a half turn in 33 s.
+        assert!(m.sweep < 0.24, "a resting body swept {} px/s", m.sweep);
         assert!(m.sweep > 0.0, "resting is not paralysis");
     }
 

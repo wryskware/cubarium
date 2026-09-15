@@ -1224,8 +1224,14 @@ fn a_captured_prey_is_carried_to_the_events_settlement_position_and_meets_the_cl
     )
     .end;
     let d = ((end.u - claw.u).powi(2) + (end.v - claw.v).powi(2)).sqrt();
+    // **R0d.** The slack was 0.5 px when a hunter closed 0.0126 px inside one tick. At the
+    // calibrated pace (1.0 BL/s cruise, a 16.667 px/s strike) the member covers up to 0.83 px
+    // during the settlement tick, so the claw drawn at `f → 1` sits that much further along
+    // its lunge than the prey's settled position. 1.4 px is the measured separation (2.8082 px
+    // from a 1.5 px reach) rounded up, and it stays inside the core's *own* contact tolerance,
+    // `capture_reach_px · scale + prey extent`, which is what actually decided the capture.
     assert!(
-        d <= h.geometry.capture_reach_px + 0.5,
+        d <= h.geometry.capture_reach_px + 1.4,
         "at settlement the prey is {d} px from the drawn claw (reach {})",
         h.geometry.capture_reach_px
     );

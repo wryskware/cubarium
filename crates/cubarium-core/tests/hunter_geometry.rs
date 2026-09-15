@@ -262,6 +262,11 @@ fn a_juvenile_grasps_at_its_own_published_scale() {
     aim(&mut world, hunter, Vec2::new(1.0, 0.0), 1.0);
     shrink(&mut world, hunter, child_structure);
     let adult_grasp = travel(spot, chart_offset(Vec2::new(1.0, 0.0), profile.capture_offset_body)).end;
+    // R0d: the claim here is about *reach*, not about patience. At the calibrated pace
+    // (1.0 BL/s) a juvenile simply walks the 8 px from its own grasp to the adult one inside
+    // 200 ticks and eats, which proves nothing about the published scale — so the member is
+    // frozen and the geometry is what decides.
+    world.state.organisms.get_mut(hunter).expect("alive").phenotype.speed_max = 0.0;
     let far = place_prey(&mut world, adult_grasp, 0.3, 0.2, 0.3);
     for _ in 0..200 {
         world.step();

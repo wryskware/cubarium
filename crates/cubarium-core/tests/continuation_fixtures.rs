@@ -1,4 +1,4 @@
-//! Regenerates the `*-plus600-r0b.cubw` continuation fixtures.
+//! Regenerates the `*-plus600-*.cubw` continuation fixtures.
 //!
 //! Milestone R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`) made body rotation
 //! a physical, paid act sharing one budget with translation, and milestone R0b
@@ -42,7 +42,7 @@ const PAIRS: &[(&str, &str, u64)] = &[
     ("pre-hunter-v9-173400.cubw", "pre-hunter-v9-173400-plus600-r0b.cubw", 174_000),
     ("care-v11-shower-360.cubw", "care-v11-shower-360-plus600-r0b.cubw", 960),
     ("care-v11-hunters-200.cubw", "care-v11-hunters-200-plus600-r0b.cubw", 800),
-    ("hunter-v3-charge-active.cubw", "hunter-v3-charge-active-plus600-r0b.cubw", 6_170),
+    ("hunter-v3-charge-active.cubw", "hunter-v3-charge-active-plus600-r0d.cubw", 6_170),
     ("quiet-v12-plain-3000.cubw", "quiet-v12-plain-3000-plus600-r0b.cubw", 147_600),
     ("quiet-v12-care-3000.cubw", "quiet-v12-care-3000-plus600-r0b.cubw", 147_600),
 ];
@@ -50,6 +50,16 @@ const PAIRS: &[(&str, &str, u64)] = &[
 /// The build id every regenerated fixture carries, so a reader can tell at a glance that it is
 /// this milestone's recording and not a release binary's.
 const BUILD_ID: &str = "r0b-motor-envelope";
+
+/// R0d (`design/handoffs/r0d-pace-opus-2026-09-14.md`) re-anchored exactly one of these pairs.
+/// The pace calibration lives in `WorldConfig`, which every fixture carries in its own
+/// snapshot, so seven of the eight trajectories are untouched and keep their R0b recording
+/// byte for byte. The hunter pair moved for a different reason: R0d corrected the pursuit
+/// hold predicate in `world/step.rs`, which is code, not config. Its recording is renamed so
+/// the build id in the file and the milestone in the name agree.
+fn build_id(end: &str) -> &'static str {
+    if end.contains("-r0d") { "r0d-pace-calibration" } else { BUILD_ID }
+}
 
 fn continue_600(start: &str) -> cubarium_core::WorldState {
     let bytes = std::fs::read(fixture(start)).expect("the start fixture");
@@ -72,7 +82,7 @@ fn regenerate() {
     for (start, end, tick) in PAIRS {
         let state = continue_600(start);
         assert_eq!(state.tick, *tick, "{start}: unexpected end tick");
-        let bytes = encode_snapshot(&state, BUILD_ID);
+        let bytes = encode_snapshot(&state, build_id(end));
         std::fs::write(fixture(end), &bytes).expect("write the continuation fixture");
         println!("{end}: {} bytes at tick {}", bytes.len(), state.tick);
     }
@@ -89,7 +99,7 @@ fn every_regenerated_fixture_is_this_builds_own_continuation() {
         assert_eq!(state.tick, *tick, "{start}: unexpected end tick");
         let recorded = std::fs::read(fixture(end)).expect("the continuation fixture");
         let (meta, expected) = decode_snapshot(&recorded).expect("it decodes");
-        assert_eq!(meta.build_id, BUILD_ID, "{end}: not a milestone recording");
+        assert_eq!(meta.build_id, build_id(end), "{end}: not a milestone recording");
         assert_eq!(state, expected, "{end} is not what this build produces from {start}");
     }
 }

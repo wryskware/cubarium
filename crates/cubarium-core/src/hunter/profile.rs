@@ -247,7 +247,13 @@ impl FixedHunterProfile {
             stalk_timeout_seconds: 8.0,
             windup_seconds: 0.6,
             strike_seconds: 1.0,
-            strike_speed_px_s: 1.0,
+            // Scaled with the world's cruise calibration (`organism.speed_max` 0.3 → 5.0
+            // px/s, i.e. 0.06 → 1.0 BL/s of the unit adult) by the same 16.667×, so the
+            // strike keeps the *multiple* of cruise it always had. The apex adult cruises
+            // about 4.2 px/s (`speed · speed_max · size^-0.25` at size 2), so a 16.67 px/s
+            // strike is still ~4× cruise, and `strike_closing_px` is 16.67 px over the 1.0 s
+            // strike — a lunge an observer can see at 64×64.
+            strike_speed_px_s: 16.667,
             strike_energy_cost: 0.08,
             recovery_seconds: 5.0,
             capture_base: 0.65,

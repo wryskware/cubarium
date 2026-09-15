@@ -957,8 +957,18 @@ impl World {
                         // The pursuit stopping distance, reconciled with the effector rather
                         // than left implicit: a prey already *inside* the reach envelope is not
                         // approached further — walking onto it would put it behind the claws.
+                        //
+                        // R0d: this used to read `body.x < capture_offset_body.x - tolerance
+                        // - closing`, which is the *far* side of the lunge, not the reach
+                        // envelope the comment names — it was false for a prey sitting in the
+                        // claws and so never held anything. It went unnoticed only because
+                        // `closing = strike_speed_px_s · strike_seconds` was 1 px, inside the
+                        // 2.6 px tolerance. The pace calibration makes the lunge 16.67 px, so
+                        // a member charged straight through point-blank prey and missed. The
+                        // predicate is now the envelope itself, which is what `in_contact`
+                        // already means everywhere else in this file.
                         let inside = organisms.get(t).and_then(admission).is_some_and(|c| {
-                            c.body.x < geometry.capture_offset_body.x - c.tolerance - closing
+                            c.body.x < geometry.capture_offset_body.x + c.tolerance
                         });
                         let hold = inside || m.phase == HunterPhase::Windup;
                         if let Some(d) = decisions.iter_mut().find(|(id, _)| *id == m.id) {

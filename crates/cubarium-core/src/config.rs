@@ -433,14 +433,29 @@ impl Default for OrganismConfig {
             structure_adult: 1.0,
             reserve_max: 1.0,
             energy_max: 2.0,
-            speed_max: 0.3,
+            // Cruise, calibrated in body lengths per second of the *unit adult*, never in
+            // pixels: the display is real space of an unfixed scale (an 8-inch cube or an
+            // 8-metre one), so BL/s is the only portable statement of pace. The unit adult's
+            // body length is `BL = 2 · extent` = 5 px, and `1.0 BL/s · 5 px/BL = 5.0 px/s`.
+            // R0b measured the old 0.3 px/s as 0.06 BL/s — a body that crosses its own length
+            // in 17 s and needs 26 s for a half turn, which reads as a still image at 64×64.
+            // The size exponent in `genome::decode` (`size^-0.25`) is untouched, so a larger
+            // body is still faster in px/s and slower in BL/s.
+            speed_max: 5.0,
             mouth_rate: 0.05,
             intake_half_saturation: 0.45,
             sense_radius: 6.0,
             assimilation_material: 0.6,
             assimilation_energy: 0.5,
             maintenance: 0.005,
-            move_cost: 0.006,
+            // Held at the *per-second* bill a body at full cruise paid before the pace
+            // calibration: `0.006 · 0.3 = 0.0018 e/s per unit structure`, so
+            // `move_cost = 0.006 · 0.3 / 5.0 = 0.00036`. The consequence is deliberate and
+            // named: travel *per pixel of distance* is now ~16.7× cheaper, because a body
+            // covers 16.7× the ground for the same second of motion. That is an ecological
+            // change, and it is to be rebalanced by the headless parameter search, not by
+            // hand here (WORKING_POLICY, 2026-09-14: "tune the whole ecosystem together").
+            move_cost: 0.00036,
             sense_cost: 0.0002,
             oxidation_threshold: 0.5,
             oxidation_rate: 0.01,

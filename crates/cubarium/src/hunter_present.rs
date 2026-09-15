@@ -122,9 +122,12 @@ pub fn validate_view(view: &HunterView) -> Result<(), String> {
 
 /// The root speed, in chart pixels per second, at which the hunter's ambient body is in full
 /// locomotion (`LivingPose::movement = 1`): the trial profile's adult maximum, about
-/// 0.2523 px/s. A strike burst (up to 1 px/s) saturates it. Review-tunable presentation;
-/// it does not read the profile so a profile change cannot move the legs by itself.
-pub const HUNTER_FULL_SPEED_PX_S: f64 = 0.25;
+/// 4.205 px/s after the R0d pace calibration (0.2523 px/s before it, scaled by the same
+/// 16.667× the world's `organism.speed_max` was). A strike burst (up to 16.67 px/s)
+/// saturates it. Review-tunable presentation; it does not read the profile so a profile
+/// change cannot move the legs by itself — which is exactly why it has to be rescaled here,
+/// or the gait would sit permanently saturated at the new pace.
+pub const HUNTER_FULL_SPEED_PX_S: f64 = 4.1667;
 
 /// The cocked reach a `Windup` leaves behind: the study's coil, fully wound.
 pub const COCKED: Reach = Reach {

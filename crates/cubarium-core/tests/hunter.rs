@@ -2269,12 +2269,16 @@ fn observations_do_not_move_a_profile_three_hunter_world() {
     // turn and both of these worlds legitimately move again. The claim — that *observing* a
     // world never moves it — is unchanged, and is anchored to this build's own numbers, still
     // read off the schema 12 projection (`snapshot::v12`).
+    // R0d re-recorded both: the pace calibration changed `WorldConfig::default()`, which is
+    // the config these staged worlds are built from, and it corrected the pursuit hold
+    // predicate in `world/step.rs`. The claim — that *observing* a world never moves it — is
+    // unchanged and is anchored to this build's own numbers.
     assert_eq!(
-        hunt_hash, 13_779_911_353_741_670_028,
+        hunt_hash, 9_510_550_268_652_031_992,
         "a hunt-and-digest world moved"
     );
     assert_eq!(
-        birth_hash, 13_840_512_171_130_438_648,
+        birth_hash, 14_451_807_541_129_279,
         "a funded-birth world moved"
     );
 }

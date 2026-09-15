@@ -8,7 +8,7 @@
 //! turns a body for free.
 
 use cubarium_core::config::FounderKind;
-use cubarium_core::hunter::ContactGeometry;
+use cubarium_core::hunter::{ContactGeometry, HunterPhase};
 use cubarium_core::ids::OrganismId;
 use cubarium_core::motor::{self, REFERENCE_RADIUS_PX};
 use cubarium_core::organism::Mode;
@@ -204,9 +204,21 @@ fn an_apex_late_override_cannot_spin_a_body_for_free() {
         "a body this wide must be held well under its genome's {ceiling} rad/s, not {pivot_ceiling}"
     );
 
+    // **R0d.** A strike is a *paid* burst that lifts the whole shared budget, so during the
+    // Strike phase the envelope is the profile's strike speed, not cruise — exactly as the
+    // escaping-prey fixture bounds a threatened body by its escape multiple. Before the pace
+    // calibration this never showed up here, because a 1 px/s strike was barely above the
+    // 0.25 px/s the member cruised at; at 16.667 px/s it is the binding envelope.
+    let strike_pivot = profile.strike_speed_px_s / radius;
     let mut largest_turn_rate = 0.0f64;
+    let mut largest_budget = capability;
     for _ in 0..400 {
         let heading = world.state.organisms.get(hunter).expect("alive").heading;
+        let striking = world
+            .hunters()
+            .members
+            .iter()
+            .any(|m| m.id == hunter && m.phase == HunterPhase::Strike);
         world.step();
         world.drain_hunter_events();
         world.drain_events();
@@ -216,10 +228,14 @@ fn an_apex_late_override_cannot_spin_a_body_for_free() {
         if crossed_a_seam(&world, hunter) {
             continue;
         }
+        let allowed = if striking { strike_pivot } else { pivot_ceiling };
+        if striking {
+            largest_budget = largest_budget.max(profile.strike_speed_px_s);
+        }
         let rate = signed_turn(heading, o.heading).abs() / DT;
         assert!(
-            rate <= pivot_ceiling * (1.0 + 1e-9),
-            "the member turned at {rate} rad/s, past the {pivot_ceiling} its body allows"
+            rate <= allowed * (1.0 + 1e-9),
+            "the member turned at {rate} rad/s, past the {allowed} its body allows"
         );
         largest_turn_rate = largest_turn_rate.max(rate);
     }
@@ -236,11 +252,17 @@ fn an_apex_late_override_cannot_spin_a_body_for_free() {
         "the fixture never made the member turn as hard as its budget allowed: \
          {largest_turn_rate} against {holding_ceiling}"
     );
-    // The R0b regression guard: the rate the *old* union-of-ceilings capability granted this
-    // body is now unreachable by more than an order of magnitude.
-    let pre_r0b = (capability + REFERENCE_RADIUS_PX * ceiling) / radius;
+    // The R0b regression guard, re-anchored at R0d. At 0.06 BL/s the addend R0b removed
+    // (`REFERENCE_RADIUS_PX · turn_rate_max` = 3.93 px/s) was thirteen times the whole cruise
+    // budget, so "unreachable by an order of magnitude" was an available claim. At 1.0 BL/s
+    // cruise is 4.2 px/s and the addend is still 3.93, so no such margin exists arithmetically
+    // and the 10× form would assert nothing about this milestone. What is still asserted, every
+    // tick above, is what R0b actually established: the rate never exceeds what the member's own
+    // budget buys in the phase it is in. Here that budget is named again, with the addend added
+    // back, to show the old envelope is strictly the larger one.
+    let pre_r0b = (largest_budget + REFERENCE_RADIUS_PX * ceiling) / radius;
     assert!(
-        largest_turn_rate < 0.1 * pre_r0b,
+        largest_turn_rate < pre_r0b,
         "the member still turns like the pre-R0b envelope allowed ({largest_turn_rate} \
          against {pre_r0b} rad/s)"
     );
@@ -492,21 +514,30 @@ fn an_escaping_prey_turns_within_its_body_and_pays_for_it() {
 
     let mut fastest: Vec<(OrganismId, f64, f64, f64)> = Vec::new();
     for _ in 0..600 {
-        let before: Vec<(OrganismId, Vec2, f64, f64)> = world
+        let before: Vec<(OrganismId, Vec2, f64, f64, Face)> = world
             .state
             .organisms
             .iter()
             .filter(|(id, _)| *id != hunter)
-            .map(|(id, o)| (id, o.heading, o.phenotype.extent, o.phenotype.speed_max))
+            .map(|(id, o)| (id, o.heading, o.phenotype.extent, o.phenotype.speed_max, o.pos.face))
             .collect();
         world.step();
         world.drain_hunter_events();
         world.drain_events();
-        for (id, heading, extent, speed_max) in before {
+        for (id, heading, extent, speed_max, face) in before {
             let Some(o) = world.state.organisms.get(id) else {
                 continue;
             };
-            if crossed_a_seam(&world, id) {
+            // **R0d.** Seam transport is unpaid and is excluded from this envelope, which is
+            // what `crossed_a_seam` is for — but that helper only sees a *published path* that
+            // straddles two faces. At 1.0 BL/s a threatened body can land its whole tick on
+            // the far side of a seam, publishing one segment on the new face and defeating the
+            // check; the residual then reads as ~47 px/s of sweep on a 9.2 px/s envelope. A
+            // change of face is the same event and is excluded the same way.
+            if crossed_a_seam(&world, id)
+                || o.pos.face != face
+                || world.moved_segments(id).len() > 1
+            {
                 continue;
             }
             let turn = signed_turn(heading, o.heading).abs();

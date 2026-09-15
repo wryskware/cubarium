@@ -1098,7 +1098,9 @@ fn depth_drive_run(depth: f32, ticks: u32) -> (f64, f64) {
 
 #[test]
 fn the_depth_drive_carries_a_canopy_genome_upward() {
-    let (h0, h1) = depth_drive_run(1.0, 400);
+    // R0d: 1.0 BL/s covers in 24 ticks the distance 400 ticks bought at 0.06 BL/s, and the
+    // probe walks off the face if it is left running for the old window.
+    let (h0, h1) = depth_drive_run(1.0, 24);
     assert!(
         h1 > h0 + 0.05,
         "`depth = 1` means `h_pref = 1`: the probe should have climbed, but went from {h0} to {h1}"
@@ -1107,7 +1109,7 @@ fn the_depth_drive_carries_a_canopy_genome_upward() {
 
 #[test]
 fn the_depth_drive_carries_a_soil_genome_downward() {
-    let (h0, h1) = depth_drive_run(0.0, 400);
+    let (h0, h1) = depth_drive_run(0.0, 24);
     assert!(
         h1 < h0 - 0.05,
         "`depth = 0` means `h_pref = −1`: the probe should have sunk, but went from {h0} to {h1}"
@@ -1225,8 +1227,10 @@ fn wading_run(depth: f64, swim: f32, ticks: u32) -> (f64, Mode) {
 
 #[test]
 fn wading_halves_the_distance_of_a_non_swimmer() {
-    let (dry, dry_mode) = wading_run(0.0, 0.0, 200);
-    let (wet, wet_mode) = wading_run(1.0, 0.0, 200);
+    // R0d: 12 ticks at 1.0 BL/s is the distance 200 ticks walked at 0.06 BL/s; the old
+    // window now carries the probe across a seam and the comparison stops being a comparison.
+    let (dry, dry_mode) = wading_run(0.0, 0.0, 12);
+    let (wet, wet_mode) = wading_run(1.0, 0.0, 12);
     assert_eq!(dry_mode, wet_mode, "the two runs must make the same decisions");
     assert!(dry > 0.5, "the dry probe must actually travel: {dry} px");
     assert!(
@@ -1237,8 +1241,8 @@ fn wading_halves_the_distance_of_a_non_swimmer() {
 
 #[test]
 fn a_swimmer_ignores_the_pool() {
-    let (dry, dry_mode) = wading_run(0.0, 1.0, 200);
-    let (wet, wet_mode) = wading_run(1.0, 1.0, 200);
+    let (dry, dry_mode) = wading_run(0.0, 1.0, 12);
+    let (wet, wet_mode) = wading_run(1.0, 1.0, 12);
     assert_eq!(dry_mode, wet_mode, "the two runs must make the same decisions");
     assert!(
         (wet - dry).abs() <= 1e-12 * dry,

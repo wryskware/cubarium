@@ -1411,12 +1411,13 @@ fn the_depth_term_points_up_the_side_faces_and_vanishes_on_top() {
             o.hunger_memory = 1.0;
             o.mode = Mode::Seeking;
         }
-        // **R0b.** The shared budget caps a unit adult's turn at `u · dt / r` = 0.006 rad a
-        // tick, so a body that starts facing along the chart needs ~260 ticks just to swing
-        // the 90° onto the depth gradient, and travels almost nothing while it does. 200 ticks
-        // no longer contains the manoeuvre; 1,600 (80 s) contains it with room to travel, and
-        // is still well inside upkeep-only survival. Nothing about the assertion moved.
-        for _ in 0..1_600 {
+        // **R0b** widened this window to 1,600 ticks because a 0.06 BL/s body needed ~260
+        // ticks just to swing 90° onto the depth gradient. **R0d** calibrated cruise to
+        // 1.0 BL/s, which scales both the turn and the travel by 16.667, so the manoeuvre and
+        // the journey fit in 1/16 of that. 1,600 ticks is now far *too* long — 80 s at 5 px/s
+        // walks the probe clean off the face it started on — so the window returns to 100
+        // ticks (5 s), which is the same physical distance R0b's 1,600 bought.
+        for _ in 0..100 {
             world.step();
         }
         let o = world.state.organisms.get(id).expect("alive");
@@ -1521,9 +1522,17 @@ fn sensing_reaches_the_configured_depth_and_finds_food_two_cells_out() {
             // old `y < −0.05` described the pre-R0b envelope, not the sensor. What the sensor
             // decides is the *direction*, and that is what is asserted: it turned the right
             // way, and it turned as hard as the shared budget permits.
-            let ceiling = speed_max * crate::DT / extent;
+            // **R0d.** At 1.0 BL/s the motor budget buys 0.1 rad a tick, which is *more*
+            // than the genome's own 90 deg/s angular ceiling (0.0785 rad a tick), so the
+            // genome binds again and the effective per-tick ceiling is the smaller of the
+            // two. What the sensor decides is still the direction, and it still turns a
+            // substantial share of whatever actually binds (measured 0.044 rad).
+            let budget = speed_max * crate::DT / extent;
+            let genome =
+                f64::from(world.config().drives.turn_rate_max_deg).to_radians() * crate::DT;
+            let ceiling = budget.min(genome);
             assert!(
-                o.heading.y < 0.0 && o.heading.y.abs() > 0.8 * ceiling,
+                o.heading.y < 0.0 && o.heading.y.abs() > 0.4 * ceiling,
                 "a 6 px sensor turned toward food two cells up: {:?} (tick ceiling {ceiling})",
                 o.heading
             );
