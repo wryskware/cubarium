@@ -13,8 +13,13 @@ use support::{Scratch, parse, run};
 /// run's output surviving in the tree.
 fn write_policy(scratch: &Scratch, name: &str, seed: u64) -> std::path::PathBuf {
     let theta = cubarium_search::es::tensor::initial_center(seed);
-    let file = cubarium_search::es::export::PolicyFile::new(&theta, "test", 0, 59)
-        .expect("an exportable centre");
+    // The ecology the policy claims: the shipped defaults, which is the world `--fresh`
+    // creates here. Its hash is the one `es-export` records (`calibrate::config_hash`).
+    let default_hash =
+        cubarium_search::calibrate::config_hash(&cubarium_core::WorldConfig::default());
+    let file =
+        cubarium_search::es::export::PolicyFile::new(&theta, "test", 0, 59, "default", default_hash)
+            .expect("an exportable centre");
     scratch.write(name, &serde_json::to_string(&file).expect("writing the policy file"))
 }
 
