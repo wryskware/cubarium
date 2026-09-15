@@ -174,23 +174,36 @@ N¹ += paid_A + paid_Q;   heat += e_v · (paid_A + paid_Q)
 
 `unpaid` is carried to 3d.
 
-### 4.4 Growth, foliage before wood, each paying construction respiration `c_g` (3a)
+### 4.4 Growth: reserve share first, then foliage, then wood, then the rest to reserve (3a)
+
+Revised after the first implementation run (§18, third round): the original
+order refilled the reserve only from what foliage and wood left, which under
+foliage-first allocation is nothing, and it spent reserve on routine foliage
+top-up whenever `P < P_cap`, which is always. A reserve that can never persist
+is not a "finite budget for recovery". Two rules fix that: a fixed share of
+surplus goes to the reserve before anything else, and reserve is spent on
+foliage only in an emergency, below `p_reflush·P_cap`.
 
 ```
+ΔQ_s = min( q_share · rem, D_Q );                       rem −= ΔQ_s;   Q¹ += ΔQ_s      reserve share off the top
 ΔP_A = min( rem / (1 + c_g), D_P );                    rem −= (1 + c_g)·ΔP_A
-ΔP_Q = min( Q¹ / (1 + c_g), D_P − ΔP_A );              Q¹ −= (1 + c_g)·ΔP_Q
+ΔP_Q = 0  unless  P⁻ < p_reflush · P_cap, then
+       ΔP_Q = min( Q¹ / (1 + c_g),  D_P − ΔP_A,  (p_reflush·P_cap − P⁻ − ΔP_A)⁺ );   Q¹ −= (1 + c_g)·ΔP_Q
 P¹ = P⁻ + ΔP_A + ΔP_Q;   N¹ += c_g·(ΔP_A + ΔP_Q);   heat += e_v · c_g · (ΔP_A + ΔP_Q)
 ΔW   = min( rem / (1 + c_g), D_W );                    rem −= (1 + c_g)·ΔW
 W¹ = W⁻ + ΔW;   N¹ += c_g·ΔW;   heat += e_v · c_g · ΔW
-ΔQ   = min( rem, D_Q );   Q¹ += ΔQ;   rem −= ΔQ
+ΔQ_r = min( rem, D_Q − ΔQ_s );   Q¹ += ΔQ_r;   rem −= ΔQ_r
 N¹ += rem;   heat += e_v · rem            (rounding residue only; must be ~0)
 ```
 
 Construction nutrient (`c_g·…`) is deposited in the growing cell's own `N`.
 Reflush from `Q` is the "finite budget for recovery": after defoliation the
-stand rebuilds leaves out of reserve at up to `r_p·W` per second until the
-reserve is gone, then only out of new income, which is proportional to the
-foliage it has left.
+stand rebuilds leaves out of reserve at up to `r_p·W` per second, but only up
+to `p_reflush·P_cap` and only until the reserve is gone; from there growth comes
+from new income, which is proportional to the foliage it has left. In ordinary
+life (`P ≥ p_reflush·P_cap`) the reserve is never touched for foliage, and
+every tick with a surplus puts `q_share` of it into the reserve until
+`Q = Q_max`; a full reserve takes no share and foliage gets everything again.
 
 ### 4.5 Senescence (3b)
 
@@ -494,7 +507,9 @@ complete.
 | foliage regrowth rate | `r_p` | 0.002 /s per m of `W` | provisional | reflush of a stripped stand from reserve in ~3.5 min; also the leaf-growth cap that sets `W*` |
 | wood growth rate | `r_w` | 0.001 /s | provisional | e-folding of wood ~25 min in average light when income allows |
 | construction respiration | `c_g` | 0.2 | provisional | growth is paid, not free |
-| dieback per unpaid maintenance | `κ` | 1 | provisional | |
+| reserve share | `q_share` | 0.2 | provisional | a stand with a surplus fills its reserve in ~1,000 s (`0.2·rem ≈ 0.0003` bright, `0.00016` average) |
+| reflush threshold | `p_reflush` | 0.25 | provisional | reserve is spent on foliage only below a quarter of the structural cap (`0.3` bright, `0.165` average), above the recovery breakeven in both classes |
+| dieback per unpaid maintenance | `κ` | 1 | provisional | wood of a stand that cannot pay dies at `m_w`: e-fold ~80 min, so death of a large stand takes hours and is censored in every 30-min scenario (first implementation run) |
 | alive threshold | `W_min` | 0.02 m | provisional | |
 | donor threshold | `W_est` | 0.3 m | provisional | half-grown stands can seed |
 | donor reserve floor | `q_prop` | 0.5 | provisional | only a stand with half its reserve spends on propagules |
@@ -569,8 +584,15 @@ expected result of B1a and B4a, not a failure of them. Coexistence is a question
 of area, light and movement (B1b, B6b), and the ratios above are what those
 scenarios measure.
 
-Recovery after stripping. Reflush spends reserve at `r_p·W*`: an average stand
-rebuilds ≈ 0.13 m of leaf from `Q = 0.16` in ≈ 3.5 min, a bright one ≈ 0.25 m
+Reserve. With `q_share = 0.2` of every tick's surplus, a bright stand at `P*`
+(`rem ≈ 0.00153`) fills `Q_max = 0.3` in ≈ 1,000 s and an average one
+(`rem ≈ 0.00079`) fills `0.16` in the same time; while filling, foliage gets
+80 % of the surplus, so `P*` sits a few hundredths lower until the reserve is
+full. A full reserve is what makes a stand a §4.8 donor.
+
+Recovery after stripping. Reflush spends reserve at `r_p·W*` up to
+`p_reflush·P_cap`: an average stand rebuilds ≈ 0.13 m of leaf (to its 0.165
+ceiling) from `Q = 0.16` in ≈ 3.5 min, a bright one ≈ 0.25 m (ceiling 0.3)
 from `Q = 0.3` in the same time. Income then has to cover senescence:
 breakeven `c·P − m_w·W* = (1 + c_g)·m_p·P` gives `P ≈ 0.12` (average) and
 `P ≈ 0.07` (bright). A reflushed average stand therefore sits near breakeven at
@@ -649,7 +671,7 @@ replacement fixtures when B0 differs.
 | B1b | one grazer, a region | one mobile legacy grazer on a 5 × 5 mature region, 36,000 ticks; twice, bright and average | as B1a plus cells visited, region foliage total, minimum stand `P`, stand deaths | bright: 25 × 0.00064 ≈ 0.016 m/s against a need of 0.0069, coexistence with retained foliage is **expected**; average: 25 × 0.00015 ≈ 0.004 against 0.0069, the grazer is expected to run the region down. Both reported; a bright failure is a finding |
 | B2 | depletion and relocation | one mobile legacy grazer, three bright mature stands three cells apart, 36,000 ticks | cells visited, time per stand, `P` minima, `Q` at departure, state on return | the grazer leaves a stand near the type-II floor and moves on; whether a stand recovers before return is reported, not assumed |
 | B3 | plant recovery | one mature stand, `P` moved by fiat to `D` at tick 0 (booked as an internal transfer), no animals; twice, bright and average | time to `0.5·P*` and `0.9·P*` of the B0 value (censored if unreached), `Q` dip depth and refill, `N` drawdown | reflush from `Q` first (visible `Q` fall), then income-limited; bright reaches `0.9·P*` in ~10 min, average is expected to sit near breakeven and be reported censored (§11) |
-| B4a | repeated stripping and death | three pinned grazers on one isolated bright mature stand | time to `Q = 0`, dieback onset, death tick, `Wd` after death, grazers' fate | `Q → 0`, `W → Wd`, no regrowth (no donors), grazers starve |
+| B4a | repeated stripping and death | three pinned grazers on one isolated bright mature stand | time to `Q = 0`, dieback onset, `W` decline rate, death tick (censored if unreached), `Wd` at horizon, grazers' fate | `Q → 0`, dieback opens, `W` declines at `κ·m_w` (e-fold ~80 min at §11, so death is expected censored), no regrowth (no donors), grazers starve |
 | B4b | recovery after death | B4a's stand killed, grazers removed, living ring of eight bright mature stands around it, 36,000 ticks | tick of establishment, `W`, `P` at horizon as fractions of the B0 bright values | establishes within a minute (eight donors, §11); rebuilding is reported censored at 30 min |
 | B5 | dietary exclusion | each founder kind pinned alone on (a) a foliage-only cell, (b) a charged litter-only cell, (c) a placed carcass (booked external material); conversions frozen: `m_p = ripen = drop = k_d = k_c = k_w = fall = 0` so a cell's food keeps its identity | survival time, reserve, served bites per stock | grazer and glider starve on (b), (c); burrower starves on (a); skimmer lives on all three at lower intake. Tests dependence, not desirability |
 | B6a | reproduction on a finite input | closed 3 × 3 bright mature region with renewal off (`g = ripen = m_p = 0`), two mobile legacy grazers, 36,000 ticks | births, deaths, population, escrow debits per birth, `U` | births while the stock lasts, then starvation to zero; no birth without an escrow debit; `U` non-increasing |
@@ -664,7 +686,7 @@ and recovery as the success criterion rather than persistent bare trunks.
 
 | Area | File(s) | Change |
 | --- | --- | --- |
-| config | `crates/cubarium-core/src/config.rs` | `PlantConfig { alpha, wood_max, reserve_cap, maintenance, foliage_rate, wood_rate, build, dieback, alive_min, donor_min, donor_reserve_floor, propagule_rate, propagule_split: [f64; 3], energy_density, initial_wood }`; `DetritusConfig` gains `carrion_decomposition`, `wood_decomposition`, `carrion_energy_cap`; `OrganismConfig` gains `capability_gate`, `capability_exponent`; `CONFIG_VERSION` 7 → 8; `validate` refuses `rate·dt > 1` for every per-second fraction rate by name, requires `alive_min < donor_min ≤ wood_max`, `propagule_split` summing to 1, `capability_gate ∈ [0, 0.5]`, `capability_exponent > 0` |
+| config | `crates/cubarium-core/src/config.rs` | `PlantConfig { alpha, wood_max, reserve_cap, maintenance, foliage_rate, wood_rate, build, dieback, alive_min, donor_min, donor_reserve_floor, propagule_rate, propagule_split: [f64; 3], energy_density, initial_wood, reserve_share, reflush_below }` (`plant.energy_density` is the one `e_v`; `producer.energy_density` no longer exists); `DetritusConfig` gains `carrion_decomposition`, `wood_decomposition`, `carrion_energy_cap`; `OrganismConfig` gains `capability_gate`, `capability_exponent`; `CONFIG_VERSION` 7 → 8; `validate` refuses `rate·dt > 1` for every per-second fraction rate by name, requires `alive_min < donor_min ≤ wood_max`, `propagule_split` summing to 1, `capability_gate ∈ [0, 0.5]`, `capability_exponent > 0`, `reserve_share ∈ [0, 1]`, `reflush_below ∈ [0, 1]` |
 | fields | `crates/cubarium-core/src/fields.rs` | subphases 3a–3h (§4.0) with the three decompositions; `total_material`, `check`, initial seeding of `W_0, P_0, Q_0` (§11) |
 | state | `crates/cubarium-core/src/world/state.rs` | trailing `EcologyV1State { wood, plant_reserve, dead_wood, carrion, carrion_energy, plant_deaths_total, recolonisations_total }`; `validate` |
 | snapshot | `crates/cubarium-core/src/snapshot.rs` | `SCHEMA_VERSION` 16; `decode_snapshot` refuses every schema below 16 by name; no v15 mirror, no migration (§15.1) |
@@ -781,6 +803,16 @@ Second round (Astra's first repair verification, same day):
 | uncapped plant-yield arithmetic | §11 recomputed with both growth caps and the ripening sink: the model's ungrazed steady state is `P ≈ 0.5, W ≈ 0.33` (average) and `P ≈ 0.56, W = 0.6` (bright), well below `P_cap`; sustainable yield is ≈ 0.00015 / 0.00064 m/s per stand, so a resting grazer needs ≈ 35 average or ≈ 8 bright stands. "Mature stand" in §13 now means those steady-state values; a new B0 measures them in the simulator; B1b, B3, B6b and B7 name their light class and their expected outcome follows from the corrected numbers. No parameter changed |
 | inert fixture completeness | A3a also zeroes `drop`, `rain_rate`, weather amplitude, initial fruit and initial water |
 | self-audit for the same defect classes | the joint-budget check was applied to every stock (§9 list); the cap check to every §11 claim (reflush, breakeven, establishment time, wood e-folding), which were corrected where stale |
+
+Third round (first implementation run, `b1dd394`, result note
+[ecology-v1-implementation-2026-09-15](7_Research/ecology-v1-implementation-2026-09-15.md)):
+
+| Finding | Fix |
+| --- | --- |
+| B0-1: the plant reserve never refills, so no simulator-grown stand is ever a donor and B3/B4b/B7 turn on a stock that cannot exist | contract defect in §4.4, two causes: refill came last and routine foliage top-up drew on reserve whenever `P < P_cap` (always). §4.4 rewritten: `q_share` of every surplus goes to reserve first; reserve is spent on foliage only below `p_reflush·P_cap`. Two provisional values added to §11, two config fields to §14. Repair cycle 1 |
+| B4a: death censored because dieback at `κ = 1` e-folds wood in ~80 min | not a defect; the expectation was wrong. §11 and B4a now say death is expected censored and the `W` decline rate is the measurement. `κ` stays provisional for the later tuning |
+| B7-1: establishment took 1,146 s not ~300 s because the donor's reserve drained into its own foliage | same root cause as B0-1; the §11 estimate stands once the reserve persists and is re-measured in the repair |
+| interpretations 6 (`e_p` removed in favour of `e_v`), 7 (`Q_0` as a constant), 3, 4, 5, 8–11 | accepted as reported; `ProducerConfig.energy_density` is gone and `plant.energy_density` is the one density, recorded in §14 |
 
 The bounded implementation handoff is
 [ecology-v1-opus-2026-09-15](handoffs/ecology-v1-opus-2026-09-15.md). Training

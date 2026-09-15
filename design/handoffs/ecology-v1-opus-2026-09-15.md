@@ -135,3 +135,26 @@ usage. Link files; paste no logs.
 Stop after the result note. Held-out checks, training in the revised ecology,
 display deployment and the presentation task are separate assignments after
 the review.
+
+## Repair cycle 1 (2026-09-15, after the first implementation run)
+
+The first run (`b1dd394`, `6d304f1`) is faithful to the contract and green; its
+finding B0-1 exposed a contract defect, fixed in contract §4.4 (reserve share
+first, reflush only below `p_reflush·P_cap`) with two new provisional values in
+§11 (`q_share` 0.2, `p_reflush` 0.25) and two config fields in §14
+(`reserve_share`, `reflush_below`). Contract §18 third round lists what was
+accepted from your interpretations. Scope of this cycle, nothing more:
+
+1. Implement the revised §4.4 exactly; add the two config fields with their
+   validation; keep every other equation, read/write and value as it is.
+2. Extend A1/A2b coverage to the new branches (reserve share taken, reflush
+   gated below the threshold and capped at it, full reserve takes no share) and
+   add one unit test that a stand at `P ≥ p_reflush·P_cap` never draws reserve
+   for foliage.
+3. Re-run the three suites and all of B0–B7 once; refresh the tables in the
+   result note, keeping the first run's tables under a "run 1" heading so the
+   change is visible. B4a's expectation is now "death censored, report the `W`
+   decline rate" (§13.2). B3, B4b and B7 should now have donor/reserve arms
+   that actually send; report whatever they measure.
+4. `graft build`; commit as before; return in the same format, plus a short
+   list of any finding from run 1 that the reserve fix did not resolve.
