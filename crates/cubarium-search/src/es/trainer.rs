@@ -31,13 +31,13 @@
 //! run, not a cheaper one.
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
 use cubarium_core::neural::Policy;
 use serde::{Deserialize, Serialize};
 
-use super::episode::{self, Detail, Driver, Episode};
+use super::episode::{self, Driver, Episode, EpisodeError, Limits};
 use super::fixture::{HORIZON_TICKS, Layout, fnv1a};
 use super::optimizer::{ADAM_EPS, Adam, BETA1, BETA2, LEARNING_RATE, SIGMA, gradient};
 use super::rng::perturbation;
@@ -190,8 +190,28 @@ pub struct Checkpoint {
     pub generation_completed: u64,
     pub episodes_run: u64,
     pub ticks_run: u64,
-    /// Every completed generation's centre score, when the centre was evaluated.
-    pub center_scores: Vec<(u64, f64)>,
+    /// Work performed by generations that were discarded (cancelled or failed). Counted
+    /// against the budget, and deliberately **not** counted as optimizer progress.
+    pub discarded: Discarded,
+    /// One record per centre this run has held, oldest first: generation `g` is the centre
+    /// *before* update `g` is applied, and the last record is the centre the run ended on.
+    ///
+    /// Each record names the file holding that centre's exact weights, so the evaluation
+    /// assignment can select **any** centre the run passed through, not only the latest. The
+    /// checkpoint's own `theta` is always the last record's weights.
+    pub centers: Vec<CenterRecord>,
+}
+
+/// One centre in the run's history.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CenterRecord {
+    pub generation: u64,
+    /// Its score, when it was evaluated. `None` means it was never evaluated — never 0.
+    pub score: Option<f64>,
+    /// Path, relative to the run directory, of the exported weights for this centre.
+    pub file: String,
+    /// FNV-1a over the weights' little-endian hex, so a file can be checked against the record.
+    pub weights_fnv1a: u64,
 }
 
 impl Checkpoint {
@@ -208,8 +228,23 @@ impl Checkpoint {
             generation_completed: 0,
             episodes_run: 0,
             ticks_run: 0,
-            center_scores: Vec::new(),
+            discarded: Discarded::default(),
+            centers: Vec::new(),
         }
+    }
+
+    /// The generations whose centre this run recorded, oldest first.
+    pub fn center_generations(&self) -> Vec<u64> {
+        self.centers.iter().map(|c| c.generation).collect()
+    }
+
+    /// An already-recorded score for this generation's centre, if there is one. Resuming must
+    /// reuse it rather than paying for the same evaluation twice.
+    pub fn recorded_center_score(&self, generation: u64) -> Option<f64> {
+        self.centers
+            .iter()
+            .find(|c| c.generation == generation)
+            .and_then(|c| c.score)
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -244,13 +279,70 @@ impl Checkpoint {
 }
 
 /// Everything one generation needs that is not the centre.
+///
+/// `deadline` is carried into every episode through [`Limits`], not consulted only when a job
+/// is dequeued: a cap that a running rollout cannot see is not a cap.
 pub struct Plan<'a> {
     pub layouts: &'a [Layout],
     pub horizon: u64,
     pub workers: usize,
-    pub detail: Detail,
     pub evaluate_center: bool,
     pub deadline: Option<Instant>,
+}
+
+/// Work a discarded generation actually performed.
+///
+/// A cancelled generation updates nothing, but it did occupy workers and simulate ticks, and
+/// the brief's budgets are budgets on *work*. So the counts survive the cancellation and are
+/// carried separately from the optimizer's own progress, which stays where it was.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Discarded {
+    pub episodes_attempted: u64,
+    pub episodes_completed: u64,
+    pub ticks_run: u64,
+}
+
+impl Discarded {
+    pub fn add(&mut self, other: Discarded) {
+        self.episodes_attempted += other.episodes_attempted;
+        self.episodes_completed += other.episodes_completed;
+        self.ticks_run += other.ticks_run;
+    }
+}
+
+/// Why a generation produced no update.
+#[derive(Clone, Debug, PartialEq)]
+pub enum GenerationError {
+    /// The deadline or the cancellation flag stopped it. The centre and Adam are untouched;
+    /// the work it did is reported so the budget can account for it.
+    Cancelled(Discarded),
+    /// A rollout found an invalid world. This is an experiment error, not a low score.
+    Invalid { job: String, detail: String, discarded: Discarded },
+}
+
+impl std::fmt::Display for GenerationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GenerationError::Cancelled(d) => write!(
+                f,
+                "generation cancelled after {} of {} episodes ({} ticks)",
+                d.episodes_completed, d.episodes_attempted, d.ticks_run
+            ),
+            GenerationError::Invalid { job, detail, .. } => {
+                write!(f, "invalid world in job {job}: {detail}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for GenerationError {}
+
+impl GenerationError {
+    pub fn discarded(&self) -> Discarded {
+        match self {
+            GenerationError::Cancelled(d) | GenerationError::Invalid { discarded: d, .. } => *d,
+        }
+    }
 }
 
 /// Evaluate one parameter vector on every layout and return its score with its episodes.
@@ -261,42 +353,100 @@ pub struct Plan<'a> {
 pub fn evaluate(
     theta: &[f64],
     plan: &Plan<'_>,
+    generation: u64,
     cancel: &AtomicBool,
-) -> Result<(f64, Vec<Episode>), episode::Cancelled> {
+) -> Result<(f64, Vec<Episode>), GenerationError> {
     let policy = tensor::policy(theta).expect("a finite centre is a policy");
-    let layouts = plan.layouts;
-    let slots: Mutex<Vec<Option<Episode>>> = Mutex::new(vec![None; layouts.len()]);
+    let names: Vec<String> = plan
+        .layouts
+        .iter()
+        .map(|l| format!("gen{generation}/center/{}", l.name))
+        .collect();
+    let episodes = dispatch(plan, plan.layouts.len(), cancel, |i| {
+        (Driver::Policy(Box::new(policy.clone())), i, names[i].clone())
+    })?;
+    Ok((score(&episodes), episodes))
+}
+
+/// The one worker pool every batch in this module uses.
+///
+/// `job(i)` names the driver, the layout index and the job identity for slot `i`. Results land
+/// at their own index, so the order workers finish in cannot reach the reduction. Every episode
+/// carries the plan's deadline, so a cap is enforced inside the rollout.
+fn dispatch<F>(
+    plan: &Plan<'_>,
+    jobs_total: usize,
+    cancel: &AtomicBool,
+    job: F,
+) -> Result<Vec<Episode>, GenerationError>
+where
+    F: Fn(usize) -> (Driver, usize, String) + Sync,
+{
+    let slots: Mutex<Vec<Option<Episode>>> = Mutex::new(vec![None; jobs_total]);
     let cursor = AtomicUsize::new(0);
+    let attempted = AtomicU64::new(0);
+    let completed = AtomicU64::new(0);
+    let ticks = AtomicU64::new(0);
+    let failure: Mutex<Option<(String, String)>> = Mutex::new(None);
+    let limits = Limits { cancel, deadline: plan.deadline };
     std::thread::scope(|scope| {
-        for _ in 0..plan.workers.max(1).min(layouts.len()) {
+        for _ in 0..plan.workers.max(1).min(jobs_total.max(1)) {
             scope.spawn(|| {
                 loop {
-                    let i = cursor.fetch_add(1, Ordering::SeqCst);
-                    if i >= layouts.len() {
+                    let index = cursor.fetch_add(1, Ordering::SeqCst);
+                    if index >= jobs_total {
                         return;
                     }
-                    if cancel.load(Ordering::Relaxed) {
+                    if limits.expired() {
                         return;
                     }
-                    if plan.deadline.is_some_and(|d| Instant::now() >= d) {
-                        cancel.store(true, Ordering::Relaxed);
-                        return;
-                    }
-                    let driver = Driver::Policy(Box::new(policy.clone()));
-                    match episode::run(&layouts[i], &driver, plan.horizon, plan.detail, cancel) {
-                        Ok(e) => slots.lock().expect("slots")[i] = Some(e),
-                        Err(episode::Cancelled) => return,
+                    let (driver, layout, name) = job(index);
+                    attempted.fetch_add(1, Ordering::SeqCst);
+                    match episode::run(
+                        &plan.layouts[layout],
+                        &driver,
+                        plan.horizon,
+                        limits,
+                        &name,
+                    ) {
+                        Ok(e) => {
+                            completed.fetch_add(1, Ordering::SeqCst);
+                            ticks.fetch_add(e.ticks, Ordering::SeqCst);
+                            slots.lock().expect("slots")[index] = Some(e);
+                        }
+                        Err(EpisodeError::Cancelled { ticks: t }) => {
+                            ticks.fetch_add(t, Ordering::SeqCst);
+                            return;
+                        }
+                        Err(EpisodeError::Invalid { ticks: t, detail }) => {
+                            ticks.fetch_add(t, Ordering::SeqCst);
+                            // Stop every other worker: an invalid world ends the experiment,
+                            // and continuing would only burn budget on a broken run.
+                            cancel.store(true, Ordering::SeqCst);
+                            let mut slot = failure.lock().expect("failure");
+                            if slot.is_none() {
+                                *slot = Some((name, detail));
+                            }
+                            return;
+                        }
                     }
                 }
             });
         }
     });
+    let discarded = Discarded {
+        episodes_attempted: attempted.load(Ordering::SeqCst),
+        episodes_completed: completed.load(Ordering::SeqCst),
+        ticks_run: ticks.load(Ordering::SeqCst),
+    };
+    if let Some((job, detail)) = failure.into_inner().expect("failure") {
+        return Err(GenerationError::Invalid { job, detail, discarded });
+    }
     let slots = slots.into_inner().expect("slots");
     if slots.iter().any(Option::is_none) {
-        return Err(episode::Cancelled);
+        return Err(GenerationError::Cancelled(discarded));
     }
-    let episodes: Vec<Episode> = slots.into_iter().map(|s| s.expect("checked")).collect();
-    Ok((score(&episodes), episodes))
+    Ok(slots.into_iter().map(|s| s.expect("checked")).collect())
 }
 
 /// Run one generation and, if every job completed, apply the Adam ascent to `theta`.
@@ -310,7 +460,7 @@ pub fn run_generation(
     generation: u64,
     plan: &Plan<'_>,
     cancel: &AtomicBool,
-) -> Result<GenerationReport, episode::Cancelled> {
+) -> Result<GenerationReport, GenerationError> {
     let started = Instant::now();
     let n = protocol.pairs;
     let layouts = plan.layouts;
@@ -342,43 +492,35 @@ pub fn run_generation(
 
     // 2. One job per (candidate, layout), at its stable index.
     let jobs_total = candidates.len() * layouts.len();
-    let slots: Mutex<Vec<Option<Episode>>> = Mutex::new(vec![None; jobs_total]);
-    let cursor = AtomicUsize::new(0);
-    let workers = plan.workers.max(1).min(jobs_total);
-    std::thread::scope(|scope| {
-        for _ in 0..workers {
-            scope.spawn(|| {
-                loop {
-                    let index = cursor.fetch_add(1, Ordering::SeqCst);
-                    if index >= jobs_total {
-                        return;
-                    }
-                    if cancel.load(Ordering::Relaxed) {
-                        return;
-                    }
-                    if plan.deadline.is_some_and(|d| Instant::now() >= d) {
-                        cancel.store(true, Ordering::Relaxed);
-                        return;
-                    }
-                    let layout = &layouts[index % layouts.len()];
-                    let policy = &policies[index / layouts.len()];
-                    let driver = Driver::Policy(Box::new(policy.clone()));
-                    match episode::run(layout, &driver, plan.horizon, plan.detail, cancel) {
-                        Ok(e) => slots.lock().expect("slot mutex")[index] = Some(e),
-                        Err(episode::Cancelled) => return,
-                    }
-                }
-            });
-        }
-    });
+    let names: Vec<String> = (0..jobs_total)
+        .map(|i| {
+            format!(
+                "gen{generation}/{}/{}",
+                candidates[i / layouts.len()].label(),
+                layouts[i % layouts.len()].name
+            )
+        })
+        .collect();
+    let episodes = dispatch(plan, jobs_total, cancel, |i| {
+        (
+            Driver::Policy(Box::new(policies[i / layouts.len()].clone())),
+            i % layouts.len(),
+            names[i].clone(),
+        )
+    })?;
 
-    let slots = slots.into_inner().expect("slot mutex");
-    if slots.iter().any(Option::is_none) {
-        return Err(episode::Cancelled);
+    // 3. The update is committed only if the run is still inside its limits. A generation that
+    //    finished its last episode *after* the deadline has not earned an update.
+    let limits = Limits { cancel, deadline: plan.deadline };
+    if limits.expired() {
+        return Err(GenerationError::Cancelled(Discarded {
+            episodes_attempted: jobs_total as u64,
+            episodes_completed: jobs_total as u64,
+            ticks_run: episodes.iter().map(|e| e.ticks).sum(),
+        }));
     }
-    let episodes: Vec<Episode> = slots.into_iter().map(|s| s.expect("checked")).collect();
 
-    // 3. Reduce in the fixed index order. Scheduling cannot reach this.
+    // 4. Reduce in the fixed index order. Scheduling cannot reach this.
     let mut jobs = Vec::with_capacity(jobs_total);
     let mut scores = vec![0.0; candidates.len()];
     for (ci, c) in candidates.iter().enumerate() {
@@ -441,17 +583,21 @@ mod tests {
             intake_producer: 0.0,
             intake_fruit: 0.0,
             intake_detritus: 0.0,
-            upkeep_paid: 0.0,
-            motion_paid: 0.0,
+            upkeep_billed: 0.0,
+            motion_billed: 0.0,
             store_start: 0.0,
             travelled_px: 0.0,
             body_lengths: 0.0,
             distinct_cells: 0,
             ticks_in_opening: 0,
             turn_sweep_rad: 0.0,
+            seam_crossing_ticks: 0,
+            turn_unmeasured_ticks: 0,
+            died_on_last_tick: false,
             route_p_start: 0.0,
             route_p_end: 0.0,
             route_p_grown: 0.0,
+            validations: 0,
         };
         // Full stores on 100 ticks must still lose to 101 ticks with empty stores.
         let full = score(std::slice::from_ref(&base));
@@ -485,7 +631,6 @@ mod tests {
                 layouts: &layouts[..1],
                 horizon: protocol.horizon_ticks,
                 workers,
-                detail: Detail::Full,
                 evaluate_center: false,
                 deadline: None,
             };
@@ -543,12 +688,11 @@ mod tests {
             layouts: &layouts[..1],
             horizon: protocol.horizon_ticks,
             workers: 2,
-            detail: Detail::Score,
             evaluate_center: false,
             deadline: None,
         };
         let out = run_generation(&mut theta, &mut adam, &protocol, 0, &plan, &cancel);
-        assert_eq!(out.err(), Some(episode::Cancelled));
+        assert!(matches!(out, Err(GenerationError::Cancelled(_))));
         assert_eq!(theta, before);
         assert_eq!(adam.step, 0);
     }
@@ -557,6 +701,8 @@ mod tests {
     fn a_checkpoint_round_trips_and_names_its_protocol() {
         let cp = Checkpoint::fresh(smoke_protocol(), 20_260_915, "test");
         cp.validate().expect("fresh checkpoint is valid");
+        assert!(cp.centers.is_empty());
+        assert_eq!(cp.discarded, Discarded::default());
         let json = serde_json::to_string(&cp).expect("serialize");
         let back: Checkpoint = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back, cp);
@@ -581,7 +727,6 @@ mod tests {
             layouts: &layouts[..1],
             horizon: 400,
             workers,
-            detail: Detail::Score,
             evaluate_center: false,
             deadline: None,
         };

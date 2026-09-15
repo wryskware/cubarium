@@ -123,6 +123,10 @@ enum Command {
         /// Continue from a checkpoint written at a completed generation boundary.
         #[arg(long)]
         resume: Option<PathBuf>,
+        /// Discard an existing run in `--out` and start fresh. Without it a fresh run into a
+        /// directory that already holds one is refused rather than truncating its history.
+        #[arg(long, default_value_t = false)]
+        overwrite: bool,
         #[arg(long, default_value = "runs/es-first")]
         out: PathBuf,
     },
@@ -207,6 +211,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             train_seed,
             center_eval,
             resume,
+            overwrite,
             out,
         } => es::commands::train(
             pairs,
@@ -217,6 +222,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             train_seed,
             center_eval,
             resume,
+            overwrite,
             out,
         ),
         Command::EsExport { checkpoint, out, verify_ticks } => {

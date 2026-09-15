@@ -14,18 +14,51 @@
 //! Nothing carries over between episodes: every candidate gets a fresh isolated world and
 //! private state, and no experience, hidden state or field is reused.
 //!
+//! # Limits are checked *inside* the episode
+//!
+//! [`Limits`] carries the shared cancellation flag **and** the run's deadline, and both are
+//! read every [`CANCEL_CHECK_TICKS`] ticks. Checking a deadline only when a job is dequeued
+//! would let every worker's last episode run past the cap — which is exactly what the R2a
+//! review measured — so the deadline is a property of the running rollout, not of the queue.
+//! A cancelled episode reports the ticks it had already simulated, so a discarded generation's
+//! work is still counted against the budget even though it never reaches the optimizer.
+//!
+//! # Invariants are checked in release too
+//!
+//! Core's own end-of-step audits are `#[cfg(debug_assertions)]`, and the trainer runs in
+//! release. So an episode validates the world itself on a bounded cadence
+//! ([`VALIDATE_EVERY_TICKS`]) and once more at the end: `World::check_invariants` for the
+//! fields, ledgers and organisms, and `WorldState::validate` for the neural extension's own
+//! rules. An invalid world fails the **experiment**, naming the job, rather than producing a
+//! score. Ordinary biological death is not invalid: it is a completed episode with a recorded
+//! survival time.
+//!
 //! # What is measured
 //!
 //! Survival ticks and usable terminal stores are the *score* (§4 of the brief). Everything
-//! else here is a **diagnostic**, reported separately and never summed into the ordering:
-//! actual mouth intake from the world's own [`cubarium_core::IntakeDiagnostics`], paid upkeep
-//! and paid motion priced from the **resolved** motion through `MotorBill`, and the four
-//! behavioural descriptors the brief lists (body-length displacement, distinct cells, time in
-//! the opening patch, turn sweep). No mode label and no field-stock delta is used as a proxy
-//! for intake.
+//! else here is a **diagnostic**, reported separately and never summed into the ordering, and
+//! it is collected on **every** episode — a campaign rollout records the same numbers a
+//! control does, because a field serialized as `0.0` that merely was not measured is worse
+//! than no field at all.
+//!
+//! Read the columns for what they are:
+//!
+//! - `intake_*` is **material** (m), taken from the world's own [`IntakeDiagnostics`]: what
+//!   actually left a field through this mouth. It is *not* an energy credit — assimilation,
+//!   its efficiency and the reserve's energy density all sit between the two, and none of them
+//!   is read here.
+//! - `upkeep_billed` and `motion_billed` are **prices**, reconstructed from the body's own
+//!   `MotorBill` and from the motion the world actually resolved. They are the exact cost of
+//!   what happened; they are *not* a reading of the world's payment ledger, and on a tick where
+//!   a body dies of starvation the bill is precisely what it could not pay.
+//! - `store_start` and `terminal_stores` are usable stores at the first and last tick. These
+//!   columns do **not** balance into an energy identity, and no claim here says they do: the
+//!   oxidation, assimilation and handling terms that would close such a box are not exposed by
+//!   the core and are not measured.
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 use cubarium_core::diagnostic::ScriptedIntent;
 use cubarium_core::motor::MotorBill;
@@ -36,10 +69,49 @@ use serde::{Deserialize, Serialize};
 
 use super::fixture::Layout;
 
-/// How often the shared cancellation flag is read inside an episode. Every 128 ticks is about
-/// 4 ms of simulated time and well under a millisecond of wall time, so a cancelled generation
-/// stops promptly without putting an atomic load on the hot path.
+/// How often the shared cancellation flag and the deadline are read inside an episode. Every
+/// 128 ticks is 6.4 s of simulated time and, at the measured 17,400 ticks/s, about 7 ms of
+/// wall time — fine enough that a 60 s budget cannot be overrun by a meaningful margin, coarse
+/// enough that neither the atomic nor the clock is on the hot path.
 pub const CANCEL_CHECK_TICKS: u64 = 128;
+
+/// How often a running episode validates the world. 2,048 ticks is 18 checks over the
+/// 36,000-tick horizon.
+pub const VALIDATE_EVERY_TICKS: u64 = 2_048;
+
+/// The limits a rollout runs under. Both are checked inside the episode.
+#[derive(Clone, Copy)]
+pub struct Limits<'a> {
+    pub cancel: &'a AtomicBool,
+    /// When the whole run must stop. `None` means the caller has imposed no clock; the
+    /// cancellation flag still applies.
+    pub deadline: Option<Instant>,
+}
+
+impl<'a> Limits<'a> {
+    /// No clock, only the flag.
+    pub fn new(cancel: &'a AtomicBool) -> Limits<'a> {
+        Limits { cancel, deadline: None }
+    }
+
+    pub fn until(cancel: &'a AtomicBool, deadline: Instant) -> Limits<'a> {
+        Limits { cancel, deadline: Some(deadline) }
+    }
+
+    /// True when the run must stop now. A passed deadline *sets* the shared flag, so one
+    /// worker noticing the clock stops every other worker's episode at its next check rather
+    /// than each discovering it separately.
+    pub fn expired(&self) -> bool {
+        if self.cancel.load(Ordering::Relaxed) {
+            return true;
+        }
+        if self.deadline.is_some_and(|d| Instant::now() >= d) {
+            self.cancel.store(true, Ordering::Relaxed);
+            return true;
+        }
+        false
+    }
+}
 
 /// What drives the body for the whole episode.
 #[derive(Clone, Debug)]
@@ -74,16 +146,7 @@ impl Control {
     }
 }
 
-/// How much per-tick accounting an episode does.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Detail {
-    /// Survival and terminal stores only: what the score needs. Used for candidate rollouts.
-    Score,
-    /// Everything in [`Episode`]. Used for the controls and the smoke.
-    Full,
-}
-
-/// The outcome of one episode.
+/// The outcome of one episode. Every field is measured on every episode.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Episode {
     pub layout: String,
@@ -95,24 +158,38 @@ pub struct Episode {
     pub terminal_stores: f64,
     /// `E_max + e_r·R_max`: the fixed body capacity the normalisation divides by.
     pub store_capacity: f64,
-    // --- diagnostics, never part of the ordering ---
+    // --- diagnostics, never part of the ordering; see the module docs for what they are not ---
+    /// Material (m) that actually left `P` through this mouth. Not an energy credit.
     pub intake_producer: f64,
     pub intake_fruit: f64,
     pub intake_detritus: f64,
-    pub upkeep_paid: f64,
-    pub motion_paid: f64,
-    /// `E + e_r·R` at the first tick. With `terminal_stores`, the intake columns and the two
-    /// paid columns this closes the episode's own energy box: what the body started with, what
-    /// it actually took through its mouth, what it actually paid, and what it had left.
+    /// The upkeep price of every simulated tick, from the body's own `MotorBill`. A price, not
+    /// a ledger reading: on a starvation tick this is exactly what could not be paid.
+    pub upkeep_billed: f64,
+    /// The motor price of the motion the world actually resolved.
+    pub motion_billed: f64,
+    /// `E + e_r·R` at the first tick.
     pub store_start: f64,
     pub travelled_px: f64,
     pub body_lengths: f64,
     pub distinct_cells: usize,
     pub ticks_in_opening: u64,
     pub turn_sweep_rad: f64,
+    /// Ticks whose heading change was a **chart transport** across a seam rather than a
+    /// physical turn. Their rotation is deliberately excluded from `turn_sweep_rad` and from
+    /// `motion_billed`; the count is published so the exclusion is visible instead of silent.
+    pub seam_crossing_ticks: u64,
+    /// Ticks whose physical turn could not be measured because the body was gone after the
+    /// step. At most one, the death tick. Excluded from the sweep and the motor price.
+    pub turn_unmeasured_ticks: u64,
+    /// Whether the last simulated tick is the one on which the body died. Its upkeep is
+    /// *billed* in `upkeep_billed` and was, by the starvation predicate, not payable.
+    pub died_on_last_tick: bool,
     pub route_p_start: f64,
     pub route_p_end: f64,
     pub route_p_grown: f64,
+    /// How many times the world was validated during this episode, terminal check included.
+    pub validations: u64,
 }
 
 impl Episode {
@@ -129,19 +206,86 @@ impl Episode {
     }
 }
 
-/// A run that was stopped by the shared cancellation flag. An incomplete generation never
-/// updates the centre, so this is a distinct outcome rather than a zero score.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Cancelled;
+/// Why an episode produced no score.
+///
+/// Neither of these is a low fitness. A cancelled episode was stopped by the run's limits; an
+/// invalid one is an **experiment error** and names the job it happened in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EpisodeError {
+    /// The run's cancellation flag or deadline stopped this rollout. Carries the ticks already
+    /// simulated, so discarded work is still counted.
+    Cancelled { ticks: u64 },
+    /// The world failed its own invariants. The experiment fails here.
+    Invalid { ticks: u64, detail: String },
+}
 
-/// Run one episode.
+impl EpisodeError {
+    pub fn ticks(&self) -> u64 {
+        match self {
+            EpisodeError::Cancelled { ticks } | EpisodeError::Invalid { ticks, .. } => *ticks,
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self, EpisodeError::Cancelled { .. })
+    }
+}
+
+impl std::fmt::Display for EpisodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EpisodeError::Cancelled { ticks } => write!(f, "cancelled after {ticks} ticks"),
+            EpisodeError::Invalid { ticks, detail } => {
+                write!(f, "invalid world after {ticks} ticks: {detail}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for EpisodeError {}
+
+/// Validate a running world: the core's own field/ledger/organism audits and the neural
+/// extension's own rules. Public so the fault-injection regression exercises the same call the
+/// rollout makes, rather than a copy of it.
+pub fn validate_runtime(world: &World, job: &str, tick: u64) -> Result<(), String> {
+    world
+        .check_invariants()
+        .map_err(|e| format!("job {job}, tick {tick}: world invariants: {e}"))?;
+    world
+        .state
+        .validate()
+        .map_err(|e| format!("job {job}, tick {tick}: world state: {e}"))
+}
+
+/// Run one episode. `job` names the rollout for an experiment error.
 pub fn run(
     layout: &Layout,
     driver: &Driver,
     horizon: u64,
-    detail: Detail,
-    cancel: &AtomicBool,
-) -> Result<Episode, Cancelled> {
+    limits: Limits<'_>,
+    job: &str,
+) -> Result<Episode, EpisodeError> {
+    run_with_fault(layout, driver, horizon, limits, job, None)
+}
+
+/// A hook that may corrupt a running world, for the fault-injection regression only.
+pub type Fault<'a> = &'a dyn Fn(&mut World, u64);
+
+/// [`run`], with a hook that may corrupt the world at a chosen tick.
+///
+/// This exists for one reason: the invariant checks above must be exercised in **release**,
+/// where core's own debug audits are compiled out, and a regression that only calls
+/// [`validate_runtime`] directly would not prove that the rollout consults it. Nothing outside
+/// the fault-injection test passes a fault.
+#[doc(hidden)]
+pub fn run_with_fault(
+    layout: &Layout,
+    driver: &Driver,
+    horizon: u64,
+    limits: Limits<'_>,
+    job: &str,
+    fault: Option<Fault<'_>>,
+) -> Result<Episode, EpisodeError> {
     let (mut world, id) = layout.build().expect("a frozen layout builds");
     let cfg = world.config().clone();
     let e_r = cfg.organism.reserve_energy_density;
@@ -207,17 +351,21 @@ pub fn run(
         intake_producer: 0.0,
         intake_fruit: 0.0,
         intake_detritus: 0.0,
-        upkeep_paid: 0.0,
-        motion_paid: 0.0,
+        upkeep_billed: 0.0,
+        motion_billed: 0.0,
         store_start: 0.0,
         travelled_px: 0.0,
         body_lengths: 0.0,
         distinct_cells: 0,
         ticks_in_opening: 0,
         turn_sweep_rad: 0.0,
+        seam_crossing_ticks: 0,
+        turn_unmeasured_ticks: 0,
+        died_on_last_tick: false,
         route_p_start,
         route_p_end: 0.0,
         route_p_grown: 0.0,
+        validations: 0,
     };
 
     episode.store_start = {
@@ -228,8 +376,14 @@ pub fn run(
     let mut target = 0usize;
 
     for tick in 0..horizon {
-        if tick % CANCEL_CHECK_TICKS == 0 && cancel.load(Ordering::Relaxed) {
-            return Err(Cancelled);
+        if tick.is_multiple_of(CANCEL_CHECK_TICKS) && limits.expired() {
+            return Err(EpisodeError::Cancelled { ticks: tick });
+        }
+        if tick > 0 && tick.is_multiple_of(VALIDATE_EVERY_TICKS) {
+            episode.validations += 1;
+            if let Err(detail) = validate_runtime(&world, job, tick) {
+                return Err(EpisodeError::Invalid { ticks: tick, detail });
+            }
         }
         let Some(o) = world.state.organisms.get(id) else {
             episode.alive = false;
@@ -259,8 +413,7 @@ pub fn run(
                     bud: Some(false),
                 }
             } else {
-                let toward = toward(&world, goal, chart_before, face_before)
-                    .unwrap_or(heading_before);
+                let toward = toward(goal, chart_before, face_before).unwrap_or(heading_before);
                 ScriptedIntent {
                     heading: Some(toward),
                     effort: Some(1.0),
@@ -274,39 +427,49 @@ pub fn run(
             world.set_scripted_intents(vec![(id, intent)]);
         }
 
-        if detail == Detail::Full {
-            visited.insert(here.0);
-            if opening.contains(&here.0) {
-                episode.ticks_in_opening += 1;
-            }
+        visited.insert(here.0);
+        if opening.contains(&here.0) {
+            episode.ticks_in_opening += 1;
         }
 
         world.step();
         world.drain_events();
+        if let Some(inject) = fault {
+            inject(&mut world, tick);
+        }
         episode.ticks = tick + 1;
 
-        let Some(o) = world.state.organisms.get(id) else {
+        // Every tick is accounted for, including the one a body dies on. `moved_segments` is
+        // indexed by slot and still holds the motion this tick resolved, so a death tick's
+        // travel is measured; only its *turn* cannot be, because there is no post-step heading.
+        let travelled: f64 = world
+            .moved_segments(id)
+            .iter()
+            .map(cubarium_surface::PathSegment::length)
+            .sum();
+        let after = world.state.organisms.get(id);
+        let turn = match after {
+            Some(o) if o.pos.face == face_before => signed_turn(heading_before, o.heading).abs(),
+            Some(_) => {
+                // A seam crossing changes the chart; that is transport, not a turn.
+                episode.seam_crossing_ticks += 1;
+                0.0
+            }
+            None => {
+                episode.turn_unmeasured_ticks += 1;
+                0.0
+            }
+        };
+        episode.travelled_px += travelled;
+        episode.turn_sweep_rad += turn;
+        episode.upkeep_billed += bill.upkeep(DT);
+        episode.motion_billed += bill.motor_cost(travelled / DT, extent * turn / DT, DT);
+
+        let Some(o) = after else {
             episode.alive = false;
+            episode.died_on_last_tick = true;
             break;
         };
-
-        if detail == Detail::Full {
-            let travelled: f64 = world
-                .moved_segments(id)
-                .iter()
-                .map(cubarium_surface::PathSegment::length)
-                .sum();
-            let turn = if o.pos.face == face_before {
-                signed_turn(heading_before, o.heading).abs()
-            } else {
-                // A seam crossing changes the chart; that is transport, not a physical turn.
-                0.0
-            };
-            episode.travelled_px += travelled;
-            episode.turn_sweep_rad += turn;
-            episode.upkeep_paid += bill.upkeep(DT);
-            episode.motion_paid += bill.motor_cost(travelled / DT, extent * turn / DT, DT);
-        }
 
         if let Driver::Control(Control::MobileScript) = driver {
             let goal = route[target % route.len()];
@@ -314,6 +477,11 @@ pub fn run(
                 target += 1;
             }
         }
+    }
+
+    episode.validations += 1;
+    if let Err(detail) = validate_runtime(&world, job, episode.ticks) {
+        return Err(EpisodeError::Invalid { ticks: episode.ticks, detail });
     }
 
     if let Some(o) = world.state.organisms.get(id) {
@@ -337,8 +505,7 @@ pub fn run(
 
 /// A unit heading from the body's chart position toward a goal cell's centre, when both are on
 /// the same face. Returns `None` across a seam, where the caller keeps its current heading.
-fn toward(world: &World, goal: CellId, from: Vec2, face: cubarium_surface::Face) -> Option<Vec2> {
-    let _ = world;
+fn toward(goal: CellId, from: Vec2, face: cubarium_surface::Face) -> Option<Vec2> {
     if goal.face() != face {
         return None;
     }
@@ -356,16 +523,20 @@ fn signed_turn(a: Vec2, b: Vec2) -> f64 {
 mod tests {
     use super::*;
     use crate::es::fixture::training_layouts;
+    use std::time::Duration;
+
+    fn free(cancel: &AtomicBool) -> Limits<'_> {
+        Limits::new(cancel)
+    }
 
     #[test]
     fn a_still_body_with_no_intake_eats_nothing_and_keeps_its_stores_falling() {
         let cancel = AtomicBool::new(false);
         let l = &training_layouts()[0];
-        let e = run(l, &Driver::Control(Control::NoIntake), 400, Detail::Full, &cancel)
-            .expect("not cancelled");
+        let e = run(l, &Driver::Control(Control::NoIntake), 400, free(&cancel), "t").expect("ok");
         assert_eq!(e.intake_producer, 0.0, "a closed mouth records exactly zero intake");
         assert_eq!(e.travelled_px, 0.0, "effort 0 is a genuine request for stillness");
-        assert!(e.upkeep_paid > 0.0, "living is not free");
+        assert!(e.upkeep_billed > 0.0, "living is not free");
         assert!(e.alive, "400 ticks is well inside the starting stores");
         assert!(e.terminal_stores < e.store_capacity);
     }
@@ -374,8 +545,8 @@ mod tests {
     fn a_stationary_grazer_eats_from_its_own_cell_only() {
         let cancel = AtomicBool::new(false);
         let l = &training_layouts()[0];
-        let e = run(l, &Driver::Control(Control::StationaryGrazing), 400, Detail::Full, &cancel)
-            .expect("not cancelled");
+        let e = run(l, &Driver::Control(Control::StationaryGrazing), 400, free(&cancel), "t")
+            .expect("ok");
         assert!(e.intake_producer > 0.0, "an open mouth on a fed cell eats");
         assert_eq!(e.travelled_px, 0.0);
         assert_eq!(e.distinct_cells, 1, "a stationary body visits one cell");
@@ -385,35 +556,71 @@ mod tests {
     fn the_mobile_script_travels_and_visits_more_than_one_cell() {
         let cancel = AtomicBool::new(false);
         let l = &training_layouts()[0];
-        let e = run(l, &Driver::Control(Control::MobileScript), 4_000, Detail::Full, &cancel)
-            .expect("not cancelled");
+        let e = run(l, &Driver::Control(Control::MobileScript), 4_000, free(&cancel), "t")
+            .expect("ok");
         assert!(e.travelled_px > 0.0, "the script pays for real motion");
         assert!(e.distinct_cells > 1, "the script relocates");
-        assert!(e.motion_paid > 0.0, "and pays for it");
+        assert!(e.motion_billed > 0.0, "and pays for it");
         assert!(e.intake_producer > 0.0);
     }
 
     #[test]
-    fn cancellation_stops_an_episode_without_a_score() {
+    fn cancellation_stops_an_episode_and_reports_the_ticks_it_had_run() {
         let cancel = AtomicBool::new(true);
         let l = &training_layouts()[0];
-        let out = run(l, &Driver::Control(Control::NoIntake), 36_000, Detail::Score, &cancel);
-        assert_eq!(out, Err(Cancelled));
+        let out = run(l, &Driver::Control(Control::NoIntake), 36_000, free(&cancel), "t");
+        assert_eq!(out.unwrap_err(), EpisodeError::Cancelled { ticks: 0 });
+    }
+
+    /// Review finding 1, at the episode level: a deadline that passes **while the rollout is
+    /// running** must stop it. Before the repair the deadline was only read when a job was
+    /// dequeued, so a long episode ran to completion however late it was.
+    #[test]
+    fn a_deadline_that_passes_mid_episode_stops_the_rollout() {
+        let cancel = AtomicBool::new(false);
+        let l = &training_layouts()[0];
+        let started = Instant::now();
+        let limits = Limits::until(&cancel, started + Duration::from_millis(20));
+        let out = run(l, &Driver::Control(Control::NoIntake), 36_000, limits, "t");
+        let err = out.expect_err("the deadline must stop it");
+        assert!(err.is_cancelled());
+        assert!(err.ticks() > 0, "it had already simulated work, and that work is counted");
+        assert!(err.ticks() < 36_000, "it did not run to the horizon");
+        assert!(started.elapsed() < Duration::from_secs(2), "it stopped promptly");
+        assert!(cancel.load(Ordering::Relaxed), "and it told the other workers");
+    }
+
+    /// Review finding 4: an identical episode must report identical diagnostics, whatever the
+    /// caller. There is no reduced mode that serializes zeros for what it did not measure.
+    #[test]
+    fn every_episode_records_the_same_diagnostics_whoever_asked_for_it() {
+        use crate::es::tensor;
+        let cancel = AtomicBool::new(false);
+        let l = &training_layouts()[0];
+        let policy = tensor::policy(&tensor::initial_center(20_260_915)).expect("valid");
+        let a = run(l, &Driver::Policy(Box::new(policy.clone())), 40, free(&cancel), "a")
+            .expect("ok");
+        let b = run(l, &Driver::Policy(Box::new(policy)), 40, free(&cancel), "b").expect("ok");
+        assert!(a.upkeep_billed > 0.0, "a living body is billed for living");
+        assert!(a.motion_billed > 0.0, "and this policy moves");
+        assert!(a.distinct_cells > 0);
+        assert_eq!(a.upkeep_billed, b.upkeep_billed);
+        assert_eq!(a.motion_billed, b.motion_billed);
+        assert_eq!(a.terminal_stores, b.terminal_stores);
+        assert_eq!(a.distinct_cells, b.distinct_cells);
     }
 
     #[test]
-    fn a_zero_policy_runs_through_the_real_dispatch_and_holds_still() {
+    fn a_zero_policy_runs_through_the_real_dispatch() {
         use crate::es::tensor;
         let cancel = AtomicBool::new(false);
         let l = &training_layouts()[0];
         let policy = tensor::policy(&vec![0.0; tensor::PARAMS]).expect("valid");
-        let e = run(l, &Driver::Policy(Box::new(policy)), 200, Detail::Full, &cancel)
-            .expect("not cancelled");
-        // A zero policy's head is its bias, which is zero: `sigma(0) = 0.5` on thrust, so it
-        // is *not* still — what matters here is that the recurrent dispatch actually ran.
+        let e = run(l, &Driver::Policy(Box::new(policy)), 200, free(&cancel), "t").expect("ok");
         assert!(e.alive);
         assert_eq!(e.ticks, 200);
         assert!(e.terminal_stores > 0.0);
+        assert!(e.validations >= 1, "the terminal validation always runs");
     }
 
     #[test]
@@ -422,9 +629,90 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let l = &training_layouts()[1];
         let policy = tensor::policy(&tensor::initial_center(5)).expect("valid");
-        let a = run(l, &Driver::Policy(Box::new(policy.clone())), 600, Detail::Full, &cancel)
+        let a = run(l, &Driver::Policy(Box::new(policy.clone())), 600, free(&cancel), "t")
             .expect("ok");
-        let b = run(l, &Driver::Policy(Box::new(policy)), 600, Detail::Full, &cancel).expect("ok");
+        let b = run(l, &Driver::Policy(Box::new(policy)), 600, free(&cancel), "t").expect("ok");
         assert_eq!(a, b);
+    }
+
+    /// Review finding 5, exercised in **release**: a world corrupted mid-rollout must fail the
+    /// experiment by name, not produce a score. Core's own end-of-step audits are compiled out
+    /// of this profile, which is exactly why the episode runs its own.
+    #[test]
+    fn a_corrupted_world_fails_the_experiment_and_names_the_job() {
+        use crate::es::tensor;
+        let cancel = AtomicBool::new(false);
+        let l = &training_layouts()[0];
+        let policy = tensor::policy(&tensor::initial_center(20_260_915)).expect("valid");
+        // Corrupt the animal's private hidden state one tick before a validation point, so the
+        // rollout's own check is what finds it. `WorldState::validate` requires every neural
+        // value to be finite — the R1a extension's own rule, which core's release build never
+        // evaluates on its own.
+        let corrupt = |w: &mut World, tick: u64| {
+            if tick == VALIDATE_EVERY_TICKS - 1 {
+                w.state.neural.animals[0].1.hidden[0] = f64::NAN;
+            }
+        };
+        let out = run_with_fault(
+            l,
+            &Driver::Policy(Box::new(policy.clone())),
+            4_000,
+            free(&cancel),
+            "gen7/pair3-/t1-corridor",
+            Some(&corrupt),
+        );
+        let err = out.expect_err("an invalid world is an experiment error");
+        match err {
+            EpisodeError::Invalid { ticks, detail } => {
+                assert_eq!(ticks, VALIDATE_EVERY_TICKS, "caught at the next validation point");
+                assert!(detail.contains("gen7/pair3-/t1-corridor"), "detail was {detail}");
+                assert!(detail.contains("world state"), "detail was {detail}");
+            }
+            other => panic!("expected Invalid, got {other:?}"),
+        }
+        // The same fault after the last cadence point is still caught by the terminal check.
+        let late = |w: &mut World, tick: u64| {
+            if tick == 2_500 {
+                w.state.neural.animals[0].1.hidden[1] = f64::INFINITY;
+            }
+        };
+        let out = run_with_fault(
+            l,
+            &Driver::Policy(Box::new(policy.clone())),
+            2_501,
+            free(&cancel),
+            "gen0/center/t1-corridor",
+            Some(&late),
+        );
+        assert!(matches!(out, Err(EpisodeError::Invalid { .. })), "terminal check must catch it");
+
+        // And the same rollout without a fault is a perfectly ordinary episode.
+        assert!(
+            run(l, &Driver::Policy(Box::new(policy)), 4_000, free(&cancel), "t").is_ok(),
+            "the fault, not the fixture, is what fails"
+        );
+    }
+
+    /// Ordinary biological death stays a completed episode with a recorded survival time, and
+    /// its final tick is accounted for rather than skipped.
+    #[test]
+    fn ordinary_death_is_a_completed_episode_with_its_last_tick_accounted_for() {
+        let cancel = AtomicBool::new(false);
+        let l = &training_layouts()[0];
+        let e = run(l, &Driver::Control(Control::NoIntake), 36_000, free(&cancel), "t")
+            .expect("death is not an error");
+        assert!(!e.alive);
+        assert_eq!(e.ticks, 7_420, "the no-intake arm's recorded survival time");
+        assert!(e.died_on_last_tick);
+        assert_eq!(e.turn_unmeasured_ticks, 1, "only the death tick's turn is unmeasurable");
+        assert_eq!(e.terminal_stores, 0.0);
+        // The death tick is billed like every other one: 7,420 ticks of upkeep, not 7,419.
+        // Upkeep is a constant per tick for this stationary body, so the short arm gives the
+        // rate and the long one must be exactly that rate times its own recorded ticks.
+        let short = run(l, &Driver::Control(Control::NoIntake), 100, free(&cancel), "t")
+            .expect("ok");
+        let per_tick = short.upkeep_billed / short.ticks as f64;
+        assert!((e.upkeep_billed - per_tick * e.ticks as f64).abs() < 1e-9,
+            "{} vs {}", e.upkeep_billed, per_tick * e.ticks as f64);
     }
 }

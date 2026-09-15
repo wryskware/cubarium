@@ -31,8 +31,11 @@ pub mod rng;
 pub mod tensor;
 pub mod trainer;
 
-pub use episode::{Control, Detail, Driver, Episode};
+pub use episode::{Control, Driver, Episode, EpisodeError, Limits};
 pub use fixture::{HORIZON_TICKS, Layout, holdout_layouts, training_layouts};
 pub use optimizer::{Adam, SIGMA};
 pub use tensor::PARAMS;
-pub use trainer::{Checkpoint, GenerationReport, Plan, Protocol, STORE_WEIGHT, run_generation, score};
+pub use trainer::{
+    Checkpoint, Discarded, GenerationError, GenerationReport, Plan, Protocol, STORE_WEIGHT,
+    run_generation, score,
+};
