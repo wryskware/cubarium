@@ -253,6 +253,52 @@ pub struct Plan<'a> {
     pub deadline: Option<Instant>,
 }
 
+/// Evaluate one parameter vector on every layout and return its score with its episodes.
+///
+/// Used for the unperturbed centre, whose score is measured rather than inferred: a sampled
+/// perturbation's score is not the centre's. The reduction is the fixed layout order, so the
+/// worker count cannot reach it.
+pub fn evaluate(
+    theta: &[f64],
+    plan: &Plan<'_>,
+    cancel: &AtomicBool,
+) -> Result<(f64, Vec<Episode>), episode::Cancelled> {
+    let policy = tensor::policy(theta).expect("a finite centre is a policy");
+    let layouts = plan.layouts;
+    let slots: Mutex<Vec<Option<Episode>>> = Mutex::new(vec![None; layouts.len()]);
+    let cursor = AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        for _ in 0..plan.workers.max(1).min(layouts.len()) {
+            scope.spawn(|| {
+                loop {
+                    let i = cursor.fetch_add(1, Ordering::SeqCst);
+                    if i >= layouts.len() {
+                        return;
+                    }
+                    if cancel.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    if plan.deadline.is_some_and(|d| Instant::now() >= d) {
+                        cancel.store(true, Ordering::Relaxed);
+                        return;
+                    }
+                    let driver = Driver::Policy(Box::new(policy.clone()));
+                    match episode::run(&layouts[i], &driver, plan.horizon, plan.detail, cancel) {
+                        Ok(e) => slots.lock().expect("slots")[i] = Some(e),
+                        Err(episode::Cancelled) => return,
+                    }
+                }
+            });
+        }
+    });
+    let slots = slots.into_inner().expect("slots");
+    if slots.iter().any(Option::is_none) {
+        return Err(episode::Cancelled);
+    }
+    let episodes: Vec<Episode> = slots.into_iter().map(|s| s.expect("checked")).collect();
+    Ok((score(&episodes), episodes))
+}
+
 /// Run one generation and, if every job completed, apply the Adam ascent to `theta`.
 ///
 /// Returns `Err(Cancelled)` without touching `theta` or `adam` when the run was cancelled or

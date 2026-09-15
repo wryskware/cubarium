@@ -17,7 +17,7 @@ use super::export::PolicyFile;
 use super::fixture::{self, HORIZON_TICKS};
 use super::optimizer::Adam;
 use super::tensor::{self, PARAMS};
-use super::trainer::{Checkpoint, GenerationReport, Plan, Protocol, run_generation, score};
+use super::trainer::{self, Checkpoint, GenerationReport, Plan, Protocol, run_generation, score};
 use crate::evaluate::BUILD_ID;
 
 /// The three controls, in the order the table reports them.
@@ -516,6 +516,35 @@ pub fn train(
         writeln!(log, "{}", serde_json::to_string(&report)?)?;
         log.flush()?;
         write_json(&out.join("checkpoint.json"), &checkpoint)?;
+    }
+
+    // The final updated centre. The loop evaluates the centre it is *about* to perturb, so
+    // without this the last update's centre would never be scored — and a sampled
+    // perturbation's score is not the centre's.
+    if center_eval && checkpoint.generation_completed > first && Instant::now() < deadline {
+        let plan = Plan {
+            layouts: &layouts,
+            horizon,
+            workers,
+            detail: Detail::Score,
+            evaluate_center: false,
+            deadline: Some(deadline),
+        };
+        match trainer::evaluate(&checkpoint.theta, &plan, &cancel) {
+            Ok((s, episodes)) => {
+                println!(
+                    "{:>4} {:>8} {:>12} {:>12} {:>12.3} {:>12} {:>9}",
+                    "fin", layouts.len(), "-", "-", s, "-", "-"
+                );
+                checkpoint
+                    .center_scores
+                    .push((checkpoint.generation_completed, s));
+                checkpoint.episodes_run += episodes.len() as u64;
+                checkpoint.ticks_run += episodes.iter().map(|e| e.ticks).sum::<u64>();
+                write_json(&out.join("checkpoint.json"), &checkpoint)?;
+            }
+            Err(episode::Cancelled) => stop = "wall-time cap before the final centre evaluation",
+        }
     }
 
     println!();
