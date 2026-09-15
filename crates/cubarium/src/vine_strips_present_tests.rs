@@ -34,6 +34,9 @@ fn draw(art: &ArtPack, column: &TallColumn, height: f64, seconds: f64, amplitude
         art.tall_plant(VINE_PLANT),
         seconds,
         amplitude,
+        // These suites test the living column at a whole crown and no dead wood.
+        1.0,
+        None,
         &mut Vec::new(),
     );
     c
@@ -324,6 +327,8 @@ fn exact_material_registration_and_expected_budget_gain() {
                             art.tall_plant(VINE_PLANT),
                             0.0625,
                             amp,
+                            1.0,
+                            None,
                             &mut Vec::new(),
                         );
                     }

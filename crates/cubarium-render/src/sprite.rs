@@ -617,7 +617,41 @@ pub fn stamp_layers_bent(
     bend: Bend,
     scratch: &mut Vec<PixelImage>,
 ) {
-    stamp_bent(canvas, anchor, heading, layers, scale, opacity, mask, bend, None, scratch);
+    stamp_bent(canvas, anchor, heading, layers, scale, opacity, mask, bend, None, None, scratch);
+}
+
+/// [`stamp_layers_bent`] with every sampled texel's colour replaced by one flat linear-RGB
+/// `tint`, its alpha kept exactly.
+///
+/// **Normative.** Everything [`stamp_layers_bent`] documents holds — the same footprint, the
+/// same sample coordinates, the same mask, the same bend, the same source-over — with one
+/// change: after the layers are mixed and the mask applied, the premultiplied sample becomes
+/// `[tint[0]·a, tint[1]·a, tint[2]·a, a]`. So the stamp paints the mixed **shape** of its
+/// layers in one colour: a silhouette, taken from the art's own alpha rather than from a
+/// second set of sprites. A non-finite tint channel reads as 0 and a channel above 1 is
+/// clamped, so the stamp can never paint more light than an opaque pixel of that colour.
+///
+/// Because every layer is flattened to the same colour, a weighted mix of two poses is a
+/// plain alpha cross-fade of two silhouettes: no colour fringing can appear between them,
+/// which is why a growth step of a silhouette needs no reveal mask.
+#[allow(clippy::too_many_arguments)]
+pub fn stamp_layers_bent_tinted(
+    canvas: &mut Canvas,
+    anchor: SurfacePoint,
+    heading: Vec2,
+    layers: &[(Pose, f32)],
+    scale: f64,
+    opacity: f32,
+    mask: Mask,
+    bend: Bend,
+    tint: [f32; 3],
+    scratch: &mut Vec<PixelImage>,
+) {
+    let tint = std::array::from_fn(|c| {
+        let v: f32 = tint[c];
+        if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 }
+    });
+    stamp_bent(canvas, anchor, heading, layers, scale, opacity, mask, bend, None, Some(tint), scratch);
 }
 
 /// [`stamp_layers_bent`] unfolding an explicitly given radius instead of the footprint it
@@ -642,7 +676,19 @@ pub fn stamp_layers_bent_with_radius(
     radius: f64,
     scratch: &mut Vec<PixelImage>,
 ) {
-    stamp_bent(canvas, anchor, heading, layers, scale, opacity, mask, bend, Some(radius), scratch);
+    stamp_bent(
+        canvas,
+        anchor,
+        heading,
+        layers,
+        scale,
+        opacity,
+        mask,
+        bend,
+        Some(radius),
+        None,
+        scratch,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -656,6 +702,7 @@ fn stamp_bent(
     mask: Mask,
     bend: Bend,
     override_radius: Option<f64>,
+    tint: Option<[f32; 3]>,
     scratch: &mut Vec<PixelImage>,
 ) {
     let mut extent = 0.0f64;
@@ -681,27 +728,30 @@ fn stamp_bent(
         return;
     };
     let opacity = opacity.min(1.0);
-    if bend.is_identity() {
-        let radius = override_radius.unwrap_or(extent * scale);
-        stamp_unfolded::<false>(
-            canvas,
-            anchor,
-            h,
-            layers,
-            scale,
-            opacity,
-            mask,
-            reference,
-            Bend::NONE,
-            radius,
-            scratch,
-        );
+    let (bend, radius) = if bend.is_identity() {
+        (Bend::NONE, override_radius.unwrap_or(extent * scale))
     } else {
         let radius = override_radius
             .unwrap_or_else(|| ((extent + bend.amplitude.abs()) * scale).min(FOOTPRINT_RADIUS));
-        stamp_unfolded::<true>(
-            canvas, anchor, h, layers, scale, opacity, mask, reference, bend, radius, scratch,
-        );
+        (bend, radius)
+    };
+    // `BENT` and `TINTED` are compile-time, so the ordinary untinted stamp carries neither
+    // the bend arithmetic nor a tint branch and costs exactly what it always did.
+    match (bend.is_identity(), tint) {
+        (true, None) => stamp_unfolded::<false, false>(
+            canvas, anchor, h, layers, scale, opacity, mask, reference, bend, radius, [0.0; 3],
+            scratch,
+        ),
+        (true, Some(t)) => stamp_unfolded::<false, true>(
+            canvas, anchor, h, layers, scale, opacity, mask, reference, bend, radius, t, scratch,
+        ),
+        (false, None) => stamp_unfolded::<true, false>(
+            canvas, anchor, h, layers, scale, opacity, mask, reference, bend, radius, [0.0; 3],
+            scratch,
+        ),
+        (false, Some(t)) => stamp_unfolded::<true, true>(
+            canvas, anchor, h, layers, scale, opacity, mask, reference, bend, radius, t, scratch,
+        ),
     }
 }
 
@@ -714,7 +764,7 @@ fn layer_weight(w: f32) -> f32 {
 /// The one unfold-and-composite loop of every stamp. `BENT` is a compile-time constant so
 /// the unbent path carries no bend arithmetic and no branch at all.
 #[allow(clippy::too_many_arguments)]
-fn stamp_unfolded<const BENT: bool>(
+fn stamp_unfolded<const BENT: bool, const TINTED: bool>(
     canvas: &mut Canvas,
     anchor: SurfacePoint,
     h: Vec2,
@@ -725,6 +775,7 @@ fn stamp_unfolded<const BENT: bool>(
     reference: &Sprite,
     bend: Bend,
     radius: f64,
+    tint: [f32; 3],
     scratch: &mut Vec<PixelImage>,
 ) {
     let side = Vec2::new(-h.y, h.x);
@@ -762,6 +813,10 @@ fn stamp_unfolded<const BENT: bool>(
             for v in &mut rgba {
                 *v *= coverage;
             }
+        }
+        if TINTED {
+            // The shape only: one flat colour at the mixed alpha, still premultiplied.
+            rgba = [tint[0] * rgba[3], tint[1] * rgba[3], tint[2] * rgba[3], rgba[3]];
         }
         let a = rgba[3] * opacity;
         if a <= 0.0 {

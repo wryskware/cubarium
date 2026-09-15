@@ -27,6 +27,7 @@ fn transition_draw_cost(growing: bool, wet: bool) {
         water: vec![if wet { 1.0 } else { 0.0 }; CELL_COUNT],
         rain: vec![1.0; CELL_COUNT],
         producer_max: 10.0,
+        wood_max: 0.6,
         organisms: (0..200u32)
             .map(|slot| OrganismView {
                 id: OrganismId {

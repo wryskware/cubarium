@@ -41,6 +41,7 @@ fn empty_view() -> RenderView {
         water: vec![0.0; CELL_COUNT],
         rain: vec![0.0; CELL_COUNT],
         producer_max: 2.0,
+        wood_max: 0.6,
         organisms: Vec::new(),
     }
 }
@@ -925,14 +926,37 @@ fn growth_cell() -> CellId {
         .expect("a rank-2 lanternstalk slot in the middle of Front")
 }
 
-/// A view whose only rich cell is `cell`, at `density` as a fraction of the producer
-/// ramp's saturation point — which is exactly what [`plant_density`] measures. One cell
-/// is far too little to grow a column ([`column_density`] averages a whole face column),
-/// so the only thing on the canvas above the ground is that cell's plant.
+/// A view whose only rich cell is `cell`, at structural `density` — exactly what
+/// [`plant_density`] measures in a foliage or canopy band, i.e. the cube root of the living
+/// wood fraction ([`wood_density`]). Its foliage is set to a **full** canopy
+/// ([`foliage_fullness`] ≥ [`FOLIAGE_FULL`]), so the cell draws the ordinary stage image
+/// with no living-wood silhouette under it and these suites keep measuring what they always
+/// measured. One cell is far too little to grow a column ([`column_density`] averages a
+/// whole face column), so the only thing on the canvas above the ground is that cell's
+/// plant.
 fn one_cell_view(tick: u64, cell: CellId, density: f64) -> RenderView {
     let mut view = empty_view();
     view.tick = tick;
-    view.producer[cell.index()] = density * view.producer_max * PRODUCER_SATURATION;
+    let wood = view.wood_max * density.clamp(0.0, 1.0).powi(3);
+    view.wood[cell.index()] = wood;
+    view.plant_reserve[cell.index()] = 0.5 * wood;
+    // A full canopy: `P / W` at the shoulder and a little over.
+    view.producer[cell.index()] = wood;
+    view
+}
+
+/// [`one_cell_view`] with the cell's canopy at an explicit fullness `P / W` instead of full.
+fn one_cell_view_at(tick: u64, cell: CellId, density: f64, fullness: f64) -> RenderView {
+    let mut view = one_cell_view(tick, cell, density);
+    view.producer[cell.index()] = fullness * view.wood[cell.index()];
+    view
+}
+
+/// [`one_cell_view`]'s structure as **dead** wood instead: no living stand at all.
+fn one_dead_cell_view(tick: u64, cell: CellId, density: f64) -> RenderView {
+    let mut view = empty_view();
+    view.tick = tick;
+    view.dead_wood[cell.index()] = view.wood_max * density.clamp(0.0, 1.0).powi(3);
     view
 }
 

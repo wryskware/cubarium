@@ -30,6 +30,7 @@ use cubarium::art_present::{
     species_of, tall_amplitude, tall_anchor_at, tall_bend_base, tall_bend_budget, tall_columns,
     tall_grown_px, tall_heading, tall_wind_of, trunk_strip, wind_at, wind_chart, wind_phase,
     wind_response, wind_strength,
+    wood_from_producer,
 };
 use cubarium::clock::DT;
 use cubarium::present::PRODUCER_SATURATION;
@@ -89,6 +90,7 @@ fn bare_view(tick: u64) -> RenderView {
         water: vec![0.0; CELL_COUNT],
         rain: vec![0.0; CELL_COUNT],
         producer_max: PRODUCER_MAX,
+        wood_max: 0.6,
         organisms: Vec::new(),
     }
 }
@@ -96,8 +98,10 @@ fn bare_view(tick: u64) -> RenderView {
 /// Producers saturated and litter rich in every cell: every slot's target is its rank cap.
 fn rich_view(tick: u64) -> RenderView {
     let mut v = bare_view(tick);
+    // Ecology v1 drives the stage from wood; this fixture speaks in producer density.
     v.producer.fill(saturation());
     v.detritus.fill(SOIL_SCALE);
+    wood_from_producer(&mut v);
     v
 }
 
@@ -105,6 +109,7 @@ fn rich_view(tick: u64) -> RenderView {
 fn one_cell_view(tick: u64, cell: CellId, density: f64) -> RenderView {
     let mut v = bare_view(tick);
     v.producer[cell.index()] = saturation() * density;
+    wood_from_producer(&mut v);
     v
 }
 

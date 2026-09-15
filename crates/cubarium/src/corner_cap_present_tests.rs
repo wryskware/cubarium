@@ -40,6 +40,9 @@ fn draw(art: &ArtPack, column: &TallColumn, height: f64, seconds: f64, amplitude
         art.tall_plant(VINE_PLANT),
         seconds,
         amplitude,
+        // These suites test the living column at a whole crown and no dead wood.
+        1.0,
+        None,
         &mut Vec::new(),
     );
     c
@@ -481,6 +484,7 @@ fn the_flag_does_not_touch_growth_or_what_the_presenter_observes() {
             water: vec![0.0; CELL_COUNT],
             rain: vec![0.0; CELL_COUNT],
             producer_max: 10.0,
+            wood_max: 0.6,
             organisms: Vec::new(),
         };
         flagged.observe(&v);

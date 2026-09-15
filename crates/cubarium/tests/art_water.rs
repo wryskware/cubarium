@@ -16,6 +16,7 @@ use cubarium::art_present::{
     stage_thresholds, tall_anchor, tall_column_of, tall_columns, tall_target, up_of,
     water_brightness, water_coverage, present_seconds,
     WIND_QUIET_TICK, plant_bend_budget, slot_of, slot_wind, wind_fixture_tick, wind_strength,
+    wood_from_producer,
 };
 use cubarium::clock::DT;
 use cubarium::present::PRODUCER_SATURATION;
@@ -39,7 +40,7 @@ fn flat(v: f64) -> Vec<f64> {
 }
 
 fn view(tick: u64, producer: Vec<f64>, detritus: Vec<f64>, water: Vec<f64>, rain: Vec<f32>) -> RenderView {
-    RenderView {
+    let mut v = RenderView {
         tick,
         producer,
         detritus,
@@ -51,8 +52,12 @@ fn view(tick: u64, producer: Vec<f64>, detritus: Vec<f64>, water: Vec<f64>, rain
         water,
         rain,
         producer_max: PRODUCER_MAX,
+        wood_max: 0.6,
         organisms: Vec::new(),
-    }
+    };
+    // Ecology v1 drives the stage from wood; these fixtures speak in producer density.
+    wood_from_producer(&mut v);
+    v
 }
 
 fn draw_at(p: &mut ArtPresenter, v: &RenderView, f: f64) -> Canvas {
@@ -426,7 +431,7 @@ fn ground_cover_is_absent_in_a_quiet_world() {
         for (face, x, y) in ground_points(face) {
             let cell = cell_of(&SurfacePoint::pixel_center(face, x, y));
             let band = band_of(cell);
-            let t = cubarium::art_present::plant_density(&v, cell.index(), band);
+            let t = cubarium::art_present::ground_density(&v, cell.index(), band);
             assert_eq!(ground_opacity(t, band), 0.0, "{face:?} ({x}, {y})");
         }
     }

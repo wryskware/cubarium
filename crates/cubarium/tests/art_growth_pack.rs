@@ -39,6 +39,7 @@ use cubarium::art_present::{
     growth_step, growth_weights, next_stage, plant_bend_budget, plant_cap, plant_phase_of,
     present_seconds, slot_of, slot_wind, species_of, stage_opacity, stage_thresholds, up_of,
     wind_response, wind_strength,
+    wood_from_producer,
 };
 use cubarium::clock::DT;
 use cubarium::present::PRODUCER_SATURATION;
@@ -121,6 +122,7 @@ fn bare_view(tick: u64) -> RenderView {
         water: vec![0.0; CELL_COUNT],
         rain: vec![0.0; CELL_COUNT],
         producer_max: PRODUCER_MAX,
+        wood_max: 0.6,
         organisms: Vec::new(),
     }
 }
@@ -235,6 +237,7 @@ fn fed_view(tick: u64, site: Site, density: f64) -> RenderView {
         Band::Foliage | Band::Canopy => v.producer[i] = density * saturation(),
         Band::Water => v.water[i] = density * REED_SCALE,
     }
+    wood_from_producer(&mut v);
     v
 }
 
@@ -1444,6 +1447,7 @@ fn capture_the_canopy_steps_as_native_frames() {
         for site in &sites {
             v.producer[site.cell.index()] = density * saturation();
         }
+        wood_from_producer(&mut v);
         v
     };
     let mut p = ArtPresenter::new(plants_only());

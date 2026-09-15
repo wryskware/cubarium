@@ -24,6 +24,7 @@ pub const TALL_VINE_P: f64 = 0.4;
 /// 0.07 on the raw density; measured from the foliage threshold so a column grows only
 /// where its foliage does, 0.08 reaches the rim at `t_col = 1`.)
 pub const TALL_STEP: f64 = 0.08;
+
 /// Most trunk segments: base + 9 trunks + crown is eleven tiles, one per foliage cell,
 /// which puts the crown exactly at the rim cell's center.
 pub const TALL_MAX_SEGMENTS: u8 = 9;
@@ -104,6 +105,29 @@ pub fn tall_columns() -> Vec<TallColumn> {
 
 /// The mean producer density (clamped to `[0, 1]`) over a column's foliage cells.
 pub fn column_density(view: &RenderView, face: Face, cx: u8) -> f64 {
+    column_mean(view, face, cx, &|v, i| wood_density(v, i))
+}
+
+/// How tall the **dead** part of a column stands: the same mean over the same cells, of
+/// [`dead_wood_density`], at the same scale. A column whose stand died keeps the height its
+/// wood earned and loses it as `Wd` decomposes.
+pub fn column_dead_density(view: &RenderView, face: Face, cx: u8) -> f64 {
+    column_mean(view, face, cx, &|v, i| dead_wood_density(v, i))
+}
+
+/// How full a column's canopy is: the mean [`foliage_fullness`] of the same cells, which is
+/// what dims its cap ([`foliage_ramp`]) when the stand around it is grazed.
+pub fn column_fullness(view: &RenderView, face: Face, cx: u8) -> f64 {
+    column_mean(view, face, cx, &|v, i| foliage_fullness(v, i))
+}
+
+/// The mean of a per-cell reading over a column's foliage cells, each clamped to `[0, 1]`.
+fn column_mean(
+    view: &RenderView,
+    face: Face,
+    cx: u8,
+    read: &dyn Fn(&RenderView, usize) -> f64,
+) -> f64 {
     let Some((top, horizon)) = foliage_rows(face) else {
         return 0.0;
     };
@@ -111,13 +135,19 @@ pub fn column_density(view: &RenderView, face: Face, cx: u8) -> f64 {
     let mut n = 0.0;
     for cy in top..=horizon {
         let cell = CellId::new(face, cx, cy);
-        sum += plant_density(view, cell.index(), Band::Foliage).clamp(0.0, 1.0);
+        sum += read(view, cell.index()).clamp(0.0, 1.0);
         n += 1.0;
     }
     if n > 0.0 { sum / n } else { 0.0 }
 }
 
-/// The rising threshold of segment `n ≥ 1`: the column density at which a column from
+/// A column's structural read is [`wood_density`] averaged over its foliage cells, at no
+/// further scale: the mapping is deliberately the same one a single cell's plant uses, and
+/// nine segments — the height at which the crown lands on the rim cell and is carried onto
+/// the top face — must stay reachable, which it only is when a column of cells at `W_max`
+/// scores 1. The knob for a forest that reads too dense is [`TALL_STEP`], not a scale here.
+///
+/// The rising threshold of segment `n >= 1`: the column density at which a column from
 /// bare ground first shows `n` trunks, `t₀ + (n − ½) · TALL_STEP` with `t₀` the foliage's
 /// first stage threshold.
 pub fn tall_rise(n: u8) -> f64 {
@@ -278,6 +308,7 @@ pub fn tall_grown_px(height: f64) -> f64 {
 /// height coordinate: no tile join opens, the cap stays on the stem's curve even where its
 /// pixels are owned by Top, and a vine cannot slide against its trunk. An amplitude of 0 is
 /// [`Bend::NONE`] and the column is drawn exactly as it was before the wind existed.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn draw_column(
     canvas: &mut Canvas,
     column: &TallColumn,
@@ -286,6 +317,8 @@ pub(super) fn draw_column(
     vine: Option<&TallPlant>,
     seconds: f64,
     amplitude: f64,
+    cap_opacity: f32,
+    tint: Option<[f32; 3]>,
     scratch: &mut Vec<PixelImage>,
 ) {
     if !(height > 0.0) {
@@ -300,7 +333,12 @@ pub(super) fn draw_column(
     // by the unfolding of the cap's final position `(u, 2)`; otherwise, and for every other
     // part, the ordinary stamp about the actual anchor.
     let near_corner = column.cx < 2 || column.cx > 13;
+    // A tinted column is dead wood: base and trunk only, so `hold_owner` is never set on
+    // this path and the retained-chart stamp — which has no tint — is never reached.
     let mut stamp = |clip: &Clip, i: f64, mask: Mask, opacity: f32, hold_owner: bool| {
+        if opacity <= 0.0 {
+            return;
+        }
         let pose = clip.sample(seconds + tall_phase_of(column.face, column.cx, clip.seconds));
         let at = tall_anchor_at(column.face, column.cx, i);
         let bend = Bend {
@@ -315,7 +353,20 @@ pub(super) fn draw_column(
             } else {
                 at
             };
-        if owner == at {
+        if let Some(tint) = tint {
+            cubarium_render::stamp_layers_bent_tinted(
+                canvas,
+                at,
+                heading,
+                &[(pose, 1.0)],
+                1.0,
+                opacity,
+                mask,
+                bend,
+                tint,
+                scratch,
+            );
+        } else if owner == at {
             stamp_layers_bent(
                 canvas,
                 at,
@@ -358,10 +409,18 @@ pub(super) fn draw_column(
             false,
         );
     }
-    if let Some(cap) = &plant.cap {
-        stamp(cap, height + 1.0, Mask::None, TALL_OPACITY * fade, true);
+    // The cap is the column's crown — foliage — so it dims with the stand's fullness and a
+    // stripped column stands as a bare trunk. A dead column has no crown and no climber.
+    if let (Some(cap), None) = (&plant.cap, tint) {
+        stamp(
+            cap,
+            height + 1.0,
+            Mask::None,
+            TALL_OPACITY * fade * cap_opacity,
+            true,
+        );
     }
-    if let (true, Some(vine)) = (column.vine, vine) {
+    if let (true, Some(vine), None) = (column.vine, vine, tint) {
         let strips = vine.vine_strips.as_ref();
         let trunk = strips.map_or(&vine.trunk, |v| &v.trunk);
         for i in (1..=TALL_MAX_SEGMENTS).step_by(2) {
@@ -448,6 +507,61 @@ pub(super) fn stage_layers(
             [(pose, 1.0), (pose, 0.0)]
         }
     }
+}
+
+/// The pose layers and base opacity of one cell's **silhouette** at a growth state: the
+/// shape a tinted stamp paints for the structure behind (or instead of) the foliage.
+///
+/// **Normative**, with `opacity_of(stage) = `[`stage_opacity`]`(stage, t, thresholds,
+/// ceiling)`:
+///
+/// * an idle growth is its one stage's own idle sway pose at `opacity_of(stage)`;
+/// * a step between two real stages is the plain mix `[(lower, 1 − tu), (upper, tu)]` at
+///   `opacity_of(lower) + (opacity_of(upper) − opacity_of(lower)) · tu`;
+/// * the bare-ground step (`None <-> 0`, which has no lower stage) is the upper stage alone
+///   at `opacity_of(upper) · tu`.
+///
+/// No reveal mask and no authored growth clip: because a tinted stamp flattens every layer
+/// to one colour ([`cubarium_render::stamp_layers_bent_tinted`]), a weighted mix of two
+/// stages is already a clean alpha cross-fade of two silhouettes, with no seam a reveal
+/// would be hiding. The result is continuous in the step's progress and, at either end of a
+/// step, exactly the neighbouring stage's own silhouette — so a silhouette tracks the very
+/// same paced growth its foliage does, sway phase included.
+///
+/// `None` when the growth is bare ground or the opacity has fallen to nothing.
+pub(super) fn silhouette_layers<'a>(
+    plant: &'a Plant,
+    cell: CellId,
+    s: f64,
+    growth: Growth,
+    t: f64,
+    thresholds: &[f64; 3],
+    ceiling: f32,
+) -> Option<([(Pose<'a>, f32); 2], f32)> {
+    let opacity_of = |stage: u8| stage_opacity(stage, t, thresholds, ceiling);
+    if growth.from == growth.to {
+        let stage = growth.to?;
+        let pose = stage_pose(plant, stage, cell, s);
+        let opacity = opacity_of(stage);
+        return (opacity > 0.0).then_some(([(pose, 1.0), (pose, 0.0)], opacity));
+    }
+    let GrowthStep { lower, upper, t: tu } = growth_step(growth)?;
+    let tu = if tu.is_finite() { tu.clamp(0.0, 1.0) } else { 0.0 };
+    let top = stage_pose(plant, upper, cell, s);
+    let (layers, opacity) = match lower {
+        Some(low) => {
+            let under = opacity_of(low);
+            (
+                [
+                    (stage_pose(plant, low, cell, s), 1.0 - tu as f32),
+                    (top, tu as f32),
+                ],
+                under + (opacity_of(upper) - under) * tu as f32,
+            )
+        }
+        None => ([(top, 1.0), (top, 0.0)], opacity_of(upper) * tu as f32),
+    };
+    (opacity > 0.0).then_some((layers, opacity))
 }
 
 /// The **idle sway pose** of one stage at presentation seconds `s`: that stage's own looping

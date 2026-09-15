@@ -19,7 +19,7 @@ fn pack() -> ArtPack {
 }
 
 fn view(tick: u64, density: f64) -> RenderView {
-    RenderView {
+    let mut v = RenderView {
         tick,
         producer: vec![density * PRODUCER_MAX * PRODUCER_SATURATION; CELL_COUNT],
         detritus: vec![0.0; CELL_COUNT],
@@ -31,8 +31,12 @@ fn view(tick: u64, density: f64) -> RenderView {
         water: vec![0.0; CELL_COUNT],
         rain: vec![0.0; CELL_COUNT],
         producer_max: PRODUCER_MAX,
+        wood_max: 0.6,
         organisms: Vec::new(),
-    }
+    };
+    // Ecology v1 drives the stage from wood; this fixture speaks in producer density.
+    cubarium::art_present::wood_from_producer(&mut v);
+    v
 }
 
 fn full_foliage_slot() -> CellId {

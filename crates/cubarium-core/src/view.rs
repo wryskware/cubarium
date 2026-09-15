@@ -53,6 +53,10 @@ pub struct RenderView {
     /// This tick's rain rate per cell (d/s); zero outside the showers.
     pub rain: Vec<f32>,
     pub producer_max: f64,
+    /// `W_max` from `config.plant.wood_max` (m): the most living wood one cell can hold.
+    /// The presenter normalises `wood` and `dead_wood` against it, exactly as it normalises
+    /// `producer` against `producer_max`. Read-only, like every other field here.
+    pub wood_max: f64,
     pub organisms: Vec<OrganismView>,
 }
 
