@@ -36,6 +36,8 @@
 //! run cannot quietly redefine the task and compare numbers across the change.
 
 use std::f64::consts::FRAC_1_SQRT_2;
+use std::path::Path;
+use std::sync::Arc;
 
 use cubarium_core::config::WorldConfig;
 use cubarium_core::ids::OrganismId;
@@ -61,6 +63,80 @@ pub use cubarium_core::TRAINING_FOUNDER_HUE as FOUNDER_HUE;
 pub use cubarium_core::TRAINING_START_RESERVE as START_RESERVE;
 /// Starting energy as a fraction of `energy_max`.
 pub use cubarium_core::TRAINING_START_ENERGY as START_ENERGY;
+
+/// The **ecology** a fixture set is built on: the base [`WorldConfig`] every layout starts
+/// from, with a label and a hash.
+///
+/// A layout was always a set of overrides on top of *some* configuration; before ecology v1's
+/// calibration that configuration was silently `WorldConfig::default()`. It is now named, so a
+/// score, a protocol hash and an exported policy all say which ecology they belong to, and a
+/// policy trained in one ecology cannot be quietly evaluated in another.
+///
+/// `hash` is [`crate::calibrate::config_hash`] itself — called, not reimplemented — so a
+/// configuration exported by `calibrate-export` carries **one** number everywhere it appears:
+/// in the calibration's note, in this protocol, and in the exported policy. (That function is
+/// a 64-bit multiply-xor fingerprint over the canonical JSON with its own constant; it is not
+/// bit-for-bit the FNV-1a that [`fnv1a`] computes, and the two must not be swapped for each
+/// other on the grounds that both are "the hash".)
+#[derive(Clone, Debug, PartialEq)]
+pub struct Ecology {
+    /// A short name for the configuration: `default`, or the TOML file's stem.
+    pub label: String,
+    /// FNV-1a over the base config's canonical JSON.
+    pub hash: u64,
+    /// The configuration a layout's own overrides are applied on top of.
+    pub base: Arc<WorldConfig>,
+}
+
+impl Default for Ecology {
+    fn default() -> Self {
+        Ecology::defaults()
+    }
+}
+
+impl Ecology {
+    /// The shipped defaults: what every R2 fixture was built on, unchanged.
+    pub fn defaults() -> Ecology {
+        Ecology::of("default", WorldConfig::default())
+    }
+
+    /// A named base configuration.
+    pub fn of(label: &str, base: WorldConfig) -> Ecology {
+        let hash = crate::calibrate::config_hash(&base);
+        Ecology { label: label.to_string(), hash, base: Arc::new(base) }
+    }
+
+    /// Read a `cubarium run --config` TOML — for instance the calibration's selected
+    /// `fast-leaf.toml` — and freeze it as this fixture set's ecology. The config is validated
+    /// here, so a file the core would refuse is refused before any episode runs.
+    pub fn load(path: &Path) -> Result<Ecology, String> {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| format!("reading {}: {e}", path.display()))?;
+        let config: WorldConfig = toml::from_str(&text)
+            .map_err(|e| format!("{} is not a world config: {e}", path.display()))?;
+        config
+            .validate()
+            .map_err(|e| format!("{} is not a config the core accepts: {e}", path.display()))?;
+        let label = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        Ok(Ecology::of(&label, config))
+    }
+
+    /// `--config <toml>` when it was given, the shipped defaults when it was not.
+    pub fn from_option(path: Option<&Path>) -> Result<Ecology, String> {
+        match path {
+            Some(p) => Ecology::load(p),
+            None => Ok(Ecology::defaults()),
+        }
+    }
+
+    /// The hash as it is printed and recorded everywhere: sixteen lower-case hex digits.
+    pub fn hex(&self) -> String {
+        format!("{:016x}", self.hash)
+    }
+}
 
 /// One painted square of producer material: `(2·half + 1)²` cells centred on `(cx, cy)`,
 /// filled to `fill · P_max`.
@@ -103,6 +179,14 @@ pub struct Layout {
     /// The opening patch first, then the later food, in the order the disclosed control tours
     /// them.
     pub patches: Vec<Patch>,
+    /// The base configuration this layout's own overrides are applied on top of.
+    ///
+    /// Deliberately **not** serialized: a layout's JSON is a description of its geometry, and
+    /// the ecology it was run in is recorded once, by label and hash, in the protocol and in
+    /// the exported policy. Nothing in this workspace deserializes a `Layout`; if something
+    /// ever does, it gets the shipped defaults and must set this itself.
+    #[serde(skip)]
+    pub ecology: Ecology,
 }
 
 /// The stand that carries `p` of foliage (`design/ecology-v1-contract.md` §14 "search"):
@@ -269,8 +353,12 @@ impl Layout {
     }
 
     /// The config every layout shares, differing only in `seed`.
+    ///
+    /// It starts from [`Layout::ecology`]'s base — the shipped defaults, or the calibrated
+    /// ecology a `--config` named — and then applies the layout's own overrides, which are the
+    /// isolated-episode conditions and nothing else.
     pub fn config(&self) -> WorldConfig {
-        let mut c = WorldConfig::default();
+        let mut c = (*self.ecology.base).clone();
         // No founders of its own: the layout places exactly the one grazer it means to.
         c.founders.kinds.clear();
         c.founders.count = 0;
@@ -308,6 +396,14 @@ impl Layout {
 /// | `t3-scatter` | 3×3 at 0.70 | a single-cell cue, then a 5×5 field | west |
 /// | `t4-ring` | 3×3 at 0.45 | two 3×3 corners and two single-cell cues | south-east |
 pub fn training_layouts() -> Vec<Layout> {
+    training_layouts_on(&Ecology::defaults())
+}
+
+/// The four training layouts on a named ecology. The geometry is the frozen one; only the
+/// configuration the overrides are applied to changes, and that change moves every layout
+/// hash and the protocol hash with it.
+pub fn training_layouts_on(ecology: &Ecology) -> Vec<Layout> {
+    let e = || ecology.clone();
     vec![
         Layout {
             name: "t1-corridor".into(),
@@ -319,6 +415,7 @@ pub fn training_layouts() -> Vec<Layout> {
                 Patch { cx: 8, cy: 8, half: 1, fill: 1.0 },
                 Patch { cx: 13, cy: 8, half: 1, fill: 1.0 },
             ],
+            ecology: e(),
         },
         Layout {
             name: "t2-weak-open".into(),
@@ -330,6 +427,7 @@ pub fn training_layouts() -> Vec<Layout> {
                 Patch { cx: 8, cy: 7, half: 1, fill: 1.0 },
                 Patch { cx: 4, cy: 3, half: 1, fill: 1.0 },
             ],
+            ecology: e(),
         },
         Layout {
             name: "t3-scatter".into(),
@@ -341,6 +439,7 @@ pub fn training_layouts() -> Vec<Layout> {
                 Patch { cx: 9, cy: 6, half: 0, fill: 1.0 },
                 Patch { cx: 5, cy: 9, half: 2, fill: 1.0 },
             ],
+            ecology: e(),
         },
         Layout {
             name: "t4-ring".into(),
@@ -354,6 +453,7 @@ pub fn training_layouts() -> Vec<Layout> {
                 Patch { cx: 4, cy: 4, half: 1, fill: 1.0 },
                 Patch { cx: 4, cy: 12, half: 0, fill: 1.0 },
             ],
+            ecology: e(),
         },
     ]
 }
@@ -369,10 +469,15 @@ pub fn training_layouts() -> Vec<Layout> {
 /// record before any policy exists, and they are kept out of optimisation, of any calibration
 /// and of candidate selection. Their evaluation belongs to the learning assignment.
 pub fn holdout_layouts() -> Vec<Layout> {
-    (0..8u64).map(holdout_layout).collect()
+    holdout_layouts_on(&Ecology::defaults())
 }
 
-fn holdout_layout(index: u64) -> Layout {
+/// The eight held-out layouts on a named ecology.
+pub fn holdout_layouts_on(ecology: &Ecology) -> Vec<Layout> {
+    (0..8u64).map(|i| holdout_layout(i, ecology)).collect()
+}
+
+fn holdout_layout(index: u64, ecology: &Ecology) -> Layout {
     let seed = 20_260_915_100 + index;
     let draw = |c: u64| super::rng::unit_at(seed, stream::ES_HOLDOUT, index, c);
     // Positions come from a 4-cell lattice inset from the rim, so a patch never clips the face
@@ -411,6 +516,7 @@ fn holdout_layout(index: u64) -> Layout {
             Patch { cx: later_a.0, cy: later_a.1, half: 1, fill: 1.0 },
             Patch { cx: later_b.0, cy: later_b.1, half: 1, fill: 1.0 },
         ],
+        ecology: ecology.clone(),
     }
 }
 
@@ -589,6 +695,119 @@ mod tests {
                     assert!(dx >= 4 || dy >= 4, "{}: patches {i} and {j} are adjacent", l.name);
                 }
             }
+        }
+    }
+
+    /// A different ecology, built the way `--config` builds one: the plant and producer
+    /// constants a calibration moves, plus every field a layout is supposed to override.
+    fn moved_ecology() -> Ecology {
+        let mut c = WorldConfig::default();
+        c.plant.foliage_rate = 0.006;
+        c.plant.maintenance = 0.0001;
+        c.plant.alpha = 2.5;
+        c.producer.max = 1.8;
+        // The three a layout must override, deliberately set to the opposite of what a layout
+        // wants, plus a seed that is not any layout's.
+        c.weather.amplitude = 0.3;
+        c.water.rain_rate = 0.6;
+        c.mechanisms.mutation = true;
+        c.founders.count = 9;
+        c.seed = 4_242;
+        c.validate().expect("the moved ecology is one the core accepts");
+        Ecology::of("moved", c)
+    }
+
+    /// The number this crate calls a config hash is **one** number. The fixture must not grow
+    /// a second fingerprint that disagrees with the calibration's published one.
+    #[test]
+    fn an_ecologys_hash_is_the_calibrations_own_config_hash() {
+        let eco = moved_ecology();
+        assert_eq!(eco.hash, crate::calibrate::config_hash(&eco.base));
+        assert_eq!(eco.hex(), format!("{:016x}", eco.hash));
+        let defaults = Ecology::defaults();
+        assert_eq!(defaults.hash, crate::calibrate::config_hash(&WorldConfig::default()));
+        assert_ne!(defaults.hash, eco.hash, "a moved ecology is a different ecology");
+        assert_eq!(defaults.label, "default");
+    }
+
+    /// `Layout::config` starts from the ecology it was given and still applies its own
+    /// overrides: no founders, no weather swing, no rain, no mutation, its own seed.
+    #[test]
+    fn a_layout_starts_from_its_ecology_and_still_applies_its_own_overrides() {
+        let eco = moved_ecology();
+        for l in training_layouts_on(&eco).iter().chain(&holdout_layouts_on(&eco)) {
+            let c = l.config();
+            // From the ecology.
+            assert_eq!(c.plant.foliage_rate, 0.006, "{}", l.name);
+            assert_eq!(c.plant.maintenance, 0.0001, "{}", l.name);
+            assert_eq!(c.plant.alpha, 2.5, "{}", l.name);
+            assert_eq!(c.producer.max, 1.8, "{}", l.name);
+            // The layout's own, on top.
+            assert!(c.founders.kinds.is_empty(), "{}", l.name);
+            assert_eq!(c.founders.count, 0, "{}", l.name);
+            assert_eq!(c.weather.amplitude, 0.0, "{}", l.name);
+            assert_eq!(c.water.rain_rate, 0.0, "{}", l.name);
+            assert!(!c.mechanisms.mutation, "{}", l.name);
+            assert_eq!(c.seed, l.seed, "{}", l.name);
+        }
+    }
+
+    /// Every layout hash moves with the ecology, and the geometry is unchanged.
+    #[test]
+    fn the_layout_hashes_move_with_the_ecology_and_the_geometry_does_not() {
+        let eco = moved_ecology();
+        let default_set = training_layouts();
+        let moved_set = training_layouts_on(&eco);
+        for (d, m) in default_set.iter().zip(&moved_set) {
+            assert_eq!(d.name, m.name);
+            assert_eq!(d.patches, m.patches, "{}: the geometry is frozen", d.name);
+            assert_eq!(d.start, m.start);
+            assert_ne!(d.hash(&d.config()), m.hash(&m.config()), "{}", d.name);
+        }
+    }
+
+    /// The whole point of the plumbing: a training layout on a calibrated ecology still builds
+    /// one valid world holding one grazer whose painted patches are **live stands** under
+    /// *that* ecology's plant constants — `P` at the declared fill of its `P_max`, `W = P/α`,
+    /// `Q = q_cap·W` — not under the shipped defaults'.
+    #[test]
+    fn every_layout_on_a_moved_ecology_paints_live_stands_under_that_ecologys_constants() {
+        let eco = moved_ecology();
+        for l in training_layouts_on(&eco).iter().chain(&holdout_layouts_on(&eco)) {
+            let (world, id) = l.build().unwrap_or_else(|e| panic!("{}: {e}", l.name));
+            assert_eq!(world.population(), 1, "{}", l.name);
+            assert!(world.state.organisms.get(id).is_some(), "{}", l.name);
+            let cfg = l.config();
+            let eco_state = &world.state.ecology;
+            let mut live = 0usize;
+            for cell in CellId::all() {
+                let i = cell.index();
+                let p = world.state.fields.p[i];
+                assert!(
+                    (eco_state.wood[i] - p / cfg.plant.alpha).abs() < 1e-12,
+                    "{}: cell {i}",
+                    l.name
+                );
+                assert!(
+                    (eco_state.plant_reserve[i] - cfg.plant.reserve_cap * eco_state.wood[i]).abs()
+                        < 1e-12,
+                    "{}: cell {i}",
+                    l.name
+                );
+                if p > 0.0 {
+                    live += 1;
+                }
+            }
+            assert_eq!(live, l.route().len(), "{}: every painted cell is live", l.name);
+            // The opening patch is at its declared fraction of *this* ecology's P_max.
+            let opening = l.patches[0];
+            let centre = CellId::new(l.face(), opening.cx, opening.cy).index();
+            assert!(
+                (world.state.fields.p[centre] - opening.fill * cfg.producer.max).abs() < 1e-12,
+                "{}",
+                l.name
+            );
+            world.check_invariants().unwrap_or_else(|e| panic!("{}: {e}", l.name));
         }
     }
 }

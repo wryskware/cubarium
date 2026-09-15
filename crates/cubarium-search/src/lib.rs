@@ -27,6 +27,7 @@ pub mod es;
 pub mod evaluate;
 pub mod metrics;
 pub mod params;
+pub mod population;
 pub mod rng;
 pub mod search;
 

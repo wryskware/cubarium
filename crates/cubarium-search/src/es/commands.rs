@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use super::episode::{self, Control, Driver, Episode, EpisodeError, Limits};
 use super::export::PolicyFile;
-use super::fixture::{self, HORIZON_TICKS};
+use super::fixture::{self, Ecology, HORIZON_TICKS};
 use super::optimizer::Adam;
 use super::tensor::{self, PARAMS};
 use super::trainer::{Aggregate, self, CenterRecord, Checkpoint, GenerationError, GenerationReport, Plan, Protocol,
@@ -28,15 +28,17 @@ pub const CONTROLS: [Control; 3] =
 type Boxed = Box<dyn std::error::Error>;
 
 /// Print the frozen protocol: everything a score depends on that is not the policy.
-pub fn protocol() {
-    let training = fixture::training_layouts();
-    let holdout = fixture::holdout_layouts();
+pub fn protocol(config: Option<PathBuf>) -> Result<(), Boxed> {
+    let eco = Ecology::from_option(config.as_deref())?;
+    let training = fixture::training_layouts_on(&eco);
+    let holdout = fixture::holdout_layouts_on(&eco);
     let p = Protocol::new(16, HORIZON_TICKS, 20_260_915, &training);
 
     println!("# R2a training protocol (frozen)");
     println!("build                {BUILD_ID}");
     println!("schema               {}", p.schema);
     println!("protocol hash        {:#018x}", p.hash());
+    println!("config               {} (hash {})", p.config, eco.hex());
     println!("policy schema digest {:#018x}", p.policy_digest);
     println!("parameters           {PARAMS}");
     println!();
@@ -70,6 +72,7 @@ pub fn protocol() {
     for l in &holdout {
         println!("{}", fixture::describe(l));
     }
+    Ok(())
 }
 
 /// Run the three controls on every training layout and judge each layout against the three
@@ -77,11 +80,13 @@ pub fn protocol() {
 pub fn controls(
     workers: usize,
     wall_seconds: u64,
+    config: Option<PathBuf>,
     out: Option<PathBuf>,
 ) -> Result<(), Boxed> {
     let started = Instant::now();
     let deadline = started + Duration::from_secs(wall_seconds);
-    let layouts = fixture::training_layouts();
+    let eco = Ecology::from_option(config.as_deref())?;
+    let layouts = fixture::training_layouts_on(&eco);
     let jobs: Vec<(usize, Control)> =
         (0..layouts.len()).flat_map(|l| CONTROLS.map(|c| (l, c))).collect();
 
@@ -249,12 +254,13 @@ pub fn controls(
 /// This exercises **ES**, not foraging and not learning. The short horizon need not outlast
 /// the starting reserves, no held-out layout is touched, and nothing it produces is a trained
 /// founder.
-pub fn smoke(out: Option<PathBuf>) -> Result<(), Boxed> {
+pub fn smoke(config: Option<PathBuf>, out: Option<PathBuf>) -> Result<(), Boxed> {
     const SMOKE_TICKS: u64 = 2_000;
     const SMOKE_PAIRS: usize = 2;
     const SMOKE_BUDGET_SECONDS: u64 = 60;
     let started = Instant::now();
-    let layouts = fixture::training_layouts();
+    let eco = Ecology::from_option(config.as_deref())?;
+    let layouts = fixture::training_layouts_on(&eco);
     let one = &layouts[..1];
     let protocol = Protocol::new(SMOKE_PAIRS, SMOKE_TICKS, 20_260_915, one);
     let cancel = AtomicBool::new(false);
@@ -268,6 +274,70 @@ pub fn smoke(out: Option<PathBuf>) -> Result<(), Boxed> {
         one[0].name
     );
     println!("# build {BUILD_ID}   protocol hash {:#018x}", protocol.hash());
+    println!("# config {} (hash {})", protocol.config, eco.hex());
+
+    // The plumbing being smoked now includes the ecology, so the layouts are checked against
+    // it before any ES arithmetic: every training layout must still build one valid world
+    // holding one grazer, with every painted cell a **live stand** under *this* config's plant
+    // constants (`P` at the declared fill of `P_max`, `W = P/alpha`, `Q = q_cap·W`). A
+    // configuration that painted foliage with no wood under it would be a scene of dying
+    // leaves, and the score would be measuring the dieback, not the forager.
+    println!();
+    println!("## the training layouts on this config");
+    println!(
+        "{:<13} {:>20} {:>6} {:>5} {:>9} {:>9} {:>9} {:>7}",
+        "layout", "layout hash", "cells", "pop", "sum P", "sum W", "sum Q", "stands"
+    );
+    for l in &layouts {
+        let cfg = l.config();
+        let (world, id) = l.build()?;
+        world.check_invariants()?;
+        if world.population() != 1 || world.state.organisms.get(id).is_none() {
+            return Err(format!("layout {} did not build exactly one grazer", l.name).into());
+        }
+        let fields = &world.state.fields;
+        let eco_state = &world.state.ecology;
+        let mut stands = 0usize;
+        for cell in cubarium_surface::CellId::all() {
+            let i = cell.index();
+            let p = fields.p[i];
+            let w = eco_state.wood[i];
+            let q = eco_state.plant_reserve[i];
+            if (w - p / cfg.plant.alpha).abs() > 1e-12
+                || (q - cfg.plant.reserve_cap * w).abs() > 1e-12
+            {
+                return Err(format!(
+                    "layout {}: cell {i} carries P {p}, W {w}, Q {q}, which is not the stand \
+                     this config's alpha {} and reserve cap {} describe",
+                    l.name, cfg.plant.alpha, cfg.plant.reserve_cap
+                )
+                .into());
+            }
+            if p > 0.0 && w > 0.0 && q > 0.0 {
+                stands += 1;
+            }
+        }
+        let route = l.route().len();
+        if stands != route {
+            return Err(format!(
+                "layout {}: {stands} of its {route} painted cells are live stands",
+                l.name
+            )
+            .into());
+        }
+        println!(
+            "{:<13} {:>20} {:>6} {:>5} {:>9.3} {:>9.3} {:>9.3} {:>4}/{:<2}",
+            l.name,
+            format!("{:#018x}", l.hash(&cfg)),
+            route,
+            world.population(),
+            fields.p.iter().sum::<f64>(),
+            eco_state.wood.iter().sum::<f64>(),
+            eco_state.plant_reserve.iter().sum::<f64>(),
+            stands,
+            route,
+        );
+    }
 
     let run = |workers: usize| -> (Vec<f64>, Adam, GenerationReport) {
         let mut theta = tensor::initial_center(protocol.train_seed);
@@ -363,8 +433,9 @@ pub fn smoke(out: Option<PathBuf>) -> Result<(), Boxed> {
 }
 
 /// Measure single-animal episode throughput, which is what the compute checkpoint needs.
-pub fn bench(ticks: u64, workers: usize) -> Result<(), Boxed> {
-    let layouts = fixture::training_layouts();
+pub fn bench(ticks: u64, workers: usize, config: Option<PathBuf>) -> Result<(), Boxed> {
+    let eco = Ecology::from_option(config.as_deref())?;
+    let layouts = fixture::training_layouts_on(&eco);
     let cancel = AtomicBool::new(false);
     let policy = tensor::policy(&tensor::initial_center(20_260_915))?;
 
@@ -449,11 +520,13 @@ pub fn train(
     aggregate: Aggregate,
     resume: Option<PathBuf>,
     overwrite: bool,
+    config: Option<PathBuf>,
     out: PathBuf,
 ) -> Result<(), Boxed> {
     let started = Instant::now();
     let deadline = started + Duration::from_secs(wall_seconds);
-    let layouts = fixture::training_layouts();
+    let eco = Ecology::from_option(config.as_deref())?;
+    let layouts = fixture::training_layouts_on(&eco);
     let protocol = Protocol::new(pairs, horizon, train_seed, &layouts).with_aggregate(aggregate);
     let log_path = out.join("generations.jsonl");
     let checkpoint_path = out.join("checkpoint.json");
@@ -508,6 +581,7 @@ pub fn train(
 
     println!("# R2a learning run");
     println!("# build {BUILD_ID}   protocol hash {:#018x}", protocol.hash());
+    println!("# config {} (hash {})", protocol.config, eco.hex());
     println!(
         "# {pairs} pairs ({} candidates) x {} layouts x {horizon} ticks, up to {generations} \
          updates, {workers} workers, {wall_seconds} s cap",
@@ -708,7 +782,14 @@ fn record_center(cp: &mut Checkpoint, out: &Path, generation: u64) -> Result<(),
         return Ok(());
     }
     let relative = format!("centers/center-{generation:05}.json");
-    let file = PolicyFile::new(&cp.theta, &cp.build, cp.protocol_hash, generation)?;
+    let file = PolicyFile::new(
+        &cp.theta,
+        &cp.build,
+        cp.protocol_hash,
+        generation,
+        &cp.protocol.config,
+        cp.protocol.config_hash,
+    )?;
     write_json_atomic(&out.join(&relative), &file)?;
     cp.centers.push(CenterRecord {
         generation,
@@ -755,9 +836,14 @@ pub fn evaluate(
     horizon: u64,
     wall_seconds: u64,
     probe: EvalProbe,
+    config: Option<PathBuf>,
     out: PathBuf,
 ) -> Result<(), Boxed> {
+    let eco = Ecology::from_option(config.as_deref())?;
     let file: PolicyFile = serde_json::from_str(&fs::read_to_string(&policy_file)?)?;
+    // The ecology is checked *before* the weights are rebuilt, so a policy from another world
+    // is refused by name rather than scored in a world it never saw.
+    file.check_ecology(&eco)?;
     let policy = file.policy()?;
     if probe.copies == 0 {
         return Err("--copies must be at least 1".into());
@@ -766,8 +852,8 @@ pub fn evaluate(
         return Err("--reset-hidden-every must be at least 1 tick".into());
     }
     let layouts = match set {
-        "training" => fixture::training_layouts(),
-        "holdout" => fixture::holdout_layouts(),
+        "training" => fixture::training_layouts_on(&eco),
+        "holdout" => fixture::holdout_layouts_on(&eco),
         other => return Err(format!("set must be `training` or `holdout`, not `{other}`").into()),
     };
     let cancel = AtomicBool::new(false);
@@ -775,6 +861,7 @@ pub fn evaluate(
     let limits = Limits::until(&cancel, started + Duration::from_secs(wall_seconds));
     println!("# evaluation of {} (generation {}, digest {:#x}) on the {set} set", policy_file.display(), file.generation, file.policy_digest);
     println!("# build {BUILD_ID}, {horizon} ticks per episode, {wall_seconds} s cap, {} layouts", layouts.len());
+    println!("# config {} (hash {}), protocol hash {:#018x}", eco.label, eco.hex(), file.protocol_hash);
     if let Some(k) = probe.reset_hidden_every {
         println!("# probe: every animal's hidden state is zeroed every {k} ticks (held action and feedback kept)");
     }
@@ -861,6 +948,8 @@ pub fn evaluate(
         "generation": file.generation,
         "policy_digest": file.policy_digest,
         "protocol_hash": file.protocol_hash,
+        "config": eco.label,
+        "config_hash": eco.hex(),
         "set": set,
         "layouts": layouts.iter().map(|l| l.name.clone()).collect::<Vec<_>>(),
         "layout_hashes": layouts.iter().map(|l| l.hash(&l.config())).collect::<Vec<_>>(),
@@ -883,20 +972,78 @@ pub fn evaluate(
 
 /// Export a checkpoint's centre as a policy, and verify the round trip and ordinary core
 /// inference on a training layout.
-pub fn export(checkpoint: PathBuf, out: PathBuf, verify_ticks: u64) -> Result<(), Boxed> {
+pub fn export(
+    checkpoint: PathBuf,
+    config: Option<PathBuf>,
+    generation: Option<u64>,
+    out: PathBuf,
+    verify_ticks: u64,
+) -> Result<(), Boxed> {
     let cp: Checkpoint = serde_json::from_str(&fs::read_to_string(&checkpoint)?)?;
     cp.validate()?;
+    let eco = Ecology::from_option(config.as_deref())?;
+    // `--config` names the world the verification episode runs in, and it must be the world
+    // the checkpoint was trained in. The checkpoint stores the hash, not the constants, so a
+    // run trained on something other than the defaults cannot be verified without the file.
+    if eco.hash != cp.protocol.config_hash {
+        return Err(format!(
+            "checkpoint {} was trained in ecology {} (config hash {:016x}); --config names {} \
+             (config hash {}). Pass the configuration the run was trained on.",
+            checkpoint.display(),
+            cp.protocol.config,
+            cp.protocol.config_hash,
+            eco.label,
+            eco.hex(),
+        )
+        .into());
+    }
+    // Which centre. The run's selection rule is "the highest **recorded centre score**,
+    // earliest generation on ties" — which is rarely the last generation, and a command that
+    // could only export `cp.theta` would quietly export a different policy than the one that
+    // was selected. `--generation` names the centre; its weights come from the file the run
+    // wrote at the time and are checked against the record's hash, so the exported policy is
+    // the one that earned the score and not a reconstruction.
+    let (theta, generation, selected_score) = match generation {
+        None => (cp.theta.clone(), cp.generation_completed, cp.recorded_center_score(cp.generation_completed)),
+        Some(g) => {
+            let record = cp
+                .centers
+                .iter()
+                .find(|c| c.generation == g)
+                .ok_or_else(|| format!(
+                    "this run recorded no centre for generation {g}; it holds {:?}",
+                    cp.center_generations()
+                ))?;
+            let dir = checkpoint.parent().unwrap_or_else(|| Path::new("."));
+            let path = dir.join(&record.file);
+            let stored: PolicyFile = serde_json::from_str(&fs::read_to_string(&path)?)?;
+            let hash = fixture::fnv1a(super::bits::encode(&stored.theta).as_bytes());
+            if hash != record.weights_fnv1a {
+                return Err(format!(
+                    "{} holds weights hashing {hash:#018x}, the checkpoint records \
+                     {:#018x} for generation {g}",
+                    path.display(),
+                    record.weights_fnv1a
+                )
+                .into());
+            }
+            (stored.theta, g, record.score)
+        }
+    };
+
     let file = PolicyFile::new(
-        &cp.theta,
+        &theta,
         &cp.build,
         cp.protocol_hash,
-        cp.generation_completed,
+        generation,
+        &cp.protocol.config,
+        cp.protocol.config_hash,
     )?;
     write_json(&out, &file)?;
 
     let back: PolicyFile = serde_json::from_str(&fs::read_to_string(&out)?)?;
     let loaded = back.policy()?;
-    let original = cp.policy()?;
+    let original = tensor::policy(&theta)?;
     let exact = tensor::flatten(&loaded.weights)
         .iter()
         .zip(tensor::flatten(&original.weights))
@@ -904,8 +1051,14 @@ pub fn export(checkpoint: PathBuf, out: PathBuf, verify_ticks: u64) -> Result<()
 
     println!("# R2a policy export");
     println!("checkpoint          {}", checkpoint.display());
-    println!("generation          {}", cp.generation_completed);
+    println!("generation          {generation}");
+    println!(
+        "recorded centre score {}",
+        selected_score.map_or_else(|| "-".to_string(), |s| format!("{s:.3}"))
+    );
+    println!("weights fnv1a       {:#018x}", fixture::fnv1a(super::bits::encode(&theta).as_bytes()));
     println!("protocol hash       {:#018x}", cp.protocol_hash);
+    println!("config              {} (hash {})", cp.protocol.config, eco.hex());
     println!("policy digest       {:#018x}", loaded.schema_digest);
     println!("parameters          {}", tensor::flatten(&loaded.weights).len());
     println!("wrote               {}", out.display());
@@ -914,7 +1067,7 @@ pub fn export(checkpoint: PathBuf, out: PathBuf, verify_ticks: u64) -> Result<()
         return Err("the exported policy does not round-trip exactly".into());
     }
 
-    let layout = &fixture::training_layouts()[0];
+    let layout = &fixture::training_layouts_on(&eco)[0];
     let (mut world, id) = layout.build()?;
     world.attach_neural_policy(id, loaded)?;
     for _ in 0..verify_ticks {

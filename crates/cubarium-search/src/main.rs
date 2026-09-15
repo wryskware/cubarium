@@ -20,6 +20,7 @@ use cubarium_search::es;
 use cubarium_search::evaluate::{BUILD_ID, Protocol, Status, evaluate};
 use cubarium_search::metrics::Scoring;
 use cubarium_search::params;
+use cubarium_search::population;
 use cubarium_search::search::{self, Budget, TRAINING_SEEDS, Variation};
 
 #[derive(Parser, Debug)]
@@ -86,18 +87,34 @@ enum Command {
         out: PathBuf,
     },
     /// Print the frozen R2a training protocol: optimizer, score, layouts and hashes.
-    EsProtocol,
+    EsProtocol {
+        /// The ecology every fixture world is built on: a `cubarium run --config` TOML, such
+        /// as the calibration's selected configuration. Omitted means the shipped defaults.
+        /// It moves every layout hash and the protocol hash.
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
     /// Run the three fixture controls on every training layout.
     EsControls {
         #[arg(long, default_value_t = 2)]
         workers: usize,
         #[arg(long, default_value_t = 120)]
         wall_seconds: u64,
+        /// The ecology every fixture world is built on: a `cubarium run --config` TOML, such
+        /// as the calibration's selected configuration. Omitted means the shipped defaults.
+        /// It moves every layout hash and the protocol hash.
+        #[arg(long)]
+        config: Option<PathBuf>,
         #[arg(long)]
         out: Option<PathBuf>,
     },
     /// The ES plumbing smoke: four episodes, then the same four at another worker count.
     EsSmoke {
+        /// The ecology every fixture world is built on: a `cubarium run --config` TOML, such
+        /// as the calibration's selected configuration. Omitted means the shipped defaults.
+        /// It moves every layout hash and the protocol hash.
+        #[arg(long)]
+        config: Option<PathBuf>,
         #[arg(long)]
         out: Option<PathBuf>,
     },
@@ -107,6 +124,11 @@ enum Command {
         ticks: u64,
         #[arg(long, default_value_t = 8)]
         workers: usize,
+        /// The ecology every fixture world is built on: a `cubarium run --config` TOML, such
+        /// as the calibration's selected configuration. Omitted means the shipped defaults.
+        /// It moves every layout hash and the protocol hash.
+        #[arg(long)]
+        config: Option<PathBuf>,
     },
     /// The evolution-strategy learning run.
     EsTrain {
@@ -137,6 +159,11 @@ enum Command {
         /// directory that already holds one is refused rather than truncating its history.
         #[arg(long, default_value_t = false)]
         overwrite: bool,
+        /// The ecology every fixture world is built on: a `cubarium run --config` TOML, such
+        /// as the calibration's selected configuration. Omitted means the shipped defaults.
+        /// It moves every layout hash and the protocol hash.
+        #[arg(long)]
+        config: Option<PathBuf>,
         #[arg(long, default_value = "runs/es-first")]
         out: PathBuf,
     },
@@ -144,6 +171,17 @@ enum Command {
     EsExport {
         #[arg(long)]
         checkpoint: PathBuf,
+        /// The ecology every fixture world is built on: a `cubarium run --config` TOML, such
+        /// as the calibration's selected configuration. Omitted means the shipped defaults.
+        /// It moves every layout hash and the protocol hash.
+        #[arg(long)]
+        config: Option<PathBuf>,
+
+        /// Which recorded centre to export. The run's selection rule is the highest recorded
+        /// centre score, which is rarely the last generation. Omitted exports the run's final
+        /// centre.
+        #[arg(long)]
+        generation: Option<u64>,
         #[arg(long, default_value = "runs/es-first/policy.json")]
         out: PathBuf,
         #[arg(long, default_value_t = 200)]
@@ -166,7 +204,45 @@ enum Command {
         /// Diagnostic: how many identical animals share the arena (1 = the plain rollout).
         #[arg(long, default_value_t = 1)]
         copies: usize,
+        /// The ecology every fixture world is built on: a `cubarium run --config` TOML, such
+        /// as the calibration's selected configuration. Omitted means the shipped defaults.
+        /// It moves every layout hash and the protocol hash.
         #[arg(long)]
+        config: Option<PathBuf>,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// The population-level comparison: `N` copies of one trained policy in a whole
+    /// calibrated world, against the same world with `N` ordinary copies of the same body.
+    EsPopulation {
+        /// The exported policy. Its recorded config hash must be `--config`'s.
+        #[arg(long)]
+        policy: PathBuf,
+        /// The ecology the world is built on. Required: this command has no default world.
+        #[arg(long)]
+        config: PathBuf,
+        /// How many of `TRAINING_SEEDS`, from the front.
+        #[arg(long, default_value_t = 2)]
+        seeds: usize,
+        /// Comma-separated apex arms: how many adults are introduced.
+        #[arg(long, default_value = "0,1,2")]
+        arms: String,
+        /// How many copies of the policy's body each arm imports at tick 0.
+        #[arg(long, default_value_t = 4)]
+        copies: usize,
+        #[arg(long, default_value_t = 180_000)]
+        ticks: u64,
+        #[arg(long, default_value_t = 600)]
+        sample_every: u64,
+        /// The tick every arm introduces its apex cohort on.
+        #[arg(long, default_value_t = 6_000)]
+        introduce_tick: u64,
+        #[arg(long, default_value_t = 8)]
+        workers: usize,
+        /// Hard wall cap. Trials not started by then are recorded as skipped, never extended.
+        #[arg(long, default_value_t = 600)]
+        wall_seconds: u64,
+        #[arg(long, default_value = "runs/es-eco-v1-fastleaf/population")]
         out: PathBuf,
     },
     /// Print every declared ecology v1 calibration candidate and what it moves.
@@ -335,15 +411,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
         Command::Replay { record, index } => replay(&record, index),
-        Command::EsProtocol => {
-            es::commands::protocol();
-            Ok(())
+        Command::EsProtocol { config } => es::commands::protocol(config),
+        Command::EsControls { workers, wall_seconds, config, out } => {
+            es::commands::controls(workers, wall_seconds, config, out)
         }
-        Command::EsControls { workers, wall_seconds, out } => {
-            es::commands::controls(workers, wall_seconds, out)
-        }
-        Command::EsSmoke { out } => es::commands::smoke(out),
-        Command::EsBench { ticks, workers } => es::commands::bench(ticks, workers),
+        Command::EsSmoke { config, out } => es::commands::smoke(config, out),
+        Command::EsBench { ticks, workers, config } => es::commands::bench(ticks, workers, config),
         Command::EsTrain {
             pairs,
             generations,
@@ -355,6 +428,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             aggregate,
             resume,
             overwrite,
+            config,
             out,
         } => es::commands::train(
             pairs,
@@ -367,14 +441,62 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             es::trainer::Aggregate::parse(&aggregate)?,
             resume,
             overwrite,
+            config,
             out,
         ),
-        Command::EsEvaluate { policy, set, horizon, wall_seconds, reset_hidden_every, copies, out } => {
+        Command::EsEvaluate {
+            policy,
+            set,
+            horizon,
+            wall_seconds,
+            reset_hidden_every,
+            copies,
+            config,
+            out,
+        } => {
             let probe = es::commands::EvalProbe { reset_hidden_every, copies };
-            es::commands::evaluate(policy, &set, horizon, wall_seconds, probe, out)
+            es::commands::evaluate(policy, &set, horizon, wall_seconds, probe, config, out)
         }
-        Command::EsExport { checkpoint, out, verify_ticks } => {
-            es::commands::export(checkpoint, out, verify_ticks)
+        Command::EsExport { checkpoint, config, generation, out, verify_ticks } => {
+            es::commands::export(checkpoint, config, generation, out, verify_ticks)
+        }
+        Command::EsPopulation {
+            policy,
+            config,
+            seeds,
+            arms,
+            copies,
+            ticks,
+            sample_every,
+            introduce_tick,
+            workers,
+            wall_seconds,
+            out,
+        } => {
+            let ecology = es::Ecology::load(&config)?;
+            let arms: Vec<u32> =
+                arms.split(',').map(|s| s.trim().parse::<u32>()).collect::<Result<_, _>>()?;
+            let seeds: Vec<u64> = TRAINING_SEEDS
+                .get(..seeds)
+                .ok_or_else(|| format!("seed count {seeds} is outside 1..={}", TRAINING_SEEDS.len()))?
+                .to_vec();
+            let report = population::run_stage(
+                &ecology,
+                &policy,
+                &seeds,
+                &arms,
+                copies,
+                ticks,
+                sample_every,
+                introduce_tick,
+                workers,
+                wall_seconds,
+                &out,
+            )?;
+            population::print_report(&report);
+            println!("\nrows    {}", out.join("rows.jsonl").display());
+            println!("summary {}", out.join("summary.json").display());
+            Ok(())
         }
     }
 }

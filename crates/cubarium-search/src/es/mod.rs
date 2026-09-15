@@ -32,7 +32,10 @@ pub mod tensor;
 pub mod trainer;
 
 pub use episode::{Control, Driver, Episode, EpisodeError, Limits};
-pub use fixture::{HORIZON_TICKS, Layout, holdout_layouts, training_layouts};
+pub use fixture::{
+    Ecology, HORIZON_TICKS, Layout, holdout_layouts, holdout_layouts_on, training_layouts,
+    training_layouts_on,
+};
 pub use optimizer::{Adam, SIGMA};
 pub use tensor::PARAMS;
 pub use trainer::{

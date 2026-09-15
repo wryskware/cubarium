@@ -38,7 +38,7 @@ use cubarium_core::neural::Policy;
 use serde::{Deserialize, Serialize};
 
 use super::episode::{self, Driver, Episode, EpisodeError, Fault, Limits};
-use super::fixture::{HORIZON_TICKS, Layout, fnv1a};
+use super::fixture::{Ecology, HORIZON_TICKS, Layout, fnv1a};
 use super::optimizer::{ADAM_EPS, Adam, BETA1, BETA2, LEARNING_RATE, SIGMA, gradient};
 use super::rng::perturbation;
 use super::tensor::{self, PARAMS};
@@ -104,6 +104,12 @@ pub struct Protocol {
     pub train_seed: u64,
     pub layouts: Vec<String>,
     pub layout_hashes: Vec<u64>,
+    /// The ecology every layout is built on: the label of the base `WorldConfig` and
+    /// [`Ecology::hash`] over it. A layout hash already covers the whole serialized config, so
+    /// these two do not add information — they make the ecology *legible* in the protocol, and
+    /// they are what an exported policy is checked against by name.
+    pub config: String,
+    pub config_hash: u64,
     pub policy_digest: u64,
     pub init: String,
     /// Absent from the JSON (and so from the hash) when it is the R2a `min`.
@@ -119,7 +125,21 @@ impl Protocol {
         self
     }
 
+    /// The ecology a layout set shares. Every layout in one set is built on one configuration;
+    /// a set that mixes ecologies is a programming error, not a task.
+    fn ecology_of(layouts: &[Layout]) -> Ecology {
+        let Some(first) = layouts.first() else {
+            return Ecology::defaults();
+        };
+        assert!(
+            layouts.iter().all(|l| l.ecology == first.ecology),
+            "a protocol's layouts must all be built on one ecology"
+        );
+        first.ecology.clone()
+    }
+
     pub fn new(pairs: usize, horizon_ticks: u64, train_seed: u64, layouts: &[Layout]) -> Protocol {
+        let ecology = Protocol::ecology_of(layouts);
         Protocol {
             schema: "cub-es-1".into(),
             horizon_ticks,
@@ -133,6 +153,8 @@ impl Protocol {
             train_seed,
             layouts: layouts.iter().map(|l| l.name.clone()).collect(),
             layout_hashes: layouts.iter().map(|l| l.hash(&l.config())).collect(),
+            config: ecology.label.clone(),
+            config_hash: ecology.hash,
             policy_digest: cubarium_core::neural::schema_digest(),
             init: tensor::init_description(),
             aggregate: Aggregate::Min,
@@ -646,6 +668,7 @@ pub fn run_generation(
 mod tests {
     use super::*;
     use crate::es::fixture::training_layouts;
+    use crate::es::fixture::{Ecology, training_layouts_on};
 
     fn smoke_protocol() -> Protocol {
         Protocol::new(2, 2_000, 20_260_915, &training_layouts()[..1])
@@ -902,5 +925,28 @@ mod tests {
         assert_eq!(resumed.adam, uninterrupted.adam);
         assert_eq!(resumed.episodes_run, uninterrupted.episodes_run);
         assert_eq!(resumed.ticks_run, uninterrupted.ticks_run);
+    }
+
+    /// The protocol hash is "everything a score depends on that is not the policy", and the
+    /// ecology is one of those things. It must move when the configuration moves — otherwise
+    /// a checkpoint trained in one world would resume happily in another.
+    #[test]
+    fn the_protocol_hash_moves_with_the_ecology() {
+        use cubarium_core::config::WorldConfig;
+        let mut moved = WorldConfig::default();
+        moved.plant.foliage_rate = 0.006;
+        let eco = Ecology::of("moved", moved);
+
+        let a = Protocol::new(16, HORIZON_TICKS, 20_260_915, &training_layouts());
+        let b = Protocol::new(16, HORIZON_TICKS, 20_260_915, &training_layouts_on(&eco));
+        assert_eq!(a.config, "default");
+        assert_eq!(b.config, "moved");
+        assert_eq!(b.config_hash, eco.hash);
+        assert_ne!(a.config_hash, b.config_hash);
+        assert_ne!(a.hash(), b.hash(), "a different ecology is a different protocol");
+        assert_ne!(a.layout_hashes, b.layout_hashes);
+        // Same ecology, same hash: the record is a pure function of the task.
+        let c = Protocol::new(16, HORIZON_TICKS, 20_260_915, &training_layouts_on(&eco));
+        assert_eq!(b.hash(), c.hash());
     }
 }

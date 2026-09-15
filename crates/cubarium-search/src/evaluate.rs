@@ -165,7 +165,7 @@ pub fn base_config(seed: u64) -> WorldConfig {
 }
 
 /// Deterministic apex founder placements for a seed: distinct faces, away from the seams.
-fn apex_targets(seed: u64, count: u32) -> Vec<HunterTarget> {
+pub(crate) fn apex_targets(seed: u64, count: u32) -> Vec<HunterTarget> {
     (0..count)
         .map(|i| {
             let face = (rng::draw(seed, rng::stream::APEX_PLACEMENT, u64::from(i), 0) % 5) as u8;
@@ -180,7 +180,7 @@ fn apex_targets(seed: u64, count: u32) -> Vec<HunterTarget> {
 /// Σ_organisms (E + e_r·R) + Σ_escrow (e_r·(S+R) + E) + Σ hunter guts`
 /// (`design/ecology-v1-contract.md` §10). Recomputed here because the core's own copy is
 /// compiled out of release builds, and this milestone needs the identity checked in release.
-fn stored_energy(world: &World) -> f64 {
+pub(crate) fn stored_energy(world: &World) -> f64 {
     let state = &world.state;
     let e_v = state.config.plant.energy_density;
     let e_f = state.config.fruit.energy_density;
