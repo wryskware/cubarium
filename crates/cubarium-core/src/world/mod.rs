@@ -26,6 +26,8 @@ pub use state::{ChargingDiagnostics, IntakeDiagnostics, TickCounters, WorldState
 pub(super) const CELL_UNFOLD_RADIUS: f64 = 20.0;
 pub(super) const SENSE_DEPTH_MAX: usize = 3;
 pub(super) const BIRTH_DRAWS: u64 = 16;
+/// The per-tick energy/water audits that read this are debug-only.
+#[cfg(debug_assertions)]
 pub(super) const AUDIT_TOLERANCE: f64 = 1e-9;
 pub(super) const GRADIENT_EPS: f64 = 1e-9;
 pub(super) const HEADING_TOLERANCE: f64 = 1e-6;

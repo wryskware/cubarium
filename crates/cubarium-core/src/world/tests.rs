@@ -668,7 +668,13 @@ fn energy_never_goes_negative_while_starving() {
     cfg.water.rain_rate = 0.0;
     let mut world = World::new(cfg).expect("valid");
     let opening = stored_energy(&world.state);
-    for _ in 0..6000 {
+    // **R0b.** 6,000 ticks (300 s) used to be enough. Under the corrected shared budget a body
+    // that turns spends most of its capability on the turn and travels very little, so the
+    // motor half of the bill is much smaller and a starving body lives longer on the same
+    // stores — R0a measured ~400 s of pure upkeep from a full one. 20,000 ticks (1,000 s) is
+    // the same test with a horizon that outlasts the new upkeep-only survival; the loop still
+    // stops the moment the world empties.
+    for _ in 0..20_000 {
         world.step();
         for (_, o) in world.state.organisms.iter() {
             assert!(o.energy >= 0.0, "energy {} went negative", o.energy);
@@ -871,9 +877,19 @@ fn the_water_budget_closes_every_tick_and_cumulatively() {
 }
 
 /// `design/water.md` "Wading": an organism's speed is divided by `1 + w` of its cell.
+///
+/// **R0b.** Wading divides `speed_cap`, and since R0b `speed_cap` is the whole shared motor
+/// budget rather than the translation half of a union of two ceilings. So what wading divides
+/// exactly is `|v| + r·|ω|` — that is the assertion below. *Travel alone* no longer halves
+/// when the body is also turning: a seeking body asks for its full cap and for whatever turn
+/// its steering wants, the resolver scales both by one common factor `u / demand`, and the
+/// granted speed is therefore `u²/demand`, which falls faster than linearly in `u` while the
+/// turn request stays the same. Measured here: travel falls 3.86x at unit depth, and the
+/// budget falls exactly 2x. Wading also now slows *turning*, which it never did before.
 #[test]
-fn wading_halves_the_speed_at_unit_depth() {
-    fn traveled(depth: f64) -> f64 {
+fn wading_halves_the_motor_budget_at_unit_depth() {
+    /// `(travel px, sweep px)` over one tick — the two halves of `|v| + r·|ω| · dt`.
+    fn motion(depth: f64) -> (f64, f64) {
         let mut cfg = config();
         cfg.founders.count = 1;
         // Freeze the water so the depth the organism wades through is exactly `depth`.
@@ -899,23 +915,39 @@ fn wading_halves_the_speed_at_unit_depth() {
         // Keep the cell's food below the feeding threshold so the mode stays Seeking.
         world.state.fields.p[cell.index()] = 0.0;
         world.state.fields.d[cell.index()] = 0.0;
+        let (before, extent) = {
+            let o = world.state.organisms.get(id).expect("alive");
+            (o.heading, o.phenotype.extent)
+        };
         world.step();
+        let after = world.state.organisms.get(id).expect("alive").heading;
+        let turn = {
+            use std::f64::consts::{PI, TAU};
+            let d = after.screen_angle() - before.screen_angle();
+            (d + PI).rem_euclid(TAU) - PI
+        };
         let view = world.render_view();
-        view.organisms[0]
-            .moved
-            .iter()
-            .map(|s| s.length())
-            .sum::<f64>()
+        let travel: f64 = view.organisms[0].moved.iter().map(|s| s.length()).sum();
+        (travel, extent * turn.abs())
     }
-    let dry = traveled(0.0);
-    let wading = traveled(1.0);
-    let deep = traveled(3.0);
-    assert!(dry > 0.0, "a seeking organism moves");
+    let budget = |(travel, sweep): (f64, f64)| travel + sweep;
+    let dry = motion(0.0);
+    let wading = motion(1.0);
+    let deep = motion(3.0);
+    assert!(dry.0 > 0.0, "a seeking organism moves");
+    assert!(dry.1 > 0.0, "and this fixture's organism also turns, so the budget is shared");
     assert!(
-        (dry / wading - 2.0).abs() < 1e-9,
-        "dry {dry} wading {wading}"
+        (budget(dry) / budget(wading) - 2.0).abs() < 1e-9,
+        "dry {dry:?} wading {wading:?}"
     );
-    assert!((dry / deep - 4.0).abs() < 1e-9, "dry {dry} deep {deep}");
+    assert!(
+        (budget(dry) / budget(deep) - 4.0).abs() < 1e-9,
+        "dry {dry:?} deep {deep:?}"
+    );
+    // Turning is throttled by the water too, which is the behaviour the old envelope's
+    // independent rotation allowance hid.
+    assert!(wading.1 < dry.1, "wading did not slow the turn: {wading:?} vs {dry:?}");
+    assert!(deep.1 < wading.1, "deeper water did not slow the turn further");
 }
 
 /// Not a test of anything: prints where the water stands after two simulated hours of a
@@ -1379,7 +1411,12 @@ fn the_depth_term_points_up_the_side_faces_and_vanishes_on_top() {
             o.hunger_memory = 1.0;
             o.mode = Mode::Seeking;
         }
-        for _ in 0..200 {
+        // **R0b.** The shared budget caps a unit adult's turn at `u · dt / r` = 0.006 rad a
+        // tick, so a body that starts facing along the chart needs ~260 ticks just to swing
+        // the 90° onto the depth gradient, and travels almost nothing while it does. 200 ticks
+        // no longer contains the manoeuvre; 1,600 (80 s) contains it with room to travel, and
+        // is still well inside upkeep-only survival. Nothing about the assertion moved.
+        for _ in 0..1_600 {
             world.step();
         }
         let o = world.state.organisms.get(id).expect("alive");
@@ -1472,12 +1509,27 @@ fn sensing_reaches_the_configured_depth_and_finds_food_two_cells_out() {
         }
         // Rich cells straight "up" the chart, two hops away, nothing at one hop.
         world.state.fields.p[CellId::new(Face::Front, 8, 6).index()] = 1.5;
+        let (extent, speed_max) = {
+            let o = world.state.organisms.get(id).expect("alive");
+            (o.phenotype.extent, o.phenotype.speed_max)
+        };
         world.step();
         let o = world.state.organisms.get(id).expect("alive");
         if turns {
+            // **R0b.** One tick of turning is now at most `u · dt / r` — 0.006 rad for this
+            // body, against the 0.0785 rad its genome's angular ceiling alone allowed — so the
+            // old `y < −0.05` described the pre-R0b envelope, not the sensor. What the sensor
+            // decides is the *direction*, and that is what is asserted: it turned the right
+            // way, and it turned as hard as the shared budget permits.
+            let ceiling = speed_max * crate::DT / extent;
             assert!(
-                o.heading.y < -0.05,
-                "a 6 px sensor turned toward food two cells up: {:?}",
+                o.heading.y < 0.0 && o.heading.y.abs() > 0.8 * ceiling,
+                "a 6 px sensor turned toward food two cells up: {:?} (tick ceiling {ceiling})",
+                o.heading
+            );
+            assert!(
+                o.heading.y.abs() <= ceiling * (1.0 + 1e-9),
+                "it turned past the envelope: {:?}",
                 o.heading
             );
         } else {
@@ -1492,6 +1544,8 @@ fn sensing_reaches_the_configured_depth_and_finds_food_two_cells_out() {
 
 #[test]
 fn a_swimmer_ignores_pools_while_a_wader_is_slowed() {
+    /// The motor budget `|v| + r·|ω|` this tick, in px. **R0b:** wading divides that whole
+    /// budget, not travel alone — see `wading_halves_the_motor_budget_at_unit_depth`.
     fn traveled(swim: f32, depth: f64) -> f64 {
         let mut cfg = config();
         cfg.founders.count = 1;
@@ -1519,12 +1573,23 @@ fn a_swimmer_ignores_pools_while_a_wader_is_slowed() {
         world.state.fields.p[cell.index()] = 0.0;
         world.state.fields.f[cell.index()] = 0.0;
         world.state.fields.d[cell.index()] = 0.0;
+        let (before, extent) = {
+            let o = world.state.organisms.get(id).expect("alive");
+            (o.heading, o.phenotype.extent)
+        };
         world.step();
-        world.render_view().organisms[0]
+        let after = world.state.organisms.get(id).expect("alive").heading;
+        let turn = {
+            use std::f64::consts::{PI, TAU};
+            let d = after.screen_angle() - before.screen_angle();
+            (d + PI).rem_euclid(TAU) - PI
+        };
+        let travel: f64 = world.render_view().organisms[0]
             .moved
             .iter()
             .map(|s| s.length())
-            .sum::<f64>()
+            .sum();
+        travel + extent * turn.abs()
     }
     let dry = traveled(0.0, 0.0);
     assert!(

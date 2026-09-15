@@ -24,14 +24,22 @@
 //!
 //! `u = min(capability, affordable)`:
 //!
-//! - `capability = speed_cap + `[`REFERENCE_RADIUS_PX`]` · turn_rate_max`. `speed_cap` is the
-//!   translation ceiling the caller already computed from effort, morphology, wading and any
-//!   burst; `turn_rate_max` is the body's angular ceiling (the genome's `turn_rate_max_deg`,
-//!   or an override such as a threatened prey's escape rate). Calibrating the budget this way
-//!   means a body of exactly [`REFERENCE_RADIUS_PX`] can still do both at once, as it could
-//!   before this milestone existed, and every larger body must trade.
+//! - `capability = speed_cap` — the translation ceiling the caller already computed from
+//!   effort, morphology, wading and any legitimate burst. **That single number is the whole
+//!   budget: going and turning spend the same pixels per second.** `turn_rate_max` (the
+//!   genome's `turn_rate_max_deg`, or an override such as a threatened prey's escape rate) is
+//!   retained as an *additional* ceiling on `|ω|` and never adds to the budget.
 //! - `affordable` is the motor magnitude the creature's remaining energy pays for *after*
 //!   unavoidable upkeep is reserved ([`MotorBill`]).
+//!
+//! **R0b correction.** Until R0b the capability was `speed_cap + `[`REFERENCE_RADIUS_PX`]` ·
+//! turn_rate_max`, a *union of two ceilings* rather than a shared budget: a unit adult had
+//! 0.3 px/s of travel plus 3.93 px/s of rim sweep it could spend on nothing else, so
+//! `|v| + r·|ω| ≤ u` never bound a body narrower than [`REFERENCE_RADIUS_PX`] and a Resting
+//! body could still spin at its genome's full rate. Removing the addend is what makes the
+//! bound a budget: a unit adult at full effort now pivots at `0.3 / 2.5` = 0.12 rad/s (6.9°/s)
+//! and gives up travel one-for-one to do it. See
+//! `design/7_Research/r0b-motor-foraging-result-2026-09-14.md`.
 //!
 //! # Simultaneous requests
 //!
@@ -59,18 +67,21 @@ use cubarium_surface::Vec2;
 use crate::config::WorldConfig;
 use crate::organism::Organism;
 
-/// The body radius at which the translation and rotation ceilings are *jointly* attainable,
-/// in pixels.
+/// The decoded outer radius of a unit-size adult founder, in pixels: the body the pace of this
+/// world was calibrated against.
 ///
-/// This is the one knob that sets how hard the size penalty bites, and it is anchored to the
-/// world's own decode rule rather than chosen freely: 2.5 px is the [`crate::genome::decode`]
-/// extent of a unit-size adult founder (core lobe `(0, 0, 1.4)`, head `(1.6, 0, 0.9)`, tail
-/// `(−1.4, 0, 0.7)`; the head lobe's `1.6 + 0.9` is the maximum). `reference_radius_is_the_unit_adult_extent`
-/// re-derives it from the decoder and fails if the body plan moves.
+/// 2.5 px is the [`crate::genome::decode`] extent of a unit-size adult founder (core lobe
+/// `(0, 0, 1.4)`, head `(1.6, 0, 0.9)`, tail `(−1.4, 0, 0.7)`; the head lobe's `1.6 + 0.9` is
+/// the maximum). `reference_radius_is_the_unit_adult_extent` re-derives it from the decoder
+/// and fails if the body plan moves.
 ///
-/// So an ordinary adult keeps exactly the turn rate its genome asks for while translating at
-/// full effort, and a body larger than that — a grown organism, or an apex whose claws reach
-/// far ahead of its root — trades speed against turning.
+/// **Since R0b this constant enters no envelope arithmetic.** It was the addend that made
+/// [`MotorLimits::capability`] a union of two ceilings — a body at exactly this radius could
+/// attain its translation and rotation ceilings *at the same time* — and removing that addend
+/// is the R0b correction. What remains is a reference scale: the radius that divides the
+/// shared budget for an ordinary adult (`u / 2.5` rad/s of pivot), used by tests and prose to
+/// say how hard the shared budget bites at a familiar body size. A body wider than this turns
+/// proportionally slower, and a narrower one proportionally faster, with no discontinuity here.
 pub const REFERENCE_RADIUS_PX: f64 = 2.5;
 
 /// What one pixel of outer-body sweep costs, relative to one pixel of centre travel.
@@ -82,14 +93,20 @@ pub const REFERENCE_RADIUS_PX: f64 = 2.5;
 /// thirds, for a uniform disc. This scale carries that difference, at the world's one
 /// `move_cost`, so translation and rotation are still billed once each through one term.
 ///
-/// **This is the knob for the price of turning, and it is deliberately separate from
-/// [`REFERENCE_RADIUS_PX`], which is the knob for how fast a body may turn.** Before R0a
-/// rotation was free; at 1.0 a unit adult turning at its genome's full rate sweeps 3.9 px/s
-/// against a top centre speed of 0.3 px/s, so turning would cost an order of magnitude more
-/// than going — a change to the world's energy economy far larger than the kinematic one this
-/// milestone is about. 0.5 is the rod figure: honest, conservative against the mean, and still
-/// a real price. The measured ecological consequence of each setting is in
-/// `design/7_Research/r0a-motor-cost-ecology-2026-09-14.md`; the balance itself is Fable's.
+/// **This is the knob for the price of turning; how fast a body may turn is set by the shared
+/// budget in [`MotorLimits::capability`].** Before R0a rotation was free. 0.5 is the rod
+/// figure: honest, conservative against the mean, and still a real price.
+///
+/// **R0b changes what this knob can do.** Under the old union-of-ceilings envelope a unit adult
+/// could sweep 3.93 px/s while travelling 0.3 px/s, so `k` priced thirteen times as much sweep
+/// as travel and was the dominant ecological lever — that is what
+/// `design/7_Research/r0a-motor-cost-ecology-2026-09-14.md` measured (population 93 at `k = 0`
+/// down to 39 at `k = 1`). With the shared budget, `|v| + r·|ω| ≤ speed_cap`, so sweep can
+/// never exceed `speed_cap` and the most `k` can ever cost is
+/// `move_cost · S · k · speed_max · dt` — at most half of what pure travel already costs.
+/// `k` is no longer an ecological lever, and R0b keeps it at 0.5 as shipped. Those population
+/// figures describe the legacy controller's turning habit under the inflated envelope and do
+/// not transfer to the corrected one.
 pub const ROTATION_COST_SCALE: f64 = 0.5;
 
 /// Free rotation is the defect R0a fixes, so a zero scale is not a tuning option.
@@ -120,9 +137,11 @@ impl MotorRequest {
 pub struct MotorLimits {
     /// `r`: the outer radius of the physical body, px ([`turn_radius_px`]).
     pub radius_px: f64,
-    /// `ω_max`: the angular ceiling, rad/s, before the shared budget is applied.
+    /// `ω_max`: an *additional* ceiling on `|ω|`, rad/s, applied before the shared budget.
+    /// It never enlarges the budget; it can only clip a request further.
     pub turn_rate_max: f64,
-    /// The translation ceiling after effort, morphology, wading and any burst, px/s.
+    /// The translation ceiling after effort, morphology, wading and any burst, px/s. **This
+    /// is the whole capability**: `|v| + r · |ω| ≤ speed_cap` (and `≤ motor_budget`).
     pub speed_cap: f64,
     /// The motor magnitude this tick's energy pays for after upkeep, px/s
     /// ([`MotorBill::affordable_motor`]). `f64::INFINITY` means movement is free.
@@ -132,12 +151,15 @@ pub struct MotorLimits {
 }
 
 impl MotorLimits {
-    /// `speed_cap + `[`REFERENCE_RADIUS_PX`]` · turn_rate_max`: what the body could do if
-    /// energy were free.
+    /// `speed_cap`: the whole `|v| + r · |ω|` this body could spend if energy were free.
+    ///
+    /// **R0b.** This used to be `speed_cap + `[`REFERENCE_RADIUS_PX`]` · turn_rate_max`, which
+    /// handed every body an independent rotation allowance the envelope then never bound.
+    /// `turn_rate_max` is now an extra ceiling applied in [`resolve`] and nothing more, so
+    /// effort, morphology, wading and the burst list are the only things that set the budget —
+    /// and a body throttled by any of them is throttled in *both* channels at once.
     pub fn capability(&self) -> f64 {
-        let speed = finite_non_negative(self.speed_cap);
-        let turn = finite_non_negative(self.turn_rate_max);
-        speed + REFERENCE_RADIUS_PX * turn
+        finite_non_negative(self.speed_cap)
     }
 
     /// `u`: the capability, capped by what the energy after upkeep actually buys.
@@ -188,6 +210,11 @@ impl ResolvedMotion {
 /// Order of operations, all documented above: clamp the requested turn to the angular
 /// ceiling, clamp the requested speed to the translation ceiling, then scale **both** by the
 /// single factor that brings `|v| + r · |ω|` inside `u`.
+///
+/// Since R0b the translation ceiling *is* `u` (when energy is not the binder), so a body that
+/// asks for full speed and any turn at all is always scaled: every radian is paid for in
+/// pixels of travel given up, at exactly `r` px per radian. That is the shared budget, and it
+/// is why a caller that wants to keep travelling asks for a small turn rather than a large one.
 pub fn resolve(
     current_heading: Vec2,
     request: &MotorRequest,
@@ -482,23 +509,104 @@ mod tests {
 
     /// A stationary body spends the whole budget on rotation — the behaviour Wrysk asked for
     /// explicitly. A comparison of sweep against centre speed would give zero here.
+    ///
+    /// **R0b.** The rate is now `u / r` with `u = speed_cap`, not the genome's `turn_rate_max`:
+    /// before the correction a unit adult pivoted at its full 90°/s because the capability
+    /// carried a rotation allowance of its own. It pivots at 6.9°/s now, and the budget splits
+    /// at the body's *own* radius, so twice as wide is exactly half as fast.
     #[test]
     fn pure_pivot_is_legal_and_bounded_by_the_budget_over_the_radius() {
         let h = Vec2::new(1.0, 0.0);
         let omega_max = 90.0f64.to_radians();
-        // A unit adult: the reference radius, so the full rate survives.
-        let l = limits(REFERENCE_RADIUS_PX, omega_max, 0.3);
+        let cap = 0.3;
         let back = Vec2::new(-1.0, 0.0);
+
+        // A unit adult: the whole translation budget, spent on turning.
+        let l = limits(REFERENCE_RADIUS_PX, omega_max, cap);
         let m = resolve(h, &MotorRequest { heading: back, speed: 0.0 }, &l);
         assert_eq!(m.speed, 0.0, "a pivot needs no forward motion");
-        assert!((m.turn.abs() - omega_max * DT).abs() < 1e-15, "{}", m.turn);
+        assert!(m.turn.abs() > 0.0, "a pure pivot is still legal");
+        assert!(
+            (m.turn.abs() / DT - cap / REFERENCE_RADIUS_PX).abs() < 1e-15,
+            "{} rad/s is not u/r",
+            m.turn.abs() / DT
+        );
+        assert!((m.motor_magnitude() - cap).abs() < 1e-15, "the whole budget went to the turn");
+        assert!(m.turn.abs() < omega_max * DT, "6.9°/s, not the genome's 90°/s");
 
-        // Twice the radius, exactly half the sweep rate the budget buys.
-        let wide = limits(2.0 * REFERENCE_RADIUS_PX, omega_max, 0.0);
-        let m = resolve(h, &MotorRequest { heading: back, speed: 0.0 }, &wide);
-        let expected = (0.0 + REFERENCE_RADIUS_PX * omega_max) / (2.0 * REFERENCE_RADIUS_PX);
-        assert!((m.turn.abs() / DT - expected).abs() < 1e-12, "{}", m.turn / DT);
-        assert!(m.turn.abs() < omega_max * DT, "a wide body turns slower than the ceiling");
+        // Twice the radius, exactly half the sweep rate the same budget buys.
+        let wide = limits(2.0 * REFERENCE_RADIUS_PX, omega_max, cap);
+        let m2 = resolve(h, &MotorRequest { heading: back, speed: 0.0 }, &wide);
+        assert!(
+            (m2.turn.abs() / DT - cap / (2.0 * REFERENCE_RADIUS_PX)).abs() < 1e-15,
+            "{}",
+            m2.turn.abs() / DT
+        );
+        assert!((m2.turn.abs() * 2.0 - m.turn.abs()).abs() < 1e-15, "half, exactly");
+        assert!((m2.motor_magnitude() - cap).abs() < 1e-15, "the same budget, either way");
+
+        // A body with no translation budget has no turning budget either: that is the whole
+        // point of a shared one.
+        let broke = limits(REFERENCE_RADIUS_PX, omega_max, 0.0);
+        assert_eq!(resolve(h, &MotorRequest { heading: back, speed: 0.0 }, &broke), ResolvedMotion::still(h));
+    }
+
+    /// **R0b regression.** The angular ceiling is a ceiling and never an addend: raising it,
+    /// by a genome or by a threatened prey's escape override, cannot buy one extra pixel per
+    /// second of anything. Before R0b each of these limits had a different capability.
+    #[test]
+    fn an_angular_ceiling_never_enlarges_the_budget() {
+        let cap = 0.3;
+        for &omega_max in &[0.0, 90.0f64.to_radians(), 240.0f64.to_radians(), 1e6] {
+            let l = limits(REFERENCE_RADIUS_PX, omega_max, cap);
+            assert_eq!(l.capability(), cap, "ceiling {omega_max} moved the capability");
+            assert_eq!(l.available(), cap, "ceiling {omega_max} moved the budget");
+        }
+        // It still clips: a genome that cannot turn fast does not turn fast.
+        let h = Vec2::new(1.0, 0.0);
+        let back = Vec2::new(-1.0, 0.0);
+        let slow = limits(REFERENCE_RADIUS_PX, 0.01, cap);
+        let m = resolve(h, &MotorRequest { heading: back, speed: 0.0 }, &slow);
+        assert!((m.turn.abs() / DT - 0.01).abs() < 1e-15, "{}", m.turn.abs() / DT);
+        assert!(m.motor_magnitude() < cap, "the ceiling bound before the budget did");
+    }
+
+    /// Wading and a burst reach the envelope through one number — `speed_cap` — so they now
+    /// throttle and lift *turning* exactly as they throttle and lift travel.
+    #[test]
+    fn wading_and_bursts_move_the_whole_budget() {
+        let h = Vec2::new(1.0, 0.0);
+        let back = Vec2::new(-1.0, 0.0);
+        let omega_max = 90.0f64.to_radians();
+        let dry = limits(REFERENCE_RADIUS_PX, omega_max, 0.3);
+        // `1 + w · (1 − swim)` with a full pool and a non-swimmer: half speed.
+        let waded = limits(REFERENCE_RADIUS_PX, omega_max, 0.3 / 2.0);
+        // A threatened prey's `escape_speed_multiple` of 2.
+        let burst = limits(REFERENCE_RADIUS_PX, omega_max, 0.3 * 2.0);
+
+        let pivot = |l: &MotorLimits| resolve(h, &MotorRequest { heading: back, speed: 0.0 }, l).turn.abs() / DT;
+        assert!((pivot(&waded) * 2.0 - pivot(&dry)).abs() < 1e-15, "wading did not slow the turn");
+        assert!((pivot(&burst) - pivot(&dry) * 2.0).abs() < 1e-15, "the burst did not lift the turn");
+        // Still the same one bound in every case.
+        for l in [&dry, &waded, &burst] {
+            let m = resolve(h, &MotorRequest { heading: back, speed: 0.15 }, l);
+            assert!(m.motor_magnitude() <= l.available() * (1.0 + 1e-12));
+        }
+    }
+
+    /// Legacy resting effort is small, not zero, and the shared budget makes a resting body's
+    /// sweep small with it. Under the old capability a Resting body still swept 3.9 px/s.
+    #[test]
+    fn a_resting_body_barely_sweeps() {
+        let h = Vec2::new(1.0, 0.0);
+        let rest_effort = DriveConfig::default().rest_effort;
+        assert!(rest_effort > 0.0, "resting effort is not literally zero");
+        let cap = rest_effort * OrganismConfig::default().speed_max;
+        let l = limits(REFERENCE_RADIUS_PX, 90.0f64.to_radians(), cap);
+        let m = resolve(h, &MotorRequest { heading: Vec2::new(-1.0, 0.0), speed: cap }, &l);
+        assert!(m.sweep <= cap, "{} px/s of sweep on a {cap} px/s budget", m.sweep);
+        assert!(m.sweep < 0.02, "a resting body swept {} px/s", m.sweep);
+        assert!(m.sweep > 0.0, "resting is not paralysis");
     }
 
     /// Both channels shrink by one common factor, so the requested split survives.
@@ -524,11 +632,19 @@ mod tests {
         assert!(((m.speed / m.turn.abs()) - (0.3 / (omega_max * DT))).abs() < 1e-9);
     }
 
+    /// A target the budget can actually reach within the tick is reached exactly.
+    ///
+    /// **R0b.** "Reachable" is now `u · dt / r` — 0.006 rad for a unit adult at full effort,
+    /// not the 0.0785 rad the genome's angular ceiling alone would allow — so this fixture
+    /// asks for an angle inside the *shared* budget. The bit-for-bit pass-through it pins is
+    /// unchanged; only what counts as unbound moved.
     #[test]
     fn a_reachable_target_is_reached_exactly_and_the_short_way() {
         let h = Vec2::new(1.0, 0.0);
-        let target = Vec2::new(1.0, -0.01).normalized().expect("unit");
         let l = limits(REFERENCE_RADIUS_PX, 90.0f64.to_radians(), 0.3);
+        let reachable = l.available() * DT / REFERENCE_RADIUS_PX;
+        assert!(reachable > 0.0 && reachable < 90.0f64.to_radians() * DT);
+        let target = Vec2::from_screen_angle(-reachable * 0.5).normalized().expect("unit");
         let m = resolve(h, &MotorRequest { heading: target, speed: 0.0 }, &l);
         assert_eq!(m.heading, target, "no round trip through an angle");
 

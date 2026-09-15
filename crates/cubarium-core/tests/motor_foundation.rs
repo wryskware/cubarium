@@ -55,9 +55,18 @@ fn travelled(world: &World, id: OrganismId) -> f64 {
 // ---------------------------------------------------------------- the envelope holds
 
 /// Every body, every tick, in an ordinary world of mixed sizes: `|v| + r · |ω|` stays inside
-/// the capability its own geometry allows. No boost exists here, so the bound checked is the
-/// tight one — `speed_max / wading + REFERENCE_RADIUS_PX · turn_rate_max`, read from each
-/// organism's own phenotype rather than from a constant.
+/// the capability its own geometry allows.
+///
+/// **R0b.** The capability is now the translation ceiling alone. No boost exists in this
+/// world and effort and wading only ever *divide* that ceiling, so the loosest bound any body
+/// here can have is its own `speed_max` — and that is the assertion. Before R0b the same
+/// assertion carried `+ REFERENCE_RADIUS_PX · turn_rate_max`, an addend worth 3.93 px/s
+/// against a 0.3 px/s ceiling, which is why it never bound anything.
+///
+/// The second thing checked is that the shared budget, not the genome's angular ceiling, is
+/// what limits turning: under the corrected envelope *every* body in this world is
+/// budget-bound, because `speed_max / extent` is far below `turn_rate_max` at every size the
+/// decoder produces.
 #[test]
 fn no_body_in_an_ordinary_world_ever_leaves_its_motor_envelope() {
     let mut config = calm();
@@ -101,22 +110,30 @@ fn no_body_in_an_ordinary_world_ever_leaves_its_motor_envelope() {
             let distance = travelled(&world, id);
             let turn = signed_turn(heading, o.heading);
             let swept = distance / DT + extent * turn.abs() / DT;
-            // Wading only ever divides the translation ceiling, so this is the loosest the
-            // capability can be, and the assertion is therefore the strictest.
-            let capability = speed_max + REFERENCE_RADIUS_PX * turn_rate_max;
+            // Effort and wading only ever divide the translation ceiling, so this is the
+            // loosest the capability can be, and the assertion is therefore the strictest.
+            let capability = speed_max;
             assert!(
                 swept <= capability * (1.0 + 1e-9),
                 "{id:?}: swept {swept} past its capability {capability} \
                  (extent {extent}, moved {distance}, turned {turn})"
             );
+            if turn != 0.0 {
+                // The trade the envelope is for: a turning body is spending budget it could
+                // have spent on travel, and its rate is set by `u / r`, not by its genome.
+                assert!(
+                    turn.abs() / DT <= capability / extent * (1.0 + 1e-9),
+                    "{id:?}: turned at {} rad/s, past the {} its {extent} px body allows",
+                    turn.abs() / DT,
+                    capability / extent
+                );
+                if distance > 0.0 {
+                    traded = true;
+                }
+            }
             if extent > REFERENCE_RADIUS_PX && turn != 0.0 {
                 widest_pivot_rate = widest_pivot_rate.max(turn.abs() / DT);
                 widest_ceiling = widest_ceiling.max(turn_rate_max);
-                // The trade the envelope is for: this body is turning *and* the envelope is
-                // what stopped it going any faster, not its genome's angular ceiling.
-                if swept > capability * 0.999 && turn.abs() / DT < turn_rate_max * 0.999 {
-                    traded = true;
-                }
             }
         }
     }
@@ -125,7 +142,7 @@ fn no_body_in_an_ordinary_world_ever_leaves_its_motor_envelope() {
         widest_pivot_rate < widest_ceiling,
         "a body wider than the reference radius reached its genome's full {widest_ceiling} rad/s          ({widest_pivot_rate}); the envelope never bound it"
     );
-    assert!(traded, "no wide body ever gave up speed to turn");
+    assert!(traded, "no body ever turned while travelling, so nothing was traded");
 }
 
 /// A founder kind of one body size, everything else the world's own defaults.
@@ -174,8 +191,8 @@ fn an_apex_late_override_cannot_spin_a_body_for_free() {
         let radius = motor::turn_radius_px(o, Some(&geometry));
         let ceiling = f64::from(o.phenotype.drives.turn_rate_max_deg).to_radians();
         // Pursuit runs at full effort, which is the largest translation ceiling an unboosted
-        // member has, and therefore the largest capability.
-        (radius, ceiling, o.phenotype.speed_max + REFERENCE_RADIUS_PX * ceiling)
+        // member has — and since R0b that ceiling *is* the whole capability.
+        (radius, ceiling, o.phenotype.speed_max)
     };
     assert!(
         radius > 3.0 * REFERENCE_RADIUS_PX,
@@ -207,9 +224,25 @@ fn an_apex_late_override_cannot_spin_a_body_for_free() {
         largest_turn_rate = largest_turn_rate.max(rate);
     }
 
+    // What the member's *own* budget buys here. This fixture puts the prey inside the grasp
+    // envelope, so the pursuit override sets `hold` and runs at `rest_effort` rather than 1.0
+    // — and since R0b effort throttles turning as well as travel, so the reachable rate is the
+    // rest-effort share of the ceiling, not the ceiling. Before R0b it was neither: the
+    // capability carried `REFERENCE_RADIUS_PX · turn_rate_max` on top, and a *resting* member
+    // spun at 0.28 rad/s. That is the allowance this milestone removes.
+    let holding_ceiling = pivot_ceiling * WorldConfig::default().drives.rest_effort;
     assert!(
-        largest_turn_rate > 0.5 * pivot_ceiling,
-        "the fixture never made the member turn hard: {largest_turn_rate}"
+        largest_turn_rate > 0.5 * holding_ceiling,
+        "the fixture never made the member turn as hard as its budget allowed: \
+         {largest_turn_rate} against {holding_ceiling}"
+    );
+    // The R0b regression guard: the rate the *old* union-of-ceilings capability granted this
+    // body is now unreachable by more than an order of magnitude.
+    let pre_r0b = (capability + REFERENCE_RADIUS_PX * ceiling) / radius;
+    assert!(
+        largest_turn_rate < 0.1 * pre_r0b,
+        "the member still turns like the pre-R0b envelope allowed ({largest_turn_rate} \
+         against {pre_r0b} rad/s)"
     );
     // What that rotation *costs* is billed in `a_turning_body_pays_for_the_distance_it_sweeps`,
     // on a fixture where no strike, meal or charging transaction shares the energy ledger.
@@ -429,9 +462,18 @@ fn a_body_with_no_movement_energy_holds_still() {
 
 // ---------------------------------------------------------------- overrides share the path
 
-/// Escape bursts and encounter retreats are requests like any other. A threatened prey may turn
-/// faster than its ordinary ceiling — that is the profile's escape rate — but never faster than
-/// its own body allows, and the world charges it.
+/// Escape bursts and encounter retreats are requests like any other: they raise ceilings and
+/// the shared envelope still answers them.
+///
+/// **R0b.** Before the correction the escape override raised `turn_rate_max` to 240°/s *and*
+/// the capability by `REFERENCE_RADIUS_PX · 240°/s` = 10.5 px/s, so a threatened prey really
+/// did spin at 240°/s — two body lengths per second of rim sweep — and the test asserted that
+/// it did. Under the shared budget a raised angular ceiling buys nothing: the prey's sweep is
+/// bounded by its *speed* ceiling, which the escape multiple raises to `2 · speed_max`. What
+/// is checked now is that the override is still real and still bounded — the escape speed
+/// multiple lifts the budget above the ordinary one (so no Mode label suppresses a legitimate
+/// escape), the envelope holds at the raised ceiling, and a prey turning hard gives up travel
+/// to do it rather than getting the turn free.
 #[test]
 fn an_escaping_prey_turns_within_its_body_and_pays_for_it() {
     let mut world = World::new(calm()).expect("valid");
@@ -469,10 +511,10 @@ fn an_escaping_prey_turns_within_its_body_and_pays_for_it() {
             }
             let turn = signed_turn(heading, o.heading).abs();
             let swept = travelled(&world, id) / DT + extent * turn / DT;
-            // The loosest envelope any override can open: the escape angular ceiling, and the
-            // escape speed multiple on the translation ceiling.
-            let capability =
-                profile_escape_speed(speed_max) + REFERENCE_RADIUS_PX * escape_ceiling;
+            // The loosest envelope any override can open: the escape speed multiple on the
+            // translation ceiling, which since R0b is the whole capability. The escape
+            // angular ceiling is a ceiling and adds nothing.
+            let capability = profile_escape_speed(speed_max);
             assert!(
                 swept <= capability * (1.0 + 1e-9),
                 "{id:?}: a threatened body swept {swept} past {capability}"
@@ -480,12 +522,29 @@ fn an_escaping_prey_turns_within_its_body_and_pays_for_it() {
             fastest.push((id, turn / DT, extent, swept));
         }
     }
-    let ordinary = WorldConfig::default().drives.turn_rate_max_deg.to_radians();
-    let hurried = fastest.iter().any(|(_, rate, _, _)| *rate > ordinary * 1.01);
+    assert!(!fastest.is_empty(), "the fixture observed no prey at all");
+    // The escape override is still real: some prey spent more motor magnitude than an
+    // unboosted body of its size ever could, which is the speed multiple arriving through the
+    // shared budget. A Resting label does not take that away.
+    let ordinary_cap = WorldConfig::default().organism.speed_max;
+    let boosted = fastest
+        .iter()
+        .any(|(_, _, _, swept)| *swept > ordinary_cap * 1.01);
     assert!(
-        hurried,
-        "no prey ever used the escape rate, so the override was never exercised"
+        boosted,
+        "no prey ever exceeded the ordinary {ordinary_cap} px/s budget, so the escape \
+         override never reached the envelope"
     );
+    // And a threatened prey that turns is bounded by its own body, not by the 240°/s ceiling
+    // the profile raises: `u / r` with `u` at most the boosted ceiling.
+    let escape_ceiling_is_slack = fastest.iter().all(|(_, rate, extent, _)| {
+        *rate <= profile_escape_speed(ordinary_cap) / extent * (1.0 + 1e-9)
+    });
+    assert!(
+        escape_ceiling_is_slack,
+        "a prey turned faster than its body's share of the escape budget"
+    );
+    let _ = escape_ceiling;
 }
 
 fn profile_escape_speed(speed_max: f64) -> f64 {

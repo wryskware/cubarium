@@ -530,9 +530,9 @@ fn a_version_three_member_reproduces_the_pre_change_binarys_next_600_ticks() {
     // physical act paid out of the same budget as translation, so this build's tick is
     // deliberately not the pre-change binary's. The pre-change payload is still decoded and
     // still proved different; the continuation is re-anchored to this build's own recording
-    // (`tests/r0a_fixtures.rs`).
+    // (`tests/continuation_fixtures.rs`).
     let recorded =
-        std::fs::read(fixture("hunter-v3-charge-active-plus600-r0a.cubw")).expect("the fixture");
+        std::fs::read(fixture("hunter-v3-charge-active-plus600-r0b.cubw")).expect("the fixture");
     let (_, expected) = decode_snapshot(&recorded).expect("this build's recording loads");
     let as_v12 = |s: &cubarium_core::WorldState| {
         postcard::to_allocvec(

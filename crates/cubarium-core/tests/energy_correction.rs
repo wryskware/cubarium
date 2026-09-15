@@ -132,8 +132,8 @@ fn zero_corrections_reproduce_the_pre_correction_binarys_next_600_ticks() {
     // physical act paid out of the same budget as translation, so this build's tick is
     // deliberately not the pre-change binary's. The pre-change payload is still decoded and
     // still proved different; the continuation is re-anchored to this build's own recording
-    // (`tests/r0a_fixtures.rs`).
-    let recorded = std::fs::read(fixture("live-v8-172800-plus600-r0a.cubw")).expect("fixture");
+    // (`tests/continuation_fixtures.rs`).
+    let recorded = std::fs::read(fixture("live-v8-172800-plus600-r0b.cubw")).expect("fixture");
     let (_, expected) = decode_snapshot(&recorded).expect("this build's recording loads");
     let expected_payload =
         postcard::to_allocvec(&v8::project(&expected).expect("standard care projects"))

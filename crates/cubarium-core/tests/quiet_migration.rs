@@ -96,13 +96,13 @@ fn an_off_world_reproduces_the_pre_quiet_binarys_next_600_ticks() {
             "quiet-v12-plain-3000.cubw",
             "quiet-v12-plain-3000-plus600.cubw",
             0x7729_2b3e_79cc_fcd1u64,
-            "quiet-v12-plain-3000-plus600-r0a.cubw",
+            "quiet-v12-plain-3000-plus600-r0b.cubw",
         ),
         (
             "quiet-v12-care-3000.cubw",
             "quiet-v12-care-3000-plus600.cubw",
             0x19ef_5ad1_afd0_2b2bu64,
-            "quiet-v12-care-3000-plus600-r0a.cubw",
+            "quiet-v12-care-3000-plus600-r0b.cubw",
         ),
     ] {
         let start = std::fs::read(fixture(open)).expect("fixture");
@@ -112,7 +112,7 @@ fn an_off_world_reproduces_the_pre_quiet_binarys_next_600_ticks() {
     // physical act paid out of the same budget as translation, so this build's tick is
     // deliberately not the pre-change binary's. The pre-change payload is still read and still
     // hashed above; the continuation is re-anchored to this build's own recording
-    // (`tests/r0a_fixtures.rs`).
+    // (`tests/continuation_fixtures.rs`).
         let bytes = std::fs::read(fixture(recorded)).expect("fixture");
         let (_, expected) = decode_snapshot(&bytes).expect("this build's recording loads");
         let expected_payload = as_v12(&expected);

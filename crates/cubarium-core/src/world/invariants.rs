@@ -2,6 +2,8 @@ use crate::organism::DeathCause;
 
 use super::*;
 
+// Only `stored_energy` below names this type directly, and it is debug/test-only.
+#[cfg(any(debug_assertions, test))]
 use super::state::WorldState;
 
 impl World {

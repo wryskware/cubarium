@@ -2259,20 +2259,22 @@ fn observations_do_not_move_a_profile_three_hunter_world() {
         "scenario B must actually give birth"
     );
 
-    // Re-recorded at R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`). The
-    // numbers these replace were recorded from `9eacb7e`, before any reproduction-evidence code
-    // existed; every change between then and R0a left them standing, which is the point of the
-    // test. R0a does not: a lanternjaw reaches 14.8 px from root to claw tip, and rotating that
-    // body is now paid physical work sharing one budget with translation, so both of these
-    // worlds legitimately move. The claim — that *observing* a world never moves it — is
-    // unchanged, and is now anchored to this build's own numbers, still read off the schema 12
-    // projection (`snapshot::v12`).
+    // Re-recorded at R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`) and again
+    // at R0b (`design/handoffs/r0b-opus-2026-09-14.md`). The numbers R0a replaced were recorded
+    // from `9eacb7e`, before any reproduction-evidence code existed; every change between then
+    // and R0a left them standing, which is the point of the test. R0a did not: a lanternjaw
+    // reaches 14.8 px from root to claw tip, and rotating that body became paid physical work
+    // sharing one budget with translation. R0b does not either: it removed the independent
+    // rotation allowance from that budget, so every body that turns now trades travel for the
+    // turn and both of these worlds legitimately move again. The claim — that *observing* a
+    // world never moves it — is unchanged, and is anchored to this build's own numbers, still
+    // read off the schema 12 projection (`snapshot::v12`).
     assert_eq!(
-        hunt_hash, 17_048_296_123_627_909_541,
+        hunt_hash, 13_779_911_353_741_670_028,
         "a hunt-and-digest world moved"
     );
     assert_eq!(
-        birth_hash, 12_867_226_482_697_264_888,
+        birth_hash, 13_840_512_171_130_438_648,
         "a funded-birth world moved"
     );
 }

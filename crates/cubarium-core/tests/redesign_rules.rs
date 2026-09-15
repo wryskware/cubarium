@@ -1161,7 +1161,13 @@ fn two_hop_patch(sense_radius: f64, ticks: u32) -> (SurfacePoint, SurfacePoint, 
 
 #[test]
 fn sensing_reaches_a_patch_two_cells_away() {
-    let (start, end, _, _) = two_hop_patch(6.0, 600);
+    // **R0b.** The probe starts pointing 180° away from the patch on purpose. Under the
+    // corrected shared budget a unit adult's turn is capped at `u · dt / r` = 0.006 rad a
+    // tick, so the half-turn alone costs ~520 ticks and 600 left almost nothing for the walk
+    // (measured: it reached u = 34.43 against a required 36). 2,400 ticks (120 s) contains the
+    // manoeuvre and the approach. What the test claims — a two-hop sensor steers to a patch a
+    // one-hop sensor cannot see — is unchanged.
+    let (start, end, _, _) = two_hop_patch(6.0, 2_400);
     assert_eq!(end.face, Face::Front);
     assert!(
         end.u > start.u + 2.0,

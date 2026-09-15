@@ -131,8 +131,8 @@ fn zero_care_reproduces_the_pre_change_binarys_next_600_ticks() {
     // now trades speed against turning instead of pivoting for free. The pre-change payload is
     // still read and still hashed above, because the migration claim it anchors is unchanged;
     // what is re-anchored is the continuation, to this build's own recording
-    // (`tests/r0a_fixtures.rs`, which also proves the recording is current).
-    let recorded = std::fs::read(fixture("live-v7-55200-plus600-r0a.cubw")).expect("fixture");
+    // (`tests/continuation_fixtures.rs`, which also proves the recording is current).
+    let recorded = std::fs::read(fixture("live-v7-55200-plus600-r0b.cubw")).expect("fixture");
     let (_, expected) = decode_snapshot(&recorded).expect("this build's recording loads");
     let expected_payload =
         postcard::to_allocvec(&v7::project(&expected)).expect("encodable");

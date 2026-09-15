@@ -27,7 +27,11 @@ use crate::{DT, pairs};
 
 use super::*;
 
-use super::invariants::{edible_detritus, stored_energy};
+use super::invariants::edible_detritus;
+// The per-tick energy and water audits are debug-only, and so is the helper they read: a
+// release build has neither, and importing it unconditionally does not compile there.
+#[cfg(debug_assertions)]
+use super::invariants::stored_energy;
 use super::lifecycle::{normalize_or_zero, sense_depth, share, ticks_from_seconds, up_direction};
 use super::state::{TickCounters, WorldState, strike_closing_px};
 
@@ -1067,7 +1071,9 @@ impl World {
                 let wading = 1.0 + fields.w[cell_of(&o.pos).index()] * (1.0 - o.phenotype.swim);
                 let mut speed_cap = d.effort * o.phenotype.speed_max / wading;
                 // A hunter's burst and a threatened prey's dash are the only boosts, and both
-                // raise the translation ceiling only; the envelope and the energy still bind.
+                // raise `speed_cap`. Since R0b that *is* the whole motor budget, so a
+                // legitimate burst lifts turning as well as travel and a Mode label can
+                // neither supply free rotation nor suppress an escape. The energy still binds.
                 // The list is empty in every world without hunters.
                 if let Some((_, wanted)) = boosts.iter().find(|(b, _)| *b == *id) {
                     speed_cap = speed_cap.max(wanted / wading);

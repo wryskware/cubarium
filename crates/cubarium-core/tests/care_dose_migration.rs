@@ -106,9 +106,9 @@ fn a_standard_dose_reproduces_the_pre_dose_binarys_next_600_ticks() {
     // physical act paid out of the same budget as translation, so this build's tick is
     // deliberately not the pre-change binary's. The pre-change payload is still read and still
     // hashed above; the continuation is re-anchored to this build's own recording
-    // (`tests/r0a_fixtures.rs`).
+    // (`tests/continuation_fixtures.rs`).
     let recorded =
-        std::fs::read(fixture("care-v11-shower-360-plus600-r0a.cubw")).expect("fixture");
+        std::fs::read(fixture("care-v11-shower-360-plus600-r0b.cubw")).expect("fixture");
     let (_, expected) = decode_snapshot(&recorded).expect("this build's recording loads");
     assert_ne!(as_v11(&expected), payload(&plus600), "R0a must actually move this world");
     assert_eq!(
@@ -155,9 +155,9 @@ fn a_genuine_schema_eleven_hunter_world_migrates_and_continues_exactly() {
     // physical act paid out of the same budget as translation, so this build's tick is
     // deliberately not the pre-change binary's. The pre-change payload is still read and still
     // hashed above; the continuation is re-anchored to this build's own recording
-    // (`tests/r0a_fixtures.rs`).
+    // (`tests/continuation_fixtures.rs`).
     let recorded =
-        std::fs::read(fixture("care-v11-hunters-200-plus600-r0a.cubw")).expect("fixture");
+        std::fs::read(fixture("care-v11-hunters-200-plus600-r0b.cubw")).expect("fixture");
     let (_, expected) = decode_snapshot(&recorded).expect("this build's recording loads");
     assert_ne!(as_v11(&expected), payload(&plus600), "R0a must actually move this world");
     assert_eq!(

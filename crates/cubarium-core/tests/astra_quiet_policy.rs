@@ -237,15 +237,15 @@ fn genuine_schema12_off_plain_and_care_continue_as_recorded() {
     // deliberately not the pre-quiet binary's and its `-plus600` payload is unreachable. The
     // migration claim this test makes is untouched — a genuine schema 12 payload decodes, runs
     // Off, publishes no record and re-projects to schema 12 — so only the continuation oracle
-    // moves, to this build's own recording (`tests/r0a_fixtures.rs`).
+    // moves, to this build's own recording (`tests/continuation_fixtures.rs`).
     for (start, end) in [
         (
             &include_bytes!("fixtures/quiet-v12-plain-3000.cubw")[..],
-            &include_bytes!("fixtures/quiet-v12-plain-3000-plus600-r0a.cubw")[..],
+            &include_bytes!("fixtures/quiet-v12-plain-3000-plus600-r0b.cubw")[..],
         ),
         (
             &include_bytes!("fixtures/quiet-v12-care-3000.cubw")[..],
-            &include_bytes!("fixtures/quiet-v12-care-3000-plus600-r0a.cubw")[..],
+            &include_bytes!("fixtures/quiet-v12-care-3000-plus600-r0b.cubw")[..],
         ),
     ] {
         let (m, s) = decode_snapshot(start).unwrap();

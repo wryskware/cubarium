@@ -44,8 +44,15 @@ fn with_policy(mut state: WorldState) -> World {
 
 /// Step until the first pause is admitted, returning the world, the `Begin` record and the
 /// boundary `B` it names. Bounded: a fixture that never reproduces is a failed test, not a hang.
+///
+/// **R0b.** The bound was 20,000 ticks. Under the corrected shared budget a body that turns
+/// travels far less for the same effort, so this mature fixture forages more slowly and takes
+/// longer to reach the budding thresholds: the first `Begin` now lands at step 32,442 rather
+/// than inside 20,000. 60,000 ticks (3,000 s) restores the same generous margin over the
+/// measured first birth that the original bound had. Nothing about what is asserted moved —
+/// this is the fixture's patience, not its claim.
 fn run_to_first_begin(world: &mut World) -> (OrganismId, OrganismId, u64, Mode) {
-    for _ in 0..20_000 {
+    for _ in 0..60_000 {
         world.step();
         world.drain_events();
         for event in world.drain_quiet_events() {
@@ -55,7 +62,7 @@ fn run_to_first_begin(world: &mut World) -> (OrganismId, OrganismId, u64, Mode) 
             }
         }
     }
-    panic!("the mature fixture admitted no pause within 20000 ticks");
+    panic!("the mature fixture admitted no pause within 60000 ticks");
 }
 
 fn mode_of(world: &World, id: OrganismId) -> Mode {
@@ -175,7 +182,8 @@ fn the_paid_child_accounting_is_unchanged() {
             assert_eq!(birth_parent, parent, "and names its parent");
             break (*parent, *child, *tick);
         }
-        assert!(world.tick() < 147_000 + 20_000, "no birth in the window");
+        // R0b: the same widened window as `run_to_first_begin` — see its note.
+        assert!(world.tick() < 147_000 + 60_000, "no birth in the window");
     };
 
     let cfg = world.config().organism.clone();
@@ -523,7 +531,12 @@ fn a_reused_slot_does_not_inherit_a_retired_parents_pause() {
         o.energy = 0.0;
         o.reserve = 0.0;
     }
-    for _ in 0..600 {
+    // **R0b.** 600 ticks used to be enough to starve a parent whose stores were zeroed. With
+    // the corrected shared budget the same parent moves far less for the same effort, pays a
+    // much smaller motor bill, and lives on what it can still crop where it stands: it now
+    // dies 10,708 ticks after the stores are emptied. 20,000 is the same test with a window
+    // that contains the measured death.
+    for _ in 0..20_000 {
         world.step();
         world.drain_events();
         world.drain_quiet_events();

@@ -1,11 +1,14 @@
-//! Regenerates the `*-plus600-r0a.cubw` continuation fixtures.
+//! Regenerates the `*-plus600-r0b.cubw` continuation fixtures.
 //!
 //! Milestone R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`) made body rotation
-//! a physical, paid act sharing one budget with translation, so every trajectory that contains
-//! a body wider than `motor::REFERENCE_RADIUS_PX` — and every apex member — now runs
-//! differently. The `*-plus600.cubw` fixtures were written by release binaries that predate
-//! that change, and this build cannot reproduce them; the claim they proved is false now, by
-//! design, not by accident.
+//! a physical, paid act sharing one budget with translation, and milestone R0b
+//! (`design/handoffs/r0b-opus-2026-09-14.md`) corrected that budget: the capability is the
+//! translation ceiling alone, with no independent rotation allowance added to it. Every
+//! trajectory that contains a body that turns — which is every trajectory — therefore runs
+//! differently again. The `*-plus600.cubw` fixtures were written by release binaries that
+//! predate both changes, and this build cannot reproduce them; the claim they proved is false
+//! now, by design, not by accident. The R0a recordings are superseded the same way and are
+//! not kept: they were this repository's own oracle for one build, not a historical artefact.
 //!
 //! Those original fixtures are **kept**: they are genuine artefacts of the builds named in
 //! `tests/fixtures/*-provenance.md`, and every test that used them still asserts their own
@@ -17,7 +20,7 @@
 //! Run deliberately, never in CI:
 //!
 //! ```text
-//! cargo test -p cubarium-core --test r0a_fixtures -- --ignored --nocapture
+//! cargo test -p cubarium-core --test continuation_fixtures -- --ignored --nocapture
 //! ```
 //!
 //! Regenerating is a decision, not a repair. If one of these files needs rewriting, the tick
@@ -34,19 +37,19 @@ fn fixture(name: &str) -> PathBuf {
 /// `(start, end, ticks the end must carry)`. Every pair is 600 ticks apart, matching the
 /// continuation each test performs.
 const PAIRS: &[(&str, &str, u64)] = &[
-    ("live-v7-55200.cubw", "live-v7-55200-plus600-r0a.cubw", 55_800),
-    ("live-v8-172800.cubw", "live-v8-172800-plus600-r0a.cubw", 173_400),
-    ("pre-hunter-v9-173400.cubw", "pre-hunter-v9-173400-plus600-r0a.cubw", 174_000),
-    ("care-v11-shower-360.cubw", "care-v11-shower-360-plus600-r0a.cubw", 960),
-    ("care-v11-hunters-200.cubw", "care-v11-hunters-200-plus600-r0a.cubw", 800),
-    ("hunter-v3-charge-active.cubw", "hunter-v3-charge-active-plus600-r0a.cubw", 6_170),
-    ("quiet-v12-plain-3000.cubw", "quiet-v12-plain-3000-plus600-r0a.cubw", 147_600),
-    ("quiet-v12-care-3000.cubw", "quiet-v12-care-3000-plus600-r0a.cubw", 147_600),
+    ("live-v7-55200.cubw", "live-v7-55200-plus600-r0b.cubw", 55_800),
+    ("live-v8-172800.cubw", "live-v8-172800-plus600-r0b.cubw", 173_400),
+    ("pre-hunter-v9-173400.cubw", "pre-hunter-v9-173400-plus600-r0b.cubw", 174_000),
+    ("care-v11-shower-360.cubw", "care-v11-shower-360-plus600-r0b.cubw", 960),
+    ("care-v11-hunters-200.cubw", "care-v11-hunters-200-plus600-r0b.cubw", 800),
+    ("hunter-v3-charge-active.cubw", "hunter-v3-charge-active-plus600-r0b.cubw", 6_170),
+    ("quiet-v12-plain-3000.cubw", "quiet-v12-plain-3000-plus600-r0b.cubw", 147_600),
+    ("quiet-v12-care-3000.cubw", "quiet-v12-care-3000-plus600-r0b.cubw", 147_600),
 ];
 
 /// The build id every regenerated fixture carries, so a reader can tell at a glance that it is
 /// this milestone's recording and not a release binary's.
-const BUILD_ID: &str = "r0a-motor-foundation";
+const BUILD_ID: &str = "r0b-motor-envelope";
 
 fn continue_600(start: &str) -> cubarium_core::WorldState {
     let bytes = std::fs::read(fixture(start)).expect("the start fixture");
