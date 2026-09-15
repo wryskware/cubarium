@@ -80,8 +80,14 @@ only; never population statistics. "Absent" encodings are listed per family.
 | 63 | 1 | `motor_avail` | [0, 1] | `min(1, u_full / v_max)`, `u_full = min(v_max / wading, affordable_motor)`: wading and the energy budget both show here, and both now throttle turning as well as travel | motor stage | — |
 | 64–66 | 3 | `ate` = (graze, fruit, scavenge) | [0, 1] | material actually removed from fields by this mouth since the last controller update, each `/ (mouth_rate · Δt_c)` | settlement (`requests`) | 0 |
 | 67 | 1 | `moved` | [0, 1] | mean resolved speed since last update `/ v_max`, clamped | `ResolvedMotion.speed` | 0 |
-| 68 | 1 | `turned` | [−1, 1] | signed physical turn since last update `/ (v_max/r · Δt_c)`, clamped: the fixed per-body scale of a full-budget pivot, so the channel uses its range at native pace | `ResolvedMotion.turn` (transport excluded) | 0 |
+| 68 | 1 | `turned` | [−1, 1] | signed physical turn since last update `/ (v_max/r · Δt_c)`, clamped: the fixed per-body scale of a full-budget pivot, so the channel uses its range at native pace | `ResolvedMotion.turn`, **negated** (transport excluded) | 0 |
 | 69 | 1 | `delivered` | [0, 1] | Σ resolved motor magnitude ÷ Σ requested magnitude over the interval's ticks; exactly 1 when the requested sum is 0 (nothing asked, or an empty interval) | resolver | 1 |
+
+**Sign.** The `turn` action channel, the sector numbering and the body frame's `+y` all
+run **clockwise**. `ResolvedMotion.turn` is measured by `Vec2::screen_angle`, which
+increases **counter-clockwise** on screen. The two differ by a sign, and the adapter
+converts once (`neural::action::resolved_turn`) so the mismatch never reaches the policy:
+a positive `turned` means the body physically turned the way a positive `a₁` asks.
 
 **Total: 70.** Grouped: food 39, bodies 14, surroundings 5, internal 5, capability 1,
 feedback 6. Parameter count with the §5 network: `3·32·(70 + 32 + 2) + 7·(32 + 1) = 10,215`.
@@ -159,9 +165,10 @@ presence[k] = max_n  w_k(θ_n) · max(0, 1 − d_n / r_sense)
 rel_size[k] = extent_n* / (extent_self + extent_n*)   for the n* attaining that max, else 0
 ```
 
-Ties for `n*` (equal weighted presence) resolve to the neighbour earlier in the list,
-which is already ordered by `(distance, id)`, so the choice is deterministic across
-runs and platforms.
+**Ties.** The neighbour list arrives sorted by `(distance, id)` and the sampler keeps the
+*first* contributor that attains the maximum (a strict `>`), so two neighbours with an
+identical weighted presence are separated by distance and then by their full
+`OrganismId`. The result does not depend on slot reuse order.
 
 `extent_n` is the neighbour's physical crowding extent, which for an apex member is the
 profile's `body_extent_px`, not the artwork support. Disclosure: when more than 16
@@ -196,11 +203,15 @@ identical for every controller that speaks this contract.
 | --- | --- | --- | --- | --- | --- |
 | 0 thrust | [0, 1] | `σ(y₀)` | `< 0.05 → 0` | always live | requested centre speed `v_req = a₀ · v_max / wading` px/s along the heading |
 | 1 turn | [−1, 1] | `tanh(y₁)` | `|·| < 0.05 → 0` | always live | requested turn rate `ω_req = a₁ · ω_attain` rad/s, positive clockwise in the body frame; `ω_attain = min(ω_max, u_full / r)` |
-| 2 graze | [0, 1] | `σ(y₂)` | `< 0.05 → 0` | `diet ≥ 0.05` | `Decision.graze_effort` |
-| 3 fruit | [0, 1] | `σ(y₃)` | `< 0.05 → 0` | `diet ≥ 0.5` | `Decision.fruit_effort` |
-| 4 scavenge | [0, 1] | `σ(y₄)` | `< 0.05 → 0` | `diet ≤ 0.95` (ordinary); `scavenge_fraction > 0` (apex member) | `Decision.scavenge_effort` |
+| 2 graze | [0, 1] | `σ(y₂)` | `< 0.05 → 0` | `cfg.mechanisms.grazing ∧ diet ≥ 0.05` | `Decision.graze_effort` |
+| 3 fruit | [0, 1] | `σ(y₃)` | `< 0.05 → 0` | `cfg.mechanisms.grazing ∧ diet ≥ 0.5` | `Decision.fruit_effort` |
+| 4 scavenge | [0, 1] | `σ(y₄)` | `< 0.05 → 0` | `cfg.mechanisms.scavenging ∧ diet ≤ 0.95` (ordinary); `scavenge_fraction > 0` (apex member) | `Decision.scavenge_effort` |
 | 5 attack | [0, 1] | `σ(y₅)` | `< 0.5 → 0` (level trigger) | apex member with `attacks_enabled` | request to enter the paid windup/strike; §7 |
 | 6 reproduce | [0, 1] | `σ(y₆)` | `< 0.5 → 0` (level trigger) | body whose lifecycle reproduces (all ordinary bodies; adult apex) | ordinary: `Decision.bud`; apex: mating consent, §7 |
+
+A world mechanism switch is a capability of the body's world exactly as the diet gate is
+a capability of the body: the legacy controller applies both, and the settlement would
+refuse the bite anyway. Masking here keeps the `Decision` honest.
 
 **Locomotion activation.** `active = (a₀ > 0 ∨ a₁ ≠ 0)` after deadband. `Decision.effort`
 is 1 when active and 0 otherwise. Capability is a property of the body, not of how
@@ -240,6 +251,14 @@ to the ceiling, then scales both by one common factor so that
 `|v| + r·|ω| ≤ u`. A held turn therefore keeps turning at the requested rate across the
 two ticks rather than chasing a fixed bearing, and every tick pays for what was
 actually resolved (`MotorBill::total_cost`). Nothing in the adapter assigns a heading.
+
+**How the split reaches the resolver.** Before R1a, `Decision` carried a heading and an
+effort that the world turned into *both* the capability and the requested speed. A policy
+that separates activation from requested translation needs one more field:
+`Decision.speed_request: Option<f64>`, `None` for every legacy caller and
+`Some(a₀ · v_max / wading)` for a neural one. `resolve` still clamps it to `speed_cap`, so
+the field can only ask for less than the capability, never more, and a legacy trajectory
+is bit-identical.
 
 **Supported directions.** Forward translation along the heading and signed rotation.
 Reverse and lateral translation are **deferred**, not silently dead: the resolver moves
@@ -402,9 +421,13 @@ owned by the world and is listed as such in §6.
 suite pattern applies. No claim of cross-platform bitwise equality.
 
 **Versioning.** One `schema_digest: u64` = FNV-1a over the canonical text
-`"cub-obs-1|cub-act-1|gru32-reset-after-1|motor:r0b-99a2bfc|10hz"` plus the field
-list of §1 and §3; the motor id names the commit whose `resolve` semantics the action
-adapter targets. It is stored in every
+`"cub-obs-1|cub-act-1|gru32-reset-after-1|motor:r0b-99a2bfc|10hz"` followed by `|obs:`
+and the §1 field list and `|act:` and the §3 channel list, as one ASCII string
+(`crate::neural::PROFILE_TEXT`). The exact bytes are the constant in the source; a
+document and a build that disagreed about them would produce two digests, which is
+precisely the failure the digest exists to catch, so the source is authoritative and
+this section names it. The motor id names the commit whose `resolve` semantics the
+action adapter targets. It is stored in every
 `Policy` and in the extension header. On load, a policy whose digest differs from the
 build's is refused by name (as `SUPPORTED_PROFILE_VERSIONS` does for hunters), never
 reinterpreted. Boundaries: changing the observation layout, action set, GRU
@@ -592,9 +615,14 @@ survival, depletion, travel and cycle-yield bounds (§9); wading and bursts act 
 whole budget (§1 index 63, §3). Legacy fixture changes in R0b (widened windows,
 re-anchored continuation oracles) do not constrain the adapter's tests.
 
-**Readiness.** This contract is ready for the R1a implementation slice in §9, subject
-to decisions 1–3 above being taken at the checkpoint. Nothing in it is canon, and it
-does not authorise R1a, training or a world change.
+**Status after R1a (2026-09-14).** Steps 1–6 of §9 are implemented
+(`6b9e255`..`7614bef`; [result](7_Research/r1a-runtime-result-2026-09-14.md)). Step zero
+replaced the starvation predicate with "cannot raise this tick's upkeep", evaluated
+before intake, so decision 3's zombie half is closed; a cropping floor remains a
+separate ecological choice. Two named sampler fixtures were not built (seam-equivalent
+sampling, 17-neighbour truncation) and the held turn is not measured across a seam;
+those belong at the start of the next slice. The display world stays legacy-controlled
+until an explicit attachment control exists. Nothing in this document is canon.
 
 ## Usage
 
