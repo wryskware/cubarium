@@ -1948,3 +1948,117 @@ fn report_fauna_by_form_after_a_short_run() {
         sample.water
     );
 }
+
+// --- the shared training body -----------------------------------------------------------
+
+/// The body `World::found_training_animal` makes is the one the recurrent fixtures used
+/// before the routine moved into the core: the unit adult founder at hue 0.5, half its
+/// reserve, three quarters of its energy, seeking, born at the current tick, and booked
+/// into the material box as an import.
+///
+/// The three stores are **pinned to their measured values**, not merely compared with a
+/// second copy of the same expression: a change to `Genome::founder` or to `decode` that
+/// moved the training animal would then be silent, and every trained policy in the tree was
+/// trained on this body.
+#[test]
+fn the_training_body_is_the_unit_adult_the_fixtures_founded() {
+    let mut cfg = WorldConfig::default();
+    cfg.founders.kinds.clear();
+    cfg.founders.count = 0;
+    let mut world = World::new(cfg.clone()).expect("a world with no founders");
+    let before = world.state.external_material_in;
+
+    let cell = CellId::new(Face::Top, 3, 8);
+    let id = world
+        .found_training_animal(cell.center(), Vec2::new(1.0, 0.0))
+        .expect("an empty world has room");
+
+    // What the fixture's own `place` computed, written out here independently.
+    let genome = Genome::founder(TRAINING_FOUNDER_HUE, &cfg.drives);
+    let phenotype = decode(&genome, &cfg.organism);
+    let o = world.state.organisms.get(id).expect("the body is there");
+    assert_eq!(o.genome, genome, "the genotype is the founder at hue 0.5");
+    assert_eq!(o.phenotype, phenotype);
+    assert_eq!(o.pos, cell.center());
+    assert_eq!(cell_of(&o.pos), cell);
+    assert_eq!(o.heading, Vec2::new(1.0, 0.0));
+    assert_eq!(o.ou, Vec2::ZERO);
+    assert_eq!(o.born_tick, 0);
+    assert_eq!(o.hunger_memory, 1.0);
+    assert_eq!(o.mode, Mode::Seeking);
+    assert!(o.escrow.is_none());
+    assert_eq!(o.births, 0);
+    assert_eq!(o.parent, None);
+    assert_eq!(o.origin, Origin::Founder);
+    assert!(!o.fed_this_tick);
+
+    // The pinned numbers. `structure_adult`, `0.5 · reserve_max` and `0.75 · energy_max`
+    // for this genotype under the default organism config.
+    assert_eq!(o.structure.to_bits(), TRAINING_STRUCTURE.to_bits(), "structure {}", o.structure);
+    assert_eq!(o.reserve.to_bits(), TRAINING_RESERVE.to_bits(), "reserve {}", o.reserve);
+    assert_eq!(o.energy.to_bits(), TRAINING_ENERGY.to_bits(), "energy {}", o.energy);
+    assert_eq!(o.structure, phenotype.structure_adult);
+    assert_eq!(o.reserve, TRAINING_START_RESERVE * phenotype.reserve_max);
+    assert_eq!(o.energy, TRAINING_START_ENERGY * phenotype.energy_max);
+
+    // Booked as an import, so the material box still closes.
+    assert_eq!(world.state.external_material_in - before, o.structure + o.reserve);
+    assert!(world.mass_residual().abs() < 1e-9, "residual {}", world.mass_residual());
+    world.check_invariants().expect("the world stays consistent");
+}
+
+/// Measured on this build; see the test above for why they are written down. `S_adult` is
+/// the unit adult's 1.0, `R_max` is 1.0 so half of it is 0.5, and `E_max` is 2.0 so three
+/// quarters of it is 1.5.
+const TRAINING_STRUCTURE: f64 = 1.0;
+const TRAINING_RESERVE: f64 = 0.5;
+const TRAINING_ENERGY: f64 = 1.5;
+
+/// `found_neural_animal` is the founding plus the attachment, and a refusal leaves nothing
+/// behind: no half-founded body, and no material booked for one.
+#[test]
+fn a_refused_neural_founding_leaves_the_world_exactly_as_it_was() {
+    let mut cfg = WorldConfig::default();
+    cfg.founders.kinds.clear();
+    cfg.founders.count = 0;
+    let mut world = World::new(cfg).expect("a world with no founders");
+    let before = (
+        world.state.organisms.len(),
+        world.state.external_material_in,
+        crate::snapshot::state_hash(&world.state),
+    );
+
+    // The quiet extension and neural animals cannot both be on; that refusal is the one
+    // reachable without building a foreign policy.
+    world.state.quiet.policy = crate::quiet::QuietPolicy::PostBirthPauseV1;
+    let policy = crate::neural::Policy::new(crate::neural::Gru32::zeros());
+    let err = world
+        .found_neural_animal(CellId::new(Face::Top, 8, 8).center(), Vec2::new(1.0, 0.0), policy)
+        .expect_err("the quiet extension refuses a neural animal");
+    assert!(err.contains("quiet extension"), "{err}");
+    world.state.quiet.policy = crate::quiet::QuietPolicy::Off;
+    assert_eq!(world.state.organisms.len(), before.0, "no body was left behind");
+    assert_eq!(world.state.external_material_in, before.1, "no material was booked");
+    assert_eq!(crate::snapshot::state_hash(&world.state), before.2);
+}
+
+/// The cap is a refusal, not a silent overflow: the invariants check population against it
+/// every tick, so a founding that pushed past it would make the next tick fatal.
+#[test]
+fn founding_past_the_capacity_cap_is_refused_by_name() {
+    let mut cfg = WorldConfig::default();
+    cfg.founders.kinds.clear();
+    cfg.founders.count = 0;
+    cfg.capacity.max_organisms = 2;
+    let mut world = World::new(cfg).expect("a tiny world");
+    for _ in 0..2 {
+        world
+            .found_training_animal(CellId::new(Face::Top, 8, 8).center(), Vec2::new(1.0, 0.0))
+            .expect("inside the cap");
+    }
+    let err = world
+        .found_training_animal(CellId::new(Face::Top, 8, 8).center(), Vec2::new(1.0, 0.0))
+        .expect_err("the third exceeds the cap");
+    assert!(err.contains("2 of its 2 organisms"), "{err}");
+    world.check_invariants().expect("the world stays consistent");
+}

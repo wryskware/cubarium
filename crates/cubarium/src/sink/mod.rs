@@ -26,6 +26,11 @@ pub trait FrameSink {
     /// observation only — nothing a sink does here can reach the world.
     fn observe_tick(&mut self, _tick: u64) {}
 
+    /// The living population and how many of them run a recurrent policy, after each
+    /// completed tick. Observation only, on the same one-way rule as [`Self::observe_tick`];
+    /// the web sink reports both at `/status` so a seeded run can be checked from outside.
+    fn observe_counts(&mut self, _population: usize, _neural: usize) {}
+
     /// True once the sink wants the host to stop (the preview window was closed).
     fn should_quit(&mut self) -> bool {
         false

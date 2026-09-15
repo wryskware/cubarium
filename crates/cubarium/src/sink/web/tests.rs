@@ -213,6 +213,25 @@ fn the_status_route_reports_the_world_tick_the_sequence_and_the_source() {
     assert_eq!(v["frames_served"], 1);
 }
 
+/// The seeding control is only checkable from outside if `/status` says how many neural
+/// animals are alive; a world that was never seeded must read zero rather than omit it.
+#[test]
+fn the_status_route_reports_the_population_and_how_many_of_it_is_neural() {
+    let mut sink = WebSink::new(0).expect("binding an ephemeral port");
+    let (_, _, body) = get(sink.addr(), "/status");
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["population"], 0, "before the first tick, zero — not absent");
+    assert_eq!(v["neural_animals"], 0, "an ordinary world is never neural");
+
+    sink.observe_tick(200);
+    sink.observe_counts(37, 4);
+    let (_, _, body) = get(sink.addr(), "/status");
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["world_tick"], 200);
+    assert_eq!(v["population"], 37);
+    assert_eq!(v["neural_animals"], 4);
+}
+
 #[test]
 fn a_plain_sink_still_answers_status_with_a_null_resume_and_this_process() {
     let sink = WebSink::new(0).expect("binding an ephemeral port");

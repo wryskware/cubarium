@@ -21,6 +21,7 @@ use crate::hunter::HunterEvent;
 use crate::pairs::NeighborLists;
 use crate::quiet::QuietEvent;
 
+pub use lifecycle::{TRAINING_FOUNDER_HUE, TRAINING_START_ENERGY, TRAINING_START_RESERVE};
 pub(crate) use state::check_genome;
 pub use state::{ChargingDiagnostics, IntakeDiagnostics, NeuralTiming, TickCounters, WorldState};
 

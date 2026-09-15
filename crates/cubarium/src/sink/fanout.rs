@@ -56,6 +56,12 @@ impl FrameSink for FanOutSink {
         }
     }
 
+    fn observe_counts(&mut self, population: usize, neural: usize) {
+        for sink in &mut self.0 {
+            sink.observe_counts(population, neural);
+        }
+    }
+
     fn should_quit(&mut self) -> bool {
         // Every child is polled, not just up to the first `true`: a sink's `should_quit`
         // is also how it drains its own event queue.

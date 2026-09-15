@@ -317,6 +317,18 @@ impl World {
         &self.state.neural
     }
 
+    /// How many **live** organisms carry a recurrent policy. Counted against the organism
+    /// slots rather than read off the extension's length, so an entry whose body has died
+    /// can never be reported as an animal that is still out there.
+    pub fn neural_population(&self) -> usize {
+        self.state
+            .neural
+            .animals
+            .iter()
+            .filter(|(id, _)| self.state.organisms.get(*id).is_some())
+            .count()
+    }
+
     /// **Explicit** development access: attach `policy` to one live ordinary body, giving it
     /// fresh private state at the current tick.
     ///

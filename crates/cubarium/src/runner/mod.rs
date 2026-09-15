@@ -51,6 +51,8 @@ pub struct RunOutcome {
     pub start_tick: u64,
     pub final_tick: u64,
     pub population: usize,
+    /// Live organisms running a recurrent policy at the end of the run.
+    pub neural_animals: usize,
     /// FNV-1a over the postcard encoding of the final state.
     pub state_hash: u64,
     pub mass_residual: f64,
@@ -187,6 +189,103 @@ fn open_world(run: &Run) -> Result<(World, Option<PathBuf>, Option<u64>)> {
     }
     let world = World::new(config).map_err(|e| anyhow::anyhow!("invalid world config: {e}"))?;
     Ok((world, None, None))
+}
+
+// --- `--neural`: seeding a new world with trained foragers ----------------------------
+
+/// The cell a seeded copy aims for on its face: the middle of the 16x16 chart. Cell (8, 8)
+/// rather than the exact geometric centre, so the start is a whole cell the clearance check
+/// can be about.
+const SEED_CELL: u8 = 8;
+
+/// Is this cell clear ground to start a grazer on? Standing water above `water.flood` is
+/// the world's own "this is not ground" threshold — it is where producer growth starts
+/// drowning — so a copy aimed into a pond walks to the nearest cell that is not one.
+fn is_clear_ground(world: &World, cell: cubarium_surface::CellId) -> bool {
+    world.state.fields.w[cell.index()] <= world.state.config.water.flood
+}
+
+/// `want` if it is clear, else the nearest clear cell on the same face, searched outward in
+/// Chebyshev rings and in a fixed order within a ring, so the choice is deterministic.
+fn nearest_clear_cell(
+    world: &World,
+    want: cubarium_surface::CellId,
+) -> Option<cubarium_surface::CellId> {
+    use cubarium_surface::{CELLS_PER_FACE_EDGE, CellId};
+    let edge = CELLS_PER_FACE_EDGE as i32;
+    let (face, cx, cy) = (want.face(), i32::from(want.cx()), i32::from(want.cy()));
+    for r in 0..edge {
+        let mut best: Option<CellId> = None;
+        for y in (cy - r).max(0)..=(cy + r).min(edge - 1) {
+            for x in (cx - r).max(0)..=(cx + r).min(edge - 1) {
+                // Only the ring itself; the interior was searched at a smaller `r`.
+                if (x - cx).abs().max((y - cy).abs()) != r {
+                    continue;
+                }
+                let cell = CellId::new(face, x as u8, y as u8);
+                if is_clear_ground(world, cell) && best.is_none() {
+                    best = Some(cell);
+                }
+            }
+        }
+        if best.is_some() {
+            return best;
+        }
+    }
+    None
+}
+
+/// Read `--neural`'s exported policy and put `--neural-count` copies of the training animal
+/// into a **newly created** world, one per face in `Face` index order (Front, Right, Back,
+/// Left, Top), heading east in that face's chart.
+///
+/// Returns how many were seeded. Nothing here can happen on a resume: the caller refuses
+/// `--neural` there, because a seeding control that ran again on every restart would add a
+/// fresh cohort to a world that already has one.
+fn seed_neural_animals(run: &Run, world: &mut World) -> Result<usize> {
+    let Some(path) = run.neural.as_ref() else {
+        return Ok(0);
+    };
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("reading the policy file {}", path.display()))?;
+    let file: cubarium_search::es::export::PolicyFile = serde_json::from_str(&text)
+        .with_context(|| format!("parsing the policy file {}", path.display()))?;
+    // `PolicyFile::policy` is what refuses a foreign schema digest by name; decoding once
+    // here means a bad file stops the run before any world is written.
+    let policy = file
+        .policy()
+        .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
+
+    let east = cubarium_surface::Vec2::new(1.0, 0.0);
+    for k in 0..run.neural_count {
+        let face = cubarium_surface::Face::from_index((k % 5) as u8).expect("five faces");
+        let want = cubarium_surface::CellId::new(face, SEED_CELL, SEED_CELL);
+        let cell = nearest_clear_cell(world, want).ok_or_else(|| {
+            anyhow::anyhow!(
+                "--neural: no clear ground anywhere on {face:?} to start a neural animal on"
+            )
+        })?;
+        if cell != want {
+            eprintln!(
+                "cubarium: --neural copy {k} on {face:?}: the centre cell ({}, {}) is not clear                  ground; starting at ({}, {}) instead",
+                want.cx(),
+                want.cy(),
+                cell.cx(),
+                cell.cy()
+            );
+        }
+        world
+            .found_neural_animal(cell.center(), east, policy.clone())
+            .map_err(|e| anyhow::anyhow!("--neural: seeding copy {k} on {face:?}: {e}"))?;
+    }
+    eprintln!(
+        "cubarium: seeded {} neural animals from {} (generation {}, digest {:#018x})",
+        run.neural_count,
+        path.display(),
+        file.generation,
+        file.policy_digest,
+    );
+    Ok(run.neural_count)
 }
 
 /// The read-only identity `--mirror-web`'s viewer serves at `/status`. Host facts only —
@@ -385,6 +484,19 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
     }
 
     let (mut world, loaded_from, loaded_tick) = open_world(run)?;
+    // A seeding control applies to the world it creates, never to one it found. Refused
+    // rather than ignored: silently dropping `--neural` on a restart would leave the
+    // operator believing a cohort was added, and honouring it would add a second one every
+    // time the runner came back up.
+    if loaded_from.is_some() && run.neural.is_some() {
+        anyhow::bail!(
+            "--neural seeds a new world, and this run resumed {}. Use --fresh with a state \
+             directory of its own to start a seeded world, or drop --neural to carry on with \
+             the animals this world already has.",
+            loaded_from.as_ref().expect("just checked").display()
+        );
+    }
+    seed_neural_animals(run, &mut world)?;
     // The presentation, and its capability against the world's hunter profile, before
     // anything below (care's opening checkpoint, the sink, the loop) touches the world: a
     // saved world whose profile the art cannot draw fails here by name, unmutated.
@@ -525,6 +637,7 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
         // world did, and has no way to tell the world anything.
         if let Some(s) = sink.as_mut() {
             s.observe_tick(tick);
+            s.observe_counts(world.population(), world.neural_population());
         }
         // Drained every tick even when nothing logs them: `World` records births and
         // deaths whatever `capacity.event_log` says, and a buffer the host never takes
@@ -742,6 +855,7 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
         start_tick,
         final_tick,
         population: world.population(),
+        neural_animals: world.neural_population(),
         state_hash: cubarium_core::snapshot::state_hash(&world.state),
         mass_residual: world.mass_residual(),
         telemetry_samples: telemetry.samples,

@@ -249,6 +249,7 @@ dependencies = [
  "ctrlc",
  "cubarium-core",
  "cubarium-render",
+ "cubarium-search",
  "cubarium-surface",
  "cube-proto",
  "libc",

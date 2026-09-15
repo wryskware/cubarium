@@ -38,10 +38,7 @@
 use std::f64::consts::FRAC_1_SQRT_2;
 
 use cubarium_core::config::WorldConfig;
-use cubarium_core::genome::{Genome, decode};
 use cubarium_core::ids::OrganismId;
-use cubarium_core::organism::{Mode, Organism, Origin};
-use cubarium_core::rng::Counter;
 use cubarium_core::{DT, World};
 use cubarium_surface::{CellId, Face, Vec2, cell_of};
 use serde::{Deserialize, Serialize};
@@ -54,13 +51,16 @@ pub const HORIZON_TICKS: u64 = 36_000;
 /// The genotype every episode uses: the unit adult founder R0a, R0b and R0d measured.
 /// `Genome::founder` takes a *hue*; everything else about the genome is that constructor's
 /// fixed unit adult, so one number names the whole genotype.
-pub const FOUNDER_HUE: f32 = 0.5;
+///
+/// The number itself now lives in the core beside the founding routine, so the display's
+/// seeding control and this fixture cannot drift apart; this is the same constant.
+pub use cubarium_core::TRAINING_FOUNDER_HUE as FOUNDER_HUE;
 
 /// Starting reserve as a fraction of `reserve_max` (headroom to store, so intake is never
 /// refused for a reason that has nothing to do with behaviour).
-pub const START_RESERVE: f64 = 0.5;
+pub use cubarium_core::TRAINING_START_RESERVE as START_RESERVE;
 /// Starting energy as a fraction of `energy_max`.
-pub const START_ENERGY: f64 = 0.75;
+pub use cubarium_core::TRAINING_START_ENERGY as START_ENERGY;
 
 /// One painted square of producer material: `(2·half + 1)²` cells centred on `(cx, cy)`,
 /// filled to `fill · P_max`.
@@ -246,37 +246,15 @@ impl Layout {
         c
     }
 
+    /// The one mature grazer, founded through the core's own
+    /// [`World::found_training_animal`] — the same routine, body for body, that the
+    /// display's `--neural` seeding uses. There is one definition of this animal, not two.
     fn place(&self, world: &mut World) -> OrganismId {
-        let cfg = world.config().clone();
-        let genome = Genome::founder(FOUNDER_HUE, &cfg.drives);
-        let phenotype = decode(&genome, &cfg.organism);
         let pos = self.start_cell().center();
         assert_eq!(cell_of(&pos), self.start_cell(), "the grazer landed outside its start cell");
-        let structure = phenotype.structure_adult;
-        let reserve = START_RESERVE * phenotype.reserve_max;
-        let energy = START_ENERGY * phenotype.energy_max;
-        let organism = Organism {
-            pos,
-            heading: self.heading_vec(),
-            ou: Vec2::ZERO,
-            structure,
-            reserve,
-            energy,
-            born_tick: 0,
-            hunger_memory: 1.0,
-            mode: Mode::Seeking,
-            escrow: None,
-            births: 0,
-            genome,
-            phenotype,
-            parent: None,
-            origin: Origin::Founder,
-            turn_counter: Counter::default(),
-            fed_this_tick: false,
-        };
-        let id = world.state.organisms.insert(organism);
-        world.state.external_material_in += structure + reserve;
-        id
+        world
+            .found_training_animal(pos, self.heading_vec())
+            .expect("a fresh layout world has room for its one grazer")
     }
 }
 

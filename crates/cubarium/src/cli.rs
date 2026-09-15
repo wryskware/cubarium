@@ -184,6 +184,15 @@ pub struct Run {
     /// instead of the procedural bodies. Omit it and the image is unchanged.
     #[arg(long)]
     pub art: Option<PathBuf>,
+    /// Seed a **new** world with trained neural animals running this exported policy file
+    /// (`cubarium-search es-export`). A seeding control, so it applies only when this run
+    /// creates the world: on a resume it is refused rather than seeding a second cohort
+    /// into a world that already has one.
+    #[arg(long)]
+    pub neural: Option<PathBuf>,
+    /// How many copies of the training animal `--neural` seeds. Must be at least 1.
+    #[arg(long, default_value_t = 4)]
+    pub neural_count: usize,
 }
 
 /// `--fps` outside [`crate::clock::MIN_FPS`]..=[`crate::clock::MAX_FPS`] is a typo, not a
@@ -256,6 +265,9 @@ impl Run {
         );
         anyhow::ensure!(self.every >= 1, "--every must be at least 1");
         anyhow::ensure!(self.scale >= 1, "--scale must be at least 1");
+        // A count of zero asks for a seeding that seeds nothing; that is a typo, not a
+        // request. `--neural-count` without `--neural` is harmless and stays accepted.
+        anyhow::ensure!(self.neural_count >= 1, "--neural-count must be at least 1");
         check_fps(self.fps)?;
         Ok(())
     }
@@ -294,6 +306,37 @@ mod tests {
             Command::Run(r) => r,
             other => panic!("expected a run command, got {other:?}"),
         }
+    }
+
+    /// `--neural` is the display's seeding door. The parser takes it on its own — the
+    /// runtime is what refuses it on a resume — and a count of zero is a typo.
+    #[test]
+    fn the_neural_seeding_controls_parse_and_refuse_a_zero_count() {
+        let r = parse_run(["cubarium", "run"]);
+        assert_eq!(r.neural, None, "no seeding unless it is asked for");
+        assert_eq!(r.neural_count, 4, "the documented default cohort");
+
+        let r = parse_run([
+            "cubarium", "run", "--fresh", "--neural", "/tmp/center-00059.json",
+            "--neural-count", "7",
+        ]);
+        assert_eq!(r.neural, Some(PathBuf::from("/tmp/center-00059.json")));
+        assert_eq!(r.neural_count, 7);
+        r.validate().expect("a seeded fresh run is well formed");
+
+        // Accepted by the parser without `--fresh`: the refusal belongs to the runtime,
+        // which is the only thing that knows whether this run created the world.
+        let r = parse_run(["cubarium", "run", "--neural", "/tmp/center-00059.json"]);
+        assert_eq!(r.neural, Some(PathBuf::from("/tmp/center-00059.json")));
+        assert!(!r.fresh);
+        r.validate().expect("the parser does not decide fresh-versus-resume");
+
+        let err = parse_run([
+            "cubarium", "run", "--fresh", "--neural", "/tmp/p.json", "--neural-count", "0",
+        ])
+        .validate()
+        .expect_err("a cohort of zero seeds nothing");
+        assert!(format!("{err}").contains("--neural-count must be at least 1"), "{err}");
     }
 
     #[test]

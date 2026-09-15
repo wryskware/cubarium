@@ -131,6 +131,11 @@ struct Shared {
     served: AtomicU64,
     /// The world's tick as of the last completed tick the host reported.
     world_tick: AtomicU64,
+    /// The living population as of that same tick.
+    population: AtomicU64,
+    /// How many of those carry a recurrent policy (`run --neural`). Zero in every ordinary
+    /// world, which is what makes a seeded one checkable from outside.
+    neural_animals: AtomicU64,
     /// Connection handler threads currently alive; the permit is released on every exit
     /// path by [`HandlerPermit`]'s `Drop`.
     handlers: AtomicU64,
@@ -159,8 +164,10 @@ impl Shared {
     fn status_json(&self) -> String {
         let submitted = self.ticks.load(Ordering::Relaxed);
         format!(
-            r#"{{"world_tick":{},"render_seq":{},"frames_served":{},"source":{}}}"#,
+            r#"{{"world_tick":{},"population":{},"neural_animals":{},"render_seq":{},"frames_served":{},"source":{}}}"#,
             self.world_tick.load(Ordering::Relaxed),
+            self.population.load(Ordering::Relaxed),
+            self.neural_animals.load(Ordering::Relaxed),
             // The render sequence of the newest frame, which is exactly the number in the
             // `/frame` prefix; before the first submit both read 0.
             submitted.saturating_sub(1),
@@ -221,6 +228,8 @@ impl WebSink {
             ticks: AtomicU64::new(0),
             served: AtomicU64::new(0),
             world_tick: AtomicU64::new(0),
+            population: AtomicU64::new(0),
+            neural_animals: AtomicU64::new(0),
             handlers: AtomicU64::new(0),
             refused: AtomicU64::new(0),
             note,
@@ -313,6 +322,11 @@ impl FrameSink for WebSink {
         // The newest frame always wins; nothing here waits on a client.
         *slot = Some(next);
         Ok(())
+    }
+
+    fn observe_counts(&mut self, population: usize, neural: usize) {
+        self.shared.population.store(population as u64, Ordering::Relaxed);
+        self.shared.neural_animals.store(neural as u64, Ordering::Relaxed);
     }
 
     fn observe_tick(&mut self, tick: u64) {

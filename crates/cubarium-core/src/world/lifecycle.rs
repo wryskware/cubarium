@@ -252,6 +252,115 @@ impl World {
     }
 }
 
+// --- the shared training body ---------------------------------------------------------
+//
+// One founding routine, used by the recurrent training fixtures and by the display's
+// seeding control. They must be the *same* body: a policy trained on one and run on the
+// other would otherwise be scored against a different animal than it drives.
+
+/// The genotype every recurrent episode — and every seeded display animal — uses: the unit
+/// adult founder R0a, R0b and R0d measured. [`Genome::founder`] takes a *hue*; everything
+/// else about the genome is that constructor's fixed unit adult, so one number names the
+/// whole genotype.
+pub const TRAINING_FOUNDER_HUE: f32 = 0.5;
+
+/// Starting reserve as a fraction of `reserve_max` (headroom to store, so intake is never
+/// refused for a reason that has nothing to do with behaviour).
+pub const TRAINING_START_RESERVE: f64 = 0.5;
+
+/// Starting energy as a fraction of `energy_max`.
+pub const TRAINING_START_ENERGY: f64 = 0.75;
+
+impl World {
+    /// Found one **training body** at `pos` facing `heading`, with no policy attached.
+    ///
+    /// This is the single definition of that body: the [`TRAINING_FOUNDER_HUE`] unit adult,
+    /// `S = S_adult`, `R = TRAINING_START_RESERVE · R_max`, `E = TRAINING_START_ENERGY ·
+    /// E_max`, `Mode::Seeking`, a full hunger memory, `Origin::Founder`, born at the current
+    /// tick, and `structure + reserve` booked into `external_material_in` because the body
+    /// arrived from outside the world's material box.
+    ///
+    /// It refuses rather than exceed `capacity.max_organisms`: a founding that silently did
+    /// nothing, or that pushed the population past the cap the invariants check, would be a
+    /// worse answer than a named error.
+    pub fn found_training_animal(
+        &mut self,
+        pos: SurfacePoint,
+        heading: Vec2,
+    ) -> Result<crate::ids::OrganismId, String> {
+        let cap = self.state.config.capacity.max_organisms as usize;
+        if self.state.organisms.len() >= cap {
+            return Err(format!(
+                "cannot found another animal: the world already holds {} of its {cap} organisms",
+                self.state.organisms.len()
+            ));
+        }
+        let heading = heading
+            .normalized()
+            .ok_or_else(|| "a founding heading must be nonzero".to_string())?;
+        let cfg = self.state.config.clone();
+        let genome = Genome::founder(TRAINING_FOUNDER_HUE, &cfg.drives);
+        let phenotype = decode(&genome, &cfg.organism);
+        let structure = phenotype.structure_adult;
+        let reserve = TRAINING_START_RESERVE * phenotype.reserve_max;
+        let energy = TRAINING_START_ENERGY * phenotype.energy_max;
+        let id = self.state.organisms.insert(Organism {
+            pos: pos.canonicalize(),
+            heading,
+            ou: Vec2::ZERO,
+            structure,
+            reserve,
+            energy,
+            born_tick: self.state.tick,
+            hunger_memory: 1.0,
+            mode: Mode::Seeking,
+            escrow: None,
+            births: 0,
+            genome,
+            phenotype,
+            parent: None,
+            origin: Origin::Founder,
+            turn_counter: Counter::default(),
+            fed_this_tick: false,
+        });
+        self.state.external_material_in += structure + reserve;
+        self.moved.resize_with(self.state.organisms.slot_count(), Vec::new);
+        Ok(id)
+    }
+
+    /// [`World::found_training_animal`] and then [`World::attach_neural_policy`]: the whole
+    /// door a development tool needs to put a trained forager into a live world.
+    ///
+    /// Every refusal `attach_neural_policy` makes — a foreign digest, an enabled quiet
+    /// extension — is made here too, and the body is removed again first, so a refused seed
+    /// leaves the world exactly as it found it rather than half-founded.
+    pub fn found_neural_animal(
+        &mut self,
+        pos: SurfacePoint,
+        heading: Vec2,
+        policy: crate::neural::Policy,
+    ) -> Result<crate::ids::OrganismId, String> {
+        // The two refusals that do not depend on the body are made *before* it exists, so
+        // the ordinary case never founds and unwinds.
+        policy.validate()?;
+        if self.state.quiet.policy.enabled() {
+            return Err(
+                "the ordinary quiet extension and neural animals cannot be enabled together"
+                    .into(),
+            );
+        }
+        let id = self.found_training_animal(pos, heading)?;
+        if let Err(e) = self.attach_neural_policy(id, policy) {
+            self.state.neural.remove(id);
+            if let Some(o) = self.state.organisms.remove(id) {
+                self.state.external_material_in -= o.structure + o.reserve;
+            }
+            return Err(e);
+        }
+        Ok(id)
+    }
+}
+
 /// The unit chart direction of increasing embedded height at a point of `face`: the chart
 /// gradient of `y`, `(tangent_u.y, tangent_v.y)` normalized. Zero on the level top face,
 /// `−v` on the four side faces.

@@ -1,0 +1,107 @@
+//! `run --fresh --neural <policy.json>`: the display's seeding door.
+//!
+//! The control exists so a trained forager can be *seen* on the cube. What it must get
+//! right is narrow and checkable: the right number of neural animals in the world it
+//! creates, and a refusal — not a second cohort — when a later run resumes that world.
+
+mod support;
+
+use support::{Scratch, parse, run};
+
+/// An exported policy file the runner can read, written the way `es-export` writes one.
+/// Synthesised rather than copied from `runs/`, so the test does not depend on a training
+/// run's output surviving in the tree.
+fn write_policy(scratch: &Scratch, name: &str, seed: u64) -> std::path::PathBuf {
+    let theta = cubarium_search::es::tensor::initial_center(seed);
+    let file = cubarium_search::es::export::PolicyFile::new(&theta, "test", 0, 59)
+        .expect("an exportable centre");
+    scratch.write(name, &serde_json::to_string(&file).expect("writing the policy file"))
+}
+
+#[test]
+fn a_fresh_seeded_world_holds_exactly_the_cohort_and_a_resume_refuses_to_seed_again() {
+    let scratch = Scratch::new("neural-seed");
+    let state = scratch.join("state");
+    let policy = write_policy(&scratch, "center.json", 20_260_915);
+
+    let seeded = run(&[
+        "--sink", "none", "--speed", "0", "--seconds", "2", "--fresh",
+        "--state", state.to_str().unwrap(),
+        "--neural", policy.to_str().unwrap(),
+        "--neural-count", "3",
+    ]);
+    assert_eq!(seeded.final_tick, 40);
+    assert_eq!(
+        seeded.neural_animals, 3,
+        "three copies were asked for and three must be in the world"
+    );
+    assert!(
+        seeded.population >= 3,
+        "the legacy founders are there too: population {}",
+        seeded.population
+    );
+    assert!(
+        seeded.mass_residual.abs() < 1e-6,
+        "founding a body from outside must still close the material box: {}",
+        seeded.mass_residual
+    );
+
+    // The same state directory again, resuming, with the same control: refused by name.
+    let err = format!(
+        "{:#}",
+        cubarium::run_world(&parse(&[
+            "--sink", "none", "--speed", "0", "--seconds", "1",
+            "--state", state.to_str().unwrap(),
+            "--neural", policy.to_str().unwrap(),
+        ]))
+        .expect_err("a resumed world must not be seeded a second time")
+    );
+    assert!(err.contains("--neural seeds a new world"), "{err}");
+    assert!(err.contains("--fresh"), "the refusal names the control that would work: {err}");
+
+    // And the resume without the control carries the cohort it already has: the policy
+    // rides the snapshot (schema 15), so a restart does not lose the animals.
+    let resumed = run(&[
+        "--sink", "none", "--speed", "0", "--seconds", "1",
+        "--state", state.to_str().unwrap(),
+    ]);
+    assert_eq!(resumed.loaded_tick, Some(40), "the resume started from the seeded snapshot");
+    assert_eq!(resumed.neural_animals, 3, "the cohort survived the snapshot round trip");
+}
+
+/// The default cohort is four, one per side face, and they are alive and moving after 20 s
+/// of world time — the brief's "verify, do not assume".
+#[test]
+fn the_default_cohort_is_four_and_they_are_still_there_after_twenty_seconds() {
+    let scratch = Scratch::new("neural-default");
+    let state = scratch.join("state");
+    let policy = write_policy(&scratch, "center.json", 7);
+
+    let outcome = run(&[
+        "--sink", "none", "--speed", "0", "--seconds", "20", "--fresh",
+        "--state", state.to_str().unwrap(),
+        "--neural", policy.to_str().unwrap(),
+    ]);
+    assert_eq!(outcome.final_tick, 400);
+    assert_eq!(outcome.neural_animals, 4, "the documented default cohort");
+}
+
+/// A file that is not an exported policy stops the run before a world is written, rather
+/// than starting an unseeded world that looks like the one that was asked for.
+#[test]
+fn an_unreadable_policy_file_refuses_the_run() {
+    let scratch = Scratch::new("neural-bad");
+    let state = scratch.join("state");
+    let bad = scratch.write("not-a-policy.json", "{\"schema\":\"something-else\"}\n");
+
+    let err = format!(
+        "{:#}",
+        cubarium::run_world(&parse(&[
+            "--sink", "none", "--speed", "0", "--seconds", "1", "--fresh",
+            "--state", state.to_str().unwrap(),
+            "--neural", bad.to_str().unwrap(),
+        ]))
+        .expect_err("a policy file that will not parse must refuse the run")
+    );
+    assert!(err.contains("not-a-policy.json"), "the refusal names the file: {err}");
+}
