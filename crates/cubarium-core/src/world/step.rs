@@ -29,6 +29,20 @@ use crate::{DT, pairs};
 use super::*;
 
 use super::invariants::edible_detritus;
+
+/// `D_eff + C_eff` for one cell: the edible portion of the litter plus the edible portion of
+/// the animal remains (`design/ecology-v1-contract.md` §3.1, §6.2, §9). Each stock has its
+/// own density and its own `min(1, ρ/e_r)` factor, so a cell full of energy-poor litter beside
+/// a fresh carcass reads as the carcass, which is what a scavenge bite would actually get.
+pub(crate) fn edible_here(
+    fields: &crate::fields::Fields,
+    eco: &crate::fields::EcologyV1State,
+    cell: usize,
+    e_r: f64,
+) -> f64 {
+    edible_detritus(fields.d[cell], fields.de[cell], e_r)
+        + edible_detritus(eco.carrion[cell], eco.carrion_energy[cell], e_r)
+}
 // The per-tick energy and water audits are debug-only, and so is the helper they read: a
 // release build has neither, and importing it unconditionally does not compile there.
 #[cfg(debug_assertions)]
@@ -216,6 +230,7 @@ impl World {
                 sense_rings,
                 neighbors,
                 travel_buf,
+                eco_scratch,
                 moved,
                 events,
                 hunter_events,
@@ -256,12 +271,15 @@ impl World {
                 apex_dormancy,
                 apex_encounters,
                 neural,
+                ecology,
             } = state;
             let cfg: &WorldConfig = config;
             let org_cfg = &cfg.organism;
             let e_r = org_cfg.reserve_energy_density;
             let k_p = org_cfg.intake_half_saturation;
             let e_f = cfg.fruit.energy_density;
+            let e_v = cfg.plant.energy_density;
+            let e_c_max = cfg.detritus.carrion_energy_cap;
             let gate = TurnGate::from_config(org_cfg);
             // One boolean, read once: an Off world never touches a quiet code path again.
             let quiet_on = quiet.active();
@@ -344,9 +362,13 @@ impl World {
                 care.showers.retain(|s| s.delivered < care::RAIN_TICKS);
             }
 
-            // 3. Field reactions (growth, mortality, decomposition, N diffusion).
-            let ledger = fields.react(cfg, light, moisture, graph, scratch);
+            // 3. Field reactions: the eight subphases 3a-3h of
+            //    `design/ecology-v1-contract.md` §4.0, in `Fields::react`.
+            let ledger = fields.react(ecology, cfg, light, moisture, graph, scratch, eco_scratch);
             intake.producer_growth += ledger.producer_growth;
+            intake.plant_income += ledger.plant_income;
+            intake.plant_maintenance_unpaid += ledger.plant_maintenance_unpaid;
+            intake.propagule_sent += ledger.propagule_sent;
             counters.light_in += ledger.light_in;
             accounting::accumulate(light_in_total, light_in_correction, ledger.light_in);
             heat(ledger.heat_out);
@@ -401,6 +423,7 @@ impl World {
                         cfg,
                         e_r,
                         fields,
+                        ecology,
                         light,
                         images,
                         &sense_rings[cell_of(&o.pos).index()],
@@ -417,7 +440,9 @@ impl World {
                 let mut obs = Observation {
                     p_here: fields.p[here],
                     f_here: fields.f[here],
-                    d_here: edible_detritus(fields.d[here], fields.de[here], e_r),
+                    // `D_eff + C_eff` (§9): litter and remains are one detrital channel to a
+                    // mouth and to an eye, each contributing only its own edible portion.
+                    d_here: edible_here(fields, ecology, here, e_r),
                     height: o.pos.embed()[1],
                     up: up_direction(o.pos.face),
                     ..Observation::default()
@@ -444,7 +469,7 @@ impl World {
                         }
                         let slope = dir * (1.0 / view.distance);
                         let there = neighbor.index();
-                        let edible = edible_detritus(fields.d[there], fields.de[there], e_r);
+                        let edible = edible_here(fields, ecology, there, e_r);
                         obs.grad_p += slope * (fields.p[there] - obs.p_here);
                         obs.grad_f += slope * (fields.f[there] - obs.f_here);
                         obs.grad_d += slope * (edible - obs.d_here);
@@ -1438,11 +1463,29 @@ impl World {
                 }
             }
 
-            // 7. Settle feeding once per cell, proportionally, from the pre-transfer fields.
+            // 7. Settle feeding once per cell, proportionally, from the pre-transfer stocks
+            //    (`design/ecology-v1-contract.md` §6.2–6.4).
+            //
+            //    One mouth, one rate. Every channel bites at the phenotype's `mouth_rate`,
+            //    and the three efforts are normalised **world-side** so that graze + fruit +
+            //    scavenge ≤ 1 for every decision — the neural squash already does this, but a
+            //    legacy decision can set all three to 1 at once, and a scripted intent can
+            //    set anything. The trade-off between foods is therefore in yield, once, not
+            //    in rate and yield twice.
+            //
+            //    The scavenge channel serves litter and remains together: the request is made
+            //    against `D_eff + C_eff` and the served bite is split between the two stocks
+            //    in proportion to their edible shares.
             let mut fruit = vec![0.0f64; CELL_COUNT];
             let mut graze = vec![0.0f64; CELL_COUNT];
             let mut scavenge = vec![0.0f64; CELL_COUNT];
-            let mut detritus_energy_density = vec![0.0f64; CELL_COUNT];
+            // The pre-settlement detrital picture of every contested cell: each stock's
+            // edible portion, and each stock's energy density. Captured before a single
+            // transfer is applied, so every mouth in a cell reads the same food.
+            let mut litter_eff = vec![0.0f64; CELL_COUNT];
+            let mut carrion_eff = vec![0.0f64; CELL_COUNT];
+            let mut litter_density = vec![0.0f64; CELL_COUNT];
+            let mut carrion_density = vec![0.0f64; CELL_COUNT];
             let mut requests: Vec<(usize, OrganismId, f64, f64, f64)> = Vec::new();
             for (id, d) in &decisions {
                 if d.fruit_effort <= 0.0 && d.graze_effort <= 0.0 && d.scavenge_effort <= 0.0 {
@@ -1451,13 +1494,28 @@ impl World {
                 let Some(o) = organisms.get(*id) else {
                     continue;
                 };
+                // §6.2: a channel whose machinery does not exist is refused here, in the
+                // world, whatever asked for it.
+                let want_fruit =
+                    if o.phenotype.cap_foliage > 0.0 { d.fruit_effort.max(0.0) } else { 0.0 };
+                let want_graze =
+                    if o.phenotype.cap_foliage > 0.0 { d.graze_effort.max(0.0) } else { 0.0 };
+                let want_scavenge =
+                    if o.phenotype.cap_detrital > 0.0 { d.scavenge_effort.max(0.0) } else { 0.0 };
+                let asked = want_fruit + want_graze + want_scavenge;
+                if asked <= 0.0 {
+                    continue;
+                }
+                // §6.3: one mouth. Normalise only when the efforts overcommit it, so a
+                // single-channel feeder is untouched.
+                let norm = if asked > 1.0 { 1.0 / asked } else { 1.0 };
                 let cell = cell_of(&o.pos).index();
                 let headroom = (o.phenotype.reserve_max - o.reserve).max(0.0);
                 // Type-II intake: what a mouth can take falls off as the cell empties, so a
                 // poor cell is poor food even to an organism standing in it. `K_P = 0` gives
-                // back the linear law exactly. The rate is the diet's: `graze_rate` on
-                // producer and fruit, `scavenge_rate` on detritus (`design/fauna-v2.md`).
-                let bite = |rate: f64, effort: f64, room: f64, food: f64| {
+                // back the linear law exactly. The rate is the same for every food.
+                let rate = o.phenotype.mouth_rate;
+                let bite = |effort: f64, room: f64, food: f64| {
                     if effort <= 0.0 {
                         return 0.0;
                     }
@@ -1465,27 +1523,15 @@ impl World {
                     let saturation = if total > 0.0 { food / total } else { 0.0 };
                     (rate * effort * dt * saturation).clamp(0.0, room.max(0.0))
                 };
+                let d_eff = edible_detritus(fields.d[cell], fields.de[cell], e_r);
+                let c_eff =
+                    edible_detritus(ecology.carrion[cell], ecology.carrion_energy[cell], e_r);
                 // Fruit settles first and takes its headroom, grazing next, scavenging
                 // gets the rest, so intake alone can never push the reserve past `R_max`.
                 // All read the cell's pre-settlement stock.
-                let f = bite(
-                    o.phenotype.graze_rate,
-                    d.fruit_effort,
-                    headroom,
-                    fields.f[cell],
-                );
-                let g = bite(
-                    o.phenotype.graze_rate,
-                    d.graze_effort,
-                    headroom - f,
-                    fields.p[cell],
-                );
-                let s = bite(
-                    o.phenotype.scavenge_rate,
-                    d.scavenge_effort,
-                    headroom - f - g,
-                    edible_detritus(fields.d[cell], fields.de[cell], e_r),
-                );
+                let f = bite(want_fruit * norm, headroom, fields.f[cell]);
+                let g = bite(want_graze * norm, headroom - f, fields.p[cell]);
+                let s = bite(want_scavenge * norm, headroom - f - g, d_eff + c_eff);
                 intake.request_ticks += 1;
                 if f <= 0.0 && g <= 0.0 && s <= 0.0 {
                     // Asked, got nothing. A full reserve is the one refusal the organism is
@@ -1500,100 +1546,156 @@ impl World {
                 scavenge[cell] += s;
                 requests.push((cell, *id, f, g, s));
             }
-            // Turn the per-cell request sums into proportional shares, and capture the
-            // detritus energy density, all before a single transfer is applied.
+            // Turn the per-cell request sums into proportional shares, and capture the two
+            // detrital stocks' edible portions and densities, all before a single transfer is
+            // applied. Sharing the scavenge requests against `D_eff + C_eff` is what bounds
+            // each stock's own withdrawal: `Σq · X_eff/(D_eff + C_eff) ≤ X_eff ≤ X`.
             let mut contested: Vec<usize> = requests.iter().map(|r| r.0).collect();
             contested.sort_unstable();
             contested.dedup();
             for &cell in &contested {
-                let (available_f, available_p, available_d) =
-                    (fields.f[cell], fields.p[cell], fields.d[cell]);
-                fruit[cell] = share(fruit[cell], available_f);
-                graze[cell] = share(graze[cell], available_p);
-                scavenge[cell] = share(scavenge[cell], available_d);
-                detritus_energy_density[cell] = if available_d > 0.0 {
-                    fields.de[cell] / available_d
-                } else {
-                    0.0
-                };
+                fruit[cell] = share(fruit[cell], fields.f[cell]);
+                graze[cell] = share(graze[cell], fields.p[cell]);
+                let (litter, litter_e) = (fields.d[cell], fields.de[cell]);
+                let (remains, remains_e) =
+                    (ecology.carrion[cell], ecology.carrion_energy[cell]);
+                litter_eff[cell] = edible_detritus(litter, litter_e, e_r);
+                carrion_eff[cell] = edible_detritus(remains, remains_e, e_r);
+                litter_density[cell] = if litter > 0.0 { litter_e / litter } else { 0.0 };
+                carrion_density[cell] = if remains > 0.0 { remains_e / remains } else { 0.0 };
+                scavenge[cell] = share(scavenge[cell], litter_eff[cell] + carrion_eff[cell]);
             }
 
             let eta_m = org_cfg.assimilation_material;
             let eta_e = org_cfg.assimilation_energy;
-            let e_p = cfg.producer.energy_density;
             for &(cell, id, f, g, s) in &requests {
                 let Some(o) = organisms.get_mut(id) else {
                     continue;
                 };
+                let cap_h = o.phenotype.cap_foliage;
+                let cap_d = o.phenotype.cap_detrital;
                 let mut eaten = 0.0;
                 let mut ate = [0.0f64; 3];
+                // §6.4, once, for every food: the stock loses the whole bite `q` and the
+                // energy `ρ·q` it carried; the digestible portion `q_d = cap·q` is
+                // assimilated at `η_m′` and stores `e_r` per unit in the reserve, `η_e` of
+                // the difference reaches the battery and the rest is heat; what the mouth
+                // could not digest — the un-assimilated part of `q_d` **and** the whole
+                // indigestible `(1 − cap)·q` — is energy-free feces in `D`, and the energy
+                // that indigestible part carried is heat. For `cap = 1` this is exactly the
+                // pre-ecology-v1 law.
+                //
+                // Written out three times rather than through a closure because each food
+                // draws its material and its energy from a different pair of fields, and the
+                // borrow of those fields is what the accounting identity is about.
                 if f > 0.0 {
-                    // Frugivory: F -> reserve (η_m) and F -> D (the rest, energy-free). Fruit
-                    // carries `e_f` per unit, richer than leaf.
                     let q = (f * fruit[cell]).clamp(0.0, fields.f[cell]);
                     if q > 0.0 {
-                        intake.fruit_eaten += q;
-                        ate[1] += q;
-                        let to_reserve = eta_m * q;
+                        let rho = e_f;
                         fields.f[cell] -= q;
-                        fields.d[cell] += q - to_reserve;
+                        let q_d = cap_h * q;
+                        let to_reserve = eta_m * q_d;
                         o.reserve += to_reserve;
-                        let spare = (e_f - e_r * eta_m) * q;
+                        let spare = rho * q_d - e_r * to_reserve;
                         let room = (o.phenotype.energy_max - o.energy).max(0.0);
                         let gained = (eta_e * spare).clamp(0.0, room);
                         o.energy += gained;
                         heat(spare - gained);
+                        let feces = (1.0 - eta_m) * q_d + (1.0 - cap_h) * q;
+                        fields.d[cell] += feces;
+                        heat(rho * (1.0 - cap_h) * q);
+                        intake.fruit_eaten += q;
+                        intake.undigested += feces;
+                        ate[1] += q;
                         eaten += q;
                     }
                 }
                 if g > 0.0 {
-                    // Grazing: P -> reserve (η_m) and P -> D (the rest, energy-free).
                     let q = (g * graze[cell]).clamp(0.0, fields.p[cell]);
                     if q > 0.0 {
-                        intake.producer_eaten += q;
-                        ate[0] += q;
-                        let to_reserve = eta_m * q;
+                        let rho = e_v;
                         fields.p[cell] -= q;
-                        fields.d[cell] += q - to_reserve;
+                        let q_d = cap_h * q;
+                        let to_reserve = eta_m * q_d;
                         o.reserve += to_reserve;
-                        // The food carried `e_p · q`; `e_r · η_m · q` of it is now stored in
-                        // the reserve, and `η_e` of the difference is usable energy.
-                        let spare = (e_p - e_r * eta_m) * q;
+                        let spare = rho * q_d - e_r * to_reserve;
                         let room = (o.phenotype.energy_max - o.energy).max(0.0);
                         let gained = (eta_e * spare).clamp(0.0, room);
                         o.energy += gained;
                         heat(spare - gained);
+                        let feces = (1.0 - eta_m) * q_d + (1.0 - cap_h) * q;
+                        fields.d[cell] += feces;
+                        heat(rho * (1.0 - cap_h) * q);
+                        intake.producer_eaten += q;
+                        intake.undigested += feces;
+                        ate[0] += q;
                         eaten += q;
                     }
                 }
                 if s > 0.0 {
-                    // Scavenging: poor detritus assimilates proportionally less material,
-                    // so the reserve is never credited with energy the food did not hold.
-                    let rho = detritus_energy_density[cell];
-                    let eta = if e_r > 0.0 {
-                        eta_m * (rho / e_r).min(1.0)
-                    } else {
-                        eta_m
-                    };
-                    let q = (s * scavenge[cell]).clamp(0.0, fields.d[cell]);
-                    if q > 0.0 && eta > 0.0 {
-                        let to_reserve = eta * q;
-                        // Scavenging removes only what it assimilates: the material that
-                        // actually left `D` is `to_reserve`, not the bite `q` that was
-                        // requested against it. Reporting `q` would overstate the flow out of
-                        // a poor-quality patch.
-                        intake.detritus_eaten += to_reserve;
-                        ate[2] += to_reserve;
-                        fields.d[cell] -= to_reserve;
-                        o.reserve += to_reserve;
-                        let carried = (rho * q).min(fields.de[cell]);
-                        fields.de[cell] -= carried;
-                        let spare = carried - e_r * to_reserve;
-                        let room = (o.phenotype.energy_max - o.energy).max(0.0);
-                        let gained = (eta_e * spare).clamp(0.0, room);
-                        o.energy += gained;
-                        heat(spare - gained);
-                        eaten += q;
+                    // One scavenge bite, split between the two stocks by their edible shares.
+                    let (d_eff, c_eff) = (litter_eff[cell], carrion_eff[cell]);
+                    let total_eff = d_eff + c_eff;
+                    let served = (s * scavenge[cell]).clamp(0.0, total_eff);
+                    if served > 0.0 && total_eff > 0.0 {
+                        let q_litter = (served * (d_eff / total_eff)).min(fields.d[cell]);
+                        let q_remains =
+                            (served - served * (d_eff / total_eff)).min(ecology.carrion[cell]);
+                        if q_litter > 0.0 {
+                            let q = q_litter;
+                            // Energy leaves at the stock's own pre-settlement density; the
+                            // clamp is a safety net that the `D_eff ≤ D` bound makes inert,
+                            // and everything below is derived from what actually left, so a
+                            // clamp could not leak a joule.
+                            let carried = (litter_density[cell] * q).min(fields.de[cell]);
+                            let rho = carried / q;
+                            fields.d[cell] -= q;
+                            fields.de[cell] -= carried;
+                            let eta =
+                                if e_r > 0.0 { eta_m * (rho / e_r).min(1.0) } else { eta_m };
+                            let q_d = cap_d * q;
+                            let to_reserve = eta * q_d;
+                            o.reserve += to_reserve;
+                            let spare = rho * q_d - e_r * to_reserve;
+                            let room = (o.phenotype.energy_max - o.energy).max(0.0);
+                            let gained = (eta_e * spare).clamp(0.0, room);
+                            o.energy += gained;
+                            heat(spare - gained);
+                            let feces = (1.0 - eta) * q_d + (1.0 - cap_d) * q;
+                            fields.d[cell] += feces;
+                            heat(rho * (1.0 - cap_d) * q);
+                            intake.litter_eaten += q;
+                            intake.undigested += feces;
+                            ate[2] += q;
+                            eaten += q;
+                        }
+                        if q_remains > 0.0 {
+                            let q = q_remains;
+                            let carried = (carrion_density[cell] * q)
+                                .min(ecology.carrion_energy[cell]);
+                            let rho = carried / q;
+                            ecology.carrion[cell] -= q;
+                            ecology.carrion_energy[cell] -= carried;
+                            let eta =
+                                if e_r > 0.0 { eta_m * (rho / e_r).min(1.0) } else { eta_m };
+                            let q_d = cap_d * q;
+                            let to_reserve = eta * q_d;
+                            o.reserve += to_reserve;
+                            let spare = rho * q_d - e_r * to_reserve;
+                            let room = (o.phenotype.energy_max - o.energy).max(0.0);
+                            let gained = (eta_e * spare).clamp(0.0, room);
+                            o.energy += gained;
+                            heat(spare - gained);
+                            // Feces are litter whatever was eaten: a scavenger's droppings
+                            // are not a carcass (§5, "Sources into each stock").
+                            let feces = (1.0 - eta) * q_d + (1.0 - cap_d) * q;
+                            fields.d[cell] += feces;
+                            heat(rho * (1.0 - cap_d) * q);
+                            intake.carrion_eaten += q;
+                            intake.undigested += feces;
+                            ate[2] += q;
+                            eaten += q;
+                        }
                     }
                 }
                 o.fed_this_tick = eaten > 0.0;
@@ -1652,6 +1754,7 @@ impl World {
                     if step.material > 0.0 {
                         o.reserve += step.to_reserve;
                         o.energy += step.energy_gain;
+                        // §8: a digestion reject is feces, and feces are litter, energy-free.
                         fields.d[cell_of(&o.pos).index()] += step.to_detritus;
                         heat(step.heat);
                         let member = &mut hunters.members[index];
@@ -1999,7 +2102,8 @@ impl World {
             }
 
             // 9. Commit: remove the dead, then place births against the freed capacity.
-            let e_d_max = cfg.detritus.energy_cap;
+            // The detritus energy cap is no longer read here: every deposit this pass makes
+            // is animal remains, under `e_c_max`.
             for (id, cause) in &deaths {
                 let Some(o) = organisms.remove(*id) else {
                     continue;
@@ -2010,11 +2114,14 @@ impl World {
                 neural.remove(*id);
                 let cell = cell_of(&o.pos).index();
                 // The body: structure carries no energy, the reserve carries `e_r` per unit.
+                // Ecology v1 §8: an ordinary death is **animal remains**, not plant litter.
+                // A detrital digester can eat it; a foliage digester cannot; decomposition
+                // takes it back to `N` on its own, faster, rate.
                 let material = o.structure + o.reserve;
                 let energy = o.energy + e_r * o.reserve;
-                fields.d[cell] += material;
-                let kept = energy.min(e_d_max * material);
-                fields.de[cell] += kept;
+                ecology.carrion[cell] += material;
+                let kept = energy.min(e_c_max * material);
+                ecology.carrion_energy[cell] += kept;
                 heat(energy - kept);
                 // A gestation that never finished decays with its own clamp.
                 if let Some(es) = &o.escrow {
@@ -2025,9 +2132,9 @@ impl World {
                     };
                     let material = es.structure + es.reserve;
                     let energy = e_r * material + es.energy;
-                    fields.d[cell] += material;
-                    let kept = energy.min(e_d_max * material);
-                    fields.de[cell] += kept;
+                    ecology.carrion[cell] += material;
+                    let kept = energy.min(e_c_max * material);
+                    ecology.carrion_energy[cell] += kept;
                     heat(energy - kept);
                     // The escrow's own terms, kept apart from the body above and the gut below:
                     // a miscarriage is not the whole corpse.
@@ -2085,9 +2192,11 @@ impl World {
                 if let Some(gone) = hunters.remove_member(*id, now + 1) {
                     let mut stored = 0.0;
                     if gone.gut_material > 0.0 || gone.gut_energy > 0.0 {
-                        fields.d[cell] += gone.gut_material;
-                        stored = gone.gut_energy.min(e_d_max * gone.gut_material);
-                        fields.de[cell] += stored;
+                        // A carried carcass released by its hunter's death is still a body:
+                        // it lands in `C` with the hunter's own (§5, §8).
+                        ecology.carrion[cell] += gone.gut_material;
+                        stored = gone.gut_energy.min(e_c_max * gone.gut_material);
+                        ecology.carrion_energy[cell] += stored;
                         heat(gone.gut_energy - stored);
                     }
                     hunters.hunter_deaths_total += 1;
@@ -2518,6 +2627,7 @@ fn neural_decision(
     cfg: &WorldConfig,
     e_r: f64,
     fields: &crate::fields::Fields,
+    eco: &crate::fields::EcologyV1State,
     light: &[f64; CELL_COUNT],
     images: &[Vec<cubarium_surface::ChartImage>; 5],
     rings: &[Vec<cubarium_surface::CellId>; super::SENSE_DEPTH_MAX],
@@ -2551,15 +2661,14 @@ fn neural_decision(
         let sampler_start = std::time::Instant::now();
         let animal = &neural.animals[index].1;
         let feedback = animal.feedback.channels(
-            o.phenotype.graze_rate,
-            o.phenotype.scavenge_rate,
+            o.phenotype.mouth_rate,
             o.phenotype.speed_max,
             radius_px,
             dt,
         );
         let observation = sample_observation(
-            o, now, dt, cfg, e_r, fields, light, images, rings, neighbours, u_full, feedback,
-            cells, bodies,
+            o, now, dt, cfg, e_r, fields, eco, light, images, rings, neighbours, u_full,
+            feedback, cells, bodies,
         );
         timing.sampler_nanos = timing
             .sampler_nanos
@@ -2592,7 +2701,8 @@ fn neural_decision(
         };
 
         let capability = Capability::ordinary(
-            o.phenotype.diet,
+            o.phenotype.cap_foliage,
+            o.phenotype.cap_detrital,
             cfg.mechanisms.grazing,
             cfg.mechanisms.scavenging,
         );
@@ -2661,6 +2771,7 @@ pub(super) fn sample_observation(
     cfg: &WorldConfig,
     e_r: f64,
     fields: &crate::fields::Fields,
+    eco: &crate::fields::EcologyV1State,
     light: &[f64; CELL_COUNT],
     images: &[Vec<cubarium_surface::ChartImage>; 5],
     rings: &[Vec<cubarium_surface::CellId>; super::SENSE_DEPTH_MAX],
@@ -2693,7 +2804,11 @@ pub(super) fn sample_observation(
                 near: hop == 0,
                 p: fields.p[there],
                 f: fields.f[there],
-                d_eff: edible_detritus(fields.d[there], fields.de[there], e_r),
+                // `design/ecology-v1-contract.md` §9: the detrital channels read the two
+                // stocks' edible portions together. The layout is unchanged — this scalar is
+                // still "edible detrital material here" — so the policy interface does not
+                // move even though the world behind it does.
+                d_eff: edible_here(fields, eco, there, e_r),
             });
         }
     }
@@ -2719,7 +2834,7 @@ pub(super) fn sample_observation(
     let self_state = crate::neural::SelfState {
         p_here: fields.p[here],
         f_here: fields.f[here],
-        d_here: edible_detritus(fields.d[here], fields.de[here], e_r),
+        d_here: edible_here(fields, eco, here, e_r),
         p_max: cfg.producer.max,
         crowd,
         water: fields.w[here],

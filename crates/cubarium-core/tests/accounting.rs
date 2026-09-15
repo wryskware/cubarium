@@ -199,14 +199,16 @@ fn every_stock_stays_nonnegative_while_the_world_starves() {
 /// rest heat. Material is therefore conserved across the death and detritus grows by the
 /// dead organism's material.
 #[test]
-fn death_moves_organism_material_into_detritus() {
+fn death_moves_organism_material_into_remains() {
     let mut world = World::new(harsh_config()).expect("the harsh config is a valid world");
 
     let mut checked = 0usize;
     for tick in 1..=8_000u64 {
         let before_material = total_material(&world);
         let before_population = world.population();
-        let before_detritus: f64 = world.state.fields.d.iter().sum();
+        // Ecology v1 §8: an ordinary death lands in **animal remains** `C`, not in plant
+        // litter `D`. Both are detrital stocks and neither is the other.
+        let before_detritus: f64 = world.state.ecology.carrion.iter().sum();
         let before_organism: f64 =
             world.state.organisms.iter().map(|(_, o)| o.material()).sum::<f64>();
 
@@ -217,7 +219,7 @@ fn death_moves_organism_material_into_detritus() {
         }
 
         let after_material = total_material(&world);
-        let after_detritus: f64 = world.state.fields.d.iter().sum();
+        let after_detritus: f64 = world.state.ecology.carrion.iter().sum();
         let after_organism: f64 =
             world.state.organisms.iter().map(|(_, o)| o.material()).sum::<f64>();
 
@@ -233,12 +235,12 @@ fn death_moves_organism_material_into_detritus() {
             lost > 0.0,
             "tick {tick}: population fell but organism material did not ({lost:e})"
         );
-        // Detritus also decomposes to `N` and is grazed within the same tick, so it need
-        // not gain the whole amount; it must not *lose* material while a corpse arrives.
+        // Remains also decompose to `N` and are scavenged within the same tick, so the stock
+        // need not gain the whole amount; it must not *lose* material while a corpse arrives.
         assert!(
             gained > -1e-9,
-            "tick {tick}: organism material {lost:e} vanished instead of becoming detritus \
-             (detritus moved by {gained:e})"
+            "tick {tick}: organism material {lost:e} vanished instead of becoming remains \
+             (carrion moved by {gained:e})"
         );
 
         // Every remaining stock is still a well-formed stock right after a death.

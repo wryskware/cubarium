@@ -8,7 +8,11 @@
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever a field's meaning changes; stored in snapshots.
-pub const CONFIG_VERSION: u32 = 7;
+///
+/// Version 8 is ecology v1 (`design/ecology-v1-contract.md`): the [`PlantConfig`] block,
+/// the detrital and capability additions, and `producer.energy_density` folded into
+/// `plant.energy_density` — one density for every plant tissue.
+pub const CONFIG_VERSION: u32 = 8;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -17,6 +21,9 @@ pub struct WorldConfig {
     /// Seed for every keyed draw (habitat noise, weather, organisms, founders).
     pub seed: u64,
     pub producer: ProducerConfig,
+    /// Structured plants (`design/ecology-v1-contract.md` §4): wood, reserve, and the rates
+    /// that pay for them.
+    pub plant: PlantConfig,
     pub detritus: DetritusConfig,
     pub nutrient: NutrientConfig,
     pub habitat: HabitatConfig,
@@ -87,19 +94,68 @@ pub struct ProducerConfig {
     pub max: f64,
     /// `f_max`: maximum fraction of a cell's `N` taken per second.
     pub uptake_max: f64,
-    /// `e_p`: energy per material unit of producer (e/m); light is the source.
-    pub energy_density: f64,
-    /// `m_p`: mortality per second (`P → D`).
+    /// `m_p`: mortality per second (`P → D`), the senescence of subphase 3b.
     pub mortality: f64,
-    /// Initial `P` as a fraction of `P_max · L₀ · W₀`.
+    /// Initial foliage as a fraction of the cell's structural capacity `P_cap`
+    /// (`design/ecology-v1-contract.md` §11); before ecology v1 it was a fraction of
+    /// `P_max · L₀ · W₀`.
     pub initial_fraction: f64,
+}
+
+/// Structured plants (`design/ecology-v1-contract.md` §3–§4): living wood `W`, the plant
+/// reserve `Q`, and the rates that pay for income, maintenance, growth, dieback, death and
+/// propagules. Every value is **provisional** (contract §11): a starting point for the
+/// accounting tests and the first measured scenarios, not a design requirement.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PlantConfig {
+    /// `α`: foliage the structure can carry, `P_cap = min(P_max, α · W)`.
+    pub alpha: f64,
+    /// `W_max`: the most living wood one cell can hold (m).
+    pub wood_max: f64,
+    /// `q_cap`: reserve per unit of wood, `Q_max = q_cap · W`.
+    pub reserve_cap: f64,
+    /// `m_w`: wood maintenance per second, respired material `Q`/income → `N`.
+    pub maintenance: f64,
+    /// `r_p`: foliage regrowth per second per unit of `W`.
+    pub foliage_rate: f64,
+    /// `r_w`: wood growth per second per unit of `W`.
+    pub wood_rate: f64,
+    /// `c_g`: construction respiration; growing one unit costs `1 + c_g`.
+    pub build: f64,
+    /// `κ`: wood lost per unit of unpaid maintenance.
+    pub dieback: f64,
+    /// `W_min`: a cell with at least this much wood is **alive**; below it, and above zero,
+    /// it is **establishing** (frozen); at exactly zero it is **bare**.
+    pub alive_min: f64,
+    /// `W_est`: the wood a stand needs before it can send propagules.
+    pub donor_min: f64,
+    /// `q_prop`: the fraction of `Q_max` a donor keeps for itself.
+    pub donor_reserve_floor: f64,
+    /// `k_est`: propagule material per second per establishing-or-bare neighbour (m/s).
+    pub propagule_rate: f64,
+    /// `w_frac, p_frac, q_frac`: how a landed propagule's net material splits between wood,
+    /// starter foliage and starter reserve. Sums to one.
+    pub propagule_split: [f64; 3],
+    /// `e_v`: energy per material unit of **every** plant tissue — foliage, wood, reserve and
+    /// dead wood alike (contract §3.1). Light is the source.
+    pub energy_density: f64,
+    /// Initial wood as a fraction of `W_max · L₀ · μ₀`; a cell below `alive_min` starts bare.
+    pub initial_wood: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DetritusConfig {
-    /// `k_d`: decomposition per second (`D → N`).
+    /// `k_d`: litter decomposition per second (`D → N`).
     pub decomposition: f64,
+    /// `k_c`: animal-remains decomposition per second (`C → N`), faster than litter — a
+    /// carcass is gone in minutes (`design/ecology-v1-contract.md` §5).
+    pub carrion_decomposition: f64,
+    /// `k_w`: dead-wood decomposition per second (`Wd → N`), slow: bare trunks persist.
+    pub wood_decomposition: f64,
+    /// `e_c_max`: maximum retained energy per material unit of animal remains (e/m).
+    pub carrion_energy_cap: f64,
     /// `e_d_max`: maximum retained energy per material unit (e/m). Equal to `e_r` since
     /// fauna v2 (2026-09-12), so fresh detritus is fully edible and a soil scavenger can
     /// live on litter; `De ≤ e_d_max · D` holds everywhere.
@@ -231,6 +287,13 @@ pub struct OrganismConfig {
     pub rest_turn_fraction: f64,
     /// `k` while Feeding. Both fractions at 1 restore the ungated behaviour of the E2 batches.
     pub feed_turn_fraction: f64,
+    /// `θ`: the minimum share of the one digestive investment below which that machinery is
+    /// nonfunctional (`design/ecology-v1-contract.md` §6.1). It is the hard exclusion: a
+    /// grazer cannot live on litter and a burrower cannot live on leaves.
+    pub capability_gate: f64,
+    /// `γ`: the curvature of `φ(x) = x^γ`. At `γ = 1` a generalist's total yield equals a
+    /// specialist's, split; above 1, breadth costs yield.
+    pub capability_exponent: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -299,6 +362,7 @@ impl Default for WorldConfig {
             version: CONFIG_VERSION,
             seed: 1,
             producer: ProducerConfig::default(),
+            plant: PlantConfig::default(),
             detritus: DetritusConfig::default(),
             nutrient: NutrientConfig::default(),
             habitat: HabitatConfig::default(),
@@ -317,13 +381,44 @@ impl Default for WorldConfig {
 
 impl Default for ProducerConfig {
     fn default() -> Self {
-        ProducerConfig { growth: 0.008, max: 1.5, uptake_max: 0.5, energy_density: 2.0, mortality: 0.001, initial_fraction: 0.4 }
+        ProducerConfig { growth: 0.008, max: 1.5, uptake_max: 0.5, mortality: 0.001, initial_fraction: 0.4 }
+    }
+}
+
+impl Default for PlantConfig {
+    /// The provisional values of `design/ecology-v1-contract.md` §11, to the digit.
+    fn default() -> Self {
+        PlantConfig {
+            alpha: 2.0,
+            wood_max: 0.6,
+            reserve_cap: 0.5,
+            maintenance: 0.0002,
+            foliage_rate: 0.002,
+            wood_rate: 0.001,
+            build: 0.2,
+            dieback: 1.0,
+            alive_min: 0.02,
+            donor_min: 0.3,
+            donor_reserve_floor: 0.5,
+            propagule_rate: 0.0002,
+            propagule_split: [0.4, 0.4, 0.2],
+            energy_density: 2.0,
+            initial_wood: 0.5,
+        }
     }
 }
 
 impl Default for DetritusConfig {
     fn default() -> Self {
-        DetritusConfig { decomposition: 0.002, energy_cap: 2.0, fall: 0.02, initial_dark: 1.2 }
+        DetritusConfig {
+            decomposition: 0.002,
+            carrion_decomposition: 0.004,
+            wood_decomposition: 0.0002,
+            energy_cap: 2.0,
+            carrion_energy_cap: 2.0,
+            fall: 0.02,
+            initial_dark: 1.2,
+        }
     }
 }
 
@@ -473,6 +568,10 @@ impl Default for OrganismConfig {
             body_extent_max: 9.0,
             rest_turn_fraction: 0.0,
             feed_turn_fraction: 0.1,
+            // `design/ecology-v1-contract.md` §11: `θ = 0.2` excludes the 0.10–0.15 fallback
+            // the founders carry, `γ = 1` is the neutral split the first scenarios test.
+            capability_gate: 0.2,
+            capability_exponent: 1.0,
         }
     }
 }
@@ -548,27 +647,72 @@ impl WorldConfig {
         finite_nonnegative(&[
             ("producer.growth", p.growth),
             ("producer.uptake_max", p.uptake_max),
-            ("producer.energy_density", p.energy_density),
             ("producer.mortality", p.mortality),
         ])?;
         positive("producer.max", p.max)?;
         fraction("producer.initial_fraction", p.initial_fraction)?;
 
+        let pl = &self.plant;
+        finite_nonnegative(&[
+            ("plant.alpha", pl.alpha),
+            ("plant.wood_max", pl.wood_max),
+            ("plant.reserve_cap", pl.reserve_cap),
+            ("plant.maintenance", pl.maintenance),
+            ("plant.foliage_rate", pl.foliage_rate),
+            ("plant.wood_rate", pl.wood_rate),
+            ("plant.build", pl.build),
+            ("plant.dieback", pl.dieback),
+            ("plant.alive_min", pl.alive_min),
+            ("plant.donor_min", pl.donor_min),
+            ("plant.propagule_rate", pl.propagule_rate),
+            ("plant.energy_density", pl.energy_density),
+        ])?;
+        fraction("plant.donor_reserve_floor", pl.donor_reserve_floor)?;
+        fraction("plant.initial_wood", pl.initial_wood)?;
+        // The three cell classes must be orderable, and a donor must be a stand a cell can
+        // actually grow into (`design/ecology-v1-contract.md` §3.1, §4.8).
+        if !(pl.alive_min < pl.donor_min && pl.donor_min <= pl.wood_max) {
+            return Err(format!(
+                "plant.alive_min {} < plant.donor_min {} <= plant.wood_max {} is required",
+                pl.alive_min, pl.donor_min, pl.wood_max
+            ));
+        }
+        for (i, f) in pl.propagule_split.iter().enumerate() {
+            if !f.is_finite() || *f < 0.0 {
+                return Err(format!("plant.propagule_split[{i}] = {f}"));
+            }
+        }
+        let split: f64 = pl.propagule_split.iter().sum();
+        if (split - 1.0).abs() > 1e-12 {
+            return Err(format!(
+                "plant.propagule_split {:?} sums to {split}, not 1",
+                pl.propagule_split
+            ));
+        }
+
         let d = &self.detritus;
         finite_nonnegative(&[
             ("detritus.decomposition", d.decomposition),
+            ("detritus.carrion_decomposition", d.carrion_decomposition),
+            ("detritus.wood_decomposition", d.wood_decomposition),
             ("detritus.energy_cap", d.energy_cap),
+            ("detritus.carrion_energy_cap", d.carrion_energy_cap),
             ("detritus.fall", d.fall),
             ("detritus.initial_dark", d.initial_dark),
         ])?;
-        // A per-tick fraction above one would drain a cell past zero.
-        if d.fall * crate::DT > 1.0 {
-            return Err(format!(
-                "detritus.fall {} per second exceeds one per tick (DT = {})",
-                d.fall,
-                crate::DT
-            ));
-        }
+        // Every per-second fraction of a stock, by name: a per-tick fraction above one would
+        // drain the stock past zero, and §5's joint withdrawal budget assumes `rate · dt ≤ 1`
+        // for both decomposition and fall (`design/ecology-v1-contract.md` §13.1 A3b).
+        per_tick_fraction(&[
+            ("detritus.fall", d.fall),
+            ("detritus.decomposition", d.decomposition),
+            ("detritus.carrion_decomposition", d.carrion_decomposition),
+            ("detritus.wood_decomposition", d.wood_decomposition),
+            ("producer.mortality", p.mortality),
+            ("plant.maintenance", pl.maintenance),
+            ("fruit.ripen", self.fruit.ripen),
+            ("fruit.drop", self.fruit.drop),
+        ])?;
 
         let n = &self.nutrient;
         finite_nonnegative(&[
@@ -649,15 +793,12 @@ impl WorldConfig {
             ("fruit.energy_density", fr.energy_density),
         ])?;
         fraction("fruit.fruit_min", fr.fruit_min)?;
-        if fr.drop * crate::DT > 1.0 {
-            return Err(format!("fruit.drop {} per second exceeds one per tick (DT = {})", fr.drop, crate::DT));
-        }
-        // Ripening adds `e_f − e_p` per unit from light; a fruit poorer than leaf would need
+        // Ripening adds `e_f − e_v` per unit from light; a fruit poorer than leaf would need
         // energy to vanish.
-        if fr.energy_density < self.producer.energy_density {
+        if fr.energy_density < pl.energy_density {
             return Err(format!(
-                "fruit.energy_density {} is below producer.energy_density {}",
-                fr.energy_density, self.producer.energy_density
+                "fruit.energy_density {} is below plant.energy_density {}",
+                fr.energy_density, pl.energy_density
             ));
         }
 
@@ -695,6 +836,15 @@ impl WorldConfig {
         fraction("organism.child_energy_fraction", o.child_energy_fraction)?;
         fraction("organism.rest_turn_fraction", o.rest_turn_fraction)?;
         fraction("organism.feed_turn_fraction", o.feed_turn_fraction)?;
+        // `θ` above one half would exclude both machineries at once, leaving a genome that
+        // can digest nothing at all (`design/ecology-v1-contract.md` §6.1).
+        if !o.capability_gate.is_finite() || !(0.0..=0.5).contains(&o.capability_gate) {
+            return Err(format!(
+                "organism.capability_gate {} is outside [0, 0.5]",
+                o.capability_gate
+            ));
+        }
+        positive("organism.capability_exponent", o.capability_exponent)?;
         positive("organism.body_extent_max", o.body_extent_max)?;
         if o.body_extent_max > cubarium_surface::MAX_LOCAL_RADIUS {
             return Err(format!(
@@ -703,12 +853,12 @@ impl WorldConfig {
                 cubarium_surface::MAX_LOCAL_RADIUS
             ));
         }
-        // Grazing stores `e_r · η_m` per unit of food carrying `e_p`; the audit needs the
+        // Grazing stores `e_r · η_m` per unit of food carrying `e_v`; the audit needs the
         // food to cover what the reserve stores.
-        if self.producer.energy_density < o.reserve_energy_density * o.assimilation_material {
+        if pl.energy_density < o.reserve_energy_density * o.assimilation_material {
             return Err(format!(
-                "producer.energy_density {} is below reserve_energy_density * assimilation_material {}",
-                self.producer.energy_density,
+                "plant.energy_density {} is below reserve_energy_density * assimilation_material {}",
+                pl.energy_density,
                 o.reserve_energy_density * o.assimilation_material
             ));
         }
@@ -835,6 +985,22 @@ fn positive(name: &str, v: f64) -> Result<(), String> {
 fn fraction(name: &str, v: f64) -> Result<(), String> {
     if !v.is_finite() || !(0.0..=1.0).contains(&v) {
         return Err(format!("{name} must be in [0, 1], got {v}"));
+    }
+    Ok(())
+}
+
+/// Every per-second rate that withdraws a **fraction of a stock** each tick. `rate · DT ≤ 1`
+/// is what keeps the withdrawal inside the stock it reads, and §5's joint decomposition/fall
+/// budget assumes it for both of its terms. Refused by name so the reason names the knob
+/// (`design/ecology-v1-contract.md` §13.1 A3b).
+fn per_tick_fraction(fields: &[(&str, f64)]) -> Result<(), String> {
+    for &(name, v) in fields {
+        if v * crate::DT > 1.0 {
+            return Err(format!(
+                "{name} {v} per second exceeds one per tick (DT = {})",
+                crate::DT
+            ));
+        }
     }
     Ok(())
 }

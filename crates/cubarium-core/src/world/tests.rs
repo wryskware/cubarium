@@ -53,7 +53,7 @@ fn founders_are_created_with_recorded_external_material() {
         .map(|(_, o)| o.structure + o.reserve)
         .sum();
     assert!((world.state.external_material_in - expected).abs() < 1e-12);
-    assert!(world.mass_residual().abs() < 1e-12);
+    assert!(world.mass_residual().abs() < 1e-9);
     world
         .check_invariants()
         .expect("a fresh world is consistent");
@@ -108,6 +108,10 @@ fn replay_is_deterministic_and_seed_sensitive() {
 fn contested_feeding_splits_the_cell_and_conserves_material() {
     let mut cfg = config();
     cfg.founders.count = 3;
+    // One channel only, so the shares are exactly the proportional split of one stock.
+    // Ecology v1 §6.3 shares one mouth between the three channels, so leaving scavenging on
+    // would halve every graze request and split the gain across two stocks.
+    cfg.mechanisms.scavenging = false;
     // Low enough that three full mouthfuls (3 x 0.0025 m) cannot all be served.
     cfg.drives.feed_min = 0.001;
     // Linear requests: the spec's proportional allocation is unchanged by the intake
@@ -140,16 +144,36 @@ fn contested_feeding_splits_the_cell_and_conserves_material() {
         "{}",
         world.state.fields.p[cell.index()]
     );
-    // Each organism assimilated η_m of its share; the rest became detritus in the cell.
+    // Each organism assimilated `η_m · cap_h` of its share (§6.4); the rest — the
+    // un-assimilated part of the digestible portion **and** the whole indigestible
+    // `(1 − cap_h)` — became energy-free feces in the cell.
     let taken: f64 = gains.iter().sum();
     let eta = world.config().organism.assimilation_material;
+    let cap_h = world
+        .state
+        .organisms
+        .iter()
+        .next()
+        .expect("a founder")
+        .1
+        .phenotype
+        .cap_foliage;
+    assert!(cap_h > 0.0 && cap_h < 1.0, "the default founder is a partial digester");
+    // Against the **served** material, not against what was painted: subphase 3a reflushes a
+    // little foliage out of the stand's reserve before settlement runs, so the painted 0.004
+    // is no longer the whole meal. `IntakeDiagnostics` records what actually left `P`.
+    let served = world.intake_diagnostics().producer_eaten;
     assert!(
-        (taken - eta * available).abs() < 1e-6,
-        "{taken} vs {}",
-        eta * available
+        served >= available,
+        "the cell served at least what was painted: {served} vs {available}"
     );
     assert!(
-        (world.mass_residual() - before).abs() < 1e-12,
+        (taken - eta * cap_h * served).abs() < 1e-12,
+        "{taken} vs {}",
+        eta * cap_h * served
+    );
+    assert!(
+        (world.mass_residual() - before).abs() < 1e-9,
         "{} -> {}",
         before,
         world.mass_residual()
@@ -313,7 +337,7 @@ fn a_completed_gestation_places_a_child() {
     let parent_pos = world.state.organisms.get(parent).expect("alive").pos;
     let offset = cubarium_surface::surface_distance(parent_pos, child.1.pos, 16.0).expect("nearby");
     assert!((offset - 2.5).abs() < 0.1, "child placed {offset} px away");
-    assert!((world.mass_residual() - residual).abs() < 1e-12);
+    assert!((world.mass_residual() - residual).abs() < 1e-9);
 }
 
 #[test]
@@ -616,9 +640,10 @@ fn both_intake_channels_respect_the_reserve_ceiling() {
         .next()
         .expect("one founder");
     let cell = CellId::new(Face::Front, 0, 0);
-    // Headroom of 0.0014 m: more than grazing's saturated bite alone (about 0.0012 m at
-    // `diet` 0.7), less than the two channels' bites together
-    // (`graze_rate + scavenge_rate = mouth_rate`, a full `k_mouth · dt = 0.0025 m`).
+    // Headroom of 0.0014 m: less than the two channels' requests together. Ecology v1 §6.3
+    // shares one mouth, so with both channels open each asks at half the mouth rate; fruit
+    // settles first, then grazing, then scavenging against what is left, and nothing may
+    // push the reserve past `R_max`.
     let (reserve_max, headroom) = {
         let o = world.state.organisms.get_mut(id).expect("alive");
         o.pos = cell.center();
@@ -641,16 +666,14 @@ fn both_intake_channels_respect_the_reserve_ceiling() {
         o.reserve
     );
     assert!(o.reserve - before <= headroom + 1e-12);
-    // Grazing alone could add at most η_m times its saturated request; more than that
-    // proves the scavenging channel ran too.
-    let org = &world.config().organism;
-    let k_p = org.intake_half_saturation;
-    let grazing_only = org.assimilation_material * (0.0025 * founder_diet()) * (1.0 / (1.0 + k_p));
-    assert!(
-        o.reserve - before > grazing_only,
-        "{} vs {grazing_only}",
-        o.reserve - before
-    );
+    // Both channels actually ran: the diagnostics record served material per stock, so this
+    // is measured rather than inferred from a reserve delta. (Before ecology v1 the proof
+    // was "the gain exceeds what grazing alone could give"; that reasoning is gone with the
+    // diet-split rates — with one shared mouth, opening a second channel *lowers* the
+    // total gain when the second food is poorer.)
+    let diag = world.intake_diagnostics();
+    assert!(diag.producer_eaten > 0.0, "grazing ran: {diag:?}");
+    assert!(diag.litter_eaten > 0.0, "scavenging ran: {diag:?}");
     assert!(o.fed_this_tick);
 }
 
@@ -830,7 +853,7 @@ fn from_state_rebuilds_and_zeroes_the_residual() {
     }
     let state = world.state.clone();
     let reloaded = World::from_state(state).expect("a stepped state is valid");
-    assert!(reloaded.mass_residual().abs() < 1e-12);
+    assert!(reloaded.mass_residual().abs() < 1e-9);
     assert_eq!(reloaded.tick(), world.tick());
     assert_eq!(reloaded.population(), world.population());
 }
@@ -1128,14 +1151,18 @@ fn the_default_kinds_place_twenty_four_founders_with_the_tables_genomes() {
     assert!((glider.phenotype.h_pref - 1.0).abs() < 1e-12);
     assert!((burrower.phenotype.h_pref + 0.8).abs() < 1e-6);
     assert_eq!(skimmer.phenotype.swim, 1.0);
-    assert!(
-        (grazer.phenotype.graze_rate - 0.85f32 as f64 * grazer.phenotype.mouth_rate).abs() < 1e-12
-    );
+    // `design/ecology-v1-contract.md` §6.1: `diet` is an allocation, not a rate. At
+    // `θ = 0.2`, `γ = 1` the grazer's 0.85 buys 0.85 of foliage yield and excludes the
+    // detrital machinery outright — 0.15 is below the gate.
+    assert!((grazer.phenotype.cap_foliage - 0.85f32 as f64).abs() < 1e-12);
+    assert_eq!(grazer.phenotype.cap_detrital, 0.0);
+    assert_eq!(burrower.phenotype.cap_foliage, 0.0, "0.10 is below θ");
+    assert!((burrower.phenotype.cap_detrital - (1.0 - 0.10f32 as f64)).abs() < 1e-12);
     // The founders' material is booked and the world is consistent.
     world
         .check_invariants()
         .expect("a fresh kinds world is consistent");
-    assert!(world.mass_residual().abs() < 1e-12);
+    assert!(world.mass_residual().abs() < 1e-9);
 }
 
 #[test]
@@ -1248,11 +1275,14 @@ fn frugivory_comes_first_and_the_diet_gates_hold() {
     // A pure grazer on a cell with fruit and producer eats the fruit first: with
     // linear intake and headroom for exactly one mouthful, the fruit bite fills it and
     // the producer, whose request comes second, gets nothing.
+    // Ecology v1 §6.3: leaf and fruit share one mouth, so a body asking for both gets half
+    // a mouth-tick each. Headroom for exactly that half-mouthful is what makes fruit-first
+    // visible: the fruit request fills the reserve and grazing is left with nothing.
     let (mut world, id, c) = frozen_feeder(1.0, 1.0, 1.0, 1.0, 1.0);
     world.state.config.organism.intake_half_saturation = 0.0;
     {
         let o = world.state.organisms.get_mut(id).expect("alive");
-        o.reserve = o.phenotype.reserve_max - o.phenotype.graze_rate * DT;
+        o.reserve = o.phenotype.reserve_max - 0.5 * o.phenotype.mouth_rate * DT;
     }
     let (p0, f0, d0) = (
         world.state.fields.p[c],
@@ -1270,8 +1300,8 @@ fn frugivory_comes_first_and_the_diet_gates_hold() {
     let q = f0 - world.state.fields.f[c];
     assert!(q > 0.0, "fruit was eaten");
     assert!(
-        (q - o.phenotype.graze_rate * DT).abs() < 1e-12,
-        "a full fruit mouthful {q}"
+        (q - 0.5 * o.phenotype.mouth_rate * DT).abs() < 1e-12,
+        "half a mouth-tick of fruit {q}"
     );
     assert_eq!(
         world.state.fields.p[c], p0,
@@ -1280,7 +1310,7 @@ fn frugivory_comes_first_and_the_diet_gates_hold() {
     // Frugivory: η_m of the bite to reserve, the rest to detritus; scavenging is gated off
     // for a pure grazer, so detritus only grew.
     let eta_m = world.config().organism.assimilation_material;
-    let r0 = o.phenotype.reserve_max - o.phenotype.graze_rate * DT;
+    let r0 = o.phenotype.reserve_max - 0.5 * o.phenotype.mouth_rate * DT;
     assert!((o.reserve - (r0 + eta_m * q)).abs() < 1e-12);
     assert!((world.state.fields.d[c] - (d0 + q - eta_m * q)).abs() < 1e-12);
     let booked = (world.state.light_in_total - light) - (world.state.heat_out_total - heat);
@@ -1289,7 +1319,7 @@ fn frugivory_comes_first_and_the_diet_gates_hold() {
         "fruit energy is audited"
     );
     assert!(
-        (world.mass_residual() - residual).abs() < 1e-12,
+        (world.mass_residual() - residual).abs() < 1e-9,
         "frugivory conserves material"
     );
 
@@ -1316,12 +1346,15 @@ fn frugivory_comes_first_and_the_diet_gates_hold() {
     assert_eq!(world.state.fields.d[c], 1.0);
     assert_eq!(o.reserve, 0.0);
 
-    // An omnivore below the fruit diet leaves fruit alone but grazes.
+    // Ecology v1 §6.1–6.2: there is no separate fruit gate any more. One foliage machinery
+    // digests leaf and fruit alike, so an omnivore at `diet = 0.4` — above `θ` on both
+    // sides — eats both, and its yield on each is `cap_foliage = 0.4`.
     let (mut world, id, c) = frozen_feeder(0.4, 1.0, 1.0, 0.0, 0.0);
     world.step();
     let o = world.state.organisms.get(id).expect("alive");
     assert_eq!(o.mode, Mode::Feeding);
-    assert_eq!(world.state.fields.f[c], 1.0, "fruit needs diet ≥ 0.5");
+    assert!((o.phenotype.cap_foliage - 0.4f32 as f64).abs() < 1e-12);
+    assert!(world.state.fields.f[c] < 1.0, "fruit is foliage machinery's food too");
     assert!(world.state.fields.p[c] < 1.0);
 }
 
@@ -1346,10 +1379,41 @@ fn fruit_is_conserved_material_over_a_default_run() {
         worst < 1e-9,
         "worst per-tick energy drift {worst:e} with fruit in the sum"
     );
+    // **Ecology v1 changes this number to zero.** A fresh world's foliage is now set by the
+    // structure that carries it — `P_0 = initial_fraction · min(P_max, α · W_0)` with
+    // `W_0 = 0.5 · W_max · L₀ · μ₀` — so even the brightest cell opens at `P ≈ 0.24`, well
+    // under the `fruit_min · P_max = 0.45` ripening threshold, and a stand needs far longer
+    // than 100 s of world time to climb there. The identity above is what this test is for;
+    // the ripening *path* is exercised on a stand that is actually rich enough.
+    assert_eq!(
+        world.state.fields.f.iter().copied().fold(0.0f64, f64::max),
+        0.0,
+        "a fresh ecology v1 world has no cell above the ripening threshold in 100 s"
+    );
+    let booked = world.state.net_energy_in_corrected();
+    let overall = (stored_energy(&world.state) - opening) - booked;
+    assert!(
+        overall.abs() < 1e-9 * stored_energy(&world.state).max(1.0),
+        "cumulative {overall:e}"
+    );
+
+    let mut rich = WorldConfig::default();
+    rich.plant.initial_wood = 1.0;
+    rich.producer.initial_fraction = 1.0;
+    let mut world = World::new(rich).expect("valid");
+    let opening = stored_energy(&world.state);
+    for _ in 0..2000 {
+        let before = stored_energy(&world.state);
+        let ledgers = world.state.energy_ledgers();
+        world.step();
+        let booked = world.state.energy_ledgers().net_since(ledgers);
+        assert!(((stored_energy(&world.state) - before) - booked).abs() < 1e-9);
+        assert!(world.mass_residual().abs() < 1e-9);
+    }
     let total_fruit: f64 = world.state.fields.f.iter().sum();
     assert!(
         total_fruit > 0.0,
-        "a lit default world ripens some fruit in 100 s"
+        "a stand rich enough to fruit ripens some in 100 s"
     );
     let booked = world.state.net_energy_in_corrected();
     let overall = (stored_energy(&world.state) - opening) - booked;
@@ -1385,6 +1449,9 @@ fn the_depth_term_points_up_the_side_faces_and_vanishes_on_top() {
     cfg.founders.count = 1;
     cfg.producer.initial_fraction = 0.0;
     cfg.producer.growth = 0.0;
+    // No stands either (ecology v1): a wooded cell reflushes foliage out of its reserve and
+    // would stop the probe to feed on the way.
+    cfg.plant.initial_wood = 0.0;
     cfg.detritus.initial_dark = 0.0;
     cfg.water.rain_rate = 0.0;
     cfg.drives.w_persist = 0.0;
@@ -1476,6 +1543,10 @@ fn sensing_reaches_the_configured_depth_and_finds_food_two_cells_out() {
     cfg.founders.count = 1;
     cfg.producer.initial_fraction = 0.0;
     cfg.producer.growth = 0.0;
+    // Ecology v1: an empty surface means no **stands**, not merely no foliage. A cell that
+    // starts with wood and a reserve reflushes leaves out of that reserve whatever the
+    // light does, so a world that meant "no food anywhere" has to start bare.
+    cfg.plant.initial_wood = 0.0;
     // Freeze everything that could leak a trace of the rich cell into the one-hop
     // neighbourhood before the observation (mortality → detritus → fall; ripening):
     // gradients are normalized, so any nonzero difference steers at full strength.

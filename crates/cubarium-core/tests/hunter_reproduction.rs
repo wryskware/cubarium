@@ -350,8 +350,9 @@ fn a_parent_that_dies_gestating_reports_the_escrow_it_exported_and_nothing_else(
         world.state.external_material_in -= material;
         (o.structure, 0.0)
     };
-    let detritus_before: f64 = world.state.fields.d.iter().sum();
-    let detritus_energy_before: f64 = world.state.fields.de.iter().sum();
+    // Ecology v1 §8: a body and a failed gestation are **animal remains**, not plant litter.
+    let detritus_before: f64 = world.state.ecology.carrion.iter().sum();
+    let detritus_energy_before: f64 = world.state.ecology.carrion_energy.iter().sum();
 
     let (seen, life) = run_for(&mut world, 60, |seen| {
         records(seen).iter().any(|(_, _, r)| matches!(r, Reproduction::Miscarried { .. }))
@@ -378,15 +379,15 @@ fn a_parent_that_dies_gestating_reports_the_escrow_it_exported_and_nothing_else(
     assert!(material < body_material, "the escrow is not the whole corpse");
     let _ = body_energy;
 
-    // The body and the escrow both landed, and the litter gained exactly their sum: in this
-    // quiet world nothing else moves detritus.
-    let detritus_after: f64 = world.state.fields.d.iter().sum();
+    // The body and the escrow both landed, and the remains gained exactly their sum: in this
+    // quiet world nothing else moves `C`.
+    let detritus_after: f64 = world.state.ecology.carrion.iter().sum();
     assert!(
         (detritus_after - detritus_before - (body_material + material)).abs() < 1e-12,
-        "litter moved by {} against body {body_material} + escrow {material}",
+        "remains moved by {} against body {body_material} + escrow {material}",
         detritus_after - detritus_before
     );
-    let detritus_energy_after: f64 = world.state.fields.de.iter().sum();
+    let detritus_energy_after: f64 = world.state.ecology.carrion_energy.iter().sum();
     assert!(detritus_energy_after - detritus_energy_before >= energy_stored - 1e-12);
 
     // The hunter's own death record is a separate fact, with its own gut terms.

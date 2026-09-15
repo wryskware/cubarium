@@ -7,7 +7,7 @@ use crate::care::CareState;
 use crate::config::WorldConfig;
 use crate::dormancy::ApexDormancyState;
 use crate::encounter::ApexEncounterState;
-use crate::fields::Fields;
+use crate::fields::{EcologyV1State, Fields};
 use crate::genome::Phenotype;
 use crate::genome::{Genome, MAX_FORMS};
 use crate::habitat::Weather;
@@ -88,6 +88,14 @@ pub struct WorldState {
     /// is neural only because something explicitly inserted an entry for it.
     #[serde(default)]
     pub neural: NeuralState,
+    /// Ecology v1's pools and counters (`crate::fields::EcologyV1State`,
+    /// `design/ecology-v1-contract.md` §3, §14). Appended **last**, after every earlier
+    /// extension, which is what makes schema 15's payload a byte-exact prefix of schema 16's.
+    ///
+    /// No `#[serde(default)]`, and no migration: schema 16 refuses every older snapshot by
+    /// name (§15.1), so a world either carries these pools or does not load at all. Nothing
+    /// is ever synthesised for a world that never had wood.
+    pub ecology: EcologyV1State,
 }
 
 impl WorldState {
@@ -129,6 +137,7 @@ impl WorldState {
             }
         }
         self.fields.check(self.config.detritus.energy_cap)?;
+        self.ecology.check(self.config.detritus.carrion_energy_cap)?;
         self.care.validate(self.tick)?;
         self.hunters
             .validate(self.tick, &self.organisms, &self.config)?;
@@ -416,10 +425,23 @@ pub struct TickCounters {
 pub struct IntakeDiagnostics {
     /// Gross producer material grown, before mortality, ripening or grazing.
     pub producer_growth: f64,
-    /// Material that actually left `P`, `F` and `D` through a mouth.
+    /// Material that actually left `P`, `F`, `D` and `C` through a mouth: the **served
+    /// bite**, before the digestible share, the assimilated share or the feces
+    /// (`design/ecology-v1-contract.md` §6.4). Litter and remains are recorded apart, so a
+    /// scenario knows which stock a detrital digester actually lived on.
     pub producer_eaten: f64,
     pub fruit_eaten: f64,
-    pub detritus_eaten: f64,
+    pub litter_eaten: f64,
+    pub carrion_eaten: f64,
+    /// Feces: the material a mouth returned to `D` because its machinery could not digest
+    /// it, `(1 − η_m′)·cap·q + (1 − cap)·q` summed over served bites.
+    pub undigested: f64,
+    /// `Σ A` (§4.2), `Σ unpaid` (§4.3) and `Σ s` (§4.8) over the run: what the plants
+    /// actually took out of `N`, what their maintenance could not cover, and what donors
+    /// spent on propagules.
+    pub plant_income: f64,
+    pub plant_maintenance_unpaid: f64,
+    pub propagule_sent: f64,
     /// What the mouths asked their cells for, before the proportional share. Larger than the
     /// three totals above exactly when a cell could not serve everyone standing in it, which
     /// is what makes competition visible rather than inferred.

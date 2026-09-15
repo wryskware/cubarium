@@ -133,7 +133,7 @@ fn main() {
     let unit = decode(&Genome::founder(0.5, &cfg.drives), &cfg.organism);
     println!(
         "# leave_below {LEAVE_BELOW}  feed_min {}  K_P {}  P_max {}  graze_rate {:.6} m/s",
-        cfg.drives.feed_min, cfg.organism.intake_half_saturation, cfg.producer.max, unit.graze_rate,
+        cfg.drives.feed_min, cfg.organism.intake_half_saturation, cfg.producer.max, unit.mouth_rate,
     );
     println!(
         "# grazer: extent {:.3} px  speed_max {:.3} px/s  turn_rate_max {:.1} deg/s  \
@@ -533,13 +533,16 @@ fn summary(arms: &[&Report; 4]) {
         println!(
             "- {:<12} P_patch {start:.4} -> {end:.4} m; centre {:.4} -> {:.4} m; \
              fruit eaten {:.4}; detritus eaten {:.4}",
-            r.name, r.centre_start, r.centre_end, r.intake.fruit_eaten, r.intake.detritus_eaten
+            r.name, r.centre_start, r.centre_end, r.intake.fruit_eaten, r.intake.litter_eaten + r.intake.carrion_eaten
         );
     }
     println!();
     println!("## Requests and refusals");
     for r in arms {
-        let served = r.intake.producer_eaten + r.intake.fruit_eaten + r.intake.detritus_eaten;
+        let served = r.intake.producer_eaten
+            + r.intake.fruit_eaten
+            + r.intake.litter_eaten
+            + r.intake.carrion_eaten;
         let served_pct = if r.intake.requested > 0.0 {
             format!("{:.1}%", 100.0 * served / r.intake.requested)
         } else {

@@ -18,7 +18,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::accounting::EnergyCorrection;
 use crate::config::WorldConfig;
 use crate::fields::Fields;
 use crate::habitat::Weather;
@@ -91,34 +90,8 @@ pub fn project(state: &WorldState) -> Option<WorldStateV8> {
     })
 }
 
-/// Migration: the corrections of a schema 8 world open at **zero**. Its raw totals are kept
-/// exactly as saved and its care history is carried through untouched; compensation starts
-/// from this load, and no historical rounding repair is claimed (`crate::accounting`).
-impl From<WorldStateV8> for WorldState {
-    fn from(old: WorldStateV8) -> WorldState {
-        WorldState {
-            config: old.config,
-            tick: old.tick,
-            fields: old.fields,
-            weather: old.weather,
-            organisms: old.organisms,
-            births_total: old.births_total,
-            deaths_total: old.deaths_total,
-            cap_rejections_total: old.cap_rejections_total,
-            external_material_in: old.external_material_in,
-            light_in_total: old.light_in_total,
-            heat_out_total: old.heat_out_total,
-            rain_in_total: old.rain_in_total,
-            evap_out_total: old.evap_out_total,
-            care: old.care.into(),
-            energy_correction: EnergyCorrection::default(),
-            hunters: crate::hunter::HunterState::default(),
-            // Off, with no retroactive pauses: a world written before the ordinary quiet
-            // extension existed never ran one (`crate::quiet`).
-            quiet: crate::quiet::QuietState::default(),
-            apex_dormancy: crate::dormancy::ApexDormancyState::default(),
-            apex_encounters: crate::encounter::ApexEncounterState::default(),
-            neural: crate::neural::NeuralState::default(),
-        }
-    }
-}
+// The `From<WorldStateVn> for WorldState` conversion this module used to carry is **gone**
+// (`design/ecology-v1-contract.md` §15.1). Converting an old payload into the current shape
+// is exactly the migration Wrysk's 2026-09-15 rule forbids: worlds always restart fresh.
+// What survives is the frozen wire shape above and its schema constant, which the refusal
+// tests name.

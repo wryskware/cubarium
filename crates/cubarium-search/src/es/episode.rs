@@ -515,7 +515,8 @@ pub fn run_with_fault(
     let diag = world.intake_diagnostics();
     episode.intake_producer = diag.producer_eaten;
     episode.intake_fruit = diag.fruit_eaten;
-    episode.intake_detritus = diag.detritus_eaten;
+    // Ecology v1 splits the detrital stock in two; the episode's one scalar is their sum.
+    episode.intake_detritus = diag.litter_eaten + diag.carrion_eaten;
     episode.route_p_grown = diag.producer_growth;
     episode.route_p_end = route.iter().map(|c| world.state.fields.p[c.index()]).sum();
     episode.motion_billed_partial = episode.turn_unmeasured_ticks > 0;

@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 
 use cubarium_core::care::{
-    ActiveShower, CLEAN_MATERIAL, CareCommand, CareDose, CareKind, CareOutcome, CareState,
+    ActiveShower, CLEAN_MATERIAL, CareCommand, CareDose, CareKind, CareOutcome,
     CareTarget, FEED_ALLOWANCE, FEED_MATERIAL, RAIN_DEPTH_TOTAL, RAIN_TICKS, footprint,
     rain_envelope,
 };
@@ -46,7 +46,7 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 /// `design/m2-world-spec.md` "Units and quantities", recomputed from public state so the
 /// energy identity is checked against the spec and not against the world's own helper.
 fn stored_energy(state: &WorldState) -> f64 {
-    let e_p = state.config.producer.energy_density;
+    let e_p = state.config.plant.energy_density;
     let e_f = state.config.fruit.energy_density;
     let e_r = state.config.organism.reserve_energy_density;
     let cells: f64 = state.fields.p.iter().map(|p| e_p * p).sum::<f64>()
@@ -83,78 +83,50 @@ fn still_water_config() -> WorldConfig {
     cfg
 }
 
-// ---------------------------------------------------------------- migration
+// ------------------------------------------------- retired migration, kept as a refusal
 
-/// The live world loads as schema 7, gains an inert `care`, and its projection is the
-/// original payload byte for byte: the migration adds a field and reinterprets nothing.
+/// **Retired by ecology v1** (`design/ecology-v1-contract.md` §15.1). Two tests lived here:
+/// the live schema 7 snapshot loading with an inert `care` and projecting back byte for byte,
+/// and the cross-version proof that stepping that migrated world 600 ticks with zero care
+/// landed exactly on the recorded continuation.
+///
+/// Wrysk's standing rule of 2026-09-15 is that worlds always restart fresh and are never
+/// migrated, so schema 16 refuses schema 7 by name and neither claim is expressible: the
+/// world cannot be loaded, and this build cannot produce a schema 7 world to re-anchor
+/// against. The `live-v7-55200*` fixtures are kept, their provenance note records the
+/// retirement, and what remains checkable on the real bytes is the refusal.
+///
+/// The care semantics those tests bracketed — Feed, Clean, the rain shower and the six
+/// ledgers — are unchanged and are tested below on worlds this build creates.
 #[test]
-fn the_live_schema_seven_snapshot_migrates_without_touching_its_ecology() {
-    let bytes = std::fs::read(fixture("live-v7-55200.cubw")).expect("the fixture is committed");
-    let (meta, state) = decode_snapshot(&bytes).expect("a genuine schema 7 snapshot loads");
-    assert_eq!(meta.schema, SCHEMA_V7, "the header still reports what was read");
-    assert_ne!(SCHEMA_VERSION, SCHEMA_V7);
-    assert_eq!(state.tick, 55_200);
-    assert_eq!(state.care, CareState::default(), "a migrated world has never been cared for");
-    assert!(!state.organisms.is_empty(), "the fixture carries a living population");
-
-    let projected = postcard::to_allocvec(&v7::project(&state)).expect("encodable");
-    assert_eq!(projected, payload(&bytes), "re-encoding the projection is not the original payload");
-    assert_eq!(ecology_hash(&state), fnv1a(payload(&bytes)));
-    // The full-state hash is a different hash: it covers the appended care field.
-    assert_ne!(state_hash(&state), ecology_hash(&state));
-
-    // The world it builds is consistent and its residual opens at zero.
-    let world = World::from_state(state).expect("the migrated state is a valid world");
-    world.check_invariants().expect("invariants hold on the migrated world");
-    assert!(world.mass_residual().abs() < 1e-9, "residual {}", world.mass_residual());
+fn the_live_schema_seven_fixtures_are_refused_by_name() {
+    for name in [
+        "live-v7-55200.cubw",
+        "live-v7-55200-plus600.cubw",
+        "live-v7-55200-plus600-r0b.cubw",
+    ] {
+        let bytes = std::fs::read(fixture(name)).expect("the fixture is committed");
+        let schema = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+        assert!(schema < SCHEMA_VERSION, "{name} is schema {schema}");
+        assert_eq!(
+            decode_snapshot(&bytes),
+            Err(cubarium_core::SnapshotError::UnsupportedSchema(schema)),
+            "{name}: an old world is refused by name, never migrated"
+        );
+    }
+    assert_eq!(SCHEMA_V7, 7);
 }
 
-/// The cross-version proof. The start fixture was produced by the pre-change schema 7 release
-/// binary; stepping the migrated world 600 ticks with zero care must land on the recorded
-/// continuation exactly. If this fails, the new code changed an operation somewhere in the
-/// tick and nothing else in this file means anything.
-///
-/// The oracle moved once, at R0a: the pre-change binary's own `-plus600` payload is still read
-/// and still proved different, but paid rotation means this build cannot reproduce it, so the
-/// continuation is compared against this build's recording instead.
+/// The schema 7 projection and `ecology_hash` still agree, on a world this build makes.
+/// `ecology_hash` is kept because the care/no-care comparison still uses it (§15.1); it
+/// necessarily no longer covers the ecology v1 pools, which is why `state_hash` is the
+/// identity for everything.
 #[test]
-fn zero_care_reproduces_the_pre_change_binarys_next_600_ticks() {
-    let start = std::fs::read(fixture("live-v7-55200.cubw")).expect("fixture");
-    let plus600 = std::fs::read(fixture("live-v7-55200-plus600.cubw")).expect("fixture");
-    let (_, state) = decode_snapshot(&start).expect("schema 7 loads");
-    let (meta, pre_change) = decode_snapshot(&plus600).expect("schema 7 loads");
-    assert_eq!(meta.schema, SCHEMA_V7);
-    assert_eq!(pre_change.tick, 55_800);
-    // R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`) made body rotation a
-    // physical act, paid for out of the same budget as translation, so this build's tick is
-    // deliberately not the pre-change binary's: a body wider than `motor::REFERENCE_RADIUS_PX`
-    // now trades speed against turning instead of pivoting for free. The pre-change payload is
-    // still read and still hashed above, because the migration claim it anchors is unchanged;
-    // what is re-anchored is the continuation, to this build's own recording
-    // (`tests/continuation_fixtures.rs`, which also proves the recording is current).
-    let recorded = std::fs::read(fixture("live-v7-55200-plus600-r0b.cubw")).expect("fixture");
-    let (_, expected) = decode_snapshot(&recorded).expect("this build's recording loads");
-    let expected_payload =
-        postcard::to_allocvec(&v7::project(&expected)).expect("encodable");
-    assert_ne!(expected_payload, payload(&plus600), "R0a must actually move this world");
-
-    let mut world = World::from_state(state).expect("valid");
-    for _ in 0..600 {
-        world.step();
-    }
-    assert_eq!(world.tick(), 55_800);
-    assert_eq!(world.care(), &CareState::default(), "no command was ever admitted");
-
+fn the_ecology_hash_is_still_the_schema_seven_projection() {
+    let world = World::new(still_water_config()).expect("valid");
     let projected = postcard::to_allocvec(&v7::project(&world.state)).expect("encodable");
-    assert_eq!(
-        projected,
-        expected_payload,
-        "600 ticks of the new build diverged from this build's recorded continuation"
-    );
-    assert_eq!(ecology_hash(&world.state), fnv1a(&expected_payload));
-    let sample = world.telemetry();
-    assert_eq!(sample.ecology_hash, fnv1a(&expected_payload));
-    assert_eq!(sample.care_admitted_seq, 0);
+    assert_eq!(ecology_hash(&world.state), fnv1a(&projected));
+    assert_ne!(state_hash(&world.state), ecology_hash(&world.state));
 }
 
 // ---------------------------------------------------------------- feed and clean

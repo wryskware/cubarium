@@ -70,3 +70,23 @@ the payload does not.
 
 `tests/quiet_migration.rs` holds both continuations and the refusals beside them. Nothing in these
 fixtures is a balance claim: they are one seed of one config, chosen because it reproduces.
+
+---
+
+## Retired by ecology v1 (2026-09-15)
+
+Wrysk's standing rule of 2026-09-15 is that **worlds always restart fresh and are never
+migrated** (`design/ecology-v1-contract.md` §15.1). Schema 16 therefore refuses every older
+snapshot **by name** (`SnapshotError::UnsupportedSchema`) rather than synthesising the wood,
+plant reserve and animal-remains pools for a world that never had them.
+
+Consequently the continuation comparisons these fixtures anchored — the load-and-step-600
+checks, and the `*-plus600-r0b` / `*-plus600-r0d` recordings this repository made for them —
+are **retired, not re-anchored**. Re-recording them would need exactly the migration the rule
+forbids: this build cannot load these payloads, and it cannot write a world in their schema
+either.
+
+Every file named above stays in the tree, unchanged, and is still genuine evidence of the build
+that wrote it. What the suite asserts on them now is the refusal itself, with each file's own
+recorded payload hash checked first so a quietly substituted file still fails. New continuation
+fixtures, if wanted, are generated from a schema 16 world in a later assignment.

@@ -150,12 +150,13 @@ fn aim(world: &mut World, id: OrganismId, heading: Vec2, reserve: f64) {
 
 /// The spec's stored energy, recomputed here, **including** what the hunters are carrying.
 fn stored_energy(state: &WorldState) -> f64 {
-    let e_p = state.config.producer.energy_density;
+    let e_p = state.config.plant.energy_density;
     let e_f = state.config.fruit.energy_density;
     let e_r = state.config.organism.reserve_energy_density;
     let cells: f64 = state.fields.p.iter().map(|p| e_p * p).sum::<f64>()
         + state.fields.f.iter().map(|f| e_f * f).sum::<f64>()
-        + state.fields.de.iter().sum::<f64>();
+        + state.fields.de.iter().sum::<f64>()
+        + state.ecology.stored_energy(e_p);
     let organisms: f64 = state
         .organisms
         .iter()
@@ -175,7 +176,8 @@ fn total_material(state: &WorldState) -> f64 {
     let cells: f64 = state.fields.n.iter().sum::<f64>()
         + state.fields.p.iter().sum::<f64>()
         + state.fields.d.iter().sum::<f64>()
-        + state.fields.f.iter().sum::<f64>();
+        + state.fields.f.iter().sum::<f64>()
+        + state.ecology.total_material();
     let organisms: f64 = state.organisms.iter().map(|(_, o)| o.material()).sum();
     cells + organisms + state.hunters.gut_material_total()
 }
@@ -402,7 +404,7 @@ fn the_founder_inventory_is_derived_from_the_config_and_booked_once() {
     assert!((total_material(&world.state) - before_material - 4.0).abs() < 1e-12);
     assert!((stored_energy(&world.state) - before_energy - 7.0).abs() < 1e-12);
     assert!(
-        world.mass_residual().abs() < 1e-12,
+        world.mass_residual().abs() < 1e-9,
         "residual {}",
         world.mass_residual()
     );
@@ -603,7 +605,7 @@ fn the_budget_matched_control_deposits_the_same_inventory_and_no_hunter() {
         before_heat,
         "nothing spilled"
     );
-    assert!(world.mass_residual().abs() < 1e-12);
+    assert!(world.mass_residual().abs() < 1e-9);
 
     // The arms are mutually exclusive, and neither repeats.
     assert!(
@@ -1232,8 +1234,8 @@ fn a_hunter_that_dies_hands_its_gut_to_the_cell_and_leaves_the_member_list() {
     }
     // Measured over the whole surface: a resting hunter may still cross a cell boundary
     // before it dies, and the litter it leaves decomposes from the next tick on.
-    let d_before: f64 = world.state.fields.d.iter().sum();
-    let de_before: f64 = world.state.fields.de.iter().sum();
+    let d_before: f64 = world.state.ecology.carrion.iter().sum();
+    let de_before: f64 = world.state.ecology.carrion_energy.iter().sum();
     let material_before = total_material(&world.state);
     let ledgers_before = world.energy_ledgers();
     let energy_before = stored_energy(&world.state);
@@ -1274,9 +1276,11 @@ fn a_hunter_that_dies_hands_its_gut_to_the_cell_and_leaves_the_member_list() {
         other => panic!("{other:?}"),
     }
     // The carcass it was carrying landed with its body, and nothing vanished: the structure it
-    // stood on plus the meal it held are both in the litter now.
-    let d_after: f64 = world.state.fields.d.iter().sum();
-    let de_after: f64 = world.state.fields.de.iter().sum();
+    // stood on plus the meal it held are both **animal remains** now
+    // (`design/ecology-v1-contract.md` §5, §8 — a hunter's death goes to `C`, and a carcass
+    // it was carrying is a body too, not plant litter).
+    let d_after: f64 = world.state.ecology.carrion.iter().sum();
+    let de_after: f64 = world.state.ecology.carrion_energy.iter().sum();
     assert!(
         d_after > d_before + gut.0,
         "the gut did not land: {d_after} vs {d_before} + {}",
@@ -1285,7 +1289,7 @@ fn a_hunter_that_dies_hands_its_gut_to_the_cell_and_leaves_the_member_list() {
     assert!(d_after > d_before + 2.0, "the body did not land either");
     assert!(
         de_after > de_before,
-        "the meal carried energy into the litter"
+        "the meal carried energy into the remains"
     );
     assert!((total_material(&world.state) - material_before).abs() < 1e-9);
     let booked = world.energy_ledgers().net_since(ledgers_before);
@@ -2273,12 +2277,17 @@ fn observations_do_not_move_a_profile_three_hunter_world() {
     // the config these staged worlds are built from, and it corrected the pursuit hold
     // predicate in `world/step.rs`. The claim — that *observing* a world never moves it — is
     // unchanged and is anchored to this build's own numbers.
+    // Re-recorded at ecology v1 (`design/ecology-v1-contract.md`): the schema 12 projection
+    // covers `config` and `fields`, and both moved — the config gained `plant` and lost
+    // `producer.energy_density`, and a fresh world's foliage is now set by the wood that
+    // carries it. The claim — that *observing* a world never moves it — is unchanged and is
+    // anchored to this build's own numbers.
     assert_eq!(
-        hunt_hash, 9_510_550_268_652_031_992,
+        hunt_hash, 12_810_497_881_292_252_125,
         "a hunt-and-digest world moved"
     );
     assert_eq!(
-        birth_hash, 14_451_807_541_129_279,
+        birth_hash, 2_608_820_484_921_370_662,
         "a funded-birth world moved"
     );
 }

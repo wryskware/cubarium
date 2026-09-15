@@ -28,13 +28,26 @@ fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name)
 }
 
-/// The committed genuine schema 12 opening: a mature world that really reproduces.
+/// A mature world that really reproduces.
+///
+/// This used to be the committed genuine schema 12 fixture at tick 147,000. Ecology v1 refuses
+/// every older snapshot by name (`design/ecology-v1-contract.md` §15.1: worlds always restart
+/// fresh, never migrate), so the opening is now **built** rather than loaded: a default world
+/// warmed for `WARMUP_TICKS` so its founders have foraged, grown and started budding before any
+/// quiet policy is switched on. What the file tests is unchanged — it was never a claim about
+/// that particular recording, only that the rule can fire in a world that genuinely reproduces
+/// rather than in a hand-built pair.
+const WARMUP_TICKS: u64 = 6_000;
+
 fn mature() -> WorldState {
-    let bytes = std::fs::read(fixture("quiet-v12-plain-3000.cubw")).expect("the fixture");
-    let (_, state) = decode_snapshot(&bytes).expect("a genuine schema 12 snapshot loads");
-    assert_eq!(state.tick, 147_000);
-    assert_eq!(state.quiet, QuietState::default(), "it migrates Off");
-    state
+    let mut world = World::new(WorldConfig::default()).expect("the defaults are a valid world");
+    for _ in 0..WARMUP_TICKS {
+        world.step();
+        world.drain_events();
+    }
+    assert_eq!(world.state.quiet, QuietState::default(), "no policy is on yet");
+    assert!(world.population() > 1, "the warmed world still has a population");
+    world.state
 }
 
 fn with_policy(mut state: WorldState) -> World {
@@ -459,6 +472,11 @@ fn a_refused_or_refunded_birth_and_a_dead_parent_admit_nothing() {
     let mut state = mature();
     let cap = state.organisms.len();
     state.config.capacity.max_organisms = cap as u32;
+    // `validate` refuses a config whose founder roster could not fit the cap. The founders are
+    // long since placed, so the roster is only a creation-time recipe here; zero it so the
+    // world this test *has* is describable.
+    state.config.founders.count = 0;
+    state.config.founders.kinds.clear();
     let mut world = with_policy(state);
     let mut refusals = 0u32;
     for _ in 0..4000 {
@@ -488,12 +506,18 @@ fn a_refused_or_refunded_birth_and_a_dead_parent_admit_nothing() {
     let mut world = with_policy(mature());
     let (parent, child, _, _) = run_to_first_begin(&mut world);
     {
+        // The old fixture opened at tick 147,000, past the two-hour age ceiling, so
+        // `born_tick = 0` was enough to make a parent overdue. A world this build warms is far
+        // younger, so the ceiling is brought to it: half the world's own age, which is past
+        // every founder and short of every recent birth.
+        let now = world.state.tick;
+        world.state.config.organism.max_age_seconds = 0.5 * now as f64 * DT;
         let max_age = world.config().organism.max_age_seconds;
-        let dt = DT;
+        assert!(max_age > 0.0, "the warmed world must have run for a while");
         let o = world.state.organisms.get_mut(parent).expect("alive");
         o.born_tick = 0;
         assert!(
-            o.age_ticks(world.state.tick) as f64 * dt > max_age,
+            o.age_ticks(now) as f64 * DT > max_age,
             "the fixture must make this parent overdue"
         );
     }

@@ -143,17 +143,19 @@ fn apex_targets(seed: u64, count: u32) -> Vec<HunterTarget> {
         .collect()
 }
 
-/// The audited energy total: `Σ_cells (e_p·P + e_f·F + De) + Σ_organisms (E + e_r·R) +
-/// Σ_escrow (e_r·(S+R) + E) + Σ hunter guts`. Recomputed here because the core's own copy is
+/// The audited energy total: `Σ_cells (e_v·(P + W + Q + Wd) + e_f·F + De + Ce) +
+/// Σ_organisms (E + e_r·R) + Σ_escrow (e_r·(S+R) + E) + Σ hunter guts`
+/// (`design/ecology-v1-contract.md` §10). Recomputed here because the core's own copy is
 /// compiled out of release builds, and this milestone needs the identity checked in release.
 fn stored_energy(world: &World) -> f64 {
     let state = &world.state;
-    let e_p = state.config.producer.energy_density;
+    let e_v = state.config.plant.energy_density;
     let e_f = state.config.fruit.energy_density;
     let e_r = state.config.organism.reserve_energy_density;
-    let cells: f64 = state.fields.p.iter().map(|p| e_p * p).sum::<f64>()
+    let cells: f64 = state.fields.p.iter().map(|p| e_v * p).sum::<f64>()
         + state.fields.f.iter().map(|f| e_f * f).sum::<f64>()
-        + state.fields.de.iter().sum::<f64>();
+        + state.fields.de.iter().sum::<f64>()
+        + state.ecology.stored_energy(e_v);
     let organisms: f64 = state
         .organisms
         .iter()
@@ -604,7 +606,7 @@ impl Recorder {
         let ticks_run = world.tick();
         let last = *self.samples.last().expect("at least one sample");
         let capacity = world.config().producer.max * world.state.fields.p.len() as f64;
-        let e_p = world.config().producer.energy_density;
+        let e_p = world.config().plant.energy_density;
         let gross_material = (world.state.light_in_corrected() / e_p).max(0.0);
         let hours = (ticks_run as f64 * cubarium_core::DT / 3600.0).max(1e-9);
 

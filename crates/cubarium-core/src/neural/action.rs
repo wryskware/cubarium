@@ -7,8 +7,6 @@
 
 use cubarium_surface::Vec2;
 
-use crate::controller::{DIET_GATE, FRUIT_DIET};
-
 /// Number of action channels.
 pub const ACT_LEN: usize = 7;
 /// The three intake channels that share one mouth: graze, fruit, scavenge.
@@ -32,9 +30,12 @@ pub const REPRODUCE: usize = 6;
 /// it simply wastes the channel rather than acquiring an ability.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Capability {
-    /// The phenotype's diet, which gates the three mouths exactly as the legacy controller's
-    /// gates did (`DIET_GATE`, `FRUIT_DIET`).
-    pub diet: f64,
+    /// The phenotype's two digestive capabilities. A channel is open exactly when its
+    /// machinery exists — `cap_foliage > 0` for leaf and fruit, `cap_detrital > 0` for litter
+    /// and remains (`design/ecology-v1-contract.md` §6.1–6.2). The masks are world-side and
+    /// identical for legacy and neural control.
+    pub cap_foliage: f64,
+    pub cap_detrital: f64,
     /// Whether the world's grazing and scavenging mechanisms are switched on at all.
     pub grazing: bool,
     pub scavenging: bool,
@@ -47,9 +48,15 @@ pub struct Capability {
 
 impl Capability {
     /// The masks an ordinary (non-member) body carries.
-    pub fn ordinary(diet: f64, grazing: bool, scavenging: bool) -> Capability {
+    pub fn ordinary(
+        cap_foliage: f64,
+        cap_detrital: f64,
+        grazing: bool,
+        scavenging: bool,
+    ) -> Capability {
         Capability {
-            diet,
+            cap_foliage,
+            cap_detrital,
             grazing,
             scavenging,
             attacks: false,
@@ -88,13 +95,13 @@ impl Action7 {
         a[ATTACK] = band(sigmoid(y[ATTACK]), LEVEL);
         a[REPRODUCE] = band(sigmoid(y[REPRODUCE]), LEVEL);
 
-        if !(cap.grazing && cap.diet >= DIET_GATE) {
+        if !(cap.grazing && cap.cap_foliage > 0.0) {
             a[GRAZE] = 0.0;
         }
-        if !(cap.grazing && cap.diet >= FRUIT_DIET) {
+        if !(cap.grazing && cap.cap_foliage > 0.0) {
             a[FRUIT] = 0.0;
         }
-        if !(cap.scavenging && cap.diet <= 1.0 - DIET_GATE) {
+        if !(cap.scavenging && cap.cap_detrital > 0.0) {
             a[SCAVENGE] = 0.0;
         }
         if !cap.attacks {
@@ -104,9 +111,10 @@ impl Action7 {
             a[REPRODUCE] = 0.0;
         }
 
-        // One mouth: with the world's own `bite = rate · effort · dt · X/(X + K_P)`, grazing
-        // and fruit together then take at most `graze_rate · dt` and scavenging at most
-        // `scavenge_rate · dt`, so total handling never exceeds one mouth-tick.
+        // One mouth (`design/ecology-v1-contract.md` §6.3): every channel bites at the same
+        // `mouth_rate`, so normalising the three efforts to sum to at most one is exactly
+        // what keeps total handling inside one mouth-tick. The world applies the same rule to
+        // a legacy decision, which can set all three efforts to 1 at once.
         let sum: f64 = MOUTH_CHANNELS.iter().map(|i| a[*i]).sum();
         if sum > 1.0 {
             for i in MOUTH_CHANNELS {
@@ -283,7 +291,7 @@ mod tests {
     const DT: f64 = 0.05;
 
     fn grazer() -> Capability {
-        Capability::ordinary(1.0, true, true)
+        Capability::ordinary(1.0, 0.0, true, true)
     }
 
     /// A unit adult at the R0d pace with ample energy.
@@ -431,7 +439,7 @@ mod tests {
     #[test]
     fn masked_channels_never_reach_the_decision() {
         // A pure scavenger: below the grazing gate, above the fruit gate's complement.
-        let scavenger = Capability::ordinary(0.0, true, true);
+        let scavenger = Capability::ordinary(0.0, 1.0, true, true);
         let a = Action7::squash(&[0.0, 0.0, 6.0, 6.0, 6.0, 6.0, 6.0], &scavenger);
         assert_eq!(a.0[GRAZE], 0.0);
         assert_eq!(a.0[FRUIT], 0.0);
@@ -440,13 +448,13 @@ mod tests {
         assert!(a.reproduce());
 
         // A pure grazer cannot scavenge.
-        let grazer = Capability::ordinary(1.0, true, true);
+        let grazer = Capability::ordinary(1.0, 0.0, true, true);
         let b = Action7::squash(&[0.0, 0.0, 6.0, 6.0, 6.0, 6.0, 6.0], &grazer);
         assert_eq!(b.0[SCAVENGE], 0.0);
         assert!(b.0[GRAZE] > 0.0 && b.0[FRUIT] > 0.0);
 
         // A disabled world mechanism masks the mouth too.
-        let off = Capability::ordinary(1.0, false, false);
+        let off = Capability::ordinary(1.0, 1.0, false, false);
         let c = Action7::squash(&[0.0, 0.0, 6.0, 6.0, 6.0, 6.0, 6.0], &off);
         assert_eq!([c.0[GRAZE], c.0[FRUIT], c.0[SCAVENGE]], [0.0, 0.0, 0.0]);
     }

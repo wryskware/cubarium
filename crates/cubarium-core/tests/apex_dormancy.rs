@@ -243,7 +243,11 @@ fn a_failed_wake_rechecks_and_exhaustion_removes_the_real_organism_with_events()
 }
 
 #[test]
-fn dormant_state_round_trips_replays_and_schema_thirteen_migrates_off() {
+fn dormant_state_round_trips_and_schema_thirteen_is_refused() {
+    // **Retired migration, kept as a refusal** (`design/ecology-v1-contract.md` §15.1):
+    // schema 13 used to load and open dormancy Off. Schema 16 refuses it by name instead —
+    // worlds always restart fresh — so what this half of the test now checks is that a
+    // well-framed schema 13 file is turned away with its version, not reinterpreted.
     let plain = quiet_world().state;
     let old = v13::project(&plain).expect("an off state has an old image");
     let payload = postcard::to_allocvec(&old).unwrap();
@@ -255,9 +259,11 @@ fn dormant_state_round_trips_replays_and_schema_thirteen_migrates_off() {
     framed.extend_from_slice(&crc32fast::hash(&payload).to_le_bytes());
     framed.extend_from_slice(&payload);
     assert_eq!(framed.len(), HEADER_FIXED_BYTES + payload.len());
-    let (_, migrated) = decode_snapshot(&framed).expect("schema 13 loads");
-    assert_eq!(migrated, plain);
-    assert_eq!(migrated.apex_dormancy, ApexDormancyState::default());
+    assert_eq!(
+        decode_snapshot(&framed),
+        Err(cubarium_core::SnapshotError::UnsupportedSchema(SCHEMA_V13))
+    );
+    assert_eq!(plain.apex_dormancy, ApexDormancyState::default());
 
     let (mut original, child) = dormant_child();
     original.drain_apex_dormancy_events();

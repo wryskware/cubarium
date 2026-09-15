@@ -95,6 +95,9 @@ fn paint(world: &mut World, id: OrganismId) {
     // two cells on two faces do not begin equal; leaving that in place would compare the
     // initial field rather than the sampler. The removal is booked so the material ledger
     // stays closed.
+    // Ecology v1: the stands go too. A cell that keeps its wood and reserve reflushes foliage
+    // out of that reserve on the next tick, by a habitat-dependent amount, so two cells on two
+    // faces would diverge again between the painting and the observation.
     let mut removed = 0.0;
     for cell in cubarium_surface::CellId::all() {
         let i = cell.index();
@@ -103,6 +106,13 @@ fn paint(world: &mut World, id: OrganismId) {
         world.state.fields.f[i] = 0.0;
         world.state.fields.d[i] = 0.0;
         world.state.fields.de[i] = 0.0;
+        let e = &mut world.state.ecology;
+        removed += e.wood[i] + e.plant_reserve[i] + e.dead_wood[i] + e.carrion[i];
+        e.wood[i] = 0.0;
+        e.plant_reserve[i] = 0.0;
+        e.dead_wood[i] = 0.0;
+        e.carrion[i] = 0.0;
+        e.carrion_energy[i] = 0.0;
     }
     world.state.external_material_in -= removed;
     let (pos, heading) = {

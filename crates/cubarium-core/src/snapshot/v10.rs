@@ -32,7 +32,7 @@ use crate::config::WorldConfig;
 use crate::fields::Fields;
 use crate::genome::Genome;
 use crate::habitat::Weather;
-use crate::hunter::{HunterPhase, HunterRole, HunterState};
+use crate::hunter::{HunterPhase, HunterRole};
 use crate::ids::{OrganismId, Slots};
 use crate::organism::Organism;
 use crate::world::WorldState;
@@ -185,44 +185,9 @@ pub fn project(state: &WorldState) -> Option<WorldStateV10> {
     })
 }
 
-/// Migration, or a refusal: an empty schema 10 extension opens empty; an active schema 10
-/// trial is refused by name rather than reinterpreted into the new profile shape.
-pub fn migrate(old: WorldStateV10) -> Result<WorldState, String> {
-    if !old.hunters.is_empty() {
-        return Err(
-            "this schema 10 snapshot carries a non-empty hunter extension (a trial, a \
-             budget-matched control, or the history of one), whose profile and member shape \
-             changed in schema 11 (measured capture effector, ingestion mouth, body scale, \
-             transition origin); it is refused rather than reinterpreted — re-create it from \
-             its recorded recipe"
-                .into(),
-        );
-    }
-    Ok(WorldState {
-        config: old.config,
-        tick: old.tick,
-        fields: old.fields,
-        weather: old.weather,
-        organisms: old.organisms,
-        births_total: old.births_total,
-        deaths_total: old.deaths_total,
-        cap_rejections_total: old.cap_rejections_total,
-        external_material_in: old.external_material_in,
-        light_in_total: old.light_in_total,
-        heat_out_total: old.heat_out_total,
-        rain_in_total: old.rain_in_total,
-        evap_out_total: old.evap_out_total,
-        care: old.care.into(),
-        energy_correction: old.energy_correction,
-        hunters: HunterState::default(),
-        // Off, with no retroactive pauses: a world written before the ordinary quiet
-        // extension existed never ran one (`crate::quiet`).
-        quiet: crate::quiet::QuietState::default(),
-        apex_dormancy: crate::dormancy::ApexDormancyState::default(),
-        apex_encounters: crate::encounter::ApexEncounterState::default(),
-        neural: crate::neural::NeuralState::default(),
-    })
-}
+// `migrate` is **gone** (`design/ecology-v1-contract.md` §15.1): schema 10 is refused by name
+// like every other old schema, so there is nothing left to reinterpret. The frozen wire shape
+// above and `SCHEMA_V10` remain for the refusal test that names the version.
 
 /// The unused `Vec2` import keeps the frozen profile's documentation honest about what schema
 /// 10 did *not* have: a two-component capture offset.

@@ -21,6 +21,7 @@ use crate::hunter::HunterEvent;
 use crate::pairs::NeighborLists;
 use crate::quiet::QuietEvent;
 
+pub use crate::fields::{CellClass, EcologyV1State};
 pub use lifecycle::{TRAINING_FOUNDER_HUE, TRAINING_START_ENERGY, TRAINING_START_RESERVE};
 pub(crate) use state::check_genome;
 pub use state::{ChargingDiagnostics, IntakeDiagnostics, NeuralTiming, TickCounters, WorldState};
@@ -47,6 +48,9 @@ pub struct World {
     pub(crate) manual_rain: Box<[f64; CELL_COUNT]>,
     pub(crate) rain_envelope: [f64; crate::care::RAIN_SAMPLES],
     pub(crate) scratch: (ScalarField, ScalarField),
+    /// Reusable working storage for the ecology v1 cross-cell subphases 3f and 3h, so a long
+    /// headless run allocates none of it per tick.
+    pub(crate) eco_scratch: crate::fields::EcoScratch,
     pub(crate) water_scratch: ScalarField,
     pub(crate) sense_rings: Vec<[Vec<CellId>; SENSE_DEPTH_MAX]>,
     pub(crate) neighbors: NeighborLists,

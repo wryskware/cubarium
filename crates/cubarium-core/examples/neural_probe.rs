@@ -197,7 +197,8 @@ fn action_tape() {
         let eaten = (
             intake.producer_eaten - intake_before.producer_eaten,
             intake.fruit_eaten - intake_before.fruit_eaten,
-            intake.detritus_eaten - intake_before.detritus_eaten,
+            (intake.litter_eaten + intake.carrion_eaten)
+                - (intake_before.litter_eaten + intake_before.carrion_eaten),
         );
         println!(
             "| {} | {:.2} | {:.1} | {:.5} | {:.5} | {:.4}/{:.4}/{:.4} | {:+.4} | {:+.5} |",

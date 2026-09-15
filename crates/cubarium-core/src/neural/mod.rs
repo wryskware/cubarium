@@ -37,6 +37,15 @@ pub const PROFILE_TEXT: &str = concat!(
     "reserve,energy,development,gestating,age,motor_avail,",
     "ate(graze,fruit,scavenge),moved,turned,delivered",
     "|act:thrust,turn,graze,fruit,scavenge,attack,reproduce",
+    // Ecology v1 (`design/ecology-v1-contract.md` §15.2). The observation and action
+    // *layouts* do not move — `d_here` is still "edible detrital material here", now
+    // `D_eff + C_eff` — but what a channel means to the body does: the mouth masks come from
+    // the two digestive capabilities, every channel bites at one shared `mouth_rate`, and
+    // the `ate` feedback is normalised by that rate. Wrysk decided on 2026-09-15 that
+    // training was cheap enough that old policies need not reload, so the digest breaks and
+    // every existing policy file, every `runs/es-*` centre and the R3a display seed is
+    // refused **by name** rather than silently reinterpreted.
+    "|eco:v1",
 );
 
 /// FNV-1a 64 over [`PROFILE_TEXT`]. Stored in every [`Policy`] and in the extension header; a

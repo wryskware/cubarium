@@ -38,22 +38,16 @@ fn stepped_world(ticks: u64) -> World {
 /// the whole difference — but postcard is not self-describing, so a schema 12 payload is still
 /// read through a frozen mirror rather than as a schema 13 one missing its tail.
 ///
-/// Version 8 was the first that migrates rather than refuses; version 13 migrates all six of
-/// its predecessors through their frozen mirrors — every one of them opening the quiet
-/// extension Off with no retroactive pauses, the five older ones carrying the frozen pre-dose
-/// care shape whose in-flight showers open at the standard dose, the older three an empty
-/// hunter extension, and the oldest two zero corrections and zero care besides. The one
-/// exception stands: a schema 10 payload carrying an *active* trial is refused by name rather
-/// than reinterpreted. Everything older is still rejected outright.
-/// Version 14 appends apex dormancy and encounters; all seven predecessor schemas
-/// migrate with both policies Off, preserving the existing migration restrictions.
-/// Version 15 **appends** the opt-in recurrent-policy extension (`crate::neural`,
-/// `design/recurrent-interface-contract.md` §5): three inert bytes in every world that has no
-/// neural animal, so a schema-14 payload loads with **every organism legacy-controlled** and
-/// steps byte for byte the tick it was saved on.
+/// **Version 16 is ecology v1, and it is a hard break.** Wrysk's standing rule of 2026-09-15
+/// is that worlds always restart fresh and are never migrated
+/// (`design/ecology-v1-contract.md` §15.1), so schema 16 appends
+/// [`cubarium_core::world::EcologyV1State`] and **refuses every older schema by name** rather
+/// than synthesising wood, a reserve or a remains pool for a world that never had them. The
+/// migration ladder that ran from version 8 to version 15 is gone; the frozen mirror shapes
+/// stay in the tree only for the refusal tests that name their versions.
 #[test]
-fn the_schema_version_is_fifteen_and_its_eight_predecessors_still_load() {
-    assert_eq!(SCHEMA_VERSION, 15);
+fn the_schema_version_is_sixteen_and_every_predecessor_is_refused() {
+    assert_eq!(SCHEMA_VERSION, 16);
     assert_eq!(cubarium_core::SCHEMA_V14, 14);
     assert_eq!(cubarium_core::SCHEMA_V13, 13);
     assert_eq!(cubarium_core::SCHEMA_V12, 12);
@@ -63,6 +57,26 @@ fn the_schema_version_is_fifteen_and_its_eight_predecessors_still_load() {
     assert_eq!(cubarium_core::SCHEMA_V8, 8);
     assert_eq!(cubarium_core::SCHEMA_V7, 7);
     assert_eq!(MAGIC, *b"CUBW");
+
+    // The refusal, on a real payload: relabelling this build's own snapshot with any older
+    // version names that version and stops, and so does an unknown future one.
+    let world = stepped_world(10);
+    let bytes = encode_snapshot(&world.state, BUILD);
+    for old in 0..SCHEMA_VERSION {
+        let mut relabelled = bytes.clone();
+        relabelled[4..8].copy_from_slice(&old.to_le_bytes());
+        assert_eq!(
+            decode_snapshot(&relabelled),
+            Err(SnapshotError::UnsupportedSchema(old)),
+            "schema {old} must be refused by name"
+        );
+    }
+    let mut future = bytes.clone();
+    future[4..8].copy_from_slice(&(SCHEMA_VERSION + 1).to_le_bytes());
+    assert_eq!(
+        decode_snapshot(&future),
+        Err(SnapshotError::UnsupportedSchema(SCHEMA_VERSION + 1))
+    );
 }
 
 /// Spec, "Observer": "fixed-seed replay hash of the state"; encoding must not depend on

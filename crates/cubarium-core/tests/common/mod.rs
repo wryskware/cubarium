@@ -9,34 +9,46 @@
 
 use cubarium_core::{World, WorldConfig};
 
-/// The spec's closed-box material (`design/m2-world-spec.md`, with the fruit pool of
-/// `design/fauna-v2.md` "Fruit"):
-/// `M = Σ_cells (N + P + D + F) + Σ_organisms (S + R) + Σ_escrow (S_child + R_child)`.
+/// The contract's closed-box material (`design/ecology-v1-contract.md` §10, extending
+/// `design/m2-world-spec.md` and the fruit pool of `design/fauna-v2.md`):
+/// `M = Σ_cells (N + P + F + W + Q + Wd + D + C) + Σ_organisms (S + R + escrow)`.
 ///
 /// `Organism::material()` is documented to include the escrow, so this is the whole `M`.
 pub fn total_material(world: &World) -> f64 {
     let fields = &world.state.fields;
+    let eco = &world.state.ecology;
     let cells: f64 = fields.n.iter().sum::<f64>()
         + fields.p.iter().sum::<f64>()
         + fields.d.iter().sum::<f64>()
-        + fields.f.iter().sum::<f64>();
+        + fields.f.iter().sum::<f64>()
+        + eco.wood.iter().sum::<f64>()
+        + eco.plant_reserve.iter().sum::<f64>()
+        + eco.dead_wood.iter().sum::<f64>()
+        + eco.carrion.iter().sum::<f64>();
     let organisms: f64 = world.state.organisms.iter().map(|(_, o)| o.material()).sum();
     cells + organisms
 }
 
-/// The spec's stored energy ("Units and quantities", fruit per `design/fauna-v2.md`):
-/// `E_total = Σ_cells (e_p · P + e_f · F + De) + Σ_organisms (E + e_r · R)
-///          + Σ_escrow (e_r · (S_child + R_child) + E_child)`.
+/// The contract's stored energy (§10, extending the spec's "Units and quantities" and the
+/// fruit pool of `design/fauna-v2.md`):
+/// `U = Σ_cells (e_v · (P + W + Q + Wd) + e_f · F + De + Ce) + Σ_organisms (E + e_r · R)
+///    + Σ_escrow (e_r · (S_child + R_child) + E_child)`.
 pub fn stored_energy(world: &World) -> f64 {
     let cfg = &world.state.config;
-    let e_p = cfg.producer.energy_density;
+    let e_p = cfg.plant.energy_density;
     let e_f = cfg.fruit.energy_density;
     let e_r = cfg.organism.reserve_energy_density;
     let fields = &world.state.fields;
 
+    let eco = &world.state.ecology;
     let mut total: f64 = fields.p.iter().map(|p| e_p * p).sum::<f64>()
         + fields.f.iter().map(|f| e_f * f).sum::<f64>()
-        + fields.de.iter().sum::<f64>();
+        + fields.de.iter().sum::<f64>()
+        + e_p
+            * (eco.wood.iter().sum::<f64>()
+                + eco.plant_reserve.iter().sum::<f64>()
+                + eco.dead_wood.iter().sum::<f64>())
+        + eco.carrion_energy.iter().sum::<f64>();
     for (_, o) in world.state.organisms.iter() {
         total += o.energy + e_r * o.reserve;
         if let Some(e) = &o.escrow {

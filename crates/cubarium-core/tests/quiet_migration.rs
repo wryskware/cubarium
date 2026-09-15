@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 use cubarium_core::organism::Mode;
 use cubarium_core::quiet::{
-    POST_BIRTH_PAUSE_TICKS, QuietPause, QuietPolicy, QuietState, QUIET_VERSION,
+    POST_BIRTH_PAUSE_TICKS, QuietPause, QuietPolicy, QuietState,
 };
 use cubarium_core::snapshot::{HEADER_FIXED_BYTES, SnapshotError, state_hash, v11, v12};
 use cubarium_core::{
@@ -39,101 +39,46 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 }
 
 /// The schema 12 image of a state, re-encoded — what the pre-quiet binary would have written.
+#[allow(dead_code)]
 fn as_v12(state: &WorldState) -> Vec<u8> {
     postcard::to_allocvec(&v12::project(state).expect("an Off world has a schema 12 image"))
         .expect("the projection is encodable")
 }
 
-// ---------------------------------------------------------------- genuine continuation
+// -------------------------------------- retired migrations, kept as refusals (§15.1)
 
-/// Both genuine pre-change worlds — the plain one and the one carrying real care — migrate with
-/// the quiet extension Off and no retroactive pauses, and their schema 12 projections are the
-/// original payloads byte for byte.
+/// **Retired by ecology v1** (`design/ecology-v1-contract.md` §15.1). Two tests lived here:
+/// both genuine pre-quiet schema 12 worlds migrating Off and projecting back byte for byte,
+/// and their 600-tick continuations. Worlds always restart fresh and are never migrated
+/// (Wrysk, 2026-09-15), so schema 16 refuses schema 12 by name; the artifacts cannot be loaded
+/// and this build cannot write a schema 12 world to re-anchor against.
+///
+/// The fixtures stay in the tree with their provenance note, their recorded hashes are still
+/// asserted here — a file quietly replaced still fails — and the refusal is checked on the same
+/// bytes.
 #[test]
-fn the_genuine_pre_quiet_worlds_migrate_off_and_project_back_exactly() {
+fn the_pre_quiet_schema_twelve_fixtures_are_refused_by_name() {
     for (name, hash) in [
-        ("quiet-v12-plain-3000.cubw", 0x55e9_f1e2_2395_4635u64),
-        ("quiet-v12-care-3000.cubw", 0x342d_78f1_ea06_cb0bu64),
+        ("quiet-v12-plain-3000.cubw", Some(0x55e9_f1e2_2395_4635u64)),
+        ("quiet-v12-plain-3000-plus600.cubw", Some(0x7729_2b3e_79cc_fcd1)),
+        ("quiet-v12-plain-3000-plus600-r0b.cubw", None),
+        ("quiet-v12-care-3000.cubw", Some(0x342d_78f1_ea06_cb0b)),
+        ("quiet-v12-care-3000-plus600.cubw", Some(0x19ef_5ad1_afd0_2b2b)),
+        ("quiet-v12-care-3000-plus600-r0b.cubw", None),
     ] {
         let bytes = std::fs::read(fixture(name)).expect("the fixture is committed");
-        assert_eq!(fnv1a(payload(&bytes)), hash, "{name}: the provenance's own hash");
-
-        let (meta, state) = decode_snapshot(&bytes).expect("a genuine schema 12 snapshot loads");
-        assert_eq!(meta.schema, SCHEMA_V12, "the header reports what was read");
-        assert_eq!(meta.build_id, "pre-quiet-fixture");
-        assert_ne!(SCHEMA_VERSION, SCHEMA_V12);
-        assert_eq!(state.tick, 147_000);
-        assert!(state.births_total > 0, "{name}: a world that has really reproduced");
-        assert_eq!(state.hunters, Default::default(), "and carries no hunter");
-
-        // Off, empty, and version 1: no timer was invented from an old birth log.
-        assert_eq!(state.quiet, QuietState::default());
-        assert_eq!(state.quiet.version, QUIET_VERSION);
-        assert_eq!(state.quiet.policy, QuietPolicy::Off);
-        assert!(state.quiet.pauses.is_empty());
-        assert!(!state.quiet.active());
-
-        // The care world really does carry care; the plain one really does not.
-        if name.contains("care") {
-            assert_eq!(state.care.admitted_seq, 1);
-            assert!(state.care.feed_material_in > 0.0 && state.care.feed_energy_in > 0.0);
-        } else {
-            assert_eq!(state.care, Default::default());
+        if let Some(h) = hash {
+            assert_eq!(fnv1a(payload(&bytes)), h, "{name}: the provenance's own hash");
         }
-
-        assert_eq!(as_v12(&state), payload(&bytes), "{name}: the projection is not the original");
-        assert_ne!(state_hash(&state), fnv1a(payload(&bytes)), "schema 13 appends three bytes");
-    }
-}
-
-/// The claim the migration rests on: an Off world resuming a pre-quiet snapshot produces the
-/// pre-quiet binary's next 600 ticks **byte for byte** — for the default no-care trajectory and
-/// for the default care one alike.
-#[test]
-fn an_off_world_reproduces_the_pre_quiet_binarys_next_600_ticks() {
-    for (open, plus600, hash, recorded) in [
-        (
-            "quiet-v12-plain-3000.cubw",
-            "quiet-v12-plain-3000-plus600.cubw",
-            0x7729_2b3e_79cc_fcd1u64,
-            "quiet-v12-plain-3000-plus600-r0b.cubw",
-        ),
-        (
-            "quiet-v12-care-3000.cubw",
-            "quiet-v12-care-3000-plus600.cubw",
-            0x19ef_5ad1_afd0_2b2bu64,
-            "quiet-v12-care-3000-plus600-r0b.cubw",
-        ),
-    ] {
-        let start = std::fs::read(fixture(open)).expect("fixture");
-        let after = std::fs::read(fixture(plus600)).expect("fixture");
-        assert_eq!(fnv1a(payload(&after)), hash, "{plus600}: the provenance's own hash");
-    // R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`) made body rotation a
-    // physical act paid out of the same budget as translation, so this build's tick is
-    // deliberately not the pre-change binary's. The pre-change payload is still read and still
-    // hashed above; the continuation is re-anchored to this build's own recording
-    // (`tests/continuation_fixtures.rs`).
-        let bytes = std::fs::read(fixture(recorded)).expect("fixture");
-        let (_, expected) = decode_snapshot(&bytes).expect("this build's recording loads");
-        let expected_payload = as_v12(&expected);
-        assert_ne!(expected_payload, payload(&after), "R0a must actually move {open}");
-
-        let (_, state) = decode_snapshot(&start).expect("schema 12 loads");
-        let mut world = World::from_state(state).expect("the migrated state is a valid world");
-        world.check_invariants().expect("invariants hold on the migrated world");
-        for _ in 0..600 {
-            world.step();
-            world.drain_events();
-            assert!(world.drain_quiet_events().is_empty(), "{open}: an Off world published a record");
-        }
-        assert_eq!(world.tick(), 147_600);
+        let schema = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+        assert!(schema < SCHEMA_VERSION, "{name} is schema {schema}");
         assert_eq!(
-            as_v12(&world.state),
-            expected_payload,
-            "{open}: 600 ticks of the quiet build diverged from this build's recorded continuation"
+            decode_snapshot(&bytes),
+            Err(SnapshotError::UnsupportedSchema(schema)),
+            "{name}: an old world is refused by name, never migrated"
         );
-        assert!(world.quiet().pauses.is_empty());
     }
+    assert_eq!(SCHEMA_V12, 12);
 }
 
 // ---------------------------------------------------------------- refusing a lossy image
@@ -141,10 +86,20 @@ fn an_off_world_reproduces_the_pre_quiet_binarys_next_600_ticks() {
 /// An enabled policy has no schema 12 image, and neither does a held pause. The old shape has
 /// nowhere to put either, and a projection that dropped them would make two different worlds
 /// compare equal — exactly the comparison these projections exist to make trustworthy.
+///
+/// Stated on a world this build makes: the schema 12 artifact it used to read no longer loads
+/// (§15.1), and the claim is about the projection, not about that recording.
 #[test]
 fn an_enabled_policy_or_a_held_pause_has_no_old_image() {
-    let bytes = std::fs::read(fixture("quiet-v12-plain-3000.cubw")).expect("fixture");
-    let (_, off) = decode_snapshot(&bytes).expect("loads");
+    let mut cfg = WorldConfig::default();
+    cfg.founders.kinds.clear();
+    cfg.founders.count = 4;
+    let mut world = World::new(cfg).expect("valid");
+    for _ in 0..40 {
+        world.step();
+        world.drain_events();
+    }
+    let off = world.state;
 
     // The control: Off really does project, and so do the older mirrors.
     assert!(v12::project(&off).is_some());
@@ -173,31 +128,33 @@ fn an_enabled_policy_or_a_held_pause_has_no_old_image() {
     assert!(stale.validate().is_err());
 }
 
-/// Schema 12 payloads and schema 13 payloads are not interchangeable, in either direction: the
-/// appended extension is why the frozen mirror exists.
+/// Schema 12 payloads and schema 16 payloads are not interchangeable, in either direction.
 #[test]
 fn a_relabelled_payload_is_refused_rather_than_misread() {
-    let bytes = std::fs::read(fixture("quiet-v12-plain-3000.cubw")).expect("fixture");
-    let (_, state) = decode_snapshot(&bytes).expect("loads");
+    let mut world = World::new(WorldConfig::default()).expect("valid");
+    world.step();
+    let state = world.state;
 
-    // A schema 13 payload relabelled as schema 12: the CRC still matches, and the mirror must
-    // refuse the trailing extension rather than read the payload at the wrong offsets.
+    // A schema 16 payload relabelled as schema 12: refused by name, without ever reading the
+    // payload at the wrong offsets.
     let mut relabelled = encode_snapshot(&state, "mislabelled");
     assert_eq!(u32::from_le_bytes(relabelled[4..8].try_into().unwrap()), SCHEMA_VERSION);
     relabelled[4..8].copy_from_slice(&SCHEMA_V12.to_le_bytes());
-    assert!(
-        decode_snapshot(&relabelled).is_err(),
-        "a schema 13 payload read as schema 12 must fail, not silently misdecode"
+    assert_eq!(
+        decode_snapshot(&relabelled),
+        Err(SnapshotError::UnsupportedSchema(SCHEMA_V12))
     );
 
-    // And the other way: the genuine schema 12 file relabelled as schema 13 is short by the
-    // extension it never had.
+    // And the other way: a genuine schema 12 file relabelled as schema 16 is short by every
+    // extension it never had, so it fails the exact-decode check rather than misreading.
+    let bytes = std::fs::read(fixture("quiet-v12-plain-3000.cubw")).expect("fixture");
     let mut forward = bytes.clone();
     forward[4..8].copy_from_slice(&SCHEMA_VERSION.to_le_bytes());
-    assert!(decode_snapshot(&forward).is_err());
+    assert!(matches!(decode_snapshot(&forward), Err(SnapshotError::Decode(_))));
 
-    // A corrupt schema 12 payload is a decode failure, not a panic.
-    let mut corrupt = bytes.clone();
+    // A corrupt payload is a checksum or decode failure, not a panic.
+    let mut corrupt = relabelled.clone();
+    corrupt[4..8].copy_from_slice(&SCHEMA_VERSION.to_le_bytes());
     let last = corrupt.len() - 1;
     corrupt[last] ^= 0xff;
     assert!(decode_snapshot(&corrupt).is_err());

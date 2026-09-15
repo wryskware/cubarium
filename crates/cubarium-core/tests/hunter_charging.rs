@@ -502,81 +502,57 @@ fn the_burn_is_capped_by_the_reserve_that_is_actually_there() {
 
 // ---------------------------------------------------------------- version 3 identity
 
-/// The load-bearing identity test. Two fixtures written by the **pre-change** release build
-/// (provenance in `tests/fixtures/hunter-v3-charge-provenance.md`) with a real version 3 trial
-/// running and its founder actually oxidizing: loading the first, stepping 600 ticks and
-/// re-encoding must reproduce the second's payload **byte for byte**.
+/// **Retired by ecology v1** (`design/ecology-v1-contract.md` §15.1). The load-bearing
+/// identity test loaded a genuine pre-change schema 12 fixture with a live version 3 trial
+/// actually oxidizing, stepped it 600 ticks, and compared the schema 12 projection against
+/// this build's recording. Worlds always restart fresh and are never migrated (Wrysk,
+/// 2026-09-15), so schema 16 refuses schema 12 by name; the artifact cannot be loaded and
+/// this build cannot write a schema 12 world to re-anchor against, so the continuation is
+/// retired rather than re-recorded.
+///
+/// The fixtures stay in the tree, the provenance note records the retirement, and the refusal
+/// is what is checked on their bytes here.
 #[test]
-fn a_version_three_member_reproduces_the_pre_change_binarys_next_600_ticks() {
-    let start = std::fs::read(fixture("hunter-v3-charge-active.cubw")).expect("the fixture");
-    let plus600 = std::fs::read(fixture("hunter-v3-charge-active-plus600.cubw")).expect("the fixture");
-    let (meta, state) = decode_snapshot(&start).expect("a genuine pre-change snapshot loads");
-    assert_eq!(meta.build_id, "pre-charge-fixture");
-    assert_eq!(state.tick, 5570);
-    let profile = state.hunters.profile.as_ref().expect("an actual trial");
-    assert_eq!(profile.version, PROFILE_VERSION, "the fixture is a version 3 experiment");
-    assert_eq!(profile.oxidation_policy(), OxidationPolicy::Configured);
-    assert_eq!(state.hunters.members.len(), 1, "with a live member");
-    let founder = state.hunters.members[0].id;
-    let o = state.organisms.get(founder).expect("alive");
-    assert!(
-        o.energy < state.config.organism.oxidation_threshold * o.phenotype.energy_max,
-        "and one that is actually oxidizing, so the continuation exercises the branch"
-    );
-    assert!(o.reserve > 0.0);
-
-
-    // R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`) made body rotation a
-    // physical act paid out of the same budget as translation, so this build's tick is
-    // deliberately not the pre-change binary's. The pre-change payload is still decoded and
-    // still proved different; the continuation is re-anchored to this build's own recording
-    // (`tests/continuation_fixtures.rs`).
-    let recorded =
-        std::fs::read(fixture("hunter-v3-charge-active-plus600-r0d.cubw")).expect("the fixture");
-    let (_, expected) = decode_snapshot(&recorded).expect("this build's recording loads");
-    let as_v12 = |s: &cubarium_core::WorldState| {
-        postcard::to_allocvec(
-            &cubarium_core::snapshot::v12::project(s).expect("an Off world projects"),
-        )
-        .expect("encodable")
-    };
-    let expected_payload = as_v12(&expected);
-    assert_ne!(expected_payload, payload(&plus600), "R0a must actually move this world");
-
-    let mut world = World::from_state(state).expect("valid");
-    world.check_invariants().expect("invariants hold on the pre-change world");
-    for _ in 0..600 {
-        world.step();
+fn the_pre_change_charge_fixtures_are_refused_by_name() {
+    for name in [
+        "hunter-v3-charge-active.cubw",
+        "hunter-v3-charge-active-plus600.cubw",
+        "hunter-v3-charge-active-plus600-r0d.cubw",
+        "hunter-v3-charge-window.cubw",
+    ] {
+        let bytes = std::fs::read(fixture(name)).expect("the fixture is committed");
+        let schema = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+        assert!(schema < cubarium_core::SCHEMA_VERSION, "{name} is schema {schema}");
+        assert_eq!(
+            decode_snapshot(&bytes),
+            Err(SnapshotError::UnsupportedSchema(schema)),
+            "{name}: an old world is refused by name, never migrated"
+        );
     }
-    assert_eq!(world.tick(), 6170);
-    assert_eq!(
-        // The comparison is against the schema 12 projection, which is the shape both the
-        // pre-change fixture and this build's recording share (`snapshot::v12`).
-        as_v12(&world.state),
-        expected_payload,
-        "600 ticks of the policy build diverged from this build's recorded continuation"
-    );
-    // The policy build made no extra transaction at all in a version 3 world.
-    assert_eq!(world.charging_diagnostics(), ChargingDiagnostics::default());
 }
 
-/// The same fixture world read the other way: caught **inside** the candidate band, where the
-/// two policies visibly disagree. Version 3 does nothing there; version 4 charges. Same
-/// opening bytes, same tick, one field of difference.
+/// The claim the retired `hunter-v3-charge-window.cubw` fixture carried, rebuilt in code: a
+/// member caught **inside** the candidate band, where the two policies visibly disagree.
+/// Version 3 does nothing there; version 4 charges. Same opening state, same tick, one field
+/// of difference.
+///
+/// The captured world is gone (§15.1) but the mechanism is not a property of that capture:
+/// what it needs is a live member with reserve to burn and a battery strictly between the
+/// world's own `oxidation_threshold` and the candidate's, which is stated here directly.
 #[test]
-fn the_genuine_window_fixture_separates_the_two_policies() {
-    let bytes = std::fs::read(fixture("hunter-v3-charge-window.cubw")).expect("the fixture");
-    let (_, state) = decode_snapshot(&bytes).expect("loads");
-    assert_eq!(state.tick, 1400);
-    let reference = state.config.organism.oxidation_threshold;
-    let founder = state.hunters.members[0].id;
-    let o = state.organisms.get(founder).expect("alive");
-    let fraction = o.energy / o.phenotype.energy_max;
+fn a_member_inside_the_band_separates_the_two_policies() {
+    let (mut staged, founder) = founded(PROFILE_VERSION, quiet_config());
+    let reference = staged.config().organism.oxidation_threshold;
+    let fraction = 0.5 * (reference + CHARGE80_OXIDATION_THRESHOLD);
     assert!(
         fraction > reference && fraction < CHARGE80_OXIDATION_THRESHOLD,
-        "the window fixture must sit strictly inside the band: {fraction}"
+        "strictly inside the band: {fraction}"
     );
-    assert!(o.reserve > 0.0);
+    let full = reserve_max(&staged, founder);
+    set_reserve(&mut staged, founder, full);
+    set_energy_fraction(&mut staged, founder, fraction);
+    let state = staged.state;
+    assert!(state.organisms.get(founder).expect("alive").reserve > 0.0);
 
     let run = |version: u32| {
         let mut s = state.clone();
@@ -586,7 +562,10 @@ fn the_genuine_window_fixture_separates_the_two_policies() {
         for _ in 0..100 {
             w.step();
         }
-        (before - w.state.organisms.get(founder).expect("alive").reserve, w.charging_diagnostics())
+        (
+            before - w.state.organisms.get(founder).expect("alive").reserve,
+            w.charging_diagnostics(),
+        )
     };
     let (v3_burn, v3_diag) = run(PROFILE_VERSION);
     let (v4_burn, v4_diag) = run(PROFILE_VERSION_CHARGE80);

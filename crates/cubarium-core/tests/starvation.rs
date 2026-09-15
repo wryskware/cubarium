@@ -331,7 +331,10 @@ fn intake_later_in_the_tick_does_not_pay_this_ticks_bill() {
         // world's own intake diagnostic, not from a cell delta: the settlement happens after
         // movement, so the cell that was grazed is not necessarily the one the body started on.
         let eaten = world.intake_diagnostics().producer_eaten;
-        let assimilated = cfg.organism.assimilation_material * eaten;
+        // Ecology v1 §6.4: a served bite `q` credits the reserve with `η_m · cap_h · q`, not
+        // `η_m · q` — the indigestible share never enters the body at all.
+        let assimilated =
+            cfg.organism.assimilation_material * before.phenotype.cap_foliage * eaten;
         let burned = before.reserve + assimilated - after.reserve;
         (burned, upkeep, eaten)
     }

@@ -14,7 +14,7 @@
 use std::path::PathBuf;
 
 use cubarium_core::care::{CareCommand, CareDose, CareKind, CareTarget, RAIN_DEPTH_TOTAL};
-use cubarium_core::snapshot::{HEADER_FIXED_BYTES, state_hash, v7, v8, v9, v10, v11};
+use cubarium_core::snapshot::{HEADER_FIXED_BYTES, v8, v9, v10, v11};
 use cubarium_core::{
     SCHEMA_V11, SCHEMA_VERSION, World, WorldConfig, decode_snapshot, ecology_hash, encode_snapshot,
 };
@@ -41,6 +41,7 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 }
 
 /// The schema 11 image of a state, re-encoded — what the pre-dose binary would have written.
+#[allow(dead_code)]
 fn as_v11(state: &cubarium_core::WorldState) -> Vec<u8> {
     postcard::to_allocvec(&v11::project(state).expect("a standard world has a schema 11 image"))
         .expect("the projection is encodable")
@@ -51,120 +52,42 @@ fn target(face: Face, u: f64, v: f64) -> CareTarget {
     CareTarget { face: p.face.index() as u8, u: p.u, v: p.v }
 }
 
-// ---------------------------------------------------------------- the genuine fixtures
+// ---------------------------------------- retired migrations, kept as refusals (§15.1)
 
-/// A genuine schema 11 world caught **mid-shower** loads, keeps every care value it had, and
-/// opens its in-flight rain at the standard dose — which is what it was, not a guess. Its own
-/// schema 11 projection is the original payload byte for byte.
+/// **Retired by ecology v1** (`design/ecology-v1-contract.md` §15.1). Three tests lived here,
+/// all resting on genuine pre-dose schema 11 artifacts: the mid-shower world migrating at the
+/// standard dose, its 600-tick continuation, and the same for a world carrying a real hunter
+/// trial. Wrysk's standing rule of 2026-09-15 is that worlds always restart fresh and are
+/// never migrated, so schema 16 refuses schema 11 by name. The artifacts cannot be loaded and
+/// this build cannot produce a schema 11 world to re-anchor against, so the continuations are
+/// retired rather than re-recorded; the fixture files are kept and the provenance note records
+/// it.
+///
+/// What is still checkable on the real recorded bytes is the refusal — and it is checked
+/// against each fixture's **own** hash, so a silently substituted file fails here.
 #[test]
-fn the_genuine_pre_dose_shower_migrates_at_the_standard_dose() {
-    let bytes = std::fs::read(fixture("care-v11-shower-360.cubw")).expect("the fixture is committed");
-    assert_eq!(fnv1a(payload(&bytes)), 0x239b_a63f_523d_93ab, "the provenance's own hash");
-
-    let (meta, state) = decode_snapshot(&bytes).expect("a genuine schema 11 snapshot loads");
-    assert_eq!(meta.schema, SCHEMA_V11, "the header reports what was read, not what we write");
-    assert_eq!(meta.build_id, "pre-dose-fixture");
-    assert_ne!(SCHEMA_VERSION, SCHEMA_V11);
-    assert_eq!(state.tick, 360);
-
-    // The care history the old build actually accumulated, not a zeroed extension.
-    assert_eq!(state.care.admitted_seq, 3);
-    assert!(state.care.feed_material_in > 0.0 && state.care.clean_material_out > 0.0);
-    assert!(state.care.rain_depth_in > 0.0, "60 of the shower's samples have already landed");
-
-    // The shower itself: unfinished, and standard.
-    let shower = &state.care.showers[0];
-    assert_eq!((shower.seq, shower.apply_after_tick, shower.delivered), (3, 300, 60));
-    assert_eq!(shower.dose_permille, CareDose::STANDARD_PERMILLE);
-    assert!(shower.dose().is_standard());
-    assert_eq!(shower.dose().scale(RAIN_DEPTH_TOTAL), RAIN_DEPTH_TOTAL, "the identity branch");
-
-    // And the migration is lossless in both directions.
-    assert_eq!(as_v11(&state), payload(&bytes), "re-encoding the projection is not the original");
-    assert_ne!(state_hash(&state), fnv1a(payload(&bytes)), "the dose is inside the new full hash");
-}
-
-/// The claim this whole package rests on: a schema 12 build resuming a pre-dose world at the
-/// standard dose produces the pre-dose binary's next 600 ticks **byte for byte** — including
-/// the 60 remaining samples of a shower admitted before the dose existed.
-#[test]
-fn a_standard_dose_reproduces_the_pre_dose_binarys_next_600_ticks() {
-    let bytes = std::fs::read(fixture("care-v11-shower-360.cubw")).expect("fixture");
-    let plus600 = std::fs::read(fixture("care-v11-shower-360-plus600.cubw")).expect("fixture");
-    assert_eq!(fnv1a(payload(&plus600)), 0xdc91_056c_8370_e7fa, "the provenance's own hash");
-
-    let (_, state) = decode_snapshot(&bytes).expect("schema 11 loads");
-    let mut world = World::from_state(state).expect("the migrated state is a valid world");
-    world.check_invariants().expect("invariants hold on the migrated world");
-    for _ in 0..600 {
-        world.step();
+fn the_pre_dose_schema_eleven_fixtures_are_refused_by_name() {
+    for (name, hash) in [
+        ("care-v11-shower-360.cubw", Some(0x239b_a63f_523d_93abu64)),
+        ("care-v11-shower-360-plus600.cubw", Some(0xdc91_056c_8370_e7fa)),
+        ("care-v11-shower-360-plus600-r0b.cubw", None),
+        ("care-v11-hunters-200.cubw", Some(0x23f2_87b7_b8fa_ff79)),
+        ("care-v11-hunters-200-plus600.cubw", Some(0xa4fe_bcf3_2cf4_0b8b)),
+        ("care-v11-hunters-200-plus600-r0b.cubw", None),
+    ] {
+        let bytes = std::fs::read(fixture(name)).expect("the fixture is committed");
+        if let Some(h) = hash {
+            assert_eq!(fnv1a(payload(&bytes)), h, "{name}: the provenance's own hash");
+        }
+        let schema = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+        assert!(schema < SCHEMA_VERSION, "{name} is schema {schema}");
+        assert_eq!(
+            decode_snapshot(&bytes),
+            Err(cubarium_core::SnapshotError::UnsupportedSchema(schema)),
+            "{name}: an old world is refused by name, never migrated"
+        );
     }
-    assert_eq!(world.tick(), 960);
-    assert!(world.care().showers.is_empty(), "the migrated shower ran out its 120 samples");
-
-    // R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`) made body rotation a
-    // physical act paid out of the same budget as translation, so this build's tick is
-    // deliberately not the pre-change binary's. The pre-change payload is still read and still
-    // hashed above; the continuation is re-anchored to this build's own recording
-    // (`tests/continuation_fixtures.rs`).
-    let recorded =
-        std::fs::read(fixture("care-v11-shower-360-plus600-r0b.cubw")).expect("fixture");
-    let (_, expected) = decode_snapshot(&recorded).expect("this build's recording loads");
-    assert_ne!(as_v11(&expected), payload(&plus600), "R0a must actually move this world");
-    assert_eq!(
-        as_v11(&world.state),
-        as_v11(&expected),
-        "600 ticks of the dose build diverged from this build's recorded continuation"
-    );
-    // The ecology projection is unmoved too, so a care run stays comparable to a no-care one.
-    assert_eq!(
-        ecology_hash(&world.state),
-        fnv1a(&postcard::to_allocvec(&v7::project(&world.state)).unwrap())
-    );
-}
-
-/// Schema 11's own change was the hunter shape, and [`v11::WorldStateV11`] deliberately borrows
-/// the live [`cubarium_core::HunterState`] rather than freezing a second copy. This is the
-/// guard on that borrow: a genuine schema 11 payload with a **real** trial in it — one founder,
-/// one live member, actual imports — must still load and continue exactly. If the hunter shape
-/// ever changes without being frozen here, this fails instead of misreading a live world.
-#[test]
-fn a_genuine_schema_eleven_hunter_world_migrates_and_continues_exactly() {
-    let bytes = std::fs::read(fixture("care-v11-hunters-200.cubw")).expect("fixture");
-    let plus600 = std::fs::read(fixture("care-v11-hunters-200-plus600.cubw")).expect("fixture");
-    assert_eq!(fnv1a(payload(&bytes)), 0x23f2_87b7_b8fa_ff79, "the provenance's own hash");
-    assert_eq!(fnv1a(payload(&plus600)), 0xa4fe_bcf3_2cf4_0b8b, "the provenance's own hash");
-
-    let (meta, state) = decode_snapshot(&bytes).expect("a genuine schema 11 hunter world loads");
-    assert_eq!(meta.schema, SCHEMA_V11);
-    assert_eq!(state.tick, 200);
-    assert!(state.hunters.active(), "the fixture carries an actual trial, not an empty extension");
-    assert_eq!(state.hunters.members.len(), 1, "one live member");
-    assert!(state.hunters.imported_material() > 0.0 && state.hunters.imported_energy() > 0.0);
-    assert_eq!(state.care.admitted_seq, 1, "and one real care command");
-    assert!(state.care.showers.is_empty());
-    assert_eq!(as_v11(&state), payload(&bytes), "the schema 11 projection is the original payload");
-
-    let mut world = World::from_state(state).expect("valid");
-    world.check_invariants().expect("invariants hold");
-    for _ in 0..600 {
-        world.step();
-    }
-    assert_eq!(world.tick(), 800);
-    // R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`) made body rotation a
-    // physical act paid out of the same budget as translation, so this build's tick is
-    // deliberately not the pre-change binary's. The pre-change payload is still read and still
-    // hashed above; the continuation is re-anchored to this build's own recording
-    // (`tests/continuation_fixtures.rs`).
-    let recorded =
-        std::fs::read(fixture("care-v11-hunters-200-plus600-r0b.cubw")).expect("fixture");
-    let (_, expected) = decode_snapshot(&recorded).expect("this build's recording loads");
-    assert_ne!(as_v11(&expected), payload(&plus600), "R0a must actually move this world");
-    assert_eq!(
-        as_v11(&world.state),
-        as_v11(&expected),
-        "600 ticks with a live hunter diverged from this build's recorded continuation"
-    );
+    assert_eq!(SCHEMA_V11, 11);
 }
 
 /// A schema 11 payload that is not a snapshot of anything is a decode failure, not a panic,

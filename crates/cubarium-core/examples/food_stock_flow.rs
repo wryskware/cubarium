@@ -61,12 +61,12 @@ fn main() {
     println!("# cell is emptied of P/F/D/De so world totals are patch totals.");
     let cfg = fixture_config();
     println!(
-        "# patch cell {:?}  feed_min {}  K_P {}  P_max {}  graze_rate(unit adult) {:.6} m/s",
+        "# patch cell {:?}  feed_min {}  K_P {}  P_max {}  mouth_rate(unit adult) {:.6} m/s",
         patch(),
         cfg.drives.feed_min,
         cfg.organism.intake_half_saturation,
         cfg.producer.max,
-        decode(&Genome::founder(0.5, &cfg.drives), &cfg.organism).graze_rate,
+        decode(&Genome::founder(0.5, &cfg.drives), &cfg.organism).mouth_rate,
     );
 
     let arms = [
@@ -342,7 +342,7 @@ fn run(name: &'static str, consumers: usize, cease: bool) -> Report {
                 if f.d[i] > 0.0 { f.de[i] / f.d[i] } else { 0.0 },
                 diag.producer_growth,
                 diag.producer_eaten,
-                diag.detritus_eaten,
+                diag.litter_eaten + diag.carrion_eaten,
             );
         }
         if tick == TICKS {
@@ -373,11 +373,14 @@ fn run(name: &'static str, consumers: usize, cease: bool) -> Report {
         producer_growth,
         producer_eaten,
         fruit_eaten,
-        detritus_eaten,
+        litter_eaten,
+        carrion_eaten,
         requested,
         request_ticks,
         reserve_saturated_ticks,
+        ..
     } = world.intake_diagnostics();
+    let detritus_eaten = litter_eaten + carrion_eaten;
     Report {
         name,
         consumers,

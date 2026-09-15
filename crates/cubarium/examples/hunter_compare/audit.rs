@@ -17,11 +17,13 @@ impl Inventory {
         let er = s.config.organism.reserve_energy_density;
         Self {
             material: s.fields.total_material()
+                + s.ecology.total_material()
                 + s.organisms.iter().map(|(_, o)| o.material()).sum::<f64>()
                 + s.hunters.gut_material_total(),
-            energy: s.fields.p.iter().sum::<f64>() * s.config.producer.energy_density
+            energy: s.fields.p.iter().sum::<f64>() * s.config.plant.energy_density
                 + s.fields.f.iter().sum::<f64>() * s.config.fruit.energy_density
                 + s.fields.de.iter().sum::<f64>()
+                + s.ecology.stored_energy(s.config.plant.energy_density)
                 + s.organisms
                     .iter()
                     .map(|(_, o)| {

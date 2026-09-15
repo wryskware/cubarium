@@ -24,28 +24,26 @@ pub use v12::{SCHEMA_V12, WorldStateV12};
 pub use v13::{SCHEMA_V13, WorldStateV13};
 pub use v14::{SCHEMA_V14, WorldStateV14};
 
-/// Bumped whenever `WorldState` or any nested type changes shape. Version 8 appends
-/// `WorldState.care`; version 9 appends `WorldState.energy_correction`
-/// (`crate::accounting`); version 10 appends `WorldState.hunters` (`crate::hunter`).
-/// Version 11 changes the *shape* of that extension: the measured capture effector, the
-/// ingestion mouth, the body-scale mapping, and each member's persisted transition origin and
-/// attack episode.
-/// Version 12 changes the shape of `WorldState.care`: an in-flight shower now persists the
-/// `dose_permille` it was admitted with, so a restart delivers the remaining samples of the
-/// amount that was actually asked for
-/// (`design/7_Research/adjustable-care-dose-handoff-2026-09-13.md`).
-/// Version 13 appends ordinary quiet state. Unreleased version 14 appends paid apex-offspring
-/// dormancy and adult apex encounters as sibling extensions, leaving the organism, hunter and
-/// quiet wire shapes unchanged.
+/// Bumped whenever `WorldState` or any nested type changes shape.
 ///
-/// [`SCHEMA_V13`] through [`SCHEMA_V7`] payloads are still accepted through their frozen mirrors.
-/// Schemas 11 and older carry the frozen
-/// pre-dose care shape ([`care_v1`]), whose in-flight showers migrate to the standard dose —
-/// the only dose those builds could deliver. The three older ones also migrate with an empty
-/// hunter extension, and the oldest two with zero corrections as well. [`SCHEMA_V10`] is
-/// accepted only when its extension is empty: an active schema 10 trial is refused by name
-/// rather than reinterpreted in the schema 11 profile shape (see [`v10`]).
-pub const SCHEMA_VERSION: u32 = 15;
+/// **Version 16 is ecology v1** (`design/ecology-v1-contract.md` §15.1) and it is a hard
+/// break. Wrysk's standing rule of 2026-09-15 is that worlds always restart fresh and are
+/// never migrated, so schema 16 **refuses every older snapshot by name**
+/// ([`SnapshotError::UnsupportedSchema`]) rather than synthesising wood, a reserve or a
+/// remains pool for a world that never had them. There is no migration rule, no synthesised
+/// material and no subsidy booking anywhere in this module.
+///
+/// The frozen mirror structs for schemas 7–14 stay in the tree only for the refusal tests
+/// that name their versions, and for [`v7::project`], which [`ecology_hash`] still uses for
+/// the care/no-care comparison. Their `From<WorldStateVn> for WorldState` conversions are
+/// gone: a conversion into the current shape is exactly the migration the rule forbids.
+///
+/// Historical shape notes, kept because the mirrors still encode them: version 8 appends
+/// `care`; 9 appends `energy_correction`; 10 appends `hunters`; 11 reshapes the hunter
+/// extension; 12 reshapes `care` for the persisted shower dose; 13 appends ordinary quiet;
+/// 14 appends apex dormancy and encounters; 15 appends the recurrent extension; 16 appends
+/// [`crate::fields::EcologyV1State`].
+pub const SCHEMA_VERSION: u32 = 16;
 pub const MAGIC: [u8; 4] = *b"CUBW";
 /// Fixed header length: magic 4, schema 4, build-id length 2, then the build id bytes,
 /// then payload length 8 and CRC32 4 (all little-endian).
@@ -124,20 +122,13 @@ where
 }
 
 /// Validate magic, schema, length, CRC, exact decode, then `state.validate()`; every failure is a
-/// distinct error so the loader can report why an older snapshot was tried.
+/// distinct error so the loader can report why a snapshot was refused.
 ///
-/// Eight schemas decode: the current [`SCHEMA_VERSION`]; [`SCHEMA_V13`] through the frozen
-/// [`WorldStateV13`] mirror, which migrates apex dormancy Off; [`SCHEMA_V12`] through the frozen
-/// [`WorldStateV12`] mirror, which migrates ordinary quiet Off; [`SCHEMA_V11`] through
-/// [`WorldStateV11`], whose in-flight showers open at the standard dose; [`SCHEMA_V10`],
-/// **only with an empty hunter extension** (an active schema 10 trial is
-/// [`SnapshotError::Invalid`] with the reason, never silently reinterpreted); [`SCHEMA_V9`]
-/// through the frozen [`WorldStateV9`] mirror with `hunters = HunterState::default()`;
-/// [`SCHEMA_V8`] through [`WorldStateV8`], which adds `energy_correction =
-/// EnergyCorrection::default()`; and [`SCHEMA_V7`] through [`WorldStateV7`], which adds
-/// `care = CareState::default()` as well. Anything else is
-/// [`SnapshotError::UnsupportedSchema`]. `SnapshotMeta.schema` reports what was read, not what
-/// the build writes. Every schema rejects unconsumed payload bytes.
+/// **Exactly one schema decodes: [`SCHEMA_VERSION`].** Every older version — 7 through 15 —
+/// is [`SnapshotError::UnsupportedSchema`] carrying the version it read, so a caller can say
+/// which world it was and that it has to be restarted rather than converted
+/// (`design/ecology-v1-contract.md` §15.1). `SnapshotMeta.schema` still reports what was read.
+/// A schema 16 payload with trailing bytes — a newer shape relabelled 16 — is refused too.
 pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), SnapshotError> {
     let take = |at: usize, n: usize| -> Result<&[u8], SnapshotError> {
         bytes.get(at..at + n).ok_or(SnapshotError::Truncated)
@@ -150,16 +141,7 @@ pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), Snaps
         return Err(SnapshotError::BadMagic);
     }
     let schema = u32::from_le_bytes(take(4, 4)?.try_into().expect("4 bytes"));
-    if schema != SCHEMA_VERSION
-        && schema != SCHEMA_V14
-        && schema != SCHEMA_V13
-        && schema != SCHEMA_V12
-        && schema != SCHEMA_V11
-        && schema != SCHEMA_V10
-        && schema != SCHEMA_V9
-        && schema != SCHEMA_V8
-        && schema != SCHEMA_V7
-    {
+    if schema != SCHEMA_VERSION {
         return Err(SnapshotError::UnsupportedSchema(schema));
     }
     let id_len = u16::from_le_bytes(take(8, 2)?.try_into().expect("2 bytes")) as usize;
@@ -177,18 +159,7 @@ pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), Snaps
     if crc32fast::hash(payload) != crc32 {
         return Err(SnapshotError::BadChecksum);
     }
-    let state: WorldState = match schema {
-        SCHEMA_V7 => WorldState::from(decode_exact::<WorldStateV7>(payload, schema)?),
-        SCHEMA_V8 => WorldState::from(decode_exact::<WorldStateV8>(payload, schema)?),
-        SCHEMA_V9 => WorldState::from(decode_exact::<WorldStateV9>(payload, schema)?),
-        SCHEMA_V10 => v10::migrate(decode_exact::<WorldStateV10>(payload, schema)?)
-            .map_err(SnapshotError::Invalid)?,
-        SCHEMA_V11 => WorldState::from(decode_exact::<WorldStateV11>(payload, schema)?),
-        SCHEMA_V12 => WorldState::from(decode_exact::<WorldStateV12>(payload, schema)?),
-        SCHEMA_V13 => WorldState::from(decode_exact::<WorldStateV13>(payload, schema)?),
-        SCHEMA_V14 => WorldState::from(decode_exact::<WorldStateV14>(payload, schema)?),
-        _ => decode_exact::<WorldState>(payload, schema)?,
-    };
+    let state: WorldState = decode_exact::<WorldState>(payload, schema)?;
     state.validate().map_err(SnapshotError::Invalid)?;
     Ok((
         SnapshotMeta {
@@ -233,6 +204,7 @@ mod tests {
 
     fn state() -> WorldState {
         let config = WorldConfig::default();
+        let habitat_config = config.clone();
         let habitat = Habitat::new(&config.habitat, config.seed);
         let fields = Fields::new(&config, &habitat.light_base, &habitat.moisture_base);
         let weather = Weather::new(&config.weather, config.seed);
@@ -257,6 +229,11 @@ mod tests {
             apex_dormancy: crate::dormancy::ApexDormancyState::default(),
             apex_encounters: crate::encounter::ApexEncounterState::default(),
             neural: crate::neural::NeuralState::default(),
+            ecology: crate::fields::EcologyV1State::new(
+                &habitat_config,
+                &habitat.light_base,
+                &habitat.moisture_base,
+            ),
         }
     }
 
@@ -395,14 +372,13 @@ mod tests {
                 + EMPTY_APEX_DORMANCY
                 + EMPTY_APEX_ENCOUNTERS
                 + EMPTY_NEURAL
+                + ecology_bytes(&s)
         );
 
-        // A schema 9 payload round-trips through the mirror into an identical state, and an
-        // initialized extension is exactly what the projection drops.
-        let back: WorldState = postcard::from_bytes::<WorldStateV9>(&projected)
-            .unwrap()
-            .into();
-        assert_eq!(back, s);
+        // Schema 16 has no way back from the mirror: the `From` conversion is gone
+        // (`design/ecology-v1-contract.md` §15.1) and the frozen shape still decodes only
+        // into itself. What the projection drops is still exactly the extension.
+        postcard::from_bytes::<WorldStateV9>(&projected).expect("the frozen shape still decodes");
         let mut hunted = s.clone();
         hunted.hunters.founder_material_in = 4.0;
         hunted.hunters.captures_total = 3;
@@ -439,6 +415,13 @@ mod tests {
     /// policy vector's length and an empty animal vector's length.
     const EMPTY_NEURAL: usize = 1 + 1 + 1;
 
+    /// Bytes [`crate::fields::EcologyV1State`] appends: five 1,280-cell `f64` vectors and two
+    /// varint counters. Unlike every earlier extension this one is never empty — a world
+    /// either carries these pools or does not load — so it is measured, not counted by hand.
+    fn ecology_bytes(s: &WorldState) -> usize {
+        postcard::to_allocvec(&s.ecology).unwrap().len()
+    }
+
     #[test]
     fn the_schema_eight_projection_is_the_payload_without_the_corrections() {
         let s = state();
@@ -459,14 +442,10 @@ mod tests {
                 + EMPTY_APEX_DORMANCY
                 + EMPTY_APEX_ENCOUNTERS
                 + EMPTY_NEURAL
+                + ecology_bytes(&s)
         );
 
-        // A schema 8 payload round-trips through the mirror into an identical state, and a
-        // nonzero correction is exactly what the projection drops.
-        let back: WorldState = postcard::from_bytes::<WorldStateV8>(&projected)
-            .unwrap()
-            .into();
-        assert_eq!(back, s);
+        postcard::from_bytes::<WorldStateV8>(&projected).expect("the frozen shape still decodes");
         let mut compensated = s.clone();
         compensated.energy_correction.heat_out = -1.5e-9;
         assert_eq!(
@@ -506,6 +485,7 @@ mod tests {
                 + EMPTY_APEX_DORMANCY
                 + EMPTY_APEX_ENCOUNTERS
                 + EMPTY_NEURAL
+                + ecology_bytes(&s)
         );
         assert_eq!(ecology_hash(&s), super::fnv1a(&projected));
         // Care moves `state_hash` and never `ecology_hash`.
@@ -513,11 +493,50 @@ mod tests {
         fed.care.feed_material_in = 1.0;
         assert_ne!(state_hash(&fed), state_hash(&s));
         assert_eq!(ecology_hash(&fed), ecology_hash(&s));
-        // A schema 7 payload round-trips through the mirror into an identical state.
-        let back: WorldState = postcard::from_bytes::<WorldStateV7>(&projected)
-            .unwrap()
-            .into();
-        assert_eq!(back, s);
+        postcard::from_bytes::<WorldStateV7>(&projected).expect("the frozen shape still decodes");
+    }
+
+    /// `design/ecology-v1-contract.md` §15.1 and §13.1 A7: **every** older schema is refused
+    /// by name. Nothing is migrated, nothing is synthesised, and the error carries the
+    /// version that was read so a caller can say which world has to be restarted.
+    #[test]
+    fn every_older_schema_is_refused_by_name() {
+        let bytes = encode_snapshot(&state(), "b");
+        for old in [
+            SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13,
+            SCHEMA_V14, 15,
+        ] {
+            let mut relabelled = bytes.clone();
+            relabelled[4..8].copy_from_slice(&old.to_le_bytes());
+            assert_eq!(
+                decode_snapshot(&relabelled),
+                Err(SnapshotError::UnsupportedSchema(old)),
+                "schema {old} must be refused by name"
+            );
+        }
+        assert_eq!(SCHEMA_VERSION, 16);
+    }
+
+    /// A newer payload relabelled 16 is refused too: the length is the only evidence a
+    /// non-self-describing format offers that reader and writer agreed about the shape.
+    #[test]
+    fn a_relabelled_schema_sixteen_payload_is_refused() {
+        let s = state();
+        let mut payload = postcard::to_allocvec(&s).unwrap();
+        payload.extend_from_slice(&[0u8; 4]);
+        let mut out = Vec::new();
+        out.extend_from_slice(&MAGIC);
+        out.extend_from_slice(&SCHEMA_VERSION.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+        out.extend_from_slice(&crc32fast::hash(&payload).to_le_bytes());
+        out.extend_from_slice(&payload);
+        match decode_snapshot(&out) {
+            Err(SnapshotError::Decode(msg)) => {
+                assert!(msg.contains("trailing byte"), "{msg}");
+            }
+            other => panic!("expected a trailing-bytes refusal, got {other:?}"),
+        }
     }
 
     #[test]

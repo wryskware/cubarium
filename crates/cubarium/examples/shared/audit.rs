@@ -89,15 +89,18 @@ impl WindowAudit {
 
 /// Every unit of material the world is holding: the fields plus every body.
 pub fn material(s: &WorldState) -> f64 {
-    s.fields.total_material() + s.organisms.iter().map(|(_, o)| o.material()).sum::<f64>()
+    s.fields.total_material()
+        + s.ecology.total_material()
+        + s.organisms.iter().map(|(_, o)| o.material()).sum::<f64>()
 }
 
 /// Every unit of chemical energy the world is holding, escrowed offspring included.
 pub fn energy(s: &WorldState) -> f64 {
     let reserve = s.config.organism.reserve_energy_density;
-    s.fields.p.iter().sum::<f64>() * s.config.producer.energy_density
+    s.fields.p.iter().sum::<f64>() * s.config.plant.energy_density
         + s.fields.f.iter().sum::<f64>() * s.config.fruit.energy_density
         + s.fields.de.iter().sum::<f64>()
+        + s.ecology.stored_energy(s.config.plant.energy_density)
         + s.organisms
             .iter()
             .map(|(_, o)| {

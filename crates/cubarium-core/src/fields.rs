@@ -1,4 +1,11 @@
 //! Material fields and their reactions.
+//!
+//! Ecology v1 (`design/ecology-v1-contract.md`) splits the field-reaction phase into the
+//! eight subphases of its §4.0 table. [`Fields`] keeps the pools every earlier schema had
+//! (`N`, `P`, `D`, `De`, `F`, `w`); the pools this milestone adds — living wood `W`, the
+//! plant reserve `Q`, dead wood `Wd` and animal remains `C`/`Ce` — live in
+//! [`EcologyV1State`], a **trailing** extension of `WorldState` rather than a change to the
+//! wire shape of `Fields`. The two are always stepped together.
 
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +37,208 @@ fn dry() -> Vec<f64> {
     vec![0.0; CELL_COUNT]
 }
 
+/// `Q_0` as a fraction of `Q_max` in a cell that starts alive
+/// (`design/ecology-v1-contract.md` §11). Not a knob: §14 fixes [`crate::config::PlantConfig`]
+/// to the fifteen fields it lists, and this number appears once, here.
+pub const INITIAL_RESERVE_FRACTION: f64 = 0.5;
+
+/// Ecology v1's new per-cell pools and its two world counters
+/// (`design/ecology-v1-contract.md` §3.1, §3.3, §14).
+///
+/// Appended to [`crate::world::WorldState`] after every earlier extension, which is what
+/// makes schema 15 a byte-exact prefix of schema 16. Schema 16 refuses every older snapshot
+/// outright (§15.1: worlds always restart fresh, never migrate), so nothing here is ever
+/// synthesised for a world that did not have it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EcologyV1State {
+    /// `W`: living wood (m). Persistent structure; no v1 animal can take it. Its value
+    /// decides the cell's class (§3.1) and carries the foliage cap and the maintenance bill.
+    pub wood: Vec<f64>,
+    /// `Q`: plant reserve (m). Pays the maintenance shortfall, the reflush after
+    /// defoliation, and propagules.
+    pub plant_reserve: Vec<f64>,
+    /// `Wd`: dead wood (m). Decomposes slowly, never falls, is never eaten, and keeps its
+    /// identity: it is not litter.
+    pub dead_wood: Vec<f64>,
+    /// `C`, `Ce`: animal remains and their energy. Bodies, failed gestations and dead
+    /// hunters land here; detrital digesters eat them.
+    pub carrion: Vec<f64>,
+    pub carrion_energy: Vec<f64>,
+    /// Cumulative stands that crossed from alive to dead (§4.7), and cells that crossed
+    /// `W_min` from a propagule (§4.8).
+    pub plant_deaths_total: u64,
+    pub recolonisations_total: u64,
+}
+
+impl Default for EcologyV1State {
+    /// Every pool empty and correctly sized: a bare, wood-free surface.
+    fn default() -> Self {
+        EcologyV1State {
+            wood: dry(),
+            plant_reserve: dry(),
+            dead_wood: dry(),
+            carrion: dry(),
+            carrion_energy: dry(),
+            plant_deaths_total: 0,
+            recolonisations_total: 0,
+        }
+    }
+}
+
+/// A cell's class this tick, decided once from the **pre-tick** wood `W⁻`
+/// (`design/ecology-v1-contract.md` §3.1).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CellClass {
+    /// `W⁻ = 0`: no plant. Litter, fruit and remains may still lie here.
+    #[default]
+    Bare,
+    /// `0 < W⁻ < W_min`: propagule material, frozen. No income, maintenance, growth,
+    /// senescence, dieback or death.
+    Establishing,
+    /// `W⁻ ≥ W_min`: runs §4.1–4.7.
+    Alive,
+}
+
+impl CellClass {
+    pub fn of(wood: f64, alive_min: f64) -> CellClass {
+        if !(wood > 0.0) {
+            CellClass::Bare
+        } else if wood < alive_min {
+            CellClass::Establishing
+        } else {
+            CellClass::Alive
+        }
+    }
+
+    /// Whether a propagule may land here (§4.8: recipients are establishing or bare).
+    pub fn recipient(self) -> bool {
+        self != CellClass::Alive
+    }
+}
+
+/// `W_0` for one cell (`design/ecology-v1-contract.md` §11): `initial_wood · W_max · L₀ · μ₀`,
+/// **set to zero where that is below `W_min`** so a fresh world never starts a cell in the
+/// frozen establishing class. One definition, read by both constructors.
+pub fn initial_wood(cfg: &WorldConfig, light0: f64, moisture0: f64) -> f64 {
+    let pc = &cfg.plant;
+    let w = pc.initial_wood * pc.wood_max * light0.clamp(0.0, 1.0) * moisture0.clamp(0.0, 1.0);
+    if w > 0.0 && w >= pc.alive_min { w } else { 0.0 }
+}
+
+impl EcologyV1State {
+    /// Initial pools per §11: `W_0` from [`initial_wood`], `Q_0 = 0.5 · q_cap · W_0` in the
+    /// cells that start alive, no dead wood and no remains.
+    pub fn new(
+        cfg: &WorldConfig,
+        light0: &[f64; CELL_COUNT],
+        moisture0: &[f64; CELL_COUNT],
+    ) -> EcologyV1State {
+        let wood: Vec<f64> = (0..CELL_COUNT)
+            .map(|i| initial_wood(cfg, light0[i], moisture0[i]))
+            .collect();
+        let plant_reserve = wood
+            .iter()
+            .map(|w| INITIAL_RESERVE_FRACTION * cfg.plant.reserve_cap * w)
+            .collect();
+        EcologyV1State {
+            wood,
+            plant_reserve,
+            dead_wood: dry(),
+            carrion: dry(),
+            carrion_energy: dry(),
+            plant_deaths_total: 0,
+            recolonisations_total: 0,
+        }
+    }
+
+    /// `W + Q + Wd + C`, summed over cells: the material this extension holds, which the
+    /// mass identity of §10 adds to [`Fields::total_material`].
+    pub fn total_material(&self) -> f64 {
+        self.wood.iter().sum::<f64>()
+            + self.plant_reserve.iter().sum::<f64>()
+            + self.dead_wood.iter().sum::<f64>()
+            + self.carrion.iter().sum::<f64>()
+    }
+
+    /// `e_v·(W + Q + Wd) + Ce`: the stored energy of §10 that this extension holds. Foliage
+    /// `e_v·P` stays with [`Fields`].
+    pub fn stored_energy(&self, e_v: f64) -> f64 {
+        e_v * (self.wood.iter().sum::<f64>()
+            + self.plant_reserve.iter().sum::<f64>()
+            + self.dead_wood.iter().sum::<f64>())
+            + self.carrion_energy.iter().sum::<f64>()
+    }
+
+    /// Finite, nonnegative, correctly sized, and `Ce ≤ e_c_max · C`.
+    pub fn check(&self, carrion_energy_cap: f64) -> Result<(), String> {
+        for (name, v) in [
+            ("wood", &self.wood),
+            ("plant_reserve", &self.plant_reserve),
+            ("dead_wood", &self.dead_wood),
+            ("carrion", &self.carrion),
+            ("carrion_energy", &self.carrion_energy),
+        ] {
+            if v.len() != CELL_COUNT {
+                return Err(format!("{name} has {} cells, expected {CELL_COUNT}", v.len()));
+            }
+            for (i, &x) in v.iter().enumerate() {
+                if !x.is_finite() {
+                    return Err(format!("{name}[{i}] is not finite: {x}"));
+                }
+                if x < 0.0 {
+                    return Err(format!("{name}[{i}] is negative: {x}"));
+                }
+            }
+        }
+        for i in 0..CELL_COUNT {
+            let cap = carrion_energy_cap * self.carrion[i] + 1e-9;
+            if self.carrion_energy[i] > cap {
+                return Err(format!(
+                    "carrion_energy[{i}] = {} exceeds e_c_max · C = {}",
+                    self.carrion_energy[i],
+                    carrion_energy_cap * self.carrion[i]
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Reusable per-tick working storage for the cross-cell subphases 3f and 3h. Held by the
+/// world so a 36,000-tick run allocates none of it per tick; never persisted, never hashed.
+#[derive(Clone, Debug)]
+pub struct EcoScratch {
+    /// The pre-tick stocks 3e and 3f both draw on (§5's joint withdrawal budget).
+    pre_d: Vec<f64>,
+    pre_c: Vec<f64>,
+    /// The immutable `X⁵`/`Xe⁵` snapshot 3f falls from.
+    d5: Vec<f64>,
+    de5: Vec<f64>,
+    c5: Vec<f64>,
+    ce5: Vec<f64>,
+    /// Each cell's class this tick, from `W⁻`.
+    class: Vec<CellClass>,
+    /// 3h's immutable donor-budget snapshot and the per-recipient incoming sum.
+    budget: Vec<f64>,
+    incoming: Vec<f64>,
+}
+
+impl Default for EcoScratch {
+    fn default() -> Self {
+        EcoScratch {
+            pre_d: dry(),
+            pre_c: dry(),
+            d5: dry(),
+            de5: dry(),
+            c5: dry(),
+            ce5: dry(),
+            class: vec![CellClass::Bare; CELL_COUNT],
+            budget: dry(),
+            incoming: dry(),
+        }
+    }
+}
+
 /// Energy ledger for one tick's field reactions.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FieldLedger {
@@ -37,22 +246,42 @@ pub struct FieldLedger {
     pub light_in: f64,
     /// Energy dissipated by mortality clamping and decomposition.
     pub heat_out: f64,
-    /// **Gross** producer material grown this tick, summed over cells, before any mortality,
+    /// **Gross** foliage material grown this tick, summed over cells, before any senescence,
     /// ripening or grazing removes it. Transient: returned to the step, never persisted and
     /// never hashed. It exists because production is otherwise only visible as a net change,
     /// and a net change cannot separate a patch that is not growing from one that is growing
     /// and being eaten at the same rate (`crate::world::IntakeDiagnostics`).
     pub producer_growth: f64,
+    /// `Σ A` (§4.2): the material plant income actually took out of `N` this tick, before
+    /// maintenance and construction respiration send most of it back.
+    pub plant_income: f64,
+    /// `Σ unpaid` (§4.3): maintenance that neither income nor reserve could cover, which is
+    /// exactly what 3d turns into dieback.
+    pub plant_maintenance_unpaid: f64,
+    /// `Σ s` (§4.8): reserve material donors actually sent to establishing or bare
+    /// neighbours this tick.
+    pub propagule_sent: f64,
 }
 
 impl Fields {
-    /// Initial fields per the spec: `N = initial`, `P = initial_fraction · P_max · L₀ · W₀`,
-    /// the litter `D = initial_dark · (1 − L₀)` with `De = e_d_max · D` (fully charged)
+    /// Initial fields per `design/ecology-v1-contract.md` §11: `N = initial`,
+    /// `P = initial_fraction · P_cap(W_0)` in cells that start alive and zero elsewhere, the
+    /// litter `D = initial_dark · (1 − L₀)` with `De = e_d_max · D` (fully charged)
     /// (`design/stratified-world.md`: the dark soil starts littered, the lit canopy clean),
     /// `F = 0`, dry.
+    ///
+    /// The wood those cells start with is [`EcologyV1State::new`]'s; both read
+    /// [`initial_wood`], so a cell has foliage exactly when it has a stand to carry it.
     pub fn new(cfg: &WorldConfig, light0: &[f64; CELL_COUNT], moisture0: &[f64; CELL_COUNT]) -> Fields {
         let p = (0..CELL_COUNT)
-            .map(|i| cfg.producer.initial_fraction * cfg.producer.max * light0[i] * moisture0[i])
+            .map(|i| {
+                let w0 = initial_wood(cfg, light0[i], moisture0[i]);
+                if w0 <= 0.0 {
+                    return 0.0;
+                }
+                let p_cap = cfg.producer.max.min(cfg.plant.alpha * w0);
+                cfg.producer.initial_fraction * p_cap
+            })
             .collect();
         let d: Vec<f64> = (0..CELL_COUNT)
             .map(|i| cfg.detritus.initial_dark * (1.0 - light0[i].clamp(0.0, 1.0)))
@@ -68,6 +297,8 @@ impl Fields {
         }
     }
 
+    /// `N + P + D + F`. The ecology v1 pools are [`EcologyV1State::total_material`]; the mass
+    /// identity of §10 is the sum of the two.
     pub fn total_material(&self) -> f64 {
         self.n.iter().sum::<f64>()
             + self.p.iter().sum::<f64>()
@@ -75,128 +306,364 @@ impl Fields {
             + self.f.iter().sum::<f64>()
     }
 
-    /// One tick of reactions, all from pre-tick values, per cell:
-    /// 1. growth `Δ = min(g · L_eff · W_eff · P · (1 − P/P_max) · N/(N + K_N) · drown · dt,
-    ///    f_max · N · dt, N)` (Δ ≥ 0): `N −= Δ`, `P += Δ`, `light_in += e_p · Δ`. The Monod
-    ///    factor `N/(N + K_N)` makes scarce nutrient limit uptake instead of only capping it;
-    ///    `K_N = 0` restores the unsaturated law. Water (`design/water.md`) enters only here:
-    ///    `W_eff = clamp(W + wet_gain · min(w, 1), W_min, 1)` and
-    ///    `drown = max(0, 1 − (w − flood)/flood)` for `w > flood`, else 1, and the algae
-    ///    light floor `L_eff = max(L, algae_light · min(w / algae_depth, 1))` ([`algae_light`]):
-    ///    standing water grows its own mat even in the dark. All three only scale Δ, so
-    ///    conservation is unaffected; ripening (step 4) still uses the sky's `L`.
-    /// 2. mortality `Δ = m_p · P · dt`: `P −= Δ`, `D += Δ`, `De += e_p · Δ`, then if
-    ///    `De > e_d_max · D` the excess goes to `heat_out` and `De` is clamped.
-    /// 3. decomposition `Δ = k_d · D · dt`: `D −= Δ`, `N += Δ`, `De` reduced by the same
-    ///    fraction with the removed energy in `heat_out`.
-    /// 4. fruit (`design/fauna-v2.md` "Fruit"): ripening `ΔF = ripen · P · (P/P_max −
-    ///    fruit_min)⁺ · L · dt` from the pre-tick `P`, never more than the cell still holds
-    ///    after growth and mortality: `P −= ΔF`, `F += ΔF`, `light_in += (e_f − e_p) · ΔF`;
-    ///    drop `ΔD = drop · F · dt`: `F −= ΔD`, `D += ΔD`, `De += e_f · ΔD`, under the same
-    ///    `e_d_max` cap as mortality (excess is heat).
+    /// One tick of field reactions: the eight subphases of `design/ecology-v1-contract.md`
+    /// §4.0, in order, each reading exactly the state its row names.
     ///
-    /// Then, from the values those three steps left, detritus falls: for every cell with a
-    /// downhill neighbour ([`FieldGraph::downhill`]) the fractions `ΔD = fall · dt · D` and
-    /// `ΔDe = fall · dt · De` leave the cell and arrive in that neighbour, every transfer
-    /// read from the same pre-fall snapshot. It is a pure transfer — no ledger entry, no
-    /// heat — and moving the same fraction of `D` and `De` leaves `De ≤ e_d_max · D`
-    /// intact in both cells. `fall · dt ≤ 1` (enforced by `WorldConfig::validate`) keeps
-    /// every cell nonnegative, and `fall = 0` leaves the fields bit-identical.
+    /// - **3a** (alive cells) income, maintenance and growth (§4.1–4.4). Potential income is
+    ///   the old growth law without its logistic term, capped by what the structure can
+    ///   actually hold: `A = min(A_pot, M + (1 + c_g)(D_P + D_W) + D_Q)`. Maintenance is paid
+    ///   from income first and then from reserve; what neither covers is `unpaid` and is
+    ///   carried to 3d. Growth goes to foliage before wood, each paying construction
+    ///   respiration `c_g` into the growing cell's own `N`.
+    /// - **3b** (alive) senescence `m_p · P¹ · dt` into litter, its energy under the `e_d_max`
+    ///   cap with the excess as heat.
+    /// - **3c** (all) ripening and fruit drop, today's rule unchanged.
+    /// - **3d** (alive) dieback `κ · unpaid` into dead wood, then stand death: a cell that
+    ///   falls below `W_min` sends its remaining wood to `Wd` and its foliage and reserve to
+    ///   litter. Dead wood keeps its identity — it is not litter and no v1 animal eats it.
+    /// - **3e** (all) decomposition of litter, remains and dead wood: material to `N`, the
+    ///   stock's energy to heat in the same proportion, nothing ever recharged.
+    /// - **3f** (all) downhill fall of litter and remains. 3e and 3f share **one** withdrawal
+    ///   budget per stock: both draw on the pre-tick material and fall acts only on the
+    ///   portion decomposition left, so `dec + fall ≤ X⁻` at every admitted endpoint.
+    /// - **3g** (all) nutrient diffusion on a snapshot of `N⁵`, unchanged.
+    /// - **3h** propagules: a donor doing well spends reserve on its establishing or bare
+    ///   neighbours, from one immutable snapshot, committed together.
     ///
-    /// Finally `N` diffuses with `cubarium_surface::diffuse` at `diffusion · dt` using
-    /// `scratch`. Never produces negatives; non-finite input is a bug (debug_assert).
-    pub fn react(&mut self, cfg: &WorldConfig, light: &[f64; CELL_COUNT], moisture: &[f64; CELL_COUNT], graph: &FieldGraph, scratch: &mut (ScalarField, ScalarField)) -> FieldLedger {
+    /// Energy is withdrawn from a detrital stock at its **current** density, so a withdrawal
+    /// never changes the density and the caps `De ≤ e_d_max·D`, `Ce ≤ e_c_max·C` survive
+    /// without a re-clamp. Every ratio guards its zero denominator: an empty stock withdraws
+    /// nothing and books no heat.
+    ///
+    /// Never produces negatives; non-finite input is a bug (debug_assert).
+    #[allow(clippy::too_many_arguments)]
+    pub fn react(
+        &mut self,
+        eco: &mut EcologyV1State,
+        cfg: &WorldConfig,
+        light: &[f64; CELL_COUNT],
+        moisture: &[f64; CELL_COUNT],
+        graph: &FieldGraph,
+        scratch: &mut (ScalarField, ScalarField),
+        work: &mut EcoScratch,
+    ) -> FieldLedger {
         debug_assert_eq!(self.n.len(), CELL_COUNT);
         let mut ledger = FieldLedger::default();
         let pc = &cfg.producer;
+        let pl = &cfg.plant;
         let dc = &cfg.detritus;
         let nc = &cfg.nutrient;
         let fc = &cfg.fruit;
+        let e_v = pl.energy_density;
+        let e_f = fc.energy_density;
+        let e_d_max = dc.energy_cap;
+        let build = 1.0 + pl.build;
 
         for i in 0..CELL_COUNT {
-            // Every delta below is a function of the pre-tick values only.
+            // Every delta below is a function of this cell's pre-tick values and of what an
+            // earlier subphase wrote *in this same cell*, exactly as the §4.0 table allows.
             let n0 = self.n[i];
             let p0 = self.p[i];
             let d0 = self.d[i];
             let de0 = self.de[i];
-            debug_assert!(
-                n0.is_finite() && p0.is_finite() && d0.is_finite() && de0.is_finite(),
-                "non-finite field at cell {i}: N={n0} P={p0} D={d0} De={de0}"
-            );
-
-            // 1. Growth: light-driven uptake of free nutrient, capped by the logistic term,
-            //    by the per-second uptake fraction, and by what the cell actually holds.
-            let monod = if n0 > 0.0 { n0 / (n0 + nc.half_saturation) } else { 0.0 };
-            let (wet, drown) = water_factors(self.w[i], moisture[i], cfg);
-            let lit = algae_light(self.w[i], light[i], cfg);
-            let logistic =
-                pc.growth * lit * wet * p0 * (1.0 - p0 / pc.max) * monod * drown * DT;
-            let grow = logistic.min(pc.uptake_max * n0 * DT).min(n0).max(0.0);
-
-            // 2. Mortality: producers fall to detritus, carrying their energy with them.
-            //    The `min` keeps `P` nonnegative even for a per-tick rate above one.
-            let die = (pc.mortality * p0 * DT).clamp(0.0, p0 + grow);
-
-            // 3b. Fruit: rich, lit producers ripen into fruit, and standing fruit drops back
-            //     to detritus. Ripening reads the pre-tick `P` and never takes more than the
-            //     cell holds after growth and mortality; fruit's extra energy density comes
-            //     from light.
             let f0 = self.f[i];
-            let over = if pc.max > 0.0 { (p0 / pc.max - fc.fruit_min).max(0.0) } else { 0.0 };
-            let ripen = (fc.ripen * p0 * over * light[i] * DT).clamp(0.0, (p0 + grow - die).max(0.0));
-            let dropped = (fc.drop * f0 * DT).clamp(0.0, f0);
-            ledger.light_in += (fc.energy_density - pc.energy_density) * ripen;
+            let w0 = eco.wood[i];
+            let q0 = eco.plant_reserve[i];
+            let wd0 = eco.dead_wood[i];
+            let c0 = eco.carrion[i];
+            let ce0 = eco.carrion_energy[i];
+            debug_assert!(
+                n0.is_finite() && p0.is_finite() && d0.is_finite() && de0.is_finite()
+                    && w0.is_finite() && q0.is_finite() && wd0.is_finite() && c0.is_finite(),
+                "non-finite field at cell {i}"
+            );
+            work.pre_d[i] = d0;
+            work.pre_c[i] = c0;
+            let class = CellClass::of(w0, pl.alive_min);
+            work.class[i] = class;
 
-            let d_after_death = d0 + die + dropped;
-            let mut de_after_death = de0 + pc.energy_density * die + fc.energy_density * dropped;
-            let de_cap = dc.energy_cap * d_after_death;
-            if de_after_death > de_cap {
-                ledger.heat_out += de_after_death - de_cap;
-                de_after_death = de_cap;
+            let mut n = n0;
+            let mut p = p0;
+            let mut w = w0;
+            let mut q = q0;
+            let mut d = d0;
+            let mut de = de0;
+            let mut wd = wd0;
+            let mut c = c0;
+            let mut ce = ce0;
+            let mut unpaid = 0.0;
+
+            if class == CellClass::Alive {
+                // --- 3a: income (§4.1), demands (§4.2), maintenance (§4.3), growth (§4.4).
+                let monod = if n0 > 0.0 { n0 / (n0 + nc.half_saturation) } else { 0.0 };
+                let (wet, drown) = water_factors(self.w[i], moisture[i], cfg);
+                let lit = algae_light(self.w[i], light[i], cfg);
+                let a_pot = (pc.growth * lit * wet * p0 * monod * drown * DT)
+                    .min(pc.uptake_max * n0 * DT)
+                    .min(n0)
+                    .max(0.0);
+                let p_cap = pc.max.min(pl.alpha * w0);
+                let maintenance = pl.maintenance * w0 * DT;
+                let demand_p = (p_cap - p0).max(0.0).min(pl.foliage_rate * w0 * DT);
+                let demand_w = (pl.wood_max - w0).max(0.0).min(pl.wood_rate * w0 * DT);
+                let q_max = pl.reserve_cap * w0;
+                let demand_q = (q_max - q0).max(0.0);
+                let a = a_pot.min(maintenance + build * (demand_p + demand_w) + demand_q);
+                n -= a;
+                ledger.light_in += e_v * a;
+                ledger.plant_income += a;
+
+                // 4.3 — maintenance from income first, then reserve; the rest is `unpaid`.
+                let paid_a = a.min(maintenance);
+                let mut rem = a - paid_a;
+                let short = maintenance - paid_a;
+                let paid_q = q0.min(short);
+                q = q0 - paid_q;
+                unpaid = short - paid_q;
+                n += paid_a + paid_q;
+                ledger.heat_out += e_v * (paid_a + paid_q);
+                ledger.plant_maintenance_unpaid += unpaid;
+
+                // 4.4 — foliage before wood, each paying `c_g` into this cell's own `N`.
+                //
+                //     Every `.max(0.0)` below is a rounding guard, not a rule: `build ·
+                //     (x / build)` can exceed `x` by an ulp, and a stock that went one ulp
+                //     negative would fail the world's own nonnegativity invariant. The
+                //     material it forgives is ~1e-22 per cell per tick, twelve orders below
+                //     the 1e-9 the mass identity is audited to.
+                let grow_p_income = (rem / build).min(demand_p).max(0.0);
+                rem = (rem - build * grow_p_income).max(0.0);
+                let grow_p_reserve = (q / build).min(demand_p - grow_p_income).max(0.0);
+                q = (q - build * grow_p_reserve).max(0.0);
+                let grown_p = grow_p_income + grow_p_reserve;
+                p = p0 + grown_p;
+                n += pl.build * grown_p;
+                ledger.heat_out += e_v * pl.build * grown_p;
+                ledger.producer_growth += grown_p;
+
+                let grow_w = (rem / build).min(demand_w).max(0.0);
+                rem = (rem - build * grow_w).max(0.0);
+                w = w0 + grow_w;
+                n += pl.build * grow_w;
+                ledger.heat_out += e_v * pl.build * grow_w;
+
+                let refill_q = rem.min(demand_q).max(0.0);
+                q += refill_q;
+                rem = (rem - refill_q).max(0.0);
+                // Rounding residue only; it must be ~0 whenever `A` bound on the demand sum.
+                n += rem;
+                ledger.heat_out += e_v * rem;
+
+                // --- 3b: senescence (§4.5).
+                let shed = (pc.mortality * p * DT).clamp(0.0, p);
+                p -= shed;
+                d = d0 + shed;
+                let want = de0 + e_v * shed;
+                let cap = e_d_max * d;
+                if want > cap {
+                    ledger.heat_out += want - cap;
+                    de = cap;
+                } else {
+                    de = want;
+                }
             }
 
-            // 3. Decomposition: detritus returns to free nutrient, its stored energy
-            //    leaving as heat in the same proportion as the material removed.
-            let decay = (dc.decomposition * d0 * DT).clamp(0.0, d_after_death);
-            let removed_fraction =
-                if d_after_death > 0.0 { decay / d_after_death } else { 0.0 };
-            let de_removed = de_after_death * removed_fraction;
-            ledger.heat_out += de_removed;
+            // --- 3c: ripening and drop, on every cell, today's rule. Ripening reads the
+            //     pre-tick `P⁻` for its trigger and is capped by what 3b left.
+            let over = if pc.max > 0.0 { (p0 / pc.max - fc.fruit_min).max(0.0) } else { 0.0 };
+            let ripened = (fc.ripen * p0 * over * light[i] * DT).clamp(0.0, p.max(0.0));
+            let dropped = (fc.drop * f0 * DT).clamp(0.0, f0);
+            ledger.light_in += (e_f - e_v) * ripened;
+            p -= ripened;
+            let f_next = f0 + ripened - dropped;
+            d += dropped;
+            let want = de + e_f * dropped;
+            let cap = e_d_max * d;
+            if want > cap {
+                ledger.heat_out += want - cap;
+                de = cap;
+            } else {
+                de = want;
+            }
 
-            ledger.light_in += pc.energy_density * grow;
-            ledger.producer_growth += grow;
-            self.n[i] = n0 - grow + decay;
-            self.p[i] = p0 + grow - die - ripen;
-            self.d[i] = d_after_death - decay;
-            self.de[i] = de_after_death - de_removed;
-            self.f[i] = f0 + ripen - dropped;
+            if class == CellClass::Alive {
+                // --- 3d: dieback (§4.6) then death (§4.7).
+                let died_back = w.min(pl.dieback * unpaid).max(0.0);
+                w -= died_back;
+                wd = wd0 + died_back;
+                if w < pl.alive_min {
+                    wd += w;
+                    let fallen = p + q;
+                    d += fallen;
+                    let room = (e_d_max * d - de).max(0.0);
+                    let want = e_v * fallen;
+                    let kept = want.min(room);
+                    de += kept;
+                    ledger.heat_out += want - kept;
+                    w = 0.0;
+                    p = 0.0;
+                    q = 0.0;
+                    eco.plant_deaths_total += 1;
+                }
+            }
+
+            // --- 3e: decomposition of the three detrital stocks (§5). The *amounts* come
+            //     from the pre-tick stocks, so material deposited above is eligible from the
+            //     next tick; the *energy* leaves at the stock's current density.
+            let dec_d = (dc.decomposition * DT * d0).clamp(0.0, d);
+            if dec_d > 0.0 {
+                let removed = de * (dec_d / d);
+                ledger.heat_out += removed;
+                de -= removed;
+                d -= dec_d;
+                n += dec_d;
+            }
+            let dec_c = (dc.carrion_decomposition * DT * c0).clamp(0.0, c);
+            if dec_c > 0.0 {
+                let removed = ce * (dec_c / c);
+                ledger.heat_out += removed;
+                ce -= removed;
+                c -= dec_c;
+                n += dec_c;
+            }
+            let dec_wd = (dc.wood_decomposition * DT * wd0).clamp(0.0, wd);
+            if dec_wd > 0.0 {
+                ledger.heat_out += e_v * dec_wd;
+                wd -= dec_wd;
+                n += dec_wd;
+            }
+
+            self.n[i] = n;
+            self.p[i] = p;
+            self.d[i] = d;
+            self.de[i] = de;
+            self.f[i] = f_next;
+            eco.wood[i] = w;
+            eco.plant_reserve[i] = q;
+            eco.dead_wood[i] = wd;
+            eco.carrion[i] = c;
+            eco.carrion_energy[i] = ce;
         }
 
-        // Detritus slides downhill. `scratch` holds the pre-fall `D` and `De` so that every
-        // transfer is a function of the values the reaction loop left, never of material
-        // that arrived from an uphill cell in this same pass. Each cell subtracts its own
-        // share exactly once, so the totals move but never change.
+        // --- 3f: litter and remains slide downhill. `work` holds the immutable `X⁵`/`Xe⁵`
+        //     so every transfer is a function of what 3e left, never of material that
+        //     arrived from an uphill cell in this same pass. The withdrawn fraction is
+        //     `fall · dt · (1 − k_X · dt) · X⁻`: the portion of the **pre-tick** stock that
+        //     decomposition did not already take, which is what keeps the two withdrawals
+        //     inside one budget. A pure transfer — no ledger entry, no heat.
         let fall = dc.fall * DT;
         if fall > 0.0 {
-            scratch.0.values.copy_from_slice(&self.d);
-            scratch.1.values.copy_from_slice(&self.de);
+            work.d5.copy_from_slice(&self.d);
+            work.de5.copy_from_slice(&self.de);
+            work.c5.copy_from_slice(&eco.carrion);
+            work.ce5.copy_from_slice(&eco.carrion_energy);
+            let left_d = 1.0 - (dc.decomposition * DT).min(1.0);
+            let left_c = 1.0 - (dc.carrion_decomposition * DT).min(1.0);
             for cell in CellId::all() {
                 let Some(down) = graph.downhill(cell) else { continue };
                 let (here, there) = (cell.index(), down.index());
-                let moved_d = fall * scratch.0.values[here];
-                let moved_de = fall * scratch.1.values[here];
-                self.d[here] -= moved_d;
-                self.de[here] -= moved_de;
-                self.d[there] += moved_d;
-                self.de[there] += moved_de;
+                let out_d = (fall * left_d * work.pre_d[here]).clamp(0.0, work.d5[here]);
+                if out_d > 0.0 {
+                    let out_e = work.de5[here] * (out_d / work.d5[here]);
+                    self.d[here] -= out_d;
+                    self.de[here] -= out_e;
+                    self.d[there] += out_d;
+                    self.de[there] += out_e;
+                }
+                let out_c = (fall * left_c * work.pre_c[here]).clamp(0.0, work.c5[here]);
+                if out_c > 0.0 {
+                    let out_e = work.ce5[here] * (out_c / work.c5[here]);
+                    eco.carrion[here] -= out_c;
+                    eco.carrion_energy[here] -= out_e;
+                    eco.carrion[there] += out_c;
+                    eco.carrion_energy[there] += out_e;
+                }
             }
         }
 
-        // Nutrient diffusion over the cell graph; `diffuse` is conservative and never
-        // pushes flux across the open rim.
+        // --- 3g: nutrient diffusion over the cell graph; `diffuse` is conservative and never
+        //     pushes flux across the open rim.
         scratch.0.values.copy_from_slice(&self.n);
-        diffuse(&mut scratch.0, &mut scratch.1, graph, cfg.nutrient.diffusion * DT);
+        diffuse(&mut scratch.0, &mut scratch.1, graph, nc.diffusion * DT);
         self.n.copy_from_slice(&scratch.0.values[..]);
+
+        // --- 3h: propagules (§4.8). One immutable snapshot of every donor's budget, then
+        //     every transfer committed together, so no donor can be drained by the order its
+        //     neighbours are visited in and no recipient can be credited twice.
+        if pl.propagule_rate > 0.0 {
+            work.budget.fill(0.0);
+            work.incoming.fill(0.0);
+            let mut any = false;
+            for cell in CellId::all() {
+                let j = cell.index();
+                // A donor is alive **after 3d** — a stand that died this tick sends nothing.
+                if work.class[j] != CellClass::Alive || eco.wood[j] < pl.donor_min {
+                    continue;
+                }
+                let floor = pl.donor_reserve_floor * pl.reserve_cap * eco.wood[j];
+                let spare = eco.plant_reserve[j] - floor;
+                if !(spare > 0.0) {
+                    continue;
+                }
+                let recipients = graph
+                    .neighbors(cell)
+                    .iter()
+                    .flatten()
+                    .filter(|n| work.class[n.index()].recipient())
+                    .count();
+                if recipients == 0 {
+                    continue;
+                }
+                let b = spare.min(pl.propagule_rate * DT * recipients as f64);
+                if b > 0.0 {
+                    work.budget[j] = b;
+                    any = true;
+                }
+            }
+            if any {
+                for cell in CellId::all() {
+                    let j = cell.index();
+                    if work.budget[j] <= 0.0 {
+                        continue;
+                    }
+                    let recipients: Vec<usize> = graph
+                        .neighbors(cell)
+                        .iter()
+                        .flatten()
+                        .map(|n| n.index())
+                        .filter(|i| work.class[*i].recipient())
+                        .collect();
+                    debug_assert!(!recipients.is_empty());
+                    let each = work.budget[j] / recipients.len() as f64;
+                    for i in recipients {
+                        work.incoming[i] += each;
+                    }
+                    eco.plant_reserve[j] -= work.budget[j];
+                    ledger.propagule_sent += work.budget[j];
+                }
+                let (w_frac, p_frac, q_frac) = (
+                    pl.propagule_split[0],
+                    pl.propagule_split[1],
+                    pl.propagule_split[2],
+                );
+                for i in 0..CELL_COUNT {
+                    let s = work.incoming[i];
+                    if s <= 0.0 {
+                        continue;
+                    }
+                    let net = s / build;
+                    let crossed_before = eco.wood[i] >= pl.alive_min && eco.wood[i] > 0.0;
+                    eco.wood[i] += w_frac * net;
+                    self.p[i] += p_frac * net;
+                    eco.plant_reserve[i] += q_frac * net;
+                    self.n[i] += pl.build * net;
+                    ledger.heat_out += e_v * pl.build * net;
+                    if !crossed_before && eco.wood[i] >= pl.alive_min && eco.wood[i] > 0.0 {
+                        eco.recolonisations_total += 1;
+                    }
+                }
+            }
+        }
 
         ledger
     }
@@ -271,17 +738,40 @@ mod tests {
         moisture: Box<[f64; CELL_COUNT]>,
         graph: FieldGraph,
         scratch: (ScalarField, ScalarField),
+        work: EcoScratch,
+        /// The ecology v1 pools this harness steps alongside `Fields`. A test that only
+        /// exercises `N`/`P`/`D`/`F` leaves it at the constructor's values.
+        eco: EcologyV1State,
     }
 
     impl Harness {
+        /// **Staging.** Every test in this module predates ecology v1 and is about `N`, `P`,
+        /// `D`, `De`, `F` and water. So the harness gives every cell a mature stand with no
+        /// maintenance bill, no construction respiration and no reserve: `A = min(A_pot,
+        /// (P_cap − P)⁺)`, `ΔP = A`, `ΔN = −A`, which is the pre-ecology-v1 growth law with
+        /// the structural cap in place of the logistic term. `W = 1` with `α = 2` puts
+        /// `P_cap` at `P_max` exactly, so the ceiling is unchanged. Ecology v1's own
+        /// arithmetic — maintenance, reflush, dieback, death, the three decompositions and
+        /// propagules — is tested in `tests/ecology_v1.rs`, not here.
         fn new(cfg: WorldConfig) -> Harness {
+            let mut cfg = cfg;
+            cfg.plant.maintenance = 0.0;
+            cfg.plant.build = 0.0;
+            cfg.plant.reserve_cap = 0.0;
+            cfg.plant.propagule_rate = 0.0;
+            cfg.plant.foliage_rate = 1e6;
             let habitat = Habitat::new(&cfg.habitat, cfg.seed);
+            let mut eco = EcologyV1State::new(&cfg, &habitat.light_base, &habitat.moisture_base);
+            eco.wood.iter_mut().for_each(|w| *w = 1.0);
+            eco.plant_reserve.iter_mut().for_each(|q| *q = 0.0);
             Harness {
                 cfg,
                 light: habitat.light_base.clone(),
                 moisture: habitat.moisture_base.clone(),
                 graph: FieldGraph::new(),
                 scratch: (ScalarField::zeros(), ScalarField::zeros()),
+                work: EcoScratch::default(),
+                eco,
             }
         }
 
@@ -290,14 +780,32 @@ mod tests {
         }
 
         fn react(&mut self, f: &mut Fields) -> FieldLedger {
-            f.react(&self.cfg, &self.light, &self.moisture, &self.graph, &mut self.scratch)
+            f.react(
+                &mut self.eco,
+                &self.cfg,
+                &self.light,
+                &self.moisture,
+                &self.graph,
+                &mut self.scratch,
+                &mut self.work,
+            )
+        }
+
+        /// The whole world's material: the fields plus the ecology v1 pools.
+        fn material(&self, f: &Fields) -> f64 {
+            f.total_material() + self.eco.total_material()
         }
     }
 
-    /// The fields' stored energy: `e_p·P + e_f·F + De` (`design/fauna-v2.md` adds fruit).
-    fn stored_energy(f: &Fields, e_p: f64) -> f64 {
-        let e_f = WorldConfig::default().fruit.energy_density;
-        f.p.iter().map(|&p| e_p * p).sum::<f64>() + f.f.iter().map(|&x| e_f * x).sum::<f64>() + f.de.iter().sum::<f64>()
+    /// The stored energy of contract §10 restricted to the fields:
+    /// `e_v·(P + W + Q + Wd) + e_f·F + De + Ce`.
+    fn stored_energy(h: &Harness, f: &Fields) -> f64 {
+        let e_v = h.cfg.plant.energy_density;
+        let e_f = h.cfg.fruit.energy_density;
+        f.p.iter().map(|&p| e_v * p).sum::<f64>()
+            + f.f.iter().map(|&x| e_f * x).sum::<f64>()
+            + f.de.iter().sum::<f64>()
+            + h.eco.stored_energy(e_v)
     }
 
     #[test]
@@ -343,21 +851,44 @@ mod tests {
         assert_eq!(unlit.p[cell], 0.3);
     }
 
+    /// `design/ecology-v1-contract.md` §11: wood follows light and moisture, foliage follows
+    /// the structure that carries it, and a cell whose wood would start below `W_min` starts
+    /// bare rather than frozen in the establishing class.
     #[test]
-    fn initial_fields_follow_the_spec() {
-        let h = Harness::new(WorldConfig::default());
-        let f = h.fields();
+    fn initial_fields_follow_the_contract() {
+        let cfg = WorldConfig::default();
+        let habitat = Habitat::new(&cfg.habitat, cfg.seed);
+        let f = Fields::new(&cfg, &habitat.light_base, &habitat.moisture_base);
+        let eco = EcologyV1State::new(&cfg, &habitat.light_base, &habitat.moisture_base);
         assert_eq!(f.n.len(), CELL_COUNT);
+        let mut alive = 0;
+        let mut bare = 0;
         for i in 0..CELL_COUNT {
-            assert_eq!(f.n[i], h.cfg.nutrient.initial);
-            let want = h.cfg.producer.initial_fraction * h.cfg.producer.max * h.light[i] * h.moisture[i];
-            assert_eq!(f.p[i], want);
-            let litter = h.cfg.detritus.initial_dark * (1.0 - h.light[i]);
+            let (l, m) = (habitat.light_base[i], habitat.moisture_base[i]);
+            assert_eq!(f.n[i], cfg.nutrient.initial);
+            let want_w = cfg.plant.initial_wood * cfg.plant.wood_max * l * m;
+            if want_w >= cfg.plant.alive_min {
+                alive += 1;
+                assert_eq!(eco.wood[i], want_w);
+                assert_eq!(eco.plant_reserve[i], 0.5 * cfg.plant.reserve_cap * want_w);
+                let p_cap = cfg.producer.max.min(cfg.plant.alpha * want_w);
+                assert_eq!(f.p[i], cfg.producer.initial_fraction * p_cap);
+                assert_eq!(CellClass::of(eco.wood[i], cfg.plant.alive_min), CellClass::Alive);
+            } else {
+                bare += 1;
+                assert_eq!((eco.wood[i], eco.plant_reserve[i], f.p[i]), (0.0, 0.0, 0.0));
+                assert_eq!(CellClass::of(eco.wood[i], cfg.plant.alive_min), CellClass::Bare);
+            }
+            let litter = cfg.detritus.initial_dark * (1.0 - l);
             assert_eq!(f.d[i], litter);
-            assert_eq!(f.de[i], h.cfg.detritus.energy_cap * litter);
+            assert_eq!(f.de[i], cfg.detritus.energy_cap * litter);
             assert_eq!(f.f[i], 0.0);
+            assert_eq!((eco.dead_wood[i], eco.carrion[i], eco.carrion_energy[i]), (0.0, 0.0, 0.0));
         }
-        f.check(h.cfg.detritus.energy_cap).unwrap();
+        assert!(alive > 0 && bare > 0, "the default habitat has both: {alive} alive, {bare} bare");
+        assert_eq!((eco.plant_deaths_total, eco.recolonisations_total), (0, 0));
+        f.check(cfg.detritus.energy_cap).unwrap();
+        eco.check(cfg.detritus.carrion_energy_cap).unwrap();
     }
 
     /// `design/stratified-world.md` mechanism 2: the initial litter follows the dark, and a
@@ -428,18 +959,18 @@ mod tests {
     fn material_is_conserved_every_tick() {
         let mut h = Harness::new(WorldConfig::default());
         let mut f = h.fields();
-        let start = f.total_material();
+        let start = h.material(&f);
         let mut worst = 0.0f64;
         for tick in 0..600 {
-            let before = f.total_material();
+            let before = h.material(&f);
             h.react(&mut f);
-            let after = f.total_material();
+            let after = h.material(&f);
             let rel = (after - before).abs() / before;
             worst = worst.max(rel);
             assert!(rel < 1e-12, "tick {tick}: relative material drift {rel}");
             f.check(h.cfg.detritus.energy_cap).unwrap();
         }
-        let drift = (f.total_material() - start).abs() / start;
+        let drift = (h.material(&f) - start).abs() / start;
         assert!(drift < 1e-12, "600 ticks drifted by {drift} relative");
         println!("worst per-tick relative material drift over 600 ticks: {worst:e}");
         println!("cumulative relative drift: {drift:e}");
@@ -448,13 +979,12 @@ mod tests {
     #[test]
     fn the_energy_ledger_matches_the_change_in_stored_energy() {
         let mut h = Harness::new(WorldConfig::default());
-        let e_p = h.cfg.producer.energy_density;
         let mut f = h.fields();
         let mut worst = 0.0f64;
         for tick in 0..600 {
-            let before = stored_energy(&f, e_p);
+            let before = stored_energy(&h, &f);
             let ledger = h.react(&mut f);
-            let after = stored_energy(&f, e_p);
+            let after = stored_energy(&h, &f);
             let residual = (ledger.light_in - ledger.heat_out) - (after - before);
             worst = worst.max(residual.abs());
             assert!(residual.abs() < 1e-9, "tick {tick}: energy residual {residual}");
@@ -468,7 +998,7 @@ mod tests {
         let mut cfg = WorldConfig::default();
         // Producers with a lot of energy per unit and a low detritus energy cap: the
         // mortality clamp must dump the excess as heat every tick.
-        cfg.producer.energy_density = 20.0;
+        cfg.plant.energy_density = 20.0;
         cfg.producer.mortality = 0.2;
         cfg.detritus.energy_cap = 0.5;
         let mut h = Harness::new(cfg);
@@ -502,14 +1032,15 @@ mod tests {
                 f.p.iter_mut().for_each(|p| *p = p0);
                 f.d.iter_mut().for_each(|d| *d = 0.25);
                 f.de.iter_mut().for_each(|de| *de = 0.25);
-                let start = f.total_material();
+                let start = h.material(&f);
                 for tick in 0..50 {
                     h.react(&mut f);
                     f.check(h.cfg.detritus.energy_cap).unwrap_or_else(|e| {
                         panic!("tick {tick} with uptake {uptake} growth {growth} P {p0}: {e}")
                     });
+                    h.eco.check(h.cfg.detritus.carrion_energy_cap).unwrap();
                 }
-                let drift = (f.total_material() - start).abs() / start.max(1e-12);
+                let drift = (h.material(&f) - start).abs() / start.max(1e-12);
                 assert!(drift < 1e-12, "extreme config drifted {drift}");
             }
         }
@@ -544,11 +1075,11 @@ mod tests {
         f.n.iter_mut().for_each(|n| *n = 0.0);
         f.p.iter_mut().for_each(|p| *p = 0.0);
         f.n[0] = 10.0;
-        let total = f.total_material();
+        let total = h.material(&f);
         for _ in 0..50 {
             h.react(&mut f);
         }
-        assert!((f.total_material() - total).abs() < 1e-12);
+        assert!((h.material(&f) - total).abs() < 1e-12);
         assert!(f.n[0] < 10.0, "the spike should have spread");
         assert!(f.n.iter().filter(|&&x| x > 1e-9).count() > 1);
         f.check(h.cfg.detritus.energy_cap).unwrap();
@@ -592,7 +1123,7 @@ mod tests {
         let mut f = h.fields();
         scatter(&mut f, cap);
         let (d0, de0) = (f.d.iter().sum::<f64>(), f.de.iter().sum::<f64>());
-        let start_material = f.total_material();
+        let start_material = h.material(&f);
         for tick in 0..400 {
             let ledger = h.react(&mut f);
             // A transfer is neither a source nor a sink of energy.
@@ -612,7 +1143,7 @@ mod tests {
             }
             f.check(cap).unwrap();
         }
-        let drift = (f.total_material() - start_material).abs() / start_material;
+        let drift = (h.material(&f) - start_material).abs() / start_material;
         assert!(drift < 1e-12, "400 ticks of falling drifted {drift} relative");
     }
 

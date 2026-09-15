@@ -33,6 +33,10 @@ fn quiet_config() -> WorldConfig {
     cfg.producer.growth = 0.0;
     cfg.producer.mortality = 0.0;
     cfg.producer.initial_fraction = 0.0;
+    // Ecology v1: an empty surface means no **stands**. A cell that keeps wood and a reserve
+    // reflushes foliage out of that reserve whatever the light does, which is not what any
+    // test in this file is about.
+    cfg.plant.initial_wood = 0.0;
     cfg.detritus.decomposition = 0.0;
     cfg.detritus.fall = 0.0;
     cfg.detritus.initial_dark = 0.0;
@@ -52,6 +56,18 @@ fn quiet_config() -> WorldConfig {
 /// [`quiet_config`] plus a habitat that is the same everywhere, so the light and moisture a
 /// formula needs are the two numbers passed in rather than a noise field a test would have
 /// to re-derive.
+/// Stage the plant side so `N → P` is the growth law and nothing else: no maintenance bill, no
+/// construction respiration, no reserve, and a foliage rate far above anything a tick can use.
+/// A test that wants to measure light, moisture or nutrient paints wood into the cells it cares
+/// about; every other cell stays bare.
+fn plain_producer(cfg: &mut WorldConfig) {
+    cfg.plant.maintenance = 0.0;
+    cfg.plant.build = 0.0;
+    cfg.plant.reserve_cap = 0.0;
+    cfg.plant.propagule_rate = 0.0;
+    cfg.plant.foliage_rate = 1e6;
+}
+
 fn flat_habitat(cfg: &mut WorldConfig, light: f64, moisture: f64) {
     cfg.habitat.light_base = light;
     cfg.habitat.light_height_gain = 0.0;
@@ -556,6 +572,7 @@ fn algae_fixture() -> (World, CellId, CellId, CellId) {
     let mut cfg = quiet_config();
     flat_habitat(&mut cfg, 0.0, 0.5);
     cfg.producer.growth = 0.008;
+    plain_producer(&mut cfg);
     let mut world = World::new(cfg).expect("config");
 
     let dry = CellId::new(Face::Front, 2, 2);
@@ -566,6 +583,10 @@ fn algae_fixture() -> (World, CellId, CellId, CellId) {
     for c in [dry, wet, flooded] {
         world.state.fields.n[c.index()] = 0.5;
         world.state.fields.p[c.index()] = 0.3;
+        // A plain stand (`plain_producer` above): enough wood that neither the foliage cap nor
+        // the wood cap binds, and no reserve, so `ΔP = A` is the growth law alone and the only
+        // thing left to measure is what the water does to it.
+        world.state.ecology.wood[c.index()] = 1.0;
     }
     let after: f64 = common::total_material(&world);
     world.state.external_material_in += after - before;
@@ -589,10 +610,16 @@ fn a_dark_wet_cell_grows_producers_at_the_algae_rate() {
     let w = cfg.water.algae_depth;
     let l_eff = (cfg.water.algae_light * (w / cfg.water.algae_depth).min(1.0)).max(0.0);
     let w_eff = (0.5 + cfg.water.wet_gain * w.min(1.0)).clamp(cfg.habitat.moisture_min, 1.0);
-    let want = (cfg.producer.growth * l_eff * w_eff * p * (1.0 - p / cfg.producer.max) * (n / (n + cfg.nutrient.half_saturation)) * DT)
+    // Ecology v1 §4.1–4.2: the growth law is the old one **without** its logistic term, capped
+    // instead by what the structure can hold. `plain_producer` puts that cap far out of reach,
+    // so what is left is exactly the light, moisture and Monod factors this test is about.
+    let want = (cfg.producer.growth * l_eff * w_eff * p * (n / (n + cfg.nutrient.half_saturation)) * DT)
         .min(cfg.producer.uptake_max * n * DT)
         .min(n);
     assert!(want > 0.0, "the fixture must actually grow: Δ = {want}");
+    let structural_cap = cfg.producer.max.min(cfg.plant.alpha * 1.0)
+        .min(cfg.plant.foliage_rate * 1.0 * DT + p);
+    assert!(want < structural_cap - p, "the structural cap must not bind here");
 
     world.step();
 
@@ -668,8 +695,30 @@ fn the_closed_box_holds_with_the_fruit_pool() {
             m - m0
         );
     }
+    // **Ecology v1 changes this to zero.** A fresh world's foliage is set by the structure that
+    // carries it (`P_0 = initial_fraction · min(P_max, α · W_0)`), which opens every cell well
+    // under the `fruit_min · P_max` ripening threshold; 100 s is nowhere near long enough for a
+    // stand to climb there. The closed box is what this test is for, and it is checked on the
+    // default world above; ripening is exercised on a world rich enough to do it.
     let fruit: f64 = world.state.fields.f.iter().sum();
-    assert!(fruit > 0.0, "a default world must ripen some fruit in 100 s, got ΣF = {fruit}");
+    assert_eq!(fruit, 0.0, "a fresh ecology v1 world holds no fruit at 100 s");
+
+    let mut rich = WorldConfig::default();
+    rich.plant.initial_wood = 1.0;
+    rich.producer.initial_fraction = 1.0;
+    let mut world = World::new(rich).expect("config");
+    let m0 = common::total_material(&world);
+    for tick in 1..=2000u32 {
+        world.step();
+        let m = common::total_material(&world);
+        assert!(
+            (m - m0).abs() <= 1e-11 * m0,
+            "tick {tick}: the closed box drifted from {m0} to {m} (Δ = {})",
+            m - m0
+        );
+    }
+    let fruit: f64 = world.state.fields.f.iter().sum();
+    assert!(fruit > 0.0, "a stand rich enough to fruit must ripen some in 100 s, got ΣF = {fruit}");
 }
 
 #[test]
@@ -784,8 +833,12 @@ fn a_frugivore_takes_fruit_before_producer() {
     );
 }
 
+/// Ecology v1 §6.1–6.2 **removes the separate fruit gate**: one foliage machinery digests leaf
+/// and fruit alike, so the question is no longer "is `diet` above 0.5" but "is there a foliage
+/// capability at all". A `diet` below `θ = 0.2` has none and cannot touch fruit; a `diet` above
+/// it can, whatever its value.
 #[test]
-fn an_organism_below_the_fruit_diet_never_reduces_fruit() {
+fn an_organism_without_a_foliage_capability_never_reduces_fruit() {
     let mut base = quiet_config();
     flat_habitat(&mut base, 0.5, 0.5);
     deterministic_steering(&mut base);
@@ -812,8 +865,20 @@ fn an_organism_below_the_fruit_diet_never_reduces_fruit() {
         (f0, world.state.fields.f.iter().sum())
     };
 
+    // Below `θ`: no foliage machinery, so the channel is masked in the world and the fruit is
+    // untouched however hungry the animal is.
+    let (f0_none, f1_none) = run(0.1);
+    assert_eq!(
+        f1_none, f0_none,
+        "a diet-0.1 organism has no foliage capability and moved ΣF from {f0_none} to {f1_none}"
+    );
+
+    // Above `θ` but under the retired fruit gate: it eats fruit now, at its own reduced yield.
     let (f0_low, f1_low) = run(0.3);
-    assert_eq!(f1_low, f0_low, "fruit is only for `diet ≥ 0.5`: a diet-0.3 organism moved ΣF from {f0_low} to {f1_low}");
+    assert!(
+        f1_low < f0_low - 1e-9,
+        "a diet-0.3 organism digests fruit too: ΣF went {f0_low} → {f1_low}"
+    );
 
     let (f0_high, f1_high) = run(0.7);
     assert!(f1_high < f0_high - 1e-9, "a diet-0.7 organism must eat fruit: ΣF went {f0_high} → {f1_high}");

@@ -15,7 +15,9 @@ fn arena() -> CellId {
     CellId::new(Face::Front, 10, 10)
 }
 
-/// Strip every field of food, then put `producer` into the arena cell only.
+/// Strip every field of food — ecology v1's stands and remains included, so no cell can
+/// reflush foliage out of a reserve between the strip and the settlement — then put `producer`
+/// into the arena cell only.
 fn only_food_in_the_arena(world: &mut World, producer: f64) {
     for v in world.state.fields.p.iter_mut() {
         *v = 0.0;
@@ -24,6 +26,17 @@ fn only_food_in_the_arena(world: &mut World, producer: f64) {
         *v = 0.0;
     }
     for v in world.state.fields.de.iter_mut() {
+        *v = 0.0;
+    }
+    let eco = &mut world.state.ecology;
+    for v in eco
+        .wood
+        .iter_mut()
+        .chain(eco.plant_reserve.iter_mut())
+        .chain(eco.dead_wood.iter_mut())
+        .chain(eco.carrion.iter_mut())
+        .chain(eco.carrion_energy.iter_mut())
+    {
         *v = 0.0;
     }
     world.state.fields.p[arena().index()] = producer;
@@ -100,20 +113,30 @@ fn contested_producer_is_split_in_equal_proportion() {
         material_after - material_before
     );
 
-    // Grazing stores `η_m · q` in the reserve, so the material actually eaten is the sum of
-    // the gains divided by `η_m`, and it must equal the producer the cell held when
-    // settlement ran. Field reactions run earlier in the tick (tick order steps 3 and 7), so
-    // that figure is `available` moved by at most one tick of growth and mortality.
+    // Ecology v1 §6.4: a served bite `q` leaves the stock whole; the reserve is credited with
+    // `η_m · cap_h · q` and the rest is energy-free feces. So the material actually eaten is
+    // the sum of the gains divided by `η_m · cap_h`, and it must equal the producer the cell
+    // held when settlement ran. The arena cell is bare of wood, so no income and no reflush
+    // can move that figure between the field reactions and the settlement; only senescence can.
     let assimilated: f64 = gains.iter().sum();
     let cfg = world.config();
     let eta = cfg.organism.assimilation_material;
-    let eaten = assimilated / eta;
-    let reaction_bound =
-        (cfg.producer.growth + cfg.producer.mortality) * available * cubarium_core::DT;
+    let cap_h = world
+        .state
+        .organisms
+        .iter()
+        .next()
+        .expect("a founder")
+        .1
+        .phenotype
+        .cap_foliage;
+    assert!(cap_h > 0.0, "the v1 founder digests foliage");
+    let eaten = assimilated / (eta * cap_h);
+    let reaction_bound = cfg.producer.mortality * available * cubarium_core::DT;
     assert!(
         (eaten - available).abs() <= reaction_bound + 1e-12,
         "the three organisms between them ate {eaten:e} of the {available} on offer \
-         (one tick of field reactions can move at most {reaction_bound:e})"
+         (one tick of senescence can move at most {reaction_bound:e})"
     );
 }
 

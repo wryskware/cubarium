@@ -230,41 +230,31 @@ fn depletion_aborts_before_the_same_tick_controller_and_cannot_be_rearmed_by_dra
     assert_eq!(encode_snapshot(&world.state, "astra"), bytes);
 }
 
+/// **Retired by ecology v1** (`design/ecology-v1-contract.md` §15.1). This was a genuine
+/// schema 12 continuation: decode `quiet-v12-{plain,care}-3000.cubw`, step 600 ticks, and
+/// compare the schema 12 projection against the recorded `-plus600-r0b` payload. Schema 16
+/// refuses every older snapshot by name — worlds always restart fresh, never migrate — so the
+/// starting payload can no longer be decoded and the comparison is not re-anchorable from a
+/// schema 12 world. The fixture files are kept and the provenance note records the
+/// retirement; new continuation fixtures, if wanted, are generated from a schema 16 world in
+/// a later assignment.
+///
+/// What is checked here now is the refusal itself, on the real recorded bytes: both the
+/// opening payload and its continuation name schema 12 and are turned away.
 #[test]
-fn genuine_schema12_off_plain_and_care_continue_as_recorded() {
-    // R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`) made body rotation a
-    // physical act paid out of the same budget as translation, so this build's tick is
-    // deliberately not the pre-quiet binary's and its `-plus600` payload is unreachable. The
-    // migration claim this test makes is untouched — a genuine schema 12 payload decodes, runs
-    // Off, publishes no record and re-projects to schema 12 — so only the continuation oracle
-    // moves, to this build's own recording (`tests/continuation_fixtures.rs`).
-    for (start, end) in [
-        (
-            &include_bytes!("fixtures/quiet-v12-plain-3000.cubw")[..],
-            &include_bytes!("fixtures/quiet-v12-plain-3000-plus600-r0b.cubw")[..],
-        ),
-        (
-            &include_bytes!("fixtures/quiet-v12-care-3000.cubw")[..],
-            &include_bytes!("fixtures/quiet-v12-care-3000-plus600-r0b.cubw")[..],
-        ),
+fn the_schema12_quiet_fixtures_are_refused_by_name() {
+    for (bytes, expect) in [
+        (&include_bytes!("fixtures/quiet-v12-plain-3000.cubw")[..], 12u32),
+        (&include_bytes!("fixtures/quiet-v12-plain-3000-plus600-r0b.cubw")[..], 14),
+        (&include_bytes!("fixtures/quiet-v12-care-3000.cubw")[..], 12),
+        (&include_bytes!("fixtures/quiet-v12-care-3000-plus600-r0b.cubw")[..], 14),
     ] {
-        let (m, s) = decode_snapshot(start).unwrap();
-        assert_eq!(m.schema, 12);
-        assert_eq!(s.quiet.policy, QuietPolicy::Off);
-        let (_, expected) = decode_snapshot(end).unwrap();
-        let mut w = World::from_state(s).unwrap();
-        for _ in 0..600 {
-            w.step();
-        }
+        let schema = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+        assert_eq!(schema, expect, "the recorded continuation was written by an R0b build");
         assert_eq!(
-            postcard::to_allocvec(&cubarium_core::snapshot::v12::project(&w.state).unwrap())
-                .unwrap(),
-            postcard::to_allocvec(&cubarium_core::snapshot::v12::project(&expected).unwrap())
-                .unwrap()
+            decode_snapshot(bytes),
+            Err(cubarium_core::SnapshotError::UnsupportedSchema(schema))
         );
-        assert!(w.drain_quiet_events().is_empty());
-        w.state.quiet.policy = QuietPolicy::PostBirthPauseV1;
-        assert!(cubarium_core::snapshot::v12::project(&w.state).is_none());
     }
 }
 
@@ -355,9 +345,12 @@ fn persisted_pause_mutations_and_hunter_combination_are_refused() {
     assert!(q.validate(state.tick, 0, false, |_| true).is_err());
 }
 
+/// The fixture this used to read is a schema 12 payload and no longer decodes (§15.1), so
+/// the claim is made on a live schema 16 world instead: it is about the *shape* of the
+/// projection API, not about any particular recorded world.
 #[test]
 fn off_ecology_hash_remains_the_bare_legacy_payload_not_an_option_wrapper() {
-    let (_, s) = decode_snapshot(include_bytes!("fixtures/quiet-v12-plain-3000.cubw")).unwrap();
+    let s = breeder().state;
     let legacy = cubarium_core::snapshot::v7::project(&s);
     let bytes = postcard::to_allocvec(&legacy).unwrap();
     let expected = bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {

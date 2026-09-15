@@ -1,105 +1,84 @@
-//! Regenerates the `*-plus600-*.cubw` continuation fixtures.
+//! **Retired.** The `*-plus600-*.cubw` continuation comparisons, and the regenerator that
+//! produced them.
 //!
-//! Milestone R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`) made body rotation
-//! a physical, paid act sharing one budget with translation, and milestone R0b
-//! (`design/handoffs/r0b-opus-2026-09-14.md`) corrected that budget: the capability is the
-//! translation ceiling alone, with no independent rotation allowance added to it. Every
-//! trajectory that contains a body that turns — which is every trajectory — therefore runs
-//! differently again. The `*-plus600.cubw` fixtures were written by release binaries that
-//! predate both changes, and this build cannot reproduce them; the claim they proved is false
-//! now, by design, not by accident. The R0a recordings are superseded the same way and are
-//! not kept: they were this repository's own oracle for one build, not a historical artefact.
+//! What this file used to do: each `*-plus600-r0b` / `-r0d` fixture was this build's own
+//! recording of its start fixture stepped 600 ticks, and the ordinary suite re-derived every
+//! one of them so that a tick that moved unintentionally failed here even if an individual
+//! migration test was skipped.
 //!
-//! Those original fixtures are **kept**: they are genuine artefacts of the builds named in
-//! `tests/fixtures/*-provenance.md`, and every test that used them still asserts their own
-//! payload hashes and still migrates them. What is re-anchored is the *continuation*: each
-//! start fixture is stepped 600 ticks by this build and the result saved beside it, so the
-//! same tests keep guarding the same thing — that nothing moves the tick unintentionally —
-//! against an oracle this build can actually reach.
+//! Why it is gone. Wrysk decided on 2026-09-15 that **worlds always restart fresh and are
+//! never migrated** (`design/ecology-v1-contract.md` §15.1). Schema 16 therefore refuses every
+//! older snapshot by name instead of synthesising wood, a reserve and a remains pool for a
+//! world that never had them. Every start fixture in the set is schema 7 through 12, so none
+//! of them can be loaded, and this build cannot write a schema 7 (or 8, 9, 11, 12) world to
+//! re-anchor the comparison against. The continuation is therefore **retired, not
+//! re-recorded** — re-recording it would need exactly the migration the rule forbids.
 //!
-//! Run deliberately, never in CI:
+//! Nothing is deleted. Every `.cubw` file stays where it is; they are genuine artefacts of the
+//! builds named in `tests/fixtures/*-provenance.md`, each provenance note records this
+//! retirement, and the tests that used to migrate them now assert the refusal on the same
+//! bytes (`tests/care.rs`, `tests/care_dose_migration.rs`, `tests/hunter_migration.rs`,
+//! `tests/quiet_migration.rs`, `tests/astra_quiet_policy.rs`).
 //!
-//! ```text
-//! cargo test -p cubarium-core --test continuation_fixtures -- --ignored --nocapture
-//! ```
-//!
-//! Regenerating is a decision, not a repair. If one of these files needs rewriting, the tick
-//! changed; say why in the commit before running this.
+//! New continuation fixtures, if wanted, are generated from a schema 16 world in a later
+//! assignment. Until then the guard against an unintentional change in the tick is the
+//! determinism and replay coverage in `tests/determinism.rs` and `world::tests`, which build
+//! their own worlds rather than loading someone else's.
 
 use std::path::PathBuf;
 
-use cubarium_core::{World, decode_snapshot, encode_snapshot};
+use cubarium_core::{SCHEMA_VERSION, SnapshotError, decode_snapshot};
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name)
 }
 
-/// `(start, end, ticks the end must carry)`. Every pair is 600 ticks apart, matching the
-/// continuation each test performs.
-const PAIRS: &[(&str, &str, u64)] = &[
-    ("live-v7-55200.cubw", "live-v7-55200-plus600-r0b.cubw", 55_800),
-    ("live-v8-172800.cubw", "live-v8-172800-plus600-r0b.cubw", 173_400),
-    ("pre-hunter-v9-173400.cubw", "pre-hunter-v9-173400-plus600-r0b.cubw", 174_000),
-    ("care-v11-shower-360.cubw", "care-v11-shower-360-plus600-r0b.cubw", 960),
-    ("care-v11-hunters-200.cubw", "care-v11-hunters-200-plus600-r0b.cubw", 800),
-    ("hunter-v3-charge-active.cubw", "hunter-v3-charge-active-plus600-r0d.cubw", 6_170),
-    ("quiet-v12-plain-3000.cubw", "quiet-v12-plain-3000-plus600-r0b.cubw", 147_600),
-    ("quiet-v12-care-3000.cubw", "quiet-v12-care-3000-plus600-r0b.cubw", 147_600),
+/// Every fixture the retired comparisons touched, start and continuation alike.
+const RETIRED: &[&str] = &[
+    "live-v7-55200.cubw",
+    "live-v7-55200-plus600.cubw",
+    "live-v7-55200-plus600-r0b.cubw",
+    "live-v8-172800.cubw",
+    "live-v8-172800-plus600.cubw",
+    "live-v8-172800-plus600-r0b.cubw",
+    "pre-hunter-v9-173400.cubw",
+    "pre-hunter-v9-173400-plus600.cubw",
+    "pre-hunter-v9-173400-plus600-r0b.cubw",
+    "care-v11-shower-360.cubw",
+    "care-v11-shower-360-plus600.cubw",
+    "care-v11-shower-360-plus600-r0b.cubw",
+    "care-v11-hunters-200.cubw",
+    "care-v11-hunters-200-plus600.cubw",
+    "care-v11-hunters-200-plus600-r0b.cubw",
+    "hunter-v3-charge-window.cubw",
+    "hunter-v3-charge-active.cubw",
+    "hunter-v3-charge-active-plus600.cubw",
+    "hunter-v3-charge-active-plus600-r0d.cubw",
+    "quiet-v12-plain-3000.cubw",
+    "quiet-v12-plain-3000-plus600.cubw",
+    "quiet-v12-plain-3000-plus600-r0b.cubw",
+    "quiet-v12-care-3000.cubw",
+    "quiet-v12-care-3000-plus600.cubw",
+    "quiet-v12-care-3000-plus600-r0b.cubw",
 ];
 
-/// The build id every regenerated fixture carries, so a reader can tell at a glance that it is
-/// this milestone's recording and not a release binary's.
-const BUILD_ID: &str = "r0b-motor-envelope";
-
-/// R0d (`design/handoffs/r0d-pace-opus-2026-09-14.md`) re-anchored exactly one of these pairs.
-/// The pace calibration lives in `WorldConfig`, which every fixture carries in its own
-/// snapshot, so seven of the eight trajectories are untouched and keep their R0b recording
-/// byte for byte. The hunter pair moved for a different reason: R0d corrected the pursuit
-/// hold predicate in `world/step.rs`, which is code, not config. Its recording is renamed so
-/// the build id in the file and the milestone in the name agree.
-fn build_id(end: &str) -> &'static str {
-    if end.contains("-r0d") { "r0d-pace-calibration" } else { BUILD_ID }
-}
-
-fn continue_600(start: &str) -> cubarium_core::WorldState {
-    let bytes = std::fs::read(fixture(start)).expect("the start fixture");
-    let (_, state) = decode_snapshot(&bytes).expect("the start fixture decodes");
-    let mut world = World::from_state(state).expect("the migrated state is a valid world");
-    world.check_invariants().expect("invariants hold on the migrated world");
-    for _ in 0..600 {
-        world.step();
-        world.drain_events();
-        world.drain_hunter_events();
-        world.drain_quiet_events();
-    }
-    world.check_invariants().expect("invariants hold after the continuation");
-    world.state
-}
-
+/// The whole set is still on disk, still older than schema 16, and refused by name — one
+/// statement over every fixture, so a file that is quietly removed or replaced with a schema
+/// 16 world fails here.
 #[test]
-#[ignore = "rewrites checked-in fixtures; run only when the tick is meant to have changed"]
-fn regenerate() {
-    for (start, end, tick) in PAIRS {
-        let state = continue_600(start);
-        assert_eq!(state.tick, *tick, "{start}: unexpected end tick");
-        let bytes = encode_snapshot(&state, build_id(end));
-        std::fs::write(fixture(end), &bytes).expect("write the continuation fixture");
-        println!("{end}: {} bytes at tick {}", bytes.len(), state.tick);
-    }
-}
-
-/// The cheap guard the ordinary suite does run: each regenerated fixture is still exactly what
-/// this build produces from its start fixture. It is the same claim the individual migration
-/// tests make, stated once over the whole set, so a fixture that drifts out of date fails here
-/// even if its own test was skipped.
-#[test]
-fn every_regenerated_fixture_is_this_builds_own_continuation() {
-    for (start, end, tick) in PAIRS {
-        let state = continue_600(start);
-        assert_eq!(state.tick, *tick, "{start}: unexpected end tick");
-        let recorded = std::fs::read(fixture(end)).expect("the continuation fixture");
-        let (meta, expected) = decode_snapshot(&recorded).expect("it decodes");
-        assert_eq!(meta.build_id, build_id(end), "{end}: not a milestone recording");
-        assert_eq!(state, expected, "{end} is not what this build produces from {start}");
+fn every_retired_fixture_is_present_and_refused_by_name() {
+    for name in RETIRED {
+        let bytes = std::fs::read(fixture(name))
+            .unwrap_or_else(|e| panic!("{name} must stay in the tree: {e}"));
+        let schema = u32::from_le_bytes(bytes[4..8].try_into().expect("4 bytes"));
+        assert!(
+            schema < SCHEMA_VERSION,
+            "{name} reports schema {schema}; the retired set is pre-{SCHEMA_VERSION} by definition"
+        );
+        assert_eq!(
+            decode_snapshot(&bytes),
+            Err(SnapshotError::UnsupportedSchema(schema)),
+            "{name}: an old world is refused by name, never migrated"
+        );
     }
 }

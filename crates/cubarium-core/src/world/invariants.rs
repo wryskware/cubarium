@@ -28,7 +28,10 @@ impl World {
     /// `external_material_in`.
     pub fn mass_residual(&self) -> f64 {
         let organisms: f64 = self.state.organisms.iter().map(|(_, o)| o.material()).sum();
-        self.state.fields.total_material() + organisms + self.state.hunters.gut_material_total()
+        self.state.fields.total_material()
+            + self.state.ecology.total_material()
+            + organisms
+            + self.state.hunters.gut_material_total()
             - self.state.external_material_in
             - self.state.care.feed_material_in
             + self.state.care.clean_material_out
@@ -42,6 +45,7 @@ impl World {
     pub fn check_invariants(&self) -> Result<(), String> {
         let cfg = &self.state.config;
         self.state.fields.check(cfg.detritus.energy_cap)?;
+        self.state.ecology.check(cfg.detritus.carrion_energy_cap)?;
         // The care ledgers and any shower's progress are runtime invariants too: catching a
         // defect here stops a checkpoint that would not load back. So are the compensated
         // energy ledgers.
@@ -115,12 +119,13 @@ impl World {
 /// own death (`crate::hunter`).
 #[cfg(any(debug_assertions, test))]
 pub(super) fn stored_energy(state: &WorldState) -> f64 {
-    let e_p = state.config.producer.energy_density;
+    let e_v = state.config.plant.energy_density;
     let e_f = state.config.fruit.energy_density;
     let e_r = state.config.organism.reserve_energy_density;
-    let cells: f64 = state.fields.p.iter().map(|p| e_p * p).sum::<f64>()
+    let cells: f64 = state.fields.p.iter().map(|p| e_v * p).sum::<f64>()
         + state.fields.f.iter().map(|f| e_f * f).sum::<f64>()
-        + state.fields.de.iter().sum::<f64>();
+        + state.fields.de.iter().sum::<f64>()
+        + state.ecology.stored_energy(e_v);
     let organisms: f64 = state
         .organisms
         .iter()
@@ -135,11 +140,16 @@ pub(super) fn stored_energy(state: &WorldState) -> f64 {
     cells + organisms + state.hunters.gut_energy_total()
 }
 
-/// Edible detritus `D_eff = D · min(1, ρ / e_r)` with `ρ = De / D` (zero when `D == 0`),
-/// from `design/m2-world-spec.md` "Controller". Detritus too energy-poor to pay for its own
-/// reserve storage is not food: this is the same `min(1, ρ / e_r)` factor that scales
-/// scavenging assimilation, so what an organism sees and what it can digest agree.
-pub(super) fn edible_detritus(detritus: f64, energy: f64, e_r: f64) -> f64 {
+/// The edible portion of one detrital stock: `X_eff = X · min(1, ρ / e_r)` with
+/// `ρ = Xe / X` (zero when `X == 0`), from `design/m2-world-spec.md` "Controller" and
+/// `design/ecology-v1-contract.md` §3.1. Matter too energy-poor to pay for its own reserve
+/// storage is not food: this is the same `min(1, ρ / e_r)` factor that scales scavenging
+/// assimilation, so what an organism sees and what it can digest agree.
+///
+/// Ecology v1 applies it **per stock**: litter and animal remains each have their own
+/// density and their own edible portion, and `D_eff + C_eff` is what a mouth and an
+/// observation both read.
+pub(crate) fn edible_detritus(detritus: f64, energy: f64, e_r: f64) -> f64 {
     if detritus <= 0.0 {
         return 0.0;
     }

@@ -39,6 +39,15 @@ pub struct RenderView {
     pub detritus: Vec<f64>,
     /// Fruit `F` per cell (m), `design/fauna-v2.md` "Fruit".
     pub fruit: Vec<f64>,
+    /// Ecology v1's pools (`design/ecology-v1-contract.md` §3.1). Carried from day one so
+    /// the follow-up presentation task (§12) — persistent living structure, foliage loss and
+    /// recovery on it, and dead wood — needs no core change. **Nothing draws them yet.**
+    pub wood: Vec<f64>,
+    pub plant_reserve: Vec<f64>,
+    pub dead_wood: Vec<f64>,
+    /// Animal remains `C` per cell (m); a presenter with no carcass look may sum it with
+    /// `detritus` until it has one.
+    pub carrion: Vec<f64>,
     /// Surface water depth per cell (d), `design/water.md`.
     pub water: Vec<f64>,
     /// This tick's rain rate per cell (d/s); zero outside the showers.
@@ -62,5 +71,11 @@ pub struct FieldDump {
     pub w: Vec<f64>,
     /// Fruit `F` per cell (m).
     pub f: Vec<f64>,
+    /// Ecology v1's pools, exactly as the world holds them.
+    pub wood: Vec<f64>,
+    pub plant_reserve: Vec<f64>,
+    pub dead_wood: Vec<f64>,
+    pub carrion: Vec<f64>,
+    pub carrion_energy: Vec<f64>,
     pub organisms: Vec<u16>,
 }

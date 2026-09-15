@@ -75,6 +75,10 @@ impl World {
             producer: self.state.fields.p.clone(),
             detritus: self.state.fields.d.clone(),
             fruit: self.state.fields.f.clone(),
+            wood: self.state.ecology.wood.clone(),
+            plant_reserve: self.state.ecology.plant_reserve.clone(),
+            dead_wood: self.state.ecology.dead_wood.clone(),
+            carrion: self.state.ecology.carrion.clone(),
             water: self.state.fields.w.clone(),
             rain: self.rain.to_vec(),
             producer_max: self.state.config.producer.max,
@@ -97,6 +101,7 @@ impl World {
             organisms[cell_of(&o.pos).index()] += 1;
         }
         let fields = &self.state.fields;
+        let eco = &self.state.ecology;
         FieldDump {
             tick: self.state.tick,
             n: fields.n.clone(),
@@ -105,6 +110,11 @@ impl World {
             de: fields.de.clone(),
             w: fields.w.clone(),
             f: fields.f.clone(),
+            wood: eco.wood.clone(),
+            plant_reserve: eco.plant_reserve.clone(),
+            dead_wood: eco.dead_wood.clone(),
+            carrion: eco.carrion.clone(),
+            carrion_energy: eco.carrion_energy.clone(),
             organisms,
         }
     }
@@ -179,6 +189,16 @@ impl World {
                 0.0
             }
         });
+        let eco = &self.state.ecology;
+        let alive_min = self.state.config.plant.alive_min;
+        let (mut bare_cells, mut establishing_cells) = (0u32, 0u32);
+        for &w in &eco.wood {
+            match crate::fields::CellClass::of(w, alive_min) {
+                crate::fields::CellClass::Bare => bare_cells += 1,
+                crate::fields::CellClass::Establishing => establishing_cells += 1,
+                crate::fields::CellClass::Alive => {}
+            }
+        }
         let sample = Telemetry {
             tick: self.state.tick,
             population: self.state.organisms.len() as u32,
@@ -237,6 +257,15 @@ impl World {
             predation_deaths_total: self.state.hunters.predation_deaths_total,
             hunter_births_total: self.state.hunters.hunter_births_total,
             hunter_deaths_total: self.state.hunters.hunter_deaths_total,
+            wood: eco.wood.iter().sum(),
+            plant_reserve: eco.plant_reserve.iter().sum(),
+            dead_wood: eco.dead_wood.iter().sum(),
+            carrion: eco.carrion.iter().sum(),
+            carrion_energy: eco.carrion_energy.iter().sum(),
+            bare_cells,
+            establishing_cells,
+            plant_deaths: eco.plant_deaths_total,
+            recolonisations: eco.recolonisations_total,
             hunter_material_in: self.state.hunters.imported_material(),
             hunter_energy_in: self.state.hunters.imported_energy(),
         };
@@ -284,13 +313,7 @@ impl World {
             (o.phenotype.speed_max / wading).min(bill.affordable_motor(o.energy, dt));
         let radius_px = crate::motor::turn_radius_px(o, None);
         let feedback = self.state.neural.get(id).map_or([0.0, 0.0, 0.0, 0.0, 0.0, 1.0], |a| {
-            a.feedback.channels(
-                o.phenotype.graze_rate,
-                o.phenotype.scavenge_rate,
-                o.phenotype.speed_max,
-                radius_px,
-                dt,
-            )
+            a.feedback.channels(o.phenotype.mouth_rate, o.phenotype.speed_max, radius_px, dt)
         });
         let mut cells = Vec::new();
         let mut bodies = Vec::new();
@@ -301,6 +324,7 @@ impl World {
             cfg,
             cfg.organism.reserve_energy_density,
             &self.state.fields,
+            &self.state.ecology,
             &self.light,
             &self.images,
             &self.sense_rings[here],

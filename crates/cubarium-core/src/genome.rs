@@ -351,11 +351,14 @@ pub struct Phenotype {
     pub lobes: Vec<(f64, f64, f64)>,
     pub extent: f64,
     pub hue: f32,
-    /// `mouth_rate · diet`: the intake rate on producer and fruit.
-    pub graze_rate: f64,
-    /// `mouth_rate · (1 − diet)`: the intake rate on edible detritus.
-    pub scavenge_rate: f64,
-    /// The genome's `diet`, widened, for the steering weights and the intake gates.
+    /// `cap_h = φ(diet)` when `diet ≥ θ`, else 0: the foliage machinery's yield on leaf and
+    /// fruit (`design/ecology-v1-contract.md` §6.1). Zero is the hard exclusion — a bite on
+    /// a masked food is refused, not merely unprofitable.
+    pub cap_foliage: f64,
+    /// `cap_d = φ(1 − diet)` when `1 − diet ≥ θ`, else 0: the detrital machinery's yield on
+    /// litter and remains.
+    pub cap_detrital: f64,
+    /// The genome's `diet`, widened, for the steering weights.
     pub diet: f64,
     /// Preferred embedded height `−1 + 2 · depth`.
     pub h_pref: f64,
@@ -370,8 +373,7 @@ pub struct Phenotype {
 /// `S_adult = size · structure_adult`, `R_max = reserve · size · reserve_max`,
 /// `E_max = energy_max · size`, `v_max = speed · speed_max · size^(−0.25)`,
 /// `mouth_rate = mouth · mouth_rate · size^0.75`, `sense_radius = sense`,
-/// `maintenance = metabolism · maintenance`, `graze_rate = mouth_rate · diet`,
-/// `scavenge_rate = mouth_rate · (1 − diet)`, `h_pref = −1 + 2 · depth`
+/// `maintenance = metabolism · maintenance`, `h_pref = −1 + 2 · depth`
 /// (`design/fauna-v2.md`); lobes: core `(0, 0, 0.9 + 0.5·size)`, head
 /// `(1.6·size, 0, 0.6 + 0.3·size)`, and tail `(−1.4·size, 0, 0.5 + 0.2·size)` when
 /// `speed > 0.6`; the extent is then clamped by scaling offsets down if it exceeds
@@ -405,6 +407,16 @@ pub fn decode(genome: &Genome, cfg: &OrganismConfig) -> Phenotype {
 
     let mouth_rate = f64::from(genome.mouth) * cfg.mouth_rate * size.powf(0.75);
     let diet = f64::from(genome.diet.clamp(0.0, 1.0));
+    // One digestive investment, allocated (`design/ecology-v1-contract.md` §6.1). There is
+    // **one** mouth rate whatever the food; the trade-off is in yield, and it is paid per
+    // bite rather than per genome.
+    let capability = |x: f64| {
+        if x >= cfg.capability_gate && x > 0.0 {
+            x.powf(cfg.capability_exponent)
+        } else {
+            0.0
+        }
+    };
     Phenotype {
         structure_adult: size * cfg.structure_adult,
         reserve_max: f64::from(genome.reserve) * size * cfg.reserve_max,
@@ -416,8 +428,8 @@ pub fn decode(genome: &Genome, cfg: &OrganismConfig) -> Phenotype {
         lobes,
         extent,
         hue: genome.hue,
-        graze_rate: mouth_rate * diet,
-        scavenge_rate: mouth_rate * (1.0 - diet),
+        cap_foliage: capability(diet),
+        cap_detrital: capability(1.0 - diet),
         diet,
         h_pref: -1.0 + 2.0 * f64::from(genome.depth.clamp(0.0, 1.0)),
         swim: f64::from(genome.swim.clamp(0.0, 1.0)),
@@ -661,9 +673,13 @@ mod tests {
         g.form = 3;
         let p = decode(&g, &cfg);
         assert!((p.diet - f64::from(0.25f32)).abs() < 1e-12);
-        assert!((p.graze_rate - p.mouth_rate * f64::from(0.25f32)).abs() < 1e-15);
-        assert!((p.scavenge_rate - p.mouth_rate * (1.0 - f64::from(0.25f32))).abs() < 1e-15);
-        assert!((p.graze_rate + p.scavenge_rate - p.mouth_rate).abs() < 1e-15, "specialization is a trade");
+        // `design/ecology-v1-contract.md` §6.1: one mouth rate whatever the food, and `diet`
+        // allocates the digestive investment. At `diet = 0.25` the foliage share is below
+        // `θ = 0.2`? No — 0.25 clears the gate, and 0.75 clears it too, so this genome is a
+        // (lopsided) generalist and `γ = 1` makes the two yields sum to one.
+        assert!((p.cap_foliage - f64::from(0.25f32)).abs() < 1e-15);
+        assert!((p.cap_detrital - (1.0 - f64::from(0.25f32))).abs() < 1e-15);
+        assert!((p.cap_foliage + p.cap_detrital - 1.0).abs() < 1e-15, "at γ = 1 breadth is free");
         assert_eq!(p.h_pref, 1.0);
         assert_eq!(p.swim, 0.5);
         assert_eq!(p.form, 3);

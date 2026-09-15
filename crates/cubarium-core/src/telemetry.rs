@@ -114,4 +114,31 @@ pub struct Telemetry {
     pub hunter_material_in: f64,
     #[serde(default)]
     pub hunter_energy_in: f64,
+
+    /// Ecology v1 (`design/ecology-v1-contract.md` §14). Every field defaults, so a reader of
+    /// older telemetry is unaffected. A consumer that used to sum `detritus` as "all dead
+    /// matter" now needs `detritus + carrion + dead_wood` (§15.3).
+    ///
+    /// `Σ W`, `Σ Q`, `Σ Wd`, `Σ C` and `Σ Ce` over all cells.
+    #[serde(default)]
+    pub wood: f64,
+    #[serde(default)]
+    pub plant_reserve: f64,
+    #[serde(default)]
+    pub dead_wood: f64,
+    #[serde(default)]
+    pub carrion: f64,
+    #[serde(default)]
+    pub carrion_energy: f64,
+    /// Cells with no wood at all, and cells holding propagule material below `W_min` (§3.1).
+    #[serde(default)]
+    pub bare_cells: u32,
+    #[serde(default)]
+    pub establishing_cells: u32,
+    /// Cumulative since world creation, like `births_total`: stands that died (§4.7) and
+    /// cells that crossed `W_min` from a propagule (§4.8).
+    #[serde(default)]
+    pub plant_deaths: u64,
+    #[serde(default)]
+    pub recolonisations: u64,
 }

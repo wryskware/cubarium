@@ -251,10 +251,17 @@ fn a_resumed_neural_world_agrees_with_an_uninterrupted_one_across_both_phases_an
     }
 }
 
-/// A schema-14 world loads with every organism legacy-controlled and steps identically to one
-/// that never had the extension. No silent replacement, no reset.
+/// **Retired by ecology v1** (`design/ecology-v1-contract.md` §15.1). A schema 14 world used
+/// to load with every organism legacy-controlled and step identically to one that never had
+/// the extension. Worlds always restart fresh and are never migrated (Wrysk, 2026-09-15), so
+/// schema 16 refuses schema 14 by name instead.
+///
+/// The claim underneath — that an empty neural extension changes nothing — is still tested,
+/// by [`a_world_with_no_neural_animal_never_enters_a_neural_code_path`] below and by the
+/// projection check here: a world with no neural animal still has a schema 14 image, and a
+/// world with one does not.
 #[test]
-fn a_schema_fourteen_world_loads_all_legacy_and_steps_identically() {
+fn a_hand_framed_schema_fourteen_payload_is_refused_by_name() {
     let mut reference = World::new(calm(8)).expect("valid");
     for _ in 0..40 {
         reference.step();
@@ -273,27 +280,16 @@ fn a_schema_fourteen_world_loads_all_legacy_and_steps_identically() {
     bytes.extend_from_slice(&crc32fast::hash(&payload).to_le_bytes());
     bytes.extend_from_slice(&payload);
 
-    let (meta, migrated) = decode_snapshot(&bytes).expect("a schema 14 world still loads");
-    assert_eq!(meta.schema, SCHEMA_V14, "the meta reports what was read");
     assert_eq!(
-        migrated.neural,
-        NeuralState::default(),
-        "every organism is legacy-controlled after the migration"
+        decode_snapshot(&bytes),
+        Err(cubarium_core::SnapshotError::UnsupportedSchema(SCHEMA_V14)),
+        "a schema 14 world is refused by name, never migrated"
     );
-    assert_eq!(state_hash(&migrated), state_hash(&reference.state));
-
-    let mut migrated = World::from_state(migrated).expect("valid");
-    for tick in 0..200 {
-        reference.step();
-        reference.drain_events();
-        migrated.step();
-        migrated.drain_events();
-        assert_eq!(
-            state_hash(&reference.state),
-            state_hash(&migrated.state),
-            "the migrated world diverged at tick {tick}"
-        );
-    }
+    // And the projection side of the rule is unchanged: an empty extension still has an old
+    // image, and the payload it drops is exactly the extension.
+    let full = postcard::to_allocvec(&reference.state).expect("encodes");
+    assert_eq!(&full[..payload.len()], &payload[..], "schema 14 is a prefix of schema 16");
+    assert!(full.len() > payload.len(), "and schema 16 appends to it");
 }
 
 /// A legacy world with no neural animal runs the pre-extension tick: the three inert bytes are

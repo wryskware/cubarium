@@ -117,18 +117,18 @@ impl Default for TurnGate {
     }
 }
 
-/// Grazing (producer and fruit) needs at least this much `diet`; scavenging needs at most
-/// `1 − DIET_GATE`.
-pub const DIET_GATE: f64 = 0.05;
-/// Fruit is eaten only by organisms with `diet ≥ FRUIT_DIET`.
-pub const FRUIT_DIET: f64 = 0.5;
+// The pre-ecology-v1 diet gates (`DIET_GATE` 0.05, `FRUIT_DIET` 0.5) are gone. A channel is
+// now open exactly when the body has the machinery for it — `cap_foliage > 0` for leaf and
+// fruit, `cap_detrital > 0` for litter and remains — which is the one hard exclusion of
+// `design/ecology-v1-contract.md` §6.1–6.2 and is identical for legacy and neural control.
 
 /// Normative rules (`design/m2-world-spec.md` "Controller" and `design/fauna-v2.md`
 /// "Controller v2"):
 /// - `h = hunger()`, `m_h += (1 − exp(−dt/τ)) (h − m_h)`.
-/// - food gates: `can_graze` when grazing is on, `diet ≥ 0.05` and `p_here ≥ feed_min`;
-///   `can_fruit` when grazing is on, `diet ≥ 0.5` and `f_here ≥ feed_min`; `can_scavenge`
-///   when scavenging is on, `diet ≤ 0.95` and `d_here ≥ feed_min` (`d_here` is `D_eff`).
+/// - food gates: `can_graze` when grazing is on, `cap_foliage > 0` and `p_here ≥ feed_min`;
+///   `can_fruit` when grazing is on, `cap_foliage > 0` and `f_here ≥ feed_min`;
+///   `can_scavenge` when scavenging is on, `cap_detrital > 0` and `d_here ≥ feed_min`
+///   (`d_here` is `D_eff + C_eff`, the two detrital stocks' edible portions together).
 /// - mode: Resting→Seeking when `m_h > seek_on`; Seeking/Feeding→Resting when `m_h < seek_off`;
 ///   Seeking→Feeding when any food gate holds; Feeding→Seeking when none does.
 /// - turn gate: `k = 1` while Seeking, `k = feed_turn_fraction` while Feeding, `k =
@@ -194,9 +194,9 @@ pub fn decide_quiet(
     // Mode with hysteresis, then the feeding sub-state from what the own cell holds and
     // what this diet can digest.
     let feed_min = f64::from(d.feed_min);
-    let can_graze = grazing && diet >= DIET_GATE && obs.p_here >= feed_min;
-    let can_fruit = grazing && diet >= FRUIT_DIET && obs.f_here >= feed_min;
-    let can_scavenge = scavenging && diet <= 1.0 - DIET_GATE && obs.d_here >= feed_min;
+    let can_graze = grazing && org.phenotype.cap_foliage > 0.0 && obs.p_here >= feed_min;
+    let can_fruit = grazing && org.phenotype.cap_foliage > 0.0 && obs.f_here >= feed_min;
+    let can_scavenge = scavenging && org.phenotype.cap_detrital > 0.0 && obs.d_here >= feed_min;
     let any_food = can_graze || can_fruit || can_scavenge;
     let mut mode = quiet.map_or(org.mode, |q| q.underlying);
     if mode == Mode::Resting {
@@ -384,9 +384,10 @@ mod tests {
             extent: 1.4,
             hue: 0.5,
             // A pure grazer at its preferred height, so the v1 tests read unchanged: the
-            // diet weights on `∇P` are 1 and the depth term is zero.
-            graze_rate: 0.05,
-            scavenge_rate: 0.0,
+            // diet weights on `∇P` are 1 and the depth term is zero. `cap_detrital = 0` is
+            // the exclusion — this body cannot digest litter or remains at all.
+            cap_foliage: 1.0,
+            cap_detrital: 0.0,
             diet: 1.0,
             h_pref: 0.0,
             swim: 0.0,
@@ -446,9 +447,11 @@ mod tests {
 
     #[test]
     fn feeding_requires_food_in_the_own_cell_and_its_mechanism() {
-        // An omnivore (`diet` 0.5) so both channels pass their diet gates.
+        // An omnivore (`diet` 0.5, both capabilities above `θ`) so both channels are open.
         let mut org = organism(Mode::Seeking, 0.0, 2.0, 1.0);
         org.phenotype.diet = 0.5;
+        org.phenotype.cap_foliage = 0.5;
+        org.phenotype.cap_detrital = 0.5;
         let hungry = Observation { p_here: 1.0, ..Observation::default() };
         let d = decide(&org, &hungry, 0, DT, true, true, gate());
         assert_eq!(d.mode, Mode::Feeding);
@@ -467,6 +470,8 @@ mod tests {
         // Feeding falls back to seeking when the cell empties below feed_min.
         let mut feeding = organism(Mode::Feeding, 0.0, 2.0, 1.0);
         feeding.phenotype.diet = 0.5;
+        feeding.phenotype.cap_foliage = 0.5;
+        feeding.phenotype.cap_detrital = 0.5;
         let d = decide(&feeding, &Observation::default(), 0, DT, true, true, gate());
         assert_eq!(d.mode, Mode::Seeking);
     }

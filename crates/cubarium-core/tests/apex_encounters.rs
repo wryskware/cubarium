@@ -3,7 +3,7 @@ use cubarium_core::genome::{Genome, decode};
 use cubarium_core::hunter::{FixedHunterProfile, HunterMember, HunterTarget};
 use cubarium_core::organism::{Mode, Organism, Origin};
 use cubarium_core::rng::Counter;
-use cubarium_core::{DT, World, WorldConfig, WorldState, decode_snapshot, encode_snapshot};
+use cubarium_core::{DT, World, WorldConfig, decode_snapshot, encode_snapshot};
 use cubarium_surface::{Face, SurfacePoint, Vec2};
 
 const A: SurfacePoint = SurfacePoint {
@@ -283,13 +283,14 @@ fn paired_policy_blocks_solitary_reproduction_and_reuses_neither_parent_during_c
     assert!(world.hunters().member(b).unwrap().next_reproduction_tick > world.tick());
 }
 
+/// An Off world still projects onto the frozen schema 13 shape and an enabled one does not.
+/// The migration half of this test is **retired**: schema 16 refuses schema 13 by name
+/// (`design/ecology-v1-contract.md` §15.1), so there is no conversion left to check.
 #[test]
-fn schema_thirteen_migrates_encounters_off_and_enabled_state_has_no_old_projection() {
+fn an_off_world_projects_onto_schema_thirteen_and_an_enabled_one_does_not() {
     let cfg = WorldConfig::default();
     let current = World::new(cfg).unwrap().state;
-    let old = cubarium_core::snapshot::v13::project(&current).expect("off state projects");
-    let migrated = WorldState::from(old);
-    assert_eq!(migrated.apex_encounters, ApexEncounterState::default());
+    assert!(cubarium_core::snapshot::v13::project(&current).is_some());
 
     let enabled = world_with(4, false, 1, 10).state;
     assert!(cubarium_core::snapshot::v13::project(&enabled).is_none());

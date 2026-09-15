@@ -10,7 +10,7 @@ use crate::care::{self, CareState};
 use crate::config::{FounderKind, WorldConfig};
 use crate::dormancy::ApexDormancyState;
 use crate::encounter::ApexEncounterState;
-use crate::fields::Fields;
+use crate::fields::{EcoScratch, EcologyV1State, Fields};
 use crate::genome::{Genome, decode};
 use crate::habitat::{Habitat, Weather};
 use crate::hunter::HunterState;
@@ -39,6 +39,8 @@ impl World {
         let habitat = Habitat::new(&config.habitat, config.seed);
         let weather = Weather::new(&config.weather, config.seed);
         let fields = Fields::new(&config, &habitat.light_base, &habitat.moisture_base);
+        let ecology =
+            EcologyV1State::new(&config, &habitat.light_base, &habitat.moisture_base);
 
         let cap = config.capacity.max_organisms;
         let mut organisms = Slots::with_capacity(cap as usize);
@@ -130,8 +132,9 @@ impl World {
         }
 
         // The residual is measured against the field material present at creation; the
-        // founders arrive from outside and are booked in `external_material_in`.
-        let initial_material = fields.total_material();
+        // founders arrive from outside and are booked in `external_material_in`. Ecology v1's
+        // wood and reserve are field material like any other: seeded, not imported.
+        let initial_material = fields.total_material() + ecology.total_material();
         let state = WorldState {
             config,
             tick: 0,
@@ -153,6 +156,7 @@ impl World {
             apex_dormancy: ApexDormancyState::default(),
             apex_encounters: ApexEncounterState::default(),
             neural: crate::neural::NeuralState::default(),
+            ecology,
         };
         Ok(World::assemble(state, habitat, initial_material))
     }
@@ -187,8 +191,10 @@ impl World {
         // imported `feed_material_in` and exported `clean_material_out` since creation, the
         // hunter extension has imported its founders (and any budget-matched control deposit),
         // and a carried carcass is material that is still in the world.
-        let initial_material =
-            state.fields.total_material() + organism_material + state.hunters.gut_material_total()
+        let initial_material = state.fields.total_material()
+            + state.ecology.total_material()
+            + organism_material
+            + state.hunters.gut_material_total()
                 - state.external_material_in
                 - state.care.feed_material_in
                 + state.care.clean_material_out
@@ -217,6 +223,7 @@ impl World {
             manual_rain: Box::new([0.0; CELL_COUNT]),
             rain_envelope: care::rain_envelope(),
             scratch: (ScalarField::zeros(), ScalarField::zeros()),
+            eco_scratch: EcoScratch::default(),
             water_scratch: ScalarField::zeros(),
             sense_rings: Vec::new(),
             neighbors: NeighborLists::default(),

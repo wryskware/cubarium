@@ -105,6 +105,17 @@ pub struct Layout {
     pub patches: Vec<Patch>,
 }
 
+/// The stand that carries `p` of foliage (`design/ecology-v1-contract.md` §14 "search"):
+/// `W = P/α`, the least wood whose `P_cap = α·W` reaches the painted foliage, and
+/// `Q = q_cap·W`, the reserve that structure holds. A zero-foliage cell is bare.
+fn stand_of(p: f64, cfg: &WorldConfig) -> (f64, f64) {
+    if !(p > 0.0) || cfg.plant.alpha <= 0.0 {
+        return (0.0, 0.0);
+    }
+    let w = p / cfg.plant.alpha;
+    (w, cfg.plant.reserve_cap * w)
+}
+
 impl Layout {
     pub fn face(&self) -> Face {
         Face::Top
@@ -138,10 +149,19 @@ impl Layout {
 
     /// Material painted into the layout, in `m`. Reported so a fixture's inputs are accounted
     /// for rather than assumed.
+    ///
+    /// Ecology v1 (`design/ecology-v1-contract.md` §14, "search"): a painted patch is a live
+    /// **stand**, not a floating leaf, so each cell also carries the wood that could hold its
+    /// foliage (`W = P/α`) and the reserve that structure holds (`Q = q_cap · W`). All three
+    /// are imported material and all three are counted here.
     pub fn painted_material(&self, cfg: &WorldConfig) -> f64 {
         self.route()
             .iter()
-            .map(|c| self.fill_of(*c) * cfg.producer.max)
+            .map(|c| {
+                let p = self.fill_of(*c) * cfg.producer.max;
+                let (w, q) = stand_of(p, cfg);
+                p + w + q
+            })
             .sum()
     }
 
@@ -195,7 +215,8 @@ impl Layout {
         let face = self.face();
         let mut world = World::new(cfg).map_err(|e| format!("layout {}: {e}", self.name))?;
 
-        // 1. Empty the surface, booking the removal as an export.
+        // 1. Empty the surface, booking the removal as an export. Ecology v1's pools go too:
+        //    an unpainted cell is bare ground, with no stand, no dead wood and no remains.
         let mut removed = 0.0;
         for cell in CellId::all() {
             let i = cell.index();
@@ -205,17 +226,34 @@ impl Layout {
             f.f[i] = 0.0;
             f.d[i] = 0.0;
             f.de[i] = 0.0;
+            let e = &mut world.state.ecology;
+            removed += e.wood[i] + e.plant_reserve[i] + e.dead_wood[i] + e.carrion[i];
+            e.wood[i] = 0.0;
+            e.plant_reserve[i] = 0.0;
+            e.dead_wood[i] = 0.0;
+            e.carrion[i] = 0.0;
+            e.carrion_energy[i] = 0.0;
         }
         world.state.external_material_in -= removed;
 
-        // 2. Paint the layout's patches, booking the addition as an import.
-        let p_max = world.state.config.producer.max;
+        // 2. Paint the layout's patches, booking the addition as an import. Each painted
+        //    cell is a live stand: the foliage the layout names, the wood that can carry it
+        //    and the reserve that wood holds (§14 "search"). Without the wood the cell would
+        //    be a dead one whose foliage falls to litter over the episode.
+        let cfg_snapshot = world.state.config.clone();
+        let p_max = cfg_snapshot.producer.max;
         let mut added = 0.0;
         for patch in &self.patches {
             for cell in patch.cells(face) {
                 let i = cell.index();
-                added += patch.fill * p_max - world.state.fields.p[i];
-                world.state.fields.p[i] = patch.fill * p_max;
+                let p = patch.fill * p_max;
+                let (w, q) = stand_of(p, &cfg_snapshot);
+                added += p - world.state.fields.p[i];
+                added += w - world.state.ecology.wood[i];
+                added += q - world.state.ecology.plant_reserve[i];
+                world.state.fields.p[i] = p;
+                world.state.ecology.wood[i] = w;
+                world.state.ecology.plant_reserve[i] = q;
             }
         }
         world.state.external_material_in += added;
@@ -465,14 +503,38 @@ mod tests {
             assert!((o.structure - o.phenotype.structure_adult).abs() < 1e-12, "{}", l.name);
             assert!((o.heading.length() - 1.0).abs() < 1e-12, "{}", l.name);
             // The layout's food is exactly what it declares, and it is all it declares.
-            let painted: f64 = world.state.fields.p.iter().sum();
+            // Ecology v1 (§14 "search"): a painted patch is a live stand, so the imported
+            // material is the foliage **plus** the wood that carries it and that wood's
+            // reserve; `painted_material` counts all three.
+            let eco = &world.state.ecology;
+            let painted: f64 = world.state.fields.p.iter().sum::<f64>()
+                + eco.wood.iter().sum::<f64>()
+                + eco.plant_reserve.iter().sum::<f64>();
             assert!(
                 (painted - l.painted_material(&l.config())).abs() < 1e-9,
                 "{}: painted {painted}",
                 l.name
             );
+            let cfg = l.config();
+            for cell in CellId::all() {
+                let i = cell.index();
+                let p = world.state.fields.p[i];
+                assert!(
+                    (eco.wood[i] - p / cfg.plant.alpha).abs() < 1e-12,
+                    "{}: cell {i} carries {} of wood for {p} of foliage",
+                    l.name,
+                    eco.wood[i]
+                );
+                assert!(
+                    (eco.plant_reserve[i] - cfg.plant.reserve_cap * eco.wood[i]).abs() < 1e-12,
+                    "{}: cell {i} reserve",
+                    l.name
+                );
+            }
             assert!(world.state.fields.f.iter().all(|x| *x == 0.0), "{}", l.name);
             assert!(world.state.fields.d.iter().all(|x| *x == 0.0), "{}", l.name);
+            assert!(eco.dead_wood.iter().all(|x| *x == 0.0), "{}", l.name);
+            assert!(eco.carrion.iter().all(|x| *x == 0.0), "{}", l.name);
             world.check_invariants().unwrap_or_else(|e| panic!("{}: {e}", l.name));
         }
     }

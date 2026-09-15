@@ -17,7 +17,7 @@ use std::path::PathBuf;
 
 use cubarium_core::accounting::{EnergyCorrection, Ledger};
 use cubarium_core::care::{CareCommand, CareKind, CareState, CareTarget, RAIN_TICKS};
-use cubarium_core::snapshot::{state_hash, v7, v8};
+use cubarium_core::snapshot::{state_hash, v7};
 use cubarium_core::world::WorldState;
 use cubarium_core::{
     SCHEMA_V8, SCHEMA_VERSION, SnapshotError, World, WorldConfig, decode_snapshot, ecology_hash,
@@ -32,6 +32,7 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 /// The postcard payload of a snapshot file: everything after the variable-length header.
+#[allow(dead_code)]
 fn payload(bytes: &[u8]) -> &[u8] {
     let id_len = usize::from(u16::from_le_bytes(bytes[8..10].try_into().expect("2 bytes")));
     &bytes[cubarium_core::snapshot::HEADER_FIXED_BYTES + id_len..]
@@ -81,131 +82,49 @@ fn command(seq: u64, tick: u64, kind: CareKind, cell: CellId) -> CareCommand {
 
 // ---------------------------------------------------------------- migration
 
-/// A genuine live schema 8 world loads, keeps its raw totals and its whole care history, and
-/// opens with zero corrections. Its schema 8 projection is the original payload byte for
-/// byte: the migration appends two `f64` and reinterprets nothing.
+// ---------------------------------------- retired migrations, kept as refusals (§15.1)
+
+/// **Retired by ecology v1** (`design/ecology-v1-contract.md` §15.1). Three tests lived here:
+/// the live schema 8 snapshot loading with zero corrections and projecting back byte for
+/// byte, its 600-tick cross-version continuation, and the same opening claim for a migrated
+/// schema 7 world.
+///
+/// Worlds always restart fresh and are never migrated (Wrysk, 2026-09-15), so schema 16
+/// refuses schemas 7 and 8 by name. The artifacts cannot be loaded and this build cannot make
+/// a schema 7 or 8 world to re-anchor against, so the continuations are retired rather than
+/// re-recorded. The fixtures stay in the tree; the refusal is what is checked on their bytes.
+///
+/// The compensation claim itself — that the corrections begin at zero on a fresh world, track
+/// the real flows, survive a restart and are refused when unusable — is unchanged and is
+/// tested below on worlds this build creates.
 #[test]
-fn the_live_schema_eight_snapshot_migrates_with_zero_corrections() {
-    let bytes = std::fs::read(fixture("live-v8-172800.cubw")).expect("the fixture is committed");
-    let (meta, state) = decode_snapshot(&bytes).expect("a genuine schema 8 snapshot loads");
-    assert_eq!(meta.schema, SCHEMA_V8, "the header still reports what was read");
-    assert_ne!(SCHEMA_VERSION, SCHEMA_V8);
-    assert_eq!(state.tick, 172_800);
-    assert_eq!(state.care.admitted_seq, 5, "the fixture carries a real care history");
-    assert!(state.care.feed_material_in > 0.0 || state.care.rain_depth_in > 0.0);
-    assert!(!state.organisms.is_empty(), "the fixture carries a living population");
-
-    // The correction begins here, at zero, and claims no repair of what is already lost.
-    assert_eq!(state.energy_correction, EnergyCorrection::default());
-    assert_eq!(state.light_in_corrected(), state.light_in_total);
-    assert_eq!(state.heat_out_corrected(), state.heat_out_total);
-    assert!(state.light_in_total > 0.0 && state.heat_out_total > 0.0);
-
-    let projected = postcard::to_allocvec(&v8::project(&state).expect("standard care projects"))
-        .expect("encodable");
-    assert_eq!(projected, payload(&bytes), "re-encoding the projection is not the original payload");
-    // The care-era ecology hash is unmoved as well: it reads the schema 7 projection.
-    assert_eq!(ecology_hash(&state), fnv1a(&postcard::to_allocvec(&v7::project(&state)).unwrap()));
-    // The full-state hash is a different hash: it covers the appended corrections.
-    assert_ne!(state_hash(&state), fnv1a(payload(&bytes)));
-
-    let world = World::from_state(state).expect("the migrated state is a valid world");
-    world.check_invariants().expect("invariants hold on the migrated world");
-    assert!(world.mass_residual().abs() < 1e-9, "residual {}", world.mass_residual());
-}
-
-/// The cross-version proof. Both fixtures were produced by the pre-correction schema 8
-/// release binary `c60241f`; stepping the migrated world 600 ticks must land on the second
-/// fixture's payload exactly, care ledgers and legacy raw counters included. If this fails,
-/// the correction changed an operation somewhere in the tick and nothing else in this file
-/// means anything.
-#[test]
-fn zero_corrections_reproduce_the_pre_correction_binarys_next_600_ticks() {
-    let start = std::fs::read(fixture("live-v8-172800.cubw")).expect("fixture");
-    let plus600 = std::fs::read(fixture("live-v8-172800-plus600.cubw")).expect("fixture");
-    let (_, state) = decode_snapshot(&start).expect("schema 8 loads");
-    let (meta, pre_change) = decode_snapshot(&plus600).expect("schema 8 loads");
-    assert_eq!(meta.schema, SCHEMA_V8);
-    assert_eq!(pre_change.tick, 173_400);
-    assert_eq!(pre_change.care.admitted_seq, 5);
-    // R0a (`design/handoffs/r0a-movement-foundation-2026-09-14.md`) made body rotation a
-    // physical act paid out of the same budget as translation, so this build's tick is
-    // deliberately not the pre-change binary's. The pre-change payload is still decoded and
-    // still proved different; the continuation is re-anchored to this build's own recording
-    // (`tests/continuation_fixtures.rs`).
-    let recorded = std::fs::read(fixture("live-v8-172800-plus600-r0b.cubw")).expect("fixture");
-    let (_, expected) = decode_snapshot(&recorded).expect("this build's recording loads");
-    let expected_payload =
-        postcard::to_allocvec(&v8::project(&expected).expect("standard care projects"))
-            .expect("encodable");
-    assert_ne!(expected_payload, payload(&plus600), "R0a must actually move this world");
-
-    let mut world = World::from_state(state).expect("valid");
-    let opening = world.energy_ledgers();
-    for _ in 0..600 {
-        world.step();
+fn the_pre_correction_fixtures_are_refused_by_name() {
+    for name in [
+        "live-v7-55200.cubw",
+        "live-v8-172800.cubw",
+        "live-v8-172800-plus600.cubw",
+        "live-v8-172800-plus600-r0b.cubw",
+    ] {
+        let bytes = std::fs::read(fixture(name)).expect("the fixture is committed");
+        let schema = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+        assert!(schema < SCHEMA_VERSION, "{name} is schema {schema}");
+        assert_eq!(
+            decode_snapshot(&bytes),
+            Err(cubarium_core::SnapshotError::UnsupportedSchema(schema)),
+            "{name}: an old world is refused by name, never migrated"
+        );
     }
-    assert_eq!(world.tick(), 173_400);
-
-    let projected = postcard::to_allocvec(&v8::project(&world.state).expect("standard care projects"))
-        .expect("encodable");
-    assert_eq!(
-        projected,
-        expected_payload,
-        "600 ticks of the corrected build diverged from this build's recorded continuation"
-    );
-    // Which covers every one of them, but name the comparisons the handoff asks for so a
-    // failure says which part of the world moved.
-    assert_eq!(world.state.fields, expected.fields, "field stocks");
-    assert_eq!(world.state.organisms, expected.organisms, "organisms");
-    assert_eq!(world.state.weather, expected.weather, "weather");
-    assert_eq!(world.state.config, expected.config, "config");
-    assert_eq!(world.state.care, expected.care, "care ledgers and shower progress");
-    assert_eq!(world.state.light_in_total, expected.light_in_total, "raw light_in_total");
-    assert_eq!(world.state.heat_out_total, expected.heat_out_total, "raw heat_out_total");
-    assert_eq!(world.state.rain_in_total, expected.rain_in_total);
-    assert_eq!(world.state.evap_out_total, expected.evap_out_total);
-    assert_eq!(world.state.births_total, expected.births_total);
-    assert_eq!(world.state.deaths_total, expected.deaths_total);
-    assert_eq!(ecology_hash(&world.state), ecology_hash(&expected), "legacy ecology projection");
-    let sample = world.telemetry();
-    assert_eq!(sample.ecology_hash, ecology_hash(&expected));
-
-    // The corrections are the only thing that moved, and they did move: 600 ticks of heat
-    // payments are not free of rounding. The schema 8 projection above carries none of them and
-    // still matched, which is the claim — corrections live in the full state, not in the
-    // payload a pre-correction build could read.
-    let closing = world.energy_ledgers();
-    assert_eq!(
-        pre_change.energy_correction,
-        EnergyCorrection::default(),
-        "the schema 8 fixture has none"
-    );
-    assert_ne!(world.state.energy_correction, EnergyCorrection::default(), "nothing was compensated");
-    assert_ne!(
-        state_hash(&world.state),
-        fnv1a(&projected),
-        "corrections are in the full hash and not in the schema 8 payload"
-    );
-    println!(
-        "600 ticks from tick 172800: light correction {:e}, heat correction {:e}, \
-         corrected net {:.17e} vs raw net {:.17e}",
-        closing.light_in.correction,
-        closing.heat_out.correction,
-        closing.net_since(opening),
-        (closing.light_in.raw - opening.light_in.raw) - (closing.heat_out.raw - opening.heat_out.raw),
-    );
+    assert_eq!(SCHEMA_V8, 8);
 }
 
-/// A migrated schema 7 world is compensated from its load too, and its schema 7 projection
-/// keeps hashing as the pre-care build's `state_hash` did.
+/// A fresh world opens with zero corrections and is compensated from there, and its schema 7
+/// projection is what `ecology_hash` hashes. This is the part of the retired pair that does
+/// not need an old artifact.
 #[test]
-fn a_migrated_schema_seven_world_also_opens_at_zero_and_is_compensated_from_there() {
-    let bytes = std::fs::read(fixture("live-v7-55200.cubw")).expect("fixture");
-    let (_, state) = decode_snapshot(&bytes).expect("schema 7 loads");
-    assert_eq!(state.care, CareState::default());
-    assert_eq!(state.energy_correction, EnergyCorrection::default());
-    let mut world = World::from_state(state).expect("valid");
+fn a_fresh_world_opens_at_zero_and_is_compensated_from_there() {
+    let mut world = World::new(WorldConfig::default()).expect("valid");
+    assert_eq!(world.state.care, CareState::default());
+    assert_eq!(world.state.energy_correction, EnergyCorrection::default());
     for _ in 0..200 {
         world.step();
     }

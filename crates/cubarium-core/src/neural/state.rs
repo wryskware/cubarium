@@ -43,15 +43,18 @@ impl Feedback {
     /// zero intake, zero motion and `delivered = 1`: nothing was requested, so everything
     /// requested was delivered. That is the same rule as a non-empty interval that asked for
     /// nothing, and it is the value a newborn carries into its first update.
-    pub fn channels(&self, graze_rate: f64, scavenge_rate: f64, v_max: f64, r: f64, dt: f64) -> [f64; 6] {
+    ///
+    /// Ecology v1 (`design/ecology-v1-contract.md` §6.3, §15.2): there is **one** mouth rate,
+    /// so all three intake channels are normalised by the same ceiling. The diet-split rates
+    /// they used before no longer exist.
+    pub fn channels(&self, mouth_rate: f64, v_max: f64, r: f64, dt: f64) -> [f64; 6] {
         let ticks = f64::from(self.ticks);
         let interval = ticks * dt;
-        let graze_cap = graze_rate * interval;
-        let scavenge_cap = scavenge_rate * interval;
+        let mouth_cap = mouth_rate * interval;
         let mut out = [0.0f64; 6];
-        out[0] = share(self.ate[0], graze_cap);
-        out[1] = share(self.ate[1], graze_cap);
-        out[2] = share(self.ate[2], scavenge_cap);
+        out[0] = share(self.ate[0], mouth_cap);
+        out[1] = share(self.ate[1], mouth_cap);
+        out[2] = share(self.ate[2], mouth_cap);
         out[3] = if ticks > 0.0 {
             share(self.speed_sum / ticks, v_max)
         } else {
@@ -297,7 +300,7 @@ mod tests {
     #[test]
     fn an_empty_interval_reports_delivered_one_and_nothing_else() {
         let f = Feedback::default();
-        let c = f.channels(1.0, 1.0, 5.0, 2.5, 0.05);
+        let c = f.channels(1.0, 5.0, 2.5, 0.05);
         assert_eq!(c[..5], [0.0; 5]);
         assert_eq!(c[5], 1.0, "nothing was requested, so all of it was delivered");
     }
@@ -310,7 +313,7 @@ mod tests {
         };
         one.ate[0] = 0.5 * 1.0 * 0.05; // half of one tick's handling
         one.speed_sum = 2.5;
-        let c = one.channels(1.0, 1.0, 5.0, 2.5, 0.05);
+        let c = one.channels(1.0, 5.0, 2.5, 0.05);
         assert!((c[0] - 0.5).abs() < 1e-12, "{c:?}");
         assert!((c[3] - 0.5).abs() < 1e-12, "mean speed over one tick");
     }
