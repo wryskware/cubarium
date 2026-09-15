@@ -154,6 +154,12 @@ enum Command {
         horizon: u64,
         #[arg(long, default_value_t = 300)]
         wall_seconds: u64,
+        /// Diagnostic: zero every animal's hidden state every N ticks.
+        #[arg(long)]
+        reset_hidden_every: Option<u64>,
+        /// Diagnostic: how many identical animals share the arena (1 = the plain rollout).
+        #[arg(long, default_value_t = 1)]
+        copies: usize,
         #[arg(long)]
         out: PathBuf,
     },
@@ -245,8 +251,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             overwrite,
             out,
         ),
-        Command::EsEvaluate { policy, set, horizon, wall_seconds, out } => {
-            es::commands::evaluate(policy, &set, horizon, wall_seconds, out)
+        Command::EsEvaluate { policy, set, horizon, wall_seconds, reset_hidden_every, copies, out } => {
+            let probe = es::commands::EvalProbe { reset_hidden_every, copies };
+            es::commands::evaluate(policy, &set, horizon, wall_seconds, probe, out)
         }
         Command::EsExport { checkpoint, out, verify_ticks } => {
             es::commands::export(checkpoint, out, verify_ticks)

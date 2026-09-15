@@ -725,6 +725,25 @@ fn score_center(cp: &mut Checkpoint, generation: u64, score: f64) {
     }
 }
 
+/// What an evaluation may add on top of the plain rollout. Both are diagnostics, never
+/// training conditions: the checkpoint/protocol hash does not see them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EvalProbe {
+    /// Zero every animal's GRU hidden state every this many ticks. `None` leaves memory alone.
+    /// Tells whether the policy is using its recurrence or acting reactively.
+    pub reset_hidden_every: Option<u64>,
+    /// How many identical animals share the arena; `1` is the plain rollout. Extras are placed
+    /// in the opening patch's other cells with fresh hidden state and the same `bud = false`
+    /// script. Tells whether one trained forager still forages when it is not alone.
+    pub copies: usize,
+}
+
+impl EvalProbe {
+    pub fn plain() -> EvalProbe {
+        EvalProbe { reset_hidden_every: None, copies: 1 }
+    }
+}
+
 /// Evaluate one saved centre/policy file on a named layout set, once per layout, with the
 /// same episode driver the trainer uses. Reports per-layout survival, stores and diagnostics
 /// and writes them as JSON. This spends no optimizer work and changes nothing on disk but
@@ -735,10 +754,17 @@ pub fn evaluate(
     set: &str,
     horizon: u64,
     wall_seconds: u64,
+    probe: EvalProbe,
     out: PathBuf,
 ) -> Result<(), Boxed> {
     let file: PolicyFile = serde_json::from_str(&fs::read_to_string(&policy_file)?)?;
     let policy = file.policy()?;
+    if probe.copies == 0 {
+        return Err("--copies must be at least 1".into());
+    }
+    if probe.reset_hidden_every == Some(0) {
+        return Err("--reset-hidden-every must be at least 1 tick".into());
+    }
     let layouts = match set {
         "training" => fixture::training_layouts(),
         "holdout" => fixture::holdout_layouts(),
@@ -749,22 +775,80 @@ pub fn evaluate(
     let limits = Limits::until(&cancel, started + Duration::from_secs(wall_seconds));
     println!("# evaluation of {} (generation {}, digest {:#x}) on the {set} set", policy_file.display(), file.generation, file.policy_digest);
     println!("# build {BUILD_ID}, {horizon} ticks per episode, {wall_seconds} s cap, {} layouts", layouts.len());
-    println!("{:<14} {:>6} {:>5} {:>7} {:>7} {:>7} {:>7} {:>7} {:>6} {:>6}", "layout", "ticks", "alive", "stores", "P", "F", "D", "upkeep", "BL", "cells");
+    if let Some(k) = probe.reset_hidden_every {
+        println!("# probe: every animal's hidden state is zeroed every {k} ticks (held action and feedback kept)");
+    }
+    if probe.copies > 1 {
+        println!("# probe: {} copies of the animal share the arena, the extras in the opening's other cells", probe.copies);
+    }
+    println!("{:<14} {:>6} {:>5} {:>7} {:>7} {:>7} {:>7} {:>7} {:>6} {:>6} {:>6}", "layout", "ticks", "alive", "stores", "P", "F", "D", "upkeep", "BL", "cells", "copies");
     let mut episodes = Vec::new();
+    let mut copies_alive_final = Vec::new();
+    let mut copies_deaths: Vec<Vec<(u64, usize)>> = Vec::new();
     for l in &layouts {
         let name = format!("eval/{}", l.name);
-        let e = match episode::run(l, &Driver::Policy(Box::new(policy.clone())), horizon, limits, &name) {
+        let deaths: Mutex<Vec<(u64, usize)>> = Mutex::new(Vec::new());
+        let last_alive = AtomicUsize::new(probe.copies);
+        let extra_cells: Vec<_> = l.patches[0]
+            .cells(l.face())
+            .into_iter()
+            .filter(|c| *c != l.start_cell())
+            .take(probe.copies - 1)
+            .collect();
+        if extra_cells.len() + 1 < probe.copies {
+            return Err(format!("layout {} opening has room for only {} copies", l.name, extra_cells.len() + 1).into());
+        }
+        let fault = |w: &mut cubarium_core::World, tick: u64| {
+            if tick == 0 && probe.copies > 1 {
+                // The focal animal is the only neural one at this point. Its extras are exact
+                // copies (same body, same reserve, same policy, fresh hidden state), placed in
+                // the opening's other cells, and scripted `bud = false` like the focal.
+                let focal = w.state.neural.animals[0].0;
+                let template = w.state.organisms.get(focal).expect("the focal animal").clone();
+                let mut ids = vec![focal];
+                for cell in &extra_cells {
+                    let mut o = template.clone();
+                    o.pos = cell.center();
+                    let booked = o.structure + o.reserve;
+                    let id = w.state.organisms.insert(o);
+                    w.state.external_material_in += booked;
+                    w.attach_neural_policy(id, policy.clone()).expect("a copy attaches");
+                    ids.push(id);
+                }
+                w.set_scripted_intents(
+                    ids.iter()
+                        .map(|id| (*id, cubarium_core::diagnostic::ScriptedIntent { bud: Some(false), ..Default::default() }))
+                        .collect(),
+                );
+            }
+            if let Some(k) = probe.reset_hidden_every {
+                if (tick + 1) % k == 0 {
+                    for (_, a) in w.state.neural.animals.iter_mut() {
+                        a.hidden.iter_mut().for_each(|h| *h = 0.0);
+                    }
+                }
+            }
+            let alive = w.state.neural.animals.len();
+            if alive != last_alive.load(Ordering::Relaxed) {
+                last_alive.store(alive, Ordering::Relaxed);
+                deaths.lock().expect("deaths").push((tick + 1, alive));
+            }
+        };
+        let e = match episode::run_with_fault(l, &Driver::Policy(Box::new(policy.clone())), horizon, limits, &name, Some(&fault)) {
             Ok(e) => e,
             Err(err) => {
                 println!("stopped: {err:?} after {:.1} s", started.elapsed().as_secs_f64());
                 break;
             }
         };
+        let alive_final = last_alive.load(Ordering::Relaxed);
         println!(
-            "{:<14} {:>6} {:>5} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>6.0} {:>6}",
-            l.name, e.ticks, e.alive, e.terminal_stores, e.intake_producer, e.intake_fruit, e.intake_detritus, e.upkeep_billed, e.body_lengths, e.distinct_cells
+            "{:<14} {:>6} {:>5} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>6.0} {:>6} {:>3}/{:<2}",
+            l.name, e.ticks, e.alive, e.terminal_stores, e.intake_producer, e.intake_fruit, e.intake_detritus, e.upkeep_billed, e.body_lengths, e.distinct_cells, alive_final, probe.copies
         );
         episodes.push(e);
+        copies_alive_final.push(alive_final);
+        copies_deaths.push(deaths.into_inner().expect("deaths"));
     }
     let wall = started.elapsed().as_secs_f64();
     let survived = episodes.iter().filter(|e| e.alive).count();
@@ -781,6 +865,10 @@ pub fn evaluate(
         "layouts": layouts.iter().map(|l| l.name.clone()).collect::<Vec<_>>(),
         "layout_hashes": layouts.iter().map(|l| l.hash(&l.config())).collect::<Vec<_>>(),
         "horizon_ticks": horizon,
+        "reset_hidden_every": probe.reset_hidden_every,
+        "copies": probe.copies,
+        "copies_alive_final": copies_alive_final,
+        "copies_deaths": copies_deaths,
         "episodes": episodes,
         "survived": survived,
         "min_ticks": min_ticks,
