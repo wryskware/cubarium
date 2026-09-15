@@ -13,16 +13,26 @@ what the §13.2 scenarios measured. Nothing here promotes anything to canon, and
 was tuned: every §11 value is the contract's, and every number below is what the simulator
 produced at those values.
 
+**Two runs are recorded.** Run 1 implemented §4.4 as it stood and measured finding B0-1 — the
+plant reserve could never persist. Fable fixed that in the contract (`3316980`: a `q_share` of
+every surplus to the reserve first, reflush only below `p_reflush · P_cap`), and **repair cycle
+1** implements the revision and re-measures. Run 2's tables are the current ones; run 1's are
+kept below so the difference is visible rather than described.
+
 ## Build and commit
 
-- Baseline: `4283040` on `main`. The code is commit `b1dd394`; this note is the commit that follows it.
-- `graft build` refreshed after the change (6,296 nodes, 13,102 edges).
+- Baseline `4283040` on `main`. Run 1 is the code commit `b1dd394` and the note `6d304f1`.
+- **Repair cycle 1** follows contract commit `3316980`, which rewrote §4.4 after run 1's
+  finding B0-1, added the §11 values `q_share` 0.2 and `p_reflush` 0.25, added the config
+  fields `reserve_share` and `reflush_below` to §14, corrected B4a's expectation, and accepted
+  all eleven of run 1's interpretations (§18, third round).
+- `graft build` refreshed after each change.
 - Schema 16, config version 8. No migration path exists anywhere in the tree.
 
-## Verification
+## Verification (after repair cycle 1)
 
 ```bash
-cargo test -p cubarium-core      # 460 passed, 0 failed, 2 ignored
+cargo test -p cubarium-core      # 461 passed, 0 failed, 2 ignored
 cargo test -p cubarium-search    #  66 passed, 0 failed
 cargo test -p cubarium           # 569 passed, 0 failed, 16 ignored
 cargo run -p cubarium-core --release --example ecology_v1_scenarios -- all   # 63 s wall
@@ -31,16 +41,187 @@ cargo run -p cubarium-core --release --example ecology_v1_scenarios -- all   # 6
 All three suites are green. The two ignored core tests and the sixteen ignored host tests are
 pre-existing (`#[ignore]` fixture regenerators and capture-writing art studies), untouched here.
 
-The accounting tests A1–A9 are `crates/cubarium-core/tests/ecology_v1.rs`. A green suite is
+The accounting tests A1–A9 are `crates/cubarium-core/tests/ecology_v1.rs`, now with three more
+A1 arms and a three-band A2b fixture covering the repaired §4.4 branches (a share taken, a full
+reserve taking none, a reflush gated and capped), plus one dedicated unit test,
+`the_reflush_threshold_and_the_reserve_share_are_the_repaired_allocation`, which proves that a
+stand at or above `p_reflush · P_cap` never draws its reserve for foliage. A green suite is
 necessary and not sufficient; the review re-derives A1, A2a, A3b, A6 and A9 independently.
 
-## What the scenarios measured
+## Run 2 — what the scenarios measured after the repaired §4.4
+
+This is the current measurement. Run 1's tables are kept below, under their own heading, so the
+change the repair made is visible rather than described.
+
+### B0 — stand baseline (the anchor)
+
+| class | P | W | Q | F | Q_max | dP/dt | dW/dt | propagules sent | §11 hand P/W/Q |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| average | 0.0977 | 0.1050 | **0.0525** | 0.0000 | 0.0525 | 2.5e-5 | 0.0 | 0.0000 | 0.50 / 0.33 / 0.16 |
+| bright | 0.4695 | 0.3578 | **0.0894** | 0.0047 | 0.1789 | 1.7e-4 | 1.5e-4 | **0.1660 m** | 0.56 / 0.60 / 0.30 |
+
+**The repair works.** The average stand's reserve is now **exactly full** (`Q = q_cap · W`) and
+the bright one is half full and still rising, against run 1's 0.0000 and 0.0435. The bright
+stand crossed the §4.8 donor threshold and **sent 0.166 m of reserve to its bare neighbours** —
+in run 1 nothing was ever sent by any simulator-grown stand. B0-1 is resolved.
+
+**Finding R2-1, the cost of the share: B0 is now *further* from the §11 hand table, not
+closer.** Bright `ΔP` went from −0.0422 to −0.0905 and `ΔW` from −0.1125 to −0.2422; average
+`ΔP` went from −0.3232 to −0.4023 and its wood did not grow at all (`W` is still exactly the
+seed `W_0 = 0.105`, `dW/dt = 0`). That is what `q_share = 0.2` costs at a 30-minute horizon: a
+fifth of every surplus now goes to a stock the hand table assumed was already full, so foliage
+and wood accumulate more slowly. §11 predicts this in words — "`P*` sits a few hundredths
+lower until the reserve is full" — and the measured gap is larger than "a few hundredths"
+because neither class finished filling inside the horizon. Both classes are still climbing;
+this is a finite-horizon baseline, not equilibrium.
+
+### B1a — one pinned grazer, one bright mature stand, 12,000 ticks
+
+| measure | run 2 | run 1 |
+| --- | --- | --- |
+| leaf / fruit bitten | 0.5473 / 0.0035 m | 0.5672 / 0.0504 m |
+| feces | 0.2699 m | 0.3026 m |
+| mean bite rate over its life | 2.31e-3 m/s (3.6×) | 2.43e-3 m/s (3.8×) |
+| reserve-saturated ticks | 0 of 2,980 | 0 of 2,108 |
+| stand at horizon | P 0.0006, W 0.3275, Q 0.0000, Wd 0.0294 | P 0.0006, W 0.4414, Q 0, Wd 0.0445 |
+| stand death | censored | censored |
+| grazer starved | 4,769 (238 s) | 5,082 (254 s) |
+
+Unchanged in direction. The fruit intake fell tenfold because the B0 bright stand now carries
+`F = 0.0047` instead of 0.0544 — foliage reaches the `fruit_min · P_max` ripening threshold
+later when a fifth of the surplus is going to the reserve.
+
+### B1b — one mobile legacy grazer on a 5 × 5 mature region
+
+| class | cells visited | Σ P painted → final | min stand P | stand deaths | grazer |
+| --- | --- | --- | --- | --- | --- |
+| bright | 66 | 23.037 → **0.0140** | 0.0004 | **18** | starved 21,877 (1,094 s) |
+| average | 44 | 6.381 → **0.0460** | 0.0004 | 0 | starved 9,313 (466 s) |
+
+**Finding R2-2: the repair did not fix B1b-1, and the bright arm got worse.** The grazer still
+emptied the region — and now killed 18 of its 25 stands, where run 1 killed none. The reason is
+visible in B0: a stand that spends a fifth of its surplus on reserve carries less wood
+(`W` 0.358 against 0.487), so the same grazing pressure carries `W` below `W_min` inside the
+horizon. The grazer itself lived 20 % longer (1,094 s against 913 s) because the reserve it was
+indirectly eating had been stocked. Coexistence with retained foliage is still **not** observed
+in the bright class.
+
+### B2 — depletion and relocation, three bright stands three cells apart
+
+| stand | ticks on | min P | Q at departure | P at horizon | Q at horizon |
+| --- | --- | --- | --- | --- | --- |
+| (5,8) | 1,060 | 0.0003 | 0.0112 | 0.0003 | 0.0000 |
+| (8,8) | 969 | 0.0003 | 0.0000 | 0.0003 | 0.0000 |
+| (11,8) | 925 | 0.0003 | 0.0000 | 0.0003 | 0.0000 |
+
+41 cells visited; grazer starved at 6,466 (323 s). **Changed direction from run 1.** In run 1
+the grazer left each stand at `P ≈ 0.28–0.41` and all three recovered to `P ≈ 0.558`; in run 2
+it stripped all three to `P = 0.0003` and **none recovered** by the horizon. The stands are
+smaller (B0 bright W 0.358 against 0.487) so each holds less, and the grazer stayed ~1,000 ticks
+on each instead of ~300. Recovery-before-return is still untested — the grazer was dead first.
+
+### B3 — plant recovery after defoliation
+
+| arm | 0.5·P* | 0.9·P* | reserve dip → end |
+| --- | --- | --- | --- |
+| bright, B0-measured | **28,919 (1,446 s)** | censored | 0.0000 → **0.0894** |
+| bright, §11 hand | 8,626 (431 s) | 25,755 (1,288 s) | 0.0000 → **0.1500** |
+| average, B0-measured | censored | censored | 0.0000 → 0.0000 |
+| average, §11 hand | censored | censored | 0.1600 → 0.0000 |
+
+**B3-1 is resolved for bright.** In run 1 the B0-measured bright stand never reached even
+0.5·P* and decayed for the whole run; now it recovers to half its foliage in 24 min **and
+refills its reserve to 0.0894** on the way. The §11-hand arm also now refills (0.30 → 0 → 0.15)
+where run 1 left it at 0.0486. Average is still censored in both arms — see the residual
+findings.
+
+### B4a — three pinned grazers on one isolated bright mature stand
+
+| measure | value |
+| --- | --- |
+| `Q` reached zero | 2,166 (108 s) — run 1: 914 (46 s) |
+| dieback opened | 2,167 (108 s) |
+| stand death | **censored, as §13.2 now expects** |
+| `W` decline since dieback | 0.3580 → 0.2572 m over 1,692 s |
+| mean `dW/dt` | 5.955e-5 m/s |
+| measured e-folding time | **5,119 s (85 min)** |
+| §11 prediction `1/(κ·m_w)` | 5,000 s (83 min) |
+| dead wood at horizon | 0.0848 m |
+| grazers starved | 8,098 (405 s) ×3 |
+
+The corrected expectation is met precisely: the measured e-fold is within 2.4 % of `κ · m_w`.
+The stand also held its reserve 2.4× longer than in run 1 before the grazers emptied it.
+
+### B4b — recovery after death, ring of eight
+
+| ring painted from | established | W at horizon | P at horizon |
+| --- | --- | --- | --- |
+| B0's measured bright stand | **2,642 (132 s)** | 0.0466 (13.0 % of B0's W) | 0.0588 (12.5 %) |
+| the §11 hand table's bright stand | 1,500 (75 s) | 0.0495 (8.3 % of 0.60) | 0.0618 (11.0 %) |
+
+**Resolved.** In run 1 the B0-measured ring never sent anything at all; it now establishes in
+132 s, close to §13.2's "within a minute" and to the §11-hand ring's 75 s. Rebuilding is
+censored at 30 min in both arms, as expected.
+
+### B5 — dietary exclusion
+
+Unchanged from run 1 to the digit — B5 freezes every conversion and paints its food directly,
+so §4.4 never runs in it. The §6.1 exclusions hold exactly: burrower 0.000 on foliage; grazer
+and glider 0.000 on litter and on carrion; skimmer eats all three.
+
+### B6a — reproduction on a finite input (3 × 3 bright, renewal off)
+
+| measure | run 2 | run 1 |
+| --- | --- | --- |
+| births / deaths | 2 / 4 starvation | 2 / 4 |
+| peak population | 4 | 4 |
+| extinct | 15,232 (762 s) | 12,621 (631 s) |
+| plant income over the run | **0.0000 m** | 0.0000 m |
+| cumulative `light_in − heat_out` | **−15.42 e** | −16.97 e |
+
+Expected direction met, unchanged: births while the stock lasts, then starvation to zero, with
+plant income identically zero and `U` strictly falling.
+
+### B6b — reproduction on a renewing patch (7 × 7 bright)
+
+| measure | run 2 | run 1 |
+| --- | --- | --- |
+| births / deaths | 6 / 8 | 8 / 10 |
+| peak population | 8 | 10 |
+| extinct | 28,571 (1,429 s) | 22,199 (1,110 s) |
+| plant income | 34.319 m | 32.331 m |
+| §11 surplus ratio | 2.24 | 2.24 |
+
+**Finding R2-3: the repair did not fix B6b.** The population still goes extinct, 29 % later
+than in run 1 and with two fewer births. A 2.24× production surplus still does not sustain two
+grazers.
+
+### B7 — establishment
+
+| donor | recipient | established | recipient at horizon |
+| --- | --- | --- | --- |
+| B0 measured | bright | **19,003 (950 s)** | W 0.0301 P 0.0370 Q 0.0151 |
+| B0 measured | dim (L·μ 0.20) | censored | W 0.0071 P 0.0071 Q 0.0036 |
+| §11 hand | bright | **6,139 (307 s)** | W 0.0445 P 0.0551 Q 0.0223 |
+| §11 hand | dim (L·μ 0.20) | censored | W 0.0173 P 0.0173 Q 0.0086 |
+
+**B7-1 is resolved.** The §11-donor bright arm now establishes in 307 s against §11's ~300 s
+prediction, where run 1 took 1,146 s; the donor's reserve is no longer drained into its own
+foliage, so the spend is continuous rather than intermittent. The B0-donor arm, which sent
+nothing at all in run 1, now establishes in 950 s. **B7-2 is not resolved**: neither dim
+recipient established or died back inside the horizon, in either arm.
+
+## Run 1 — what the scenarios measured before the §4.4 repair
+
+Kept unchanged, so the repair's effect is visible rather than asserted. Everything below this
+heading is the first implementation run (`b1dd394`), against contract §4.4 as it stood before
+commit `3316980`.
 
 Every row is from one `--release` run of
 `crates/cubarium-core/examples/ecology_v1_scenarios.rs`, censored at the 36,000-tick horizon
 and never extended.
 
-### B0 — stand baseline (the anchor)
+### Run 1: B0 — stand baseline (the anchor)
 
 | class | P | W | Q | F | dP/dt | dW/dt | §11 hand P | §11 hand W |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -61,7 +242,7 @@ consequence is that a stand grown by the simulator never becomes what §4.8 call
 (`Q > q_prop·Q_max`), and never holds the "finite budget for recovery" §4.4 describes. B3, B4b
 and B7 below all turn on this.
 
-### B1a — one pinned grazer, one bright mature stand, 12,000 ticks
+### Run 1: B1a — one pinned grazer, one bright mature stand, 12,000 ticks
 
 | measure | value |
 | --- | --- |
@@ -88,7 +269,7 @@ dieback opens, and the grazer starves. Two departures from §11's arithmetic:
   `unpaid = m_w·W·dt ≈ 3.5e-6` per tick, so carrying `W` from 0.44 down to `W_min = 0.02` needs
   on the order of 10⁵ ticks. "The stand dies" is true of the mechanism and false of the horizon.
 
-### B1b — one mobile legacy grazer on a 5 × 5 mature region
+### Run 1: B1b — one mobile legacy grazer on a 5 × 5 mature region
 
 | class | region production (§11) | cells visited | Σ P painted → final | min stand P | stand deaths | grazer |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -108,7 +289,7 @@ slice.
 The average arm behaved as expected: the grazer ran the region down (Σ P 7.15 → 5.38 with a
 minimum of 0.075) and starved.
 
-### B2 — depletion and relocation, three bright stands three cells apart
+### Run 1: B2 — depletion and relocation, three bright stands three cells apart
 
 | stand | ticks on | min P | Q at departure | P at horizon | Q at horizon |
 | --- | --- | --- | --- | --- | --- |
@@ -122,7 +303,7 @@ long before the stand is empty. Every stand recovered fully (to `P ≈ 0.558`) b
 which is reported rather than assumed; the grazer was dead by then, so recovery-before-return
 was never tested.
 
-### B3 — plant recovery after defoliation
+### Run 1: B3 — plant recovery after defoliation
 
 | arm | reached 0.5·P* | reached 0.9·P* | reserve dip → end |
 | --- | --- | --- | --- |
@@ -144,7 +325,7 @@ both "the §11 steady-state values" and "the measured values become the mature s
 and B7 are each run **twice**, once from each, and both are reported. See "contract
 interpretations" below.
 
-### B4a — three pinned grazers on one isolated bright mature stand
+### Run 1: B4a — three pinned grazers on one isolated bright mature stand
 
 | measure | value |
 | --- | --- |
@@ -158,7 +339,7 @@ interpretations" below.
 censored for the same reason as B1a-3: dieback at `κ · m_w · W · dt` is far slower than the
 horizon.
 
-### B4b — recovery after death, ring of eight
+### Run 1: B4b — recovery after death, ring of eight
 
 | ring painted from | established | W at horizon | P at horizon |
 | --- | --- | --- | --- |
@@ -169,7 +350,7 @@ With §11's stand the ring establishes in 75 s — §13.2 expected "within a min
 rebuild is censored at 30 min, also as expected. With B0's measured stand **nothing is ever
 sent**: no ring cell clears `q_prop · Q_max`, so §4.8 never fires (finding B0-1).
 
-### B5 — dietary exclusion
+### Run 1: B5 — dietary exclusion
 
 Conversions frozen (`m_p = ripen = drop = k_d = k_c = k_w = fall = 0`), bodies pinned, each
 animal built from its full default founder kind (diet, size, metabolism, speed, depth, swim).
@@ -192,7 +373,7 @@ conversion. §13.2's "the skimmer lives on all three" is met in the sense that m
 it is the only kind that draws on all three — but it is not immortal on them, and the test
 measures dependence rather than viability, as §13.2 says.
 
-### B6a — reproduction on a finite input (3 × 3 bright, renewal off)
+### Run 1: B6a — reproduction on a finite input (3 × 3 bright, renewal off)
 
 | measure | value |
 | --- | --- |
@@ -209,7 +390,7 @@ plant income identically zero and `U` strictly falling. Every birth was paid —
 the escrow accounting at machine precision, and the world's own debug audit ran on every tick
 of this run.
 
-### B6b — reproduction on a renewing patch (7 × 7 bright)
+### Run 1: B6b — reproduction on a renewing patch (7 × 7 bright)
 
 | measure | value |
 | --- | --- |
@@ -227,7 +408,7 @@ is measured rather than assumed — so this is the measurement, and it is the sa
 B1b-1: a production surplus of 2.24× did not keep a population alive, because the mouths meet
 stocks rather than production.
 
-### B7 — establishment
+### Run 1: B7 — establishment
 
 | donor | recipient | established | recipient at horizon |
 | --- | --- | --- | --- |
@@ -246,6 +427,15 @@ establishes and is expected to die back" is **not observed**: the dim cell did n
 establishing either. Both are reported as censored rather than resolved.
 
 ## Contract clauses that had to be interpreted
+
+All eleven below were **accepted** in contract §18's third round; interpretation 6
+(`producer.energy_density` removed in favour of the one `e_v`) is now recorded in §14. They
+are kept here as the record of what was decided and why.
+
+Repair cycle 1 added no new interpretation: the revised §4.4 is unambiguous, and
+`reserve_share` / `reflush_below` are the two §14 fields with their stated `[0, 1]` validation.
+One arithmetic coincidence in §11 is worth naming, and it is a measurement rather than a
+reading — see finding R2-4.
 
 Each of these was ambiguous or under-determined in the contract; none of them is a change to a
 §4–§10 equation, a §4.0 read/write, a §11 value or a §15 rule.
@@ -303,11 +493,13 @@ Each of these was ambiguous or under-determined in the contract; none of them is
 
 ## §11 values `validate` forced to change
 
-**None.** Every §11 provisional value is the shipped default and every one of them is admitted
-by `WorldConfig::validate`. The new validations (`rate · dt ≤ 1` by name for `m_w`, `m_p`,
-`ripen`, `drop`, `k_d`, `k_c`, `k_w`, `fall`; `alive_min < donor_min ≤ wood_max`;
-`propagule_split` summing to 1; `capability_gate ∈ [0, 0.5]`; `capability_exponent > 0`) all
-pass at the §11 table with room to spare.
+**None, in either run.** Every §11 provisional value — including repair cycle 1's `q_share` 0.2
+and `p_reflush` 0.25 — is the shipped default and every one is admitted by
+`WorldConfig::validate`. The validations (`rate · dt ≤ 1` by name for `m_w`, `m_p`, `ripen`,
+`drop`, `k_d`, `k_c`, `k_w`, `fall`; `alive_min < donor_min ≤ wood_max`; `propagule_split`
+summing to 1; `capability_gate ∈ [0, 0.5]`; `capability_exponent > 0`; and now
+`reserve_share ∈ [0, 1]`, `reflush_below ∈ [0, 1]`) all pass at the §11 table with room to
+spare.
 
 ## Old-schema refusal tests, and the retired continuations
 
@@ -397,26 +589,51 @@ format and the motor contract are untouched. `GRU_PARAMETERS` is still 10,215 an
 - **`Layout::build` in `cubarium-search`** paints `W = P/α` and `Q = q_cap·W` with its foliage,
   and `painted_material` counts all three. The layout and protocol hashes change by
   construction; the optimizer, trainer loop and export format are untouched.
+- **`hunter.rs::observations_do_not_move_a_profile_three_hunter_world` was re-recorded twice**,
+  once for ecology v1 and once for repair cycle 1. Its schema 12 projection covers `config` and
+  `fields`, and both moved each time — the config gained the `plant` block and then its two new
+  fields, and the plant arithmetic changed. The claim the test makes, that *observing* a world
+  never moves it, is unchanged; only its build-specific anchor is.
+- **Repair cycle 1 touched exactly three source files**: `config.rs` (the two fields and their
+  validation), `fields.rs` (the revised §4.4 block), and the B4a reporting in the scenario
+  binary. Nothing in `neural/`, `snapshot.rs`, `step.rs` or `cubarium-search` moved.
 
-## Open findings, in the order a reviewer should weigh them
+## Open findings after repair cycle 1
 
-1. **B0-1 — the plant reserve never refills** under §11's values, so no simulator-grown stand is
-   ever a donor and §4.8 never fires outside a hand-painted fixture. This is §4.4's allocation
-   order meeting §11's rates; it is not a coding defect and was not tuned away.
-2. **B1b-1 — bright coexistence failed**, which §13.2 explicitly names as a finding. One grazer
-   emptied a 25-cell bright region whose production exceeds its cruising need by 2.3×.
-3. **B6b — a 2.24× production surplus still ended in extinction**, the same shape as B1b-1.
-4. **B1a-3 / B4a — stand death is far slower than the 30-minute horizon** at `κ = 1` and
-   `m_w = 2e-4`: a stripped stand's dieback needs ~10⁵ ticks to carry `W` to `W_min`.
-5. **B7-1 — establishment beside one §11 donor takes 1,146 s, not §11's ~300 s**, because the
-   donor's spend is limited by its reserve above the floor rather than by `k_est`.
-6. **B7-2 — the dim recipient neither established nor died back** inside the horizon; both are
-   censored, so §13.2's expectation there is untested rather than contradicted.
-7. **`ecology_hash` no longer covers the ecology.** Kept because the care/no-care comparison
-   uses it (§15.1), but a reader should not treat it as an ecological identity any more.
+### Resolved by the repaired §4.4
 
-None of these was tuned. Every one is a measurement at the contract's own §11 values, which
-WORKING_POLICY 2026-09-14 says are to be tuned together later, not one at a time here.
+| run-1 finding | evidence it is resolved |
+| --- | --- |
+| **B0-1** — the reserve never refills, so no simulator-grown stand is a §4.8 donor | B0 average `Q` is now **exactly full** (0.0525 = `q_cap · W`), bright is half full and rising (0.0894 of 0.1789), and the bright stand **sent 0.1660 m** of propagules where run 1 sent none. |
+| **B3-1** — a stripped stand cannot recover, because it has no reserve to reflush from | B3 bright, B0-measured arm: 0.5·P* at 1,446 s where run 1 was censored; the reserve dips to 0 and **refills to 0.0894** during the run. The §11-hand arm refills to 0.1500 where run 1 left it at 0.0486. |
+| **B4b, B0-donor arm** — nothing ever sent | establishes at 2,642 (132 s), against the §11-donor ring's 75 s. |
+| **B7-1** — establishment took 1,146 s, not §11's ~300 s | §11-donor bright arm now establishes at **307 s**. The B0-donor arm, which sent nothing in run 1, establishes at 950 s. |
+| **B4a death censored** | not a defect; §13.2 now expects censoring and asks for the decline rate. Measured e-fold **5,119 s (85 min)** against `1/(κ·m_w)` = 5,000 s (83 min), within 2.4 %. |
+
+### Not resolved by the reserve fix
+
+| finding | evidence |
+| --- | --- |
+| **B1b-1 — bright coexistence still fails, and got worse.** | One grazer took a 25-cell bright region from Σ P 23.037 to **0.0140** and **killed 18 of its 25 stands** (run 1: 0 deaths). It lived 1,094 s against 913 s. The stands carry less wood after the repair (B0 bright `W` 0.358 against 0.487), so the same pressure carries them below `W_min` inside the horizon. §13.2 names a bright failure as a finding, and it is still a failure. |
+| **B6b — a 2.24× production surplus still ends in extinction.** | 6 births, 8 deaths, peak 8, extinct at 1,429 s (run 1: 8 / 10 / 10, 1,110 s). Later and smaller, not avoided. Same shape as B1b-1: mouths meet stocks, not production. |
+| **R2-1 — B0 is now *further* from the §11 hand table, not closer.** | Bright `ΔP` −0.0422 → −0.0905, `ΔW` −0.1125 → −0.2422; average `ΔP` −0.3232 → −0.4023 and its wood did not grow at all (`W` still exactly the seed 0.105, `dW/dt = 0`). `q_share = 0.2` is paid out of growth, and neither class finished filling its reserve inside the 30-minute horizon, so the diversion is still in force at the measurement point. §11 predicts the sign of this ("`P*` sits a few hundredths lower until the reserve is full") but not the size. |
+| **R2-2 — B2 changed direction.** | Run 1: the grazer left each stand at `P ≈ 0.28–0.41` and all three recovered to `P ≈ 0.558`. Run 2: it strips all three to `P = 0.0003` and **none recovers** by the horizon, staying ~1,000 ticks per stand instead of ~300. Same cause as B1b-1: the B0 stands are smaller. Recovery-before-return remains untested, because the grazer dies first in both runs. |
+| **B3 average — censored in both arms, unchanged.** | B0-measured: 0.5·P* censored; §11-hand: 0.5·P* censored, reserve 0.16 → 0. §13.2 expects the average class to sit near breakeven and be reported censored, so this is the expected direction — but it means the repair bought recovery for bright only. |
+| **B7-2 — the dim recipient neither establishes nor dies back.** | Censored in all four arms across both runs (run 2: W 0.0071 with a B0 donor, 0.0173 with a §11 donor). §13.2's expectation there is untested rather than contradicted. |
+| **`ecology_hash` no longer covers the ecology.** | Structural, untouched by the repair. Kept because the care/no-care comparison uses it (§15.1); `state_hash` covers everything. |
+
+### New, from run 2
+
+**R2-4 — at §11's own values the reflush ceiling and `Q_max` are the same number.**
+`p_reflush · α = 0.25 · 2 = 0.5 = q_cap`, so `p_reflush · P_cap = q_cap · W = Q_max` exactly
+whenever `α · W < P_max`. A stand with a *full* reserve therefore cannot quite reach the reflush
+ceiling: paying `1 + c_g` per unit of leaf, `Q_max` of reserve buys `Q_max / 1.2` of foliage and
+the reserve binds first, by that factor. The mechanism is correct either way — the unit test
+demonstrates the ceiling binding by over-provisioning the reserve — but "reflush up to
+`p_reflush · P_cap`" is, at this table, always "reflush until the reserve runs out". Worth a
+look in the whole-ecosystem tuning; not touched here.
+
+None of these was tuned. Every number is a measurement at the contract's own §11 values.
 
 ## Stop
 

@@ -13,7 +13,7 @@
 
 use std::path::PathBuf;
 
-use cubarium_core::care::{CareCommand, CareDose, CareKind, CareTarget, RAIN_DEPTH_TOTAL};
+use cubarium_core::care::{CareCommand, CareDose, CareKind, CareTarget};
 use cubarium_core::snapshot::{HEADER_FIXED_BYTES, v8, v9, v10, v11};
 use cubarium_core::{
     SCHEMA_V11, SCHEMA_VERSION, World, WorldConfig, decode_snapshot, ecology_hash, encode_snapshot,

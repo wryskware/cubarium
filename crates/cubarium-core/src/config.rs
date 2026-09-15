@@ -142,6 +142,16 @@ pub struct PlantConfig {
     pub energy_density: f64,
     /// Initial wood as a fraction of `W_max · L₀ · μ₀`; a cell below `alive_min` starts bare.
     pub initial_wood: f64,
+    /// `q_share`: the share of every tick's surplus that goes to the reserve **before**
+    /// foliage and wood (`design/ecology-v1-contract.md` §4.4, revised in repair cycle 1).
+    /// Without it the reserve is refilled only from what growth leaves, which under
+    /// foliage-first allocation is nothing, and a reserve that can never persist is not a
+    /// finite budget for recovery.
+    pub reserve_share: f64,
+    /// `p_reflush`: reserve is spent on foliage **only** while `P⁻ < reflush_below · P_cap`,
+    /// and the reflush stops at that ceiling. Above it a stand grows leaves from income
+    /// alone, so routine top-up can no longer drain the reserve.
+    pub reflush_below: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -404,6 +414,8 @@ impl Default for PlantConfig {
             propagule_split: [0.4, 0.4, 0.2],
             energy_density: 2.0,
             initial_wood: 0.5,
+            reserve_share: 0.2,
+            reflush_below: 0.25,
         }
     }
 }
@@ -669,6 +681,8 @@ impl WorldConfig {
         ])?;
         fraction("plant.donor_reserve_floor", pl.donor_reserve_floor)?;
         fraction("plant.initial_wood", pl.initial_wood)?;
+        fraction("plant.reserve_share", pl.reserve_share)?;
+        fraction("plant.reflush_below", pl.reflush_below)?;
         // The three cell classes must be orderable, and a donor must be a stand a cell can
         // actually grow into (`design/ecology-v1-contract.md` §3.1, §4.8).
         if !(pl.alive_min < pl.donor_min && pl.donor_min <= pl.wood_max) {

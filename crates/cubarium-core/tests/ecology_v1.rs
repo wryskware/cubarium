@@ -247,6 +247,33 @@ fn a1_material_is_closed_through_every_ecology_v1_transfer() {
             ticks: 200,
         },
         Arm {
+            name: "the reserve share, with room in `Q` to take it",
+            class: BRIGHT,
+            // A stand with a full foliage load and an **empty** reserve: every surplus tick
+            // takes `q_share` off the top (§4.4, repair cycle 1) and the rest tops it up.
+            stage: |world| paint(world, CellId::new(Face::Top, 8, 8), 0.56, 0.6, 0.0),
+            tune: |_| {},
+            ticks: 4_000,
+        },
+        Arm {
+            name: "a full reserve, which takes no share",
+            class: BRIGHT,
+            // `Q = q_cap · W` exactly, so `D_Q = 0`: the share branch and the final top-up
+            // both clamp to zero and the whole surplus goes to foliage and wood.
+            stage: |world| paint(world, CellId::new(Face::Top, 8, 8), 0.56, 0.6, 0.30),
+            tune: |_| {},
+            ticks: 4_000,
+        },
+        Arm {
+            name: "reflush from a stocked reserve below the threshold",
+            class: BRIGHT,
+            // Stripped foliage with a full reserve: the emergency draw runs every tick until
+            // it reaches `p_reflush · P_cap`, then stops.
+            stage: |world| paint(world, CellId::new(Face::Top, 8, 8), 0.0, 0.6, 0.30),
+            tune: |_| {},
+            ticks: 4_000,
+        },
+        Arm {
             name: "a fast establishment ring",
             class: BRIGHT,
             tune: |cfg| {
@@ -287,6 +314,167 @@ fn a1_material_is_closed_through_every_ecology_v1_transfer() {
         }
         println!("A1 {}: worst |mass_residual| {worst:e}", arm.name);
     }
+}
+
+// -------------------------------------------------------------- §4.4, repair cycle 1
+
+/// **The repaired §4.4 allocation (`design/ecology-v1-contract.md` §4.4, repair cycle 1).**
+///
+/// Three claims, each on a one-cell world with `c_g = 0` so the arithmetic is exact:
+///
+/// 1. a stand at or above `p_reflush · P_cap` **never** draws its reserve for foliage — the
+///    defect the first implementation run measured as B0-1 was routine top-up draining `Q`
+///    whenever `P < P_cap`, which is always;
+/// 2. a stand with room in `Q` takes exactly `q_share` of the tick's surplus into the reserve
+///    before foliage and wood see any of it;
+/// 3. a **full** reserve takes no share at all, so foliage gets the whole surplus back.
+#[test]
+fn the_reflush_threshold_and_the_reserve_share_are_the_repaired_allocation() {
+    /// A one-cell world in which the only thing that can move `P`, `W`, `Q` or `N` is §4.4.
+    fn arena(tune: impl FnOnce(&mut WorldConfig)) -> (WorldConfig, CellId) {
+        let mut cfg = bare_config(BRIGHT.0, BRIGHT.1);
+        // `c_g = 0` makes every `x / (1 + c_g)` the identity, so the assertions below are the
+        // contract's expressions with nothing rounded into them.
+        cfg.plant.build = 0.0;
+        cfg.plant.maintenance = 0.0;
+        cfg.plant.wood_rate = 0.0;
+        cfg.plant.propagule_rate = 0.0;
+        cfg.producer.mortality = 0.0;
+        cfg.fruit.ripen = 0.0;
+        cfg.fruit.drop = 0.0;
+        cfg.detritus.decomposition = 0.0;
+        cfg.detritus.fall = 0.0;
+        cfg.nutrient.diffusion = 0.0;
+        tune(&mut cfg);
+        (cfg, CellId::new(Face::Top, 8, 8))
+    }
+
+    fn staged(cfg: WorldConfig, cell: CellId, p: f64, w: f64, q: f64) -> World {
+        let mut world = World::new(cfg).expect("valid");
+        let before = total_material(&world);
+        world.state.fields.n[cell.index()] = REFERENCE_NUTRIENT;
+        book(&mut world, before);
+        paint(&mut world, cell, p, w, q);
+        restage(world)
+    }
+
+    // ---- 1. At or above the reflush ceiling, the reserve is never touched for foliage.
+    //
+    // Income is off, so the only foliage a tick could make is reflush. The stand sits exactly
+    // **at** the ceiling, which is the boundary the contract writes as a strict `<`.
+    let (cfg, cell) = arena(|c| {
+        c.producer.growth = 0.0;
+        c.plant.foliage_rate = 1e6;
+    });
+    let (w, ceiling) = {
+        let w = 0.6;
+        let p_cap = cfg.producer.max.min(cfg.plant.alpha * w);
+        (w, cfg.plant.reflush_below * p_cap)
+    };
+    let mut world = staged(cfg.clone(), cell, ceiling, w, 0.30);
+    let i = cell.index();
+    for tick in 1..=2_000u64 {
+        world.step();
+        assert_eq!(
+            world.state.ecology.plant_reserve[i], 0.30,
+            "tick {tick}: a stand at the ceiling drew on its reserve"
+        );
+        assert_eq!(
+            world.state.fields.p[i], ceiling,
+            "tick {tick}: and grew foliage it had no income for"
+        );
+    }
+    // One hair below the ceiling and it draws — so the guard is the threshold, not inertia.
+    let mut world = staged(cfg.clone(), cell, ceiling - 1e-6, w, 0.30);
+    world.step();
+    assert!(
+        world.state.ecology.plant_reserve[i] < 0.30,
+        "below the ceiling the reserve must pay for the reflush"
+    );
+    assert!(
+        (world.state.fields.p[i] - ceiling).abs() < 1e-15,
+        "and the reflush stops exactly at `p_reflush · P_cap`: {}",
+        world.state.fields.p[i]
+    );
+
+    // A stripped stand climbs to the ceiling and stops there, with reserve to spare — so the
+    // thing that stopped it is the ceiling and not an empty reserve. The stand is
+    // over-provisioned on purpose (`Q > Q_max`, which also zeroes `D_Q` and so the share),
+    // because at §11's own values a *full* reserve cannot quite reach the ceiling: with
+    // `p_reflush · α = 0.25 · 2 = 0.5 = q_cap`, the ceiling and `Q_max` are the same number,
+    // so paying `1 + c_g` per unit exhausts the reserve first. That is a property of §11's
+    // table, reported in the result note, not something this test asserts away.
+    let mut world = staged(cfg.clone(), cell, 0.0, w, 3.0 * 0.30);
+    for _ in 0..4_000 {
+        world.step();
+    }
+    assert!(
+        (world.state.fields.p[i] - ceiling).abs() < 1e-12,
+        "reflush settled at {} against the ceiling {ceiling}",
+        world.state.fields.p[i]
+    );
+    assert!(
+        world.state.ecology.plant_reserve[i] > 0.0,
+        "and it stopped because of the ceiling, not because the reserve ran out"
+    );
+
+    // The same stand with exactly a full reserve stops **short** of the ceiling, at the
+    // reserve's own limit: `Q_max / (1 + c_g)` of leaf for `Q_max` of reserve.
+    let mut world = staged(cfg.clone(), cell, 0.0, w, 0.30);
+    for _ in 0..4_000 {
+        world.step();
+    }
+    assert!(
+        world.state.fields.p[i] <= ceiling + 1e-12,
+        "a full reserve cannot pass the ceiling either: {}",
+        world.state.fields.p[i]
+    );
+
+    // ---- 2. With room in `Q`, the share is exactly `q_share · rem`, taken first.
+    //
+    // No maintenance, so `rem = A`; a huge `r_p` so foliage could absorb everything; an empty
+    // reserve and a foliage load above the ceiling, so nothing reflushes back.
+    let (cfg, cell) = arena(|c| c.plant.foliage_rate = 1e6);
+    let q_share = cfg.plant.reserve_share;
+    let mut world = staged(cfg.clone(), cell, 0.56, w, 0.0);
+    let (n0, p0, q0) = (
+        world.state.fields.n[i],
+        world.state.fields.p[i],
+        world.state.ecology.plant_reserve[i],
+    );
+    world.step();
+    let income = n0 - world.state.fields.n[i];
+    assert!(income > 0.0, "the fixture must actually earn something");
+    let gained_q = world.state.ecology.plant_reserve[i] - q0;
+    let gained_p = world.state.fields.p[i] - p0;
+    assert!(
+        (gained_q - q_share * income).abs() < 1e-15,
+        "the reserve took {gained_q}, not `q_share · rem` = {}",
+        q_share * income
+    );
+    assert!(
+        (gained_p - (1.0 - q_share) * income).abs() < 1e-15,
+        "foliage took {gained_p}, not the remaining {}",
+        (1.0 - q_share) * income
+    );
+
+    // ---- 3. A full reserve takes no share: `D_Q = 0` clamps both reserve branches.
+    let full = cfg.plant.reserve_cap * w;
+    let mut world = staged(cfg, cell, 0.56, w, full);
+    let (n0, p0) = (world.state.fields.n[i], world.state.fields.p[i]);
+    world.step();
+    let income = n0 - world.state.fields.n[i];
+    assert!(income > 0.0);
+    assert_eq!(
+        world.state.ecology.plant_reserve[i], full,
+        "a full reserve must take nothing"
+    );
+    assert!(
+        (world.state.fields.p[i] - p0 - income).abs() < 1e-15,
+        "so foliage gets the whole surplus: {} of {income}",
+        world.state.fields.p[i] - p0
+    );
+    assert!(world.mass_residual().abs() < 1e-9);
 }
 
 // ------------------------------------------------------------------------------ A2
@@ -355,11 +543,20 @@ fn a2b_the_energy_ledger_closes_every_tick_with_everything_on() {
     // A band of mature stands, a band of charged litter and a band of fresh remains, so every
     // channel has something to work on and the propagule ring has somewhere to go.
     for u in 0..16u8 {
+        // Three plant bands, so the repaired §4.4 (repair cycle 1) runs every branch inside
+        // the full ledger: a **full** reserve that takes no share, a **part-full** one that
+        // takes `q_share` off the top every surplus tick, and a **stripped** stand below
+        // `p_reflush · P_cap` that draws its reserve down for the emergency reflush.
         for v in 0..8u8 {
             let i = CellId::new(Face::Top, u, v).index();
-            world.state.fields.p[i] = 0.56;
+            let (p, q) = match v % 3 {
+                0 => (0.56, 0.30),
+                1 => (0.56, 0.05),
+                _ => (0.0, 0.30),
+            };
+            world.state.fields.p[i] = p;
             world.state.ecology.wood[i] = 0.6;
-            world.state.ecology.plant_reserve[i] = 0.30;
+            world.state.ecology.plant_reserve[i] = q;
             world.state.fields.f[i] = 0.16;
         }
         for v in 8..16u8 {

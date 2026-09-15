@@ -2282,12 +2282,18 @@ fn observations_do_not_move_a_profile_three_hunter_world() {
     // `producer.energy_density`, and a fresh world's foliage is now set by the wood that
     // carries it. The claim — that *observing* a world never moves it — is unchanged and is
     // anchored to this build's own numbers.
+    // Re-recorded at ecology v1 (`design/ecology-v1-contract.md`), and again in its repair
+    // cycle 1: the schema 12 projection covers `config` and `fields`, and both moved — the
+    // config gained the `plant` block (and, in the repair, `reserve_share` and
+    // `reflush_below`), and a fresh world's foliage is set by the wood that carries it. The
+    // claim — that *observing* a world never moves it — is unchanged and is anchored to this
+    // build's own numbers.
     assert_eq!(
-        hunt_hash, 12_810_497_881_292_252_125,
+        hunt_hash, 14_789_154_998_038_686_881,
         "a hunt-and-digest world moved"
     );
     assert_eq!(
-        birth_hash, 2_608_820_484_921_370_662,
+        birth_hash, 5_973_878_847_541_680_162,
         "a funded-birth world moved"
     );
 }

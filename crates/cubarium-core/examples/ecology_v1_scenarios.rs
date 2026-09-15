@@ -883,6 +883,12 @@ struct Killed {
     dieback: Option<u64>,
     death: Option<u64>,
     grazers: Vec<Option<u64>>,
+    /// §13.2 (repair cycle 1): death at `κ = 1` is expected **censored**, so the measurement
+    /// is the decline itself — the mean `dW/dt` over the dieback window, and the e-folding
+    /// time it implies.
+    wood_at_dieback: f64,
+    wood_at_horizon: f64,
+    decline_ticks: u64,
 }
 
 fn run_b4a(verbose: bool) -> Killed {
@@ -903,6 +909,7 @@ fn run_b4a(verbose: bool) -> Killed {
     let mut q_zero = None;
     let mut dieback = None;
     let mut death = None;
+    let mut wood_at_dieback = f64::NAN;
     let mut grazers = vec![None; ids.len()];
     if verbose {
         println!();
@@ -935,6 +942,7 @@ fn run_b4a(verbose: bool) -> Killed {
         }
         if dieback.is_none() && world.state.ecology.dead_wood[i] > 1e-12 {
             dieback = Some(tick);
+            wood_at_dieback = world.state.ecology.wood[i];
         }
         if death.is_none() && world.state.ecology.plant_deaths_total > 0 {
             death = Some(tick);
@@ -951,12 +959,16 @@ fn run_b4a(verbose: bool) -> Killed {
         }
     }
     world.check_invariants().expect("B4a ends consistent");
+    let decline_ticks = HORIZON - dieback.unwrap_or(HORIZON);
     let out = Killed {
         dead_wood: world.state.ecology.dead_wood[i],
         q_zero,
         dieback,
         death,
         grazers,
+        wood_at_dieback,
+        wood_at_horizon: world.state.ecology.wood[i],
+        decline_ticks,
     };
     if verbose {
         println!(
@@ -971,11 +983,33 @@ fn run_b4a(verbose: bool) -> Killed {
             world.state.ecology.wood[i],
             world.state.fields.p[i]
         );
+        // §13.2 (repair cycle 1) asks for the decline rate rather than a death tick.
+        let seconds = out.decline_ticks as f64 * DT;
+        let rate = if seconds > 0.0 {
+            (out.wood_at_dieback - out.wood_at_horizon) / seconds
+        } else {
+            f64::NAN
+        };
+        let e_fold = if out.wood_at_horizon > 0.0 && out.wood_at_dieback > 0.0 {
+            seconds / (out.wood_at_dieback / out.wood_at_horizon).ln()
+        } else {
+            f64::NAN
+        };
+        println!(
+            "- `W` decline over the {seconds:.0} s since dieback opened: {:.4} → {:.4} m, mean \
+             {rate:.3e} m/s, e-folding time {:.0} s ({:.0} min). §11's `κ · m_w` predicts an \
+             e-fold of 1/2e-4 = 5,000 s (83 min).",
+            out.wood_at_dieback,
+            out.wood_at_horizon,
+            e_fold,
+            e_fold / 60.0
+        );
         let fates: Vec<String> = out.grazers.iter().map(|d| censored(*d)).collect();
         println!("- grazers starved at: {}.", fates.join(", "));
         println!(
-            "Expected direction (§13.2): `Q → 0`, `W → Wd`, no regrowth (there is no donor), and \
-             the grazers starve."
+            "Expected direction (§13.2, repair cycle 1): `Q → 0`, dieback opens, `W` declines at \
+             `κ · m_w` (e-fold ~80 min, so death is **expected censored**), no regrowth (there \
+             is no donor), and the grazers starve."
         );
     }
     out

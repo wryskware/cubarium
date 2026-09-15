@@ -39,7 +39,7 @@ fn dry() -> Vec<f64> {
 
 /// `Q_0` as a fraction of `Q_max` in a cell that starts alive
 /// (`design/ecology-v1-contract.md` §11). Not a knob: §14 fixes [`crate::config::PlantConfig`]
-/// to the fifteen fields it lists, and this number appears once, here.
+/// to the fields it lists and this is not one of them, so the number appears once, here.
 pub const INITIAL_RESERVE_FRACTION: f64 = 0.5;
 
 /// Ecology v1's new per-cell pools and its two world counters
@@ -424,16 +424,41 @@ impl Fields {
                 ledger.heat_out += e_v * (paid_a + paid_q);
                 ledger.plant_maintenance_unpaid += unpaid;
 
-                // 4.4 — foliage before wood, each paying `c_g` into this cell's own `N`.
+                // 4.4 — reserve share off the top, then foliage, then wood, then the rest
+                //     back to the reserve; each growth paying `c_g` into this cell's own `N`.
+                //
+                //     **Repair cycle 1.** The original order refilled the reserve only from
+                //     what foliage and wood left — under foliage-first allocation, nothing —
+                //     and spent reserve on routine foliage top-up whenever `P < P_cap`, which
+                //     is always. The first implementation run measured the consequence: a
+                //     stand's reserve never persisted, so no simulator-grown stand was ever a
+                //     §4.8 donor. Two rules fix it, and both are in the loop below: a fixed
+                //     `q_share` of the surplus goes to the reserve first, and reserve is spent
+                //     on foliage **only** below `p_reflush · P_cap`, capped at that ceiling.
                 //
                 //     Every `.max(0.0)` below is a rounding guard, not a rule: `build ·
                 //     (x / build)` can exceed `x` by an ulp, and a stock that went one ulp
                 //     negative would fail the world's own nonnegativity invariant. The
                 //     material it forgives is ~1e-22 per cell per tick, twelve orders below
                 //     the 1e-9 the mass identity is audited to.
+                let share_q = (pl.reserve_share * rem).min(demand_q).max(0.0);
+                rem = (rem - share_q).max(0.0);
+                q += share_q;
+
                 let grow_p_income = (rem / build).min(demand_p).max(0.0);
                 rem = (rem - build * grow_p_income).max(0.0);
-                let grow_p_reserve = (q / build).min(demand_p - grow_p_income).max(0.0);
+                // Reflush is an **emergency** draw, not routine top-up: it opens only when the
+                // pre-tick foliage is below `p_reflush · P_cap`, and it stops at that ceiling
+                // rather than at `P_cap`.
+                let reflush_ceiling = pl.reflush_below * p_cap;
+                let grow_p_reserve = if p0 < reflush_ceiling {
+                    (q / build)
+                        .min(demand_p - grow_p_income)
+                        .min((reflush_ceiling - p0 - grow_p_income).max(0.0))
+                        .max(0.0)
+                } else {
+                    0.0
+                };
                 q = (q - build * grow_p_reserve).max(0.0);
                 let grown_p = grow_p_income + grow_p_reserve;
                 p = p0 + grown_p;
@@ -447,7 +472,7 @@ impl Fields {
                 n += pl.build * grow_w;
                 ledger.heat_out += e_v * pl.build * grow_w;
 
-                let refill_q = rem.min(demand_q).max(0.0);
+                let refill_q = rem.min((demand_q - share_q).max(0.0)).max(0.0);
                 q += refill_q;
                 rem = (rem - refill_q).max(0.0);
                 // Rounding residue only; it must be ~0 whenever `A` bound on the demand sum.
