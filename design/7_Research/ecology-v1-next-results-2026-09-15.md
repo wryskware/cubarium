@@ -21,7 +21,7 @@ never lets its predator reproduce.
 | --- | --- | --- | --- |
 | A calibration + apex arms | [brief](../handoffs/ecology-v1-calibration-opus-2026-09-15.md) | Opus, high, on `main` | **done** |
 | B presentation | [brief](../handoffs/ecology-v1-presentation-opus-2026-09-15.md) | Opus, high, isolated worktree | **done**, merged `7d9a5ae` |
-| C fresh forager training | [brief](../handoffs/ecology-v1-training-opus-2026-09-15.md) | Opus, high, on `main` | see §C |
+| C fresh forager training | [brief](../handoffs/ecology-v1-training-opus-2026-09-15.md) | Opus, high, on `main` | **done**, one integration repair (`617703f`) |
 | D fresh display world | Fable | — | **done**, build `7d9a5ae`, `fast-leaf` |
 
 Fable's own review of each stream was one targeted pass: A's harness diff
@@ -29,7 +29,14 @@ read for equation touches (none; `cubarium-core` untouched), one recorded
 row replayed (`REPRODUCED`), the search suite re-run (76 passed); B's core
 diff read (one read-only `RenderView` field), the contact sheet inspected,
 host and render suites re-run on the merged tree. No repair cycle was needed
-for A or B. Astra was not re-engaged: the handoff asked for no repeat of the
+for A or B. C's review: the held-out evaluation re-run on its exported policy
+reproduced all eight episodes field for field, and the protocol hash moves
+with the config (`0x8e51a1a9b1e2742b` for `fast-leaf`, `0x65c51e05060f0d5a`
+for the defaults). C's one integration defect was found by Fable running the
+whole workspace: the widened `PolicyFile::new` broke the host crate's
+neural-seed test, which C's brief had walled off. Fixed inline in `617703f`.
+Final suites on `617703f`, release: `cubarium-core` 467, `cubarium-search`
+86, `cubarium` 586, `cubarium-render` 101 passed, 0 failed. Astra was not re-engaged: the handoff asked for no repeat of the
 ecology-v1 review.
 
 Compute actually spent, all on this host, ≤ 8 workers throughout:
@@ -41,11 +48,11 @@ Compute actually spent, all on this host, ≤ 8 workers throughout:
 | A held-out (36 runs, 360 k ticks) | — | 4.8 min |
 | **A total** | **60 min** | **24.9 min**, 63.7 M ticks, 24 MiB RSS, 2.9 MiB stored |
 | B viewer check | — | a few minutes, scratch state deleted |
-| C training | 20 min | see §C |
-| C evaluation | 10 min | see §C |
+| C smoke + training (2,116 episodes, 17.2 M ticks) | 20 min | 2.3 min |
+| C held-out + population (12 worlds, run twice) | 10 min | 1.9 min |
 
 Model usage is not exposed by the harness. Subagent token use as reported
-by the orchestration tool: A ≈ 379 k, B ≈ 409 k.
+by the orchestration tool: A ≈ 379 k, B ≈ 409 k, C ≈ 291 k.
 
 ## A — calibration and matched apex comparisons
 
@@ -196,8 +203,61 @@ Deployed at 15:38 on 2026-09-15 by Fable, no worker.
 
 ## C — fresh forager training in `fast-leaf`
 
-*Pending: the worker is running under its brief; this section is filled in
-when it reports and Fable has reviewed it.*
+Full note: [ecology-v1-training-2026-09-15.md](ecology-v1-training-2026-09-15.md).
+Commits `7553975` (harness), `5711b4d` (note), `617703f` (Fable's integration
+repair). The ES fixtures now carry a named ecology: `--config` on every ES
+command, layout and protocol hashes that move with it, a policy file that
+records its ecology and is refused by name against any other, and an
+`es-population` command that founds neural or legacy copies of the training
+body in a whole world. The GRU, optimizer, score and R2 fixtures are byte
+unchanged; `cubarium-core` untouched.
+
+**The campaign**: exactly the brief's command, `fast-leaf` frozen at config
+hash `09e244392ec91768`, protocol `0x8e51a1a9b1e2742b`, 16 of 16 updates in
+139 s of the 1,200 s cap, 0 discarded work. Trained body: the unit grazer
+(diet 0.85, herbivore guild), births disabled in training episodes. Centre
+score 6,521 → best 8,703 at generation 9 → 7,269 at generation 16. **No
+centre or candidate ever reached the 36,000-tick horizon on any layout**; in
+the pre-ecology-v1 world the same protocol reached it on every layout. The
+selected centre (generation 9, weight hash `0x84e359e171fc7cf6`,
+`runs/es-eco-v1-fastleaf/selected/center-00009-policy.json`) was chosen by
+the recorded-score rule before any held-out episode.
+
+**Held-out**: survived 0 of 8 layouts, 6,914–8,707 ticks, no censoring (every
+death is observed, none reaches the horizon). Intake ≈ 0.6 m of material
+against ≈ 2.5 e of upkeep billed per episode: on a painted patch under
+ecology v1 a lone grazer's energy budget does not close, which is what
+contract §11's arithmetic said (a stand yields 40–170× less than a grazer
+bites) and what A found the free-roaming world hides.
+
+**Population comparison** (4 copies of the training body founded at tick 0,
+neural vs legacy control, 24 legacy founders beside them, reproduction and
+mutation on, apex arms 0/1/2 as A's screen, 2 seeds, 180 k ticks): the
+trained controller doubles its body's lifetime (≈ 12,200 vs 5,574 ticks on
+both seeds and every arm) and covers ≈ 4× the distinct ground, and the world
+does not notice: producer intake −0.3 %, foliage retention within 1 %,
+population within noise. It trades reproduction for range (2.5 vs 4.0
+offspring). Every copy in both mixes starves; the neural lineage peaks at
+6–7 and is extinct by tick 147,600 in all six trials. **Provenance, read
+from the world at each birth**: every child of a neural parent is neural
+(parent's policy, fresh hidden state), so the arms are neural lineages inside
+a mixed population; the legacy arm never holds a neural body. Two findings
+that bind future screens: the legacy copies die at ticks 5,290–5,994, before
+the apex arrives at tick 6,000, so **the predator arms cannot discriminate
+controllers at all yet**; and intake by food per controller is not
+measurable without a per-organism intake accumulator in core, which C's
+brief excluded, so food use is reported per arm only.
+
+One quirk C found and left alone: A's `calibrate::config_hash` uses a
+multiplier one hex digit longer than FNV-1a's, so it is not FNV-1a despite
+its comment. It is consistent with itself, C calls it rather than
+re-deriving it, and changing it would move every published hash; a later
+cleanup may rename it.
+
+Policy on the display: **not installed.** It survives about ten minutes on
+its own and would add nothing visible; the ordinary
+`cubarium run --fresh --neural <policy>` control remains the door if Wrysk
+wants to see it, and it would require a fresh world.
 
 ## What this does and does not establish
 
@@ -216,7 +276,11 @@ when it reports and Fable has reviewed it.*
 
 ## Next recommendation
 
-One bounded design task before any further search: give animals a reason to
+Two bounded tasks before any further search or training, in this order:
+first, C's energy-budget measurement (one body, the disclosed mobile control,
+`fast-leaf`, served bite → digestible share → assimilated energy → upkeep
+over one episode), which needs one small core addition, a per-organism
+intake accumulator; second, one design task: give animals a reason to
 stay (a per-distance movement cost or site fidelity) and give the diet locus
 a cost of breadth (`γ > 1`) with a stabilising term; then re-run A's matrix
 unchanged as the comparison. The apex mating radius is the single constant

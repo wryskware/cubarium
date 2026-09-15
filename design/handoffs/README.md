@@ -1,6 +1,6 @@
 ---
 design_status: exploration
-last_reviewed: 2026-09-13
+last_reviewed: 2026-09-15
 decision_refs: []
 ---
 
@@ -13,22 +13,32 @@ entries, then **one** task brief. Do not ingest the whole research archive.
 
 ## Where we landed
 
-**2026-09-15 ecology v1 delivered and reviewed:** the
-[ecology v1 contract](../ecology-v1-contract.md) is implemented on `main`
-(`b1dd394` … `f9ff91e`, not pushed): schema 16, structured plants, distinct
-litter / dead wood / remains, inherited digestive capability, care-masked
-`ecology_hash`, accounting tests A1–A9 and scenarios B0–B7. Astra's
-[implementation review](../7_Research/ecology-v1-implementation-review-2026-09-15.md)
-accepted six of seven repairs after cycle 2; the seventh (B6's complete bill)
-landed in cycle 3. The
-[result note](../7_Research/ecology-v1-implementation-2026-09-15.md) records
-run 3 criterion-first. Ecological outcomes at the provisional values are
-carried to the later whole-ecosystem search unchanged: one grazer still runs a
-bright 25-stand region down, a renewing 7 × 7 patch doubles its population in
-150 s while a stand needs 823 s to recover half its foliage. Next, separately:
-retrain in the revised ecology, the presentation task (living structure,
-foliage loss, dead wood), and a fresh display world. The old
-[Opus brief](ecology-v1-opus-2026-09-15.md) is closed.
+**2026-09-15 next orchestration:**
+[Fable: calibration, apex comparisons, parallel presentation and fresh training](ecology-v1-next-fable-2026-09-15.md).
+Accept the completed ecology-v1 review. Start ecology experiments and presentation
+in parallel; follow with bounded fresh RNN training and a fresh display world.
+The handoff defines separate compute caps and permits presentation deployment
+before ecological balance or training is complete.
+
+**2026-09-15 ecology v1 next: calibrated, presented, retrained, deployed.**
+The [consolidated result](../7_Research/ecology-v1-next-results-2026-09-15.md)
+answers [the next-steps handoff](ecology-v1-next-fable-2026-09-15.md). A
+([calibration](../7_Research/ecology-v1-calibration-2026-09-15.md)) found the
+provisional defaults do not fail at world scale the way the fixtures did,
+that variety does fail (skimmer lost, generalists usually, apex never mates
+in 180 runs), and selected `fast-leaf` (`runs/ecology-v1-calibration/selected/`).
+B ([presentation](../7_Research/ecology-v1-presentation-2026-09-15.md),
+merged `7d9a5ae`) draws structure from wood, foliage as fullness on it, and
+dead wood; veto list in its note. C
+([training](../7_Research/ecology-v1-training-2026-09-15.md)) trained one
+grazer in `fast-leaf`: it doubles its own lifetime, still starves on every
+held-out patch, and changes nothing about the world; not installed on the
+cube. D: the cube runs build `0.1.0+7d9a5ae`, a fresh schema-16 `fast-leaf`
+world, 24 legacy founders, apex controls available, since 15:38 on 2026-09-15.
+Next: the energy-budget measurement and a place-coupling design task named in
+the consolidated result. The [ecology v1 contract](../ecology-v1-contract.md)
+and its [implementation review](../7_Research/ecology-v1-implementation-review-2026-09-15.md)
+stand as the accepted baseline.
 
 **2026-09-15 R2a cleared:** Repair cycle 2 is verified at `dbb769e`; 65 search
 tests plus the independent seam regression pass. Next is the
