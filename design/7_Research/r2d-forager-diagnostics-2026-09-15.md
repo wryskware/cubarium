@@ -98,3 +98,26 @@ addendum below when the run completes.
   forager is meaningful at population scale; the single-animal one is not a proxy.
 - Horizon: either train at the horizon we care about, or add a regrowth-sufficient
   layout so that 36,000-tick survival implies sustained foraging.
+
+## Addendum: seed 2 completed
+
+64 updates, 8,452 episodes, 251.1 M ticks, 1,064.6 s wall at 20 workers
+(`runs/es-r2c-min64-seed2/`). Centre scores: first at 36,000 on all four at update 19
+(36,000.064); highest at update 64 (36,000.184), rising monotonically through the
+plateau as the store term improves. Selection was frozen before any held-out episode:
+both the R2c rule's centre (19) and the highest (64), evaluated on the eight held-out
+layouts (`runs/es-r2c-diag/seed2-g{19,64}-holdout.{txt,json}`):
+
+| centre | held-out survived | min ticks | mean ticks | fails |
+| --- | --- | --- | --- | --- |
+| seed 1, g59 (R2c) | 7 of 8 | 6,501 | 32,313 | h2 (ate 0.02 m) |
+| seed 2, g19 | 5 of 8 | 13,475 | 27,916 | h2, h4, h5 |
+| seed 2, g64 | 7 of 8 | 14,475 | 33,309 | h2 (ate 1.50 m, died at 14,475) |
+
+Two independent seeds fail the same held-out layout, h2 (the weakest opening with the
+start heading away from the patch), and pass the other seven. The first centre to clear
+the training step transfers worse than the same run's later plateau centres, so "earliest
+at 36,000" is not the right freezing rule; the store term keeps carrying information once
+survival saturates. Seed 2's g64 forager has slightly higher stores and lower path
+length (about 1,420 body lengths against 1,600) than seed 1's g59: it walks less to eat
+the same.
