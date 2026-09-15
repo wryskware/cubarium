@@ -25,6 +25,7 @@ use cubarium::art_present::{
     rain_fall, rain_marks, rain_origin, rig_of, slot_of, slot_wind, species_of, stage_thresholds,
     state_of, tall_anchor, tall_anchor_at, tall_between, tall_columns, tall_grown_px, tall_heading,
     tall_target, up_of,
+    wood_from_producer,
 };
 use cubarium::clock::DT;
 use cubarium::present::{PRODUCER_SATURATION, interpolate};
@@ -85,6 +86,7 @@ fn bare_view(tick: u64) -> RenderView {
         water: vec![0.0; CELL_COUNT],
         rain: vec![0.0; CELL_COUNT],
         producer_max: PRODUCER_MAX,
+        wood_max: 0.6,
         organisms: Vec::new(),
     }
 }
@@ -94,6 +96,8 @@ fn rich_view(tick: u64) -> RenderView {
     let mut v = bare_view(tick);
     v.producer.fill(saturation());
     v.detritus.fill(SOIL_SCALE);
+    // Ecology v1 drives the stage from wood; this fixture speaks in producer density.
+    wood_from_producer(&mut v);
     v
 }
 
@@ -101,6 +105,7 @@ fn rich_view(tick: u64) -> RenderView {
 fn one_cell_view(tick: u64, cell: CellId, density: f64) -> RenderView {
     let mut v = bare_view(tick);
     v.producer[cell.index()] = saturation() * density;
+    wood_from_producer(&mut v);
     v
 }
 
@@ -979,6 +984,7 @@ fn column_view(tick: u64, face: Face, cx: u8) -> RenderView {
             v.producer[cell.index()] = saturation();
         }
     }
+    wood_from_producer(&mut v);
     v
 }
 
@@ -1964,6 +1970,7 @@ fn growth_sequence_capture() {
             }
         }
         v.fruit[fruity.index()] = FRUIT_SHOW * 2.0;
+        wood_from_producer(&mut v);
         v
     };
 

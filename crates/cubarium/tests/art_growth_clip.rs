@@ -27,6 +27,7 @@ use cubarium::art_present::{
     PLANT_REVEAL_PX, STAGE_GROW_SECONDS, band_of, band_opacity, growth_between, growth_step,
     growth_weights, plant_bend_budget, plant_cap, plant_phase_of, present_seconds, slot_of,
     slot_wind, species_of, stage_opacity, stage_thresholds, wind_strength,
+    wood_from_producer,
 };
 use cubarium::clock::DT;
 use cubarium::present::PRODUCER_SATURATION;
@@ -102,6 +103,7 @@ fn bare_view(tick: u64) -> RenderView {
         water: vec![0.0; CELL_COUNT],
         rain: vec![0.0; CELL_COUNT],
         producer_max: PRODUCER_MAX,
+        wood_max: 0.6,
         organisms: Vec::new(),
     }
 }
@@ -110,6 +112,8 @@ fn bare_view(tick: u64) -> RenderView {
 fn one_cell_view(tick: u64, cell: CellId, density: f64) -> RenderView {
     let mut v = bare_view(tick);
     v.producer[cell.index()] = saturation() * density;
+    // Ecology v1 drives the stage from wood; this fixture speaks in producer density.
+    wood_from_producer(&mut v);
     v
 }
 

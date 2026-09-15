@@ -14,19 +14,34 @@ use cubarium_core::{
 use cubarium_render::Canvas;
 use cubarium_surface::{CELL_COUNT, Face, SurfacePoint, Vec2};
 
-fn transition_draw_cost(growing: bool, wet: bool) {
+/// Living wood at `W_max`, which is what the structural read calls a full-grown stand since
+/// ecology v1.
+const WOOD_MAX: f64 = 0.6;
+/// The foliage a full stand carries in these fixtures: `P / W` above the fullness shoulder,
+/// so `fullness` below decides whether the silhouette layer is stamped at all.
+const FULL_FOLIAGE: f64 = WOOD_MAX;
+
+/// `fullness` is the cell's `P / W`: 1 or more is an ungrazed stand, which stamps exactly
+/// what this presenter stamped before ecology v1; anything between 0 and the shoulder stamps
+/// the living-wood silhouette *as well*, which is this feature's worst case per cell.
+/// `dead` adds standing dead wood in every cell on top, a third stamp.
+fn transition_draw_cost_at(growing: bool, wet: bool, fullness: f64, dead: f64, what: &str) {
     let mut view = RenderView {
         tick: 121, // Six simulated seconds: inside a gust, not its quiet interval.
-        producer: vec![if growing { 0.0 } else { 10.0 }; CELL_COUNT],
+        producer: vec![
+            if growing { 0.0 } else { fullness * WOOD_MAX };
+            CELL_COUNT
+        ],
         detritus: vec![if growing { 0.0 } else { 1.5 }; CELL_COUNT],
         fruit: vec![if growing { 0.0 } else { 1.0 }; CELL_COUNT],
-        wood: vec![0.0; CELL_COUNT],
+        wood: vec![if growing { 0.0 } else { WOOD_MAX }; CELL_COUNT],
         plant_reserve: vec![0.0; CELL_COUNT],
-        dead_wood: vec![0.0; CELL_COUNT],
+        dead_wood: vec![if growing { 0.0 } else { dead }; CELL_COUNT],
         carrion: vec![0.0; CELL_COUNT],
         water: vec![if wet { 1.0 } else { 0.0 }; CELL_COUNT],
         rain: vec![1.0; CELL_COUNT],
         producer_max: 10.0,
+        wood_max: 0.6,
         organisms: (0..200u32)
             .map(|slot| OrganismView {
                 id: OrganismId {
@@ -58,7 +73,11 @@ fn transition_draw_cost(growing: bool, wet: bool) {
     for _ in 0..5 {
         presenter.draw(&view, 0.0, &mut canvas);
     }
-    view.producer.fill(if growing { 10.0 } else { 0.0 });
+    view
+        .producer
+        .fill(if growing { fullness * WOOD_MAX } else { 0.0 });
+    view.wood.fill(if growing { WOOD_MAX } else { 0.0 });
+    view.dead_wood.fill(if growing { dead } else { 0.0 });
     view.detritus.fill(if growing { 1.5 } else { 0.0 });
     view.fruit.fill(if growing { 1.0 } else { 0.0 });
 
@@ -79,7 +98,7 @@ fn transition_draw_cost(growing: bool, wet: bool) {
     let mean = buckets.iter().sum::<f64>() / buckets.len() as f64;
     let worst = buckets.iter().copied().fold(0.0, f64::max);
     println!(
-        "{} / {} / rain / 200 bodies: mean {mean:.3} ms/frame; worst one-second mean {worst:.3}; buckets {buckets:.3?}",
+        "{} / {} / {what} / rain / 200 bodies: mean {mean:.3} ms/frame; worst one-second mean {worst:.3}; buckets {buckets:.3?}",
         if growing { "growing" } else { "wilting" },
         if wet { "wet" } else { "dry" },
     );
@@ -87,6 +106,28 @@ fn transition_draw_cost(growing: bool, wet: bool) {
         worst < 1_000.0 / 60.0,
         "crowded transition exceeds the draw budget: {worst:.3} ms"
     );
+}
+
+/// The pre-ecology comparison point: every stand ungrazed, so no silhouette is stamped and
+/// the frame is the one this presenter drew before the feature existed.
+fn transition_draw_cost(growing: bool, wet: bool) {
+    transition_draw_cost_at(growing, wet, FULL_FOLIAGE / WOOD_MAX, 0.0, "full canopy");
+}
+
+/// Ecology v1's worst case: every cell half-grazed, so every cell stamps its foliage *and*
+/// the living-wood silhouette under it.
+#[test]
+#[ignore = "release-only timing study; run alone with --test-threads=1"]
+fn crowded_half_grazed_draw_cost() {
+    transition_draw_cost_at(true, false, 0.5, 0.0, "half-grazed");
+}
+
+/// Worse still, and not a state the ecology sustains: every cell half-grazed *and* carrying
+/// standing dead wood, so every cell stamps three times.
+#[test]
+#[ignore = "release-only timing study; run alone with --test-threads=1"]
+fn crowded_half_grazed_over_dead_wood_draw_cost() {
+    transition_draw_cost_at(true, false, 0.5, WOOD_MAX, "half-grazed over dead wood");
 }
 
 #[test]

@@ -51,6 +51,81 @@ pub const REED_STAGES: [f64; 3] = [0.6, 0.8, 1.0];
 /// oscillating around a threshold does not make the plant flicker. Review-tunable.
 pub const STAGE_HYST: f64 = 0.04;
 
+// --- Ecology v1: structure from wood, foliage as fullness on it ---------------------
+//
+// `design/ecology-v1-contract.md` §3 gives every cell three plant stocks the presenter can
+// read: living wood `W` (persistent structure), living foliage `P`, and dead wood `Wd`.
+// These constants are the whole mapping from those stocks to the picture, and every one of
+// them is review-tunable from a viewing session.
+
+/// Shape of the structural read: the stage a foliage or canopy cell shows is driven by
+/// `(W / wood_max)^WOOD_SHAPE` through the band's ordinary [`stage_thresholds`] and
+/// hysteresis. Review-tunable.
+///
+/// **Why a cube root and not the raw fraction.** `W` spans 0.02 m (`W_min`, barely alive)
+/// to 0.6 m (`W_max`) — a thirty-fold range — while the three stage thresholds span 0.25 to
+/// 0.70, under threefold. No linear normalisation can put a just-alive stand at stage 0 and
+/// still separate an average-light stand from a bright one. A cube root is the honest
+/// compression: wood is the stand's *bulk* and the sprite is its *size*, and size goes as
+/// the cube root of bulk. With the shipped foliage thresholds it puts the stage steps at
+/// `W = 0.0094` (bare to stage 0, below `W_min`, so **every living cell shows a plant**),
+/// `W = 0.055` (stage 1) and `W = 0.206` (stage 2), so the implementation note's measured
+/// stands — average `W = 0.105`, bright `W = 0.393` — read stage 1 and stage 2.
+pub const WOOD_SHAPE: f64 = 1.0 / 3.0;
+
+/// `k` of the fullness rule `f = clamp(P / (k * W), 0, 1)`: the foliage per unit of wood a
+/// stand carries when its canopy is "whole". Review-tunable.
+///
+/// 1 m of foliage per m of wood is exactly half the structural cap `P_cap = alpha*W`
+/// (`alpha = 2`, §11), and both measured ungrazed classes sit above it — average
+/// `P/W = 0.93`, bright `1.22` — so an ungrazed stand of either class reads as a full
+/// canopy.
+pub const FOLIAGE_PER_WOOD: f64 = 1.0;
+
+/// The fullness at which the canopy is drawn whole: [`foliage_ramp`] is 1 at and above it.
+/// Review-tunable.
+///
+/// The shoulder is not slack, it is leaf overlap: the last sixth of a canopy hides behind
+/// the rest of it and adding it changes no pixel. It also buys the two measured ungrazed
+/// classes a margin (average `f = 0.93`, 9 % above the shoulder) so an ordinary steady-state
+/// wobble cannot make the foliage layer breathe, and it is what lets a healthy stand draw
+/// **exactly** the image it drew before this feature existed, in one stamp.
+pub const FOLIAGE_FULL: f64 = 0.85;
+
+/// Living structure: a dim warm ember, the one warm value in a cube whose ground ramps
+/// indigo to cyan and whose soil ramps dark plum to violet-mauve ([`SOIL_LOW_SRGB`],
+/// [`SOIL_HIGH_SRGB`]). Review-tunable *within the Outrun family* of
+/// `design/appearance.md` "Palette" — a stripped stand must read as a plant standing on the
+/// ground, not as a hole in it, and hue is the only cue a 64 x 64 face reliably carries.
+pub const LIVING_WOOD_SRGB: u32 = 0x009B_4633;
+
+/// Dead structure: cool ash, desaturated and a long way round the wheel from
+/// [`LIVING_WOOD_SRGB`]. Review-tunable. It is deliberately the least saturated thing on
+/// the cube: dead wood is the only stock with no life in it.
+pub const DEAD_WOOD_SRGB: u32 = 0x005A_5E6E;
+
+/// How a wood tone carries the art's own light ([`cubarium_render::Shade`]).
+/// Review-tunable, and the difference between "a plant with no leaves on it" and "a hole in
+/// the ground".
+///
+/// A silhouette taken from alpha alone is a solid blob — a stripped bloomcrown becomes a
+/// filled disc — because the pack's plants are drawn with their structure *inside* their
+/// outline, not around it. Scaling the tone by the texel's own relative luminance keeps that
+/// structure. `reference` 0.30 is about the luminance of the pack's lit neon at full alpha,
+/// so a lit texel takes the whole tone; `floor` 0.42 is what an unlit one keeps, which is
+/// enough that the outline never breaks up at 64 x 64.
+pub fn wood_shade() -> cubarium_render::Shade {
+    cubarium_render::Shade {
+        floor: 0.42,
+        reference: 0.30,
+    }
+}
+
+/// How loud a dead silhouette is against a living one at the same stage. Review-tunable:
+/// dead wood is scenery that is on its way out, and at 1 a field of standing dead wood
+/// reads as busy as a living forest.
+pub const DEAD_WOOD_OPACITY: f32 = 0.70;
+
 /// Fruit density (m per cell) above which a full-grown plant with a `fruit` clip shows
 /// it. Low on purpose: with frugivores about, the fruit a rich cell holds at any moment
 /// is what ripened since the last bite, 0.02–0.06 m in the fauna runs, so a threshold
@@ -291,6 +366,25 @@ pub(super) static SOIL_RAMP: LazyLock<([f32; 3], [f32; 3])> = LazyLock::new(|| {
     )
 });
 
+/// [`LIVING_WOOD_SRGB`] and [`DEAD_WOOD_SRGB`] decoded to linear light once, the way
+/// [`SOIL_RAMP`] decodes the soil. `srgb_decode` is not a `const fn`.
+pub(super) static WOOD_TONES: LazyLock<([f32; 3], [f32; 3])> = LazyLock::new(|| {
+    (
+        present::srgb_linear(LIVING_WOOD_SRGB),
+        present::srgb_linear(DEAD_WOOD_SRGB),
+    )
+});
+
+/// The living-structure tint a silhouette is stamped with, in linear light.
+pub fn living_wood_tone() -> [f32; 3] {
+    WOOD_TONES.0
+}
+
+/// The dead-structure tint a silhouette is stamped with, in linear light.
+pub fn dead_wood_tone() -> [f32; 3] {
+    WOOD_TONES.1
+}
+
 /// Seeds the per-cell slot hash. Any fixed value works; this one keeps the placement
 /// stream separate from every other `SplitMix64` stream in the host.
 const MOTIF_SEED: u64 = 0x6D6F_7469_6600_0001;
@@ -446,16 +540,44 @@ pub fn stage_thresholds(band: Band) -> [f64; 3] {
     }
 }
 
-/// The density that drives a cell's plant, as a fraction of its band's scale.
+/// The structural density that drives a cell's plant, as a fraction of its band's scale.
 ///
-/// **Normative**: soil reads detritus over [`SOIL_SCALE`]; foliage and canopy read the
-/// producer field over the ramp's saturation point (`producer_max ·
-/// `[`PRODUCER_SATURATION`]); water reads depth over [`REED_SCALE`]. Not clamped: the
-/// stage rules compare it against thresholds and the opacity ramp clamps on its own. A
-/// missing cell, a non-positive saturation or a non-finite value is density 0.
+/// **Normative**: soil reads **litter plus remains** (`detritus + carrion`) over
+/// [`SOIL_SCALE`]; foliage and canopy read [`wood_density`] — the cube root of the living
+/// wood fraction, not the producer field; water reads depth over [`REED_SCALE`]. Not
+/// clamped above (the stage rules compare it against thresholds and the opacity ramp clamps
+/// on its own); a missing cell or a non-finite value is density 0.
+///
+/// This is the ecology v1 presentation boundary (contract §12): what a cell *is* comes from
+/// its persistent structure, so stripping a stand's foliage does not take its plant away.
+/// [`ground_density`] keeps the old producer read for the ground-cover texture, which is
+/// low cover rather than structure.
 pub fn plant_density(view: &RenderView, index: usize, band: Band) -> f64 {
     let value = match band {
-        Band::Soil => view.detritus.get(index).copied().unwrap_or(0.0) / SOIL_SCALE,
+        Band::Soil => litter_density(view, index),
+        Band::Water => view.water.get(index).copied().unwrap_or(0.0) / REED_SCALE,
+        Band::Foliage | Band::Canopy => return wood_density(view, index),
+    };
+    if value.is_finite() { value } else { 0.0 }
+}
+
+/// Litter plus remains over [`SOIL_SCALE`]: what the soil band's plants, its flecks and its
+/// ground wash all read (contract §3.1 `D` and `C`; §12 allows the presenter to sum them
+/// until a carcass look exists, and there is none).
+pub fn litter_density(view: &RenderView, index: usize) -> f64 {
+    let d = view.detritus.get(index).copied().unwrap_or(0.0);
+    let c = view.carrion.get(index).copied().unwrap_or(0.0);
+    let value = (d + c) / SOIL_SCALE;
+    if value.is_finite() { value } else { 0.0 }
+}
+
+/// The density that drives the **ground-cover texture**, unchanged from before ecology v1:
+/// soil reads litter plus remains, foliage and canopy the producer field over the ramp's
+/// saturation point, water its depth. Ground cover is low cover, not structure, so it
+/// follows the foliage field and thins out under grazing with it.
+pub fn ground_density(view: &RenderView, index: usize, band: Band) -> f64 {
+    let value = match band {
+        Band::Soil => litter_density(view, index),
         Band::Water => view.water.get(index).copied().unwrap_or(0.0) / REED_SCALE,
         Band::Foliage | Band::Canopy => {
             let saturation = view.producer_max * PRODUCER_SATURATION;
@@ -466,6 +588,60 @@ pub fn plant_density(view: &RenderView, index: usize, band: Band) -> f64 {
         }
     };
     if value.is_finite() { value } else { 0.0 }
+}
+
+/// One wood stock as a stage-driving density: `(value / wood_max)^`[`WOOD_SHAPE`], with the
+/// fraction clamped to `[0, 1]` first. A non-positive or non-finite `wood_max`, or a
+/// non-finite value, is density 0.
+pub fn wood_fraction(value: f64, wood_max: f64) -> f64 {
+    if !(wood_max.is_finite() && wood_max > 0.0 && value.is_finite() && value > 0.0) {
+        return 0.0;
+    }
+    (value / wood_max).clamp(0.0, 1.0).powf(WOOD_SHAPE)
+}
+
+/// The living structure of a cell: [`wood_fraction`] of its `wood`.
+pub fn wood_density(view: &RenderView, index: usize) -> f64 {
+    wood_fraction(view.wood.get(index).copied().unwrap_or(0.0), view.wood_max)
+}
+
+/// The dead structure of a cell: [`wood_fraction`] of its `dead_wood`, read through exactly
+/// the same mapping so a stand that dies keeps the size it had.
+pub fn dead_wood_density(view: &RenderView, index: usize) -> f64 {
+    wood_fraction(
+        view.dead_wood.get(index).copied().unwrap_or(0.0),
+        view.wood_max,
+    )
+}
+
+/// How full a living stand's canopy is: `f = clamp(P / (`[`FOLIAGE_PER_WOOD`]` * W), 0, 1)`,
+/// and 0 where there is no wood to carry foliage.
+///
+/// **Normative**, and the one continuous quantity ecology v1 adds to the picture. It is a
+/// *ratio*, not a stock: a stand that loses half its wood and half its foliage is still
+/// full, and a stand that keeps its wood and loses its foliage empties out. That is what
+/// makes grazing legible on a structure that does not move.
+pub fn foliage_fullness(view: &RenderView, index: usize) -> f64 {
+    let w = view.wood.get(index).copied().unwrap_or(0.0);
+    let p = view.producer.get(index).copied().unwrap_or(0.0);
+    if !(w.is_finite() && w > 0.0 && p.is_finite() && p > 0.0) {
+        return 0.0;
+    }
+    (p / (FOLIAGE_PER_WOOD * w)).clamp(0.0, 1.0)
+}
+
+/// The share of a stand's stage sprite drawn as **foliage** rather than as bare structure:
+/// the clamped Hermite of the fullness over [`FOLIAGE_FULL`].
+///
+/// **Normative**: 0 at `f = 0`, 1 at and above `f = `[`FOLIAGE_FULL`], monotone
+/// non-decreasing in between, with zero slope at both ends — so neither a full canopy nor a
+/// stripped one can flicker, and a grazed stand thins and refills continuously. A `NaN`
+/// fullness is a stripped stand.
+pub fn foliage_ramp(f: f64) -> f32 {
+    if f.is_nan() {
+        return 0.0;
+    }
+    hermite(f / FOLIAGE_FULL) as f32
 }
 
 /// The stage a slot is in after this tick, from the stage it was in.
@@ -508,6 +684,47 @@ pub fn stage_opacity(stage: u8, t: f64, thresholds: &[f64; 3], ceiling: f32) -> 
         return 0.0;
     }
     (((t - start) / (end - start)).clamp(0.0, 1.0) as f32) * ceiling
+}
+
+/// The living wood a cell needs to read as structural `density`: the inverse of
+/// [`wood_fraction`], `wood_max * density³`.
+pub fn wood_for_density(density: f64, wood_max: f64) -> f64 {
+    if !(wood_max.is_finite() && wood_max > 0.0 && density.is_finite() && density > 0.0) {
+        return 0.0;
+    }
+    wood_max * density.min(1.0).powi(3)
+}
+
+/// Fixture and capture support: give every cell of a view the living wood whose structural
+/// density ([`wood_density`]) equals the **producer** density that cell already carries
+/// ([`ground_density`]), plus a reserve at half of it.
+///
+/// Fixtures and studies written before ecology v1 said "how grown is this cell" as a
+/// fraction of the producer ramp's saturation point, which is what drove the stage then.
+/// This translates such a view into the stocks that drive it now, exactly, and leaves
+/// `producer` alone — so the ground cover, which still reads the producer field, is
+/// untouched, and every cell's canopy is full (`P / W = 1.5 / d²`, never below 1.5), which
+/// is the case those fixtures were written for. It is not part of the drawn contract: the
+/// world fills both fields itself.
+pub fn wood_from_producer(view: &mut RenderView) {
+    for i in 0..view.wood.len() {
+        let w = wood_for_density(ground_density(view, i, Band::Foliage), view.wood_max);
+        view.wood[i] = w;
+        if i < view.plant_reserve.len() {
+            view.plant_reserve[i] = 0.5 * w;
+        }
+    }
+}
+
+/// Whether a band's plants are **structural**: driven by living wood, carrying a
+/// living-wood silhouette under their foliage and a dead-wood silhouette of their own.
+///
+/// Only the foliage and canopy bands are. The soil band's plants are litter scenery — their
+/// stage comes from `D + C`, not from `W`, and painting a wood silhouette under a mushroom
+/// whose size is set by litter would say something the stocks do not. The water band's reeds
+/// stand by depth. Both keep exactly the image they had before ecology v1.
+pub fn structural(band: Band) -> bool {
+    matches!(band, Band::Foliage | Band::Canopy)
 }
 
 /// The opacity ceiling of a band's plants.

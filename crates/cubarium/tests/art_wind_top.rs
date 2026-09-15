@@ -33,6 +33,7 @@ use cubarium::art_present::{
     next_stage, placement_of, plant_bend, plant_bend_budget, plant_cap, plant_phase_of,
     present_seconds, slot_of, slot_wind, species_of, stage_opacity, stage_thresholds, up_of,
     wind_at, wind_chart, wind_phase, wind_response, wind_strength,
+    wood_from_producer,
 };
 use cubarium::present::PRODUCER_SATURATION;
 use cubarium_core::view::RenderView;
@@ -101,6 +102,7 @@ fn bare_view(tick: u64) -> RenderView {
         water: vec![0.0; CELL_COUNT],
         rain: vec![0.0; CELL_COUNT],
         producer_max: PRODUCER_MAX,
+        wood_max: 0.6,
         organisms: Vec::new(),
     }
 }
@@ -116,6 +118,7 @@ fn flooded_view(tick: u64, cell: CellId) -> RenderView {
 fn lit_view(tick: u64, cell: CellId) -> RenderView {
     let mut v = bare_view(tick);
     v.producer[cell.index()] = CANOPY_FULL * saturation();
+    wood_from_producer(&mut v);
     v
 }
 

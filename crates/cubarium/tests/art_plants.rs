@@ -23,6 +23,7 @@ use cubarium::art_present::{
     plant_bend_budget, slot_wind, tall_amplitude, tall_bend_base, tall_bend_budget, wind_strength,
     WIND_QUIET_TICK,
     TALL_BEND_LENGTH, TALL_BEND_ROOT,
+    wood_from_producer,
 };
 use cubarium::clock::DT;
 use cubarium::present::{
@@ -55,7 +56,7 @@ fn flat(v: f64) -> Vec<f64> {
 }
 
 fn view(tick: u64, producer: Vec<f64>, detritus: Vec<f64>, water: Vec<f64>) -> RenderView {
-    RenderView {
+    let mut v = RenderView {
         tick,
         producer,
         detritus,
@@ -67,8 +68,12 @@ fn view(tick: u64, producer: Vec<f64>, detritus: Vec<f64>, water: Vec<f64>) -> R
         water,
         rain: vec![0.0; CELL_COUNT],
         producer_max: PRODUCER_MAX,
+        wood_max: 0.6,
         organisms: Vec::new(),
-    }
+    };
+    // Ecology v1 drives the stage from wood; these fixtures speak in producer density.
+    wood_from_producer(&mut v);
+    v
 }
 
 /// Observe the view against `fruit` (the accent is paced in `observe`, and a first view
@@ -187,7 +192,8 @@ fn expected_ground(v: &RenderView) -> Canvas {
             let cell = cell_of(&point);
             let band = band_of(cell);
             let Some(tile) = pack.ground_for(band) else { continue };
-            let t = plant_density(v, cell.index(), band);
+            // Ground cover is low cover, not structure: it still reads the producer field.
+            let t = cubarium::art_present::ground_density(v, cell.index(), band);
             let opacity = ground_opacity(t, band) * ground_weight(face, x, y, band);
             if opacity <= 0.0 {
                 continue;

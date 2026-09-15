@@ -17,10 +17,41 @@
 //!
 //! | Band | Where | Ground | Plants (by hash, per cell) | Driven by |
 //! | --- | --- | --- | --- | --- |
-//! | Soil | `h < `[`SOIL_TOP`] | detritus ramp, dark plum → violet-mauve, no flecks | glowcap / rootveil, dim | detritus `D` |
-//! | Foliage | [`SOIL_TOP`]` ≤ h < 1` | the decided producer ramp and flecks | lanternstalk / tendrilfan | producer `P` |
-//! | Canopy | the top face (`h = 1`) | the decided producer ramp and flecks | umbrellafrond / bloomcrown, eager | producer `P` |
+//! | Soil | `h < `[`SOIL_TOP`] | litter ramp, dark plum → violet-mauve, no flecks | glowcap / rootveil, dim | litter + remains `D + C` |
+//! | Foliage | [`SOIL_TOP`]` ≤ h < 1` | the decided producer ramp and flecks | lanternstalk / tendrilfan | living wood `W` |
+//! | Canopy | the top face (`h = 1`) | the decided producer ramp and flecks | umbrellafrond / bloomcrown, eager | living wood `W` |
 //! | Water | any cell deeper than [`REED_DEPTH`] | (the band's own ground) | reedspire | water depth |
+//!
+//! ## Ecology v1: structure, fullness, dead wood
+//!
+//! **Normative**, and the whole of the ecology v1 presentation slice
+//! (`design/ecology-v1-contract.md` §12). What a cell *is* comes from its persistent
+//! **living wood** `W`; how leafy it looks comes from the ratio `P / W`; what is left when it
+//! dies comes from `Wd`. Three rules, in the order they are composited:
+//!
+//! 1. **Structure from wood.** In the structural bands ([`structural`]: foliage and canopy)
+//!    the stage and the tall columns' height are driven by [`wood_density`] — the cube root
+//!    of `W / wood_max` ([`WOOD_SHAPE`]) — through the band's ordinary thresholds and
+//!    hysteresis. Every living cell (`W ≥ W_min`) is therefore at least a sprout: a stand
+//!    that is grazed to nothing still stands. Ground cover is *not* structure and keeps the
+//!    producer read ([`ground_density`]).
+//! 2. **Foliage is a continuous layer on it.** [`foliage_fullness`] is `clamp(P / (k·W), 0,
+//!    1)` and [`foliage_ramp`] turns it into the share `a` of the stage sprite drawn as
+//!    foliage. The rest of that sprite is drawn *underneath* as a **silhouette**: the same
+//!    pose, in one flat warm [`living_wood_tone`], through
+//!    [`cubarium_render::stamp_layers_bent_tinted`], at the opacity
+//!    [`silhouette_opacity`] picks so the two together always cover exactly the band's
+//!    ceiling. A stand being stripped therefore changes colour without fading, and at
+//!    `a = 1` — every ungrazed stand — the silhouette is not stamped at all and the image is
+//!    bit for bit what this presenter drew before the feature existed.
+//! 3. **Dead wood is the same silhouette in a dead tone.** A second paced [`Growth`] track
+//!    per cell reads [`dead_wood_density`] through the same mapping, and is drawn first, in
+//!    [`dead_wood_tone`] at [`DEAD_WOOD_OPACITY`], so a stand that dies leaves its own shape
+//!    standing and that shape shrinks and fades as `Wd` decomposes. A tall column does the
+//!    same with base and trunk only: a dead column has no crown and no climber.
+//!
+//! No analytical overlay, no new sprite and nothing the world can see: the stocks were
+//! already on the [`RenderView`], and this is the whole of what reads them.
 //!
 //! Each cell owns one plant slot at a hashed placement. The plant grows through three
 //! authored stages as its field rises ([`stage_thresholds`]), with hysteresis so an
@@ -66,7 +97,8 @@ use cubarium_core::hunter::{FixedHunterProfile, HunterEvent, HunterPhase, Hunter
 use cubarium_core::organism::Mode;
 use cubarium_core::view::{OrganismView, RenderView};
 use cubarium_render::{
-    Bend, Canvas, Mask, Pose, draw_field, stamp_layers, stamp_layers_bent, stamp_pose,
+    Bend, Canvas, Mask, Pose, Tone, draw_field, stamp_layers, stamp_layers_bent,
+    stamp_layers_bent_toned, stamp_pose,
 };
 use cubarium_surface::{
     CELL_COUNT, CELLS_PER_FACE_EDGE, CellId, Edge, PixelImage, ScalarField, SurfacePoint, Vec2,
@@ -296,6 +328,9 @@ pub struct ArtPresenter {
     /// The raw detritus field, which the soil ground ramps against. Separate from
     /// `detritus`, which the flecks threshold: the soil is a wash, not flecks.
     soil: ScalarField,
+    /// Litter plus remains per cell (`D + C`), rebuilt once per frame: what both the flecks
+    /// and the soil wash read since ecology v1 gave remains their own stock.
+    litter: Vec<f64>,
     /// One layer of the foliage/canopy ground, drawn on its own so it can be faded out
     /// per pixel by the horizon before it reaches the image.
     layer: Canvas,
@@ -315,6 +350,14 @@ pub struct ArtPresenter {
     /// draws [`growth_between`] the two: growth is then continuous at the render rate, not
     /// stepped at 20 Hz. Equal to `growth` after a snap.
     growth_prev: Vec<Growth>,
+    /// The **dead** structure of each cell, paced by exactly the same rules as `growth`
+    /// against [`dead_wood_density`] instead of [`wood_density`]. A dead stand is drawn as
+    /// its cell's own species silhouette in [`dead_wood_tone`], so it keeps the shape the
+    /// living stand had without the presenter remembering anything about it: the species
+    /// pick is a pure function of the cell.
+    dead: Vec<Growth>,
+    /// `dead` as the previous `observe` left it, for [`growth_between`].
+    dead_prev: Vec<Growth>,
     /// The water field, seam-filtered per pixel when drawn.
     water: ScalarField,
     /// The pack's tall species resolved once.
@@ -326,6 +369,12 @@ pub struct ArtPresenter {
     tall: Vec<TallGrowth>,
     /// `tall` as the previous `observe` left it, for [`tall_between`].
     tall_prev: Vec<TallGrowth>,
+    /// The **dead** height of each column, paced exactly like `tall` against
+    /// [`column_dead_density`]: a column whose stand died stands as a bare trunk in the dead
+    /// tone and loses segments as `Wd` decomposes.
+    tall_dead: Vec<TallGrowth>,
+    /// `tall_dead` as the previous `observe` left it.
+    tall_dead_prev: Vec<TallGrowth>,
     /// The state each live body is in and when it last changed, for the cross-clip fade.
     /// Bodies the view no longer carries are dropped in `observe`.
     bodies: std::collections::HashMap<OrganismId, BodyMemory>,
@@ -392,16 +441,21 @@ impl ArtPresenter {
             tall_species,
             columns,
             tall_prev: tall.clone(),
+            tall_dead: tall.clone(),
+            tall_dead_prev: tall.clone(),
             tall,
             producer: ScalarField::zeros(),
             detritus: ScalarField::zeros(),
             soil: ScalarField::zeros(),
+            litter: vec![0.0; CELL_COUNT],
             layer: Canvas::new(),
             scratch: Vec::new(),
             slots,
             bands,
             growth: vec![Growth::snapped(None, false); CELL_COUNT],
             growth_prev: vec![Growth::snapped(None, false); CELL_COUNT],
+            dead: vec![Growth::snapped(None, false); CELL_COUNT],
+            dead_prev: vec![Growth::snapped(None, false); CELL_COUNT],
             bodies: std::collections::HashMap::new(),
             budgets,
             last_tick: None,
@@ -614,6 +668,17 @@ impl ArtPresenter {
 
     /// The whole paced growth of a cell's plant: where the visual is, where it is going and
     /// how far along it is.
+    /// The dead-structure growth state of a cell: what the dead-wood silhouette is drawn
+    /// from ([`ArtPresenter::dead`]).
+    pub fn dead_growth_of(&self, cell: CellId) -> Growth {
+        self.dead[cell.index()]
+    }
+
+    /// The previous-observe dead-structure state of a cell, for interpolation at render rate.
+    pub fn dead_growth_prev_of(&self, cell: CellId) -> Growth {
+        self.dead_prev[cell.index()]
+    }
+
     pub fn growth_of(&self, cell: CellId) -> Growth {
         self.growth[cell.index()]
     }
@@ -698,6 +763,7 @@ impl ArtPresenter {
                 self.bands[index] = band;
                 // The new band's plant is a different plant: it starts from bare ground.
                 self.growth[index] = Growth::snapped(None, false);
+                self.dead[index] = Growth::snapped(None, false);
             }
             let t = plant_density(view, index, band);
             let from_target = if snap {
@@ -719,6 +785,28 @@ impl ArtPresenter {
             if snap {
                 self.growth_prev[index] = self.growth[index];
             }
+            // The dead track: the same stage rule, the same pacing, the same hysteresis,
+            // driven by `dead_wood` instead of `wood`. It never carries fruit.
+            if structural(band) {
+                let td = dead_wood_density(view, index);
+                let dead_from = if snap { None } else { self.dead[index].target };
+                let dead_target = plant_cap(band, cell)
+                    .and_then(|cap| next_stage(dead_from, td, &stage_thresholds(band), cap));
+                if new_tick {
+                    self.dead_prev[index] = self.dead[index];
+                }
+                self.dead[index] = if snap {
+                    Growth::snapped(dead_target, false)
+                } else {
+                    advance_growth(self.dead[index], dead_target, false, dt)
+                };
+                if snap {
+                    self.dead_prev[index] = self.dead[index];
+                }
+            } else {
+                self.dead[index] = Growth::snapped(None, false);
+                self.dead_prev[index] = self.dead[index];
+            }
         }
         for (i, column) in self.columns.iter().enumerate() {
             let t_col = column_density(view, column.face, column.cx);
@@ -737,6 +825,23 @@ impl ArtPresenter {
             };
             if snap {
                 self.tall_prev[i] = self.tall[i];
+            }
+            let t_dead = column_dead_density(view, column.face, column.cx);
+            let dead_from = if snap { 0 } else { self.tall_dead[i].target };
+            let dead_target = next_tall(dead_from, t_dead);
+            if new_tick {
+                self.tall_dead_prev[i] = self.tall_dead[i];
+            }
+            self.tall_dead[i] = if snap {
+                TallGrowth {
+                    height: f64::from(dead_target),
+                    target: dead_target,
+                }
+            } else {
+                advance_tall(self.tall_dead[i], dead_target, dt)
+            };
+            if snap {
+                self.tall_dead_prev[i] = self.tall_dead[i];
             }
         }
         self.observe_bodies(view, snap);
@@ -790,6 +895,11 @@ impl ArtPresenter {
 
     /// The paced height of a tall column: how tall it is drawn now and what it is headed
     /// for.
+    /// The dead-structure growth of a tall column, clamped to the valid range.
+    pub fn tall_dead_growth_of(&self, column: usize) -> TallGrowth {
+        self.tall_dead[column.min(self.tall_dead.len().saturating_sub(1))]
+    }
+
     pub fn tall_growth_of(&self, column: usize) -> TallGrowth {
         self.tall.get(column).copied().unwrap_or(TallGrowth {
             height: 0.0,
@@ -906,7 +1016,13 @@ impl ArtPresenter {
 
         // Detritus flecks, exactly as the M2 presenter draws them — and likewise only
         // above the horizon. In the soil, detritus is the ground itself, not a fleck.
-        present::threshold_field(&mut self.detritus, &view.detritus, DETRITUS_THRESHOLD);
+        // Litter plus remains: contract §3.1 gives remains their own stock and §12 lets the
+        // presenter sum it with litter until a carcass look exists. There is none, so a
+        // carcass reads as a denser patch of the fleck and wash treatment litter already has.
+        self.litter.clear();
+        self.litter
+            .extend((0..CELL_COUNT).map(|i| litter_density(view, i) * SOIL_SCALE));
+        present::threshold_field(&mut self.detritus, &self.litter, DETRITUS_THRESHOLD);
         self.layer.clear();
         draw_field(
             &mut self.layer,
@@ -919,7 +1035,7 @@ impl ArtPresenter {
 
         // The soil ground: dark plum to violet-mauve by raw detritus, seam-filtered like
         // every other field layer, faded in through the same horizon.
-        present::copy_field(&mut self.soil, &view.detritus);
+        present::copy_field(&mut self.soil, &self.litter);
         draw_soil_ground(canvas, &self.soil);
 
         // Ground cover: each band's tileable texture on the 8-px lattice, fading in with
@@ -935,7 +1051,7 @@ impl ArtPresenter {
                     let Some(tile) = pack.ground_for(band) else {
                         continue;
                     };
-                    let t = plant_density(view, cell.index(), band);
+                    let t = ground_density(view, cell.index(), band);
                     let opacity = ground_opacity(t, band) * ground_weight(face, x, y, band);
                     if opacity <= 0.0 {
                         continue;
@@ -973,7 +1089,10 @@ impl ArtPresenter {
         for (index, cell) in CellId::all().enumerate() {
             // The growth this frame shows: between the last two observed states, at `f`.
             let growth = growth_between(self.growth_prev[index], self.growth[index], f);
-            if growth.from.is_none() && growth.to.is_none() {
+            let dead = growth_between(self.dead_prev[index], self.dead[index], f);
+            let bare = growth.from.is_none() && growth.to.is_none();
+            let dead_bare = dead.from.is_none() && dead.to.is_none();
+            if bare && dead_bare {
                 continue;
             }
             let band = self.bands[index];
@@ -984,6 +1103,64 @@ impl ArtPresenter {
             let t = plant_density(view, index, band);
             let thresholds = stage_thresholds(band);
             let ceiling = band_opacity(band);
+            // The shared breeze, once for this slot this frame: a side-face plant bends
+            // along its own tile's horizontal axis, a radial top-face plant turns in place,
+            // and a species with no response takes neither. The silhouettes take the same
+            // one, so structure and foliage lean together.
+            let (bend, heading) =
+                slot_wind(slot, &plant.name, budget_in(budgets, &plant.name), seconds);
+            // Dead structure, under everything living: the cell's own species as a whole
+            // silhouette in the dead tone, at a stage from `dead_wood` through the same
+            // mapping the living stand uses, quieter by `DEAD_WOOD_OPACITY` and fading out
+            // as the stock decays. This is the one extra stamp ecology v1 can cost a cell,
+            // and only where a stand has actually died.
+            if !dead_bare
+                && let Some((layers, opacity)) = silhouette_layers(
+                    plant,
+                    cell,
+                    seconds,
+                    dead,
+                    dead_wood_density(view, index),
+                    &thresholds,
+                    ceiling * DEAD_WOOD_OPACITY,
+                )
+            {
+                stamp_layers_bent_toned(
+                    canvas,
+                    slot.at,
+                    heading,
+                    &layers,
+                    1.0,
+                    opacity,
+                    Mask::None,
+                    bend,
+                    Tone {
+                        colour: dead_wood_tone(),
+                        shade: wood_shade(),
+                        mix: 1.0,
+                    },
+                    scratch,
+                );
+            }
+            if bare {
+                continue;
+            }
+            // How far this cell's plant has travelled from leaf to bare living wood: `0`
+            // where the canopy is whole — every ungrazed stand, and every non-structural
+            // band — and `1` where it is stripped. It is a *colour* on the stage sprite, not
+            // a layer under it: the stamp covers exactly what it always covered, so a stand
+            // being stripped changes hue without fading out of the ground, the image at
+            // `mix = 0` is bit for bit the one this presenter drew before ecology v1, and
+            // none of it costs a second stamp.
+            let tone = Tone {
+                colour: living_wood_tone(),
+                shade: wood_shade(),
+                mix: if structural(band) {
+                    1.0 - foliage_ramp(foliage_fullness(view, index))
+                } else {
+                    0.0
+                },
+            };
             let opacity_of = |stage: u8| stage_opacity(stage, t, &thresholds, ceiling);
             // The accent is gated by the field this frame is drawn against: the paced value
             // only ever fades it *in*.
@@ -992,18 +1169,13 @@ impl ArtPresenter {
             } else {
                 0.0
             };
-            // The shared breeze, once for this slot this frame: a side-face plant bends
-            // along its own tile's horizontal axis, a radial top-face plant turns in place,
-            // and a species with no response takes neither.
-            let (bend, heading) =
-                slot_wind(slot, &plant.name, budget_in(budgets, &plant.name), seconds);
             if growth.from == growth.to {
                 // Idle: one stage, whole, with the fruit accent blended in where it holds.
                 let stage = growth.to.expect("an idle bare slot was skipped above");
                 let opacity = opacity_of(stage);
                 if opacity > 0.0 {
                     let layers = stage_layers(plant, stage, cell, seconds, fruit_now);
-                    stamp_layers_bent(
+                    stamp_layers_bent_toned(
                         canvas,
                         slot.at,
                         heading,
@@ -1012,6 +1184,7 @@ impl ArtPresenter {
                         opacity,
                         Mask::None,
                         bend,
+                        tone,
                         scratch,
                     );
                 }
@@ -1044,7 +1217,7 @@ impl ArtPresenter {
                         (clip.sample(gu * clip.seconds), w_grow),
                         (stage_pose(plant, upper, cell, seconds), w_to),
                     ];
-                    stamp_layers_bent(
+                    stamp_layers_bent_toned(
                         canvas,
                         slot.at,
                         heading,
@@ -1053,6 +1226,7 @@ impl ArtPresenter {
                         opacity,
                         Mask::None,
                         bend,
+                        tone,
                         scratch,
                     );
                 }
@@ -1062,7 +1236,7 @@ impl ArtPresenter {
                 let opacity = opacity_of(stage) * (1.0 - gu) as f32;
                 if opacity > 0.0 {
                     let layers = stage_layers(plant, stage, cell, seconds, fruit_now);
-                    stamp_layers_bent(
+                    stamp_layers_bent_toned(
                         canvas,
                         slot.at,
                         heading,
@@ -1071,6 +1245,7 @@ impl ArtPresenter {
                         opacity,
                         Mask::None,
                         bend,
+                        tone,
                         scratch,
                     );
                 }
@@ -1090,8 +1265,9 @@ impl ArtPresenter {
                             reveal: gu * (layers_extent(&layers) + 0.5),
                         },
                     };
-                    stamp_layers_bent(
-                        canvas, slot.at, heading, &layers, 1.0, opacity, mask, bend, scratch,
+                    stamp_layers_bent_toned(
+                        canvas, slot.at, heading, &layers, 1.0, opacity, mask, bend, tone,
+                        scratch,
                     );
                 }
             }
@@ -1118,8 +1294,30 @@ impl ArtPresenter {
                     }
                 };
                 let amplitude = tall_amplitude(column, budget, seconds);
+                // Dead wood first, under the living column: base and trunk only, in the dead
+                // tone, at its own paced height.
+                let dead = tall_between(self.tall_dead_prev[i], self.tall_dead[i], f).height;
                 draw_column(
-                    canvas, column, height, plant, vine, seconds, amplitude, scratch,
+                    canvas,
+                    column,
+                    dead,
+                    plant,
+                    vine,
+                    seconds,
+                    amplitude,
+                    0.0,
+                    Some(Tone {
+                        colour: dead_wood_tone(),
+                        shade: wood_shade(),
+                        mix: 1.0,
+                    }),
+                    scratch,
+                );
+                // The crown dims with the stand's own foliage fullness: a stripped column
+                // keeps its trunk and loses its head.
+                let cap = foliage_ramp(column_fullness(view, column.face, column.cx));
+                draw_column(
+                    canvas, column, height, plant, vine, seconds, amplitude, cap, None, scratch,
                 );
             }
         }

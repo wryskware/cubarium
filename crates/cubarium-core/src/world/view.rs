@@ -82,6 +82,7 @@ impl World {
             water: self.state.fields.w.clone(),
             rain: self.rain.to_vec(),
             producer_max: self.state.config.producer.max,
+            wood_max: self.state.config.plant.wood_max,
             organisms,
         }
     }

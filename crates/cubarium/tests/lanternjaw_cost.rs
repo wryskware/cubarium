@@ -121,6 +121,7 @@ fn dense_view() -> RenderView {
         water: vec![1.0; CELL_COUNT],
         rain: vec![1.0; CELL_COUNT],
         producer_max: 10.0,
+        wood_max: 0.6,
         organisms: (0..200u32)
             .map(|slot| OrganismView {
                 id: OrganismId { slot, generation: 1 },

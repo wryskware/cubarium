@@ -52,6 +52,7 @@ fn bare_view(tick: u64) -> RenderView {
         water: vec![0.0; CELL_COUNT],
         rain: vec![0.0; CELL_COUNT],
         producer_max: PRODUCER_MAX,
+        wood_max: 0.6,
         organisms: Vec::new(),
     }
 }

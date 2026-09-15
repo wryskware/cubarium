@@ -443,6 +443,7 @@ mod tests {
             water: vec![0.0; cubarium_surface::CELL_COUNT],
             rain: vec![0.0; cubarium_surface::CELL_COUNT],
             producer_max: 2.0,
+            wood_max: 0.6,
             organisms: Vec::new(),
         }
     }
