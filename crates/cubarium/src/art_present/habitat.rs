@@ -104,6 +104,23 @@ pub const LIVING_WOOD_SRGB: u32 = 0x009B_4633;
 /// the cube: dead wood is the only stock with no life in it.
 pub const DEAD_WOOD_SRGB: u32 = 0x005A_5E6E;
 
+/// How a wood tone carries the art's own light ([`cubarium_render::Shade`]).
+/// Review-tunable, and the difference between "a plant with no leaves on it" and "a hole in
+/// the ground".
+///
+/// A silhouette taken from alpha alone is a solid blob — a stripped bloomcrown becomes a
+/// filled disc — because the pack's plants are drawn with their structure *inside* their
+/// outline, not around it. Scaling the tone by the texel's own relative luminance keeps that
+/// structure. `reference` 0.30 is about the luminance of the pack's lit neon at full alpha,
+/// so a lit texel takes the whole tone; `floor` 0.42 is what an unlit one keeps, which is
+/// enough that the outline never breaks up at 64 x 64.
+pub fn wood_shade() -> cubarium_render::Shade {
+    cubarium_render::Shade {
+        floor: 0.42,
+        reference: 0.30,
+    }
+}
+
 /// How loud a dead silhouette is against a living one at the same stage. Review-tunable:
 /// dead wood is scenery that is on its way out, and at 1 a field of standing dead wood
 /// reads as busy as a living forest.
@@ -625,29 +642,6 @@ pub fn foliage_ramp(f: f64) -> f32 {
         return 0.0;
     }
     hermite(f / FOLIAGE_FULL) as f32
-}
-
-/// The opacity the living-wood (or dead-wood) silhouette is stamped at **under** a foliage
-/// layer of share `a` drawn at ceiling `ceiling`, so that the two together always cover
-/// exactly `ceiling`.
-///
-/// **Normative**: `ceiling * (1 − a) / (1 − ceiling * a)`, and 0 at `a >= 1`. Source-over of
-/// the foliage (alpha `ceiling * a`) onto this leaves background weight
-/// `(1 − this)(1 − ceiling*a) = 1 − ceiling`, independent of `a`. So a stand being stripped
-/// does not fade out and back in: its coverage of the ground is constant and only its
-/// **colour** travels from leaf to bare wood. `a` outside `[0, 1]` is clamped; a `NaN` `a`
-/// is a stripped stand (full silhouette).
-pub fn silhouette_opacity(ceiling: f32, a: f32) -> f32 {
-    let a = if a.is_nan() { 0.0 } else { a.clamp(0.0, 1.0) };
-    if a >= 1.0 || !(ceiling > 0.0) {
-        return 0.0;
-    }
-    let ceiling = ceiling.min(1.0);
-    let denom = 1.0 - ceiling * a;
-    if denom <= 0.0 {
-        return ceiling;
-    }
-    (ceiling * (1.0 - a) / denom).clamp(0.0, 1.0)
 }
 
 /// The stage a slot is in after this tick, from the stage it was in.

@@ -97,8 +97,8 @@ use cubarium_core::hunter::{FixedHunterProfile, HunterEvent, HunterPhase, Hunter
 use cubarium_core::organism::Mode;
 use cubarium_core::view::{OrganismView, RenderView};
 use cubarium_render::{
-    Bend, Canvas, Mask, Pose, draw_field, stamp_layers, stamp_layers_bent,
-    stamp_layers_bent_tinted, stamp_pose,
+    Bend, Canvas, Mask, Pose, Tone, draw_field, stamp_layers, stamp_layers_bent,
+    stamp_layers_bent_toned, stamp_pose,
 };
 use cubarium_surface::{
     CELL_COUNT, CELLS_PER_FACE_EDGE, CellId, Edge, PixelImage, ScalarField, SurfacePoint, Vec2,
@@ -1109,9 +1109,11 @@ impl ArtPresenter {
             // one, so structure and foliage lean together.
             let (bend, heading) =
                 slot_wind(slot, &plant.name, budget_in(budgets, &plant.name), seconds);
-            // Dead structure, under everything living: the cell's own species in the dead
-            // tone, at a stage from `dead_wood` through the same mapping the living stand
-            // uses, quieter by `DEAD_WOOD_OPACITY` and fading out as the stock decays.
+            // Dead structure, under everything living: the cell's own species as a whole
+            // silhouette in the dead tone, at a stage from `dead_wood` through the same
+            // mapping the living stand uses, quieter by `DEAD_WOOD_OPACITY` and fading out
+            // as the stock decays. This is the one extra stamp ecology v1 can cost a cell,
+            // and only where a stand has actually died.
             if !dead_bare
                 && let Some((layers, opacity)) = silhouette_layers(
                     plant,
@@ -1123,7 +1125,7 @@ impl ArtPresenter {
                     ceiling * DEAD_WOOD_OPACITY,
                 )
             {
-                stamp_layers_bent_tinted(
+                stamp_layers_bent_toned(
                     canvas,
                     slot.at,
                     heading,
@@ -1132,45 +1134,34 @@ impl ArtPresenter {
                     opacity,
                     Mask::None,
                     bend,
-                    dead_wood_tone(),
+                    Tone {
+                        colour: dead_wood_tone(),
+                        shade: wood_shade(),
+                        mix: 1.0,
+                    },
                     scratch,
                 );
             }
             if bare {
                 continue;
             }
-            // How much of the stage sprite this cell paints as *foliage*. A full canopy is
-            // 1 and draws exactly the image this presenter always drew; anything less hands
-            // that share to the living-wood silhouette underneath, which is the same sprite
-            // in one flat warm tone. The two together always cover exactly `ceiling`
-            // ([`silhouette_opacity`]), so a stand being stripped changes colour without
-            // fading, and a non-structural band (soil, water) keeps its old image exactly.
-            let a = if structural(band) {
-                foliage_ramp(foliage_fullness(view, index))
-            } else {
-                1.0
+            // How far this cell's plant has travelled from leaf to bare living wood: `0`
+            // where the canopy is whole — every ungrazed stand, and every non-structural
+            // band — and `1` where it is stripped. It is a *colour* on the stage sprite, not
+            // a layer under it: the stamp covers exactly what it always covered, so a stand
+            // being stripped changes hue without fading out of the ground, the image at
+            // `mix = 0` is bit for bit the one this presenter drew before ecology v1, and
+            // none of it costs a second stamp.
+            let tone = Tone {
+                colour: living_wood_tone(),
+                shade: wood_shade(),
+                mix: if structural(band) {
+                    1.0 - foliage_ramp(foliage_fullness(view, index))
+                } else {
+                    0.0
+                },
             };
-            if a < 1.0
-                && let Some((layers, under)) =
-                    silhouette_layers(plant, cell, seconds, growth, t, &thresholds, ceiling)
-            {
-                let opacity = silhouette_opacity(under, a);
-                if opacity > 0.0 {
-                    stamp_layers_bent_tinted(
-                        canvas,
-                        slot.at,
-                        heading,
-                        &layers,
-                        1.0,
-                        opacity,
-                        Mask::None,
-                        bend,
-                        living_wood_tone(),
-                        scratch,
-                    );
-                }
-            }
-            let opacity_of = |stage: u8| stage_opacity(stage, t, &thresholds, ceiling) * a;
+            let opacity_of = |stage: u8| stage_opacity(stage, t, &thresholds, ceiling);
             // The accent is gated by the field this frame is drawn against: the paced value
             // only ever fades it *in*.
             let fruit_now = if fruit_stage(fruit.and_then(|f| f.get(index).copied())) {
@@ -1184,7 +1175,7 @@ impl ArtPresenter {
                 let opacity = opacity_of(stage);
                 if opacity > 0.0 {
                     let layers = stage_layers(plant, stage, cell, seconds, fruit_now);
-                    stamp_layers_bent(
+                    stamp_layers_bent_toned(
                         canvas,
                         slot.at,
                         heading,
@@ -1193,6 +1184,7 @@ impl ArtPresenter {
                         opacity,
                         Mask::None,
                         bend,
+                        tone,
                         scratch,
                     );
                 }
@@ -1225,7 +1217,7 @@ impl ArtPresenter {
                         (clip.sample(gu * clip.seconds), w_grow),
                         (stage_pose(plant, upper, cell, seconds), w_to),
                     ];
-                    stamp_layers_bent(
+                    stamp_layers_bent_toned(
                         canvas,
                         slot.at,
                         heading,
@@ -1234,6 +1226,7 @@ impl ArtPresenter {
                         opacity,
                         Mask::None,
                         bend,
+                        tone,
                         scratch,
                     );
                 }
@@ -1243,7 +1236,7 @@ impl ArtPresenter {
                 let opacity = opacity_of(stage) * (1.0 - gu) as f32;
                 if opacity > 0.0 {
                     let layers = stage_layers(plant, stage, cell, seconds, fruit_now);
-                    stamp_layers_bent(
+                    stamp_layers_bent_toned(
                         canvas,
                         slot.at,
                         heading,
@@ -1252,6 +1245,7 @@ impl ArtPresenter {
                         opacity,
                         Mask::None,
                         bend,
+                        tone,
                         scratch,
                     );
                 }
@@ -1271,8 +1265,9 @@ impl ArtPresenter {
                             reveal: gu * (layers_extent(&layers) + 0.5),
                         },
                     };
-                    stamp_layers_bent(
-                        canvas, slot.at, heading, &layers, 1.0, opacity, mask, bend, scratch,
+                    stamp_layers_bent_toned(
+                        canvas, slot.at, heading, &layers, 1.0, opacity, mask, bend, tone,
+                        scratch,
                     );
                 }
             }
@@ -1311,7 +1306,11 @@ impl ArtPresenter {
                     seconds,
                     amplitude,
                     0.0,
-                    Some(dead_wood_tone()),
+                    Some(Tone {
+                        colour: dead_wood_tone(),
+                        shade: wood_shade(),
+                        mix: 1.0,
+                    }),
                     scratch,
                 );
                 // The crown dims with the stand's own foliage fullness: a stripped column

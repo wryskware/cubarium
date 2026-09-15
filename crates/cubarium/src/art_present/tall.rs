@@ -318,7 +318,7 @@ pub(super) fn draw_column(
     seconds: f64,
     amplitude: f64,
     cap_opacity: f32,
-    tint: Option<[f32; 3]>,
+    tone: Option<Tone>,
     scratch: &mut Vec<PixelImage>,
 ) {
     if !(height > 0.0) {
@@ -333,8 +333,8 @@ pub(super) fn draw_column(
     // by the unfolding of the cap's final position `(u, 2)`; otherwise, and for every other
     // part, the ordinary stamp about the actual anchor.
     let near_corner = column.cx < 2 || column.cx > 13;
-    // A tinted column is dead wood: base and trunk only, so `hold_owner` is never set on
-    // this path and the retained-chart stamp — which has no tint — is never reached.
+    // A toned column is dead wood: base and trunk only, so `hold_owner` is never set on
+    // this path and the retained-chart stamp — which has no tone — is never reached.
     let mut stamp = |clip: &Clip, i: f64, mask: Mask, opacity: f32, hold_owner: bool| {
         if opacity <= 0.0 {
             return;
@@ -353,8 +353,8 @@ pub(super) fn draw_column(
             } else {
                 at
             };
-        if let Some(tint) = tint {
-            cubarium_render::stamp_layers_bent_tinted(
+        if let Some(tone) = tone {
+            cubarium_render::stamp_layers_bent_toned(
                 canvas,
                 at,
                 heading,
@@ -363,7 +363,7 @@ pub(super) fn draw_column(
                 opacity,
                 mask,
                 bend,
-                tint,
+                tone,
                 scratch,
             );
         } else if owner == at {
@@ -411,7 +411,7 @@ pub(super) fn draw_column(
     }
     // The cap is the column's crown — foliage — so it dims with the stand's fullness and a
     // stripped column stands as a bare trunk. A dead column has no crown and no climber.
-    if let (Some(cap), None) = (&plant.cap, tint) {
+    if let (Some(cap), None) = (&plant.cap, tone) {
         stamp(
             cap,
             height + 1.0,
@@ -420,7 +420,7 @@ pub(super) fn draw_column(
             true,
         );
     }
-    if let (true, Some(vine), None) = (column.vine, vine, tint) {
+    if let (true, Some(vine), None) = (column.vine, vine, tone) {
         let strips = vine.vine_strips.as_ref();
         let trunk = strips.map_or(&vine.trunk, |v| &v.trunk);
         for i in (1..=TALL_MAX_SEGMENTS).step_by(2) {

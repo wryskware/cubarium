@@ -945,21 +945,6 @@ fn one_cell_view(tick: u64, cell: CellId, density: f64) -> RenderView {
     view
 }
 
-/// [`one_cell_view`] with the cell's canopy at an explicit fullness `P / W` instead of full.
-fn one_cell_view_at(tick: u64, cell: CellId, density: f64, fullness: f64) -> RenderView {
-    let mut view = one_cell_view(tick, cell, density);
-    view.producer[cell.index()] = fullness * view.wood[cell.index()];
-    view
-}
-
-/// [`one_cell_view`]'s structure as **dead** wood instead: no living stand at all.
-fn one_dead_cell_view(tick: u64, cell: CellId, density: f64) -> RenderView {
-    let mut view = empty_view();
-    view.tick = tick;
-    view.dead_wood[cell.index()] = view.wood_max * density.clamp(0.0, 1.0).powi(3);
-    view
-}
-
 fn drawn_with(p: &mut ArtPresenter, view: &RenderView, f: f64) -> Canvas {
     let mut canvas = Canvas::new();
     p.draw(view, f, &mut canvas);

@@ -620,22 +620,107 @@ pub fn stamp_layers_bent(
     stamp_bent(canvas, anchor, heading, layers, scale, opacity, mask, bend, None, None, scratch);
 }
 
-/// [`stamp_layers_bent`] with every sampled texel's colour replaced by one flat linear-RGB
-/// `tint`, its alpha kept exactly.
+/// How much of the art's own light a tinted stamp carries into its one colour.
 ///
-/// **Normative.** Everything [`stamp_layers_bent`] documents holds — the same footprint, the
-/// same sample coordinates, the same mask, the same bend, the same source-over — with one
-/// change: after the layers are mixed and the mask applied, the premultiplied sample becomes
-/// `[tint[0]·a, tint[1]·a, tint[2]·a, a]`. So the stamp paints the mixed **shape** of its
-/// layers in one colour: a silhouette, taken from the art's own alpha rather than from a
-/// second set of sprites. A non-finite tint channel reads as 0 and a channel above 1 is
-/// clamped, so the stamp can never paint more light than an opaque pixel of that colour.
+/// A silhouette taken from alpha alone is a solid blob: the shape is right, but a plant's
+/// internal drawing — the gap between two fronds, the line down a stalk — is gone, and a
+/// large sprite reads as a hole in the ground rather than as a plant standing on it. This
+/// keeps that drawing by scaling the tint with the sampled texel's own relative luminance.
 ///
-/// Because every layer is flattened to the same colour, a weighted mix of two poses is a
-/// plain alpha cross-fade of two silhouettes: no colour fringing can appear between them,
-/// which is why a growth step of a silhouette needs no reveal mask.
+/// **Normative**: with `L` the Rec. 709 relative luminance of the mixed sample
+/// *un-premultiplied*, the tint is scaled by `floor + (1 − floor)·min(L / reference, 1)`.
+/// So `reference` is the luminance at which a texel takes the full tint and `floor` is what
+/// an unlit one keeps. [`Shade::FLAT`] is the plain flat fill. A non-finite or negative
+/// `floor` reads as 0 and one above 1 as 1; a non-positive or non-finite `reference` makes
+/// every painted texel take the full tint.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Shade {
+    pub floor: f32,
+    pub reference: f32,
+}
+
+/// One colour a stamp may travel toward, and how far.
+///
+/// **Normative**: at `mix = 0` the stamp is [`stamp_layers_bent`], bit for bit and at the
+/// same cost. At `mix = 1` every painted texel takes `colour`, shaded by [`Shade`] — a
+/// silhouette of the layers' own shape. In between, each texel's premultiplied sample is the
+/// linear blend of those two, so the **coverage of the stamp does not change with `mix` at
+/// all**: only its colour travels. A non-finite `mix` reads as 0 and it is clamped to
+/// `[0, 1]`.
+///
+/// That is the whole reason this exists rather than a second stamp underneath: a plant that
+/// is losing its leaves must not fade in and out of the ground while it does so, and drawing
+/// it in one pass makes that exact rather than approximate — and free.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tone {
+    pub colour: [f32; 3],
+    pub shade: Shade,
+    pub mix: f32,
+}
+
+impl Tone {
+    /// The sanitized `(colour, floor, reference, mix)`, or `None` for a stamp that does not
+    /// travel at all and must take the ordinary path.
+    fn sanitized(self) -> Option<([f32; 3], f32, f32, f32)> {
+        let mix = if self.mix.is_finite() {
+            self.mix.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        if mix <= 0.0 {
+            return None;
+        }
+        let colour = std::array::from_fn(|c| {
+            let v: f32 = self.colour[c];
+            if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 }
+        });
+        let (floor, reference) = self.shade.sanitized();
+        Some((colour, floor, reference, mix))
+    }
+}
+
+impl Shade {
+    /// One flat colour, the art's light discarded.
+    pub const FLAT: Shade = Shade {
+        floor: 1.0,
+        reference: 1.0,
+    };
+
+    fn sanitized(self) -> (f32, f32) {
+        let floor = if self.floor.is_finite() {
+            self.floor.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let reference = if self.reference.is_finite() && self.reference > 0.0 {
+            self.reference
+        } else {
+            0.0
+        };
+        (floor, reference)
+    }
+}
+
+/// [`stamp_layers_bent`] with every sampled texel's colour carried `tone.mix` of the way
+/// toward one linear-RGB colour, shaded by [`Shade`], its alpha kept exactly.
+///
+/// **Normative.** Everything [`stamp_layers_bent`] documents still holds — the same
+/// footprint, the same sample coordinates, the same mask, the same bend, the same
+/// source-over — with one change: after the layers are mixed and the mask applied, the
+/// premultiplied sample's colour becomes `lerp(sample, colour·s·a, mix)` with `s` the
+/// [`Shade`] factor and `a` the mixed alpha. The alpha is untouched, so the stamp covers
+/// exactly what it covered.
+///
+/// At `tone.mix = 0` (or non-finite) this takes exactly the path [`stamp_layers_bent`] takes
+/// and draws exactly its image at exactly its cost. At `tone.mix = 1` it is the layers' shape
+/// in that one colour: a silhouette, taken from the sprites themselves rather than from a
+/// second set of them.
+///
+/// Because the drawn pixel is linear in `mix` and the coverage does not depend on it, the
+/// image at `mix = m` is exactly `(1 − m)` of the image at 0 plus `m` of the image at 1 —
+/// which is what lets a plant travel from leaf to bare wood without fading.
 #[allow(clippy::too_many_arguments)]
-pub fn stamp_layers_bent_tinted(
+pub fn stamp_layers_bent_toned(
     canvas: &mut Canvas,
     anchor: SurfacePoint,
     heading: Vec2,
@@ -644,14 +729,22 @@ pub fn stamp_layers_bent_tinted(
     opacity: f32,
     mask: Mask,
     bend: Bend,
-    tint: [f32; 3],
+    tone: Tone,
     scratch: &mut Vec<PixelImage>,
 ) {
-    let tint = std::array::from_fn(|c| {
-        let v: f32 = tint[c];
-        if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 }
-    });
-    stamp_bent(canvas, anchor, heading, layers, scale, opacity, mask, bend, None, Some(tint), scratch);
+    stamp_bent(
+        canvas,
+        anchor,
+        heading,
+        layers,
+        scale,
+        opacity,
+        mask,
+        bend,
+        None,
+        tone.sanitized(),
+        scratch,
+    );
 }
 
 /// [`stamp_layers_bent`] unfolding an explicitly given radius instead of the footprint it
@@ -702,7 +795,7 @@ fn stamp_bent(
     mask: Mask,
     bend: Bend,
     override_radius: Option<f64>,
-    tint: Option<[f32; 3]>,
+    tone: Option<([f32; 3], f32, f32, f32)>,
     scratch: &mut Vec<PixelImage>,
 ) {
     let mut extent = 0.0f64;
@@ -737,16 +830,16 @@ fn stamp_bent(
     };
     // `BENT` and `TINTED` are compile-time, so the ordinary untinted stamp carries neither
     // the bend arithmetic nor a tint branch and costs exactly what it always did.
-    match (bend.is_identity(), tint) {
+    match (bend.is_identity(), tone) {
         (true, None) => stamp_unfolded::<false, false>(
-            canvas, anchor, h, layers, scale, opacity, mask, reference, bend, radius, [0.0; 3],
+            canvas, anchor, h, layers, scale, opacity, mask, reference, bend, radius, FLAT_TINT,
             scratch,
         ),
         (true, Some(t)) => stamp_unfolded::<false, true>(
             canvas, anchor, h, layers, scale, opacity, mask, reference, bend, radius, t, scratch,
         ),
         (false, None) => stamp_unfolded::<true, false>(
-            canvas, anchor, h, layers, scale, opacity, mask, reference, bend, radius, [0.0; 3],
+            canvas, anchor, h, layers, scale, opacity, mask, reference, bend, radius, FLAT_TINT,
             scratch,
         ),
         (false, Some(t)) => stamp_unfolded::<true, true>(
@@ -754,6 +847,9 @@ fn stamp_bent(
         ),
     }
 }
+
+/// The tint argument the untinted monomorphizations carry and never read.
+const FLAT_TINT: ([f32; 3], f32, f32, f32) = ([0.0; 3], 1.0, 1.0, 0.0);
 
 /// A layer weight sanitized into "sampled" (`> 0`) or "not sampled" (`0`).
 #[inline]
@@ -775,7 +871,7 @@ fn stamp_unfolded<const BENT: bool, const TINTED: bool>(
     reference: &Sprite,
     bend: Bend,
     radius: f64,
-    tint: [f32; 3],
+    tone: ([f32; 3], f32, f32, f32),
     scratch: &mut Vec<PixelImage>,
 ) {
     let side = Vec2::new(-h.y, h.x);
@@ -814,9 +910,20 @@ fn stamp_unfolded<const BENT: bool, const TINTED: bool>(
                 *v *= coverage;
             }
         }
-        if TINTED {
-            // The shape only: one flat colour at the mixed alpha, still premultiplied.
-            rgba = [tint[0] * rgba[3], tint[1] * rgba[3], tint[2] * rgba[3], rgba[3]];
+        if TINTED && rgba[3] > 0.0 {
+            // Toward one colour at the mixed alpha, carrying the art's own light through
+            // `Shade`, still premultiplied and at exactly the alpha it already had.
+            let (colour, floor, reference, mix) = tone;
+            let luma = (0.2126 * rgba[0] + 0.7152 * rgba[1] + 0.0722 * rgba[2]) / rgba[3];
+            let lit = if reference > 0.0 {
+                (luma / reference).clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+            let s = (floor + (1.0 - floor) * lit) * rgba[3];
+            for c in 0..3 {
+                rgba[c] += (colour[c] * s - rgba[c]) * mix;
+            }
         }
         let a = rgba[3] * opacity;
         if a <= 0.0 {
@@ -1327,6 +1434,145 @@ mod tests {
         // An empty mask still draws nothing, bent or not.
         let empty = Mask::Strip { floor: 8.0, reveal: 8.0 };
         assert_eq!(total(&draw(bend_of(2.0), empty)), 0.0);
+    }
+
+    /// A toned stamp moves colour and nothing else: it covers exactly the pixels the
+    /// untoned stamp covers, its image at `mix = 0` is that stamp bit for bit, and its image
+    /// at any `mix` is exactly the linear blend of its two ends. That last property is what
+    /// lets a caller cross-fade a sprite's colour without the shape fading at all.
+    #[test]
+    fn a_toned_stamp_moves_colour_only_and_is_linear_between_its_ends() {
+        let sprite = stem();
+        let anchor = SurfacePoint::new(Face::Front, 32.0, 32.0);
+        let heading = Vec2::new(0.0, -1.0);
+        let tone = |mix: f32| Tone {
+            colour: [0.6, 0.25, 0.1],
+            shade: Shade {
+                floor: 0.4,
+                reference: 0.3,
+            },
+            mix,
+        };
+        let draw = |mix: f32| {
+            let mut c = Canvas::new();
+            // A non-black background, so "covers the same pixels" is a real claim.
+            for face in Face::ALL {
+                for y in 0..64u8 {
+                    for x in 0..64u8 {
+                        c.set(face, x, y, [0.05, 0.02, 0.11]);
+                    }
+                }
+            }
+            stamp_layers_bent_toned(
+                &mut c,
+                anchor,
+                heading,
+                &[(Pose::still(&sprite), 1.0)],
+                1.0,
+                0.85,
+                Mask::None,
+                Bend::NONE,
+                tone(mix),
+                &mut Vec::new(),
+            );
+            c
+        };
+        let plain = {
+            let mut c = Canvas::new();
+            for face in Face::ALL {
+                for y in 0..64u8 {
+                    for x in 0..64u8 {
+                        c.set(face, x, y, [0.05, 0.02, 0.11]);
+                    }
+                }
+            }
+            stamp_layers_bent(
+                &mut c,
+                anchor,
+                heading,
+                &[(Pose::still(&sprite), 1.0)],
+                1.0,
+                0.85,
+                Mask::None,
+                Bend::NONE,
+                &mut Vec::new(),
+            );
+            c
+        };
+        let (zero, one) = (draw(0.0), draw(1.0));
+        assert_eq!(still_vs(&plain, &zero), 0, "mix 0 is not the untoned stamp");
+        let background = [0.05f32, 0.02, 0.11];
+        let painted = |c: &Canvas| {
+            let mut v = Vec::new();
+            for face in Face::ALL {
+                for y in 0..64u8 {
+                    for x in 0..64u8 {
+                        if c.get(face, x, y) != background {
+                            v.push((face, x, y));
+                        }
+                    }
+                }
+            }
+            v
+        };
+        assert_eq!(
+            painted(&zero),
+            painted(&one),
+            "the tone changed which pixels were covered"
+        );
+        assert!(painted(&one).len() > 8, "the fixture painted almost nothing");
+        for i in 1..8 {
+            let mix = i as f32 / 8.0;
+            let got = draw(mix);
+            for face in Face::ALL {
+                for y in 0..64u8 {
+                    for x in 0..64u8 {
+                        let (a, b, g) = (
+                            zero.get(face, x, y),
+                            one.get(face, x, y),
+                            got.get(face, x, y),
+                        );
+                        for c in 0..3 {
+                            let want = a[c] * (1.0 - mix) + b[c] * mix;
+                            assert!(
+                                (g[c] - want).abs() < 1e-6,
+                                "mix {mix} at {face:?} ({x}, {y}) channel {c}: {} not {want}",
+                                g[c]
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        // And a nonsense tone is the untoned stamp, not a panic.
+        for bad in [f32::NAN, -1.0, 0.0] {
+            let mut c = Canvas::new();
+            stamp_layers_bent_toned(
+                &mut c,
+                anchor,
+                heading,
+                &[(Pose::still(&sprite), 1.0)],
+                1.0,
+                0.85,
+                Mask::None,
+                Bend::NONE,
+                tone(bad),
+                &mut Vec::new(),
+            );
+            let mut d = Canvas::new();
+            stamp_layers_bent(
+                &mut d,
+                anchor,
+                heading,
+                &[(Pose::still(&sprite), 1.0)],
+                1.0,
+                0.85,
+                Mask::None,
+                Bend::NONE,
+                &mut Vec::new(),
+            );
+            assert_eq!(still_vs(&c, &d), 0, "mix {bad} was not the untoned stamp");
+        }
     }
 
     #[test]
