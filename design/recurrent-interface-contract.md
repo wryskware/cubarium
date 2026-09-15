@@ -598,9 +598,11 @@ Decisions for Wrysk, preferred option first.
 4. **Activation rule.** Preferred: binary activation (any motor channel above deadband
    gives the body its full capability; the request sets the split). Alternative:
    graded `max(a₀, |a₁|)` scaling of capability, which makes gentle turns slower still.
-5. **Maturity gate for `reproduce`.** Preferred: the world requires `S ≥ S_adult` and
-   funding; `bud_min_age` is dropped as a behavioural drive. Alternative: keep the age
-   gate as physiology in v1 for continuity with the current lifecycle.
+5. **Maturity gate for `reproduce`.** As implemented in R1a repair 1: the world's
+   gestation admission retains `bud_min_age_seconds` (physical maturity), escrow
+   absence, funding and the population cap for neural bodies; `bud_reserve`/`bud_energy`
+   stay with the policy as drive preferences. Replacing the age gate by `S ≥ S_adult`
+   remains a later option, not a v1 change.
 6. **Fruit sectors.** Preferred: keep (70 inputs). Fallback if throughput forces it: 58.
 7. **Bursts for neural bodies.** Preferred: none in v1; the strike burst remains a paid
    world grant tied to the attack extension's strike phase. No escape dash.
@@ -616,12 +618,14 @@ whole budget (§1 index 63, §3). Legacy fixture changes in R0b (widened windows
 re-anchored continuation oracles) do not constrain the adapter's tests.
 
 **Status after R1a (2026-09-14).** Steps 1–6 of §9 are implemented
-(`6b9e255`..`7614bef`; [result](7_Research/r1a-runtime-result-2026-09-14.md)). Step zero
+(`6b9e255`..`7614bef`, repair cycle 1 `2055a9b`..`73fbd33` after
+[Astra's review](7_Research/r1a-runtime-review-2026-09-14.md);
+[result](7_Research/r1a-runtime-result-2026-09-14.md)). Step zero
 replaced the starvation predicate with "cannot raise this tick's upkeep", evaluated
 before intake, so decision 3's zombie half is closed; a cropping floor remains a
-separate ecological choice. Two named sampler fixtures were not built (seam-equivalent
-sampling, 17-neighbour truncation) and the held turn is not measured across a seam;
-those belong at the start of the next slice. The display world stays legacy-controlled
+separate ecological choice. The seam-equivalent sampling, 17-neighbour truncation and
+held-turn-through-a-seam fixtures exist as of repair cycle 1, and sampler, inference
+and adapter costs are instrumented separately. The display world stays legacy-controlled
 until an explicit attachment control exists. Nothing in this document is canon.
 
 ## Usage
