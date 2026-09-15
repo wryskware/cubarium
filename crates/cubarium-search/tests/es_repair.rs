@@ -93,6 +93,7 @@ fn a_resumed_run_continues_the_same_run_rather_than_repeating_it() {
             120,
             20_260_915,
             true,
+            es::trainer::Aggregate::Min,
             resume,
             false,
             out.to_path_buf(),
@@ -167,7 +168,7 @@ fn a_resumed_run_continues_the_same_run_rather_than_repeating_it() {
 fn a_fresh_run_refuses_to_overwrite_an_existing_one_unless_told_to() {
     let out = scratch("no-clobber");
     let go = |overwrite: bool| {
-        es::commands::train(1, 1, 40, 2, 120, 20_260_915, false, None, overwrite, out.clone())
+        es::commands::train(1, 1, 40, 2, 120, 20_260_915, false, es::trainer::Aggregate::Min, None, overwrite, out.clone())
     };
 
     go(false).expect("the first run is fine");

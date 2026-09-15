@@ -120,6 +120,10 @@ enum Command {
         /// not the centre's.
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         center_eval: bool,
+        /// How per-layout survival combines into the score: `min` (the frozen R2a `t_min`) or
+        /// `mean`. Anything but `min` is a different task with a different protocol hash.
+        #[arg(long, default_value = "min")]
+        aggregate: String,
         /// Continue from a checkpoint written at a completed generation boundary.
         #[arg(long)]
         resume: Option<PathBuf>,
@@ -210,6 +214,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             wall_seconds,
             train_seed,
             center_eval,
+            aggregate,
             resume,
             overwrite,
             out,
@@ -221,6 +226,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             wall_seconds,
             train_seed,
             center_eval,
+            es::trainer::Aggregate::parse(&aggregate)?,
             resume,
             overwrite,
             out,

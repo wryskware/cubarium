@@ -17,10 +17,8 @@ use super::export::PolicyFile;
 use super::fixture::{self, HORIZON_TICKS};
 use super::optimizer::Adam;
 use super::tensor::{self, PARAMS};
-use super::trainer::{
-    self, CenterRecord, Checkpoint, GenerationError, GenerationReport, Plan, Protocol,
-    run_generation, score,
-};
+use super::trainer::{Aggregate, self, CenterRecord, Checkpoint, GenerationError, GenerationReport, Plan, Protocol,
+    run_generation, score,};
 use crate::evaluate::BUILD_ID;
 
 /// The three controls, in the order the table reports them.
@@ -53,6 +51,7 @@ pub fn protocol() {
     println!();
     println!("## score (frozen before the smoke)");
     println!("score = t_min + {} * mean(clip(usable terminal stores / body capacity, 0, 1))", p.store_weight);
+    println!("aggregate = {} (`es-train --aggregate mean` scores mean survival ticks instead; a different hash)", p.aggregate.as_str());
     println!("t_min is the minimum survival ticks over the candidate's layouts; a dead animal");
     println!("contributes zero stores. The whole secondary term is at most {} of one tick.", p.store_weight);
     println!();
@@ -447,6 +446,7 @@ pub fn train(
     wall_seconds: u64,
     train_seed: u64,
     center_eval: bool,
+    aggregate: Aggregate,
     resume: Option<PathBuf>,
     overwrite: bool,
     out: PathBuf,
@@ -454,7 +454,7 @@ pub fn train(
     let started = Instant::now();
     let deadline = started + Duration::from_secs(wall_seconds);
     let layouts = fixture::training_layouts();
-    let protocol = Protocol::new(pairs, horizon, train_seed, &layouts);
+    let protocol = Protocol::new(pairs, horizon, train_seed, &layouts).with_aggregate(aggregate);
     let log_path = out.join("generations.jsonl");
     let checkpoint_path = out.join("checkpoint.json");
 
@@ -671,7 +671,7 @@ pub fn finalize_center(
     cancel: &AtomicBool,
 ) -> Result<Option<f64>, Boxed> {
     let generation = checkpoint.generation_completed;
-    match trainer::evaluate(&checkpoint.theta, plan, generation, cancel) {
+    match trainer::evaluate(&checkpoint.theta, &checkpoint.protocol, plan, generation, cancel) {
         Ok((score, episodes)) => {
             score_center(checkpoint, generation, score);
             checkpoint.episodes_run += episodes.len() as u64;

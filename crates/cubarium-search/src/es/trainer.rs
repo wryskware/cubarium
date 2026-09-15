@@ -50,6 +50,45 @@ use super::tensor::{self, PARAMS};
 /// outweigh one tick of survival**. Frozen before the smoke.
 pub const STORE_WEIGHT: f64 = 0.25;
 
+/// How a candidate's per-layout survival ticks combine into one scalar.
+///
+/// `Min` is the R2a convention (frozen: `t_min`). `Mean` is the R2c screen's alternative,
+/// where a policy that solves three layouts and dies early on the fourth gets credit for the
+/// three. Only `Mean` is serialized, so every `Min` protocol keeps the hash it already had.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Aggregate {
+    Min,
+    Mean,
+}
+
+impl Aggregate {
+    pub fn is_min(&self) -> bool {
+        *self == Aggregate::Min
+    }
+
+    pub fn parse(s: &str) -> Result<Aggregate, String> {
+        match s {
+            "min" => Ok(Aggregate::Min),
+            "mean" => Ok(Aggregate::Mean),
+            other => Err(format!("aggregate must be `min` or `mean`, not `{other}`")),
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Aggregate::Min => "min",
+            Aggregate::Mean => "mean",
+        }
+    }
+}
+
+impl Default for Aggregate {
+    fn default() -> Self {
+        Aggregate::Min
+    }
+}
+
 /// The frozen protocol: everything a score depends on that is not the policy.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Protocol {
@@ -67,9 +106,19 @@ pub struct Protocol {
     pub layout_hashes: Vec<u64>,
     pub policy_digest: u64,
     pub init: String,
+    /// Absent from the JSON (and so from the hash) when it is the R2a `min`.
+    #[serde(default, skip_serializing_if = "Aggregate::is_min")]
+    pub aggregate: Aggregate,
 }
 
 impl Protocol {
+    /// The same protocol with a different survival aggregate: a different task, a different
+    /// hash.
+    pub fn with_aggregate(mut self, aggregate: Aggregate) -> Protocol {
+        self.aggregate = aggregate;
+        self
+    }
+
     pub fn new(pairs: usize, horizon_ticks: u64, train_seed: u64, layouts: &[Layout]) -> Protocol {
         Protocol {
             schema: "cub-es-1".into(),
@@ -86,6 +135,7 @@ impl Protocol {
             layout_hashes: layouts.iter().map(|l| l.hash(&l.config())).collect(),
             policy_digest: cubarium_core::neural::schema_digest(),
             init: tensor::init_description(),
+            aggregate: Aggregate::Min,
         }
     }
 
@@ -107,11 +157,22 @@ impl Default for Protocol {
 /// solves three layouts and dies immediately on the fourth is ordered by the fourth. The
 /// secondary term is a mean over the same layouts, with a dead animal contributing zero.
 pub fn score(episodes: &[Episode]) -> f64 {
+    score_by(Aggregate::Min, episodes)
+}
+
+/// [`score`] under a chosen survival aggregate: `t_min` for [`Aggregate::Min`], the mean
+/// survival ticks over the layouts for [`Aggregate::Mean`]. The stores tiebreak is the same.
+pub fn score_by(aggregate: Aggregate, episodes: &[Episode]) -> f64 {
     assert!(!episodes.is_empty(), "a candidate is scored on at least one layout");
-    let t_min = episodes.iter().map(|e| e.ticks).min().expect("nonempty") as f64;
+    let survival = match aggregate {
+        Aggregate::Min => episodes.iter().map(|e| e.ticks).min().expect("nonempty") as f64,
+        Aggregate::Mean => {
+            episodes.iter().map(|e| e.ticks as f64).sum::<f64>() / episodes.len() as f64
+        }
+    };
     let stores: f64 = episodes.iter().map(Episode::normalized_stores).sum::<f64>()
         / episodes.len() as f64;
-    t_min + STORE_WEIGHT * stores
+    survival + STORE_WEIGHT * stores
 }
 
 /// Which candidate a job belongs to.
@@ -368,6 +429,7 @@ impl GenerationError {
 /// worker count cannot reach it.
 pub fn evaluate(
     theta: &[f64],
+    protocol: &Protocol,
     plan: &Plan<'_>,
     generation: u64,
     cancel: &AtomicBool,
@@ -381,7 +443,7 @@ pub fn evaluate(
     let episodes = dispatch(plan, plan.layouts.len(), cancel, |i| {
         (Driver::Policy(Box::new(policy.clone())), i, names[i].clone())
     })?;
-    Ok((score(&episodes), episodes))
+    Ok((score_by(protocol.aggregate, &episodes), episodes))
 }
 
 /// The one worker pool every batch in this module uses.
@@ -542,7 +604,7 @@ pub fn run_generation(
     let mut scores = vec![0.0; candidates.len()];
     for (ci, c) in candidates.iter().enumerate() {
         let slice = &episodes[ci * layouts.len()..(ci + 1) * layouts.len()];
-        scores[ci] = score(slice);
+        scores[ci] = score_by(protocol.aggregate, slice);
         for (li, e) in slice.iter().enumerate() {
             jobs.push(Job {
                 generation,
@@ -587,6 +649,50 @@ mod tests {
 
     fn smoke_protocol() -> Protocol {
         Protocol::new(2, 2_000, 20_260_915, &training_layouts()[..1])
+    }
+
+    #[test]
+    fn the_mean_aggregate_is_a_different_task_and_the_min_hash_is_untouched() {
+        let base = Episode {
+            layout: "x".into(),
+            ticks: 10,
+            alive: false,
+            terminal_stores: 0.0,
+            store_capacity: 1.0,
+            intake_producer: 0.0,
+            intake_fruit: 0.0,
+            intake_detritus: 0.0,
+            upkeep_billed: 0.0,
+            motion_billed: 0.0,
+            store_start: 0.0,
+            travelled_px: 0.0,
+            body_lengths: 0.0,
+            distinct_cells: 0,
+            ticks_in_opening: 0,
+            turn_sweep_rad: 0.0,
+            seam_crossing_ticks: 0,
+            turn_unmeasured_ticks: 0,
+            motion_billed_partial: false,
+            died_on_last_tick: false,
+            route_p_start: 0.0,
+            route_p_end: 0.0,
+            route_p_grown: 0.0,
+            validations: 0,
+        };
+        let long = Episode { ticks: 30, ..base.clone() };
+        let both = [base.clone(), long.clone()];
+        assert!((score_by(Aggregate::Min, &both) - 10.0).abs() < 1e-12);
+        assert!((score_by(Aggregate::Mean, &both) - 20.0).abs() < 1e-12);
+        assert!((score(&both) - score_by(Aggregate::Min, &both)).abs() < 1e-12);
+        let p = Protocol::default();
+        let json = serde_json::to_string(&p).expect("serializes");
+        assert!(!json.contains("aggregate"), "min must not appear in the hashed JSON: {json}");
+        let mean = p.clone().with_aggregate(Aggregate::Mean);
+        assert_ne!(p.hash(), mean.hash());
+        let back: Protocol = serde_json::from_str(&json).expect("round trip");
+        assert_eq!(back.aggregate, Aggregate::Min);
+        assert_eq!(Aggregate::parse("mean"), Ok(Aggregate::Mean));
+        assert!(Aggregate::parse("max").is_err());
     }
 
     #[test]
