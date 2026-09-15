@@ -18,6 +18,7 @@ use crate::genome::decode;
 use crate::hunter::{self, AttemptOutcome, HunterEvent, HunterPhase};
 use crate::ids::{OrganismId, Slots};
 use crate::motor::{self, MotorBill, MotorLimits, MotorRequest};
+use crate::neural;
 use crate::organism::{DeathCause, Escrow, Mode, Organism, Origin};
 use crate::pairs::Body;
 use crate::quiet::{QuietEvent, QuietOverride, QuietPause, QuietReason, QuietState};
@@ -253,6 +254,7 @@ impl World {
                 quiet,
                 apex_dormancy,
                 apex_encounters,
+                neural,
             } = state;
             let cfg: &WorldConfig = config;
             let org_cfg = &cfg.organism;
@@ -370,10 +372,41 @@ impl World {
 
             // 5. Observe and decide (pure per organism, from the pre-movement world).
             let mut decisions: Vec<(OrganismId, Decision)> = Vec::with_capacity(organisms.len());
+            // Scratch for the recurrent sampler, reused across animals so a neural world does
+            // not allocate per body per tick. Empty and untouched in every legacy world.
+            let mut sensed_cells: Vec<neural::SensedCell> = Vec::new();
+            let mut sensed_bodies: Vec<neural::SensedBody> = Vec::new();
             for (id, o) in organisms.iter_mut() {
                 // A concealed offspring has no surface observation, controller draw, movement,
                 // intake or ordinary physiology. Its dedicated paid lifecycle runs below.
                 if apex_dormancy_on && apex_dormancy.contains(id) {
+                    continue;
+                }
+                // **Per-animal dispatch.** An animal is neural exactly when the extension
+                // holds an entry for its full id. It runs the contract's own pipeline and
+                // never touches the legacy controller: no mode hysteresis, no hunger memory,
+                // no steering weights, no OU draw, no turn gate, no `feed_min`, no quiet hold.
+                // The world's physics and physiology below are untouched.
+                if !neural.animals.is_empty()
+                    && let Some(index) = neural.index_of(id)
+                {
+                    let decision = neural_decision(
+                        neural,
+                        index,
+                        o,
+                        now,
+                        dt,
+                        cfg,
+                        e_r,
+                        fields,
+                        light,
+                        images,
+                        &sense_rings[cell_of(&o.pos).index()],
+                        neighbors.lists.get(id.slot as usize).map_or(&[][..], |l| &l[..]),
+                        &mut sensed_cells,
+                        &mut sensed_bodies,
+                    );
+                    decisions.push((id, decision));
                     continue;
                 }
                 let cell = cell_of(&o.pos);
@@ -1030,6 +1063,12 @@ impl World {
                 //     briefly ask for more speed than its own maximum.
                 let escape_turn = profile.escape_turn_rate_deg.to_radians() * dt;
                 for (prey_id, hunter_id) in threats {
+                    // A neural animal owns its own flight: the automatic escape turn and dash
+                    // are a legacy behavioural override and must not steer it (contract §6).
+                    // Its own sensing still reports the pursuer through the body sectors.
+                    if neural.contains(prey_id) {
+                        continue;
+                    }
                     let Some(prey) = organisms.get(prey_id) else {
                         continue;
                     };
@@ -1130,9 +1169,34 @@ impl World {
                 };
                 let request = MotorRequest {
                     heading: d.heading,
-                    speed: speed_cap,
+                    // A recurrent policy asks for a share of its capability as travel and
+                    // leaves the rest for the pivot; every legacy caller asks for all of it.
+                    // `resolve` clamps this to `speed_cap` either way.
+                    speed: d.speed_request.unwrap_or(speed_cap),
                 };
                 let motion = motor::resolve(o.heading, &request, &limits);
+                if !neural.animals.is_empty()
+                    && let Some(a) = neural.get_mut(*id)
+                {
+                    // Feedback accumulates every physics tick and is consumed at the animal's
+                    // own controller tick. `ResolvedMotion.turn` excludes transport by
+                    // construction, and `neural::action::resolved_turn` puts it in the same
+                    // clockwise sign convention as the `turn` channel.
+                    let requested = neural::action::Envelope {
+                        speed_max: o.phenotype.speed_max,
+                        wading,
+                        radius_px: limits.radius_px,
+                        turn_rate_max: d.turn_rate_max,
+                        u_full: limits.available(),
+                        dt,
+                    }
+                    .requested_magnitude(&a.held_action());
+                    a.feedback.speed_sum += motion.speed;
+                    a.feedback.turn_sum += neural::action::resolved_turn(&motion);
+                    a.feedback.req_mag += requested;
+                    a.feedback.res_mag += motion.motor_magnitude();
+                    a.feedback.ticks = a.feedback.ticks.saturating_add(1);
+                }
                 travel_into(o.pos, motion.heading * (motion.speed * dt), travel_buf);
                 o.pos = travel_buf.end;
                 // Transport is a change of chart, applied to the *resolved* heading: it costs
@@ -1411,12 +1475,14 @@ impl World {
                     continue;
                 };
                 let mut eaten = 0.0;
+                let mut ate = [0.0f64; 3];
                 if f > 0.0 {
                     // Frugivory: F -> reserve (η_m) and F -> D (the rest, energy-free). Fruit
                     // carries `e_f` per unit, richer than leaf.
                     let q = (f * fruit[cell]).clamp(0.0, fields.f[cell]);
                     if q > 0.0 {
                         intake.fruit_eaten += q;
+                        ate[1] += q;
                         let to_reserve = eta_m * q;
                         fields.f[cell] -= q;
                         fields.d[cell] += q - to_reserve;
@@ -1434,6 +1500,7 @@ impl World {
                     let q = (g * graze[cell]).clamp(0.0, fields.p[cell]);
                     if q > 0.0 {
                         intake.producer_eaten += q;
+                        ate[0] += q;
                         let to_reserve = eta_m * q;
                         fields.p[cell] -= q;
                         fields.d[cell] += q - to_reserve;
@@ -1465,6 +1532,7 @@ impl World {
                         // requested against it. Reporting `q` would overstate the flow out of
                         // a poor-quality patch.
                         intake.detritus_eaten += to_reserve;
+                        ate[2] += to_reserve;
                         fields.d[cell] -= to_reserve;
                         o.reserve += to_reserve;
                         let carried = (rho * q).min(fields.de[cell]);
@@ -1478,6 +1546,15 @@ impl World {
                     }
                 }
                 o.fed_this_tick = eaten > 0.0;
+                // What this mouth actually removed from the fields, for the `ate` channels.
+                // Material removed, not material requested: a poor cell reports the poor bite.
+                if !neural.animals.is_empty()
+                    && let Some(a) = neural.get_mut(id)
+                {
+                    for (acc, q) in a.feedback.ate.iter_mut().zip(ate) {
+                        *acc += q;
+                    }
+                }
             }
 
             // 7b. Handling and digestion. A carried carcass is homogeneous: a portion `q`
@@ -1857,6 +1934,10 @@ impl World {
                 let Some(o) = organisms.remove(*id) else {
                     continue;
                 };
+                // The private recurrent state goes at the same boundary the body does. The
+                // entry is keyed by the full id, so a reused slot could not inherit it even if
+                // this removal were ever missed.
+                neural.remove(*id);
                 let cell = cell_of(&o.pos).index();
                 // The body: structure carries no energy, the reserve carries `e_r` per unit.
                 let material = o.structure + o.reserve;
@@ -2184,6 +2265,16 @@ impl World {
                 let genome_digest = child.genome.digest();
                 let origin = child.origin;
                 let child_id = organisms.insert(child);
+                // A neural offspring copies the parent's **policy** and starts with fresh
+                // private state: zero hidden, nothing held, no feedback, its own birth-tick
+                // phase. Weight mutation, two-parent neural mating and any change to body
+                // inheritance belong to a later slice; nothing here mutates weights.
+                if let Some(parent_policy) = neural.get(*parent_id).map(|a| a.policy) {
+                    neural.insert(
+                        child_id,
+                        neural::AnimalState::fresh(now + 1, parent_policy),
+                    );
+                }
                 if let Some(index) = hunter_parent {
                     // The funded descendant joins the lineage with no target, an empty gut and
                     // a fresh attack counter, and the parent starts its recovery interval.
@@ -2331,5 +2422,207 @@ impl World {
             );
         }
         &self.counters
+    }
+}
+
+/// One neural animal's observe-and-decide, in tick order (`crate::neural`, contract §1–5).
+///
+/// Every legacy behavioural rule is absent by construction here, not switched off downstream:
+/// there is no hysteresis, no hunger memory, no steering weight, no OU draw, no turn gate and
+/// no `feed_min`. What remains is the world's own physics, which stage 6 and everything after
+/// it apply exactly as they do to a legacy body.
+///
+/// The cadence is the animal's own: on its controller tick it consumes the interval's
+/// accumulated feedback, samples the world, advances the GRU and latches a new held action; on
+/// the other tick it rebuilds this tick's request from the action already in force and the
+/// heading the body has *now*, so a held turn keeps turning across the interval and across a
+/// seam instead of chasing a bearing in a chart that no longer exists.
+#[allow(clippy::too_many_arguments)]
+fn neural_decision(
+    neural: &mut crate::neural::NeuralState,
+    index: usize,
+    o: &Organism,
+    now: u64,
+    dt: f64,
+    cfg: &WorldConfig,
+    e_r: f64,
+    fields: &crate::fields::Fields,
+    light: &[f64; CELL_COUNT],
+    images: &[Vec<cubarium_surface::ChartImage>; 5],
+    rings: &[Vec<cubarium_surface::CellId>; super::SENSE_DEPTH_MAX],
+    neighbours: &[crate::pairs::Neighbor],
+    cells: &mut Vec<crate::neural::SensedCell>,
+    bodies: &mut Vec<crate::neural::SensedBody>,
+) -> Decision {
+    use crate::neural::action::{Action7, Capability, Envelope};
+
+    let org_cfg = &cfg.organism;
+    let here = cell_of(&o.pos).index();
+    let chart = o.pos.chart();
+    let omega_max = f64::from(o.phenotype.drives.turn_rate_max_deg).to_radians();
+    let radius_px = motor::turn_radius_px(o, None);
+    // `motor_avail` and `ω_attain` share the world's own affordability calculation rather than
+    // re-deriving an approximate energy bill: `u_full = min(v_max / wading, affordable_motor)`
+    // at the energy the body holds *before* this tick's payment, which is the state stage 6
+    // will price the move against.
+    let wading = 1.0 + fields.w[here] * (1.0 - o.phenotype.swim);
+    let bill = MotorBill::of(o, cfg);
+    let u_full = (o.phenotype.speed_max / wading).min(bill.affordable_motor(o.energy, dt));
+    let envelope = Envelope {
+        speed_max: o.phenotype.speed_max,
+        wading,
+        radius_px,
+        turn_rate_max: omega_max,
+        u_full,
+        dt,
+    };
+
+    if neural.animals[index].1.updates_on(now) {
+        // ---- sample ----
+        cells.clear();
+        bodies.clear();
+        let depth = sense_depth(o.phenotype.sense_radius);
+        for (hop, ring) in rings[..depth].iter().enumerate() {
+            for neighbor in ring {
+                let center = neighbor.center();
+                let Some(view) =
+                    unfold_with(&images[o.pos.face.index()], o.pos, center, CELL_UNFOLD_RADIUS)
+                else {
+                    continue;
+                };
+                if view.distance <= GRADIENT_EPS || view.distance.is_nan() {
+                    continue;
+                }
+                let there = neighbor.index();
+                cells.push(crate::neural::SensedCell {
+                    offset: view.local - chart,
+                    near: hop == 0,
+                    p: fields.p[there],
+                    f: fields.f[there],
+                    d_eff: edible_detritus(fields.d[there], fields.de[there], e_r),
+                });
+            }
+        }
+        let mut crowd = Vec2::ZERO;
+        for n in neighbours {
+            bodies.push(crate::neural::SensedBody {
+                offset: n.local - chart,
+                distance: n.distance,
+                extent: n.extent,
+            });
+            // The same overlap term the world already computes, on the same condition.
+            let extent_sum = o.phenotype.extent + n.extent;
+            if n.distance >= extent_sum + 1.0 {
+                continue;
+            }
+            let delta = chart - n.local;
+            let len_sq = delta.length_sq();
+            if len_sq > GRADIENT_EPS {
+                crowd += delta * (extent_sum / len_sq);
+            }
+        }
+
+        let animal = &neural.animals[index].1;
+        let feedback = animal.feedback.channels(
+            o.phenotype.graze_rate,
+            o.phenotype.scavenge_rate,
+            o.phenotype.speed_max,
+            radius_px,
+            dt,
+        );
+        let self_state = crate::neural::SelfState {
+            p_here: fields.p[here],
+            f_here: fields.f[here],
+            d_here: edible_detritus(fields.d[here], fields.de[here], e_r),
+            p_max: cfg.producer.max,
+            crowd,
+            water: fields.w[here],
+            w_flood: cfg.water.flood,
+            light: light[here],
+            height: o.pos.embed()[1],
+            up: up_direction(o.pos.face),
+            extent: o.phenotype.extent,
+            sense_radius: o.phenotype.sense_radius,
+            reserve: o.reserve,
+            reserve_max: o.phenotype.reserve_max,
+            energy: o.energy,
+            energy_max: o.phenotype.energy_max,
+            structure: o.structure,
+            structure_adult: o.phenotype.structure_adult,
+            gestating: o.escrow.is_some(),
+            age_seconds: o.age_ticks(now) as f64 * dt,
+            max_age_seconds: org_cfg.max_age_seconds,
+            motor_avail: if o.phenotype.speed_max > 0.0 {
+                u_full / o.phenotype.speed_max
+            } else {
+                0.0
+            },
+            feedback,
+        };
+        let observation = crate::neural::obs::observe(o.heading, cells, bodies, &self_state);
+
+        // ---- infer ----
+        let policy_index = neural.animals[index].1.policy as usize;
+        let head = match neural.policies.get(policy_index) {
+            Some(policy) => {
+                let mut hidden = [0.0f64; crate::neural::HIDDEN];
+                let animal = &neural.animals[index].1;
+                hidden.copy_from_slice(&animal.hidden);
+                let y = policy.weights.forward(observation.as_slice(), &mut hidden);
+                neural.animals[index].1.hidden.copy_from_slice(&hidden);
+                y
+            }
+            // A validated world cannot reach this; a dangling index holds the last action
+            // rather than inventing one.
+            None => {
+                let held = neural.animals[index].1.held;
+                neural.animals[index].1.feedback = crate::neural::Feedback::default();
+                return decision_from(Action7(held), o, &envelope, omega_max);
+            }
+        };
+
+        let capability = Capability::ordinary(
+            o.phenotype.diet,
+            cfg.mechanisms.grazing,
+            cfg.mechanisms.scavenging,
+        );
+        neural.animals[index].1.held = Action7::squash(&head, &capability).0;
+        neural.animals[index].1.feedback = crate::neural::Feedback::default();
+    }
+
+    decision_from(neural.animals[index].1.held_action(), o, &envelope, omega_max)
+}
+
+/// Turn the action in force into this tick's `Decision`, from the body's *current* heading.
+fn decision_from(
+    action: crate::neural::Action7,
+    o: &Organism,
+    envelope: &crate::neural::action::Envelope,
+    omega_max: f64,
+) -> Decision {
+    let request = envelope.request(o.heading, &action);
+    Decision {
+        // A neural animal has no mode: the label the renderer and the telemetry read is the
+        // honest description of what it is doing, never an input to anything it decides.
+        mode: if action.active() {
+            Mode::Seeking
+        } else {
+            Mode::Resting
+        },
+        underlying_mode: if action.active() {
+            Mode::Seeking
+        } else {
+            Mode::Resting
+        },
+        heading: request.heading,
+        turn_rate_max: omega_max,
+        ou: o.ou,
+        effort: action.effort(),
+        fruit_effort: action.0[crate::neural::action::FRUIT],
+        graze_effort: action.0[crate::neural::action::GRAZE],
+        scavenge_effort: action.0[crate::neural::action::SCAVENGE],
+        bud: action.reproduce(),
+        hunger_memory: o.hunger_memory,
+        speed_request: Some(request.speed),
     }
 }

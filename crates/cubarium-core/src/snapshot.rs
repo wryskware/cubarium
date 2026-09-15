@@ -8,6 +8,7 @@ pub mod v10;
 pub mod v11;
 pub mod v12;
 pub mod v13;
+pub mod v14;
 pub mod v7;
 pub mod v8;
 pub mod v9;
@@ -21,6 +22,7 @@ pub use v10::{SCHEMA_V10, WorldStateV10};
 pub use v11::{SCHEMA_V11, WorldStateV11};
 pub use v12::{SCHEMA_V12, WorldStateV12};
 pub use v13::{SCHEMA_V13, WorldStateV13};
+pub use v14::{SCHEMA_V14, WorldStateV14};
 
 /// Bumped whenever `WorldState` or any nested type changes shape. Version 8 appends
 /// `WorldState.care`; version 9 appends `WorldState.energy_correction`
@@ -43,7 +45,7 @@ pub use v13::{SCHEMA_V13, WorldStateV13};
 /// hunter extension, and the oldest two with zero corrections as well. [`SCHEMA_V10`] is
 /// accepted only when its extension is empty: an active schema 10 trial is refused by name
 /// rather than reinterpreted in the schema 11 profile shape (see [`v10`]).
-pub const SCHEMA_VERSION: u32 = 14;
+pub const SCHEMA_VERSION: u32 = 15;
 pub const MAGIC: [u8; 4] = *b"CUBW";
 /// Fixed header length: magic 4, schema 4, build-id length 2, then the build id bytes,
 /// then payload length 8 and CRC32 4 (all little-endian).
@@ -149,6 +151,7 @@ pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), Snaps
     }
     let schema = u32::from_le_bytes(take(4, 4)?.try_into().expect("4 bytes"));
     if schema != SCHEMA_VERSION
+        && schema != SCHEMA_V14
         && schema != SCHEMA_V13
         && schema != SCHEMA_V12
         && schema != SCHEMA_V11
@@ -183,6 +186,7 @@ pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), Snaps
         SCHEMA_V11 => WorldState::from(decode_exact::<WorldStateV11>(payload, schema)?),
         SCHEMA_V12 => WorldState::from(decode_exact::<WorldStateV12>(payload, schema)?),
         SCHEMA_V13 => WorldState::from(decode_exact::<WorldStateV13>(payload, schema)?),
+        SCHEMA_V14 => WorldState::from(decode_exact::<WorldStateV14>(payload, schema)?),
         _ => decode_exact::<WorldState>(payload, schema)?,
     };
     state.validate().map_err(SnapshotError::Invalid)?;
@@ -252,6 +256,7 @@ mod tests {
             quiet: crate::quiet::QuietState::default(),
             apex_dormancy: crate::dormancy::ApexDormancyState::default(),
             apex_encounters: crate::encounter::ApexEncounterState::default(),
+            neural: crate::neural::NeuralState::default(),
         }
     }
 
@@ -389,6 +394,7 @@ mod tests {
                 + EMPTY_QUIET
                 + EMPTY_APEX_DORMANCY
                 + EMPTY_APEX_ENCOUNTERS
+                + EMPTY_NEURAL
         );
 
         // A schema 9 payload round-trips through the mirror into an identical state, and an
@@ -429,6 +435,10 @@ mod tests {
     /// Version, Off policy, two empty vectors, seven zero counters and one zero f64.
     const EMPTY_APEX_ENCOUNTERS: usize = 1 + 1 + 2 + 7 + 8;
 
+    /// Bytes an empty [`crate::neural::NeuralState`] appends: the version byte, an empty
+    /// policy vector's length and an empty animal vector's length.
+    const EMPTY_NEURAL: usize = 1 + 1 + 1;
+
     #[test]
     fn the_schema_eight_projection_is_the_payload_without_the_corrections() {
         let s = state();
@@ -448,6 +458,7 @@ mod tests {
                 + EMPTY_QUIET
                 + EMPTY_APEX_DORMANCY
                 + EMPTY_APEX_ENCOUNTERS
+                + EMPTY_NEURAL
         );
 
         // A schema 8 payload round-trips through the mirror into an identical state, and a
@@ -494,6 +505,7 @@ mod tests {
                 + EMPTY_QUIET
                 + EMPTY_APEX_DORMANCY
                 + EMPTY_APEX_ENCOUNTERS
+                + EMPTY_NEURAL
         );
         assert_eq!(ecology_hash(&s), super::fnv1a(&projected));
         // Care moves `state_hash` and never `ecology_hash`.

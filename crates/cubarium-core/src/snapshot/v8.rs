@@ -118,6 +118,7 @@ impl From<WorldStateV8> for WorldState {
             quiet: crate::quiet::QuietState::default(),
             apex_dormancy: crate::dormancy::ApexDormancyState::default(),
             apex_encounters: crate::encounter::ApexEncounterState::default(),
+            neural: crate::neural::NeuralState::default(),
         }
     }
 }

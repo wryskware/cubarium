@@ -258,4 +258,50 @@ impl World {
     pub fn population(&self) -> usize {
         self.state.organisms.len()
     }
+
+    /// The recurrent extension, for a development tool or a fixture to read.
+    pub fn neural(&self) -> &crate::neural::NeuralState {
+        &self.state.neural
+    }
+
+    /// **Explicit** development access: attach `policy` to one live ordinary body, giving it
+    /// fresh private state at the current tick.
+    ///
+    /// Nothing in the world ever calls this. Loading a snapshot never does it either: a world
+    /// becomes neural only because a tool or a fixture said so, by name, for a named body.
+    /// The refusals are the contract's: a foreign digest, an apex member, an enabled quiet
+    /// policy, and a body that is not there.
+    pub fn attach_neural_policy(
+        &mut self,
+        id: crate::ids::OrganismId,
+        policy: crate::neural::Policy,
+    ) -> Result<(), String> {
+        policy.validate()?;
+        if self.state.organisms.get(id).is_none() {
+            return Err(format!("organism {}:{} is not alive", id.slot, id.generation));
+        }
+        if self.state.hunters.contains(id) {
+            return Err(format!(
+                "organism {}:{} is an apex member: the apex sensory and action extensions do \
+                 not exist in this interface version",
+                id.slot, id.generation
+            ));
+        }
+        if self.state.quiet.policy.enabled() {
+            return Err(
+                "the ordinary quiet extension and neural animals cannot be enabled together"
+                    .into(),
+            );
+        }
+        let index = self.state.neural.intern(policy);
+        let birth_tick = self
+            .state
+            .organisms
+            .get(id)
+            .map_or(self.state.tick, |o| o.born_tick);
+        self.state
+            .neural
+            .insert(id, crate::neural::AnimalState::fresh(birth_tick, index));
+        self.state.validate()
+    }
 }

@@ -1,6 +1,8 @@
-//! Frozen schema 13 `WorldState`, immediately before apex dormancy and encounters were appended.
+//! Frozen schema 14 `WorldState`, immediately before the neural extension was appended.
 //!
-//! Every nested type is unchanged by schema 14; the new extension is a trailing sibling field.
+//! Every nested type is unchanged by schema 15; the new extension is a trailing sibling field.
+//! A schema-14 payload therefore decodes into a world where **every organism is
+//! legacy-controlled**, byte for byte the tick it was saved on.
 
 use serde::{Deserialize, Serialize};
 
@@ -13,14 +15,15 @@ use crate::fields::Fields;
 use crate::habitat::Weather;
 use crate::hunter::HunterState;
 use crate::ids::Slots;
+use crate::neural::NeuralState;
 use crate::organism::Organism;
 use crate::quiet::QuietState;
 use crate::world::WorldState;
 
-pub const SCHEMA_V13: u32 = 13;
+pub const SCHEMA_V14: u32 = 14;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct WorldStateV13 {
+pub struct WorldStateV14 {
     pub config: WorldConfig,
     pub tick: u64,
     pub fields: Fields,
@@ -44,16 +47,18 @@ pub struct WorldStateV13 {
     pub hunters: HunterState,
     #[serde(default)]
     pub quiet: QuietState,
+    #[serde(default)]
+    pub apex_dormancy: ApexDormancyState,
+    #[serde(default)]
+    pub apex_encounters: ApexEncounterState,
 }
 
-/// A current state has an honest schema-13 image only when neither apex extension was enabled.
-pub fn project(state: &WorldState) -> Option<WorldStateV13> {
-    if state.apex_dormancy != ApexDormancyState::default()
-        || state.apex_encounters != ApexEncounterState::default()
-    {
+/// A current state has an honest schema-14 image only when no animal is neural.
+pub fn project(state: &WorldState) -> Option<WorldStateV14> {
+    if state.neural != NeuralState::default() {
         return None;
     }
-    Some(WorldStateV13 {
+    Some(WorldStateV14 {
         config: state.config.clone(),
         tick: state.tick,
         fields: state.fields.clone(),
@@ -71,11 +76,13 @@ pub fn project(state: &WorldState) -> Option<WorldStateV13> {
         energy_correction: state.energy_correction,
         hunters: state.hunters.clone(),
         quiet: state.quiet.clone(),
+        apex_dormancy: state.apex_dormancy.clone(),
+        apex_encounters: state.apex_encounters.clone(),
     })
 }
 
-impl From<WorldStateV13> for WorldState {
-    fn from(old: WorldStateV13) -> Self {
+impl From<WorldStateV14> for WorldState {
+    fn from(old: WorldStateV14) -> Self {
         WorldState {
             config: old.config,
             tick: old.tick,
@@ -94,9 +101,9 @@ impl From<WorldStateV13> for WorldState {
             energy_correction: old.energy_correction,
             hunters: old.hunters,
             quiet: old.quiet,
-            apex_dormancy: ApexDormancyState::default(),
-            apex_encounters: ApexEncounterState::default(),
-            neural: crate::neural::NeuralState::default(),
+            apex_dormancy: old.apex_dormancy,
+            apex_encounters: old.apex_encounters,
+            neural: NeuralState::default(),
         }
     }
 }

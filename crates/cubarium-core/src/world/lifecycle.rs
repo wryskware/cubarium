@@ -152,6 +152,7 @@ impl World {
             quiet: QuietState::default(),
             apex_dormancy: ApexDormancyState::default(),
             apex_encounters: ApexEncounterState::default(),
+            neural: crate::neural::NeuralState::default(),
         };
         Ok(World::assemble(state, habitat, initial_material))
     }

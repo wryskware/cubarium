@@ -74,7 +74,7 @@ pub use ids::OrganismId;
 pub use motor::{MotorBill, MotorLimits, MotorRequest, ResolvedMotion};
 pub use neural::{Action7, AnimalState, NeuralState, Observation70, Policy};
 pub use snapshot::{
-    SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13,
+    SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14,
     SCHEMA_VERSION, SnapshotError, WorldStateV7, WorldStateV8, WorldStateV9, WorldStateV10,
     WorldStateV11, WorldStateV12, WorldStateV13, decode_snapshot, ecology_hash, encode_snapshot,
 };

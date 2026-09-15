@@ -14,6 +14,7 @@ use crate::habitat::Weather;
 use crate::hunter::{FixedHunterProfile, HunterState};
 use crate::ids::Slots;
 use crate::organism::Organism;
+use crate::neural::NeuralState;
 use crate::quiet::QuietState;
 
 use super::*;
@@ -79,6 +80,14 @@ pub struct WorldState {
     /// carries both milestone extensions; schema 13 migrates each one Off.
     #[serde(default)]
     pub apex_encounters: ApexEncounterState,
+    /// The opt-in recurrent-policy extension (`crate::neural`). Appended in schema 15, after
+    /// every earlier extension, so [`crate::snapshot::WorldStateV14`] is a byte-exact prefix.
+    ///
+    /// Empty by default and empty for every world migrated from schema 14 or earlier: **an
+    /// existing world therefore loads with every organism legacy-controlled**, and an animal
+    /// is neural only because something explicitly inserted an entry for it.
+    #[serde(default)]
+    pub neural: NeuralState,
 }
 
 impl WorldState {
@@ -139,6 +148,34 @@ impl WorldState {
                 || !self.hunters.members.is_empty(),
             |id| self.organisms.get(id).is_some(),
         )?;
+        self.neural.validate()?;
+        for (id, _) in &self.neural.animals {
+            if self.organisms.get(*id).is_none() {
+                return Err(format!(
+                    "neural animal {}:{} has no organism",
+                    id.slot, id.generation
+                ));
+            }
+            // Two combinations have no contract yet and are refused rather than silently
+            // half-applied. A neural animal ignores the quiet pause and every legacy
+            // behavioural override, so a world that also runs one is not describable; and the
+            // apex sensory/action extensions (gut, handling, strike readiness, attack
+            // semantics) do not exist, so a member cannot speak this interface at all.
+            if self.hunters.contains(*id) {
+                return Err(format!(
+                    "neural animal {}:{} is an apex member: the apex sensory and action \
+                     extensions do not exist in this interface version",
+                    id.slot, id.generation
+                ));
+            }
+        }
+        if !self.neural.animals.is_empty() && self.quiet.policy.enabled() {
+            return Err(
+                "the ordinary quiet extension and neural animals cannot be enabled together: \
+                 a neural animal does not observe the post-birth pause"
+                    .into(),
+            );
+        }
         // The corrections are signed, so they are checked as the *combined* totals they are
         // part of: finite corrections, and finite nonnegative corrected cumulative flows.
         // Nothing is clamped or reset — an unusable accounting state fails the load.

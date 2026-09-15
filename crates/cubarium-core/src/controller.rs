@@ -69,6 +69,17 @@ pub struct Decision {
     /// Request to begin gestation (capacity and escrow checks happen in the world).
     pub bud: bool,
     pub hunger_memory: f64,
+    /// The centre speed this tick **requests**, px/s, when the controller wants it to differ
+    /// from the whole translational capability.
+    ///
+    /// `None` is the legacy behaviour and the only value the ordinary controller ever
+    /// produces: the request *is* the capability `effort · v_max / wading`, so a mode's effort
+    /// sets both at once. A recurrent policy separates them (`crate::neural`): activation
+    /// gives the body its full capability to split, and `thrust` says how much of the split it
+    /// wants as travel, leaving the rest available for the pivot. The resolver still clamps
+    /// this to `speed_cap` and still scales both halves into `|v| + r·|ω| ≤ u`, so this can
+    /// only ask for *less* than the capability, never for more.
+    pub speed_request: Option<f64>,
 }
 
 /// The per-mode turn gate `k` (spec: "Turning is gated by mode"). Seeking is always 1; the
@@ -247,6 +258,7 @@ pub fn decide_quiet(
         && age_seconds >= f64::from(d.bud_min_age_seconds);
 
     Decision {
+        speed_request: None,
         mode,
         underlying_mode,
         heading,

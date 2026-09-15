@@ -47,9 +47,14 @@ fn stepped_world(ticks: u64) -> World {
 /// than reinterpreted. Everything older is still rejected outright.
 /// Version 14 appends apex dormancy and encounters; all seven predecessor schemas
 /// migrate with both policies Off, preserving the existing migration restrictions.
+/// Version 15 **appends** the opt-in recurrent-policy extension (`crate::neural`,
+/// `design/recurrent-interface-contract.md` §5): three inert bytes in every world that has no
+/// neural animal, so a schema-14 payload loads with **every organism legacy-controlled** and
+/// steps byte for byte the tick it was saved on.
 #[test]
-fn the_schema_version_is_fourteen_and_its_seven_predecessors_still_load() {
-    assert_eq!(SCHEMA_VERSION, 14);
+fn the_schema_version_is_fifteen_and_its_eight_predecessors_still_load() {
+    assert_eq!(SCHEMA_VERSION, 15);
+    assert_eq!(cubarium_core::SCHEMA_V14, 14);
     assert_eq!(cubarium_core::SCHEMA_V13, 13);
     assert_eq!(cubarium_core::SCHEMA_V12, 12);
     assert_eq!(cubarium_core::SCHEMA_V11, 11);
