@@ -259,6 +259,59 @@ impl World {
         self.state.organisms.len()
     }
 
+    /// The 70-scalar observation this body's policy would see on its next controller tick,
+    /// built by the world's own sampler from the current state.
+    ///
+    /// A development and fixture accessor: it takes no step, consumes no draw, changes
+    /// nothing, and works for **any** live ordinary body, neural or not — what it reports is a
+    /// property of where the body is standing, not of whether a policy is attached. The
+    /// neighbour list it reads is the one the last pair pass built, so a fixture that has just
+    /// moved bodies by hand should step once (or call it after a step) to see them.
+    ///
+    /// Feedback channels (indices 64–69) come from the animal's accumulated interval when it
+    /// has one, and are the birth-tick values otherwise.
+    pub fn neural_observation(
+        &self,
+        id: crate::ids::OrganismId,
+    ) -> Option<crate::neural::Observation70> {
+        let o = self.state.organisms.get(id)?;
+        let cfg = &self.state.config;
+        let dt = crate::DT;
+        let here = cubarium_surface::cell_of(&o.pos).index();
+        let wading = 1.0 + self.state.fields.w[here] * (1.0 - o.phenotype.swim);
+        let bill = crate::motor::MotorBill::of(o, cfg);
+        let u_full =
+            (o.phenotype.speed_max / wading).min(bill.affordable_motor(o.energy, dt));
+        let radius_px = crate::motor::turn_radius_px(o, None);
+        let feedback = self.state.neural.get(id).map_or([0.0, 0.0, 0.0, 0.0, 0.0, 1.0], |a| {
+            a.feedback.channels(
+                o.phenotype.graze_rate,
+                o.phenotype.scavenge_rate,
+                o.phenotype.speed_max,
+                radius_px,
+                dt,
+            )
+        });
+        let mut cells = Vec::new();
+        let mut bodies = Vec::new();
+        Some(super::step::sample_observation(
+            o,
+            self.state.tick,
+            dt,
+            cfg,
+            cfg.organism.reserve_energy_density,
+            &self.state.fields,
+            &self.light,
+            &self.images,
+            &self.sense_rings[here],
+            self.neighbors.lists.get(id.slot as usize).map_or(&[][..], |l| &l[..]),
+            u_full,
+            feedback,
+        &mut cells,
+            &mut bodies,
+        ))
+    }
+
     /// The recurrent extension, for a development tool or a fixture to read.
     pub fn neural(&self) -> &crate::neural::NeuralState {
         &self.state.neural

@@ -230,6 +230,7 @@ impl World {
             counters: TickCounters::default(),
             charging: ChargingDiagnostics::default(),
             intake: IntakeDiagnostics::default(),
+            neural_timing: crate::world::state::NeuralTiming::default(),
             scripted: Vec::new(),
             initial_material,
         };

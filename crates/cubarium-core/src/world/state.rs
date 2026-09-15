@@ -412,7 +412,7 @@ pub struct TickCounters {
 /// **Cost.** Seven running scalars written inside branches the step already takes. No per-tick
 /// history, no RNG, nothing read or written that the step did not already touch, so recording
 /// this cannot move the simulation.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct IntakeDiagnostics {
     /// Gross producer material grown, before mortality, ripening or grazing.
     pub producer_growth: f64,
@@ -428,6 +428,42 @@ pub struct IntakeDiagnostics {
     /// for because their reserve was already full.
     pub request_ticks: u64,
     pub reserve_saturated_ticks: u64,
+}
+
+/// Transient per-run timing of the recurrent stage (`crate::neural`): the sampler, the GRU
+/// forward pass and the action adapter, each measured at its own call rather than inferred
+/// from the difference between a legacy world and a neural one — two worlds that also differ
+/// in their trajectories, their controllers and the work those imply.
+///
+/// Never persisted, never hashed, never read by the simulation, and only written inside the
+/// neural branch, which a world with no neural animal never enters.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct NeuralTiming {
+    /// Wall nanoseconds inside the 70-scalar sampler, and the number of times it ran.
+    pub sampler_nanos: u64,
+    pub sampler_calls: u64,
+    /// Wall nanoseconds inside `Gru32::forward`, and the number of forward passes.
+    pub inference_nanos: u64,
+    pub inference_calls: u64,
+    /// Wall nanoseconds inside the action adapter: squash, deadband, masks, mouth
+    /// normalisation and this tick's `MotorRequest`. Runs on **every** tick, not only
+    /// controller ticks, because a held action is rebuilt from the current heading each tick.
+    pub adapter_nanos: u64,
+    pub adapter_calls: u64,
+}
+
+impl NeuralTiming {
+    /// The difference between two readings, for a probe that brackets a run.
+    pub fn since(&self, earlier: &NeuralTiming) -> NeuralTiming {
+        NeuralTiming {
+            sampler_nanos: self.sampler_nanos.saturating_sub(earlier.sampler_nanos),
+            sampler_calls: self.sampler_calls.saturating_sub(earlier.sampler_calls),
+            inference_nanos: self.inference_nanos.saturating_sub(earlier.inference_nanos),
+            inference_calls: self.inference_calls.saturating_sub(earlier.inference_calls),
+            adapter_nanos: self.adapter_nanos.saturating_sub(earlier.adapter_nanos),
+            adapter_calls: self.adapter_calls.saturating_sub(earlier.adapter_calls),
+        }
+    }
 }
 
 /// Read-only diagnostics for the paid-charging experiment: what the member oxidation policy

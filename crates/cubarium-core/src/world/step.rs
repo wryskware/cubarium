@@ -225,6 +225,7 @@ impl World {
                 counters,
                 charging,
                 intake,
+                neural_timing,
                 scripted,
                 initial_material: _,
             } = &mut *self;
@@ -392,6 +393,7 @@ impl World {
                 {
                     let decision = neural_decision(
                         neural,
+                        neural_timing,
                         index,
                         o,
                         now,
@@ -2508,6 +2510,7 @@ impl World {
 #[allow(clippy::too_many_arguments)]
 fn neural_decision(
     neural: &mut crate::neural::NeuralState,
+    timing: &mut super::state::NeuralTiming,
     index: usize,
     o: &Organism,
     now: u64,
@@ -2524,9 +2527,7 @@ fn neural_decision(
 ) -> Decision {
     use crate::neural::action::{Action7, Capability, Envelope};
 
-    let org_cfg = &cfg.organism;
     let here = cell_of(&o.pos).index();
-    let chart = o.pos.chart();
     let omega_max = f64::from(o.phenotype.drives.turn_rate_max_deg).to_radians();
     let radius_px = motor::turn_radius_px(o, None);
     // `motor_avail` and `ω_attain` share the world's own affordability calculation rather than
@@ -2547,49 +2548,7 @@ fn neural_decision(
 
     if neural.animals[index].1.updates_on(now) {
         // ---- sample ----
-        cells.clear();
-        bodies.clear();
-        let depth = sense_depth(o.phenotype.sense_radius);
-        for (hop, ring) in rings[..depth].iter().enumerate() {
-            for neighbor in ring {
-                let center = neighbor.center();
-                let Some(view) =
-                    unfold_with(&images[o.pos.face.index()], o.pos, center, CELL_UNFOLD_RADIUS)
-                else {
-                    continue;
-                };
-                if view.distance <= GRADIENT_EPS || view.distance.is_nan() {
-                    continue;
-                }
-                let there = neighbor.index();
-                cells.push(crate::neural::SensedCell {
-                    offset: view.local - chart,
-                    near: hop == 0,
-                    p: fields.p[there],
-                    f: fields.f[there],
-                    d_eff: edible_detritus(fields.d[there], fields.de[there], e_r),
-                });
-            }
-        }
-        let mut crowd = Vec2::ZERO;
-        for n in neighbours {
-            bodies.push(crate::neural::SensedBody {
-                offset: n.local - chart,
-                distance: n.distance,
-                extent: n.extent,
-            });
-            // The same overlap term the world already computes, on the same condition.
-            let extent_sum = o.phenotype.extent + n.extent;
-            if n.distance >= extent_sum + 1.0 {
-                continue;
-            }
-            let delta = chart - n.local;
-            let len_sq = delta.length_sq();
-            if len_sq > GRADIENT_EPS {
-                crowd += delta * (extent_sum / len_sq);
-            }
-        }
-
+        let sampler_start = std::time::Instant::now();
         let animal = &neural.animals[index].1;
         let feedback = animal.feedback.channels(
             o.phenotype.graze_rate,
@@ -2598,36 +2557,14 @@ fn neural_decision(
             radius_px,
             dt,
         );
-        let self_state = crate::neural::SelfState {
-            p_here: fields.p[here],
-            f_here: fields.f[here],
-            d_here: edible_detritus(fields.d[here], fields.de[here], e_r),
-            p_max: cfg.producer.max,
-            crowd,
-            water: fields.w[here],
-            w_flood: cfg.water.flood,
-            light: light[here],
-            height: o.pos.embed()[1],
-            up: up_direction(o.pos.face),
-            extent: o.phenotype.extent,
-            sense_radius: o.phenotype.sense_radius,
-            reserve: o.reserve,
-            reserve_max: o.phenotype.reserve_max,
-            energy: o.energy,
-            energy_max: o.phenotype.energy_max,
-            structure: o.structure,
-            structure_adult: o.phenotype.structure_adult,
-            gestating: o.escrow.is_some(),
-            age_seconds: o.age_ticks(now) as f64 * dt,
-            max_age_seconds: org_cfg.max_age_seconds,
-            motor_avail: if o.phenotype.speed_max > 0.0 {
-                u_full / o.phenotype.speed_max
-            } else {
-                0.0
-            },
-            feedback,
-        };
-        let observation = crate::neural::obs::observe(o.heading, cells, bodies, &self_state);
+        let observation = sample_observation(
+            o, now, dt, cfg, e_r, fields, light, images, rings, neighbours, u_full, feedback,
+            cells, bodies,
+        );
+        timing.sampler_nanos = timing
+            .sampler_nanos
+            .saturating_add(sampler_start.elapsed().as_nanos() as u64);
+        timing.sampler_calls = timing.sampler_calls.saturating_add(1);
 
         // ---- infer ----
         let policy_index = neural.animals[index].1.policy as usize;
@@ -2636,7 +2573,12 @@ fn neural_decision(
                 let mut hidden = [0.0f64; crate::neural::HIDDEN];
                 let animal = &neural.animals[index].1;
                 hidden.copy_from_slice(&animal.hidden);
+                let inference_start = std::time::Instant::now();
                 let y = policy.weights.forward(observation.as_slice(), &mut hidden);
+                timing.inference_nanos = timing
+                    .inference_nanos
+                    .saturating_add(inference_start.elapsed().as_nanos() as u64);
+                timing.inference_calls = timing.inference_calls.saturating_add(1);
                 neural.animals[index].1.hidden.copy_from_slice(&hidden);
                 y
             }
@@ -2654,11 +2596,22 @@ fn neural_decision(
             cfg.mechanisms.grazing,
             cfg.mechanisms.scavenging,
         );
-        neural.animals[index].1.held = Action7::squash(&head, &capability).0;
+        let squash_start = std::time::Instant::now();
+        let held = Action7::squash(&head, &capability).0;
+        timing.adapter_nanos = timing
+            .adapter_nanos
+            .saturating_add(squash_start.elapsed().as_nanos() as u64);
+        neural.animals[index].1.held = held;
         neural.animals[index].1.feedback = crate::neural::Feedback::default();
     }
 
-    decision_from(neural.animals[index].1.held_action(), o, &envelope, omega_max)
+    let adapter_start = std::time::Instant::now();
+    let decision = decision_from(neural.animals[index].1.held_action(), o, &envelope, omega_max);
+    timing.adapter_nanos = timing
+        .adapter_nanos
+        .saturating_add(adapter_start.elapsed().as_nanos() as u64);
+    timing.adapter_calls = timing.adapter_calls.saturating_add(1);
+    decision
 }
 
 /// Turn the action in force into this tick's `Decision`, from the body's *current* heading.
@@ -2693,4 +2646,104 @@ fn decision_from(
         hunger_memory: o.hunger_memory,
         speed_request: Some(request.speed),
     }
+}
+
+/// Build one animal's 70-scalar observation from the pre-movement world (contract §1–2).
+///
+/// Split out of [`neural_decision`] so that a development accessor
+/// (`World::neural_observation`) can produce exactly the vector the controller would see,
+/// without stepping and without a second copy of the geometry.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn sample_observation(
+    o: &Organism,
+    now: u64,
+    dt: f64,
+    cfg: &WorldConfig,
+    e_r: f64,
+    fields: &crate::fields::Fields,
+    light: &[f64; CELL_COUNT],
+    images: &[Vec<cubarium_surface::ChartImage>; 5],
+    rings: &[Vec<cubarium_surface::CellId>; super::SENSE_DEPTH_MAX],
+    neighbours: &[crate::pairs::Neighbor],
+    u_full: f64,
+    feedback: [f64; 6],
+    cells: &mut Vec<crate::neural::SensedCell>,
+    bodies: &mut Vec<crate::neural::SensedBody>,
+) -> crate::neural::Observation70 {
+    let org_cfg = &cfg.organism;
+    let here = cell_of(&o.pos).index();
+    let chart = o.pos.chart();
+    cells.clear();
+    bodies.clear();
+    let depth = sense_depth(o.phenotype.sense_radius);
+    for (hop, ring) in rings[..depth].iter().enumerate() {
+        for neighbor in ring {
+            let center = neighbor.center();
+            let Some(view) =
+                unfold_with(&images[o.pos.face.index()], o.pos, center, CELL_UNFOLD_RADIUS)
+            else {
+                continue;
+            };
+            if view.distance <= GRADIENT_EPS || view.distance.is_nan() {
+                continue;
+            }
+            let there = neighbor.index();
+            cells.push(crate::neural::SensedCell {
+                offset: view.local - chart,
+                near: hop == 0,
+                p: fields.p[there],
+                f: fields.f[there],
+                d_eff: edible_detritus(fields.d[there], fields.de[there], e_r),
+            });
+        }
+    }
+    let mut crowd = Vec2::ZERO;
+    for n in neighbours {
+        bodies.push(crate::neural::SensedBody {
+            offset: n.local - chart,
+            distance: n.distance,
+            extent: n.extent,
+        });
+        // The same overlap term the world already computes, on the same condition.
+        let extent_sum = o.phenotype.extent + n.extent;
+        if n.distance >= extent_sum + 1.0 {
+            continue;
+        }
+        let delta = chart - n.local;
+        let len_sq = delta.length_sq();
+        if len_sq > GRADIENT_EPS {
+            crowd += delta * (extent_sum / len_sq);
+        }
+    }
+
+    let self_state = crate::neural::SelfState {
+        p_here: fields.p[here],
+        f_here: fields.f[here],
+        d_here: edible_detritus(fields.d[here], fields.de[here], e_r),
+        p_max: cfg.producer.max,
+        crowd,
+        water: fields.w[here],
+        w_flood: cfg.water.flood,
+        light: light[here],
+        height: o.pos.embed()[1],
+        up: up_direction(o.pos.face),
+        extent: o.phenotype.extent,
+        sense_radius: o.phenotype.sense_radius,
+        reserve: o.reserve,
+        reserve_max: o.phenotype.reserve_max,
+        energy: o.energy,
+        energy_max: o.phenotype.energy_max,
+        structure: o.structure,
+        structure_adult: o.phenotype.structure_adult,
+        gestating: o.escrow.is_some(),
+        age_seconds: o.age_ticks(now) as f64 * dt,
+        max_age_seconds: org_cfg.max_age_seconds,
+        motor_avail: if o.phenotype.speed_max > 0.0 {
+            u_full / o.phenotype.speed_max
+        } else {
+            0.0
+        },
+        feedback,
+    };
+    crate::neural::obs::observe(o.heading, cells, bodies, &self_state)
 }

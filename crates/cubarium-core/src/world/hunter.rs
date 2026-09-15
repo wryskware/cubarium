@@ -52,6 +52,12 @@ impl World {
         self.intake
     }
 
+    /// [`crate::world::state::NeuralTiming`] accumulated since this `World` was constructed.
+    /// Bracket a run with two readings and take `since` to time one arm.
+    pub fn neural_timing(&self) -> crate::world::state::NeuralTiming {
+        self.neural_timing
+    }
+
     /// The oxidation activation threshold, as a fraction of `E_max`, that an **authoritative
     /// member** of this world runs under — the world's configured one when there is no
     /// profile, or no raised policy on it. Published so a recorded experiment can state the

@@ -80,7 +80,7 @@ pub use snapshot::{
 };
 pub use telemetry::Telemetry;
 pub use view::RenderView;
-pub use world::{ChargingDiagnostics, IntakeDiagnostics, World, WorldState};
+pub use world::{ChargingDiagnostics, IntakeDiagnostics, NeuralTiming, World, WorldState};
 
 /// Simulation ticks per second.
 pub const TICK_HZ: u32 = 20;

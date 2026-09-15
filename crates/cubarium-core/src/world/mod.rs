@@ -22,7 +22,7 @@ use crate::pairs::NeighborLists;
 use crate::quiet::QuietEvent;
 
 pub(crate) use state::check_genome;
-pub use state::{ChargingDiagnostics, IntakeDiagnostics, TickCounters, WorldState};
+pub use state::{ChargingDiagnostics, IntakeDiagnostics, NeuralTiming, TickCounters, WorldState};
 
 pub(super) const CELL_UNFOLD_RADIUS: f64 = 20.0;
 pub(super) const SENSE_DEPTH_MAX: usize = 3;
@@ -59,6 +59,9 @@ pub struct World {
     pub(crate) counters: TickCounters,
     pub(crate) charging: ChargingDiagnostics,
     pub(crate) intake: IntakeDiagnostics,
+    /// Transient timing of the recurrent stage (`crate::neural`). Development measurement
+    /// only: never persisted, never hashed, never read by the tick.
+    pub(crate) neural_timing: NeuralTiming,
     /// Transient diagnostic intent overrides (`crate::diagnostic`). Empty in every ordinary
     /// world, never persisted, never set by the world itself.
     pub(crate) scripted: Vec<(crate::ids::OrganismId, ScriptedIntent)>,
