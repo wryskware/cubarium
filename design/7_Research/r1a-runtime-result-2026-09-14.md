@@ -1,6 +1,6 @@
 ---
 design_status: exploration
-last_reviewed: 2026-09-14
+last_reviewed: 2026-09-15
 decision_refs: []
 ---
 
@@ -137,10 +137,11 @@ no two-parent neural mating, no change to biological inheritance.
 
 | Command | Result |
 | --- | --- |
-| `cargo test -p cubarium-core --release` | 438 passed, 0 failed, 2 ignored |
-| `cargo test --workspace --release` | 1,274 passed, 0 failed, 20 ignored |
+| `cargo test -p cubarium-core --release` | 450 passed, 0 failed, 3 ignored |
+| `cargo test --workspace --release` | 1,286 passed, 0 failed, 20 ignored |
 
-New: `src/neural/**` unit tests (33), `tests/neural_runtime.rs` (10), `tests/starvation.rs` (2).
+New: `src/neural/**` unit tests (33), `tests/neural_runtime.rs` (13), `tests/starvation.rs` (7),
+`tests/neural_geometry.rs` (3), `tests/neural_predation.rs` (1).
 
 **Sampler.** Partition of unity over 720 bearings; a lone cell dead ahead lands in sector 0 and
 nowhere else; rotating the observer 60° clockwise shifts every sector by exactly one index; a
@@ -189,38 +190,53 @@ body that is not alive, an apex member, an enabled quiet policy.
 headroom. Each segment is 200 ticks (10 s) with a bias-only head, so the tape is fixed and only
 the world's response varies.
 
-| segment | px travelled | net turn (deg) | upkeep (e) | motor (e) | P eaten (m) | reserve gained (m) |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| rest | 0.00 | 0.0 | 0.06200 | 0.00000 | 0.1796 | 0.0000 |
-| travel (thrust 1) | 49.98 | 0.0 | 0.06200 | 0.01799 | 0.1692 | 0.0000 |
-| pure pivot (turn +1) | 0.00 | 900.0 | 0.06200 | 0.00707 | 0.1796 | 0.0000 |
-| split (≈0.5, ≈0.5) | 25.00 | 450.5 | 0.06200 | 0.01254 | 0.1790 | 0.0000 |
-| graze in place | 0.00 | 0.0 | 0.06200 | 0.00000 | 0.4044 | 0.1553 |
-| travel and graze | 49.98 | 0.0 | 0.06200 | 0.01799 | 0.4150 | 0.1590 |
+| segment | px travelled | net turn (deg) | paid upkeep (e) | paid motion (e) | eaten P (m) | Δreserve (m) | Δenergy (e) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| rest | 0.00 | 0.0 | 0.06200 | 0.00000 | 0.0000 | +0.0000 | −0.06200 |
+| travel (thrust 1) | 49.98 | 0.0 | 0.06200 | 0.01799 | 0.0000 | +0.0000 | −0.07999 |
+| pure pivot (turn +1) | 0.00 | 900.0 | 0.06200 | 0.00707 | 0.0000 | +0.0000 | −0.06907 |
+| split (≈0.5, ≈0.5) | 25.00 | 450.5 | 0.06200 | 0.01254 | 0.0000 | +0.0000 | −0.07454 |
+| graze in place | 0.00 | 0.0 | 0.06200 | 0.00000 | 0.2588 | +0.1553 | +0.00000 |
+| travel and graze | 49.98 | 0.0 | 0.06200 | 0.01799 | 0.2649 | +0.1590 | +0.00000 |
 
-Read plainly: a pure pivot turns 90°/s (the genome ceiling, which binds at the new pace) with
-zero travel and pays for the sweep; the split halves both and costs between the two; grazing
-works standing still and while travelling, out of one mouth. The `P eaten` in the non-grazing
-rows is the cell's own background flux, not the mouth. The two grazing rows show zero *net*
-energy spent because assimilation refills a battery that is already at its ceiling; the upkeep
-column is still the bill that was charged.
+**These numbers are the repaired ones; see "Repair cycle 1" below for what the first version
+got wrong.** Intake is the world's own `IntakeDiagnostics` — material that actually left a
+field through a mouth — and the motion column is the resolved motion priced through
+`MotorBill::motor_cost`. Read plainly: a pure pivot turns 90°/s (the genome ceiling, which
+binds at the new pace) with zero travel and pays 0.00707 e for the sweep; the split halves both
+and costs between the two; grazing works standing still and while travelling, out of one mouth.
+The probe asserts that a closed mouth records exactly zero intake and that travel-and-graze
+records both a motor debit and an intake.
 
-**Throughput.** Each arm run twice, all-legacy and all-neural, so the sampler-and-inference
-cost is a difference and not an estimate. Births off.
+**Throughput.** Each arm run twice, all-legacy and all-neural. Births off.
 
-| bodies | ticks | legacy ticks/s | neural ticks/s | sampler+inference µs per body-tick |
+| bodies | ticks | legacy ticks/s | neural ticks/s | world difference µs/body-tick |
 | ---: | ---: | ---: | ---: | ---: |
-| 32 | 2,000 | 14,027 | 8,568 | 1.420 |
-| 128 | 2,000 | 6,716 | 2,980 | 1.459 |
-| 512 | 200 | 1,046 | 569 | 1.566 |
+| 32 | 2,000 | 13,899 | 8,203 | 1.561 |
+| 128 | 2,000 | 6,578 | 2,832 | 1.571 |
+| 512 | 200 | 1,032 | 547 | 1.680 |
 
-Whole screen: **1.9 s of wall time** against the 60 s budget. The per-body-tick cost is
-essentially flat in population, as it should be: the sampler is bounded by `hops` and by
-`max_neighbors`, and inference runs on every second tick. At 512 bodies an all-neural world
-still runs 569 ticks/s, 28× the 20 Hz the display needs. **No channel was cut, and none needs
-to be on this evidence.** Sensor and inference are not separated further than this difference:
-the screen measures the whole neural path against the whole legacy path, which is the quantity
-that decides whether the runtime is affordable.
+**Component cost, measured at the calls** (added in repair cycle 1; the world difference above
+is *not* an isolated measurement, because the two arms also differ in controller and
+trajectory, so it subtracts the legacy controller work that was removed as well as adding the
+neural work):
+
+| bodies | sampler µs/call | inference µs/call | adapter µs/call | all three, µs/body-tick |
+| ---: | ---: | ---: | ---: | ---: |
+| 32 | 0.999 | 2.423 | 0.052 | 1.763 |
+| 128 | 1.067 | 2.438 | 0.052 | 1.804 |
+| 512 | 1.407 | 2.439 | 0.052 | 1.975 |
+
+The sampler and the GRU run on the animal's controller tick (half the body-ticks); the adapter
+runs on every one, because a held action is rebuilt from the current transported heading each
+tick. Each region is bracketed by two `Instant::now()` calls, so a sub-microsecond column
+carries a few percent of its own instrument. The summed component cost slightly *exceeds* the
+world difference, which is the expected sign: the neural arm does not pay for the legacy
+controller.
+
+Whole screen: **2.0 s of wall time** against the 60 s budget. At 512 bodies an all-neural world
+still runs 547 ticks/s, 27× the 20 Hz the display needs. **No channel was cut, and none needs
+to be on this evidence.**
 
 ## 5. Contract corrections
 
@@ -295,45 +311,176 @@ the brief asked for the number to be inspected rather than taken from the plan.
 
 ## 6. What is left, and what is not claimed
 
-- **Two named §9 sampler fixtures were not built.** "A body straddling a seam senses the same
-  70 values as the equivalent flat layout" and "17 neighbours disclose the truncation" have no
-  test. The first is structurally true — the sampler receives offsets that the world has
-  already unfolded into the observer's chart, and does nothing chart-dependent — but
-  *structurally true* is not *tested*, and the seam behaviour that **is** tested is the weaker
-  save/resume-across-a-seam agreement. The second is the world's existing `max_neighbors`
-  budget, unchanged by this slice and undisclosed to the policy by design.
-- **The held turn is tested across ticks, not across a seam.** The mechanism is the same — the
-  request is rebuilt from the current transported heading every tick — and a seam-parked body
-  is in the persistence fixture, but there is no fixture that measures the signed turn on
-  either side of a crossing.
 - **No trained policy exists.** Every weight set in this slice is hand-authored or zero. The
   memory check is a statement about the interface; the probe is a statement about the world's
   response to a fixed tape. Neither is evidence about learning, foraging competence or
   sustainability.
-- **No sensor/inference split.** The throughput screen reports the whole neural path against
-  the whole legacy path. Separating the sampler from the GRU would need instrumentation this
-  slice did not add.
 - **No apex extension, no weight mutation, no optimizer, no migration command, no subsidy.**
   Neural+apex and neural+quiet are refused; a legacy world is never migrated by loading.
 - **The starvation correction is a world-physiology change, not an ecology rebalance.** The
   cropping floor R0b and R0d both named is still open, and so is the energy rebalance the R0d
   pace forces.
+- **The far-ring seam residual is real, if tiny.** Own cell, near ring and body channels match a
+  physically equivalent flat layout exactly; the far ring (hops 2–3) matches to 5.1e-6, which is
+  floating point in the unfold moving a hair of weight between two overlapping sector windows.
+  Nothing at that scale is sensory information, and nothing here claims bit-identity.
+- **The component timings carry their own instrument.** Two `Instant::now()` calls bracket each
+  region, so the 0.052 µs adapter column in particular is close to the measurement floor.
+- **The display world was not observed over a long horizon.** It was reset, confirmed stepping,
+  and left alone; no ecological claim follows from that.
+
+Closed in repair cycle 1, and therefore no longer listed: the seam-equivalent sampling fixture,
+the 17-neighbour truncation fixture, the held turn through a seam, and the sensor/inference
+timing split.
+
+## 6a. Repair cycle 1 (2026-09-15)
+
+Against [Astra's review](r1a-runtime-review-2026-09-14.md) of `693a300`. All three of the
+review's reproductions were confirmed failing on a copy of its
+[source](assets/r1a-review-regressions.rs) before anything was changed, then promoted into the
+permanent suites and the temporary file deleted.
+
+### P1 — Predation left dangling private state
+
+**Root cause.** The capture settlement (`world/step.rs`, the `caught` branch) is the *second*
+boundary in the world that removes an organism, and it removed only the body. The physiology
+pass's death commit had been given `neural.remove`; this one had not. An ordinary neural body is
+legitimate prey for a legacy hunter — refusing a neural *apex* says nothing about that
+combination — so after an ordinary interaction the world failed its own `validate` with
+`neural animal 1:1 has no organism`, which breaks continuation loading.
+
+**Fix.** `neural.remove(prey_id)` at the capture boundary, beside the body's removal.
+
+**Regression.** `tests/neural_predation.rs::a_captured_neural_prey_leaves_no_private_state_behind`
+— a certain capture of a neural prey under a legacy hunter, then `validate`, `check_invariants`,
+a snapshot round trip that resumes and steps 40 ticks, and slot reuse starting from zero hidden
+state. Before: `Err("neural animal 1:1 has no organism")`. After: valid, lossless, resumes.
+
+### P1 — Solvency admitted what settlement never collected
+
+**Root cause.** `raisable_energy` admits a body that can raise this tick's upkeep from
+`energy + one tick of oxidation`, but the payment was `min(cost, energy)`. A body with no stored
+energy had the whole bill forgiven, and the physiology pass then credited it the full oxidation
+gain. The review measured a body owing 1.85e-4 e ending the tick holding its entire 8.0e-4 e
+credit, having paid 7.59e-19 e. The original test asserted survival and non-negative energy —
+not payment — which is exactly the gap.
+
+**Fix.** Settlement now collects from the same resources solvency counted: stored energy first,
+then exactly the shortfall oxidised out of the reserve, at the world's own rate, density and
+efficiency, with the burned material going to `fields.n` and the inefficiency to heat — the
+physiology pass's own transaction. The burn is recorded per slot and subtracted from that body's
+allowance in the physiology pass, so `oxidation_rate · dt` bounds the **tick**, not each pass.
+Only the *mandatory* half can ever reach the reserve: `motor_budget` is sized from stored energy
+alone, so a body short of upkeep has `u = 0`, stands still, and its shortfall is never motion.
+Movement is still paid from the battery.
+
+**Regressions** (`tests/starvation.rs`), all asserting the actual payment:
+
+| case | assertion | result |
+| --- | --- | --- |
+| zero stored energy, adequate reserve | payment == upkeep to 1e-15 | was ~0, now exact |
+| partial stored energy | battery first, reserve gives up exactly the shortfall | burn is the shortfall's 1.45e-4, not the whole 5.0e-4 allowance |
+| inadequate reserve | pays what it has, dies of Starvation | dies |
+| intake later in the tick | fed and bare arms burn identical reserve | both 1.9375e-4 |
+| shared allowance | total burn ≤ `oxidation_rate · dt` | holds |
+
+The accounting suite stays green: material, energy and heat are all conserved.
+
+### P2 — Neural budding skipped the retained minimum-age gate
+
+**Root cause.** `decide_quiet` refuses a budding request on five conditions: the quiet hold,
+`escrow.is_none()`, the two drive *thresholds* `bud_reserve` and `bud_energy`, and
+`bud_min_age_seconds`. A neural body skips that function entirely, and no equivalent world
+admission check existed.
+
+**The exact conditions retained**, and why:
+
+| condition | owner | reason |
+| --- | --- | --- |
+| `escrow.is_none()` | world (already) | one gestation at a time is a lifecycle rule |
+| funding (`reserve ≥ structure+reserve`, `energy ≥ build+energy`) | world (already) | the child must be paid for |
+| population cap | world (already) | capacity |
+| `bud_min_age_seconds` | **world, added here** | physical maturity; the brief keeps present maturity, funding and gestation constraints in this slice |
+| `bud_reserve`, `bud_energy` | **policy** | these are drive *preferences* — "am I comfortable enough to breed" — which is exactly the behaviour the policy is meant to own |
+| quiet hold | n/a | neural+quiet is refused outright |
+
+**Fix.** The ordinary gestation admission in the physiology pass now also requires
+`age_ticks · dt ≥ bud_min_age_seconds`. It is a strict no-op for a legacy body: `d.bud` already
+carries the same test, and a scripted diagnostic intent can only suppress `bud`
+(`d.bud = d.bud && b`), never set it.
+
+**Regressions** (`tests/neural_runtime.rs`): below the gate (age 0, and one tick short of 120 s)
+opens no escrow; at the gate a funded adult does; mature but unfunded does not. The existing
+birth test's precondition is repaired — it now winds the world clock past the gate so the parent
+is genuinely old enough, instead of asserting it in a comment; its horizon drops 4,200 → 1,200
+ticks as a result.
+
+### P2 — The probe reported field loss as intake and net energy as motor cost
+
+**Root cause.** `P eaten` was accumulated from own-cell stock deltas, which contain growth,
+mortality and decomposition — and which read the wrong cell: the settlement runs *after*
+movement, so the cell that is grazed is not always the one the body started the tick on.
+`motor` was `start.energy − end.energy − assumed_upkeep`, mixing expenditure with assimilation
+and oxidation credits.
+
+**Fix.** Intake from `World::intake_diagnostics()`; the bill rebuilt from the resolved motion
+through `MotorBill::motor_cost`; paid upkeep, paid motion, net reserve and net energy reported
+separately so credits are visible instead of netted away.
+
+**Before and after**, same tape:
+
+| row | old "P eaten" | new eaten P | old "motor" | new paid motion |
+| --- | ---: | ---: | ---: | ---: |
+| rest | 0.1796 | **0.0000** | 0.00000 | 0.00000 |
+| travel | 0.1692 | **0.0000** | 0.01799 | 0.01799 |
+| graze in place | 0.4044 | **0.2588** | 0.00000 | 0.00000 |
+| travel and graze | 0.4150 | **0.2649** | **0.00000** | **0.01799** |
+
+The probe now asserts both checks: a closed mouth records exactly zero intake, and
+travel-and-graze records both a motor debit and an intake. The same confounder was found in a
+starvation fixture while writing it; that one reads the diagnostic too.
+
+### The three owed checks
+
+`tests/neural_geometry.rs`, through a new read-only `World::neural_observation` accessor. The
+sampling block is factored out of `neural_decision` into `sample_observation`, so the accessor
+runs the same geometry the controller does rather than a second copy of it.
+
+- **Seam-equivalent sampling.** A body in the last cell row before the Top/Front seam and one
+  deep in the interior, both at their cell's exact centre (sub-cell position decides which cells
+  a body-relative offset lands in, so this has to match or the fixture measures itself), painted
+  with the same stocks at the same body-relative offsets via `travel`, with a companion body at
+  the same body-relative position. Habitat channels excluded per contract §9.
+  **Measured: own cell and near ring max |Δ| = 0, body channels max |Δ| = 0, far ring 5.1e-6.**
+- **17 neighbours.** Sixteen crowded behind the observer and a seventeenth alone dead ahead, all
+  inside `r_sense`: sector 0 reports no presence while the others do, and the fixture asserts the
+  seventeenth really was in range.
+- **Held turn through a seam.** A neural body under a steady clockwise turn crosses the seam; the
+  five ticks after turn by the same signed amount as the five before, to 1e-9. The crossing tick
+  itself is excluded as a change of chart, not a turn.
+
+### Component timings
+
+`NeuralTiming` (transient, never persisted, never hashed, written only inside the neural branch)
+counts wall nanoseconds and calls at the sampler, at `Gru32::forward` and at the action adapter.
+The numbers are in §4. The headline: the summed component cost (1.76–1.98 µs/body-tick) is
+*larger* than the legacy-versus-neural world difference (1.56–1.68), because that difference also
+subtracts the legacy controller work the neural arm does not do.
 
 ## 7. Build and development status
 
-Wrysk authorized a world reset at ship time ("we can just reset it every major change").
+Wrysk resets `state/` at every major change, and did so at the end of both passes.
 
-- **Before.** pid 1738804, build `0.1.0+3e21c57`, `state/`, world tick 51409, `resumed_from:
-  null`. Stopped.
-- **`state/`** emptied, `.lock` included.
-- **After.** `nohup ./scripts/run-cube.sh --fresh`, which rebuilds this checkout and launches
-  the normal `assets/atelier`. pid **1848090**, build **`0.1.0+a0cb6bf`**, `state_dir`
+- **After R1a.** pid 1848090, build `0.1.0+a0cb6bf`, fresh, ran to tick 195355.
+- **After repair cycle 1.** Stopped 1848090, emptied `state/` including `.lock`, relaunched
+  `nohup ./scripts/run-cube.sh --fresh`. pid **2062111**, build **`0.1.0+a106cee`**, `state_dir`
   `/home/wrysk/wryskware/cubarium/state`, `sink` `shim`, **`resumed_from: null`**,
-  `start_tick: 0`, stepping (tick 174 at the check). The shim was not touched.
+  `start_tick: 0`, stepping. The shim was not touched.
 
-The display world is **legacy-controlled**. No policy is attached to it, and nothing attaches
-one by itself: `World::attach_neural_policy` is the only door and it is called nowhere outside
-the probe and the fixtures. The probe runs on its own isolated world.
+The display world is **legacy-controlled** in both passes. No policy is attached to it, and
+nothing attaches one by itself: `World::attach_neural_policy` is the only door and it is called
+nowhere outside the probe and the fixtures. `World::neural_observation`, added in the repair
+pass, is read-only — it takes no step, consumes no draw and changes nothing.
 
 Commits, oldest first:
 
@@ -343,6 +490,9 @@ Commits, oldest first:
 | `ac5d8ef` | `neural/{obs,action,gru,state}.rs`, 33 unit tests |
 | `ea07e5b` | per-animal dispatch, `Decision.speed_request`, schema 15 + `v14` mirror, 10 runtime fixtures |
 | `a0cb6bf` | `examples/neural_probe`: the action tape and the throughput screen |
+| `7614bef` | this result document |
+| `2055a9b` | repair 1: the three runtime defects (predation boundary, solvency settlement, maturity gate) |
+| `a106cee` | repair 1: honest probe accounting, component timings, the three owed fixtures |
 
 ## Usage
 
