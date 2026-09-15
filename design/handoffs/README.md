@@ -13,18 +13,22 @@ entries, then **one** task brief. Do not ingest the whole research archive.
 
 ## Where we landed
 
-**2026-09-15 ecology contract repaired after review, awaiting targeted
-verification:** the [ecology v1 contract](../ecology-v1-contract.md) specifies
-structured plants (foliage, wood, reserve), distinct litter / dead wood /
-remains, inherited digestive capability with hard exclusions, paid reproduction,
-and the accounting tests and short scenarios that gate it.
-[Astra's review](../7_Research/ecology-v1-contract-review-2026-09-15.md) found
-two P1 and three P2 defects; contract §18 maps each to its fix. Wrysk's rules
-apply: worlds restart fresh, never migrate (§15.1), and old policies need not
-reload (§15.2); §17 lists the routine choices made on his behalf for veto. The
-matching implementation brief is
-[ecology-v1-opus-2026-09-15](ecology-v1-opus-2026-09-15.md), not yet dispatched.
-Training resumes only after the scenarios are verified in the revised ecology.
+**2026-09-15 ecology v1 delivered and reviewed:** the
+[ecology v1 contract](../ecology-v1-contract.md) is implemented on `main`
+(`b1dd394` … `f9ff91e`, not pushed): schema 16, structured plants, distinct
+litter / dead wood / remains, inherited digestive capability, care-masked
+`ecology_hash`, accounting tests A1–A9 and scenarios B0–B7. Astra's
+[implementation review](../7_Research/ecology-v1-implementation-review-2026-09-15.md)
+accepted six of seven repairs after cycle 2; the seventh (B6's complete bill)
+landed in cycle 3. The
+[result note](../7_Research/ecology-v1-implementation-2026-09-15.md) records
+run 3 criterion-first. Ecological outcomes at the provisional values are
+carried to the later whole-ecosystem search unchanged: one grazer still runs a
+bright 25-stand region down, a renewing 7 × 7 patch doubles its population in
+150 s while a stand needs 823 s to recover half its foliage. Next, separately:
+retrain in the revised ecology, the presentation task (living structure,
+foliage loss, dead wood), and a fresh display world. The old
+[Opus brief](ecology-v1-opus-2026-09-15.md) is closed.
 
 **2026-09-15 R2a cleared:** Repair cycle 2 is verified at `dbb769e`; 65 search
 tests plus the independent seam regression pass. Next is the
