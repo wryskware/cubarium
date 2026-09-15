@@ -129,9 +129,20 @@ fn a_fresh_world_opens_at_zero_and_is_compensated_from_there() {
         world.step();
     }
     assert_ne!(world.state.energy_correction, EnergyCorrection::default());
-    assert_eq!(
+    // `ecology_hash` is the care-masked hash of the **current** state (§15.1, revised in
+    // repair cycle 2), so it covers the signed corrections; it is no longer the schema 7
+    // projection, which predates them.
+    assert_ne!(
         ecology_hash(&world.state),
-        fnv1a(&postcard::to_allocvec(&v7::project(&world.state)).unwrap())
+        fnv1a(&postcard::to_allocvec(&v7::project(&world.state)).unwrap()),
+        "the ecology hash is not the schema 7 projection any more"
+    );
+    let mut compensated = world.state.clone();
+    compensated.energy_correction.heat_out += 1e-12;
+    assert_ne!(
+        ecology_hash(&compensated),
+        ecology_hash(&world.state),
+        "and the corrections are inside it"
     );
 }
 

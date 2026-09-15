@@ -154,9 +154,18 @@ pub const EXCLUDED: &[(&str, &str)] = &[
     ),
     (
         "organism.{assimilation_material, assimilation_energy, reserve_energy_density}, \
-         producer.energy_density, fruit.energy_density",
+         plant.energy_density, fruit.energy_density",
         "energy-density and efficiency terms are cross-constrained by `WorldConfig::validate`; \
-         searching them jointly would spend most of the budget on rejections",
+         searching them jointly would spend most of the budget on rejections. Ecology v1 folded \
+         `producer.energy_density` into `plant.energy_density`, the one `e_v` for foliage, \
+         wood, reserve and dead wood; the removed key is named nowhere in this file",
+    ),
+    (
+        "plant.*",
+        "the whole structured-plant block — wood, reserve, maintenance, the growth and \
+         propagule rates, the reserve share and the reflush threshold — is provisional at its \
+         first measured values (`design/ecology-v1-contract.md` §11) and joins the search \
+         vector in a later assignment, not this one (§15.3)",
     ),
     (
         "hunter.{reproduce_min_age_seconds, reproduce_interval_seconds, gestation_seconds}",
@@ -307,4 +316,80 @@ pub fn from_bit_labels(labels: &[String]) -> Result<Vec<f64>, String> {
                 .map_err(|e| format!("{}: {text:?} is not 16 hex digits: {e}", p.name))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **Every searched name must still exist on a schema 16 config, and writing the defaults
+    /// back must leave a world the core will accept.**
+    ///
+    /// Ecology v1 removed `ProducerConfig.energy_density` in favour of the one
+    /// `plant.energy_density`, and the result note claimed the compatibility surface had been
+    /// swept; Astra's implementation review found this file still advertising the removed key
+    /// in [`EXCLUDED`], so a tool could print or accept a name no schema 16 config has. The
+    /// list is prose, so this test is the thing that makes it checkable: it drives every
+    /// entry through the real writers and the real reader, and then through
+    /// `WorldConfig::validate`.
+    #[test]
+    fn every_searched_parameter_applies_to_a_schema_sixteen_config_and_validates() {
+        let mut config = WorldConfig::default();
+        let mut profile = FixedHunterProfile::lanternjaw_trial(&config);
+
+        // The writers: a name with no writer is an error, not a silent skip.
+        let values = defaults();
+        apply(&values, &mut config, &mut profile).expect("every parameter has a writer");
+        config
+            .validate()
+            .expect("writing the shipped defaults back leaves a valid schema 16 config");
+
+        // The readers: the round trip is bit-exact, so no name reads a different field than
+        // it writes.
+        let back = read(&config, &profile);
+        assert_eq!(back.len(), PARAMS.len());
+        for (p, (wrote, got)) in PARAMS.iter().zip(values.iter().zip(&back)) {
+            assert_eq!(
+                wrote.to_bits(),
+                got.to_bits(),
+                "{}: wrote {wrote}, read back {got}",
+                p.name
+            );
+        }
+
+        // A moved value has to land somewhere the reader can see, so a name that writes into
+        // a field nothing reads cannot pass either.
+        for (k, p) in PARAMS.iter().enumerate() {
+            let mut moved = defaults();
+            moved[k] = 0.5 * (p.lo + p.hi);
+            let mut config = WorldConfig::default();
+            let mut profile = FixedHunterProfile::lanternjaw_trial(&config);
+            apply(&moved, &mut config, &mut profile).unwrap_or_else(|e| panic!("{}: {e}", p.name));
+            let back = read(&config, &profile);
+            assert_eq!(
+                back[k].to_bits(),
+                moved[k].to_bits(),
+                "{}: the midpoint did not survive the round trip",
+                p.name
+            );
+        }
+    }
+
+    /// The exclusion list is prose about real fields, so it must not name a key that no
+    /// longer exists. `producer.energy_density` is the one ecology v1 removed.
+    #[test]
+    fn the_exclusion_list_names_no_removed_key() {
+        for (names, why) in EXCLUDED {
+            assert!(
+                !names.contains("producer.energy_density"),
+                "the exclusion list still advertises a key schema 16 does not have: {names}"
+            );
+            assert!(!why.is_empty(), "{names} has no reason");
+        }
+        // And the key that replaced it is named, so the list still covers the constraint.
+        assert!(
+            EXCLUDED.iter().any(|(names, _)| names.contains("plant.energy_density")),
+            "the one `e_v` must still be listed as excluded and why"
+        );
+    }
 }

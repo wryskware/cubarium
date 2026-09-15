@@ -91,7 +91,14 @@ fn the_older_projections_still_drop_only_what_they_are_named_for() {
     assert_eq!(&full[..as_v9.len()], &as_v9[..], "schema 9 is a prefix of schema 16");
     assert_eq!(&as_v9[..as_v8.len()], &as_v8[..], "schema 8 is a prefix of schema 9");
     assert_eq!(&as_v8[..as_v7.len()], &as_v7[..], "schema 7 is a prefix of schema 8");
-    assert_eq!(ecology_hash(&world.state), fnv1a(&as_v7));
+    // `ecology_hash` is the care-masked hash of the current state (§15.1, revised in repair
+    // cycle 2), not any of these projections.
+    assert_ne!(ecology_hash(&world.state), fnv1a(&as_v7));
+    assert_eq!(
+        ecology_hash(&world.state),
+        state_hash(&world.state),
+        "with no care in the state the mask removes nothing"
+    );
     assert_ne!(state_hash(&world.state), fnv1a(&as_v9));
 }
 

@@ -177,12 +177,25 @@ pub fn state_hash(state: &WorldState) -> u64 {
     fnv1a(&postcard::to_allocvec(state).expect("WorldState is always postcard-encodable"))
 }
 
-/// FNV-1a 64 over the postcard encoding of the state's **schema 7 projection**: everything
-/// but `care`. Two worlds with the same ecology and different care histories hash alike, so
-/// a care run and a matched no-care run are directly comparable and a migrated schema 7
-/// world with zero care hashes exactly as the pre-care build's `state_hash` did.
+/// FNV-1a 64 over the postcard encoding of the **current** state with its care extension
+/// masked to [`crate::care::CareState::default()`] and nothing else altered
+/// (`design/ecology-v1-contract.md` §15.1, revised after the implementation review).
+///
+/// Every other field is hashed: the config, the tick, every field vector, the organisms, the
+/// hunter, quiet, apex and neural extensions, **and every ecology v1 stock and counter**. Only
+/// care is masked, so a care run and a matched no-care run of the same ecology still compare
+/// directly — which is the one thing this hash exists for.
+///
+/// It replaces the schema 7 projection this used to hash. That projection predates wood, the
+/// plant reserve, dead wood and animal remains, so two schema 16 worlds could differ in every
+/// pool ecology v1 added and still hash alike; a care replay could pass after the ecology had
+/// diverged. [`state_hash`] remains the full encoding, care included.
 pub fn ecology_hash(state: &WorldState) -> u64 {
-    fnv1a(&postcard::to_allocvec(&v7::project(state)).expect("the projection is encodable"))
+    let masked = WorldState {
+        care: crate::care::CareState::default(),
+        ..state.clone()
+    };
+    fnv1a(&postcard::to_allocvec(&masked).expect("WorldState is always postcard-encodable"))
 }
 
 fn fnv1a(payload: &[u8]) -> u64 {
@@ -392,7 +405,14 @@ mod tests {
             state_hash(&s),
             "it is in the full-state hash"
         );
-        assert_eq!(ecology_hash(&hunted), ecology_hash(&s));
+        // **Revised in repair cycle 2** (`design/ecology-v1-contract.md` §15.1): `ecology_hash`
+        // is no longer the schema 7 projection, so it now sees the hunter extension too. Only
+        // care is masked.
+        assert_ne!(
+            ecology_hash(&hunted),
+            ecology_hash(&s),
+            "the care-masked hash covers every extension but care"
+        );
     }
 
     /// Bytes an empty [`crate::hunter::HunterState`] appends to the payload: `Option::None`,
@@ -458,7 +478,11 @@ mod tests {
             state_hash(&s),
             "it is in the full-state hash"
         );
-        assert_eq!(ecology_hash(&compensated), ecology_hash(&s));
+        assert_ne!(
+            ecology_hash(&compensated),
+            ecology_hash(&s),
+            "the care-masked hash covers the signed corrections too"
+        );
     }
 
     #[test]
@@ -487,7 +511,19 @@ mod tests {
                 + EMPTY_NEURAL
                 + ecology_bytes(&s)
         );
-        assert_eq!(ecology_hash(&s), super::fnv1a(&projected));
+        // `ecology_hash` **is not** this projection any more: it is the care-masked hash of
+        // the current state (§15.1, revised in repair cycle 2), so it covers every pool the
+        // schema 7 shape predates. What survives is the one property the hash exists for.
+        assert_ne!(
+            ecology_hash(&s),
+            super::fnv1a(&projected),
+            "the ecology hash is the current state, not the schema 7 projection"
+        );
+        assert_eq!(
+            ecology_hash(&s),
+            state_hash(&s),
+            "with no care in it, masking care changes nothing"
+        );
         // Care moves `state_hash` and never `ecology_hash`.
         let mut fed = s.clone();
         fed.care.feed_material_in = 1.0;

@@ -336,6 +336,38 @@ impl World {
         ))
     }
 
+    /// Pin one cell's **base** light and moisture, for a staged fixture that needs two
+    /// adjacent cells in different reference classes.
+    ///
+    /// Development staging only, and the narrowest thing that makes it expressible: the
+    /// habitat is otherwise a pure function of `config.habitat` and the seed, which is uniform
+    /// or smooth by construction, so a scenario that must light a donor and its recipient
+    /// differently (`design/ecology-v1-contract.md` §13.2, B7) has no other way to say it.
+    ///
+    /// The world derives each tick's `L` and `μ` from these bases, so with
+    /// `weather.amplitude = 0` a pinned cell sees exactly these numbers on every tick after
+    /// the call. **The pin lives in the transient habitat, not in the state**: it is not
+    /// persisted, not hashed, and a `World::from_state` round trip rebuilds the habitat from
+    /// the config and drops it. Apply it after the last restage.
+    ///
+    /// Changes nothing else: no equation, no ordering, no parameter, and no draw.
+    pub fn pin_cell_habitat(&mut self, cell: CellId, light: f64, moisture: f64) {
+        let i = cell.index();
+        self.habitat.light_base[i] = light;
+        self.habitat.moisture_base[i] = moisture;
+        // Make the pinned values readable before the next tick advances weather, exactly as
+        // `assemble` does after construction.
+        let cfg = &self.state.config;
+        self.state.weather.sample(
+            &cfg.weather,
+            &self.habitat,
+            &mut self.light,
+            &mut self.moisture,
+            &mut self.rain_source,
+            cfg.habitat.moisture_min,
+        );
+    }
+
     /// The recurrent extension, for a development tool or a fixture to read.
     pub fn neural(&self) -> &crate::neural::NeuralState {
         &self.state.neural

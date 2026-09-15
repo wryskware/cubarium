@@ -39,7 +39,7 @@ use cubarium_core::ids::OrganismId;
 use cubarium_core::organism::{Mode, Organism, Origin};
 use cubarium_core::rng::Counter;
 use cubarium_core::world::CellClass;
-use cubarium_core::{DT, World};
+use cubarium_core::{DT, MotorBill, World};
 use cubarium_surface::{CellId, Face, SurfacePoint, Vec2, cell_of};
 
 /// §13: every scenario runs at most 36,000 ticks (30 min simulated) and is censored there.
@@ -81,6 +81,12 @@ impl Class {
 }
 
 const NUTRIENT: f64 = 0.4;
+
+/// §11's own chain for a unit grazer at `diet = 0.85`: a metre of foliage bitten yields
+/// ≈ 1.16 e of usable energy, once assimilation, the reserve's carried energy and later
+/// oxidation are counted. It is the bridge between an income in `m/s` and an upkeep in `e/s`,
+/// and it is the contract's number, not a new one.
+const ENERGY_PER_FOLIAGE_M: f64 = 1.16;
 
 /// The staged config: the world's ordinary ecology on a flat habitat of one reference class,
 /// with nothing in it that the scenario did not put there.
@@ -356,7 +362,19 @@ struct Baseline {
 }
 
 fn run_b0(class: Class, verbose: bool) -> Baseline {
-    let cfg = class_config(class);
+    run_b0_arm(class, false, verbose)
+}
+
+/// `propagules`: §13.2's B0 row holds them **off** — the §11 hand table has no propagule sink,
+/// and a lone stand in a stripped world would otherwise export into its bare neighbours, so a
+/// B0 with them on measures a different quantity than the table it is compared against
+/// (Astra's implementation review, finding 3). The B0x arm turns them back on and reports the
+/// export separately.
+fn run_b0_arm(class: Class, propagules: bool, verbose: bool) -> Baseline {
+    let mut cfg = class_config(class);
+    if !propagules {
+        cfg.plant.propagule_rate = 0.0;
+    }
     let seed = Stand::seed(&cfg, class);
     let mut world = World::new(cfg).expect("the staged config is valid");
     nutrient_everywhere(&mut world);
@@ -366,7 +384,7 @@ fn run_b0(class: Class, verbose: bool) -> Baseline {
 
     if verbose {
         head(
-            &format!("B0 {}", class.name()),
+            &format!("{} {}", if propagules { "B0x" } else { "B0" }, class.name()),
             "one lone stand, seeded at the §11 `W_0`, no animals, 36,000 ticks",
         );
         println!(
@@ -374,9 +392,10 @@ fn run_b0(class: Class, verbose: bool) -> Baseline {
             seed.p, seed.w, seed.q
         );
         println!(
-            "note: §4.8 is part of the model and is **on**. A lone stand that clears `W_est` and \
-             its reserve floor spends on its bare neighbours, so the patch can spread; the \
-             propagule spend and the number of cells that crossed `W_min` are reported below."
+            "propagules: {}. §13.2 holds them **off** for B0, because the §11 table has no \
+             propagule sink and a lone stand in a stripped world would otherwise export into \
+             its bare neighbours; B0x is the same fixture with them on.",
+            if propagules { "on (B0x)" } else { "off (`propagule_rate = 0`)" }
         );
         row_header();
     }
@@ -434,15 +453,20 @@ fn run_b0(class: Class, verbose: bool) -> Baseline {
 }
 
 fn b0() {
-    println!("# B0 — stand baseline (§13.2)");
+    println!("# B0 — stand baseline, propagules off (§13.2) — and B0x, with them on");
     println!(
         "The §11 table is a hand calculation; these are the simulator's own numbers, and they \
-         are what every later scenario paints and is judged against."
+         are what every later scenario paints and is judged against. **B0 holds propagules \
+         off**: the hand table has no propagule sink, so a stand exporting into its bare \
+         neighbours is not the quantity the comparison names. B0x is the same fixture with \
+         §4.8 on, and reports the export."
     );
-    let avg = run_b0(Class::Average, true);
-    let bright = run_b0(Class::Bright, true);
+    let avg = run_b0_arm(Class::Average, false, true);
+    let bright = run_b0_arm(Class::Bright, false, true);
+    let avg_x = run_b0_arm(Class::Average, true, true);
+    let bright_x = run_b0_arm(Class::Bright, true, true);
     println!();
-    println!("## B0 summary at the 36,000-tick horizon");
+    println!("## B0 summary at the 36,000-tick horizon (propagules off)");
     println!(
         "{:<8} {:>8} {:>8} {:>8} {:>8} {:>12} {:>12} {:>8} {:>10}",
         "class", "P", "W", "Q", "F", "|dP/dt|", "|dW/dt|", "estab.", "sent"
@@ -461,6 +485,28 @@ fn b0() {
             b.propagule_sent
         );
     }
+    println!();
+    println!("## B0x summary — the same fixture with §4.8 on, for comparison");
+    println!(
+        "{:<8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>10}",
+        "class", "P", "W", "Q", "F", "estab.", "sent"
+    );
+    for (class, b) in [(Class::Average, &avg_x), (Class::Bright, &bright_x)] {
+        println!(
+            "{:<8} {:>8.4} {:>8.4} {:>8.4} {:>8.4} {:>8} {:>10.4}",
+            class.name(),
+            b.terminal.p,
+            b.terminal.w,
+            b.terminal.q,
+            b.terminal.f,
+            b.established,
+            b.propagule_sent
+        );
+    }
+    println!(
+        "The difference between the two summaries is exactly what §4.8 exports from a lone \
+         stand over 30 minutes."
+    );
     println!();
     println!("Expected direction (§13.2): approaches the §11 table — average `P ≈ 0.5, W ≈ 0.33`;");
     println!("bright `P ≈ 0.56, W = 0.6`. The comparison rows above are the finding.");
@@ -606,7 +652,11 @@ fn run_b1b(class: Class) {
     for c in &cells {
         paint(&mut world, *c, stand);
     }
-    let painted: f64 = cells.len() as f64 * stand.material();
+    // §13.2 (repair cycle 2): report foliage `ΣP` **apart from** total plant material
+    // `Σ(P+W+Q+F)`. Run 2's note labelled the total as "ΣP painted", which is 2.0–2.4× the
+    // foliage actually painted (Astra's implementation review, finding 3).
+    let painted_foliage: f64 = cells.len() as f64 * stand.p;
+    let painted_material: f64 = cells.len() as f64 * stand.material();
     let grazer = place(&mut world, centre, 0.85, 0);
     let mut world = restage(world);
 
@@ -619,8 +669,13 @@ fn run_b1b(class: Class) {
         cells.len()
     );
     println!(
-        "{:>7} {:>10} {:>9} {:>9} {:>10} {:>10} {:>8}",
-        "tick", "Σ P", "min P", "reserve", "leaf eaten", "Σ W", "cells"
+        "opening: foliage ΣP {painted_foliage:.4} m; total plant material Σ(P+W+Q+F) \
+         {painted_material:.4} m over {} cells",
+        cells.len()
+    );
+    println!(
+        "{:>7} {:>10} {:>12} {:>9} {:>9} {:>10} {:>10} {:>8}",
+        "tick", "Σ P", "Σ(P+W+Q+F)", "min P", "reserve", "leaf eaten", "Σ W", "cells"
     );
     for tick in 0..=HORIZON {
         if let Some(o) = world.state.organisms.get(grazer) {
@@ -628,6 +683,16 @@ fn run_b1b(class: Class) {
         }
         if tick % (SAMPLE * 4) == 0 {
             let p_total: f64 = cells.iter().map(|c| world.state.fields.p[c.index()]).sum();
+            let plant_total: f64 = cells
+                .iter()
+                .map(|c| {
+                    let i = c.index();
+                    world.state.fields.p[i]
+                        + world.state.fields.f[i]
+                        + world.state.ecology.wood[i]
+                        + world.state.ecology.plant_reserve[i]
+                })
+                .sum();
             let p_min = cells
                 .iter()
                 .map(|c| world.state.fields.p[c.index()])
@@ -636,8 +701,8 @@ fn run_b1b(class: Class) {
             let reserve = world.state.organisms.get(grazer).map_or(f64::NAN, |o| o.reserve);
             let diag = world.intake_diagnostics();
             println!(
-                "{tick:>7} {p_total:>10.4} {p_min:>9.4} {reserve:>9.4} {:>10.4} {w_total:>10.4} \
-                 {:>8}",
+                "{tick:>7} {p_total:>10.4} {plant_total:>12.4} {p_min:>9.4} {reserve:>9.4} \
+                 {:>10.4} {w_total:>10.4} {:>8}",
                 diag.producer_eaten + diag.fruit_eaten,
                 visited.len()
             );
@@ -669,11 +734,21 @@ fn run_b1b(class: Class) {
         yield_per_stand,
         cells.len() as f64 * yield_per_stand
     );
+    let plant_total: f64 = cells
+        .iter()
+        .map(|c| {
+            let i = c.index();
+            world.state.fields.p[i]
+                + world.state.fields.f[i]
+                + world.state.ecology.wood[i]
+                + world.state.ecology.plant_reserve[i]
+        })
+        .sum();
     println!(
-        "- cells visited {}, region Σ P {p_total:.4} (painted {:.4}), minimum stand P {p_min:.4}, \
-         stand deaths {}, grazer starved at {}.",
+        "- cells visited {}; **foliage** ΣP {painted_foliage:.4} → {p_total:.4} m; total plant \
+         material Σ(P+W+Q+F) {painted_material:.4} → {plant_total:.4} m; minimum stand P \
+         {p_min:.4}; stand deaths {}; grazer starved at {}.",
         visited.len(),
-        painted,
         world.state.ecology.plant_deaths_total,
         censored(died)
     );
@@ -778,7 +853,8 @@ fn b2() {
 
 // ------------------------------------------------------------------------------- B3
 
-fn run_b3(class: Class, stand: Stand, label: &str) {
+/// Returns `(time to 0.5·P*, time to 0.9·P*)`, each `None` if censored at the horizon.
+fn run_b3(class: Class, stand: Stand, label: &str, verbose: bool) -> (Option<u64>, Option<u64>) {
     let mut cfg = class_config(class);
     let mut world = World::new(cfg.clone()).expect("valid");
     nutrient_everywhere(&mut world);
@@ -808,16 +884,18 @@ fn run_b3(class: Class, stand: Stand, label: &str) {
     let mut half = None;
     let mut nine = None;
 
-    println!();
-    println!(
-        "### B3 {} ({label}) — stripped at tick 0 ({:.4} m of foliage to litter), no animals",
-        class.name(),
-        moved
-    );
-    println!(
-        "{:>7} {:>8} {:>8} {:>8} {:>8} {:>9}",
-        "tick", "P", "W", "Q", "N", "P/P*"
-    );
+    if verbose {
+        println!();
+        println!(
+            "### B3 {} ({label}) — stripped at tick 0 ({:.4} m of foliage to litter), no animals",
+            class.name(),
+            moved
+        );
+        println!(
+            "{:>7} {:>8} {:>8} {:>8} {:>8} {:>9}",
+            "tick", "P", "W", "Q", "N", "P/P*"
+        );
+    }
     for tick in 0..=HORIZON {
         let p = world.state.fields.p[i];
         let q = world.state.ecology.plant_reserve[i];
@@ -829,7 +907,7 @@ fn run_b3(class: Class, stand: Stand, label: &str) {
         if nine.is_none() && p >= target_nine {
             nine = Some(tick);
         }
-        if tick % (SAMPLE * 3) == 0 {
+        if verbose && tick % (SAMPLE * 3) == 0 {
             println!(
                 "{tick:>7} {p:>8.4} {:>8.4} {q:>8.4} {:>8.4} {:>9.3}",
                 world.state.ecology.wood[i],
@@ -843,17 +921,20 @@ fn run_b3(class: Class, stand: Stand, label: &str) {
         world.step();
     }
     world.check_invariants().expect("B3 ends consistent");
-    println!(
-        "- reached 0.5·P* ({target_half:.4}) at {}; 0.9·P* ({target_nine:.4}) at {}.",
-        censored(half),
-        censored(nine)
-    );
-    println!(
-        "- reserve dipped to {q_min:.4} of the painted {:.4} and now holds {:.4}; `N` bottomed \
-         at {n_min:.4} from {n0:.4}.",
-        stand.q,
-        world.state.ecology.plant_reserve[i]
-    );
+    if verbose {
+        println!(
+            "- reached 0.5·P* ({target_half:.4}) at {}; 0.9·P* ({target_nine:.4}) at {}.",
+            censored(half),
+            censored(nine)
+        );
+        println!(
+            "- reserve dipped to {q_min:.4} of the painted {:.4} and now holds {:.4}; `N` \
+             bottomed at {n_min:.4} from {n0:.4}.",
+            stand.q,
+            world.state.ecology.plant_reserve[i]
+        );
+    }
+    (half, nine)
 }
 
 fn b3() {
@@ -869,8 +950,8 @@ fn b3() {
          difference is measured rather than assumed."
     );
     for class in [Class::Bright, Class::Average] {
-        run_b3(class, mature(class), "B0 measured");
-        run_b3(class, Stand::hand(class), "§11 hand table");
+        run_b3(class, mature(class), "B0 measured", true);
+        run_b3(class, Stand::hand(class), "§11 hand table", true);
     }
 }
 
@@ -1211,6 +1292,77 @@ fn b5() {
 
 // ------------------------------------------------------------------------------ B6
 
+/// The **actual** per-tick upkeep of every body alive, from the world's own [`MotorBill`]:
+/// `(maintenance · S + sense_cost · r_sense) · dt`, summed over live bodies. This is the
+/// mandatory half of §7's bill — the part a body pays for existing, before it moves.
+fn mandatory_upkeep(world: &World) -> f64 {
+    let cfg = world.config();
+    world
+        .state
+        .organisms
+        .iter()
+        .map(|(_, o)| MotorBill::of(o, cfg).upkeep(DT))
+        .sum()
+}
+
+/// The **travel** half of the motor bill, from the distance the world actually transported
+/// each body this tick: `move_cost · S · |v| · dt`.
+///
+/// The rotation term `move_cost · S · ROTATION_COST_SCALE · r · |ω| · dt` is not observable
+/// from outside the step — the resolved `ω` is not published — so this is a **lower bound** on
+/// the motor bill, and it is reported as one.
+fn travel_bill(world: &World) -> f64 {
+    let move_cost = world.config().organism.move_cost;
+    world
+        .state
+        .organisms
+        .iter()
+        .map(|(id, o)| {
+            let px: f64 = world
+                .moved_segments(id)
+                .iter()
+                .map(|seg| (seg.to - seg.from).length())
+                .sum();
+            move_cost * o.structure * px
+        })
+        .sum()
+}
+
+/// Escrow openings, so "no birth without a debited escrow" is measured rather than asserted:
+/// the ids holding an escrow now, and the material each one debited when it opened.
+#[derive(Default)]
+struct Escrows {
+    open: BTreeSet<(u32, u32)>,
+    opened: u64,
+    debited: f64,
+}
+
+impl Escrows {
+    /// Diff against the previous tick and book every new escrow's material.
+    fn observe(&mut self, world: &World) {
+        let now: BTreeSet<(u32, u32)> = world
+            .state
+            .organisms
+            .iter()
+            .filter(|(_, o)| o.escrow.is_some())
+            .map(|(id, _)| (id.slot, id.generation))
+            .collect();
+        for key in now.difference(&self.open) {
+            self.opened += 1;
+            if let Some((_, o)) = world
+                .state
+                .organisms
+                .iter()
+                .find(|(id, _)| (id.slot, id.generation) == *key)
+                && let Some(e) = &o.escrow
+            {
+                self.debited += e.structure + e.reserve;
+            }
+        }
+        self.open = now;
+    }
+}
+
 fn run_b6(renewal: bool, half: i32, label: &str) {
     let stand = mature(Class::Bright);
     let mut cfg = class_config(Class::Bright);
@@ -1232,9 +1384,24 @@ fn run_b6(renewal: bool, half: i32, label: &str) {
     let mut world = restage(world);
 
     let opening_u = world.state.net_energy_in_corrected();
+    let opening_population = world.population();
     let mut peak = world.population();
     let mut extinct = None;
     let mut births = 0u64;
+    let mut escrows = Escrows::default();
+    escrows.observe(&world);
+    // §13.2 (repair cycle 2): the **actual** upkeep the bodies pay, accumulated tick by tick
+    // as the population changes, rather than a static two-body figure. Run 2's "2.24× surplus"
+    // came from a fixed denominator and a peak population of 8–10 (Astra's implementation
+    // review, finding 3).
+    let mut upkeep_total = 0.0f64;
+    let mut travel_total = 0.0f64;
+    let mut window_upkeep = 0.0f64;
+    let mut window_travel = 0.0f64;
+    let mut window_income = 0.0f64;
+    let mut last_income = world.intake_diagnostics().plant_income;
+    let mut last_eaten = 0.0f64;
+    let mut first_doubling = None;
     println!();
     println!(
         "### {label} — {} × {} region ({} cells), renewal {}",
@@ -1244,34 +1411,76 @@ fn run_b6(renewal: bool, half: i32, label: &str) {
         if renewal { "on" } else { "off" }
     );
     println!(
-        "{:>7} {:>6} {:>8} {:>8} {:>10} {:>10} {:>10}",
-        "tick", "pop", "births", "deaths", "Σ P", "eaten", "escrows"
+        "Upkeep is the world's own `MotorBill::upkeep` — `(maintenance · S + sense_cost · \
+         r_sense) · dt` — summed over every live body, plus the **travel** half of the motor \
+         bill from the distance the world actually transported each one. The rotation half is \
+         not published per tick, so `upkeep` is a lower bound and the ratio an upper one."
+    );
+    println!(
+        "Units: plant income is material (m/s); upkeep is energy (e/s). They are compared \
+         through §11's own chain — a unit grazer wins ≈1.16 e of usable energy per m of \
+         foliage bitten — so `need` is `upkeep / 1.16` in m/s and `ratio` is `income / need`, \
+         both in m/s. `eaten/s` is the foliage the mouths actually took, which is the realised \
+         harvest rather than gross income."
+    );
+    println!(
+        "{:>7} {:>5} {:>6} {:>6} {:>9} {:>10} {:>10} {:>10} {:>10} {:>7} {:>6}",
+        "tick",
+        "pop",
+        "birth",
+        "death",
+        "Σ P",
+        "income/s",
+        "eaten/s",
+        "upkeep e/s",
+        "need m/s",
+        "ratio",
+        "escr"
     );
     for tick in 0..=HORIZON {
-        if tick % (SAMPLE * 4) == 0 {
-            let p_total: f64 = cells.iter().map(|c| world.state.fields.p[c.index()]).sum();
+        if tick % SAMPLE == 0 && tick > 0 {
             let diag = world.intake_diagnostics();
-            let escrows = world
-                .state
-                .organisms
-                .iter()
-                .filter(|(_, o)| o.escrow.is_some())
-                .count();
-            println!(
-                "{tick:>7} {:>6} {:>8} {:>8} {p_total:>10.4} {:>10.4} {escrows:>10}",
-                world.population(),
-                world.state.births_total,
-                world.state.deaths_total.iter().sum::<u64>(),
-                diag.producer_eaten + diag.fruit_eaten + diag.litter_eaten + diag.carrion_eaten,
-            );
+            let seconds = SAMPLE as f64 * DT;
+            window_income = (diag.plant_income - last_income) / seconds;
+            last_income = diag.plant_income;
+            let bill = (window_upkeep + window_travel) / seconds;
+            let need = bill / ENERGY_PER_FOLIAGE_M;
+            let eaten_now =
+                diag.producer_eaten + diag.fruit_eaten + diag.litter_eaten + diag.carrion_eaten;
+            let eaten_rate = (eaten_now - last_eaten) / seconds;
+            last_eaten = eaten_now;
+            if tick % (SAMPLE * 4) == 0 {
+                let p_total: f64 = cells.iter().map(|c| world.state.fields.p[c.index()]).sum();
+                println!(
+                    "{tick:>7} {:>5} {:>6} {:>6} {p_total:>9.4} {window_income:>10.3e} \
+                     {eaten_rate:>10.3e} {bill:>10.3e} {need:>10.3e} {:>7.2} {:>6}",
+                    world.population(),
+                    world.state.births_total,
+                    world.state.deaths_total.iter().sum::<u64>(),
+                    if need > 0.0 { window_income / need } else { f64::NAN },
+                    escrows.open.len(),
+                );
+            }
+            window_upkeep = 0.0;
+            window_travel = 0.0;
         }
         if tick == HORIZON {
             break;
         }
+        let paid = mandatory_upkeep(&world);
         world.step();
         world.drain_events();
+        let moved = travel_bill(&world);
+        upkeep_total += paid;
+        travel_total += moved;
+        window_upkeep += paid;
+        window_travel += moved;
+        escrows.observe(&world);
         peak = peak.max(world.population());
         births = world.state.births_total;
+        if first_doubling.is_none() && world.population() >= 2 * opening_population {
+            first_doubling = Some(tick + 1);
+        }
         if extinct.is_none() && world.population() == 0 {
             extinct = Some(tick + 1);
         }
@@ -1283,6 +1492,43 @@ fn run_b6(renewal: bool, half: i32, label: &str) {
         world.state.deaths_total,
         censored(extinct)
     );
+    println!(
+        "- escrows opened {}, births {births}: **no birth without a debited escrow** iff births \
+         ≤ escrows opened, which is {}. Material debited into escrow over the run: {:.4} m \
+         ({:.4} m per escrow).",
+        escrows.opened,
+        if births <= escrows.opened { "true" } else { "FALSE" },
+        escrows.debited,
+        if escrows.opened > 0 { escrows.debited / escrows.opened as f64 } else { f64::NAN }
+    );
+    let seconds = HORIZON as f64 * DT;
+    let bill = upkeep_total + travel_total;
+    let need = bill / seconds / ENERGY_PER_FOLIAGE_M;
+    println!(
+        "- actual upkeep over the run: mandatory {:.4} e ({:.3e} e/s mean), travel {:.4} e \
+         ({:.3e} e/s mean), total ≥ {bill:.4} e. In §11's foliage units that is a mean need of \
+         {need:.3e} m/s — against a **static** 0.014 m/s for two cruising grazers, which is \
+         what run 2 used, on a population that peaked at {peak}.",
+        upkeep_total,
+        upkeep_total / seconds,
+        travel_total,
+        travel_total / seconds,
+    );
+    let income_rate = world.intake_diagnostics().plant_income / seconds;
+    println!(
+        "- mean plant income {income_rate:.3e} m/s against that mean need: ratio {:.2}. The \
+         foliage the mouths actually took was {:.3e} m/s.",
+        if need > 0.0 { income_rate / need } else { f64::NAN },
+        (diag.producer_eaten + diag.fruit_eaten + diag.litter_eaten + diag.carrion_eaten)
+            / seconds
+    );
+    println!(
+        "- first doubling of the population ({} → {}): {}.",
+        opening_population,
+        2 * opening_population,
+        censored(first_doubling)
+    );
+    let _ = window_income;
     println!(
         "- intake: leaf {:.4} m, fruit {:.4} m, litter {:.4} m, remains {:.4} m; plant income \
          {:.4} m.",
@@ -1298,9 +1544,14 @@ fn run_b6(renewal: bool, half: i32, label: &str) {
         if renewal { "" } else { " — with renewal off this must not be positive" }
     );
     if renewal {
+        // §11's own hand figure, kept only as the prediction the measurement above replaces.
+        // It divides a per-stand sustainable yield by a **static** two-body cruising need, and
+        // run 2 reported its 2.24 as if it were the realised surplus (Astra's implementation
+        // review, finding 3). The measured ratio is the line above this one.
         println!(
-            "- §11 comparison: {} × 6.4e-4 = {:.4e} m/s of production against 1.4e-2 m/s for two \
-             cruising grazers — a ratio of {:.2}.",
+            "- for comparison, §11's hand prediction: {} × 6.4e-4 = {:.4e} m/s of sustainable \
+             yield against a static 1.4e-2 m/s for two cruising grazers — a ratio of {:.2}, on \
+             a two-body assumption this run does not satisfy.",
             cells.len(),
             cells.len() as f64 * 6.4e-4,
             cells.len() as f64 * 6.4e-4 / 1.4e-2
@@ -1325,16 +1576,31 @@ fn b6b() {
          measured, not assumed. §13.2 marks B6b unresolved by design."
     );
     run_b6(true, 3, "B6b");
+    // §13.2 (repair cycle 2) asks for the first-doubling time **against the stand recovery
+    // time**, so the B3 bright recovery is measured here rather than quoted from elsewhere.
+    let (half, nine) = run_b3(Class::Bright, mature(Class::Bright), "B0 measured", false);
+    println!(
+        "- B3 bright recovery, measured on the same stand this region is painted from: \
+         0.5·P* at {}, 0.9·P* at {}. Compare with the first-doubling time above: a population \
+         that doubles faster than its food recovers is the coupled failure §13's B1/B6 pair \
+         is looking for.",
+        censored(half),
+        censored(nine)
+    );
 }
 
 // ------------------------------------------------------------------------------- B7
 
 fn run_b7(dim: bool, stand: Stand, label: &str) {
-    // §13.2: the donor is a bright mature stand; the bare cell is either bright or at
-    // `L_eff · μ = 0.2`. Light and moisture are flat per world, so the dim arm runs the whole
-    // world at the dim class and paints the donor with the bright stand it measured.
-    let (light, moisture) = if dim { (0.4, 0.5) } else { (Class::Bright.light(), Class::Bright.moisture()) };
-    let mut cfg = staged(light, moisture);
+    // §13.2 (repair cycle 2): the donor's and the recipient's light and moisture are pinned
+    // **per cell, independently**, so the donor is bright in both arms and only the recipient
+    // changes. Run 2 lit the whole world at the dim class in the dim arm, which could not
+    // separate donor illumination from recipient illumination (Astra's implementation review,
+    // finding 3).
+    let (donor_light, donor_moisture) = (Class::Bright.light(), Class::Bright.moisture());
+    // `L_eff · μ = 0.2` for the dim recipient, as §13.2 names it.
+    let (light, moisture) = if dim { (0.4, 0.5) } else { (donor_light, donor_moisture) };
+    let mut cfg = staged(donor_light, donor_moisture);
     cfg.plant.propagule_rate = WorldConfig::default().plant.propagule_rate;
     let mut world = World::new(cfg).expect("valid");
     nutrient_everywhere(&mut world);
@@ -1342,12 +1608,18 @@ fn run_b7(dim: bool, stand: Stand, label: &str) {
     let bare = CellId::new(Face::Top, 8, 9);
     paint(&mut world, donor, stand);
     let mut world = restage(world);
+    // After the last restage, because a `World::from_state` round trip rebuilds the habitat
+    // from the config and would drop the pin.
+    world.pin_cell_habitat(donor, donor_light, donor_moisture);
+    world.pin_cell_habitat(bare, light, moisture);
 
     let i = bare.index();
     println!();
     println!(
-        "### B7 {} — one bright mature donor ({label}) beside one bare cell (L·μ = {:.2})",
+        "### B7 {} — one bright mature donor ({label}, pinned L·μ = {:.2}) beside one bare cell \
+         (pinned L·μ = {:.2})",
         if dim { "dim recipient" } else { "bright recipient" },
+        donor_light * donor_moisture,
         light * moisture
     );
     println!(

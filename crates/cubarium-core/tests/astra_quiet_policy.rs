@@ -345,21 +345,45 @@ fn persisted_pause_mutations_and_hunter_combination_are_refused() {
     assert!(q.validate(state.tick, 0, false, |_| true).is_err());
 }
 
-/// The fixture this used to read is a schema 12 payload and no longer decodes (§15.1), so
-/// the claim is made on a live schema 16 world instead: it is about the *shape* of the
-/// projection API, not about any particular recorded world.
+/// The claim this test carried — that the projection API's `Option` wrapper never leaks its
+/// tag into the hash — is about **hashing an encoded value, not an encoded `Option`**.
+///
+/// Two things moved under it. The schema 12 payload it used to read no longer decodes (§15.1),
+/// and `ecology_hash` is no longer the schema 7 projection at all: repair cycle 2 makes it the
+/// care-masked hash of the **current** state, so it sees every ecology v1 pool (Astra's
+/// implementation review, finding 2). Both halves are stated here on a live schema 16 world:
+/// the projection still encodes as a bare payload with no `Option` tag, and the hash is the
+/// masked current state.
 #[test]
-fn off_ecology_hash_remains_the_bare_legacy_payload_not_an_option_wrapper() {
+fn a_projection_encodes_bare_and_the_ecology_hash_is_the_masked_current_state() {
     let s = breeder().state;
-    let legacy = cubarium_core::snapshot::v7::project(&s);
-    let bytes = postcard::to_allocvec(&legacy).unwrap();
-    let expected = bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
-        (h ^ u64::from(*b)).wrapping_mul(0x100_0000_01b3)
-    });
+    let fnv = |bytes: &[u8]| {
+        bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
+            (h ^ u64::from(*b)).wrapping_mul(0x100_0000_01b3)
+        })
+    };
+    // A projection that returns `Option` still encodes the value itself, with no variant tag:
+    // the `Some` payload is byte-identical to encoding the projection directly.
+    let bare = postcard::to_allocvec(&cubarium_core::snapshot::v7::project(&s)).unwrap();
+    let wrapped = cubarium_core::snapshot::v12::project(&s).expect("an Off world projects");
+    let wrapped_bytes = postcard::to_allocvec(&wrapped).unwrap();
+    assert_eq!(
+        &wrapped_bytes[..bare.len().min(wrapped_bytes.len())],
+        &bare[..bare.len().min(wrapped_bytes.len())],
+        "an Option-returning projection must not prepend a variant tag"
+    );
+
+    // And the hash is the care-masked current state, not that projection.
+    let masked = cubarium_core::WorldState { care: Default::default(), ..s.clone() };
     assert_eq!(
         cubarium_core::snapshot::ecology_hash(&s),
-        expected,
-        "changing a projection API to Option must not add its tag to legacy ecology hashing"
+        fnv(&postcard::to_allocvec(&masked).unwrap()),
+        "the ecology hash is the care-masked encoding of the current state"
+    );
+    assert_ne!(
+        cubarium_core::snapshot::ecology_hash(&s),
+        fnv(&bare),
+        "and it is no longer the schema 7 projection"
     );
 }
 

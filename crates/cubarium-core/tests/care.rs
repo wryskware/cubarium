@@ -117,16 +117,44 @@ fn the_live_schema_seven_fixtures_are_refused_by_name() {
     assert_eq!(SCHEMA_V7, 7);
 }
 
-/// The schema 7 projection and `ecology_hash` still agree, on a world this build makes.
-/// `ecology_hash` is kept because the care/no-care comparison still uses it (§15.1); it
-/// necessarily no longer covers the ecology v1 pools, which is why `state_hash` is the
-/// identity for everything.
+/// **`ecology_hash` is the care-masked hash of the current state** (`§15.1`, revised in repair
+/// cycle 2 after Astra's implementation review found the old schema 7 projection blind to every
+/// pool ecology v1 added). It is what the care/no-care comparison compares, so care — and only
+/// care — is masked out of it.
 #[test]
-fn the_ecology_hash_is_still_the_schema_seven_projection() {
-    let world = World::new(still_water_config()).expect("valid");
+fn the_ecology_hash_masks_care_and_nothing_else() {
+    let mut world = World::new(still_water_config()).expect("valid");
+    for _ in 0..40 {
+        world.step();
+        world.drain_events();
+    }
+    let plain = ecology_hash(&world.state);
+    // With no care in the state, masking care changes nothing, so it agrees with `state_hash`.
+    assert_eq!(plain, state_hash(&world.state));
+    // It is **not** the schema 7 projection: that shape predates wood, the plant reserve, dead
+    // wood and animal remains.
     let projected = postcard::to_allocvec(&v7::project(&world.state)).expect("encodable");
-    assert_eq!(ecology_hash(&world.state), fnv1a(&projected));
-    assert_ne!(state_hash(&world.state), ecology_hash(&world.state));
+    assert_ne!(plain, fnv1a(&projected));
+
+    // Feeding the world moves the ecology (litter arrives) **and** the care ledger. The
+    // ecology part must move the hash; the ledger part must not.
+    let cell = CellId::new(Face::Top, 8, 8);
+    let receipt = world.apply_care(&command(1, world.tick(), CareKind::Feed, cell));
+    assert!(receipt.outcome.applied().is_some(), "{:?}", receipt.outcome);
+    assert_ne!(
+        ecology_hash(&world.state),
+        plain,
+        "the litter a feed adds is ecology, and must move the hash"
+    );
+    let mut ledger_only = world.state.clone();
+    ledger_only.care.allowance_used += 1.0;
+    ledger_only.care.admitted_seq += 5;
+    assert_eq!(
+        ecology_hash(&ledger_only),
+        ecology_hash(&world.state),
+        "moving the care ledger alone must not move the care-masked hash"
+    );
+    assert_ne!(state_hash(&ledger_only), state_hash(&world.state));
 }
 
 // ---------------------------------------------------------------- feed and clean

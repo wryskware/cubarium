@@ -379,8 +379,10 @@ impl Fields {
             );
             work.pre_d[i] = d0;
             work.pre_c[i] = c0;
+            // This tick's class, from the **pre-tick** wood (§3.1): it decides whether 3a–3d
+            // run at all. `work.class` is 3h's, and is written from the **post-3d** wood at
+            // the end of this cell's block — see there.
             let class = CellClass::of(w0, pl.alive_min);
-            work.class[i] = class;
 
             let mut n = n0;
             let mut p = p0;
@@ -557,6 +559,15 @@ impl Fields {
                 wd -= dec_wd;
                 n += dec_wd;
             }
+
+            // 3h reads `W⁴`, the wood **after** 3d, for donors and recipients alike (§4.0).
+            // A stand that died in 3d therefore becomes an eligible recipient on the same
+            // tick, rather than waiting for the next one: `W⁴ = 0` is bare by §3.1, whatever
+            // the cell was at the start of the tick. (Astra's implementation review, finding
+            // 1: reading the pre-tick class here made the result depend on a state the table
+            // does not name.) Donor eligibility is unchanged by this — a cell that died has
+            // `W⁴ = 0 < W_est` and was never a donor under either reading.
+            work.class[i] = CellClass::of(w, pl.alive_min);
 
             self.n[i] = n;
             self.p[i] = p;

@@ -21,8 +21,8 @@ use cubarium_core::organism::{Mode, Organism, Origin};
 use cubarium_core::rng::Counter;
 use cubarium_core::world::CellClass;
 use cubarium_core::{
-    DT, FixedHunterProfile, HunterTarget, SnapshotError, World, decode_snapshot, encode_snapshot,
-    snapshot::SCHEMA_VERSION, snapshot::state_hash,
+    DT, FixedHunterProfile, HunterTarget, SnapshotError, World, decode_snapshot, ecology_hash,
+    encode_snapshot, snapshot::SCHEMA_VERSION, snapshot::state_hash,
 };
 use cubarium_surface::{CELL_COUNT, CellId, Face, SurfacePoint, Vec2, cell_of};
 
@@ -316,6 +316,281 @@ fn a1_material_is_closed_through_every_ecology_v1_transfer() {
     }
 }
 
+/// **A1, stock by stock.** The sweep above audits an aggregate: `mass_residual` is a single
+/// number, so a pair of equal-and-opposite omissions, or the same stock counted on both sides,
+/// passes it (Astra's implementation review, finding 4). These arms close that gap by isolating
+/// one transfer at a time and asserting the **exact** movement of every one of the eight
+/// stocks — the one that should move, and the seven that must not.
+///
+/// Each arm switches off every rate but the one it names, so the expected numbers below are
+/// the contract's own expressions with nothing else mixed into them.
+#[test]
+fn a1_every_stock_moves_only_through_the_transfer_that_names_it() {
+    /// The eight world stocks of §10, summed, plus the two counters.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct Stocks {
+        n: f64,
+        p: f64,
+        f: f64,
+        w: f64,
+        q: f64,
+        wd: f64,
+        d: f64,
+        de: f64,
+        c: f64,
+        ce: f64,
+    }
+
+    fn stocks(world: &World) -> Stocks {
+        let s = &world.state;
+        Stocks {
+            n: s.fields.n.iter().sum(),
+            p: s.fields.p.iter().sum(),
+            f: s.fields.f.iter().sum(),
+            w: s.ecology.wood.iter().sum(),
+            q: s.ecology.plant_reserve.iter().sum(),
+            wd: s.ecology.dead_wood.iter().sum(),
+            d: s.fields.d.iter().sum(),
+            de: s.fields.de.iter().sum(),
+            c: s.ecology.carrion.iter().sum(),
+            ce: s.ecology.carrion_energy.iter().sum(),
+        }
+    }
+
+    /// Every rate off. An arm turns back on exactly what it is about.
+    fn frozen(class: (f64, f64)) -> WorldConfig {
+        let mut cfg = bare_config(class.0, class.1);
+        cfg.producer.growth = 0.0;
+        cfg.producer.mortality = 0.0;
+        cfg.fruit.ripen = 0.0;
+        cfg.fruit.drop = 0.0;
+        cfg.detritus.decomposition = 0.0;
+        cfg.detritus.carrion_decomposition = 0.0;
+        cfg.detritus.wood_decomposition = 0.0;
+        cfg.detritus.fall = 0.0;
+        cfg.nutrient.diffusion = 0.0;
+        cfg.plant.maintenance = 0.0;
+        cfg.plant.foliage_rate = 0.0;
+        cfg.plant.wood_rate = 0.0;
+        cfg.plant.reserve_share = 0.0;
+        cfg.plant.propagule_rate = 0.0;
+        cfg
+    }
+
+    let cell = CellId::new(Face::Top, 8, 8);
+    let i = cell.index();
+    /// The exact-equality bound: every expression below is a handful of multiplications.
+    const EXACT: f64 = 1e-15;
+
+    /// `left` must equal `right` to `EXACT`, and the message names the stock.
+    fn same(stock: &str, left: f64, right: f64) {
+        assert!(
+            (left - right).abs() <= EXACT.max(right.abs() * 1e-12),
+            "{stock}: {left} is not {right}"
+        );
+    }
+
+    // ---- senescence alone: `P → D`, its energy with it, and nothing else moves.
+    {
+        let mut cfg = frozen(AVERAGE);
+        cfg.producer.mortality = 0.4;
+        let m_p = cfg.producer.mortality;
+        let e_v = cfg.plant.energy_density;
+        let mut world = World::new(cfg).expect("valid");
+        paint(&mut world, cell, 0.5, 0.6, 0.1);
+        let mut world = restage(world);
+        let before = stocks(&world);
+        world.step();
+        let after = stocks(&world);
+        let shed = m_p * before.p * DT;
+        same("P", after.p, before.p - shed);
+        same("D", after.d, before.d + shed);
+        same("De", after.de, before.de + e_v * shed);
+        for (name, a, b) in [
+            ("N", after.n, before.n),
+            ("F", after.f, before.f),
+            ("W", after.w, before.w),
+            ("Q", after.q, before.q),
+            ("Wd", after.wd, before.wd),
+            ("C", after.c, before.c),
+            ("Ce", after.ce, before.ce),
+        ] {
+            assert_eq!(a, b, "senescence moved {name}");
+        }
+    }
+
+    // ---- ripening and drop alone: `P → F → D`, and `De` gains `e_f` per dropped unit.
+    {
+        let mut cfg = frozen(BRIGHT);
+        cfg.fruit.ripen = 0.02;
+        cfg.fruit.drop = 0.004;
+        let (ripen, drop, fruit_min) = (cfg.fruit.ripen, cfg.fruit.drop, cfg.fruit.fruit_min);
+        let (p_max, e_f, e_v) =
+            (cfg.producer.max, cfg.fruit.energy_density, cfg.plant.energy_density);
+        let light = BRIGHT.0;
+        let mut world = World::new(cfg).expect("valid");
+        paint(&mut world, cell, 1.2, 0.6, 0.1);
+        let before_f = 0.3;
+        {
+            let b = total_material(&world);
+            world.state.fields.f[i] = before_f;
+            // Energy-poor litter already in the cell, so the `e_d_max · D` cap has room for
+            // the dropped fruit's `e_f` and the arm measures the transfer, not the clamp.
+            world.state.fields.d[i] = 1.0;
+            world.state.fields.de[i] = 0.0;
+            book(&mut world, b);
+        }
+        let mut world = restage(world);
+        let before = stocks(&world);
+        world.step();
+        let after = stocks(&world);
+        let over = (before.p / p_max - fruit_min).max(0.0);
+        let ripened = ripen * before.p * over * light * DT;
+        let dropped = drop * before.f * DT;
+        assert!(ripened > 0.0 && dropped > 0.0, "the arm must actually convert something");
+        same("P", after.p, before.p - ripened);
+        same("F", after.f, before.f + ripened - dropped);
+        same("D", after.d, before.d + dropped);
+        same("De", after.de, before.de + e_f * dropped);
+        for (name, a, b) in [
+            ("N", after.n, before.n),
+            ("W", after.w, before.w),
+            ("Q", after.q, before.q),
+            ("Wd", after.wd, before.wd),
+            ("C", after.c, before.c),
+            ("Ce", after.ce, before.ce),
+        ] {
+            assert_eq!(a, b, "ripening moved {name}");
+        }
+        let _ = e_v;
+    }
+
+    // ---- dieback alone: unpaid maintenance carries `W → Wd`, one for one.
+    {
+        let mut cfg = frozen(AVERAGE);
+        cfg.plant.maintenance = 0.002;
+        let (m_w, kappa) = (cfg.plant.maintenance, cfg.plant.dieback);
+        let mut world = World::new(cfg).expect("valid");
+        // No foliage and no reserve, so the whole maintenance bill is unpaid.
+        paint(&mut world, cell, 0.0, 0.6, 0.0);
+        let mut world = restage(world);
+        let before = stocks(&world);
+        world.step();
+        let after = stocks(&world);
+        let unpaid = m_w * before.w * DT;
+        let died = kappa * unpaid;
+        assert!(died > 0.0);
+        same("W", after.w, before.w - died);
+        same("Wd", after.wd, before.wd + died);
+        for (name, a, b) in [
+            ("N", after.n, before.n),
+            ("P", after.p, before.p),
+            ("F", after.f, before.f),
+            ("Q", after.q, before.q),
+            ("D", after.d, before.d),
+            ("De", after.de, before.de),
+            ("C", after.c, before.c),
+            ("Ce", after.ce, before.ce),
+        ] {
+            assert_eq!(a, b, "dieback moved {name}");
+        }
+    }
+
+    // ---- each decomposition alone: its own stock to `N`, and no other stock touched.
+    for (what, rate_of, stock_of) in [
+        (
+            "litter",
+            (|c: &mut WorldConfig, r: f64| c.detritus.decomposition = r) as fn(&mut WorldConfig, f64),
+            (|s: &Stocks| s.d) as fn(&Stocks) -> f64,
+        ),
+        (
+            "remains",
+            |c: &mut WorldConfig, r: f64| c.detritus.carrion_decomposition = r,
+            |s: &Stocks| s.c,
+        ),
+        (
+            "dead wood",
+            |c: &mut WorldConfig, r: f64| c.detritus.wood_decomposition = r,
+            |s: &Stocks| s.wd,
+        ),
+    ] {
+        let mut cfg = frozen(AVERAGE);
+        rate_of(&mut cfg, 0.3);
+        let mut world = World::new(cfg).expect("valid");
+        let b = total_material(&world);
+        world.state.fields.d[i] = 1.0;
+        world.state.fields.de[i] = 2.0;
+        world.state.ecology.carrion[i] = 0.8;
+        world.state.ecology.carrion_energy[i] = 1.6;
+        world.state.ecology.dead_wood[i] = 0.6;
+        book(&mut world, b);
+        let mut world = restage(world);
+        let before = stocks(&world);
+        world.step();
+        let after = stocks(&world);
+        let gone = 0.3 * DT * stock_of(&before);
+        assert!(gone > 0.0);
+        same(what, stock_of(&after), stock_of(&before) - gone);
+        same("N", after.n, before.n + gone);
+        // The two stocks this arm did **not** name are untouched to the bit: no decomposition
+        // leaks across stocks (§5's separate withdrawals).
+        for (name, a, b) in [
+            ("litter", after.d, before.d),
+            ("remains", after.c, before.c),
+            ("dead wood", after.wd, before.wd),
+        ] {
+            if name != what {
+                assert_eq!(a, b, "{what} decomposition moved {name}");
+            }
+        }
+        for (name, a, b) in [
+            ("P", after.p, before.p),
+            ("F", after.f, before.f),
+            ("W", after.w, before.w),
+            ("Q", after.q, before.q),
+        ] {
+            assert_eq!(a, b, "{what} decomposition moved {name}");
+        }
+    }
+
+    // ---- fall alone: `ΣD` and `ΣC` are conserved and `N`, `Wd` never see it.
+    {
+        let mut cfg = frozen(AVERAGE);
+        cfg.detritus.fall = 0.5;
+        let mut world = World::new(cfg).expect("valid");
+        let b = total_material(&world);
+        for c in CellId::all() {
+            let k = c.index();
+            world.state.fields.d[k] = 0.4;
+            world.state.fields.de[k] = 0.6;
+            world.state.ecology.carrion[k] = 0.3;
+            world.state.ecology.carrion_energy[k] = 0.45;
+        }
+        book(&mut world, b);
+        let mut world = restage(world);
+        let before = stocks(&world);
+        for _ in 0..50 {
+            world.step();
+        }
+        let after = stocks(&world);
+        for (name, a, b) in [
+            ("D", after.d, before.d),
+            ("De", after.de, before.de),
+            ("C", after.c, before.c),
+            ("Ce", after.ce, before.ce),
+            ("N", after.n, before.n),
+            ("Wd", after.wd, before.wd),
+        ] {
+            same(name, a, b);
+        }
+        // And it really did move: the source cell is poorer than it started.
+        assert!(
+            world.state.fields.d[CellId::new(Face::Front, 6, 0).index()] < 0.4,
+            "the fall arm must actually move something"
+        );
+    }
+}
+
 // -------------------------------------------------------------- §4.4, repair cycle 1
 
 /// **The repaired §4.4 allocation (`design/ecology-v1-contract.md` §4.4, repair cycle 1).**
@@ -569,10 +844,31 @@ fn a2b_the_energy_ledger_closes_every_tick_with_everything_on() {
         }
     }
     book(&mut world, before);
-    // Two mouths that between them use every channel: a foliage digester on the stands and a
-    // detrital one on the litter-and-remains band.
-    place(&mut world, CellId::new(Face::Top, 4, 4), 0.85, 0.0);
-    place(&mut world, CellId::new(Face::Top, 4, 12), 0.10, 0.0);
+    // Mouths that between them use every channel, and lifecycles that between them cover
+    // every remains path: a foliage digester and a detrital one, both stocked well enough to
+    // fund a birth inside the run, and one body with nothing at all, which starves on the
+    // first tick so an ordinary death is inside the ledger too.
+    let breeders = [
+        place(&mut world, CellId::new(Face::Top, 4, 4), 0.85, 0.0),
+        place(&mut world, CellId::new(Face::Top, 4, 12), 0.10, 0.0),
+    ];
+    for id in breeders {
+        let o = world.state.organisms.get_mut(id).expect("placed");
+        let (r, e) = (o.phenotype.reserve_max, o.phenotype.energy_max);
+        world.state.external_material_in += r - o.reserve;
+        o.reserve = r;
+        o.energy = e;
+    }
+    // Two more mouths with **empty** reserves, so something actually eats: a full-reserve
+    // breeder has no headroom and its every request is refused.
+    place(&mut world, CellId::new(Face::Top, 8, 4), 0.85, 0.0);
+    place(&mut world, CellId::new(Face::Top, 8, 12), 0.10, 0.0);
+    let doomed = place(&mut world, CellId::new(Face::Top, 6, 12), 0.10, 1.0);
+    {
+        let o = world.state.organisms.get_mut(doomed).expect("placed");
+        o.energy = 0.0;
+        o.reserve = 0.0;
+    }
     let mut world = restage(world);
 
     let feed_cell = CellId::new(Face::Top, 2, 12);
@@ -582,9 +878,11 @@ fn a2b_the_energy_ledger_closes_every_tick_with_everything_on() {
         CareTarget { face: p.face.index() as u8, u: p.u, v: p.v }
     };
 
+    // Long enough for a birth: `bud_min_age_seconds` is 120 s (2,400 ticks) and gestation is
+    // 30 s (600 ticks), so a funded parent's first child lands around tick 3,000.
     let mut seq = 1u64;
     let mut worst = 0.0f64;
-    for tick in 1..=2_000u64 {
+    for tick in 1..=4_000u64 {
         // Care commits at a boundary, never inside a step, so the identity below picks it up
         // in the same tick's difference of the ledgers.
         if tick % 200 == 0 {
@@ -613,8 +911,33 @@ fn a2b_the_energy_ledger_closes_every_tick_with_everything_on() {
     }
     assert!(world.state.care.feed_material_in > 0.0, "the fixture must actually have fed");
     assert!(world.state.care.clean_material_out > 0.0, "and actually have cleaned");
-    assert!(world.state.ecology.plant_deaths_total > 0 || world.tick() > 0);
-    println!("A2b: worst per-tick energy drift {worst:e}");
+    // The fixture must really have exercised what it claims to. The old line here read
+    // `plant_deaths_total > 0 || world.tick() > 0`, which is true of every world after one
+    // tick and asserted nothing (Astra's implementation review, finding 5). These are the
+    // claims: mouths fed on every stock, plants earned and lost, and animals were born.
+    let diag = world.intake_diagnostics();
+    assert!(diag.producer_eaten > 0.0, "no leaf was eaten: {diag:?}");
+    assert!(diag.fruit_eaten > 0.0, "no fruit was eaten: {diag:?}");
+    assert!(diag.litter_eaten > 0.0, "no litter was eaten: {diag:?}");
+    assert!(diag.carrion_eaten > 0.0, "no remains were eaten: {diag:?}");
+    assert!(diag.plant_income > 0.0, "the plants earned nothing");
+    assert!(diag.propagule_sent > 0.0, "no propagule was sent");
+    assert!(
+        world.state.births_total > 0,
+        "the full ledger must cover a birth, and no birth happened"
+    );
+    assert!(
+        world.state.deaths_total.iter().sum::<u64>() > 0,
+        "and a death, so the remains path is inside the ledger too"
+    );
+    println!(
+        "A2b: worst per-tick energy drift {worst:e}; births {}, deaths {:?}, plant deaths {}, \
+         propagules {:.4} m",
+        world.state.births_total,
+        world.state.deaths_total,
+        world.state.ecology.plant_deaths_total,
+        diag.propagule_sent
+    );
 }
 
 // ------------------------------------------------------------------------------ A3
@@ -776,6 +1099,107 @@ fn a3b_rates_are_validated_by_name_and_the_joint_endpoints_are_exact() {
         assert!(world.mass_residual().abs() < 1e-9);
     }
 
+    // **The interior case.** The coincident endpoint above is not enough on its own: at
+    // `k·dt = fall·dt = 1` the correct joint rule makes fall exactly zero, so an
+    // implementation that simply suppressed fall whenever decomposition ran would pass it
+    // (Astra's implementation review, finding 4). Here both rates are nonzero and **below**
+    // one per tick, so the two withdrawals are separately visible and their exact sizes are
+    // the thing under test:
+    //
+    // ```
+    // dec  = k·dt·X⁻                      fall = fall·dt·(1 − k·dt)·X⁻
+    // source keeps  X⁻ − dec − fall       downhill gains fall
+    // N gains dec                          energy moves at the source's current density
+    // ```
+    for (stock, k_dt) in [("litter", 0.3f64), ("remains", 0.3)] {
+        let fall_dt = 0.5f64;
+        let mut cfg = bare_config(AVERAGE.0, AVERAGE.1);
+        cfg.nutrient.diffusion = 0.0;
+        cfg.detritus.fall = fall_dt / DT;
+        match stock {
+            "litter" => cfg.detritus.decomposition = k_dt / DT,
+            _ => cfg.detritus.carrion_decomposition = k_dt / DT,
+        }
+        cfg.validate().expect("both rates are admitted below one per tick");
+        let mut world = World::new(cfg).expect("valid");
+        let source = CellId::new(Face::Front, 6, 6);
+        let (si, x0, xe0) = (source.index(), 1.0f64, 1.5f64);
+        let before = total_material(&world);
+        if stock == "litter" {
+            world.state.fields.d[si] = x0;
+            world.state.fields.de[si] = xe0;
+        } else {
+            world.state.ecology.carrion[si] = x0;
+            world.state.ecology.carrion_energy[si] = xe0;
+        }
+        book(&mut world, before);
+        let mut world = restage(world);
+        let down = world
+            .cell_neighbors()
+            .get(si)
+            .copied()
+            .expect("the source cell exists");
+        let n0: f64 = world.state.fields.n.iter().sum();
+        let heat0 = world.state.heat_out_corrected();
+        world.step();
+
+        let dec = k_dt * x0;
+        let fall = fall_dt * (1.0 - k_dt) * x0;
+        let kept = x0 - dec - fall;
+        let (x_now, xe_now, total, total_e) = if stock == "litter" {
+            (
+                world.state.fields.d[si],
+                world.state.fields.de[si],
+                world.state.fields.d.iter().sum::<f64>(),
+                world.state.fields.de.iter().sum::<f64>(),
+            )
+        } else {
+            (
+                world.state.ecology.carrion[si],
+                world.state.ecology.carrion_energy[si],
+                world.state.ecology.carrion.iter().sum::<f64>(),
+                world.state.ecology.carrion_energy.iter().sum::<f64>(),
+            )
+        };
+        assert!(
+            (x_now - kept).abs() < 1e-15,
+            "{stock}: the source kept {x_now}, not `X⁻(1 − k·dt)(1 − fall·dt)` = {kept}"
+        );
+        assert!(
+            fall > 0.0 && kept > 0.0,
+            "{stock}: the interior case must leave both withdrawals visible"
+        );
+        // The whole stock, source and downhill together, lost exactly the decomposition.
+        assert!(
+            (total - (x0 - dec)).abs() < 1e-15,
+            "{stock}: the stock totals {total}, not {}",
+            x0 - dec
+        );
+        assert!(
+            (world.state.fields.n.iter().sum::<f64>() - (n0 + dec)).abs() < 1e-12,
+            "{stock}: `N` did not gain exactly the decomposition"
+        );
+        // Energy leaves at the stock's **current** density, so the density is unchanged and
+        // the heat is exactly the decomposed share of the energy.
+        let rho = xe0 / x0;
+        assert!(
+            (total_e - rho * (x0 - dec)).abs() < 1e-15,
+            "{stock}: energy {total_e}, not `ρ · (X⁻ − dec)` = {}",
+            rho * (x0 - dec)
+        );
+        assert!(
+            (xe_now - rho * kept).abs() < 1e-15,
+            "{stock}: the source's density moved"
+        );
+        assert!(
+            (world.state.heat_out_corrected() - heat0 - rho * dec).abs() < 1e-12,
+            "{stock}: the heat is not the decomposed energy"
+        );
+        let _ = down;
+        assert!(world.mass_residual().abs() < 1e-9);
+        world.check_invariants().expect("nothing went negative");
+    }
+
     // The same at `m_p · dt = 1` with ripening on: a whole tick's senescence takes all the
     // foliage the growth left and no more, and the cell stays a well-formed stock.
     let mut cfg = bare_config(BRIGHT.0, BRIGHT.1);
@@ -926,6 +1350,180 @@ fn a4_capabilities_decode_and_a_partial_bite_books_every_term() {
         "and so are the feces"
     );
     assert!(world.mass_residual().abs() < 1e-9);
+}
+
+/// **A4, all four foods.** The bite above is a leaf bite and asserts a heat *lower bound*, so
+/// a mistake in fruit, litter or carrion energy passes it (Astra's implementation review,
+/// finding 4). This drives one **isolated** bite of each of the four foods and asserts every
+/// term of §6.4 exactly: the stock's material and energy, the reserve, the battery, the feces,
+/// and the heat — the last as an equality, because the fixture pays no other bill.
+#[test]
+fn a4_every_one_of_the_four_foods_books_material_and_energy_exactly() {
+    // `(name, the stock it eats, the digester's diet)`.
+    let foods = [
+        ("leaf", 0u8, 0.85f32),
+        ("fruit", 1, 0.85),
+        ("litter", 2, 0.10),
+        ("remains", 3, 0.10),
+    ];
+    let cell = CellId::new(Face::Front, 6, 6);
+    let i = cell.index();
+
+    for (name, which, diet) in foods {
+        let mut cfg = bare_config(AVERAGE.0, AVERAGE.1);
+        immobile(&mut cfg);
+        cfg.drives.feed_min = 0.001;
+        // Nothing may move a stock but the one mouth, and nothing may cost the body energy
+        // but the bite, so every heat term below is an equality rather than a bound.
+        cfg.producer.growth = 0.0;
+        cfg.producer.mortality = 0.0;
+        cfg.fruit.ripen = 0.0;
+        cfg.fruit.drop = 0.0;
+        cfg.detritus.decomposition = 0.0;
+        cfg.detritus.carrion_decomposition = 0.0;
+        cfg.detritus.wood_decomposition = 0.0;
+        cfg.detritus.fall = 0.0;
+        cfg.nutrient.diffusion = 0.0;
+        cfg.plant.maintenance = 0.0;
+        cfg.plant.foliage_rate = 0.0;
+        cfg.plant.propagule_rate = 0.0;
+        cfg.organism.maintenance = 0.0;
+        cfg.organism.sense_cost = 0.0;
+        cfg.organism.move_cost = 0.0;
+        cfg.organism.oxidation_rate = 0.0;
+        cfg.organism.growth_rate = 0.0;
+        let (e_v, e_f, e_r) = (
+            cfg.plant.energy_density,
+            cfg.fruit.energy_density,
+            cfg.organism.reserve_energy_density,
+        );
+        let (eta_m, eta_e) = (
+            cfg.organism.assimilation_material,
+            cfg.organism.assimilation_energy,
+        );
+
+        let mut world = World::new(cfg).expect("valid");
+        // Only the food under test is present, so only one channel can open.
+        let (stock0, energy0, rho) = match which {
+            0 => (1.0, 0.0, e_v),
+            1 => (1.0, 0.0, e_f),
+            // Litter and remains at three quarters of `e_r`: a density below `e_r`, so the
+            // `min(1, ρ/e_r)` factor in `η_m′` is genuinely engaged rather than saturated.
+            _ => (1.0, 1.5, 1.5),
+        };
+        let before = total_material(&world);
+        match which {
+            0 => {
+                world.state.fields.p[i] = stock0;
+                world.state.ecology.wood[i] = 0.6;
+            }
+            1 => world.state.fields.f[i] = stock0,
+            2 => {
+                world.state.fields.d[i] = stock0;
+                world.state.fields.de[i] = energy0;
+            }
+            _ => {
+                world.state.ecology.carrion[i] = stock0;
+                world.state.ecology.carrion_energy[i] = energy0;
+            }
+        }
+        book(&mut world, before);
+        let id = place(&mut world, cell, diet, 0.0);
+        let mut world = restage(world);
+
+        let (cap, r0, e0, e_max) = {
+            let o = world.state.organisms.get(id).expect("alive");
+            let cap = if which <= 1 { o.phenotype.cap_foliage } else { o.phenotype.cap_detrital };
+            (cap, o.reserve, o.energy, o.phenotype.energy_max)
+        };
+        assert!(cap > 0.0 && cap < 1.0, "{name}: the digester must be partial, not perfect");
+        let d0 = world.state.fields.d[i];
+        let heat0 = world.state.heat_out_corrected();
+        world.step();
+        let o = world.state.organisms.get(id).expect("alive");
+
+        // What actually left the stock.
+        let (stock_now, energy_now) = match which {
+            0 => (world.state.fields.p[i], f64::NAN),
+            1 => (world.state.fields.f[i], f64::NAN),
+            2 => (world.state.fields.d[i], world.state.fields.de[i]),
+            _ => (world.state.ecology.carrion[i], world.state.ecology.carrion_energy[i]),
+        };
+        let diag = world.intake_diagnostics();
+        let q = match which {
+            0 => diag.producer_eaten,
+            1 => diag.fruit_eaten,
+            2 => diag.litter_eaten,
+            _ => diag.carrion_eaten,
+        };
+        assert!(q > 0.0, "{name}: nothing was eaten");
+
+        // §6.4, term by term.
+        let q_d = cap * q;
+        let eta = if which <= 1 { eta_m } else { eta_m * (rho / e_r).min(1.0) };
+        let to_reserve = eta * q_d;
+        let feces = (1.0 - eta) * q_d + (1.0 - cap) * q;
+        let spare = rho * q_d - e_r * to_reserve;
+        let gained = (eta_e * spare).min(e_max - e0).max(0.0);
+        let bite_heat = (spare - gained) + rho * (1.0 - cap) * q;
+
+        assert!(
+            (o.reserve - (r0 + to_reserve)).abs() < 1e-15,
+            "{name}: reserve {} is not {}",
+            o.reserve,
+            r0 + to_reserve
+        );
+        assert!(
+            (o.energy - (e0 + gained)).abs() < 1e-15,
+            "{name}: battery {} is not {}",
+            o.energy,
+            e0 + gained
+        );
+        // The **whole** bite left the stock — litter and remains included, where the
+        // pre-ecology-v1 rule removed only the assimilated part.
+        let expected_stock = if which == 2 {
+            // Litter is also where this bite's own feces land, so the net is the difference.
+            stock0 - q + feces
+        } else {
+            stock0 - q
+        };
+        assert!(
+            (stock_now - expected_stock).abs() < 1e-15,
+            "{name}: the stock holds {stock_now}, not {expected_stock}"
+        );
+        if which >= 2 {
+            assert!(
+                (energy_now - (energy0 - rho * q)).abs() < 1e-15,
+                "{name}: the stock's energy is {energy_now}, not {}",
+                energy0 - rho * q
+            );
+        }
+        // Feces are litter, and they are energy-free.
+        if which != 2 {
+            assert!(
+                (world.state.fields.d[i] - (d0 + feces)).abs() < 1e-15,
+                "{name}: feces {} are not {feces}",
+                world.state.fields.d[i] - d0
+            );
+        }
+        if which <= 1 {
+            assert_eq!(
+                world.state.fields.de[i], 0.0,
+                "{name}: feces carried energy into the litter"
+            );
+        }
+        // And the whole tick's heat is exactly this bite's, because nothing else was paid.
+        assert!(
+            (world.state.heat_out_corrected() - heat0 - bite_heat).abs() < 1e-12,
+            "{name}: the tick's heat {} is not the bite's {bite_heat}",
+            world.state.heat_out_corrected() - heat0
+        );
+        assert!(world.mass_residual().abs() < 1e-9, "{name}: mass");
+        println!(
+            "A4 {name}: q {q:.6} cap {cap:.2} η′ {eta:.4} reserve +{to_reserve:.6} \
+             battery +{gained:.6} feces {feces:.6} heat {bite_heat:.6}"
+        );
+    }
 }
 
 // ------------------------------------------------------------------------------ A5
@@ -1097,7 +1695,13 @@ fn a6_remains_route_to_c_rejects_route_to_d_and_no_stock_leaks_into_another() {
         let o = world.state.organisms.get(id).expect("alive");
         o.structure + o.reserve
     };
+    let body_energy = {
+        let o = world.state.organisms.get(id).expect("alive");
+        o.energy + world.config().organism.reserve_energy_density * o.reserve
+    };
+    let e_c_max = world.config().detritus.carrion_energy_cap;
     let d0: f64 = world.state.fields.d.iter().sum();
+    let heat0 = world.state.heat_out_corrected();
     world.step();
     assert!(world.state.organisms.get(id).is_none(), "it must actually die");
     assert!(
@@ -1105,7 +1709,24 @@ fn a6_remains_route_to_c_rejects_route_to_d_and_no_stock_leaks_into_another() {
         "the body landed as {} of remains, not {body}",
         world.state.ecology.carrion[cell.index()]
     );
+    // Its energy went with it, under `e_c_max`, and the excess is heat — exactly, because
+    // this body had nothing left to pay any other bill with.
+    let kept = body_energy.min(e_c_max * body);
+    assert!(
+        (world.state.ecology.carrion_energy[cell.index()] - kept).abs() < 1e-12,
+        "the remains carry {}, not {kept}",
+        world.state.ecology.carrion_energy[cell.index()]
+    );
+    assert!(
+        (world.state.heat_out_corrected() - heat0 - (body_energy - kept)).abs() < 1e-12,
+        "the clamped excess is not heat"
+    );
     assert_eq!(world.state.fields.d.iter().sum::<f64>(), d0, "and not in the litter");
+    assert_eq!(
+        world.state.ecology.carrion_energy.iter().sum::<f64>(),
+        world.state.ecology.carrion_energy[cell.index()],
+        "nor anywhere but the cell it died in"
+    );
     assert!(world.mass_residual().abs() < 1e-9);
 
     // --- a failed gestation: the escrow lands in `C` beside the body.
@@ -1136,7 +1757,21 @@ fn a6_remains_route_to_c_rejects_route_to_d_and_no_stock_leaks_into_another() {
         let o = world.state.organisms.get(id).expect("alive");
         o.structure + o.reserve
     };
+    let (body_energy, escrow_energy) = {
+        let o = world.state.organisms.get(id).expect("alive");
+        let e_r = world.config().organism.reserve_energy_density;
+        let es = o.escrow.as_ref().expect("gestating");
+        (
+            o.energy + e_r * o.reserve,
+            e_r * (es.structure + es.reserve) + es.energy,
+        )
+    };
+    let e_c_max = world.config().detritus.carrion_energy_cap;
     let d0: f64 = world.state.fields.d.iter().sum();
+    let heat0 = world.state.heat_out_corrected();
+    // This arm books the escrow into `external_material_in` after restaging, so the residual
+    // opens at a known offset; what must not move is the **change** across the death.
+    let residual0 = world.mass_residual();
     world.step();
     assert!(world.state.organisms.get(id).is_none());
     assert!(
@@ -1144,7 +1779,26 @@ fn a6_remains_route_to_c_rejects_route_to_d_and_no_stock_leaks_into_another() {
         "body {body} plus escrow {escrow_material} vs {}",
         world.state.ecology.carrion[cell.index()]
     );
+    // The body and the escrow are two deposits, each under its own `e_c_max` clamp — the
+    // miscarriage is not the corpse and the contract books them apart (§5).
+    let kept = body_energy.min(e_c_max * body) + escrow_energy.min(e_c_max * escrow_material);
+    assert!(
+        (world.state.ecology.carrion_energy[cell.index()] - kept).abs() < 1e-12,
+        "the remains carry {}, not {kept}",
+        world.state.ecology.carrion_energy[cell.index()]
+    );
+    assert!(
+        (world.state.heat_out_corrected() - heat0
+            - ((body_energy + escrow_energy) - kept))
+            .abs()
+            < 1e-12,
+        "the clamped excess is not heat"
+    );
     assert_eq!(world.state.fields.d.iter().sum::<f64>(), d0, "no part of it became litter");
+    assert!(
+        (world.mass_residual() - residual0).abs() < 1e-9,
+        "the miscarriage moved material out of the box"
+    );
 
     // --- a hunter's digestion reject is feces and lands in `D`; its death lands in `C`.
     let mut cfg = bare_config(AVERAGE.0, AVERAGE.1);
@@ -1195,29 +1849,73 @@ fn a6_remains_route_to_c_rejects_route_to_d_and_no_stock_leaks_into_another() {
     assert!(rejected > 0.0, "the digestion must actually have rejected something");
     assert!(world.mass_residual().abs() < 1e-9);
 
-    // Its death routes the body — and anything still in the gut — to `C`.
-    let body = {
+    // Its death routes the body **and** everything still in the gut to `C`, exactly — a
+    // lower bound of "at least the body" would pass an implementation that quietly dropped the
+    // gut (Astra's implementation review, finding 4). It is stopped mid-meal on purpose, so
+    // there is a gut to lose.
+    let (body, gut_material, gut_energy, body_energy) = {
         let o = world.state.organisms.get(hunter).expect("alive");
-        o.structure + o.reserve
+        let m = world.state.hunters.member(hunter).expect("still a member");
+        let e_r = world.config().organism.reserve_energy_density;
+        (
+            o.structure + o.reserve,
+            m.gut_material,
+            m.gut_energy,
+            o.energy + e_r * o.reserve,
+        )
     };
+    assert!(
+        gut_material > 0.0,
+        "the fixture must kill it **while carrying**, or the gut term is untested"
+    );
     let d_before = world.state.fields.d[here];
+    let c_before = world.state.ecology.carrion[here];
+    let ce_before = world.state.ecology.carrion_energy[here];
+    let e_c_max = world.config().detritus.carrion_energy_cap;
     {
+        // Starve it outright: `raisable_energy` is zero, so it dies on this tick, before
+        // handling could digest any more of the meal.
         let o = world.state.organisms.get_mut(hunter).expect("alive");
         o.energy = 0.0;
         o.reserve = 0.0;
     }
+    // The body it dies with, re-read after the edit.
+    let (body_now, body_energy_now) = {
+        let o = world.state.organisms.get(hunter).expect("alive");
+        (o.structure + o.reserve, o.energy)
+    };
     let mut world = restage(world);
     world.step();
     assert!(world.state.organisms.get(hunter).is_none(), "the member must die");
     assert!(
-        world.state.ecology.carrion[here] >= body - 1e-9,
-        "a dead hunter is remains: {} vs a body of {body}",
-        world.state.ecology.carrion[here]
+        world.state.hunters.member(hunter).is_none(),
+        "and leave the member list, so no gut is left dangling"
+    );
+    assert!(
+        (world.state.ecology.carrion[here] - (c_before + body_now + gut_material)).abs() < 1e-12,
+        "remains gained {}, not the body {body_now} plus the gut {gut_material}",
+        world.state.ecology.carrion[here] - c_before
+    );
+    // Each deposit keeps at most `e_c_max` per unit; the body and the gut are booked apart,
+    // so the cap is applied to each and the total is the sum of the two clamped amounts.
+    let kept_body = body_energy_now.min(e_c_max * body_now);
+    let kept_gut = gut_energy.min(e_c_max * gut_material);
+    assert!(
+        (world.state.ecology.carrion_energy[here] - (ce_before + kept_body + kept_gut)).abs()
+            < 1e-12,
+        "the remains' energy is {}, not {}",
+        world.state.ecology.carrion_energy[here] - ce_before,
+        kept_body + kept_gut
     );
     assert!(
         (world.state.fields.d[here] - d_before).abs() < 1e-12,
         "none of it became litter"
     );
+    // The post-death residual: nothing of the member is left anywhere.
+    assert_eq!(world.state.hunters.gut_material_total(), 0.0, "a gut outlived its hunter");
+    assert_eq!(world.state.hunters.gut_energy_total(), 0.0);
+    assert!(world.mass_residual().abs() < 1e-9, "the death closed the box");
+    let _ = (body, body_energy);
 
     // --- no stock leaks into another. Each stock alone, decomposing, with the other two
     //     empty: only `N` may gain, and the other two must stay at exactly zero.
@@ -1319,6 +2017,104 @@ fn a7_schema_sixteen_round_trips_and_every_older_schema_is_refused_by_name() {
     assert!(
         matches!(decode_snapshot(&framed), Err(SnapshotError::Decode(_))),
         "a relabelled schema 16 payload must be refused"
+    );
+}
+
+/// **A7b — `ecology_hash` sees the ecology (`design/ecology-v1-contract.md` §15.1, revised).**
+///
+/// It used to hash the schema 7 projection, which predates wood, the plant reserve, dead wood
+/// and animal remains: two schema 16 worlds could differ in every pool ecology v1 added and
+/// still hash alike, so a care replay could pass after the ecology had diverged (Astra's
+/// implementation review, finding 2). It is now the care-masked hash of the current state.
+///
+/// The perturbation test the contract asks for: **every** ecology v1 vector entry and both
+/// counters move the hash, and care state does not.
+#[test]
+fn a7b_the_ecology_hash_moves_with_every_ecology_stock_and_not_with_care() {
+    let mut world = bare_world(BRIGHT);
+    paint(&mut world, CellId::new(Face::Top, 8, 8), 0.56, 0.6, 0.30);
+    let mut world = restage(world);
+    for _ in 0..40 {
+        world.step();
+    }
+    let base = world.state.clone();
+    let h0 = ecology_hash(&base);
+    assert_eq!(h0, ecology_hash(&base), "the hash is a pure function of the state");
+
+    // One entry of each ecology v1 vector, in three places apiece — a cell the fixture used,
+    // a cell it did not, and the last cell — so a hash that covered only a prefix would fail.
+    let cells = [CellId::new(Face::Top, 8, 8).index(), 0, CELL_COUNT - 1];
+    type Poke = fn(&mut cubarium_core::world::EcologyV1State, usize);
+    let pokes: [(&str, Poke); 5] = [
+        ("wood", |e, i| e.wood[i] += 1e-9),
+        ("plant_reserve", |e, i| e.plant_reserve[i] += 1e-9),
+        ("dead_wood", |e, i| e.dead_wood[i] += 1e-9),
+        ("carrion", |e, i| e.carrion[i] += 1e-9),
+        ("carrion_energy", |e, i| e.carrion_energy[i] += 1e-9),
+    ];
+    for (name, poke) in pokes {
+        for i in cells {
+            let mut moved = base.clone();
+            poke(&mut moved.ecology, i);
+            assert_ne!(
+                ecology_hash(&moved),
+                h0,
+                "{name}[{i}] moved and the ecology hash did not"
+            );
+        }
+    }
+    for (name, poke) in [
+        ("plant_deaths_total", (|e: &mut cubarium_core::world::EcologyV1State| {
+            e.plant_deaths_total += 1
+        }) as fn(&mut cubarium_core::world::EcologyV1State)),
+        ("recolonisations_total", |e| e.recolonisations_total += 1),
+    ] {
+        let mut moved = base.clone();
+        poke(&mut moved.ecology);
+        assert_ne!(ecology_hash(&moved), h0, "{name} moved and the ecology hash did not");
+    }
+
+    // The pools that were already hashed stay hashed.
+    for (name, poke) in [
+        ("n", (|s: &mut cubarium_core::WorldState| s.fields.n[3] += 1e-9)
+            as fn(&mut cubarium_core::WorldState)),
+        ("p", |s| s.fields.p[3] += 1e-9),
+        ("d", |s| s.fields.d[3] += 1e-9),
+        ("de", |s| s.fields.de[3] += 1e-9),
+        ("f", |s| s.fields.f[3] += 1e-9),
+        ("tick", |s| s.tick += 1),
+    ] {
+        let mut moved = base.clone();
+        poke(&mut moved);
+        assert_ne!(ecology_hash(&moved), h0, "{name} moved and the ecology hash did not");
+    }
+
+    // And care does **not** move it — the one thing this hash exists to ignore, so a care run
+    // and a matched no-care run of the same ecology still compare directly.
+    let mut cared = base.clone();
+    cared.care.admitted_seq = 7;
+    cared.care.feed_material_in = 1.5;
+    cared.care.feed_energy_in = 3.0;
+    cared.care.clean_material_out = 0.5;
+    cared.care.clean_energy_out = 1.0;
+    cared.care.rain_depth_in = 0.25;
+    cared.care.allowance_used = 2.0;
+    assert_eq!(
+        ecology_hash(&cared),
+        h0,
+        "care state moved the care-masked ecology hash"
+    );
+    // `state_hash` is the full encoding and must see exactly what `ecology_hash` masks.
+    assert_ne!(state_hash(&cared), state_hash(&base), "care is in the full hash");
+    assert_ne!(
+        state_hash(&cared),
+        ecology_hash(&cared),
+        "with care in it, the two hashes must differ — that difference *is* the mask"
+    );
+    assert_eq!(
+        state_hash(&base),
+        h0,
+        "and with no care they agree exactly: the mask is care and nothing else"
     );
 }
 
@@ -1569,5 +2365,271 @@ fn a9_one_donor_one_recipient_books_every_term_of_the_propagule() {
     println!(
         "A9: crossed W_min on tick {crossed} ({:.1} s) after {sent_total:.6} m of reserve sent",
         crossed as f64 * DT
+    );
+}
+
+// ----------------------------------------------- A9, repair cycle 2: 3h recipient state
+
+/// **A9b — a stand that dies in 3d is an eligible recipient on the same tick.**
+///
+/// §4.0 says 3h reads `W⁴`, the wood **after** 3d, for recipients as well as donors. The first
+/// implementation read the pre-tick class instead, so a cell that crossed `W_min` downward in
+/// 3d stayed ineligible until the following tick — a difference from the named state that the
+/// aggregate tests could not see (Astra's implementation review, finding 1).
+///
+/// The fixture makes the death happen on a chosen tick and asserts the propagule lands in the
+/// same one.
+#[test]
+fn a9b_a_stand_that_dies_in_3d_receives_a_propagule_in_the_same_tick() {
+    let mut cfg = bare_config(BRIGHT.0, BRIGHT.1);
+    // Nothing grows, nothing decays: the only two things that happen are the doomed stand's
+    // dieback and the donor's propagule.
+    cfg.producer.growth = 0.0;
+    cfg.producer.mortality = 0.0;
+    cfg.fruit.ripen = 0.0;
+    cfg.fruit.drop = 0.0;
+    cfg.detritus.decomposition = 0.0;
+    cfg.detritus.carrion_decomposition = 0.0;
+    cfg.detritus.wood_decomposition = 0.0;
+    cfg.detritus.fall = 0.0;
+    cfg.nutrient.diffusion = 0.0;
+    cfg.plant.foliage_rate = 0.0;
+    cfg.plant.wood_rate = 0.0;
+    cfg.plant.reserve_share = 0.0;
+    let alive_min = cfg.plant.alive_min;
+    let split = cfg.plant.propagule_split;
+    let build = 1.0 + cfg.plant.build;
+    let (rate, floor_fraction, reserve_cap) = (
+        cfg.plant.propagule_rate,
+        cfg.plant.donor_reserve_floor,
+        cfg.plant.reserve_cap,
+    );
+    // Maintenance stays at the §11 value: the doomed stand is instead placed one hair above
+    // `W_min`, so a single tick of unpaid maintenance — `κ · m_w · W · dt = 2e-7` against a
+    // margin of 2e-8 — carries it below the threshold. A larger `m_w` would also bill the
+    // donor, which is not what this test is about.
+    let m_w = cfg.plant.maintenance;
+
+    let mut world = World::new(cfg).expect("valid");
+    let donor = CellId::new(Face::Top, 8, 8);
+    let doomed = CellId::new(Face::Top, 8, 9);
+    // The donor's other three neighbours are alive but below `W_est`, so they are neither
+    // recipients nor donors and the doomed cell is the donor's only recipient.
+    paint(&mut world, donor, 0.0, 0.6, 0.30);
+    for c in [
+        CellId::new(Face::Top, 8, 7),
+        CellId::new(Face::Top, 7, 8),
+        CellId::new(Face::Top, 9, 8),
+    ] {
+        paint(&mut world, c, 0.0, 0.2, 0.0);
+    }
+    // Just alive, with nothing to pay maintenance with.
+    let doomed_wood = alive_min * (1.0 + 1e-6);
+    paint(&mut world, doomed, 0.0, doomed_wood, 0.0);
+    let mut world = restage(world);
+
+    let (di, ti) = (donor.index(), doomed.index());
+    assert_eq!(
+        CellClass::of(world.state.ecology.wood[ti], alive_min),
+        CellClass::Alive,
+        "the doomed stand must start alive, or nothing is being tested"
+    );
+    let q_before = world.state.ecology.plant_reserve[di];
+    let donor_wood = world.state.ecology.wood[di];
+    let wd_before = world.state.ecology.dead_wood[ti];
+    world.step();
+
+    // 3d killed it this tick.
+    assert_eq!(world.state.ecology.plant_deaths_total, 1, "the stand must die on this tick");
+    assert!(
+        wd_before < world.state.ecology.dead_wood[ti],
+        "and its wood must have become dead wood"
+    );
+    // 3h saw `W⁴` and treated it as bare, so the donor spent on it in the **same** tick. The
+    // donor also pays its own (tiny) maintenance out of reserve in 4.3, before 3h reads `Q⁴`.
+    let donor_upkeep = m_w * donor_wood * DT;
+    let q4 = q_before - donor_upkeep;
+    let floor = floor_fraction * reserve_cap * world.state.ecology.wood[di];
+    let sent = (q4 - floor).max(0.0).min(rate * DT);
+    assert!(sent > 0.0, "the donor must have something to send");
+    assert!(
+        (q_before - world.state.ecology.plant_reserve[di] - (donor_upkeep + sent)).abs() < 1e-15,
+        "the donor's reserve fell by {}, not upkeep {donor_upkeep} plus the sent {sent}",
+        q_before - world.state.ecology.plant_reserve[di]
+    );
+    let net = sent / build;
+    assert!(
+        (world.state.ecology.wood[ti] - split[0] * net).abs() < 1e-15,
+        "the dead cell holds {} of wood, not the propagule's {}",
+        world.state.ecology.wood[ti],
+        split[0] * net
+    );
+    assert!(
+        (world.state.fields.p[ti] - split[1] * net).abs() < 1e-15,
+        "nor the propagule's starter foliage"
+    );
+    assert!(
+        (world.state.ecology.plant_reserve[ti] - split[2] * net).abs() < 1e-15,
+        "nor its starter reserve"
+    );
+    assert!(world.mass_residual().abs() < 1e-9);
+    println!(
+        "A9b: the stand died and received {net:.3e} m of propagule in tick {}",
+        world.tick()
+    );
+}
+
+/// **A9c — two donors sharing three recipients allocate by the §4.8 rule.**
+///
+/// Each donor splits its own budget `B_j = min(Q⁴ − q_prop·Q_max, k_est·dt·n_j)` equally among
+/// its `n_j` recipients, every transfer is read from one immutable snapshot, and a recipient
+/// shared by both donors receives the **sum**. The one-donor case (A9) cannot see either the
+/// `n_j` factor or the sum, so a wrong denominator or a last-writer-wins commit passes it
+/// (Astra's implementation review, finding 4).
+#[test]
+fn a9c_two_donors_split_their_own_budgets_and_a_shared_recipient_gets_both() {
+    let mut cfg = bare_config(BRIGHT.0, BRIGHT.1);
+    cfg.producer.growth = 0.0;
+    cfg.producer.mortality = 0.0;
+    // No maintenance anywhere, so the only thing that moves a reserve is the propagule.
+    cfg.plant.maintenance = 0.0;
+    cfg.plant.foliage_rate = 0.0;
+    cfg.plant.wood_rate = 0.0;
+    cfg.plant.reserve_share = 0.0;
+    cfg.fruit.ripen = 0.0;
+    cfg.fruit.drop = 0.0;
+    cfg.detritus.decomposition = 0.0;
+    cfg.detritus.carrion_decomposition = 0.0;
+    cfg.detritus.wood_decomposition = 0.0;
+    cfg.detritus.fall = 0.0;
+    cfg.nutrient.diffusion = 0.0;
+    let split = cfg.plant.propagule_split;
+    let build = 1.0 + cfg.plant.build;
+    let c_g = cfg.plant.build;
+    let (rate, floor_fraction, reserve_cap, alive_min, donor_min) = (
+        cfg.plant.propagule_rate,
+        cfg.plant.donor_reserve_floor,
+        cfg.plant.reserve_cap,
+        cfg.plant.alive_min,
+        cfg.plant.donor_min,
+    );
+
+    // Two donors side by side in a row, each with its own bare neighbours, and one bare cell
+    // between them that both can reach.
+    //
+    // ```
+    //        (7,7)      (9,7)          <- one private recipient each
+    //  (6,8) (7,8) (8,8) (9,8) (10,8)  <- donors at (7,8) and (9,8); (8,8) is shared
+    //        (7,9)      (9,9)          <- one private recipient each
+    // ```
+    // The row cells flanking the donors are alive-but-not-donors, so each donor has exactly
+    // three recipients: its two private ones and the shared centre.
+    let a = CellId::new(Face::Top, 7, 8);
+    let b = CellId::new(Face::Top, 9, 8);
+    let shared = CellId::new(Face::Top, 8, 8);
+    let private = [
+        CellId::new(Face::Top, 7, 7),
+        CellId::new(Face::Top, 7, 9),
+        CellId::new(Face::Top, 9, 7),
+        CellId::new(Face::Top, 9, 9),
+    ];
+
+    let mut world = World::new(cfg).expect("valid");
+    // Two donors with **different budgets**, so an implementation that pooled them, or used
+    // one donor's for both, would give the wrong per-recipient share. Donor A has reserve to
+    // spare and is capped by `k_est · dt · n_j`; donor B is capped by what it holds above its
+    // floor, which is set to half of A's rate cap.
+    let wood = 0.6f64;
+    let floor = floor_fraction * reserve_cap * wood;
+    paint(&mut world, a, 0.0, wood, 0.30);
+    paint(&mut world, b, 0.0, wood, floor + 0.5 * rate * DT * 3.0);
+    for c in [CellId::new(Face::Top, 6, 8), CellId::new(Face::Top, 10, 8)] {
+        paint(&mut world, c, 0.0, 0.5 * (alive_min + donor_min), 0.0);
+    }
+    let mut world = restage(world);
+
+    // Confirm the arrangement before measuring it.
+    for c in [shared].iter().chain(private.iter()) {
+        assert_eq!(
+            CellClass::of(world.state.ecology.wood[c.index()], alive_min),
+            CellClass::Bare,
+            "{c:?} must be a recipient"
+        );
+    }
+    let q_a0 = world.state.ecology.plant_reserve[a.index()];
+    let q_b0 = world.state.ecology.plant_reserve[b.index()];
+    assert!(q_a0 > q_b0, "the two donors must differ, or the test cannot tell them apart");
+    let n0: Vec<f64> = world.state.fields.n.clone();
+
+    world.step();
+
+    // Each donor's own budget, over its own three recipients.
+    let budget = |q0: f64, wood: f64| {
+        let floor = floor_fraction * reserve_cap * wood;
+        (q0 - floor).max(0.0).min(rate * DT * 3.0)
+    };
+    let b_a = budget(q_a0, world.state.ecology.wood[a.index()]);
+    let b_b = budget(q_b0, world.state.ecology.wood[b.index()]);
+    assert!(b_a > 0.0 && b_b > 0.0);
+    assert!(
+        (q_a0 - world.state.ecology.plant_reserve[a.index()] - b_a).abs() < 1e-15,
+        "donor A spent {}, not its budget {b_a}",
+        q_a0 - world.state.ecology.plant_reserve[a.index()]
+    );
+    assert!(
+        (q_b0 - world.state.ecology.plant_reserve[b.index()] - b_b).abs() < 1e-15,
+        "donor B spent {}, not its budget {b_b}",
+        q_b0 - world.state.ecology.plant_reserve[b.index()]
+    );
+
+    let share_a = b_a / 3.0;
+    let share_b = b_b / 3.0;
+    // The shared recipient gets **both** shares; each private one gets its own donor's.
+    let expect = |s: f64| (s / build, s);
+    for (cell, incoming) in [
+        (shared, share_a + share_b),
+        (private[0], share_a),
+        (private[1], share_a),
+        (private[2], share_b),
+        (private[3], share_b),
+    ] {
+        let k = cell.index();
+        let (net, sent) = expect(incoming);
+        assert!(
+            (world.state.ecology.wood[k] - split[0] * net).abs() < 1e-15,
+            "{cell:?}: wood {} is not {}",
+            world.state.ecology.wood[k],
+            split[0] * net
+        );
+        assert!(
+            (world.state.fields.p[k] - split[1] * net).abs() < 1e-15,
+            "{cell:?}: foliage"
+        );
+        assert!(
+            (world.state.ecology.plant_reserve[k] - split[2] * net).abs() < 1e-15,
+            "{cell:?}: reserve"
+        );
+        assert!(
+            (world.state.fields.n[k] - (n0[k] + c_g * net)).abs() < 1e-15,
+            "{cell:?}: the construction nutrient is not `c_g · net`"
+        );
+        let _ = sent;
+    }
+    // A shared recipient really did get more than a private one — the sum is visible, not a
+    // coincidence of equal budgets.
+    assert!(
+        world.state.ecology.wood[shared.index()] > world.state.ecology.wood[private[0].index()],
+        "the shared recipient must receive both donors' shares"
+    );
+    assert!(
+        world.state.ecology.wood[private[0].index()]
+            > world.state.ecology.wood[private[2].index()],
+        "and the richer donor's recipients must receive more than the poorer donor's"
+    );
+    assert!(world.mass_residual().abs() < 1e-9);
+    println!(
+        "A9c: donor A sent {b_a:.3e} over 3, donor B {b_b:.3e} over 3; the shared cell took \
+         {:.3e} of wood",
+        world.state.ecology.wood[shared.index()]
     );
 }
