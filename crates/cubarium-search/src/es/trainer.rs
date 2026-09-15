@@ -37,7 +37,7 @@ use std::time::Instant;
 use cubarium_core::neural::Policy;
 use serde::{Deserialize, Serialize};
 
-use super::episode::{self, Driver, Episode, EpisodeError, Limits};
+use super::episode::{self, Driver, Episode, EpisodeError, Fault, Limits};
 use super::fixture::{HORIZON_TICKS, Layout, fnv1a};
 use super::optimizer::{ADAM_EPS, Adam, BETA1, BETA2, LEARNING_RATE, SIGMA, gradient};
 use super::rng::perturbation;
@@ -288,6 +288,22 @@ pub struct Plan<'a> {
     pub workers: usize,
     pub evaluate_center: bool,
     pub deadline: Option<Instant>,
+    /// Test-only: corrupt a running world, so an error path can be exercised through the code
+    /// that will actually run it rather than through a copy of it. `None` everywhere else.
+    pub fault: Option<Fault<'a>>,
+}
+
+impl<'a> Plan<'a> {
+    /// The ordinary plan: no fault.
+    pub fn new(
+        layouts: &'a [Layout],
+        horizon: u64,
+        workers: usize,
+        evaluate_center: bool,
+        deadline: Option<Instant>,
+    ) -> Plan<'a> {
+        Plan { layouts, horizon, workers, evaluate_center, deadline, fault: None }
+    }
 }
 
 /// Work a discarded generation actually performed.
@@ -402,12 +418,13 @@ where
                     }
                     let (driver, layout, name) = job(index);
                     attempted.fetch_add(1, Ordering::SeqCst);
-                    match episode::run(
+                    match episode::run_with_fault(
                         &plan.layouts[layout],
                         &driver,
                         plan.horizon,
                         limits,
                         &name,
+                        plan.fault,
                     ) {
                         Ok(e) => {
                             completed.fetch_add(1, Ordering::SeqCst);
@@ -593,6 +610,7 @@ mod tests {
             turn_sweep_rad: 0.0,
             seam_crossing_ticks: 0,
             turn_unmeasured_ticks: 0,
+            motion_billed_partial: false,
             died_on_last_tick: false,
             route_p_start: 0.0,
             route_p_end: 0.0,
@@ -633,6 +651,7 @@ mod tests {
                 workers,
                 evaluate_center: false,
                 deadline: None,
+                fault: None,
             };
             let report = run_generation(&mut theta, &mut adam, &protocol, 0, &plan, &cancel)
                 .expect("not cancelled");
@@ -690,6 +709,7 @@ mod tests {
             workers: 2,
             evaluate_center: false,
             deadline: None,
+            fault: None,
         };
         let out = run_generation(&mut theta, &mut adam, &protocol, 0, &plan, &cancel);
         assert!(matches!(out, Err(GenerationError::Cancelled(_))));
@@ -729,6 +749,7 @@ mod tests {
             workers,
             evaluate_center: false,
             deadline: None,
+            fault: None,
         };
 
         let mut cp = Checkpoint::fresh(protocol.clone(), protocol.train_seed, "test");

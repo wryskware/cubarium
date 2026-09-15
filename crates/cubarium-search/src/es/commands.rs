@@ -279,6 +279,7 @@ pub fn smoke(out: Option<PathBuf>) -> Result<(), Boxed> {
             workers,
             evaluate_center: false,
             deadline: Some(deadline),
+            fault: None,
         };
         let report = run_generation(&mut theta, &mut adam, &protocol, 0, &plan, &cancel)
             .expect("the smoke fits its budget many times over");
@@ -535,6 +536,7 @@ pub fn train(
             workers,
             evaluate_center: center_eval && reused.is_none(),
             deadline: Some(deadline),
+            fault: None,
         };
         let report = match run_generation(
             &mut checkpoint.theta,
@@ -616,30 +618,14 @@ pub fn train(
         && checkpoint.recorded_center_score(checkpoint.generation_completed).is_none()
         && Instant::now() < deadline
     {
-        let plan = Plan {
-            layouts: &layouts,
-            horizon,
-            workers,
-            evaluate_center: false,
-            deadline: Some(deadline),
-        };
-        let generation = checkpoint.generation_completed;
-        match trainer::evaluate(&checkpoint.theta, &plan, generation, &cancel) {
-            Ok((s, episodes)) => {
-                println!(
-                    "{:>4} {:>8} {:>12} {:>12} {:>12.3} {:>12} {:>9}",
-                    "fin", layouts.len(), "-", "-", s, "-", "-"
-                );
-                score_center(&mut checkpoint, generation, s);
-                checkpoint.episodes_run += episodes.len() as u64;
-                checkpoint.ticks_run += episodes.iter().map(|e| e.ticks).sum::<u64>();
-            }
-            Err(e) => {
-                checkpoint.discarded.add(e.discarded());
-                stop = "wall-time cap before the final centre evaluation".into();
-            }
+        let plan = Plan::new(&layouts, horizon, workers, false, Some(deadline));
+        match finalize_center(&mut checkpoint, &plan, &checkpoint_path, &cancel)? {
+            Some(s) => println!(
+                "{:>4} {:>8} {:>12} {:>12} {:>12.3} {:>12} {:>9}",
+                "fin", layouts.len(), "-", "-", s, "-", "-"
+            ),
+            None => stop = "wall-time cap before the final centre evaluation".into(),
         }
-        write_json_atomic(&checkpoint_path, &checkpoint)?;
     }
 
     println!();
@@ -661,6 +647,58 @@ pub fn train(
     println!("centres recorded: {:?}", checkpoint.center_generations());
     println!("checkpoint {}", checkpoint_path.display());
     Ok(())
+}
+
+/// Evaluate the run's final centre and fold the result into the checkpoint.
+///
+/// The two failure modes are **not** the same thing, and the generation loop already
+/// distinguishes them. This does too:
+///
+/// - `Cancelled` is an ordinary budget stop. The centre simply has no score, the work it did is
+///   counted as discarded, the checkpoint is saved and the run ends normally (`Ok(None)`).
+/// - `Invalid` is an **experiment error**. The job identity and the detail are preserved, the
+///   discarded work is counted, the completed optimizer state is saved unchanged — `theta`,
+///   `adam` and `generation_completed` are still the last completed generation's, because
+///   nothing here updates them — and the error is returned so `es-train` exits non-zero.
+///
+/// Before repair cycle 2 both arms wrote "wall-time cap before the final centre evaluation"
+/// and returned `Ok(())`, so an invariant failure in the last four episodes of a run was
+/// reported as a successful timeout.
+pub fn finalize_center(
+    checkpoint: &mut Checkpoint,
+    plan: &Plan<'_>,
+    checkpoint_path: &Path,
+    cancel: &AtomicBool,
+) -> Result<Option<f64>, Boxed> {
+    let generation = checkpoint.generation_completed;
+    match trainer::evaluate(&checkpoint.theta, plan, generation, cancel) {
+        Ok((score, episodes)) => {
+            score_center(checkpoint, generation, score);
+            checkpoint.episodes_run += episodes.len() as u64;
+            checkpoint.ticks_run += episodes.iter().map(|e| e.ticks).sum::<u64>();
+            write_json_atomic(checkpoint_path, checkpoint)?;
+            Ok(Some(score))
+        }
+        Err(e) => {
+            checkpoint.discarded.add(e.discarded());
+            write_json_atomic(checkpoint_path, checkpoint)?;
+            match e {
+                GenerationError::Cancelled(_) => Ok(None),
+                GenerationError::Invalid { .. } => {
+                    println!();
+                    println!("stopped: EXPERIMENT ERROR: {e}");
+                    println!(
+                        "discarded work: {} of {} episodes, {} ticks",
+                        checkpoint.discarded.episodes_completed,
+                        checkpoint.discarded.episodes_attempted,
+                        checkpoint.discarded.ticks_run
+                    );
+                    println!("checkpoint {}", checkpoint_path.display());
+                    Err(Box::new(e) as Boxed)
+                }
+            }
+        }
+    }
 }
 
 /// Write this generation's centre weights, once. A centre already recorded is left alone —

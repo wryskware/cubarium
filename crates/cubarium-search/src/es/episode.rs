@@ -48,9 +48,17 @@
 //!   its efficiency and the reserve's energy density all sit between the two, and none of them
 //!   is read here.
 //! - `upkeep_billed` and `motion_billed` are **prices**, reconstructed from the body's own
-//!   `MotorBill` and from the motion the world actually resolved. They are the exact cost of
-//!   what happened; they are *not* a reading of the world's payment ledger, and on a tick where
-//!   a body dies of starvation the bill is precisely what it could not pay.
+//!   `MotorBill` and from the motion the world actually resolved. They are *not* a reading of
+//!   the world's payment ledger, and on a tick where a body dies of starvation the bill is
+//!   precisely what it could not pay.
+//! - A tick whose **physical turn cannot be measured** contributes its travel but no rotation,
+//!   so `turn_sweep_rad` and `motion_billed` are then **lower bounds, not exact**.
+//!   `motion_billed_partial` says when that has happened and `turn_unmeasured_ticks` says how
+//!   often. Two cases produce it: the tick a body dies on, which has no post-step heading, and
+//!   a tick that crosses a seam, where the stored heading changes by a chart transport *and*
+//!   possibly by a real turn and this module cannot separate the two. Excluding the transport
+//!   is right; excluding the real turn with it is a measurement gap, and it is labelled as one
+//!   rather than hidden inside a number called exact.
 //! - `store_start` and `terminal_stores` are usable stores at the first and last tick. These
 //!   columns do **not** balance into an energy identity, and no claim here says they do: the
 //!   oxidation, assimilation and handling terms that would close such a box are not exposed by
@@ -175,13 +183,17 @@ pub struct Episode {
     pub distinct_cells: usize,
     pub ticks_in_opening: u64,
     pub turn_sweep_rad: f64,
-    /// Ticks whose heading change was a **chart transport** across a seam rather than a
-    /// physical turn. Their rotation is deliberately excluded from `turn_sweep_rad` and from
-    /// `motion_billed`; the count is published so the exclusion is visible instead of silent.
+    /// Ticks that crossed a seam. The stored heading changed by a chart transport, and may
+    /// *also* have changed by a real turn; this module reconstructs the turn from the two
+    /// stored headings and so cannot separate them. Every such tick is therefore counted in
+    /// `turn_unmeasured_ticks` as well.
     pub seam_crossing_ticks: u64,
-    /// Ticks whose physical turn could not be measured because the body was gone after the
-    /// step. At most one, the death tick. Excluded from the sweep and the motor price.
+    /// Ticks whose physical turn could not be measured: every seam crossing, plus the tick a
+    /// body dies on (no post-step heading). Their rotation is excluded from `turn_sweep_rad`
+    /// and from `motion_billed`, which are lower bounds whenever this is nonzero.
     pub turn_unmeasured_ticks: u64,
+    /// `turn_unmeasured_ticks > 0`: the sweep and the motor price are **partial**.
+    pub motion_billed_partial: bool,
     /// Whether the last simulated tick is the one on which the body died. Its upkeep is
     /// *billed* in `upkeep_billed` and was, by the starvation predicate, not payable.
     pub died_on_last_tick: bool,
@@ -269,7 +281,7 @@ pub fn run(
 }
 
 /// A hook that may corrupt a running world, for the fault-injection regression only.
-pub type Fault<'a> = &'a dyn Fn(&mut World, u64);
+pub type Fault<'a> = &'a (dyn Fn(&mut World, u64) + Sync);
 
 /// [`run`], with a hook that may corrupt the world at a chosen tick.
 ///
@@ -361,6 +373,7 @@ pub fn run_with_fault(
         turn_sweep_rad: 0.0,
         seam_crossing_ticks: 0,
         turn_unmeasured_ticks: 0,
+        motion_billed_partial: false,
         died_on_last_tick: false,
         route_p_start,
         route_p_end: 0.0,
@@ -451,8 +464,15 @@ pub fn run_with_fault(
         let turn = match after {
             Some(o) if o.pos.face == face_before => signed_turn(heading_before, o.heading).abs(),
             Some(_) => {
-                // A seam crossing changes the chart; that is transport, not a turn.
+                // A seam crossing changes the chart, and may have turned the body as well.
+                // `signed_turn` on two headings in different charts would read the transport
+                // as rotation, so the tick's real turn is unknown, not zero: count it as
+                // unmeasured rather than pretending the exclusion was free. Measuring it would
+                // mean transporting one heading into the other's chart, which needs the
+                // resolved physical turn the core keeps for neural feedback and does not
+                // publish; that is a core accessor, out of this milestone's scope.
                 episode.seam_crossing_ticks += 1;
+                episode.turn_unmeasured_ticks += 1;
                 0.0
             }
             None => {
@@ -498,6 +518,7 @@ pub fn run_with_fault(
     episode.intake_detritus = diag.detritus_eaten;
     episode.route_p_grown = diag.producer_growth;
     episode.route_p_end = route.iter().map(|c| world.state.fields.p[c.index()]).sum();
+    episode.motion_billed_partial = episode.turn_unmeasured_ticks > 0;
     episode.distinct_cells = visited.len();
     episode.body_lengths = if extent > 0.0 { episode.travelled_px / extent } else { 0.0 };
     Ok(episode)
@@ -693,6 +714,52 @@ mod tests {
         );
     }
 
+    /// Review repair-1 finding B: a tick that crosses a seam changes the stored heading by a
+    /// chart transport *and* possibly by a real body turn, and this module cannot separate the
+    /// two. Zeroing the turn silently dropped the real one — the interior arm swept
+    /// 0.3431227672041359 rad and the seam arm 0.3345446980240325, a deficit of exactly one
+    /// tick's turn — while `turn_unmeasured_ticks` stayed 0 and the price still called itself
+    /// exact. The crossing is now counted as unmeasured and the price is labelled partial.
+    #[test]
+    fn a_seam_crossing_tick_is_counted_as_an_unmeasured_turn_not_as_no_turn() {
+        use cubarium_core::neural::{Policy, gru::Gru32};
+        let cancel = AtomicBool::new(false);
+        let mut layout = training_layouts()[0].clone();
+        let mut weights = Gru32::zeros();
+        // A constant action: full thrust and a steady turn, so both arms ask for the same
+        // thing tick for tick and only the geometry differs.
+        weights.b_o[0] = 8.0;
+        weights.b_o[1] = 0.12;
+        weights.b_o[2] = -8.0;
+        weights.b_o[3] = -8.0;
+        weights.b_o[4] = -8.0;
+        let driver = Driver::Policy(Box::new(Policy::new(weights)));
+
+        layout.start = (8, 15);
+        layout.heading = (0.0, 1.0);
+        let seam = run(&layout, &driver, 40, free(&cancel), "seam").expect("ok");
+        layout.start = (8, 8);
+        let flat = run(&layout, &driver, 40, free(&cancel), "flat").expect("ok");
+
+        assert!(seam.alive && flat.alive);
+        assert!(seam.seam_crossing_ticks > 0, "the fixture must actually cross a seam");
+        assert!(
+            seam.turn_unmeasured_ticks >= seam.seam_crossing_ticks,
+            "every crossing tick's turn is unknown, not zero: {} crossings, {} unmeasured",
+            seam.seam_crossing_ticks,
+            seam.turn_unmeasured_ticks
+        );
+        assert!(seam.motion_billed_partial, "so its sweep and price are lower bounds");
+
+        // The interior arm crosses nothing, so its price is not partial and its sweep is the
+        // whole rotation. That is what makes the seam arm's label meaningful rather than
+        // always-on.
+        assert_eq!(flat.seam_crossing_ticks, 0);
+        assert_eq!(flat.turn_unmeasured_ticks, 0);
+        assert!(!flat.motion_billed_partial);
+        assert!(flat.turn_sweep_rad > seam.turn_sweep_rad, "the deficit is the dropped turn");
+    }
+
     /// Ordinary biological death stays a completed episode with a recorded survival time, and
     /// its final tick is accounted for rather than skipped.
     #[test]
@@ -704,7 +771,9 @@ mod tests {
         assert!(!e.alive);
         assert_eq!(e.ticks, 7_420, "the no-intake arm's recorded survival time");
         assert!(e.died_on_last_tick);
+        assert_eq!(e.seam_crossing_ticks, 0, "a stationary body crosses no seam");
         assert_eq!(e.turn_unmeasured_ticks, 1, "only the death tick's turn is unmeasurable");
+        assert!(e.motion_billed_partial, "so the sweep and the price are lower bounds");
         assert_eq!(e.terminal_stores, 0.0);
         // The death tick is billed like every other one: 7,420 ticks of upkeep, not 7,419.
         // Upkeep is a constant per tick for this stationary body, so the short arm gives the

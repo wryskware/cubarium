@@ -42,6 +42,7 @@ fn a_deadline_that_passes_during_the_last_batch_cancels_without_an_update() {
         workers: 2,
         evaluate_center: false,
         deadline: Some(started + Duration::from_millis(50)),
+        fault: None,
     };
 
     let result = trainer::run_generation(&mut theta, &mut adam, &protocol, 0, &plan, &cancel);
@@ -183,4 +184,86 @@ fn a_fresh_run_refuses_to_overwrite_an_existing_one_unless_told_to() {
     assert_eq!(cp.generation_completed, 1);
     let rows = fs::read_to_string(out.join("generations.jsonl")).expect("log");
     assert_eq!(rows.lines().count(), 1, "an overwrite starts the history over, once");
+}
+
+/// **Repair-1 review finding A**: an invariant failure in the *final centre* evaluation must be
+/// an experiment error, not a successful timeout.
+///
+/// Before the fix, `commands.rs`'s `Err(e)` arm handled `Cancelled` and `Invalid` alike: both
+/// set `stop = "wall-time cap before the final centre evaluation"` and the function returned
+/// `Ok(())`, dropping the job identity and exiting successfully. The generation loop already
+/// distinguished them; this is now the same handling, driven through the same code the command
+/// runs.
+#[test]
+fn an_invalid_final_centre_evaluation_fails_the_run_and_keeps_the_completed_checkpoint() {
+    let out = scratch("final-centre-invalid");
+    let checkpoint_path = out.join("checkpoint.json");
+    let layouts = es::training_layouts();
+    let protocol = es::Protocol::new(1, 400, 20_260_915, &layouts);
+
+    // A checkpoint standing at a completed generation, exactly as the loop would leave it.
+    let mut cp = Checkpoint::fresh(protocol, 20_260_915, "test");
+    cp.generation_completed = 3;
+    cp.episodes_run = 24;
+    cp.ticks_run = 9_600;
+    cp.theta[0] += 0.125;
+    fs::write(&checkpoint_path, serde_json::to_string_pretty(&cp).expect("write"))
+        .expect("seed checkpoint");
+    let completed = cp.clone();
+
+    // Corrupt the animal's private state one tick before the rollout's validation cadence.
+    let corrupt = |w: &mut cubarium_core::World, tick: u64| {
+        if tick == cubarium_search::es::episode::VALIDATE_EVERY_TICKS - 1 {
+            w.state.neural.animals[0].1.hidden[0] = f64::NAN;
+        }
+    };
+    let cancel = AtomicBool::new(false);
+    let plan = es::Plan {
+        layouts: &layouts,
+        horizon: 4_000,
+        workers: 2,
+        evaluate_center: false,
+        deadline: Some(Instant::now() + Duration::from_secs(120)),
+        fault: Some(&corrupt),
+    };
+
+    let err = es::commands::finalize_center(&mut cp, &plan, &checkpoint_path, &cancel)
+        .expect_err("an invalid world must fail the run");
+
+    // The job identity and the detail survive.
+    let message = err.to_string();
+    assert!(message.contains("invalid world"), "{message}");
+    assert!(message.contains("gen3/center/"), "the failing job is named: {message}");
+    assert!(
+        message.contains("t1-corridor")
+            || message.contains("t2-weak-open")
+            || message.contains("t3-scatter")
+            || message.contains("t4-ring"),
+        "the layout is named: {message}"
+    );
+    assert!(!message.contains("wall-time cap"), "this is not a budget stop: {message}");
+
+    // Discarded work is counted, and it is not optimizer progress.
+    assert!(cp.discarded.episodes_attempted > 0);
+    assert!(cp.discarded.ticks_run > 0);
+    assert_eq!(cp.episodes_run, completed.episodes_run, "no episodes credited to progress");
+    assert_eq!(cp.ticks_run, completed.ticks_run);
+
+    // The completed optimizer state is saved and unchanged on disk.
+    let saved: Checkpoint =
+        serde_json::from_str(&fs::read_to_string(&checkpoint_path).expect("read")).expect("parse");
+    assert_eq!(saved.theta, completed.theta, "the last completed centre survives");
+    assert_eq!(saved.adam, completed.adam);
+    assert_eq!(saved.generation_completed, 3);
+    assert_eq!(saved.episodes_run, completed.episodes_run);
+    assert_eq!(saved.discarded, cp.discarded, "with the discarded work recorded beside it");
+
+    // And a cancellation in the same place is still an ordinary budget stop, not an error.
+    let mut cp = completed.clone();
+    let stopped = AtomicBool::new(true);
+    let plan = es::Plan::new(&layouts, 4_000, 2, false, None);
+    let outcome = es::commands::finalize_center(&mut cp, &plan, &checkpoint_path, &stopped)
+        .expect("cancellation is a normal stop");
+    assert_eq!(outcome, None, "no score, but no error either");
+    assert_eq!(cp.generation_completed, 3);
 }

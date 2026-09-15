@@ -574,11 +574,14 @@ The review also asked for the full accounting to be fixed or qualified. Fixed:
   2.2999 → 2.3002 over its 7,420 ticks — one tick, the one it could not pay for. Survival ticks
   and every verdict are unchanged.
 - **Seam-crossing ticks are counted, not silently dropped.** `seam_crossing_ticks` publishes how
-  many ticks had a chart transport rather than a physical turn. Excluding their rotation is
-  correct — transport is not a turn — but the exclusion is now visible.
+  many ticks had a chart transport. ~~Excluding their rotation is correct — transport is not a
+  turn — but the exclusion is now visible.~~ **This sentence was wrong and repair cycle 2
+  corrects it:** a crossing tick can carry a real body turn *as well as* the transport, and
+  excluding both was dropping a measurement. See repair cycle 2, finding B.
 - **The one unmeasurable turn is named.** A body that is gone after the step has no post-step
-  heading, so that tick's turn cannot be measured; `turn_unmeasured_ticks` records it (at most
-  one, the death tick) and `died_on_last_tick` marks the case.
+  heading, so that tick's turn cannot be measured; `turn_unmeasured_ticks` records it and
+  `died_on_last_tick` marks the case. (Repair cycle 2 adds seam crossings to that count, so it
+  is no longer "at most one".)
 
 Qualified rather than claimed:
 
@@ -679,3 +682,100 @@ live behaviour cannot have changed.
 - `upkeep_billed` and `motion_billed` are prices, not ledger readings, because the core exposes
   no settlement ledger for them. Making them readings would need an additive core accessor;
   none was added here.
+
+## 12. Repair cycle 2 — 2026-09-15
+
+Against the **Repair cycle 1 verification** in [Astra's review](r2a-trainer-review-2026-09-15.md),
+which cleared findings 1–3 and 5's cadence but raised two follow-ups. Only those two were
+touched: the optimizer, the fixtures, the compute budget and the apex scope were not reopened,
+and no campaign, held-out evaluation or runner change was performed. Head at the start was
+`af6808e`, which also carries Fable's `float_roundtrip` and HEAD-following build stamp — the
+stamp now reads `af6808e53d0d-dirty` by itself, with no override.
+
+**Nothing observable moved.** The smoke's four candidate scores are still
+`[2000.111761151833, 2000.1119808873987, 2000.148182488754, 2000.1162204649784]` with gradient
+norm `5.978362473094e2`, byte-identical to both earlier runs. Score, simulation and every layout
+hash are unchanged.
+
+### Finding A (P2) — an invalid final-centre evaluation was reported as a successful timeout
+
+**Root cause.** The final-centre evaluation's `Err(e)` arm handled `GenerationError::Cancelled`
+and `GenerationError::Invalid` identically: both set
+`stop = "wall-time cap before the final centre evaluation"` and the function returned `Ok(())`.
+An invariant failure in the last four episodes of a run therefore lost its job identity and its
+detail and exited zero, while the generation loop above it handled the same two variants
+correctly.
+
+**Fix.** The step is now
+[`commands.rs::finalize_center`](../../crates/cubarium-search/src/es/commands.rs), which
+distinguishes them the way the loop does:
+
+- `Cancelled` → `Ok(None)`: an ordinary budget stop, the centre simply has no score, the work is
+  counted as discarded and the checkpoint is saved.
+- `Invalid` → the job identity and detail are preserved, the discarded work is counted, the
+  checkpoint is saved with the **completed** optimizer state untouched (`theta`, `adam` and
+  `generation_completed` are still the last completed generation's — nothing in this step
+  updates them), and the error is returned, so `es-train` exits non-zero.
+
+`Plan` gained a `fault: Option<Fault<'a>>` field, `None` everywhere outside the regression, so
+the error path is exercised through the code the command actually runs rather than a copy of it.
+
+**Regression.** `tests/es_repair.rs::an_invalid_final_centre_evaluation_fails_the_run_and_keeps_the_completed_checkpoint`.
+
+| | before | after |
+| --- | --- | --- |
+| invalid world in the final-centre evaluation | `Ok(())`, stop recorded as "wall-time cap before the final centre evaluation", job and detail dropped | `Err` naming `gen3/center/<layout>` and "invalid world"; `episodes_run`/`ticks_run` unchanged; `discarded` counted; on-disk `theta`, `adam` and `generation_completed` still the last completed generation's |
+| cancellation in the same place | normal stop | unchanged: `Ok(None)`, still a normal budget stop |
+
+### Finding B (P2) — seam-crossing ticks dropped a real turn while the price claimed to be exact
+
+**Root cause.** Any tick whose face changed produced a zero turn
+([`episode.rs`, the `Some(_)` arm of the turn match](../../crates/cubarium-search/src/es/episode.rs)).
+A tick can contain a chart transport **and** a real body turn; excluding the transport is right,
+excluding the real turn with it is a lost measurement. `turn_unmeasured_ticks` counted only
+death ticks, so the loss was invisible, and the module documentation still called the
+reconstructed prices exact.
+
+**Fix**, the simpler one the review accepts for this milestone:
+
+- every seam-crossing tick is counted in `turn_unmeasured_ticks` as well as in
+  `seam_crossing_ticks`;
+- a new `motion_billed_partial` flag is `turn_unmeasured_ticks > 0`;
+- the module documentation now says `turn_sweep_rad` and `motion_billed` are **lower bounds, not
+  exact**, whenever any tick is unmeasured, and names both causes (a seam crossing, and the tick
+  a body dies on).
+
+**Measuring instead was considered and rejected inside the time box.** `ResolvedMotion.turn` is
+the physical turn before transport and the core does keep it — it feeds
+`neural::action::resolved_turn` into the animal's feedback channel — but `World` publishes no
+per-organism accessor for it, and the feedback field is zeroed at every controller tick and
+exists only for neural bodies, not for the scripted controls. Reading it honestly would mean an
+additive core accessor, which is outside this repair's ownership. Recorded here as the cheap
+follow-up if a later milestone wants an exact sweep.
+
+**Regression.** `episode.rs::a_seam_crossing_tick_is_counted_as_an_unmeasured_turn_not_as_no_turn`,
+promoted from [Astra's source](assets/r2a-repair1-seam-regression.rs) (confirmed failing at
+`af6808e` first, reproducing her numbers exactly; the temporary target was deleted afterwards).
+
+| diagnostic, 40 ticks, constant action | interior | one seam crossing (before) | one seam crossing (after) |
+| --- | ---: | ---: | ---: |
+| turn sweep (rad) | 0.3431227672041359 | 0.3345446980240325 | unchanged (still the measured part) |
+| motor bill (e) | 0.003445594754758156 | 0.0034417346236271 | unchanged |
+| `seam_crossing_ticks` | 0 | 1 | 1 |
+| `turn_unmeasured_ticks` | 0 | **0** | **1** |
+| `motion_billed_partial` | — | — | interior `false`, seam **`true`** |
+
+The numbers themselves are deliberately not changed: the fix is to stop calling a lower bound
+exact, not to invent the missing rotation. The interior arm still carries no flag, which is what
+makes the seam arm's label informative rather than always-on.
+
+### Checks
+
+| check | result |
+| --- | --- |
+| `cargo test -p cubarium-search --release` | **65 passed**, 0 failed (49 lib + 4 `es_repair` + 12 M1 harness) |
+| `cargo clippy -p cubarium-search --release --all-targets` | clean for this crate; the two remaining warnings are pre-existing in `cubarium-core` |
+| `es-smoke` | 0.4 s of 60 s, scores and gradient norm **byte-identical** to the recorded run, repeat deterministic |
+
+No core file was changed. The display runner was not touched. The learning command, its budget
+and the apex scope are exactly as §7 and §11 leave them.
