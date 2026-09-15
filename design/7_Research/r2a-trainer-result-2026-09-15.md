@@ -152,22 +152,24 @@ mid-strength with two 3×3 corners and two single-cell cues. Held-out hashes are
 `cubarium-search es-controls --workers 2 --wall-seconds 120`, 36,000 ticks each (1,800 s),
 **432,000 ticks total, wall time 6.6 s of the 120 s budget**, build
 `f716256191ca+unrelated-uncommitted`. Intake is the world's own `IntakeDiagnostics` — material
-that actually left a field through a mouth — and the two paid columns are priced from the
-**resolved** motion through `MotorBill`, never from a stock delta or a net-energy difference.
+that actually left a field through a mouth — and the two cost columns are *prices* reconstructed from the body's own `MotorBill` and the
+**resolved** motion — never a stock delta or a net-energy difference, and never a reading of the
+world's payment ledger, which the core does not expose. Every simulated tick is billed, the one a
+body dies on included (repair 1, finding 4).
 
-| layout | control | ticks | s | alive | stores_end | intake P | upkeep | motion | px | cells |
+| layout | control | ticks | s | alive | stores_end | intake P (m) | upkeep billed | motion billed | px | cells |
 | --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| t1-corridor | no-intake | 7,420 | 371.0 | no | 0 | 0.0000 | 2.2999 | 0.0000 | 0.0 | 1 |
-| t1-corridor | stationary-grazing | 10,978 | 548.9 | no | 0 | 0.8111 | 3.4029 | 0.0000 | 0.0 | 1 |
+| t1-corridor | no-intake | 7,420 | 371.0 | no | 0 | 0.0000 | 2.3002 | 0.0000 | 0.0 | 1 |
+| t1-corridor | stationary-grazing | 10,978 | 548.9 | no | 0 | 0.8111 | 3.4032 | 0.0000 | 0.0 | 1 |
 | t1-corridor | mobile-script | 36,000 | 1800.0 | **yes** | 2.9995 | 8.5158 | 11.1600 | 0.1218 | 260.3 | 48 |
-| t2-weak-open | no-intake | 7,420 | 371.0 | no | 0 | 0.0000 | 2.2999 | 0.0000 | 0.0 | 1 |
-| t2-weak-open | stationary-grazing | 9,404 | 470.2 | no | 0 | 0.4523 | 2.9149 | 0.0000 | 0.0 | 1 |
+| t2-weak-open | no-intake | 7,420 | 371.0 | no | 0 | 0.0000 | 2.3002 | 0.0000 | 0.0 | 1 |
+| t2-weak-open | stationary-grazing | 9,404 | 470.2 | no | 0 | 0.4523 | 2.9152 | 0.0000 | 0.0 | 1 |
 | t2-weak-open | mobile-script | 36,000 | 1800.0 | **yes** | 1.3967 | 8.1983 | 11.1600 | 0.9721 | 1959.3 | 44 |
-| t3-scatter | no-intake | 7,420 | 371.0 | no | 0 | 0.0000 | 2.2999 | 0.0000 | 0.0 | 1 |
-| t3-scatter | stationary-grazing | 11,873 | 593.6 | no | 0 | 1.0151 | 3.6803 | 0.0000 | 0.0 | 1 |
+| t3-scatter | no-intake | 7,420 | 371.0 | no | 0 | 0.0000 | 2.3002 | 0.0000 | 0.0 | 1 |
+| t3-scatter | stationary-grazing | 11,873 | 593.6 | no | 0 | 1.0151 | 3.6806 | 0.0000 | 0.0 | 1 |
 | t3-scatter | mobile-script | 36,000 | 1800.0 | **yes** | 3.0000 | 8.5065 | 11.1600 | 0.1088 | 237.2 | 42 |
-| t4-ring | no-intake | 7,420 | 371.0 | no | 0 | 0.0000 | 2.2999 | 0.0000 | 0.0 | 1 |
-| t4-ring | stationary-grazing | 10,401 | 520.1 | no | 0 | 0.6796 | 3.2240 | 0.0000 | 0.0 | 1 |
+| t4-ring | no-intake | 7,420 | 371.0 | no | 0 | 0.0000 | 2.3002 | 0.0000 | 0.0 | 1 |
+| t4-ring | stationary-grazing | 10,401 | 520.1 | no | 0 | 0.6796 | 3.2243 | 0.0000 | 0.0 | 1 |
 | t4-ring | mobile-script | 36,000 | 1800.0 | **yes** | 3.0002 | 8.5438 | 11.1600 | 0.1593 | 345.0 | 60 |
 
 Behavioural diagnostics for the mobile arm, reported separately and never scored: body-length
@@ -218,7 +220,7 @@ body that cannot pay its upkeep dies under the repaired starvation predicate exa
 does anywhere else, and that death is a completed episode with a recorded survival time, not
 an error.
 
-Every other number the trainer records — intake, paid upkeep, paid motion, starting and
+Every other number the trainer records — intake, billed upkeep, billed motion, starting and
 terminal stores, travelled px, body lengths, distinct cells, ticks in the opening patch, turn
 sweep, and the route's producer stock before and after — is a diagnostic and enters no
 ordering. No reward shaping, no path-length reward, no mode label, no births, no action
@@ -272,7 +274,7 @@ Verified end to end through the CLI, at 400 ticks and 2 pairs over all four layo
 
 | check | result |
 | --- | --- |
-| two generations in one run (4 workers) vs one generation, save, reload, one more (2 then 7 workers) | `theta` **equal**, Adam equal, counted work equal |
+| two generations in one run (4 workers) vs one generation, save, reload, one more (2 then 7 workers) | `theta` **equal**, Adam equal, counted work equal — **but only with the centre evaluation off; see repair 1, finding 3** |
 | the centre evaluation changes nothing | the same `theta` with `--center-eval true` and `false` |
 | checkpoint size | 491,724 bytes (three 10,215-element vectors in hex) |
 | export round trip | `es-export`: **exact, bit for bit** (compared on `to_bits`) |
@@ -450,3 +452,230 @@ and `design/*.md` — none of it authored or touched here.
 
 Measured token usage: unavailable in this harness. Context-counter deltas are not a
 billed-usage measurement and are not reported as one.
+
+## 11. Repair cycle 1 — 2026-09-15
+
+Against [Astra's review](r2a-trainer-review-2026-09-15.md) of `bf96ecb..80bf718`. All three of
+the review's regressions were confirmed **failing** on a copy of its
+[source](assets/r2a-review-regressions.rs) before anything changed, and its CLI reproduction of
+finding 3 was reproduced exactly, before any fix. The temporary test target was deleted after
+the cases were promoted into permanent suites; Astra's source file is retained untouched.
+
+**The optimizer and the fixtures did not move.** The smoke's four candidate scores, its
+gradient norm and its update RMS are byte-identical to the pre-repair run, and every layout
+hash, the protocol hash and the score convention are unchanged. The controls reproduce tick for
+tick; the only numeric change anywhere is the one finding 4 asked for (below).
+
+Commit: `e3717f2`.
+
+### Finding 1 (P1) — the wall-time cap was not checked inside running episodes
+
+**Root cause.** The deadline was read only when a job was *dequeued*
+(`trainer.rs`, the worker loop), and an episode read only an atomic flag that nothing set as
+time passed (`episode.rs`, the periodic check). Every worker that had entered its last episode
+inside the deadline therefore ran to completion however late it became, and `run_generation`
+then applied Adam anyway. `commands.rs` gave the smoke no deadline at all.
+
+**Fix.** `episode::Limits` ([`episode.rs:82-114`](../../crates/cubarium-search/src/es/episode.rs))
+carries the cancellation flag and the deadline together; `Limits::expired()` is read every
+`CANCEL_CHECK_TICKS` inside the rollout and a passed deadline **sets** the shared flag, so one
+worker noticing the clock stops the others at their next check. `run_generation`
+([`trainer.rs`](../../crates/cubarium-search/src/es/trainer.rs), step 3) re-checks the limits
+after the batch and **before** the Adam ascent. `trainer::dispatch` is now the single worker
+pool for perturbations and for centre evaluations, and it carries the plan's deadline into
+every episode. The controls and the smoke take the same mechanism; the smoke's 60 s budget is
+now a real deadline. Budgets are unchanged.
+
+**Discarded work is counted.** `Discarded { episodes_attempted, episodes_completed, ticks_run }`
+survives cancellation, is accumulated into `Checkpoint.discarded`, and is reported separately
+from `episodes_run`/`ticks_run`, which remain optimizer progress only.
+
+**Regressions.**
+`tests/es_repair.rs::a_deadline_that_passes_during_the_last_batch_cancels_without_an_update`
+uses the review's own parameters, and
+`episode.rs::a_deadline_that_passes_mid_episode_stops_the_rollout` covers the episode level.
+
+| | before | after |
+| --- | --- | --- |
+| 1 pair, 1 layout, 4,000 ticks, 2 workers, 50 ms deadline | returned **success after 235 ms**, Adam step **1** | `Cancelled`, `theta` unchanged, Adam step **0**, 10 ms overrun |
+| `es-train --horizon 36000 --wall-seconds 2` through the CLI | (would run every dequeued episode to the end) | **wall 2.01 s**, `generation_completed 0`, Adam step 0, `episodes_run 0`, discarded 8 of 10 episodes / 71,021 ticks |
+
+### Finding 2 (P1) — policy import ignored the saved compatibility digest
+
+**Root cause.** `PolicyFile::policy` checked the file-format string and the parameter count and
+then called `tensor::policy`, which stamps whatever it builds with the **current** digest. The
+saved `policy_digest` was written and never read, so weights from another observation layout,
+action set, recurrence convention, motor contract or controller rate — with the same 10,215
+values — would be silently reinterpreted.
+
+**Fix.** [`export.rs:71-86`](../../crates/cubarium-search/src/es/export.rs) compares the saved
+digest against this build's *first* and refuses a mismatch by name, in the same wording the
+core's own `Policy::validate` uses.
+
+**Regression.** `export.rs::a_foreign_compatibility_digest_is_refused_by_name`. Before: flipping
+one bit of `policy_digest` still returned `Ok`. After: `Err` naming the file's digest and this
+build's, and saying the weights cannot be reinterpreted.
+
+### Finding 3 (P2) — resuming erased history and repeated a centre evaluation
+
+**Root cause.** `commands.rs` opened `generations.jsonl` with `File::create`, truncating it on
+every resume; the final-centre evaluation was recorded but never *reused*, so the first
+generation after a resume evaluated and charged the same centre again; the checkpoint was
+written in place; and only the latest centre's weights were retained.
+
+**Fix**, all in [`commands.rs::train`](../../crates/cubarium-search/src/es/commands.rs):
+
+- the log is opened with `append(true)`;
+- a fresh run into a directory that already holds a checkpoint or a log is **refused**, naming
+  the `--resume` path and the new `--overwrite` flag;
+- `record_center` writes each centre's exact weights to `centers/center-NNNNN.json` once, with
+  its FNV-1a in `Checkpoint.centers`, and `recorded_center_score` makes the loop skip an
+  evaluation that has already been paid for (the reused score prints with a `*`);
+- `write_json_atomic` writes to a sibling temporary file and renames, so a crash leaves the last
+  completed checkpoint intact;
+- `Checkpoint.centers` is a full history, so the evaluation assignment can select **any** centre
+  the run passed through, not only the last. `Checkpoint.center_scores` is replaced by it; a
+  centre that was never evaluated carries `score: None`, never `0`.
+
+**Regression.** `tests/es_repair.rs::a_resumed_run_continues_the_same_run_rather_than_repeating_it`
+(through `commands::train`, the function the CLI calls, with centre evaluation on and the same
+output directory) and `::a_fresh_run_refuses_to_overwrite_an_existing_one_unless_told_to`.
+
+Reproduced and re-verified through the real CLI, 1 pair, 4 layouts, 40 ticks, centre evaluation
+on:
+
+| | episodes / ticks | centre ids | `generations.jsonl` |
+| --- | --- | --- | --- |
+| two uninterrupted updates | 28 / 1,120 | `[0, 1, 2]` | `[0, 1]` |
+| one update + resume + one, **before** | 32 / 1,280 | `[0, 1, 1, 2]` | `[1]` — generation 0 gone |
+| one update + resume + one, **after** | **28 / 1,120** | **`[0, 1, 2]`** | **`[0, 1]`** |
+
+`theta` and Adam are equal in all three; after the repair the counted work is equal too, and all
+three centre files round-trip to their recorded hashes.
+
+**The delivery report's claim is corrected.** §6 said CLI resume preserves counted work. That
+held only with the centre evaluation disabled, which is not the campaign's configuration. §6 now
+says so, and this section carries the measurement.
+
+### Finding 4 (P2) — training recorded unmeasured movement and costs as zero
+
+**Root cause.** `Detail::Score` skipped the per-tick accounting while the same non-optional
+fields were still serialized, so a campaign episode reported `0.0` paid upkeep and `0` visited
+cells for a body that was alive, moving and feeding.
+
+**Fix.** `Detail` is **deleted**. Every episode collects every diagnostic, so there is no mode
+that can serialize an unmeasured zero. The measured cost of always collecting is none:
+17,188–17,853 ticks/s per worker, against 17,238–18,054 before.
+
+The review also asked for the full accounting to be fixed or qualified. Fixed:
+
+- **The death tick is billed.** The loop used to `break` before accounting on the tick a body
+  died. It now accounts for every simulated tick, so the no-intake control's upkeep moves
+  2.2999 → 2.3002 over its 7,420 ticks — one tick, the one it could not pay for. Survival ticks
+  and every verdict are unchanged.
+- **Seam-crossing ticks are counted, not silently dropped.** `seam_crossing_ticks` publishes how
+  many ticks had a chart transport rather than a physical turn. Excluding their rotation is
+  correct — transport is not a turn — but the exclusion is now visible.
+- **The one unmeasurable turn is named.** A body that is gone after the step has no post-step
+  heading, so that tick's turn cannot be measured; `turn_unmeasured_ticks` records it (at most
+  one, the death tick) and `died_on_last_tick` marks the case.
+
+Qualified rather than claimed:
+
+- `upkeep_paid`/`motion_paid` are renamed **`upkeep_billed`/`motion_billed`**. They are exact
+  *prices* of what the world resolved, reconstructed from the body's own `MotorBill`; they are
+  not readings of a payment ledger, and on a starvation tick the bill is precisely what could
+  not be paid. The core exposes no settlement ledger for upkeep, so no stronger claim is
+  available and none is made.
+- `intake_*` is documented as **material (m)** from the world's own `IntakeDiagnostics`, not an
+  energy credit: assimilation, its efficiency and the reserve's energy density sit between the
+  two and none of them is read.
+- **The "closes the energy box" claim on `store_start` is removed.** There is no assimilation,
+  oxidation or handling term here to establish that identity, and the review is right that the
+  columns do not balance. The module documentation now says so explicitly.
+
+Diagnostics remain entirely out of fitness; the score is unchanged.
+
+**Regression.** `episode.rs::every_episode_records_the_same_diagnostics_whoever_asked_for_it`
+and `::ordinary_death_is_a_completed_episode_with_its_last_tick_accounted_for`. Before, the same
+40-tick episode reported 0.0124 e upkeep in full mode and `0` in score mode; after, there is one
+mode and both callers get 0.0124 e.
+
+### Finding 5 (P2) — release rollouts did not check runtime invariants
+
+**Root cause.** Core's end-of-step audits are `#[cfg(debug_assertions)]` and the trainer runs in
+release; `fixture.rs` validated only the initial world; checking the policy's weights for
+finiteness says nothing about fields, organisms, ledgers or the neural extension during a
+rollout.
+
+**Fix.** [`episode.rs::validate_runtime`](../../crates/cubarium-search/src/es/episode.rs) calls
+`World::check_invariants` and `WorldState::validate` — the latter carries the neural extension's
+own rules — and the rollout calls it every `VALIDATE_EVERY_TICKS` (2,048) ticks and once at the
+end: 18 checks over the 36,000-tick horizon. An invalid world returns
+`EpisodeError::Invalid { ticks, detail }` whose detail **names the job**
+(`gen7/pair3-/t1-corridor`); `dispatch` stops every other worker and fails the generation with
+`GenerationError::Invalid`, and `es-train` exits non-zero. Ordinary biological death is
+untouched: it remains a completed episode with a recorded survival time.
+
+**Regression**, in release: `episode.rs::a_corrupted_world_fails_the_experiment_and_names_the_job`
+drives a real rollout through `run_with_fault`, writes a NaN into the animal's private `hidden`
+one tick before a cadence point and asserts the cadence check catches it at tick 2,048 with the
+job in the message; then writes an infinity after the last cadence point and asserts the
+terminal check catches that; then runs the same rollout with no fault and asserts it is an
+ordinary episode. The first attempt at this regression corrupted a *field* instead, and
+`World::step` panicked on the NaN before any validation could run — which is itself worth
+recording: this cadence catches invalid state that the world tolerates, not every possible
+corruption.
+
+**Throughput after the checks.** Re-measured: 17,188 / 17,853 / 17,188 / 17,456 ticks/s per
+worker and **131,259 ticks/s aggregate at eight workers**, against 130,393 before the repair.
+The validation cadence and the always-on diagnostics are inside the noise, so **the compute
+estimate in §7 stands unchanged**.
+
+### Re-verification after the repair
+
+| check | result |
+| --- | --- |
+| `cargo test -p cubarium-search --release` | **63 passed** (48 lib + 3 `es_repair` + 12 M1 harness), 0 failed |
+| `cargo test --workspace --release` | **1,335 passed**, 0 failed, 20 ignored |
+| `cargo clippy -p cubarium-search --release --all-targets` | clean for this crate |
+| `es-controls` | 6.6 s of 120 s, all four layouts still pass all three requirements, survival ticks identical |
+| `es-smoke` | 0.4 s of 60 s, the same four scores and the same gradient norm as before the repair, repeat byte-identical |
+| CLI resume | 28 / 1,120 and centres `[0,1,2]` both ways; fresh-run refusal names the way forward |
+| CLI cap | 2.01 s against a 2 s cap, nothing updated, discarded work counted |
+| `es-export` | exact, bit for bit; 400 ticks of ordinary core inference |
+
+### The proposed first-learning command, restated
+
+Unchanged in every parameter; `--overwrite` is new and deliberately **not** passed, so the
+command refuses to discard an existing run rather than truncating it.
+
+```
+cargo run -p cubarium-search --release -- \
+    es-train --pairs 16 --generations 16 --horizon 36000 \
+             --workers 8 --wall-seconds 1200 --train-seed 20260915 \
+             --center-eval true --out runs/es-first
+```
+
+Protocol hash `0xb69033f65e56f1df`. Budget unchanged: 2,048 perturbation episodes
+(73,728,000 ticks) plus 68 centre episodes (2,448,000 ticks) = **2,116 episodes /
+76,176,000 ticks**, about **580 s ≈ 9.7 minutes** at the re-measured 131,259 ticks/s — inside
+the 20-minute cap with roughly 2× headroom. The cap is now enforced *inside* the rollouts, so a
+run that turns out slower stops at the cap with its last completed generation saved and its
+discarded work counted, rather than overrunning. Storage: the checkpoint (0.5 MiB), the
+generation log, and 17 centre files at 160 KiB each ≈ **3.3 MiB**, well under 10 MiB.
+
+**Still not executed.** No learning campaign, no held-out evaluation, no live attachment, no
+world reset. The display runner was not touched; no core file was modified in this repair, so
+live behaviour cannot have changed.
+
+### What this repair did not do
+
+- The two M1-scope defects in §8 (`serde_json`'s parser under `replay`, the stale build stamp)
+  are still Fable's call and still unfixed, for the same ownership reason.
+- The validation cadence catches invalid state the world *tolerates*. A corruption that makes
+  `World::step` itself panic — a NaN in a field, for instance — still panics the worker rather
+  than producing a named experiment error.
+- `upkeep_billed` and `motion_billed` are prices, not ledger readings, because the core exposes
+  no settlement ledger for them. Making them readings would need an additive core accessor;
+  none was added here.
