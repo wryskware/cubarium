@@ -666,17 +666,17 @@ replacement fixtures when B0 differs.
 
 | ID | Scenario | Fixture | Measure | Expected direction |
 | --- | --- | --- | --- | --- |
-| B0 | stand baseline | one lone stand per light class, seeded at `W_0` of §11 (not painted mature), no animals, 36,000 ticks | `P, W, Q, F`, income, senescence, ripening every 1,000 ticks; values at horizon | approaches the §11 table (average `P ≈ 0.5, W ≈ 0.33`; bright `P ≈ 0.56, W = 0.6`); the measured values become the "mature stand" every later scenario is judged against |
+| B0 | stand baseline | one lone stand per light class, seeded at `W_0` of §11 (not painted mature), no animals, **propagules off** (`propagule_rate = 0`, because the §11 table has no propagule sink and a lone stand in a stripped world would otherwise export into its bare neighbours), 36,000 ticks | `P, W, Q, F`, income, senescence, ripening every 1,000 ticks; values at horizon | approaches the §11 table (average `P ≈ 0.5, W ≈ 0.33`; bright `P ≈ 0.56, W = 0.6`); the measured values become the "mature stand" every later scenario is judged against. A B0x arm with propagules on reports the export separately |
 | B1a | one grazer, one stand | one pinned grazer on one bright mature stand, 12,000 ticks | income, leaf and fruit bitten, feces, `P`, `Q`, `W`, reserve, headroom-limited ticks | bite exceeds yield ~40× (§11); reserve saturates first; the stand is stripped, reflushes from `Q`, and dies; the grazer then starves. Coexistence is **not** expected |
-| B1b | one grazer, a region | one mobile legacy grazer on a 5 × 5 mature region, 36,000 ticks; twice, bright and average | as B1a plus cells visited, region foliage total, minimum stand `P`, stand deaths | bright: 25 × 0.00064 ≈ 0.016 m/s against a need of 0.0069, coexistence with retained foliage is **expected**; average: 25 × 0.00015 ≈ 0.004 against 0.0069, the grazer is expected to run the region down. Both reported; a bright failure is a finding |
+| B1b | one grazer, a region | one mobile legacy grazer on a 5 × 5 mature region, 36,000 ticks; twice, bright and average | as B1a plus cells visited, region foliage total `ΣP` (foliage only, reported apart from total plant material `Σ(P+W+Q+F)`), minimum stand `P`, stand deaths | bright: 25 × 0.00064 ≈ 0.016 m/s against a need of 0.0069, coexistence with retained foliage is **expected**; average: 25 × 0.00015 ≈ 0.004 against 0.0069, the grazer is expected to run the region down. Both reported; a bright failure is a finding |
 | B2 | depletion and relocation | one mobile legacy grazer, three bright mature stands three cells apart, 36,000 ticks | cells visited, time per stand, `P` minima, `Q` at departure, state on return | the grazer leaves a stand near the type-II floor and moves on; whether a stand recovers before return is reported, not assumed |
-| B3 | plant recovery | one mature stand, `P` moved by fiat to `D` at tick 0 (booked as an internal transfer), no animals; twice, bright and average | time to `0.5·P*` and `0.9·P*` of the B0 value (censored if unreached), `Q` dip depth and refill, `N` drawdown | reflush from `Q` first (visible `Q` fall), then income-limited; bright reaches `0.9·P*` in ~10 min, average is expected to sit near breakeven and be reported censored (§11) |
+| B3 | plant recovery | one mature stand, `P` moved by fiat to `D` at tick 0 (booked as an internal transfer), no animals; twice, bright and average | time to `0.5·P*` and `0.9·P*` of the B0 value (censored if unreached), `Q` dip depth and refill, `N` drawdown | reflush from `Q` first (visible `Q` fall), then income-limited; the §11 "~10 min" for bright `0.9·P*` is a hand estimate that ignores ripening's drain above `P = 0.45`, so the measured time stands and is not a pass/fail; average is expected to sit near breakeven and be reported censored (§11) |
 | B4a | repeated stripping and death | three pinned grazers on one isolated bright mature stand | time to `Q = 0`, dieback onset, `W` decline rate, death tick (censored if unreached), `Wd` at horizon, grazers' fate | `Q → 0`, dieback opens, `W` declines at `κ·m_w` (e-fold ~80 min at §11, so death is expected censored), no regrowth (no donors), grazers starve |
-| B4b | recovery after death | B4a's stand killed, grazers removed, living ring of eight bright mature stands around it, 36,000 ticks | tick of establishment, `W`, `P` at horizon as fractions of the B0 bright values | establishes within a minute (eight donors, §11); rebuilding is reported censored at 30 min |
+| B4b | recovery after death | B4a's stand killed, grazers removed, living ring of eight bright mature stands around it, 36,000 ticks | tick of establishment, `W`, `P` at horizon as fractions of the B0 bright values | establishes within a few minutes: each ring donor splits its budget among **all** its bare neighbours in the stripped world, not only the centre, so the §11 "eight donors" figure is an upper bound on the rate; rebuilding is reported censored at 30 min |
 | B5 | dietary exclusion | each founder kind pinned alone on (a) a foliage-only cell, (b) a charged litter-only cell, (c) a placed carcass (booked external material); conversions frozen: `m_p = ripen = drop = k_d = k_c = k_w = fall = 0` so a cell's food keeps its identity | survival time, reserve, served bites per stock | grazer and glider starve on (b), (c); burrower starves on (a); skimmer lives on all three at lower intake. Tests dependence, not desirability |
 | B6a | reproduction on a finite input | closed 3 × 3 bright mature region with renewal off (`g = ripen = m_p = 0`), two mobile legacy grazers, 36,000 ticks | births, deaths, population, escrow debits per birth, `U` | births while the stock lasts, then starvation to zero; no birth without an escrow debit; `U` non-increasing |
-| B6b | reproduction on a renewing patch | closed 7 × 7 bright mature region with renewal on, two mobile legacy grazers, 36,000 ticks | births, deaths, population, income vs total upkeep, doubling time vs stand recovery time | 49 × 0.00064 ≈ 0.031 m/s against 0.014 for two cruising grazers leaves a surplus, so some births are expected; whether they are followed by starvation is measured, not assumed; the ratio is reported |
-| B7 | establishment | one bright mature donor beside one bare cell, no animals, 36,000 ticks; twice, with the bare cell bright and at `L_eff·μ = 0.2` | establishment tick, then `P`, `A`, `W` every 1,000 ticks | the bright cell establishes (~5 min with one donor, §11) and shows positive foliage and income that grow; the dim cell establishes and is expected to die back; both reported |
+| B6b | reproduction on a renewing patch | closed 7 × 7 bright mature region with renewal on, two mobile legacy grazers, 36,000 ticks | births, deaths, population; per 1,000 ticks the region's plant income, the **actual** total upkeep paid by every body alive (maintenance + sensing + motor bills, from the ledger), and their ratio; the first-doubling time of the population (censored if none) against the B3 bright time to `0.5·P*`; escrow debit per birth | 49 × 0.00064 ≈ 0.031 m/s against 0.014 for two cruising grazers leaves a surplus, so some births are expected; whether they are followed by starvation is measured, not assumed; the ratio is reported |
+| B7 | establishment | one bright mature donor beside one bare cell, no animals, 36,000 ticks; twice, with the bare cell bright and at `L_eff·μ = 0.2`; the donor's and the recipient's light and moisture are pinned **per cell**, independently, so the donor is bright in both arms | establishment tick, then `P`, `A`, `W` every 1,000 ticks | the bright cell establishes (~5 min with one donor, §11) and shows positive foliage and income that grow; the dim cell establishes and is expected to die back; both reported |
 
 B1 and B6 are the coupled test the synthesis asks for: realised leaf consumption
 against production, intake limits and population growth, with retained foliage
@@ -721,10 +721,18 @@ Consequences for the existing tests: the schema-7…15 load-and-continue fixture
 names the old schema and stops); the `*-plus600-r0b` / `-r0d` continuation
 comparisons are retired rather than re-anchored, with a note in their
 provenance files. New continuation fixtures, if wanted, are generated from a
-schema-16 world in a later assignment. The `ecology_hash` schema-7 projection
-loses its purpose once no schema-7 world can load; keep it only if the
-care/no-care comparison still uses it, otherwise retire it with the fixtures.
-`state_hash` covers everything.
+schema-16 world in a later assignment.
+
+**`ecology_hash`** (revised after the implementation review, §18 fourth round):
+the old schema-7 projection cannot see any ecology-v1 stock, so it is replaced.
+`ecology_hash` is the FNV-1a 64 of the postcard encoding of the **current**
+`WorldState` with its care extension replaced by `CareState::default()` and
+nothing else altered: every field, organism, hunter, quiet, apex, neural and
+ecology-v1 stock and counter is hashed; only care is masked, so a care run and
+a no-care run of the same ecology still compare directly. A perturbation test
+must show that changing any single ecology-v1 vector entry or counter changes
+the hash and that toggling care state does not. `state_hash` stays the full
+encoding.
 
 The live display starts a fresh world after this lands. Trainer and tool runs
 likewise begin from fresh schema-16 worlds.
@@ -813,6 +821,21 @@ Third round (first implementation run, `b1dd394`, result note
 | B4a: death censored because dieback at `κ = 1` e-folds wood in ~80 min | not a defect; the expectation was wrong. §11 and B4a now say death is expected censored and the `W` decline rate is the measurement. `κ` stays provisional for the later tuning |
 | B7-1: establishment took 1,146 s not ~300 s because the donor's reserve drained into its own foliage | same root cause as B0-1; the §11 estimate stands once the reserve persists and is re-measured in the repair |
 | interpretations 6 (`e_p` removed in favour of `e_v`), 7 (`Q_0` as a constant), 3, 4, 5, 8–11 | accepted as reported; `ProducerConfig.energy_density` is gone and `plant.energy_density` is the one density, recorded in §14 |
+
+Fourth round (Astra's
+[implementation review](7_Research/ecology-v1-implementation-review-2026-09-15.md),
+same day; disposition "repair required before acceptance"):
+
+| Finding | Owner | Fix |
+| --- | --- | --- |
+| 1 (P1) 3h recipient eligibility read the pre-tick class, not post-3d `W⁴` | implementation | repair cycle 2: eligibility from the post-3d wood snapshot; regression with a same-tick death and with several donors and recipients |
+| 2 (P1) `ecology_hash` blind to every ecology-v1 stock | contract | §15.1 now defines it as the care-masked hash of the current state with a perturbation test; repair cycle 2 implements it |
+| 3 (P2) B0 exported propagules, B1b reported total material as foliage, B6b never measured actual upkeep, B7 lit donor and recipient together | scenario design (contract §13 was underspecified) | §13.2 rows for B0, B1b, B6b, B7 now say exactly what to hold and measure; repair cycle 2 re-runs them |
+| 4 (P2) A1/A3b/A4/A6/A9 could pass a wrong implementation | tests | repair cycle 2 adds the stock-by-stock, interior joint-withdrawal, four-food energy, remains-destination and multi-donor assertions named in the review |
+| 5 (P2) result note called censored or contrary measurements resolved | reporting | repair cycle 2 restates every result against the literal §13 criterion; §13.2 B3 and B4b expectations corrected here so the criteria are honest (the §11 hand times were upper bounds) |
+| 6 (P2) `producer.energy_density` still advertised in `params.rs` | implementation | repair cycle 2 removes it and adds a check that every search parameter name validates against a schema-16 config |
+| 7, 8 (P3) ledgers balance; remaining items are tuning questions (B1b-1, B3 average, R2-4) | none now | carried to the later whole-ecosystem search, unchanged |
+| 9 (P2) Astra's sandbox could not run cargo | environment | Fable ran the four commands (green) and repair cycle 2 attaches fresh summaries |
 
 The bounded implementation handoff is
 [ecology-v1-opus-2026-09-15](handoffs/ecology-v1-opus-2026-09-15.md). Training

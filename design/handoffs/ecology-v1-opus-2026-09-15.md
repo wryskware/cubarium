@@ -158,3 +158,43 @@ accepted from your interpretations. Scope of this cycle, nothing more:
    that actually send; report whatever they measure.
 4. `graft build`; commit as before; return in the same format, plus a short
    list of any finding from run 1 that the reserve fix did not resolve.
+
+## Repair cycle 2 (2026-09-15, after Astra's implementation review) — the last cycle
+
+Read [the review](../7_Research/ecology-v1-implementation-review-2026-09-15.md)
+whole and contract §18 fourth round. Scope is the review's seven-item "Fable
+repair handoff", with the contract changes already made for you: §15.1 defines
+the new `ecology_hash`; §13.2 rows B0, B1b, B3, B4b, B6b and B7 now state
+exactly what to hold, measure and expect. Do exactly these, nothing more:
+
+1. 3h recipient eligibility from the post-3d wood snapshot (review finding 1);
+   regressions: a stand that dies in 3d receives propagules in the same tick;
+   two donors sharing three recipients allocate by the §4.8 rule.
+2. `ecology_hash` per contract §15.1 (care-masked hash of the current state);
+   perturbation test that every ecology-v1 vector and counter moves it and care
+   state does not; update `care_replay.rs` and any other consumer.
+3. Scenarios: B0 with `propagule_rate = 0` plus a B0x arm with it on; B1b
+   reports foliage `ΣP` apart from total material; B6b measures actual total
+   upkeep from the ledger per 1,000 ticks, the ratio, first-doubling time and
+   the B3 recovery time; B7 pins donor and recipient light and moisture per
+   cell. Re-run all of B0–B7 once after items 1 and 2.
+4. Tests: strengthen A1 (stock-by-stock deltas around each subphase), A3b (an
+   interior case with both `k_d·dt` and `fall·dt` nonzero and below 1, exact
+   expected withdrawals), A4 (exact material and energy for all four foods),
+   A6 (exact destinations for ordinary death, miscarriage, hunter body and gut,
+   rejects, feces, with post-death residuals), A9 (same-tick death, several
+   donors and recipients); fix the tautological assertion at
+   `tests/ecology_v1.rs:616`.
+5. Remove `producer.energy_density` from `cubarium-search/src/params.rs` and
+   add a test that every parameter name applies to a schema-16 config and
+   validates.
+6. Result note: add a "run 3" section; restate every scenario result against
+   the literal §13.2 criterion, marking censored, missing or contrary
+   measurements as unresolved, not passes (review finding 5 lists the ones
+   currently overstated: B1a, B3, B4b, B5 skimmer, B6a). Attach the four
+   command summaries.
+7. `graft build`; commit as before; return in the same format plus a
+   finding-by-finding statement of what changed and what the re-run measured.
+
+No parameter changes. No other equation or ordering changes. Same constraints
+as the original brief.
