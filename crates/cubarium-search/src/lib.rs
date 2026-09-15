@@ -10,9 +10,17 @@
 //! - [`metrics`]: the component metrics and the scalar rank derived from them.
 //! - [`search`]: the bounded genetic search and every limit it runs under.
 //! - [`rng`]: the search's own keyed randomness, independent of the world's.
+//!
+//! It also hosts the **recurrent-policy trainer**, which is a different search over the same
+//! tick loop:
+//!
+//! - [`es`]: antithetic evolution strategies over a GRU policy's weights (R2a). It shares this
+//!   crate's build stamp and worker pattern and nothing else; every M1 command above is
+//!   untouched by it.
 
 #![forbid(unsafe_code)]
 
+pub mod es;
 pub mod evaluate;
 pub mod metrics;
 pub mod params;
