@@ -39,7 +39,7 @@ use cubarium_core::ids::OrganismId;
 use cubarium_core::organism::{Mode, Organism, Origin};
 use cubarium_core::rng::Counter;
 use cubarium_core::world::CellClass;
-use cubarium_core::{DT, MotorBill, World};
+use cubarium_core::{DT, World};
 use cubarium_surface::{CellId, Face, SurfacePoint, Vec2, cell_of};
 
 /// §13: every scenario runs at most 36,000 ticks (30 min simulated) and is censored there.
@@ -1292,40 +1292,22 @@ fn b5() {
 
 // ------------------------------------------------------------------------------ B6
 
-/// The **actual** per-tick upkeep of every body alive, from the world's own [`MotorBill`]:
-/// `(maintenance · S + sense_cost · r_sense) · dt`, summed over live bodies. This is the
-/// mandatory half of §7's bill — the part a body pays for existing, before it moves.
-fn mandatory_upkeep(world: &World) -> f64 {
-    let cfg = world.config();
-    world
-        .state
-        .organisms
-        .iter()
-        .map(|(_, o)| MotorBill::of(o, cfg).upkeep(DT))
-        .sum()
-}
-
-/// The **travel** half of the motor bill, from the distance the world actually transported
-/// each body this tick: `move_cost · S · |v| · dt`.
+/// The **complete** animal energy bill the world booked over the run so far, in `e`, read
+/// straight from the transient diagnostic the charging pass writes.
 ///
-/// The rotation term `move_cost · S · ROTATION_COST_SCALE · r · |ω| · dt` is not observable
-/// from outside the step — the resolved `ω` is not published — so this is a **lower bound** on
-/// the motor bill, and it is reported as one.
-fn travel_bill(world: &World) -> f64 {
-    let move_cost = world.config().organism.move_cost;
-    world
-        .state
-        .organisms
-        .iter()
-        .map(|(id, o)| {
-            let px: f64 = world
-                .moved_segments(id)
-                .iter()
-                .map(|seg| (seg.to - seg.from).length())
-                .sum();
-            move_cost * o.structure * px
-        })
-        .sum()
+/// Returns `(owed, paid, mandatory)`. `owed` is `Σ MotorBill::total_cost` — maintenance,
+/// sensing and **both** halves of the motor charge, translation and rotational sweep — over
+/// every body billed, **including any removed later in the same tick**. `paid` is what they
+/// could actually raise. The difference is the bill a dying body left unpaid.
+///
+/// Repair cycle 3 replaces the reconstruction this scenario used before, which summed
+/// `MotorBill::upkeep` over the bodies still alive *after* the step and added a travel term
+/// derived from the distance each was transported. That omitted the rotational motor charge
+/// and every bill paid by a body that died in the tick, so its ratio was an upper bound
+/// (Astra's cycle 2 verification).
+fn body_bill(world: &World) -> (f64, f64, f64) {
+    let d = world.intake_diagnostics();
+    (d.body_bill_total, d.body_bill_paid, d.body_bill_upkeep)
 }
 
 /// Escrow openings, so "no birth without a debited escrow" is measured rather than asserted:
@@ -1394,10 +1376,9 @@ fn run_b6(renewal: bool, half: i32, label: &str) {
     // as the population changes, rather than a static two-body figure. Run 2's "2.24× surplus"
     // came from a fixed denominator and a peak population of 8–10 (Astra's implementation
     // review, finding 3).
-    let mut upkeep_total = 0.0f64;
-    let mut travel_total = 0.0f64;
-    let mut window_upkeep = 0.0f64;
-    let mut window_travel = 0.0f64;
+    let (mut last_owed, mut last_paid, mut last_mandatory) = body_bill(&world);
+    let (opening_owed, opening_paid, opening_mandatory) = (last_owed, last_paid, last_mandatory);
+    let mut window_owed = 0.0f64;
     let mut window_income = 0.0f64;
     let mut last_income = world.intake_diagnostics().plant_income;
     let mut last_eaten = 0.0f64;
@@ -1411,10 +1392,10 @@ fn run_b6(renewal: bool, half: i32, label: &str) {
         if renewal { "on" } else { "off" }
     );
     println!(
-        "Upkeep is the world's own `MotorBill::upkeep` — `(maintenance · S + sense_cost · \
-         r_sense) · dt` — summed over every live body, plus the **travel** half of the motor \
-         bill from the distance the world actually transported each one. The rotation half is \
-         not published per tick, so `upkeep` is a lower bound and the ratio an upper one."
+        "Upkeep is the **complete** bill the world booked, read from the charging pass itself: \
+         `MotorBill::total_cost` — maintenance, sensing and both halves of the motor charge, \
+         translation and rotational sweep — over every body billed, **including any removed \
+         later in the same tick**. It is not a reconstruction and it is not a bound."
     );
     println!(
         "Units: plant income is material (m/s); upkeep is energy (e/s). They are compared \
@@ -1443,7 +1424,7 @@ fn run_b6(renewal: bool, half: i32, label: &str) {
             let seconds = SAMPLE as f64 * DT;
             window_income = (diag.plant_income - last_income) / seconds;
             last_income = diag.plant_income;
-            let bill = (window_upkeep + window_travel) / seconds;
+            let bill = window_owed / seconds;
             let need = bill / ENERGY_PER_FOLIAGE_M;
             let eaten_now =
                 diag.producer_eaten + diag.fruit_eaten + diag.litter_eaten + diag.carrion_eaten;
@@ -1461,20 +1442,18 @@ fn run_b6(renewal: bool, half: i32, label: &str) {
                     escrows.open.len(),
                 );
             }
-            window_upkeep = 0.0;
-            window_travel = 0.0;
+            window_owed = 0.0;
         }
         if tick == HORIZON {
             break;
         }
-        let paid = mandatory_upkeep(&world);
         world.step();
         world.drain_events();
-        let moved = travel_bill(&world);
-        upkeep_total += paid;
-        travel_total += moved;
-        window_upkeep += paid;
-        window_travel += moved;
+        let (owed, paid, mandatory) = body_bill(&world);
+        window_owed += owed - last_owed;
+        last_owed = owed;
+        last_paid = paid;
+        last_mandatory = mandatory;
         escrows.observe(&world);
         peak = peak.max(world.population());
         births = world.state.births_total;
@@ -1502,17 +1481,21 @@ fn run_b6(renewal: bool, half: i32, label: &str) {
         if escrows.opened > 0 { escrows.debited / escrows.opened as f64 } else { f64::NAN }
     );
     let seconds = HORIZON as f64 * DT;
-    let bill = upkeep_total + travel_total;
-    let need = bill / seconds / ENERGY_PER_FOLIAGE_M;
+    let owed = last_owed - opening_owed;
+    let paid = last_paid - opening_paid;
+    let mandatory = last_mandatory - opening_mandatory;
+    let motor = owed - mandatory;
+    let need = owed / seconds / ENERGY_PER_FOLIAGE_M;
     println!(
-        "- actual upkeep over the run: mandatory {:.4} e ({:.3e} e/s mean), travel {:.4} e \
-         ({:.3e} e/s mean), total ≥ {bill:.4} e. In §11's foliage units that is a mean need of \
-         {need:.3e} m/s — against a **static** 0.014 m/s for two cruising grazers, which is \
-         what run 2 used, on a population that peaked at {peak}.",
-        upkeep_total,
-        upkeep_total / seconds,
-        travel_total,
-        travel_total / seconds,
+        "- actual upkeep over the run: **{owed:.4} e owed**, {paid:.4} e paid — mandatory \
+         {mandatory:.4} e ({:.3e} e/s mean), motor {motor:.4} e ({:.3e} e/s mean), both halves \
+         of it. The {:.4} e the bodies could not raise is the bill the dying left unpaid. In \
+         §11's foliage units the owed bill is a mean need of {need:.3e} m/s — against a \
+         **static** 0.014 m/s for two cruising grazers, which is what run 2 used, on a \
+         population that peaked at {peak}.",
+        mandatory / seconds,
+        motor / seconds,
+        owed - paid,
     );
     let income_rate = world.intake_diagnostics().plant_income / seconds;
     println!(

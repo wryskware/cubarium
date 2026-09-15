@@ -442,6 +442,29 @@ pub struct IntakeDiagnostics {
     pub plant_income: f64,
     pub plant_maintenance_unpaid: f64,
     pub propagule_sent: f64,
+
+    /// **The complete animal energy bill of the run**, in `e`, accumulated inside the pass
+    /// that charges it — so it is what the world actually booked, not a reconstruction.
+    ///
+    /// `body_bill_total` is what every body **owed**: `MotorBill::total_cost`, which is
+    /// `(maintenance · S + move_cost · S · billed_motion(speed, sweep) + sense_cost ·
+    /// r_sense) · dt` — maintenance, sensing and **both** halves of the motor bill, the
+    /// translation and the rotational sweep. `body_bill_paid` is what it **actually paid**,
+    /// after the clamp to the energy it could raise; the two differ only for a body that could
+    /// not cover its own upkeep, which is a body that dies this tick. `body_bill_upkeep` is
+    /// the mandatory half alone (`MotorBill::upkeep`), so the motor half is the difference, to
+    /// floating-point association.
+    ///
+    /// **Every body that was billed is in here, including one removed later in the same
+    /// tick** — a starving body, a captured prey, a miscarrying parent — because the charge is
+    /// recorded where it is levied, in step 6, and removals commit in step 9. A concealed apex
+    /// offspring's dormancy upkeep is counted too, at its own site.
+    ///
+    /// Transient like every other field here: never persisted, never hashed, never read back
+    /// by the tick, and zero again after a reload. Recording it changes no bill.
+    pub body_bill_total: f64,
+    pub body_bill_paid: f64,
+    pub body_bill_upkeep: f64,
     /// What the mouths asked their cells for, before the proportional share. Larger than the
     /// three totals above exactly when a cell could not serve everyone standing in it, which
     /// is what makes competition visible rather than inferred.

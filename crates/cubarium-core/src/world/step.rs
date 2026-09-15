@@ -1258,6 +1258,12 @@ impl World {
                 // `u = 0` and stands still, and the shortfall is never motion. Movement is paid
                 // from the battery, as it always was.
                 let cost = bill.total_cost(motion.speed, motion.sweep, dt);
+                // The complete bill, recorded where it is levied: maintenance, sensing and
+                // both halves of the motor charge, for every body billed this tick — including
+                // one that is removed later in the same tick, because removals commit in step
+                // 9 and this is step 6 (`crate::world::IntakeDiagnostics`).
+                intake.body_bill_total += cost;
+                intake.body_bill_upkeep += bill.upkeep(dt);
                 let mut collected = cost.min(o.energy).max(0.0);
                 o.energy -= collected;
                 let shortfall = (cost - collected).max(0.0);
@@ -1287,6 +1293,10 @@ impl World {
                     }
                 }
                 heat(collected);
+                // What it could actually raise. Less than `cost` only for a body that failed
+                // to pay for being alive, which the starvation predicate above has already
+                // marked for removal.
+                intake.body_bill_paid += collected;
             }
 
             // 6b. Capture settlement, from the common post-movement state and before any
@@ -1855,6 +1865,12 @@ impl World {
                     let paid = cost.min(o.energy).max(0.0);
                     o.energy -= paid;
                     heat(paid);
+                    // A concealed offspring is a body too: its dormancy upkeep is part of the
+                    // run's complete animal bill. It has no motor half — it does not move — so
+                    // the whole charge is mandatory.
+                    intake.body_bill_total += cost;
+                    intake.body_bill_upkeep += cost;
+                    intake.body_bill_paid += paid;
                     apex_dormancy.maintenance_energy_paid_total += paid;
                     let record = &mut apex_dormancy.dormant[index];
                     record.maintenance_energy_paid += paid;

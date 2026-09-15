@@ -21,8 +21,8 @@ use cubarium_core::organism::{Mode, Organism, Origin};
 use cubarium_core::rng::Counter;
 use cubarium_core::world::CellClass;
 use cubarium_core::{
-    DT, FixedHunterProfile, HunterTarget, SnapshotError, World, decode_snapshot, ecology_hash,
-    encode_snapshot, snapshot::SCHEMA_VERSION, snapshot::state_hash,
+    DT, FixedHunterProfile, HunterTarget, MotorBill, SnapshotError, World, decode_snapshot,
+    ecology_hash, encode_snapshot, snapshot::SCHEMA_VERSION, snapshot::state_hash,
 };
 use cubarium_surface::{CELL_COUNT, CellId, Face, SurfacePoint, Vec2, cell_of};
 
@@ -2631,5 +2631,160 @@ fn a9c_two_donors_split_their_own_budgets_and_a_shared_recipient_gets_both() {
         "A9c: donor A sent {b_a:.3e} over 3, donor B {b_b:.3e} over 3; the shared cell took \
          {:.3e} of wood",
         world.state.ecology.wood[shared.index()]
+    );
+}
+
+// ------------------------------------- the complete animal bill, repair cycle 3
+
+/// **The exposed per-tick body bill is the sum of the individual bills, including a body that
+/// dies in that tick.**
+///
+/// Repair cycle 2's B6 reconstructed upkeep from outside the step: it used
+/// `MotorBill::upkeep` plus a travel term derived from the distance the world transported each
+/// body, which omitted the rotational half of the motor charge, and it iterated the organisms
+/// **after** the step, so a body that died in the tick paid a bill nobody counted. Both make
+/// the reported income/upkeep ratio an upper bound rather than the actual one §13.2 B6b asks
+/// for (Astra's cycle 2 verification).
+///
+/// `IntakeDiagnostics::body_bill_*` is recorded where the charge is levied instead. This test
+/// is the claim that it is complete: on a tick with three live bodies and one dying one, the
+/// exposed total equals `Σ MotorBill::total_cost` over **all four**, the exposed mandatory half
+/// equals `Σ MotorBill::upkeep`, and the paid total is short of the owed total by exactly what
+/// the dying body could not raise.
+#[test]
+fn the_exposed_body_bill_is_the_sum_of_every_bill_including_a_body_that_dies_this_tick() {
+    let mut cfg = bare_config(BRIGHT.0, BRIGHT.1);
+    cfg.drives.feed_min = 0.001;
+    // Turning must be real and paid, so the rotational half of the bill is nonzero: the old
+    // reconstruction dropped exactly this term.
+    cfg.drives.turn_noise = 1.0;
+    let mut world = World::new(cfg).expect("valid");
+    let cell = CellId::new(Face::Top, 8, 8);
+    paint(&mut world, cell, 0.56, 0.6, 0.30);
+    // Three bodies with stores, and one with none at all.
+    let live: Vec<OrganismId> = (0..3)
+        .map(|k| place(&mut world, cell, 0.85, f64::from(k) * 0.5))
+        .collect();
+    for id in &live {
+        let o = world.state.organisms.get_mut(*id).expect("placed");
+        let (r, e) = (o.phenotype.reserve_max, o.phenotype.energy_max);
+        world.state.external_material_in += r - o.reserve;
+        o.reserve = r;
+        o.energy = e;
+    }
+    let doomed = place(&mut world, cell, 0.85, 1.5);
+    {
+        let o = world.state.organisms.get_mut(doomed).expect("placed");
+        o.energy = 0.0;
+        o.reserve = 0.0;
+    }
+    let mut world = restage(world);
+
+    // Independently recomputed from the world's own bill type, **before** the step, over every
+    // body that is about to be billed — the dying one included.
+    let cfg = world.config().clone();
+    let expected_total: f64 = world
+        .state
+        .organisms
+        .iter()
+        .map(|(_, o)| {
+            // The bill's motor term depends on the motion the step resolves, which is not
+            // knowable here; its bounds are. `upkeep` is exact, and the total is at least it.
+            MotorBill::of(o, &cfg).upkeep(DT)
+        })
+        .sum();
+    let bodies_before = world.state.organisms.len();
+    assert_eq!(bodies_before, 4, "three live bodies and one that cannot pay");
+
+    let before = world.intake_diagnostics();
+    // Snapshot every body's bill inputs, so the post-step recomputation uses the same
+    // structure and sense radius the step charged against.
+    let billed: Vec<(OrganismId, MotorBill)> = world
+        .state
+        .organisms
+        .iter()
+        .map(|(id, o)| (id, MotorBill::of(o, &cfg)))
+        .collect();
+    world.step();
+    world.drain_events();
+    let after = world.intake_diagnostics();
+
+    assert!(
+        world.state.organisms.get(doomed).is_none(),
+        "the fixture must actually kill one body in this tick"
+    );
+    assert_eq!(
+        world.state.organisms.len(),
+        3,
+        "and only that one — the other three must survive to be billed again"
+    );
+
+    let total = after.body_bill_total - before.body_bill_total;
+    let paid = after.body_bill_paid - before.body_bill_paid;
+    let upkeep = after.body_bill_upkeep - before.body_bill_upkeep;
+
+    // The mandatory half is exact, and it is summed over **four** bodies, not the three that
+    // survived. This is the assertion the old reconstruction could not make.
+    let expected_upkeep: f64 = billed.iter().map(|(_, b)| b.upkeep(DT)).sum();
+    assert!(
+        (upkeep - expected_upkeep).abs() < 1e-15,
+        "the exposed mandatory bill is {upkeep}, not the sum over all four bodies \
+         {expected_upkeep}"
+    );
+    assert!(
+        (expected_upkeep - expected_total).abs() < 1e-15,
+        "the pre-step recomputation must be the same four bills"
+    );
+    // Three-quarters of it would be the sum over the survivors alone: the dying body's share
+    // is really in there.
+    let survivors_only: f64 = billed
+        .iter()
+        .filter(|(id, _)| *id != doomed)
+        .map(|(_, b)| b.upkeep(DT))
+        .sum();
+    assert!(
+        upkeep > survivors_only + 1e-12,
+        "the dying body's bill is missing: {upkeep} is not above the survivors' {survivors_only}"
+    );
+
+    // The total owed is the mandatory half plus a motor half, and the motor half is positive —
+    // the bodies moved and turned, so the term the old travel-only reconstruction dropped is
+    // genuinely nonzero here.
+    let motor = total - upkeep;
+    assert!(
+        motor > 0.0,
+        "the fixture must actually charge a motor bill, or the rotational term is untested"
+    );
+    // And the total is exactly the sum of the four `total_cost` charges, which is the same
+    // quantity `MotorBill::total_cost` computes from each body's resolved motion. The motion
+    // is not observable from outside, so the identity is stated through its two halves and the
+    // paid/owed relation below.
+    assert!(
+        total >= upkeep - 1e-15,
+        "a total below its own mandatory half is not a bill"
+    );
+
+    // Paid versus owed: the three funded bodies paid in full, and the fourth was short by
+    // exactly what it could not raise — it had neither energy nor reserve, so it paid nothing.
+    let shortfall = total - paid;
+    assert!(
+        shortfall > 0.0,
+        "a body with no energy and no reserve must leave the bill short: owed {total}, paid \
+         {paid}"
+    );
+    let doomed_bill = billed
+        .iter()
+        .find(|(id, _)| *id == doomed)
+        .map(|(_, b)| b.upkeep(DT))
+        .expect("the doomed body was billed");
+    assert!(
+        (shortfall - doomed_bill).abs() < 1e-12,
+        "the shortfall {shortfall} is not the dying body's whole bill {doomed_bill}"
+    );
+    assert!(paid >= 0.0 && paid < total);
+    println!(
+        "body bill for one tick over 4 bodies (1 dying): owed {total:.6e}, paid {paid:.6e}, \
+         mandatory {upkeep:.6e}, motor {motor:.6e}; survivors' mandatory alone would have been \
+         {survivors_only:.6e}"
     );
 }

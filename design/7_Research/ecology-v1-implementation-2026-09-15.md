@@ -38,7 +38,12 @@ them.
 - **Repair cycle 2** follows commit `5a0c813`: Astra's
   [implementation review](ecology-v1-implementation-review-2026-09-15.md), §15.1's new
   care-masked `ecology_hash`, the rewritten §13.2 rows for B0, B1b, B3, B4b, B6b and B7, and
-  §18's fourth round. This is the last cycle.
+  §18's fourth round.
+- **Repair cycle 3** follows commit `88fe2ac`: Astra verified cycle 2 and accepted six of its
+  seven items. The one left was B6 — its upkeep was a reconstruction that omitted the
+  rotational motor charge and every bill paid by a body that died in the tick, so the reported
+  ratio was an upper bound rather than the actual one §13.2 B6b requires. One item, and the
+  last cycle.
 - `graft build` refreshed after each change.
 - Schema 16, config version 8. No migration path exists anywhere in the tree.
 
@@ -54,10 +59,15 @@ cargo test -p cubarium           # 569 passed, 0 failed, 16 ignored
 cargo run -p cubarium-core --release --example ecology_v1_scenarios -- all   # 71 s wall, exit 0
 ```
 
-Repair cycle 1's totals, for comparison: core 461, search 66, host 569. The five new core tests
-are the A1 stock-by-stock isolation arms, the A4 four-food ledger, the A7b `ecology_hash`
-perturbation test and the two A9 propagule regressions; the two new search tests are the
-schema-16 parameter check and the exclusion-list check.
+Repair cycle 1's totals, for comparison: core 461, search 66, host 569; repair cycle 2's: core
+466. The six new core tests are the A1 stock-by-stock isolation arms, the A4 four-food ledger,
+the A7b `ecology_hash` perturbation test, the two A9 propagule regressions, and repair cycle 3's
+body-bill completeness test; the two new search tests are the schema-16 parameter check and the
+exclusion-list check.
+
+Repair cycle 3 re-ran **B6a and B6b only**, as its brief directs; every other scenario figure
+below is from the full run-3 pass and is unaffected, because nothing outside B6's reporting
+changed.
 
 All three suites are green. The two ignored core tests and the sixteen ignored host tests are
 pre-existing (`#[ignore]` fixture regenerators and capture-writing art studies), untouched here.
@@ -77,9 +87,13 @@ contrary, the verdict is *unresolved*, not a pass. Astra's review named five res
 had overstated — B1a, B3, B4b, B5's skimmer and B6a — and those are the first five to read.
 
 Fixtures changed in this cycle: B0 holds propagules off (a B0x arm reports the export), B1b
-reports foliage apart from total plant material, B6 measures the bodies' **actual** upkeep from
-the world's own `MotorBill` and the escrow debit behind every birth, and B7 pins the donor's and
-the recipient's light per cell so only the recipient changes between its arms.
+reports foliage apart from total plant material, B6 measures the **complete** bill the world
+booked — maintenance, sensing and both halves of the motor charge, over every body billed
+including any removed later in the same tick — and the escrow debit behind every birth; and B7
+pins the donor's and the recipient's light per cell so only the recipient changes between its
+arms. **B6's figures were corrected again in repair cycle 3**, after Astra's verification found
+the cycle-2 reconstruction was a lower bound on upkeep; the section below carries the corrected
+numbers and says what moved.
 
 ### B0 — stand baseline, propagules off
 
@@ -239,7 +253,9 @@ either.
 | **escrows opened** | **2** — so births ≤ escrows opened, and no birth was unfunded |
 | material debited into escrow | 1.2000 m, 0.6000 m per escrow |
 | peak population / extinct | 4 / 11,929 (596 s) |
-| actual upkeep over the run | mandatory 8.456 e (4.70e-3 e/s), travel 0.540 e (3.00e-4 e/s) |
+| **complete bill over the run** | **9.1514 e owed**, 9.1509 e paid — mandatory 8.4559 e (4.70e-3 e/s), motor 0.6955 e (3.86e-4 e/s), both halves |
+| unpaid (what the dying could not raise) | 0.0005 e |
+| mean need in §11 foliage units | 4.383e-3 m/s |
 | plant income | **0.0000 m** |
 | cumulative `light_in − heat_out` | **−17.12 e** |
 
@@ -256,22 +272,36 @@ figure it is.
 
 | window (ticks) | pop | births | deaths | Σ P | income m/s | eaten m/s | upkeep e/s | need m/s | **ratio** |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 12,000 | 6 | 5 | 1 | 13.319 | 4.18e-2 | 5.27e-2 | 2.88e-2 | 2.48e-2 | **1.68** |
-| 16,000 | 7 | 6 | 1 | 8.117 | 2.69e-2 | 5.77e-2 | 3.97e-2 | 3.42e-2 | **0.79** |
-| 20,000 | 8 | 8 | 2 | 3.481 | 1.31e-2 | 3.78e-2 | 4.32e-2 | 3.72e-2 | **0.35** |
-| 24,000 | 8 | 8 | 2 | 0.914 | 3.68e-3 | 1.14e-2 | 4.37e-2 | 3.77e-2 | **0.10** |
-| 28,000 | 3 | 8 | 7 | 0.074 | 4.72e-4 | 1.67e-3 | 1.64e-2 | 1.42e-2 | **0.03** |
+| 4,000 | 4 | 2 | 0 | 21.660 | 6.08e-2 | 3.87e-2 | 2.01e-2 | 1.73e-2 | **3.52** |
+| 8,000 | 4 | 3 | 1 | 18.508 | 5.30e-2 | 3.46e-2 | 2.41e-2 | 2.08e-2 | **2.55** |
+| 12,000 | 6 | 5 | 1 | 13.319 | 4.18e-2 | 5.27e-2 | 2.90e-2 | 2.50e-2 | **1.67** |
+| 16,000 | 7 | 6 | 1 | 8.117 | 2.69e-2 | 5.77e-2 | 4.03e-2 | 3.47e-2 | **0.78** |
+| 20,000 | 8 | 8 | 2 | 3.481 | 1.31e-2 | 3.78e-2 | 4.36e-2 | 3.76e-2 | **0.35** |
+| 24,000 | 8 | 8 | 2 | 0.914 | 3.68e-3 | 1.14e-2 | 4.42e-2 | 3.81e-2 | **0.10** |
+| 28,000 | 3 | 8 | 7 | 0.074 | 4.72e-4 | 1.67e-3 | 1.68e-2 | 1.45e-2 | **0.03** |
 
 Whole run: 8 births, 10 deaths, peak 9, extinct at 30,983 (1,549 s). **8 escrows opened for 8
-births**, 4.8 m debited. Mean income 2.49e-2 m/s against a mean need of 2.12e-2 m/s — **ratio
-1.18**. First doubling 2 → 4 at tick 3,001 (150 s); B3's bright recovery to 0.5·P* on the same
-stand is 823 s.
+births**, 4.8 m debited. The complete bill is **44.8542 e owed**, 44.8527 e paid — mandatory
+41.9411 e (2.33e-2 e/s) and motor 2.9131 e (1.62e-3 e/s), both halves; the 0.0015 e gap is the
+bill the dying left unpaid. Mean income 2.49e-2 m/s against a mean need of 2.148e-2 m/s —
+**ratio 1.16**. First doubling 2 → 4 at tick 3,001 (150 s); B3's bright recovery to 0.5·P* on
+the same stand is 823 s.
 
 Units: income and need are both m/s. Upkeep is energy, converted through §11's own chain — a
-unit grazer wins ≈1.16 e per metre of foliage bitten — so `need = upkeep / 1.16`. Upkeep is the
-world's own `MotorBill::upkeep` summed over live bodies plus the travel half of the motor bill
-from the distance the world actually transported each one; the rotation half is not published
-per tick, so `need` is a **lower** bound and `ratio` an **upper** one.
+unit grazer wins ≈1.16 e per metre of foliage bitten — so `need = upkeep / 1.16`. **Upkeep is
+the complete bill the world booked**, read from the charging pass itself:
+`MotorBill::total_cost` — maintenance, sensing and **both** halves of the motor charge,
+translation and rotational sweep — over every body billed, **including any removed later in the
+same tick**. It is not a reconstruction and it is not a bound.
+
+**Repair cycle 3 corrected these figures.** Run 3 as first written reconstructed upkeep from
+outside the step: `MotorBill::upkeep` over the bodies still alive *after* it, plus a travel term
+from the distance each was transported. That dropped the rotational motor charge and every bill
+a body paid in the tick it died, so the numbers were a lower bound on upkeep and the ratio an
+upper bound on the surplus — which is not the "actual total upkeep" §13.2 B6b asks for (Astra's
+cycle 2 verification). The measured motor half is 2.9131 e where the travel-only term gave
+2.3161 e, so the rotational sweep is ~26 % of the motor bill; the whole-run ratio moves from
+1.18 to **1.16**, and the window at 16,000 from 0.79 to **0.78**.
 
 **Criterion (§13.2, rewritten in this round):** "per 1,000 ticks the region's plant income, the
 **actual** total upkeep paid by every body alive, and their ratio; the first-doubling time
@@ -279,11 +309,12 @@ against the B3 bright time to `0.5·P*`; escrow debit per birth."
 **Verdict: measured, and the surplus does not exist.** Run 2 reported a "2.24× surplus" and
 called the extinction that followed a finding. Astra was right that the ratio was a
 scenario-design artefact: it divided a per-stand hand yield by a **static** two-body need on a
-population that peaked at 9. Measured against the bodies' own bill, the ratio is **1.18 over the
-run and falls below 1 by tick 16,000** — the population overtakes its food. The mechanism is in
-the doubling comparison: the population doubles in **150 s** while the stand it eats needs
-**823 s** to recover half its foliage, 5.5× slower. That is the coupled failure §13's B1/B6 pair
-was built to look for, and it is now measured rather than inferred.
+population that peaked at 9. Measured against the bodies' own **complete** bill, the ratio is
+**1.16 over the run, starts at 3.52 and falls below 1 between ticks 12,000 and 16,000** — the
+population overtakes its food. The mechanism is in the doubling comparison: the population
+doubles in **150 s** while the stand it eats needs **823 s** to recover half its foliage, 5.5×
+slower. That is the coupled failure §13's B1/B6 pair was built to look for, and it is now
+measured rather than inferred.
 
 ### B7 — establishment
 
@@ -869,6 +900,12 @@ format and the motor contract are untouched. `GRU_PARAMETERS` is still 10,215 an
   post-3d wood), `snapshot.rs` (`ecology_hash`), `world/view.rs` (`pin_cell_habitat`), and
   `cubarium-search/src/params.rs` (the exclusion text). Nothing in `neural/`, `step.rs`,
   `config.rs` or the optimizer moved, and no parameter value changed in any cycle.
+- **Repair cycle 3 touched two**: `world/state.rs` (three transient `body_bill_*` counters on
+  `IntakeDiagnostics`) and `world/step.rs` (three accumulation lines at the two sites that
+  already levy the charge — the movement pass and the dormancy pass). **No bill changed**: the
+  counters read `MotorBill::total_cost`, `MotorBill::upkeep` and the amount actually collected,
+  all of which the step already computed. Nothing is persisted or hashed, and the figures are
+  zero again after a reload, like every other field on that struct.
 - **`ecology_hash` now covers the ecology**, which retires run 1's open finding 7. A consumer
   that compared a care run with a no-care run still compares — only care is masked — but a
   reader should know the number changed meaning: it is the current state, not a schema 7
@@ -882,11 +919,12 @@ format and the motor contract are untouched. `GRU_PARAMETERS` is still 10,215 an
 | --- | --- | --- |
 | **1 (P1) 3h read the pre-tick class, not post-3d `W⁴`** | `work.class` is now written from the post-3d wood inside the per-cell block, so a stand that dies in 3d is bare to 3h on the **same** tick. Donor eligibility is unchanged by this — a dead cell has `W⁴ = 0 < W_est` under either reading. | `a9b_a_stand_that_dies_in_3d_receives_a_propagule_in_the_same_tick`: the stand dies on tick 1 and receives 8.33e-6 m of propagule on tick 1. Under the old reading it would have received nothing. |
 | **2 (P1) `ecology_hash` blind to every ecology v1 pool** | It is now the FNV-1a of the postcard encoding of the **current** `WorldState` with `care = CareState::default()` and nothing else altered (§15.1). | `a7b_the_ecology_hash_moves_with_every_ecology_stock_and_not_with_care`: each of the five ecology vectors perturbed by 1e-9 in three cells apiece, both counters, and six pre-existing fields all move the hash; a fully populated care ledger does not; `state_hash` and `ecology_hash` agree exactly when care is empty and differ when it is not. Four stale claims elsewhere in the suite were corrected to the new definition, and `care_replay.rs` passes unchanged. |
-| **3 (P2) B0, B1b, B6b and B7 did not measure their claims** | B0 holds `propagule_rate = 0` with a B0x arm reporting the export; B1b reports foliage `ΣP` apart from `Σ(P+W+Q+F)`; B6 measures actual upkeep from `MotorBill` plus the travel bill, the income/need ratio in one unit, the first-doubling time and the escrow debit behind every birth; B7 pins donor and recipient light per cell through the new `World::pin_cell_habitat`. | B0 bright reserve 0.0894 → **0.1967** (full) once the export stops. B1b bright foliage is **11.972 m**, not run 2's mislabelled 23.037. B6b's measured ratio is **1.18**, not 2.24, and falls below 1 by tick 16,000. B7's two arms now establish on the **same** tick, isolating the recipient's light. |
+| **3 (P2) B0, B1b, B6b and B7 did not measure their claims** | B0 holds `propagule_rate = 0` with a B0x arm reporting the export; B1b reports foliage `ΣP` apart from `Σ(P+W+Q+F)`; B6 measures the income/need ratio in one unit, the first-doubling time and the escrow debit behind every birth — and, since repair cycle 3, the **complete** bill from the charging pass itself; B7 pins donor and recipient light per cell through the new `World::pin_cell_habitat`. | B0 bright reserve 0.0894 → **0.1967** (full) once the export stops. B1b bright foliage is **11.972 m**, not run 2's mislabelled 23.037. B6b's measured ratio is **1.16**, not 2.24, and falls below 1 between ticks 12,000 and 16,000. B7's two arms now establish on the **same** tick, isolating the recipient's light. |
 | **4 (P2) A1/A3b/A4/A6/A9 could pass a wrong implementation** | Five strengthenings, listed below. | `cargo test -p cubarium-core` 466 passed (461 before). |
 | **5 (P2) the note called censored results passes** | The whole run 3 section is written criterion-first, and every verdict is *met* or *unresolved* against the literal §13.2 text. | B1a, B2, B5's skimmer clause and B7's dieback clause are now **unresolved**; B3 and B4b are met only because §13.2's expectations were themselves corrected in this round. |
 | **6 (P2) `params.rs` advertised `producer.energy_density`** | The exclusion entry names `plant.energy_density` and explains the fold; a second entry excludes the whole `plant.*` block per §15.3. | Two new tests: every searched name applies to a schema 16 config, round-trips bit-exactly through `apply`/`read`, and validates; and the exclusion list names no removed key. |
 | **7, 8 (P3)** | Nothing to change. The three tuning questions (B1b-1, B3 average, R2-4) are carried forward unchanged. | — |
+| **cycle 2 verification: B6's upkeep was a lower bound** | Repair cycle 3. `IntakeDiagnostics` gains `body_bill_total`, `body_bill_paid` and `body_bill_upkeep`, accumulated where the charge is levied, so the complete bill — both halves of the motor charge included — is counted for every body billed, whether or not it survives the tick. B6a and B6b read it and were re-run. | `the_exposed_body_bill_is_the_sum_of_every_bill_including_a_body_that_dies_this_tick`: four bodies, one with no stores, on a fixture with turn noise on. Exposed mandatory 1.240e-3 e equals `Σ MotorBill::upkeep` over **all four** and exceeds the survivors' 9.300e-4 e; the motor half is 4.813e-5 e and positive; the owed-minus-paid gap is exactly the dying body's whole bill. B6b's whole-run ratio moves 1.18 → **1.16**. |
 | **9 (P2) cargo was blocked in Astra's sandbox** | The four commands were run here. | The summaries are in "Verification" above: 466 / 68 / 569 passed, 0 failed, scenarios exit 0 in 71 s. |
 
 The five test strengthenings, each answering a specific way the old test could pass a wrong
@@ -926,9 +964,10 @@ No parameter was changed in any cycle, and none is proposed here.
    stands dead, grazer starved at 1,262 s. Astra classified it a **later tuning question**
    (finding 8, item 1) once the reporting was corrected, and the corrected reporting does not
    change the outcome.
-2. **B6b — the population overtakes its food.** Measured ratio 1.18 over the run, below 1 from
-   tick 16,000; doubling in 150 s against an 823 s recovery. Now a measurement rather than a
-   scenario artefact, and a tuning question.
+2. **B6b — the population overtakes its food.** Measured ratio **1.16** over the run against
+   the bodies' complete bill, starting at 3.52 and below 1 between ticks 12,000 and 16,000;
+   doubling in 150 s against an 823 s recovery. Now a measurement rather than a scenario
+   artefact, and a tuning question.
 3. **B3 average censored in both arms** — §13.2's own expected direction, and a tuning question
    (finding 8, item 5).
 4. **R2-4 — `p_reflush · α = q_cap` at §11's values**, so a full reserve buys only `Q_max/(1+c_g)`
