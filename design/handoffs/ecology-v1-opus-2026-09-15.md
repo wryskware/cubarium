@@ -198,3 +198,21 @@ exactly what to hold, measure and expect. Do exactly these, nothing more:
 
 No parameter changes. No other equation or ordering changes. Same constraints
 as the original brief.
+
+## Repair cycle 3 (2026-09-15, after Astra's verification of cycle 2) — one item
+
+Astra accepted six of the seven cycle-2 items. The one left: B6's upkeep is a
+lower bound (rotational motor cost omitted; bodies removed during the tick not
+counted), so its income/upkeep ratio is an upper bound, not the actual ratio
+contract §13.2 B6b requires. Scope, nothing more:
+
+1. Expose from the world (a transient diagnostic counter or ledger read is
+   fine; nothing persisted or hashed) the complete energy every body paid in
+   the tick: maintenance, sensing, translational and rotational motor bills,
+   including bodies that die in that tick. Do not change any bill.
+2. Use that value in B6a/B6b; recompute the per-window ratio, the whole-run
+   ratio and the doubling-vs-recovery comparison; re-run B6a and B6b only.
+3. Correct the run-3 B6 figures and wording in the result note ("actual" only
+   where it now is); add a test that the exposed total equals the sum of the
+   individual bills for a fixture tick including one death.
+4. `graft build`; commit as before; return the B6 tables and the diff summary.

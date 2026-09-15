@@ -144,3 +144,28 @@ Caused by: Read-only file system (os error 30)
 workspace after both worker commits (core 461 / search 66 / host 569 passed,
 0 failed) and are re-run again in repair cycle 2; the sandbox limitation was
 Codex's, not the repository's.*
+
+## Repair cycle 2 verification (Astra, same session, read-only, against `eba275c`)
+
+*Saved verbatim by Fable; Astra could not write in its sandbox. Executable
+results were supplied by Fable's own runs (core 466 / search 68 / host 569
+passed, 0 failed; scenario binary exit 0).*
+
+| Item | Status | Evidence (Astra) |
+| --- | --- | --- |
+| 1. 3h recipient eligibility from post-3d wood | **verified** | `work.class[i]` assigned from local `w` after the 3a–3e block (`fields.rs:362-385`, `:516-570`); both 3h passes consume it (`:626-675`). A9b: recipient dies in-tick and receives ≈ 8.33e-6 m the same tick, arithmetic independent of the implementation (`tests/ecology_v1.rs:2383-2479`). A9c: two donors with different budgets, three recipients each, one shared; pooled budgets, wrong denominators, sequential eligibility or last-writer-wins all fail it (`:2482-2629`) |
+| 2. care-neutral current-state `ecology_hash` | **verified** | contract §15.1 (`:726-735`) and `snapshot.rs:175-205` agree; A7b perturbs all five vectors at three positions plus both counters, checks care does not move it and `state_hash` does, and equality when care is empty (`tests/ecology_v1.rs:2033-2118`); dependent tests updated, not weakened |
+| 3. B0 isolation, B1b foliage | **verified** | B0 sets `plant.propagule_rate = 0`, B0x reports export separately (`examples/ecology_v1_scenarios.rs:364-377`, `:455-503`); bright reserve reaches `0.1967 = Q_max`; B1b computes `ΣP` and `Σ(P+W+Q+F)` separately (`:644-659`, `:680-708`, `:719-753`); `25 × 0.4789 = 11.9725` matches the reported 11.972 |
+| 4. B6 actual upkeep, B7 illumination | **not resolved as a whole** | B7 verified: donor and recipient pinned independently after the final restage (`:1594-1614`), identical establishment ticks, different recipient growth. B6: `travel_bill` deliberately omits rotational motor cost (`:1295-1329`) and iterates only bodies alive after the step (`:1470-1478`), so the reported 1.18 is an upper bound, not the contract's actual total upkeep (`contract:678`); the ratio falling below 1 by tick 16,000 is still sufficient to show the actual ratio is below 1 then |
+| 5. A1/A3b/A4/A6/A9 coverage | **verified with a caveat** | A1 isolated stock-total arms (`tests/ecology_v1.rs:319-592`); A3b interior case `k·dt = 0.3, fall·dt = 0.5` with independently derived 0.3/0.35/0.35 splits (`:1102-1200`); A4 four isolated bites with every §6.4 term as an equality (`:1355-1526`); A6 exact destinations incl. hunter body + gut, zero gut residual (`:1674-1917`); tautology replaced by positive assertions (`:912-932`). Caveat: A1's arms use global totals, so a spatially wrong but globally conservative transfer is caught by A6/A9/A3b, not by A1 itself; no repair outstanding |
+| 6. `producer.energy_density` metadata | **verified** | `params.rs:155-168`; every searched default applies to a schema-16 config, validates, round-trips bit-exactly (`:325-376`); exclusion list rejects the removed key (`:378-394`) |
+| 7. reruns and criterion-first note | **verified with the B6 caveat** | run 3 states each literal criterion before its verdict; B1a, B2, B5 skimmer, B7 dieback marked unresolved; B3 and B4b met only against the corrected §13.2 criteria, disclosed in the contract's fourth round (`contract:825-838`) |
+
+Additional implementation: `World::pin_cell_habitat` (`world/view.rs:339-369`),
+transient, not persisted or hashed, lost on `from_state`, used only by B7 after
+its last restage. **Acceptable.**
+
+**Final disposition — repair still required:** make B6 measure the complete
+actual per-tick upkeep, including rotational motor cost and costs paid by
+bodies removed during the tick, then rerun B6 and correct its run-3 figures;
+the other six handoff items are accepted.
