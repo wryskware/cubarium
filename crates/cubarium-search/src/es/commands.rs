@@ -725,6 +725,74 @@ fn score_center(cp: &mut Checkpoint, generation: u64, score: f64) {
     }
 }
 
+/// Evaluate one saved centre/policy file on a named layout set, once per layout, with the
+/// same episode driver the trainer uses. Reports per-layout survival, stores and diagnostics
+/// and writes them as JSON. This spends no optimizer work and changes nothing on disk but
+/// `out`. Which policies are evaluated on the held-out set is a selection the caller froze
+/// beforehand; this command does not choose.
+pub fn evaluate(
+    policy_file: PathBuf,
+    set: &str,
+    horizon: u64,
+    wall_seconds: u64,
+    out: PathBuf,
+) -> Result<(), Boxed> {
+    let file: PolicyFile = serde_json::from_str(&fs::read_to_string(&policy_file)?)?;
+    let policy = file.policy()?;
+    let layouts = match set {
+        "training" => fixture::training_layouts(),
+        "holdout" => fixture::holdout_layouts(),
+        other => return Err(format!("set must be `training` or `holdout`, not `{other}`").into()),
+    };
+    let cancel = AtomicBool::new(false);
+    let started = Instant::now();
+    let limits = Limits::until(&cancel, started + Duration::from_secs(wall_seconds));
+    println!("# evaluation of {} (generation {}, digest {:#x}) on the {set} set", policy_file.display(), file.generation, file.policy_digest);
+    println!("# build {BUILD_ID}, {horizon} ticks per episode, {wall_seconds} s cap, {} layouts", layouts.len());
+    println!("{:<14} {:>6} {:>5} {:>7} {:>7} {:>7} {:>7} {:>7} {:>6} {:>6}", "layout", "ticks", "alive", "stores", "P", "F", "D", "upkeep", "BL", "cells");
+    let mut episodes = Vec::new();
+    for l in &layouts {
+        let name = format!("eval/{}", l.name);
+        let e = match episode::run(l, &Driver::Policy(Box::new(policy.clone())), horizon, limits, &name) {
+            Ok(e) => e,
+            Err(err) => {
+                println!("stopped: {err:?} after {:.1} s", started.elapsed().as_secs_f64());
+                break;
+            }
+        };
+        println!(
+            "{:<14} {:>6} {:>5} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>6.0} {:>6}",
+            l.name, e.ticks, e.alive, e.terminal_stores, e.intake_producer, e.intake_fruit, e.intake_detritus, e.upkeep_billed, e.body_lengths, e.distinct_cells
+        );
+        episodes.push(e);
+    }
+    let wall = started.elapsed().as_secs_f64();
+    let survived = episodes.iter().filter(|e| e.alive).count();
+    let min_ticks = episodes.iter().map(|e| e.ticks).min().unwrap_or(0);
+    let mean_ticks = if episodes.is_empty() { 0.0 } else { episodes.iter().map(|e| e.ticks as f64).sum::<f64>() / episodes.len() as f64 };
+    println!("survived {survived} of {} layouts; min {min_ticks} ticks, mean {mean_ticks:.0}; wall {wall:.1} s of {wall_seconds}", layouts.len());
+    let summary = serde_json::json!({
+        "build": BUILD_ID,
+        "policy_file": policy_file.display().to_string(),
+        "generation": file.generation,
+        "policy_digest": file.policy_digest,
+        "protocol_hash": file.protocol_hash,
+        "set": set,
+        "layouts": layouts.iter().map(|l| l.name.clone()).collect::<Vec<_>>(),
+        "layout_hashes": layouts.iter().map(|l| l.hash(&l.config())).collect::<Vec<_>>(),
+        "horizon_ticks": horizon,
+        "episodes": episodes,
+        "survived": survived,
+        "min_ticks": min_ticks,
+        "mean_ticks": mean_ticks,
+        "wall_seconds": wall,
+    });
+    if let Some(parent) = out.parent() { fs::create_dir_all(parent)?; }
+    fs::write(&out, serde_json::to_string_pretty(&summary)?)?;
+    println!("wrote {}", out.display());
+    Ok(())
+}
+
 /// Export a checkpoint's centre as a policy, and verify the round trip and ordinary core
 /// inference on a training layout.
 pub fn export(checkpoint: PathBuf, out: PathBuf, verify_ticks: u64) -> Result<(), Boxed> {

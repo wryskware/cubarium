@@ -143,6 +143,20 @@ enum Command {
         #[arg(long, default_value_t = 200)]
         verify_ticks: u64,
     },
+    /// Evaluate one saved centre/policy file on the training or held-out layout set.
+    EsEvaluate {
+        #[arg(long)]
+        policy: PathBuf,
+        /// `training` or `holdout`.
+        #[arg(long, default_value = "holdout")]
+        set: String,
+        #[arg(long, default_value_t = cubarium_search::es::HORIZON_TICKS)]
+        horizon: u64,
+        #[arg(long, default_value_t = 300)]
+        wall_seconds: u64,
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// Re-run one recorded row and check it reproduces.
     Replay {
         /// The `evals.jsonl` written by a search.
@@ -231,6 +245,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             overwrite,
             out,
         ),
+        Command::EsEvaluate { policy, set, horizon, wall_seconds, out } => {
+            es::commands::evaluate(policy, &set, horizon, wall_seconds, out)
+        }
         Command::EsExport { checkpoint, out, verify_ticks } => {
             es::commands::export(checkpoint, out, verify_ticks)
         }
