@@ -105,3 +105,51 @@ fn an_unreadable_policy_file_refuses_the_run() {
     );
     assert!(err.contains("not-a-policy.json"), "the refusal names the file: {err}");
 }
+
+/// Present *and moving*: the seeded bodies are ordinary organisms driven by the policy, so
+/// after 20 s of world time each of them has left the cell it was founded in. Built through
+/// the same core door the runner uses, because `RunOutcome` reports counts and not
+/// positions.
+#[test]
+fn every_seeded_animal_leaves_its_starting_cell() {
+    use cubarium_core::{World, WorldConfig};
+    use cubarium_surface::{CellId, Face, Vec2, cell_of};
+
+    let theta = cubarium_search::es::tensor::initial_center(20_260_915);
+    let policy = cubarium_search::es::tensor::policy(&theta).expect("a valid policy");
+
+    let mut world = World::new(WorldConfig::default()).expect("the ordinary legacy world");
+    let mut seeded = Vec::new();
+    for k in 0..4u8 {
+        let face = Face::from_index(k).expect("four side faces");
+        let cell = CellId::new(face, 8, 8);
+        let id = world
+            .found_neural_animal(cell.center(), Vec2::new(1.0, 0.0), policy.clone())
+            .expect("a fresh world has room for four more");
+        seeded.push((id, cell));
+    }
+    assert_eq!(world.neural_population(), 4);
+
+    let mut visited: Vec<std::collections::BTreeSet<_>> =
+        seeded.iter().map(|(_, c)| [*c].into_iter().collect()).collect();
+    for _ in 0..400 {
+        world.step();
+        world.drain_events();
+        for (i, (id, _)) in seeded.iter().enumerate() {
+            if let Some(o) = world.state.organisms.get(*id) {
+                visited[i].insert(cell_of(&o.pos));
+            }
+        }
+    }
+    world.check_invariants().expect("the world stays consistent");
+
+    for (i, (id, start)) in seeded.iter().enumerate() {
+        let o = world.state.organisms.get(*id).expect("alive after 20 s");
+        assert!(
+            visited[i].len() >= 2,
+            "copy {i} never left {start:?}: {} cells visited, now at {:?}",
+            visited[i].len(),
+            cell_of(&o.pos)
+        );
+    }
+}
