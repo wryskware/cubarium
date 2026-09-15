@@ -4,9 +4,10 @@
 //! and the export to round-trip weight for weight. Plain JSON numbers do not deliver that
 //! here: `serde_json` writes an `f64` with a shortest round-trip representation, but its
 //! default **parser** is a fast approximate one that can land one unit in the last place away
-//! from the written value. Measured on this build: about 11% of arbitrary `f64` values come
-//! back changed (`serde_json`'s `float_roundtrip` feature is what makes parsing correctly
-//! rounded, and it is off by default).
+//! from the written value. Measured before the fix: about 11% of arbitrary `f64` values came
+//! back changed. This crate now enables `serde_json`'s `float_roundtrip` feature (Cargo.toml),
+//! so plain numbers parse correctly rounded too; the hex encoding stays because exactness
+//! should be a property of the format, not of a dependency feature someone can drop.
 //!
 //! One ULP is nothing to a weight and everything to a claim of exactness: a resumed run whose
 //! centre differs in the last bit is not the run that was saved, and a test that asserts it is
@@ -93,10 +94,11 @@ mod tests {
         v: Vec<f64>,
     }
 
-    /// The defect this module exists for, stated as a test: plain JSON numbers do **not**
-    /// round-trip every `f64` on this build, and the hex encoding does.
+    /// The defect this module was written for, stated as a test: with `float_roundtrip`
+    /// enabled, plain JSON numbers now round-trip every `f64` on this build (the count below
+    /// pins that the feature is on), and the hex encoding round-trips regardless.
     #[test]
-    fn hex_round_trips_exactly_where_plain_json_numbers_do_not() {
+    fn hex_round_trips_exactly_and_the_plain_parser_is_correctly_rounded() {
         let mut values = Vec::new();
         let mut x = 0.180_897_503_983_798_34f64;
         for i in 0..20_000u64 {
@@ -113,10 +115,10 @@ mod tests {
                 y.to_bits() != x.to_bits()
             })
             .count();
-        assert!(
-            plain_mismatches > 0,
-            "if this build's serde_json parser became correctly rounded, the hex encoding is \
-             still correct — but the claim in this module's documentation needs rewording"
+        assert_eq!(
+            plain_mismatches, 0,
+            "serde_json's `float_roundtrip` feature must stay enabled in this crate's Cargo.toml: \
+             without it about one f64 in nine parses one ULP off and `replay` is not exact"
         );
 
         let holder = Holder { v: values.clone() };
