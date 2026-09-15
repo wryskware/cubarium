@@ -512,11 +512,14 @@ a benchmark for any of it.
 
 Decisions for Wrysk, preferred option first.
 
-1. **Pace.** Under the shared budget a unit adult pivots at ≤ 6.88°/s and an apex at
-   ≤ 0.97°/s; Opus's native observation reads as slower and quieter, nothing wrong.
-   Preferred: decide *once*, from the R0b native-size report, whether `v_max` (or the
-   size exponent behind it) moves, before R1 fixtures bake in the numbers. The contract
-   is pace-neutral: `ω_attain` and `motor_avail` follow whatever the world sets.
+1. **Pace.** Decided in principle by Wrysk on 2026-09-14: the display is real space at
+   an unspecified scale, so pace is calibrated in **body lengths per second of the unit
+   adult**, never in pixels, at about 1 BL/s cruise (today's 0.3 px/s is 0.06 BL/s, snail
+   pace). The [R0d brief](handoffs/r0d-pace-opus-2026-09-14.md) applies it. At 1 BL/s the
+   shared budget gives a unit adult ≈ 115°/s of pivot, so the genome ceiling binds again
+   and `ω_attain` mostly equals `ω_max` for small bodies; the contract is unchanged
+   because `ω_attain` and `motor_avail` follow whatever the world sets. Still open: the
+   energy rebalance that the faster pace forces, deferred to the headless ecology search.
 2. **Resolver scaling rule.** Opus kept the single common factor (`v = u²/demand` when
    over budget) and flagged that a translation-priority rule would be a redesign.
    Preferred: keep the common factor; this contract's `ω_attain` scaling already removes
