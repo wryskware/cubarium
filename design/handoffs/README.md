@@ -13,6 +13,61 @@ entries, then **one** task brief. Do not ingest the whole research archive.
 
 ## Where we landed
 
+**2026-09-15 ecology contract repaired after review, awaiting targeted
+verification:** the [ecology v1 contract](../ecology-v1-contract.md) specifies
+structured plants (foliage, wood, reserve), distinct litter / dead wood /
+remains, inherited digestive capability with hard exclusions, paid reproduction,
+and the accounting tests and short scenarios that gate it.
+[Astra's review](../7_Research/ecology-v1-contract-review-2026-09-15.md) found
+two P1 and three P2 defects; contract §18 maps each to its fix. Wrysk's rules
+apply: worlds restart fresh, never migrate (§15.1), and old policies need not
+reload (§15.2); §17 lists the routine choices made on his behalf for veto. The
+matching implementation brief is
+[ecology-v1-opus-2026-09-15](ecology-v1-opus-2026-09-15.md), not yet dispatched.
+Training resumes only after the scenarios are verified in the revised ecology.
+
+**2026-09-15 R2a cleared:** Repair cycle 2 is verified at `dbb769e`; 65 search
+tests plus the independent seam regression pass. Next is the
+[R2b first-learning screen](r2b-fable-first-learning-2026-09-15.md): one fixed run,
+16 updates, eight workers, 20-minute cap. Apex training remains R3.
+
+**2026-09-15 R2a repair 1 verified:** 63 search tests pass at `af6808e`.
+The [review's repair-cycle-2 handoff](../7_Research/r2a-trainer-review-2026-09-15.md)
+lists two remaining items: preserve invalid-state errors from final-center evaluation,
+and measure or honestly qualify missing physical turns on seam-crossing ticks.
+The original deadline, digest and same-directory resume reproductions are resolved.
+
+**2026-09-15 R2a reviewed:** The trainer is delivered at `80bf718`; its controls
+reproduce, but [the implementation review](../7_Research/r2a-trainer-review-2026-09-15.md)
+requests one bounded repair before learning: deadline enforcement, policy digest
+validation, resume history, diagnostic accounting and release invariant checks.
+The review document includes the Fable repair handoff. Keep the optimizer and fixtures.
+
+**2026-09-15 next assignment:** [R2a ES trainer and plumbing smoke](r2a-fable-trainer-2026-09-15.md)
+uses antithetic Gaussian evolution strategies for both smoke and later learning.
+It builds the trainer, validates paid-foraging fixtures and measures the small
+smoke; the first learning campaign waits for its concrete compute checkpoint.
+
+**2026-09-15 R1a repair verified:** The recurrent runtime clears its
+[implementation review](../7_Research/r1a-runtime-review-2026-09-14.md) at
+`bf96ecb`: original reproductions and expanded regression checks pass, and probe
+accounting/component timings are corrected. Next is a concrete bounded training
+protocol; no trained behavior or sustainability claim follows from runtime sign-off.
+
+**2026-09-14 R0 progress checkpoint:** R0b/R0c and the later R0d pace change are
+delivered. The next bounded implementation is
+[Fable R1a: recurrent runtime and integration](r1a-fable-runtime-2026-09-14.md).
+It incorporates the current pace and interface corrections, preserves legacy saves,
+and stops before training. The tiny-intake survival defect remains a prerequisite
+to fix before survival becomes a training score; it does not block runtime work.
+
+**2026-09-14 post-review dispatch:** Start from the
+[R0b / R0c task split](post-fable-dispatch-2026-09-14.md): Opus owns the motor
+correction and grazing measurements; Fable can draft the sensory/action contract
+in parallel. The dispatch incorporates the response to Fable's review and takes
+precedence over the older early-start instructions below for these assignments.
+Both stop before neural implementation or training.
+
 **2026-09-14 planning update:** Wrysk has requested recurrent organism control
 directly, without an MLP comparison. Review the research-backed
 [recurrent-organism plan](../recurrent-organism-plan.md) and its
