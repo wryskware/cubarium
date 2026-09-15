@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use clap::{Parser, Subcommand};
+use cubarium_search::es;
 use cubarium_search::evaluate::{BUILD_ID, Protocol, Status, evaluate};
 use cubarium_search::metrics::Scoring;
 use cubarium_search::params;
@@ -78,6 +79,62 @@ enum Command {
         #[arg(long, default_value = "runs/ecology-search")]
         out: PathBuf,
     },
+    /// Print the frozen R2a training protocol: optimizer, score, layouts and hashes.
+    EsProtocol,
+    /// Run the three fixture controls on every training layout.
+    EsControls {
+        #[arg(long, default_value_t = 2)]
+        workers: usize,
+        #[arg(long, default_value_t = 120)]
+        wall_seconds: u64,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// The ES plumbing smoke: four episodes, then the same four at another worker count.
+    EsSmoke {
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Measure single-animal episode throughput.
+    EsBench {
+        #[arg(long, default_value_t = 4_000)]
+        ticks: u64,
+        #[arg(long, default_value_t = 8)]
+        workers: usize,
+    },
+    /// The evolution-strategy learning run.
+    EsTrain {
+        #[arg(long, default_value_t = 16)]
+        pairs: usize,
+        #[arg(long, default_value_t = 16)]
+        generations: u64,
+        #[arg(long, default_value_t = cubarium_search::es::HORIZON_TICKS)]
+        horizon: u64,
+        #[arg(long, default_value_t = 8)]
+        workers: usize,
+        #[arg(long, default_value_t = 1_200)]
+        wall_seconds: u64,
+        #[arg(long, default_value_t = 20_260_915)]
+        train_seed: u64,
+        /// Evaluate the unperturbed centre each generation. A sampled perturbation's score is
+        /// not the centre's.
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        center_eval: bool,
+        /// Continue from a checkpoint written at a completed generation boundary.
+        #[arg(long)]
+        resume: Option<PathBuf>,
+        #[arg(long, default_value = "runs/es-first")]
+        out: PathBuf,
+    },
+    /// Export a checkpoint's centre as a policy and verify it round-trips and runs.
+    EsExport {
+        #[arg(long)]
+        checkpoint: PathBuf,
+        #[arg(long, default_value = "runs/es-first/policy.json")]
+        out: PathBuf,
+        #[arg(long, default_value_t = 200)]
+        verify_ticks: u64,
+    },
     /// Re-run one recorded row and check it reproduces.
     Replay {
         /// The `evals.jsonl` written by a search.
@@ -132,6 +189,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             out,
         ),
         Command::Replay { record, index } => replay(&record, index),
+        Command::EsProtocol => {
+            es::commands::protocol();
+            Ok(())
+        }
+        Command::EsControls { workers, wall_seconds, out } => {
+            es::commands::controls(workers, wall_seconds, out)
+        }
+        Command::EsSmoke { out } => es::commands::smoke(out),
+        Command::EsBench { ticks, workers } => es::commands::bench(ticks, workers),
+        Command::EsTrain {
+            pairs,
+            generations,
+            horizon,
+            workers,
+            wall_seconds,
+            train_seed,
+            center_eval,
+            resume,
+            out,
+        } => es::commands::train(
+            pairs,
+            generations,
+            horizon,
+            workers,
+            wall_seconds,
+            train_seed,
+            center_eval,
+            resume,
+            out,
+        ),
+        Command::EsExport { checkpoint, out, verify_ticks } => {
+            es::commands::export(checkpoint, out, verify_ticks)
+        }
     }
 }
 

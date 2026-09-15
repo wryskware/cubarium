@@ -15,12 +15,16 @@
 //! - [`fixture`]: the frozen training and held-out layouts, and how one becomes a world.
 //! - [`episode`]: one rollout through `World::step`, plus the three disclosed controls.
 //! - [`trainer`]: stable job identities, bounded workers, the reduction and the checkpoint.
+//! - [`export`]: a trained centre as a self-contained policy the core can attach.
+//! - [`commands`]: the development commands behind the `es-*` subcommands.
 //!
 //! Nothing here attaches a policy to the display world, migrates a world, or trains during a
 //! world's ordinary life. The trainer builds its own isolated worlds and throws them away.
 
 pub mod bits;
+pub mod commands;
 pub mod episode;
+pub mod export;
 pub mod fixture;
 pub mod optimizer;
 pub mod rng;
