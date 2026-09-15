@@ -12,6 +12,7 @@ mod view;
 
 use cubarium_surface::{CELL_COUNT, CellId, ChartImage, FieldGraph, ScalarField, Travel};
 
+use crate::diagnostic::ScriptedIntent;
 use crate::dormancy::ApexDormancyEvent;
 use crate::encounter::ApexEncounterEvent;
 use crate::events::LifeEvent;
@@ -58,5 +59,8 @@ pub struct World {
     pub(crate) counters: TickCounters,
     pub(crate) charging: ChargingDiagnostics,
     pub(crate) intake: IntakeDiagnostics,
+    /// Transient diagnostic intent overrides (`crate::diagnostic`). Empty in every ordinary
+    /// world, never persisted, never set by the world itself.
+    pub(crate) scripted: Vec<(crate::ids::OrganismId, ScriptedIntent)>,
     pub(crate) initial_material: f64,
 }

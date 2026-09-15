@@ -30,6 +30,23 @@ impl World {
 
     /// What this world's producers actually made and its mouths actually took, since this
     /// `World` value was built. Read-only, transient and process-scoped; see
+    /// Install the transient diagnostic intent overrides for the ticks that follow
+    /// (`crate::diagnostic`). Replaces any previous list; an empty list is off, which is
+    /// where every ordinary world stays. Nothing here is persisted, and an override is an
+    /// intent that the ordinary resolver, the world's intake law and the funding checks still
+    /// answer — see [`crate::diagnostic::ScriptedIntent`].
+    pub fn set_scripted_intents(
+        &mut self,
+        intents: Vec<(crate::ids::OrganismId, crate::diagnostic::ScriptedIntent)>,
+    ) {
+        self.scripted = intents;
+    }
+
+    /// Remove every diagnostic intent override.
+    pub fn clear_scripted_intents(&mut self) {
+        self.scripted.clear();
+    }
+
     /// [`IntakeDiagnostics`] for the exact scope and time window.
     pub fn intake_diagnostics(&self) -> IntakeDiagnostics {
         self.intake

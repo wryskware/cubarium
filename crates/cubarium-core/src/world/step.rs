@@ -224,6 +224,7 @@ impl World {
                 counters,
                 charging,
                 intake,
+                scripted,
                 initial_material: _,
             } = &mut *self;
             let WorldState {
@@ -469,6 +470,22 @@ impl World {
                     p.underlying = decision.underlying_mode;
                 }
                 decisions.push((id, decision));
+            }
+
+            // 5a. Transient diagnostic intent overrides (`crate::diagnostic`). Empty in every
+            //     ordinary world — the world never sets one — so this is a single `is_empty`
+            //     test and the reference trajectory is untouched. A script states an *intent*
+            //     and nothing more: the resolver below still bounds it by `|v| + r · |ω| ≤ u`,
+            //     the intake pass still applies the cell's share, the type-II term and the
+            //     reserve headroom, and gestation still faces capacity and funding. Running it
+            //     here, before the hunter, escape and encounter passes, keeps a legitimate
+            //     override winning over a script exactly as it wins over the controller.
+            if !scripted.is_empty() {
+                for (id, d) in &mut decisions {
+                    if let Some((_, intent)) = scripted.iter().find(|(s, _)| s == id) {
+                        intent.apply(d);
+                    }
+                }
             }
 
             // 5b. Hunters (`crate::hunter`), when any member exists: advance each member's

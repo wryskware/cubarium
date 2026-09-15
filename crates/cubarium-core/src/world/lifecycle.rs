@@ -229,6 +229,7 @@ impl World {
             counters: TickCounters::default(),
             charging: ChargingDiagnostics::default(),
             intake: IntakeDiagnostics::default(),
+            scripted: Vec::new(),
             initial_material,
         };
         // Make the derived light/moisture readable before the first tick advances weather.

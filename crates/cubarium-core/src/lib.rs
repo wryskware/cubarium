@@ -31,6 +31,7 @@ pub mod accounting;
 pub mod care;
 pub mod config;
 pub mod controller;
+pub mod diagnostic;
 pub mod dormancy;
 pub mod encounter;
 pub mod events;
@@ -56,6 +57,7 @@ pub use care::{
     CareState, CareTarget,
 };
 pub use config::WorldConfig;
+pub use diagnostic::ScriptedIntent;
 pub use dormancy::{ApexDormancyEvent, ApexDormancyPolicy, ApexDormancyState, DormantApex};
 pub use encounter::{
     ApexContribution, ApexEncounterEvent, ApexEncounterPolicy, ApexEncounterState, CombatResponse,
