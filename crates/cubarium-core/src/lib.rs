@@ -41,6 +41,7 @@ pub mod habitat;
 pub mod hunter;
 pub mod ids;
 pub mod motor;
+pub mod neural;
 pub mod organism;
 pub mod pairs;
 pub mod quiet;
@@ -71,6 +72,7 @@ pub use hunter::{
 };
 pub use ids::OrganismId;
 pub use motor::{MotorBill, MotorLimits, MotorRequest, ResolvedMotion};
+pub use neural::{Action7, AnimalState, NeuralState, Observation70, Policy};
 pub use snapshot::{
     SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13,
     SCHEMA_VERSION, SnapshotError, WorldStateV7, WorldStateV8, WorldStateV9, WorldStateV10,
