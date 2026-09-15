@@ -12,7 +12,7 @@ use cubarium_core::neural::obs::{FOOD_NEAR, OBS_LEN};
 use cubarium_core::neural::{AnimalState, NeuralState, Policy};
 use cubarium_core::organism::Mode;
 use cubarium_core::{
-    LifeEvent, SCHEMA_V14, World, WorldConfig, decode_snapshot, encode_snapshot,
+    DT, LifeEvent, SCHEMA_V14, World, WorldConfig, decode_snapshot, encode_snapshot,
     snapshot::state_hash,
 };
 use cubarium_surface::{Face, SurfacePoint};
@@ -391,7 +391,10 @@ fn a_funded_ordinary_birth_gives_the_child_the_parents_policy_and_fresh_state() 
         .attach_neural_policy(parent, Policy::new(w))
         .expect("attach");
     {
-        // Fund it: adult, full stores, old enough for the world's own maturity gate.
+        // Fund it: adult and full stores. The world's retained maturity gate is the real
+        // condition here, so the body is *aged* into it rather than merely asserted to be old
+        // enough: the world clock is wound past `bud_min_age_seconds` and `born_tick` is left
+        // at 0, which makes `age_ticks` genuinely exceed the gate on the first step.
         let o = world.state.organisms.get_mut(parent).expect("alive");
         let before = o.reserve;
         o.structure = o.phenotype.structure_adult;
@@ -399,12 +402,24 @@ fn a_funded_ordinary_birth_gives_the_child_the_parents_policy_and_fresh_state() 
         o.energy = o.phenotype.energy_max;
         let added = o.reserve - before;
         world.state.external_material_in += added;
-        world.state.organisms.get_mut(parent).expect("alive").born_tick = 0;
+        o.born_tick = 0;
+        let gate = f64::from(o.phenotype.drives.bud_min_age_seconds);
+        assert!(gate > 0.0, "the fixture must face a real age gate");
+        world.state.tick = (gate / DT).ceil() as u64 + 1;
     }
     let mut world = World::from_state(world.state).expect("valid");
+    {
+        let o = world.state.organisms.get(parent).expect("alive");
+        let age = o.age_ticks(world.tick()) as f64 * DT;
+        assert!(
+            age > f64::from(o.phenotype.drives.bud_min_age_seconds),
+            "precondition: the parent is {age} s old against a {} s gate",
+            o.phenotype.drives.bud_min_age_seconds
+        );
+    }
 
     let mut child = None;
-    for _ in 0..4200 {
+    for _ in 0..1200 {
         world.step();
         for e in world.drain_events() {
             if let LifeEvent::Birth { id, .. } = e
@@ -457,4 +472,91 @@ fn unsupported_combinations_and_foreign_policies_are_refused_by_name() {
         .attach_neural_policy(qid, Policy::new(Gru32::zeros()))
         .unwrap_err();
     assert!(err.contains("quiet"), "{err}");
+}
+
+// ------------------------------------------------------- the retained maturity gate
+
+/// A neural body with `reproduce` held high, adult and fully funded, at a chosen age.
+/// Returns whether it opened an escrow on its first step.
+fn tries_to_bud(age_seconds: f64, funded: bool) -> (bool, f64) {
+    let mut world = World::new(calm(1)).expect("valid");
+    let parent = ids(&world)[0];
+    let mut w = Gru32::zeros();
+    // Still, mouths shut, reproduce held above the level trigger.
+    w.b_o[0] = -8.0;
+    w.b_o[2] = -8.0;
+    w.b_o[3] = -8.0;
+    w.b_o[4] = -8.0;
+    w.b_o[6] = 8.0;
+    world
+        .attach_neural_policy(parent, Policy::new(w))
+        .expect("attach");
+    let gate = {
+        let o = world.state.organisms.get_mut(parent).expect("alive");
+        let before = o.reserve;
+        o.structure = o.phenotype.structure_adult;
+        if funded {
+            o.reserve = o.phenotype.reserve_max;
+            o.energy = o.phenotype.energy_max;
+        } else {
+            // Adult and old, but nothing to build a child out of: the world's own funding
+            // check refuses, and it must refuse for that reason and not for the age.
+            o.reserve = 0.05 * o.phenotype.reserve_max;
+            o.energy = 0.05 * o.phenotype.energy_max;
+        }
+        let added = o.reserve - before;
+        o.born_tick = 0;
+        let gate = f64::from(o.phenotype.drives.bud_min_age_seconds);
+        world.state.external_material_in += added;
+        gate
+    };
+    world.state.tick = (age_seconds / DT).round() as u64;
+    let mut world = World::from_state(world.state).expect("valid");
+    // Two ticks, because the action is latched on the animal's own controller tick and one of
+    // any two consecutive ticks is one. The age quoted is the age at the start.
+    world.step();
+    world.step();
+    let opened = world
+        .state
+        .organisms
+        .get(parent)
+        .expect("alive")
+        .escrow
+        .is_some();
+    (opened, gate)
+}
+
+/// **Below the gate.** A neural policy owns reproductive *intent*; it does not own physical
+/// maturity. `decide_quiet` refuses a budding request under `bud_min_age_seconds`, and a
+/// neural body skips that function entirely — so the world enforces the same condition at
+/// gestation admission. Before this repair a funded body at age zero opened escrow on its
+/// very first tick against a 120 s gate.
+#[test]
+fn a_neural_body_below_the_minimum_age_cannot_start_gestation() {
+    let (opened, gate) = tries_to_bud(0.0, true);
+    assert!(gate > 0.0, "the fixture must face a real age gate");
+    assert!(!opened, "age 0 started gestation against a {gate} s gate");
+
+    // Just short of it, too: the gate is a threshold, not a formality at zero. The fixture
+    // runs two ticks, so it starts three short and is still one short when it finishes.
+    let (opened, _) = tries_to_bud(gate - 3.0 * DT, true);
+    assert!(!opened, "a tick short of {gate} s still started gestation");
+}
+
+/// **At the gate.** Once the body is old enough the request is honoured: the repair restores
+/// the retained condition, it does not disable ordinary budding.
+#[test]
+fn a_neural_body_at_the_minimum_age_starts_gestation() {
+    let (_, gate) = tries_to_bud(0.0, true);
+    let (opened, _) = tries_to_bud(gate + DT, true);
+    assert!(opened, "a funded adult past the {gate} s gate did not start gestation");
+}
+
+/// **Insufficient funding.** Old enough, and still refused — by the world's own escrow
+/// funding check, which this repair did not touch.
+#[test]
+fn a_mature_but_unfunded_neural_body_cannot_start_gestation() {
+    let (_, gate) = tries_to_bud(0.0, true);
+    let (opened, _) = tries_to_bud(gate + DT, false);
+    assert!(!opened, "an unfunded body opened an escrow it could not pay for");
 }

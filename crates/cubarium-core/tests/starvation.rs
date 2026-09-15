@@ -145,3 +145,240 @@ fn a_body_with_no_energy_but_oxidisable_reserve_survives() {
     world.check_invariants().unwrap();
 }
 
+
+// --------------------------------------------------------------- solvency is also settlement
+
+/// What a body actually paid this tick, reconstructed from the transaction rather than from
+/// the closing energy: stored energy spent, plus the usable energy the reserve it burned was
+/// worth. Every case below asserts *this*, not merely that the body is still breathing.
+fn paid(before: &cubarium_core::organism::Organism, after: &cubarium_core::organism::Organism, cfg: &WorldConfig) -> f64 {
+    let oxidised = (before.reserve - after.reserve).max(0.0)
+        * cfg.organism.reserve_energy_density
+        * cfg.organism.oxidation_efficiency;
+    before.energy + oxidised - after.energy
+}
+
+/// A solo body that cannot feed: no mouth, no food underfoot, nothing to move toward.
+fn sealed(world: &mut World, id: cubarium_core::OrganismId) -> usize {
+    let here = park(world, id);
+    for cell in cubarium_surface::CellId::all() {
+        world.state.fields.p[cell.index()] = 0.0;
+        world.state.fields.f[cell.index()] = 0.0;
+        world.state.fields.d[cell.index()] = 0.0;
+        world.state.fields.de[cell.index()] = 0.0;
+    }
+    here
+}
+
+/// **Zero stored energy, adequate reserve.** Solvency admits the body on energy the reserve
+/// can supply, so the settlement must actually take it. Before this repair the bill was
+/// forgiven and the whole oxidation credit was handed over anyway: the body ended the tick
+/// with `8.0e-4 e` having paid `7.6e-19`.
+#[test]
+fn a_body_with_no_stored_energy_pays_its_upkeep_out_of_the_reserve() {
+    let mut world = World::new(solo(1.0)).expect("valid");
+    let id = only_id(&world);
+    sealed(&mut world, id);
+    let cfg = world.config().clone();
+    {
+        let o = world.state.organisms.get_mut(id).expect("the founder");
+        o.energy = 0.0;
+        o.reserve = 10.0 * cfg.organism.oxidation_rate * DT;
+    }
+    let before = world.state.organisms.get(id).expect("alive").clone();
+    let upkeep = MotorBill::of(&before, &cfg).upkeep(DT);
+    assert!(before.raisable_energy(&cfg.organism, DT) >= upkeep, "the fixture is solvent");
+
+    world.step();
+
+    let after = world.state.organisms.get(id).expect("it survived").clone();
+    let settled = paid(&before, &after, &cfg);
+    assert!(
+        (settled - upkeep).abs() < 1e-15,
+        "owed {upkeep:e}, paid {settled:e}, reserve {:e} -> {:e}, energy {:e} -> {:e}",
+        before.reserve,
+        after.reserve,
+        before.energy,
+        after.energy
+    );
+    assert!(after.reserve < before.reserve, "the reserve is what paid");
+    world.check_invariants().unwrap();
+}
+
+/// **Partial stored energy.** The battery goes first and the reserve gives up exactly the
+/// shortfall — no more.
+///
+/// `oxidation_threshold` is zeroed so the physiology pass's own top-up never runs: the only
+/// oxidation in the tick is the settlement's, and the reserve delta therefore measures it
+/// directly instead of being confounded by a legitimate later recharge.
+#[test]
+fn a_body_with_partial_stored_energy_oxidises_only_the_shortfall() {
+    let mut config = solo(1.0);
+    config.organism.oxidation_threshold = 0.0;
+    let mut world = World::new(config).expect("valid");
+    let id = only_id(&world);
+    sealed(&mut world, id);
+    let cfg = world.config().clone();
+    let upkeep = {
+        let o = world.state.organisms.get(id).expect("the founder");
+        MotorBill::of(o, &cfg).upkeep(DT)
+    };
+    {
+        let o = world.state.organisms.get_mut(id).expect("the founder");
+        o.energy = 0.25 * upkeep;
+        o.reserve = 10.0 * cfg.organism.oxidation_rate * DT;
+    }
+    let before = world.state.organisms.get(id).expect("alive").clone();
+
+    world.step();
+
+    let after = world.state.organisms.get(id).expect("it survived").clone();
+    let settled = paid(&before, &after, &cfg);
+    assert!((settled - upkeep).abs() < 1e-15, "owed {upkeep:e}, paid {settled:e}");
+    // Three quarters of the upkeep was missing; that, and nothing more, came out of the
+    // reserve, leaving most of the per-tick oxidation allowance unspent.
+    let burned = before.reserve - after.reserve;
+    let want =
+        0.75 * upkeep / (cfg.organism.reserve_energy_density * cfg.organism.oxidation_efficiency);
+    assert!(
+        (burned - want).abs() < 1e-15,
+        "burned {burned:e} of reserve, expected the shortfall's {want:e}"
+    );
+    assert!(
+        burned < cfg.organism.oxidation_rate * DT,
+        "and it did not reach for the whole allowance"
+    );
+    assert!(after.energy.abs() < 1e-15, "the battery was emptied into the bill first");
+    world.check_invariants().unwrap();
+}
+
+/// **Inadequate reserve.** The body pays everything it can raise and dies the same tick; the
+/// shortfall is not silently forgiven and no energy is created.
+#[test]
+fn a_body_whose_reserve_cannot_cover_the_shortfall_pays_what_it_has_and_dies() {
+    let mut world = World::new(solo(1.0)).expect("valid");
+    let id = only_id(&world);
+    sealed(&mut world, id);
+    let cfg = world.config().clone();
+    let upkeep = {
+        let o = world.state.organisms.get(id).expect("the founder");
+        MotorBill::of(o, &cfg).upkeep(DT)
+    };
+    {
+        let o = world.state.organisms.get_mut(id).expect("the founder");
+        o.energy = 0.1 * upkeep;
+        // A hair of reserve: real, oxidisable, and nowhere near enough.
+        o.reserve = 0.01 * upkeep / (cfg.organism.reserve_energy_density * cfg.organism.oxidation_efficiency);
+    }
+    let before = world.state.organisms.get(id).expect("alive").clone();
+    assert!(before.raisable_energy(&cfg.organism, DT) < upkeep, "the fixture is insolvent");
+
+    world.step();
+
+    let died = world
+        .drain_events()
+        .into_iter()
+        .any(|e| matches!(e, LifeEvent::Death { id: d, cause, .. } if d == id && cause == DeathCause::Starvation));
+    assert!(died, "an insolvent body starves");
+    assert!(world.state.organisms.get(id).is_none());
+    world.check_invariants().unwrap();
+}
+
+/// **Intake arriving later in the tick does not retroactively fund the bill.** The settlement
+/// runs in the motor stage, before the feeding pass, so a body pays out of the resources it
+/// held *then*.
+///
+/// The measurement is a comparison: the identical body on a rich cell and on a bare one burns
+/// exactly the same reserve for its upkeep. If the later bite were being allowed to settle any
+/// part of the bill, the fed arm would have burned less. `oxidation_threshold` is zeroed in
+/// both arms so the only oxidation is the settlement's.
+#[test]
+fn intake_later_in_the_tick_does_not_pay_this_ticks_bill() {
+    fn arm(fed: bool) -> (f64, f64, f64) {
+        let mut config = solo(1.0);
+        config.organism.oxidation_threshold = 0.0;
+        // Producer dynamics off, so the cell's stock changes by the bite and by nothing else
+        // and the reconstruction below is exact rather than approximate.
+        config.producer.growth = 0.0;
+        config.producer.mortality = 0.0;
+        config.detritus.decomposition = 0.0;
+        // Growth also draws on the reserve, and it fires only in the arm whose bite refilled
+        // it. Switch it off so the two arms differ in exactly one thing: whether a bite landed.
+        config.organism.growth_rate = 0.0;
+        let mut world = World::new(config).expect("valid");
+        let id = only_id(&world);
+        let here = sealed(&mut world, id);
+        if fed {
+            world.state.fields.p[here] = world.state.config.producer.max;
+        }
+        let cfg = world.config().clone();
+        {
+            let o = world.state.organisms.get_mut(id).expect("the founder");
+            o.energy = 0.0;
+            o.reserve = 10.0 * cfg.organism.oxidation_rate * DT;
+            // Hungry, and on a rich cell in the fed arm, so the legacy mouth actually opens.
+            o.hunger_memory = 1.0;
+            o.mode = cubarium_core::organism::Mode::Feeding;
+        }
+        let before = world.state.organisms.get(id).expect("alive").clone();
+        let upkeep = MotorBill::of(&before, &cfg).upkeep(DT);
+        let _ = here;
+        world.step();
+        let after = world.state.organisms.get(id).expect("it survived").clone();
+        world.check_invariants().unwrap();
+        // Reserve *gained* from the bite and *lost* to the settlement in the same tick, so the
+        // burn is recovered by removing the material the mouth put in. The bite comes from the
+        // world's own intake diagnostic, not from a cell delta: the settlement happens after
+        // movement, so the cell that was grazed is not necessarily the one the body started on.
+        let eaten = world.intake_diagnostics().producer_eaten;
+        let assimilated = cfg.organism.assimilation_material * eaten;
+        let burned = before.reserve + assimilated - after.reserve;
+        (burned, upkeep, eaten)
+    }
+
+    let (bare_burn, upkeep, bare_eaten) = arm(false);
+    let (fed_burn, _, fed_eaten) = arm(true);
+    assert_eq!(bare_eaten, 0.0, "the control arm must not feed");
+    assert!(fed_eaten > 0.0, "the fed arm must actually feed, or this tests nothing");
+    let want = upkeep / (cfg_density() * cfg_efficiency());
+    assert!(
+        (bare_burn - want).abs() < 1e-12 && (fed_burn - want).abs() < 1e-12,
+        "upkeep {upkeep:e} should cost {want:e} of reserve in both arms; bare {bare_burn:e}, \
+         fed {fed_burn:e}"
+    );
+}
+
+fn cfg_density() -> f64 {
+    WorldConfig::default().organism.reserve_energy_density
+}
+
+fn cfg_efficiency() -> f64 {
+    WorldConfig::default().organism.oxidation_efficiency
+}
+
+/// The per-tick oxidation limit bounds the **tick**, not each pass: a body that oxidised in
+/// the settlement cannot oxidise a second full allowance in the physiology pass.
+#[test]
+fn the_settlement_and_the_physiology_pass_share_one_oxidation_allowance() {
+    let mut world = World::new(solo(1.0)).expect("valid");
+    let id = only_id(&world);
+    sealed(&mut world, id);
+    let cfg = world.config().clone();
+    {
+        let o = world.state.organisms.get_mut(id).expect("the founder");
+        o.energy = 0.0;
+        o.reserve = o.phenotype.reserve_max;
+    }
+    let before = world.state.organisms.get(id).expect("alive").clone();
+
+    world.step();
+
+    let after = world.state.organisms.get(id).expect("it survived").clone();
+    let burned = before.reserve - after.reserve;
+    let allowance = cfg.organism.oxidation_rate * DT;
+    assert!(
+        burned <= allowance + 1e-15,
+        "burned {burned:e} of reserve against a per-tick allowance of {allowance:e}"
+    );
+    world.check_invariants().unwrap();
+}

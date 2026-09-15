@@ -1123,6 +1123,11 @@ impl World {
             // applied in the physiology pass below, so no amount of food arriving later in the
             // tick can reverse a body that already failed to pay for being alive.
             let mut starving = vec![false; organisms.slot_count()];
+            // Reserve material each body oxidised *in the settlement below* to cover a bill its
+            // stored energy could not. The physiology pass subtracts it from that body's
+            // per-tick oxidation allowance, so the world's `oxidation_rate · dt` ceiling is a
+            // ceiling on the tick, not on each pass separately.
+            let mut settled_oxidation = vec![0.0f64; organisms.slot_count()];
             for (id, d) in &decisions {
                 // The apex contact geometry, read before the mutable borrow: a member's claws
                 // reach well past its lobes and are the part of it that actually sweeps.
@@ -1212,12 +1217,49 @@ impl World {
                 if let Some(segments) = moved.get_mut(id.slot as usize) {
                     segments.extend_from_slice(&travel_buf.segments);
                 }
-                // The bill is now affordable by construction; `min` stays as a guard against
-                // floating-point overshoot, not as the mechanism that lets a body move broke.
+                // **The bill is collected from the resources solvency counted.** The
+                // starvation predicate above admits a body that can raise this tick's upkeep
+                // out of `energy + one tick of oxidation`; taking only `min(cost, energy)`
+                // forgave the difference and then handed the body the whole oxidation credit
+                // in the physiology pass, so a body with no stored energy survived without
+                // paying. Stored energy goes first; exactly the shortfall is then oxidised out
+                // of the reserve, at the world's own rate, density and efficiency, inside the
+                // same per-tick allowance the physiology pass uses.
+                //
+                // Only the *mandatory* half can reach the reserve: `motor_budget` is sized from
+                // stored energy alone (`affordable_motor`), so a body short of upkeep has
+                // `u = 0` and stands still, and the shortfall is never motion. Movement is paid
+                // from the battery, as it always was.
                 let cost = bill.total_cost(motion.speed, motion.sweep, dt);
-                let paid = cost.min(o.energy).max(0.0);
-                o.energy -= paid;
-                heat(paid);
+                let mut collected = cost.min(o.energy).max(0.0);
+                o.energy -= collected;
+                let shortfall = (cost - collected).max(0.0);
+                if shortfall > 0.0 {
+                    let allowance = (org_cfg.oxidation_rate * dt).min(o.reserve.max(0.0)).max(0.0);
+                    let per_unit = e_r * org_cfg.oxidation_efficiency;
+                    if allowance > 0.0 && per_unit > 0.0 {
+                        // Burn only what the shortfall needs, never the whole allowance.
+                        let burned = (shortfall / per_unit).min(allowance);
+                        o.reserve -= burned;
+                        fields.n[cell_of(&o.pos).index()] += burned;
+                        // The same transaction the physiology pass runs: the reserve material
+                        // carried `e_r` per unit, `η_ox` of it becomes usable, the rest is heat.
+                        let released = e_r * burned;
+                        let room = (o.phenotype.energy_max - o.energy).max(0.0);
+                        let gained = (released * org_cfg.oxidation_efficiency).min(room);
+                        o.energy += gained;
+                        heat(released - gained);
+                        if let Some(already) = settled_oxidation.get_mut(id.slot as usize) {
+                            *already = burned;
+                        }
+                        // Spend what the bill still owes; anything the burn over-delivered
+                        // stays in the battery rather than evaporating.
+                        let more = shortfall.min(o.energy).max(0.0);
+                        o.energy -= more;
+                        collected += more;
+                    }
+                }
+                heat(collected);
             }
 
             // 6b. Capture settlement, from the common post-movement state and before any
@@ -1339,6 +1381,13 @@ impl World {
                             // and its escrow moved into the gut, energy included. This is an
                             // internal transfer with no source ledger and no detritus cap.
                             let prey = organisms.remove(prey_id).expect("the claim was checked");
+                            // The private recurrent state goes with the body here too. An
+                            // *ordinary* neural body is legitimate prey for a legacy hunter —
+                            // refusing a neural apex says nothing about that combination — and
+                            // this is the second boundary that removes an organism. Leaving the
+                            // entry behind left the world failing its own `validate` with
+                            // "neural animal has no organism" after an ordinary interaction.
+                            neural.remove(prey_id);
                             // Every other member invalidates the handle in the same breath, so
                             // no unpaid hunt can chase a body that left the arena. A paid
                             // contender remains in Strike and settles from the attempt snapshot.
@@ -1775,7 +1824,13 @@ impl World {
                     // one a configured-threshold member would actually have failed — not a
                     // subtraction reconstructed afterwards from rounded values.
                     let above_reference = o.energy >= reference * o.phenotype.energy_max;
-                    let burned = (org_cfg.oxidation_rate * dt).min(o.reserve);
+                    // Whatever the settlement already oxidised out of this body comes off its
+                    // allowance: `oxidation_rate · dt` bounds the tick, not each pass.
+                    let already = settled_oxidation
+                        .get(id.slot as usize)
+                        .copied()
+                        .unwrap_or(0.0);
+                    let burned = (org_cfg.oxidation_rate * dt - already).max(0.0).min(o.reserve);
                     o.reserve -= burned;
                     fields.n[cell_of(&o.pos).index()] += burned;
                     // The reserve material carried `e_r` per unit; `η_ox` of it becomes usable.
@@ -1831,12 +1886,25 @@ impl World {
                     .is_some_and(|e| now.saturating_sub(e.started_tick) >= gestation);
                 // A hunter's one paid offspring is gated by its profile and its own local
                 // state; the ordinary controller's `bud` never applies to a member.
+                // **The retained maturity gate.** `decide_quiet` refuses a budding request on
+                // five conditions (`controller.rs`): the quiet hold, `escrow.is_none()`, the
+                // two drive *thresholds* `bud_reserve`/`bud_energy`, and `bud_min_age_seconds`.
+                // A neural body skips that function entirely, and the two thresholds are
+                // exactly the behavioural preference the policy is meant to own. The age gate
+                // is not: the brief keeps present physical maturity, funding and gestation
+                // constraints in this slice, so the world enforces it at admission instead.
+                // `escrow.is_none()`, funding and capacity are already world conditions below.
+                //
+                // This is a strict no-op for a legacy body: `d.bud` already carries the same
+                // test, and a scripted diagnostic intent can only suppress `bud`, never set it.
+                let mature = o.age_ticks(now) as f64 * dt
+                    >= f64::from(o.phenotype.drives.bud_min_age_seconds);
                 let bud = match (member, hunters.profile.as_ref()) {
                     (Some(index), Some(profile)) if !apex_encounters_on => {
                         hunter::may_reproduce(profile, o, &hunters.members[index], now, dt)
                     }
                     (Some(_), Some(_)) => false,
-                    _ => d.bud,
+                    _ => d.bud && mature,
                 };
                 if due {
                     births.push(*id);
