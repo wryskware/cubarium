@@ -1074,6 +1074,16 @@ impl World {
             for segments in moved.iter_mut() {
                 segments.clear();
             }
+            // **Starvation is decided here, before intake settles.** A body starves when the
+            // energy it can raise *this* tick — what it holds, plus everything one tick of
+            // oxidation can convert out of its reserve (`Organism::raisable_energy`) — cannot
+            // cover this tick's mandatory upkeep. The old rule (`energy <= 0 && reserve <= 0`,
+            // evaluated after the settlement) could never fire while a geometric reserve decay
+            // and an infinitesimal bite kept both stores positive: R0b found broke bodies at
+            // `energy = 5.5e-57` still alive and still grazing. Recorded per slot now and
+            // applied in the physiology pass below, so no amount of food arriving later in the
+            // tick can reverse a body that already failed to pay for being alive.
+            let mut starving = vec![false; organisms.slot_count()];
             for (id, d) in &decisions {
                 // The apex contact geometry, read before the mutable borrow: a member's claws
                 // reach well past its lobes and are the part of it that actually sweeps.
@@ -1106,6 +1116,11 @@ impl World {
                     speed_cap = speed_cap.max(wanted / wading);
                 }
                 let bill = MotorBill::of(o, cfg);
+                if o.raisable_energy(org_cfg, dt) < bill.upkeep(dt)
+                    && let Some(flag) = starving.get_mut(id.slot as usize)
+                {
+                    *flag = true;
+                }
                 let limits = MotorLimits {
                     radius_px: motor::turn_radius_px(o, apex_geometry.as_ref()),
                     turn_rate_max: d.turn_rate_max,
@@ -1820,7 +1835,7 @@ impl World {
                     }
                 }
 
-                let cause = if o.energy <= 0.0 && o.reserve <= 0.0 {
+                let cause = if starving.get(id.slot as usize).copied().unwrap_or(false) {
                     Some(DeathCause::Starvation)
                 } else if o.age_ticks(now) >= max_age_ticks {
                     Some(DeathCause::Age)

@@ -355,6 +355,12 @@ fn carrier_death_exports_the_whole_joint_escrow_and_keeps_accounting_closed() {
     let o = world.state.organisms.get_mut(a).unwrap();
     o.reserve = 0.0;
     o.energy = 0.0;
+    // Starvation is "cannot pay this tick's upkeep", not "both stores are exactly zero".
+    // This fixture's world makes living free (`maintenance = sense_cost = 0`), so an empty
+    // body owes nothing and never starves. Give *this* carrier a real maintenance bill —
+    // its own phenotype, not the world config, so every accounting assertion above and the
+    // partner's stores are untouched — and it fails to pay on the very next tick.
+    o.phenotype.maintenance = 1.0;
     world.step();
     let event = world
         .drain_apex_encounter_events()
@@ -382,6 +388,9 @@ fn partner_death_leaves_the_prepaid_gestation_and_stale_safe_parentage_intact() 
     let partner = world.state.organisms.get_mut(b).unwrap();
     partner.reserve = 0.0;
     partner.energy = 0.0;
+    // See the carrier fixture above: an empty body in a free-upkeep world owes nothing, so
+    // the partner is given its own maintenance bill to make it starve.
+    partner.phenotype.maintenance = 1.0;
     world.step();
     assert!(world.state.organisms.get(b).is_none());
     assert!(world.apex_encounters().gestation(a).is_some());
