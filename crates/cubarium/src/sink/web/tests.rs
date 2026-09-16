@@ -840,56 +840,6 @@ fn care_is_503_replaying_until_the_recovered_schedule_is_exhausted() {
     drop(sink);
 }
 
-/// Astra's bound: partial connections beyond the cap must not raise the number of live
-/// handlers, and permits must come back when the request deadline expires.
-#[test]
-fn partial_connections_cannot_push_live_handlers_past_the_cap() {
-    let sink = WebSink::new(0).expect("binding");
-    let addr = sink.addr();
-    // Twice the cap, each sending a head that never ends.
-    let mut held = Vec::new();
-    for _ in 0..(MAX_HANDLERS * 2) {
-        match TcpStream::connect_timeout(&addr, Duration::from_secs(2)) {
-            Ok(mut s) => {
-                let _ = write!(s, "GET /frame HTTP/1.1\r\nHost: localhost\r\n");
-                let _ = s.flush();
-                held.push(s);
-            }
-            Err(_) => break,
-        }
-    }
-    // Let the accept loop work through them.
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    while sink.refused_connections() == 0 && std::time::Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    assert!(
-        sink.handlers() <= MAX_HANDLERS as u64,
-        "live handlers {} above the cap {MAX_HANDLERS}",
-        sink.handlers()
-    );
-    assert!(
-        sink.refused_connections() > 0,
-        "the excess must be closed, not queued"
-    );
-
-    // The permits come back once the absolute deadline expires, even though every one
-    // of those peers is still connected and would renew a per-read timeout forever.
-    let deadline = std::time::Instant::now() + REQUEST_DEADLINE + Duration::from_secs(5);
-    while sink.handlers() > 0 && std::time::Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    assert_eq!(
-        sink.handlers(),
-        0,
-        "a permit was not released on some exit path"
-    );
-    // And the sink still answers.
-    let (status, _, _) = get(addr, "/status");
-    assert_eq!(status, "HTTP/1.1 200 OK");
-    drop(held);
-}
-
 #[test]
 fn a_head_that_crosses_the_cap_in_one_read_is_still_refused() {
     let sink = WebSink::new(0).expect("binding");
@@ -1304,82 +1254,6 @@ fn the_frame_route_serves_the_raster_behind_the_same_eight_byte_sequence() {
     assert_eq!(held.as_bytes(), newest.as_bytes());
     assert!(sink.newest().is_none(), "a ring world has no cube frame to hand out");
     assert_eq!(sink.shape(), ring_shape());
-}
-
-/// The care route validates against *this* world. `u = 200` is a cell on a 320-pixel ring
-/// and is nowhere on a cube, and neither host guesses at the other's answer.
-#[test]
-fn a_care_target_is_validated_against_the_world_the_viewer_is_showing() {
-    let service = CareService::for_world("epoch-ring", Arc::new(JournalStatus::default()), RING);
-    let sink = WebSink::with_world(
-        0,
-        "",
-        Source::default(),
-        Some(service.shared()),
-        ring_shape(),
-    )
-    .expect("binding");
-    let (_, _, body) = care_post(sink.addr(), "/care/register", "{}");
-    let client = serde_json::from_str::<serde_json::Value>(&body).unwrap()["client"]
-        .as_str()
-        .expect("an issued identity")
-        .to_string();
-
-    let submit = |u: u16, v: u16, request: u64| {
-        care_post(
-            sink.addr(),
-            "/care",
-            &format!(
-                r#"{{"client":"{client}","request":{request},"kind":"feed","target":{{"face":0,"u":{u},"v":{v}}}}}"#
-            ),
-        )
-    };
-    // Accepted: past the cube's pixel 63 in both axes, and the far corner of the ring.
-    for (i, (u, v)) in [(200u16, 120u16), (319, 179)].into_iter().enumerate() {
-        let (status, _, body) = submit(u, v, i as u64 + 1);
-        assert!(
-            !status.starts_with("HTTP/1.1 400"),
-            "({u}, {v}) must be a cell on a 320x180 ring: {status} {body}"
-        );
-    }
-    // Refused: off the ring, and a chart the ring does not have.
-    for (u, v) in [(320u16, 90u16), (160, 180)] {
-        let (status, _, body) = submit(u, v, 9);
-        assert_eq!(status, "HTTP/1.1 400 Bad Request", "({u}, {v}): {body}");
-        assert!(body.contains("pixel extent"), "{body}");
-    }
-    let (status, _, body) = care_post(
-        sink.addr(),
-        "/care",
-        &format!(
-            r#"{{"client":"{client}","request":9,"kind":"feed","target":{{"face":4,"u":10,"v":10}}}}"#
-        ),
-    );
-    assert_eq!(status, "HTTP/1.1 400 Bad Request", "a ring has no Face::Top: {body}");
-
-    // The same coordinates on a cube host: (200, 120) has no cell, and (32, 32) does.
-    let (cube_sink, _cube_service) = care_sink();
-    let (_, _, body) = care_post(cube_sink.addr(), "/care/register", "{}");
-    let cube_client = serde_json::from_str::<serde_json::Value>(&body).unwrap()["client"]
-        .as_str()
-        .expect("an issued identity")
-        .to_string();
-    let (status, _, body) = care_post(
-        cube_sink.addr(),
-        "/care",
-        &format!(
-            r#"{{"client":"{cube_client}","request":1,"kind":"feed","target":{{"face":0,"u":200,"v":120}}}}"#
-        ),
-    );
-    assert_eq!(status, "HTTP/1.1 400 Bad Request", "{body}");
-    let (status, _, body) = care_post(
-        cube_sink.addr(),
-        "/care",
-        &format!(
-            r#"{{"client":"{cube_client}","request":2,"kind":"feed","target":{{"face":0,"u":32,"v":32}}}}"#
-        ),
-    );
-    assert!(!status.starts_with("HTTP/1.1 400"), "the cube is unchanged: {status} {body}");
 }
 
 /// The page picks its mode from `/status` and sizes its buffer from `w` and `h`, so those

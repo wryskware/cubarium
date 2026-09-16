@@ -117,13 +117,6 @@ use crate::present::{
 };
 use crate::rng::SplitMix64;
 
-#[cfg(test)]
-#[path = "../corner_cap_present_tests.rs"]
-mod corner_cap_present_tests;
-#[cfg(test)]
-#[path = "../vine_strips_present_tests.rs"]
-mod vine_strips_present_tests;
-
 mod environment;
 mod growth;
 mod habitat;

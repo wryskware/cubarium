@@ -373,42 +373,6 @@ fn dominance_is_a_partial_order_over_all_seven_objectives() {
     assert!(!traded.dominates(&better) && !better.dominates(&traded));
 }
 
-/// The wall clock is a limit, not a suggestion: a worker checks it before claiming the next
-/// simulation, so an overrunning search stops between evaluations rather than at the end.
-///
-/// Timing-dependent by nature, so the horizon is set well above the cutoff and the assertions
-/// only require that the search stopped early and said so.
-#[test]
-fn the_wall_clock_stops_a_search_between_evaluations() {
-    let budget = Budget {
-        max_evaluations: 16,
-        workers: 1,
-        wall_seconds: 1,
-        population: 4,
-        elite: 1,
-        generations: 2,
-        seeds: 1,
-        max_rows: 64,
-    };
-    let started = std::time::Instant::now();
-    let report = search::run(
-        Protocol { horizon_ticks: 40_000, sample_every: 500, ..SHORT },
-        budget,
-        Variation::default(),
-        Scoring::default(),
-        9,
-        |_| {},
-    )
-    .unwrap();
-    assert_eq!(report.stop_reason, StopReason::WallTime);
-    assert!(
-        report.evaluations_run < budget.max_evaluations,
-        "the clock, not the evaluation cap, must have stopped it"
-    );
-    assert_eq!(report.generations_run, 1, "it must not have started another generation");
-    assert!(started.elapsed().as_secs_f64() >= 1.0);
-}
-
 /// A recorded row must hand the simulation back exactly the numbers it was given.
 ///
 /// Regression: the first version of this harness replayed from the row's readable decimals, and

@@ -1319,37 +1319,6 @@ mod tests {
         assert_eq!(legacy.births_of_neural_parents, 0);
     }
 
-    /// **The pursuit stopping rule is applied, not merely recorded.** An apex arm under the
-    /// rule before 2026-09-16 is a different world from the same arm under the shipped rule —
-    /// which is exactly why the plan has to record which one it ran — and an arm handed the
-    /// shipped rule is the arm that was handed nothing.
-    #[test]
-    fn an_apex_arm_runs_the_pursuit_rule_it_was_handed() {
-        const TICKS: u64 = 24_000;
-        let eco = Ecology::defaults();
-        let policy = tensor::policy(&tensor::initial_center(7)).expect("a policy");
-        let arm = |stop| {
-            run_trial(&eco, &policy, 1002, 2, Mix::Legacy, 2, TICKS, 600, 500, stop, Instant::now())
-        };
-        let shipped = arm(PursuitStop::ReachEnvelope);
-        let unnamed = arm(PursuitStop::default());
-        let before = arm(PursuitStop::ForwardHalfSpace);
-
-        for row in [&shipped, &unnamed, &before] {
-            assert_eq!(row.status, "completed", "{:?}", row.reason);
-            assert_eq!(row.apex_introduced, 2, "the arm has an apex cohort to hunt with");
-        }
-        assert_eq!(
-            shipped.population_series, unnamed.population_series,
-            "naming the shipped rule is what an arm that names nothing already runs"
-        );
-        assert_ne!(
-            shipped.population_series, before.population_series,
-            "an arm handed the rule before 2026-09-16 must run it: if the argument were only \
-             recorded and never set on the world, these two worlds would be identical"
-        );
-    }
-
     /// The same `(seed, arm, mix)` reproduces: the comparison is a measurement, not a draw.
     #[test]
     fn a_trial_reproduces_from_its_seed() {

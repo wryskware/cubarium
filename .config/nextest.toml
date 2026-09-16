@@ -1,0 +1,5 @@
+# Tests here check that a function works, on the smallest thing, for a few frames
+# at most. Anything that takes longer than two seconds has drifted into a study
+# and should be cut or marked `#[ignore = "study: run by name"]`.
+[profile.default]
+slow-timeout = { period = "2s" }
