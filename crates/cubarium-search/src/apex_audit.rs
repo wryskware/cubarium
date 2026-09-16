@@ -41,9 +41,14 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
+use std::collections::VecDeque;
+
 use cubarium_core::encounter::ApexOpportunity;
-use cubarium_core::hunter::FixedHunterProfile;
-use cubarium_core::{OrganismId, World, WorldConfig};
+use cubarium_core::hunter::{
+    self, AttemptOutcome, FixedHunterProfile, HunterEvent, HunterPhase,
+};
+use cubarium_core::organism::DeathCause;
+use cubarium_core::{BodyBudget, OrganismId, World, WorldConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::calibrate;
@@ -57,15 +62,260 @@ type Boxed = Box<dyn std::error::Error>;
 /// every 500 ticks; this run has nothing to sample, so the check is the only reason to stop.
 pub const VALIDATE_EVERY: u64 = 5_000;
 
+/// How many ticks of the end of a life the tail window covers. The question the window answers
+/// is "was this body still earning when it died", and 2,000 ticks is 100 s — long enough to
+/// contain several strike/recovery cycles (`recovery_seconds` 5.0) and short enough that a
+/// meal early in the life does not hide in it.
+pub const TAIL_TICKS: u64 = 2_000;
+
+/// Ticks one member spent in each hunt phase, and underground, over the life the audit
+/// watched. The sum is its `lived_ticks`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PhaseOccupancy {
+    pub perched: u64,
+    pub stalking: u64,
+    pub windup: u64,
+    pub strike: u64,
+    pub recovering: u64,
+    pub handling: u64,
+    /// Ticks the member was a concealed offspring rather than an active body. An introduced
+    /// founder is never dormant; a descendant begins that way.
+    pub dormant: u64,
+}
+
+impl PhaseOccupancy {
+    fn sample(&mut self, phase: HunterPhase, dormant: bool) {
+        if dormant {
+            self.dormant += 1;
+            return;
+        }
+        match phase {
+            HunterPhase::Perched => self.perched += 1,
+            HunterPhase::Stalking => self.stalking += 1,
+            HunterPhase::Windup => self.windup += 1,
+            HunterPhase::Strike => self.strike += 1,
+            HunterPhase::Recovering => self.recovering += 1,
+            HunterPhase::Handling => self.handling += 1,
+        }
+    }
+}
+
+/// Paid attempts this member resolved, by outcome, from the world's own hunter events.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttemptTally {
+    pub captured: u64,
+    pub missed: u64,
+    pub out_of_reach: u64,
+    pub target_lost: u64,
+    pub target_claimed: u64,
+    pub ineligible: u64,
+    pub grasp_unmapped: u64,
+    pub unaffordable: u64,
+}
+
+impl AttemptTally {
+    fn sample(&mut self, outcome: AttemptOutcome) {
+        match outcome {
+            AttemptOutcome::Captured => self.captured += 1,
+            AttemptOutcome::Missed => self.missed += 1,
+            AttemptOutcome::OutOfReach => self.out_of_reach += 1,
+            AttemptOutcome::TargetLost => self.target_lost += 1,
+            AttemptOutcome::TargetClaimed => self.target_claimed += 1,
+            AttemptOutcome::Ineligible => self.ineligible += 1,
+            AttemptOutcome::GraspUnmapped => self.grasp_unmapped += 1,
+            AttemptOutcome::Unaffordable => self.unaffordable += 1,
+        }
+    }
+
+    pub fn total(&self) -> u64 {
+        self.captured
+            + self.missed
+            + self.out_of_reach
+            + self.target_lost
+            + self.target_claimed
+            + self.ineligible
+            + self.grasp_unmapped
+            + self.unaffordable
+    }
+}
+
+/// `hunter::may_reproduce` taken apart into its nine terms, counted per tick of one member's
+/// life, in the predicate's own source order.
+///
+/// [`ApexOpportunity`] says *whether* a member was ready; this says **which term refused it**,
+/// which is the difference between "the age gate binds" and "the age gate binds and so would
+/// the stock gate". Exactly one bin is incremented per sampled tick, or `ready` is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReadinessTerms {
+    /// Ticks this member was alive and its readiness could be evaluated.
+    pub sampled: u64,
+    pub ready: u64,
+    pub fail_escrow: u64,
+    pub fail_carrying: u64,
+    pub fail_target: u64,
+    pub fail_hunting: u64,
+    pub fail_structure: u64,
+    pub fail_reserve: u64,
+    pub fail_energy: u64,
+    pub fail_age: u64,
+    pub fail_interval: u64,
+    /// Ticks on which the decomposition above disagreed with `hunter::may_reproduce` itself.
+    /// It must be zero; if it is not, nothing above it may be read.
+    pub mismatch: u64,
+}
+
+impl ReadinessTerms {
+    /// Add another member's tally into this one.
+    pub fn add(&mut self, other: &ReadinessTerms) {
+        self.sampled += other.sampled;
+        self.ready += other.ready;
+        self.fail_escrow += other.fail_escrow;
+        self.fail_carrying += other.fail_carrying;
+        self.fail_target += other.fail_target;
+        self.fail_hunting += other.fail_hunting;
+        self.fail_structure += other.fail_structure;
+        self.fail_reserve += other.fail_reserve;
+        self.fail_energy += other.fail_energy;
+        self.fail_age += other.fail_age;
+        self.fail_interval += other.fail_interval;
+        self.mismatch += other.mismatch;
+    }
+
+    /// The term that refused this member most often, and how many ticks it refused on.
+    pub fn dominant_failure(&self) -> (&'static str, u64) {
+        [
+            ("gestating", self.fail_escrow),
+            ("carrying a carcass", self.fail_carrying),
+            ("holding a target", self.fail_target),
+            ("hunting", self.fail_hunting),
+            ("below adult structure", self.fail_structure),
+            ("reserve below the stock fraction", self.fail_reserve),
+            ("energy below the stock fraction", self.fail_energy),
+            ("below the minimum reproduction age", self.fail_age),
+            ("inside the reproduction interval", self.fail_interval),
+        ]
+        .into_iter()
+        .max_by_key(|(_, n)| *n)
+        .unwrap_or(("none", 0))
+    }
+
+    /// Sample one tick. The term list is `hunter::may_reproduce`'s own conjunction, in its
+    /// order, and the result is checked against the function rather than trusted.
+    fn sample(
+        &mut self,
+        profile: &FixedHunterProfile,
+        o: &cubarium_core::organism::Organism,
+        member: &cubarium_core::hunter::HunterMember,
+        now: u64,
+        dt: f64,
+    ) {
+        self.sampled += 1;
+        let terms = [
+            o.escrow.is_none(),
+            !member.carrying(),
+            member.target.is_none(),
+            !member.phase.hunting(),
+            o.structure >= o.phenotype.structure_adult - hunter::TOLERANCE,
+            o.reserve >= profile.reproduce_reserve_fraction * o.phenotype.reserve_max,
+            o.energy >= profile.reproduce_energy_fraction * o.phenotype.energy_max,
+            o.age_ticks(now) as f64 * dt >= profile.reproduce_min_age_seconds,
+            now >= member.next_reproduction_tick,
+        ];
+        let truth = hunter::may_reproduce(profile, o, member, now, dt);
+        if terms.iter().all(|t| *t) != truth {
+            self.mismatch += 1;
+        }
+        match terms.iter().position(|t| !t) {
+            None => self.ready += 1,
+            Some(0) => self.fail_escrow += 1,
+            Some(1) => self.fail_carrying += 1,
+            Some(2) => self.fail_target += 1,
+            Some(3) => self.fail_hunting += 1,
+            Some(4) => self.fail_structure += 1,
+            Some(5) => self.fail_reserve += 1,
+            Some(6) => self.fail_energy += 1,
+            Some(7) => self.fail_age += 1,
+            _ => self.fail_interval += 1,
+        }
+    }
+}
+
+/// The difference between two [`BodyBudget`] readings of the same body: what it earned and
+/// what it owed over the ticks between them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BudgetWindow {
+    /// Ticks the window actually covers, which is `TAIL_TICKS` or the whole life if shorter.
+    pub ticks: u64,
+    pub served_total: f64,
+    pub reserve_credit: f64,
+    pub gut_reserve_credit: f64,
+    pub battery_credit: f64,
+    pub gut_battery_credit: f64,
+    pub oxidation_reserve_burned: f64,
+    pub oxidation_battery_credit: f64,
+    pub bill_total: f64,
+    pub bill_paid: f64,
+    pub upkeep_billed: f64,
+    pub motor_billed: f64,
+    pub other_energy_paid: f64,
+}
+
+impl BudgetWindow {
+    fn between(from_tick: u64, from: &BodyBudget, to_tick: u64, to: &BodyBudget) -> BudgetWindow {
+        BudgetWindow {
+            ticks: to_tick.saturating_sub(from_tick),
+            served_total: to.served_total() - from.served_total(),
+            reserve_credit: to.reserve_credit_total() - from.reserve_credit_total(),
+            gut_reserve_credit: to.gut_reserve_credit - from.gut_reserve_credit,
+            battery_credit: to.battery_credit_total() - from.battery_credit_total(),
+            gut_battery_credit: to.gut_battery_credit - from.gut_battery_credit,
+            oxidation_reserve_burned: to.oxidation_reserve_burned - from.oxidation_reserve_burned,
+            oxidation_battery_credit: to.oxidation_battery_credit - from.oxidation_battery_credit,
+            bill_total: to.bill_total - from.bill_total,
+            bill_paid: to.bill_paid - from.bill_paid,
+            upkeep_billed: to.upkeep_billed - from.upkeep_billed,
+            motor_billed: (to.motor_translation_billed + to.motor_turn_billed)
+                - (from.motor_translation_billed + from.motor_turn_billed),
+            other_energy_paid: to.other_energy_paid - from.other_energy_paid,
+        }
+    }
+}
+
 /// One introduced adult's life in the run that introduced it.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ApexLife {
     pub id: OrganismId,
     pub introduced_tick: u64,
+    /// The age it was placed at, in ticks: `0` for the door as it has always behaved.
+    pub introduced_age_ticks: u64,
     /// The first tick the id no longer resolved. `None` if it outlived the horizon.
     pub gone_tick: Option<u64>,
     /// Ticks it was alive inside this run.
     pub lived_ticks: u64,
+    /// `introduced_age_ticks + lived_ticks`: the age `may_reproduce` compared, at the end.
+    pub age_at_end_ticks: u64,
+    /// Why the world removed it, from the ledger's closed record. `None` if it survived, or if
+    /// the ledger was off.
+    pub death_cause: Option<DeathCause>,
+    /// Its whole store budget: the closed record if it died, the live one at the horizon
+    /// otherwise. `None` when the ledger was off.
+    pub budget: Option<BodyBudget>,
+    /// The last [`TAIL_TICKS`] of that budget, so a body that starved after earning nothing is
+    /// distinguishable from one that was earning and still lost.
+    pub tail: Option<BudgetWindow>,
+    pub phases: PhaseOccupancy,
+    pub readiness: ReadinessTerms,
+    pub attempts: AttemptTally,
+    /// Captures, and the material and energy they actually put into the gut.
+    pub captures: u64,
+    pub capture_material: f64,
+    pub capture_energy: f64,
+    /// The highest fraction of `R_max` and `E_max` this body ever held, against the 0.8 and
+    /// 0.75 `may_reproduce` demands, and what it held at the end.
+    pub max_reserve_fraction: f64,
+    pub max_energy_fraction: f64,
+    pub end_reserve_fraction: f64,
+    pub end_energy_fraction: f64,
 }
 
 /// One `(configuration, seed)` audit.
@@ -79,6 +329,11 @@ pub struct AuditRow {
     pub seed: u64,
     pub apex_founders: u32,
     pub introduce_tick: u64,
+    /// The age the founders were introduced at (s). `0.0` is the door as the screen ran it.
+    pub founder_age_seconds: f64,
+    /// Whether the per-body store ledger was recording. When it is off, every `budget` and
+    /// `tail` below is `None` and no `death_cause` is known.
+    pub ledger: bool,
     pub horizon_ticks: u64,
     /// Ticks actually simulated: the horizon, or fewer if the world emptied.
     pub ticks: u64,
@@ -118,6 +373,8 @@ pub struct AuditReport {
     pub seeds: Vec<u64>,
     pub apex_founders: u32,
     pub introduce_tick: u64,
+    pub founder_age_seconds: f64,
+    pub ledger: bool,
     pub horizon_ticks: u64,
     pub workers: usize,
     pub wall_seconds: f64,
@@ -126,14 +383,21 @@ pub struct AuditReport {
     pub rows: Vec<AuditRow>,
 }
 
+/// What one arm runs: the screen's own settings, plus the two this workstream added.
+#[derive(Clone, Copy, Debug)]
+pub struct Arm {
+    pub apex: u32,
+    pub horizon: u64,
+    pub introduce_tick: u64,
+    /// The age the founders are placed at (s). `0.0` is the door the screen used.
+    pub founder_age_seconds: f64,
+    /// Whether to record the per-body store ledger for the run.
+    pub ledger: bool,
+}
+
 /// Run one `(configuration, seed)` arm of the audit.
-fn run_one(
-    eco: &Ecology,
-    seed: u64,
-    apex: u32,
-    horizon: u64,
-    introduce_tick: u64,
-) -> Result<AuditRow, String> {
+fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
+    let Arm { apex, horizon, introduce_tick, founder_age_seconds, ledger } = arm;
     let start = Instant::now();
     let mut config: WorldConfig = (*eco.base).clone();
     config.seed = seed;
@@ -151,8 +415,14 @@ fn run_one(
     profile.validate().map_err(|e| format!("hunter profile rejected: {e}"))?;
     config.validate().map_err(|e| format!("config rejected: {e}"))?;
     let mut world = World::new(config).map_err(|e| format!("world creation refused: {e}"))?;
+    world.record_body_budgets(ledger);
+    let dt = cubarium_core::DT;
+    let age_ticks = (founder_age_seconds / dt).round().max(0.0) as u64;
 
     let mut lives: Vec<ApexLife> = Vec::new();
+    // One rolling window of `(tick, budget)` readings per life, capped at `TAIL_TICKS`, so the
+    // end of a life can be differenced against its own state 2,000 ticks earlier.
+    let mut tails: Vec<VecDeque<(u64, BodyBudget)>> = Vec::new();
     let (mut material_in, mut energy_in) = (0.0, 0.0);
     let mut introduced = false;
     let mut collapsed_at = None;
@@ -161,18 +431,47 @@ fn run_one(
     for _ in 0..horizon {
         world.step();
         ticks = world.tick();
-        // The queues are drained every tick rather than accumulated: this command reads none
-        // of them and a 180,000-tick run would otherwise hold every event it ever emitted.
+        // The queues are drained every tick rather than accumulated: a 180,000-tick run would
+        // otherwise hold every event it ever emitted. The hunt queue is read on the way past,
+        // for the attempts and captures of the members this audit follows.
         world.drain_events();
-        world.drain_hunter_events();
+        for event in world.drain_hunter_events() {
+            match event {
+                HunterEvent::Attempt { hunter, outcome, .. } => {
+                    if let Some(life) = lives.iter_mut().find(|l| l.id == hunter) {
+                        life.attempts.sample(outcome);
+                    }
+                }
+                HunterEvent::Capture { hunter, material, energy, .. } => {
+                    if let Some(life) = lives.iter_mut().find(|l| l.id == hunter) {
+                        life.captures += 1;
+                        life.capture_material += material;
+                        life.capture_energy += energy;
+                    }
+                }
+                _ => {}
+            }
+        }
         world.drain_apex_dormancy_events();
         world.drain_apex_encounter_events();
         world.drain_quiet_events();
+        // The ledger is drained every tick too, for the same reason, and the records of the
+        // members this audit follows are kept. Everything else the world buried is dropped.
+        let (closed, dropped) = world.drain_body_budgets();
+        if dropped > 0 {
+            return Err(format!("the ledger dropped {dropped} closed record(s)"));
+        }
+        for record in closed {
+            if let Some(life) = lives.iter_mut().find(|l| l.id == record.id) {
+                life.death_cause = record.death_cause;
+                life.budget = Some(record);
+            }
+        }
 
         if !introduced && apex > 0 && world.tick() == introduce_tick {
             let targets = evaluate::apex_targets(seed, apex);
             let receipts = world
-                .introduce_hunters(profile.clone(), &targets)
+                .introduce_hunters_with_age(profile.clone(), &targets, founder_age_seconds)
                 .map_err(|e| format!("apex introduction refused: {e}"))?;
             material_in = receipts.iter().map(|r| r.material_in).sum();
             energy_in = receipts.iter().map(|r| r.energy_in).sum();
@@ -181,20 +480,59 @@ fn run_one(
                 .map(|r| ApexLife {
                     id: r.id,
                     introduced_tick: world.tick(),
+                    introduced_age_ticks: age_ticks,
                     gone_tick: None,
                     lived_ticks: 0,
+                    age_at_end_ticks: age_ticks,
+                    death_cause: None,
+                    budget: None,
+                    tail: None,
+                    phases: PhaseOccupancy::default(),
+                    readiness: ReadinessTerms::default(),
+                    attempts: AttemptTally::default(),
+                    captures: 0,
+                    capture_material: 0.0,
+                    capture_energy: 0.0,
+                    max_reserve_fraction: 0.0,
+                    max_energy_fraction: 0.0,
+                    end_reserve_fraction: 0.0,
+                    end_energy_fraction: 0.0,
                 })
                 .collect();
+            tails = lives.iter().map(|_| VecDeque::new()).collect();
             introduced = true;
         }
-        for life in lives.iter_mut() {
+        let now = world.tick();
+        for (life, tail) in lives.iter_mut().zip(tails.iter_mut()) {
             if life.gone_tick.is_some() {
                 continue;
             }
-            if world.state.organisms.get(life.id).is_some() {
-                life.lived_ticks += 1;
-            } else {
-                life.gone_tick = Some(world.tick());
+            let Some(o) = world.state.organisms.get(life.id) else {
+                life.gone_tick = Some(now);
+                // The record the ledger closed this tick is the whole life; the window is its
+                // last `TAIL_TICKS`, differenced against this member's own earlier reading.
+                if let (Some(end), Some((from_tick, from))) = (life.budget.as_ref(), tail.front()) {
+                    life.tail = Some(BudgetWindow::between(*from_tick, from, now, end));
+                }
+                continue;
+            };
+            life.lived_ticks += 1;
+            life.age_at_end_ticks = life.introduced_age_ticks + life.lived_ticks;
+            let reserve_fraction = o.reserve / o.phenotype.reserve_max;
+            let energy_fraction = o.energy / o.phenotype.energy_max;
+            life.max_reserve_fraction = life.max_reserve_fraction.max(reserve_fraction);
+            life.max_energy_fraction = life.max_energy_fraction.max(energy_fraction);
+            life.end_reserve_fraction = reserve_fraction;
+            life.end_energy_fraction = energy_fraction;
+            if let Some(member) = world.hunters().member(life.id) {
+                life.phases.sample(member.phase, world.state.apex_dormancy.contains(life.id));
+                life.readiness.sample(&profile, o, member, now, dt);
+            }
+            if let Some(budget) = world.body_budget(life.id) {
+                tail.push_back((now, *budget));
+                while tail.len() as u64 > TAIL_TICKS {
+                    tail.pop_front();
+                }
             }
         }
 
@@ -209,6 +547,21 @@ fn run_one(
         }
     }
 
+    // A member that outlived the horizon has no closed record: its budget is the live one, and
+    // its window ends where the run did.
+    let end_tick = world.tick();
+    for (life, tail) in lives.iter_mut().zip(tails.iter()) {
+        if life.gone_tick.is_some() {
+            continue;
+        }
+        if let Some(budget) = world.body_budget(life.id) {
+            if let Some((from_tick, from)) = tail.front() {
+                life.tail = Some(BudgetWindow::between(*from_tick, from, end_tick, budget));
+            }
+            life.budget = Some(*budget);
+        }
+    }
+
     Ok(AuditRow {
         reproduce_min_age_ticks: (profile.reproduce_min_age_seconds / cubarium_core::DT) as u64,
         reproduce_reserve_fraction: profile.reproduce_reserve_fraction,
@@ -220,6 +573,8 @@ fn run_one(
         seed,
         apex_founders: apex,
         introduce_tick,
+        founder_age_seconds,
+        ledger,
         horizon_ticks: horizon,
         ticks,
         collapsed_at,
@@ -247,7 +602,7 @@ fn verdict(rows: &[AuditRow]) -> String {
         // the wrong knob" and "the radius is the wrong knob and here is the right one".
         let oldest = rows
             .iter()
-            .flat_map(|r| r.lives.iter().map(|l| l.lived_ticks))
+            .flat_map(|r| r.lives.iter().map(|l| l.age_at_end_ticks))
             .max()
             .unwrap_or(0);
         let min_age = rows.iter().map(|r| r.reproduce_min_age_ticks).max().unwrap_or(0);
@@ -257,6 +612,32 @@ fn verdict(rows: &[AuditRow]) -> String {
                  {oldest} ticks and `may_reproduce` requires {min_age}, so every member died at \
                  {:.0}% of its own minimum reproduction age.",
                 100.0 * oldest as f64 / min_age as f64
+            )
+        } else if min_age > 0 {
+            // The age gate was reachable in this arm, so it is not what refused them. Name the
+            // term that did, from the members' own per-tick decomposition.
+            let mut terms = ReadinessTerms::default();
+            for r in rows {
+                for l in &r.lives {
+                    terms.add(&l.readiness);
+                }
+            }
+            let (name, ticks) = terms.dominant_failure();
+            let mismatch = if terms.mismatch > 0 {
+                format!(
+                    " WARNING: the term decomposition disagreed with `may_reproduce` on \
+                     {} tick(s) and must not be read.",
+                    terms.mismatch
+                )
+            } else {
+                String::new()
+            };
+            format!(
+                " The age gate is not what refused them here: members reached {oldest} ticks \
+                 against the {min_age} `may_reproduce` requires. Of {} member-ticks watched, \
+                 the first term to refuse was `{name}` on {ticks} ({:.1}%).{mismatch}",
+                terms.sampled,
+                100.0 * ticks as f64 / terms.sampled.max(1) as f64,
             )
         } else {
             String::new()
@@ -293,15 +674,17 @@ fn verdict(rows: &[AuditRow]) -> String {
 pub fn run(
     configs: Vec<PathBuf>,
     seeds: usize,
-    apex: u32,
-    horizon: u64,
-    introduce_tick: u64,
+    arm: Arm,
     workers: usize,
     wall_seconds: u64,
     out: PathBuf,
 ) -> Result<(), Boxed> {
+    let Arm { apex, horizon, introduce_tick, founder_age_seconds, ledger } = arm;
     if configs.is_empty() {
         return Err("--config must name at least one world configuration TOML".into());
+    }
+    if !founder_age_seconds.is_finite() || founder_age_seconds < 0.0 {
+        return Err("--founder-age-seconds must be finite and not negative".into());
     }
     if seeds == 0 || seeds > HELDOUT_SEEDS.len() {
         return Err(format!("--seeds must be between 1 and {}", HELDOUT_SEEDS.len()).into());
@@ -314,6 +697,10 @@ pub fn run(
 
     println!("# apex opportunity audit");
     println!("# build {BUILD_ID}, {apex} adults introduced at tick {introduce_tick}, never restocked");
+    println!(
+        "# founders placed at age {founder_age_seconds} s, per-body ledger {}",
+        if ledger { "on" } else { "off" }
+    );
     println!("# horizon {horizon} ticks, held-out seeds {seeds:?}, {workers} workers");
     for e in &ecologies {
         println!("# config {} (hash {})", e.label, e.hex());
@@ -342,7 +729,7 @@ pub fn run(
                             .push(format!("{}/{seed}: not started inside the wall cap", ecologies[e].label));
                         continue;
                     }
-                    match run_one(&ecologies[e], seed, apex, horizon, introduce_tick) {
+                    match run_one(&ecologies[e], seed, arm) {
                         Ok(row) => rows.lock().expect("rows").push(row),
                         Err(err) => failures
                             .lock()
@@ -388,6 +775,50 @@ pub fn run(
         );
     }
 
+    if ledger {
+        println!();
+        println!(
+            "{:<12} {:>7} {:>3} {:>9} {:>9} {:>11} {:>8} {:>8} {:>8} {:>8} {:>8} {:>10}",
+            "config",
+            "seed",
+            "#",
+            "lived",
+            "age end",
+            "cause",
+            "captures",
+            "credit e",
+            "paid e",
+            "max R/R*",
+            "max E/E*",
+            "refused by",
+        );
+        for r in &rows {
+            for (i, l) in r.lives.iter().enumerate() {
+                let (credit, paid) = l.budget.as_ref().map_or((0.0, 0.0), |b| {
+                    (
+                        b.battery_credit_total() + b.gut_battery_credit + b.oxidation_battery_credit,
+                        b.bill_paid + b.other_energy_paid,
+                    )
+                });
+                println!(
+                    "{:<12} {:>7} {:>3} {:>9} {:>9} {:>11} {:>8} {:>8.3} {:>8.3} {:>8.3} {:>8.3} {:>10}",
+                    r.config,
+                    r.seed,
+                    i,
+                    l.lived_ticks,
+                    l.age_at_end_ticks,
+                    l.death_cause.map_or_else(|| "alive".to_string(), |c| format!("{c:?}")),
+                    l.captures,
+                    credit,
+                    paid,
+                    l.max_reserve_fraction,
+                    l.max_energy_fraction,
+                    l.readiness.dominant_failure().0,
+                );
+            }
+        }
+    }
+
     let verdict = verdict(&rows);
     println!();
     println!("{verdict}");
@@ -397,6 +828,8 @@ pub fn run(
         seeds,
         apex_founders: apex,
         introduce_tick,
+        founder_age_seconds,
+        ledger,
         horizon_ticks: horizon,
         workers,
         wall_seconds: started.elapsed().as_secs_f64(),
@@ -426,6 +859,8 @@ mod tests {
             seed: 1,
             apex_founders: 2,
             introduce_tick: 6_000,
+            founder_age_seconds: 0.0,
+            ledger: true,
             horizon_ticks: 180_000,
             ticks: 180_000,
             collapsed_at: None,
@@ -463,6 +898,118 @@ mod tests {
 
         let met = verdict(&[row(500, 400, 12, 3, 0)]);
         assert!(met.contains("neither readiness nor distance"), "{met}");
+    }
+
+    /// An all-zero ledger record. `BodyBudget` is a plain record of sums with no constructor
+    /// outside the world that fills it, so a unit test writes one out.
+    fn zero_budget() -> BodyBudget {
+        BodyBudget {
+            id: OrganismId { slot: 0, generation: 1 },
+            opened_tick: 0,
+            born_tick: 0,
+            closed_tick: None,
+            death_cause: None,
+            start_structure: 0.0,
+            start_reserve: 0.0,
+            start_energy: 0.0,
+            end_structure: 0.0,
+            end_reserve: 0.0,
+            end_energy: 0.0,
+            served: [0.0; 4],
+            digestible: [0.0; 4],
+            reserve_credit: [0.0; 4],
+            battery_credit: [0.0; 4],
+            gut_reserve_credit: 0.0,
+            gut_battery_credit: 0.0,
+            oxidation_reserve_burned: 0.0,
+            oxidation_battery_credit: 0.0,
+            upkeep_billed: 0.0,
+            motor_translation_billed: 0.0,
+            motor_turn_billed: 0.0,
+            bill_total: 0.0,
+            bill_paid: 0.0,
+            other_energy_paid: 0.0,
+            growth_material: 0.0,
+            growth_energy: 0.0,
+            reproduction_material: 0.0,
+            reproduction_energy: 0.0,
+            injury_structure: 0.0,
+            billed_ticks: 0,
+        }
+    }
+
+    fn life(age_at_end: u64, readiness: ReadinessTerms) -> ApexLife {
+        ApexLife {
+            id: OrganismId { slot: 0, generation: 1 },
+            introduced_tick: 6_000,
+            introduced_age_ticks: age_at_end,
+            gone_tick: None,
+            lived_ticks: 0,
+            age_at_end_ticks: age_at_end,
+            death_cause: Some(DeathCause::Starvation),
+            budget: None,
+            tail: None,
+            phases: PhaseOccupancy::default(),
+            readiness,
+            attempts: AttemptTally::default(),
+            captures: 0,
+            capture_material: 0.0,
+            capture_energy: 0.0,
+            max_reserve_fraction: 0.0,
+            max_energy_fraction: 0.0,
+            end_reserve_fraction: 0.0,
+            end_energy_fraction: 0.0,
+        }
+    }
+
+    /// When the founders were placed past the age gate and readiness still never opened, the
+    /// verdict must stop blaming the age and name the term the members' own decomposition says
+    /// refused them.
+    #[test]
+    fn the_verdict_names_the_term_that_refused_once_the_age_gate_is_open() {
+        let terms = ReadinessTerms {
+            sampled: 1_000,
+            fail_reserve: 900,
+            fail_energy: 100,
+            ..ReadinessTerms::default()
+        };
+        let mut r = row(500, 0, 0, 0, 0);
+        r.lives = vec![life(30_000, terms)];
+        let said = verdict(&[r]);
+        assert!(said.contains("cannot produce a mating"), "{said}");
+        assert!(said.contains("age gate is not what refused them"), "{said}");
+        assert!(said.contains("reserve below the stock fraction"), "{said}");
+        assert!(said.contains("90.0%"), "{said}");
+        assert!(!said.contains("WARNING"), "{said}");
+    }
+
+    /// A decomposition that disagreed with `may_reproduce` says so instead of being read.
+    #[test]
+    fn a_disagreeing_decomposition_is_flagged_not_reported_quietly() {
+        let terms =
+            ReadinessTerms { sampled: 10, fail_reserve: 10, mismatch: 3, ..ReadinessTerms::default() };
+        let mut r = row(500, 0, 0, 0, 0);
+        r.lives = vec![life(30_000, terms)];
+        let said = verdict(&[r]);
+        assert!(said.contains("WARNING"), "{said}");
+    }
+
+    /// The tail window is the difference of two readings of the same body, not a recomputation.
+    #[test]
+    fn the_tail_window_differences_two_readings() {
+        let mut from = zero_budget();
+        from.bill_paid = 1.0;
+        from.oxidation_reserve_burned = 0.25;
+        let mut to = from;
+        to.bill_paid = 3.5;
+        to.oxidation_reserve_burned = 0.75;
+        to.gut_reserve_credit = 2.0;
+        let w = BudgetWindow::between(9_000, &from, 11_000, &to);
+        assert_eq!(w.ticks, 2_000);
+        assert!((w.bill_paid - 2.5).abs() < 1e-12, "{w:?}");
+        assert!((w.oxidation_reserve_burned - 0.5).abs() < 1e-12, "{w:?}");
+        assert!((w.gut_reserve_credit - 2.0).abs() < 1e-12, "{w:?}");
+        assert_eq!(w.served_total, 0.0);
     }
 
     /// The two row predicates read the counters they claim to read.
