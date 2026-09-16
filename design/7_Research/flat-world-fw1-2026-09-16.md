@@ -142,10 +142,10 @@ or the `CELL_COUNT -> CUBE_CELL_COUNT` rename. No behaviour changed anywhere.
 
 | crate | files | what changed |
 |---|---|---|
-| `cubarium-core` | 46 | `Topology::Cube` / `Scale::ONE` threaded through `cell_of`, `CellId::*`, `travel`, `unfold*`, `chart_images`, `ScalarField`; `CELL_COUNT` renamed; `.embed()` → `Topology::Cube.embed(Scale::ONE, &p)`; `chord_sq` moved to the topology at `pairs.rs:64`; a few cell-index loop bounds `u8 -> u16` |
-| `cubarium-render` | 20 | the same threading, plus **`Canvas::{get, set, add}` widened to `u16`** (plan §2 names them) and the pixel tuples and loop bounds that feed them |
-| `cubarium` (host) | 55 | the same threading, plus the pixel-index widening through `present.rs`, `art_present/{environment,habitat,tall}.rs`, `raycast.rs`, `runner/mod.rs` and their tests; `GROUND_LATTICE`, `SEED_CELL`, `TallColumn.cx` and the `rain_marks`/`foliage_rows` pixel and cell types |
-| `cubarium-search` | 6 | threading only; the crate stays cube-only (plan §1) |
+| `cubarium-core` | 36 | `Topology::Cube` / `Scale::ONE` threaded through `cell_of`, `CellId::*`, `travel`, `unfold*`, `chart_images`, `ScalarField`; `CELL_COUNT` renamed; `.embed()` → `Topology::Cube.embed(Scale::ONE, &p)`; `chord_sq` moved to the topology at `pairs.rs:64`; a few cell-index loop bounds `u8 -> u16` |
+| `cubarium-render` | 13 | the same threading, plus **`Canvas::{get, set, add}` widened to `u16`** (plan §2 names them) and the pixel tuples and loop bounds that feed them |
+| `cubarium` (host) | 49 | the same threading, plus the pixel-index widening through `present.rs`, `art_present/{environment,habitat,tall}.rs`, `raycast.rs`, `runner/mod.rs` and their tests; `GROUND_LATTICE`, `SEED_CELL`, `TallColumn.cx` and the `rain_marks`/`foliage_rows` pixel and cell types |
+| `cubarium-search` | 5 | threading only; the crate stays cube-only (plan §1) |
 | `cubarium-surface-oracle` | 0 | untouched; it has no surface call sites and stays cube-only |
 | `vendor/cube-proto` | 0 | untouched (FW-0 owns it), and still `u8` at the discrete API, so the bridging casts live on the cubarium side |
 
@@ -207,10 +207,10 @@ and one reflection.
 | | before | after |
 |---|---|---|
 | `cargo test --workspace` | 1,472 passed, 0 failed, 23 ignored | 1,510 passed, 0 failed, 23 ignored |
-| `cubarium-surface` unit tests | 53 | 100 |
-| `cubarium-surface` integration tests | 39 | 40 (`cube_by_value.rs` is the new one) |
+| `cubarium-surface` unit tests (`#[test]`) | 54 | 95 |
+| `cubarium-surface` integration tests (`#[test]`) | 40 | 41 (`cube_by_value.rs` is the new one) |
 
-The 38 new tests are the by-value golden plus the ring exercises in
+The 42 new tests are the by-value golden plus the ring exercises in
 `geometry.rs`, `point.rs`, `travel.rs`, `unfold.rs`, `raster.rs` and `field.rs`.
 FW-6's reserved paths `tests/{ring_travel,ring_field,ring_raster}.rs` were not
 created.

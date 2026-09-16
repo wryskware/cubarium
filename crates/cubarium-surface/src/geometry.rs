@@ -361,15 +361,11 @@ impl Topology {
                 if wf % cp != 0.0 || hf % cp != 0.0 {
                     return Err(TopologyError::ExtentNotCellMultiple { w, h, cell_pixels: cp });
                 }
-                let (cx, cy) = self.cells(scale, Face::Front);
-                let cells = usize::from(cx).checked_mul(usize::from(cy));
-                let cells = cells.ok_or(TopologyError::TooManyCells {
-                    cells: usize::MAX,
-                    w,
-                    h,
-                    cell_pixels: cp,
-                })?;
-                if cells > usize::from(u16::MAX) {
+                // Counted in f64 before any narrowing cast, so a world too large to index
+                // cannot hide behind a saturating `as u16`.
+                let wanted = (wf / cp) * (hf / cp);
+                if wanted.is_nan() || wanted > f64::from(u16::MAX) {
+                    let cells = if wanted.is_finite() { wanted as usize } else { usize::MAX };
                     return Err(TopologyError::TooManyCells { cells, w, h, cell_pixels: cp });
                 }
                 // Two images of the chart, `2w` apart, must be the only ones that can ever
