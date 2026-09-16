@@ -198,18 +198,17 @@ impl State {
     }
 
     fn rebuild_swapchain(&mut self) -> Result<()> {
-        let gpu = &self.gpu;
-        let d = &gpu.device;
-        unsafe { d.device_wait_idle()? };
+        unsafe { self.gpu.device.device_wait_idle()? };
         self.destroy_swapchain();
-
+        let pdev = self.gpu.pdev;
         let capabilities = unsafe {
             self.surface_instance
-                .get_physical_device_surface_capabilities(gpu.pdev, self.surface)
+                .get_physical_device_surface_capabilities(pdev, self.surface)
         }?;
         let formats = unsafe {
-            self.surface_instance.get_physical_device_surface_formats(gpu.pdev, self.surface)
+            self.surface_instance.get_physical_device_surface_formats(pdev, self.surface)
         }?;
+        let d = &self.gpu.device;
         // An `_SRGB` surface makes the encode the hardware's, exactly as on the board's
         // preferred route; a UNORM surface falls back to the present shader's own.
         let chosen = formats

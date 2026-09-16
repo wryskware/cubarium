@@ -3,9 +3,13 @@
 //! * [`Headless`] — no target at all: render the world raster and read it back. The
 //!   golden-image test and every desktop screenshot use this, and so does the board
 //!   when it is measuring the scene passes without the panel in the way.
-//! * [`Scanout`] (feature `scanout`) — the board: a ring of `VK_IMAGE_TILING_LINEAR`
-//!   `B8G8R8A8_UNORM` images exported as dma-bufs, imported into KMS with a
-//!   modifier-free `AddFB2` and page-flipped at DP-1. Variant (c) of the spike.
+//! * [`ShimScanout`] (feature `scanout`) — **the board, in production**: the same
+//!   exported `VK_IMAGE_TILING_LINEAR` dma-bufs, handed to `cube-screen-shim` over
+//!   GS-2's `SOCK_SEQPACKET` socket. The daemon keeps DRM master and flips, so the
+//!   service stays up and two workers can be on the device at once.
+//! * [`Scanout`] (feature `scanout`) — the same images flipped by *this* process, which
+//!   needs DRM master and therefore the daemon stopped. Kept because it is the path the
+//!   spike measured end to end, so it is the control when a socket frame looks wrong.
 //! * A desktop **window** — a `winit` window and an `ash` swapchain — which lives in
 //!   the standalone `crates/cubarium-gpu/window` crate. It drives exactly the passes
 //!   below through [`Renderer::record`](crate::render::Renderer::record); it is out of
@@ -20,11 +24,17 @@ use crate::scene::Scene;
 use crate::vk::Gpu;
 
 #[cfg(feature = "scanout")]
+pub mod dmabuf;
+#[cfg(feature = "scanout")]
 pub mod kms;
 #[cfg(feature = "scanout")]
 mod scanout;
 #[cfg(feature = "scanout")]
+mod shim;
+#[cfg(feature = "scanout")]
 pub use scanout::Scanout;
+#[cfg(feature = "scanout")]
+pub use shim::ShimScanout;
 
 /// Render into the world raster and nothing else.
 pub struct Headless {

@@ -6,8 +6,11 @@
 //! ```
 //!
 //! `headless` renders `--frames` frames and writes the last one out; it is what the
-//! desktop screenshots and the golden image come from. `scanout` takes DRM master and
-//! page-flips at DP-1 (stop `cube-screen-shim` first). `window` opens a `winit` window.
+//! desktop screenshots and the golden image come from. `shim` hands dma-bufs to
+//! `cube-screen-shim` over its frame socket and is the board's production path.
+//! `kms` takes DRM master and page-flips at DP-1 itself, which needs the daemon
+//! stopped; it is the spike's control path. The window lives in the standalone
+//! `crates/cubarium-gpu/window` crate.
 
 use anyhow::{Context, Result, bail};
 use cubarium_gpu::atlas::Atlas;
@@ -31,6 +34,11 @@ struct Args {
     connector: String,
     quarter_turns: u32,
     seed: u64,
+    /// Build the scene once and present it unchanged every frame. The animation stops,
+    /// but the CPU cost left is the *renderer's* — the upload, the command buffer and
+    /// the wait — with the Stage A scene producer, which Stage B replaces wholesale,
+    /// taken out of the number.
+    hold: bool,
 }
 
 fn parse() -> Result<Args> {
@@ -45,6 +53,7 @@ fn parse() -> Result<Args> {
         connector: "DP-1".into(),
         quarter_turns: 1,
         seed: 1,
+        hold: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -66,6 +75,7 @@ fn parse() -> Result<Args> {
             "--connector" => a.connector = value()?,
             "--quarter-turns" => a.quarter_turns = value()?.parse()?,
             "--seed" => a.seed = value()?.parse()?,
+            "--hold" => a.hold = true,
             other => bail!("unknown flag {other}"),
         }
     }
@@ -85,9 +95,9 @@ fn main() -> Result<()> {
     match args.target.as_str() {
         "headless" => headless(&args, &atlas),
         #[cfg(feature = "scanout")]
-        "scanout" => scanout(&args, &atlas),
-        #[cfg(feature = "window")]
-        "window" => window(&args, &atlas),
+        "shim" => shim(&args, &atlas),
+        #[cfg(feature = "scanout")]
+        "kms" => kms(&args, &atlas),
         other => bail!("target {other} is not built into this binary"),
     }
 }
@@ -107,20 +117,28 @@ fn headless(args: &Args, atlas: &Atlas) -> Result<()> {
 
     let mut gpu_ms = Vec::new();
     let mut instances = 0;
+    if args.hold {
+        world.tick(1, 0.0);
+        world.frame(atlas, 0.0, 0.0);
+    }
+    let cpu0 = cpu_seconds();
     let wall = std::time::Instant::now();
     for frame in 0..args.frames {
         let seconds = args.at.unwrap_or(frame as f64 / args.fps);
         let tick = (seconds * TICK_HZ).floor() as u64 + 1;
         let f = (seconds * TICK_HZ).fract();
-        world.tick(tick, present_seconds(tick, 0.0));
-        let scene = world.frame(atlas, present_seconds(tick, f), f as f32);
-        instances = scene.instance_count();
-        let ms = target.draw(&gpu, &mut renderer, scene)?;
+        if !args.hold {
+            world.tick(tick, present_seconds(tick, 0.0));
+            world.frame(atlas, present_seconds(tick, f), f as f32);
+        }
+        instances = world.scene().instance_count();
+        let ms = target.draw(&gpu, &mut renderer, world.scene())?;
         if frame >= 5 {
             gpu_ms.push(ms);
         }
     }
     let elapsed = wall.elapsed().as_secs_f64();
+    println!("headless CPU: {:.3} core-seconds per second", (cpu_seconds() - cpu0) / elapsed);
     stat("GPU per frame", &gpu_ms);
     println!(
         "{} frames, {instances} instances, {:.1} fps end to end (CPU-bound: this waits on every frame)",
@@ -137,8 +155,68 @@ fn headless(args: &Args, atlas: &Atlas) -> Result<()> {
     Ok(())
 }
 
+/// The board's production path: GS-2's dma-buf socket.
 #[cfg(feature = "scanout")]
-fn scanout(args: &Args, atlas: &Atlas) -> Result<()> {
+fn shim(args: &Args, atlas: &Atlas) -> Result<()> {
+    use cubarium_gpu::target::ShimScanout;
+    let gpu = Gpu::open(&[])?;
+    println!("device: {} (dma-buf: {})", gpu.name, gpu.has_dma_buf);
+    let mut renderer = Renderer::new(&gpu, atlas, args.layout)?;
+    let mut world = SyntheticWorld::new(args.layout, args.seed);
+    let mut target = ShimScanout::open(&gpu, &mut renderer, args.quarter_turns)?;
+    println!(
+        "upscale x{}, {} quarter turn(s)",
+        target.transform().factor,
+        target.transform().quarter_turns
+    );
+    let (mut gpu_ms, mut submit_ms, mut present_ms) = (Vec::new(), Vec::new(), Vec::new());
+    let cpu0 = cpu_seconds();
+    let wall = std::time::Instant::now();
+    if args.hold {
+        world.tick(1, 0.0);
+        world.frame(atlas, 0.0, 0.0);
+    }
+    for frame in 0..args.frames {
+        let seconds = frame as f64 / args.fps;
+        let tick = (seconds * TICK_HZ).floor() as u64 + 1;
+        let f = (seconds * TICK_HZ).fract();
+        if !args.hold {
+            world.tick(tick, present_seconds(tick, 0.0));
+            world.frame(atlas, present_seconds(tick, f), f as f32);
+        }
+        let timing = target.draw(&gpu, &mut renderer, world.scene())?;
+        if frame >= 5 {
+            gpu_ms.push(timing.0);
+            submit_ms.push(timing.1);
+            present_ms.push(timing.2);
+        }
+    }
+    let elapsed = wall.elapsed().as_secs_f64();
+    let cpu = cpu_seconds() - cpu0;
+    stat("GPU render into the presented dma-buf", &gpu_ms);
+    stat("submit..fence", &submit_ms);
+    stat("Present..Presented (the daemon's pacing)", &present_ms);
+    println!(
+        "wall={elapsed:.2}s cpu={cpu:.2}s -> {:.3} CPU core-seconds per second, {:.1} fps, {} instances",
+        cpu / elapsed,
+        args.frames as f64 / elapsed,
+        world.scene().instance_count()
+    );
+    if let Some(path) = &args.png {
+        // The panel-resolution buffer the daemon is scanning out, not the world raster:
+        // proof that the frame on the wire is the frame that was drawn.
+        let (w, h, rgba) = target.read_presented(&gpu, &renderer)?;
+        cubarium_gpu::target::write_png(path, w, h, &rgba)?;
+        println!("wrote {} ({w}x{h}, read back from the presented dma-buf)", path.display());
+    }
+    target.destroy(&gpu);
+    renderer.destroy(&gpu);
+    Ok(())
+}
+
+/// The spike's control path: this process takes DRM master and flips.
+#[cfg(feature = "scanout")]
+fn kms(args: &Args, atlas: &Atlas) -> Result<()> {
     use cubarium_gpu::target::Scanout;
     let gpu = Gpu::open(&[])?;
     println!("device: {} (dma-buf: {})", gpu.name, gpu.has_dma_buf);
@@ -157,13 +235,19 @@ fn scanout(args: &Args, atlas: &Atlas) -> Result<()> {
     let (mut gpu_ms, mut submit_ms, mut flip_ms) = (Vec::new(), Vec::new(), Vec::new());
     let cpu0 = cpu_seconds();
     let wall = std::time::Instant::now();
+    if args.hold {
+        world.tick(1, 0.0);
+        world.frame(atlas, 0.0, 0.0);
+    }
     for frame in 0..args.frames {
         let seconds = frame as f64 / args.fps;
         let tick = (seconds * TICK_HZ).floor() as u64 + 1;
         let f = (seconds * TICK_HZ).fract();
-        world.tick(tick, present_seconds(tick, 0.0));
-        let scene = world.frame(atlas, present_seconds(tick, f), f as f32);
-        let timing = target.draw(&gpu, &mut renderer, scene)?;
+        if !args.hold {
+            world.tick(tick, present_seconds(tick, 0.0));
+            world.frame(atlas, present_seconds(tick, f), f as f32);
+        }
+        let timing = target.draw(&gpu, &mut renderer, world.scene())?;
         if frame >= 5 {
             gpu_ms.push(timing.0);
             submit_ms.push(timing.1);
@@ -182,18 +266,13 @@ fn scanout(args: &Args, atlas: &Atlas) -> Result<()> {
         world.scene().instance_count()
     );
     if let Some(path) = &args.png {
-        let rgba = renderer.read_raster(&gpu)?;
-        cubarium_gpu::target::write_png(path, args.layout.w, args.layout.h, &rgba)?;
-        println!("wrote {}", path.display());
+        let (w, h, rgba) = target.read_scanout(&gpu, &renderer)?;
+        cubarium_gpu::target::write_png(path, w, h, &rgba)?;
+        println!("wrote {} ({w}x{h}, read back from the scanned-out dma-buf)", path.display());
     }
     target.destroy(&gpu);
     renderer.destroy(&gpu);
     Ok(())
-}
-
-#[cfg(feature = "window")]
-fn window(args: &Args, atlas: &Atlas) -> Result<()> {
-    cubarium_gpu::target::Window::run(atlas, args.layout, args.seed, args.fps)
 }
 
 fn stat(name: &str, values: &[f64]) {
@@ -215,7 +294,6 @@ fn stat(name: &str, values: &[f64]) {
     );
 }
 
-#[cfg(feature = "scanout")]
 fn cpu_seconds() -> f64 {
     let stat = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
     // utime and stime are fields 14 and 15, after the (possibly parenthesised) comm.
