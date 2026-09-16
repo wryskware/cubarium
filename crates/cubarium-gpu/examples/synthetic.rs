@@ -112,6 +112,8 @@ fn headless(args: &Args, atlas: &Atlas) -> Result<()> {
     let gpu = Gpu::open(&[])?;
     println!("device: {} (dma-buf: {})", gpu.name, gpu.has_dma_buf);
     let mut renderer = Renderer::new(&gpu, atlas, args.layout)?;
+    // The synthetic scene is drawn the plan's way: one source texel per S x S block.
+    renderer.art_scale = args.layout.scale as f32;
     let mut world = SyntheticWorld::new(args.layout, args.seed);
     let mut target = Headless::new(&gpu, &renderer)?;
 
@@ -162,6 +164,8 @@ fn shim(args: &Args, atlas: &Atlas) -> Result<()> {
     let gpu = Gpu::open(&[])?;
     println!("device: {} (dma-buf: {})", gpu.name, gpu.has_dma_buf);
     let mut renderer = Renderer::new(&gpu, atlas, args.layout)?;
+    // The synthetic scene is drawn the plan's way: one source texel per S x S block.
+    renderer.art_scale = args.layout.scale as f32;
     let mut world = SyntheticWorld::new(args.layout, args.seed);
     let mut target = ShimScanout::open(&gpu, &mut renderer, args.quarter_turns)?;
     println!(
@@ -221,6 +225,8 @@ fn kms(args: &Args, atlas: &Atlas) -> Result<()> {
     let gpu = Gpu::open(&[])?;
     println!("device: {} (dma-buf: {})", gpu.name, gpu.has_dma_buf);
     let mut renderer = Renderer::new(&gpu, atlas, args.layout)?;
+    // The synthetic scene is drawn the plan's way: one source texel per S x S block.
+    renderer.art_scale = args.layout.scale as f32;
     let mut world = SyntheticWorld::new(args.layout, args.seed);
     let mut target = Scanout::open(&gpu, &mut renderer, &args.connector, args.quarter_turns)?;
     println!(

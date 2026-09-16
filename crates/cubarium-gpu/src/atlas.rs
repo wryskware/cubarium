@@ -144,8 +144,9 @@ impl Atlas {
             loaded.push((key, w, h, bytes));
         }
         let width = loaded.iter().map(|s| s.1).max().unwrap_or(1).max(1);
-        // One extra row for the solid white texel the rain quads sample.
-        let height = loaded.iter().map(|s| s.2).sum::<u32>() + 1;
+        // Two extra tile rows for the derived vine strips (see `derive_vine_strips`),
+        // and one more for the solid white texel the rain quads sample.
+        let height = loaded.iter().map(|s| s.2).sum::<u32>() + 2 * u32::from(tile) + 1;
         let mut rgba = vec![0u8; (width * height * 4) as usize];
         let mut origin = HashMap::new();
         let mut y0 = 0u32;
@@ -159,6 +160,8 @@ impl Atlas {
             origin.insert(*key, (0u32, y0));
             y0 += h;
         }
+        let derived_y = y0;
+        y0 += 2 * u32::from(tile);
         // The solid texel: opaque white, so `colour · 1` is the instance's tone.
         let solid_y = y0;
         let s = ((solid_y * width) * 4) as usize;
@@ -284,6 +287,34 @@ impl Atlas {
             );
         }
 
+        // The derived vine strips, `art.rs::derive_vine_strips` transcribed onto the
+        // atlas bytes: a four-row-periodic vine trunk paints the column through a tile
+        // whose rows 0 and 15 are cleared, and its top is a separate clip keeping only
+        // rows 4..=7. Both inherit the original's clock. Without them a vine draws its
+        // raw tile and paints the rows its neighbours already own — the one place the
+        // GPU could not simply read the pack.
+        for row in meta["tall"].as_array().into_iter().flatten() {
+            let (Some(name), Some(part)) = (row["name"].as_str(), row["part"].as_str()) else {
+                continue;
+            };
+            if part != "trunk" || row["vine_strips"].as_str() != Some(VINE_STRIPS_V1) {
+                continue;
+            }
+            let Some(source) = atlas.tall(name, "trunk") else { continue };
+            for (i, (clear, keep)) in
+                [(vec![0usize, usize::from(tile) - 1], None), (Vec::new(), Some(4..8))]
+                    .into_iter()
+                    .enumerate()
+            {
+                let y = derived_y + i as u32 * u32::from(tile);
+                let first = atlas.copy_derived(source, 0, y, tile, &clear, keep);
+                atlas.tall.insert(
+                    (name.to_owned(), if i == 0 { "trunk_strip" } else { "endpoint" }.to_owned()),
+                    Clip { first, count: source.count, seconds: source.seconds, looping: true },
+                );
+            }
+        }
+
         if atlas.plants.is_empty() || atlas.creatures.is_empty() {
             bail!("pack at {} carries no plants or no creatures", directory.display());
         }
@@ -331,6 +362,40 @@ impl Atlas {
         extent as f32
     }
 
+    /// Copy a clip's frames to `(x, y)`, clearing whole rows or keeping only a range of
+    /// them, and register the copies as new frames. Returns the first one's index.
+    fn copy_derived(
+        &mut self,
+        source: Clip,
+        x: u32,
+        y: u32,
+        tile: u16,
+        clear: &[usize],
+        keep: Option<std::ops::Range<usize>>,
+    ) -> u32 {
+        for i in 0..source.count {
+            let from = self.frames[(source.first + i) as usize];
+            let to_x = x + i * u32::from(tile);
+            for row in 0..u32::from(tile) {
+                let blank = clear.contains(&(row as usize))
+                    || keep.as_ref().is_some_and(|k| !k.contains(&(row as usize)));
+                for col in 0..u32::from(tile) {
+                    let src = (((u32::from(from.y) + row) * self.width + u32::from(from.x) + col)
+                        * 4) as usize;
+                    let dst = (((y + row) * self.width + to_x + col) * 4) as usize;
+                    let texel = if blank { [0u8; 4] } else { [
+                        self.rgba[src],
+                        self.rgba[src + 1],
+                        self.rgba[src + 2],
+                        self.rgba[src + 3],
+                    ] };
+                    self.rgba[dst..dst + 4].copy_from_slice(&texel);
+                }
+            }
+        }
+        self.push_frames(x, y, tile, source.count, tile)
+    }
+
     /// The rect of a frame index.
     pub fn rect(&self, frame: u32) -> FrameRect {
         self.frames[frame as usize]
@@ -375,6 +440,8 @@ impl Atlas {
 
 /// The four clip rows every creature carries, in atlas order — `art::STATES`.
 pub const STATES: [&str; 4] = ["rest", "move", "feed", "bud"];
+/// `art::VINE_STRIPS_V1`: the selector that opts a vine trunk into the derived strips.
+pub const VINE_STRIPS_V1: &str = "period4_endpoint_v1";
 
 fn read_rgba(path: &Path) -> Result<(u32, u32, Vec<u8>)> {
     let decoder = png::Decoder::new(std::io::BufReader::new(
@@ -424,6 +491,33 @@ mod tests {
             assert!(a.tall("spiretree", part).is_some(), "spiretree {part}");
         }
         assert!(a.tall("vinecoil", "trunk").is_some());
+    }
+
+    #[test]
+    fn the_vine_strips_are_derived_from_the_raw_trunk() {
+        let a = atelier();
+        let raw = a.tall("vinecoil", "trunk").expect("the pack carries a vine");
+        let strip = a.tall("vinecoil", "trunk_strip").expect("the strip is derived");
+        let end = a.tall("vinecoil", "endpoint").expect("the endpoint is derived");
+        assert_eq!((strip.count, strip.seconds), (raw.count, raw.seconds));
+        assert_eq!((end.count, end.seconds), (raw.count, raw.seconds));
+        let alpha = |clip: Clip, row: u16, col: u16| {
+            let r = a.rect(clip.first);
+            let i = (((u32::from(r.y) + u32::from(row)) * a.width + u32::from(r.x) + u32::from(col))
+                * 4
+                + 3) as usize;
+            a.rgba[i]
+        };
+        // The strip clears rows 0 and 15 and keeps the rest; the endpoint keeps 4..=7.
+        for col in 0..16 {
+            assert_eq!(alpha(strip, 0, col), 0, "strip row 0 col {col}");
+            assert_eq!(alpha(strip, 15, col), 0, "strip row 15 col {col}");
+            for row in [0u16, 1, 2, 3, 8, 15] {
+                assert_eq!(alpha(end, row, col), 0, "endpoint row {row} col {col}");
+            }
+        }
+        let painted = (0..16).any(|col| alpha(end, 5, col) > 0);
+        assert!(painted, "the endpoint kept nothing at all");
     }
 
     #[test]

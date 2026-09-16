@@ -149,6 +149,16 @@ pub enum SinkArg {
     Web,
 }
 
+/// How `--sink gpu` samples a sprite.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GpuFilterArg {
+    /// One source texel per `S x S` block, nothing filtered.
+    Nearest,
+    /// `cubarium_render::Sprite::sample`'s four taps at the un-snapped anchor: the CPU
+    /// presenter's stamp, for a like-for-like comparison.
+    Bilinear,
+}
+
 /// `run` adds a headless sink to the three `demo` sinks.
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RunSinkArg {
@@ -157,6 +167,9 @@ pub enum RunSinkArg {
     Png,
     /// Local HTTP viewer mapping the frame onto a rotatable cube.
     Web,
+    /// The GPU renderer: the ring drawn by `cubarium-gpu` instead of by the canvas, onto
+    /// the panel through the display daemon's socket or into a development window.
+    Gpu,
     /// Headless: no canvas, no encode, no frames.
     None,
 }
@@ -174,6 +187,7 @@ impl RunSinkArg {
             RunSinkArg::Shim => "shim",
             RunSinkArg::Png => "png",
             RunSinkArg::Web => "web",
+            RunSinkArg::Gpu => "gpu",
             RunSinkArg::None => "none",
         }
     }
@@ -249,6 +263,33 @@ pub struct Run {
     /// instead of the procedural bodies. Omit it and the image is unchanged.
     #[arg(long)]
     pub art: Option<PathBuf>,
+    /// Where `--sink gpu` puts its frames. Omitted, it is `shim` where the display
+    /// daemon's frame socket exists and `window` where it does not.
+    #[arg(long)]
+    pub gpu_target: Option<crate::sink::GpuTargetKind>,
+    /// How `--sink gpu` samples a sprite. `nearest` is the pixel-art rule: one source
+    /// texel on an exact S x S block. `bilinear` is the CPU presenter's own sampler at
+    /// its own sub-pixel anchor, for comparing the two renderers with nothing but the
+    /// sampler between them.
+    #[arg(long, value_enum, default_value_t = GpuFilterArg::Nearest)]
+    pub gpu_filter: GpuFilterArg,
+    /// How many raster pixels one authored source texel covers in `--sink gpu`.
+    ///
+    /// The default, 1, is what the CPU presenter does at every `--world-scale`: `S`
+    /// scales the cell grid and leaves the art the size it was authored. The ring-world
+    /// plan §6 instead has `S` multiply the sprite tile too, which is `--gpu-art-scale`
+    /// equal to the world scale. The two have not been reconciled; this shows both.
+    #[arg(long)]
+    pub gpu_art_scale: Option<f32>,
+    /// Let the wind's displacement land between source texels at `--world-scale` 2 and
+    /// above, instead of rounding it to a whole one. Off by default: a whole-texel bend
+    /// is what keeps every sprite texel on an exact S x S block. A viewing-session knob.
+    #[arg(long, default_value_t = false)]
+    pub gpu_bend_substep: bool,
+    /// Write a PNG of every `--sink gpu` frame into this directory. Captures and the
+    /// fidelity comparison; not for a run anyone is watching.
+    #[arg(long)]
+    pub gpu_capture: Option<PathBuf>,
     /// Seed a **new** world with trained neural animals running this exported policy file
     /// (`cubarium-search es-export`). A seeding control, so it applies only when this run
     /// creates the world: on a resume it is refused rather than seeding a second cohort

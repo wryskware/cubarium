@@ -73,7 +73,7 @@ pub struct SceneUniforms {
     pub raster: [f32; 4],
     /// `(cells_x, cells_y, scale S, producer_max)`.
     pub grid: [f32; 4],
-    /// `(seconds, tick phase f, 0, 0)`. `seconds` is wrapped into a 3,600 s window
+    /// `(seconds, tick phase f, filter, art scale)`. `seconds` is wrapped into a 3,600 s window
     /// before it reaches the shader so `f32` keeps sub-millisecond phase precision
     /// after days of simulated time.
     pub time: [f32; 4],
@@ -113,6 +113,8 @@ impl SceneUniforms {
         seconds: f64,
         f: f32,
         bend_substep: bool,
+        filter_bilinear: bool,
+        art_scale: f32,
     ) -> SceneUniforms {
         let rgb = |hex: u32, w: f32| {
             let c = srgb_linear(hex);
@@ -134,7 +136,12 @@ impl SceneUniforms {
             ],
             // 3,600 simulated seconds is 20 whole periods of the 2.5 s shimmer and
             // 9,000 of the 0.4 s rain fall, so the wrap is invisible in every clip.
-            time: [seconds.rem_euclid(3600.0) as f32, f, 0.0, 0.0],
+            time: [
+                seconds.rem_euclid(3600.0) as f32,
+                f,
+                if filter_bilinear { 1.0 } else { 0.0 },
+                art_scale,
+            ],
             floor: [
                 floor[0] * FLOOR_BRIGHTNESS,
                 floor[1] * FLOOR_BRIGHTNESS,

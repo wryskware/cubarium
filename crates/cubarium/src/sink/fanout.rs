@@ -12,6 +12,9 @@
 
 use anyhow::Result;
 
+use cubarium_core::hunter::{HunterEvent, HunterView};
+use cubarium_core::view::RenderView;
+
 use super::{FrameSink, Output};
 
 /// Hands each frame to every child sink in order.
@@ -55,6 +58,34 @@ impl FrameSink for FanOutSink {
         for sink in &mut self.0 {
             sink.observe_tick(tick);
         }
+    }
+
+    fn observe_world(&mut self, view: &RenderView, hunters: &[HunterView], events: &[HunterEvent]) {
+        for sink in &mut self.0 {
+            sink.observe_world(view, hunters, events);
+        }
+    }
+
+    fn observe_view(&mut self, view: &RenderView, seconds: f64, f: f64) -> Result<()> {
+        // Same failure policy as `submit`: every child is visited, the first error wins.
+        let mut first: Option<anyhow::Error> = None;
+        for sink in &mut self.0 {
+            if let Err(e) = sink.observe_view(view, seconds, f)
+                && first.is_none()
+            {
+                first = Some(e);
+            }
+        }
+        match first {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+
+    /// Any child that wants pixels makes the host rasterise them: a GPU sink mirrored to
+    /// the web viewer still owes the viewer a picture.
+    fn wants_pixels(&self) -> bool {
+        self.0.iter().any(|s| s.wants_pixels())
     }
 
     fn observe_counts(&mut self, population: usize, neural: usize) {

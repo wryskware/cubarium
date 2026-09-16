@@ -46,6 +46,7 @@ fn render(layout: RingLayout) -> Option<Vec<u8>> {
         }
     };
     let mut renderer = Renderer::new(&gpu, &atlas, layout).expect("build the renderer");
+    renderer.art_scale = layout.scale as f32;
     let mut world = SyntheticWorld::new(layout, 1);
     let mut headless = Headless::new(&gpu, &renderer).expect("headless target");
     let tick = (AT * TICK_HZ).floor() as u64 + 1;
@@ -151,6 +152,7 @@ fn every_sprite_texel_covers_a_whole_scale_by_scale_block() {
     let histogram = |scale: u32| {
         let layout = RingLayout { w: 64 * scale, h: 64 * scale, scale };
         let mut renderer = Renderer::new(&gpu, &atlas, layout).expect("renderer");
+        renderer.art_scale = scale as f32;
         let mut headless = Headless::new(&gpu, &renderer).expect("headless");
         let mut scene = cubarium_gpu::scene::Scene::new(layout);
         scene.fields.producer_max = 1.0;

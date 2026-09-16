@@ -37,13 +37,15 @@ void main() {
     vec2 lo = vec2(-pivot.x - pad, -pivot.y - 1.0);
     vec2 hi = vec2(tile.x - pivot.x + pad, tile.y - pivot.y + 1.0);
     // The stamp's own scale (1, or 0.7 for a juvenile) multiplies the world's S.
-    float stampScale = u.grid.z * max(iShade.z, 1e-3);
+    float stampScale = u.time.w * max(iShade.z, 1e-3);
     vec2 corner = vec2((gl_VertexIndex & 1) == 0 ? lo.x : hi.x,
                        (gl_VertexIndex & 2) == 0 ? lo.y : hi.y);
 
     // The anchor lands on a whole raster pixel: pixel art has no sub-pixel positions.
     // Everything else follows from that, including the S x S blocks in the fragment.
-    vec2 anchor = floor(iAnchor) + 0.5;
+    // `--gpu-filter bilinear` keeps the sub-pixel anchor instead, because the point of
+    // that mode is to be the CPU presenter's stamp and the CPU does not snap.
+    vec2 anchor = u.time.z > 0.5 ? iAnchor : floor(iAnchor) + 0.5;
     vec2 side = vec2(-iHeading.y, iHeading.x);
     vec2 px = anchor + stampScale * (corner.x * iHeading + corner.y * side);
 

@@ -10,7 +10,7 @@
 layout(set = 0, binding = 0, std140) uniform Scene {
     vec4 raster;        // w, h, 1/w, 1/h
     vec4 grid;          // cells_x, cells_y, S, producer_max
-    vec4 time;          // seconds, f, -, -
+    vec4 time;          // seconds, f, bilinear filter, art scale
     vec4 floorColour;   // pre-scaled by FLOOR_BRIGHTNESS
     vec4 producerLow;   // rgb, RAMP_MIN_BRIGHTNESS
     vec4 producerHigh;  // rgb, RAMP_MAX_BRIGHTNESS

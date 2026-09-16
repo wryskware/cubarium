@@ -31,14 +31,40 @@ float unit(float v) { return clamp(v, 0.0, 1.0); }
 // One frame's premultiplied linear sample. The pack is straight sRGB + alpha, so the
 // premultiply happens after the sampler's decode -- exactly `Sprite::from_rgba`'s
 // `srgb_decode(c) * a`.
-vec4 frameAt(uvec2 origin, ivec2 texel, float weight, bool fromScratch) {
-    if (weight <= 0.0) { return vec4(0.0); }
+// One texel of one frame, premultiplied and linear, transparent outside the tile —
+// exactly `Sprite::pixel`'s out-of-range rule.
+vec4 texelOf(uvec2 origin, ivec2 texel, vec2 tile, bool fromScratch) {
+    if (texel.x < 0 || texel.y < 0 || texel.x >= int(tile.x) || texel.y >= int(tile.y)) {
+        return vec4(0.0);
+    }
     if (fromScratch) {
         // Already premultiplied linear: the rig's rasteriser produced it that way.
-        return texelFetch(scratch, ivec2(origin) + texel, 0) * weight;
+        return texelFetch(scratch, ivec2(origin) + texel, 0);
     }
     vec4 t = texelFetch(atlas, ivec2(origin) + texel, 0);
-    return vec4(t.rgb * t.a, t.a) * weight;
+    return vec4(t.rgb * t.a, t.a);
+}
+
+// One frame's contribution at tile coordinate `src`.
+//
+// Nearest by default: `floor(src)`, which is what puts every source texel on a whole
+// S x S block. With `u.time.z` set (`--gpu-filter bilinear`) it is instead
+// `Sprite::sample`'s own four taps — `p = src − 0.5`, the four texels around it, the
+// four bilinear weights — which is the CPU presenter's sampler, bit for bit, and is
+// there so the two renderers can be compared with only the sampler between them.
+vec4 frameAt(uvec2 origin, vec2 src, vec2 tile, float weight, bool fromScratch) {
+    if (weight <= 0.0) { return vec4(0.0); }
+    if (u.time.z > 0.5) {
+        vec2 p = src - vec2(0.5);
+        ivec2 t0 = ivec2(floor(p));
+        vec2 fr = p - vec2(t0);
+        vec4 sum = texelOf(origin, t0, tile, fromScratch) * ((1.0 - fr.x) * (1.0 - fr.y))
+                 + texelOf(origin, t0 + ivec2(1, 0), tile, fromScratch) * (fr.x * (1.0 - fr.y))
+                 + texelOf(origin, t0 + ivec2(0, 1), tile, fromScratch) * ((1.0 - fr.x) * fr.y)
+                 + texelOf(origin, t0 + ivec2(1, 1), tile, fromScratch) * (fr.x * fr.y);
+        return sum * weight;
+    }
+    return texelOf(origin, ivec2(floor(src)), tile, fromScratch) * weight;
 }
 
 void main() {
@@ -50,7 +76,7 @@ void main() {
     // turns a half-ulp of interpolation error at a texel boundary into a whole wrong
     // texel; computing it here makes the coordinate a function of the pixel centre and
     // the instance alone, which every conformant implementation agrees on.
-    vec2 offset = (gl_FragCoord.xy - vPlace.xy) / (u.grid.z * max(vShade.z, 1e-3));
+    vec2 offset = (gl_FragCoord.xy - vPlace.xy) / (u.time.w * max(vShade.z, 1e-3));
     vec2 heading = vPlace.zw;
     vec2 vLocal = vec2(dot(offset, heading), dot(offset, vec2(-heading.y, heading.x)));
 
@@ -65,16 +91,18 @@ void main() {
         if (u.knobs.w < 0.5) { d = round(d); }
     }
     vec2 src = vec2(vLocal.x - d, vLocal.y) + pivot;
-    ivec2 texel = ivec2(floor(src));
-    if (texel.x < 0 || texel.y < 0 || texel.x >= int(tile.x) || texel.y >= int(tile.y)) {
+    // Nearest mode can reject the whole fragment early; the filtered one cannot, because
+    // a sample half a texel outside the tile still carries part of the edge texel.
+    if (u.time.z <= 0.5
+        && (src.x < 0.0 || src.y < 0.0 || src.x >= tile.x || src.y >= tile.y)) {
         discard;
     }
 
     bool fromScratch = vShade.w > 0.5;
-    vec4 rgba = frameAt(vFrames01.xy, texel, vWeights.x, fromScratch)
-              + frameAt(vFrames01.zw, texel, vWeights.y, fromScratch)
-              + frameAt(vFrames23.xy, texel, vWeights.z, fromScratch)
-              + frameAt(vFrames23.zw, texel, vWeights.w, fromScratch);
+    vec4 rgba = frameAt(vFrames01.xy, src, tile, vWeights.x, fromScratch)
+              + frameAt(vFrames01.zw, src, tile, vWeights.y, fromScratch)
+              + frameAt(vFrames23.xy, src, tile, vWeights.z, fromScratch)
+              + frameAt(vFrames23.zw, src, tile, vWeights.w, fromScratch);
 
     // `Mask`, in the sprite's own material coordinates so a reveal covers the same
     // material however the wind displaces it. Axial and strip read the row; radial reads

@@ -109,6 +109,29 @@ pub struct Renderer {
     /// (`--gpu-bend-substep`). Off by default: a whole-texel bend is what keeps every
     /// sprite texel on an exact `S × S` block, and the two are identical at `S = 1`.
     pub bend_substep: bool,
+    /// Sample sprites the way the **CPU presenter** does — `Sprite::sample`'s four
+    /// bilinear taps, at the un-snapped sub-pixel anchor — instead of nearest on a whole
+    /// texel.
+    ///
+    /// This is not a quality setting. It exists so the two renderers can be compared with
+    /// only the sampler between them: in this mode the GPU picture is the CPU picture, and
+    /// any remaining difference is a bug in the adapter rather than a consequence of the
+    /// pixel-art rule. Off by default, because the default *is* the pixel-art rule.
+    pub filter_bilinear: bool,
+    /// How many raster pixels one authored **source texel** covers.
+    ///
+    /// **Default 1, which is what the CPU presenter does.** `art_present` passes
+    /// `scale = 1.0` to every plant, ground and body stamp whatever the world's `S` is,
+    /// so a 16 × 16 tile covers 16 × 16 raster pixels at `S = 1` and at `S = 2` alike:
+    /// `S` scales the *cell grid* and everything measured in cells, and leaves the art at
+    /// the size it was authored.
+    ///
+    /// `design/flat-world-plan-2026-09-16.md` §6 says otherwise — "one factor that
+    /// multiplies every length in the world — sprite tile, field cell, body extent" — and
+    /// the two have not been reconciled. This is the knob that shows both: 1 is the
+    /// presenter's rule and the reference the fidelity test compares against; `S` is the
+    /// plan's, and is what the synthetic scene used.
+    pub art_scale: f32,
     // --- the world raster ---
     raster_image: vk::Image,
     raster_memory: vk::DeviceMemory,
@@ -422,6 +445,8 @@ impl Renderer {
         Ok(Renderer {
             layout,
             bend_substep: false,
+            filter_bilinear: false,
+            art_scale: 1.0,
             raster_image,
             raster_memory,
             raster_view,
@@ -572,6 +597,8 @@ impl Renderer {
             scene.seconds,
             scene.f,
             self.bend_substep,
+            self.filter_bilinear,
+            self.art_scale,
         )]);
 
         // Instances, concatenated in draw order; `first_instance` then selects a layer.

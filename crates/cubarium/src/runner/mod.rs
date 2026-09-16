@@ -382,6 +382,25 @@ fn open_sink(
             care.clone(),
             shape,
         )?),
+        RunSinkArg::Gpu => {
+            // The GPU sink draws from the art pack, so it needs one. `--art` is the same
+            // flag the CPU art presenter takes, and naming it here rather than defaulting
+            // to `assets/atelier` keeps one answer to "which art is this run showing?".
+            let art = run.art.as_deref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "--sink gpu draws the baked sprite art; pass --art <dir> (e.g. assets/atelier)"
+                )
+            })?;
+            Box::new(crate::sink::GpuSink::new(
+                shape,
+                art,
+                run.gpu_target.unwrap_or_else(crate::sink::GpuTargetKind::detect),
+                run.gpu_bend_substep,
+                run.gpu_filter == crate::cli::GpuFilterArg::Bilinear,
+                run.gpu_art_scale,
+                run.gpu_capture.clone(),
+            )?)
+        }
     };
     if !run.mirror_web {
         return Ok(Some(primary));
@@ -719,6 +738,11 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
             presenter.observe(&published);
             // The owning world's hunter membership, by full id (empty without a trial).
             presenter.observe_hunters(&published, &world.hunter_view(), &hunted)?;
+            // A sink that draws the world itself gets the same two things at the same
+            // instant, one way only.
+            if let Some(s) = sink.as_mut() {
+                s.observe_world(&published, &world.hunter_view(), &hunted);
+            }
             *view = Some(published);
         }
         // Cadences are anchored on the absolute tick, so a resumed world keeps the same
@@ -840,23 +864,31 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
                                 true => 1.0,
                                 false => f,
                             };
-                            presenter.draw(v, f, &mut canvas);
-                            if let Some(rt) = care.as_mut() {
-                                // A brief local receipt flourish, not a persistent food
-                                // inventory or a second world. Use the same held-time
-                                // fraction as the bodies and encode it for every sink.
-                                rt.effects.draw(v.tick, f, &mut canvas);
-                            }
-                            // Exactly one encode per rendered frame; the identical bytes
-                            // reach whichever sink is active.
-                            match raster.as_mut() {
-                                Some(r) => {
-                                    canvas.encode_raster(r);
-                                    s.submit(Output::Ring(r))?;
+                            // A sink that draws the world itself is handed the view at
+                            // exactly the instant the presenter would have been.
+                            s.observe_view(v, crate::art_present::present_seconds(v.tick, f), f)?;
+                            // ... and then the canvas is skipped entirely for it. A GPU
+                            // sink that still paid for a CPU rasterisation it threw away
+                            // would be slower than the CPU path, not faster.
+                            if s.wants_pixels() {
+                                presenter.draw(v, f, &mut canvas);
+                                if let Some(rt) = care.as_mut() {
+                                    // A brief local receipt flourish, not a persistent food
+                                    // inventory or a second world. Use the same held-time
+                                    // fraction as the bodies and encode it for every sink.
+                                    rt.effects.draw(v.tick, f, &mut canvas);
                                 }
-                                None => {
-                                    canvas.encode(&mut frame);
-                                    s.submit(Output::Cube(&frame))?;
+                                // Exactly one encode per rendered frame; the identical bytes
+                                // reach whichever sink is active.
+                                match raster.as_mut() {
+                                    Some(r) => {
+                                        canvas.encode_raster(r);
+                                        s.submit(Output::Ring(r))?;
+                                    }
+                                    None => {
+                                        canvas.encode(&mut frame);
+                                        s.submit(Output::Cube(&frame))?;
+                                    }
                                 }
                             }
                             frames += 1;

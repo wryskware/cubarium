@@ -37,7 +37,7 @@ pub struct RingLayout {
     /// Raster height in pixels. There is no wrap in `y`; the top and bottom rows are
     /// the ring's rims.
     pub h: u32,
-    /// The world scale `S` of §6: one authored source texel is `S` raster pixels and
+    /// The world scale `S` of §6: one field cell is `4·S` raster pixels and
     /// one field cell is `4·S` of them — `cubarium_surface::Scale::cell_pixels`, which
     /// FW-1 froze at `4·S` with `CELL_PIXELS = 4.0`.
     ///
@@ -362,6 +362,10 @@ impl Scene {
         let w = self.layout.w as f32;
         // Half the tile's diagonal plus the bend, in raster pixels: a bound on how
         // far from the anchor the stamp can paint.
+        // How far from the anchor a stamp can paint: half the tile's longest side plus
+        // the bend, at the art scale. `art_scale` is the renderer's, so this uses the
+        // largest it can be (`S`) rather than reaching for it — a seam duplicate that is
+        // not needed costs one quad, and one that is missing costs a visible cut.
         let tile = f32::from(instance.size[0].max(instance.size[1]));
         let radius = (0.5 * tile * instance.scale.max(1.0) + instance.bend[0].abs() + 1.0)
             * self.layout.scale as f32;

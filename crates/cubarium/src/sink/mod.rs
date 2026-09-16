@@ -2,6 +2,7 @@
 //! per rendered frame — a `Frame` on a cube world, a `Raster` on a ring world.
 
 pub mod fanout;
+pub mod gpu;
 pub mod png;
 pub mod preview;
 pub mod shim;
@@ -9,9 +10,12 @@ pub mod web;
 
 use anyhow::Result;
 use cube_proto::{FACE_SIZE, Frame, Raster};
+use cubarium_core::hunter::{HunterEvent, HunterView};
+use cubarium_core::view::RenderView;
 use cubarium_surface::{Scale, Topology};
 
 pub use fanout::FanOutSink;
+pub use gpu::{GpuSink, GpuTargetKind};
 pub use png::PngSink;
 pub use preview::PreviewSink;
 pub use shim::ShimSink;
@@ -156,6 +160,42 @@ pub trait FrameSink {
     /// completed tick. Observation only, on the same one-way rule as [`Self::observe_tick`];
     /// the web sink reports both at `/status` so a seeded run can be checked from outside.
     fn observe_counts(&mut self, _population: usize, _neural: usize) {}
+
+    /// The world's own view once per completed tick, with the hunter membership and the
+    /// hunter events it committed — exactly what the host hands its presenter at the same
+    /// instant, and on the same one-way rule: nothing a sink does here can reach the world.
+    ///
+    /// A sink that draws the world itself rather than consuming the host's pixels needs
+    /// this, because a `RenderView` alone does not carry the state a picture has: paced
+    /// growth, column heights, body cross-fades, hunter phases. Default no-op, so every
+    /// pixel sink is unaffected.
+    fn observe_world(
+        &mut self,
+        _view: &RenderView,
+        _hunters: &[HunterView],
+        _events: &[HunterEvent],
+    ) {
+    }
+
+    /// One rendered frame's view, at presentation `seconds` and tick fraction `f` — the
+    /// same two numbers [`crate::art_present::ArtPresenter::draw`] is called with, at the
+    /// same point in the host's loop.
+    ///
+    /// The pair with [`Self::observe_world`] is the presenter's own two-method contract
+    /// (observe once per tick, draw once per frame), offered to a sink. Default no-op.
+    fn observe_view(&mut self, _view: &RenderView, _seconds: f64, _f: f64) -> Result<()> {
+        Ok(())
+    }
+
+    /// Whether this sink needs the pixels [`Self::submit`] carries.
+    ///
+    /// `false` lets the host skip the canvas entirely — no `draw`, no encode, no submit —
+    /// which is the whole point of a sink that renders the world itself: a GPU sink that
+    /// still paid for a 23 ms CPU rasterisation it threw away would be slower than the
+    /// CPU path, not faster. A fan-out wants pixels if **any** child does.
+    fn wants_pixels(&self) -> bool {
+        true
+    }
 
     /// True once the sink wants the host to stop (the preview window was closed).
     fn should_quit(&mut self) -> bool {
