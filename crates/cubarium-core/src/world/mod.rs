@@ -73,6 +73,9 @@ pub struct World {
     /// Per-organism store budgets (`budget`). Off by default; transient, never persisted,
     /// never hashed, never read back by the tick.
     pub(crate) budgets: BudgetRecorder,
+    /// Per-attempt apex strike records (`crate::hunter::StrikeRecorder`). Off by default;
+    /// transient, never persisted, never hashed, never read back by the tick.
+    pub(crate) strikes: crate::hunter::StrikeRecorder,
     /// Why two adult apex members did or did not mate (`crate::encounter::ApexOpportunity`).
     /// Written only inside the apex-encounter pass; transient like every field above.
     pub(crate) apex_opportunity: ApexOpportunity,

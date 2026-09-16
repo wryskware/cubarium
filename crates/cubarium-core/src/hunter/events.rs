@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use cubarium_surface::{SurfacePoint, Vec2};
 
@@ -46,7 +46,7 @@ pub struct HunterControlReceipt {
 
 /// Why a paid attempt ended the way it did. `Unaffordable` is the one refusal that happens
 /// *before* payment: it consumes no energy, no draw and no attack counter.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum AttemptOutcome {
     Captured,
     /// In contact, paid, and the capture roll failed.

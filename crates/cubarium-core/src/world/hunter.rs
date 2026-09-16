@@ -70,6 +70,32 @@ impl World {
         }
     }
 
+    /// Record one [`crate::hunter::StrikeRecord`] per paid attempt, or stop recording.
+    ///
+    /// **Off by default and inert.** The flag is read only at the three sites in the strike
+    /// path that build a frame; it consumes no draw, moves no value the simulation reads back,
+    /// and is never persisted or hashed. Turning it off drops everything in flight and
+    /// everything undrained, so a half-recorded attempt is never published as a record.
+    ///
+    /// Independent of [`crate::World::record_body_budgets`]: the ledger says what a body
+    /// raised and spent over its life, this says what one of its lunges was aimed at.
+    pub fn record_strike_attempts(&mut self, on: bool) {
+        self.strikes.set_enabled(on);
+    }
+
+    /// Whether this world is recording per-attempt strike records.
+    pub fn records_strike_attempts(&self) -> bool {
+        self.strikes.enabled()
+    }
+
+    /// The strike records closed since the last drain, oldest first, with how many were
+    /// dropped because more than [`crate::hunter::MAX_STRIKE_RECORDS`] accumulated undrained,
+    /// and how many resolved with no intent frame (only possible across a mid-attempt
+    /// switch-on).
+    pub fn drain_strike_records(&mut self) -> (Vec<crate::hunter::StrikeRecord>, u64, u64) {
+        self.strikes.drain()
+    }
+
     /// The hunter extension: profile, members, guts, imports and counters (`crate::hunter`).
     pub fn hunters(&self) -> &HunterState {
         &self.state.hunters
