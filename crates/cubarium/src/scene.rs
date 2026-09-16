@@ -13,7 +13,9 @@ use cubarium_surface::{
 };
 
 use crate::clock::DT;
-use crate::present::{PALETTE, TRAIL_BRIGHTNESS, draw_floor, draw_ramp_field, interpolate};
+use crate::present::{PALETTE, TRAIL_BRIGHTNESS, draw_floor, draw_ramp_field, interpolate_on};
+#[cfg(test)]
+use crate::present::interpolate;
 use crate::rng::SplitMix64;
 
 /// Which fixture(s) to run.
@@ -114,8 +116,9 @@ pub fn render(view: &SceneView, f: f64, canvas: &mut Canvas, scratch: &mut Vec<P
     if let Some(trail) = &view.trail {
         draw_trail(canvas, trail, view.tick, TRAIL_MAX_AGE_TICKS, trail_color());
     }
+    let topo = canvas.topology();
     for b in &view.bodies {
-        let (anchor, heading) = interpolate(&b.moved, b.anchor, b.heading, f);
+        let (anchor, heading) = interpolate_on(topo, &b.moved, b.anchor, b.heading, f);
         stamp_body(canvas, anchor, heading, &b.shape, b.color, scratch);
     }
 }
@@ -134,6 +137,7 @@ const OU_SIGMA: f64 = 0.08;
 /// One asymmetric body wandering the whole surface, with a history trail.
 #[derive(Clone, Debug)]
 pub struct BodyScene {
+    topology: Topology,
     pos: SurfacePoint,
     heading: Vec2,
     /// Radians per second. A scalar: it is body-relative and does *not* transport.
@@ -146,10 +150,19 @@ pub struct BodyScene {
 
 impl BodyScene {
     pub fn new(seed: u64) -> BodyScene {
+        BodyScene::on(Topology::Cube, seed)
+    }
+
+    /// The wandering body on a named surface: it starts at the middle of the first chart
+    /// and is transported by that topology, so on a ring it walks round the wrap and
+    /// turns away from the two rims instead of leaving for a chart that does not exist.
+    pub fn on(topology: Topology, seed: u64) -> BodyScene {
         let mut rng = SplitMix64::new(seed ^ 0x_B0D1_5EED_0000_0001);
         let angle = rng.range(0.0, std::f64::consts::TAU);
+        let (w, h) = topology.extent(Face::Front);
         BodyScene {
-            pos: SurfacePoint::new(Face::Front, 32.0, 32.0),
+            topology,
+            pos: SurfacePoint::new(Face::Front, w / 2.0, h / 2.0),
             heading: Vec2::from_screen_angle(angle),
             turn_rate: 0.0,
             rng,
@@ -166,7 +179,7 @@ impl BodyScene {
 
         // Steer, then sweep, then transport the heading through the travel's tangent map.
         self.heading = rotate_screen_ccw(self.heading, self.turn_rate * DT);
-        travel_into(Topology::Cube, self.pos, self.heading * (BODY_SPEED * DT), &mut self.travel_buf);
+        travel_into(self.topology, self.pos, self.heading * (BODY_SPEED * DT), &mut self.travel_buf);
         self.trail.push_travel(&self.travel_buf, tick);
         self.pos = self.travel_buf.end;
         self.heading = self.travel_buf.map.apply(self.heading);
@@ -203,6 +216,7 @@ const VERTEX_TURN_RATE: f64 = std::f64::consts::TAU * 0.25 / 60.0;
 /// with slowly rotating headings, plus one straddling the Front/Right seam.
 #[derive(Clone, Debug)]
 pub struct VertexScene {
+    topology: Topology,
     angle: f64,
     shape: BodyShape,
 }
@@ -214,8 +228,17 @@ pub const VERTEX_ANCHORS: [(f64, f64); 4] =
 pub const SEAM_ANCHOR: (f64, f64) = (63.2, 40.0);
 
 impl VertexScene {
-    pub fn new(_seed: u64) -> VertexScene {
-        VertexScene { angle: 0.0, shape: fixture_body() }
+    pub fn new(seed: u64) -> VertexScene {
+        VertexScene::on(Topology::Cube, seed)
+    }
+
+    /// The ownership fixture on a named surface. The cube's is four Top-face vertices and
+    /// a seam straddler; a **ring has no vertex and one seam**, so its fixture is the two
+    /// places a ring can get ownership wrong instead: a body straddling the wrap, which
+    /// must be carried by two images, and one tucked against each rim, which must be
+    /// clipped and not wrapped.
+    pub fn on(topology: Topology, _seed: u64) -> VertexScene {
+        VertexScene { topology, angle: 0.0, shape: fixture_body() }
     }
 
     pub fn tick(&mut self, _tick: u64) {
@@ -227,6 +250,25 @@ impl VertexScene {
 
     pub fn bodies(&self) -> Vec<BodyView> {
         let heading = Vec2::from_screen_angle(self.angle);
+        if let Topology::Ring { .. } = self.topology {
+            let (w, h) = self.topology.extent(Face::Front);
+            let body = |u: f64, v: f64, heading: Vec2| BodyView {
+                anchor: SurfacePoint::new(Face::Front, u, v),
+                heading,
+                shape: self.shape.clone(),
+                color: body_color(),
+                moved: Vec::new(),
+            };
+            return vec![
+                // Straddling the wrap from either side, and tucked against each rim.
+                body(0.5, h / 2.0, heading),
+                body(w - 0.5, h / 2.0, heading),
+                body(w / 4.0, 0.5, heading),
+                body(w / 4.0, h - 0.5, heading),
+                // One in the open, as a control that the others are the same body.
+                body(w / 2.0, h / 2.0, Vec2::new(1.0, 0.0)),
+            ];
+        }
         let mut v: Vec<BodyView> = VERTEX_ANCHORS
             .iter()
             .map(|&(u, p)| BodyView {
@@ -275,27 +317,64 @@ pub const PATCH_CENTERS: [(Face, f64, f64); 4] = [
 /// A diffusing, decaying scalar field fed by periodic deposits at awkward geometry.
 /// The cell adjacency graph is derived once from `cross_seam` and never copied.
 pub struct PatchScene {
+    topology: Topology,
+    scale: Scale,
     field: ScalarField,
     scratch: ScalarField,
     graph: FieldGraph,
 }
 
 impl PatchScene {
-    pub fn new(_seed: u64) -> PatchScene {
+    pub fn new(seed: u64) -> PatchScene {
+        PatchScene::on(Topology::Cube, Scale::ONE, seed)
+    }
+
+    /// The patch fixture on a named surface: **both fields and the cell graph are sized
+    /// from the topology**, which is what a ring needs — the substrate pass reads the
+    /// canvas's own cell count, so a cube-sized field on a ring canvas is the mismatch
+    /// FW-4 had to refuse `--scene patch` over.
+    pub fn on(topology: Topology, scale: Scale, _seed: u64) -> PatchScene {
         PatchScene {
-            field: ScalarField::zeros(Topology::Cube, Scale::ONE),
-            scratch: ScalarField::zeros(Topology::Cube, Scale::ONE),
-            graph: FieldGraph::new(Topology::Cube, Scale::ONE),
+            topology,
+            scale,
+            field: ScalarField::zeros(topology, scale),
+            scratch: ScalarField::zeros(topology, scale),
+            graph: FieldGraph::new(topology, scale),
+        }
+    }
+
+    /// The four deposit centres of this surface, in order. On a cube they are
+    /// [`PATCH_CENTERS`]; a ring has no vertex and one seam, so they are the wrap, each
+    /// rim, and one in the open — the same job, at the geometry that exists.
+    pub fn centers(&self) -> [(Face, f64, f64); 4] {
+        match self.topology {
+            Topology::Cube => PATCH_CENTERS,
+            Topology::Ring { .. } => {
+                let (w, h) = self.topology.extent(Face::Front);
+                [
+                    (Face::Front, 0.0, h / 2.0),
+                    (Face::Front, w / 4.0, 3.0),
+                    (Face::Front, w / 2.0, h - 3.0),
+                    (Face::Front, 3.0 * w / 4.0, h / 2.0),
+                ]
+            }
         }
     }
 
     pub fn tick(&mut self, tick: u64) {
         if tick.is_multiple_of(PATCH_PERIOD_TICKS) {
-            let (face, u, v) = PATCH_CENTERS[((tick / PATCH_PERIOD_TICKS) % 4) as usize];
-            deposit(Topology::Cube, Scale::ONE, &mut self.field, SurfacePoint::new(face, u, v), PATCH_RADIUS, PATCH_AMOUNT);
+            let (face, u, v) = self.centers()[((tick / PATCH_PERIOD_TICKS) % 4) as usize];
+            deposit(
+                self.topology,
+                self.scale,
+                &mut self.field,
+                SurfacePoint::new(face, u, v),
+                PATCH_RADIUS,
+                PATCH_AMOUNT,
+            );
         }
         diffuse(&mut self.field, &mut self.scratch, &self.graph, PATCH_DIFFUSION);
-        for c in cubarium_surface::CellId::all(Topology::Cube, Scale::ONE) {
+        for c in cubarium_surface::CellId::all(self.topology, self.scale) {
             let x = self.field.get(c);
             self.field.set(c, x * PATCH_DECAY);
         }
@@ -314,6 +393,7 @@ impl PatchScene {
 
 /// The scene set selected by `--scene`, driven by one tick counter.
 pub struct Scenes {
+    topology: Topology,
     kind: SceneKind,
     tick: u64,
     body: Option<BodyScene>,
@@ -323,16 +403,31 @@ pub struct Scenes {
 
 impl Scenes {
     pub fn new(kind: SceneKind, seed: u64) -> Scenes {
+        Scenes::on(Topology::Cube, Scale::ONE, kind, seed)
+    }
+
+    /// The fixture set on a named surface. Every fixture is sized and placed from
+    /// `(topology, scale)`, so `--scene patch` and `--scene all` run on a ring: the patch
+    /// field and its cell graph have the world's own cell count, the wandering body is
+    /// transported round the wrap, and the ownership fixture stands at the wrap and the
+    /// two rims instead of at four vertices that do not exist.
+    pub fn on(topology: Topology, scale: Scale, kind: SceneKind, seed: u64) -> Scenes {
         let want_body = matches!(kind, SceneKind::Body | SceneKind::All);
         let want_vertex = matches!(kind, SceneKind::Vertex | SceneKind::All);
         let want_patch = matches!(kind, SceneKind::Patch | SceneKind::All);
         Scenes {
+            topology,
             kind,
             tick: 0,
-            body: want_body.then(|| BodyScene::new(seed)),
-            vertex: want_vertex.then(|| VertexScene::new(seed)),
-            patch: want_patch.then(|| PatchScene::new(seed)),
+            body: want_body.then(|| BodyScene::on(topology, seed)),
+            vertex: want_vertex.then(|| VertexScene::on(topology, seed)),
+            patch: want_patch.then(|| PatchScene::on(topology, scale, seed)),
         }
+    }
+
+    /// The surface these fixtures run on.
+    pub fn topology(&self) -> Topology {
+        self.topology
     }
 
     pub fn kind(&self) -> SceneKind {
@@ -404,6 +499,71 @@ mod tests {
             s.tick();
         }
         s
+    }
+
+    fn ring() -> Topology {
+        Topology::Ring { w: 320, h: 180 }
+    }
+
+    /// The fixtures on a ring: the patch field is the ring's own size, the body walks the
+    /// ring and stays canonical on it, and the ownership fixture stands where a ring can
+    /// get ownership wrong. This is what `--scene patch` and `--scene all` need before the
+    /// CLI can stop refusing them on a ring.
+    #[test]
+    fn the_fixtures_run_on_a_ring() {
+        let mut s = Scenes::on(ring(), Scale::ONE, SceneKind::All, 5);
+        assert_eq!(s.topology(), ring());
+        for _ in 0..(PATCH_PERIOD_TICKS * 4 + 10) {
+            s.tick();
+        }
+        let view = s.view();
+        let field = view.field.as_ref().expect("the patch fixture has a field");
+        assert_eq!(field.values.len(), ring().cell_count(Scale::ONE));
+        assert!(field.total() > 0.0, "the deposits landed");
+        // Every deposit centre is on the ring, and the field is not concentrated in one
+        // row: the wrap deposit reaches both sides of `u = 0`.
+        let cells_x = ring().cells(Scale::ONE, Face::Front).0;
+        let left: f64 = (0..4)
+            .map(|cx| field.values[usize::from(cells_x) * 22 + cx])
+            .sum();
+        let right: f64 = (0..4)
+            .map(|cx| field.values[usize::from(cells_x) * 22 + usize::from(cells_x) - 1 - cx])
+            .sum();
+        assert!(left > 0.0 && right > 0.0, "the wrap deposit is on both sides: {left} {right}");
+
+        for b in &view.bodies {
+            assert!(b.anchor.is_canonical(ring()), "{:?} is on the ring", b.anchor);
+        }
+        // And it draws onto a ring canvas without reaching for a chart the ring has not.
+        let mut canvas = Canvas::new(ring(), Scale::ONE);
+        let mut scratch = Vec::new();
+        render(&view, 0.0, &mut canvas, &mut scratch);
+        assert!(canvas.pixels().iter().any(|p| *p != PALETTE.floor), "it drew");
+    }
+
+    /// Six simulated minutes of the wandering body on a ring: it stays canonical, it goes
+    /// all the way round the wrap, and it never leaves `Face::Front`.
+    #[test]
+    fn the_wandering_body_circles_a_ring_and_never_leaves_its_chart() {
+        let mut s = Scenes::on(ring(), Scale::ONE, SceneKind::Body, 7);
+        let mut min_u = f64::MAX;
+        let mut max_u = f64::MIN;
+        let mut wrapped = false;
+        for _ in 0..(20 * 60 * 6) {
+            s.tick();
+            let v = s.view();
+            let a = v.bodies[0].anchor;
+            assert_eq!(a.face, Face::Front, "a ring has one chart");
+            assert!(a.is_canonical(ring()), "non-canonical anchor {a:?}");
+            min_u = min_u.min(a.u);
+            max_u = max_u.max(a.u);
+            wrapped |= v.bodies[0]
+                .moved
+                .iter()
+                .any(|seg| seg.from.x < 1.0 || seg.to.x > 319.0);
+        }
+        assert!(wrapped, "the body reached the wrap at least once");
+        assert!(max_u - min_u > 200.0, "it covered the world: {min_u}..{max_u}");
     }
 
     #[test]
