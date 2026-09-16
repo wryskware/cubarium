@@ -38,6 +38,14 @@ use crate::search::{HELDOUT_SEEDS, TRAINING_SEEDS};
 /// The three matched apex arms, in the order the summary reports them.
 pub const ARMS: [u32; 3] = [0, 1, 2];
 
+/// The shipped `organism.move_cost`, in e per unit of structure per pixel travelled. A stage
+/// that names no price runs at this one, which is exactly what the calibration screen ran.
+pub const DEFAULT_MOVE_COST: f64 = 0.00036;
+
+fn default_move_cost() -> f64 {
+    DEFAULT_MOVE_COST
+}
+
 /// One declared candidate: a name, the hypothesis it encodes, and the searched names it moves
 /// away from the shipped defaults. Everything it does not name keeps the default value.
 #[derive(Clone, Copy, Debug)]
@@ -323,6 +331,11 @@ pub struct CalibrationRow {
     pub axes: String,
     /// Apex adults introduced in this arm: 0, 1 or 2.
     pub arm: u32,
+    /// The per-structure-pixel motor price this row was charged. It is also inside `params`
+    /// and `param_bits`; it is lifted to the top level so a price arm is filterable without
+    /// decoding the vector. `0.00036` is the shipped default.
+    #[serde(default = "default_move_cost")]
+    pub move_cost: f64,
     pub seed_set: String,
     pub stage: String,
     pub params: serde_json::Map<String, Value>,
@@ -336,6 +349,10 @@ pub struct CalibrationRow {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StagePlan {
     pub stage: String,
+    /// The `organism.move_cost` levels this stage crossed the matrix with. A single-element
+    /// list at the shipped default is the calibration screen's own matrix, unchanged.
+    #[serde(default)]
+    pub prices: Vec<f64>,
     pub build_id: String,
     pub horizon_ticks: u64,
     pub sample_every: u64,
@@ -369,6 +386,8 @@ pub struct CellSummary {
     pub candidate: String,
     pub axes: String,
     pub arm: u32,
+    #[serde(default = "default_move_cost")]
+    pub move_cost: f64,
     pub seeds: usize,
     pub completed: usize,
     pub invalid: usize,
@@ -568,6 +587,8 @@ pub fn run_stage(
     seed_set: SeedSet,
     seed_count: usize,
     arms: &[u32],
+    // One or more `organism.move_cost` levels. `&[DEFAULT_MOVE_COST]` is the screen's matrix.
+    prices: &[f64],
     horizon_ticks: u64,
     sample_every: u64,
     apex_introduce_tick: u64,
@@ -595,27 +616,54 @@ pub fn run_stage(
             return Err(format!("apex arm {arm} is not one of {ARMS:?}"));
         }
     }
+    if prices.is_empty() {
+        return Err("--prices named no movement price".into());
+    }
+    let price_index = params::index_of("organism.move_cost")
+        .ok_or("organism.move_cost is not in the parameter box")?;
+    let (lo, hi) = (params::PARAMS[price_index].lo, params::PARAMS[price_index].hi);
+    for price in prices {
+        if !price.is_finite() || *price <= 0.0 {
+            return Err(format!("movement price {price} is not a positive finite number"));
+        }
+        if *price < lo || *price > hi {
+            return Err(format!(
+                "movement price {price} is outside the declared box [{lo}, {hi}]; widen the box                  deliberately rather than running outside it"
+            ));
+        }
+    }
 
     // The job list, in a fixed order, so the same matrix always produces the same rows in the
     // same places whatever order the workers finish in.
     struct Job {
         candidate: &'static Candidate,
         values: Vec<f64>,
+        move_cost: f64,
         seed: u64,
         arm: u32,
     }
     let mut jobs = Vec::new();
-    for c in &chosen {
-        let values = c.vector()?;
-        for seed in &seeds {
-            for arm in arms {
-                jobs.push(Job { candidate: c, values: values.clone(), seed: *seed, arm: *arm });
+    for price in prices {
+        for c in &chosen {
+            let mut values = c.vector()?;
+            values[price_index] = *price;
+            for seed in &seeds {
+                for arm in arms {
+                    jobs.push(Job {
+                        candidate: c,
+                        values: values.clone(),
+                        move_cost: *price,
+                        seed: *seed,
+                        arm: *arm,
+                    });
+                }
             }
         }
     }
 
     let plan = StagePlan {
         stage: stage.to_string(),
+        prices: prices.to_vec(),
         build_id: BUILD_ID.to_string(),
         horizon_ticks,
         sample_every,
@@ -667,6 +715,7 @@ pub fn run_stage(
                         candidate: job.candidate.name.to_string(),
                         axes: job.candidate.axes.to_string(),
                         arm: job.arm,
+                        move_cost: job.move_cost,
                         seed_set: seed_set.label().to_string(),
                         stage: stage.to_string(),
                         params: params::labelled(&job.values),
@@ -699,11 +748,16 @@ pub fn run_stage(
 
     // Aggregate per (candidate, arm).
     let mut cells = Vec::new();
-    for c in &chosen {
+    for price in prices {
+        for c in &chosen {
         for arm in arms {
             let mine: Vec<&CalibrationRow> = rows
                 .iter()
-                .filter(|r| r.candidate == c.name && r.arm == *arm)
+                .filter(|r| {
+                    r.candidate == c.name
+                        && r.arm == *arm
+                        && r.move_cost.to_bits() == price.to_bits()
+                })
                 .collect();
             if mine.is_empty() {
                 continue;
@@ -720,6 +774,7 @@ pub fn run_stage(
                 candidate: c.name.to_string(),
                 axes: c.axes.to_string(),
                 arm: *arm,
+                move_cost: *price,
                 seeds: mine.len(),
                 completed: mine
                     .iter()
@@ -735,6 +790,7 @@ pub fn run_stage(
                 foliage_retention,
                 gates,
             });
+        }
         }
     }
 
@@ -837,9 +893,11 @@ pub fn print_report(report: &StageReport) {
         report.plan.seeds,
         report.plan.seed_set,
     );
+    println!("movement prices {:?}", report.plan.prices);
     println!(
-        "\n{:<24} {:>3} {:>4} {:>6} {:>9} {:>9} {:>8} {:>8} {:>7} {:>7}  gates",
-        "candidate", "arm", "ok", "extinc", "foliage/0", "wood", "pop", "births", "deaths", "apexA",
+        "\n{:<24} {:>9} {:>3} {:>4} {:>6} {:>9} {:>9} {:>8} {:>8} {:>7} {:>7}  gates",
+        "candidate", "move_cost", "arm", "ok", "extinc", "foliage/0", "wood", "pop", "births",
+        "deaths", "apexA",
     );
     for cell in &report.cells {
         let get = |path: &[&str]| -> f64 {
@@ -855,8 +913,9 @@ pub fn print_report(report: &StageReport) {
         let opening = get(&["opening_foliage"]).max(1e-12);
         let flag = |on: bool, ch: char| if on { ch } else { '.' };
         println!(
-            "{:<24} {:>3} {:>4} {:>6} {:>9.3} {:>9.1} {:>8.1} {:>8.1} {:>7.1} {:>7.2}  {}{}{}{}{}{} {}",
+            "{:<24} {:>9.5} {:>3} {:>4} {:>6} {:>9.3} {:>9.1} {:>8.1} {:>8.1} {:>7.1} {:>7.2}  {}{}{}{}{}{} {}",
             cell.candidate,
+            cell.move_cost,
             cell.arm,
             cell.completed,
             cell.extinctions,
@@ -993,6 +1052,85 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The three movement prices this workstream runs must all be inside the declared box, and
+    /// the control price must be the value the world actually ships — otherwise the "control"
+    /// arm is not the screen's world and the reproduction check could not be met.
+    #[test]
+    fn the_declared_movement_prices_are_the_shipped_default_and_two_inside_the_box() {
+        let k = params::index_of("organism.move_cost").expect("the price is in the box");
+        let spec = params::PARAMS[k];
+        assert_eq!(
+            spec.default.to_bits(),
+            DEFAULT_MOVE_COST.to_bits(),
+            "the declared default price is not the shipped one"
+        );
+        assert_eq!(
+            WorldConfig::default().organism.move_cost.to_bits(),
+            DEFAULT_MOVE_COST.to_bits(),
+            "the shipped config no longer carries the price this module calls the default"
+        );
+        for price in [0.00036, 0.0018, 0.006] {
+            assert!(
+                spec.lo <= price && price <= spec.hi,
+                "{price} is outside the declared box [{}, {}]",
+                spec.lo,
+                spec.hi
+            );
+        }
+    }
+
+    /// Writing the price at its shipped default must change **no bit** of the configuration,
+    /// so the movement campaign's control arm is the calibration screen's world exactly.
+    #[test]
+    fn writing_the_default_price_leaves_every_candidate_config_bit_for_bit_unchanged() {
+        let k = params::index_of("organism.move_cost").expect("the price is in the box");
+        for name in ["baseline", "fast-leaf"] {
+            let c = candidate(name).expect("declared");
+            let mut values = c.vector().expect("builds");
+            let with_default = {
+                let mut config = crate::evaluate::base_config(1);
+                let mut profile = FixedHunterProfile::lanternjaw_trial(&config);
+                params::apply(&values, &mut config, &mut profile).expect("applies");
+                config_hash(&config)
+            };
+            assert_eq!(with_default, config_hash(&c.config(1).expect("builds")));
+            // And a raised price must change it, or the knob is not connected.
+            values[k] = 0.006;
+            let mut config = crate::evaluate::base_config(1);
+            let mut profile = FixedHunterProfile::lanternjaw_trial(&config);
+            params::apply(&values, &mut config, &mut profile).expect("applies");
+            assert_ne!(
+                config_hash(&config),
+                with_default,
+                "{name}: raising the movement price changed no configuration bit"
+            );
+        }
+    }
+
+    /// A price outside the declared box is refused before any compute is spent, rather than
+    /// quietly clamped into it.
+    #[test]
+    fn a_movement_price_outside_the_box_is_refused() {
+        let dir = std::env::temp_dir().join(format!("cubarium-price-box-{}", std::process::id()));
+        let err = run_stage(
+            "test",
+            &["baseline".to_string()],
+            SeedSet::Training,
+            1,
+            &[0],
+            &[0.5],
+            100,
+            50,
+            10,
+            1,
+            1,
+            &dir,
+        )
+        .expect_err("a price outside the box is refused");
+        assert!(err.contains("outside the declared box"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The gates are conjunctive and censoring is not a pass: a cell with no late window
     /// fails every ecological gate rather than defaulting to true.
     #[test]
@@ -1001,6 +1139,7 @@ mod tests {
             candidate: "baseline".into(),
             axes: "-".into(),
             arm: 0,
+            move_cost: DEFAULT_MOVE_COST,
             seed_set: "training".into(),
             stage: "test".into(),
             params: params::labelled(&params::defaults()),
@@ -1019,6 +1158,7 @@ mod tests {
                     opening_foliage: 10.0,
                     ..crate::metrics::Components::default()
                 }),
+                movement: None,
             },
         };
         let (gates, retention, extinctions, _, _) = gates_for(&[&row]);

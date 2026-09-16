@@ -10,7 +10,7 @@
 //! Parameters that are plausible candidates but are **not** searched in this milestone are
 //! listed in [`EXCLUDED`], with the reason.
 //!
-//! ## Why these thirteen
+//! ## Why these fourteen
 //!
 //! The calibration brief names four axes — intake/assimilation pressure, foliage growth and
 //! reserve allocation, maturation and reproductive timing, and recycling — and asks for
@@ -43,6 +43,23 @@
 //!
 //! `plant.wood_rate` and `plant.alpha` are the two names from the brief's list that were
 //! dropped to make room; [`EXCLUDED`] says why.
+//!
+//! ## The fourteenth: the price of travel
+//!
+//! `organism.move_cost` was added after the calibration screen, for
+//! `design/handoffs/ecology-v1-movement-opus-2026-09-16.md`. The screen moved no name that
+//! couples an animal to a place and measured 0 foliage recovery events in 270 of 270 runs
+//! while a prey body covered a quarter of the cube per window; this is the one knob already in
+//! `WorldConfig` that makes leaving a cell cost anything. It is **appended**, so the first
+//! thirteen indices are exactly where they were, and its default is the shipped value, so the
+//! default vector still builds the world the screen ran — a check the movement campaign makes
+//! explicitly against that screen's retained `final_state_hash`es.
+//!
+//! One consequence is deliberate and is not hidden: a result row recorded before this name
+//! existed carries a thirteen-component `param_bits`, and [`from_bit_labels`] refuses it by
+//! length rather than padding it. Those rows replay under the build that wrote them; this
+//! build reproduces them by re-running the matrix and comparing state hashes, which is the
+//! stronger check anyway.
 
 use cubarium_core::WorldConfig;
 use cubarium_core::hunter::FixedHunterProfile;
@@ -61,9 +78,9 @@ pub struct ParamSpec {
     pub why: &'static str,
 }
 
-/// The thirteen searched parameters: four for primary production and foliage turnover, two for
+/// The fourteen searched parameters: four for primary production and foliage turnover, two for
 /// the plant's reserve policy, three for animal intake and upkeep, three for maturation and
-/// reproductive timing, and one for recycling.
+/// reproductive timing, one for recycling, and one — appended last — for the price of travel.
 pub const PARAMS: &[ParamSpec] = &[
     // --- production and foliage turnover ------------------------------------------------
     ParamSpec {
@@ -214,6 +231,24 @@ pub const PARAMS: &[ParamSpec] = &[
               litter is food, the rate at which a detritivore's larder is taken away by \
               microbes instead. It is the one knob that is simultaneously a plant income term \
               and an animal food term, which is why it is the recycling axis's representative",
+    },
+    // --- the price of travel ------------------------------------------------------------------
+    ParamSpec {
+        name: "organism.move_cost",
+        unit: "e per unit of structure per pixel of distance travelled",
+        lo: 0.00036,
+        hi: 0.006,
+        default: 0.00036,
+        why: "the per-pixel coefficient of the motor bill `move_cost · S · (speed + k·r·|ω|) · \
+              dt` (`crates/cubarium-core/src/motor.rs:354-408`), which charges translation by \
+              distance and turning by swept distance. It is the only existing knob that makes \
+              leaving a cell cost anything, and the ecology v1 screen moved **no** name that \
+              couples an animal to a place, which is why it recorded 0 foliage recovery events \
+              in 270 of 270 runs. The bounds are not invented: 0.00036 is what the world ships, \
+              and 0.006 is the per-second coefficient the world charged *before* the pace \
+              calibration divided it by the new `speed_max = 5.0` \
+              (`crates/cubarium-core/src/config.rs:558-565`), so the top of the box restores \
+              the per-pixel price of travel that existed before cruise speed rose",
     },
 ];
 
@@ -376,6 +411,7 @@ pub fn apply(
             "drives.bud_reserve" => config.drives.bud_reserve = v,
             "drives.bud_min_age_seconds" => config.drives.bud_min_age_seconds = v,
             "detritus.decomposition" => config.detritus.decomposition = v,
+            "organism.move_cost" => config.organism.move_cost = v,
             other => return Err(format!("no writer for parameter {other}")),
         }
     }
@@ -400,6 +436,7 @@ pub fn read(config: &WorldConfig, _profile: &FixedHunterProfile) -> Vec<f64> {
             "drives.bud_reserve" => config.drives.bud_reserve,
             "drives.bud_min_age_seconds" => config.drives.bud_min_age_seconds,
             "detritus.decomposition" => config.detritus.decomposition,
+            "organism.move_cost" => config.organism.move_cost,
             other => panic!("no reader for parameter {other}"),
         })
         .collect()
