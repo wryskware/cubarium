@@ -1,6 +1,6 @@
 //! Authored RGBA sprites, composited through the existing surface atlas.
 
-use cubarium_surface::{PixelImage, SurfacePoint, Vec2, unfold_pixels};
+use cubarium_surface::{PixelImage, Scale, SurfacePoint, Vec2, unfold_pixels};
 
 use crate::{Canvas, srgb_decode};
 
@@ -13,25 +13,39 @@ pub struct Sprite {
     pivot: Vec2,
     pixels: Vec<[f32; 4]>,
     extent: f64,
+    /// `Scale::footprint_radius()` of the world this art was authored for: the tile-space
+    /// budget its extent and its [`Bend`] headroom are measured against.
+    budget: f64,
 }
-
-/// The hard per-stamp footprint bound, in face pixels: no stamp may need surface pixels
-/// further than this from its anchor. Not review-tunable — it is the radius the shared
-/// unfolding (`cubarium_surface::unfold_pixels`) is proven correct for, and every sprite,
-/// pose blend and [`Bend`] is budgeted against it rather than the other way round.
-const FOOTPRINT_RADIUS: f64 = 9.0;
 
 /// Half a pixel diagonal plus half a pixel of bilinear support: the distance beyond a
 /// painted texel's center that a stamp of that texel can still touch.
 const TEXEL_SUPPORT: f64 = std::f64::consts::FRAC_1_SQRT_2 + 0.5;
 
 impl Sprite {
+    /// Art authored for a world at `S = 1`: the budget is the nine pixels
+    /// `Scale::ONE.footprint_radius()` gives, which is every baked pack shipped today.
     pub fn from_rgba(
         width: usize,
         height: usize,
         pivot: Vec2,
         bytes: &[u8],
     ) -> Result<Self, String> {
+        Sprite::from_rgba_at(Scale::ONE, width, height, pivot, bytes)
+    }
+
+    /// [`Sprite::from_rgba`] for art authored at world scale `scale`, whose budget is
+    /// `9·S` rather than nine: the *first* of the two budget check sites §9's FW-3 row
+    /// names. A pack baked at twice the resolution is stamped at `scale = 1` on a world at
+    /// `S = 2`, so its tiles are allowed to reach twice as far from their pivot.
+    pub fn from_rgba_at(
+        scale: Scale,
+        width: usize,
+        height: usize,
+        pivot: Vec2,
+        bytes: &[u8],
+    ) -> Result<Self, String> {
+        let budget = scale.footprint_radius();
         if width == 0
             || height == 0
             || width > 64
@@ -58,18 +72,14 @@ impl Sprite {
                 extent = extent.max(x.hypot(y) + TEXEL_SUPPORT);
             }
         }
-        if extent > FOOTPRINT_RADIUS {
+        if extent > budget {
             return Err(format!(
-                "sprite extent {extent:.2} exceeds the 9-pixel surface budget"
+                "sprite extent {extent:.2} exceeds the {budget}-pixel surface budget \
+                 of a world at S = {}",
+                scale.world()
             ));
         }
-        Ok(Self {
-            width,
-            height,
-            pivot,
-            pixels,
-            extent,
-        })
+        Ok(Self { width, height, pivot, pixels, extent, budget })
     }
 
     /// A sprite from **premultiplied linear** RGBA already in the canvas's own light, for
@@ -88,6 +98,18 @@ impl Sprite {
         pivot: Vec2,
         pixels: Vec<[f32; 4]>,
     ) -> Result<Self, String> {
+        Sprite::from_premultiplied_at(Scale::ONE, width, height, pivot, pixels)
+    }
+
+    /// [`Sprite::from_premultiplied`] against the budget of a world at `scale`.
+    pub fn from_premultiplied_at(
+        scale: Scale,
+        width: usize,
+        height: usize,
+        pivot: Vec2,
+        pixels: Vec<[f32; 4]>,
+    ) -> Result<Self, String> {
+        let budget = scale.footprint_radius();
         if width == 0
             || height == 0
             || width > 64
@@ -112,12 +134,14 @@ impl Sprite {
                 extent = extent.max(x.hypot(y) + TEXEL_SUPPORT);
             }
         }
-        if extent > FOOTPRINT_RADIUS {
+        if extent > budget {
             return Err(format!(
-                "sprite extent {extent:.2} exceeds the 9-pixel surface budget"
+                "sprite extent {extent:.2} exceeds the {budget}-pixel surface budget \
+                 of a world at S = {}",
+                scale.world()
             ));
         }
-        Ok(Self { width, height, pivot, pixels, extent })
+        Ok(Self { width, height, pivot, pixels, extent, budget })
     }
 
     /// The pivot, in sprite pixels from the image's upper-left corner.
@@ -193,7 +217,14 @@ impl Sprite {
                 extent = extent.max(x.hypot(y) + TEXEL_SUPPORT);
             }
         }
-        Sprite { width: self.width, height: self.height, pivot: self.pivot, pixels, extent }
+        Sprite {
+            width: self.width,
+            height: self.height,
+            pivot: self.pivot,
+            pixels,
+            extent,
+            budget: self.budget,
+        }
     }
 
     /// The largest `|`[`Bend::amplitude`]`|` this sprite may be stamped with, in tile
@@ -256,7 +287,7 @@ impl Sprite {
             }
             let x = ((i % self.width) as f64 + 0.5 - self.pivot.x).abs();
             let y = (row - self.pivot.y).abs() + 1.0;
-            let across = (FOOTPRINT_RADIUS * FOOTPRINT_RADIUS - y * y).max(0.0).sqrt();
+            let across = (self.budget * self.budget - y * y).max(0.0).sqrt();
             bound = bound.min(((across - x - 1.0) / s).max(0.0));
         }
         bound
@@ -807,9 +838,13 @@ fn stamp_bent(
         }
     }
     let Some(reference) = reference else { return };
+    // The *second* budget check site: `9·S` of the world this canvas is the raster of, not
+    // a constant nine. A pack authored at S = 1 and stamped at `scale = S` therefore draws
+    // on a bigger world instead of vanishing, which is §7's Stage A0.
+    let budget = canvas.scale().footprint_radius();
     if !scale.is_finite()
         || scale <= 0.0
-        || extent * scale > FOOTPRINT_RADIUS
+        || extent * scale > budget
         || !opacity.is_finite()
         || opacity <= 0.0
         || extent == 0.0
@@ -825,7 +860,7 @@ fn stamp_bent(
         (Bend::NONE, override_radius.unwrap_or(extent * scale))
     } else {
         let radius = override_radius
-            .unwrap_or_else(|| ((extent + bend.amplitude.abs()) * scale).min(FOOTPRINT_RADIUS));
+            .unwrap_or_else(|| ((extent + bend.amplitude.abs()) * scale).min(budget));
         (bend, radius)
     };
     // `BENT` and `TINTED` are compile-time, so the ordinary untinted stamp carries neither
@@ -966,6 +1001,7 @@ pub fn stamp_pose_in_chart(
     scratch: &mut Vec<PixelImage>,
 ) {
     let topo = canvas.topology();
+    let budget = canvas.scale().footprint_radius();
     let extent = pose.extent();
     if owner.face != center.face
         || !owner.is_canonical(topo)
@@ -973,14 +1009,14 @@ pub fn stamp_pose_in_chart(
         || !opacity.is_finite()
         || opacity <= 0.0
         || extent == 0.0
-        || extent > FOOTPRINT_RADIUS
+        || extent > budget
         || mask.is_empty()
     {
         return;
     }
     let Some(h) = heading.normalized() else { return };
     let bend = if bend.is_identity() { Bend::NONE } else { bend };
-    let radius = (extent + bend.amplitude.abs()).min(FOOTPRINT_RADIUS);
+    let radius = (extent + bend.amplitude.abs()).min(budget);
     let query = radius + (owner.chart() - center.chart()).length();
     if query > topo.max_local_radius() {
         return;
@@ -1025,7 +1061,7 @@ pub fn stamp_pose_in_chart(
 mod tests {
     use super::*;
     use cube_proto::Face;
-    use cubarium_surface::Topology;
+    use cubarium_surface::{FOOTPRINT_PIXELS, Topology};
 
     fn total(canvas: &Canvas) -> f64 {
         Face::ALL
@@ -1332,8 +1368,8 @@ mod tests {
             }
             worst
         };
-        assert!(worst(room) <= FOOTPRINT_RADIUS + 1e-9, "at the budget: {}", worst(room));
-        assert!(worst(room * 1.2) > FOOTPRINT_RADIUS + 1e-9, "the budget is not tight");
+        assert!(worst(room) <= FOOTPRINT_PIXELS + 1e-9, "at the budget: {}", worst(room));
+        assert!(worst(room * 1.2) > FOOTPRINT_PIXELS + 1e-9, "the budget is not tight");
         // A bend nothing can follow (no length) bounds nothing.
         assert_eq!(s.bend_headroom(1.0, 0.0, 0.0), f64::INFINITY);
         // A root above the whole tile freezes every texel, so again no bound.
@@ -1577,6 +1613,58 @@ mod tests {
         }
     }
 
+    /// Both budget check sites read `Scale::footprint_radius()`, so the same art that is
+    /// over budget at `S = 1` draws at `S = 2` — §7's Stage A0, and the reason the check
+    /// sites had to stop naming the constant nine.
+    #[test]
+    fn the_budget_is_nine_times_the_world_scale_at_both_check_sites() {
+        // Construction: a 13x13 solid square reaches 9.69 px, refused at S = 1 and
+        // accepted for art authored at S = 2.
+        let solid = |side: usize| vec![255u8; side * side * 4];
+        let pivot = |side: usize| Vec2::new(side as f64 / 2.0, side as f64 / 2.0);
+        assert!(Sprite::from_rgba(13, 13, pivot(13), &solid(13)).is_err());
+        let big = Sprite::from_rgba_at(Scale::new(2.0), 13, 13, pivot(13), &solid(13))
+            .expect("9.69 px is inside the 18 px budget of a world at S = 2");
+        assert!(big.extent() > FOOTPRINT_PIXELS && big.extent() <= 18.0);
+
+        // Stamping: an 8x8 square at `scale = 2` reaches 10.06 px, so it vanishes on a
+        // cube (S is pinned to 1) and draws on a ring at S = 2.
+        let sprite = Sprite::from_rgba(8, 8, pivot(8), &solid(8)).unwrap();
+        assert!(sprite.extent() * 2.0 > FOOTPRINT_PIXELS);
+        let mut cube = Canvas::cube();
+        stamp_sprite(
+            &mut cube,
+            SurfacePoint::new(Face::Front, 32.5, 32.5),
+            Vec2::new(1.0, 0.0),
+            &sprite,
+            2.0,
+            1.0,
+            &mut Vec::new(),
+        );
+        assert!(cube.pixels().iter().all(|p| *p == [0.0; 3]), "over budget at S = 1");
+
+        let topo = Topology::Ring { w: 640, h: 360 };
+        let mut ring = Canvas::new(topo, Scale::new(2.0));
+        stamp_sprite(
+            &mut ring,
+            SurfacePoint::new(Face::Front, 320.5, 180.5),
+            Vec2::new(1.0, 0.0),
+            &sprite,
+            2.0,
+            1.0,
+            &mut Vec::new(),
+        );
+        let lit = ring.pixels().iter().filter(|p| **p != [0.0; 3]).count();
+        assert!(lit > 200, "a scale = 2 stamp must draw on a world at S = 2, lit {lit}");
+
+        // And its bend headroom scales with the art it was authored for.
+        let room1 = Sprite::from_rgba(8, 8, pivot(8), &solid(8)).unwrap().bend_headroom(1.0, 6.0, 0.0);
+        let room2 = Sprite::from_rgba_at(Scale::new(2.0), 8, 8, pivot(8), &solid(8))
+            .unwrap()
+            .bend_headroom(1.0, 6.0, 0.0);
+        assert!(room2 > room1, "a bigger budget is a bigger bend headroom: {room1} -> {room2}");
+    }
+
     #[test]
     fn invalid_assets_and_extent_are_rejected() {
         assert!(Sprite::from_rgba(2, 2, Vec2::ZERO, &[0; 3]).is_err());
@@ -1657,7 +1745,7 @@ mod tests {
                 let owner = SurfacePoint::new(face, u, v);
                 let center = SurfacePoint::new(face, u, v - 4.0);
                 let mut neighborhood = Vec::new();
-                unfold_pixels(Topology::Cube, center, FOOTPRINT_RADIUS, &mut neighborhood);
+                unfold_pixels(Topology::Cube, center, FOOTPRINT_PIXELS, &mut neighborhood);
                 let mut allowed = vec![false; 5 * 64 * 64];
                 for p in neighborhood {
                     allowed[p.face.index() * 4096 + usize::from(p.y) * 64 + usize::from(p.x)] = true;

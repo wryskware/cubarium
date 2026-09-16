@@ -61,7 +61,7 @@ impl Table {
     #[inline]
     pub(crate) fn encode(&self, linear: f32) -> u8 {
         // NaN and every non-positive value encode as 0; `>= 1.0` saturates.
-        if !(linear > 0.0) {
+        if linear.is_nan() || linear <= 0.0 {
             return 0;
         }
         if linear >= 1.0 {
