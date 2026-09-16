@@ -325,6 +325,14 @@ new code, and the second is exactly one `--pairs 32 --generations 8`.
 
 ## What would change on the cube
 
+> **Added at integration (Fable, `997fb24`).** One more refusal beside the three below:
+> `World::from_state` refuses, by name, a snapshot holding a `cub-act-2` policy. The adapter
+> is a transient the bytes cannot carry, a resumed world runs `cub-act-1`, and decoding those
+> weights under it would have been silent and wrong once `Policy::validate()` was widened to
+> accept any adapter this build knows. A shipped-adapter world with a policy round-trips as
+> before; tested in `crates/cubarium-core/tests/action_adapter.rs`.
+
+
 **Nothing, today.** The display host builds worlds that never name an adapter, so it runs
 `cub-act-1`, byte for byte the build before this workstream — that is what the pinned state hash
 and the field-for-field holdout reproduction are for. A `cub-act-2` policy is refused **by name**
