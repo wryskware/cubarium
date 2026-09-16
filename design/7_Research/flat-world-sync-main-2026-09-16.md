@@ -280,8 +280,18 @@ Nothing `main` added is a new *per-cell* vector sized at the cube — the only o
   cubarium-gpu --all-targets` is clean on the integrated tree. **The main checkout
   `/home/wrysk/wryskware/cubarium` was never written to**; `main` was read through a detached
   worktree under scratch, removed afterwards.
-- **`main` has moved on**: `a4ad52d` at the time of writing, four commits past the merge's
-  second parent, all of them design documents and no change under `crates/`.
+- **`main` has moved on, and by the end of this package it had moved on with code.** The merge
+  took `cdcee03`. By the time SYNC-1 closed, `main` was `c60534d`, **17 commits** further, and
+  those are no longer documents: workstream X landed the `cub-act-2` action adapter (a `World`
+  transient, an ES protocol field, and a **resume refusal by name** for a snapshot holding such
+  a policy) and workstream Y landed the skimmer depth ladder. They touch
+  `neural/{action,gru,mod}.rs`, `world/{lifecycle,mod,step,view}.rs` and eight `cubarium-search`
+  files — the same neighbourhoods this merge worked in, including `world/lifecycle.rs` and
+  `world/mod.rs`, two of the eight conflicts. **A second sync will be needed and it will not be
+  free**, and the schema question will come back with it: X's resume refusal is another
+  transient-that-the-bytes-cannot-carry, which is the same argument that made 17. Chasing a
+  branch that commits several times an hour does not converge, so SYNC-1 stops at `cdcee03` and
+  says where the line is rather than pretending it is current.
 
 ## 8. Commits
 
