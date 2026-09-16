@@ -4,7 +4,7 @@ last_reviewed: 2026-09-16
 decision_refs: []
 ---
 
-# A flat W×H world beside the cube world
+# A ring W×H world beside the cube world
 
 Coupling audit and phased plan for the Tachyon panel, written by Opus on
 2026-09-16 under
@@ -28,14 +28,14 @@ Read-only audit: no source file was changed to write it.
    (identity map, translation by `∓w`), the rims reuse the existing `REFLECT_Y`
    bounce, and a ring corner *is* the cube's lower side corner, tie rule included.
    §5 decides the canopy drain; §5a embeds the ring as a cylinder.
-5. **Candidate first flat world: 640×360, upscaled 3×, at world scale S = 2** —
+5. **Candidate first ring world: 640×360, upscaled 3×, at world scale S = 2** —
    sprite tile 32 px, field cell 8 px. Gated on FW-0's measured board numbers,
    not fixed here. 320×180 is the cube world stretched and wastes the panel.
 6. `world_scale` S multiplies every length. Hold `cell = 4·S` and embed on an
    isotropic cylinder (`r = w/(2π·32·S)`, `y_e = (h/2 − v)/(32·S)`), and every
    raster from 320×180 to 1920×1080 has the same 3,600 cells, the same noise scale
-   and the same ecology — weather defaults included, because the ring covers 87.0%
-   of the sphere against the cube's 83.3%.
+   and the same ecology — weather defaults included, because a blob centre is
+   uniform on the whole sphere, so one blob covers 21.3% of either world.
 7. Sim and render share **one host loop**, so the budget is
    `20·tick_ms + fps·render_ms <= 1000 ms`, not two independent budgets. Render
    work is `∝ S²`; the tick is S-invariant.
@@ -218,7 +218,7 @@ an arbitrary `Ring { w, h }` from a config file is not.
   the 129 `0..64u8` loop bounds must widen. Purely mechanical, zero behaviour
   change on the cube, and the compiler finds every site.
 - `CELL_COUNT` from a const to a runtime count. `1,280 = 2^8·5` cannot be
-  factored 16:9 with square cells, so no flat raster reproduces it.
+  factored 16:9 with square cells, so no ring raster reproduces it.
   `ScalarField.values` becomes `Box<[f64]>` sized at construction, `CellId`
   becomes a plain index decoded through the topology, and `World`'s five
   `Box<[f64; CELL_COUNT]>` weather caches and `[Vec<ChartImage>; 5]` become
@@ -252,30 +252,30 @@ of `cell_pixels()`; every raster in §6 is.
 
 ## 3. Render and host
 
-| piece | cube today | flat |
+| piece | cube today | ring |
 |---|---|---|
-| `Canvas` | `Box<[[[f32;3]; 4096]; 5]>` | `Canvas::new(topo)`, flat `Vec<[f32;3]>` of `w·h`, same `get/set/add` on `(Face::Front, x, y)` |
+| `Canvas` | `Box<[[[f32;3]; 4096]; 5]>` | `Canvas::new(topo)`, a flat `Vec<[f32;3]>` of `w·h`, same `get/set/add` on `(Face::Front, x, y)` |
 | per-pixel loops | `for face in Face::ALL { for y in 0..64 { for x in 0..64` (129 lines) | one new `Canvas::pixels() -> impl Iterator<Item=(Face,u16,u16)>`; each triple loop becomes one line and is then topology-correct for free |
 | encode | `Canvas::encode(&mut Frame)` | add `Canvas::encode_raster(&mut Raster)`; sRGB encode is shared and untouched |
 | `FrameSink` | `submit(&mut self, frame: &Frame)` | `submit(&mut self, out: Output<'_>)` with `enum Output<'a> { Cube(&'a Frame), Ring(&'a Raster) }` — the trait must stay object-safe for `FanOutSink(Vec<Box<dyn FrameSink>>)` (`sink/fanout.rs:19`); a generic would monomorphise the whole host per topology |
 | `ShimSink` | `CubeClient` + `Frame` mailbox | the same worker and mailbox, sending a `Raster` in wire format 2 (strips); the newest-frame mailbox and backoff are unchanged |
-| `PngSink` | `net_rgb8` → 256×128 PNG | flat writes the raster directly as a `w×h` PNG; `net.rs` untouched |
+| `PngSink` | `net_rgb8` → 256×128 PNG | a ring writes the raster directly as a `w×h` PNG; `net.rs` untouched |
 | `WebSink` | `/frame` = 8-byte seq + 61,440 frame bytes | `/frame` = 8-byte seq + the raster bytes; `/status` gains `"topology"` so the page picks a mode |
 | `index.html` | three.js cube + 768×384 net | a third mode: one `<canvas width=w height=h>` with `image-rendering: pixelated`; the cube/net code stays for cube worlds |
-| `PreviewSink` | net + ray-cast cube (`minifb`) | **refuses** a flat world with a clear error (`--sink web` or `png` instead). The ray-cast camera has no meaning on a plane and the window is a development tool |
-| care overlay | `CareTarget { face: u8, u, v }`, `face > 4` rejected (`care/mod.rs:134`) | validate `face == 0` and `u < w`, `v < h` for flat |
+| `PreviewSink` | net + ray-cast cube (`minifb`) | **refuses** a ring world with a clear error (`--sink web` or `png` instead). The ray-cast camera has no meaning on a ring and the window is a development tool |
+| care overlay | `CareTarget { face: u8, u, v }`, `face > 4` rejected (`care/mod.rs:134`) | validate `face == 0` and `u < w`, `v < h` for a ring |
 
 CLI/config: `WorldConfig` gains `topology`, so it is chosen at `--fresh` from the
 TOML and then carried by the snapshot:
 
 ```toml
 topology = "cube"                        # default, unchanged
-topology = { flat = { w = 320, h = 180 } }
+topology = { ring = { w = 320, h = 180 } }
 ```
 
 `open_world` (`runner/mod.rs:128`) must refuse a resume whose `--config`
 topology differs from the loaded snapshot's, by name, like every other schema
-refusal. `--sink preview` with a flat topology is refused at argument validation
+refusal. `--sink preview` with a ring topology is refused at argument validation
 (`cli.rs`, next to the existing `--fresh`/`--require-resume` check at line 262).
 
 `Raster` itself is W1b's, in the shim repo. Cubarium picks it up by running
@@ -305,7 +305,7 @@ that tool for no gain: the schema number already refuses a mismatched build.
 
 **The post-decode hook already exists and is named `WorldState::validate`.**
 `decode_snapshot` calls it at `snapshot.rs:163` after the CRC and the exact-length
-decode (`world/state.rs:108`). The flat work is to extend it, and to replace the
+decode (`world/state.rs:108`). The ring work is to extend it, and to replace the
 `CELL_COUNT` constants it reaches with the world's runtime `cell_count()`:
 
 - `config.topology` is one this build supports and `Topology::validate()` passes:
@@ -342,7 +342,14 @@ comparator therefore needs a cross-schema procedure, not just a masked hash:
 
 1. Define `CubeProjection` as **`WorldState` verbatim with exactly one
    substitution**: `config: ConfigProjection`, where `ConfigProjection` is
-   `WorldConfig` minus *only* the two added fields (`topology`, `world_scale`).
+   `WorldConfig` minus **three** fields — `topology`, `world_scale`, **and
+   `version`**. `WorldConfig.version` is a serialized field defaulting to
+   `CONFIG_VERSION` (`config.rs:15,19,372`), and this plan bumps it 8 → 9 (§4
+   above), so leaving it in would fail every comparison for a reason that has
+   nothing to do with the world. The versions are instead asserted **separately
+   and explicitly**: the fixture must report schema 16 / config 8, the new build
+   schema 17 / config 9. A silent version change and a silent world change must
+   not be able to cancel or mask each other.
    Every other field is carried whole, at its own type — `tick`, `fields`,
    `weather`, `organisms: Slots<Organism>` **including the allocator's `entries`,
    `free` and `live`** (`ids.rs:15-23`), `births_total`, `deaths_total`,
@@ -354,12 +361,14 @@ comparator therefore needs a cross-schema procedure, not just a masked hash:
    and `turn_counter` from every organism (`organism.rs:46-67`), the free-list
    state, the weather, every extension, and all behaviour-bearing config. **Carry
    everything; subtract two fields.**
-2. Each build produces it from its own binary and never decodes the other's
-   snapshot file. The post-change build reads the pre-change *payload* through the
-   frozen `v16.rs` mirror and `decode_exact` — the same mechanism the existing
-   refusal tests already use for schemas 7–14 — so `decode_snapshot`'s refusal of
-   schema 16 stays exactly as it is, and no patch to `main` is needed: the fixture
-   is one snapshot file from an unmodified `main` run.
+2. Precisely what reads what. The new build **never calls `decode_snapshot` on a
+   v16 file** — that call refuses schema 16 and keeps refusing it, unchanged. Its
+   *test* does read the v16 **payload** (the bytes after the header) through the
+   frozen `v16.rs` mirror and `decode_exact::<WorldStateV16>`, which is the same
+   mechanism the existing refusal tests already use for schemas 7–14. The
+   distinction matters: the product refuses old worlds, and only the comparator
+   looks inside one. No patch to `main` is needed — the fixture is one snapshot
+   file from an unmodified `main` run.
 3. Compare the two projections field-by-field and hash them for a one-line CI
    signal. Equality is the cube regression evidence used throughout §9.
 4. **Negative tests are part of the definition**, in FW-6's reserved
@@ -373,20 +382,20 @@ snapshot taken from the current `main` build before FW-1 merges.
 
 ## 5. Ecology and art: what is not mechanical
 
-Everything below reads the cube's embedded height, and it is the one place a flat
+Everything below reads the cube's embedded height, and it is the one place a ring
 port changes the world rather than the coordinates. The first draft under-counted
 the consumers; this is the corrected list.
 
-| system | cube | flat — recommended |
+| system | cube | ring — recommended |
 |---|---|---|
 | light / moisture | `y = cell.center().embed()[1]` (`habitat.rs:94-98`) | **design call: `height(p) = 1 − 2v/h`.** The panel is a side view: canopy at the top row, soil at the bottom edge. Keeps `design/stratified-world.md` intact |
-| **classic controller** | `height: o.pos.embed()[1]`, `up: up_direction(o.pos.face)` (`world/step.rs:449-460`) | both become `Topology` methods; flat `up` is the constant `(0, −1)` |
+| **classic controller** | `height: o.pos.embed()[1]`, `up: up_direction(o.pos.face)` (`world/step.rs:449-460`) | both become `Topology` methods; the ring's `up` is the constant `(0, −1)` |
 | **neural controller** | the same two fields in `SelfState` (`world/step.rs:3068-3079`) | identical treatment; a policy trained on cube height reads the same channel |
 | **depth preference** | `obs.up * (w_depth · (h_pref − obs.height))` steers every organism (`controller.rs:228-235`) | works unchanged *given* a topology height and up; with a wrong height it silently steers the whole population into a wall |
 | noise sampling | 3D noise on `[-1,1]^3` (`habitat.rs:43-75`) | **the same wave sum on a cylinder** (below): seamless across the wrap by construction, no periodic-noise work, and one pixel is `1/(32S)` embedded units on **both** axes, so patches are round |
 | **weather blobs** | orbital: `center` rotated about `axis` at `rate` rad/tick, plus a per-minute random-walk tilt (`habitat.rs:110-196`); sampled by `dot(b.center, dir)` against an angular cap (`habitat.rs:198-225`) | **unchanged — see §5a.** On the cylinder embedding `normalize()` preserves azimuth and maps height monotonically to latitude, so `Weather::new`, `advance` and `sample` all work verbatim. No new model, no new validation, no RNG change |
 | band thresholds | `Canopy` iff `h >= 1.0` — true only on the Top face (`art_present/habitat.rs:380`) | needs a `canopy_top` threshold. **No value can be validated from current code**; propose `0.67` as an explicit new default for review, not as a derived number |
-| detritus fall / downhill | gravity's tangential component vanishes on the level Top face, so `downhill` is `None` there (`field.rs:135-151`, `design/stratified-world.md:47-52`): **the cube canopy deliberately never drains**, and the bottom row of the side faces has nothing below it | **decided: the flat world mirrors both exceptions.** `downhill(c) = None` when `cy == 0`, otherwise the neighbour at `(cx, cy+1)`. The top cell row is the canopy and holds its water and detritus exactly as the cube's level Top does; the bottom row has no cell below it and keeps its litter, exactly as the cube's rim row does. No toggle, no new config |
+| detritus fall / downhill | gravity's tangential component vanishes on the level Top face, so `downhill` is `None` there (`field.rs:135-151`, `design/stratified-world.md:47-52`): **the cube canopy deliberately never drains**, and the bottom row of the side faces has nothing below it | **decided: the ring mirrors both exceptions.** `downhill(c) = None` when `cy == 0`, otherwise the neighbour at `(cx, cy+1)`. The top cell row is the canopy and holds its water and detritus exactly as the cube's level Top does; the bottom row has no cell below it and keeps its litter, exactly as the cube's rim row does. No toggle, no new config |
 | water flow / pools | no flux across the open rim (`water.rs`) | the bottom wall becomes a moat the cube never had; expect standing water along the bottom row and re-check `evap_floor` |
 | pair rejection | conservative chord bound (`pairs.rs:64`) | exact Euclidean; strictly fewer candidate pairs |
 | founders | random face + `unit·FACE_EXTENT` (`lifecycle.rs:69-72`) | one chart, `unit·w` and `unit·h`; the face draw must be **kept and discarded** or every seed shifts |
@@ -445,24 +454,50 @@ earlier planar blob model and its extra `WorldState::validate` checks are delete
 
 | quantity | ring (isotropic) | cube | note |
 |---|---|---|---|
-| latitude span | `±60.50°` | ±90° less the missing bottom face | was `±32.15°` when anisotropic |
-| share of the sphere the world occupies | **87.0%** | 83.3% (5 of 6 faces' directions) | within 4 points |
+| latitude span | `±60.50°` | ±90° less the missing bottom face | was `±32.15°` when `embed` reused `1 − 2v/h` |
+| share of the sphere the world occupies | 87.0% | 83.3% (5 of 6 faces' directions) | how much of a blob's travel is on-world |
 | a `blob_radius_deg = 55` cap | 21.3% of the sphere | 21.3% | the config is unchanged |
-| **world covered per blob** | **24.5%** | **25.6%** | within 5% — so `blobs_per_channel` stays **3** and `amplitude` stays as it is |
-| lateral area | `2πr · H_e = 56.25` units² | 20 units² | intrinsic area is 2.81× the cube's, but it is the *solid angle* that sets blob coverage, and that matches |
+| **expected share of the world one blob covers** | **21.3%** | **21.3%** | identical, so `blobs_per_channel` stays **3** and `amplitude` is unchanged |
+| lateral area | `2πr · H_e = 56.25` units² | 20 units² | intrinsic area, which turns out to set nothing here |
 
-The area row is why the earlier "3 → 8" derivation was wrong in both directions:
-intrinsic surface area is the wrong frame for a model that lives on the unit
-sphere after `normalize()`. The solid-angle comparison above is the right one, and
-it says the cube's weather defaults transfer to the ring untouched.
+**Why the coverage figures are equal, and why two earlier derivations were wrong.**
+Blob centres are drawn uniformly on the **whole sphere** (`sphere_direction`,
+`habitat.rs:136`) and orbit over the whole sphere (`habitat.rs:166`), spending
+part of their period off-world in either topology. For a centre uniform on the
+sphere, the chance that any given world direction falls inside a 55° cap is just
+the cap's own fraction — **21.3%, independent of the world's shape or area**. So
+the cube's weather defaults transfer to the ring untouched. Repair 2's "3 → 8"
+(from the plane's intrinsic area) and repair 3's "stays 3 because the area is
+exactly 20" were both computed in the wrong frame: intrinsic surface area sets
+nothing for a model that lives on the unit sphere after `normalize()`, and
+dividing cap area by *visible-world* area — the 24.5% and 25.6% figures in the
+previous revision — double-counts a restriction the blob centres do not obey.
 
-**One distortion remains, stated and accepted for v1.** `dφ/dy_e = r/(r² + y_e²)`
-falls from `0.6283` at the equator to `0.1524` at `y_e = ±2.8125`, so a blob whose
-orbit carries it over the top or bottom rows sweeps through them about **4.1×
-faster in pixels** than it crosses the middle of the world. Showers therefore move
-quickly across the canopy and the soil floor and linger in the foliage band. That
-is accepted for the first version; `weather.periods_min` and `blob_radius_deg` are
-the knobs if it reads badly, and nothing about it needs a code change.
+**Noise is round; weather is not. Both are accepted for v1.**
+
+- *Noise is isotropic.* The isotropic cylinder is a local isometry from the
+  `(u, v)` plane — one pixel is `1/(32S)` units along both axes — so the habitat
+  wave sum, which is a function of the 3D point, gives **round patches** in pixel
+  space. That is what the embedding decision bought.
+- *Weather caps are not.* `sample` compares `dot(b.center, dir)` **after**
+  `normalize()` (`habitat.rs:217-219`), and projecting the cylinder onto the unit
+  sphere is not an isometry: one pixel spans `cos φ / (32Sr)` of spherical
+  distance horizontally but `cos²φ / (32Sr)` vertically, so a round spherical cap
+  maps to a pixel-space shape stretched vertically by `1/cos φ`. A shower is
+  **round at the equator and up to `sec(60.50°) = 2.03×` taller than wide at the
+  top and bottom rows.** The previous revision's blanket claim that
+  "showers are round" was wrong.
+- *Vertical drift is uneven.* `dφ/dy_e = r/(r² + y_e²)` falls from `0.6283` at the
+  equator to `0.1524` at `y_e = ±2.8125`, so a blob whose orbit carries it over
+  the top or bottom rows sweeps through them about **4.1× faster in pixels** than
+  it crosses the middle: showers move quickly across the canopy and the soil floor
+  and linger in the foliage band.
+
+**Decision, 2026-09-16: accept the shape distortion for v1; do not redesign
+weather.** The knobs remain `weather.periods_min` and `weather.blob_radius_deg`,
+and neither involves a code change. FW-6's `ring_weather.rs` **measures and
+records the cap aspect at the rims rather than asserting it round** — the test
+must pin the real behaviour, not the behaviour the first draft claimed.
 
 ## 6. World resolution: the trade, and the recommendation
 
@@ -599,7 +634,7 @@ Today (`art/README.md`, `art/bake.gd`, `art/PLANTS.md`):
 already take a `scale: f64` (`cubarium-render/src/sprite.rs:317-326`), so an
 integer nearest-neighbour `scale = 2.0` path can draw the existing pack v5 at
 S = 2 with no new assets — call it **Stage A0**, and it is the fastest way to see
-a flat world at 640×360. It is blocked by one hard gate: `FOOTPRINT_RADIUS = 9.0`
+a ring world at 640×360. It is blocked by one hard gate: `FOOTPRINT_RADIUS = 9.0`
 is checked both when a sprite is built (`sprite.rs:18-22,61-64`, which returns
 `Err("sprite extent … exceeds the 9-pixel surface budget")`) and again at stamp
 time as `extent * scale > FOOTPRINT_RADIUS`, which **silently draws nothing**
@@ -607,8 +642,8 @@ time as `extent * scale > FOOTPRINT_RADIUS`, which **silently draws nothing**
 documented as "not review-tunable — it is the radius the shared unfolding is
 proven correct for", so it must become `9.0 · world_scale`, defined in FW-1's
 `Scale` and validated against the **topology's own** `max_local_radius()` (§2) —
-`min(w, h)/2` on a plane, and the untouched cube proof of 32 px on a cube, where
-`S` is pinned to 1 anyway. **That work lives in `cubarium-render` and therefore in FW-3**, which
+`min(h, w − 2·CELL_PIXELS)/2` on a ring, and the untouched cube proof of 32 px on
+a cube, where `S` is pinned to 1 anyway. **That work lives in `cubarium-render` and therefore in FW-3**, which
 owns that crate; FW-7 consumes the interface and must not edit it. The first
 draft's FW-7 omitted the render crate entirely — that was the gap.
 
@@ -620,7 +655,7 @@ an S× finer grid. Each file is small (a handful of `<path>` elements), but it i
 authoring work, not a bake parameter. The staging that follows:
 
 - **Stage A0 (no assets):** `scale = 2.0` on pack v5 with a scaled footprint
-  budget. Proves the flat world at 640×360 before any Godot run.
+  budget. Proves the ring world at 640×360 before any Godot run.
 - **Stage A (code, mechanical):** bake at `TILE = 16·S`, `GROUND_TILE = 8·S`,
   `svg/scale = S`; `pack.json` v6 makes `tile`, `ground_tile` and `pivot` data
   the loader honours instead of asserting; every hard `16`/`8`/`4` in `art.rs`,
@@ -628,7 +663,7 @@ authoring work, not a bake parameter. The staging that follows:
   picture is unchanged in shape, only larger. This unblocks everything else.
 - **Stage B (authoring, incremental):** redraw parts at the finer grid,
   file by file. The runtime reads the same pack, so art can improve one creature
-  or one plant at a time after the flat world is already on the panel.
+  or one plant at a time after the ring world is already on the panel.
 
 **One factor can drive the code side.** Put `world_scale: f64` in `WorldConfig`
 and have the *fresh-world default builder* multiply the length-dimensioned
@@ -660,7 +695,7 @@ moisture and a basin noise for pools (`cubarium-core/src/habitat.rs:63-104`);
 moving moisture blobs on 20–47 minute periods driving rain
 (`design/water.md`); downhill detritus fall and gravity-driven flow; and a
 stimulus envelope for external `Light | Moisture | Nutrient | Flow` events
-(`design/environmental-inputs.md`). On a flat world all of that survives and
+(`design/environmental-inputs.md`). On a ring all of that survives and
 varies only *vertically* — the world is banded but horizontally uniform, which is
 exactly the monotony Wrysk flagged about the top-down cube.
 
@@ -685,7 +720,7 @@ picks the ground tile and palette by dominant biome and blends with the existing
 seam-aware filter. An authored `biome_map` PNG read nearest-cell is a drop-in
 alternative source for `R` later.
 
-This is FW-8. The first flat world ships without it.
+This is FW-8. The first ring world ships without it.
 
 ## 9. The plan
 
@@ -698,19 +733,19 @@ FW-6 reservation below.
 **FW-6 reserves these exact paths**, and every implementation package's glob
 excludes `tests/ring_*.rs`:
 `cubarium-surface/tests/{ring_travel,ring_field,ring_raster}.rs`;
-`cubarium-core/tests/{ring_world,ring_embedding,ring_schema17}.rs`;
+`cubarium-core/tests/{ring_world,ring_weather,ring_schema17}.rs`;
 `cubarium-render/tests/{ring_canvas,ring_stamp_scale}.rs`;
 `cubarium/tests/{ring_sinks,ring_present,ring_care}.rs`.
 
 | id | objective | owns (decision) | files (exclusive; no `tests/ring_*.rs`) | interface exposed | verification | size | effort |
 |---|---|---|---|---|---|---|---|
 | FW-0 | Vendor `cube-proto` with `Raster` + wire format 2. **Measure, pinned: serial `R` and `tick_ms` now; the four-A78 render number re-measured after FW-3** (the parallel presenter does not exist until then), plus end-to-end fps and ticks/s. **S is provisional until that rerun** | the S and `--fps` values in §6 | `vendor/cube-proto/**`, `vendor/cube-proto.rev` | `Raster { width, height, data }` | `cargo test --workspace`; each number recorded with its pinning and its date, and the S it selects | small | medium |
-| FW-1 | `Topology` + `Scale`: cell pixels, `world_scale` (ring-only; cube pinned to 1), `footprint_radius() = 9·S`, per-topology `max_local_radius()` and `chord_sq()` (ring: `min(|Δu|, w−|Δu|)² + Δv²`); `u16` pixel indices; runtime cell count with the `u16::MAX` and two-image checks; **the ring's self-seam through the existing `Some(seam)` branch**, rims at `v = 0` and `v = h` through the existing `REFLECT_Y`; ring `downhill` (`cy == 0` ⇒ `None`); the cylinder `embed()`; the `CubeProjection` type and exporter | the whole geometry contract and **the stamp-budget value** | `crates/cubarium-surface/**` | §2's API; `CUBE_CELL_COUNT`; `CubeProjection` | cube results identical by value; ring exercised at **S = 1 and S = 2 from the first commit**; a ring corner fixture mirroring `lower_corner_crosses_a_vertical_seam_and_reflects`; pre-change projection fixture captured from `main` before merge | large | **high** |
-| FW-2 | Topology and scale through the world: config, schema 17, extended `WorldState::validate` (runtime `cell_count()` at `care.rs:340,345-349`), height/`up`, both controllers, the decided canopy `downhill`, the cylinder embedding fed to habitat and **weather unchanged**, founders, **and both cube-hardcoded core resolvers: `CareTarget::resolve` (`care.rs:148-168`, used at `world/care.rs:60`) and `HunterTarget::resolve` for `SpawnApex` (`hunter/state.rs:47-67`) — core types with `f64` `u`/`v`, distinct from FW-4's host `CareTarget`** | the ecological calls as written in §5/§5a | `crates/cubarium-core/**` | `WorldConfig.{topology,world_scale}`, `World::topology()`, `RenderView.topology` | cube run equal by `CubeProjection`; RNG stream parity (expected exact — no draw changes); **feed/rain/clean/apex targets beyond pixel 63 resolve on a ring and are refused off-world**; ring run reaches steady state | large | **high** |
+| FW-1 | `Topology` + `Scale`: cell pixels, `world_scale` (ring-only; cube pinned to 1), `footprint_radius() = 9·S`, per-topology `max_local_radius()` and `chord_sq()` (ring: `min(|Δu|, w−|Δu|)² + Δv²`); `u16` pixel indices; runtime cell count with the `u16::MAX` and two-image checks; **the ring's self-seam through the existing `Some(seam)` branch**, rims at `v = 0` and `v = h` through the existing `REFLECT_Y`; ring `downhill` (`cy == 0` ⇒ `None`); the isotropic cylinder `embed()` and `height()` as separate methods | the whole geometry contract and **the stamp-budget value** | `crates/cubarium-surface/**` | §2's API; `CUBE_CELL_COUNT` | cube results identical by value — **the surface crate's own by-value tests are FW-1's evidence; the projection comparison starts at FW-2**; ring exercised at **S = 1 and S = 2 from the first commit**; **exact-tie and near-tie fixtures at all four corners**, whose resolutions differ (`Edge::Top = 0 < Right = 1 < Bottom = 2 < Left = 3`, `travel.rs:50-70`): top-left, top-right and bottom-left reflect first, bottom-right crosses the seam first | large | **high** |
+| FW-2 | Topology and scale through the world: config, schema 17, extended `WorldState::validate` (runtime `cell_count()` at `care.rs:340,345-349`), height/`up`, both controllers, the decided canopy `downhill`, the cylinder embedding fed to habitat and **weather unchanged**, founders, **and both cube-hardcoded core resolvers: `CareTarget::resolve` (`care.rs:148-168`, used at `world/care.rs:60`) and `HunterTarget::resolve` for `SpawnApex` (`hunter/state.rs:47-67`) — core types with `f64` `u`/`v`, distinct from FW-4's host `CareTarget`**, **and the `CubeProjection` type, the frozen `v16.rs` mirror, the exporter and the comparator** — they live here because `WorldState`, `snapshot`, `decode_exact` and the mirrors are all in `cubarium-core` (`world/state.rs:22`, `snapshot.rs:7,101`) and the dependency runs core → surface | the ecological calls as written in §5/§5a | `crates/cubarium-core/**` | `WorldConfig.{topology,world_scale}`, `World::topology()`, `RenderView.topology`, `CubeProjection` + the exporter | cube run equal by `CubeProjection` (the first package where that evidence exists); RNG stream parity (expected exact — no draw changes); **feed/rain/clean/apex targets beyond pixel 63 resolve on a ring and are refused off-world**; ring run reaches steady state | large | **high** |
 | FW-3 | `Canvas` by topology, `Canvas::pixels()`, `encode_raster`; **adopt** `Scale::footprint_radius()` at both check sites (`sprite.rs:61-64,810-818`) and the `scale` stamp path; port `field/trail/sprite/body/multipart`; deterministic row-band parallel hook | adoption only — the value is FW-1's | `crates/cubarium-render/**` | `Canvas::new(topo)`, `pixels()`, `encode_raster` | same-seed cube canvas bit-identical; a `scale = 2` stamp draws instead of vanishing | medium | **high** |
-| FW-4 | `Output` enum + sinks (shim/png/web), viewer flat mode, CLI/config, preview refusal, **the whole care chain: `CareTarget.{u,v}` widened to `u16` and validated against the topology extent (`care/mod.rs:122-140`), `PlannedCommand` journal and web-request compatibility (`care/mod.rs:146-162`), and the canvas flourish** | the care wire and journal shape | `crates/cubarium/src/{sink/**,cli.rs,net.rs,run.rs,runner/**,care/**,care_effects.rs}`, `sink/web/index.html` | `enum Output`, `topology`/`world_scale` TOML, the widened `CareTarget` | flat PNG capture; viewer screenshot; a journal written before the widening still replays; the measured split that picks `--fps` | medium | medium |
-| FW-5 | Presenter for flat: `RenderView.topology` consumed, `ArtPresenter` built from the world's cell count, bands, horizon, water/rain, motifs, columns, bodies | presenter cache lifetime | `crates/cubarium/src/{present.rs,art_present/**,lanternjaw/**,scene.rs}` | — | flat capture reviewed by Wrysk; cube capture diffed to zero | large | **high** |
-| FW-6 | Independent test authoring at the reserved paths: the ring self-seam and both rims incl. the corner tie, two-image unfolding, ring-row field flux, capacity and two-image refusals, extended `validate`, the cylinder embedding's wrap continuity, **feed/rain/clean/apex targets beyond pixel 63**, care widening, sink/raster, presenter goldens, and **the `CubeProjection` negative tests of §4 in `ring_schema17.rs`** | — | only the reserved `tests/ring_*.rs` paths above | — | written without reading FW-1..FW-5's own tests; every negative test shown to fail on a perturbation | medium | **high** |
+| FW-4 | `Output` enum + sinks (shim/png/web), viewer ring mode, CLI/config, preview refusal, **the whole care chain: `CareTarget.{u,v}` widened to `u16` and validated against the topology extent (`care/mod.rs:122-140`), `PlannedCommand` journal and web-request compatibility (`care/mod.rs:146-162`), and the canvas flourish** | the care wire and journal shape | `crates/cubarium/src/{sink/**,cli.rs,net.rs,run.rs,runner/**,care/**,care_effects.rs}`, `sink/web/index.html` | `enum Output`, `topology`/`world_scale` TOML, the widened `CareTarget` | ring PNG capture; viewer screenshot; a journal written before the widening still replays; the measured split that picks `--fps` | medium | medium |
+| FW-5 | Presenter for the ring: `RenderView.topology` consumed, `ArtPresenter` built from the world's cell count, bands, horizon, water/rain, motifs, columns, bodies | presenter cache lifetime | `crates/cubarium/src/{present.rs,art_present/**,lanternjaw/**,scene.rs}` | — | ring capture reviewed by Wrysk; cube capture diffed to zero | large | **high** |
+| FW-6 | Independent test authoring at the reserved paths: the ring self-seam and both rims, **exact and near ties at all four corners** in `ring_travel.rs`, two-image unfolding, ring-row field flux, capacity and two-image refusals, extended `validate`, the cylinder embedding's wrap continuity, and in `ring_weather.rs` **the cap aspect at the rims measured and recorded, not asserted round**, **feed/rain/clean/apex targets beyond pixel 63**, care widening, sink/raster, presenter goldens, and **the `CubeProjection` negative tests of §4 in `ring_schema17.rs`** | — | only the reserved `tests/ring_*.rs` paths above | — | written without reading FW-1..FW-5's own tests; every negative test shown to fail on a perturbation | medium | **high** |
 | FW-7 | Pack v6 (`tile` as data), baker at `TILE = 16·S`, `art.rs`/`tall.rs`/`lanternjaw` constants made tile-relative, S-scaled default builder; re-bake at S = 2 | — | `art/**`, `assets/atelier/**`, `crates/cubarium/src/art.rs` | `pack.json` v6 | S = 1 pack still loads and renders bit-identically; 640×360 capture; reproducible Godot bake | large | **high** |
 | FW-8 | Biomes: region field, four parameter sets, `mechanisms.biomes` off by default, presentation by dominant biome | biome parameter sets | `crates/cubarium-core/src/biome.rs` (new), `crates/cubarium/src/art_present/habitat.rs` | `HabitatConfig.biomes` | toggle off ⇒ `CubeProjection` unchanged; toggle on ⇒ short run showing distinct regions | medium | medium |
 | FW-9 | **GPU hybrid (approved follow-on, not the first version).** Sim and sprite stamping stay on the CPU at world resolution; the display daemon renders on the Adreno — EGL surfaceless into a dma-buf imported into KMS — and does the integer upscale, the rotation and panel-resolution post-effects there. The CPU gather remains the fallback, chosen per display | the renderer choice per display | the `led-cube-shim` repo's `cube-screen-shim` and `cube-proto` crates, plus cubarium's `sink/` raster encoder for the auxiliary layers | **auxiliary layers beside RGB in the raster strip format** — candidates: emissive, water mask, height/stratum, rain — with a layer id in the strip header; **FW-4 publishes which layers cubarium emits** | byte-identical output to the CPU gather with no effects enabled; measured ms/frame on the GPU path | large | **high** |
@@ -731,7 +766,7 @@ follows FW-7.
 
 **The scale staging.** Scale lives in the FW-1 contract and is exercised at S = 2
 there, so nothing downstream ever changes geometry. What stages is the chosen
-*value*: FW-1..FW-6 can ship a flat world at S = 1 on pack v5, FW-3's Stage A0 can
+*value*: FW-1..FW-6 can ship a ring world at S = 1 on pack v5, FW-3's Stage A0 can
 show S = 2 on the same pack, and FW-7 makes S = 2 the shipped default with
 re-baked art. If FW-7 slips the panel still works.
 
@@ -744,10 +779,15 @@ format change, with a byte-identical fallback to hold).
 
 **Standing evidence at every package:** `cargo test --workspace` green, a
 fixed-seed `cubarium run --fresh --seed 1 --speed 0 --seconds 120 --sink png`
-capture whose PNG bytes match the pre-change run, and **`CubeProjection` equality**
-against the fixture exported from `main` before FW-1 — not `ecology_hash`, which
-cannot be equal across a config change (`snapshot.rs:193-199`) and cannot even be
-computed across the schema refusal.
+capture whose PNG bytes match the pre-change run, and — **from FW-2 onwards, which
+is where the projection can exist** — **`CubeProjection` equality** against a
+fixture captured from `main` before FW-1 starts. FW-1's own evidence is the
+surface crate's by-value tests: it cannot build the projection, because
+`cubarium-surface` sits *below* `cubarium-core` in the dependency graph and
+`WorldState`, `snapshot` and `decode_exact` all live in core
+(`world/state.rs:22`, `snapshot.rs:7,101`). Not `ecology_hash`, which cannot be
+equal across a config change (`snapshot.rs:193-199`) and cannot even be computed
+across the schema refusal.
 
 **Test authoring is its own pass.** FW-6 is that pass at high effort, written
 against §2's contract and §5/§5a's decisions rather than against the
@@ -864,3 +904,21 @@ numbers**. The blob defaults still transfer unchanged (`blobs_per_channel` 3), b
 for the solid-angle reason §5a now gives rather than the area coincidence recorded
 here. Reason for the record: the stratified design needs height only as a scalar,
 and there is no reason for the picture to stretch.
+
+## Review repair 4 (Astra round four, 2026-09-16)
+
+Three blocking and two should-fix. Every citation was checked against the tree
+and **all five were accurate**; none is rebutted. Two of them caught claims this
+document had asserted rather than derived.
+
+| # | finding | verdict | what changed |
+|---|---|---|---|
+| 1 | **BLOCKING** — `CubeProjection` still cannot compare v16 with v17: the plan bumps `CONFIG_VERSION` 8 → 9, but `ConfigProjection` excluded only `topology` and `world_scale`, while `WorldConfig.version` is a serialized field defaulting to `CONFIG_VERSION` (`config.rs:15,19,372`), so every comparison would fail | **accepted** | `ConfigProjection` now excludes **three** fields — `topology`, `world_scale` and `version` — and §4 states that the versions are asserted **separately and explicitly** (fixture: schema 16 / config 8; new build: schema 17 / config 9), so a silent version change and a silent world change cannot cancel or mask each other. The decode wording is also made precise: the new build **never calls `decode_snapshot` on a v16 file** — that refusal is untouched — while its *test* reads the v16 **payload** through the frozen `v16.rs` mirror and `decode_exact::<WorldStateV16>`, the mechanism the existing refusal tests already use. The product refuses old worlds; only the comparator looks inside one |
+| 2 | **BLOCKING** — FW-1 cannot own `CubeProjection`: it owns `cubarium-surface/**`, but `WorldState`, the snapshot module, `decode_exact` and the mirrors are all in `cubarium-core` (`world/state.rs:22`, `snapshot.rs:7,101`) and the dependency runs core → surface | **accepted** | The projection, the frozen `v16.rs` mirror, the exporter and the comparator move to **FW-2**, with the dependency reason stated in the row. FW-1's objective drops them and its verification now reads "the surface crate's own by-value tests are FW-1's evidence; the projection comparison starts at FW-2". The standing-evidence paragraph is rewritten to say the projection applies **from FW-2 onwards**, with the fixture still captured from `main` before FW-1 starts |
+| 3 | **BLOCKING** — weather is not isotropic after `normalize()` (`habitat.rs:217`): caps are ~`sec(60.5°) = 2.03×` taller than wide at the rims, so "showers are round" is wrong; and the 24.5% / 25.6% coverage figures divide cap area by *visible-world* area although blob centres are initialised and orbit over the whole sphere (`habitat.rs:136,166`), so the expected covered fraction is 21.3% for either world | **accepted; both errors were mine** | Confirmed by derivation: one pixel spans `cos φ/(32Sr)` of spherical distance horizontally but `cos²φ/(32Sr)` vertically, so a round cap maps to a pixel shape stretched by `1/cos φ` — `1.00` at the equator, `2.03` at `±60.50°`. §5a now separates the two claims that the previous revision conflated: **noise patches are round** (the isotropic cylinder is a local isometry from the `(u,v)` plane, which is what the embedding decision bought), **weather caps are round at the equator and up to ~2× taller than wide at the top and bottom rows**. The coverage row becomes **21.3% in both worlds**, with the reason spelled out — for a centre uniform on the sphere the covered fraction is the cap's own fraction, independent of the world's shape — and a paragraph records that repair 2's "3 → 8" and repair 3's "stays 3 because the area is 20" were *both* computed in the wrong frame. `blobs_per_channel` stays 3 for the third and correct reason. Per Wrysk's decision the shape distortion is **accepted for v1 and weather is not redesigned**; the knobs remain `periods_min` and `blob_radius_deg`. FW-6's `ring_weather.rs` must **measure and record the cap aspect at the rims, not assert it round** |
+| 4 | Should-fix — ring transport is sound (self-seams fit `Seam` at `geometry.rs:138`, the rim bounce at `travel.rs:254`, raster dedup at `raster.rs:127`, field-edge dedup at `field.rs:123`), but edge priority differs among the four corners | **accepted** | `earliest_exit` resolves a tie by `tied.trailing_zeros()` — the lowest `Edge` index — over `Top = 0 < Right = 1 < Bottom = 2 < Left = 3` (`travel.rs:50-70`, `geometry.rs:72-77`). The four ring corners therefore behave in **two different ways**: top-left (`Top` vs `Left`), top-right (`Top` vs `Right`) and bottom-left (`Bottom` vs `Left`) **reflect first**, while bottom-right (`Right` vs `Bottom`) **crosses the seam first** — which is the only one the cube's `lower_corner_crosses_a_vertical_seam_and_reflects` precedent covers. "A ring corner fixture" is replaced by **exact-tie and near-tie tests at all four corners** in FW-1's verification and FW-6's `ring_travel.rs` |
+| 5 | Should-fix — stale text: the config example still read `{ flat = … }`, and the Stage A0 paragraph still gave the deleted planar `min(w, h)/2` radius although §7's later paragraph had the `Ring` formula | **accepted** | Both corrected: the TOML example is `topology = { ring = { w = 320, h = 180 } }`, and the Stage A0 line now reads `min(h, w − 2·CELL_PIXELS)/2`. A full sweep replaced the remaining topology-denoting "flat"/"Flat" with ring/Ring across every live section, including the document title, leaving the `FW-` ids, the file name and the historical repair sections as they are; the one surviving "flat" in §5a was the adjective "flat claim" and is reworded |
+
+The reserved FW-6 path `cubarium-core/tests/ring_embedding.rs` is renamed
+`ring_weather.rs` and now carries both the embedding's wrap continuity and the
+measured cap aspect; the count stays at eleven.
