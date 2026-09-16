@@ -40,7 +40,7 @@ Read-only audit: no source file was changed to write it.
    exists but is blocked by a hard 9-pixel stamp budget that must scale with S.
 9. Biome/terrain variation is real but **separable**: one low-frequency region
    field offsetting per-cell habitat parameters, behind a toggle, off by default.
-10. Total: **nine packages — 4 large, 4 medium, 1 small**; five at high effort.
+10. Total: **nine packages — 4 large, 4 medium, 1 small**; six at high effort.
     Parallel pairs start only after FW-1's contract is frozen.
 
 ## 1. How deep the cube goes
@@ -354,23 +354,47 @@ organisms** (constant here) — the O(n²) pair pass, controller, motor, neural.
 stamps, since a body extent of `9·S` px covers `∝ S²` pixels. Hence:
 **render ∝ S², tick ≈ constant.**
 
+**The board, corrected (measured from sysfs, 2026-09-16).** Eight online cores,
+not six A55: `cpu0-3` Cortex-A55 (MIDR `0x412fd050`) at 1.96 GHz, `cpu4-6`
+Cortex-A78 (`0x411fd411`) at 2.40 GHz, `cpu7` Cortex-A78 at 2.71 GHz. The earlier
+"6 usable A55" in the tachyon-screen handoff came from `nproc` under a restricted
+affinity with `lscpu` naming only the first core. Everything below therefore
+budgets against the **A78 cluster**, and `R` means *one A78 core at 2.40 GHz*.
+**Assumption pending FW-0's measurement:** an A78 at 2.40 GHz is roughly 2.5–3×
+an A55 per core on this scalar `f64` pixel-and-field code (out-of-order versus
+in-order, wider issue), so an `R` measured on an A55 divides by ~2.5–3.
+
+Recommended placement, to be confirmed by FW-0: the host loop on `cpu7` (the
+2.71 GHz core), the parallel presenter across `cpu4-6` plus `cpu7` when it is in
+its render phase, and the screen shim plus the OS on the four A55s — the shim's
+integer block upscale to 1920×1080 XRGB is memory-bound and does not need a big
+core. The board also carries an **Adreno GPU and a Hexagon NPU; both are out of
+scope for the first version** (Wrysk may want the NPU for organism networks or
+voice later, which is a reason not to spend it on rendering now).
+
 **The budget is shared, not split.** `Step::Tick` and `Step::Render` alternate on
 one thread in one loop (`crates/cubarium/src/runner/mod.rs:733-801`), so the real
 constraint per wall second is
 
 > `20 · tick_ms + fps · render_ms <= 1000 ms`
 
-with `render_ms ≈ 2.81 · S² · R` for a measured single-core cube render `R`. At
+with `render_ms ≈ 2.81 · S² · R` for a measured one-A78-core cube render `R`. At
 the architecture doc's `tick_ms = 20` target the tick alone takes 400 ms, leaving
-600 ms, so `R_max = 600 / (fps · 2.81 · S²)`:
+600 ms, so `R_max = 600 / (fps · 2.81 · S²)`. The parallel columns assume the
+presenter split over the four A78 cores, worth ~3.5× after split and join:
 
-| S | 60 fps, serial | 30 fps, serial | 60 fps, presenter on 4 cores (×3.5) | 30 fps, ×3.5 |
+| S | 60 fps, one A78 | 30 fps, one A78 | 60 fps, 4×A78 (×3.5) | 30 fps, 4×A78 |
 |---|---|---|---|---|
 | 1 | `R ≤ 3.6 ms` | `R ≤ 7.1 ms` | `R ≤ 12.5 ms` | `R ≤ 24.9 ms` |
 | 1.5 | `R ≤ 1.6 ms` | `R ≤ 3.2 ms` | `R ≤ 5.5 ms` | `R ≤ 11.1 ms` |
 | **2** | `R ≤ 0.9 ms` | `R ≤ 1.8 ms` | `R ≤ 3.1 ms` | `R ≤ 6.2 ms` |
 | 3 | `R ≤ 0.40 ms` | `R ≤ 0.79 ms` | `R ≤ 1.4 ms` | `R ≤ 2.8 ms` |
 | 6 | `R ≤ 0.10 ms` | `R ≤ 0.20 ms` | `R ≤ 0.35 ms` | `R ≤ 0.69 ms` |
+
+The corrected core count helps in exactly one place — the parallel columns are
+now four *big* cores rather than four in-order A55s, which is what makes S = 2
+plausible at all. It does not change the serial columns, because they were always
+per-core, and it does not change the shape of the trade.
 
 Two consequences the shared loop makes visible. A slower tick eats the render
 budget directly: at `tick_ms = 40` only 200 ms remains and every figure above
@@ -385,9 +409,10 @@ sound.
 3× is an integer upscale so the pixel-art grid stays visible; S = 2 is an integer
 art scale, so every 4-px and 16-px constant doubles exactly (4→8, 16→32, tile
 rows 10/15→20/30) where S = 1.5 would round; creatures read ~32 world px ≈ 96
-device px. But the table above shows it needs `R ≤ 3.1 ms` even with a parallel
-presenter, and **no `R` or `tick_ms` has been measured on the board**. FW-0 must
-produce both before the value is fixed; 480×270 and 30 fps are the documented
+device px. But the table above shows it needs `R ≤ 3.1 ms` even with the presenter on all
+four A78 cores, and **no `R` or `tick_ms` has been measured on the board** — the
+A78-versus-A55 ratio above is an assumption, not a measurement. FW-0 must produce
+both, pinned, before the value is fixed; 480×270 and 30 fps are the documented
 fallbacks and are config edits, not rewrites. The *contract* carries S from FW-1
 either way (§2), so only the number moves.
 
@@ -490,57 +515,65 @@ This is FW-8. The first flat world ships without it.
 
 ## 9. The plan
 
-| id | objective | files (exclusive) | interface exposed | must stay green | verification | size | effort |
+Re-cut after review: **FW-1 owns cell geometry and `world_scale`** in the surface
+contract, **FW-2 owns the two ecological design calls** (planar weather metric,
+canopy drain), and **FW-3 owns the scale-derived stamp budget** in the render
+crate. The *Owns* column names the decisions, not just the files.
+
+| id | objective | owns (decision) | files (exclusive) | interface exposed | verification | size | effort |
 |---|---|---|---|---|---|---|---|
-| FW-0 | Vendor `cube-proto` with `Raster` + wire format 2 once W1b lands; measure `R`, the single-core cube render cost, on desktop and on the board | `vendor/cube-proto/**`, `vendor/cube-proto.rev` | `Raster { width, height, data }` | whole workspace | `cargo test --workspace`; a recorded `R` in ms | small | medium |
-| FW-1 | `Topology` enum; widen pixel indices to `u16`; runtime cell count; the `Flat` arms of travel/unfold/raster/field | `crates/cubarium-surface/**` | §2's API; `CUBE_CELL_COUNT` for cube-only callers | surface's 99 tests | cube results identical *by value*, not only by test | large | **high** — reflection on four edges, tie rules, exactness |
-| FW-2 | Thread topology and `world_scale` through the world: config, schema 17, habitat height/noise, water, fields, pairs, founders, care | `crates/cubarium-core/**` | `WorldConfig.{topology,world_scale}`, `World::topology()` | 479 core tests | fixed-seed cube run: identical `ecology_hash`; a flat run reaches steady state | large | **high** — the height/canopy/water calls, RNG stream order |
-| FW-3 | `Canvas` by topology, `Canvas::pixels()`, `encode_raster`; port `field/trail/sprite/body/multipart`; row-parallel presenter hook | `crates/cubarium-render/**` | `Canvas::new(topo)`, `pixels()`, `encode_raster` | 102 render tests | same-seed cube canvas bit-identical | medium | medium |
-| FW-4 | `Output` enum + sinks (shim/png/web), viewer flat mode, CLI/config, preview refusal, measured ms/frame both topologies | `crates/cubarium/src/{sink/**,cli.rs,net.rs,run.rs,runner/**}`, `sink/web/index.html` | `enum Output`, `topology`/`world_scale` TOML | host sink + CLI tests | a flat PNG capture; viewer screenshot; the numbers that pick `--fps` | medium | medium |
-| FW-5 | Presenter and art for flat at S = 1: bands, horizon, water/rain, motifs, columns, bodies, care effects | `crates/cubarium/src/{present.rs,art_present/**,lanternjaw/**,care_effects.rs,scene.rs}` | — | 344 host tests; cube PNG byte-identical | a 320×180 capture reviewed by Wrysk | large | **high** — new UI construction |
-| FW-6 | Independent test authoring: flat travel/reflection/unfold, field conservation, schema-17 refusal, sink/raster, presenter goldens | new files only: `crates/*/tests/flat_*.rs` | — | — | written without reading FW-1..FW-5's own tests | medium | **high** |
-| FW-7 | World scale: pack v6 (`tile` as data), baker at `TILE = 16·S`, `art.rs`/`tall.rs`/`lanternjaw` constants made tile-relative, the S-scaled default builder; re-bake at S = 2 and ship 640×360 | `art/**`, `assets/atelier/**`, `crates/cubarium/src/art.rs`, `art_present/tall.rs`, `lanternjaw/**` | `pack.json` v6, `world_scale` defaults | the S = 1 pack must still load and render bit-identically | a 640×360 capture beside the 320×180 one; reproducible Godot bake | large | **high** — `tall.rs`'s 4/16-px lattice is the densest coupling in the repo |
-| FW-8 | Biomes: the region field, four parameter sets, `mechanisms.biomes` off by default, presentation by dominant biome | `crates/cubarium-core/src/habitat.rs` (+ a new `biome.rs`), `crates/cubarium/src/art_present/habitat.rs` | `HabitatConfig.biomes` | everything, with the toggle off | toggle off ⇒ `ecology_hash` unchanged; toggle on ⇒ a short run showing distinct regions | medium | medium |
+| FW-0 | Vendor `cube-proto` with `Raster` + wire format 2; **measure `R` (single-core cube render ms) and `tick_ms` on desktop and on the board** | the S/fps value in §6 | `vendor/cube-proto/**`, `vendor/cube-proto.rev` | `Raster { width, height, data }` | `cargo test --workspace`; recorded `R` and `tick_ms`, and the S they select | small | medium |
+| FW-1 | `Topology` + `Scale` (cell px, world scale, footprint and local radii); `u16` pixel indices; runtime cell count with the `u16::MAX` capacity check; flat travel with per-axis and corner wall reflection | the geometry contract, incl. the corner tie deviation | `crates/cubarium-surface/**` | §2's API; `CUBE_CELL_COUNT`; the normalized cube-state comparator | cube results identical by value; flat exercised at **S = 1 and S = 2 from the first commit** | large | **high** — reflection algebra, tie/near-tie equivalence, progress bounds |
+| FW-2 | Topology and scale through the world: config, schema 17 + post-decode validation, height/`up`, both controllers, **planar weather metric**, **canopy drain decision**, S-scaled noise, founders, care | planar weather; canopy drain; `canopy_top` | `crates/cubarium-core/**` | `WorldConfig.{topology,world_scale}`, `World::topology()`, `RenderView.topology` | cube run matches by the normalized comparator (not `ecology_hash`); a flat run reaches steady state | large | **high** — the two calls, RNG stream order, controller height |
+| FW-3 | `Canvas` by topology, `Canvas::pixels()`, `encode_raster`, **`footprint_radius = 9·S`** and the `scale` stamp path; port `field/trail/sprite/body/multipart`; deterministic row-band parallel hook | the stamp budget | `crates/cubarium-render/**` | `Canvas::new(topo)`, `pixels()`, `encode_raster`, `footprint_radius(scale)` | same-seed cube canvas bit-identical; a `scale = 2` stamp draws instead of vanishing | medium | **high** (raised) — the 9-px budget is a correctness bound, not a knob |
+| FW-4 | `Output` enum + sinks (shim/png/web), viewer flat mode, CLI/config, preview refusal, host timing numbers | — | `crates/cubarium/src/{sink/**,cli.rs,net.rs,run.rs,runner/**}`, `sink/web/index.html` | `enum Output`, `topology`/`world_scale` TOML | flat PNG capture; viewer screenshot; the measured split that picks `--fps` | medium | medium |
+| FW-5 | Presenter for flat: `RenderView.topology` consumed, `ArtPresenter` built from the world's cell count, bands, horizon, water/rain, motifs, columns, bodies, care effects | presenter cache lifetime | `crates/cubarium/src/{present.rs,art_present/**,lanternjaw/**,care_effects.rs,scene.rs}` | — | a flat capture reviewed by Wrysk; cube capture diffed to zero | large | **high** — new UI construction |
+| FW-6 | Independent test authoring: wall reflection incl. exact and near corner, corner-cell flux, capacity refusal, schema-17 post-decode validation, planar weather, sink/raster, presenter goldens | — | new files only: `crates/*/tests/flat_*.rs` | — | written without reading FW-1..FW-5's own tests | medium | **high** |
+| FW-7 | Pack v6 (`tile` as data), baker at `TILE = 16·S`, `art.rs`/`tall.rs`/`lanternjaw` constants made tile-relative, S-scaled default builder; re-bake at S = 2 | — | `art/**`, `assets/atelier/**`, `crates/cubarium/src/art.rs`, `art_present/tall.rs`, `lanternjaw/**` | `pack.json` v6 | the S = 1 pack still loads and renders bit-identically; a 640×360 capture; reproducible Godot bake | large | **high** — `tall.rs`'s 4/16-px lattice |
+| FW-8 | Biomes: region field, four parameter sets, `mechanisms.biomes` off by default, presentation by dominant biome | biome parameter sets | `crates/cubarium-core/src/habitat.rs` (+ new `biome.rs`), `crates/cubarium/src/art_present/habitat.rs` | `HabitatConfig.biomes` | toggle off ⇒ comparator unchanged; toggle on ⇒ short run showing distinct regions | medium | medium |
 
-The staging is deliberate: **FW-1..FW-6 ship a correct flat world at S = 1
-(320×180)**, which is the smallest sound diff and proves the topology on the
-panel; **FW-7 then turns the scale up to the recommended 640×360 at S = 2**
-without touching topology again. If FW-7 slips, the panel still works.
+**Ordering, with the review's constraint that parallel pairs start only after
+shared interfaces are frozen.** FW-0 any time. FW-1 first, **and its API is
+frozen and published before anything else starts** — that freeze is the gate, not
+the merge. Then **FW-2 ∥ FW-3** (disjoint crates). Then **FW-4 ∥ FW-5** (disjoint
+file sets in `crates/cubarium/src`), but only after FW-3 publishes
+`footprint_radius` and `encode_raster`. FW-6 starts at the FW-1 freeze and only
+creates new files. FW-7 follows FW-5 (both would otherwise write
+`art_present/tall.rs`) and depends on FW-3's budget without editing it. FW-8 last.
+W2 (the device) follows FW-7.
 
-Ordering: FW-0 any time. FW-1 first. Then **FW-2 ∥ FW-3** (disjoint crates), then
-**FW-4 ∥ FW-5** (disjoint file sets inside `crates/cubarium/src`). FW-6 starts as
-soon as FW-1's signatures are frozen and only creates new files, so it never
-collides. FW-7 follows FW-5 and touches `art_present/tall.rs`, which FW-5 owns —
-they must not run together. FW-8 is last and can slip indefinitely. W2 (the
-device) follows FW-7.
+**The scale staging survives the review, with one correction.** Scale lives in
+the FW-1 *contract* and is exercised at S = 2 there, so nothing downstream ever
+changes geometry. What stages is the chosen *value*: FW-1..FW-6 can ship a flat
+world at S = 1 on pack v5, FW-3's Stage A0 can show S = 2 on the same pack, and
+FW-7 makes S = 2 the shipped default with re-baked art. If FW-7 slips the panel
+still works. The first draft's claim of "S = 1 then S = 2 without touching
+topology" was wrong because cell size is a surface constant
+(`field.rs:11-16,49-68`); putting `Scale` in FW-1 is the fix.
 
-Four packages are high effort, for different reasons: FW-1 because a reflection
-or tie-rule mistake is silent and corrupts motion; FW-2 because the
-height/canopy/water calls decide whether the flat world is alive or a flat lawn,
-and touching the founder RNG order changes every seed; FW-5 because it is new UI
-construction, which the working rules put at high effort by default; FW-7 because
-`tall.rs` encodes the 4-px cell and 16-px tile lattice in dozens of named row
-indices, and an off-by-one there is a visible seam in every plant.
+Six packages are high effort: FW-1 (a reflection or tie mistake is silent and
+corrupts motion), FW-2 (the weather metric and canopy drain decide whether the
+flat world is alive), FW-3 (raised — the 9-px stamp budget is a proven-correctness
+bound shared with `unfold_pixels`), FW-5 (new UI construction), FW-6 (test
+authoring is high by the working rules), FW-7 (`tall.rs`'s named row indices).
 
-**The standing evidence at every package**, since the cube must keep working:
-`cargo test --workspace` green, plus a fixed-seed
-`cubarium run --fresh --seed 1 --speed 0 --seconds 120 --sink png` capture whose
-PNG bytes and `ecology_hash` match the pre-change run. That is what
-"byte-for-byte identical" means operationally, and it is cheap enough to run on
-every package.
+**Standing evidence at every package:** `cargo test --workspace` green, plus a
+fixed-seed `cubarium run --fresh --seed 1 --speed 0 --seconds 120 --sink png`
+capture whose PNG bytes match the pre-change run, plus the **normalized
+cube-state comparator** of §4 — *not* `ecology_hash`, which cannot be equal across
+a config change (`snapshot.rs:193-199`).
 
-**Test authoring is its own pass.** FW-6 is that pass, at high effort, written
-against §2's contract and §5's design calls rather than against the
-implementation. FW-7 and FW-8 each need their own small authoring pass for the
-same reason — a worker's green tests are not evidence about its own art or its
-own biome field.
+**Test authoring is its own pass.** FW-6 is that pass at high effort, written
+against §2's contract and §5's calls rather than against the implementation.
+FW-7 and FW-8 each need their own small authoring pass.
 
 ## What this audit could not determine
 
 - **Device performance.** No build was run (the shared `target/` belongs to the
   main checkout, and a worktree build would cost tens of GiB) and the Tachyon is
   not reachable from this task. §6 gives the scaling law and a decision table
-  keyed on a single measured number `R`; FW-0 must produce it before S is fixed.
+  keyed on a measured `R` and `tick_ms`; FW-0 must produce both, pinned to an A78
+  core, before S is fixed. The 2.5–3× A78:A55 per-core ratio is an assumption.
 - **The exact `Raster` API.** W1b had not landed; the vendored `cube-proto` at
   `7a21b5f` has no `Raster` and no format 2. FW-0 may need a small adaptation.
 - **How much art authoring Stage B really is.** 148 SVG part files were counted
@@ -549,3 +582,34 @@ own biome field.
 - **Whether 640×360 reads well.** That is Wrysk's call on the panel. The raster
   and `world_scale` are both config precisely so it can change without a code
   edit.
+
+## Review repair 1 (Astra, 2026-09-16)
+
+Astra returned *rework*. Every finding is accepted; none is rebutted. Three were
+blocking and two of those were substantive errors of fact in the first draft.
+
+| # | finding | verdict | what changed |
+|---|---|---|---|
+| 1 | hub audit incomplete: `World.images` five-element cache, `RenderView` carries no topology, `ArtPresenter` initialises through global `CellId::all()` | **accepted** | §1 gains a fifth hub row citing `world/mod.rs:44-53`, `view.rs:34-61`, `art_present/mod.rs:416-423`; §2 adds `World`'s five `Box<[f64; CELL_COUNT]>` caches to the runtime-sizing work; FW-2 exposes `RenderView.topology`; FW-5 owns building `ArtPresenter` from the world's cell count |
+| 2 | `CellId(u16)` caps a flat world at 65,535 cells; `CUBE_CELL_COUNT` claim overstated | **accepted** | §2 adds `Topology::validate()` with checked multiplication and a `u16::MAX` refusal (1920×1080 at 4-px cells would want 129,600), carried into FW-1 and into §4's post-decode checks. The mitigation claim is rewritten: the const preserves cube-only *literals* as a rename, not callers that iterate runtime-length vectors — `redesign_rules.rs:116,418` is cited as the counter-example |
+| 3 | **BLOCKING** — flat reflection cannot be `TangentMap::IDENTITY`; also "four border rows degree 3" is wrong | **accepted; the draft was wrong** | §2 replaces the identity claim with the per-axis algebra table: `REFLECT_Y` on horizontal walls, `REFLECT_X` on vertical, both at a corner (`= quarter_turns(2)`, commuting, `det = +1`), citing `travel.rs:254-258`. The cube's lowest-`Edge` tie rule is documented as *inverted* for flat (a tie applies both walls, not one seam); exact-tie versus near-corner equivalence, on-wall progress, `MAX_CROSSINGS` and the counted `nudge_inward` fallback are named as required tests. Degrees corrected to 3,354 × degree 4, 242 × degree 3, **4 corners × degree 2** (`field.rs:98-119`), and the edge count corrected from a bogus 7,115 to **7,075** = `79·45 + 80·44` |
+| 4 | **BLOCKING** — height audit missed consumers; spherical weather; canopy drain; unvalidated 0.67 | **accepted; the draft was incomplete** | §5 is rebuilt. Added: both controllers reading `o.pos.embed()[1]` (`step.rs:449-460`, `3068-3079`), `up_direction(face)` (`lifecycle.rs:376-379`), and depth-preference steering (`controller.rs:228-235`) — with the note that a wrong height steers the whole population into a wall. The weather metric is now a named **BLOCKING design call**: `normalize([u/32,v/32,0])` gives a polar fan, not moving weather (`habitat.rs:198-225`), so a planar metric with a stated edge rule is required, owned by FW-2. The canopy drain is a named decision: the cube's level Top has no downhill neighbour by construction (`field.rs:135-151`) while a flat canopy drains completely — recommend *accept and measure*, owned by FW-2. `canopy_top = 0.67` is relabelled an explicit new default for review, not a derived value |
+| 5 | constant-cost argument is conditional; render and sim share one loop; 640×360 not yet defensible | **accepted** | §6 states the three conditions the invariance depends on, the first being that habitat noise must be sampled at `/(32·S)` (`habitat.rs:43-75`) or patchiness per cell changes with S; cites `sense_depth`'s `r_sense / CELL_PIXELS` (`lifecycle.rs:383-389`) as the checkable invariant. The two independent budgets are replaced by the shared-loop budget `20·tick_ms + fps·render_ms <= 1000 ms` (`runner/mod.rs:733-801`) and an `R_max` table derived from it, with the consequence that a slower tick eats the render budget. 640×360 is relabelled a **gated candidate** pending FW-0's measured `R` and `tick_ms` |
+| 6 | cheapest Stage A missed; 2× assets fail the nine-pixel budget; FW-7 must include `cubarium-render` | **accepted** | §7 adds **Stage A0**: `stamp_sprite`'s existing `scale` parameter (`sprite.rs:317-326`) draws pack v5 at S = 2 with no re-bake — blocked by `FOOTPRINT_RADIUS = 9.0`, which rejects at build (`sprite.rs:18-22,61-64`) and *silently draws nothing* at stamp time (`sprite.rs:810-818`). The budget becomes `9·S`, validated against `max_local_radius()` (`S ≤ 3.5` today). Placement note: the work is in `cubarium-render`, so it is given to **FW-3**, whose effort is raised to high, rather than to FW-7 — one owner per crate keeps the parallel pairs write-disjoint, and FW-7 consumes the published interface |
+| 7 | **BLOCKING** — "S=1 then S=2 without touching topology" is impossible | **accepted; the draft was wrong** | Cell size is a surface constant (`field.rs:11-16,49-68`), so FW-7 could not have delivered `4·S`. `Scale` (cell pixels, world scale, footprint and local radii) moves into **FW-1's contract**, which exercises S = 2 from its first commit while keeping S = 1 cube goldens. What stages is now the chosen *value*, not the geometry. §9 also states that parallel pairs start at the **interface freeze**, not the merge |
+| 8 | `ScalarField` is not a serialization cause; don't widen the fixed header; `ecology_hash` equality impossible | **accepted; the draft was wrong** | §4 is rewritten. `Fields` is already `Vec<f64>` (`fields.rs:19-32`) and the fixed arrays live in `Habitat`/`World`, which are rebuilt on load — the bump's real cause is `WorldConfig` gaining fields inside the payload (`world/state.rs:22-28`). The header widening is dropped, because `scripts/reduce-quiet-compare.mjs:112-126` parses the 22-byte layout at hardcoded offsets; validation moves after decode (topology, dimensions, capacity, every field-vector length, every organism and care `face`). The pre/post `ecology_hash` check is replaced everywhere by a **normalized cube-state comparator** that excludes `config`, because `ecology_hash` hashes the whole masked state including it (`snapshot.rs:193-199`) |
+
+Two further corrections not in the findings, folded into the same pass:
+
+- **Device facts.** The Tachyon has **8 online cores**, not six A55: `cpu0-3`
+  Cortex-A55 at 1.96 GHz, `cpu4-6` Cortex-A78 at 2.40 GHz, `cpu7` Cortex-A78 at
+  2.71 GHz (sysfs, 2026-09-16; the earlier figure came from `nproc` under a
+  restricted affinity). §6 now budgets against the A78 cluster, defines `R` as
+  one A78 core at 2.40 GHz, states the 2.5–3× A78:A55 per-core ratio as an
+  assumption pending FW-0, and proposes a placement (host loop on `cpu7`,
+  presenter across `cpu4-7`, shim and OS on the A55s). The Adreno GPU and Hexagon
+  NPU are explicitly out of scope for the first version.
+- **Package count and effort.** Six packages are now high effort rather than
+  four: FW-3 was raised because the 9-pixel stamp budget is a proven-correctness
+  bound shared with `unfold_pixels`, not a tunable, and FW-6 was already high by
+  the working rules but had not been counted.
