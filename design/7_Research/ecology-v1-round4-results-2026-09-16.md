@@ -26,7 +26,7 @@ which would be visible on the cube; none of this round touches the cube.
 | P apex predicate pair | Opus 5 high | worktree, merged `36515fa` | 190 s / 4 min | 8.0 MiB / 20 | core 523, search 224 |
 | R skimmer depth census | Opus 5 high | worktree, merged `c506af9` | 4.2 min / 6 min | 0.6 MiB / 30 | search 257 |
 | S preconditioned opening | Opus 5 high | worktree, merged `0fb9754` | 4.5 min / 10 min | 33 MiB / 80 | core 530, search 270, host 596 |
-| T inertial motor model (Wrysk's direction, added mid-round) | Opus 5 high | worktree | *(pending)* | | |
+| T inertial motor model (Wrysk's direction, added mid-round) | Opus 5 high | worktree, merged | 374 s / 11 min | 7.8 MiB / 40 | core 544, search 275, host 596 |
 
 Fable's verification so far: Q's two ignored experiments re-run and the
 retained files rewritten with identical generation-9 figures (span
@@ -40,7 +40,12 @@ seed at ages 0 and 48,000 and matched on 4 of 4. One semantic conflict between
 R and S (R's test constructed the run options before S added its
 `precondition` field) was repaired at integration (`1200075`); the shared
 cache's stale-artifact race recurred in every worker and in Fable's own
-re-runs, cleared each time by touching the core crate root.
+re-runs, cleared each time by touching the core crate root. T's inertial apex arm
+re-run and compared field for field with its retained rows (identical); T's
+merge conflicted with S in the run options and the evaluation entry (both
+sides kept: the motor model is set before any preconditioning), and five
+initialisers written by R, S and T had to name each other's fields — repaired
+at integration, suites green after.
 
 ## Q — where the ES search loses candidate variation: it does not; there is too little at source
 
@@ -301,6 +306,93 @@ foliage. On this evidence the honest target for a §11 change is the grazed
 standing crop, not the ungrazed one, which is a different measurement. S
 chose none; §11 and `producer.initial_fraction` are untouched.
 
+## T — the inertial motor model, paired against the shipped sweep (Wrysk's direction)
+
+Full note: [ecology-v1-motor-inertial-2026-09-16.md](ecology-v1-motor-inertial-2026-09-16.md).
+Commits `0629ac8` (the switch, the model, the provenance, 19 tests written
+first), `6b90a2c` (note). Brief
+[T](../handoffs/ecology-v1-motor-inertial-opus-2026-09-16.md), written on
+Wrysk's direction that movement cost follow rough physics — mass and
+momentum, bodies as balls or cylinders, turning cheaper than moving, no
+modelling of outstretched claws — after P found the apex spending two thirds
+of its lunge on turn sweep at its claw-reach radius. The model: every body a
+uniform disc of radius its own lobe extent, rotation as the energy-equivalent
+speed `r·ω/√2`, envelope `√(v² + v_rot²) ≤ cap`, bill `move_cost·S·(|v| +
+v_rot)`, the apex's grasp contact geometry only. `MotorModel::{Sweep,
+Inertial}` is a `World` transient (no `WorldConfig` field); `Sweep` is
+byte-identical to the shipped contract (six state hashes over 9,000 ticks of a
+two-apex, eight-neural world, captured before any code was written); the
+motor model is recorded in the ES protocol and policy file and a mismatch is
+refused by name, with a missing field reading as `sweep` (exactly one contract
+existed when those files were written). Two design calls T made and argued:
+one radius everywhere (the observation, the envelope, the bill and the neural
+adapter all read the same number, which under `Sweep` had silently disagreed
+for the apex — told 9 px, bounded by 14.8), and two constraints under
+`Inertial` (capability bounds the quadrature magnitude, the purse bounds the
+billed sum) so energy-bound pure translation is identical under both models.
+A geometry correction to the brief: the apex's lobes are 9 px, so its
+rotation radius falls 2.3×, not "far less"; per radian it pays 0.86 of the
+shipped cost while an ordinary 2.5 px body pays 1.41×; the apex's gain is
+turning room, not a discount. Two files outside T's list, one line each,
+forced (the transient's default in `World::assemble`; the option on
+`RunOptions`), plus `Protocol` in `trainer.rs` and the host test's constructor.
+
+**Arm A, the apex** (P's eight-seed design, predicate corrected, both models;
+the `sweep` arm reproduces P's rows row for row):
+
+| | sweep | inertial |
+| --- | --- | --- |
+| delivered burst: translation / rotation / whole motor | 4.6 / 8.0 / 12.5 px/s | **8.6 / 15.6 / 24.0** |
+| gap change per burst, whole arm | +0.21 px (grows) | **−0.57 px (closes)** |
+| contacts | 140 | **207** |
+| captures per life | 2.09 | **2.91** |
+| attempts beginning past 12 px: contacts / captures | 0 / 0 of 355 | **21 / 12** of 449 |
+| earned fraction of its own bill | 13.6 % | **19.9 %** |
+| lifetime max | 23,201 | **46,449** |
+| death cause | starvation 32 / 32 | starvation 32 / 32 |
+
+The burst closes the gap for the first time; attempts past 12 px produce
+contacts where they never could; the reproduction age gate opens (members
+reach 46,449 ticks against the 24,000 required) and the first refusing
+readiness term becomes the reserve stock fraction. Still no mating. Caveat T
+could not remove: the switch changes every body from tick 0, so the apex is
+dropped into a thinner prey stock and part of its gain is confounded with the
+world change.
+
+**Arm B, the whole world** (A's screen rows, both configurations, six seeds,
+three arms; all 36 `sweep` rows reproduce the retained hashes, with the
+ledger on, so the ledger's inertness is measured again): the legacy
+controller turns more — motor billed +50 %, range +14 % (cells per body per
+window +58 in `fast-leaf`), feeding fraction +3 points, on 18 of 18 rows in
+`fast-leaf`; population −5.6 % (`fast-leaf` arm 0: 60.8 → 56.0, seed ranges
+not overlapping); foliage, litter and living cells within 1.5 %; every one of
+the six gates kept in every arm under both models. Against the r0a memory:
+the 93 → 39 collapse belonged to the old union-of-ceilings envelope where
+sweep could be thirteen times travel; the shared budget removed that lever
+and `Inertial` does not bring it back. Worth watching: baseline's scavenger
+guild all but vanishes in arm 0 (2.2 → 0.2) on an ecology that already fails
+the guild gate under both contracts, with a large seed spread.
+
+**Verdict:** (a) decisively yes on the apex; (b) partly on the world (four
+motor and behaviour measures move beyond seed noise, the rest within 1.5 %);
+(c) every gate kept. **What Wrysk would be adopting:** the rotation term and
+envelope for every body — on the cube, bodies that turn √2 faster and hold
+their travel through a turn (curvier paths, more ground per window, more time
+feeding), an apex that pivots 2.3× faster and can actually charge; a slightly
+leaner `fast-leaf`; a new protocol hash with every trained policy refused by
+name and needing retraining (the single largest cost); and these retained
+rows needing re-measurement under the new contract: A's screen and held-out,
+I's ladder, F's movement rows and P's predicate rows (the plant-budget,
+factorial, depth and census rows only where they quote a motor or range
+measure). T's own recommendation, recorded: the apex evidence is strong but
+the retraining bill is not worth paying for the apex alone; the cheap
+intermediate — drop the grasp from `turn_radius_px` under `Sweep` alone,
+changing no ordinary body and no protocol — would capture most of arm A's
+gain. Fable's view differs and is stated in the recommendation below: Wrysk
+asked for the physics model, no trained policy is installed anywhere and the
+one that exists cannot forage, so the retraining cost is currently zero in
+practice, and the world-level change is small and gate-clean.
+
 ## What this does and does not establish
 
 - **Established by measurement:** the apex's pursuit stopping predicate is
@@ -313,8 +405,12 @@ chose none; §11 and `producer.initial_fraction` are untouched.
   both configurations; no plant-only age removes the ungrazed depletion
   crossings, one age (48,000 ticks) makes every grazer founder breed, and
   every arm converges to the same grazed standing crop whatever it opened on.
-- **Not established:** whether a delivered lunge can pay for the apex once
-  the turn radius is fixed (T, pending); whether a wider turn deadband lets a
+- **Established by T:** under the inertial model the corrected apex closes
+  the gap, reaches prey it never could, and lives past its reproduction age
+  gate, still starving at a fifth of its bill; the world absorbs the model
+  with every gate kept and a 6 % leaner `fast-leaf`.
+- **Not established:** whether the apex can ever fund itself (the reserve
+  stock fraction is now the first refusing term); whether a wider turn deadband lets a
   policy express residence (a fresh campaign under a new protocol, not run);
   whether some skimmer depth between 0.10 and 0.55 rescues the lineage without
   the grazer's loss (a ladder, not run); what a §11 seeded at the grazed
@@ -328,13 +424,19 @@ chose none; §11 and `producer.initial_fraction` are untouched.
 The round turns three of the pending owner decisions into concrete
 proposals and withdraws one.
 
-1. **Apex: approve the predicate correction** (`inside` → `in_contact()`,
-   one line). Astra's condition for telling Wrysk to approve is met: the
-   burst is delivered, the gap closes, contacts and captures rise, the ledger
-   is not worse. It does not make the apex viable on its own; T's motor
-   result decides whether the corrected apex can then close. Recommend
-   deploying the predicate together with T's motor model if T confirms,
-   as one fresh world, so the cube's apex changes once rather than twice.
+1. **Apex and motor together: propose both to Wrysk as one fresh world.**
+   The predicate correction (`inside` → `in_contact()`, one line) meets
+   Astra's condition; the inertial motor model (Wrysk's own direction) is
+   confirmed on the apex, gate-clean on the world, and is the first step of
+   the physics-engine backlog. Fable recommends adopting both as the contract
+   and deploying one fresh `fast-leaf` world with them, because the cube's
+   apex changes once, no trained policy is installed anywhere (so the
+   retraining cost T names is zero in practice today), and the world-level
+   effect is small. What changes visibly: bodies turn more freely and cover
+   more ground, an apex spawned from the viewer charges and catches. What does
+   not: the apex still starves; it is not yet a population. The rows T lists
+   would be re-measured under the new contract as the next calibration
+   baseline, not before deployment.
 2. **Skimmer: no roster change now.** Run R's depth ladder {0.10, 0.20,
    0.30, 0.40, 0.55, 0.75} at arm 0 (about 3.5 minutes) to ask whether any
    depth rescues the lineage without the grazer's loss, and split the ledger's
@@ -352,6 +454,6 @@ proposals and withdraws one.
    fresh, bounded campaign under a new protocol hash (never a migration),
    with the four-layout aggregation A/B (`Aggregate::Mean` exists) run beside
    it at the same seed; the score stays. Not visible on the cube.
-5. **Motor** (T, pending): if the inertial model confirms on both arms and
-   keeps every gate, it becomes the contract proposal to Wrysk, with the
-   acceleration cost as the following step on the physics-engine backlog.
+5. **Physics, next step:** a cost of acceleration (momentum) on the same disc
+   model, then the apex's reserve stock fraction as the next readiness term
+   to measure, since age no longer binds.
