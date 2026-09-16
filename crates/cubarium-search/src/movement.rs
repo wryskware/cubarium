@@ -213,6 +213,13 @@ impl BodyTrack {
 ///
 /// The totals this counter produces are the same numbers A's whole-run counters produce — it
 /// is the same rule, kept per cell instead of only in aggregate.
+/// Which way a cell crossed, reported by [`CrossingCounter::observe_reporting`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CrossingKind {
+    Depleted,
+    Recovered,
+}
+
 #[derive(Clone, Debug)]
 pub struct CrossingCounter {
     p_ref: Vec<f64>,
@@ -240,6 +247,15 @@ impl CrossingCounter {
 
     /// One probe of the foliage field.
     pub fn observe(&mut self, p: &[f64]) {
+        self.observe_reporting(p, |_, _| {});
+    }
+
+    /// One probe of the foliage field, reporting each crossing as it is counted.
+    ///
+    /// [`Self::observe`] is this with a closure that does nothing, so the per-cell record in
+    /// [`crate::depletion`] and this counter can never apply two different rules: there is one
+    /// rule and one place it is written.
+    pub fn observe_reporting(&mut self, p: &[f64], mut on: impl FnMut(usize, CrossingKind)) {
         for i in 0..self.p_ref.len().min(p.len()) {
             if !self.watched[i] {
                 continue;
@@ -250,10 +266,12 @@ impl CrossingCounter {
                 if now > self.recover * reference {
                     self.depleted[i] = false;
                     self.recoveries[i] += 1;
+                    on(i, CrossingKind::Recovered);
                 }
             } else if now < self.deplete * reference {
                 self.depleted[i] = true;
                 self.depletions[i] += 1;
+                on(i, CrossingKind::Depleted);
             }
         }
     }
@@ -602,6 +620,242 @@ impl CensusBuilder {
 }
 
 // ---------------------------------------------------------------------------------------
+// Workstream I: the founder grazer's brood, and the net energy margin from E's ledger
+// ---------------------------------------------------------------------------------------
+
+/// How many visual forms the founder roster can carry, so a per-form array is a fixed size.
+pub const FORMS: usize = 5;
+
+/// Completed broods by **founder** parents, per visual form.
+///
+/// A *completed brood* is a `LifeEvent::Birth` whose parent is a tick-0 founder: the core emits
+/// that event when gestation completes and the child is committed, so a birth event **is** a
+/// completed brood and nothing is inferred from a reserve or an age. The founder grazer
+/// (form 0) is the ladder's gate; the glider (form 1) is reported beside it because
+/// `fast-leaf` x 0.0018 already satisfied a "first herbivore brood" gate through the glider
+/// alone (Astra's finding 1).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FounderBroods {
+    /// Founders alive at tick 0, per form. Measured, never assumed.
+    pub founders_by_form: [u64; FORMS],
+    /// Births whose parent is a founder of that form.
+    pub broods_by_form: [u64; FORMS],
+    /// The tick of the first such birth, per form.
+    pub first_brood_tick_by_form: [Option<u64>; FORMS],
+    /// How many distinct founders of that form produced at least one.
+    pub parents_by_form: [u64; FORMS],
+}
+
+impl Default for FounderBroods {
+    fn default() -> Self {
+        FounderBroods {
+            founders_by_form: [0; FORMS],
+            broods_by_form: [0; FORMS],
+            first_brood_tick_by_form: [None; FORMS],
+            parents_by_form: [0; FORMS],
+        }
+    }
+}
+
+impl FounderBroods {
+    /// A founder of `form` was alive at tick 0.
+    pub fn found(&mut self, form: u8) {
+        let f = usize::from(form).min(FORMS - 1);
+        self.founders_by_form[f] += 1;
+    }
+
+    /// A founder of `form` completed a brood at `tick`. `first_parent` says whether this is
+    /// the first brood by that particular founder, so parents are counted once.
+    pub fn brood(&mut self, form: u8, tick: u64, first_parent: bool) {
+        let f = usize::from(form).min(FORMS - 1);
+        self.broods_by_form[f] += 1;
+        if self.first_brood_tick_by_form[f].is_none() {
+            self.first_brood_tick_by_form[f] = Some(tick);
+        }
+        if first_parent {
+            self.parents_by_form[f] += 1;
+        }
+    }
+
+    /// The ladder's gate quantity: did the founder grazer rig complete a brood at all?
+    pub fn grazer_bred(&self) -> bool {
+        self.broods_by_form[0] > 0
+    }
+}
+
+/// The net energy margin of one `(form, diet bin)` group, from E's per-body ledger.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MarginBin {
+    pub form: u8,
+    pub diet_bin: u8,
+    pub bodies: u64,
+    pub deaths: u64,
+    pub alive: u64,
+    /// `e_food_in - e_owed` (e), meaned over bodies. See [`MarginAccumulator::add`].
+    pub margin_mean: f64,
+    /// The same divided by each body's own recorded seconds, then meaned (e/s).
+    pub margin_rate_mean: f64,
+    pub food_energy_in_mean: f64,
+    /// What the body **owed**: `bill_total + other + growth + reproduction` (e).
+    pub energy_owed_mean: f64,
+    pub bill_total_mean: f64,
+    /// `bill_total - bill_paid`: what it could not raise (e).
+    pub bill_unpaid_mean: f64,
+    /// `(translation + turn) / bill_total`, meaned over bodies with a positive bill.
+    pub motor_share_mean: f64,
+    pub served_total_mean: f64,
+    pub recorded_seconds_mean: f64,
+}
+
+/// Every group's margin, plus what the ledger itself reported about its own completeness.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Margins {
+    pub ledger_on: bool,
+    pub bodies: u64,
+    /// Closed records the ledger dropped because more than its cap accumulated undrained.
+    /// Never silently zero.
+    pub records_dropped: u64,
+    /// The mean margin over every body, whatever its group.
+    pub margin_mean: f64,
+    pub bins: Vec<MarginBin>,
+}
+
+/// Accumulates [`Margins`] as bodies' ledger records close and at the horizon.
+#[derive(Clone, Debug, Default)]
+pub struct MarginAccumulator {
+    bins: BTreeMap<(u8, u8), MarginSum>,
+    bodies: u64,
+    margin_sum: f64,
+    dropped: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct MarginSum {
+    bodies: u64,
+    deaths: u64,
+    alive: u64,
+    margin: f64,
+    margin_rate: f64,
+    food_in: f64,
+    owed: f64,
+    bill_total: f64,
+    bill_unpaid: f64,
+    motor_share: f64,
+    motor_share_bodies: u64,
+    served: f64,
+    seconds: f64,
+}
+
+impl MarginAccumulator {
+    /// One body's complete ledger record.
+    ///
+    /// ```text
+    /// e_food_in = sum_channels ( battery_credit + e_r * reserve_credit )
+    ///             + gut_battery_credit + e_r * gut_reserve_credit
+    /// e_owed    = bill_total + other_energy_paid + growth_energy + reproduction_energy
+    /// margin    = e_food_in - e_owed
+    /// ```
+    ///
+    /// `bill_total` and not `bill_paid`: what the body **owed** is the question, and a
+    /// starving body's unpaid bill is exactly its deficit. Reserve material is valued at its
+    /// stated density `e_r` rather than at the 0.8 the later oxidation returns, so `margin` is
+    /// an **upper bound** on the energy the body could actually have spent.
+    pub fn add(
+        &mut self,
+        key: CensusKey,
+        budget: &cubarium_core::BodyBudget,
+        reserve_energy_density: f64,
+        now_tick: u64,
+        dt: f64,
+        alive: bool,
+    ) {
+        let e_r = reserve_energy_density;
+        let food_in = budget.battery_credit_total()
+            + e_r * budget.reserve_credit_total()
+            + budget.gut_battery_credit
+            + e_r * budget.gut_reserve_credit;
+        let owed = budget.bill_total
+            + budget.other_energy_paid
+            + budget.growth_energy
+            + budget.reproduction_energy;
+        let margin = food_in - owed;
+        let closed = budget.closed_tick.unwrap_or(now_tick);
+        let seconds = closed.saturating_sub(budget.opened_tick) as f64 * dt;
+
+        let bin = self.bins.entry((key.form, key.diet_bin)).or_default();
+        bin.bodies += 1;
+        if alive {
+            bin.alive += 1;
+        } else {
+            bin.deaths += 1;
+        }
+        bin.margin += margin;
+        bin.margin_rate += if seconds > 0.0 { margin / seconds } else { 0.0 };
+        bin.food_in += food_in;
+        bin.owed += owed;
+        bin.bill_total += budget.bill_total;
+        bin.bill_unpaid += budget.bill_total - budget.bill_paid;
+        if budget.bill_total > 0.0 {
+            bin.motor_share +=
+                (budget.motor_translation_billed + budget.motor_turn_billed) / budget.bill_total;
+            bin.motor_share_bodies += 1;
+        }
+        bin.served += budget.served_total();
+        bin.seconds += seconds;
+
+        self.bodies += 1;
+        self.margin_sum += margin;
+    }
+
+    /// Closed ledger records the world reported dropping.
+    pub fn note_dropped(&mut self, dropped: u64) {
+        self.dropped += dropped;
+    }
+
+    pub fn finish(self, ledger_on: bool) -> Margins {
+        let bins = self
+            .bins
+            .into_iter()
+            .map(|((form, diet_bin), sum)| {
+                let n = sum.bodies.max(1) as f64;
+                let m = sum.motor_share_bodies.max(1) as f64;
+                MarginBin {
+                    form,
+                    diet_bin,
+                    bodies: sum.bodies,
+                    deaths: sum.deaths,
+                    alive: sum.alive,
+                    margin_mean: sum.margin / n,
+                    margin_rate_mean: sum.margin_rate / n,
+                    food_energy_in_mean: sum.food_in / n,
+                    energy_owed_mean: sum.owed / n,
+                    bill_total_mean: sum.bill_total / n,
+                    bill_unpaid_mean: sum.bill_unpaid / n,
+                    motor_share_mean: if sum.motor_share_bodies == 0 {
+                        0.0
+                    } else {
+                        sum.motor_share / m
+                    },
+                    served_total_mean: sum.served / n,
+                    recorded_seconds_mean: sum.seconds / n,
+                }
+            })
+            .collect();
+        Margins {
+            ledger_on,
+            bodies: self.bodies,
+            records_dropped: self.dropped,
+            margin_mean: if self.bodies == 0 {
+                0.0
+            } else {
+                self.margin_sum / self.bodies as f64
+            },
+            bins,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
 // The row
 // ---------------------------------------------------------------------------------------
 
@@ -632,12 +886,22 @@ pub struct Movement {
     pub census: Census,
     /// Terminal stores by death cause, in [`crate::metrics::DEATH_CAUSES`] order.
     pub terminal_by_cause: [StoreSum; 4],
-    /// **Not measured on this build.** The per-organism budget accumulator is workstream E's
-    /// deliverable and had not landed on `main` when this campaign ran; intake is served
-    /// inside `World::step` and only the world-level `intake_diagnostics()` is exposed, so a
-    /// per-body credit cannot be separated from a per-body bill by differencing stores.
-    /// Death cause and terminal stores are what this row carries instead.
+    /// The mean of [`Margins::margin_mean`] over every prey body, or `None` on a build or a
+    /// run whose ledger was off. F's rows carry `null` here because workstream E's per-organism
+    /// budget accumulator had not landed on `main` when F ran; workstream I turns it on.
     pub net_energy_margin_per_body: Option<f64>,
+    /// Whether this run recorded per-body budgets (workstream I).
+    #[serde(default)]
+    pub ledger_on: bool,
+    /// Completed broods by tick-0 founders, per form: the ladder's gate (workstream I).
+    #[serde(default)]
+    pub founder_broods: FounderBroods,
+    /// Net energy margin by `(form, diet bin)` from E's ledger, absent when it was off.
+    #[serde(default)]
+    pub margins: Option<Margins>,
+    /// The per-depleted-cell record and its four-way classification (workstream I).
+    #[serde(default)]
+    pub depletion: Option<crate::depletion::DepletionSummary>,
 }
 
 #[cfg(test)]

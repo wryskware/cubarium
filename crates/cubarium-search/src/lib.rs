@@ -9,6 +9,8 @@
 //! - [`apex_audit`]: why two introduced apex adults never mate, counted at the predicate.
 //! - [`calibrate`]: the ecology v1 calibration matrix — declared candidates × seeds × matched
 //!   zero/one/two-apex arms, with the ecology v1 component vector and a config export.
+//! - [`depletion`]: the per-depleted-cell record — habitat quality, foliage trajectory,
+//!   post-depletion pressure, and the four-way reading of why a cell stays depleted.
 //! - [`evaluate`]: one candidate on one seed, to a hard tick horizon, with component metrics.
 //! - [`metrics`]: the component metrics and the scalar rank derived from them.
 //! - [`movement`]: the spatial-coupling measures — visits, residence, revisit intervals, the
@@ -27,6 +29,7 @@
 
 pub mod apex_audit;
 pub mod calibrate;
+pub mod depletion;
 pub mod es;
 pub mod evaluate;
 pub mod metrics;
