@@ -30,11 +30,7 @@ fn cell(cx: u16, cy: u16) -> CellId {
 #[test]
 fn a_320_by_180_ring_has_80_by_45_cells() {
     let topo = ring();
-    assert_eq!(
-        topo.cells(Scale::ONE, Face::Front),
-        (COLS, ROWS),
-        "cells per chart"
-    );
+    assert_eq!(topo.cells(Scale::ONE, Face::Front), (COLS, ROWS), "cells per chart");
     assert_eq!(topo.cell_count(Scale::ONE), 3600, "80 × 45");
 
     let all: Vec<CellId> = CellId::all(topo, Scale::ONE).collect();
@@ -46,11 +42,7 @@ fn a_320_by_180_ring_has_80_by_45_cells() {
     }
 
     let field = ScalarField::zeros(topo, Scale::ONE);
-    assert_eq!(
-        field.len(),
-        3600,
-        "a scalar field is sized from the topology"
-    );
+    assert_eq!(field.len(), 3600, "a scalar field is sized from the topology");
 }
 
 /// At S = 2 the cell is 8 px, so the 640×360 ring has the *same* 3,600 cells: the world
@@ -75,11 +67,7 @@ fn cell_centres_are_cell_middles_and_cell_of_inverts_them() {
             let p = c.center(topo, Scale::ONE);
             assert_eq!(p.u, f64::from(cx) * 4.0 + 2.0, "centre u of ({cx}, {cy})");
             assert_eq!(p.v, f64::from(cy) * 4.0 + 2.0, "centre v of ({cx}, {cy})");
-            assert_eq!(
-                cell_of(topo, Scale::ONE, &p),
-                c,
-                "cell_of(centre) round trip"
-            );
+            assert_eq!(cell_of(topo, Scale::ONE, &p), c, "cell_of(centre) round trip");
         }
     }
 }
@@ -106,14 +94,8 @@ fn a_ring_has_no_corner_cells() {
         by_degree[g.degree(c)] += 1;
     }
     assert_eq!(by_degree[4], 3440, "interior cells of degree 4");
-    assert_eq!(
-        by_degree[3], 160,
-        "the 80 + 80 cells of the top and bottom rows"
-    );
-    assert_eq!(
-        by_degree[2], 0,
-        "the previous revision's degree-2 corner case is deleted"
-    );
+    assert_eq!(by_degree[3], 160, "the 80 + 80 cells of the top and bottom rows");
+    assert_eq!(by_degree[2], 0, "the previous revision's degree-2 corner case is deleted");
     assert_eq!(by_degree[1], 0);
     assert_eq!(by_degree[0], 0);
     // and the degree-3 cells are exactly the two rim rows.
@@ -149,21 +131,14 @@ fn the_wrap_joins_the_first_and_last_column() {
 fn both_horizontal_rims_are_open() {
     let g = FieldGraph::new(ring(), Scale::ONE);
     for cx in 0..COLS {
-        assert_eq!(
-            g.neighbor(cell(cx, 0), Edge::Top),
-            None,
-            "above the top row at {cx}"
-        );
+        assert_eq!(g.neighbor(cell(cx, 0), Edge::Top), None, "above the top row at {cx}");
         assert_eq!(
             g.neighbor(cell(cx, ROWS - 1), Edge::Bottom),
             None,
             "below the bottom row at {cx}"
         );
         assert_eq!(g.neighbor(cell(cx, 0), Edge::Bottom), Some(cell(cx, 1)));
-        assert_eq!(
-            g.neighbor(cell(cx, ROWS - 1), Edge::Top),
-            Some(cell(cx, ROWS - 2))
-        );
+        assert_eq!(g.neighbor(cell(cx, ROWS - 1), Edge::Top), Some(cell(cx, ROWS - 2)));
     }
 }
 
@@ -173,11 +148,7 @@ fn both_horizontal_rims_are_open() {
 fn downhill_is_none_on_the_top_row_and_one_step_down_elsewhere() {
     let g = FieldGraph::new(ring(), Scale::ONE);
     for cx in 0..COLS {
-        assert_eq!(
-            g.downhill(cell(cx, 0)),
-            None,
-            "the canopy row never drains ({cx})"
-        );
+        assert_eq!(g.downhill(cell(cx, 0)), None, "the canopy row never drains ({cx})");
         for cy in 1..ROWS - 1 {
             assert_eq!(
                 g.downhill(cell(cx, cy)),
@@ -207,19 +178,12 @@ fn diffusion_is_conservative_and_crosses_the_wrap() {
     let before = f.total();
 
     diffuse(&mut f, &mut scratch, &g, 0.2);
-    assert!(
-        (f.total() - before).abs() <= 1e-12,
-        "mass after one step: {}",
-        f.total()
-    );
+    assert!((f.total() - before).abs() <= 1e-12, "mass after one step: {}", f.total());
     assert!(
         f.get(cell(COLS - 1, 22)) > 0.0,
         "the only path from column 0 to column 79 is the wrap edge"
     );
-    assert!(
-        f.get(cell(1, 22)) > 0.0,
-        "and the ordinary neighbour got the same share"
-    );
+    assert!(f.get(cell(1, 22)) > 0.0, "and the ordinary neighbour got the same share");
     assert!(
         (f.get(cell(COLS - 1, 22)) - f.get(cell(1, 22))).abs() <= 1e-15,
         "the wrap edge is an ordinary edge: {} vs {}",
@@ -230,11 +194,7 @@ fn diffusion_is_conservative_and_crosses_the_wrap() {
     for _ in 0..200 {
         diffuse(&mut f, &mut scratch, &g, 0.2);
     }
-    assert!(
-        (f.total() - before).abs() <= 1e-9,
-        "mass after 201 steps: {}",
-        f.total()
-    );
+    assert!((f.total() - before).abs() <= 1e-9, "mass after 201 steps: {}", f.total());
     assert!(f.is_nonnegative(), "diffusion never goes negative");
 }
 
@@ -254,15 +214,8 @@ fn no_flux_leaves_through_a_rim() {
     for _ in 0..50 {
         diffuse(&mut f, &mut scratch, &g, 0.24);
     }
-    assert!(
-        (f.total() - before).abs() <= 1e-9,
-        "mass: {} vs {before}",
-        f.total()
-    );
-    assert!(
-        f.max() <= 1.0 + 1e-12,
-        "no cell exceeds the initial maximum"
-    );
+    assert!((f.total() - before).abs() <= 1e-9, "mass: {} vs {before}", f.total());
+    assert!(f.max() <= 1.0 + 1e-12, "no cell exceeds the initial maximum");
     assert!(f.min() >= 0.0);
 }
 
@@ -275,26 +228,16 @@ fn a_deposit_straddling_the_wrap_keeps_its_whole_amount() {
     let centre = SurfacePoint::new(Face::Front, 1.0, 90.0);
     let touched = deposit(topo, Scale::ONE, &mut f, centre, 9.0, 5.0);
     assert!(touched > 0, "the footprint touches cells");
-    assert!(
-        (f.total() - 5.0).abs() <= 1e-9,
-        "deposited total: {}",
-        f.total()
-    );
+    assert!((f.total() - 5.0).abs() <= 1e-9, "deposited total: {}", f.total());
     let west: f64 = (0..ROWS).map(|cy| f.get(cell(COLS - 1, cy))).sum();
-    assert!(
-        west > 0.0,
-        "a footprint at u = 1 reaches around the wrap into column 79"
-    );
+    assert!(west > 0.0, "a footprint at u = 1 reaches around the wrap into column 79");
 
     // The same deposit in the middle of the chart puts the same amount down.
     let mut mid = ScalarField::zeros(topo, Scale::ONE);
     let mid_centre = SurfacePoint::new(Face::Front, 161.0, 90.0);
     let mid_touched = deposit(topo, Scale::ONE, &mut mid, mid_centre, 9.0, 5.0);
     assert!((mid.total() - 5.0).abs() <= 1e-9);
-    assert_eq!(
-        touched, mid_touched,
-        "the wrap costs the footprint no cells"
-    );
+    assert_eq!(touched, mid_touched, "the wrap costs the footprint no cells");
 }
 
 // ---------------------------------------------------------------------------
@@ -316,28 +259,16 @@ fn validate_accepts_the_section_6_ladder() {
 fn validate_refuses_extents_that_are_not_cell_multiples() {
     assert_eq!(
         Topology::Ring { w: 321, h: 180 }.validate(Scale::ONE),
-        Err(TopologyError::ExtentNotCellMultiple {
-            w: 321,
-            h: 180,
-            cell_pixels: 4.0
-        })
+        Err(TopologyError::ExtentNotCellMultiple { w: 321, h: 180, cell_pixels: 4.0 })
     );
     assert_eq!(
         Topology::Ring { w: 320, h: 181 }.validate(Scale::ONE),
-        Err(TopologyError::ExtentNotCellMultiple {
-            w: 320,
-            h: 181,
-            cell_pixels: 4.0
-        })
+        Err(TopologyError::ExtentNotCellMultiple { w: 320, h: 181, cell_pixels: 4.0 })
     );
     // At S = 2 the cell is 8 px, so a raster that was legal at S = 1 need not be.
     assert_eq!(
         ring().validate(Scale::new(2.0)),
-        Err(TopologyError::ExtentNotCellMultiple {
-            w: 320,
-            h: 180,
-            cell_pixels: 8.0
-        })
+        Err(TopologyError::ExtentNotCellMultiple { w: 320, h: 180, cell_pixels: 8.0 })
     );
 }
 
@@ -346,18 +277,10 @@ fn validate_refuses_more_cells_than_a_u16_can_index() {
     // §2's worked example: "at cell = 4 px a 1920×1080 world would want 129,600".
     assert_eq!(
         Topology::Ring { w: 1920, h: 1080 }.validate(Scale::ONE),
-        Err(TopologyError::TooManyCells {
-            cells: 129_600,
-            w: 1920,
-            h: 1080,
-            cell_pixels: 4.0
-        })
+        Err(TopologyError::TooManyCells { cells: 129_600, w: 1920, h: 1080, cell_pixels: 4.0 })
     );
     // The same raster at S = 2 is 8 px cells, 240 × 135 = 32,400, and fits.
-    assert_eq!(
-        Topology::Ring { w: 1920, h: 1080 }.validate(Scale::new(2.0)),
-        Ok(())
-    );
+    assert_eq!(Topology::Ring { w: 1920, h: 1080 }.validate(Scale::new(2.0)), Ok(()));
 }
 
 #[test]
@@ -367,10 +290,7 @@ fn validate_refuses_a_ring_too_narrow_for_two_images() {
     for (w, h) in [(8u16, 180u16), (4, 8), (4, 180)] {
         let topo = Topology::Ring { w, h };
         assert!(
-            matches!(
-                topo.validate(Scale::ONE),
-                Err(TopologyError::RingTooNarrow { .. })
-            ),
+            matches!(topo.validate(Scale::ONE), Err(TopologyError::RingTooNarrow { .. })),
             "{topo:?} must be refused as too narrow, got {:?}",
             topo.validate(Scale::ONE)
         );
@@ -415,10 +335,7 @@ fn validate_refuses_a_ring_whose_stamp_budget_exceeds_its_local_radius() {
     assert!(Scale::ONE.footprint_radius() > topo.max_local_radius());
     assert_eq!(
         topo.validate(Scale::ONE),
-        Err(TopologyError::FootprintExceedsLocalRadius {
-            footprint: 9.0,
-            radius: 8.0
-        })
+        Err(TopologyError::FootprintExceedsLocalRadius { footprint: 9.0, radius: 8.0 })
     );
     // The ladder is clear of it: 9 ≤ 90 at S = 1, 18 ≤ 180 at S = 2, 9 ≤ 32 on the cube.
     assert_eq!(ring().max_local_radius(), 90.0, "min(180, 320 − 8) / 2");

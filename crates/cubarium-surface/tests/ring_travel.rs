@@ -300,7 +300,13 @@ fn the_double_size_ring_doubles_every_coordinate() {
         (2.0, 358.0),
     );
     // The top-left corner tie, doubled.
-    assert_corner("top-left at 2x", ring_2x(), front(2.0, 2.0), Vec2::new(-4.0, -4.0), (638.0, 2.0));
+    assert_corner(
+        "top-left at 2x",
+        ring_2x(),
+        front(2.0, 2.0),
+        Vec2::new(-4.0, -4.0),
+        (638.0, 2.0),
+    );
 
     // The double wrap, doubled.
     let d = Vec2::new(1400.0, 0.0);
