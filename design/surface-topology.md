@@ -11,6 +11,11 @@ coordinate charts joined by the shim's existing seam contract. A face ID is a
 coordinate chart, not a simulation partition. All systems use the same surface
 operations. See [checked local APIs](7_Research/local-contracts.md).
 
+**Since FW-1 (2026-09-16) the cube is one of two shapes.** Everything below is
+the `Topology::Cube` arm of `cubarium_surface::Topology`, unchanged by value;
+[the ring](#the-ring-w-h-2026-09-16) at the end of this document is the other,
+and it is written in the same contract rather than beside it.
+
 ## Coordinates and existing ownership
 
 Use `cube_proto::Face` with indices **Front=0, Right=1, Back=2, Left=3, Top=4**.
@@ -207,3 +212,132 @@ Neither the preview nor the physical output gets its own geometry implementation
 - Review a seam-spanning asymmetric organism, a thick trail, and a diffusing
   patch on both a cube preview and the physical cube. Diagnostic patterns are
   explicit development modes and never part of ambient presentation.
+
+## The ring `w × h` (2026-09-16)
+
+`Topology::Ring { w, h }` is **one chart**, `Face::Front`, `w` by `h` pixels.
+**The left and right edges join; the top and bottom are solid.** It adds no new
+geometry: the vertical edge is a seam of the chart *to itself* and the two
+horizontal edges are the open rim this document already describes. Decided in
+[the ring-world plan](flat-world-plan-2026-09-16.md) §2 and §5a; implemented in
+FW-1.
+
+### Seam transport
+
+The seam table above gains exactly one row, with the neighbour being the same
+chart:
+
+| Exit | Entry | Along-edge parameter | Heading quarter-turns |
+| --- | --- | --- | --- |
+| Front right | Front left | same | 0 |
+
+and its inverse, Front left → Front right. Nothing is reversed and nothing
+rotates: the transport is `TangentMap::IDENTITY` and the crossing is a pure
+translation by `∓w`, so a heading, a steering vector and a trail segment all
+cross the wrap unchanged. Continuous along-edge reversal, where it applied,
+would be `t -> edge_len - t`; on a ring it never applies.
+
+`Face::Top` and `Face::Bottom` of the chart have **no neighbour**. They are the
+same open boundary as the cube's four lower edges: no flux, no neighbour, swept
+specular reflection (`REFLECT_Y`) for a moving point, and body pixels outside the
+surface clipped rather than mirrored. A ring therefore has two rims where the
+cube has one, and both behave identically.
+
+Examples in continuous coordinates, at `w = 320, h = 180`:
+
+- Front `(319.5, 20)` moving `(1, 0)` finishes at Front `(0.5, 20)`, one
+  crossing, no rotation.
+- Front `(10, 179)` moving `(0, 2)` finishes at Front `(10, 179)`, one
+  reflection, `REFLECT_Y`.
+- Front `(160, 90)` moving `(900, 0)` finishes at Front `(100, 90)`, three
+  crossings, four path segments.
+
+### Corners
+
+A ring corner is where the wrap meets a rim, which is precisely the cube's
+*lower side corner*: the unfolded boundary is straight, and the existing
+lowest-`Edge` tie rule resolves an exactly corner-directed sweep with no new
+case. Under `Edge::Top = 0 < Right = 1 < Bottom = 2 < Left = 3` the four corners
+do not resolve alike, and **that asymmetry is the contract, not an accident**:
+
+| Corner | Tied edges | Winner | What happens first |
+| --- | --- | --- | --- |
+| top-left `(0, 0)` | Top, Left | **Top** | reflects, then crosses the seam |
+| top-right `(w, 0)` | Top, Right | **Top** | reflects, then crosses the seam |
+| bottom-left `(0, h)` | Bottom, Left | **Bottom** | reflects, then crosses the seam |
+| bottom-right `(w, h)` | Right, Bottom | **Right** | **crosses the seam, then reflects** |
+
+Whichever order a corner takes, the sweep costs exactly one crossing and one
+reflection, the tie is counted in `ties`, the fallback never fires, and the swept
+length is preserved. Sweeps skewed by a couple of percent do not tie and resolve
+to one edge alone. Exercised at both `S = 1` and `S = 2` in
+`crates/cubarium-surface/src/travel.rs`'s ring tests.
+
+### Unfolding and distance
+
+An observer sees **three images** of the one chart — the direct image and the
+translations by `+w` (exiting `Edge::Right`) and `−w` (exiting `Edge::Left`) — of
+which at most two can be within `Topology::max_local_radius()`, because the two
+shifts are `2w` apart and `Topology::validate()` requires
+
+> `w >= 2 · max_local_radius() + 2 · CELL_PIXELS`,
+
+which `Ring::max_local_radius() = min(h, w − 2·CELL_PIXELS) / 2` satisfies by
+construction. `MAX_SEAMS` is a cube constant and is not consulted: one crossing
+is the whole wrap, and a second could only name `±2w`.
+
+Distance is `Topology::chord_sq` in squared pixels. On a ring it is
+
+> `min(|Δu|, w − |Δu|)² + Δv²`
+
+taken straight from the chart coordinates, so pair rejection is the **true**
+distance rather than the cube's conservative 3D chord, and strictly fewer
+candidate pairs survive it.
+
+`unfold_pixels` keeps its exactly-once guarantee across the wrap: a body
+straddling `u = 0` is carried by the existing two-image machinery and a pixel
+visible through two images keeps its shortest one. Bodies clip only at the two
+rims.
+
+### Fields
+
+Cells are `4·S` pixels, so 320×180 at `S = 1` and 640×360 at `S = 2` are both
+**80 × 45 = 3,600 cells**. **Every row is a ring**, so the horizontal wrap adds
+one edge per row: `80·45 + 80·44 = 7,120` undirected edges. Degrees are simpler
+than a rectangle's — **there are no corners**: 3,440 interior cells of degree 4
+and the 80 + 80 cells of the top and bottom rows at degree 3, since only the two
+horizontal rims are open. `w` and `h` must be whole numbers of cells, which
+`Topology::validate()` checks along with `cell_count() <= u16::MAX`.
+
+`downhill` mirrors both of the cube's exceptions: `None` on the top row — the
+canopy holds its water and detritus exactly as the cube's level Top face does —
+and otherwise the neighbour at `(cx, cy + 1)`, which the bottom row does not
+have, so it keeps its litter exactly as the cube's rim row does.
+
+### Embedding, and height beside it
+
+`embed()` and `height()` are **different functions on a ring**, and that is the
+point. `Topology::height(p) = 1 − 2v/h` is the scalar light, moisture, the bands,
+`downhill` and both controllers read: the panel is a side view, canopy at the top
+row, soil at the bottom edge. `embed()` drives *position* — noise and weather —
+and is the isotropic cylinder
+
+> `θ = 2π·u/w`, `r = w / (2π·32·S)`, `y_e = (h/2 − v) / (32·S)`,
+> `embed(p) = [r·cos θ, y_e, r·sin θ]`
+
+with the vertical in slot 1, where the cube puts height. Arc length per pixel is
+`1/(32·S)` on **both** axes, the cube's feature scale, so the habitat wave sum
+samples at the cube's frequency in every direction, patches are round, and the
+field is seamless across the wrap by construction: `u = 0` and `u = w` are the
+same point in 3D. No periodic noise, no seeded tiling, no special case. The two
+functions coincide on the cube, where height *is* `embed()[1]`; on a ring they
+must be asked for separately.
+
+### World scale
+
+`Scale` carries `S`. Cells are `4·S` pixels, the stamp budget is `9·S`, and the
+cylinder divides by `32·S`, so **a ring at 640×360 with `S = 2` is the same world
+as one at 320×180 with `S = 1`** — the same cells, the same noise scale, the same
+ecology — drawn twice as large. `Topology::Cube` is pinned to `S = 1`:
+`MAX_LOCAL_RADIUS = 32` and the 9-pixel stamp budget are completeness proofs
+about a 64-pixel chart, not tunables, and `validate()` refuses a rescaled cube.
