@@ -37,7 +37,7 @@ use cubarium_core::hunter::{HunterEvent, HunterView};
 use cubarium_core::view::{OrganismView, RenderView};
 use cubarium_surface::{CellId, SurfacePoint, Topology, Vec2, cell_of};
 
-use cubarium_gpu::adapter::{PoseRef, ScratchFrame, Stamp, StampMask, StampTone};
+use cubarium_gpu::adapter::{MAX_POSES, PoseRef, ScratchFrame, Stamp, StampMask, StampTone};
 use cubarium_gpu::atlas::{Atlas, Clip as GpuClip, PlantClip};
 use cubarium_gpu::render::Renderer;
 use cubarium_gpu::scene::{Layer, RingLayout, Scene};
@@ -76,6 +76,15 @@ pub struct GpuSink {
     layout: RingLayout,
     /// The tick the presenter last observed, so the per-frame hook can advance it once.
     observed: Option<u64>,
+    /// Every cell's fixed plant slot, laid out once.
+    ///
+    /// `ArtGeometry::slot_of` is seven `SplitMix64` draws and a `Topology::embed_tangent`;
+    /// the CPU presenter builds the table once in `for_world` and this must too, or the
+    /// adapter spends more time hashing than the renderer spends drawing.
+    slots: Vec<crate::art_present::Slot>,
+    /// Each plant family's measured bend budget, by name, so the per-cell lookup is not a
+    /// linear scan over the pack with a string compare at every step.
+    budgets: std::collections::HashMap<&'static str, f64>,
     /// Each column's height as the previous `observe` left it.
     ///
     /// `ArtPresenter` keeps its own `tall_prev` and interpolates across the tick, but
@@ -89,9 +98,13 @@ pub struct GpuSink {
     /// (`cubarium_gpu::Stamp::instance`). Reported at `finish`, because a number nobody
     /// prints is a number nobody checks.
     dropped_frames: u64,
-    /// Frames drawn, and the GPU milliseconds they took.
+    /// Frames drawn, and where their time went: building the scene on the CPU, the GPU's
+    /// own timestamps, and everything the target's `draw` spends (submit, the fence wait
+    /// and the daemon's vsync pacing).
     frames: u64,
     gpu_ms: f64,
+    build_ms: f64,
+    present_ms: f64,
     /// Where to write a PNG of every rendered raster, for captures and the fidelity test.
     capture: Option<PathBuf>,
 }
@@ -138,8 +151,31 @@ impl GpuSink {
         // is how the plan's "the sprite tile scales with S" gets looked at on the panel.
         renderer.art_scale = art_scale.unwrap_or(1.0);
         let target = GpuTarget::open(kind, &gpu, &mut renderer)?;
+        // The canopy line comes from `ArtGeometry::new`, which is `CANOPY_TOP = 0.67` on
+        // a ring — FW-5's constant, so the GPU and the CPU cannot disagree about where
+        // the canopy starts.
+        //
+        // TODO: when a world config carries the threshold, read it here and pass it
+        // through `ArtPresenter::with_canopy_top`. `WorldConfig` has no such key today
+        // (checked 2026-09-16); the natural name, beside `topology` and `world_scale`,
+        // is `canopy_top`, and `ArtGeometry::with_canopy_top` already validates the
+        // `0..=1` range a config would have to be checked against.
         let presenter = ArtPresenter::for_world(pack, shape.topology, shape.scale);
         let geom = presenter.geometry();
+        let slots: Vec<crate::art_present::Slot> =
+            geom.all_cells().map(|c| geom.slot_of(c)).collect();
+        let budgets = [
+            crate::art_present::SOIL_PLANTS[0],
+            crate::art_present::SOIL_PLANTS[1],
+            crate::art_present::FOLIAGE_PLANTS[0],
+            crate::art_present::FOLIAGE_PLANTS[1],
+            crate::art_present::CANOPY_PLANTS[0],
+            crate::art_present::CANOPY_PLANTS[1],
+            crate::art_present::WATER_PLANT,
+        ]
+        .into_iter()
+        .map(|name| (name, presenter.bend_budget(name)))
+        .collect();
         Ok(GpuSink {
             presenter,
             geom,
@@ -152,11 +188,15 @@ impl GpuSink {
             scene: Scene::new(layout),
             layout,
             observed: None,
+            slots,
+            budgets,
             tall_prev: Vec::new(),
             tall_dead_prev: Vec::new(),
             dropped_frames: 0,
             frames: 0,
             gpu_ms: 0.0,
+            build_ms: 0.0,
+            present_ms: 0.0,
             capture,
         })
     }
@@ -187,11 +227,16 @@ impl GpuSink {
 
     /// Render one view and present it.
     fn render(&mut self, view: &RenderView, seconds: f64, f: f64) -> Result<()> {
+        let started = std::time::Instant::now();
         self.renderer.scratch_begin();
         self.build(view, seconds, f);
+        let built = std::time::Instant::now();
         let ms = self.target.draw(&self.gpu, &mut self.renderer, &self.scene)?;
+        let done = std::time::Instant::now();
         self.frames += 1;
         self.gpu_ms += ms;
+        self.build_ms += (built - started).as_secs_f64() * 1e3;
+        self.present_ms += (done - built).as_secs_f64() * 1e3;
         if let Some(dir) = &self.capture {
             let rgba = self.renderer.read_raster(&self.gpu)?;
             let path = dir.join(format!("gpu-{:06}.png", self.frames));
@@ -272,7 +317,7 @@ impl GpuSink {
                 let stamp = Stamp {
                     anchor: raster_of(point),
                     heading: [1.0, 0.0],
-                    layers: vec![pose(clip, at)],
+                    layers: one(pose(clip, at)),
                     opacity,
                     ..Default::default()
                 };
@@ -303,15 +348,19 @@ impl GpuSink {
                 continue;
             }
             let band = self.presenter.band_at(cell);
-            let slot = geom.slot_of(cell);
-            let Some(name) = self.presenter.plant_for(band, cell).map(|p| p.name.clone()) else {
+            let slot = self.slots[index];
+            // `habitat::species_of`'s own table, read with the slot this sink already
+            // has. Calling `geom.species_of(band, cell)` would re-derive the slot — seven
+            // `SplitMix64` draws and an `embed_tangent` — once per cell per frame.
+            let name = species_name(band, slot.pick);
+            if self.atlas.plant(name, PlantClip::Stage(0)).is_none() {
                 continue;
-            };
+            }
             let t = plant_density(view, index, band);
             let thresholds = stage_thresholds(band);
             let ceiling = band_opacity(band);
             let (bend, heading) =
-                geom.slot_wind(&slot, &name, self.presenter.bend_budget(&name), seconds);
+                geom.slot_wind(&slot, name, self.budget_of(name), seconds);
             let bend = bend_of(bend);
             let heading = [heading.x as f32, heading.y as f32];
             let anchor = raster_of(slot.at);
@@ -322,7 +371,7 @@ impl GpuSink {
             // `stage_opacity` and `growth_step` the original calls.
             if !dead_bare
                 && let Some((layers, opacity)) =
-                    self.silhouette(&name, cell, seconds, dead, dead_wood_density(view, index), &thresholds, ceiling * DEAD_WOOD_OPACITY)
+                    self.silhouette(name, cell, seconds, dead, dead_wood_density(view, index), &thresholds, ceiling * DEAD_WOOD_OPACITY)
             {
                 let stamp = Stamp {
                     anchor,
@@ -360,7 +409,7 @@ impl GpuSink {
                     let stamp = Stamp {
                         anchor,
                         heading,
-                        layers: self.stage_layers(&name, stage, cell, seconds, fruit_now),
+                        layers: self.stage_layers(name, stage, cell, seconds, fruit_now),
                         bend,
                         opacity,
                         tone: Some(tone),
@@ -376,17 +425,18 @@ impl GpuSink {
             // An authored growth clip *is* the picture, held between the two idle clips.
             if let Some((low, clip)) = lower.and_then(|low| {
                 self.atlas
-                    .plant(&name, PlantClip::Grow(low, upper))
+                    .plant(name, PlantClip::Grow(low, upper))
                     .map(|c| (low, c))
             }) {
                 let under = opacity_of(low);
                 let opacity = under + (opacity_of(upper) - under) * gu as f32;
                 if opacity > 0.0 {
                     let [w_from, w_grow, w_to] = growth_weights(gu);
-                    let mut layers = Vec::with_capacity(3);
-                    layers.push(self.stage_pose(&name, low, cell, seconds, w_from));
-                    layers.push(pose_at(clip, gu * clip.seconds, w_grow));
-                    layers.push(self.stage_pose(&name, upper, cell, seconds, w_to));
+                    let layers = [
+                        self.stage_pose(name, low, cell, seconds, w_from),
+                        pose_at(clip, gu * clip.seconds, w_grow),
+                        self.stage_pose(name, upper, cell, seconds, w_to),
+                    ];
                     let stamp = Stamp {
                         anchor,
                         heading,
@@ -407,7 +457,7 @@ impl GpuSink {
                     let stamp = Stamp {
                         anchor,
                         heading,
-                        layers: self.stage_layers(&name, stage, cell, seconds, fruit_now),
+                        layers: self.stage_layers(name, stage, cell, seconds, fruit_now),
                         bend,
                         opacity,
                         tone: Some(tone),
@@ -418,7 +468,7 @@ impl GpuSink {
             }
             let opacity = opacity_of(upper);
             if opacity > 0.0 {
-                let layers = self.stage_layers(&name, upper, cell, seconds, fruit_now);
+                let layers = self.stage_layers(name, upper, cell, seconds, fruit_now);
                 let mask = if slot.radial {
                     StampMask::Radial { reveal: gu as f32 * (self.layers_extent(&layers) + 0.5) }
                 } else {
@@ -450,17 +500,16 @@ impl GpuSink {
             if opacity <= 0.0 {
                 continue;
             }
-            let slot = geom.slot_of(cell);
-            let Some(name) = self.presenter.plant_for(Band::Soil, cell).map(|p| p.name.clone())
-            else {
+            let slot = self.slots[index];
+            let name = species_name(Band::Soil, slot.pick);
+            if self.atlas.plant(name, PlantClip::Stage(0)).is_none() {
                 continue;
-            };
-            let (bend, heading) =
-                geom.slot_wind(&slot, &name, self.presenter.bend_budget(&name), seconds);
+            }
+            let (bend, heading) = geom.slot_wind(&slot, name, self.budget_of(name), seconds);
             let stamp = Stamp {
                 anchor: raster_of(slot.at),
                 heading: [heading.x as f32, heading.y as f32],
-                layers: vec![self.stage_pose(&name, 0, cell, seconds, 1.0)],
+                layers: one(self.stage_pose(name, 0, cell, seconds, 1.0)),
                 bend: bend_of(bend),
                 opacity,
                 mask: StampMask::Axial { reveal: SOIL_SNAG_PX as f32 },
@@ -541,7 +590,10 @@ impl GpuSink {
             let stamp = Stamp {
                 anchor: raster_of(at),
                 heading,
-                layers: vec![pose(clip, seconds + geom.tall_phase_of(column.face, column.cx, clip.seconds))],
+                layers: one(pose(
+                    clip,
+                    seconds + geom.tall_phase_of(column.face, column.cx, clip.seconds),
+                )),
                 bend: [
                     amplitude as f32,
                     tall_bend_base(i) as f32,
@@ -623,10 +675,10 @@ impl GpuSink {
             let stamp = Stamp {
                 anchor: raster_of(at),
                 heading,
-                layers: vec![pose(
+                layers: one(pose(
                     trunk,
                     seconds + geom.tall_phase_of(column.face, column.cx, trunk.seconds),
-                )],
+                )),
                 bend: bend_at(f64::from(i)),
                 opacity: TALL_OPACITY * fade,
                 mask: StampMask::Strip {
@@ -646,10 +698,10 @@ impl GpuSink {
                 let stamp = Stamp {
                     anchor: raster_of(at),
                     heading,
-                    layers: vec![pose(
+                    layers: one(pose(
                         endpoint,
                         seconds + geom.tall_phase_of(column.face, column.cx, endpoint.seconds),
-                    )],
+                    )),
                     bend: bend_at(i),
                     opacity: TALL_OPACITY * fade,
                     mask: StampMask::Axial { reveal: reveal as f32 },
@@ -685,7 +737,6 @@ impl GpuSink {
                         anchor: [f32::from(x) + 0.5, f32::from(y) + 0.5],
                         heading: [1.0, 0.0],
                         scratch: None,
-                        layers: Vec::new(),
                         opacity: alpha,
                         tone: Some(StampTone {
                             colour,
@@ -751,18 +802,33 @@ impl GpuSink {
             })
             .flatten();
         let mode_weight = meal.map_or(1.0, |(_, w)| 1.0 - w);
-        let mut layers = Vec::with_capacity(states.len() + 1);
+        let mut layers = [PoseRef::NONE; MAX_POSES];
+        let mut n = 0usize;
         if mode_weight > 0.0 {
             for &(st, w) in &states {
+                if n == MAX_POSES {
+                    break;
+                }
                 if let Some(p) = pose_of(st, w * mode_weight) {
-                    layers.push(p);
+                    layers[n] = p;
+                    n += 1;
                 }
             }
         }
         if let Some((bout, w)) = meal
             && let Some(gpu) = self.atlas.creature(&rig, crate::art_present::FEED_STATE)
         {
-            layers.push(pose_at(gpu, bout, w));
+            // The meal layer is the one that must not be dropped: it is what a feeding
+            // body *is*. If three mode layers already filled the array, the lightest of
+            // them gives way — the same rule `Stamp::instance` uses one level down.
+            if n == MAX_POSES {
+                let lightest = (0..MAX_POSES)
+                    .min_by(|a, b| layers[*a].weight.total_cmp(&layers[*b].weight))
+                    .unwrap_or(0);
+                layers[lightest] = PoseRef::NONE;
+                n = lightest;
+            }
+            layers[n] = pose_at(gpu, bout, w);
         }
         Stamp {
             anchor: raster_of(anchor),
@@ -835,6 +901,11 @@ impl GpuSink {
         self.scene.push(layer, instance);
     }
 
+    /// A plant family's measured bend budget, from the table built at construction.
+    fn budget_of(&self, name: &str) -> f64 {
+        self.budgets.get(name).copied().unwrap_or(f64::INFINITY)
+    }
+
     /// `tall::stage_pose`: the stage's own looping clip at the slot's phase.
     fn stage_pose(&self, name: &str, stage: u8, cell: CellId, s: f64, weight: f32) -> PoseRef {
         match self.atlas.plant(name, PlantClip::Stage(stage)) {
@@ -844,14 +915,22 @@ impl GpuSink {
     }
 
     /// `tall::stage_layers`: the stage, with the fruit accent blended in where it holds.
-    fn stage_layers(&self, name: &str, stage: u8, cell: CellId, s: f64, fruit: f64) -> Vec<PoseRef> {
+    fn stage_layers(
+        &self,
+        name: &str,
+        stage: u8,
+        cell: CellId,
+        s: f64,
+        fruit: f64,
+    ) -> [PoseRef; MAX_POSES] {
         let q = if fruit.is_finite() { fruit.clamp(0.0, 1.0) as f32 } else { 0.0 };
         match self.atlas.plant(name, PlantClip::Fruit) {
-            Some(clip) if stage == 2 && q > 0.0 => vec![
+            Some(clip) if stage == 2 && q > 0.0 => [
                 self.stage_pose(name, stage, cell, s, 1.0 - q),
                 pose_at(clip, s + plant_phase_of(cell, clip.seconds), q),
+                PoseRef::NONE,
             ],
-            _ => vec![self.stage_pose(name, stage, cell, s, 1.0)],
+            _ => one(self.stage_pose(name, stage, cell, s, 1.0)),
         }
     }
 
@@ -869,13 +948,13 @@ impl GpuSink {
         t: f64,
         thresholds: &[f64; 3],
         ceiling: f32,
-    ) -> Option<(Vec<PoseRef>, f32)> {
+    ) -> Option<([PoseRef; MAX_POSES], f32)> {
         let opacity_of = |stage: u8| stage_opacity(stage, t, thresholds, ceiling);
         if growth.from == growth.to {
             let stage = growth.to?;
             let opacity = opacity_of(stage);
             return (opacity > 0.0)
-                .then(|| (vec![self.stage_pose(name, stage, cell, s, 1.0)], opacity));
+                .then(|| (one(self.stage_pose(name, stage, cell, s, 1.0)), opacity));
         }
         let GrowthStep { lower, upper, t: tu } = growth_step(growth)?;
         let tu = if tu.is_finite() { tu.clamp(0.0, 1.0) } else { 0.0 } as f32;
@@ -883,15 +962,16 @@ impl GpuSink {
             Some(low) => {
                 let under = opacity_of(low);
                 (
-                    vec![
+                    [
                         self.stage_pose(name, low, cell, s, 1.0 - tu),
                         self.stage_pose(name, upper, cell, s, tu),
+                        PoseRef::NONE,
                     ],
                     under + (opacity_of(upper) - under) * tu,
                 )
             }
             None => (
-                vec![self.stage_pose(name, upper, cell, s, 1.0)],
+                one(self.stage_pose(name, upper, cell, s, 1.0)),
                 opacity_of(upper) * tu,
             ),
         };
@@ -899,12 +979,28 @@ impl GpuSink {
     }
 
     /// `tall::layers_extent`: the largest extent among the layers that will be sampled.
-    fn layers_extent(&self, layers: &[PoseRef]) -> f32 {
+    fn layers_extent(&self, layers: &[PoseRef; MAX_POSES]) -> f32 {
         layers
             .iter()
             .filter(|p| p.weight > 0.0)
             .map(|p| self.atlas.rect(p.a).extent.max(self.atlas.rect(p.b).extent))
             .fold(0.0, f32::max)
+    }
+}
+
+/// One pose in a stamp's fixed layer array.
+fn one(pose: PoseRef) -> [PoseRef; MAX_POSES] {
+    [pose, PoseRef::NONE, PoseRef::NONE]
+}
+
+/// `habitat::species_of`'s table, read from a slot this caller already has.
+fn species_name(band: Band, pick: usize) -> &'static str {
+    use crate::art_present::{CANOPY_PLANTS, FOLIAGE_PLANTS, SOIL_PLANTS, WATER_PLANT};
+    match band {
+        Band::Soil => SOIL_PLANTS[pick],
+        Band::Foliage => FOLIAGE_PLANTS[pick],
+        Band::Canopy => CANOPY_PLANTS[pick],
+        Band::Water => WATER_PLANT,
     }
 }
 
@@ -999,15 +1095,20 @@ impl FrameSink for GpuSink {
 
     fn finish(&mut self) -> Result<()> {
         if self.frames > 0 {
+            let n = self.frames as f64;
             eprintln!(
-                "cubarium: --sink gpu drew {} frames, {:.2} ms GPU mean{}",
+                "cubarium: --sink gpu drew {} frames: scene {:.2} ms, GPU {:.2} ms, \
+                 submit+present {:.2} ms, {} instances{}",
                 self.frames,
-                self.gpu_ms / self.frames as f64,
+                self.build_ms / n,
+                self.gpu_ms / n,
+                self.present_ms / n,
+                self.scene.instance_count(),
                 match self.dropped_frames {
                     0 => String::new(),
-                    n => format!(
-                        ", {n} frame slot(s) dropped from over-full stamps ({:.4} per frame)",
-                        n as f64 / self.frames as f64
+                    d => format!(
+                        ", {d} frame slot(s) dropped from over-full stamps ({:.4} per frame)",
+                        d as f64 / n
                     ),
                 }
             );

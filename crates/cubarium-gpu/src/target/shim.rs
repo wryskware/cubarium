@@ -191,10 +191,11 @@ impl ShimScanout {
 
     /// Render one frame into a free slot and present it.
     ///
-    /// Returns `(GPU ms, submit..fence ms, present..reply ms)`. The third is the
-    /// daemon's own pacing — it answers a `Present` once the flip it queued has
-    /// completed, so it plays the part the direct path's flip wait plays.
+    /// Returns `(GPU ms, submit..fence ms, pacing ms)`. The third is what this frame
+    /// spent waiting for the daemon to give a slot back — the panel's own pacing, which
+    /// with three slots shows up only once the renderer is a frame ahead of it.
     pub fn draw(&mut self, gpu: &Gpu, renderer: &mut Renderer, scene: &Scene) -> Result<(f64, f64, f64)> {
+        let waited = Instant::now();
         let index = self.take_free_slot()?;
         let d = &gpu.device;
         let start = Instant::now();
@@ -222,11 +223,10 @@ impl ShimScanout {
         }
         let submitted = Instant::now();
         self.present(self.slots[index].id)?;
-        let presented = Instant::now();
         Ok((
             renderer.gpu_ms(gpu),
             (submitted - start).as_secs_f64() * 1e3,
-            (presented - submitted).as_secs_f64() * 1e3,
+            (start - waited).as_secs_f64() * 1e3,
         ))
     }
 
@@ -274,11 +274,17 @@ impl ShimScanout {
 
     /// `Present` describes nothing: every geometry field is reserved and must be zero,
     /// because the daemon already has the slot's description from `Attach`.
+    ///
+    /// **It does not wait for the answer.** The daemon replies when the flip it queued has
+    /// completed, so waiting here would put a whole vsync period on the critical path and
+    /// leave the host blocked while the GPU and the panel both had nothing to do. The
+    /// replies are drained in [`ShimScanout::take_free_slot`] instead, which needs one
+    /// anyway — `released` is the only signal a buffer is free — so with three slots the
+    /// wait happens only when the renderer has genuinely got a frame ahead of the panel.
     fn present(&mut self, slot: u8) -> Result<()> {
         self.seq = self.seq.wrapping_add(1);
         send(&self.socket, &request(TAG_PRESENT, slot, self.seq, 0, 0, 0, 0, 0), None)
-            .context("sendmsg(Present)")?;
-        self.read_reply(REPLY_PRESENTED)
+            .context("sendmsg(Present)")
     }
 
     /// Read one reply and fold its `released` mask into the free set.

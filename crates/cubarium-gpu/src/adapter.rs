@@ -40,7 +40,7 @@ use crate::scene::{
 
 /// One pose of one clip at a weight: `cubarium_render`'s `(Pose, f32)`, with the two
 /// bracketing frames named by their index in [`Atlas::frames`].
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct PoseRef {
     /// The pose's first frame.
     pub a: u32,
@@ -95,9 +95,11 @@ pub struct Stamp {
     pub anchor: [f32; 2],
     /// The tile's `+x` in raster space.
     pub heading: [f32; 2],
-    /// Up to three poses; more than four *frames* between them is what
-    /// [`Stamp::instance`] reports as dropped.
-    pub layers: Vec<PoseRef>,
+    /// Up to [`MAX_POSES`] poses; more than four *frames* between them is what
+    /// [`Stamp::instance`] reports as dropped. A fixed array rather than a `Vec`: a
+    /// ring frame builds a few thousand stamps and an allocation each would be the
+    /// adapter's largest single cost.
+    pub layers: [PoseRef; MAX_POSES],
     /// `(amplitude, base, root, length)`.
     pub bend: [f32; 4],
     pub mask: StampMask,
@@ -110,12 +112,22 @@ pub struct Stamp {
     pub scratch: Option<ScratchFrame>,
 }
 
+impl PoseRef {
+    /// A slot that carries nothing.
+    pub const NONE: PoseRef = PoseRef { a: 0, b: 0, mix: 0.0, weight: 0.0 };
+}
+
+/// The most poses one stamp can carry: `art_present` never composites more than three
+/// (`stage_layers`'s fruit blend is two, an authored growth step names three, a body's
+/// cross-fade at most three).
+pub const MAX_POSES: usize = 3;
+
 impl Default for Stamp {
     fn default() -> Stamp {
         Stamp {
             anchor: [0.0, 0.0],
             heading: [1.0, 0.0],
-            layers: Vec::new(),
+            layers: [PoseRef::NONE; MAX_POSES],
             bend: [0.0; 4],
             mask: StampMask::None,
             tone: None,
@@ -156,36 +168,45 @@ impl Stamp {
         // Flatten every pose into (frame, weight), then keep the four heaviest. A pose
         // sitting exactly on a frame contributes one entry, not two, which is why an
         // idle plant and a fruiting one both fit.
-        let mut flat: Vec<(u32, f32)> = Vec::with_capacity(self.layers.len() * 2);
+        let mut flat = [(0u32, 0f32); MAX_POSES * 2];
+        let mut n = 0usize;
+        let mut push = |frame: u32, weight: f32| {
+            flat[n] = (frame, weight);
+            n += 1;
+        };
         for pose in &self.layers {
             if !(pose.weight.is_finite() && pose.weight > 0.0) {
                 continue;
             }
             let mix = if pose.mix.is_finite() { pose.mix.clamp(0.0, 1.0) } else { 0.0 };
             if mix <= 0.0 {
-                flat.push((pose.a, pose.weight));
+                push(pose.a, pose.weight);
             } else if mix >= 1.0 {
-                flat.push((pose.b, pose.weight));
+                push(pose.b, pose.weight);
             } else {
-                flat.push((pose.a, pose.weight * (1.0 - mix)));
-                flat.push((pose.b, pose.weight * mix));
+                push(pose.a, pose.weight * (1.0 - mix));
+                push(pose.b, pose.weight * mix);
             }
         }
+        drop(push);
+        let flat = &mut flat[..n];
         // Merge repeats first: `stage_layers` hands the same pose twice when a plant is
         // not in fruit, and a fade between two clips of one state is one frame.
         flat.sort_by_key(|(frame, _)| *frame);
-        flat.dedup_by(|(frame, w), (keep, kw)| {
-            if frame == keep {
-                *kw += *w;
-                true
+        let mut unique = 0usize;
+        for i in 0..flat.len() {
+            if unique > 0 && flat[unique - 1].0 == flat[i].0 {
+                flat[unique - 1].1 += flat[i].1;
             } else {
-                false
+                flat[unique] = flat[i];
+                unique += 1;
             }
-        });
+        }
+        let flat = &mut flat[..unique];
         let total: f32 = flat.iter().map(|(_, w)| *w).sum();
         flat.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         let dropped = flat.len().saturating_sub(4);
-        flat.truncate(4);
+        let flat = &flat[..flat.len().min(4)];
         let kept: f32 = flat.iter().map(|(_, w)| *w).sum();
         let renormalise = if kept > 0.0 && total > 0.0 { total / kept } else { 1.0 };
 
@@ -251,13 +272,11 @@ mod tests {
     }
 
     fn poses(layers: &[(u32, u32, f32, f32)]) -> Stamp {
-        Stamp {
-            layers: layers
-                .iter()
-                .map(|&(a, b, mix, weight)| PoseRef { a, b, mix, weight })
-                .collect(),
-            ..Default::default()
+        let mut stamp = Stamp::default();
+        for (slot, &(a, b, mix, weight)) in stamp.layers.iter_mut().zip(layers) {
+            *slot = PoseRef { a, b, mix, weight };
         }
+        stamp
     }
 
     #[test]
