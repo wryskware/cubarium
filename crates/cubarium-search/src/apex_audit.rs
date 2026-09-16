@@ -45,7 +45,7 @@ use std::collections::VecDeque;
 
 use cubarium_core::encounter::ApexOpportunity;
 use cubarium_core::hunter::{
-    self, AttemptOutcome, FixedHunterProfile, HunterEvent, HunterPhase,
+    self, AttemptOutcome, FixedHunterProfile, HunterEvent, HunterPhase, StrikeClass, StrikeRecord,
 };
 use cubarium_core::organism::DeathCause;
 use cubarium_core::{BodyBudget, OrganismId, World, WorldConfig};
@@ -318,6 +318,242 @@ pub struct ApexLife {
     pub end_energy_fraction: f64,
 }
 
+// ---------------------------------------------------------------- the reach diagnostic (N)
+
+/// How many raw per-attempt records one row keeps. The aggregates below are computed over
+/// **every** record; this cap only bounds the artifact, and what it left out is counted.
+pub const MAX_KEPT_RECORDS: usize = 4_000;
+
+/// One quantity over a set of attempts: enough to report a mean without hiding the spread, and
+/// the extremes a verdict's deciding rows come from. `n` counts only the attempts that
+/// actually carried the quantity, so a mean is never diluted by a missing frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Series {
+    pub n: u64,
+    pub sum: f64,
+    pub min: f64,
+    pub max: f64,
+}
+
+impl Series {
+    fn push(&mut self, v: f64) {
+        if !v.is_finite() {
+            return;
+        }
+        if self.n == 0 {
+            self.min = v;
+            self.max = v;
+        } else {
+            self.min = self.min.min(v);
+            self.max = self.max.max(v);
+        }
+        self.n += 1;
+        self.sum += v;
+    }
+
+    fn push_opt(&mut self, v: Option<f64>) {
+        if let Some(v) = v {
+            self.push(v);
+        }
+    }
+
+    pub fn add(&mut self, other: &Series) {
+        if other.n == 0 {
+            return;
+        }
+        if self.n == 0 {
+            *self = *other;
+            return;
+        }
+        self.n += other.n;
+        self.sum += other.sum;
+        self.min = self.min.min(other.min);
+        self.max = self.max.max(other.max);
+    }
+
+    pub fn mean(&self) -> Option<f64> {
+        (self.n > 0).then(|| self.sum / self.n as f64)
+    }
+}
+
+/// Everything one bucket of attempts — one class, or one outcome — says about reach.
+///
+/// Separations are `effector_distance`: the surface distance from the scaled grasp centre to
+/// the prey. `overshoot` is that minus the contact tolerance, so zero is the edge of the grasp
+/// and positive is out of it. Speeds are realised displacement over the phase's own duration.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct StrikeStats {
+    pub count: u64,
+    /// The strike cost these attempts actually paid, summed.
+    pub energy_paid: f64,
+    /// Attempts whose intent frame said the prey was already inside the grasp.
+    pub began_in_reach: u64,
+    /// Attempts whose resolution frame said so.
+    pub resolved_in_reach: u64,
+    /// Attempts in which the prey, or the hunter, changed cube face during the attempt.
+    pub target_crossed_face: u64,
+    pub hunter_crossed_face: u64,
+    pub advertised_reach: Series,
+    pub tolerance: Series,
+    pub intent_separation: Series,
+    pub intent_overshoot: Series,
+    pub strike_separation: Series,
+    pub resolution_separation: Series,
+    pub resolution_overshoot: Series,
+    /// `resolution − strike`: how far the gap moved across the paid burst. Positive is the
+    /// prey pulling away.
+    pub separation_change_over_strike: Series,
+    /// `resolution − intent`: across the whole attempt, windup included.
+    pub separation_change_total: Series,
+    pub prey_speed_windup: Series,
+    pub prey_speed_strike: Series,
+    pub hunter_speed_windup: Series,
+    pub hunter_speed_strike: Series,
+    pub prey_turn_strike_deg: Series,
+}
+
+impl StrikeStats {
+    fn sample(&mut self, r: &StrikeRecord) {
+        self.count += 1;
+        self.energy_paid += r.energy_paid;
+        if r.intent.is_some_and(|f| f.in_reach) {
+            self.began_in_reach += 1;
+        }
+        if r.resolution.in_reach {
+            self.resolved_in_reach += 1;
+        }
+        if r.target_crossed_face {
+            self.target_crossed_face += 1;
+        }
+        if r.hunter_crossed_face {
+            self.hunter_crossed_face += 1;
+        }
+        self.advertised_reach.push(r.resolution.advertised_reach);
+        self.tolerance.push_opt(r.resolution.tolerance);
+        self.intent_separation.push_opt(r.intent.and_then(|f| f.effector_distance));
+        self.intent_overshoot.push_opt(r.intent.and_then(|f| f.overshoot()));
+        self.strike_separation.push_opt(r.strike.and_then(|f| f.effector_distance));
+        self.resolution_separation.push_opt(r.resolution.effector_distance);
+        self.resolution_overshoot.push_opt(r.resolution.overshoot());
+        self.separation_change_over_strike.push_opt(r.separation_change_over_strike());
+        self.separation_change_total.push_opt(r.separation_change_total());
+        self.prey_speed_windup.push_opt(r.target_speed_windup);
+        self.prey_speed_strike.push_opt(r.target_speed_strike);
+        self.hunter_speed_windup.push_opt(r.hunter_speed_windup);
+        self.hunter_speed_strike.push_opt(r.hunter_speed_strike);
+        self.prey_turn_strike_deg.push_opt(r.target_turn_strike.map(f64::to_degrees));
+    }
+
+    pub fn add(&mut self, other: &StrikeStats) {
+        self.count += other.count;
+        self.energy_paid += other.energy_paid;
+        self.began_in_reach += other.began_in_reach;
+        self.resolved_in_reach += other.resolved_in_reach;
+        self.target_crossed_face += other.target_crossed_face;
+        self.hunter_crossed_face += other.hunter_crossed_face;
+        self.advertised_reach.add(&other.advertised_reach);
+        self.tolerance.add(&other.tolerance);
+        self.intent_separation.add(&other.intent_separation);
+        self.intent_overshoot.add(&other.intent_overshoot);
+        self.strike_separation.add(&other.strike_separation);
+        self.resolution_separation.add(&other.resolution_separation);
+        self.resolution_overshoot.add(&other.resolution_overshoot);
+        self.separation_change_over_strike.add(&other.separation_change_over_strike);
+        self.separation_change_total.add(&other.separation_change_total);
+        self.prey_speed_windup.add(&other.prey_speed_windup);
+        self.prey_speed_strike.add(&other.prey_speed_strike);
+        self.hunter_speed_windup.add(&other.hunter_speed_windup);
+        self.hunter_speed_strike.add(&other.hunter_speed_strike);
+        self.prey_turn_strike_deg.add(&other.prey_turn_strike_deg);
+    }
+}
+
+/// Every paid attempt of one run, split the two ways the diagnostic asks for: by the mechanism
+/// its own geometry implicates, and by the outcome the world gave it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct StrikeAudit {
+    /// Paid attempts recorded. Equals the sum of `AttemptTally` over the followed members
+    /// minus its `unaffordable`, which is refused before payment and is not an attempt.
+    pub recorded: u64,
+    /// Records the recorder dropped undrained, and records that resolved with no intent frame.
+    /// Both must be zero for the table below to be complete.
+    pub dropped: u64,
+    pub unreadable: u64,
+    /// Raw records omitted from `records` by [`MAX_KEPT_RECORDS`]; the aggregates saw them.
+    pub omitted: u64,
+    pub by_class: Vec<(StrikeClass, StrikeStats)>,
+    pub by_outcome: Vec<(AttemptOutcome, StrikeStats)>,
+    pub records: Vec<StrikeRecord>,
+}
+
+impl StrikeAudit {
+    /// File one closed record: one class bucket, one outcome bucket, and the raw record if
+    /// the cap allows.
+    pub fn sample(&mut self, r: StrikeRecord) {
+        self.recorded += 1;
+        match self.by_class.iter_mut().find(|(c, _)| *c == r.class) {
+            Some((_, s)) => s.sample(&r),
+            None => {
+                let mut s = StrikeStats::default();
+                s.sample(&r);
+                self.by_class.push((r.class, s));
+            }
+        }
+        match self.by_outcome.iter_mut().find(|(o, _)| *o == r.outcome) {
+            Some((_, s)) => s.sample(&r),
+            None => {
+                let mut s = StrikeStats::default();
+                s.sample(&r);
+                self.by_outcome.push((r.outcome, s));
+            }
+        }
+        if self.records.len() < MAX_KEPT_RECORDS {
+            self.records.push(r);
+        } else {
+            self.omitted += 1;
+        }
+    }
+
+    pub fn add(&mut self, other: &StrikeAudit) {
+        self.recorded += other.recorded;
+        self.dropped += other.dropped;
+        self.unreadable += other.unreadable;
+        self.omitted += other.omitted;
+        for (c, s) in &other.by_class {
+            match self.by_class.iter_mut().find(|(k, _)| k == c) {
+                Some((_, into)) => into.add(s),
+                None => self.by_class.push((*c, *s)),
+            }
+        }
+        for (o, s) in &other.by_outcome {
+            match self.by_outcome.iter_mut().find(|(k, _)| k == o) {
+                Some((_, into)) => into.add(s),
+                None => self.by_outcome.push((*o, *s)),
+            }
+        }
+    }
+
+    /// The classes in the fixed reporting order, so two runs' tables line up.
+    pub fn classes_in_order(&self) -> Vec<(StrikeClass, StrikeStats)> {
+        const ORDER: [StrikeClass; 6] = [
+            StrikeClass::ResolvedInReach,
+            StrikeClass::BeganInReachResolvedOut,
+            StrikeClass::PreyOutran,
+            StrikeClass::BeganOutOfReach,
+            StrikeClass::TargetLost,
+            StrikeClass::Unreadable,
+        ];
+        ORDER
+            .iter()
+            .filter_map(|c| self.by_class.iter().find(|(k, _)| k == c).copied())
+            .collect()
+    }
+
+    pub fn stats_for_outcome(&self, outcome: AttemptOutcome) -> Option<StrikeStats> {
+        self.by_outcome.iter().find(|(o, _)| *o == outcome).map(|(_, s)| *s)
+    }
+}
+
 /// One `(configuration, seed)` audit.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AuditRow {
@@ -342,6 +578,9 @@ pub struct AuditRow {
     pub apex_energy_in: f64,
     pub lives: Vec<ApexLife>,
     pub opportunity: ApexOpportunity,
+    /// Every paid attempt of this run, classified (workstream N). Empty when the strike
+    /// recorder was off.
+    pub strikes: StrikeAudit,
     /// The world's own conservation residuals at the end, so a run that drifted is visible.
     pub mass_residual: f64,
     pub final_population: usize,
@@ -380,6 +619,8 @@ pub struct AuditReport {
     pub wall_seconds: f64,
     /// The one sentence the audit exists to produce.
     pub verdict: String,
+    /// Every paid attempt of every row, classified together (workstream N).
+    pub strikes: StrikeAudit,
     pub rows: Vec<AuditRow>,
 }
 
@@ -416,6 +657,10 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
     config.validate().map_err(|e| format!("config rejected: {e}"))?;
     let mut world = World::new(config).map_err(|e| format!("world creation refused: {e}"))?;
     world.record_body_budgets(ledger);
+    // The per-attempt strike record follows the ledger flag rather than a new one: this whole
+    // command is a diagnostic, the record is inert by the same hash test the ledger is, and a
+    // second CLI switch would only be a second way to run the audit half-instrumented.
+    world.record_strike_attempts(ledger);
     let dt = cubarium_core::DT;
     let age_ticks = (founder_age_seconds / dt).round().max(0.0) as u64;
 
@@ -424,6 +669,7 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
     // end of a life can be differenced against its own state 2,000 ticks earlier.
     let mut tails: Vec<VecDeque<(u64, BodyBudget)>> = Vec::new();
     let (mut material_in, mut energy_in) = (0.0, 0.0);
+    let mut strikes = StrikeAudit::default();
     let mut introduced = false;
     let mut collapsed_at = None;
     let mut ticks = 0;
@@ -457,6 +703,14 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
         world.drain_quiet_events();
         // The ledger is drained every tick too, for the same reason, and the records of the
         // members this audit follows are kept. Everything else the world buried is dropped.
+        // The strike records are drained on the same schedule and for the same reason: a
+        // 180,000-tick run would otherwise hold every attempt it ever made.
+        let (records, strike_dropped, strike_unreadable) = world.drain_strike_records();
+        strikes.dropped += strike_dropped;
+        strikes.unreadable += strike_unreadable;
+        for record in records {
+            strikes.sample(record);
+        }
         let (closed, dropped) = world.drain_body_budgets();
         if dropped > 0 {
             return Err(format!("the ledger dropped {dropped} closed record(s)"));
@@ -582,6 +836,7 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
         apex_energy_in: energy_in,
         lives,
         opportunity: world.drain_apex_opportunity(),
+        strikes,
         mass_residual: world.mass_residual(),
         final_population: world.population(),
         elapsed_ms: start.elapsed().as_millis() as u64,
@@ -819,6 +1074,57 @@ pub fn run(
         }
     }
 
+    // The reach diagnostic: every paid attempt of every row, classified by its own geometry.
+    let mut strikes = StrikeAudit::default();
+    for r in &rows {
+        strikes.add(&r.strikes);
+    }
+    if strikes.recorded > 0 {
+        println!();
+        println!(
+            "# paid attempts {}, dropped {}, unreadable {} (both must be 0)",
+            strikes.recorded, strikes.dropped, strikes.unreadable
+        );
+        println!(
+            "{:<28} {:>7} {:>8} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9}",
+            "class", "n", "e paid", "sep@int", "sep@str", "sep@res", "over@res", "prey px/s", "hunt px/s",
+        );
+        let cell = |s: Option<f64>| s.map_or_else(|| "—".to_string(), |v| format!("{v:.2}"));
+        for (class, st) in strikes.classes_in_order() {
+            println!(
+                "{:<28} {:>7} {:>8.3} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9}",
+                class.as_str(),
+                st.count,
+                st.energy_paid,
+                cell(st.intent_separation.mean()),
+                cell(st.strike_separation.mean()),
+                cell(st.resolution_separation.mean()),
+                cell(st.resolution_overshoot.mean()),
+                cell(st.prey_speed_strike.mean()),
+                cell(st.hunter_speed_strike.mean()),
+            );
+        }
+        println!();
+        println!(
+            "{:<28} {:>7} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9}",
+            "outcome", "n", "sep@int", "sep@str", "sep@res", "tol", "reach", "prey px/s", "hunt px/s",
+        );
+        for (outcome, st) in &strikes.by_outcome {
+            println!(
+                "{:<28} {:>7} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9}",
+                outcome.as_str(),
+                st.count,
+                cell(st.intent_separation.mean()),
+                cell(st.strike_separation.mean()),
+                cell(st.resolution_separation.mean()),
+                cell(st.tolerance.mean()),
+                cell(st.advertised_reach.mean()),
+                cell(st.prey_speed_strike.mean()),
+                cell(st.hunter_speed_strike.mean()),
+            );
+        }
+    }
+
     let verdict = verdict(&rows);
     println!();
     println!("{verdict}");
@@ -834,6 +1140,7 @@ pub fn run(
         workers,
         wall_seconds: started.elapsed().as_secs_f64(),
         verdict,
+        strikes,
         rows,
     };
     if let Some(parent) = out.parent() {
@@ -875,6 +1182,7 @@ mod tests {
                 fail_radius: radius,
                 ..ApexOpportunity::default()
             },
+            strikes: StrikeAudit::default(),
             mass_residual: 0.0,
             final_population: 0,
             elapsed_ms: 0,

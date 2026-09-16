@@ -242,6 +242,7 @@ impl World {
                 charging,
                 intake,
                 budgets,
+                strikes,
                 apex_opportunity,
                 neural_timing,
                 scripted,
@@ -1087,6 +1088,21 @@ impl World {
                             {
                                 m.enter(HunterPhase::Windup, now, now + windup_ticks, 0);
                                 m.target = Some(t);
+                                // The intent frame: where both bodies stood when this member
+                                // committed to the gesture. Inert and opt-in
+                                // (`crate::hunter::StrikeRecorder`); one `bool` test otherwise.
+                                if strikes.enabled() {
+                                    strikes.open_intent(
+                                        m.id,
+                                        hunter::StrikeFrame::gather(
+                                            images,
+                                            profile,
+                                            now,
+                                            o,
+                                            organisms.get(t).map(|prey| (t, prey)),
+                                        ),
+                                    );
+                                }
                             }
                         }
                         HunterPhase::Windup if now >= m.phase_ends_tick => {
@@ -1103,6 +1119,22 @@ impl World {
                                 let episode = m.attack_counter;
                                 m.enter(HunterPhase::Strike, now, now + strike_ticks, episode);
                                 m.target = Some(t);
+                                // The strike frame: where both bodies stood when the burst was
+                                // paid for, i.e. after `windup_seconds` of the hunter holding
+                                // and the prey fleeing.
+                                if strikes.enabled() {
+                                    strikes.begin_strike(
+                                        m.id,
+                                        episode,
+                                        hunter::StrikeFrame::gather(
+                                            images,
+                                            profile,
+                                            now,
+                                            o,
+                                            organisms.get(t).map(|prey| (t, prey)),
+                                        ),
+                                    );
+                                }
                             } else {
                                 // Refused before payment: no energy, no draw, no attempt.
                                 hunter_events.push(HunterEvent::Attempt {
@@ -1193,6 +1225,14 @@ impl World {
                             d.1.mode = Mode::Resting;
                             d.1.effort = f64::from(o.phenotype.drives.rest_effort);
                         }
+                    }
+                    // A member that left the gesture without paying for a burst has no
+                    // attempt to record; a member still cocking or still lunging keeps its
+                    // open frames. A no-op when nothing is open, and when recording is off.
+                    if strikes.enabled()
+                        && !matches!(m.phase, HunterPhase::Windup | HunterPhase::Strike)
+                    {
+                        strikes.abandon(m.id);
                     }
                     hunters.members[index] = m;
                 }
@@ -1561,6 +1601,36 @@ impl World {
                         attack_counter: Some(m.attack_counter),
                         evidence,
                     });
+                    // The resolution frame, read from the same common post-movement state the
+                    // settlement above used, and before anything is removed. Closing the
+                    // record derives the classification from the three frames and nothing
+                    // else; it re-measures nothing and mutates nothing the tick reads.
+                    if strikes.enabled() {
+                        let resolution = hunter::StrikeFrame::gather(
+                            images,
+                            &profile,
+                            now + 1,
+                            hunter_o,
+                            aimed_at.and_then(|t| organisms.get(t).map(|prey| (t, prey))),
+                        );
+                        strikes.close(
+                            hunter_id,
+                            m.attack_counter,
+                            resolution,
+                            outcome,
+                            profile.strike_energy_cost,
+                            profile.windup_seconds,
+                            profile.strike_seconds,
+                            |from, to| {
+                                hunter::surface_reach(
+                                    images,
+                                    from,
+                                    to,
+                                    cubarium_surface::MAX_LOCAL_RADIUS,
+                                )
+                            },
+                        );
+                    }
 
                     match caught {
                         Some((prey_id, material, energy)) => {

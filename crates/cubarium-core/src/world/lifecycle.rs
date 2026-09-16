@@ -238,6 +238,7 @@ impl World {
             charging: ChargingDiagnostics::default(),
             intake: IntakeDiagnostics::default(),
             budgets: crate::world::BudgetRecorder::default(),
+            strikes: crate::hunter::StrikeRecorder::default(),
             apex_opportunity: crate::encounter::ApexOpportunity::default(),
             neural_timing: crate::world::state::NeuralTiming::default(),
             scripted: Vec::new(),
