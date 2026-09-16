@@ -174,9 +174,31 @@ impl World {
     /// attaching a policy: `World::attach_neural_policy` refuses, by name, a policy whose
     /// schema digest is not the adapter in force, so a world that changes adapter after
     /// attaching is refused at the next attachment rather than quietly running the wrong
-    /// decode. Changing it mid-run is legal and makes one run of two animals.
-    pub fn set_action_adapter(&mut self, adapter: crate::neural::ActionAdapter) {
+    /// decode.
+    ///
+    /// **Fallible and atomic** (Astra, round-5 review P1): every policy already interned in
+    /// this world is validated against the requested adapter first, and on any mismatch the
+    /// refusal names both adapters and the world is left exactly as it was. Without that, a
+    /// `cub-act-1` policy could be attached and the world then flipped to `cub-act-2`, decoding
+    /// the same weights under the other adapter with no refusal — the silent reinterpretation
+    /// `World::from_state` refuses at the persistence boundary. A world with no neural policy
+    /// may change adapter freely; a world whose policies all match the requested adapter is
+    /// unchanged by a request for it.
+    pub fn set_action_adapter(
+        &mut self,
+        adapter: crate::neural::ActionAdapter,
+    ) -> Result<(), String> {
+        for policy in &self.state.neural.policies {
+            policy.validate_in(adapter).map_err(|e| {
+                format!(
+                    "cannot run this world under the {} adapter: a policy already attached \
+                     was authored under another one, and the world is unchanged: {e}",
+                    adapter.name()
+                )
+            })?;
+        }
         self.action_adapter = adapter;
+        Ok(())
     }
 
     /// The adapter in force, [`crate::neural::ActionAdapter::CubAct1`] unless one was named.

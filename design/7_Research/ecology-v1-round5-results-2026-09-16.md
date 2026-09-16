@@ -58,7 +58,12 @@ adapters:
 
 **Verdict by the rule: mixed.** Support fails (on-food and `t_min` do not
 rise); falsification fails on its own terms because dwell moves
-significantly, in the negative direction. Q's prediction about the
+significantly, in the negative direction. **Read substantively (Astra, P1):
+the frozen-policy expression hypothesis is refuted at this operating point,
+and dwell worsened.** The rule's "mixed" branch let a significant
+deterioration authorise the training run; that label stays as history, the
+training run is the exploratory follow-up it permitted, and it is not
+evidence that the bottleneck moved to learnability. Q's prediction about the
 *channel* is confirmed exactly: under `cub-act-2` the body turns on every
 tick (turn activity 1.000 on all 132 trajectories against 0.72), in more and
 shorter bouts. The inference from that to residence does not hold on frozen
@@ -95,9 +100,13 @@ disagree and that is the finding. Releasing the band does not make frozen
 weights forage better; it lets the search move a channel that was clipped to
 zero for most of a newborn candidate's ticks, and the training arm gains
 consistently on aggregate columns while its held-out residence does not
-move. That is a *learnability* hypothesis, not an *expression* one, and
-nothing here tests it. A second training seed (140 s) is the cheapest thing
-that separates "this adapter is better" from "this seed was luckier".
+move. "The search can exploit the released channel" is plausible;
+"learnability rather than expression" is not identified, and sixteen
+sequential generations are one autocorrelated trajectory, so the paired
+p-values are descriptive. A second training seed is the independent repeat
+(n = 2 over seeds), and the sharper test Astra names is the selected
+centres replayed under both adapters as a weights × adapter 2 × 2; both are
+in XY2.
 
 **What changed on the cube: nothing.** The host names no adapter and runs
 `cub-act-1`, byte for byte. A `cub-act-2` policy is refused by name at
@@ -107,8 +116,14 @@ accept any adapter this build knows, so a snapshot holding a `cub-act-2`
 policy would have resumed silently under the shipped adapter (the adapter is
 a transient the bytes cannot carry). `World::from_state` now refuses such a
 snapshot by name, with a test; a shipped-adapter world round-trips as before.
+After Astra's review (P1), `World::set_action_adapter` is fallible and atomic
+too: it validates every attached policy against the requested adapter and
+refuses a mismatch by name, leaving the world unchanged, so a live world can
+no longer be flipped under an attached policy (both directions tested).
+Astra's P3 on Y — the seed-agreement rule read one of two as a majority — is
+made a strict majority (`runs / 2 + 1`), which changes no retained cell.
 
-## Y — the skimmer depth ladder, arm 0: no rung is acceptable; the rescue is one move off the litter onto the grazer's leaf
+## Y — the skimmer depth ladder, arm 0: no rung is acceptable; lineage success goes with a shift onto the grazer's foliage channel
 
 [Note](ecology-v1-depth-ladder-2026-09-16.md). R's named next task, on R's
 census, pre-registered before a row existed: `skimmer.depth` ∈ {0.10, 0.20,
@@ -137,19 +152,25 @@ at most 4 of 6 worlds. In Astra's words, the choice becomes three viable
 heights and four kinds, or a wet-floor producer, which is a new food web and
 not a repair. **No roster change is proposed.**
 
-**What the two added measures settled.** Material taken per `fast-leaf`
+**What the two added measures showed.** Material taken per `fast-leaf`
 skimmer descendant across 0.10 → 0.75: litter 2.60 → 0.02 m, foliage 1.64 →
-26.3 m (the grazer's own descendants take 22–26). The swap is monotone from
-the first rung, and the descendant margin turns positive exactly where it
-happens: "off the wet floor" and "onto the grazer's leaf" are one move
-across the whole ladder, which was the confound R could not separate. The
-founder's margin rate falls with height in both configurations while the
-descendant's rises, so the rescue is a descendant phenomenon everywhere; R's
-founder-lifetime reversal is the founder's income, not a sign change in its
-economics (a one-sentence correction to R, recorded in Y).
+26.3 m (the grazer's own descendants take 22–26). The shift is large overall
+and not monotone at every rung (litter rises at 0.20, foliage peaks at 0.55;
+baseline's sequence is rougher), and the margin sequences dip in both
+configurations. What it establishes is **increasing dietary overlap with the
+grazer's foliage and declining litter use**; it does not establish that the
+skimmer removed material the grazer would otherwise have received, or that
+the rescue and the grazer's cost are one mechanism — direct displacement was
+not isolated, and at arm 0 the grazer's horizon population is 0.90–1.24×
+control at every rung (Astra, P1). The rescue is a descendant phenomenon in
+both configurations; R's founder-lifetime reversal is the founder's income.
+R had disclosed that its pooled ledger could not separate founders from
+descendants, so Y refines that record rather than correcting a sign claim.
 
 **Found unasked, and it bears on R's reading:** re-reading R's own retained
-rows by arm, R's `fast-leaf` result is largely an apex-arm property. At
+rows by arm, R's `fast-leaf` result is largely a property of the **apex-arm
+treatment** (arm number changes predator presence and count, predation,
+recycling and feedbacks together; why the arm matters is not identified). At
 0.55, arm 0 gives grazer 0.90× and lineage 3/6; arms 1 and 2 give 0.47× and
 0.46× with lineage 5/6. R's rows reproduce exactly and R's pooled cell is
 what R said; but R's sentence "nothing here turns on the apex" is wrong for
@@ -180,9 +201,10 @@ no §11 change proposed.
   find residence is open: one seed, aggregate columns up, held-out residence
   flat. Nothing on the cube changes.
 - No skimmer depth rescues the lineage in the selected ecology without
-  predators; the mechanism of the rescue where it occurs is the skimmer
-  taking the grazer's foliage. The arm-2 ladder is untested and R's own rows
-  say the apex is load-bearing for `fast-leaf`.
+  predators; where a lineage establishes, its diet has shifted onto the
+  foliage channel the grazer also uses, and whether that is the grazer's cost
+  was not isolated. The arm-2 ladder is untested and R's own rows say the
+  apex-arm treatment matters for `fast-leaf`.
 - Sixteen pairs' sufficiency remains untested; the split-half spread is
   reported, not concluded on.
 
@@ -190,11 +212,16 @@ no §11 change proposed.
 
 1. **X, second training seed** (140 s): the retained command with `--adapter
    cub-act-2 --train-seed <second>` and its `cub-act-1` control at the same
-   seed (a second control is owed too, 140 s), to separate adapter from
-   seed. Only then decide whether `cub-act-2` becomes the training default;
-   the host stays on `cub-act-1` regardless until a policy is selected and
-   the host learns to name an adapter.
+   seed (a second control is owed too, 140 s), the seed being the replicate;
+   plus the selected centres of both seeds replayed under both adapters as a
+   weights × adapter 2 × 2 (expression, a different region, or
+   co-adaptation). No training default from this: a favourable second seed
+   still lacks whole-world evaluation while `es-population` refuses
+   `cub-act-2`; the host stays on `cub-act-1` regardless.
 2. **Y, the ladder at arm 2** (4 min): same design, two apex adults
-   introduced, because R's rows say that is where the effect lives.
+   introduced, under the shipped predicate with R's arm-2 rows reproduced
+   under the half-space and the predicate contrast reported at 0.10 and
+   0.55; an acceptable rung would be a candidate for held-out confirmation,
+   not a roster decision from six training seeds.
 3. **Z** lands and is read by its rule.
 4. The motor decision remains Wrysk's, on the terms in the round-4 result.

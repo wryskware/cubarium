@@ -260,14 +260,30 @@ the shim and the running `cubarium` untouched.
 is what it measured.*
 ## The headline
 
-> **No depth is acceptable, and the reason is not a threshold — it is that the
-> only income which pays a skimmer at *any* height off the rim is the grazer's
-> leaf.** Across the whole ladder the skimmer's descendants move off litter and
-> onto foliage monotonically — in `fast-leaf`, 2.60 → 2.75 → 1.86 → 1.11 →
-> 0.30 → **0.02** m of litter per body against 1.64 → 10.18 → 15.96 → 19.49 →
-> 28.69 → **26.34** m of foliage — and their margin rate turns positive at
-> exactly the rung where that swap happens. **There is no rung at which the
-> skimmer is fed and is not on the leaf.** In `fast-leaf`, the selected
+> **Corrections after Astra's round-5 review (P1, P2).** The channel and margin
+> sequences below are *not* monotone at every rung (fast-leaf descendant litter
+> rises 2.60 → 2.75 before falling; descendant foliage peaks at 0.55; baseline
+> descendant foliage goes 8.68 → 11.99 → 6.55 → 16.91 → 20.03 → 26.53; the
+> founder's margin rate is less negative at 0.75 than at 0.55 in baseline;
+> descendant margin dips in both configurations). What the served-channel data
+> establish is **increasing dietary overlap with the grazer's foliage and
+> declining litter use overall**; they do not establish that the skimmer removed
+> material the grazer would otherwise have received, nor that the rescue and the
+> cost are one mechanism — direct displacement was not isolated, and at arm 0
+> the grazer's horizon population is 0.90–1.24× control at every rung. "The
+> founder's margin rate falls monotonically" is withdrawn, and with it the
+> "correction" to R: R had disclosed that its pooled ledger could not separate
+> founders from descendants and called its founder mechanism a reading, so this
+> campaign *refines* that record. "The apex is load-bearing" names the
+> **apex-arm treatment** (arm number changes predator presence and count,
+> predation, recycling and feedbacks together), not an apex mechanism. The
+> no-rung verdict and the arm split stand.
+>
+> **No depth is acceptable.** Across the ladder the skimmer's descendants shift
+> from litter toward the foliage channel the grazer also uses — in `fast-leaf`,
+> 2.60 → 2.75 → 1.86 → 1.11 → 0.30 → **0.02** m of litter per body against
+> 1.64 → 10.18 → 15.96 → 19.49 → 28.69 → **26.34** m of foliage — and lineage
+> success is associated with that shift. In `fast-leaf`, the selected
 > ecology, clause **L never holds at any rung**: the lineage establishes in at
 > most 4 of 6 worlds (at 0.40) where 5 are needed. So the answer to R's
 > question is Astra's second branch: *three viable heights and four kinds, or a
@@ -279,10 +295,11 @@ is what it measured.*
 > **R's own retained rows** by arm shows why: R's grazer cost lives in arms 1
 > and 2 (0.47× and 0.46×) and is nearly absent at arm 0, and so does R's
 > lineage (5/6 and 5/6 against **3/6** at arm 0). **R's "nothing here turns on
-> the apex" is wrong, and my own arm-0 design inherits that limitation.**
-> Second, the generation split shows the rescue is a **descendant** phenomenon
-> in *both* configurations — the founder skimmer's margin rate falls
-> monotonically with height everywhere — and locates R's founder-lifetime
+> the apex" is too strong for `fast-leaf`, and my own arm-0 design inherits
+> that limitation.** Second, the generation split shows the rescue is a
+> **descendant** phenomenon in *both* configurations — the founder skimmer's
+> margin rate is lower off the rim than on it in both, though not monotonically
+> — and locates R's founder-lifetime
 > reversal in the founder's own **foliage intake**, which rises 0.23 → 9.98 m
 > in `fast-leaf` and stays under 0.13 m in `baseline` until 0.75.
 
@@ -491,13 +508,15 @@ pooled over the 6 runs of each cell.
 
 Three things are measured here rather than inferred.
 
-- **The swap is monotone and it is complete.** The skimmer's litter falls at
-  every rung of both configurations, 6.34 → 1.23 m for founders and 2.60 →
-  0.02 m for descendants in `fast-leaf`, and its foliage rises to 26–29 m —
-  more than the grazer's own descendants take (22–26 m). By 0.40 a `fast-leaf`
-  skimmer descendant already draws 19.5 m of leaf against 1.1 m of litter.
-  **"Off the wet floor" and "onto the grazer's leaf" are not two moves that the
-  0.55 rung happened to bundle; they are one move, across the whole ladder.**
+- **The shift is large overall, and not monotone at every rung.** The skimmer's
+  litter falls from 6.34 to 1.23 m for founders and from 2.60 to 0.02 m for
+  descendants in `fast-leaf` (with a rise at 0.20), and its foliage rises to
+  26–29 m, peaking at 0.55 — more than the grazer's own descendants take (22–26
+  m). By 0.40 a `fast-leaf` skimmer descendant already draws 19.5 m of leaf
+  against 1.1 m of litter. What this measures is **dietary overlap with the
+  grazer's foliage rising with height**; whether that overlap is what the grazer
+  pays for, or whether the field's production and composition change with depth
+  instead, is not isolated here (see the correction block).
 - **And the grazer's founder pays at every rung it happens at.** The
   `fast-leaf` grazer founder's own foliage falls 9.94 → 7.20 m, 28 %, with the
   skimmer founder's rising 0.23 → 9.98 m. The horizon *population* does not
@@ -549,7 +568,7 @@ That is the measurement R said it could not make, and it **corrects R's
 sentence** in one respect: the founder's per-second economics get worse with
 height in both worlds, not better in one of them.
 
-## What this campaign found that it was not asked to: the apex is load-bearing
+## What this campaign found that it was not asked to: the apex-arm treatment matters
 
 R wrote that "nothing here turns on the apex" and carried three arms only for
 its hash check. Dropping to arm 0 to buy four more rungs was this brief's
@@ -578,8 +597,12 @@ This is not a repair of R's verdict — R's rows are R's, they reproduce here
 field for field, and R's pooled cell is what R said it was. It is a limitation
 of **this** campaign, stated plainly: the ladder was run in the one arm where
 R's effect is weakest, and a ladder at arm 2 could read differently. It is also
-a correction to R's "nothing turns on the apex", which this campaign is in a
-position to make only because it re-read R's rows.
+a refinement of R's "nothing turns on the apex", which this campaign is in a
+position to make only because it re-read R's rows. Why the arm matters is not
+identified: arm number changes predator presence and count, predation,
+recycling, prey abundance and the resource feedbacks that follow, and the
+census records do not isolate direct predation on skimmers from predation on
+grazers or a plant-mediated path.
 
 ## What Wrysk would be approving
 
@@ -587,11 +610,11 @@ position to make only because it re-read R's rows.
 could propose one at.
 
 What the ladder rules out is worth stating as a positive result, because it was
-the open question R left: **the rescue and the cost are the same mechanism, and
-no height separates them.** There is no `skimmer.depth` between the rim and the
-grazer at which the fourth guild feeds itself on something the grazer is not
-already eating. The skimmer's litter income falls monotonically from the first
-rung upward, and its foliage income is what replaces it, at every rung, in both
+the open question R left: **at no tested height does the skimmer lineage
+establish on litter; where it establishes, its diet has shifted onto the
+foliage channel the grazer also uses.** Whether that overlap is the grazer's
+cost was not isolated. The skimmer's litter income falls from the first rung
+upward (not at every step), and its foliage income is what replaces it, in both
 configurations. A value that buys a lineage without buying it out of the leaf
 does not exist on this ladder.
 

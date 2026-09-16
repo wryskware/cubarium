@@ -1269,12 +1269,15 @@ fn mean(values: impl Iterator<Item = f64>) -> f64 {
 
 /// How many runs satisfy a predicate, and how many seeds agree.
 ///
-/// **A seed agrees when a majority of its own runs do**, `ceil(runs_of_seed / 2)`. R's cell
-/// carried three apex arms per seed and R's rule read "at least 2 of its 3 arms", which is
-/// this rule at that cell size and is reproduced by it exactly. Workstream Y runs one arm per
-/// seed, where a fixed "at least 2 runs" would make every seed disagree and no clause could
-/// ever hold; the majority rule reads 1 of 1 there. The generalisation is pre-registered in
-/// `design/7_Research/ecology-v1-depth-ladder-2026-09-16.md`, before any row existed.
+/// **A seed agrees when a strict majority of its own runs do**, `runs_of_seed / 2 + 1`. R's
+/// cell carried three apex arms per seed and R's rule read "at least 2 of its 3 arms", which
+/// is this rule at that cell size and is reproduced by it exactly. Workstream Y runs one arm
+/// per seed, where a fixed "at least 2 runs" would make every seed disagree and no clause
+/// could ever hold; the majority rule reads 1 of 1 there. The generalisation is pre-registered
+/// in `design/7_Research/ecology-v1-depth-ladder-2026-09-16.md`, before any row existed. Y
+/// implemented it as `ceil(runs / 2)`, which agrees at every odd cell size but reads one of
+/// two as a majority; Astra's round-5 review (P3) had it made strict, which changes no retained
+/// result (every retained cell is one or three runs per seed).
 fn agreement(facts: &[RunFacts], pred: impl Fn(&RunFacts) -> bool) -> (usize, usize) {
     let mut runs = 0usize;
     let mut by_seed: BTreeMap<u64, (usize, usize)> = BTreeMap::new();
@@ -1287,8 +1290,23 @@ fn agreement(facts: &[RunFacts], pred: impl Fn(&RunFacts) -> bool) -> (usize, us
         e.0 += usize::from(ok);
         e.1 += 1;
     }
-    let seeds = by_seed.values().filter(|(ok, of)| *of > 0 && *ok >= of.div_ceil(2)).count();
+    let seeds = by_seed.values().filter(|(ok, of)| *of > 0 && *ok >= of / 2 + 1).count();
     (runs, seeds)
+}
+
+#[cfg(test)]
+mod agreement_tests {
+    /// The strict-majority threshold at every cell size the harness has run or could run:
+    /// 1 of 1, 2 of 3, 4 of 6 — and 2 of 2, where "at least half" would have accepted a tie.
+    #[test]
+    fn a_seed_agrees_on_a_strict_majority_of_its_own_runs() {
+        let needed = |of: usize| of / 2 + 1;
+        assert_eq!(needed(1), 1);
+        assert_eq!(needed(2), 2, "one of two is a tie, not a majority");
+        assert_eq!(needed(3), 2, "R's 2 of 3");
+        assert_eq!(needed(4), 3);
+        assert_eq!(needed(6), 4);
+    }
 }
 
 impl Assessment {

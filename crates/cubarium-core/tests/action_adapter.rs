@@ -226,7 +226,7 @@ fn fixture(weights: &Gru32, adapter: ActionAdapter) -> World {
         world.drain_events();
     }
     if adapter != ActionAdapter::CubAct1 {
-        world.set_action_adapter(adapter);
+        world.set_action_adapter(adapter).expect("no policy is attached yet");
     }
     let ids: Vec<_> = world.state.organisms.iter().map(|(id, _)| id).collect();
     let mut attached = 0;
@@ -286,7 +286,7 @@ fn the_adapter_is_transient_and_never_persisted() {
         world.step();
     }
     let before = encode_snapshot(&world.state, "test-build");
-    world.set_action_adapter(ActionAdapter::CubAct2);
+    world.set_action_adapter(ActionAdapter::CubAct2).expect("no policy is attached");
     assert_eq!(world.action_adapter(), ActionAdapter::CubAct2);
     let after = encode_snapshot(&world.state, "test-build");
     assert_eq!(before, after, "naming an adapter must not reach the snapshot");
@@ -298,6 +298,33 @@ fn the_adapter_is_transient_and_never_persisted() {
         ActionAdapter::CubAct1,
         "a resumed world runs the shipped adapter until it is told otherwise"
     );
+}
+
+/// The same contract at the live boundary (Astra, round-5 review P1): once a policy is
+/// attached, the world cannot be switched to an adapter that policy was not authored for. The
+/// refusal names both adapters and leaves the world unchanged; a world whose policies match
+/// the requested adapter, or that has none, may still change. Both directions.
+#[test]
+fn a_live_adapter_change_that_mismatches_an_attached_policy_is_refused_and_atomic() {
+    let mut world = fixture(&remembering_policy(), ActionAdapter::CubAct1);
+    let before = encode_snapshot(&world.state, "test-build");
+    let err = match world.set_action_adapter(ActionAdapter::CubAct2) {
+        Ok(()) => panic!("a cub-act-1 policy must not be decoded under cub-act-2"),
+        Err(e) => e,
+    };
+    assert!(err.contains("cub-act-2") && err.contains("cub-act-1"), "{err}");
+    assert_eq!(world.action_adapter(), ActionAdapter::CubAct1, "unchanged");
+    assert_eq!(encode_snapshot(&world.state, "test-build"), before, "untouched");
+    world.set_action_adapter(ActionAdapter::CubAct1).expect("a matching request is a no-op");
+
+    let mut world = fixture(&remembering_policy(), ActionAdapter::CubAct2);
+    let err = match world.set_action_adapter(ActionAdapter::CubAct1) {
+        Ok(()) => panic!("a cub-act-2 policy must not be decoded under cub-act-1"),
+        Err(e) => e,
+    };
+    assert!(err.contains("cub-act-1") && err.contains("cub-act-2"), "{err}");
+    assert_eq!(world.action_adapter(), ActionAdapter::CubAct2, "unchanged");
+    world.set_action_adapter(ActionAdapter::CubAct2).expect("a matching request is a no-op");
 }
 
 /// A snapshot holding a `cub-act-2` policy cannot be resumed: the adapter is a transient the
@@ -348,7 +375,7 @@ fn a_policy_from_the_other_adapter_is_refused_by_name_at_attachment() {
     assert!(world.neural().get(id).is_none(), "nothing was attached");
 
     // And the other direction: the shipped policy into a `cub-act-2` world.
-    world.set_action_adapter(ActionAdapter::CubAct2);
+    world.set_action_adapter(ActionAdapter::CubAct2).expect("nothing was attached");
     let shipped = Policy::new(remembering_policy());
     let err = world.attach_neural_policy(id, shipped).expect_err("refused");
     assert!(err.contains("schema_digest"), "{err}");

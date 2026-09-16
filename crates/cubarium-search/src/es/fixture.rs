@@ -396,7 +396,9 @@ impl Layout {
         world.set_motor_model(self.motor);
         // And the action adapter, on the same world and before the first tick, for the same
         // reason: transient, so it is not in the staged state and `cub-act-1` changes nothing.
-        world.set_action_adapter(self.adapter);
+        world
+            .set_action_adapter(self.adapter)
+            .map_err(|e| format!("layout {}: {e}", self.name))?;
         world
             .check_invariants()
             .map_err(|e| format!("layout {}: staged world inconsistent: {e}", self.name))?;

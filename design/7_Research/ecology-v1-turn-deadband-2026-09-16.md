@@ -172,6 +172,16 @@ requires `p > 0.1` on *all three* of on-food fraction, dwell and `t_min`, and **
 is significant at p = 0.036 — in the negative direction**. Releasing the band does not leave
 residence untouched; it makes it worse in a specific way.
 
+**The scientific result, stated apart from the registered label (Astra, round-5 review P1).**
+"Mixed" is the honest application of the rule as written, and it stays as history. But the
+hypothesis under test was that releasing turn expression would raise on-food residence or
+worst-layout survival, and a significant deterioration in dwell is evidence *against* that,
+not evidence between support and falsification. Read substantively: **the frozen-policy
+expression hypothesis is refuted at this operating point, and dwell worsened.** The bounded
+training run below is an exploratory follow-up the registered rule permitted, not a
+confirmation that the bottleneck moved to learnability; "the search can exploit the released
+channel" is plausible, "learnability rather than expression" is not identified here.
+
 ### What actually changed
 
 | | `cub-act-1` | `cub-act-2` |
