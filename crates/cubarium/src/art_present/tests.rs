@@ -1660,3 +1660,373 @@ fn a_pivot_with_no_travel_is_spent_over_the_ticks_frames() {
         previous = now;
     }
 }
+
+// --- FW-5: the ring -------------------------------------------------------------------
+//
+// What the presenter must keep on the cube, and what it must do on a ring. These pin the
+// *presenter's* half of the contract; FW-6's `tests/ring_present.rs` is the independent
+// pass, and the picture itself is Wrysk's call.
+
+fn ring() -> Topology {
+    Topology::Ring { w: 320, h: 180 }
+}
+
+fn ring_geom() -> ArtGeometry {
+    ArtGeometry::new(ring(), Scale::ONE)
+}
+
+fn ring_view() -> RenderView {
+    let n = ring().cell_count(Scale::ONE);
+    RenderView {
+        topology: ring(),
+        scale: Scale::ONE,
+        tick: 0,
+        producer: vec![0.0; n],
+        detritus: vec![0.0; n],
+        fruit: vec![0.0; n],
+        wood: vec![0.0; n],
+        plant_reserve: vec![0.0; n],
+        dead_wood: vec![0.0; n],
+        carrion: vec![0.0; n],
+        water: vec![0.0; n],
+        rain: vec![0.0; n],
+        producer_max: 2.0,
+        wood_max: 0.6,
+        organisms: Vec::new(),
+    }
+}
+
+/// The cube's canopy rule is `h >= 1.0` and nothing else, whatever `canopy_top` now is.
+/// Pinned by value at the exact heights a cube cell centre can take.
+#[test]
+fn the_cube_s_canopy_is_still_exactly_the_top_face() {
+    assert_eq!(ArtGeometry::CUBE.canopy_top(), 1.0);
+    for cell in ArtGeometry::CUBE.all_cells() {
+        let h = ArtGeometry::CUBE.height_of(cell);
+        let top = ArtGeometry::CUBE.face_of(cell) == Face::Top;
+        assert_eq!(
+            ArtGeometry::CUBE.band_of(cell) == Band::Canopy,
+            top,
+            "{cell:?} at h = {h}"
+        );
+        // And the free function is the geometry method, for every cell.
+        assert_eq!(band_of(cell), ArtGeometry::CUBE.band_of(cell));
+        assert_eq!(band_of_height(h), ArtGeometry::CUBE.band_of_height(h));
+        assert_eq!(slot_of(cell), ArtGeometry::CUBE.slot_of(cell));
+        assert_eq!(up_of(cell), ArtGeometry::CUBE.up_of(cell));
+        // Radial is the Top face, which is the canopy band, which is "no uphill".
+        assert_eq!(ArtGeometry::CUBE.is_radial(cell), top);
+        assert_eq!(ArtGeometry::CUBE.up_of(cell).is_none(), top);
+    }
+    // A side face's highest cell centre is 0.984375: below 1, so foliage, not canopy.
+    assert_eq!(ArtGeometry::CUBE.band_of_height(0.984_375), Band::Foliage);
+    assert_eq!(ArtGeometry::CUBE.band_of_height(1.0), Band::Canopy);
+}
+
+/// A ring's bands are runs of rows, read from `Topology::height` against `CANOPY_TOP`:
+/// the top 16.5 % canopy, the bottom 33.5 % soil, the half between them foliage.
+#[test]
+fn a_ring_s_bands_are_rows_from_the_topology_s_height() {
+    let geom = ring_geom();
+    assert_eq!(geom.canopy_top(), CANOPY_TOP);
+    let (nx, ny) = geom.cells(Face::Front);
+    assert_eq!((nx, ny), (80, 45));
+    let mut counts = [0usize; 3];
+    let mut last = None;
+    for cy in 0..ny {
+        let band = geom.band_of(geom.cell(Face::Front, 0, cy));
+        // Every column of the same row is in the same band, and the bands run top to
+        // bottom in one block each: canopy, then foliage, then soil, never back.
+        for cx in 0..nx {
+            assert_eq!(geom.band_of(geom.cell(Face::Front, cx, cy)), band, "row {cy}");
+        }
+        let rank = match band {
+            Band::Canopy => 0,
+            Band::Foliage => 1,
+            Band::Soil => 2,
+            Band::Water => unreachable!("water is not a geometric band"),
+        };
+        if let Some(prev) = last {
+            assert!(rank >= prev, "row {cy} went back from {prev} to {rank}");
+        }
+        last = Some(rank);
+        counts[rank] += 1;
+    }
+    assert_eq!(counts, [7, 23, 15], "canopy, foliage, soil rows of 45");
+}
+
+/// Every ring plant is a stalk except in the canopy band, where the art is radial. The
+/// cube reached that through `Face::Top`; a ring has no such chart.
+#[test]
+fn a_ring_s_canopy_slots_are_radial_and_the_rest_stand_up() {
+    let geom = ring_geom();
+    let mut free_headings = std::collections::HashSet::new();
+    for cell in geom.all_cells() {
+        let slot = geom.slot_of(cell);
+        assert_eq!(slot.radial, geom.band_of(cell) == Band::Canopy);
+        // `up` is the constant (0, -1): height falls with v everywhere on a ring.
+        let up = geom.up_of(cell).expect("a ring has no level chart");
+        assert!((up.x - 0.0).abs() < 1e-12 && (up.y + 1.0).abs() < 1e-12, "{up:?}");
+        if slot.radial {
+            free_headings.insert(slot.heading.screen_angle().to_bits());
+        } else {
+            // A stalk faces "up turned a quarter turn", within the hashed jitter.
+            let want = stalk_heading(up).screen_angle();
+            let d = (slot.heading.screen_angle() - want).abs();
+            assert!(d <= HEADING_JITTER_DEG.to_radians() + 1e-12, "{d}");
+        }
+    }
+    assert!(
+        free_headings.len() > 100,
+        "the canopy's headings are free, not one repeated angle: {}",
+        free_headings.len()
+    );
+}
+
+/// Tall columns are chosen along `u` in one pass, and a full column's crown still lands
+/// on the top row of its own foliage band — 9 segments on the cube, 21 on this ring.
+#[test]
+fn ring_columns_run_along_u_and_fill_their_band() {
+    let geom = ring_geom();
+    assert_eq!(ArtGeometry::CUBE.tall_max_segments(Face::Front), TALL_MAX_SEGMENTS);
+    assert_eq!(ArtGeometry::CUBE.tall_step(Face::Front), TALL_STEP);
+    assert_eq!(geom.foliage_rows(Face::Front), Some((7, 29)));
+    assert_eq!(geom.tall_max_segments(Face::Front), 21);
+
+    let columns = geom.tall_columns();
+    assert!(columns.iter().all(|c| c.face == Face::Front), "one chart");
+    let cxs: Vec<u16> = columns.iter().map(|c| c.cx).collect();
+    let mut sorted = cxs.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(cxs, sorted, "in `u` order, each column once");
+    assert!(
+        (8..30).contains(&columns.len()),
+        "about 22 % of 80 columns: {}",
+        columns.len()
+    );
+
+    // The crown of a full column sits on the topmost foliage cell's centre, and a column
+    // of cells at `W_max` is tall enough to get there.
+    let crown = geom.tall_anchor(Face::Front, 0, geom.tall_max_segments(Face::Front) + 1);
+    let top_row = geom.center_of(geom.cell(Face::Front, 0, 7));
+    assert!((crown.v - top_row.v).abs() < 1e-9, "{crown:?} vs {top_row:?}");
+    assert!(geom.tall_rise(Face::Front, geom.tall_max_segments(Face::Front)) <= 1.0);
+    assert_eq!(geom.next_tall(Face::Front, 0, 1.0), geom.tall_max_segments(Face::Front));
+}
+
+/// A stamp anchored beside `u = 0` reaches the far side of the world. The presenter's own
+/// anchors go to the shared unfolding unclipped: nothing here trims a footprint to the
+/// chart, and the wrap is not a rim.
+#[test]
+fn a_slot_beside_the_wrap_draws_on_both_sides() {
+    let geom = ring_geom();
+    let pack = pack();
+    let plant = pack
+        .plants
+        .iter()
+        .find(|p| p.name == FOLIAGE_PLANTS[0])
+        .expect("the pack has lanternstalk");
+    // The first foliage cell of the first column stands beside the wrap; its own slot is
+    // within a pixel of u = 2, and the shared unfolding is what carries its footprint.
+    let cell = geom.cell(Face::Front, 0, 20);
+    let slot = geom.slot_of(cell);
+    assert!(slot.at.u < 3.0, "{:?} is beside the wrap", slot.at);
+
+    // Stamp the same pose twice: once straddling `u = 0` and once in the open middle of
+    // the world, and compare the two images shifted onto each other. If anything in this
+    // presenter clipped a footprint at the chart edge, the two would differ.
+    let stamp = |u: f64| {
+        let mut canvas = Canvas::new(ring(), Scale::ONE);
+        let mut unfolds = Unfolds::new();
+        stamp_layers_cached(
+            &mut canvas,
+            SurfacePoint::new(Face::Front, u, slot.at.v),
+            slot.heading,
+            &[(stage_pose(plant, 2, cell, 0.0), 1.0)],
+            1.0,
+            1.0,
+            Mask::None,
+            Bend::NONE,
+            FLAT_TONE,
+            &mut unfolds,
+        );
+        canvas
+    };
+    let at_wrap = stamp(0.5);
+    let in_middle = stamp(160.5);
+    let mut both = 0;
+    for y in 0..180u16 {
+        for x in 0..320u16 {
+            let a = at_wrap.get(Face::Front, x, y);
+            let b = in_middle.get(Face::Front, (x + 160) % 320, y);
+            assert_eq!(a, b, "({x}, {y}) differs across the wrap");
+            if a != [0.0; 3] {
+                both += 1;
+            }
+        }
+    }
+    assert!(both > 0, "the stamp drew something");
+    let lit = |c: &Canvas, x: u16| (0..180u16).any(|y| c.get(Face::Front, x, y) != [0.0; 3]);
+    assert!((0..4).any(|x| lit(&at_wrap, x)), "ink on the near side of u = 0");
+    assert!(
+        (316..320).any(|x| lit(&at_wrap, x)),
+        "and the same stamp's ink on the far side of the wrap"
+    );
+}
+
+/// Rain falls down the chart in every ring cell — there is no level face to sparkle on —
+/// and a streak at the bottom rim loses its tail instead of wrapping into the top row.
+#[test]
+fn ring_rain_falls_everywhere_and_clips_at_the_rims() {
+    let geom = ring_geom();
+    let (_, ny) = geom.cells(Face::Front);
+    for cy in [0u16, 22, ny - 1] {
+        let cell = geom.cell(Face::Front, 40, cy);
+        let marks = geom.rain_marks(cell, 0, 0.31);
+        assert!(!marks.is_empty(), "row {cy} has rain");
+        for ((x, y), _) in &marks {
+            assert!(*x < 320 && *y < 180, "({x}, {y}) is on the ring");
+            assert!(
+                (*y as i32 - i32::from(cy) * 4).abs() <= 8,
+                "row {cy} streak stayed near its cell, not wrapped"
+            );
+        }
+    }
+    // Rain is drawn anywhere: the whole world, not just the four side faces of a cube.
+    let mut view = ring_view();
+    view.rain = vec![1.0; view.rain.len()];
+    let mut canvas = Canvas::new(ring(), Scale::ONE);
+    let mut presenter = ArtPresenter::for_world(pack(), ring(), Scale::ONE);
+    presenter.observe(&view);
+    presenter.draw(&view, 0.0, &mut canvas);
+    let rain = present::srgb_linear(RAIN_SRGB);
+    for band in [0..20u16, 80..100, 160..180] {
+        assert!(
+            band.clone().any(|y| (0..320).any(|x| {
+                let p = canvas.get(Face::Front, x, y);
+                p[0] > rain[0] * 0.3 && p[2] > rain[2] * 0.3
+            })),
+            "rain marks in rows {band:?}"
+        );
+    }
+}
+
+/// A presenter built for a cube and handed a ring view fits itself to the ring rather
+/// than panicking or drawing 1,280 cells of a 3,600-cell world.
+#[test]
+fn a_cube_presenter_handed_a_ring_view_refits() {
+    let mut presenter = ArtPresenter::new(pack());
+    assert_eq!(presenter.geometry(), ArtGeometry::CUBE);
+    let view = ring_view();
+    presenter.observe(&view);
+    assert_eq!(presenter.geometry(), ring_geom());
+    let mut canvas = Canvas::new(ring(), Scale::ONE);
+    presenter.draw(&view, 0.0, &mut canvas);
+    assert!(canvas.pixels().iter().any(|p| *p != [0.0; 3]), "it drew");
+    // And back again: the cube's own layout returns intact.
+    let cube = empty_view();
+    presenter.observe(&cube);
+    assert_eq!(presenter.geometry(), ArtGeometry::CUBE);
+    let mut cube_canvas = Canvas::cube();
+    presenter.draw(&cube, 0.0, &mut cube_canvas);
+    let mut fresh = Canvas::cube();
+    ArtPresenter::new(pack()).draw(&cube, 0.0, &mut fresh);
+    assert_eq!(cube_canvas.pixels(), fresh.pixels(), "the refit cube is the cube");
+}
+
+/// `canopy_top` is a presenter setting, validated on the way in.
+#[test]
+fn the_canopy_threshold_is_validated_and_refuses_nonsense() {
+    let geom = ring_geom();
+    assert_eq!(geom.with_canopy_top(0.5).canopy_top(), 0.5);
+    assert_eq!(geom.with_canopy_top(0.0).canopy_top(), 0.0);
+    assert_eq!(geom.with_canopy_top(1.0).canopy_top(), 1.0);
+    for bad in [-0.1, 1.000_001, f64::NAN, f64::INFINITY] {
+        assert_eq!(geom.with_canopy_top(bad).canopy_top(), CANOPY_TOP, "{bad}");
+    }
+    // Moving it moves the bands, and only the bands.
+    let low = geom.with_canopy_top(0.4);
+    let rows = |g: ArtGeometry| {
+        (0..45u16)
+            .filter(|&cy| g.band_of(g.cell(Face::Front, 0, cy)) == Band::Canopy)
+            .count()
+    };
+    assert_eq!(rows(geom), 7);
+    assert_eq!(rows(low), 14);
+}
+
+/// The two committed ring captures, rendered deterministically and compared byte for byte.
+///
+/// `#[ignore]`d because it steps two worlds to 3,000 ticks; it is the evidence behind
+/// `crates/cubarium/tests/golden/ring_*.png`, not a per-commit check. Run it with
+///
+/// ```text
+/// cargo test --release -p cubarium --lib -- --ignored ring_goldens
+/// CUBARIUM_WRITE_GOLDEN=1 cargo test --release -p cubarium --lib -- --ignored ring_goldens
+/// ```
+///
+/// the second of which rewrites them. Deterministic where a `--sink png` run is not: the
+/// world is a fixed seed at a fixed tick and the frame is drawn at `f = 0`, so nothing in
+/// it depends on when the render loop happened to stop.
+#[test]
+#[ignore = "steps two worlds to 3,000 ticks; the ring goldens' own evidence"]
+fn the_ring_goldens_are_what_this_presenter_draws() {
+    use cubarium_core::World;
+    use cubarium_core::config::WorldConfig;
+
+    const SEED: u64 = 1;
+    const TICKS: u64 = 3_000;
+
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden");
+    let write = std::env::var_os("CUBARIUM_WRITE_GOLDEN").is_some();
+    for (w, h) in [(320u16, 180u16), (640, 360)] {
+        let topology = Topology::Ring { w, h };
+        let mut cfg = WorldConfig { seed: SEED, ..WorldConfig::default() };
+        cfg.topology = topology;
+        let mut world = World::new(cfg).expect("a legal ring world");
+        for _ in 0..TICKS {
+            world.step();
+        }
+        let view = world.render_view();
+        let mut presenter = ArtPresenter::for_world(pack(), topology, Scale::ONE);
+        presenter.observe(&view);
+        presenter
+            .observe_hunters(&view, &world.hunter_view(), &[])
+            .expect("the shipped pack draws this world's hunters");
+        let mut canvas = Canvas::new(topology, Scale::ONE);
+        presenter.draw(&view, 0.0, &mut canvas);
+        let mut raster = cube_proto::Raster::black(w, h);
+        canvas.encode_raster(&mut raster);
+
+        let path = dir.join(format!("ring_{w}x{h}.png"));
+        if write || !path.exists() {
+            crate::sink::png::write_rgb8_png(
+                &path,
+                u32::from(w),
+                u32::from(h),
+                raster.as_bytes(),
+            )
+            .expect("writing the golden");
+            continue;
+        }
+        let decoder = ::png::Decoder::new(std::io::BufReader::new(
+            std::fs::File::open(&path).expect("the golden"),
+        ));
+        let mut reader = decoder.read_info().expect("a readable golden");
+        let mut buf = vec![0u8; reader.output_buffer_size().expect("a sized golden")];
+        let info = reader.next_frame(&mut buf).expect("the golden's pixels");
+        assert_eq!(
+            (info.width, info.height),
+            (u32::from(w), u32::from(h)),
+            "{}",
+            path.display()
+        );
+        assert_eq!(
+            &buf[..info.buffer_size()],
+            raster.as_bytes(),
+            "{} differs; rerun with CUBARIUM_WRITE_GOLDEN=1 to re-record it",
+            path.display()
+        );
+    }
+}
