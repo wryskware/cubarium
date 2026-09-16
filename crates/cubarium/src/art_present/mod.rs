@@ -454,7 +454,7 @@ impl ArtPresenter {
             detritus: ScalarField::zeros(Topology::Cube, Scale::ONE),
             soil: ScalarField::zeros(Topology::Cube, Scale::ONE),
             litter: vec![0.0; CUBE_CELL_COUNT],
-            layer: Canvas::new(),
+            layer: Canvas::cube(),
             scratch: Vec::new(),
             slots,
             bands,

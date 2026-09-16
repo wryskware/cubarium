@@ -32,7 +32,7 @@ fn legacy_pack() -> ArtPack {
     art
 }
 fn draw(art: &ArtPack, column: &TallColumn, height: f64, seconds: f64, amplitude: f64) -> Canvas {
-    let mut c = Canvas::new();
+    let mut c = Canvas::cube();
     draw_column(
         &mut c,
         column,

@@ -49,7 +49,7 @@ fn anchors(seam: bool) -> [SurfacePoint; 2] {
 fn draw_cost(rig: &Lanternjaw, bodies: usize, mode: Mode, seam: bool) -> (f64, f64) {
     let anchors = anchors(seam);
     let heading = Vec2::new(1.0, 0.0);
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     let mut parts = Vec::new();
     let mut scratch = Vec::new();
     // Warm the allocations the same way a running route does before it is measured.
@@ -154,7 +154,7 @@ fn incremental_cost_on_a_dense_world_frame() {
     let rig = Lanternjaw::new();
     let anchors = anchors(false);
     let heading = Vec2::new(1.0, 0.0);
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     let mut parts = Vec::new();
     let mut scratch = Vec::new();
     presenter.observe(&view);

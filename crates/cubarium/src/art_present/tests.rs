@@ -61,7 +61,7 @@ fn identical_above_horizon(a: &Canvas, b: &Canvas) -> bool {
 /// The art image of a view with no organisms: floor, both grounds, and whatever
 /// plants its fields grow.
 fn art_ground(view: &RenderView) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     ArtPresenter::new(pack()).draw(view, 0.0, &mut canvas);
     canvas
 }
@@ -131,12 +131,12 @@ fn a_body_is_drawn_with_the_rig_its_form_names() {
     o.form = 3;
     view.organisms = vec![o.clone()];
     let mut presenter = ArtPresenter::new(pack());
-    let mut drawn = Canvas::new();
+    let mut drawn = Canvas::cube();
     presenter.observe(&view);
     presenter.draw(&view, 0.0, &mut drawn);
 
     // The same frame stamped by hand with rig 3's rest clip on the same ground.
-    let mut expected = Canvas::new();
+    let mut expected = Canvas::cube();
     let mut bare = view.clone();
     bare.organisms.clear();
     presenter.observe(&bare);
@@ -165,7 +165,7 @@ fn a_body_is_drawn_with_the_rig_its_form_names() {
     );
 
     // With the hue-tercile fallback the body is rig 0 instead, so the images differ.
-    let mut fallback = Canvas::new();
+    let mut fallback = Canvas::cube();
     view.organisms[0].form = u8::MAX;
     presenter.observe(&view);
     presenter.draw(&view, 0.0, &mut fallback);
@@ -280,8 +280,8 @@ fn a_quiet_world_draws_the_m2_image_above_the_horizon() {
     for (i, v) in view.detritus.iter_mut().enumerate() {
         *v = SOIL_SCALE * SOIL_STAGES[0] * (i % 5) as f64 / 5.0;
     }
-    let mut plain = Canvas::new();
-    let mut art = Canvas::new();
+    let mut plain = Canvas::cube();
+    let mut art = Canvas::cube();
     Presenter::new().draw(&view, 0.0, &mut plain);
     let mut presenter = ArtPresenter::new(pack());
     presenter.observe(&view);
@@ -327,7 +327,7 @@ fn each_state_draws_a_body_near_the_organism_and_bud_ends_on_the_last_frame() {
         let mut o = organism(0, 0.5, mode);
         o.gestation = gestation;
         view.organisms = vec![o];
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         // The floor, the (empty) fields and the bare soil band alone, to subtract.
         let plain = art_ground(&empty_view());
         ArtPresenter::new(pack()).draw(&view, 0.0, &mut canvas);
@@ -361,12 +361,12 @@ fn a_juvenile_is_the_same_clip_drawn_smaller() {
     let mut o = organism(0, 0.9, Mode::Seeking);
     o.juvenile = true;
     view.organisms = vec![o.clone()];
-    let mut small = Canvas::new();
+    let mut small = Canvas::cube();
     ArtPresenter::new(pack()).draw(&view, 0.0, &mut small);
 
     o.juvenile = false;
     view.organisms = vec![o];
-    let mut full = Canvas::new();
+    let mut full = Canvas::cube();
     ArtPresenter::new(pack()).draw(&view, 0.0, &mut full);
 
     let floor = art_ground(&empty_view());
@@ -947,7 +947,7 @@ fn one_cell_view(tick: u64, cell: CellId, density: f64) -> RenderView {
 }
 
 fn drawn_with(p: &mut ArtPresenter, view: &RenderView, f: f64) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     p.draw(view, f, &mut canvas);
     canvas
 }
@@ -1443,7 +1443,7 @@ fn a_growth_stamp_takes_the_slots_wind_and_still_never_moves_its_root() {
     // `PLANT_BEND_ROOT` holds the profile at exactly 0 there.
     let axis = SurfacePoint::new(Face::Front, 32.0, 32.0);
     let along = |bend: Bend| {
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         stamp_layers_bent(
             &mut canvas,
             axis,
@@ -1582,7 +1582,7 @@ fn plant_and_body_draw_cost() {
         .collect();
 
     let mut presenter = ArtPresenter::new(pack());
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     presenter.observe(&view);
     // Warm the caches, then time a run of frames.
     for _ in 0..5 {

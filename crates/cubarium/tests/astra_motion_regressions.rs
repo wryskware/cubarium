@@ -133,7 +133,7 @@ fn drawing_at_30_60_or_120_fps_cannot_advance_growth_history() {
     let tall_before: Vec<_> = (0..presenter.columns().len())
         .map(|i| presenter.tall_growth_of(i))
         .collect();
-    let mut image = Canvas::new();
+    let mut image = Canvas::cube();
     for fps in [30, 60, 120] {
         for frame in 0..fps {
             presenter.draw(&rich, f64::from(frame) / f64::from(fps), &mut image);

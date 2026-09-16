@@ -26,7 +26,7 @@ fn legacy_pack() -> ArtPack {
     art
 }
 fn draw(art: &ArtPack, column: &TallColumn, height: f64, seconds: f64, amplitude: f64) -> Canvas {
-    let mut c = Canvas::new();
+    let mut c = Canvas::cube();
     draw_column(
         &mut c,
         column,
@@ -215,8 +215,8 @@ fn strict(old: &ArtPack, new: &ArtPack) -> serde_json::Value {
                             let at = cubarium_surface::SurfacePoint::new(face, u, v);
                             let heading = cubarium_surface::Vec2::new(1., 0.);
                             let pose = cubarium_render::Pose::still(frame);
-                            let mut a = Canvas::new();
-                            let mut b = Canvas::new();
+                            let mut a = Canvas::cube();
+                            let mut b = Canvas::cube();
                             stamp_layers_bent(
                                 &mut a,
                                 at,
@@ -305,7 +305,7 @@ fn exact_material_registration_and_expected_budget_gain() {
                         pick: 0,
                         vine: true,
                     };
-                    let mut a = Canvas::new();
+                    let mut a = Canvas::cube();
                     for f in Face::ALL {
                         for y in 0..64 {
                             for x in 0..64 {
@@ -356,8 +356,8 @@ fn retained_endpoint_chart_preserves_vertex_and_physical_footprint() {
         .unwrap()
         .endpoint;
     let pose = clip.sample(0.);
-    let mut owned = Canvas::new();
-    let mut independent = Canvas::new();
+    let mut owned = Canvas::cube();
+    let mut independent = Canvas::cube();
     let owner = tall_anchor(Face::Front, 0, 9);
     let center = tall_anchor(Face::Front, 0, 10);
     let heading = tall_heading(Face::Front, 0);
@@ -396,7 +396,7 @@ fn retained_endpoint_chart_preserves_vertex_and_physical_footprint() {
             for frame in &clip.frames {
                 for amplitude in [-1.314171379627988, 0., 1.314171379627988] {
                     let center = tall_anchor(face, cx, 10);
-                    let mut c = Canvas::new();
+                    let mut c = Canvas::cube();
                     cubarium_render::stamp_pose_in_chart(
                         &mut c,
                         tall_anchor(face, cx, 9),

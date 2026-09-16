@@ -118,7 +118,7 @@ fn care_flourishes_follow_durable_application_and_boundary_replay_only() {
             1,
         );
         let sample = |rt: &mut CareRuntime| {
-            let mut canvas = Canvas::new();
+            let mut canvas = Canvas::cube();
             rt.effects
                 .draw(command.apply_after_tick + 11, 0.5, &mut canvas);
             let mut frame = Frame::black();
@@ -226,7 +226,7 @@ fn capture_care_flourishes_on_the_authored_world() {
             continue;
         }
         let hash = cubarium_core::snapshot::state_hash(&world.state);
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         presenter.draw(&view, 0.5, &mut canvas);
         for variant in ["base", "flourish"] {
             if variant == "flourish" {

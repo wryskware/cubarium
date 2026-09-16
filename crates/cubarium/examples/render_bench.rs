@@ -254,7 +254,7 @@ fn main() -> Result<()> {
     );
 
     // (a) one thread: draw, encode, and the two together.
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     let mut frame = Frame::black();
     for i in 0..60 {
         show.draw(&view, (i % 20) as f64 / 20.0, &mut canvas);

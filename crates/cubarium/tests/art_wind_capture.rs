@@ -128,7 +128,7 @@ fn spiretree_before_after_capture() {
             for tick in 1..=warm_ticks {
                 p.observe(&view_at(tick));
             }
-            let mut canvas = Canvas::new();
+            let mut canvas = Canvas::cube();
             let mut frame = Frame::black();
             let mut rgb = Vec::new();
             let frames = (20.0 * 60.0) as u64;
@@ -219,7 +219,7 @@ fn wind_and_growth_capture() {
     for tick in 1..=warm_ticks {
         p.observe(&view_at(tick, -1.0));
     }
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     let mut frame = Frame::black();
     let mut rgb = Vec::new();
     let seconds = 36.0;

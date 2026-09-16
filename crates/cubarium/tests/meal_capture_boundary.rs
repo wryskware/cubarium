@@ -22,7 +22,7 @@ fn observe(p: &mut ArtPresenter, view: &RenderView, hunter: HunterView) {
 }
 
 fn draw(p: &mut ArtPresenter, v: &RenderView, f: f64) -> Canvas {
-    let mut c = Canvas::new();
+    let mut c = Canvas::cube();
     p.draw(v, f, &mut c);
     c
 }

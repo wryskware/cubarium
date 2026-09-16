@@ -132,7 +132,7 @@ fn snapped(art: ArtPack, view: &RenderView) -> ArtPresenter {
 }
 
 fn draw(p: &mut ArtPresenter, v: &RenderView, f: f64) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     p.draw(v, f, &mut canvas);
     canvas
 }

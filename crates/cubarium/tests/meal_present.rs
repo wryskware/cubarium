@@ -102,7 +102,7 @@ fn assert_same_canvas(a: &Canvas, b: &Canvas, what: &str) {
 }
 
 fn draw(p: &mut ArtPresenter, v: &RenderView, f: f64) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     p.draw(v, f, &mut canvas);
     canvas
 }

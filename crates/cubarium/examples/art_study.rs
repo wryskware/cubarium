@@ -185,7 +185,7 @@ fn main() -> Result<()> {
         specimens[5].heading = Vec2::new(0.0, -1.0);
         specimens[5].offset = 0.0;
     }
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     let mut frame = Frame::black();
     let mut scratch = Vec::new();
     let mut clock = Clock::with_fps(Instant::now(), args.fps);

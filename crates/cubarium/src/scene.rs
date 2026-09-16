@@ -466,7 +466,7 @@ mod tests {
 
     #[test]
     fn every_scene_lights_more_than_one_face() {
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         let mut scratch = Vec::new();
         for kind in [SceneKind::Body, SceneKind::Vertex, SceneKind::Patch, SceneKind::All] {
             // 20 s of simulation, the capture length the contract asks for.
@@ -487,7 +487,7 @@ mod tests {
         assert_eq!(seam.anchor.face, Face::Front);
         assert!((seam.anchor.u - 63.2).abs() < 1e-12);
 
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         let mut scratch = Vec::new();
         render(&v, 0.0, &mut canvas, &mut scratch);
         let faces = lit_faces(&canvas);
@@ -516,7 +516,7 @@ mod tests {
 
         // A whole tick of motion is 4 px/s * 0.05 s = 0.2 px, so the two stamps differ
         // by a fraction of a pixel: compare the images, not just the anchors.
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         let mut scratch = Vec::new();
         render(&v, 0.0, &mut canvas, &mut scratch);
         let at_zero: Vec<f32> = Face::ALL

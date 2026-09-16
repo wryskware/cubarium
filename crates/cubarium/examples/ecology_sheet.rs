@@ -168,7 +168,7 @@ fn state_view(state: usize, cells: &[CellId]) -> RenderView {
 fn shot(v: &RenderView) -> Frame {
     let mut p = ArtPresenter::new(pack());
     p.observe(v);
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     p.draw(v, 0.0, &mut canvas);
     let mut frame = Frame::black();
     canvas.encode(&mut frame);
@@ -287,7 +287,7 @@ fn recovery(cell: CellId, samples: &[u64], horizon: u64) -> Vec<(u64, Frame, [f6
     }
 
     let mut presenter = ArtPresenter::new(pack());
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     let mut rows = Vec::new();
     let mut removed_at = None;
     // The grazer comes off as soon as the stand is stripped to a seventh of its foliage, so

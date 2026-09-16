@@ -94,7 +94,7 @@ fn transition_draw_cost_at(
     let pack = ArtPack::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/atelier"))
         .expect("shipped art pack");
     let mut presenter = ArtPresenter::new(pack);
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     presenter.observe(&view);
     for _ in 0..5 {
         presenter.draw(&view, 0.0, &mut canvas);

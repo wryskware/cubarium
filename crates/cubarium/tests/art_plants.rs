@@ -80,7 +80,7 @@ fn view(tick: u64, producer: Vec<f64>, detritus: Vec<f64>, water: Vec<f64>) -> R
 /// Observe the view against `fruit` (the accent is paced in `observe`, and a first view
 /// snaps it fully on), then draw the same frame against the same fruit.
 fn draw(p: &mut ArtPresenter, v: &RenderView, fruit: Option<&[f64]>) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     p.observe_with_fruit(v, fruit);
     p.draw_with_fruit(v, 0.0, &mut canvas, fruit);
     canvas
@@ -150,9 +150,9 @@ fn expected_ground(v: &RenderView) -> Canvas {
     use cubarium::art_present::{
         SOIL_HIGH_SRGB, SOIL_LOW_SRGB, SOIL_MAX_BRIGHTNESS, SOIL_MIN_BRIGHTNESS,
     };
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     present::draw_floor(&mut canvas);
-    let mut layer = Canvas::new();
+    let mut layer = Canvas::cube();
     present::draw_ramp_field(
         &mut layer,
         &field_from(&v.producer),
@@ -168,7 +168,7 @@ fn expected_ground(v: &RenderView) -> Canvas {
             *value = 0.0;
         }
     }
-    let mut layer = Canvas::new();
+    let mut layer = Canvas::cube();
     draw_field(&mut layer, &flecks, DETRITUS_SCALE, PALETTE.detritus, false);
     add_scaled(&mut canvas, &layer, |f, x, y| 1.0 - soil_weight(f, x, y));
     let detritus = field_from(&v.detritus);
@@ -496,18 +496,18 @@ fn a_flickering_field_does_not_flicker_the_plant() {
 fn a_frame_without_an_observe_shows_the_ticks_plants_and_changes_nothing_else() {
     let v = view(3, flat(saturation()), flat(SOIL_SCALE), flat(0.0));
     let mut observed = ArtPresenter::new(pack());
-    let mut canvas_a = Canvas::new();
+    let mut canvas_a = Canvas::cube();
     observed.observe(&v);
     observed.draw(&v, 0.0, &mut canvas_a);
     let mut unobserved = ArtPresenter::new(pack());
-    let mut canvas_b = Canvas::new();
+    let mut canvas_b = Canvas::cube();
     unobserved.draw(&v, 0.0, &mut canvas_b);
     assert_same_canvas(&canvas_a, &canvas_b, "observe then draw vs draw alone");
     for cell in CellId::all(Topology::Cube, Scale::ONE) {
         assert_eq!(observed.stage_of(cell), unobserved.stage_of(cell));
     }
     // And a second draw of the same view is identical.
-    let mut canvas_c = Canvas::new();
+    let mut canvas_c = Canvas::cube();
     observed.draw(&v, 0.0, &mut canvas_c);
     assert_same_canvas(&canvas_a, &canvas_c, "two draws of one view");
 }
@@ -795,7 +795,7 @@ fn plant_draw_cost() {
         })
         .collect();
     let mut p = ArtPresenter::new(pack());
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     p.observe(&v);
     for _ in 0..5 {
         p.draw(&v, 0.0, &mut canvas);

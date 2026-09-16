@@ -70,7 +70,7 @@ fn settled(ambient: f64) -> LivingPose {
 }
 
 fn draw(pose: &LivingPose, anchor: SurfacePoint, heading: Vec2, scale: f64) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     Lanternjaw::new().draw_living(
         &mut canvas,
         anchor,
@@ -93,7 +93,7 @@ fn draw_part(pose: &LivingPose, name: PartName, anchor: SurfacePoint, scale: f64
         .find(|p| p.name == name)
         .expect("the part exists");
     let rig = [part.rig_part()];
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     stamp_rig_scaled(
         &mut canvas,
         anchor,

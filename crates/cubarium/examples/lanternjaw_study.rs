@@ -515,7 +515,7 @@ fn main() -> Result<()> {
 
     let rig = Lanternjaw::new();
     let mut bodies = scene_bodies(args.scene);
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     let mut frame = Frame::black();
     let mut scratch = Vec::new();
     let mut parts = Vec::new();

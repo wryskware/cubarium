@@ -700,7 +700,7 @@ fn at_the_strike_the_near_limb_is_over_the_hull_and_its_claw_reaches_past_it() {
             .filter(|p| keep(p.name))
             .map(Part::rig_part)
             .collect();
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         stamp_rig(
             &mut canvas,
             anchor,

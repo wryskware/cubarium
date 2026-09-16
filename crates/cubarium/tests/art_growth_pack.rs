@@ -299,13 +299,13 @@ fn assert_same_canvas(a: &Canvas, b: &Canvas, what: &str) {
 }
 
 fn draw(p: &mut ArtPresenter, v: &RenderView, f: f64) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     p.draw(v, f, &mut canvas);
     canvas
 }
 
 fn draw_fruit(p: &mut ArtPresenter, v: &RenderView, f: f64, fruit: Option<&[f64]>) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     p.draw_with_fruit(v, f, &mut canvas, fruit);
     canvas
 }
@@ -1071,7 +1071,7 @@ fn every_authored_step_moves_less_than_a_fraction_of_a_baked_sample_per_frame_at
             // `jump`: the largest adjacent-sample difference, stamped alone over black at
             // this slot's own anchor, heading and opacity.
             let stamp_alone = |sprite| {
-                let mut canvas = Canvas::new();
+                let mut canvas = Canvas::cube();
                 stamp_pose(
                     &mut canvas,
                     slot.at,
@@ -1464,7 +1464,7 @@ fn capture_the_canopy_steps_as_native_frames() {
         p.observe(&v);
         for k in 0..FRAMES_PER_TICK {
             let f = k as f64 / FRAMES_PER_TICK as f64;
-            let mut canvas = Canvas::new();
+            let mut canvas = Canvas::cube();
             p.draw(&v, f, &mut canvas);
             canvas.encode(&mut frame);
             sink.submit(&frame).unwrap();

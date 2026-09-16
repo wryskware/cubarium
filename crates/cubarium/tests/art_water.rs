@@ -62,7 +62,7 @@ fn view(tick: u64, producer: Vec<f64>, detritus: Vec<f64>, water: Vec<f64>, rain
 }
 
 fn draw_at(p: &mut ArtPresenter, v: &RenderView, f: f64) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     p.observe(v);
     p.draw(v, f, &mut canvas);
     canvas
@@ -628,7 +628,7 @@ fn everything_on_draw_cost() {
     let mut v = view(base, flat(saturation()), flat(1.5), flat(1.0), vec![1.0; CUBE_CELL_COUNT]);
     v.organisms = organisms;
     let mut p = ArtPresenter::new(pack());
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     p.observe(&v);
     p.draw(&v, 0.0, &mut canvas);
     let frames = 60;

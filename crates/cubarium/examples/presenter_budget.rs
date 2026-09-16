@@ -188,7 +188,7 @@ fn main() -> Result<()> {
     }
     let view = world.render_view();
     let mut p = presenter(&art, &world, &view)?;
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     println!(
         "{}\nworld: seed {} warmed {} ticks; population {}, organisms in view {}; art {}",
         args.label,
@@ -260,7 +260,7 @@ fn main() -> Result<()> {
     // --- (B) the composite a cached background would cost ------------------------------
     println!("\n(B) compositing a cached layer instead of rebuilding it");
     let cached = canvas.clone();
-    let mut dst = Canvas::new();
+    let mut dst = Canvas::cube();
     let mut xs = Vec::with_capacity(args.frames);
     for _ in 0..args.frames {
         let t0 = Instant::now();
@@ -430,7 +430,7 @@ fn main() -> Result<()> {
         );
         let frames = args.frames.min(200);
         let one = {
-            let mut c = Canvas::new();
+            let mut c = Canvas::cube();
             draw_ms(&mut p, &view, &mut c, frames)
         };
         row("one presenter, one core", one, 0.0);
@@ -446,7 +446,7 @@ fn main() -> Result<()> {
                 .map(|(p, &cpu)| {
                     s.spawn(move || {
                         pin(&[cpu]);
-                        let mut c = Canvas::new();
+                        let mut c = Canvas::cube();
                         draw_ms(p, view_ref, &mut c, frames)
                     })
                 })

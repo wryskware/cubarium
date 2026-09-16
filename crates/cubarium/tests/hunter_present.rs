@@ -207,7 +207,7 @@ fn step_until(
 }
 
 fn draw(p: &mut ArtPresenter, world: &World, f: f64) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     p.draw(&world.render_view(), f, &mut canvas);
     canvas
 }
@@ -444,8 +444,8 @@ fn an_empty_membership_draws_the_image_a_presenter_never_told_about_hunters_draw
         told.observe_hunters(&view, &world.hunter_view(), &[])
             .unwrap();
         for f in [0.0, 0.5, 0.999] {
-            let mut a = Canvas::new();
-            let mut b = Canvas::new();
+            let mut a = Canvas::cube();
+            let mut b = Canvas::cube();
             plain.draw(&view, f, &mut a);
             told.draw(&view, f, &mut b);
             assert!(
@@ -497,7 +497,7 @@ fn a_member_is_drawn_once_as_the_lanternjaw_by_full_id_and_ordinary_bodies_are_u
     // Drawn once: the atelier rig's pixels at the hunter's root are gone, replaced by the
     // rig's — the plain image's light at the root is not simply added to.
     let rig_only = {
-        let mut c = Canvas::new();
+        let mut c = Canvas::cube();
         let mut p = presenter();
         p.observe(&view);
         p.observe_hunters(&view, &world.hunter_view(), &[]).unwrap();
@@ -587,7 +587,7 @@ fn a_certain_strike_settles_fully_extended_at_the_capture_boundary_and_the_prey_
         .observe_hunters(&view, &world.hunter_view(), &[])
         .unwrap();
     let fresh = {
-        let mut c = Canvas::new();
+        let mut c = Canvas::cube();
         without_prey.draw(&view, 0.5, &mut c);
         c
     };
@@ -600,7 +600,7 @@ fn a_certain_strike_settles_fully_extended_at_the_capture_boundary_and_the_prey_
     // hunter's own restart reconstruction (a fresh presenter reconstructs the strike's end
     // from `entered_from`, which differs from the observed reach by a fraction of a pixel of
     // far-claw lag), whereas before the boundary the whole prey body was there.
-    let mut at_fresh = Canvas::new();
+    let mut at_fresh = Canvas::cube();
     without_prey.draw(&view, 1.0, &mut at_fresh);
     let near_prey = |a: &Canvas, b: &Canvas| -> f32 {
         let (cx, cy) = prey_pos.pixel(Topology::Cube);
@@ -785,15 +785,15 @@ fn a_stale_id_is_ignored_and_dropped_membership_is_forgotten() {
         q.hunter_ids().is_empty(),
         "a stale generation must not resolve to a body"
     );
-    let mut c = Canvas::new();
+    let mut c = Canvas::cube();
     q.draw(&view, 0.5, &mut c);
     // Membership dropped: memory forgotten, the body returns to its ordinary rig.
     p.observe_hunters(&view, &[], &[]).unwrap();
     assert!(p.hunter_ids().is_empty() && p.hunter_of(hunter).is_none());
     let mut plain = presenter();
     plain.observe(&view);
-    let mut a = Canvas::new();
-    let mut b = Canvas::new();
+    let mut a = Canvas::cube();
+    let mut b = Canvas::cube();
     p.draw(&view, 0.5, &mut a);
     plain.draw(&view, 0.5, &mut b);
     assert!(identical(&a, &b));
@@ -1064,7 +1064,7 @@ fn a_repeated_observation_of_the_same_tick_changes_no_fractional_frame() {
     let images_before: Vec<Canvas> = [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0]
         .into_iter()
         .map(|f| {
-            let mut c = Canvas::new();
+            let mut c = Canvas::cube();
             p.draw(&handled.0, f, &mut c);
             c
         })
@@ -1083,7 +1083,7 @@ fn a_repeated_observation_of_the_same_tick_changes_no_fractional_frame() {
             before[k],
             "f {f}"
         );
-        let mut c = Canvas::new();
+        let mut c = Canvas::cube();
         p.draw(&handled.0, f, &mut c);
         assert!(identical(&c, &images_before[k]), "f {f}: the image changed");
     }
@@ -1119,8 +1119,8 @@ fn a_rewound_presenter_reconstructs_hunter_memory_like_a_fresh_one() {
     );
     assert_eq!(a.from, Reach::FOLDED);
     for f in [0.0, 0.5, 1.0] {
-        let mut x = Canvas::new();
-        let mut y = Canvas::new();
+        let mut x = Canvas::cube();
+        let mut y = Canvas::cube();
         reused.draw(&old.0, f, &mut x);
         fresh.draw(&old.0, f, &mut y);
         assert!(
@@ -1243,7 +1243,7 @@ fn a_captured_prey_is_carried_to_the_events_settlement_position_and_meets_the_cl
     fresh
         .observe_hunters(&view, &world.hunter_view(), &[])
         .unwrap();
-    let mut none = Canvas::new();
+    let mut none = Canvas::cube();
     fresh.draw(&view, 0.999, &mut none);
     assert!(
         differing_near(&before, &none, at, 3.0) > 0,
@@ -1299,7 +1299,7 @@ fn a_capture_at_the_open_rim_draws_nothing_below_it_and_a_vertex_hunt_does_not_p
     let view = world.render_view();
     let mut plain = presenter();
     plain.observe(&view);
-    let mut base = Canvas::new();
+    let mut base = Canvas::cube();
     plain.draw(&view, 0.5, &mut base);
     for (f, x, y) in every_pixel() {
         if f != Face::Front {
@@ -1428,9 +1428,9 @@ fn the_render_rate_and_repeated_draws_change_neither_the_image_nor_the_world() {
     // Common instants of 30, 60 and 120 Hz within one tick (DT = 50 ms): f = 0, 1/3, 2/3 …
     let mut images = Vec::new();
     for f in [0.0, 1.0 / 3.0, 2.0 / 3.0] {
-        let mut a = Canvas::new();
+        let mut a = Canvas::cube();
         p.draw(&view, f, &mut a);
-        let mut b = Canvas::new();
+        let mut b = Canvas::cube();
         p.draw(&view, f, &mut b);
         assert!(identical(&a, &b), "a repeated draw at f {f} differs");
         images.push(a);
@@ -1815,7 +1815,7 @@ fn a_growing_hunter_is_drawn_at_the_interpolated_scale_and_exactly_at_the_publis
     assert_eq!(m.state_at(31, 0.0).2, 0.5);
     assert_eq!(m.state_at(31, 1.0).2, 0.6);
     let image = |p: &mut ArtPresenter, f: f64| {
-        let mut c = Canvas::new();
+        let mut c = Canvas::cube();
         p.draw(&view, f, &mut c);
         c
     };
@@ -1920,9 +1920,9 @@ fn a_capture_across_a_seam_carries_the_prey_over_the_seam_on_screen() {
         .collect();
     let view = world.render_view();
     for (f, pose) in &poses {
-        let mut with = Canvas::new();
+        let mut with = Canvas::cube();
         a.draw(&view, *f, &mut with);
-        let mut without = Canvas::new();
+        let mut without = Canvas::cube();
         b.draw(&view, *f, &mut without);
         let lit: Vec<SurfacePoint> = every_pixel()
             .filter(|&(face, x, y)| with.get(face, x, y) != without.get(face, x, y))
@@ -1966,9 +1966,9 @@ fn a_capture_across_a_seam_carries_the_prey_over_the_seam_on_screen() {
             );
         }
     }
-    let mut with = Canvas::new();
+    let mut with = Canvas::cube();
     a.draw(&view, 1.0, &mut with);
-    let mut without = Canvas::new();
+    let mut without = Canvas::cube();
     b.draw(&view, 1.0, &mut without);
     assert!(identical(&with, &without), "gone at the boundary");
     assert_eq!(
@@ -2021,7 +2021,7 @@ fn capture_a_seam_crossing_capture_as_native_frames() {
         let per_tick = if crossing { 12 } else { 3 };
         for k in 0..per_tick {
             let f = f64::from(k) / f64::from(per_tick);
-            let mut canvas = Canvas::new();
+            let mut canvas = Canvas::cube();
             p.draw(&view, f, &mut canvas);
             canvas.encode(&mut frame);
             sink.submit(&frame).unwrap();
@@ -2072,7 +2072,7 @@ fn capture_a_real_attack_as_native_frames() {
         phase_log.push_str(&format!("{} {:?}\n", view.tick, phase));
         for k in 0..3 {
             let f = f64::from(k) / 3.0;
-            let mut canvas = Canvas::new();
+            let mut canvas = Canvas::cube();
             p.draw(&view, f, &mut canvas);
             canvas.encode(&mut frame);
             sink.submit(&frame).unwrap();
@@ -2113,7 +2113,7 @@ fn draw_cost_with_hunters() {
         let mut without = presenter();
         without.observe(&view);
         let time = |p: &mut ArtPresenter| {
-            let mut canvas = Canvas::new();
+            let mut canvas = Canvas::cube();
             let start = std::time::Instant::now();
             for k in 0..120 {
                 p.draw(&view, f64::from(k % 3) / 3.0, &mut canvas);

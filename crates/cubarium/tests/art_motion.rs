@@ -194,13 +194,13 @@ fn observe_draw(p: &mut ArtPresenter, v: &RenderView, f: f64) -> Canvas {
 }
 
 fn draw(p: &mut ArtPresenter, v: &RenderView, f: f64) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     p.draw(v, f, &mut canvas);
     canvas
 }
 
 fn draw_fruit(p: &mut ArtPresenter, v: &RenderView, f: f64, fruit: Option<&[f64]>) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     p.draw_with_fruit(v, f, &mut canvas, fruit);
     canvas
 }
@@ -284,7 +284,7 @@ fn clip_sample_brackets_each_instant_and_wraps_a_loop_without_a_step() {
 
 /// Stamp one tile over black, where the composite is exactly linear in the sampled pose.
 fn stamp_alone(pose: Pose<'_>, anchor: SurfacePoint) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     stamp_pose(
         &mut canvas,
         anchor,
@@ -726,7 +726,7 @@ fn the_render_fraction_and_repeated_draws_never_move_the_growth() {
         let v = if tick == 0 { bare_view(0) } else { rich_view(tick) };
         thirds.observe(&v);
         halves.observe(&v);
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         for frame in 0..FRAMES_PER_TICK {
             thirds.draw(&v, frame as f64 / FRAMES_PER_TICK as f64, &mut canvas);
         }
@@ -1859,7 +1859,7 @@ fn stamp_tile(sprite: &Sprite, mask: Mask, background: &Canvas) -> Canvas {
 fn a_crown_cap_keeps_its_own_art_and_drops_the_trunk_rows_it_merely_repeats() {
     let art = pack();
     let white = {
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         for (f, x, y) in every_pixel() {
             canvas.set(f, x, y, [1.0, 1.0, 1.0]);
         }
@@ -1976,7 +1976,7 @@ fn growth_sequence_capture() {
     };
 
     let mut p = ArtPresenter::new(pack());
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     let mut frame = Frame::black();
     let mut rgb = Vec::new();
     let seconds = 45.0;

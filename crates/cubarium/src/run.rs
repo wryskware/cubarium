@@ -104,7 +104,7 @@ pub fn drive(
     fps: u32,
     stop: &AtomicBool,
 ) -> Result<RunStats> {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     let mut scratch: Vec<PixelImage> = Vec::new();
     let mut frame = Frame::black();
     let start = Instant::now();

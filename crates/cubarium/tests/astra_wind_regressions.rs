@@ -173,7 +173,7 @@ fn shipped_lanternstalk_root_contact_does_not_move_under_added_wind() {
     for (stage, clip) in plant.stages.iter().enumerate() {
         let sprite = &clip.frames[0];
         let paint = |bend| {
-            let mut canvas = Canvas::new();
+            let mut canvas = Canvas::cube();
             stamp_layers_bent(
                 &mut canvas,
                 SurfacePoint::new(Face::Front, 32.0, 32.0),

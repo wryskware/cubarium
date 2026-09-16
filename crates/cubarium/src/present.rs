@@ -535,7 +535,7 @@ mod tests {
         let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 4, 4).index();
         view.detritus[cell] = DETRITUS_THRESHOLD;
         let mut p = Presenter::new();
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         p.draw(&view, 0.0, &mut canvas);
         assert!(
             (total(&canvas) - floor_total()).abs() < 1e-3,
@@ -571,7 +571,7 @@ mod tests {
             *v = view.producer_max;
         }
         let mut p = Presenter::new();
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         p.draw(&view, 0.0, &mut canvas);
         // A saturated field paints the cyan end at the ramp's maximum brightness everywhere,
         // over the floor.
@@ -606,7 +606,7 @@ mod tests {
     #[test]
     fn the_floor_is_under_every_pixel_and_nothing_else_is() {
         let mut p = Presenter::new();
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         p.draw(&empty_view(), 0.0, &mut canvas);
         for face in Face::ALL {
             for y in 0..64u16 {
@@ -624,7 +624,7 @@ mod tests {
         o.fed = false;
         view.organisms = vec![o.clone()];
         let mut p = Presenter::new();
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         p.draw(&view, 0.0, &mut canvas);
         let unfed = total(&canvas);
 
@@ -687,7 +687,7 @@ mod tests {
     #[test]
     fn an_empty_world_paints_only_the_floor() {
         let mut p = Presenter::new();
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         p.draw(&empty_view(), 0.0, &mut canvas);
         assert!((total(&canvas) - floor_total()).abs() < 1e-3, "{}", total(&canvas));
     }
@@ -812,7 +812,7 @@ mod tests {
         o.moved = vec![seg(Face::Front, (20.0, 32.0), (40.0, 32.0))];
         view.organisms = vec![o];
         let mut p = Presenter::new();
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
 
         let centroid = |canvas: &Canvas| {
             let (mut sum, mut weight) = (0.0f64, 0.0f64);

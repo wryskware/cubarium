@@ -160,7 +160,7 @@ fn total_light(c: &Canvas) -> f64 {
 }
 
 fn draw_art(p: &mut ArtPresenter, v: &RenderView, f: f64) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     p.observe(v);
     p.draw(v, f, &mut canvas);
     canvas
@@ -560,7 +560,7 @@ fn an_empty_quiet_world_draws_exactly_the_m2_image_above_the_horizon() {
     let art_canvas = draw_art(&mut art, &v, 0.5);
 
     let mut old = Presenter::new();
-    let mut old_canvas = Canvas::new();
+    let mut old_canvas = Canvas::cube();
     old.observe(&v);
     old.draw(&v, 0.5, &mut old_canvas);
 
@@ -595,7 +595,7 @@ fn a_rich_cell_adds_a_plant_and_nothing_else() {
     let art_canvas = draw_art(&mut art, &v, 0.0);
 
     let mut old = Presenter::new();
-    let mut old_canvas = Canvas::new();
+    let mut old_canvas = Canvas::cube();
     old.observe(&v);
     old.draw(&v, 0.0, &mut old_canvas);
 

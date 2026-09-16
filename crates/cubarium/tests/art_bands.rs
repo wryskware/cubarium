@@ -70,7 +70,7 @@ fn flat(v: f64) -> Vec<f64> {
 }
 
 fn draw(v: &RenderView) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     ArtPresenter::new(pack()).draw(v, 0.0, &mut canvas);
     canvas
 }
@@ -124,7 +124,7 @@ fn filtered(field: &ScalarField, face: Face, x: u16, y: u16) -> f64 {
 /// The whole ground of the art image — floor, the foliage/canopy layers faded out by the
 /// horizon, and the soil ground faded in by it — with no motifs and no bodies.
 fn expected_ground(v: &RenderView) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     present::draw_floor(&mut canvas);
 
     let producer = field_from(&v.producer);
@@ -137,7 +137,7 @@ fn expected_ground(v: &RenderView) -> Canvas {
     let detritus = field_from(&v.detritus);
 
     // The decided producer ramp and the decided flecks, each scaled by `1 - w_soil`.
-    let mut layer = Canvas::new();
+    let mut layer = Canvas::cube();
     present::draw_ramp_field(
         &mut layer,
         &producer,
@@ -147,7 +147,7 @@ fn expected_ground(v: &RenderView) -> Canvas {
         true,
     );
     add_scaled(&mut canvas, &layer, |f, x, y| 1.0 - soil_weight(f, x, y));
-    let mut layer = Canvas::new();
+    let mut layer = Canvas::cube();
     draw_field(&mut layer, &flecks, DETRITUS_SCALE, PALETTE.detritus, false);
     add_scaled(&mut canvas, &layer, |f, x, y| 1.0 - soil_weight(f, x, y));
 
@@ -361,7 +361,7 @@ fn a_saturated_world_with_no_detritus_still_has_a_bare_soil_band() {
     assert!(foliage_px > 1_000, "only {foliage_px} foliage pixels were compared");
 
     // The soil is genuinely darker than the lit foliage above it: that is the picture.
-    let mut ramp_only = Canvas::new();
+    let mut ramp_only = Canvas::cube();
     present::draw_floor(&mut ramp_only);
     present::draw_ramp_field(
         &mut ramp_only,
@@ -417,7 +417,7 @@ fn the_foliage_ground_is_the_decided_image_and_the_soil_never_flecks() {
 
     // Above the horizon, the ground is exactly floor + ramp + flecks, drawn with the
     // `present` helpers the M2 image uses.
-    let mut foliage = Canvas::new();
+    let mut foliage = Canvas::cube();
     present::draw_floor(&mut foliage);
     present::draw_ramp_field(
         &mut foliage,
@@ -533,7 +533,7 @@ fn band_draw_cost() {
         .collect();
 
     let mut presenter = ArtPresenter::new(pack());
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     for _ in 0..5 {
         presenter.draw(&v, 0.0, &mut canvas);
     }

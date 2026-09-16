@@ -73,7 +73,7 @@ fn max_diff(a: &Canvas, b: &Canvas) -> f32 {
 }
 
 fn filled(rgb: [f32; 3]) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     for (f, x, y) in every_pixel() {
         canvas.set(f, x, y, rgb);
     }
@@ -97,7 +97,7 @@ fn body(seconds: f64, mode: Mode) -> Vec<Part> {
 }
 
 fn drawn(seconds: f64, mode: Mode, anchor: SurfacePoint, heading: Vec2, opacity: f32) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     Lanternjaw::new().draw(
         &mut canvas,
         anchor,
@@ -612,7 +612,7 @@ fn parts_and_draw_are_pure_functions_of_the_time_and_the_mode() {
         let mut second = filled([0.03, 0.02, 0.07]);
         rig.draw(&mut first, anchor, Vec2::new(0.6, -0.8), 3.32, Mode::Hunt, 0.9, &mut parts, &mut scratch);
         // Draw something else with the same buffers, then repeat the original.
-        let mut junk = Canvas::new();
+        let mut junk = Canvas::cube();
         rig.draw(&mut junk, mid(), forward(), 1.0, Mode::Bud, 1.0, &mut parts, &mut scratch);
         rig.draw(&mut second, anchor, Vec2::new(0.6, -0.8), 3.32, Mode::Hunt, 0.9, &mut parts, &mut scratch);
         assert_identical(&first, &second, &format!("a repeated draw at {what}"));
@@ -873,8 +873,8 @@ fn at_the_strike_the_near_limb_is_over_the_hull_and_the_far_limb_under_it() {
     let hull_black = stamp_only(&parts, &HULL, anchor, heading, 1.0, [0.0; 3]);
     let hull_white = stamp_only(&parts, &HULL, anchor, heading, 1.0, [1.0; 3]);
 
-    assert!(max_diff(&far_only, &Canvas::new()) > 0.01, "the far limb painted nothing");
-    assert!(max_diff(&near_only, &Canvas::new()) > 0.01, "the near limb painted nothing");
+    assert!(max_diff(&far_only, &Canvas::cube()) > 0.01, "the far limb painted nothing");
+    assert!(max_diff(&near_only, &Canvas::cube()) > 0.01, "the near limb painted nothing");
 
     // The hull's coverage, exactly: over black the pixel is `c`, over white it is
     // `c + (1 − c.a)`, so `c.a = 1 − (white − black)`.
@@ -905,7 +905,7 @@ fn at_the_strike_the_near_limb_is_over_the_hull_and_the_far_limb_under_it() {
         offset: far_light.offset,
         layer: 9,
     });
-    let mut far_on_top = Canvas::new();
+    let mut far_on_top = Canvas::cube();
     stamp_rig(&mut far_on_top, anchor, heading, &[(&wrong_depth[..], 1.0)], 1.0, &mut Vec::new());
 
     let mut hidden = 0usize;
@@ -962,7 +962,7 @@ fn at_the_strike_the_near_limb_is_over_the_hull_and_the_far_limb_under_it() {
         .collect();
     let near_part = part_of(&parts, PartName::NearLimb);
     behind.insert(0, RigPart { sprite: &near_part.sprite, offset: near_part.offset, layer: 0 });
-    let mut near_at_back = Canvas::new();
+    let mut near_at_back = Canvas::cube();
     stamp_rig(&mut near_at_back, anchor, heading, &[(&behind[..], 1.0)], 1.0, &mut Vec::new());
 
     let overlap: Vec<(Face, u16, u16)> = every_pixel()
@@ -1350,7 +1350,7 @@ fn a_fractional_anchor_moves_the_body_by_sub_pixel_brightness_only() {
         }
         let one = |u: f64| {
             let rig = [part.rig_part()];
-            let mut canvas = Canvas::new();
+            let mut canvas = Canvas::cube();
             stamp_rig(
                 &mut canvas,
                 SurfacePoint::new(Face::Front, u, 32.5),
@@ -1450,7 +1450,7 @@ fn move_never_jumps_more_than_the_wave_and_the_gait_allow_in_one_frame() {
     let mut counted = 0usize;
 
     for seconds in frames() {
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         rig.draw(&mut canvas, mid(), forward(), seconds, Mode::Move, 1.0, &mut parts, &mut scratch);
         for face in Face::ALL {
             if face == Face::Front {

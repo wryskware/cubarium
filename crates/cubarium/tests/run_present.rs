@@ -133,14 +133,14 @@ fn the_presenter_paints_only_what_the_spec_lists() {
     let view = world.render_view();
     let mut presenter = Presenter::new();
     presenter.observe(&view);
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     presenter.draw(&view, 0.0, &mut canvas);
 
     // The same fields with the organisms taken out: whatever the two images differ by is
     // exactly the bodies and their trails, whatever hue those bodies happen to carry.
     let mut fields_only = view.clone();
     fields_only.organisms.clear();
-    let mut substrate = Canvas::new();
+    let mut substrate = Canvas::cube();
     let mut blank = Presenter::new();
     blank.draw(&fields_only, 0.0, &mut substrate);
 

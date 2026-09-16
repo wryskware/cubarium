@@ -267,7 +267,7 @@ mod tests {
     }
 
     fn frame(effects: &mut CareEffects, tick: u64, fraction: f64) -> Frame {
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         effects.draw(tick, fraction, &mut canvas);
         let mut frame = Frame::black();
         canvas.encode(&mut frame);
@@ -284,7 +284,7 @@ mod tests {
 
     #[test]
     fn no_input_is_byte_identical_even_on_a_nonempty_canvas() {
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         for face in Face::ALL {
             for y in 0..64 {
                 for x in 0..64 {
@@ -396,7 +396,7 @@ mod tests {
         let (old, receipt) = pair(CareKind::Feed, 1, 1);
         effects.observe(&old, &receipt);
         assert_eq!(effects.events.len(), MAX_EVENTS);
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         effects.draw(1001, 0.5, &mut canvas);
         assert!(effects.scratch.len() < 400);
         canvas.clear();
@@ -418,7 +418,7 @@ mod tests {
                 .as_bytes()
                 .iter()
                 .all(|&b| b == 0));
-            let mut tiny = Canvas::new();
+            let mut tiny = Canvas::cube();
             effects.draw(21, 1e-4, &mut tiny);
             assert!(light(&tiny) < 1e-7);
             let moving = frame(&mut effects, 29, 0.2);
@@ -426,7 +426,7 @@ mod tests {
             assert_eq!(moving.as_bytes(), frame(&mut effects, 29, 0.2).as_bytes());
             assert_ne!(moving.as_bytes(), frame(&mut effects, 29, 0.8).as_bytes());
             let last = 20 + (effects.events[0].duration() / DT).round() as u64;
-            let mut almost = Canvas::new();
+            let mut almost = Canvas::cube();
             effects.draw(last, 1.0 - 1e-4, &mut almost);
             assert!(light(&almost) < 1e-7);
             assert!(frame(&mut effects, last, 1.0)
@@ -455,9 +455,9 @@ mod tests {
         a.observe(&command, &full);
         let mut b = CareEffects::default();
         b.observe(&command, &half);
-        let mut ca = Canvas::new();
+        let mut ca = Canvas::cube();
         a.draw(11, 0.5, &mut ca);
-        let mut cb = Canvas::new();
+        let mut cb = Canvas::cube();
         b.draw(11, 0.5, &mut cb);
         assert!((light(&cb) / light(&ca) - 0.5).abs() < 1e-6);
         let expected = frame(&mut a, 11, 0.5);
@@ -492,7 +492,7 @@ mod tests {
                     };
                     let mut effects = CareEffects::default();
                     effects.observe(&command, &receipt);
-                    let mut canvas = Canvas::new();
+                    let mut canvas = Canvas::cube();
                     effects.draw(15, 0.5, &mut canvas);
                     assert!(light(&canvas) > 0.0, "{face:?} {u},{v} {kind:?}");
                     for f in Face::ALL {
@@ -523,12 +523,12 @@ mod tests {
         let (mut command, receipt) = pair(CareKind::Feed, 1, 0);
         let mut flat = CareEffects::default();
         flat.observe(&command, &receipt);
-        let mut reference = Canvas::new();
+        let mut reference = Canvas::cube();
         flat.draw(23, 0.5, &mut reference);
         command.target.v = 63.0;
         let mut rim = CareEffects::default();
         rim.observe(&command, &receipt);
-        let mut cropped = Canvas::new();
+        let mut cropped = Canvas::cube();
         rim.draw(23, 0.5, &mut cropped);
         for y in 31..64 {
             for x in 0..64 {
@@ -542,7 +542,7 @@ mod tests {
         command.target.u = 63.0;
         let mut seam = CareEffects::default();
         seam.observe(&command, &receipt);
-        let mut across = Canvas::new();
+        let mut across = Canvas::cube();
         seam.draw(23, 0.5, &mut across);
         for y in 0..64 {
             for x in 25..40 {

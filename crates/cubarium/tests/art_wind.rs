@@ -184,7 +184,7 @@ fn observe_draw(p: &mut ArtPresenter, v: &RenderView, f: f64) -> Canvas {
 }
 
 fn draw(p: &mut ArtPresenter, v: &RenderView, f: f64) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     p.draw(v, f, &mut canvas);
     canvas
 }
@@ -702,9 +702,9 @@ fn every_shipped_plant_and_column_frame_draws_completely_at_its_own_budget() {
                     "{name}: the family budget {admitted} is over this frame's own headroom"
                 );
                 for (what, anchor) in anchors {
-                    let mut tight = Canvas::new();
+                    let mut tight = Canvas::cube();
                     stamp(&mut tight, frame, anchor, Vec2::new(0.8, -0.6), 1.0, Mask::None, bend);
-                    let mut wide = Canvas::new();
+                    let mut wide = Canvas::cube();
                     stamp_layers_bent_with_radius(
                         &mut wide,
                         anchor,
@@ -989,7 +989,7 @@ fn draw_striped_column(
     amplitude: f64,
     vine: bool,
 ) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     let heading = tall_heading(column.face, column.cx);
     let grown = tall_grown_px(height);
     let bend_at = |i: f64| Bend {
@@ -1188,14 +1188,14 @@ fn the_painted_root_row_of_every_side_species_is_identical_windy_and_calm() {
             .collect();
         for (which, clip) in clips.iter().enumerate() {
             for frame in clip.frames.iter().step_by(6) {
-                let mut calm = Canvas::new();
+                let mut calm = Canvas::cube();
                 stamp(&mut calm, frame, anchor, Vec2::new(1.0, 0.0), MOTIF_OPACITY, Mask::None, Bend::NONE);
                 let painted = (24..40u16)
                     .any(|x| calm.get(Face::Front, x, root_rows[0]) != [0.0; 3]);
                 for sign in [-1.0, 1.0] {
                     let bend = plant_bend(tip, Vec2::new(sign, 0.0), Vec2::new(1.0, 0.0));
                     assert!((bend.amplitude.abs() - tip).abs() < 1e-12, "the fixture's bend must be at full tip");
-                    let mut windy = Canvas::new();
+                    let mut windy = Canvas::cube();
                     stamp(&mut windy, frame, anchor, Vec2::new(1.0, 0.0), MOTIF_OPACITY, Mask::None, bend);
                     for &y in &root_rows {
                         for x in 20..44u16 {
@@ -1336,7 +1336,7 @@ fn thirty_sixty_and_a_hundred_and_twenty_fps_draw_the_same_simulated_instant_ali
         assert_same_canvas(&images[0].1, image, &format!("{fps} fps against 30 fps"));
     }
     assert!(
-        max_diff(&images[0].1, &Canvas::new()) > 0.01,
+        max_diff(&images[0].1, &Canvas::cube()) > 0.01,
         "the fixture drew an empty cube"
     );
 }
@@ -1499,12 +1499,12 @@ fn a_v4_pack_still_draws_and_the_growth_clip_is_a_non_looping_pair_of_endpoints(
     let v = rich_view(tick);
     let mut p = snapped(v4, &v);
     let image = draw(&mut p, &v, 0.0);
-    assert!(max_diff(&image, &Canvas::new()) > 0.05, "a v4 pack drew nothing");
+    assert!(max_diff(&image, &Canvas::cube()) > 0.05, "a v4 pack drew nothing");
 }
 
 /// One sprite stamped alone, for comparing two frames of a clip.
 fn frame_image(sprite: &Sprite) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     stamp(
         &mut canvas,
         sprite,
@@ -1556,7 +1556,7 @@ fn build_column(
     floor2: f64,
     top: &dyn Fn(u8) -> f64,
 ) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     let heading = tall_heading(column.face, column.cx);
     let grown = tall_grown_px(height);
     let mut part = |sprite: &Sprite, i: f64, mask: Mask| {

@@ -104,7 +104,7 @@ fn both_versions_draw_the_same_supplied_state_to_the_byte() {
         let view = world.render_view();
         art.observe(&view);
         art.observe_hunters(&view, &world.hunter_view(), &[]).expect("the adapter accepts it");
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         art.draw(&view, 0.0, &mut canvas);
         let mut frame = Frame::black();
         canvas.encode(&mut frame);

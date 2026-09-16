@@ -109,7 +109,7 @@ fn main() {
     // Per id: (onsets in presentation seconds, gaps between fed ticks in ticks, first tick fed seen).
     let mut bouts: BTreeMap<String, (Vec<f64>, Vec<u64>, Option<u64>)> = BTreeMap::new();
     let mut receipt = serde_json::Value::Null;
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     let mut frame = Frame::black();
     let mut rgb = Vec::new();
     let mut written = 0u64;

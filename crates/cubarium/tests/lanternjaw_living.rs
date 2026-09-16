@@ -142,7 +142,7 @@ fn lit_faces(image: &Canvas) -> usize {
 }
 
 fn filled(rgb: [f32; 3]) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     for (f, x, y) in every_pixel() {
         canvas.set(f, x, y, rgb);
     }
@@ -172,7 +172,7 @@ fn living(pose: &LivingPose) -> Vec<Part> {
 }
 
 fn drawn_living(pose: &LivingPose, anchor: SurfacePoint, heading: Vec2, scale: f64) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     Lanternjaw::new().draw_living(
         &mut canvas,
         anchor,
@@ -201,7 +201,7 @@ fn stamp_subset(
         .filter(|p| keep.contains(&p.name))
         .map(Part::rig_part)
         .collect();
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     stamp_rig_scaled(
         &mut canvas,
         anchor,
@@ -1891,7 +1891,7 @@ fn draw_living_refuses_a_scale_outside_the_admitted_range() {
         .into_iter()
         .map(|scale| {
             let refused = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                let mut canvas = Canvas::new();
+                let mut canvas = Canvas::cube();
                 rig.draw_living(
                     &mut canvas,
                     mid(),
@@ -1912,7 +1912,7 @@ fn draw_living_refuses_a_scale_outside_the_admitted_range() {
         .into_iter()
         .map(|scale| {
             let refused = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                let mut canvas = Canvas::new();
+                let mut canvas = Canvas::cube();
                 rig.draw_living(
                     &mut canvas,
                     mid(),
@@ -2183,7 +2183,7 @@ fn the_living_body_is_a_pure_function_of_its_pose_at_every_frame_rate() {
             &mut parts,
             &mut scratch,
         );
-        let mut junk = Canvas::new();
+        let mut junk = Canvas::cube();
         rig.draw_living(
             &mut junk,
             mid(),

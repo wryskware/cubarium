@@ -106,7 +106,7 @@ fn canopy_pilot() -> CellId {
 fn snapped(v: &RenderView) -> Canvas {
     let mut p = ArtPresenter::new(pack());
     p.observe(v);
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     p.draw(v, 0.0, &mut canvas);
     canvas
 }
@@ -540,7 +540,7 @@ const EXCESS_BOUND: f32 = 0.05;
 /// frame to the last (so a test can show the sequence actually did something).
 fn worst_frame_step(states: &dyn Fn(u64) -> RenderView, ticks: u64) -> (f32, f32) {
     let mut p = ArtPresenter::new(pack());
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     let mut previous: Option<Canvas> = None;
     let mut first: Option<Canvas> = None;
     let mut worst = 0.0f32;
@@ -639,10 +639,10 @@ fn drawing_mutates_nothing_and_re_observing_a_tick_is_idempotent() {
         )
     };
     let before = state(&p);
-    let mut a = Canvas::new();
+    let mut a = Canvas::cube();
     p.draw(&v, 0.5, &mut a);
     for _ in 0..8 {
-        let mut b = Canvas::new();
+        let mut b = Canvas::cube();
         p.draw(&v, 0.5, &mut b);
         assert!(differing(&a, &b).is_empty(), "a repeated draw moved");
     }
@@ -653,7 +653,7 @@ fn drawing_mutates_nothing_and_re_observing_a_tick_is_idempotent() {
     p.observe(&v);
     p.observe(&v);
     assert_eq!(once, state(&p), "re-observing a tick advanced it");
-    let mut c = Canvas::new();
+    let mut c = Canvas::cube();
     p.draw(&v, 0.5, &mut c);
     assert!(
         differing(&a, &c).is_empty(),
@@ -1116,7 +1116,7 @@ fn the_foliage_shoulder_is_overridable_for_a_study_and_ships_unchanged() {
     let shot = |full: f64| {
         let mut p = ArtPresenter::new(pack()).with_foliage_full(full);
         p.observe(&bright);
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         p.draw(&bright, 0.0, &mut canvas);
         canvas
     };
@@ -1130,7 +1130,7 @@ fn the_foliage_shoulder_is_overridable_for_a_study_and_ships_unchanged() {
     let at = |full: f64| {
         let mut p = ArtPresenter::new(pack()).with_foliage_full(full);
         p.observe(&average);
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         p.draw(&average, 0.0, &mut canvas);
         canvas
     };

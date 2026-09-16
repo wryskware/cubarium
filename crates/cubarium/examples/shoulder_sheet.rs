@@ -190,7 +190,7 @@ fn foliage_cell() -> CellId {
 fn shot(v: &RenderView, full: f64) -> Frame {
     let mut p = ArtPresenter::new(pack()).with_foliage_full(full);
     p.observe(v);
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     p.draw(v, 0.0, &mut canvas);
     let mut frame = Frame::black();
     canvas.encode(&mut frame);
@@ -241,7 +241,7 @@ fn encode(canvas: &Canvas) -> Frame {
 /// a tick, returning the largest per-channel step between consecutive frames.
 fn worst_frame_step(full: f64, states: &dyn Fn(u64) -> RenderView, ticks: u64) -> f32 {
     let mut p = ArtPresenter::new(pack()).with_foliage_full(full);
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     let mut previous: Option<Canvas> = None;
     let mut worst = 0.0f32;
     for tick in 0..ticks {
@@ -271,7 +271,7 @@ fn first_visible_loss(full: f64, cell: CellId, loss: f64) -> Option<(usize, f64)
     const TICKS: u64 = 60;
     let mut at = ArtPresenter::new(pack()).with_foliage_full(full);
     let mut whole = ArtPresenter::new(pack()).with_foliage_full(WHOLE);
-    let (mut a, mut b) = (Canvas::new(), Canvas::new());
+    let (mut a, mut b) = (Canvas::cube(), Canvas::cube());
     for tick in 0..TICKS {
         let share = loss * f64::from(u32::try_from(tick).unwrap()) / f64::from(TICKS as u32 - 1);
         let v = stand(tick + 1, cell, BRIGHT_W, BRIGHT_P * (1.0 - share));
@@ -296,7 +296,7 @@ fn first_visible_anywhere(cell: CellId, loss: f64) -> Option<(usize, f64)> {
     const TICKS: u64 = 60;
     let mut moving = ArtPresenter::new(pack());
     let mut held = ArtPresenter::new(pack());
-    let (mut a, mut b) = (Canvas::new(), Canvas::new());
+    let (mut a, mut b) = (Canvas::cube(), Canvas::cube());
     for tick in 0..TICKS {
         let share = loss * f64::from(u32::try_from(tick).unwrap()) / f64::from(TICKS as u32 - 1);
         let moved = stand(tick + 1, cell, BRIGHT_W, BRIGHT_P * (1.0 - share));
@@ -405,7 +405,7 @@ fn recovery(cell: CellId, horizon: u64) -> [Vec<Frame>; SHOULDERS.len()] {
         .iter()
         .map(|&full| ArtPresenter::new(pack()).with_foliage_full(full))
         .collect();
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     let mut rows: [Vec<Frame>; SHOULDERS.len()] = Default::default();
     let mut removed_at = None;
     let strip_to = BRIGHT_P / 7.0;
