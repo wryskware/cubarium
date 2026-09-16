@@ -8,6 +8,7 @@ members = [
     "crates/cubarium-core",
     "crates/cubarium",
     "crates/cubarium-search",
+    "crates/cubarium-gpu",
 ]
 
 [workspace.package]
