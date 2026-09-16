@@ -199,6 +199,37 @@ impl World {
         profile: FixedHunterProfile,
         targets: &[HunterTarget],
     ) -> Result<Vec<HunterFounderReceipt>, String> {
+        self.introduce_hunters_with_age(profile, targets, 0.0)
+    }
+
+    /// [`World::introduce_hunters`], with the founders placed as if they had **already lived**
+    /// for `age_seconds`.
+    ///
+    /// The only value this moves is the placed body's `born_tick`, which is the world's single
+    /// source of age (`Organism::age_ticks`). Stores, geometry, headings, draws, member
+    /// records, imports and receipts are what the age-zero door produces, so `age_seconds ==
+    /// 0.0` is that door byte for byte — the one `introduce_hunters` itself now calls.
+    ///
+    /// It exists for one measurement. The apex opportunity audit found that two introduced
+    /// adults were never simultaneously able to reproduce because every one of them died at
+    /// 43–59 % of the `reproduce_min_age_seconds` its own profile demands
+    /// (`design/7_Research/ecology-v1-budget-2026-09-16.md`). Separating "the age gate is what
+    /// binds" from "something after the age gate also binds" needs a founder that is already
+    /// past that gate and nothing else changed. No constant moved to provide it, and the
+    /// display's ordinary spawn control does not use it.
+    ///
+    /// Refused, without changing a single value, for everything
+    /// [`World::introduce_hunters`] refuses, and additionally when `age_seconds` is not a
+    /// finite non-negative number, when it exceeds this world's `organism.max_age_seconds`
+    /// (a founder that is already dead of old age), or when it exceeds the world's own age —
+    /// a body cannot have been born before the world began, and `WorldState::validate` holds
+    /// every organism to `born_tick <= tick`.
+    pub fn introduce_hunters_with_age(
+        &mut self,
+        profile: FixedHunterProfile,
+        targets: &[HunterTarget],
+        age_seconds: f64,
+    ) -> Result<Vec<HunterFounderReceipt>, String> {
         if !(1..=2).contains(&targets.len()) {
             return Err(
                 "an interactive hunter introduction must contain one or two founders".into(),
@@ -211,6 +242,28 @@ impl World {
             && installed != &profile
         {
             return Err("the requested hunter profile does not match the installed lineage".into());
+        }
+        if !age_seconds.is_finite() || age_seconds < 0.0 {
+            return Err(format!(
+                "a founder's age at introduction must be a finite, non-negative number of \
+                 seconds, not {age_seconds}"
+            ));
+        }
+        let lifespan_seconds = self.state.config.organism.max_age_seconds;
+        if age_seconds > lifespan_seconds {
+            return Err(format!(
+                "a founder introduced at {age_seconds} s would already be past this world's \
+                 {lifespan_seconds} s lifespan"
+            ));
+        }
+        let age_ticks = ticks_from_seconds(age_seconds, DT);
+        if age_ticks > self.state.tick {
+            return Err(format!(
+                "a founder introduced at {age_seconds} s ({age_ticks} ticks) into tick {} would \
+                 have been born before this world began; introduce it no earlier than tick \
+                 {age_ticks}",
+                self.state.tick
+            ));
         }
         let founder = self.derive_hunter_founder(&profile)?;
         let positions = targets
@@ -231,6 +284,9 @@ impl World {
         }
 
         let tick = self.state.tick;
+        // The world's only source of age. `age_ticks <= tick` was checked above, so this is a
+        // real tick of this world and never a body born before it existed.
+        let born_tick = tick - age_ticks;
         let first_draw = u64::from(self.state.hunters.founders_placed);
         let mut receipts = Vec::with_capacity(positions.len());
         for (offset, pos) in positions.into_iter().enumerate() {
@@ -251,7 +307,7 @@ impl World {
                 structure: founder.structure,
                 reserve: founder.reserve,
                 energy: founder.energy,
-                born_tick: tick,
+                born_tick,
                 hunger_memory,
                 mode: Mode::Resting,
                 escrow: None,

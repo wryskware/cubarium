@@ -286,6 +286,15 @@ enum Command {
         /// The tick the cohort is introduced on, exactly as the screen introduced it.
         #[arg(long, default_value_t = 6_000)]
         introduce_tick: u64,
+        /// Place the founders as if they had already lived this many seconds. `0` is the door
+        /// the screen used. An age larger than `--introduce-tick` worth of world is refused:
+        /// a body cannot have been born before the world began.
+        #[arg(long, default_value_t = 0.0)]
+        founder_age_seconds: f64,
+        /// Turn the per-body store ledger off. It is on by default for this command, which is
+        /// a diagnostic; it changes no dynamics, and a run with it off records no death cause.
+        #[arg(long, default_value_t = false)]
+        no_ledger: bool,
         #[arg(long, default_value_t = 8)]
         workers: usize,
         #[arg(long, default_value_t = 600)]
@@ -521,10 +530,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::EsBudget { policy, config, horizon, initial_seed, workers, wall_seconds, out } => {
             es::budget::run(policy, config, horizon, initial_seed, workers, wall_seconds, out)
         }
-        Command::ApexAudit { config, seeds, apex, ticks, introduce_tick, workers, wall_seconds, out } => {
+        Command::ApexAudit {
+            config,
+            seeds,
+            apex,
+            ticks,
+            introduce_tick,
+            founder_age_seconds,
+            no_ledger,
+            workers,
+            wall_seconds,
+            out,
+        } => {
+            let arm = cubarium_search::apex_audit::Arm {
+                apex,
+                horizon: ticks,
+                introduce_tick,
+                founder_age_seconds,
+                ledger: !no_ledger,
+            };
             cubarium_search::apex_audit::run(
                 config.split(',').map(|s| PathBuf::from(s.trim())).filter(|p| !p.as_os_str().is_empty()).collect(),
-                seeds, apex, ticks, introduce_tick, workers, wall_seconds, out,
+                seeds, arm, workers, wall_seconds, out,
             )
         }
         Command::EsExport { checkpoint, config, generation, out, verify_ticks } => {
