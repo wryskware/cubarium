@@ -248,6 +248,7 @@ impl World {
                 scripted,
                 motor_model,
                 apex_turn_radius,
+                apex_motor_model,
                 initial_material: _,
             } = &mut *self;
             // The motor contract in force this tick, read once. `Sweep` is the shipped
@@ -256,6 +257,10 @@ impl World {
             // And which radius an apex member's grasp puts in that contract's rotation term
             // (`crate::motor::ApexTurnRadius`). `Grasp` is the shipped rule and the default.
             let apex_turn_radius = *apex_turn_radius;
+            // And the contract a *hunter member* runs when it is not the world's own
+            // (`crate::motor::model_for_body`). `None` is the default and means every body runs
+            // `motor_model`; an override reaches nothing without apex contact geometry.
+            let apex_motor_model = *apex_motor_model;
             let WorldState {
                 config,
                 tick,
@@ -1353,6 +1358,14 @@ impl World {
                             .get(*id)
                             .map(|o| hunter::ContactGeometry::of(profile, o))
                     });
+                // The motor contract **this body** runs: the apex override where one is set and
+                // this body has the contact geometry only a hunter member is handed, the world's
+                // own otherwise. All four of this block's motor reads — the envelope radius, the
+                // resolver, the bill and the rotation price the budget split uses — take it from
+                // here, and for `apex_motor_model == None` it is `motor_model` for every body,
+                // arithmetic for arithmetic.
+                let body_model =
+                    motor::model_for_body(motor_model, apex_motor_model, apex_geometry.as_ref());
                 let Some(o) = organisms.get_mut(*id) else {
                     continue;
                 };
@@ -1385,7 +1398,7 @@ impl World {
                     radius_px: motor::turn_radius_px_in_with(
                         o,
                         apex_geometry.as_ref(),
-                        motor_model,
+                        body_model,
                         apex_turn_radius,
                     ),
                     turn_rate_max: d.turn_rate_max,
@@ -1400,7 +1413,7 @@ impl World {
                     // `resolve` clamps this to `speed_cap` either way.
                     speed: d.speed_request.unwrap_or(speed_cap),
                 };
-                let motion = motor::resolve_in(o.heading, &request, &limits, motor_model);
+                let motion = motor::resolve_in(o.heading, &request, &limits, body_model);
                 if !neural.animals.is_empty()
                     && let Some(a) = neural.get_mut(*id)
                 {
@@ -1451,7 +1464,7 @@ impl World {
                 // stored energy alone (`affordable_motor`), so a body short of upkeep has
                 // `u = 0` and stands still, and the shortfall is never motion. Movement is paid
                 // from the battery, as it always was.
-                let cost = bill.total_cost_in(motion.speed, motion.sweep, dt, motor_model);
+                let cost = bill.total_cost_in(motion.speed, motion.sweep, dt, body_model);
                 // The complete bill, recorded where it is levied: maintenance, sensing and
                 // both halves of the motor charge, for every body billed this tick — including
                 // one that is removed later in the same tick, because removals commit in step
@@ -1469,7 +1482,7 @@ impl World {
                     rec.upkeep_billed += bill.upkeep(dt);
                     rec.motor_translation_billed += per_motor * motion.speed.max(0.0);
                     rec.motor_turn_billed +=
-                        per_motor * motor_model.rotation_price() * motion.sweep.max(0.0);
+                        per_motor * body_model.rotation_price() * motion.sweep.max(0.0);
                 }
                 if let Some(row) = budgets.row_of(*id) {
                     row.bill_total += cost;

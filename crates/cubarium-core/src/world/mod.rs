@@ -96,6 +96,12 @@ pub struct World {
     /// is [`crate::motor::ApexTurnRadius::Grasp`], the shipped rule, so a world that never
     /// names one is byte-identical to the build before the switch existed.
     pub(crate) apex_turn_radius: crate::motor::ApexTurnRadius,
+    /// The motor contract a **hunter member** runs, when it is not the world's own
+    /// (`crate::motor::model_for_body`). Transient like every field above: never persisted,
+    /// never hashed, never in [`WorldConfig`]. `None` — the default — means every body runs
+    /// [`World::motor_model`], so a world that never names one is byte-identical to the build
+    /// before the override existed.
+    pub(crate) apex_motor_model: Option<crate::motor::MotorModel>,
     pub(crate) initial_material: f64,
 }
 
@@ -129,5 +135,26 @@ impl World {
     /// The rule in force, [`crate::motor::ApexTurnRadius::Grasp`] unless one was named.
     pub fn apex_turn_radius(&self) -> crate::motor::ApexTurnRadius {
         self.apex_turn_radius
+    }
+
+    /// Run this world's **apex members** under a motor contract of their own, leaving every
+    /// other body on the world's
+    /// (`design/7_Research/ecology-v1-apex-motor-isolation-2026-09-16.md`).
+    ///
+    /// Opt-in and transient exactly as [`World::set_motor_model`] is: nothing in a snapshot
+    /// records it, so a resumed world runs `None` — the world's own contract for every body —
+    /// until it is told otherwise. It reaches no ordinary body: only a hunter member is handed
+    /// the contact geometry [`crate::motor::model_for_body`] selects on.
+    ///
+    /// This is what makes a paired motor arm a measurement of the apex's envelope alone: the
+    /// prey run the world's own contract in both arms, so the world the founders are introduced
+    /// into is the same world, row for row.
+    pub fn set_apex_motor_model(&mut self, model: Option<crate::motor::MotorModel>) {
+        self.apex_motor_model = model;
+    }
+
+    /// The contract a member runs when it is not the world's own; `None` unless one was named.
+    pub fn apex_motor_model(&self) -> Option<crate::motor::MotorModel> {
+        self.apex_motor_model
     }
 }

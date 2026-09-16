@@ -221,6 +221,7 @@ impl World {
             scripted: Vec::new(),
             motor_model: crate::motor::MotorModel::default(),
             apex_turn_radius: crate::motor::ApexTurnRadius::default(),
+            apex_motor_model: None,
             initial_material,
         };
         // Make the derived light/moisture readable before the first tick advances weather.

@@ -801,6 +801,20 @@ pub struct AuditRow {
     /// switch existed, which is `grasp`.
     #[serde(default = "grasp_name")]
     pub apex_turn_radius: String,
+    /// The motor contract this run's **apex members** ran, by name, when it was not the world's
+    /// own (`cubarium_core::World::set_apex_motor_model`, workstream W). `None` — and absent on
+    /// a row written before the override existed — means the member ran `motor`, which is what
+    /// it did. Read it through [`AuditRow::apex_motor_ran`] rather than directly.
+    #[serde(default)]
+    pub apex_motor: Option<String>,
+    /// **The complete world state hash at the introduction tick, taken before the founders are
+    /// placed** (`cubarium_core::snapshot::state_hash`), as `{:016x}`. Two arms that share
+    /// `motor` must agree on it row for row, whatever their `apex_motor` is: the override
+    /// cannot reach a world that has no member in it yet, so this is the evidence that the
+    /// founders were introduced into the same world and not merely into the same prey count.
+    /// Absent on a row written before this field existed.
+    #[serde(default)]
+    pub pre_introduction_state_hash: Option<String>,
     pub horizon_ticks: u64,
     /// Ticks actually simulated: the horizon, or fewer if the world emptied.
     pub ticks: u64,
@@ -831,6 +845,13 @@ pub struct AuditRow {
 }
 
 impl AuditRow {
+    /// **The contract this row's apex members actually ran.** The override when one was named,
+    /// the world's own contract otherwise — including for every row written before the override
+    /// existed, when there was only one contract in a run.
+    pub fn apex_motor_ran(&self) -> &str {
+        self.apex_motor.as_deref().unwrap_or(&self.motor)
+    }
+
     /// Did any two ready adults ever stand within the mating radius?
     pub fn ready_pair_ever_met(&self) -> bool {
         self.opportunity.ticks_ready_pair_within_radius > 0
@@ -862,6 +883,10 @@ pub struct AuditReport {
     /// a report written before the switch existed, which is `grasp`.
     #[serde(default = "grasp_name")]
     pub apex_turn_radius: String,
+    /// The motor contract every row's **apex members** ran, when it was not the world's own, by
+    /// name. Absent from a report written before the override existed, which is `motor`.
+    #[serde(default)]
+    pub apex_motor: Option<String>,
     pub horizon_ticks: u64,
     pub workers: usize,
     pub wall_seconds: f64,
@@ -870,6 +895,15 @@ pub struct AuditReport {
     /// Every paid attempt of every row, classified together (workstream N).
     pub strikes: StrikeAudit,
     pub rows: Vec<AuditRow>,
+}
+
+impl AuditReport {
+    /// **The contract this report's apex members actually ran**, on the same rule
+    /// [`AuditRow::apex_motor_ran`] uses: the override when one was named, the world's own
+    /// contract otherwise.
+    pub fn apex_motor_ran(&self) -> &str {
+        self.apex_motor.as_deref().unwrap_or(&self.motor)
+    }
 }
 
 /// What one arm runs: the screen's own settings, plus the two this workstream added.
@@ -897,6 +931,13 @@ pub struct Arm {
     /// variable of workstream U's paired arm, under `MotorModel::Sweep`; `Grasp` is the shipped
     /// rule and is byte-identical to an arm that never set it.
     pub apex_turn_radius: ApexTurnRadius,
+    /// **Which motor contract the arm's apex members run**, when it is not `motor`
+    /// (`cubarium_core::motor::model_for_body`, `crate::World::set_apex_motor_model`). The one
+    /// variable of workstream W's paired arm; `None` is the world's own contract for every body
+    /// and is byte-identical to an arm that never set it. It reaches no ordinary body, so the
+    /// prey world at introduction is the same world in both halves of the pair — which is the
+    /// whole point of the isolation.
+    pub apex_motor: Option<MotorModel>,
 }
 
 /// The name a report written before the motor switch existed implies: there was one contract.
@@ -922,6 +963,12 @@ pub fn parse_motor(name: &str) -> Result<MotorModel, String> {
     MotorModel::parse(name)
 }
 
+/// The apex members' own motor contract named on the command line. The same two names `--motor`
+/// takes, refused the same way; the flag's *absence* — not any name — is "the world's own".
+pub fn parse_apex_motor(name: &str) -> Result<MotorModel, String> {
+    MotorModel::parse(name)
+}
+
 /// Run one `(configuration, seed)` arm of the audit.
 fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
     let Arm {
@@ -933,6 +980,7 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
         stop,
         motor,
         apex_turn_radius,
+        apex_motor,
     } = arm;
     let start = Instant::now();
     let mut config: WorldConfig = (*eco.base).clone();
@@ -974,6 +1022,11 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
     // whether an apex member's 14.8 px grasp is a turn radius as well as a reach, and `Grasp`
     // is byte-identical to not calling this at all. No ordinary body can see it.
     world.set_apex_turn_radius(apex_turn_radius);
+    // Workstream W's variable, transient in exactly the same way and the only one of the four
+    // that is *per body*: it names the contract a hunter member runs while every ordinary body
+    // keeps `motor`, so the prey world at introduction is identical between the two arms of the
+    // pair. `None` is byte-identical to not calling this at all.
+    world.set_apex_motor_model(apex_motor);
     let dt = cubarium_core::DT;
     let age_ticks = (founder_age_seconds / dt).round().max(0.0) as u64;
 
@@ -990,6 +1043,9 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
     // `predation_deaths_total` is the world's own count of prey taken by any member, so the
     // predator's captures and the prey's losses are read from two independent counters.
     let mut population_at_introduction = 0;
+    // Astra's control on the isolation (workstream W): the complete world state at the tick the
+    // founders are placed, taken **before** they are placed. Read-only; it changes no draw.
+    let mut pre_introduction_state_hash: Option<String> = None;
 
     for _ in 0..horizon {
         world.step();
@@ -1040,6 +1096,10 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
         }
 
         if !introduced && apex > 0 && world.tick() == introduce_tick {
+            // Before a founder exists, so an apex override cannot have reached this world yet:
+            // two arms that share `motor` must produce the same hash here, row for row.
+            pre_introduction_state_hash =
+                Some(format!("{:016x}", cubarium_core::snapshot::state_hash(&world.state)));
             let targets = evaluate::apex_targets(seed, apex);
             let receipts = world
                 .introduce_hunters_with_age(profile.clone(), &targets, founder_age_seconds)
@@ -1150,6 +1210,8 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
         pursuit_stop: stop,
         motor: motor.name().to_string(),
         apex_turn_radius: apex_turn_radius.name().to_string(),
+        apex_motor: apex_motor.map(|m| m.name().to_string()),
+        pre_introduction_state_hash,
         horizon_ticks: horizon,
         ticks,
         collapsed_at,
@@ -1266,6 +1328,7 @@ pub fn run(
         stop,
         motor,
         apex_turn_radius,
+        apex_motor,
     } = arm;
     if configs.is_empty() {
         return Err("--config must name at least one world configuration TOML".into());
@@ -1290,6 +1353,13 @@ pub fn run(
     );
     println!("# pursuit stopping rule {}", stop.as_str());
     println!("# motor contract {}, apex turn radius {}", motor.name(), apex_turn_radius.name());
+    println!(
+        "# apex members' motor contract {}",
+        match apex_motor {
+            Some(m) => format!("{} (the world's own is {})", m.name(), motor.name()),
+            None => format!("{} (the world's own)", motor.name()),
+        }
+    );
     println!("# horizon {horizon} ticks, held-out seeds {seeds:?}, {workers} workers");
     for e in &ecologies {
         println!("# config {} (hash {})", e.label, e.hex());
@@ -1556,6 +1626,7 @@ pub fn run(
         pursuit_stop: stop,
         motor: motor.name().to_string(),
         apex_turn_radius: apex_turn_radius.name().to_string(),
+        apex_motor: apex_motor.map(|m| m.name().to_string()),
         horizon_ticks: horizon,
         workers,
         wall_seconds: started.elapsed().as_secs_f64(),
@@ -1591,6 +1662,8 @@ mod tests {
             pursuit_stop: PursuitStop::ForwardHalfSpace,
             motor: MotorModel::Sweep.name().to_string(),
             apex_turn_radius: ApexTurnRadius::Grasp.name().to_string(),
+            apex_motor: None,
+            pre_introduction_state_hash: None,
             population_at_introduction: 0,
             prey_deaths_predation: 0,
             horizon_ticks: 180_000,

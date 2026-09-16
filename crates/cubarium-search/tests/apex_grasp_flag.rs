@@ -59,6 +59,7 @@ fn a_record_from_before_the_switch_reads_as_the_shipped_rule() {
         pursuit_stop: PursuitStop::ReachEnvelope,
         motor: MotorModel::Sweep.name().to_string(),
         apex_turn_radius: ApexTurnRadius::Lobes.name().to_string(),
+        apex_motor: None,
         horizon_ticks: 180_000,
         workers: 8,
         wall_seconds: 0.0,

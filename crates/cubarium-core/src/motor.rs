@@ -608,6 +608,31 @@ pub fn turn_radius_px_in_with(
     }
 }
 
+/// **Which [`MotorModel`] one body runs**: the world's own contract, unless an apex override is
+/// in force and this body has the contact geometry only a hunter member is ever handed
+/// (`crate::World::set_apex_motor_model`, workstream W).
+///
+/// The only place that choice is written. An `apex_override` of `None` — the default of every
+/// ordinary world — returns `world` for every body, arithmetic for arithmetic, and an override
+/// is unreachable by any body without `apex`. The point is a paired arm in which the *prey world
+/// is identical*: workstream T ran `Inertial` on every body at once, so 628 prey stood at
+/// introduction against `Sweep`'s 745 and its apex gain is not apportioned between the
+/// quadrature envelope and that thinner world.
+///
+/// It is a selector, not a one-way flag: `Some(MotorModel::Sweep)` in an `Inertial` world puts
+/// the member back on the shipped envelope while the rest of the world keeps the disc.
+#[inline]
+pub fn model_for_body(
+    world: MotorModel,
+    apex_override: Option<MotorModel>,
+    apex: Option<&crate::hunter::ContactGeometry>,
+) -> MotorModel {
+    match apex_override {
+        Some(model) if apex.is_some() => model,
+        _ => world,
+    }
+}
+
 /// What one tick of living and moving costs, and therefore how much motion the remaining
 /// energy can buy.
 ///
