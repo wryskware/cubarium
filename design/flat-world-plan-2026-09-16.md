@@ -1043,3 +1043,14 @@ Astra's fifth pass: **accept with corrections**. The three corrections
 (three excluded config fields, FW-2 as the projection's author, the weather
 shape sentence) were applied by the coordinator in this commit. The plan is
 the contract for FW-1..FW-9.
+
+### FW-6 corrections (2026-09-16)
+
+FW-6's independent tests (110, all green) pin three facts the prose had
+wrong or unstated: a 320×180 raster is **three** strips (68/68/44 rows), not
+one datagram; at a ring corner the rim reflection and the wrap commute, so
+"which edge wins" is not observable through the public API (only the
+counters and the end point are); and a 55° rain cap at the rims is wider
+than tall (height/width 0.36 at the rim, 1.48 at the equator), since the
+2.03× figure is a per-pixel local ratio, not the cap's shape. FW-1's
+`FootprintExceedsLocalRadius` refusal stays.
