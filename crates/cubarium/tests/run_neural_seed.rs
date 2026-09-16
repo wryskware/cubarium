@@ -27,7 +27,7 @@ fn write_policy_in(
 ) -> std::path::PathBuf {
     let theta = cubarium_search::es::tensor::initial_center(seed);
     let hash = cubarium_search::calibrate::config_hash(config);
-    let file = cubarium_search::es::export::PolicyFile::new(&theta, "test", 0, 59, label, hash)
+    let file = cubarium_search::es::export::PolicyFile::new(&theta, "test", 0, 59, label, hash, cubarium_core::MotorModel::Sweep)
         .expect("an exportable centre");
     scratch.write(name, &serde_json::to_string(&file).expect("writing the policy file"))
 }
@@ -226,7 +226,7 @@ fn a_policy_without_a_recorded_ecology_is_refused() {
     let scratch = Scratch::new("neural-unknown-ecology");
     let state = scratch.join("state");
     let theta = cubarium_search::es::tensor::initial_center(5);
-    let mut file = cubarium_search::es::export::PolicyFile::new(&theta, "test", 0, 59, "default", 0)
+    let mut file = cubarium_search::es::export::PolicyFile::new(&theta, "test", 0, 59, "default", 0, cubarium_core::MotorModel::Sweep)
         .expect("an exportable centre");
     file.config = None;
     file.config_hash = None;
