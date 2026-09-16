@@ -43,3 +43,29 @@ simulation with genetic search over ecological parameters, evaluated on
 sustainability and variety across the world. Keep search work bounded and
 measure throughput before selecting a compute budget; do not launch an
 unbounded parameter search or tune predators against a frozen ecology alone.
+
+## Fast iteration — correction, 2026-09-16
+
+Wrysk: this is "a zero stakes art project ... little pixels wiggling around on a
+screen for me to watch", closer to prototyping a game than to systems
+engineering. Iteration speed is priority one. Clean code, fast and dirty process.
+
+- **Tests check that a function works**: build the smallest thing, run a few
+  frames at most. No pinned hashes of worlds or configs, no provenance /
+  adoption / migration / regression suites, no test that steps a world past a
+  few hundred ticks. A long run someone wants is an `#[ignore = "study: run by
+  name"]`. `cargo nextest run --workspace --exclude cubarium-gpu` is the check
+  and should stay under a few seconds; `.config/nextest.toml` flags anything over
+  two seconds. (The 2026-09-16 cull: 2,019 tests / 154 s serial → 1,502 / 2.3 s.)
+- **Run only the crate you touched.** Never the full suite for a doc or plan
+  commit.
+- **The commit message is the report.** No evidence tables, no report file per
+  package unless Wrysk asks. Briefs stay short.
+- **Astra review rounds are opt-in**: only when Wrysk says a thread should use
+  that workflow.
+- **Worlds and snapshots are disposable.** Do not ask whether it is OK to reset
+  a world; reset, redeploy, delete run output freely. Nothing on the cube or
+  the panel is a production run.
+- The ecology training tooling (`cubarium-search`) stays in the workspace; it
+  may be reused or rewritten when the ecology changes. Live knobs and hot
+  reload are undecided; restarting to reload is fine.
