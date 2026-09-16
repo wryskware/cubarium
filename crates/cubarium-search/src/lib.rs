@@ -7,7 +7,7 @@
 //!
 //! - [`params`]: the joint parameter vector, its bounds, and what is deliberately excluded.
 //! - [`apex_audit`]: why two introduced apex adults never mate, counted at the predicate.
-//! - [`census`]: workstream R's depth census — F's 150-minute variety census with the roster
+//! - [`census`]: the depth census — F's 150-minute variety census with the roster
 //!   skimmer's `depth` overridden search-side at tick 0 and nothing else changed.
 //! - [`calibrate`]: the ecology v1 calibration matrix — declared candidates × seeds × matched
 //!   zero/one/two-apex arms, with the ecology v1 component vector and a config export.

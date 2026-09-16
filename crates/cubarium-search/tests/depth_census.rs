@@ -235,11 +235,16 @@ fn a_treatment_run_is_a_different_world_and_a_control_run_is_not() {
 // The design and the habitat bands
 // ---------------------------------------------------------------------------------------
 
+/// R's design was 2 depths × 2 configurations × 6 seeds × **3 arms**. Workstream Y widened
+/// the depths to a six-rung ladder and dropped the arms to 0, so `plan` is now the ladder's
+/// (`tests/depth_ladder.rs` checks it as a whole). What this test still owns is the part of
+/// R's design that has to survive that widening: **R's own two levels at arm 0 are still
+/// cells of the plan**, which is what makes the row-for-row reproduction of R's arm-0 rows
+/// possible at all.
 #[test]
-fn the_plan_is_the_declared_seventy_two_cells() {
+fn the_plan_still_carries_rs_two_levels_at_arm_zero() {
     let seeds = [1001u64, 1002, 1003, 1004, 1005, 1006];
     let jobs = census::plan(&seeds);
-    assert_eq!(jobs.len(), 72, "2 depths x 2 configurations x 6 seeds x 3 arms");
     let mut keys: Vec<(String, u32, u64, u32)> = jobs
         .iter()
         .map(|j| (j.candidate.to_string(), j.depth.to_bits(), j.seed, j.arm))
@@ -249,23 +254,26 @@ fn the_plan_is_the_declared_seventy_two_cells() {
     keys.dedup();
     assert_eq!(keys.len(), unique, "every cell appears exactly once");
     for candidate in census::CONFIGURATIONS {
-        for arm in census::ARMS {
-            for seed in seeds {
-                for depth in [DEPTH_CONTROL, DEPTH_TREATMENT] {
-                    assert_eq!(
-                        jobs.iter()
-                            .filter(|j| j.candidate == candidate
-                                && j.arm == arm
-                                && j.seed == seed
-                                && j.depth == depth)
-                            .count(),
-                        1,
-                        "{candidate}/{seed}/arm {arm}/depth {depth} is run once"
-                    );
-                }
+        for seed in seeds {
+            for depth in [DEPTH_CONTROL, DEPTH_TREATMENT] {
+                assert_eq!(
+                    jobs.iter()
+                        .filter(|j| j.candidate == candidate
+                            && j.arm == 0
+                            && j.seed == seed
+                            && j.depth == depth)
+                        .count(),
+                    1,
+                    "{candidate}/{seed}/arm 0/depth {depth} is R's cell and is run once"
+                );
             }
         }
     }
+    assert_eq!(
+        jobs.iter().filter(|j| j.depth == DEPTH_CONTROL || j.depth == DEPTH_TREATMENT).count(),
+        24,
+        "R's 24 arm-0 rows are the reproduction target"
+    );
 }
 
 #[test]

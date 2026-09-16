@@ -26,6 +26,19 @@
 //! `MarginAccumulator` and `CrossingCounter` `evaluate` uses — and
 //! `a_control_run_reproduces_the_ordinary_harness_world` pins it to `evaluate_with`'s own
 //! hash, census, broods, crossings and margins. It is the ordinary loop or the test fails.
+//!
+//! # Workstream Y — the ladder
+//!
+//! R's answer was that the lineage survives and **the grazer pays for it**, and R named the
+//! confound that decides it: 0.55 *is* the grazer's own `depth`, so "off the wet floor" and
+//! "onto the grazer's height" are the same move.
+//! [Workstream Y](../../../design/7_Research/ecology-v1-depth-ladder-2026-09-16.md) separates
+//! them by running the heights between: [`DEPTH_LEVELS`] instead of two levels, at
+//! [`LADDER_ARM`] instead of three arms, everything else of R's census unchanged. It adds the
+//! two cheap measures R named — [`GenerationMarginAccumulator`], which splits E's margin into
+//! founders and descendants, and [`ServedProfile`], which counts what each kind actually took
+//! off the field by stock channel — and pins its own rows to R's, field for field, through
+//! [`check_rows_against`]. It proposes no roster change.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write as _;
@@ -79,6 +92,198 @@ pub const DEPTH_BANDS: [f64; 4] = [1e-3, 0.05, 0.15, f64::INFINITY];
 /// Which band a water depth falls in. The edges are inclusive upper bounds.
 pub fn depth_band(depth: f64) -> usize {
     DEPTH_BANDS.iter().position(|hi| depth <= *hi).unwrap_or(DEPTH_BANDS.len() - 1)
+}
+
+// ---------------------------------------------------------------------------------------
+// Workstream Y's ladder: six rungs, one arm, and R's two cheap measures
+// ---------------------------------------------------------------------------------------
+
+/// The ladder, bottom to top. 0.10 is the roster skimmer's own value and is the control;
+/// 0.55 is the roster grazer's own and is R's treatment; 0.20, 0.30, 0.40 and 0.75 are
+/// nobody's. The glider's 1.00 is deliberately **not** a rung: it would re-import, one kind
+/// further up, exactly the confound this ladder exists to remove.
+pub const DEPTH_LEVELS: [f32; 6] = [0.10, 0.20, 0.30, 0.40, 0.55, 0.75];
+
+/// The one apex arm this campaign runs. R measured 1-2 prey deaths per run by predation in
+/// every cell and wrote that nothing there turned on the apex; the three arms bought its
+/// 36-row hash reproduction, and this campaign buys three more rungs with them instead.
+pub const LADDER_ARM: u32 = 0;
+
+/// A body is a tick-0 **founder** or a **descendant**. Two values, and identity decides
+/// which: not age, not a generation counter on the id.
+pub const GENERATIONS: usize = 2;
+pub const FOUNDER: usize = 0;
+pub const DESCENDANT: usize = 1;
+
+/// The two generations' names, in slot order, for a column heading.
+pub const GENERATION_NAMES: [&str; GENERATIONS] = ["founder", "descendant"];
+
+/// What one group of bodies took off the field, by stock channel, from their own ledger
+/// records.
+///
+/// R asked for "each form-3 body's own foliage and litter served, by channel", so that "the
+/// skimmer now eats the grazer's leaf" is **counted** rather than inferred from the grazer's
+/// falling margin. The channel order is the core's own
+/// (`FOLIAGE, FRUIT, LITTER, CARRION`, `world/budget.rs:61`), and the names are
+/// [`cubarium_core::CHANNEL_NAMES`] rather than a second list that could drift out of it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ServedProfile {
+    pub bodies: u64,
+    /// Sigma `served[channel]` over the bodies of this group (m).
+    pub served: [f64; cubarium_core::CHANNELS],
+}
+
+impl ServedProfile {
+    /// One body's complete ledger record.
+    pub fn add(&mut self, budget: &BodyBudget) {
+        self.bodies += 1;
+        for (a, b) in self.served.iter_mut().zip(budget.served) {
+            *a += b;
+        }
+    }
+
+    pub fn merge(&mut self, other: &ServedProfile) {
+        self.bodies += other.bodies;
+        for (a, b) in self.served.iter_mut().zip(other.served) {
+            *a += b;
+        }
+    }
+
+    /// The mean over the bodies of the group, not a sum: zero when there are none.
+    pub fn mean(&self, channel: usize) -> f64 {
+        if self.bodies == 0 {
+            0.0
+        } else {
+            self.served.get(channel).copied().unwrap_or(0.0) / self.bodies as f64
+        }
+    }
+
+    pub fn mean_total(&self) -> f64 {
+        if self.bodies == 0 {
+            0.0
+        } else {
+            self.served.iter().sum::<f64>() / self.bodies as f64
+        }
+    }
+}
+
+/// One `(generation, form, diet bin)` group's net energy margin, E's quantity unchanged.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct GenerationMarginBin {
+    pub generation: u8,
+    pub form: u8,
+    pub diet_bin: u8,
+    pub bodies: u64,
+    pub deaths: u64,
+    pub alive: u64,
+    pub margin_mean: f64,
+    pub margin_rate_mean: f64,
+    pub served_total_mean: f64,
+    pub recorded_seconds_mean: f64,
+}
+
+/// Every generation-split group's margin.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct GenerationMargins {
+    pub bins: Vec<GenerationMarginBin>,
+}
+
+impl GenerationMargins {
+    pub fn bin(&self, generation: u8, form: u8, diet_bin: u8) -> Option<&GenerationMarginBin> {
+        self.bins
+            .iter()
+            .find(|b| b.generation == generation && b.form == form && b.diet_bin == diet_bin)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct GenerationMarginSum {
+    bodies: u64,
+    deaths: u64,
+    alive: u64,
+    margin: f64,
+    margin_rate: f64,
+    served: f64,
+    seconds: f64,
+}
+
+/// Accumulates [`GenerationMargins`] as records close and at the horizon.
+///
+/// The margin is **E's**, computed here exactly as `movement::MarginAccumulator::add`
+/// computes it — `margin = e_food_in - e_owed` with
+/// `e_food_in = Sigma(battery_credit + e_r * reserve_credit) + gut credits` and
+/// `e_owed = bill_total + other + growth + reproduction` — and the only thing added is the
+/// key. That equality is a **test**
+/// (`the_generation_split_sums_to_es_own_bins`), not a comment: for every
+/// `(form, diet bin)`, this accumulator's founder and descendant bins must sum back to E's
+/// one bin, body for body and energy for energy.
+#[derive(Clone, Debug, Default)]
+pub struct GenerationMarginAccumulator {
+    bins: BTreeMap<(u8, u8, u8), GenerationMarginSum>,
+}
+
+impl GenerationMarginAccumulator {
+    #[allow(clippy::too_many_arguments)]
+    pub fn add(
+        &mut self,
+        generation: usize,
+        key: CensusKey,
+        budget: &BodyBudget,
+        reserve_energy_density: f64,
+        now_tick: u64,
+        dt: f64,
+        alive: bool,
+    ) {
+        let e_r = reserve_energy_density;
+        let food_in = budget.battery_credit_total()
+            + e_r * budget.reserve_credit_total()
+            + budget.gut_battery_credit
+            + e_r * budget.gut_reserve_credit;
+        let owed = budget.bill_total
+            + budget.other_energy_paid
+            + budget.growth_energy
+            + budget.reproduction_energy;
+        let margin = food_in - owed;
+        let closed = budget.closed_tick.unwrap_or(now_tick);
+        let seconds = closed.saturating_sub(budget.opened_tick) as f64 * dt;
+
+        let g = generation.min(GENERATIONS - 1) as u8;
+        let bin = self.bins.entry((g, key.form, key.diet_bin)).or_default();
+        bin.bodies += 1;
+        if alive {
+            bin.alive += 1;
+        } else {
+            bin.deaths += 1;
+        }
+        bin.margin += margin;
+        bin.margin_rate += if seconds > 0.0 { margin / seconds } else { 0.0 };
+        bin.served += budget.served_total();
+        bin.seconds += seconds;
+    }
+
+    pub fn finish(self) -> GenerationMargins {
+        GenerationMargins {
+            bins: self
+                .bins
+                .into_iter()
+                .map(|((generation, form, diet_bin), sum)| {
+                    let n = sum.bodies.max(1) as f64;
+                    GenerationMarginBin {
+                        generation,
+                        form,
+                        diet_bin,
+                        bodies: sum.bodies,
+                        deaths: sum.deaths,
+                        alive: sum.alive,
+                        margin_mean: sum.margin / n,
+                        margin_rate_mean: sum.margin_rate / n,
+                        served_total_mean: sum.served / n,
+                        recorded_seconds_mean: sum.seconds / n,
+                    }
+                })
+                .collect(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -152,14 +357,16 @@ pub struct Job {
 
 /// The whole design, in a fixed order, so the same matrix always produces the same rows in the
 /// same places whatever order the workers finish in.
+///
+/// Workstream Y's ladder: [`DEPTH_LEVELS`] x [`CONFIGURATIONS`] x the seeds x [`LADDER_ARM`].
+/// R's two levels at arm 0 are still cells of it, which is what makes the row-for-row
+/// reproduction of R's arm-0 rows possible.
 pub fn plan(seeds: &[u64]) -> Vec<Job> {
-    let mut jobs = Vec::with_capacity(seeds.len() * 12);
-    for depth in [DEPTH_CONTROL, DEPTH_TREATMENT] {
+    let mut jobs = Vec::with_capacity(seeds.len() * DEPTH_LEVELS.len() * CONFIGURATIONS.len());
+    for depth in DEPTH_LEVELS {
         for candidate in CONFIGURATIONS {
             for seed in seeds {
-                for arm in ARMS {
-                    jobs.push(Job { candidate, depth, seed: *seed, arm });
-                }
+                jobs.push(Job { candidate, depth, seed: *seed, arm: LADDER_ARM });
             }
         }
     }
@@ -325,6 +532,13 @@ pub struct Row {
     /// The tick-0 skimmers only, so a founder's habitat is separable from its descendants'.
     pub founder_skimmer_depth: DepthProfile,
     pub series: Vec<Snapshot>,
+
+    // --- workstream Y's two measures, the ones R named as cheap ------------------------
+    /// E's margin, binned by `(generation, form, diet bin)`. Sums back to [`Row::margins`].
+    pub generation_margins: GenerationMargins,
+    /// What each form's bodies took off the field, by stock channel, split by generation.
+    /// Indexed `[form][generation]`.
+    pub served_by_form: [[ServedProfile; GENERATIONS]; 5],
 }
 
 // ---------------------------------------------------------------------------------------
@@ -362,6 +576,8 @@ struct Recorder {
     founder_skimmers: BTreeSet<OrganismId>,
     founder_form: BTreeMap<OrganismId, u8>,
     founder_lives: [FounderLives; 5],
+    generation_margins: GenerationMarginAccumulator,
+    served_by_form: [[ServedProfile; GENERATIONS]; 5],
     entered_by_form: [u64; 5],
     births_by_form: [u64; 5],
     deaths_by_form: [u64; 5],
@@ -429,6 +645,8 @@ impl Recorder {
             founder_skimmers,
             founder_form,
             founder_lives,
+            generation_margins: GenerationMarginAccumulator::default(),
+            served_by_form: [[ServedProfile::default(); GENERATIONS]; 5],
             entered_by_form,
             births_by_form: [0; 5],
             deaths_by_form: [0; 5],
@@ -592,7 +810,29 @@ impl Recorder {
             self.note_residuals(&budget);
             let Some(key) = self.key_of_id.get(&budget.id).copied() else { continue };
             self.margins.add(key, &budget, self.e_r, now, cubarium_core::DT, false);
+            self.record_generation(key, &budget, now, false);
         }
+    }
+
+    /// Workstream Y's two measures, taken off the **same** ledger record E's margin is taken
+    /// off, at the same two sites, so a body can never be in one and not the other.
+    ///
+    /// The generation is the body's **identity**: a tick-0 founder, or anything born into the
+    /// world. `self.founders` is the tick-0 set, and an apex member never reaches here because
+    /// it has no `key_of_id` entry.
+    fn record_generation(&mut self, key: CensusKey, budget: &BodyBudget, now: u64, alive: bool) {
+        let generation =
+            if self.founders.contains(&budget.id) { FOUNDER } else { DESCENDANT };
+        self.generation_margins.add(
+            generation,
+            key,
+            budget,
+            self.e_r,
+            now,
+            cubarium_core::DT,
+            alive,
+        );
+        self.served_by_form[usize::from(key.form).min(4)][generation].add(budget);
     }
 
     fn note_residuals(&mut self, budget: &BodyBudget) {
@@ -653,6 +893,7 @@ impl Recorder {
                 let budget = *budget;
                 self.note_residuals(&budget);
                 self.margins.add(key, &budget, self.e_r, now, cubarium_core::DT, true);
+                self.record_generation(key, &budget, now, true);
             }
         }
 
@@ -706,6 +947,8 @@ impl Recorder {
             depth_by_form: self.depth_by_form,
             founder_skimmer_depth: self.founder_skimmer_depth,
             series: self.series,
+            generation_margins: self.generation_margins.finish(),
+            served_by_form: self.served_by_form,
             mean_foliage: self.foliage_sum / n,
             mean_litter: self.litter_sum / n,
             mean_population: self.population_sum / n,
@@ -737,6 +980,8 @@ struct Finished {
     depth_by_form: [DepthProfile; 5],
     founder_skimmer_depth: DepthProfile,
     series: Vec<Snapshot>,
+    generation_margins: GenerationMargins,
+    served_by_form: [[ServedProfile; GENERATIONS]; 5],
     mean_foliage: f64,
     mean_litter: f64,
     mean_population: f64,
@@ -883,6 +1128,8 @@ pub fn run_one(
         depth_by_form: f.depth_by_form,
         founder_skimmer_depth: f.founder_skimmer_depth,
         series: f.series,
+        generation_margins: f.generation_margins,
+        served_by_form: f.served_by_form,
     })
 }
 
@@ -985,6 +1232,29 @@ pub struct Assessment {
     /// O's predicted drift toward foliage: reported, never read by the verdict.
     pub diet_drift: Clause,
     pub verdict: Verdict,
+
+    // --- workstream Y: the number the acceptance turns on, reported beside every rung ---
+    /// The grazer's mean horizon population in this cell. STUB.
+    pub grazer_mean: f64,
+    /// The same in the 0.10 control cell. STUB.
+    pub grazer_control_mean: f64,
+    /// `grazer_mean / grazer_control_mean`, 0 when the control had none. STUB.
+    pub grazer_ratio: f64,
+}
+
+impl Assessment {
+    /// **Astra's rule, and the brief's.** A depth is acceptable if **L** holds and neither
+    /// **M** nor **V** does - a lineage that persists across seeds without materially reducing
+    /// another kind. It is R's `Verdict::Confirmed` condition unchanged.
+    ///
+    /// **F and D are not read.** R disclosed both as defective - F measures a breeding
+    /// founder's lifetime where O's quantity was a sterile clone's, and D's per-seed
+    /// requirement is wrong for a rate measured over a handful of lineage-founding events -
+    /// and both are carried unrepaired, for comparability with R, as reported evidence beside
+    /// the verdict rather than as thresholds the verdict reads.
+    pub fn acceptable(&self) -> bool {
+        self.lineage.holds && !self.monoculture.holds && !self.variety_harmed.holds
+    }
 }
 
 fn mean(values: impl Iterator<Item = f64>) -> f64 {
@@ -997,18 +1267,28 @@ fn mean(values: impl Iterator<Item = f64>) -> f64 {
     if n == 0 { 0.0 } else { sum / n as f64 }
 }
 
-/// How many runs satisfy a predicate, and how many seeds have at least two runs that do.
+/// How many runs satisfy a predicate, and how many seeds agree.
+///
+/// **A seed agrees when a majority of its own runs do**, `ceil(runs_of_seed / 2)`. R's cell
+/// carried three apex arms per seed and R's rule read "at least 2 of its 3 arms", which is
+/// this rule at that cell size and is reproduced by it exactly. Workstream Y runs one arm per
+/// seed, where a fixed "at least 2 runs" would make every seed disagree and no clause could
+/// ever hold; the majority rule reads 1 of 1 there. The generalisation is pre-registered in
+/// `design/7_Research/ecology-v1-depth-ladder-2026-09-16.md`, before any row existed.
 fn agreement(facts: &[RunFacts], pred: impl Fn(&RunFacts) -> bool) -> (usize, usize) {
     let mut runs = 0usize;
-    let mut by_seed: BTreeMap<u64, usize> = BTreeMap::new();
+    let mut by_seed: BTreeMap<u64, (usize, usize)> = BTreeMap::new();
     for f in facts {
         let ok = pred(f);
         if ok {
             runs += 1;
         }
-        *by_seed.entry(f.seed).or_insert(0) += usize::from(ok);
+        let e = by_seed.entry(f.seed).or_insert((0, 0));
+        e.0 += usize::from(ok);
+        e.1 += 1;
     }
-    (runs, by_seed.values().filter(|n| **n >= 2).count())
+    let seeds = by_seed.values().filter(|(ok, of)| *of > 0 && *ok >= of.div_ceil(2)).count();
+    (runs, seeds)
 }
 
 impl Assessment {
@@ -1136,6 +1416,11 @@ impl Assessment {
             ),
         };
 
+        // The number the acceptance turns on, reported beside every rung: form 0 is the
+        // grazer, and V's 0.60x line is read on exactly this ratio.
+        let grazer_mean = mean(treatment.iter().map(|f| f.alive_by_form[0] as f64));
+        let grazer_control_mean = mean(control.iter().map(|f| f.alive_by_form[0] as f64));
+
         let verdict = if lineage.holds && !monoculture.holds && !variety_harmed.holds {
             Verdict::Confirmed
         } else if rescue_gone.holds || variety_harmed.holds {
@@ -1155,6 +1440,13 @@ impl Assessment {
             rescue_gone,
             diet_drift,
             verdict,
+            grazer_mean,
+            grazer_control_mean,
+            grazer_ratio: if grazer_control_mean > 0.0 {
+                grazer_mean / grazer_control_mean
+            } else {
+                0.0
+            },
         }
     }
 }
@@ -1178,6 +1470,9 @@ pub struct CampaignReport {
     pub worst_energy_residual: f64,
     pub ledger_records_dropped: u64,
     pub reproduction: Vec<Reproduction>,
+    /// Workstream Y: R's arm-0 rows, field for field.
+    pub row_reproduction: Vec<RowReproduction>,
+    /// One per `(configuration, rung above the control)`, labelled `candidate @ depth`.
     pub assessments: Vec<(String, Assessment)>,
 }
 
@@ -1251,6 +1546,114 @@ fn check_against(rows: &[Row], path: &Path) -> Reproduction {
     r
 }
 
+/// Workstream Y's own reproduction check: this campaign's rows at R's two levels, arm 0,
+/// against R's retained rows **field for field**.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct RowReproduction {
+    pub source: String,
+    /// Rows of this campaign at a level R also ran.
+    pub checked: usize,
+    pub matched: usize,
+    /// Rows at R's levels with no row of the same `(candidate, seed, arm, depth)` in R's file.
+    pub missing: usize,
+    /// Fields compared per row, so "matched" is a number of comparisons and not a shrug.
+    pub fields_compared: usize,
+    /// Fields deliberately not compared, named here rather than invented afterwards.
+    pub excluded: Vec<String>,
+    pub mismatches: Vec<String>,
+}
+
+/// A stamp and a stopwatch: the only two fields of R's rows this campaign does not have to
+/// reproduce. Named in the pre-registration.
+pub const ROW_REPRODUCTION_EXCLUDED: [&str; 2] = ["build_id", "elapsed_ms"];
+
+/// Compare every field R's row carries, except [`ROW_REPRODUCTION_EXCLUDED`], against this
+/// campaign's row for the same `(candidate, seed, arm, depth)`.
+///
+/// Arm 0 has no predator, so these 24 rows are also a second measurement of workstream V's
+/// pursuit-predicate adoption (schema 17): if it reaches anything without a predator, they
+/// say so.
+fn check_rows_against(rows: &[Row], path: &Path) -> RowReproduction {
+    let mut out = RowReproduction {
+        source: path.display().to_string(),
+        excluded: ROW_REPRODUCTION_EXCLUDED.iter().map(|s| (*s).to_string()).collect(),
+        ..RowReproduction::default()
+    };
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) => {
+            out.mismatches.push(format!("unreadable: {}: {e}", path.display()));
+            return out;
+        }
+    };
+    let mut theirs: BTreeMap<(String, u64, u32, u64), serde_json::Value> = BTreeMap::new();
+    for line in text.lines().filter(|l| !l.trim().is_empty()) {
+        let v: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(e) => {
+                out.mismatches.push(format!("unparsable row: {e}"));
+                return out;
+            }
+        };
+        let (Some(c), Some(seed), Some(arm), Some(depth)) = (
+            v.get("candidate").and_then(|c| c.as_str()).map(str::to_string),
+            v.get("seed").and_then(|x| x.as_u64()),
+            v.get("arm").and_then(|x| x.as_u64()),
+            v.get("depth").and_then(|x| x.as_f64()),
+        ) else {
+            continue;
+        };
+        theirs.insert((c, seed, arm as u32, depth.to_bits()), v);
+    }
+
+    for row in rows {
+        let key = (row.candidate.clone(), row.seed, row.arm, row.depth.to_bits());
+        if !theirs.contains_key(&key) {
+            // Only a level R also ran is a target; the four new rungs are not "missing".
+            if row.depth.to_bits() == f64::from(DEPTH_CONTROL).to_bits()
+                || row.depth.to_bits() == f64::from(DEPTH_TREATMENT).to_bits()
+            {
+                out.missing += 1;
+            }
+            continue;
+        }
+        let theirs = &theirs[&key];
+        let mine = match serde_json::to_value(row) {
+            Ok(v) => v,
+            Err(e) => {
+                out.mismatches.push(format!("{key:?}: unserialisable: {e}"));
+                continue;
+            }
+        };
+        out.checked += 1;
+        let mut bad: Vec<String> = Vec::new();
+        if let Some(fields) = theirs.as_object() {
+            for (name, value) in fields {
+                if ROW_REPRODUCTION_EXCLUDED.contains(&name.as_str()) {
+                    continue;
+                }
+                out.fields_compared += 1;
+                if mine.get(name) != Some(value) {
+                    bad.push(name.clone());
+                }
+            }
+        }
+        if bad.is_empty() {
+            out.matched += 1;
+        } else {
+            out.mismatches.push(format!(
+                "{}/{}/arm {}/depth {:.2}: {}",
+                row.candidate,
+                row.seed,
+                row.arm,
+                row.depth,
+                bad.join(", ")
+            ));
+        }
+    }
+    out
+}
+
 /// The census subcommand's arguments. Declared here rather than in `main.rs` so this
 /// workstream's footprint on the binary is the one module line and the one dispatch line the
 /// brief allows.
@@ -1278,7 +1681,11 @@ pub struct Args {
         default_value = "runs/ecology-v1-calibration/screen/evals.jsonl,runs/ecology-v1-ladder/ladder/evals.jsonl,runs/ecology-v1-plant-budget/present-off/evals.jsonl"
     )]
     pub retained: String,
-    #[arg(long, default_value = "runs/ecology-v1-depth-census")]
+    /// R's retained rows. Every row of this campaign at a level R also ran must reproduce
+    /// R's arm-0 row of the same cell, field for field.
+    #[arg(long, default_value = "runs/ecology-v1-depth-census/runs.jsonl")]
+    pub census_rows: PathBuf,
+    #[arg(long, default_value = "runs/ecology-v1-depth-ladder")]
     pub out: PathBuf,
 }
 
@@ -1297,7 +1704,15 @@ pub fn run_command(args: Args) -> Result<(), String> {
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
         .collect();
-    command(args.seeds, args.workers, protocol, args.wall_seconds, &retained, &args.out)
+    command(
+        args.seeds,
+        args.workers,
+        protocol,
+        args.wall_seconds,
+        &retained,
+        &args.census_rows,
+        &args.out,
+    )
 }
 
 /// Run the campaign, write its rows and report, print the tables the note carries.
@@ -1308,6 +1723,7 @@ pub fn command(
     protocol: Protocol,
     wall_seconds: u64,
     retained: &[PathBuf],
+    census_rows: &Path,
     out: &Path,
 ) -> Result<(), String> {
     if workers == 0 || workers > 8 {
@@ -1316,9 +1732,9 @@ pub fn command(
     let seeds = calibrate::SeedSet::Training.seeds(seed_count)?;
     let jobs = plan(&seeds);
     println!("build {BUILD_ID}");
-    println!("seeds {seeds:?}   arms {ARMS:?}   configurations {CONFIGURATIONS:?}");
+    println!("seeds {seeds:?}   arm {LADDER_ARM}   configurations {CONFIGURATIONS:?}");
     println!(
-        "depth {DEPTH_CONTROL} (control) vs {DEPTH_TREATMENT} (treatment)   trials {}",
+        "ladder {DEPTH_LEVELS:?}   control {DEPTH_CONTROL}   arm {LADDER_ARM} only   trials {}",
         jobs.len()
     );
     println!(
@@ -1393,9 +1809,9 @@ pub fn command(
         .collect::<Result<_, _>>()
         .map_err(|e| format!("{}: {e}", rows_path.display()))?;
     disk.sort_by(|a, b| {
-        (a.level.clone(), a.candidate.clone(), a.seed, a.arm).cmp(&(
-            b.level.clone(),
+        (a.candidate.clone(), a.depth.to_bits(), a.seed, a.arm).cmp(&(
             b.candidate.clone(),
+            b.depth.to_bits(),
             b.seed,
             b.arm,
         ))
@@ -1406,18 +1822,26 @@ pub fn command(
 
     let reproduction: Vec<Reproduction> =
         retained.iter().map(|p| check_against(&disk, p)).collect();
-    print_reproduction(&reproduction);
-    let clean = reproduction.iter().all(|r| r.mismatches.is_empty() && r.matched > 0);
+    let row_reproduction = vec![check_rows_against(&disk, census_rows)];
+    print_reproduction(&reproduction, &row_reproduction);
+    let clean = reproduction.iter().all(|r| r.mismatches.is_empty() && r.matched > 0)
+        && row_reproduction.iter().all(|r| r.mismatches.is_empty() && r.matched > 0);
 
     let mut assessments = Vec::new();
     for candidate in CONFIGURATIONS {
-        let facts = |level: &str| -> Vec<RunFacts> {
+        let facts = |depth: f32| -> Vec<RunFacts> {
             disk.iter()
-                .filter(|r| r.candidate == candidate && r.level == level)
+                .filter(|r| r.candidate == candidate && r.depth.to_bits() == f64::from(depth).to_bits())
                 .map(RunFacts::of)
                 .collect()
         };
-        assessments.push((candidate.to_string(), Assessment::of(&facts("control"), &facts("treatment"))));
+        let control = facts(DEPTH_CONTROL);
+        for depth in DEPTH_LEVELS.into_iter().skip(1) {
+            assessments.push((
+                format!("{candidate} @ {depth:.2}"),
+                Assessment::of(&control, &facts(depth)),
+            ));
+        }
     }
 
     if clean {
@@ -1447,6 +1871,7 @@ pub fn command(
         worst_energy_residual: disk.iter().map(|r| r.worst_energy_residual).fold(0.0f64, f64::max),
         ledger_records_dropped: disk.iter().map(|r| r.ledger_records_dropped).sum(),
         reproduction,
+        row_reproduction,
         assessments,
     };
     let summary = out.join("summary.json");
@@ -1473,7 +1898,7 @@ pub fn command(
     Ok(())
 }
 
-fn print_reproduction(checks: &[Reproduction]) {
+fn print_reproduction(checks: &[Reproduction], rows: &[RowReproduction]) {
     println!("\n## The reproduction check, before anything is interpreted\n");
     println!("| retained rows | control rows checked | matched | not in that file |");
     println!("| --- | --- | --- | --- |");
@@ -1483,10 +1908,30 @@ fn print_reproduction(checks: &[Reproduction]) {
             println!("| | | **{m}** | |");
         }
     }
+    println!("\n### R's own arm-0 rows, field for field\n");
+    println!("| R's rows | rows checked | matched | fields compared | not in that file | excluded |");
+    println!("| --- | --- | --- | --- | --- | --- |");
+    for r in rows {
+        println!(
+            "| {} | {} | {} | {} | {} | {} |",
+            r.source,
+            r.checked,
+            r.matched,
+            r.fields_compared,
+            r.missing,
+            r.excluded.join(", ")
+        );
+        for m in &r.mismatches {
+            println!("| | | **{m}** | | | |");
+        }
+    }
 }
 
-fn cell_rows<'a>(rows: &'a [Row], candidate: &str, level: &str) -> Vec<&'a Row> {
-    rows.iter().filter(|r| r.candidate == candidate && r.level == level).collect()
+/// The rows of one rung of one configuration.
+fn cell_rows<'a>(rows: &'a [Row], candidate: &str, depth: f32) -> Vec<&'a Row> {
+    rows.iter()
+        .filter(|r| r.candidate == candidate && r.depth.to_bits() == f64::from(depth).to_bits())
+        .collect()
 }
 
 fn mean_of(rows: &[&Row], f: impl Fn(&Row) -> f64) -> f64 {
@@ -1501,7 +1946,7 @@ fn print_tables(rows: &[Row]) {
     );
     println!("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
     for candidate in CONFIGURATIONS {
-        for level in ["control", "treatment"] {
+        for level in DEPTH_LEVELS {
             let cell = cell_rows(rows, candidate, level);
             if cell.is_empty() {
                 continue;
@@ -1548,7 +1993,7 @@ fn print_tables(rows: &[Row]) {
     );
     println!("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
     for candidate in CONFIGURATIONS {
-        for level in ["control", "treatment"] {
+        for level in DEPTH_LEVELS {
             let cell = cell_rows(rows, candidate, level);
             if cell.is_empty() {
                 continue;
@@ -1579,7 +2024,7 @@ fn print_tables(rows: &[Row]) {
     println!("| cand | depth | form | diet bin | bodies | margin (e) | margin (e/s) | served (m) |");
     println!("| --- | --- | --- | --- | --- | --- | --- | --- |");
     for candidate in CONFIGURATIONS {
-        for level in ["control", "treatment"] {
+        for level in DEPTH_LEVELS {
             let cell = cell_rows(rows, candidate, level);
             let mut acc: BTreeMap<(u8, u8), (u64, f64, f64, f64)> = BTreeMap::new();
             for r in &cell {
@@ -1613,7 +2058,7 @@ fn print_tables(rows: &[Row]) {
     println!("| cand | depth | tick | pop | grazer | glider | burrower | **skimmer** |");
     println!("| --- | --- | --- | --- | --- | --- | --- | --- |");
     for candidate in CONFIGURATIONS {
-        for level in ["control", "treatment"] {
+        for level in DEPTH_LEVELS {
             let cell = cell_rows(rows, candidate, level);
             if cell.is_empty() {
                 continue;
@@ -1645,7 +2090,7 @@ fn print_tables(rows: &[Row]) {
         println!("| cand | depth | 1001 | 1002 | 1003 | 1004 | 1005 | 1006 |");
         println!("| --- | --- | --- | --- | --- | --- | --- | --- |");
         for candidate in CONFIGURATIONS {
-            for level in ["control", "treatment"] {
+            for level in DEPTH_LEVELS {
                 let cell = cell_rows(rows, candidate, level);
                 if cell.is_empty() {
                     continue;
@@ -1663,14 +2108,96 @@ fn print_tables(rows: &[Row]) {
         }
     }
 
-    println!("\n### The founder skimmers themselves (5 per run, 90 per cell)\n");
+    println!(
+        "\n### Net margin per body by generation, form and diet bin (e, from E's ledger)\n"
+    );
+    println!(
+        "| cand | depth | generation | form | diet bin | bodies | margin (e) | margin (e/s) | \
+         served (m) |"
+    );
+    println!("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    for candidate in CONFIGURATIONS {
+        for level in DEPTH_LEVELS {
+            let cell = cell_rows(rows, candidate, level);
+            let mut acc: BTreeMap<(u8, u8, u8), (u64, f64, f64, f64)> = BTreeMap::new();
+            for r in &cell {
+                for b in &r.generation_margins.bins {
+                    let e = acc
+                        .entry((b.generation, b.form, b.diet_bin))
+                        .or_insert((0, 0.0, 0.0, 0.0));
+                    e.0 += b.bodies;
+                    e.1 += b.margin_mean * b.bodies as f64;
+                    e.2 += b.margin_rate_mean * b.bodies as f64;
+                    e.3 += b.served_total_mean * b.bodies as f64;
+                }
+            }
+            for ((generation, form, bin), (bodies, margin, rate, served)) in acc {
+                if bodies < 5 {
+                    continue;
+                }
+                let n = bodies as f64;
+                println!(
+                    "| {candidate} | {level:.2} | {} | {} | {} | {bodies} | {:+.4} | {:+.6} | \
+                     {:.2} |",
+                    GENERATION_NAMES[usize::from(generation).min(GENERATIONS - 1)],
+                    form_name(form),
+                    crate::movement::DIET_BINS[usize::from(bin).min(2)],
+                    margin / n,
+                    rate / n,
+                    served / n
+                );
+            }
+        }
+    }
+
+    println!(
+        "\n### What each kind took off the field, per body, by channel (m, from E's ledger)\n"
+    );
+    println!(
+        "| cand | depth | form | generation | bodies | **foliage** | fruit | **litter** | \
+         carrion |"
+    );
+    println!("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    for candidate in CONFIGURATIONS {
+        for level in DEPTH_LEVELS {
+            let cell = cell_rows(rows, candidate, level);
+            let mut pooled = [[ServedProfile::default(); GENERATIONS]; 5];
+            for r in &cell {
+                for (form, per_form) in r.served_by_form.iter().enumerate() {
+                    for (g, profile) in per_form.iter().enumerate() {
+                        pooled[form][g].merge(profile);
+                    }
+                }
+            }
+            for (form, per_form) in pooled.iter().enumerate() {
+                for (g, profile) in per_form.iter().enumerate() {
+                    if profile.bodies < 5 {
+                        continue;
+                    }
+                    println!(
+                        "| {candidate} | {level:.2} | {} | {} | {} | **{:.3}** | {:.3} | \
+                         **{:.3}** | {:.3} |",
+                        form_name(form as u8),
+                        GENERATION_NAMES[g],
+                        profile.bodies,
+                        profile.mean(cubarium_core::FOLIAGE),
+                        profile.mean(cubarium_core::FRUIT),
+                        profile.mean(cubarium_core::LITTER),
+                        profile.mean(cubarium_core::CARRION),
+                    );
+                }
+            }
+        }
+    }
+
+    println!("\n### The founder skimmers themselves (5 per run, 30 per cell)\n");
     println!(
         "| cand | depth | alive at the horizon | died | mean age at death | mean lifetime \
          (survivors at the horizon) | broods |"
     );
     println!("| --- | --- | --- | --- | --- | --- | --- |");
     for candidate in CONFIGURATIONS {
-        for level in ["control", "treatment"] {
+        for level in DEPTH_LEVELS {
             let cell = cell_rows(rows, candidate, level);
             if cell.is_empty() {
                 continue;
@@ -1705,6 +2232,26 @@ fn print_tables(rows: &[Row]) {
 
 fn print_assessments(assessments: &[(String, Assessment)]) {
     println!("\n## The verdict, by the pre-registered rule\n");
+    println!(
+        "| rung | L | M | V | F | *D* | grazer at the horizon | ratio to control | \
+         **acceptable** |"
+    );
+    println!("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    let yes = |b: bool| if b { "**yes**" } else { "no" };
+    for (candidate, a) in assessments {
+        println!(
+            "| {candidate} | {} | {} | {} | {} | {} | {:.1} of {:.1} | {:.2}x | {} |",
+            yes(a.lineage.holds),
+            yes(a.monoculture.holds),
+            yes(a.variety_harmed.holds),
+            yes(a.rescue_gone.holds),
+            yes(a.diet_drift.holds),
+            a.grazer_mean,
+            a.grazer_control_mean,
+            a.grazer_ratio,
+            if a.acceptable() { "**ACCEPTABLE**" } else { "no" }
+        );
+    }
     for (candidate, a) in assessments {
         println!(
             "\n**{candidate}** — {} runs over {} seeds; a clause needs {} runs and {} seeds.\n",
@@ -1724,7 +2271,15 @@ fn print_assessments(assessments: &[(String, Assessment)]) {
                 c.detail
             );
         }
-        println!("\n**{}**", a.verdict.label());
+        println!(
+            "\n**{}** — {} (L and not M and not V); the grazer holds {:.1} against the \
+             control's {:.1}, {:.2}x",
+            a.verdict.label(),
+            if a.acceptable() { "ACCEPTABLE" } else { "not acceptable" },
+            a.grazer_mean,
+            a.grazer_control_mean,
+            a.grazer_ratio
+        );
     }
 }
 
