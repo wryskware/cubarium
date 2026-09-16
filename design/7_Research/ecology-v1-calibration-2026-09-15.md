@@ -513,10 +513,15 @@ minutes**, 0 skipped, 44,882 ticks/s. Predicted 4.8 minutes.
    baseline's 2.00–2.50 and `recycle-slow`'s 2.25–2.75. It also holds the largest prey
    population (65–67 against 51–55), the smallest population drift, the largest nutrient
    reserve (911–916 against 695–717), and — over 300 minutes, twice the tuned horizon —
-   no drift toward collapse in any measure.
+   no collapse in any measure. It also carries **about half the living wood** (169–171
+   against 334–345), a larger population and a different death balance and nutrient
+   inventory: those are trade-offs, not free.
 4. **Doubling the horizon changes nothing qualitatively.** No extinction, no nutrient
-   crash, no runaway. The 3–15 % `ΣN` decline seen at 150 minutes is the approach to a
-   plateau, not a trend: `fast-leaf` sits at 911–916 at 300 minutes against 920 at 150.
+   crash, no runaway. Whether the 3–15 % `ΣN` decline seen at 150 minutes is the
+   approach to a plateau is **not** established by one 300-minute horizon: in the
+   retained `fast-leaf` rows seeds 9002 and 9004 still end below their own late-window
+   nutrient mean in every arm while 9001 and 9003 turn upward — mixed finite-horizon
+   behaviour (corrected after review; the first version called it a plateau).
 5. **The skimmer is gone in 12 of 12 runs of every configuration**, and predation deaths
    in the late window are **0.00** in every arm: by 300 simulated minutes the introduced
    apexes have been dead for hours.
@@ -551,11 +556,19 @@ back through the same `toml::from_str::<WorldConfig>` + `validate()` that
 preference declared before the screen ran, and the held-out confirms it is plausible on
 every seed and arm. The reason to prefer it *over the shipped defaults* is the variety
 measurement — founder kinds retained — which was a reported component throughout but was
-**not** one of the six pre-registered gates. That makes it weaker evidence than a gate
-result, and the honest summary is: **the campaign found no configuration decisively
-better than the shipped defaults on vegetation or persistence, because the shipped
-defaults do not fail on those at whole-world scale; it found one configuration that
-holds one more creature kind, consistently, out of sample, for free.** What it does not
+**not** one of the six pre-registered gates, nor a predeclared rule for choosing over
+the baseline: preferring `fast-leaf` to the defaults is a transparent post-hoc
+exploratory choice made after the held-out result was seen. The six gates are
+minimum-plausibility gates (completion, non-empty world, late foliage ≥ 50 % of opening,
+any births and deaths, herbivore and detritivore present, ≥ 80 % of opening living
+cells); they do not require all founder kinds, the generalist guild, any apex mating,
+a single depletion/recovery cycle, fruit or dead wood, which is why the baseline passes
+all of them while losing every skimmer. The honest summary is: **the campaign found no
+configuration decisively better than the shipped defaults on vegetation or persistence,
+because the shipped defaults do not fail on those at whole-world scale; it found one
+configuration that holds one more creature kind, consistently, out of sample, at the
+price of about half the living wood.** `fast-leaf` is a provisional development
+configuration, not a demonstrated improvement. What it does not
 fix: the skimmer still dies everywhere, the generalist guild still collapses, the apex
 still never reproduces, and 1 of 4 kinds is still lost.
 
@@ -570,10 +583,18 @@ for a later assignment to act on, not proposals; nothing here is implemented.
    foliage depletion events per run and **0 recovery events in all 270 runs**, and stand
    deaths of 0–3 per late window. Grazing is spatially averaged into a uniform tax of
    0.42–0.88 of gross leaf production. There is no territory, no site fidelity, no
-   memory of a good patch, and `move_cost` is charged per second of motion rather than
-   per distance, so travelling is free relative to staying. Without a cost of leaving,
-   local depletion — the mechanism B1b and B6b measured — cannot exist at world scale,
-   and every local plant feedback in §4.4 is dead code in practice.
+   memory of a good patch, and travel is cheap: the motor bill is
+   `move_cost · S · (speed + k·r·|ω|) · dt`, charged **per distance** covered
+   (`crates/cubarium-core/src/motor.rs:354-408`), but the per-pixel price was
+   deliberately cut ≈ 16.7× when cruise speed rose (`config.rs:558-565`). (Corrected
+   after review: the first version of this note said the bill was per second and
+   travel therefore free; it is per distance and cheap, which is a different claim.)
+   Without a meaningful cost of leaving, local depletion — the mechanism B1b and B6b
+   measured — is almost never observed at world scale, and the local plant feedbacks in
+   §4.4 are rarely exercised. This is the supported **hypothesis**; no screen arm moved
+   `move_cost`, site fidelity, density or area while holding the rest fixed, so high
+   range as a *response* to thin local food is not ruled out and causality was not
+   tested here.
 2. **The consumer has no numerical response to its food.** Late-window deaths are
    dominated by **age** rather than starvation in 11 of 15 candidates, and the standing
    population tracks the birth interval rather than the harvest: `plant-first` produces
@@ -654,9 +675,12 @@ Reported explicitly, as the brief requires.
   - **Intake against production.** `(leaf + fruit eaten) ≤ (gross foliage grown +
     opening ΣP)` in every row; the worst case is **0.850** (`plant-first`, arm 2, seed
     1006), so the bound is never approached from above.
-  - **Conservation.** `max_abs_mass_residual ≤ 1.4e-10` in all 306 runs.
-    `max_abs_energy_residual ≤ 1.2e-10` in arm 0, and in arms 1 and 2 it equals
-    **`apex_energy_in` to within 1e-9** — 7.00 e for one apex, 14.00 e for two. That is
+  - **Conservation.** `max_abs_mass_residual ≤ 4.6e-10` over the 270 screen rows and
+    `≤ 7.8e-10` over the 36 held-out rows; `max_abs_energy_residual ≤ 5.5e-10` in arm 0
+    (corrected after review: the first version quoted `1.4e-10` and `1.2e-10`, a
+    report arithmetic error; every value is inside the contract's `1e-9` tolerance).
+    In arms 1 and 2 the energy residual equals
+    **`apex_energy_in` to within 1.1e-11** — 7.00 e for one apex, 14.00 e for two. That is
     not drift: the harness's energy identity is `ΔU = light_in − heat_out`, and the apex
     cohort's imported energy enters through neither ledger. The residual reading exactly
     the accounted import, in 180 runs, is an independent confirmation that the import is

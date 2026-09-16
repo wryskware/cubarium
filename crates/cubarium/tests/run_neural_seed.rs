@@ -12,15 +12,40 @@ use support::{Scratch, parse, run};
 /// Synthesised rather than copied from `runs/`, so the test does not depend on a training
 /// run's output surviving in the tree.
 fn write_policy(scratch: &Scratch, name: &str, seed: u64) -> std::path::PathBuf {
-    let theta = cubarium_search::es::tensor::initial_center(seed);
     // The ecology the policy claims: the shipped defaults, which is the world `--fresh`
     // creates here. Its hash is the one `es-export` records (`calibrate::config_hash`).
-    let default_hash =
-        cubarium_search::calibrate::config_hash(&cubarium_core::WorldConfig::default());
-    let file =
-        cubarium_search::es::export::PolicyFile::new(&theta, "test", 0, 59, "default", default_hash)
-            .expect("an exportable centre");
+    write_policy_in(scratch, name, seed, "default", &cubarium_core::WorldConfig::default())
+}
+
+/// The same, claiming a named ecology: the label and hash `es-train --config` would record.
+fn write_policy_in(
+    scratch: &Scratch,
+    name: &str,
+    seed: u64,
+    label: &str,
+    config: &cubarium_core::WorldConfig,
+) -> std::path::PathBuf {
+    let theta = cubarium_search::es::tensor::initial_center(seed);
+    let hash = cubarium_search::calibrate::config_hash(config);
+    let file = cubarium_search::es::export::PolicyFile::new(&theta, "test", 0, 59, label, hash)
+        .expect("an exportable centre");
     scratch.write(name, &serde_json::to_string(&file).expect("writing the policy file"))
+}
+
+/// A world config that is a different ecology from the defaults: one plant constant moved,
+/// the way the calibration's `fast-leaf` moved it.
+fn fast_leaf_like() -> cubarium_core::WorldConfig {
+    let mut config = cubarium_core::WorldConfig::default();
+    config.plant.foliage_rate = 0.006;
+    config.validate().expect("a config the core accepts");
+    config
+}
+
+fn refusal(args: &[&str]) -> String {
+    format!(
+        "{:#}",
+        cubarium::run_world(&parse(args)).expect_err("the run must be refused")
+    )
 }
 
 #[test]
@@ -157,4 +182,87 @@ fn every_seeded_animal_leaves_its_starting_cell() {
             cell_of(&o.pos)
         );
     }
+}
+
+/// `--neural` seeds the world `--config` describes, so the policy's recorded ecology must
+/// be that config's: a policy trained in one ecology is refused, by name, against another —
+/// the same refusal `es-evaluate` and `es-population` make. The digest check alone would
+/// let a forager trained where foliage triples in a minute loose in the shipped defaults.
+#[test]
+fn a_policy_trained_in_another_ecology_is_refused_against_this_world() {
+    let scratch = Scratch::new("neural-foreign-ecology");
+    let state = scratch.join("state");
+    let policy = write_policy_in(&scratch, "fast-leaf-center.json", 3, "fast-leaf", &fast_leaf_like());
+
+    // No `--config`: the world is the shipped defaults, the policy is not.
+    let err = refusal(&[
+        "--sink", "none", "--speed", "0", "--seconds", "1", "--fresh",
+        "--state", state.to_str().unwrap(),
+        "--neural", policy.to_str().unwrap(),
+    ]);
+    assert!(err.contains("fast-leaf-center.json"), "the refusal names the file: {err}");
+    assert!(err.contains("trained in ecology fast-leaf"), "and the ecology it claims: {err}");
+    assert!(err.contains("config hash"), "and says what differs: {err}");
+    assert!(support::snapshot_ticks(&state).is_empty(), "a refused run writes no world");
+
+    // The other way round: a defaults policy against a `--config` that is a different ecology.
+    let toml = toml::to_string(&fast_leaf_like()).expect("a config serialises");
+    let config = scratch.write("fast-leaf.toml", &toml);
+    let defaults_policy = write_policy(&scratch, "default-center.json", 3);
+    let err = refusal(&[
+        "--sink", "none", "--speed", "0", "--seconds", "1", "--fresh",
+        "--state", state.to_str().unwrap(),
+        "--config", config.to_str().unwrap(),
+        "--neural", defaults_policy.to_str().unwrap(),
+    ]);
+    assert!(err.contains("trained in ecology default"), "{err}");
+    assert!(err.contains("this evaluation is fast-leaf"), "the world's ecology is named by the file's stem: {err}");
+}
+
+/// A policy that records no ecology at all — every file written before the ecology was
+/// part of the protocol — is "unknown", not "the defaults", and is refused for that reason.
+#[test]
+fn a_policy_without_a_recorded_ecology_is_refused() {
+    let scratch = Scratch::new("neural-unknown-ecology");
+    let state = scratch.join("state");
+    let theta = cubarium_search::es::tensor::initial_center(5);
+    let mut file = cubarium_search::es::export::PolicyFile::new(&theta, "test", 0, 59, "default", 0)
+        .expect("an exportable centre");
+    file.config = None;
+    file.config_hash = None;
+    let policy = scratch.write("old-center.json", &serde_json::to_string(&file).unwrap());
+
+    let err = refusal(&[
+        "--sink", "none", "--speed", "0", "--seconds", "1", "--fresh",
+        "--state", state.to_str().unwrap(),
+        "--neural", policy.to_str().unwrap(),
+    ]);
+    assert!(err.contains("old-center.json"), "{err}");
+    assert!(err.contains("records no config hash"), "refused as unknown, not accepted as default: {err}");
+}
+
+/// The matching case with a named ecology: a policy trained under `--config <toml>` seeds a
+/// world created from that same file, and `--seed` — an override applied after the config is
+/// loaded, which `es-train` also applies per layout — is not part of the ecology's identity.
+#[test]
+fn a_policy_trained_in_the_configured_ecology_seeds_that_world() {
+    let scratch = Scratch::new("neural-matching-ecology");
+    let state = scratch.join("state");
+    let toml = toml::to_string(&fast_leaf_like()).expect("a config serialises");
+    let config = scratch.write("fast-leaf.toml", &toml);
+    // Hash the config the way the runner and `es-train` both read it: from the file.
+    let loaded = cubarium::runner::load_config(&config).expect("the file loads");
+    let policy = write_policy_in(&scratch, "fast-leaf-center.json", 3, "fast-leaf", &loaded);
+
+    let seeded = run(&[
+        "--sink", "none", "--speed", "0", "--seconds", "1", "--fresh",
+        "--state", state.to_str().unwrap(),
+        "--config", config.to_str().unwrap(),
+        "--seed", "7",
+        "--neural", policy.to_str().unwrap(),
+        "--neural-count", "2",
+    ]);
+    assert_eq!(seeded.neural_animals, 2, "the matching policy seeds its cohort");
+    assert_eq!(seeded.config.seed, 7, "the seed override still applies");
+    assert_eq!(seeded.config.plant.foliage_rate, 0.006, "in the configured ecology");
 }

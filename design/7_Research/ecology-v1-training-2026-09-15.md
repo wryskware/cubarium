@@ -25,8 +25,29 @@ ticks against the same body's 5,574 on the ordinary controller — and covers fo
 times the ground doing it. It **still starves**: nothing survives a held-out
 episode, the imported lineage is extinct by tick 147,600 in every arm, and at the
 scale of the whole world the two arms are indistinguishable in population, food
-use and vegetation. The capability is real and the energy budget, not the search,
-is what ends the run.
+use and vegetation. The capability is real. What ends the run is starvation on
+every layout; whether the body's budget or this short search is the binding
+constraint is **not** settled here (see "Correction after review" below).
+
+**Correction after review (Astra, 2026-09-15).** Two statements in the first
+version of this note were wrong and are corrected in place, with the original
+wording struck where it mattered. (1) The trained body is **not** a `diet` 0.85
+herbivore: `World::found_training_animal` builds `Genome::founder`, whose v2
+default `diet` is **0.7**, which ecology v1 decodes as `cap_foliage = 0.7`,
+`cap_detrital = 0.3` — a **generalist**. The held-out rows show it: every
+solitary episode records positive detrital intake. The mistaken value came from
+Fable's brief, not from the fixture. (2) "Intake ≈ 0.6 m against ≈ 2.5 e of
+upkeep" is a material total against an energy bill; a served bite passes
+through capability, food energy density, assimilation and battery headroom
+before it is energy (contract §6.4), so the ratio is not "a quarter of what it
+burns" and the sentence "the energy budget, not the search, is what ends the
+run" does not follow from the recorded columns. What the rows establish is
+narrower: this controller always starves on these held-out patches, and no
+feasible control (the disclosed mobile control on the same `fast-leaf` layouts)
+was run beside it, so body infeasibility and controller failure remain
+confounded. The review is
+[ecology-v1-next-review-2026-09-15.md](ecology-v1-next-review-2026-09-15.md),
+findings 1 and 8.
 
 ## Build and commits
 
@@ -134,8 +155,11 @@ Run once, as written. No retry, no continuation, no extra seed, no horizon
 change, no tuning. 16 of 16 updates completed in **138.7 s** of the 1,200 s cap,
 2,116 episodes, 17,180,924 ticks, **0 discarded** episodes and 0 discarded ticks.
 
-The trained body is the unit grazer of `World::found_training_animal`: hue
-`TRAINING_FOUNDER_HUE` = 0.5, `diet` 0.85 — the herbivore guild — structure at
+The trained body is the founder animal of `World::found_training_animal`: hue
+`TRAINING_FOUNDER_HUE` = 0.5, `diet` **0.7** — the generalist, `cap_foliage`
+0.7 and `cap_detrital` 0.3 (corrected after review; the first version of this
+note said 0.85, herbivore, which was Fable's brief and not the fixture:
+`crates/cubarium-core/src/genome.rs:56-58,207-223,408-433`) — structure at
 `structure_adult`, reserve 0.5 of `R_max`, energy 0.75 of `E_max`, and births
 disabled inside a training episode through the diagnostic seam's
 `bud: Some(false)`. One animal, no other organism anywhere.
@@ -207,12 +231,16 @@ compared with any number drawn from a run where animals did reach the horizon.
 
 **What the intake columns say.** Over roughly 8,000 ticks the animal takes in
 about 0.25 of producer, 0.18 of fruit and 0.19 of detritus — roughly 0.6 of
-material in total — while its upkeep alone bills about 2.5 of energy. The body
-does not fail to find food; it fails to find *enough*, by a wide margin, and the
-route's own foliage falls from ~34 to ~14 over the episode largely without the
-animal's help. R2d finding 3's caution applies in the other direction here:
-survival on a patch is not sustained foraging, and this policy is not even
-achieving survival.
+material in total — while its upkeep alone bills about 2.5 of energy. Those two
+numbers are in different units (material served versus energy billed) and are
+not a ratio of intake to burn; the energy the served material became is not a
+recorded column (corrected after review). The body does not fail to find food;
+it fails to find *enough* to survive, and the route's own foliage falls from
+~34 to ~14 over the episode. R2d finding 3's caution applies in the other
+direction here: survival on a patch is not sustained foraging, and this policy
+is not even achieving survival. Whether the shortfall is the body's budget on
+these patches or this controller leaving reachable intake unused is not
+separable from these rows alone.
 
 ## Population-level comparison
 
@@ -373,8 +401,9 @@ zero.
 
 ## What this does not establish
 
-- **Not every guild.** One genotype was trained: the unit grazer, `diet` 0.85,
-  herbivore. The burrower, glider and skimmer kinds in `fast-leaf`'s roster were
+- **Not every guild.** One genotype was trained: the founder animal, `diet`
+  0.7, a generalist (corrected after review). The burrower, glider and skimmer
+  kinds in `fast-leaf`'s roster were
   never trained and are legacy-controlled throughout.
 - **Not the apex.** No apex body is neural; the core refuses a neural apex member.
   The predator arms here are matched conditions, and in fact the imported legacy
@@ -530,14 +559,20 @@ task"
 These are the tasks this result implies. **None of them is started here.**
 
 1. **The energy budget before the next campaign.** Every body in every arm and
-   every held-out episode dies of starvation, and the trained one takes in about
-   a quarter of what it burns. Either the forager's intake law or its upkeep is
-   the binding constraint, and a second search against the same wall will find the
-   same wall. The task is a measurement, not a search: one body, the disclosed
-   mobile control, the `fast-leaf` ecology, and an accounting of served bite →
-   digestible share → assimilated energy → upkeep over one episode, to say which
-   term is short and by how much. It needs the per-organism intake the core does
-   not yet expose, which is the first thing to decide.
+   every held-out episode dies of starvation. Whether the forager's intake law,
+   its upkeep, or this controller is the binding constraint is not yet known,
+   and a second search against an unmeasured wall will find the same wall. The
+   task is a measurement, not a search: the actual body (`diet` 0.7, or a
+   deliberately constructed 0.85 grazer, named either way), the disclosed
+   mobile control **and** a stationary grazer beside the initial centre and
+   generation 9, on the same `fast-leaf` training and held-out layouts, with a
+   per-body accounting of served bite → digestible share (`cap · q`) → reserve
+   and battery credit → oxidation → upkeep and motor bill → terminal stores,
+   over one episode. If the mobile control also dies with its sustained
+   credit/bill ratio below 1, the body's budget binds; if it survives while
+   generation 9 dies, the controller or the 16-update search binds. It needs
+   the per-organism intake the core does not yet expose, which is the first
+   thing to decide.
 2. **Reproduction as part of the objective.** The trained policy trades offspring
    for range (2.5 against 4.0) because nothing in `t_min + 0.25·stores` values a
    child. A forager meant to found a lineage needs the budding decision inside the

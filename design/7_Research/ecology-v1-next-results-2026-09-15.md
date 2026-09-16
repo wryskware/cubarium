@@ -103,8 +103,9 @@ founder kinds on 12 of 12 held-out runs against the baseline's 2–2.5.
 gate, and the note says so.
 
 **Missing population feedbacks**, named from the measurements: nothing
-couples an animal to a place (movement is charged per second, not per
-distance); no consumer numerical response (late deaths are by age, population
+couples an animal to a place (movement is charged per distance but at a
+per-pixel price cut ≈ 16.7× with the pace calibration, and no arm varied it,
+so this is the supported hypothesis, not a tested cause); no consumer numerical response (late deaths are by age, population
 tracks the birth interval); the detrital loop has one source and it is the
 vegetation cap; the diet locus is an unregulated random walk across a hard
 gate; the apex is an input; the fruit channel never opens (mean cell foliage
@@ -207,15 +208,19 @@ Full note: [ecology-v1-training-2026-09-15.md](ecology-v1-training-2026-09-15.md
 Commits `7553975` (harness), `5711b4d` (note), `617703f` (Fable's integration
 repair). The ES fixtures now carry a named ecology: `--config` on every ES
 command, layout and protocol hashes that move with it, a policy file that
-records its ecology and is refused by name against any other, and an
+records its ecology and is refused by name against any other (the host's
+`cubarium run --neural` did **not** make that check until the post-review
+repair below), and an
 `es-population` command that founds neural or legacy copies of the training
 body in a whole world. The GRU, optimizer, score and R2 fixtures are byte
 unchanged; `cubarium-core` untouched.
 
 **The campaign**: exactly the brief's command, `fast-leaf` frozen at config
 hash `09e244392ec91768`, protocol `0x8e51a1a9b1e2742b`, 16 of 16 updates in
-139 s of the 1,200 s cap, 0 discarded work. Trained body: the unit grazer
-(diet 0.85, herbivore guild), births disabled in training episodes. Centre
+139 s of the 1,200 s cap, 0 discarded work. Trained body: the founder animal
+of `found_training_animal`, diet **0.7**, a generalist (`cap_foliage` 0.7,
+`cap_detrital` 0.3; the first version of this note and C's brief said 0.85,
+herbivore, which was wrong), births disabled in training episodes. Centre
 score 6,521 → best 8,703 at generation 9 → 7,269 at generation 16. **No
 centre or candidate ever reached the 36,000-tick horizon on any layout**; in
 the pre-ecology-v1 world the same protocol reached it on every layout. The
@@ -225,10 +230,11 @@ the recorded-score rule before any held-out episode.
 
 **Held-out**: survived 0 of 8 layouts, 6,914–8,707 ticks, no censoring (every
 death is observed, none reaches the horizon). Intake ≈ 0.6 m of material
-against ≈ 2.5 e of upkeep billed per episode: on a painted patch under
-ecology v1 a lone grazer's energy budget does not close, which is what
-contract §11's arithmetic said (a stand yields 40–170× less than a grazer
-bites) and what A found the free-roaming world hides.
+served against ≈ 2.5 e of upkeep billed per episode: two different units, not
+a ratio of intake to burn. The controller always starves on these patches;
+whether the body's budget or this controller is the binding constraint is
+not separable from these rows, because no feasible control was run on the
+same `fast-leaf` layouts (corrected after review).
 
 **Population comparison** (4 copies of the training body founded at tick 0,
 neural vs legacy control, 24 legacy founders beside them, reproduction and
@@ -259,13 +265,60 @@ its own and would add nothing visible; the ordinary
 `cubarium run --fresh --neural <policy>` control remains the door if Wrysk
 wants to see it, and it would require a fresh world.
 
+## Review and repair (Astra, 2026-09-15)
+
+Astra's review of this package is
+[ecology-v1-next-review-2026-09-15.md](ecology-v1-next-review-2026-09-15.md).
+Disposition: keep the presentation work and the bounded experiment artifacts;
+correct the scientific interpretation and one host seam before treating the
+package as a basis for another training or ecology change. One repair cycle
+was spent, all on `main`:
+
+- **P1, training body misidentified.** The fixture's body is the `diet` 0.7
+  generalist, not a 0.85 herbivore; the error was in Fable's brief and was
+  copied into C's note and this one. Corrected in place in both notes.
+- **P1, material versus energy.** "Intake ≈ 0.6 m against ≈ 2.5 e" was
+  presented as an energy shortfall; it is not a ratio. The "body budget, not
+  controller" conclusion is withdrawn to "starves on every patch; body and
+  controller confounded until a feasible control runs on the same layouts".
+- **P1, host did not enforce the ecology.** `cubarium run --neural` checked
+  the schema digest only. Repaired: `seed_neural_animals` now builds the
+  ecology from `--config` as loaded (the defaults without it), exactly what
+  `es-train --config` hashed, and calls `PolicyFile::check_ecology`; three
+  host tests cover mismatch both ways, an absent hash, and a match under
+  `--config` with a `--seed` override. Dormant on the live cube (no policy is
+  installed), fixed before the control is used.
+- **P1, gates and selection.** The six gates are minimum-plausibility gates
+  that do not test variety, apex mating, depletion/recovery, fruit or dead
+  wood; preferring `fast-leaf` over the baseline was a post-hoc choice on a
+  reported component, and it costs about half the living wood. Both notes now
+  say so; "for free" and "plateau" are withdrawn.
+- **P1, movement cost.** The motor bill is per distance, not per second; the
+  per-pixel price was cut ≈ 16.7× with the pace calibration. Corrected; the
+  spatial-dilution reading is kept as the supported hypothesis, not a cause.
+- **P2, residual arithmetic.** The retained rows give mass ≤ 4.6e-10 (screen)
+  and ≤ 7.8e-10 (held-out), arm-0 energy ≤ 5.5e-10, not the 1.4e-10/1.2e-10
+  quoted. All inside tolerance; corrected.
+- **P2, presentation vetoes for Wrysk** (not applied): the 0.85 foliage
+  shoulder hides the first ≈ 30 % of foliage loss on a bright canopy, so
+  compare 0.85/0.95/1.0 on the cube before accepting it; the soil band
+  suppresses dead wood entirely, so a separate dead-wood mark is owed there.
+  `TALL_STEP` stays until Wrysk sees the physical cube.
+- **P3, hash name and apex diagnosis.** `config_hash` is not FNV-1a (already
+  recorded); "refused by name" means a named error, not label equality. The
+  10 px mating radius is not shown to be the deciding constant: no
+  ready-pair distance or per-predicate failure count was recorded.
+
 ## What this does and does not establish
 
 - Food accounting, paid reproduction and the presenter's readability are
   verified by tests and by the campaign's zero invalid rows.
-- The `fast-leaf` world is plausible on every held-out seed at 300 simulated
-  minutes with the legacy controllers; that is five hours, not indefinite,
-  and it is one candidate among several that pass.
+- The `fast-leaf` world passes six minimum-plausibility gates on every
+  held-out seed at 300 simulated minutes with the legacy controllers; that is
+  five hours, not indefinite, the baseline passes the same gates, and the
+  preference for `fast-leaf` (one more founder kind kept, at about half the
+  living wood) was made after the result was seen. It is a provisional
+  development configuration.
 - Unresolved ecological failures, stated plainly: one founder kind (the
   skimmer) dies in every run of every configuration; the generalist guild
   usually follows; the apex never mates, so predator presence is a transient
@@ -276,14 +329,48 @@ wants to see it, and it would require a fresh world.
 
 ## Next recommendation
 
-Two bounded tasks before any further search or training, in this order:
-first, C's energy-budget measurement (one body, the disclosed mobile control,
-`fast-leaf`, served bite → digestible share → assimilated energy → upkeep
-over one episode), which needs one small core addition, a per-organism
-intake accumulator; second, one design task: give animals a reason to
-stay (a per-distance movement cost or site fidelity) and give the diet locus
-a cost of breadth (`γ > 1`) with a stabilising term; then re-run A's matrix
-unchanged as the comparison. The apex mating radius is the single constant
-that decides whether predators can ever be a population and should be a
-Wrysk decision, not a search knob. Presentation vetoes go to a small
-follow-up on `TALL_STEP` and the soil band.
+Fable's first recommendation was: intake accumulator plus energy-budget
+measurement; then one coupled design task (place coupling plus diet-breadth
+cost `γ > 1`); the apex mating radius as a Wrysk decision. Astra's review
+agrees that measurement precedes search but reorders and splits it, and Fable
+accepts that order. The reconciled recommendation, measurements before any
+new equation:
+
+1. **Per-body store budget and one matched feasibility experiment** (Astra 1,
+   Fable 1): the per-organism accumulator, the actual body named, and on the
+   same `fast-leaf` layouts a stationary grazer, the disclosed mobile control,
+   the initial centre and generation 9, each with served → digestible →
+   credited → oxidised → billed → terminal stores. This is the single most
+   informative cheap experiment; it says whether body, controller or
+   relocation binds.
+2. **Host ecology guard** (Astra 2): done in this repair cycle.
+3. **Movement cost alone, as a matched arm** (Astra 3): `organism.move_cost`
+   at 0.00036 / 0.0018 / 0.006 with everything else as A's screen; measure
+   cells per body per window, revisit interval, residence time, depletion and
+   recovery crossings, death cause and net energy margin. Only if range does
+   not fall or deaths rise without depletion appearing is a new site-fidelity
+   mechanism worth designing. Fable's "coupled design task" is withdrawn in
+   favour of this.
+4. **Do not couple `γ > 1` to that** (Astra 4): first report births, deaths
+   and lifetime intake by founder form × diet bin × guild to learn whether the
+   skimmer is lost through body, controller, habitat or realised diet yield;
+   a `γ` matrix (1, 1.5, 2) is its own later experiment and must show stable
+   occupation of both food channels, not just fewer intermediates.
+5. **Apex opportunity audit before any radius decision** (Astra 5): count
+   simultaneously ready pairs, minimum ready-pair distance and failures by
+   mating predicate on the two-apex baseline and `fast-leaf` arms. Only if
+   ready pairs exist and never come within 10 px does the radius become
+   Wrysk's choice. Fable's "radius as a Wrysk decision now" is withdrawn
+   until that audit.
+6. **Presentation follow-up** (Astra 6, B's veto list): shoulder
+   0.85/0.95/1.0 compared at native scale, a soil-band dead-wood cue, the
+   missing dead-column pixel test; `TALL_STEP` waits for the physical cube.
+
+Astra reads the open failures as several causes, not one: no depletion and
+no dead wood are probably one spatial-pressure cluster (price, behaviour,
+density and area still confounded); absent fruit is a separate threshold
+problem (mean `P` below the 0.45 m ripening threshold, which more depletion
+would worsen); skimmer-form and generalist-guild loss may overlap only because
+the founder skimmer is a generalist; apex non-reproduction is separate again.
+Another joint calibration or training campaign before these checks would
+mostly fit ambiguity.

@@ -255,6 +255,15 @@ fn seed_neural_animals(run: &Run, world: &mut World) -> Result<usize> {
     let policy = file
         .policy()
         .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
+    // The ecology, too: a policy trained in one set of plant, animal and detrital
+    // constants is a different animal in another, and the digest says nothing about that.
+    // The identity is `--config` as loaded (the shipped defaults without it), which is
+    // exactly what `es-train --config` hashed; `--seed` and the operational merges are not
+    // part of it. Refused by name, as `es-evaluate` and `es-population` refuse it.
+    let ecology = cubarium_search::es::fixture::Ecology::from_option(run.config.as_deref())
+        .map_err(|e| anyhow::anyhow!("--neural: {e}"))?;
+    file.check_ecology(&ecology)
+        .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
 
     let east = cubarium_surface::Vec2::new(1.0, 0.0);
     for k in 0..run.neural_count {

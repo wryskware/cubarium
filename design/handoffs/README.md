@@ -31,12 +31,17 @@ B ([presentation](../7_Research/ecology-v1-presentation-2026-09-15.md),
 merged `7d9a5ae`) draws structure from wood, foliage as fullness on it, and
 dead wood; veto list in its note. C
 ([training](../7_Research/ecology-v1-training-2026-09-15.md)) trained one
-grazer in `fast-leaf`: it doubles its own lifetime, still starves on every
-held-out patch, and changes nothing about the world; not installed on the
-cube. D: the cube runs build `0.1.0+7d9a5ae`, a fresh schema-16 `fast-leaf`
+generalist forager in `fast-leaf`: it doubles its own lifetime, still starves
+on every held-out patch, and changes nothing about the world; not installed on
+the cube. D: the cube runs build `0.1.0+7d9a5ae`, a fresh schema-16 `fast-leaf`
 world, 24 legacy founders, apex controls available, since 15:38 on 2026-09-15.
-Next: the energy-budget measurement and a place-coupling design task named in
-the consolidated result. The [ecology v1 contract](../ecology-v1-contract.md)
+[Astra's review](../7_Research/ecology-v1-next-review-2026-09-15.md) kept the
+work, corrected the interpretation (body misidentified, material≠energy,
+post-hoc selection, movement cost per distance) and found the host's
+`--neural` door did not check the policy's ecology; repaired the same day.
+Next, in the reconciled order in the consolidated result: the per-body store
+budget with a matched feasibility experiment, a movement-cost arm, the apex
+opportunity audit. The [ecology v1 contract](../ecology-v1-contract.md)
 and its [implementation review](../7_Research/ecology-v1-implementation-review-2026-09-15.md)
 stand as the accepted baseline.
 
