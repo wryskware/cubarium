@@ -205,6 +205,10 @@ pub struct ReplayRow {
     pub adapter: String,
     pub ticks: u64,
     pub alive: bool,
+    /// The two fields the protocol's own `score_by` reads besides the survival ticks, carried
+    /// so the replayed score is the **protocol's** score and not the survival term alone.
+    pub terminal_stores: f64,
+    pub store_capacity: f64,
     pub turn_measured_ticks: u64,
     pub turn_active_ticks: u64,
     pub turn_active_fraction: f64,
@@ -229,6 +233,8 @@ impl ReplayRow {
             adapter: adapter.name().to_string(),
             ticks: e.ticks,
             alive: e.alive,
+            terminal_stores: e.terminal_stores,
+            store_capacity: e.store_capacity,
             turn_measured_ticks: t.turn_measured_ticks,
             turn_active_ticks: t.turn_active_ticks,
             turn_active_fraction: t.turn_active_fraction().unwrap_or(0.0),
@@ -531,13 +537,16 @@ fn reduce_replay(
                 .iter()
                 .map(|l| {
                     let r = find(adapter, label, l);
-                    // Only the two fields `score_by` reads are reconstructed, and both are
-                    // recorded exactly: the survival ticks and the normalised terminal stores
-                    // are carried through `Episode` itself below.
+                    // Exactly the four fields `score_by` reads, each recorded on the row:
+                    // the survival ticks, whether the body was alive, and the two that make
+                    // `Episode::normalized_stores`. Every other field is a diagnostic the
+                    // score never touches, and is left at zero rather than reconstructed.
                     Episode {
                         layout: r.layout.clone(),
                         ticks: r.ticks,
                         alive: r.alive,
+                        terminal_stores: r.terminal_stores,
+                        store_capacity: r.store_capacity,
                         ..blank_episode()
                     }
                 })
@@ -658,10 +667,9 @@ fn reduce_replay(
     }
 }
 
-/// An `Episode` with every diagnostic zeroed. Only `layout`, `ticks` and `alive` are filled in
-/// by the caller, and `score_by` reads exactly those plus the stores — which are deliberately
-/// left at zero here, so the reconstructed score is the **survival** term alone and the
-/// tiebreak cannot make a difference look like a survival difference.
+/// An `Episode` with every diagnostic zeroed. The caller fills in exactly the fields
+/// [`score_by`] reads — `ticks`, `alive`, `terminal_stores`, `store_capacity` — and nothing
+/// else, so a reconstructed score is the protocol's score and cannot pick up a diagnostic.
 fn blank_episode() -> Episode {
     Episode {
         layout: String::new(),
