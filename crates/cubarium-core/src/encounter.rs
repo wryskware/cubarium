@@ -390,3 +390,150 @@ pub fn recombine(a: &Genome, b: &Genome, carrier: OrganismId, partner: OrganismI
     child.clamp();
     child
 }
+
+/// **Why no two introduced apexes ever mate**, counted where the decision is made.
+///
+/// The screen established that one or two introduced adults produce no mating, no birth and
+/// no survivor, and then attributed that to the 10 px [`MATING_RADIUS_PX`]. The predicate has
+/// six other terms (`crate::world`, section 5a), and the screen recorded none of them, so
+/// early death, never being ready, and never meeting are still one undivided outcome
+/// (`design/7_Research/ecology-v1-next-review-2026-09-15.md`, finding 5). This is the cheap
+/// audit that separates them.
+///
+/// **Two levels, deliberately.** The *census* fields count members, in states, per tick, over
+/// every member the world holds — they do not care whether anybody sensed anybody. The
+/// *candidate* fields count the pairs that reached the sorted `pairs` list, which requires
+/// that the two sensed each other. A radius failure can only ever appear in the second group,
+/// and a world where the census says two adults were never ready at once cannot produce one at
+/// all. Reading only the histogram would therefore answer the wrong question.
+///
+/// **Definitions, exactly as the pass evaluates them.**
+/// - *alive*: the member's id still resolves to an organism.
+/// - *adult*: alive, not dormant, and `structure ≥ structure_adult − hunter::TOLERANCE`.
+/// - *mature and perched*: adult and `HunterPhase::Perched`.
+/// - *ready*: mature and perched, `hunter::may_reproduce` (no escrow, not carrying, no target,
+///   not hunting, adult, stock fractions met, past its minimum age and past
+///   `next_reproduction_tick`), and in no gestation as carrier or partner. This is exactly the
+///   `a_ready` the pass computes.
+/// - *first failing predicate*: the source order of the pass — partner already used this tick,
+///   then radius, then `a_ready`, then `b_ready`, then population capacity, then whether both
+///   could afford the half contribution.
+///
+/// **Time.** Totals run from the moment this `World` was constructed, like every other
+/// diagnostic on it, and are reset by a drain. Transient: never persisted, never hashed, never
+/// read back by the tick, zero again after a reload.
+///
+/// **Cost.** Only inside the apex-encounter pass, which an ordinary world never enters. One
+/// pass over the member list (never more than a handful) plus one surface unfolding per ready
+/// pair — and a ready pair is the thing the campaign has never once observed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ApexOpportunity {
+    /// Ticks on which the apex-encounter pass ran at all: the policy was on and the world held
+    /// at least one member with a profile. The denominator for every count below.
+    pub ticks_sampled: u64,
+
+    /// Σ over sampled ticks of the number of members alive, adult, mature-and-perched and
+    /// ready. Divide by `ticks_sampled` for a mean.
+    pub members_alive_ticks: u64,
+    pub adults_alive_ticks: u64,
+    pub mature_perched_ticks: u64,
+    pub ready_ticks: u64,
+
+    /// Ticks on which at least two members were in each state at the same time. The third is
+    /// the *readiness overlap* the audit is about: if it is zero, no radius can matter.
+    pub ticks_two_adults: u64,
+    pub ticks_two_mature_perched: u64,
+    pub ticks_two_ready: u64,
+
+    /// The most members ever in each state at once, so "two adults alive" is distinguishable
+    /// from "two adults alive for one tick out of 180,000".
+    pub max_members_alive: u32,
+    pub max_adults_alive: u32,
+    pub max_ready: u32,
+
+    /// The smallest surface distance between two simultaneously ready members, ever (px).
+    /// `None` when no two were ever ready at once, or when every such pair was further apart
+    /// than one local unfolding can measure — `ready_pair_unmeasured_ticks` says which.
+    pub min_ready_distance_px: Option<f64>,
+    /// Ticks on which two members were ready and no pair of them was within
+    /// `cubarium_surface::MAX_LOCAL_RADIUS`, so their separation is known only to be larger
+    /// than that.
+    pub ready_pair_unmeasured_ticks: u64,
+    /// Ticks on which a ready pair stood within [`MATING_RADIUS_PX`] of each other.
+    pub ticks_ready_pair_within_radius: u64,
+
+    /// Pairs that reached the sorted candidate list: both perched, both adult, neither dormant,
+    /// neither in a gestation, and each inside the other's sensing.
+    pub pair_candidates: u64,
+    /// First failing predicate, in the pass's own evaluation order. Exactly one bin, or
+    /// `matings`, is incremented per candidate.
+    pub fail_partner_used: u64,
+    pub fail_radius: u64,
+    pub fail_ready_a: u64,
+    pub fail_ready_b: u64,
+    pub fail_capacity: u64,
+    pub fail_contribution: u64,
+    /// Candidates that passed every term and conceived.
+    pub matings: u64,
+}
+
+impl ApexOpportunity {
+    /// Fold one tick's census in. `distance` is the closest ready pair this tick, `None` when
+    /// there was no ready pair or none close enough to measure.
+    pub(crate) fn observe(
+        &mut self,
+        members_alive: u32,
+        adults: u32,
+        mature_perched: u32,
+        ready: u32,
+        distance: Option<f64>,
+    ) {
+        self.ticks_sampled += 1;
+        self.members_alive_ticks += u64::from(members_alive);
+        self.adults_alive_ticks += u64::from(adults);
+        self.mature_perched_ticks += u64::from(mature_perched);
+        self.ready_ticks += u64::from(ready);
+        self.ticks_two_adults += u64::from(adults >= 2);
+        self.ticks_two_mature_perched += u64::from(mature_perched >= 2);
+        self.ticks_two_ready += u64::from(ready >= 2);
+        self.max_members_alive = self.max_members_alive.max(members_alive);
+        self.max_adults_alive = self.max_adults_alive.max(adults);
+        self.max_ready = self.max_ready.max(ready);
+        if ready >= 2 {
+            match distance {
+                Some(d) => {
+                    self.min_ready_distance_px =
+                        Some(self.min_ready_distance_px.map_or(d, |m: f64| m.min(d)));
+                    self.ticks_ready_pair_within_radius += u64::from(d <= MATING_RADIUS_PX);
+                }
+                None => self.ready_pair_unmeasured_ticks += 1,
+            }
+        }
+    }
+
+    /// Fold one candidate pair's outcome in. Exactly one counter moves.
+    pub(crate) fn candidate(&mut self, outcome: PairOutcome) {
+        self.pair_candidates += 1;
+        match outcome {
+            PairOutcome::PartnerUsed => self.fail_partner_used += 1,
+            PairOutcome::Radius => self.fail_radius += 1,
+            PairOutcome::ReadyA => self.fail_ready_a += 1,
+            PairOutcome::ReadyB => self.fail_ready_b += 1,
+            PairOutcome::Capacity => self.fail_capacity += 1,
+            PairOutcome::Contribution => self.fail_contribution += 1,
+            PairOutcome::Mated => self.matings += 1,
+        }
+    }
+}
+
+/// What stopped one candidate pair, in the pass's own evaluation order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PairOutcome {
+    PartnerUsed,
+    Radius,
+    ReadyA,
+    ReadyB,
+    Capacity,
+    Contribution,
+    Mated,
+}

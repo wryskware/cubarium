@@ -237,6 +237,8 @@ impl World {
             counters: TickCounters::default(),
             charging: ChargingDiagnostics::default(),
             intake: IntakeDiagnostics::default(),
+            budgets: crate::world::BudgetRecorder::default(),
+            apex_opportunity: crate::encounter::ApexOpportunity::default(),
             neural_timing: crate::world::state::NeuralTiming::default(),
             scripted: Vec::new(),
             initial_material,

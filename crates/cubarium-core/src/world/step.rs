@@ -28,6 +28,7 @@ use crate::{DT, pairs};
 
 use super::*;
 
+use super::budget;
 use super::invariants::edible_detritus;
 
 /// `D_eff + C_eff` for one cell: the edible portion of the litter plus the edible portion of
@@ -240,6 +241,8 @@ impl World {
                 counters,
                 charging,
                 intake,
+                budgets,
+                apex_opportunity,
                 neural_timing,
                 scripted,
                 initial_material: _,
@@ -297,6 +300,15 @@ impl World {
                 counters.heat_out += amount;
                 accounting::accumulate(heat_out_total, heat_out_correction, amount);
             };
+            // Open a per-body budget record for anything that does not have one yet, before
+            // this tick mutates a single store, so a record's `start_*` is the body's opening
+            // inventory and its identity closes over whole ticks (`crate::world::budget`).
+            // Off by default: one boolean test and no allocation in an ordinary world.
+            if budgets.enabled() {
+                for (id, o) in organisms.iter() {
+                    budgets.ensure(id, o, now);
+                }
+            }
 
             // 1. Admit due stimuli. The queue is empty in M2; the hook is the journal.
 
@@ -613,6 +625,64 @@ impl World {
                     }
                 }
                 pairs.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+                // **The opportunity census** (`crate::encounter::ApexOpportunity`). Counted
+                // over every member the world holds, not over the candidate list above, so a
+                // world where two adults were never ready at the same instant is
+                // distinguishable from one where they were ready and never met. Reads only
+                // values the pass already reads and writes nothing the tick consults.
+                {
+                    let mut alive = 0u32;
+                    let mut adults = 0u32;
+                    let mut perched = 0u32;
+                    let mut ready_ids: Vec<OrganismId> = Vec::new();
+                    for (index, m) in hunters.members.iter().enumerate() {
+                        let Some(o) = organisms.get(m.id) else { continue };
+                        alive += 1;
+                        let dormant = apex_dormancy_on && apex_dormancy.contains(m.id);
+                        let adult =
+                            o.structure >= o.phenotype.structure_adult - hunter::TOLERANCE;
+                        if dormant || !adult {
+                            continue;
+                        }
+                        adults += 1;
+                        if m.phase != HunterPhase::Perched {
+                            continue;
+                        }
+                        perched += 1;
+                        let committed = apex_encounters
+                            .gestations
+                            .iter()
+                            .any(|g| g.carrier == m.id || g.partner == m.id);
+                        if !committed
+                            && hunter::may_reproduce(&profile, o, &hunters.members[index], now, dt)
+                        {
+                            ready_ids.push(m.id);
+                        }
+                    }
+                    let mut closest: Option<f64> = None;
+                    for (i, a) in ready_ids.iter().enumerate() {
+                        for b in &ready_ids[i + 1..] {
+                            let (Some(oa), Some(ob)) = (organisms.get(*a), organisms.get(*b))
+                            else {
+                                continue;
+                            };
+                            if let Some(d) = cubarium_surface::surface_distance(
+                                oa.pos,
+                                ob.pos,
+                                cubarium_surface::MAX_LOCAL_RADIUS,
+                            ) {
+                                closest = Some(closest.map_or(d, |m: f64| m.min(d)));
+                            }
+                        }
+                    }
+                    apex_opportunity.observe(
+                        alive,
+                        adults,
+                        perched,
+                        u32::try_from(ready_ids.len()).unwrap_or(u32::MAX),
+                        closest,
+                    );
+                }
                 let mut used: Vec<OrganismId> = Vec::new();
                 let gestation_ticks = ticks_from_seconds(profile.gestation_seconds, dt);
                 let interval_ticks = ticks_from_seconds(profile.reproduce_interval_seconds, dt);
@@ -621,6 +691,7 @@ impl World {
 
                 for (distance, a_id, b_id) in pairs {
                     if used.contains(&a_id) || used.contains(&b_id) {
+                        apex_opportunity.candidate(encounter::PairOutcome::PartnerUsed);
                         continue;
                     }
                     let (Some(a_index), Some(b_index)) =
@@ -638,6 +709,23 @@ impl World {
                         && hunter::may_reproduce(&profile, b, &hunters.members[b_index], now, dt)
                         && !apex_encounters.gestations.iter().any(|g| g.partner == b_id);
 
+                    // The first of the four cheap terms that fails, in the `if`'s own
+                    // evaluation order. The remaining two outcomes — the contribution, and a
+                    // conception — are recorded inside the branch, where the world computes
+                    // them; nothing here re-derives a due or draws anything.
+                    if let Some(blocked) = if distance > encounter::MATING_RADIUS_PX {
+                        Some(encounter::PairOutcome::Radius)
+                    } else if !a_ready {
+                        Some(encounter::PairOutcome::ReadyA)
+                    } else if !b_ready {
+                        Some(encounter::PairOutcome::ReadyB)
+                    } else if organisms.len() >= cfg.capacity.max_organisms as usize {
+                        Some(encounter::PairOutcome::Capacity)
+                    } else {
+                        None
+                    } {
+                        apex_opportunity.candidate(blocked);
+                    }
                     if distance <= encounter::MATING_RADIUS_PX
                         && a_ready
                         && b_ready
@@ -663,6 +751,7 @@ impl World {
                             && a.energy >= energy_due
                             && b.energy >= energy_due
                         {
+                            apex_opportunity.candidate(encounter::PairOutcome::Mated);
                             // End the immutable reads before mutating the two distinct slots.
                             let child_genome = genome.digest();
                             let a = organisms
@@ -670,6 +759,10 @@ impl World {
                                 .expect("paired adult remained alive");
                             a.reserve -= material_due;
                             a.energy -= energy_due;
+                            if let Some(rec) = budgets.at(a_id) {
+                                rec.reproduction_material += material_due;
+                                rec.reproduction_energy += energy_due;
+                            }
                             a.escrow = Some(Escrow {
                                 structure,
                                 reserve,
@@ -682,6 +775,10 @@ impl World {
                                 .expect("paired adult remained alive");
                             b.reserve -= material_due;
                             b.energy -= energy_due;
+                            if let Some(rec) = budgets.at(b_id) {
+                                rec.reproduction_material += material_due;
+                                rec.reproduction_energy += energy_due;
+                            }
                             hunters.members[a_index].next_reproduction_tick =
                                 now.saturating_add(encounter_cooldown);
                             hunters.members[b_index].next_reproduction_tick =
@@ -707,6 +804,7 @@ impl World {
                             used.extend([a_id, b_id]);
                             continue;
                         }
+                        apex_opportunity.candidate(encounter::PairOutcome::Contribution);
                     }
 
                     // A failed mutual funding is not a free attack. Combat is an alternative
@@ -753,12 +851,18 @@ impl World {
                             .expect("attacker remained alive");
                         o.energy -= profile.strike_energy_cost;
                     }
+                    if let Some(rec) = budgets.at(attacker) {
+                        rec.other_energy_paid += profile.strike_energy_cost;
+                    }
                     heat(profile.strike_energy_cost);
                     if retreats {
                         let o = organisms
                             .get_mut(defender)
                             .expect("defender remained alive");
                         o.energy -= retreat_cost;
+                        if let Some(rec) = budgets.at(defender) {
+                            rec.other_energy_paid += retreat_cost;
+                        }
                         heat(retreat_cost);
                         defender_energy_paid = retreat_cost;
                         response = CombatResponse::Retreated;
@@ -808,9 +912,18 @@ impl World {
                             attacker_injury = attack_injury.min(o.structure);
                             o.structure -= attacker_injury;
                             fields.d[cell_of(&o.pos).index()] += attacker_injury;
+                            if let Some(rec) = budgets.at(attacker) {
+                                rec.injury_structure += attacker_injury;
+                            }
+                            if let Some(rec) = budgets.at(defender) {
+                                rec.other_energy_paid += profile.strike_energy_cost;
+                            }
                         } else {
                             defender_energy_paid = 0.0;
                             response = CombatResponse::Injured;
+                        }
+                        if let Some(rec) = budgets.at(defender) {
+                            rec.injury_structure += defender_injury;
                         }
                     }
                     hunters.members[attacker_index].enter(
@@ -1081,6 +1194,9 @@ impl World {
                     if let Some(o) = organisms.get_mut(id) {
                         let paid = cost.min(o.energy).max(0.0);
                         o.energy -= paid;
+                        if let Some(rec) = budgets.at(id) {
+                            rec.other_energy_paid += paid;
+                        }
                         heat(paid);
                     }
                 }
@@ -1264,6 +1380,19 @@ impl World {
                 // 9 and this is step 6 (`crate::world::IntakeDiagnostics`).
                 intake.body_bill_total += cost;
                 intake.body_bill_upkeep += bill.upkeep(dt);
+                // The same charge, per body, with its three terms kept apart. Translation and
+                // the rotational sweep are priced exactly as `MotorBill::total_cost` prices
+                // them — `move_cost · S · |v| · dt` and `move_cost · S · k · sweep · dt` — so
+                // the split is the bill's own, not a second formula (`crate::world::budget`).
+                if let Some(rec) = budgets.at(*id) {
+                    let per_motor = bill.move_cost * bill.structure * dt;
+                    rec.billed_ticks += 1;
+                    rec.bill_total += cost;
+                    rec.upkeep_billed += bill.upkeep(dt);
+                    rec.motor_translation_billed += per_motor * motion.speed.max(0.0);
+                    rec.motor_turn_billed +=
+                        per_motor * motor::ROTATION_COST_SCALE * motion.sweep.max(0.0);
+                }
                 let mut collected = cost.min(o.energy).max(0.0);
                 o.energy -= collected;
                 let shortfall = (cost - collected).max(0.0);
@@ -1282,6 +1411,10 @@ impl World {
                         let gained = (released * org_cfg.oxidation_efficiency).min(room);
                         o.energy += gained;
                         heat(released - gained);
+                        if let Some(rec) = budgets.at(*id) {
+                            rec.oxidation_reserve_burned += burned;
+                            rec.oxidation_battery_credit += gained;
+                        }
                         if let Some(already) = settled_oxidation.get_mut(id.slot as usize) {
                             *already = burned;
                         }
@@ -1297,6 +1430,9 @@ impl World {
                 // to pay for being alive, which the starvation predicate above has already
                 // marked for removal.
                 intake.body_bill_paid += collected;
+                if let Some(rec) = budgets.at(*id) {
+                    rec.bill_paid += collected;
+                }
             }
 
             // 6b. Capture settlement, from the common post-movement state and before any
@@ -1418,6 +1554,7 @@ impl World {
                             // and its escrow moved into the gut, energy included. This is an
                             // internal transfer with no source ledger and no detritus cap.
                             let prey = organisms.remove(prey_id).expect("the claim was checked");
+                            budgets.close(prey_id, &prey, now + 1, DeathCause::Predation);
                             // The private recurrent state goes with the body here too. An
                             // *ordinary* neural body is legitimate prey for a legacy hunter —
                             // refusing a neural apex says nothing about that combination — and
@@ -1616,6 +1753,12 @@ impl World {
                         heat(rho * (1.0 - cap_h) * q);
                         intake.fruit_eaten += q;
                         intake.undigested += feces;
+                        if let Some(rec) = budgets.at(id) {
+                            rec.served[budget::FRUIT] += q;
+                            rec.digestible[budget::FRUIT] += q_d;
+                            rec.reserve_credit[budget::FRUIT] += to_reserve;
+                            rec.battery_credit[budget::FRUIT] += gained;
+                        }
                         ate[1] += q;
                         eaten += q;
                     }
@@ -1638,6 +1781,12 @@ impl World {
                         heat(rho * (1.0 - cap_h) * q);
                         intake.producer_eaten += q;
                         intake.undigested += feces;
+                        if let Some(rec) = budgets.at(id) {
+                            rec.served[budget::FOLIAGE] += q;
+                            rec.digestible[budget::FOLIAGE] += q_d;
+                            rec.reserve_credit[budget::FOLIAGE] += to_reserve;
+                            rec.battery_credit[budget::FOLIAGE] += gained;
+                        }
                         ate[0] += q;
                         eaten += q;
                     }
@@ -1676,6 +1825,12 @@ impl World {
                             heat(rho * (1.0 - cap_d) * q);
                             intake.litter_eaten += q;
                             intake.undigested += feces;
+                            if let Some(rec) = budgets.at(id) {
+                                rec.served[budget::LITTER] += q;
+                                rec.digestible[budget::LITTER] += q_d;
+                                rec.reserve_credit[budget::LITTER] += to_reserve;
+                                rec.battery_credit[budget::LITTER] += gained;
+                            }
                             ate[2] += q;
                             eaten += q;
                         }
@@ -1703,6 +1858,12 @@ impl World {
                             heat(rho * (1.0 - cap_d) * q);
                             intake.carrion_eaten += q;
                             intake.undigested += feces;
+                            if let Some(rec) = budgets.at(id) {
+                                rec.served[budget::CARRION] += q;
+                                rec.digestible[budget::CARRION] += q_d;
+                                rec.reserve_credit[budget::CARRION] += to_reserve;
+                                rec.battery_credit[budget::CARRION] += gained;
+                            }
                             ate[2] += q;
                             eaten += q;
                         }
@@ -1744,6 +1905,9 @@ impl World {
                     };
                     let paid = handling.min(o.energy).max(0.0);
                     o.energy -= paid;
+                    if let Some(rec) = budgets.at(m.id) {
+                        rec.other_energy_paid += paid;
+                    }
                     heat(paid);
                     if paid < handling {
                         // It could not carry its meal this tick; the gut keeps everything and
@@ -1764,6 +1928,10 @@ impl World {
                     if step.material > 0.0 {
                         o.reserve += step.to_reserve;
                         o.energy += step.energy_gain;
+                        if let Some(rec) = budgets.at(m.id) {
+                            rec.gut_reserve_credit += step.to_reserve;
+                            rec.gut_battery_credit += step.energy_gain;
+                        }
                         // §8: a digestion reject is feces, and feces are litter, energy-free.
                         fields.d[cell_of(&o.pos).index()] += step.to_detritus;
                         heat(step.heat);
@@ -1864,6 +2032,12 @@ impl World {
                     let cost = MAINTENANCE_PER_STRUCTURE_SECOND * o.structure * dt;
                     let paid = cost.min(o.energy).max(0.0);
                     o.energy -= paid;
+                    if let Some(rec) = budgets.at(id) {
+                        rec.billed_ticks += 1;
+                        rec.bill_total += cost;
+                        rec.upkeep_billed += cost;
+                        rec.bill_paid += paid;
+                    }
                     heat(paid);
                     // A concealed offspring is a body too: its dormancy upkeep is part of the
                     // run's complete animal bill. It has no motor half — it does not move — so
@@ -1960,6 +2134,10 @@ impl World {
                     let gained = (released * org_cfg.oxidation_efficiency).min(room);
                     o.energy += gained;
                     heat(released - gained);
+                    if let Some(rec) = budgets.at(*id) {
+                        rec.oxidation_reserve_burned += burned;
+                        rec.oxidation_battery_credit += gained;
+                    }
                     // Bounded diagnostics, after the transaction and out of its way: this is
                     // the branch a member under the configured threshold would not have taken.
                     // Reads nothing new, writes no world state, consumes no draw
@@ -1991,6 +2169,10 @@ impl World {
                         o.structure += grown;
                         let cost = (org_cfg.build_cost * grown).min(o.energy);
                         o.energy -= cost;
+                        if let Some(rec) = budgets.at(*id) {
+                            rec.growth_material += grown;
+                            rec.growth_energy += cost;
+                        }
                         // Structure holds no chemical energy: the reserve's energy is released.
                         heat(cost + e_r * grown);
                     }
@@ -2042,6 +2224,10 @@ impl World {
                             let (reserve_before, energy_before) = (o.reserve, o.energy);
                             o.reserve -= structure + reserve;
                             o.energy -= build + energy;
+                            if let Some(rec) = budgets.at(*id) {
+                                rec.reproduction_material += structure + reserve;
+                                rec.reproduction_energy += build + energy;
+                            }
                             heat(build);
                             let genome = o.genome.clone();
                             o.escrow = Some(Escrow {
@@ -2124,6 +2310,7 @@ impl World {
                 let Some(o) = organisms.remove(*id) else {
                     continue;
                 };
+                budgets.close(*id, &o, now + 1, *cause);
                 // The private recurrent state goes at the same boundary the body does. The
                 // entry is keyed by the full id, so a reused slot could not inherit it even if
                 // this removal were ever missed.
@@ -2285,12 +2472,23 @@ impl World {
                         carrier.reserve += pair.carrier_paid.material();
                         carrier.energy += pair.carrier_paid.energy;
                     }
+                    // A refund is negative outlay, not income: the contributor's own
+                    // reproduction line goes back down by exactly what it got back. The build
+                    // heat it also paid is not refunded and stays on the line.
+                    if let Some(rec) = budgets.at(*parent_id) {
+                        rec.reproduction_material -= pair.carrier_paid.material();
+                        rec.reproduction_energy -= pair.carrier_paid.energy;
+                    }
                     let partner_refund_to = if organisms.get(pair.partner).is_some() {
                         let partner = organisms
                             .get_mut(pair.partner)
                             .expect("checked live partner");
                         partner.reserve += pair.partner_paid.material();
                         partner.energy += pair.partner_paid.energy;
+                        if let Some(rec) = budgets.at(pair.partner) {
+                            rec.reproduction_material -= pair.partner_paid.material();
+                            rec.reproduction_energy -= pair.partner_paid.energy;
+                        }
                         pair.partner
                     } else {
                         let carrier = organisms
@@ -2298,6 +2496,13 @@ impl World {
                             .expect("a due paired carrier is alive");
                         carrier.reserve += pair.partner_paid.material();
                         carrier.energy += pair.partner_paid.energy;
+                        // A dead partner's share falls back to the carrier, which never paid
+                        // it: that is income to this body, so it reduces its own line by the
+                        // same amount the identity's `Δ(S + R)` grew.
+                        if let Some(rec) = budgets.at(*parent_id) {
+                            rec.reproduction_material -= pair.partner_paid.material();
+                            rec.reproduction_energy -= pair.partner_paid.energy;
+                        }
                         *parent_id
                     };
                     debug_assert!(
@@ -2342,6 +2547,10 @@ impl World {
                         let (reserve_before, energy_before) = (parent.reserve, parent.energy);
                         parent.reserve += escrow.structure + escrow.reserve;
                         parent.energy += escrow.energy;
+                        if let Some(rec) = budgets.at(*parent_id) {
+                            rec.reproduction_material -= escrow.structure + escrow.reserve;
+                            rec.reproduction_energy -= escrow.energy;
+                        }
                         counters.cap_rejections += 1;
                         *cap_rejections_total += 1;
                         if hunter_parent.is_some() && paired.is_none() {
@@ -2576,6 +2785,15 @@ impl World {
                 moved[slot].clear();
                 counters.births += 1;
                 *births_total += 1;
+            }
+
+            // Bring every surviving record's terminal stores up to this tick's close, so a
+            // reader that stops mid-run sees a closed identity rather than a stale one. One
+            // pass over the living, and nothing at all when recording is off.
+            if budgets.enabled() {
+                for (id, o) in organisms.iter() {
+                    budgets.mark(id, o);
+                }
             }
 
             *tick += 1;

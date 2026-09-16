@@ -1,5 +1,6 @@
 //! The world: checkpointed state plus transient caches, and the tick.
 
+mod budget;
 mod care;
 mod hunter;
 mod invariants;
@@ -14,13 +15,17 @@ use cubarium_surface::{CELL_COUNT, CellId, ChartImage, FieldGraph, ScalarField, 
 
 use crate::diagnostic::ScriptedIntent;
 use crate::dormancy::ApexDormancyEvent;
-use crate::encounter::ApexEncounterEvent;
+use crate::encounter::{ApexEncounterEvent, ApexOpportunity};
 use crate::events::LifeEvent;
 use crate::habitat::Habitat;
 use crate::hunter::HunterEvent;
 use crate::pairs::NeighborLists;
 use crate::quiet::QuietEvent;
 
+pub use budget::{
+    BodyBudget, BudgetRecorder, CARRION, CHANNEL_NAMES, CHANNELS, FOLIAGE, FRUIT, LITTER,
+    MAX_CLOSED_RECORDS,
+};
 pub use crate::fields::{CellClass, EcologyV1State};
 pub use lifecycle::{TRAINING_FOUNDER_HUE, TRAINING_START_ENERGY, TRAINING_START_RESERVE};
 pub(crate) use state::check_genome;
@@ -64,6 +69,12 @@ pub struct World {
     pub(crate) counters: TickCounters,
     pub(crate) charging: ChargingDiagnostics,
     pub(crate) intake: IntakeDiagnostics,
+    /// Per-organism store budgets (`budget`). Off by default; transient, never persisted,
+    /// never hashed, never read back by the tick.
+    pub(crate) budgets: BudgetRecorder,
+    /// Why two adult apex members did or did not mate (`crate::encounter::ApexOpportunity`).
+    /// Written only inside the apex-encounter pass; transient like every field above.
+    pub(crate) apex_opportunity: ApexOpportunity,
     /// Transient timing of the recurrent stage (`crate::neural`). Development measurement
     /// only: never persisted, never hashed, never read by the tick.
     pub(crate) neural_timing: NeuralTiming,
