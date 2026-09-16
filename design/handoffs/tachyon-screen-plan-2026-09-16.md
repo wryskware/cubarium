@@ -225,3 +225,21 @@ the daemon (or a presenter stage) doing upscale, rotation and post-effects on
 the GPU at panel resolution (EGL surfaceless, render into a dma-buf imported
 into KMS; a pbuffer + readback is the fallback). Wrysk reserves the Hexagon
 NPU for organism networks or voice.
+
+### Approved: the GPU hybrid, and the longer-term shaded renderer (Wrysk, 2026-09-16)
+
+Wrysk approved the hybrid as a package after the flat world ships: sim and
+sprite stamping on the CPU at world resolution; the display daemon renders on
+the Adreno (EGL surfaceless, dma-buf into KMS) doing the integer upscale, the
+rotation and panel-resolution post-effects. To give the shaders something to
+work with, the raster wire format should be able to carry **auxiliary layers**
+beside RGB (candidates: emissive, water mask, height/stratum, rain), so the
+daemon can shade water, glow and weather without knowing the world. That is
+FW-9, briefed after FW-5 lands, and it replaces the daemon's CPU gather when
+present (CPU gather stays as the fallback).
+
+Longer term (not scheduled): a rendering mode with shading, blending and
+anti-aliasing, where the pixel-art look is a style rather than a constraint.
+That drops byte-identical frame parity between desktop, cube and panel for
+anything shaded, so it lives behind a renderer choice per display, with the
+CPU rasterizer kept for the LED cube and for tests.
