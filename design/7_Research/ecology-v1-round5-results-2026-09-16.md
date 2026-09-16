@@ -352,8 +352,9 @@ run, and a wet-floor producer is one world-level alternative among others.
 - No skimmer depth rescues the lineage in the selected ecology without
   predators; where a lineage establishes, its diet has shifted onto the
   foliage channel the grazer also uses, and whether that is the grazer's cost
-  was not isolated. The arm-2 ladder is untested and R's own rows say the
-  apex-arm treatment matters for `fast-leaf`.
+  was not isolated. The arm-2 ladder was then run (XY2): no rung is
+  acceptable there either, and the shipped predicate halves R's arm-2 effect;
+  R's own rows say the apex-arm treatment matters for `fast-leaf`.
 - Sixteen pairs' sufficiency remains untested; the split-half spread is
   reported, not concluded on.
 - The released turn band does not replicate as a training advantage; on the

@@ -549,8 +549,9 @@ a mis-specified clean gate that did not affect the comparison.** The banner is r
 suppressed, and the gate's first branch is not claimed to "hold". The ladder run itself was given no retained files, for the reason in
 the pre-registration.
 
-So the pre-registered stop rule's **first** branch holds: R's arm-2 numbers are reproduced at
-this build, and the ladder's verdicts below are comparable to R's and to Y's. It also
+So the primary R reproduction passed (24 of 24 rows, 1,056 fields) while the I/M checks were
+inapplicable: R's arm-2 numbers are reproduced at this build, and the ladder's verdicts below
+are comparable to R's and to Y's. It also
 establishes something R and Y could not: **across every shipped change between R's build
 `c38b5a6` and this one, the only thing that moves an arm-2 world is the pursuit predicate** —
 because holding the predicate fixed reproduces R bit for bit in all 24 cells, apex and all.
