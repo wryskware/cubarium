@@ -79,6 +79,42 @@ fn roster(seed: u64) -> Roster {
 
 // --- 1. the same eight cells in every arm -----------------------------------------------
 
+/// The counterbalanced arm is arm A's exact complement as *planned output*: slot by slot the
+/// same cell and class, the same skimmer body and every other locus equal, and the diet in
+/// each slot is the other of the two constants — so a future change to `plan` that broke the
+/// pairing would fail here, not only in the slot arithmetic.
+#[test]
+fn the_swapped_arm_is_arm_a_with_only_each_slots_diet_exchanged() {
+    let r = roster(1);
+    let cells = placements();
+    let a = factorial::plan(Arm::A, &r, &cells);
+    let s = factorial::plan(Arm::ASwap, &r, &cells);
+    assert_eq!(a.len(), CLONES);
+    assert_eq!(s.len(), CLONES);
+    let mut diets = std::collections::BTreeSet::new();
+    for i in 0..CLONES {
+        assert_eq!(a[i].slot, s[i].slot, "slot {i}");
+        assert_eq!(a[i].cell, s[i].cell, "slot {i}: the same cell");
+        assert_eq!(a[i].wet_start, s[i].wet_start, "slot {i}: the same class");
+        assert_eq!(a[i].form, s[i].form, "slot {i}: the same body");
+        assert_ne!(a[i].genome.diet, s[i].genome.diet, "slot {i}: the diet is exchanged");
+        let mut a_rest = a[i].genome.clone();
+        let mut s_rest = s[i].genome.clone();
+        a_rest.diet = 0.0;
+        s_rest.diet = 0.0;
+        assert_eq!(a_rest, s_rest, "slot {i}: every other locus equal");
+        diets.insert(a[i].genome.diet.to_bits());
+        diets.insert(s[i].genome.diet.to_bits());
+    }
+    assert_eq!(diets.len(), 2, "exactly the two diet constants appear across both arms");
+    // Across the two arms each diet stands in every one of the eight cells once.
+    for i in 0..CLONES {
+        let low_in_a = a[i].genome.diet < s[i].genome.diet;
+        let low_in_s = s[i].genome.diet < a[i].genome.diet;
+        assert!(low_in_a != low_in_s, "slot {i}: the low diet is in exactly one arm");
+    }
+}
+
 #[test]
 fn the_three_arms_stand_in_the_same_eight_cells_in_the_same_order() {
     let r = roster(1);

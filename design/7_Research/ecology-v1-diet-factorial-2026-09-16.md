@@ -450,15 +450,18 @@ F measured **descendants over 150 simulated minutes with reproduction on**. Only
 a lineage that found a persistent stand leaves descendants at all — and this
 campaign shows that in `fast-leaf` the *only* way to a positive margin is the
 foliage channel, which pays 8 times in 64 and nothing the other 56. So a
-surviving skimmer lineage is necessarily a foliage-diet lineage, born into the
-patch its parent won, and F's 84 % is survivorship of the winners of an
-all-or-nothing lottery.
+surviving skimmer lineage is most plausibly a foliage-diet lineage born into
+the patch its parent won, and F's 84 % is most plausibly survivorship of the
+winners of an all-or-nothing lottery. (Softened after review: this campaign
+measured cold founding with reproduction off, so it makes the survivorship
+explanation plausible; it does not identify the causal process inside F's
+reproductive descendant census.)
 
 This campaign measures **establishment from a cold founding with reproduction
 off**. Different hazard, different question. What it establishes is that the
-association is not a causal *founding-time* diet effect, and that the confound F
-named — lineage habitat travelling with lineage diet — is sufficient to explain
-it. The two results together say something neither says alone: **a detrital diet
+association is not a causal *founding-time* diet effect — at founding the
+opposite diet wins — and that the confound F named, lineage habitat travelling
+with lineage diet, is a sufficient explanation, not a demonstrated one. The two results together say something neither says alone: **a detrital diet
 buys a long, certain, always-losing decline, and a foliage diet is a lottery
 that mostly ends in six minutes and occasionally pays indefinitely.** Over 150
 minutes with reproduction, only the lottery winners have descendants.

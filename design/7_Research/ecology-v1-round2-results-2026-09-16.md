@@ -23,16 +23,19 @@ left open now has a measured answer, and three of the four move the obstacle
 rather than remove it. The trained forager does not eat because it does not
 *stay*: its mouth is open whenever it stands on food and its bite is never
 clamped, but it stands on food 8 % of the time against the scripted control's
-95 %, walks off stands it has barely touched, and ignores the "food here" scalar
-it is given; the next move is the score, not the observation. The introduced
+95 %, and walks off stands it has barely touched although the "food here"
+scalar is in its observation; whether its frozen weights, hidden state or
+update cadence use that scalar was not tested, so the training score is the
+leading hypothesis for the next move, to be falsified first. The introduced
 apex starves: it captures on 3 % of paid strikes and earns 6 % of its bill, and
 even when introduced already past the age gate it never becomes ready because
 its reserve only falls; the next question is its reach, not its eligibility.
 The finer movement-price ladder is refuted under its pre-registered rules, and
-in refuting it the campaign found that ecology v1's "depletion events" are almost
-never grazed cells: 971 of 1,355 depleted cells never held a prey body, the
-depleted set is the dimmest band of the habitat at every price, and the nine
-recoveries are plant-side events in three cells. The depletion/recovery cycle
+in refuting it the campaign found that most of ecology v1's counted "depletion
+events" had no grazing observed at probe resolution: 971 of 1,355 depleted
+cells never held a prey body at any one-second probe, the depleted set is the
+dimmest band of the habitat at every price, and the nine recoveries are
+plant-side events in three cells. The depletion/recovery cycle
 §4.4 was written for has not yet been observed, and the display shows a world
 seeded above its own equilibrium in its dim cells — as a leading hypothesis:
 the classification rests on one-second occupancy probes, attributed rather
@@ -250,10 +253,11 @@ slots were the richer cells on every seed, so Fable added the swapped arm
 low diet wins 29 of 32 pairs and establishes 22 of 32 against 2 of 32, in all
 four worlds; the clone-level Fisher test is withdrawn and the world is the
 replicate (4 of 4).
-F's "foliage-diet skimmers survive 84 %" was survivorship: with reproduction on
-over 150 minutes, only lineages that win the foliage lottery leave descendants,
-and a surviving skimmer lineage is necessarily a foliage-diet lineage born into
-its parent's patch — exactly the confound F named. Arm C's yield gap is a diet-locus difference (the two roster diets' capacities),
+F's "foliage-diet skimmers survive 84 %" is most plausibly survivorship: with
+reproduction on over 150 minutes, lineages that win the foliage lottery are the
+ones that leave descendants, born into the patch their parent won — the
+confound F named. J's cold-founding experiment makes that explanation
+plausible; it does not identify the causal process in F's descendant census. Arm C's yield gap is a diet-locus difference (the two roster diets' capacities),
 not a body cost: arm C moves form and diet together. At a foliage diet the body
 leg is not resolvable and J declined to report it as one; the body leg is
 therefore unmeasured and the depth-only factorial is its test. Habitat is the
