@@ -421,10 +421,14 @@ zero.
 - **Not a comparison with R2c.** Those policies were trained in the
   pre-calibration ecology, are refused by `check_ecology`, and were not run.
 
-**Does the trained policy destabilise the world?** No. It feeds no better at world
-scale, it does not deplete more (1.5 depletion events against 1.0, out of the
-1,106–1,118 cells that opened with foliage), foliage retention is equal, and the population it joins is the
-same size. It is a better *forager* and an ecologically invisible one.
+**Does the trained policy destabilise the world?** No destabilisation was detected
+at this tested scale: four bodies in twenty-eight, two seeds, and per-controller
+intake unmeasured, so the comparison can miss a population effect. It feeds no
+better at world scale by the per-arm totals, it does not deplete more (1.5
+depletion events against 1.0, out of the 1,106–1,118 cells that opened with
+foliage), foliage retention is equal, and the population it joins is the same
+size. It is a longer-lived, wider-ranging controller whose effect on the world,
+if any, is below what this comparison can see (wording corrected after review).
 
 ## Compute and storage actually used
 

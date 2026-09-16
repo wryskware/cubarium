@@ -622,10 +622,13 @@ for a later assignment to act on, not proposals; nothing here is implemented.
    empty one. With drift and no stabilising term, losing variety is the only available
    long-run outcome, and the run length only decides how much is lost.
 5. **The apex is an input, not a population.** Over 180 apex runs: 0 matings, 0 births,
-   0 emergences, 0 survivors, 1.2–2.6 % of deaths by predation. `MATING_RADIUS_PX` = 10
-   on a 5 × 64 × 64 surface means two introduced adults essentially never meet, and the
-   §13 constants that would let a paid offspring emerge are never reached because no
-   offspring is ever conceived. The predator therefore cannot respond to prey density
+   0 emergences, 0 survivors, 1.2–2.6 % of deaths by predation. No offspring is ever
+   conceived, so the §13 constants that would let a paid offspring emerge are never
+   reached. Why no pair mates is **not** isolated here: the predicate needs two mature
+   adults within `MATING_RADIUS_PX` = 10, both `Perched`, both stock- and interval-ready,
+   neither committed (`world/step.rs:600-665`), and no ready-pair distance, simultaneous
+   readiness or per-predicate failure count was recorded; the radius is one candidate
+   among early death and lack of readiness (corrected after review). The predator therefore cannot respond to prey density
    and cannot exert the top-down control the arms exist to measure — which is why the
    paired arm differences are all under 0.2 seed standard deviations. The apex constants
    were held unsearched by the brief; this is their measured effect.

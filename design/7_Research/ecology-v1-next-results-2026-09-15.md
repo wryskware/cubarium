@@ -323,8 +323,8 @@ was spent, all on `main`:
   skimmer) dies in every run of every configuration; the generalist guild
   usually follows; the apex never mates, so predator presence is a transient
   input; local depletion and recovery, the mechanisms ecology v1 was built to
-  show, are almost never triggered at world scale because nothing holds an
-  animal to a place; fruit and dead wood, two of the looks B built, have
+  show, are almost never triggered at world scale, with cheap wide-ranging
+  movement the leading but untested hypothesis; fruit and dead wood, two of the looks B built, have
   almost nothing to draw at these parameters.
 
 ## Next recommendation
