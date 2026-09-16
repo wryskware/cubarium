@@ -83,7 +83,7 @@ Decisions, with the reasoning:
    The same LUT is the inverse map touch will need in phase 2.
 4. **Build natively on the Tachyon** (rustup, `cargo build --release`). No
    cross toolchain exists on the desktop and installing one is a system
-   change. The board has 6 cores and 7 GB; a daemon-sized build is minutes.
+   change. The board has 8 cores (4× A78 + 4× A55) and 7 GB; a daemon-sized build is minutes.
 5. **Run as a root system service.** Headless image, `/dev/dri/card0` is
    `root:video`, no logind session. Unit at
    `/etc/systemd/system/cube-screen-shim.service`, `Restart=always`,
@@ -207,7 +207,7 @@ the tiny sprite sheets are a downscale for the 64×64 faces, so the world
 should be rescaled and the artwork re-baked at a higher resolution, pixel-art
 style kept, using the real estate; biome and terrain variation are wanted.
 FW-A now also evaluates the world resolution (480×270, 640×360, 960×540,
-1920×1080) against six A55 cores, the art re-bake path and its scale
+1920×1080) against the 4× A78 + 4× A55 cores, the art re-bake path and its scale
 constants, and a bounded first-version biome/terrain package separable from
 the topology work.
 
