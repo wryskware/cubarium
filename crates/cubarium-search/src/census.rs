@@ -82,6 +82,92 @@ pub fn depth_band(depth: f64) -> usize {
 }
 
 // ---------------------------------------------------------------------------------------
+// Workstream Y's ladder — declared here as stubs, so the definition tests in
+// `tests/depth_ladder.rs` can be committed and run *before* anything implements them.
+// Nothing below this line does any work yet.
+// ---------------------------------------------------------------------------------------
+
+/// The ladder. STUB.
+pub const DEPTH_LEVELS: [f32; 6] = [0.0; 6];
+
+/// The one apex arm this campaign runs.
+pub const LADDER_ARM: u32 = 0;
+
+pub const GENERATIONS: usize = 2;
+pub const FOUNDER: usize = 0;
+pub const DESCENDANT: usize = 1;
+
+/// STUB.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ServedProfile {
+    pub bodies: u64,
+    pub served: [f64; 4],
+}
+
+impl ServedProfile {
+    pub fn add(&mut self, _budget: &BodyBudget) {}
+    pub fn merge(&mut self, _other: &ServedProfile) {}
+    pub fn mean(&self, _channel: usize) -> f64 {
+        0.0
+    }
+    pub fn mean_total(&self) -> f64 {
+        0.0
+    }
+}
+
+/// STUB.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct GenerationMarginBin {
+    pub generation: u8,
+    pub form: u8,
+    pub diet_bin: u8,
+    pub bodies: u64,
+    pub deaths: u64,
+    pub alive: u64,
+    pub margin_mean: f64,
+    pub margin_rate_mean: f64,
+    pub served_total_mean: f64,
+    pub recorded_seconds_mean: f64,
+}
+
+/// STUB.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct GenerationMargins {
+    pub bins: Vec<GenerationMarginBin>,
+}
+
+impl GenerationMargins {
+    pub fn bin(&self, _generation: u8, _form: u8, _diet_bin: u8) -> Option<&GenerationMarginBin> {
+        None
+    }
+}
+
+/// STUB.
+#[derive(Clone, Debug, Default)]
+pub struct GenerationMarginAccumulator {
+    _unused: (),
+}
+
+impl GenerationMarginAccumulator {
+    #[allow(clippy::too_many_arguments)]
+    pub fn add(
+        &mut self,
+        _generation: usize,
+        _key: CensusKey,
+        _budget: &BodyBudget,
+        _reserve_energy_density: f64,
+        _now_tick: u64,
+        _dt: f64,
+        _alive: bool,
+    ) {
+    }
+
+    pub fn finish(self) -> GenerationMargins {
+        GenerationMargins::default()
+    }
+}
+
+// ---------------------------------------------------------------------------------------
 // The override
 // ---------------------------------------------------------------------------------------
 
@@ -985,6 +1071,22 @@ pub struct Assessment {
     /// O's predicted drift toward foliage: reported, never read by the verdict.
     pub diet_drift: Clause,
     pub verdict: Verdict,
+
+    // --- workstream Y: the number the acceptance turns on, reported beside every rung ---
+    /// The grazer's mean horizon population in this cell. STUB.
+    pub grazer_mean: f64,
+    /// The same in the 0.10 control cell. STUB.
+    pub grazer_control_mean: f64,
+    /// `grazer_mean / grazer_control_mean`, 0 when the control had none. STUB.
+    pub grazer_ratio: f64,
+}
+
+impl Assessment {
+    /// Astra's rule: a depth is acceptable if the lineage establishes and neither the
+    /// monoculture clause nor the variety clause holds. STUB.
+    pub fn acceptable(&self) -> bool {
+        false
+    }
 }
 
 fn mean(values: impl Iterator<Item = f64>) -> f64 {
@@ -1155,6 +1257,10 @@ impl Assessment {
             rescue_gone,
             diet_drift,
             verdict,
+            // STUB: workstream Y's reported grazer ratio.
+            grazer_mean: 0.0,
+            grazer_control_mean: 0.0,
+            grazer_ratio: 0.0,
         }
     }
 }
