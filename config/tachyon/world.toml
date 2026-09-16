@@ -1,0 +1,84 @@
+# Cubarium on the Tachyon: the world a **fresh** ring is founded with.
+#
+# Installed to /var/lib/cubarium/world.toml. Every field here is read at world
+# creation; on a resume `runner::open_world` calls `merge_operational`, which
+# copies `capacity` and `weather.moving` out of this file and nothing else, so
+# editing the founders below never touches a world that already exists. Missing
+# fields take `WorldConfig::default()` (serde `default`, `deny_unknown_fields`:
+# a typo here is a refusal at startup, not a silent default).
+
+# The shape of the surface. `--topology ring:640x360` on the command line says
+# the same thing and takes precedence; both are written so the file alone is a
+# complete description of the world it founds. A resume that is handed a
+# topology different from the snapshot's is refused by name.
+topology = { Ring = { w = 640, h = 360 } }
+# S = 2: the same 3,600-cell world as ring:320x180 at twice the resolution.
+world_scale = 2.0
+
+# --- Founders -------------------------------------------------------------
+#
+# 67 rather than the cube's 24. `design/handoffs/tachyon-screen-plan-2026-09-16.md`
+# ("FW-2 result and two ring-world calls"): at the unchanged 24 founders the ring
+# is 2.81x thinner than the cube, so the ring's fresh-world default scales with
+# cell count — 24 x 2.81 ~= 67 — and a fresh ring starts as dense as a fresh cube.
+# This is a fresh-world default, not a tuning of a running world.
+#
+# `founders.count` is ignored whenever `kinds` is non-empty, so the density call
+# has to be spent kind by kind. Each kind below is `FounderKind::defaults()`
+# (crates/cubarium-core/src/config.rs:519) transcribed field for field with only
+# `count` changed, scaled by 67/24 = 2.7917 and rounded:
+#
+#     burrower  4 -> 11      glider   5 -> 14
+#     grazer   10 -> 28      skimmer  5 -> 14      = 67
+#
+# The transcription is load-bearing: an omitted field is `None`, which means
+# "take the v1 founder value", not "take the default kind's value". Keep it in
+# step with `FounderKind::defaults()` if that function ever moves.
+
+[[founders.kinds]]
+name = "burrower"
+count = 11
+diet = 0.10
+depth = 0.10
+speed = 0.6
+size = 1.0
+# The burrower runs cool: a scavenger's income from litter is thin.
+metabolism = 0.7
+swim = 0.0
+hue = 0.15
+form = 2
+
+[[founders.kinds]]
+name = "grazer"
+count = 28
+diet = 0.85
+depth = 0.55
+speed = 1.0
+size = 1.0
+swim = 0.0
+hue = 0.50
+form = 0
+
+[[founders.kinds]]
+name = "glider"
+count = 14
+diet = 0.90
+depth = 1.00
+speed = 1.0
+size = 1.0
+swim = 0.0
+hue = 0.85
+form = 1
+
+[[founders.kinds]]
+name = "skimmer"
+count = 14
+diet = 0.60
+depth = 0.10
+speed = 0.9
+size = 0.9
+# Runs cool and grazes: its food is the algae standing water grows on the floor.
+metabolism = 0.7
+swim = 1.0
+hue = 0.65
+form = 3
