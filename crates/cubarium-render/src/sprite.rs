@@ -2,7 +2,8 @@
 
 use cubarium_surface::{PixelImage, Scale, SurfacePoint, Vec2, unfold_pixels};
 
-use crate::{Canvas, srgb_decode};
+use crate::unfolds::Source;
+use crate::{Canvas, Unfolds, srgb_decode};
 
 /// Linear premultiplied pixels. The pivot is measured from the image's upper-left
 /// boundary; body +x is forward. Transparent padding never enlarges the footprint.
@@ -648,7 +649,19 @@ pub fn stamp_layers_bent(
     bend: Bend,
     scratch: &mut Vec<PixelImage>,
 ) {
-    stamp_bent(canvas, anchor, heading, layers, scale, opacity, mask, bend, None, None, scratch);
+    stamp_bent(
+        canvas,
+        anchor,
+        heading,
+        layers,
+        scale,
+        opacity,
+        mask,
+        bend,
+        None,
+        None,
+        Source::Scratch(scratch),
+    );
 }
 
 /// How much of the art's own light a tinted stamp carries into its one colour.
@@ -774,7 +787,44 @@ pub fn stamp_layers_bent_toned(
         bend,
         None,
         tone.sanitized(),
-        scratch,
+        Source::Scratch(scratch),
+    );
+}
+
+/// [`stamp_layers_bent_toned`] taking its footprint from an [`Unfolds`] cache instead of
+/// unfolding from scratch — FW-P's W2, and the only thing that changes is where the pixel
+/// list comes from.
+///
+/// **Normative**: the image is bit-identical to [`stamp_layers_bent_toned`]'s for the same
+/// arguments, because a cached footprint is the same list narrowed by the same limit (see
+/// [`Unfolds`]). Every other stamp entry point is this one with a still pose, an identity
+/// bend or a zero tone, so a presenter that wants the cache routes its fixed-anchor passes
+/// here and leaves the moving ones where they are.
+#[allow(clippy::too_many_arguments)]
+pub fn stamp_layers_cached(
+    canvas: &mut Canvas,
+    anchor: SurfacePoint,
+    heading: Vec2,
+    layers: &[(Pose, f32)],
+    scale: f64,
+    opacity: f32,
+    mask: Mask,
+    bend: Bend,
+    tone: Tone,
+    unfolds: &mut Unfolds,
+) {
+    stamp_bent(
+        canvas,
+        anchor,
+        heading,
+        layers,
+        scale,
+        opacity,
+        mask,
+        bend,
+        None,
+        tone.sanitized(),
+        Source::Cached(unfolds),
     );
 }
 
@@ -811,7 +861,7 @@ pub fn stamp_layers_bent_with_radius(
         bend,
         Some(radius),
         None,
-        scratch,
+        Source::Scratch(scratch),
     );
 }
 
@@ -827,7 +877,7 @@ fn stamp_bent(
     bend: Bend,
     override_radius: Option<f64>,
     tone: Option<([f32; 3], f32, f32, f32)>,
-    scratch: &mut Vec<PixelImage>,
+    pixels: Source<'_>,
 ) {
     let mut extent = 0.0f64;
     let mut reference: Option<&Sprite> = None;
@@ -868,17 +918,17 @@ fn stamp_bent(
     match (bend.is_identity(), tone) {
         (true, None) => stamp_unfolded::<false, false>(
             canvas, anchor, h, layers, scale, opacity, mask, reference, bend, radius, FLAT_TINT,
-            scratch,
+            pixels,
         ),
         (true, Some(t)) => stamp_unfolded::<false, true>(
-            canvas, anchor, h, layers, scale, opacity, mask, reference, bend, radius, t, scratch,
+            canvas, anchor, h, layers, scale, opacity, mask, reference, bend, radius, t, pixels,
         ),
         (false, None) => stamp_unfolded::<true, false>(
             canvas, anchor, h, layers, scale, opacity, mask, reference, bend, radius, FLAT_TINT,
-            scratch,
+            pixels,
         ),
         (false, Some(t)) => stamp_unfolded::<true, true>(
-            canvas, anchor, h, layers, scale, opacity, mask, reference, bend, radius, t, scratch,
+            canvas, anchor, h, layers, scale, opacity, mask, reference, bend, radius, t, pixels,
         ),
     }
 }
@@ -907,12 +957,19 @@ fn stamp_unfolded<const BENT: bool, const TINTED: bool>(
     bend: Bend,
     radius: f64,
     tone: ([f32; 3], f32, f32, f32),
-    scratch: &mut Vec<PixelImage>,
+    mut pixels: Source<'_>,
 ) {
     let side = Vec2::new(-h.y, h.x);
     let tile_height = reference.height as f64;
-    unfold_pixels(canvas.topology(), anchor, radius, scratch);
-    for pixel in canvas.band_pixels(scratch) {
+    // A cached footprint may be wider than this stamp asked for, so the limit is applied
+    // here rather than by the query; `unfold_pixels` uses exactly this test, so a freshly
+    // unfolded list passes every pixel and nothing changes on the uncached path.
+    let limit = radius + cubarium_surface::GEOM_EPS;
+    let found = pixels.pixels(canvas.topology(), anchor, radius);
+    for pixel in canvas.band_pixels(found) {
+        if pixel.distance > limit {
+            continue;
+        }
         let d = pixel.local - anchor.chart();
         let local = Vec2::new(h.dot(d) / scale, side.dot(d) / scale);
         // The material row is never displaced, so the sample only moves along tile +x.

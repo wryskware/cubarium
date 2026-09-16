@@ -18,21 +18,25 @@
 
 mod body;
 mod canvas;
+mod cells;
 mod field;
 mod multipart;
 mod sprite;
 mod trail;
+mod unfolds;
 
 pub use body::{BodyShape, Lobe, stamp_body};
 pub use canvas::{Bands, Canvas, srgb_decode, srgb_encode};
-pub use field::draw_field;
+pub use cells::PixelCells;
+pub use field::{draw_field, draw_field_with};
 pub use multipart::{
     MAX_GRID, MIN_RIG_SCALE, RIG_MARGIN, RigPart, SUPERSAMPLE_REACH, grid_schedule, rig_radius,
     stamp_rig, stamp_rig_scaled, stamp_rig_with_radius,
 };
 pub use sprite::{
     Bend, Mask, Pose, Shade, Sprite, Tone, stamp_layers, stamp_layers_bent,
-    stamp_layers_bent_toned, stamp_layers_bent_with_radius, stamp_pose, stamp_pose_in_chart,
-    stamp_sprite,
+    stamp_layers_bent_toned, stamp_layers_bent_with_radius, stamp_layers_cached, stamp_pose,
+    stamp_pose_in_chart, stamp_sprite,
 };
 pub use trail::{Trail, TrailSegment, draw_trail};
+pub use unfolds::Unfolds;

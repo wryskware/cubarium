@@ -1,6 +1,7 @@
 //! Substrate rendering from a scalar field.
 
-use crate::Canvas;
+use crate::{Canvas, PixelCells};
+use cube_proto::Face;
 use cubarium_surface::{Edge, ScalarField, SurfacePoint, cell_of, pixel_neighbor};
 
 /// Add `color · min(value / scale, 1)` for each pixel from its cell (nearest-cell sample).
@@ -9,36 +10,78 @@ use cubarium_surface::{Edge, ScalarField, SurfacePoint, cell_of, pixel_neighbor}
 /// found through `cubarium_surface::pixel_neighbor` (weight 1 each), normalized over the
 /// neighbors actually present so the rim is not darkened. The filter changes presentation
 /// only; it never changes the field.
+///
+/// The pixel→cell map is recomputed per pixel here. A presenter that draws a field every
+/// frame should hold a [`PixelCells`] and call [`draw_field_with`], which is the same
+/// image bit for bit.
 pub fn draw_field(canvas: &mut Canvas, field: &ScalarField, scale: f64, color: [f32; 3], filter: bool) {
     if scale.is_nan() || scale <= 0.0 {
         return;
     }
     let topo = canvas.topology();
     let world = canvas.scale();
-    let width = canvas.width();
     let at = |face, x, y| {
         field.get(cell_of(topo, world, &SurfacePoint::pixel_center(topo, face, x, y)))
     };
+    draw(canvas, scale, color, |face, x, y| {
+        let own = at(face, x, y);
+        if !filter {
+            return own;
+        }
+        // Weight 4 for the pixel's own cell, 1 for each pixel neighbor's cell, normalized
+        // over the neighbors that exist so the open rim is not dark.
+        let mut sum = own * 4.0;
+        let mut weight = 4.0;
+        for edge in Edge::ALL {
+            if let Some((nf, nx, ny)) = pixel_neighbor(topo, face, x, y, edge) {
+                sum += at(nf, nx, ny);
+                weight += 1.0;
+            }
+        }
+        sum / weight
+    });
+}
+
+/// [`draw_field`] reading the pixel→cell map from a table built once (FW-P's W1).
+///
+/// **Normative**: bit-identical to [`draw_field`] — [`PixelCells`] tabulates exactly the
+/// answers `cell_of` and `pixel_neighbor` give and sums the neighbours in the same order.
+/// Panics if the table was built for a different topology or scale than the canvas.
+pub fn draw_field_with(
+    canvas: &mut Canvas,
+    cells: &PixelCells,
+    field: &ScalarField,
+    scale: f64,
+    color: [f32; 3],
+    filter: bool,
+) {
+    if scale.is_nan() || scale <= 0.0 {
+        return;
+    }
+    assert!(
+        cells.fits(canvas.topology(), canvas.scale()),
+        "the pixel-cell table is for {:?} at S = {}, the canvas for {:?} at S = {}",
+        cells.topology(),
+        cells.scale().world(),
+        canvas.topology(),
+        canvas.scale().world(),
+    );
+    draw(canvas, scale, color, |face, x, y| {
+        if filter {
+            cells.filtered(field, face, x, y)
+        } else {
+            cells.value(field, face, x, y)
+        }
+    });
+}
+
+/// The shared per-pixel loop: whatever the value comes from, the light is the same.
+fn draw(canvas: &mut Canvas, scale: f64, color: [f32; 3], value: impl Fn(Face, u16, u16) -> f64) {
+    let width = canvas.width();
     for &face in canvas.charts() {
         for y in canvas.rows_of(face) {
             for x in 0..width {
-                let own = at(face, x, y);
-                let value = if filter {
-                    // Weight 4 for the pixel's own cell, 1 for each pixel neighbor's cell,
-                    // normalized over the neighbors that exist so the open rim is not dark.
-                    let mut sum = own * 4.0;
-                    let mut weight = 4.0;
-                    for edge in Edge::ALL {
-                        if let Some((nf, nx, ny)) = pixel_neighbor(topo, face, x, y, edge) {
-                            sum += at(nf, nx, ny);
-                            weight += 1.0;
-                        }
-                    }
-                    sum / weight
-                } else {
-                    own
-                };
-                let t = (value / scale).min(1.0);
+                let t = (value(face, x, y) / scale).min(1.0);
                 if t != 0.0 {
                     let t = t as f32;
                     canvas.add(face, x, y, [color[0] * t, color[1] * t, color[2] * t]);
@@ -120,6 +163,31 @@ mod tests {
         // One on the cell's border is softened: (6*4 + 6 + 6 + 6 + 0) / 8 / 6 = 0.875.
         let border = canvas.get(Face::Front, 16, 17)[0];
         assert!((border - 0.875).abs() < 1e-6, "border {border}");
+    }
+
+    /// The tabulated map draws exactly what the recomputed one draws, filtered and not,
+    /// on both topologies.
+    #[test]
+    fn the_table_draws_the_same_image_bit_for_bit() {
+        for (topo, world) in [
+            (Topology::Cube, Scale::ONE),
+            (Topology::Ring { w: 96, h: 48 }, Scale::ONE),
+            (Topology::Ring { w: 96, h: 48 }, Scale::new(2.0)),
+        ] {
+            let mut f = ScalarField::zeros(topo, world);
+            for (i, v) in f.values.iter_mut().enumerate() {
+                *v = (i as f64 * 0.7).sin().abs() * 9.0 + (i % 5) as f64 * 1e-9;
+            }
+            let cells = PixelCells::new(topo, world);
+            for filter in [false, true] {
+                let mut plain = Canvas::new(topo, world);
+                draw_field(&mut plain, &f, 6.0, [0.12, 0.5, 0.2], filter);
+                let mut tabled = Canvas::new(topo, world);
+                draw_field_with(&mut tabled, &cells, &f, 6.0, [0.12, 0.5, 0.2], filter);
+                assert_eq!(plain.pixels(), tabled.pixels(), "{topo:?} filter={filter}");
+                assert!(plain.pixels().iter().any(|p| *p != [0.0; 3]), "the pass drew");
+            }
+        }
     }
 
     #[test]
