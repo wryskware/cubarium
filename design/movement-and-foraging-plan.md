@@ -5,6 +5,12 @@ last_reviewed: 2026-09-14
 
 # Bodies, food patches, and purposeful activity
 
+**Post-review note (2026-09-14):** The R0a stationary-feeding fixture found
+starvation and slow recovery; excessive regrowth is not established as the cause
+of inactivity. The [current dispatch](handoffs/post-fable-dispatch-2026-09-14.md)
+corrects movement and measures paid mobile grazing before changing food rules.
+Read the food-redesign proposals below in that light.
+
 Proposal for Wrysk's review. This document implements no behavior and promotes no
 ledger decision. Implementation/delegation follows review; M1 search changes and
 sustainability tuning follow the behavioral redesign. Updated after Wrysk clarified

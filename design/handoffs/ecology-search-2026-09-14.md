@@ -6,8 +6,8 @@ last_reviewed: 2026-09-14
 # Claude Code handoff: whole-ecosystem search, with a GPU path
 
 Work in `/home/wrysk/wryskware/cubarium`. Use Claude Opus for this bounded
-implementation milestone. Read `AGENTS.md`, `WORKING_POLICY.md`, the personal
-`bounded-agent-work` skill, and the canon instructions before design material.
+implementation milestone. Read `AGENTS.md`, `WORKING_POLICY.md`, and the canon
+instructions before design material.
 Use Graft for targeted code retrieval. Do not load old agent transcripts.
 
 ## Objective and current state

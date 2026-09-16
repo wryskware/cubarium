@@ -10,8 +10,8 @@ the deliberately narrowed portion of R0 that Wrysk can start while awaiting
 Fable's review of the broader recurrent-organism plan. Forwarding this handoff
 as an implementation request starts this milestone only. Do not start R1–R4.
 
-Read `AGENTS.md`, `WORKING_POLICY.md`, the personal `bounded-agent-work` skill,
-and the canon rules/ledger. Then read this handoff and sections 2–4 of
+Read `AGENTS.md`, `WORKING_POLICY.md`, and the canon rules/ledger. Then read this
+handoff and sections 2–4 of
 `design/recurrent-organism-plan.md`. Current user instructions take precedence.
 Use Graft for exact source context and caller/override coverage. Protect other
 authored changes; no full-history agent resumes or unrelated cleanup.

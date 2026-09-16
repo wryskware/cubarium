@@ -8,9 +8,13 @@
 // context_window field is withheld from that call because row 1 already draws
 // the context meter and Graft would otherwise repeat it as a number.
 //
-// Named so it does NOT contain "graft-statusline.cjs": `graft init` identifies
-// its own statusLine by that substring and rewrites it. Under this name Graft
-// treats the setting as foreign and leaves it alone (it only logs a warning).
+// The filename must NOT contain the substring "graft-statusline.cjs". `graft
+// init` claims any statusLine whose command merely *includes* that string
+// (hosts/retract.js: `JSON.stringify(v).includes('graft-statusline.cjs')`) and
+// rewrites it to its own shim. An earlier name here, outrun-graft-statusline.cjs,
+// looked distinct but still contained the substring, so every `graft init` /
+// reinstall silently reclaimed the setting. Under a name that does not contain
+// it, Graft treats the setting as foreign and only logs a warning.
 
 const path = require('path');
 const { execFileSync } = require('child_process');

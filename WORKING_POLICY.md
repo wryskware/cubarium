@@ -4,10 +4,6 @@ This records the owner's explicit working preferences, not a new ecological desi
 It overrides older agent-authored plans that assume indefinite retention, repeated
 independent reviews, or a permanently pinned release workflow.
 
-- Before delegation or extended autonomous work, read the personal
-  `/home/wrysk/.codex/skills/bounded-agent-work/SKILL.md`. Fresh bounded contexts,
-  narrow ownership, one targeted review, explicit spending checkpoints. Do not
-  resume hundred-thousand-token histories for small assignments.
 - The cube is a development display: run the latest development checkout with
   normal `assets/atelier`, not art or executables from `captures/` release copies.
   Rebuild/restart after relevant checks when shipping changes. Keep an accurate

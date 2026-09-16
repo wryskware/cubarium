@@ -5,6 +5,20 @@ last_reviewed: 2026-09-14
 
 # Recurrent organisms: bodies, senses, learning, and ecology
 
+**2026-09-15 trainer dispatch:** The [R2a brief](handoffs/r2a-fable-trainer-2026-09-15.md)
+selects antithetic Gaussian ES with centered ranks for the first trainer. It replaces
+this document's earlier GA-first proposal for that assignment. The same optimizer
+is used for smoke and learning; the learning campaign remains behind a measured
+compute checkpoint. Its exact objective, controls and counted budget are in the brief.
+
+**Post-review execution note (2026-09-14):** Wrysk requested the
+[R0b / R0c handoffs](handoffs/post-fable-dispatch-2026-09-14.md). Their scope and
+review disposition govern the next assignments: correct the additive rotation
+allowance, measure paid mobile/continuous grazing with current regrowth, and draft
+an exact sensory/action contract in parallel. Do not automatically adopt the
+review's cropping floor, population target, training horizon or optimizer change.
+Numbers and mechanisms below remain proposals until reconciled at that checkpoint.
+
 Implementation proposal for review, extending [movement and foraging](movement-and-foraging-plan.md).
 Wrysk has requested recurrent control from the outset, without an MLP comparison.
 That direction is explicit; the architecture, numbers and training protocol below
