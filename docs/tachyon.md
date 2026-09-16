@@ -132,47 +132,69 @@ the board: a fresh world from this file reports `pop 67 … forms 28/14/11/14`.
 ## The look knob
 
 ```
-Environment=CUBARIUM_EXTRA_ARGS=
+Environment="CUBARIUM_EXTRA_ARGS=--gpu-art-scale 2"
 ```
 
-in the unit. systemd splits an unquoted `$VAR` on whitespace and expands an
-empty one to no arguments at all, so this is a one-line edit plus `systemctl
-restart cubarium`. It exists for the two open viewing-session decisions:
+in the unit — a one-line edit plus `systemctl restart cubarium`. It can also go
+in a drop-in: `systemctl edit cubarium`, then `[Service]` /
+`Environment="CUBARIUM_EXTRA_ARGS=--gpu-art-scale 2"`.
 
-* `--gpu-art-scale 2` — 32-pixel plants instead of 16. `S` currently scales the
-  cell grid and leaves the art the size it was authored; the ring-world plan §6
-  says `S` should multiply the sprite tile too. The two have not been
-  reconciled and this flag shows both.
-* `--gpu-bend-substep` — lets the wind's displacement land between source texels
-  at `S >= 2` instead of rounding to a whole one. With the shipped pack's
-  measured bend budgets (0.3–1.3 texels, derived against the *cube's* nine-pixel
-  footprint) the default is often no visible breeze at all.
+**Quote the assignment, and do not quote the reference.** `Environment=` splits
+its own line on whitespace into separate assignments, so an unquoted
+`Environment=CUBARIUM_EXTRA_ARGS=--gpu-art-scale 2` sets the variable to
+`--gpu-art-scale` alone and drops the `2`; the service then crash-loops with
+`error: a value is required for '--gpu-art-scale'`. In `ExecStart`, by contrast,
+`$CUBARIUM_EXTRA_ARGS` is deliberately *unquoted*, because there systemd splits
+an unquoted variable on whitespace back into separate arguments. An empty value
+expands to no arguments at all.
 
-Either can also go in a drop-in: `systemctl edit cubarium`, then
-`[Service]` / `Environment=CUBARIUM_EXTRA_ARGS=--gpu-art-scale 2`.
+**`--gpu-art-scale 2` is the decided look** (Wrysk, 2026-09-16, after seeing both
+on the panel): 32-pixel plants instead of 16. `S` scales the cell grid and leaves
+the art the size it was authored; the ring-world plan §6 says `S` should multiply
+the sprite tile too, and this is that. It was 42.7 fps when the decision was
+taken and GS-1c's fill work brought it to 59.9 over 60 s, so it costs the panel
+nothing now.
 
-## The viewer, and why it is off by default
+The other two viewing-session knobs are settled and need no flag:
 
-`--mirror-web` serves the same frames as a page on `127.0.0.1:7393`. It is
-**not** in the default `ExecStart`, because `FanOutSink::wants_pixels` is true
-if any child wants pixels, and the web sink wants pixels — so mirroring makes
-the host pay for the whole CPU rasterisation and PNG encode that the GPU sink
-otherwise skips, which is the entire reason the GPU path is faster than the CPU
-one. Measured on this board, 640x360 S=2, 40 s each, everything else identical:
+* the **sub-texel wind** is the default on a ring at `S >= 2`
+  (`--no-gpu-bend-substep` turns it off), and
+* the **bend budgets** are measured against the world's own footprint rather than
+  the cube's nine pixels, so at this rung every species draws the full tip its
+  response asks for (`tendrilfan` +92 %, `glasscane` +18 %, the rest unchanged).
 
-| | frames | seconds | fps | GPU ms |
-|---|---|---|---|---|
-| without `--mirror-web` | 2384 | 40.04 | **59.5** | 3.84 |
-| with `--mirror-web` | 660 | 40.13 | **16.5** | 3.84 |
+## The viewer, and which one to ask for
 
-The GPU cost is unchanged; all of the loss is CPU the panel is no longer
-getting. The panel is the product and the viewer is a convenience, so the
-viewer is opt-in. To watch it for a session:
+Two flags serve the same page on `127.0.0.1:7393`, and only one of them is free.
+They are refused together.
+
+**`--gpu-web-rate 2` is the one to use.** It serves the raster the GPU has
+already drawn, copied back at the rate given — one `vkCmdCopyImageToBuffer` of
+640x360x4 and one RGBA→RGB pass, 5.9 ms, twice a second.
+
+`--mirror-web` puts a web sink beside the GPU sink in a `FanOutSink`, whose
+`wants_pixels` is true if any child's is — so mirroring makes the host pay for
+the whole CPU rasterisation and PNG encode that the GPU sink otherwise skips,
+which is the entire reason the GPU path is faster than the CPU one. Measured on
+this board at 640x360 S=2 with `--gpu-art-scale 2`, 40 s each, everything else
+identical:
+
+| | frames | seconds | fps |
+|---|---|---|---|
+| no viewer | 2395 | 40.08 | **59.8** |
+| `--gpu-web-rate 2` | 2395 | 40.08 | **59.8** (100 frames served) |
+| `--mirror-web` | 661 | 40.12 | **16.5** |
+
+The GPU cost is unchanged in all three; all of `--mirror-web`'s loss is CPU the
+panel is no longer getting. `--mirror-web` is still the only way to get the
+**care** buttons, which are drawn onto the CPU canvas this sink does not have.
+
+To watch it for a session:
 
 ```sh
 # on the board
 sudo systemctl edit cubarium     # [Service]
-                                 # Environment=CUBARIUM_EXTRA_ARGS=--mirror-web --web-port 7393
+                                 # Environment="CUBARIUM_EXTRA_ARGS=--gpu-art-scale 2 --gpu-web-rate 2"
 sudo systemctl restart cubarium
 
 # on your machine

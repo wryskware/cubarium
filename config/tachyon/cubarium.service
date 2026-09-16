@@ -18,12 +18,27 @@ Group=cubarium
 SupplementaryGroups=video render
 WorkingDirectory=/var/lib/cubarium
 Environment=RUST_LOG=info
-# Wrysk's pending look decision is a one-line edit here plus `systemctl restart
-# cubarium`: e.g. `--gpu-art-scale 2`, `--gpu-bend-substep`. systemd splits an
-# unquoted `$VAR` on whitespace, and an empty one expands to no arguments at all.
-# `--mirror-web --web-port 7393` also belongs here rather than in the ExecStart
-# below; see the note on it.
-Environment=CUBARIUM_EXTRA_ARGS=
+# The look, decided by Wrysk on 2026-09-16 after seeing both on the panel: 32-pixel
+# plants. `--gpu-art-scale 2` draws one authored source texel on a `2S x 2S` block
+# instead of an `S x S` one, so a 16 px tile is 64 raster pixels at this rung; on a
+# 5.5-inch panel it is visibly the better picture. GS-1c made it hold 60 fps
+# (59.9 over 60 s; it was 42.7 when the decision was taken). `--gpu-bend-substep`
+# is NOT here because it is already the default on a ring at S >= 2.
+#
+# **Both quotes matter, and in opposite directions.** `Environment=` splits its own
+# line on whitespace into separate assignments, so an unquoted
+# `Environment=CUBARIUM_EXTRA_ARGS=--gpu-art-scale 2` sets the variable to
+# `--gpu-art-scale` and throws the `2` away — the service then crash-loops with
+# "a value is required for '--gpu-art-scale'". The assignment is quoted here so it
+# is one value. `$CUBARIUM_EXTRA_ARGS` in the ExecStart below is *not* quoted,
+# because there systemd splits an unquoted variable on whitespace into separate
+# arguments, which is what turns the one value back into two. An empty one expands
+# to no arguments at all. (W2 recorded the second half of this rule and not the
+# first; GS-1c hit the first.)
+#
+# `--gpu-web-rate 2` also belongs here rather than in the ExecStart below; see the
+# note on it.
+Environment="CUBARIUM_EXTRA_ARGS=--gpu-art-scale 2"
 # The four A78s. Never a single core: core_ctl isolates idle big cores and a
 # one-core mask is how a 60 fps frame turns into a 20 fps one.
 CPUAffinity=4-7
@@ -34,16 +49,22 @@ CPUAffinity=4-7
 # at all. A directory whose snapshots are present but unreadable is refused by
 # name rather than replaced. See docs/tachyon.md "Resume".
 #
-# `--mirror-web` is deliberately NOT here. `FanOutSink::wants_pixels` is true if
-# any child wants pixels, so mirroring makes the host pay for the whole CPU
-# rasterisation and PNG encode it otherwise skips — which is the entire reason
-# the GPU sink is faster than the CPU one. Measured on this board, 640x360 S=2,
-# 40 s each, everything else identical: 2384 frames / 40.04 s = 59.5 fps
-# without, 660 frames / 40.13 s = 16.5 fps with, at an unchanged GPU 3.84 ms.
-# The panel is the product; the viewer is a convenience. To turn it on, put
-# `--mirror-web --web-port 7393` in CUBARIUM_EXTRA_ARGS above (or in a
-# `systemctl edit cubarium` drop-in) and accept 16 fps on the panel while it is
-# on. docs/tachyon.md has the ssh -L line for reaching it.
+# No viewer is here either, but the one to reach for is now `--gpu-web-rate 2`,
+# not `--mirror-web`. `FanOutSink::wants_pixels` is true if any child wants
+# pixels, so mirroring makes the host pay for the whole CPU rasterisation and PNG
+# encode it otherwise skips — which is the entire reason the GPU sink is faster
+# than the CPU one. Measured on this board at 640x360 S=2 with --gpu-art-scale 2,
+# 40 s each, everything else identical:
+#
+#   no viewer              2395 frames / 40.08 s = 59.8 fps
+#   --gpu-web-rate 2       the same 59.8, 100 frames served to a polling client
+#   --mirror-web            661 frames / 40.12 s = 16.5 fps
+#
+# `--gpu-web-rate` serves the same page on the same port from the raster the GPU
+# has already drawn, at the rate given. The two are refused together. To turn the
+# cheap one on, put `--gpu-web-rate 2` beside `--gpu-art-scale 2` in
+# CUBARIUM_EXTRA_ARGS above (or in a `systemctl edit cubarium` drop-in);
+# docs/tachyon.md has the ssh -L line for reaching it.
 ExecStart=/usr/local/bin/cubarium run \
     --state /var/lib/cubarium/state \
     --config /var/lib/cubarium/world.toml \
