@@ -955,6 +955,10 @@ impl Recorder {
             // this ran, and nothing on the search side can substitute for it: intake is served
             // inside `World::step` and only the world-level `intake_diagnostics()` is exposed.
             net_energy_margin_per_body: None,
+            ledger_on: false,
+            founder_broods: crate::movement::FounderBroods::default(),
+            margins: None,
+            depletion: None,
         };
 
         let apex_active_samples = self.samples.iter().filter(|s| s.apex_active > 0).count() as f64;
