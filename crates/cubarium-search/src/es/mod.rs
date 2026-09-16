@@ -8,6 +8,8 @@
 //! did. The two live together because a search harness is a search harness, not because a
 //! policy is an ecology parameter.
 //!
+//! - [`antithetic`]: the antithetic-pair reduction over the retained generation reports,
+//!   and the deadband occupancy of a sigma-scale perturbation.
 //! - [`bits`]: exact float persistence, because plain JSON numbers are not exact here.
 //! - [`rng`]: the trainer's own positional randomness, separate from the world's.
 //! - [`tensor`]: the flatten/unflatten order and the seeded centre.
@@ -26,6 +28,7 @@
 //! Nothing here attaches a policy to the display world, migrates a world, or trains during a
 //! world's ordinary life. The trainer builds its own isolated worlds and throws them away.
 
+pub mod antithetic;
 pub mod bits;
 pub mod budget;
 pub mod commands;
