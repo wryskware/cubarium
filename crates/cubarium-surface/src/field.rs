@@ -824,3 +824,227 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod ring_tests {
+    //! The ring's field graph: **every row is a ring**, so there are no corners — the
+    //! degree-3 cells are the top and bottom rows and nothing else.
+
+    use super::*;
+    use crate::Vec2;
+
+    const RING: Topology = Topology::Ring { w: 320, h: 180 };
+    const RING2: Topology = Topology::Ring { w: 640, h: 360 };
+    const S1: Scale = Scale::ONE;
+    const S2: Scale = Scale::new(2.0);
+
+    fn cell(topo: Topology, scale: Scale, cx: u16, cy: u16) -> CellId {
+        CellId::new(topo, scale, Face::Front, cx, cy)
+    }
+
+    #[test]
+    fn the_grid_is_eighty_by_forty_five_at_both_scales() {
+        for (topo, scale) in [(RING, S1), (RING2, S2)] {
+            assert_eq!(topo.cells(scale, Face::Front), (80, 45));
+            assert_eq!(topo.cell_count(scale), 3600);
+            assert_eq!(CellId::all(topo, scale).count(), 3600);
+            for c in CellId::all(topo, scale) {
+                let (cx, cy) = (c.cx(topo, scale), c.cy(topo, scale));
+                assert_eq!(c.face(topo, scale), Face::Front);
+                assert_eq!(cell(topo, scale, cx, cy), c);
+                assert_eq!(c.index(), usize::from(cy) * 80 + usize::from(cx));
+                // The centre is half a cell in, and maps back to its own cell.
+                let centre = c.center(topo, scale);
+                let cp = scale.cell_pixels();
+                assert_eq!(centre.u, f64::from(cx) * cp + cp / 2.0);
+                assert_eq!(centre.v, f64::from(cy) * cp + cp / 2.0);
+                assert_eq!(cell_of(topo, scale, &centre), c);
+            }
+            // Every pixel of a cell maps back to it.
+            let cp = scale.cell_pixels() as u16;
+            for &(cx, cy) in &[(0u16, 0u16), (79, 44), (37, 21)] {
+                for dy in 0..cp {
+                    for dx in 0..cp {
+                        let p = SurfacePoint::pixel_center(topo, Face::Front, cx * cp + dx, cy * cp + dy);
+                        assert_eq!(cell_of(topo, scale, &p), cell(topo, scale, cx, cy));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_row_is_a_ring_and_there_are_no_corners() {
+        for (topo, scale) in [(RING, S1), (RING2, S2)] {
+            let g = FieldGraph::new(topo, scale);
+            // 80·45 horizontal (the wrap adds one per row) + 80·44 vertical.
+            assert_eq!(g.edges().len(), 7120, "{topo:?}");
+            let (mut deg4, mut deg3) = (0, 0);
+            for c in CellId::all(topo, scale) {
+                match g.degree(c) {
+                    4 => deg4 += 1,
+                    3 => {
+                        deg3 += 1;
+                        let cy = c.cy(topo, scale);
+                        assert!(cy == 0 || cy == 44, "{c:?} has degree 3 away from a rim");
+                    }
+                    d => panic!("{c:?} has degree {d}: a ring has no corners"),
+                }
+            }
+            assert_eq!((deg4, deg3), (3440, 160), "{topo:?}");
+            // Sorted, unique, canonically ordered, and all within the one chart.
+            for w in g.edges().windows(2) {
+                assert!(w[0] < w[1]);
+            }
+            for &(a, b) in g.edges() {
+                assert!(a < b);
+                assert_eq!(a.face(topo, scale), Face::Front);
+                assert_eq!(b.face(topo, scale), Face::Front);
+            }
+            assert_eq!(g.topology(), topo);
+            assert_eq!(g.cell_count(), 3600);
+        }
+    }
+
+    #[test]
+    fn the_wrap_joins_the_two_ends_of_every_row() {
+        let g = FieldGraph::new(RING, S1);
+        for cy in 0..45u16 {
+            let last = cell(RING, S1, 79, cy);
+            let first = cell(RING, S1, 0, cy);
+            assert_eq!(g.neighbor(last, Edge::Right), Some(first), "row {cy}");
+            assert_eq!(g.neighbor(first, Edge::Left), Some(last), "row {cy}");
+            // Reciprocal, and not a self-loop or a duplicate.
+            assert_ne!(first, last);
+            assert_eq!(g.neighbor(first, Edge::Right), Some(cell(RING, S1, 1, cy)));
+        }
+        // The rims have no neighbour, and only the rims.
+        for cx in 0..80u16 {
+            assert_eq!(g.neighbor(cell(RING, S1, cx, 0), Edge::Top), None);
+            assert_eq!(g.neighbor(cell(RING, S1, cx, 44), Edge::Bottom), None);
+            assert_eq!(g.neighbor(cell(RING, S1, cx, 0), Edge::Bottom), Some(cell(RING, S1, cx, 1)));
+        }
+        let missing: usize = CellId::all(RING, S1)
+            .map(|c| g.neighbors(c).iter().filter(|n| n.is_none()).count())
+            .sum();
+        assert_eq!(missing, 160, "only the two rims are open");
+    }
+
+    /// `design/flat-world-plan-2026-09-16.md` §5: the top row is the canopy and never
+    /// drains, the bottom row has nothing below it, and everything between steps to
+    /// `(cx, cy + 1)`.
+    #[test]
+    fn downhill_is_none_on_the_canopy_row_and_the_cell_below_everywhere_else() {
+        for (topo, scale) in [(RING, S1), (RING2, S2)] {
+            let g = FieldGraph::new(topo, scale);
+            for cx in 0..80u16 {
+                assert_eq!(g.downhill(cell(topo, scale, cx, 0)), None, "the canopy drains");
+                assert_eq!(g.downhill(cell(topo, scale, cx, 44)), None, "the floor drains");
+                for cy in 1..44u16 {
+                    let c = cell(topo, scale, cx, cy);
+                    let d = g.downhill(c).unwrap_or_else(|| panic!("{c:?} has no downhill"));
+                    assert_eq!(d, cell(topo, scale, cx, cy + 1), "{c:?}");
+                    // Downhill really is downhill in the height the world uses.
+                    assert!(topo.height(&d.center(topo, scale)) < topo.height(&c.center(topo, scale)));
+                }
+            }
+            // Acyclic and terminating: following it always reaches the floor.
+            let mut c = cell(topo, scale, 13, 1);
+            let mut steps = 0;
+            while let Some(next) = g.downhill(c) {
+                c = next;
+                steps += 1;
+                assert!(steps <= 45, "downhill does not terminate");
+            }
+            assert_eq!(c.cy(topo, scale), 44);
+            assert_eq!(steps, 43);
+        }
+    }
+
+    #[test]
+    fn diffusion_conserves_mass_and_leaks_through_neither_rim() {
+        let g = FieldGraph::new(RING, S1);
+        let mut f = ScalarField::zeros(RING, S1);
+        let mut scratch = ScalarField::zeros(RING, S1);
+        assert_eq!(f.len(), 3600);
+        // A line of mass right on the wrap, and a line on each rim.
+        for cy in 0..45u16 {
+            f.set(cell(RING, S1, 0, cy), 1.0);
+        }
+        for cx in 0..80u16 {
+            f.set(cell(RING, S1, cx, 0), 1.0);
+            f.set(cell(RING, S1, cx, 44), 1.0);
+        }
+        let start = f.total();
+        for _ in 0..200 {
+            diffuse(&mut f, &mut scratch, &g, 0.9);
+        }
+        assert!((f.total() - start).abs() < 1e-9, "{} != {start}", f.total());
+        assert!(f.is_nonnegative() && f.is_finite());
+        // Mass spread the whole way round the ring, not into a wall.
+        assert!(f.get(cell(RING, S1, 40, 22)) > 0.0, "nothing reached the far side");
+        // A constant field is bit-identical after a step.
+        let mut c = ScalarField::constant(RING, S1, 0.37);
+        let before = c.clone();
+        diffuse(&mut c, &mut scratch, &g, 0.25);
+        assert_eq!(c, before);
+    }
+
+    /// A footprint deposits the same total wherever it lands, including straddling the
+    /// wrap and clipped by a rim.
+    #[test]
+    fn deposit_normalizes_over_the_cells_that_exist() {
+        for (topo, scale) in [(RING, S1), (RING2, S2)] {
+            let (w, h) = topo.extent(Face::Front);
+            let places = [
+                (w / 2.0, h / 2.0),
+                (0.5, h / 2.0),
+                (w - 0.5, h / 2.0),
+                (w / 2.0, 0.5),
+                (0.5, 0.5),
+                (w - 0.5, h - 0.5),
+            ];
+            let radius = scale.footprint_radius();
+            for (u, v) in places {
+                let mut f = ScalarField::zeros(topo, scale);
+                let centre = SurfacePoint::new(Face::Front, u, v).canonicalize(topo);
+                let touched = deposit(topo, scale, &mut f, centre, radius, 3.0);
+                assert!(touched > 1, "{centre:?} touched {touched} cells");
+                assert!((f.total() - 3.0).abs() < 1e-9, "{centre:?}: {}", f.total());
+                assert!(f.is_nonnegative());
+            }
+            // Straddling the wrap reaches cells on both sides of it.
+            let mut f = ScalarField::zeros(topo, scale);
+            deposit(topo, scale, &mut f, SurfacePoint::new(Face::Front, 0.5, h / 2.0), radius, 1.0);
+            assert!(f.get(cell(topo, scale, 79, 22)) > 0.0, "the wrap blocked the footprint");
+            assert!(f.get(cell(topo, scale, 0, 22)) > 0.0);
+        }
+    }
+
+    #[test]
+    fn a_walker_that_reflects_at_the_rims_stays_inside() {
+        // The rim is reflective, not absorbing and not a teleport: a long random walk
+        // never leaves the chart and never stops moving.
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut rnd = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let mut p = SurfacePoint::new(Face::Front, 160.5, 90.5);
+        let mut wrapped = 0;
+        let mut bounced = 0;
+        for _ in 0..20_000 {
+            let step = Vec2::new((rnd() - 0.5) * 30.0, (rnd() - 0.5) * 30.0);
+            let t = crate::travel(RING, p, step);
+            assert!(!t.fallback);
+            assert!(t.end.is_canonical(RING), "{:?}", t.end);
+            wrapped += t.crossings;
+            bounced += t.reflections;
+            p = t.end;
+        }
+        assert!(wrapped > 100, "only {wrapped} wraps");
+        assert!(bounced > 100, "only {bounced} bounces");
+    }
+}

@@ -576,3 +576,210 @@ mod tests {
         let _ = unfold(Topology::Cube, a, a, MAX_LOCAL_RADIUS + 1.0);
     }
 }
+
+#[cfg(test)]
+mod ring_tests {
+    //! Unfolding a ring: three images of the one chart, of which at most two are ever in
+    //! range, and a distance that is exact rather than a bound.
+
+    use super::*;
+    use crate::{Scale, travel};
+
+    const RING: Topology = Topology::Ring { w: 320, h: 180 };
+    const RING2: Topology = Topology::Ring { w: 640, h: 360 };
+
+    fn at(u: f64, v: f64) -> SurfacePoint {
+        SurfacePoint::new(Face::Front, u, v)
+    }
+
+    fn images(topo: Topology) -> Vec<ChartImage> {
+        let mut v = Vec::new();
+        chart_images(topo, Face::Front, MAX_SEAMS, &mut v);
+        v
+    }
+
+    #[test]
+    fn a_ring_has_exactly_three_images_the_direct_one_and_plus_or_minus_w() {
+        for (topo, w) in [(RING, 320.0), (RING2, 640.0)] {
+            let v = images(topo);
+            assert_eq!(v.len(), 3, "{topo:?}");
+            // In ChartPath order: direct, then Right (edge 1), then Left (edge 3).
+            assert_eq!(v[0].path, ChartPath::direct());
+            assert_eq!(v[0].origin, Vec2::ZERO);
+            assert_eq!(v[1].path.steps(), &[(Face::Front, Edge::Right)]);
+            assert_eq!(v[1].origin, Vec2::new(w, 0.0));
+            assert_eq!(v[2].path.steps(), &[(Face::Front, Edge::Left)]);
+            assert_eq!(v[2].origin, Vec2::new(-w, 0.0));
+            for img in &v {
+                // The wrap is a pure translation: no rotation, no reflection, one chart.
+                assert_eq!(img.target_face, Face::Front);
+                assert_eq!(img.map, TangentMap::IDENTITY);
+                assert_eq!(img.map.det(), 1);
+                let p = Vec2::new(11.25, 47.5);
+                assert!((img.preimage_point(img.image_point(p)) - p).length() < 1e-12);
+            }
+            // The two shifts are 2w apart, so at most two can be within the local radius
+            // of any observer — which is what `Topology::validate` buys.
+            assert!(2.0 * w > 2.0 * topo.max_local_radius(), "{topo:?}");
+        }
+    }
+
+    #[test]
+    fn a_pixel_step_across_the_wrap_is_one_pixel_of_distance() {
+        let a = SurfacePoint::pixel_center(RING, Face::Front, 319, 20);
+        let b = SurfacePoint::pixel_center(RING, Face::Front, 0, 20);
+        let u = unfold(RING, a, b, 12.0).expect("adjacent pixels");
+        assert!((u.distance - 1.0).abs() < 1e-12, "{}", u.distance);
+        assert_eq!(u.path.steps(), &[(Face::Front, Edge::Right)]);
+        assert_eq!(u.local, Vec2::new(320.5, 20.5));
+        assert_eq!(u.map, TangentMap::IDENTITY);
+        // And the other way round, through the Left image.
+        let back = unfold(RING, b, a, 12.0).expect("adjacent pixels");
+        assert!((back.distance - 1.0).abs() < 1e-12);
+        assert_eq!(back.path.steps(), &[(Face::Front, Edge::Left)]);
+    }
+
+    #[test]
+    fn the_short_way_round_wins() {
+        // Three pixels apart the short way, 317 the long way.
+        let a = at(1.5, 20.5);
+        let b = at(318.5, 20.5);
+        let u = unfold(RING, a, b, 12.0).expect("in range");
+        assert!((u.distance - 3.0).abs() < 1e-12, "{}", u.distance);
+        assert_eq!(u.path.steps(), &[(Face::Front, Edge::Left)]);
+        // Inside the chart the direct image wins even close to the seam.
+        let c = at(4.5, 20.5);
+        let u = unfold(RING, a, c, 12.0).expect("in range");
+        assert_eq!(u.path, ChartPath::direct());
+        assert!((u.distance - 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn chord_sq_is_the_exact_distance_so_nothing_in_range_is_rejected() {
+        let mut seed = 0x77c4_2e8f_1d3b_5a90u64;
+        let mut rnd = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let imgs = images(RING);
+        let mut in_range = 0;
+        for i in 0..40_000 {
+            let a = at(rnd() * 320.0, rnd() * 180.0).canonicalize(RING);
+            // Half the pairs are placed near `a` — often across the wrap — so the exact
+            // distance is exercised where it matters and not just rejected.
+            let b = if i % 2 == 0 {
+                travel(RING, a, Vec2::from_screen_angle(rnd() * std::f64::consts::TAU) * (rnd() * 14.0)).end
+            } else {
+                at(rnd() * 320.0, rnd() * 180.0).canonicalize(RING)
+            };
+            let chord = RING.chord_sq(&a, &b).sqrt();
+            match unfold_with(RING, &imgs, a, b, 12.0) {
+                Some(u) => {
+                    // Exact, not a bound: the unfolded distance *is* the chord.
+                    assert!((u.distance - chord).abs() < 1e-9, "{a:?} {b:?}: {} vs {chord}", u.distance);
+                    in_range += 1;
+                }
+                None => assert!(chord > 12.0 - 1e-9, "{a:?} {b:?} at {chord} was rejected"),
+            }
+        }
+        assert!(in_range > 10_000, "only {in_range} pairs were in range");
+    }
+
+    #[test]
+    fn unfolding_agrees_with_travel() {
+        let mut seed = 0x1a2b_3c4d_5e6f_7081u64;
+        let mut rnd = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let mut checked = 0u32;
+        for topo in [RING, RING2] {
+            let (w, h) = topo.extent(Face::Front);
+            for _ in 0..20_000 {
+                let a = at(rnd() * w, rnd() * h).canonicalize(topo);
+                let angle = rnd() * std::f64::consts::TAU;
+                let b = travel(topo, a, Vec2::from_screen_angle(angle) * (rnd() * 14.0)).end;
+                let Some(u) = unfold(topo, a, b, 12.0) else { continue };
+                let t = travel(topo, a, u.local - a.chart());
+                if t.ties > 0 {
+                    continue;
+                }
+                assert!(!t.fallback);
+                assert_eq!(t.reflections, 0, "an unfolding never reflects: {a:?} {b:?}");
+                assert_eq!(t.crossings, u32::from(u.path.len), "{a:?} {b:?} {:?}", u.path);
+                assert!(
+                    (t.end.u - b.u).abs() < 1e-7 && (t.end.v - b.v).abs() < 1e-7,
+                    "{a:?} -> {b:?} landed on {:?}",
+                    t.end
+                );
+                assert_eq!(t.map.inverse(), u.map);
+                let swept: f64 = t.segments.iter().map(crate::PathSegment::length).sum();
+                assert!((swept - u.distance).abs() < 1e-7);
+                checked += 1;
+            }
+        }
+        assert!(checked > 4000, "only {checked} pairs were in range");
+    }
+
+    #[test]
+    fn surface_distance_is_symmetric_and_zero_on_the_diagonal() {
+        let mut seed = 0x2468_1357_9bdf_ace0u64;
+        let mut rnd = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for _ in 0..20_000 {
+            let a = at(rnd() * 320.0, rnd() * 180.0).canonicalize(RING);
+            let b = at(rnd() * 320.0, rnd() * 180.0).canonicalize(RING);
+            match (surface_distance(RING, a, b, 12.0), surface_distance(RING, b, a, 12.0)) {
+                (Some(x), Some(y)) => assert!((x - y).abs() < 1e-9, "{a:?} {b:?}: {x} vs {y}"),
+                (None, None) => {}
+                (x, y) => panic!("asymmetric range for {a:?} {b:?}: {x:?} vs {y:?}"),
+            }
+            let u = unfold(RING, a, a, 12.0).expect("self");
+            assert_eq!(u.path, ChartPath::direct());
+            assert_eq!(u.distance, 0.0);
+        }
+    }
+
+    #[test]
+    fn a_rim_is_never_a_valid_unfolding_step() {
+        let o = Vec2::new(160.0, 5.0);
+        // Straight up and out through the top rim: no path, direct or otherwise, is valid.
+        let rim = ChartPath { len: 1, steps: [(Face::Front, Edge::Top), PATH_FILLER] };
+        assert!(!segment_is_valid(RING, Face::Front, o, Vec2::new(160.0, -5.0), &rim));
+        assert!(!segment_is_valid(RING, Face::Front, o, Vec2::new(160.0, -5.0), &ChartPath::direct()));
+        // The wrap is valid, and claiming the wrong one of the two is not.
+        let right = ChartPath { len: 1, steps: [(Face::Front, Edge::Right), PATH_FILLER] };
+        let left = ChartPath { len: 1, steps: [(Face::Front, Edge::Left), PATH_FILLER] };
+        assert!(segment_is_valid(RING, Face::Front, Vec2::new(318.0, 20.0), Vec2::new(322.0, 20.0), &right));
+        assert!(!segment_is_valid(RING, Face::Front, Vec2::new(318.0, 20.0), Vec2::new(322.0, 20.0), &left));
+        assert!(segment_is_valid(RING, Face::Front, Vec2::new(2.0, 20.0), Vec2::new(-2.0, 20.0), &left));
+    }
+
+    #[test]
+    fn the_local_radius_is_the_rings_own_and_a_larger_one_panics() {
+        assert_eq!(RING.max_local_radius(), 90.0);
+        assert_eq!(RING2.max_local_radius(), 180.0);
+        // Well past the cube's 32, which is a cube proof and not a ring limit.
+        let a = at(160.0, 90.0);
+        let b = at(160.0, 130.0);
+        assert!((surface_distance(RING, a, b, 50.0).expect("in range") - 40.0).abs() < 1e-12);
+        // The stamp budget fits inside it at both scales.
+        assert!(Scale::ONE.footprint_radius() <= RING.max_local_radius());
+        assert!(Scale::new(2.0).footprint_radius() <= RING2.max_local_radius());
+    }
+
+    #[test]
+    #[should_panic(expected = "MAX_LOCAL_RADIUS")]
+    fn a_radius_above_the_rings_bound_panics() {
+        let a = at(1.0, 1.0);
+        let _ = unfold(RING, a, a, RING.max_local_radius() + 1.0);
+    }
+}

@@ -552,3 +552,282 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod ring_tests {
+    //! The ring's own transport: one seam (the chart to itself), two rims, four corners.
+    //!
+    //! Every fixture runs at `S = 1` (320×180) and again at `S = 2` (640×360) with every
+    //! length doubled, because a ring at twice the scale is the same world drawn twice as
+    //! large: the geometry here is scale-free, so the two answers must agree exactly.
+
+    use super::*;
+    use crate::Edge;
+
+    const RING: Topology = Topology::Ring { w: 320, h: 180 };
+    const RING2: Topology = Topology::Ring { w: 640, h: 360 };
+
+    fn at(u: f64, v: f64) -> SurfacePoint {
+        SurfacePoint::new(Face::Front, u, v)
+    }
+
+    fn approx(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-9
+    }
+
+    /// The same fixture at both scales: coordinates and displacement double, and the
+    /// answer must double with them.
+    fn both_scales(u: f64, v: f64, d: Vec2, check: impl Fn(&Travel, f64)) {
+        check(&travel(RING, at(u, v), d), 1.0);
+        check(&travel(RING2, at(u * 2.0, v * 2.0), d * 2.0), 2.0);
+    }
+
+    #[test]
+    fn the_wrap_is_a_seam_of_the_chart_to_itself() {
+        // Out through the right edge, in through the left: a pure translation by -w, no
+        // rotation, no reflection, and the same chart on both sides.
+        both_scales(319.5, 20.0, Vec2::new(1.0, 0.0), |t, s| {
+            assert_eq!((t.crossings, t.reflections, t.ties, t.fallback), (1, 0, 0, false));
+            assert_eq!(t.map, TangentMap::IDENTITY);
+            assert_eq!(t.end.face, Face::Front);
+            assert!(approx(t.end.u, 0.5 * s) && approx(t.end.v, 20.0 * s), "{:?}", t.end);
+            let total: f64 = t.segments.iter().map(PathSegment::length).sum();
+            assert!(approx(total, 1.0 * s));
+        });
+        // And back the other way.
+        both_scales(0.5, 20.0, Vec2::new(-1.0, 0.0), |t, s| {
+            assert_eq!(t.crossings, 1);
+            assert!(approx(t.end.u, 319.5 * s), "{:?}", t.end);
+            assert_eq!(t.map, TangentMap::IDENTITY);
+        });
+    }
+
+    #[test]
+    fn a_pixel_step_across_the_wrap_lands_on_the_neighbouring_pixel() {
+        // Every row: half a pixel inside the last column, one pixel outward, lands half a
+        // pixel into column 0 — the discrete contract `pixel_neighbor` states.
+        for y in 0..180u16 {
+            let s = f64::from(y) + 0.5;
+            let t = travel(RING, at(319.5, s), Vec2::new(1.0, 0.0));
+            assert_eq!(t.end.pixel(RING), (0, y), "row {y}");
+            assert_eq!(t.crossings, 1);
+            assert_eq!(t.map, TangentMap::IDENTITY);
+            let back = travel(RING, at(0.5, s), Vec2::new(-1.0, 0.0));
+            assert_eq!(back.end.pixel(RING), (319, y), "row {y}");
+        }
+    }
+
+    #[test]
+    fn both_rims_reflect_and_never_tunnel() {
+        // The bottom rim, exactly as the cube's open bottom does.
+        both_scales(10.0, 179.0, Vec2::new(0.0, 2.0), |t, s| {
+            assert_eq!((t.crossings, t.reflections), (0, 1));
+            assert_eq!(t.map, TangentMap::REFLECT_Y);
+            assert!(approx(t.end.v, 179.0 * s), "{:?}", t.end);
+            let total: f64 = t.segments.iter().map(PathSegment::length).sum();
+            assert!(approx(total, 2.0 * s));
+        });
+        // The top rim is the same bounce: the ring is the only topology with two.
+        both_scales(10.0, 1.0, Vec2::new(0.0, -2.0), |t, s| {
+            assert_eq!((t.crossings, t.reflections), (0, 1));
+            assert_eq!(t.map, TangentMap::REFLECT_Y);
+            assert!(approx(t.end.v, 1.0 * s), "{:?}", t.end);
+        });
+        // A straight vertical sweep longer than the world bounces without escaping.
+        let t = travel(RING, at(10.0, 90.0), Vec2::new(0.0, 1000.0));
+        assert!(t.end.is_canonical(RING), "{:?}", t.end);
+        assert!(!t.fallback);
+        assert_eq!(t.crossings, 0);
+        let total: f64 = t.segments.iter().map(PathSegment::length).sum();
+        assert!(approx(total, 1000.0), "{total}");
+    }
+
+    /// The four corners, where the wrap meets a rim. `Edge::Top = 0 < Right = 1 <
+    /// Bottom = 2 < Left = 3`, so **top-left, top-right and bottom-left reflect first and
+    /// bottom-right crosses the seam first**. Each corner is checked three ways: the
+    /// `earliest_exit` tie itself, the end-to-end sweep, and two near-ties skewed either
+    /// side of the exact aim, which must each resolve to one edge alone.
+    #[test]
+    fn the_four_corners_resolve_by_the_lowest_edge_index() {
+        /// One corner fixture: where to start, which way to aim, which two edges tie,
+        /// and which of them the lowest-index rule takes.
+        struct Corner {
+            name: &'static str,
+            start: (f64, f64),
+            disp: (f64, f64),
+            tied: [Edge; 2],
+            winner: Edge,
+        }
+        let corner = |name, start, disp, tied, winner| Corner { name, start, disp, tied, winner };
+        let corners = [
+            corner("top-left", (1.0, 1.0), (-2.0, -2.0), [Edge::Top, Edge::Left], Edge::Top),
+            corner("top-right", (319.0, 1.0), (2.0, -2.0), [Edge::Top, Edge::Right], Edge::Top),
+            corner("bottom-left", (1.0, 179.0), (-2.0, 2.0), [Edge::Bottom, Edge::Left], Edge::Bottom),
+            corner("bottom-right", (319.0, 179.0), (2.0, 2.0), [Edge::Right, Edge::Bottom], Edge::Right),
+        ];
+        for Corner { name, start: (u, v), disp: (dx, dy), tied, winner } in corners {
+            let d = Vec2::new(dx, dy);
+            let exit = earliest_exit(Vec2::new(u, v), d, d.length(), RING.extent(Face::Front))
+                .expect("the corner is a boundary hit");
+            assert!(exit.is_tie(), "{name}: not a tie");
+            assert!(exit.includes(tied[0]) && exit.includes(tied[1]), "{name}: {exit:?}");
+            assert_eq!(exit.edge, winner, "{name}");
+
+            let t = travel(RING, at(u, v), d);
+            assert_eq!(t.ties, 1, "{name}");
+            assert!(!t.fallback, "{name}");
+            // Whichever went first, the corner is one crossing and one reflection, and no
+            // length is lost at the singularity.
+            assert_eq!((t.crossings, t.reflections), (1, 1), "{name}");
+            let total: f64 = t.segments.iter().map(PathSegment::length).sum();
+            assert!((total - d.length()).abs() < 1e-9, "{name}: {total}");
+            assert!(t.end.is_canonical(RING), "{name}: {:?}", t.end);
+
+            // The same fixture at S = 2 gives the same corner, doubled.
+            let t2 = travel(RING2, at(u * 2.0, v * 2.0), d * 2.0);
+            assert_eq!((t2.ties, t2.crossings, t2.reflections), (1, 1, 1), "{name} at S = 2");
+            assert!(approx(t2.end.u, t.end.u * 2.0) && approx(t2.end.v, t.end.v * 2.0),
+                "{name} at S = 2: {:?} is not twice {:?}", t2.end, t.end);
+
+            // Near-ties: skew the aim 2% either way and each edge wins alone.
+            for (sx, sy) in [(1.0, 1.02), (1.02, 1.0)] {
+                let skewed = Vec2::new(dx * sx, dy * sy);
+                let e = earliest_exit(Vec2::new(u, v), skewed, skewed.length(), RING.extent(Face::Front))
+                    .expect("still a boundary hit");
+                assert!(!e.is_tie(), "{name}: a 2% skew still ties");
+                let st = travel(RING, at(u, v), skewed);
+                assert_eq!(st.ties, 0, "{name}: skewed sweep tied");
+                // Whichever edge went first, the corner still costs one of each.
+                assert_eq!((st.crossings, st.reflections), (1, 1), "{name} skewed");
+                // And the exact tie's answer is the limit of the two skewed ones.
+                assert!((st.end.u - t.end.u).abs() < 0.1 && (st.end.v - t.end.v).abs() < 0.1,
+                    "{name}: skewed end {:?} is far from the exact-tie end {:?}", st.end, t.end);
+            }
+        }
+    }
+
+    /// `bottom-right` is the one corner that crosses before it reflects; the other three
+    /// reflect first. Observed through the chart the first hit leaves by.
+    #[test]
+    fn only_the_bottom_right_corner_crosses_before_it_reflects() {
+        let first_edge = |u: f64, v: f64, d: Vec2| {
+            earliest_exit(Vec2::new(u, v), d, d.length(), RING.extent(Face::Front)).expect("hit").edge
+        };
+        assert_eq!(first_edge(1.0, 1.0, Vec2::new(-2.0, -2.0)), Edge::Top);
+        assert_eq!(first_edge(319.0, 1.0, Vec2::new(2.0, -2.0)), Edge::Top);
+        assert_eq!(first_edge(1.0, 179.0, Vec2::new(-2.0, 2.0)), Edge::Bottom);
+        assert_eq!(first_edge(319.0, 179.0, Vec2::new(2.0, 2.0)), Edge::Right);
+        // A rim edge has no neighbour and a wrap edge does, so "Top/Bottom first" means
+        // "reflect first" and "Right/Left first" means "cross first".
+        assert!(RING.neighbor(Face::Front, Edge::Top).is_none());
+        assert!(RING.neighbor(Face::Front, Edge::Bottom).is_none());
+        assert!(RING.neighbor(Face::Front, Edge::Right).is_some());
+        assert!(RING.neighbor(Face::Front, Edge::Left).is_some());
+    }
+
+    #[test]
+    fn one_displacement_wraps_and_reflects() {
+        // Aimed into the bottom-right region but not at the corner: the seam comes first
+        // at t = 0.5, the rim afterwards, and neither is a tie.
+        both_scales(318.0, 178.0, Vec2::new(4.0, 3.0), |t, s| {
+            assert_eq!((t.crossings, t.reflections, t.ties, t.fallback), (1, 1, 0, false));
+            assert_eq!(t.map, TangentMap::REFLECT_Y);
+            assert!(approx(t.end.u, 2.0 * s) && approx(t.end.v, 179.0 * s), "{:?}", t.end);
+            let total: f64 = t.segments.iter().map(PathSegment::length).sum();
+            assert!(approx(total, 5.0 * s));
+        });
+    }
+
+    #[test]
+    fn a_long_displacement_wraps_more_than_once() {
+        // 900 pixels east from u = 160: exits at 160, 480 and 800 pixels travelled.
+        both_scales(160.0, 90.0, Vec2::new(900.0, 0.0), |t, s| {
+            assert_eq!(t.crossings, 3);
+            assert_eq!(t.reflections, 0);
+            assert_eq!(t.segments.len(), 4);
+            assert_eq!(t.map, TangentMap::IDENTITY);
+            assert!(approx(t.end.u, 100.0 * s) && approx(t.end.v, 90.0 * s), "{:?}", t.end);
+            let total: f64 = t.segments.iter().map(PathSegment::length).sum();
+            assert!(approx(total, 900.0 * s), "{total}");
+        });
+        // Westward too, and diagonally so the rims join in.
+        let t = travel(RING, at(160.0, 90.0), Vec2::new(-900.0, 0.0));
+        assert_eq!(t.crossings, 3);
+        assert!(approx(t.end.u, 220.0), "{:?}", t.end);
+        let t = travel(RING, at(160.0, 90.0), Vec2::new(-1300.0, 700.0));
+        assert!(!t.fallback);
+        assert!(t.crossings >= 4 && t.reflections >= 3, "{t:?}");
+        let total: f64 = t.segments.iter().map(PathSegment::length).sum();
+        assert!((total - Vec2::new(-1300.0, 700.0).length()).abs() < 1e-9, "{total}");
+    }
+
+    #[test]
+    fn retracing_returns_to_the_start() {
+        let mut seed = 0x51ce_9a3d_77b1_0e42u64;
+        let mut rnd = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let mut checked = 0;
+        for _ in 0..4000 {
+            let start = at(rnd() * 320.0, rnd() * 180.0).canonicalize(RING);
+            let disp = Vec2::new((rnd() - 0.5) * 800.0, (rnd() - 0.5) * 400.0);
+            let fwd = travel(RING, start, disp);
+            if fwd.fallback || fwd.ties > 0 {
+                continue;
+            }
+            let back = travel(RING, fwd.end, fwd.map.apply(-disp));
+            if back.fallback || back.ties > 0 {
+                continue;
+            }
+            assert!(
+                (back.end.u - start.u).abs() < 1e-7 && (back.end.v - start.v).abs() < 1e-7,
+                "start={start:?} disp={disp:?} -> {:?} -> {:?}",
+                fwd.end,
+                back.end
+            );
+            assert_eq!(fwd.map.then(back.map), TangentMap::IDENTITY, "start={start:?} disp={disp:?}");
+            checked += 1;
+        }
+        assert!(checked > 2000, "only {checked} round trips");
+    }
+
+    #[test]
+    fn every_end_is_canonical_and_the_length_survives() {
+        let mut seed = 0x0bad_1dea_face_b00cu64;
+        let mut rnd = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let mut out = Travel::default();
+        for topo in [RING, RING2] {
+            let (w, h) = topo.extent(Face::Front);
+            for _ in 0..20_000 {
+                let start = at(rnd() * w, rnd() * h).canonicalize(topo);
+                // Vertex-directed, huge, and ordinary steps.
+                let disp = match (rnd() * 3.0) as u32 {
+                    0 => Vec2::new(w - start.u, -start.v),
+                    1 => Vec2::new((rnd() - 0.5) * 8000.0, (rnd() - 0.5) * 8000.0),
+                    _ => Vec2::new((rnd() - 0.5) * 20.0, (rnd() - 0.5) * 20.0),
+                };
+                travel_into(topo, start, disp, &mut out);
+                assert!(out.end.is_canonical(topo), "{start:?} {disp:?} -> {:?}", out.end);
+                for s in &out.segments {
+                    assert!(s.length() > 0.0, "zero-length segment emitted");
+                }
+                if !out.fallback {
+                    let total: f64 = out.segments.iter().map(PathSegment::length).sum();
+                    assert!(
+                        (total - disp.length()).abs() < 1e-6,
+                        "{start:?} {disp:?}: {total} != {}",
+                        disp.length()
+                    );
+                }
+            }
+        }
+    }
+}
