@@ -25,7 +25,8 @@ Read-only audit: no source file was changed to write it.
    checked `cell_count() <= u16::MAX` bound on `CellId`.
 4. Flat edges are **not** identity: a wall bounce composes `REFLECT_Y` on
    horizontal walls, `REFLECT_X` on vertical ones, and both at a corner
-   (`= quarter_turns(2)`). Only `unfold` is identity on a plane.
+   (`= quarter_turns(2)`). Only `unfold` is identity on a plane. §5 now *decides*
+   the canopy drain and specifies the planar weather model normatively (§5a).
 5. **Candidate first flat world: 640×360, upscaled 3×, at world scale S = 2** —
    sprite tile 32 px, field cell 8 px. Gated on FW-0's measured board numbers,
    not fixed here. 320×180 is the cube world stretched and wastes the panel.
@@ -135,9 +136,35 @@ Why an enum and not the alternatives:
 `chart_images` returns one direct image, so `unfold` collapses to segment length
 (and *there* the tangent map is genuinely `IDENTITY`) and `unfold_pixels` always
 takes the direct fast path clipped to `0..w`/`0..h`. `embed()` becomes
-`[u/32S, v/32S, 0]` (see §6), which keeps `chord_sq`'s `×1024` factor exact — on a
-plane the chord bound is the true distance, so pair rejection stops being
-conservative and becomes exact (`point.rs:111`).
+`[u/(32S), v/(32S), 0]` (see §6).
+
+**Distance is a topology method, not a scaled embedding.** `chord_sq` multiplies
+the embedded chord by a hardcoded `1024 = 32²` to reach pixel units
+(`point.rs:108-116`); with a flat embedding divided by `32S` that constant is
+right only at `S = 1`, and patching it to `1024·S²` would leave distance
+depending on a scale factor it has no business knowing. Make it
+`Topology::chord_sq(a, b) -> f64` in squared **pixels**: the cube arm is today's
+body verbatim; the flat arm is `(Δu)² + (Δv)²` straight from the chart
+coordinates — exact, cheaper, and independent of the embedding. The embedding is
+then used for exactly two things on a plane: habitat noise sampling and weather
+blob state. Pair rejection stops being a conservative bound and becomes the true
+distance (`pairs.rs:64`).
+
+**Local-radius bounds are per topology; the cube's proof is not rescaled.**
+`MAX_LOCAL_RADIUS = 32.0` is a *completeness* proof, not a tunable: within it
+"every shortest path crosses at most `MAX_SEAMS` seams … so enumerating chart
+paths of that length is complete" (`unfold.rs:5-13`). Nothing about `S` may touch
+it. Two consequences, stated as rules:
+
+- **`world_scale` is a flat-only parameter. `Topology::Cube` pins `S = 1`**, so
+  the cube keeps its 32-px bound, its 9-px stamp budget and its proof untouched.
+  Validation refuses a cube world with `world_scale != 1`.
+- `Topology::max_local_radius()` for `Flat { w, h }` has no seam argument at all —
+  one chart, direct images only — so completeness is trivial and the bound exists
+  only to keep `unfold_pixels` cost finite. Set it to `min(w, h) / 2` (beyond
+  that a radius reaches past the far wall and means nothing), with the stamp
+  budget `9·S` required to satisfy `9·S <= max_local_radius()`; at S = 2 on
+  640×360 that is `18 <= 180`, comfortably inside.
 
 **Wall reflection is not identity — this is the part to get right.** The existing
 rim bounce does two things at once (`travel.rs:254-258`): it negates the
@@ -264,28 +291,55 @@ freeze a `v16.rs` mirror beside `v7..v14`.
 `[magic][schema u32][id_len u16][id][payload_len u64][crc32 u32][payload]`
 (`snapshot.rs:48-50,78-97`) is parsed with hardcoded offsets outside Rust, by
 `scripts/reduce-quiet-compare.mjs:112-126`. Inserting a topology word there breaks
-that tool for no gain, because the schema number already refuses a mismatched
-build. Validate **after decode** instead, in `WorldState::check`:
+that tool for no gain: the schema number already refuses a mismatched build.
 
-- `config.topology` is one the build supports, and `Topology::validate()` passes
-  (dimensions positive, multiples of `cell_pixels()`, `cell_count() <= u16::MAX`);
-- every `Fields` vector, every ecology vector and the care state have length
-  exactly `cell_count()`;
-- every organism's `pos.face` and every care target's `face`
-  (`crates/cubarium/src/care/mod.rs:125-135`) is a chart the topology has —
-  `face == Face::Front` for flat — and `u < w`, `v < h`.
+**The post-decode hook already exists and is named `WorldState::validate`.**
+`decode_snapshot` calls it at `snapshot.rs:163` after the CRC and the exact-length
+decode (`world/state.rs:108`). The flat work is to extend it, and to replace the
+`CELL_COUNT` constants it reaches with the world's runtime `cell_count()`:
+
+- `config.topology` is one this build supports and `Topology::validate()` passes:
+  dimensions positive, multiples of `cell_pixels()`, `cell_count() <= u16::MAX`,
+  and `world_scale == 1` for `Cube`;
+- every `Fields` vector (`fields.rs:19-32`) and every ecology v1 vector has length
+  exactly `cell_count()` — these are the only per-cell serialized arrays;
+- **care's persisted state is not a per-cell vector.** `CareState.showers[].cells`
+  is a `Vec<u16>` of raw `CellId` indices with matching weights
+  (`care.rs:257-276`); `CareState::validate` already range-checks them against
+  `CELL_COUNT` at `care.rs:340,345-349`, including a `vec![false; CELL_COUNT]`
+  duplicate set. Each of those becomes `cell_count()`. The first draft wrongly
+  said the care state has `cell_count()` length;
+- every organism's `pos.face` is a chart the topology has — `Face::Front` for
+  flat — with `u < w`, `v < h`.
+
+`CareTarget` (`crates/cubarium/src/care/mod.rs:122-140`) is a **host** command
+type and is not in `WorldState`, so it is not validated here at all; its widening
+and admission checks belong to FW-4 (§9). The first draft put it in the wrong
+place.
 
 Keep the `face` byte in `SurfacePoint`: one byte per organism against forking the
 position type, `OrganismView`, `PathSegment` and every fixture.
 
-**The cube regression check has to change too.** `ecology_hash` hashes
-`postcard::to_allocvec` of the whole masked `WorldState`, config included
-(`snapshot.rs:193-199`), so adding two config fields changes it for cube worlds
-as well — a pre/post equality claim is impossible. Replace it with a **normalized
-cube-state comparator** written once in FW-1's test pass: a digest over
-everything *except* `config`, plus an explicit assertion that the two configs
-differ only in the new fields at their cube defaults. That comparator, not
-`ecology_hash`, is the standing evidence in §9.
+**The cube regression check, and how it survives the refusal.** `ecology_hash`
+hashes `postcard::to_allocvec` of the whole masked `WorldState`, config included
+(`snapshot.rs:193-199`), so two config fields change it for cube worlds too — a
+pre/post equality claim is impossible. Worse, schema 17 *refuses* a schema 16
+snapshot by design, so the new build cannot even read the old run's output. The
+comparator therefore needs a cross-schema procedure, not just a masked hash:
+
+1. Define a **common semantic projection** `CubeProjection` carrying only what
+   schemas 16 and 17 both have and both mean identically: `tick`, every `Fields`
+   and ecology vector, the organism roster (id, `pos`, heading, energy, reserve,
+   genome), the tick counters, the RNG stream states and the care ledgers —
+   **excluding `config`** and excluding anything the bump reshaped.
+2. Each build exports it from its own binary: the pre-change build emits
+   `CubeProjection` from a fixed-seed run, the post-change build emits the same.
+   Neither ever decodes the other's snapshot, so the refusal rule is untouched.
+3. Compare the two projections field-by-field (and hash them for a one-line CI
+   signal). Equality is the cube regression evidence used throughout §9.
+
+FW-1 authors the projection type and the exporter; the pre-change export is taken
+**before** FW-1 merges, from the current `main` build, and committed as a fixture.
 
 ## 5. Ecology and art: what is not mechanical
 
@@ -300,9 +354,9 @@ the consumers; this is the corrected list.
 | **neural controller** | the same two fields in `SelfState` (`world/step.rs:3068-3079`) | identical treatment; a policy trained on cube height reads the same channel |
 | **depth preference** | `obs.up * (w_depth · (h_pref − obs.height))` steers every organism (`controller.rs:228-235`) | works unchanged *given* a topology height and up; with a wrong height it silently steers the whole population into a wall |
 | noise sampling | 3D noise on `[-1,1]^3` (`habitat.rs:43-75`) | same wave sum at `[u/32S, v/32S, 0]` — the `S` divisor is required, see §6 |
-| **weather blobs** | `normalize(positions[i])`, `dot(b.center, dir)`, angular cap `cap(θ)` with `blob_radius_deg` (`habitat.rs:198-225`) | **BLOCKING design call: this is a spherical metric.** `normalize([u/32, v/32, 0])` collapses the plane to a polar *fan* around the origin, not a moving blob. A flat world needs a **planar weather metric**: blob centres drifting in the plane, a raised-cosine cap on planar distance in pixels (`blob_radius_px = blob_radius_deg` reinterpreted through `world_scale`), and a stated edge rule (drift reflects, matching the walls). Owned by **FW-2** |
+| **weather blobs** | orbital: `center` rotated about `axis` at `rate` rad/tick, plus a per-minute random-walk tilt (`habitat.rs:110-196`); sampled by `dot(b.center, dir)` against an angular cap (`habitat.rs:198-225`) | **decided — see §5a for the normative model.** The spherical metric does not transfer: `normalize([u/32S, v/32S, 0])` collapses the plane to a polar *fan* about the origin. §5a specifies a planar blob reusing the same `Blob`/`Weather` structs. Owned by **FW-2** |
 | band thresholds | `Canopy` iff `h >= 1.0` — true only on the Top face (`art_present/habitat.rs:380`) | needs a `canopy_top` threshold. **No value can be validated from current code**; propose `0.67` as an explicit new default for review, not as a derived number |
-| detritus fall / downhill | gravity's tangential component vanishes on the level Top face, so `downhill` is `None` there (`field.rs:135-151`, `design/stratified-world.md:47-52`): **the cube canopy deliberately never drains** | on a plane every cell has a lower neighbour, so a flat canopy drains completely to the bottom wall. **Explicit decision required, owned by FW-2:** either accept it (the top rows become a shedding ridge and the bottom a litter bank) or reproduce the cube's behaviour with a `downhill_floor` on the top band. Recommend **accept, and measure**, because the drain is what makes a side view read as gravity |
+| detritus fall / downhill | gravity's tangential component vanishes on the level Top face, so `downhill` is `None` there (`field.rs:135-151`, `design/stratified-world.md:47-52`): **the cube canopy deliberately never drains**, and the bottom row of the side faces has nothing below it | **decided: the flat world mirrors both exceptions.** `downhill(c) = None` when `cy == 0`, otherwise the neighbour at `(cx, cy+1)`. The top cell row is the canopy and holds its water and detritus exactly as the cube's level Top does; the bottom row has no cell below it and keeps its litter, exactly as the cube's rim row does. No toggle, no new config |
 | water flow / pools | no flux across the open rim (`water.rs`) | the bottom wall becomes a moat the cube never had; expect standing water along the bottom row and re-check `evap_floor` |
 | pair rejection | conservative chord bound (`pairs.rs:64`) | exact Euclidean; strictly fewer candidate pairs |
 | founders | random face + `unit·FACE_EXTENT` (`lifecycle.rs:69-72`) | one chart; the face draw must be **kept and discarded** or every seed shifts |
@@ -310,11 +364,75 @@ the consumers; this is the corrected list.
 | tall columns / rigs | per side face, `Face::ALL` order (`art_present/mod.rs:365`) | choose columns along `u`; the three-quarter rigs already read as walking along a wall |
 | ray-cast preview | `raycast.rs` | not ported; cube-only |
 
-The visible risks needing a call rather than a port: the **planar weather
-metric**, the **canopy drain**, the **canopy threshold**, **water against the new
-bottom wall**, and **organism density** — the same 512-organism cap over 3,600
+The calls now made in this document: the **planar weather model** (§5a) and the
+**canopy drain** (decided above). Still open and needing Wrysk's eye rather than a
+rule: the **canopy threshold**, **water against the new bottom wall**, and
+**organism density** — the same 512-organism cap over 3,600
 cells instead of 1,280 thins the world by 2.81× in ecological terms, whatever the
 raster. Recommend keeping the cap and raising `founders` proportionally.
+
+## 5a. The planar weather model (normative)
+
+Flat weather reuses the persisted structs unchanged, so the cube path and the
+snapshot shape are untouched: `Blob { center: [f64;3], axis: [f64;3], rate: f64 }`
+and `Weather { light, moisture, last_walk_minute }` (`habitat.rs:110-127`). Only
+the *interpretation* of the three fields changes with the topology.
+
+| field | cube meaning | flat meaning |
+|---|---|---|
+| `center` | unit direction of the cap centre on the sphere | the blob centre embedded on the plane: `[u/(32S), v/(32S), 0.0]` — the same embedding cells use, so `z == 0` always |
+| `axis` | unit orbit axis, perpendicular to `center` | the unit heading of travel in the plane, `[cos φ, sin φ, 0.0]` |
+| `rate` | angular speed, rad/tick | linear speed in embedded units per tick |
+
+The plane is **10 × 5.625 embedding units at every S** (`w/(32S) = 320S/32S = 10`,
+`h/(32S) = 5.625`), so every quantity below is S-invariant, which is what keeps §6's
+constant-ecology claim true.
+
+**Initialization** (`Weather::new`, `habitat.rs:136-156`). The cube draws four
+`unit` values per blob at the reserved block `u64::MAX − 8 + k, k ∈ 0..4` (centre
+`z`, centre azimuth, axis `z`, axis azimuth), light blobs keyed `0..n`, moisture
+`n..2n`. Flat **consumes the same four draws in the same order** so the stream
+stays aligned: draw 0 → `u = unit · w`; draw 1 → `v = unit · h`; **draw 2 is
+consumed and discarded** (the cube's axis `z` has no planar counterpart); draw 3 →
+`φ = TAU · unit`. `period_min` is cycled from `cfg.periods_min` exactly as today,
+and
+
+> `rate = 10.0 / (period_min · 60 · TICK_HZ)`
+
+— one traversal of the world width per period. At the default 20-minute period and
+20 Hz that is `1.0/2400` units/tick ≈ 0.43 px/s at S = 1, crossing 320 px in 20
+minutes. A zero or empty period gives `rate = 0`, as today.
+
+**Per tick** (`Weather::advance`). `cfg.moving == false` freezes centres in both
+topologies, unchanged. Otherwise `center += axis · rate`, then **specular
+reflection at the four walls using exactly §2's algebra**: negate `axis.x` at
+`u = 0` or `u = w`, negate `axis.y` at `v = 0` or `v = h`, both at a corner, and
+mirror the overshoot back inside so the centre always lands in the rectangle. A
+blob therefore bounces around the world the way an organism does, which is the
+consistency argument for reusing the rule.
+
+**Per simulated minute.** The cube draws one `unit(seed, Stream::Weather, key,
+minute)` per blob and tilts by `walk_deg_per_min`. Flat draws **the same single
+value with the same key and counter** and applies a bounded heading walk:
+
+> `θ = walk_deg_per_min.to_radians() · (2·unit − 1)`, then `axis ← rotate(axis, θ)`
+
+— uniform in `[−step, +step]`, one draw per blob per minute, so the RNG stream is
+consumed identically to the cube and a stream-parity test can assert it.
+
+**Sampling** (`Weather::sample`, `habitat.rs:204-227`). Same raised-cosine
+profile, planar argument: `radius = blob_radius_deg.to_radians()` read as a radius
+in **embedded units** (equivalently `radius · 32 · S` pixels), and
+`cap(d) = 0.5·(1 + cos(π·d/radius))` for `d = |p_cell − b.center| <= radius`, else
+0. `amplitude`, the `light`/`moisture` sums, `rain_source` as the bare moisture
+sum and therefore `rain_threshold` all keep their meanings, so `design/water.md`'s
+tuning carries over. The `[f64; CELL_COUNT]` out-params become slices.
+
+**One default needs changing.** `blob_radius_deg = 55°` is 0.96 embedded units,
+about 31 px of radius at S = 1. The flat plane is 56.25 unit² against the cube's
+20 unit² — the same 2.81× as the cell count — so `blobs_per_channel = 3` leaves
+the flat world mostly dry. Set the flat default to **8** (`2.81 × 3`) to keep
+shower coverage per cell at the cube's value; the cube default is unchanged.
 
 ## 6. World resolution: the trade, and the recommendation
 
@@ -440,9 +558,10 @@ is checked both when a sprite is built (`sprite.rs:18-22,61-64`, which returns
 time as `extent * scale > FOOTPRINT_RADIUS`, which **silently draws nothing**
 (`sprite.rs:810-818`). At `scale = 2` every creature disappears. The constant is
 documented as "not review-tunable — it is the radius the shared unfolding is
-proven correct for", so it must become `9.0 · world_scale`, derived in FW-1's
-`Scale` and validated against `max_local_radius()` (which bounds `S ≤ 3.5` at
-today's 32). **That work lives in `cubarium-render` and therefore in FW-3**, which
+proven correct for", so it must become `9.0 · world_scale`, defined in FW-1's
+`Scale` and validated against the **topology's own** `max_local_radius()` (§2) —
+`min(w, h)/2` on a plane, and the untouched cube proof of 32 px on a cube, where
+`S` is pinned to 1 anyway. **That work lives in `cubarium-render` and therefore in FW-3**, which
 owns that crate; FW-7 consumes the interface and must not edit it. The first
 draft's FW-7 omitted the render crate entirely — that was the gap.
 
@@ -515,57 +634,63 @@ This is FW-8. The first flat world ships without it.
 
 ## 9. The plan
 
-Re-cut after review: **FW-1 owns cell geometry and `world_scale`** in the surface
-contract, **FW-2 owns the two ecological design calls** (planar weather metric,
-canopy drain), and **FW-3 owns the scale-derived stamp budget** in the render
-crate. The *Owns* column names the decisions, not just the files.
+Re-cut twice. **FW-1** owns cell geometry, `world_scale` and every derived bound
+(including the *value* of the stamp budget); **FW-2** owns the ecological calls
+now written down in §5/§5a; **FW-3** owns *adopting* the budget in the render
+crate; **FW-4** owns the care chain end to end. "Files" are exclusive after the
+FW-6 reservation below.
 
-| id | objective | owns (decision) | files (exclusive) | interface exposed | verification | size | effort |
+**FW-6 reserves these exact paths**, and every implementation package's glob
+excludes `tests/flat_*.rs`:
+`cubarium-surface/tests/{flat_travel,flat_field,flat_raster}.rs`;
+`cubarium-core/tests/{flat_world,flat_weather,flat_schema17}.rs`;
+`cubarium-render/tests/{flat_canvas,flat_stamp_scale}.rs`;
+`cubarium/tests/{flat_sinks,flat_present,flat_care}.rs`.
+
+| id | objective | owns (decision) | files (exclusive; no `tests/flat_*.rs`) | interface exposed | verification | size | effort |
 |---|---|---|---|---|---|---|---|
-| FW-0 | Vendor `cube-proto` with `Raster` + wire format 2; **measure `R` (single-core cube render ms) and `tick_ms` on desktop and on the board** | the S/fps value in §6 | `vendor/cube-proto/**`, `vendor/cube-proto.rev` | `Raster { width, height, data }` | `cargo test --workspace`; recorded `R` and `tick_ms`, and the S they select | small | medium |
-| FW-1 | `Topology` + `Scale` (cell px, world scale, footprint and local radii); `u16` pixel indices; runtime cell count with the `u16::MAX` capacity check; flat travel with per-axis and corner wall reflection | the geometry contract, incl. the corner tie deviation | `crates/cubarium-surface/**` | §2's API; `CUBE_CELL_COUNT`; the normalized cube-state comparator | cube results identical by value; flat exercised at **S = 1 and S = 2 from the first commit** | large | **high** — reflection algebra, tie/near-tie equivalence, progress bounds |
-| FW-2 | Topology and scale through the world: config, schema 17 + post-decode validation, height/`up`, both controllers, **planar weather metric**, **canopy drain decision**, S-scaled noise, founders, care | planar weather; canopy drain; `canopy_top` | `crates/cubarium-core/**` | `WorldConfig.{topology,world_scale}`, `World::topology()`, `RenderView.topology` | cube run matches by the normalized comparator (not `ecology_hash`); a flat run reaches steady state | large | **high** — the two calls, RNG stream order, controller height |
-| FW-3 | `Canvas` by topology, `Canvas::pixels()`, `encode_raster`, **`footprint_radius = 9·S`** and the `scale` stamp path; port `field/trail/sprite/body/multipart`; deterministic row-band parallel hook | the stamp budget | `crates/cubarium-render/**` | `Canvas::new(topo)`, `pixels()`, `encode_raster`, `footprint_radius(scale)` | same-seed cube canvas bit-identical; a `scale = 2` stamp draws instead of vanishing | medium | **high** (raised) — the 9-px budget is a correctness bound, not a knob |
-| FW-4 | `Output` enum + sinks (shim/png/web), viewer flat mode, CLI/config, preview refusal, host timing numbers | — | `crates/cubarium/src/{sink/**,cli.rs,net.rs,run.rs,runner/**}`, `sink/web/index.html` | `enum Output`, `topology`/`world_scale` TOML | flat PNG capture; viewer screenshot; the measured split that picks `--fps` | medium | medium |
-| FW-5 | Presenter for flat: `RenderView.topology` consumed, `ArtPresenter` built from the world's cell count, bands, horizon, water/rain, motifs, columns, bodies, care effects | presenter cache lifetime | `crates/cubarium/src/{present.rs,art_present/**,lanternjaw/**,care_effects.rs,scene.rs}` | — | a flat capture reviewed by Wrysk; cube capture diffed to zero | large | **high** — new UI construction |
-| FW-6 | Independent test authoring: wall reflection incl. exact and near corner, corner-cell flux, capacity refusal, schema-17 post-decode validation, planar weather, sink/raster, presenter goldens | — | new files only: `crates/*/tests/flat_*.rs` | — | written without reading FW-1..FW-5's own tests | medium | **high** |
-| FW-7 | Pack v6 (`tile` as data), baker at `TILE = 16·S`, `art.rs`/`tall.rs`/`lanternjaw` constants made tile-relative, S-scaled default builder; re-bake at S = 2 | — | `art/**`, `assets/atelier/**`, `crates/cubarium/src/art.rs`, `art_present/tall.rs`, `lanternjaw/**` | `pack.json` v6 | the S = 1 pack still loads and renders bit-identically; a 640×360 capture; reproducible Godot bake | large | **high** — `tall.rs`'s 4/16-px lattice |
-| FW-8 | Biomes: region field, four parameter sets, `mechanisms.biomes` off by default, presentation by dominant biome | biome parameter sets | `crates/cubarium-core/src/habitat.rs` (+ new `biome.rs`), `crates/cubarium/src/art_present/habitat.rs` | `HabitatConfig.biomes` | toggle off ⇒ comparator unchanged; toggle on ⇒ short run showing distinct regions | medium | medium |
+| FW-0 | Vendor `cube-proto` with `Raster` + wire format 2. **Measure four numbers on the board, pinned:** serial cube render `R` on one A78, the same render split across four A78 cores, `tick_ms`, and end-to-end achieved fps and ticks/s for a real run | the S and `--fps` values in §6 | `vendor/cube-proto/**`, `vendor/cube-proto.rev` | `Raster { width, height, data }` | `cargo test --workspace`; all four numbers recorded with their pinning, and the S they select | small | medium |
+| FW-1 | `Topology` + `Scale`: cell pixels, `world_scale` (flat-only; cube pinned to 1), `footprint_radius() = 9·S`, per-topology `max_local_radius()` and `chord_sq()`; `u16` pixel indices; runtime cell count with the `u16::MAX` check; flat travel with per-axis and corner wall reflection; flat `downhill` (`cy == 0` ⇒ `None`); the `CubeProjection` type and exporter | the whole geometry contract, incl. the corner tie deviation and **the stamp-budget value** | `crates/cubarium-surface/**` | §2's API; `CUBE_CELL_COUNT`; `CubeProjection` | cube identical by value; flat exercised at **S = 1 and S = 2 from the first commit**; pre-change projection fixture captured from `main` before merge | large | **high** |
+| FW-2 | Topology and scale through the world: config, schema 17, extended `WorldState::validate` (runtime `cell_count()` in `care.rs:340,345-349` included), height/`up`, both controllers, **§5a's planar weather**, the decided canopy `downhill`, S-scaled noise, flat `blobs_per_channel` default, founders, core care state | the ecological calls as written in §5/§5a | `crates/cubarium-core/**` | `WorldConfig.{topology,world_scale}`, `World::topology()`, `RenderView.topology` | cube run equal by `CubeProjection`; RNG stream parity test for weather init and the per-minute draw; flat run reaches steady state | large | **high** |
+| FW-3 | `Canvas` by topology, `Canvas::pixels()`, `encode_raster`; **adopt** `Scale::footprint_radius()` at both check sites (`sprite.rs:61-64,810-818`) and the `scale` stamp path; port `field/trail/sprite/body/multipart`; deterministic row-band parallel hook | adoption only — the value is FW-1's | `crates/cubarium-render/**` | `Canvas::new(topo)`, `pixels()`, `encode_raster` | same-seed cube canvas bit-identical; a `scale = 2` stamp draws instead of vanishing | medium | **high** |
+| FW-4 | `Output` enum + sinks (shim/png/web), viewer flat mode, CLI/config, preview refusal, **the whole care chain: `CareTarget.{u,v}` widened to `u16` and validated against the topology extent (`care/mod.rs:122-140`), `PlannedCommand` journal and web-request compatibility (`care/mod.rs:146-162`), and the canvas flourish** | the care wire and journal shape | `crates/cubarium/src/{sink/**,cli.rs,net.rs,run.rs,runner/**,care/**,care_effects.rs}`, `sink/web/index.html` | `enum Output`, `topology`/`world_scale` TOML, the widened `CareTarget` | flat PNG capture; viewer screenshot; a journal written before the widening still replays; the measured split that picks `--fps` | medium | medium |
+| FW-5 | Presenter for flat: `RenderView.topology` consumed, `ArtPresenter` built from the world's cell count, bands, horizon, water/rain, motifs, columns, bodies | presenter cache lifetime | `crates/cubarium/src/{present.rs,art_present/**,lanternjaw/**,scene.rs}` | — | flat capture reviewed by Wrysk; cube capture diffed to zero | large | **high** |
+| FW-6 | Independent test authoring at the reserved paths: wall reflection incl. exact and near corner, corner-cell flux, capacity refusal, extended `validate`, §5a's weather incl. stream parity, care widening, sink/raster, presenter goldens | — | only the reserved `tests/flat_*.rs` paths above | — | written without reading FW-1..FW-5's own tests | medium | **high** |
+| FW-7 | Pack v6 (`tile` as data), baker at `TILE = 16·S`, `art.rs`/`tall.rs`/`lanternjaw` constants made tile-relative, S-scaled default builder; re-bake at S = 2 | — | `art/**`, `assets/atelier/**`, `crates/cubarium/src/art.rs` | `pack.json` v6 | S = 1 pack still loads and renders bit-identically; 640×360 capture; reproducible Godot bake | large | **high** |
+| FW-8 | Biomes: region field, four parameter sets, `mechanisms.biomes` off by default, presentation by dominant biome | biome parameter sets | `crates/cubarium-core/src/biome.rs` (new), `crates/cubarium/src/art_present/habitat.rs` | `HabitatConfig.biomes` | toggle off ⇒ `CubeProjection` unchanged; toggle on ⇒ short run showing distinct regions | medium | medium |
 
-**Ordering, with the review's constraint that parallel pairs start only after
-shared interfaces are frozen.** FW-0 any time. FW-1 first, **and its API is
-frozen and published before anything else starts** — that freeze is the gate, not
-the merge. Then **FW-2 ∥ FW-3** (disjoint crates). Then **FW-4 ∥ FW-5** (disjoint
-file sets in `crates/cubarium/src`), but only after FW-3 publishes
-`footprint_radius` and `encode_raster`. FW-6 starts at the FW-1 freeze and only
-creates new files. FW-7 follows FW-5 (both would otherwise write
-`art_present/tall.rs`) and depends on FW-3's budget without editing it. FW-8 last.
-W2 (the device) follows FW-7.
+FW-5 and FW-7 both touch `art_present/tall.rs` and `lanternjaw/**`; FW-7 runs
+after FW-5 and the table gives those paths to FW-5, with FW-7 editing them only in
+its own window. FW-8's presenter file is likewise sequenced after FW-5.
 
-**The scale staging survives the review, with one correction.** Scale lives in
-the FW-1 *contract* and is exercised at S = 2 there, so nothing downstream ever
-changes geometry. What stages is the chosen *value*: FW-1..FW-6 can ship a flat
-world at S = 1 on pack v5, FW-3's Stage A0 can show S = 2 on the same pack, and
-FW-7 makes S = 2 the shipped default with re-baked art. If FW-7 slips the panel
-still works. The first draft's claim of "S = 1 then S = 2 without touching
-topology" was wrong because cell size is a surface constant
-(`field.rs:11-16,49-68`); putting `Scale` in FW-1 is the fix.
+**Ordering.** FW-0 any time. FW-1 first, **and its API is frozen and published
+before anything else starts** — the freeze is the gate, not the merge. Then
+FW-2 ∥ FW-3 (disjoint crates). Then FW-4 ∥ FW-5 (disjoint file sets), only after
+FW-3 publishes `encode_raster`. FW-6 starts at the FW-1 freeze and writes only its
+reserved paths. FW-7 follows FW-5; FW-8 last. W2 (the device) follows FW-7.
 
-Six packages are high effort: FW-1 (a reflection or tie mistake is silent and
-corrupts motion), FW-2 (the weather metric and canopy drain decide whether the
-flat world is alive), FW-3 (raised — the 9-px stamp budget is a proven-correctness
-bound shared with `unfold_pixels`), FW-5 (new UI construction), FW-6 (test
-authoring is high by the working rules), FW-7 (`tall.rs`'s named row indices).
+**The scale staging.** Scale lives in the FW-1 contract and is exercised at S = 2
+there, so nothing downstream ever changes geometry. What stages is the chosen
+*value*: FW-1..FW-6 can ship a flat world at S = 1 on pack v5, FW-3's Stage A0 can
+show S = 2 on the same pack, and FW-7 makes S = 2 the shipped default with
+re-baked art. If FW-7 slips the panel still works.
 
-**Standing evidence at every package:** `cargo test --workspace` green, plus a
+Six packages are high effort: FW-1 (a reflection, tie or bound mistake is silent
+and corrupts motion), FW-2 (the weather model and the validate extension), FW-3
+(the 9-px stamp budget is a proven-correctness bound shared with `unfold_pixels`),
+FW-5 (new UI construction), FW-6 (test authoring is high by the working rules),
+FW-7 (`tall.rs`'s named row indices).
+
+**Standing evidence at every package:** `cargo test --workspace` green, a
 fixed-seed `cubarium run --fresh --seed 1 --speed 0 --seconds 120 --sink png`
-capture whose PNG bytes match the pre-change run, plus the **normalized
-cube-state comparator** of §4 — *not* `ecology_hash`, which cannot be equal across
-a config change (`snapshot.rs:193-199`).
+capture whose PNG bytes match the pre-change run, and **`CubeProjection` equality**
+against the fixture exported from `main` before FW-1 — not `ecology_hash`, which
+cannot be equal across a config change (`snapshot.rs:193-199`) and cannot even be
+computed across the schema refusal.
 
 **Test authoring is its own pass.** FW-6 is that pass at high effort, written
-against §2's contract and §5's calls rather than against the implementation.
-FW-7 and FW-8 each need their own small authoring pass.
+against §2's contract and §5/§5a's decisions rather than against the
+implementation. FW-7 and FW-8 each need their own small authoring pass.
 
 ## What this audit could not determine
 
@@ -587,6 +712,11 @@ FW-7 and FW-8 each need their own small authoring pass.
 
 Astra returned *rework*. Every finding is accepted; none is rebutted. Three were
 blocking and two of those were substantive errors of fact in the first draft.
+
+**This section records what round one changed, not the current state.** Its
+item 4 left planar weather and the canopy drain as deferred design calls and its
+item 6 quoted an `S ≤ 3.5` bound; both are **superseded by Review repair 2**,
+which decides the two calls (§5, §5a) and deletes the bound.
 
 | # | finding | verdict | what changed |
 |---|---|---|---|
@@ -613,3 +743,24 @@ Two further corrections not in the findings, folded into the same pass:
   four: FW-3 was raised because the 9-pixel stamp budget is a proven-correctness
   bound shared with `unfold_pixels`, not a tunable, and FW-6 was already high by
   the working rules but had not been counted.
+
+## Review repair 2 (Astra, 2026-09-16)
+
+Round one's findings 1–3 are confirmed closed. Round two raised two blocking and
+four should-fix items; all six are accepted and none is rebutted. Astra's two
+decisions in item 2 are adopted verbatim and written up normatively in §5a.
+
+| # | finding | verdict | what changed |
+|---|---|---|---|
+| 2 | **BLOCKING** — prior finding 4 not closed: the body still *deferred* planar weather and canopy drainage instead of deciding them; existing weather persists 3D centre, axis and angular rate with orbital plus random-walk semantics (`habitat.rs:110-196`, `config.rs:249-262`) | **accepted; both decisions adopted** | **(a) Canopy decided, no toggle:** `downhill(c) = None` when `cy == 0`, else `(cx, cy+1)`. The §5 row now says the flat world mirrors *both* cube exceptions — the level Top (`field.rs:135-151`) and the rim row with nothing below it — so canopy water and detritus hold as they do today. **(b) Weather specified normatively in the new §5a**, reusing `Blob`/`Weather` unchanged with a per-topology reading of the three fields: `center = [u/(32S), v/(32S), 0]`, `axis = [cos φ, sin φ, 0]`, `rate` = embedded units/tick. Seeded init consumes the **same four draws** in the same order (draw 2 consumed and discarded), `rate = 10.0/(period_min·60·TICK_HZ)` for one width traversal per period (≈0.43 px/s at S = 1, 20 min), a bounded heading walk `θ = walk_deg_per_min·(2·unit − 1)` from the **same single draw** per blob per minute, radius `= blob_radius_deg.to_radians()` in embedded units (`= radius·32·S` px), specular reflection of `axis` at the four walls by §2's algebra, and `z = 0` so the serialized shape and the cube path are untouched. The plane is 10 × 5.625 units at every S, so all of it is S-invariant. One derived default change: `blobs_per_channel` 3 → **8** for flat, because the plane is 56.25 unit² against the cube's 20 (the same 2.81×) |
+| 3 | **BLOCKING** — flat care coordinates: `CareTarget` `u`/`v` are `u8`, refused above 63 (`care/mod.rs:122-140`), journaled in `PlannedCommand` (`care/mod.rs:146-162`); no package owned `crates/cubarium/src/care/**` | **accepted** | The whole care chain moves into **FW-4**, explicitly: `u`/`v` widened to `u16` and validated against the topology's extent instead of a literal 64, `PlannedCommand` journal and web-request compatibility, and `care_effects.rs` (moved out of FW-5 so the target type and its drawing have one owner). FW-4's verification gains "a journal written before the widening still replays", and FW-6 reserves `cubarium/tests/flat_care.rs` |
+| 4 | Should-fix — `chord_sq`'s `×1024` (`point.rs:108-116`) is not exact for `S ≠ 1`; the plan both scaled `max_local_radius` and claimed a fixed 32 bounds `S ≤ 3.5`, but 32 is a cube completeness proof tied to two seams (`unfold.rs:5-13`) | **accepted** | §2 makes distance a topology method returning squared **pixels**: cube unchanged, flat `(Δu)² + (Δv)²` straight from chart coordinates — exact, cheaper and independent of the embedding, which on a plane is then used only for noise and weather. Two explicit rules replace the implicit scaling: **`world_scale` is flat-only and `Topology::Cube` pins `S = 1`**, so the 32-px proof and the 9-px budget are never rescaled; and `Flat`'s `max_local_radius()` is `min(w, h)/2`, justified by having no seams at all rather than by the cube's proof. The `S ≤ 3.5` claim is deleted from §7 |
+| 5 | Should-fix — "files (exclusive)" was false: FW-6 creates `crates/*/tests/flat_*.rs` inside FW-1/2/3's globs; FW-1 defined `Scale::footprint_radius()` while FW-3 claimed the decision | **accepted** | §9 now reserves **eleven exact FW-6 paths** by name and states that every implementation package's glob excludes `tests/flat_*.rs`. Ownership split stated in the *Owns* column: **FW-1 owns the budget's value**, FW-3 owns **adopting** it at `sprite.rs:61-64,810-818`. The two remaining genuine overlaps (FW-5/FW-7 on `art_present/tall.rs` and `lanternjaw/**`, FW-5/FW-8 on `art_present/habitat.rs`) are named and resolved by sequencing rather than left implicit |
+| 6 | Should-fix — the plan named a nonexistent `check`, said the variable-sized care state has `cell_count()` length, validated non-persisted care targets, and gave the comparator no cross-schema procedure although 17 refuses 16 | **accepted; three factual errors** | §4 rewritten: the hook is **`WorldState::validate`** (`world/state.rs:108`), already called after decode at `snapshot.rs:163`. Care's persisted state is **not** per-cell — `CareState.showers[].cells` is a `Vec<u16>` of raw `CellId` indices (`care.rs:257-276`) already range-checked against `CELL_COUNT` at `care.rs:340,345-349` including a `vec![false; CELL_COUNT]` set, and each becomes runtime `cell_count()`. `CareTarget` is a host type, not in `WorldState`, so it is validated at admission in FW-4, not post-decode. The comparator gains the missing procedure: a **`CubeProjection`** carrying only what v16 and v17 both mean identically (excluding `config`), exported by each build from its own binary so neither ever decodes the other's snapshot, compared field-by-field and hashed; FW-1 authors it and the pre-change fixture is taken from `main` before FW-1 merges |
+| 7 | Should-fix — FW-0 measured only serial `R` and `tick_ms`, not the decisive four-core parallel render time | **accepted** | FW-0 now measures **four** pinned numbers: serial cube render on one A78, the same render split across four A78 cores, `tick_ms`, and end-to-end achieved fps and ticks/s for a real run. Its verification line requires all four with their pinning recorded |
+
+No item was rebutted. Every citation in the findings was checked against the
+tree before the change; all were accurate, including the three that identified
+statements in the previous revision as simply wrong — the nonexistent `check`,
+the care state's supposed per-cell length, and the implicit rescaling of the
+cube's 32-pixel completeness proof.
