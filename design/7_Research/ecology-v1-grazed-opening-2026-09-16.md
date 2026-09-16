@@ -26,8 +26,9 @@ as written, including where it falls awkwardly.
 
 **Answer in one line.** A coupled-grazed opening is the one opening of the three that is
 **already at the grazed standing crop**: it opens at ΣP 204–256 against a late-window standing
-crop of 222–230, moves by 0–13 % over the first simulated hour instead of the status quo's
-+117 % or the plant-only opening's −46 %, gives every grazer founder a brood at tick 3,001,
+crop of 222–230, moves by at most 13 % of its own opening over the first simulated hour
+(−12.9 % to +9.4 %) against the status quo's **+117 %** and the plant-only opening's **−40 %**,
+gives every grazer founder a brood at tick 3,001,
 doubles the surviving founder lineages, and **loses no seed's herbivore guild** — at a cost the
 status quo does not pay in founder broods (39–46 against 43–56) and, at 180,000 ticks, in
 terminal starved cells.
@@ -258,8 +259,9 @@ either configuration, so "the burn-in population" at that age is entirely descen
 **This is the result.** S §5's transient is not inverted here; it is *removed*. The status quo
 climbs 108–126 units over the hour and the plant-only opening falls 142–176; a coupled-grazed
 opening moves by 2.5–33 units, and at `fast-leaf` 180,000 by **2.5 units on a total of 229**.
-The deepest excursion below the opening is 195.9 against 228.0 (baseline 48,000) and never more
-than 14 % — against the plant-only opening's 46 %.
+The deepest excursion below the opening, as a fraction of that opening, is **16.1 %** (baseline
+180,000, 255.9 → 214.7) and at fast-leaf never more than 3.0 % — against the plant-only
+opening's **46.5 %** and **50.4 %**.
 
 Exact plant flows over that hour, summed over every cell, are in the regenerated table: gross
 income 2,035–2,330 and foliage out 680–862 across all ten arms, i.e. the *flows* barely differ
@@ -377,7 +379,8 @@ nothing was sent to the display and the running `cubarium` was not touched.
   display ends with 2.3 of 4 forms, and one seed in six loses its herbivores altogether.
 - **Adopt a coupled-grazed opening at a declared age.** The opening is green, smooth and
   *already at the grazed standing crop*: it moves by 2.5–33 units over the first hour instead of
-  108–176, every grazer founder breeds at the 3,001-tick floor, 9.5–13.2 lineages survive with
+  108–176 — at most 13 % of its own opening against +117 % and −40 % — every grazer founder
+  breeds at the 3,001-tick floor, 9.5–13.2 lineages survive with
   3.0–3.5 forms and evenness 0.66–0.70, no seed loses its herbivore guild, and the terminal
   starved-cell cost at 48,000–96,000 is 1.8–14.3 cells against the status quo's 0.8–11.2. The
   costs are (a) **the computation**: 40–150 simulated minutes of a *coupled* world before a
