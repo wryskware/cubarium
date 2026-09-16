@@ -181,10 +181,11 @@ record that the stand died could be hidden by the consequence of its dying.
 ground wash on their own; `Wd` is not folded into `litter_density`, and a tested assertion says
 so.
 
-**Visible effect.** Below the horizon, a cell whose stand has died now carries a short grey-blue
-stub among its mushrooms, brightest just after the stand dies and fading to nothing as `Wd`
-decomposes. A cell that never had a stand, or whose stand is alive, looks exactly as it did.
-A face whose lower rows have died reads as stubble rather than as ordinary litter.
+**Visible effect.** Below the horizon, a cell whose dead wood has come to outweigh its living
+wood carries a short grey-blue stub among its mushrooms, arriving during the dieback,
+brightest just after the stand dies and fading to nothing as `Wd` decomposes. A cell that
+never had a stand, or whose living stand still outweighs its dead wood, looks exactly as it
+did. A face whose lower rows have died reads as stubble rather than as ordinary litter.
 
 ## 3. The dead tall column
 

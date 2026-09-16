@@ -501,8 +501,9 @@ median of 15.4 simulated minutes (baseline control) and 54.8 minutes
 (`fast-leaf` control) of 150, and the last form-3 death is a starvation in 15 of
 16 baseline-control losses and in 18 of 18 `fast-leaf`-control losses.
 
-**It is not the rig.** The decisive comparison is *within* the rig, which holds
-the body fixed:
+**Within the rig, diet is strongly associated with survival.** The comparison
+that holds the body fixed (but not birth tick, lineage or other loci — see the
+confound below):
 
 | | entered | mean lifetime (deaths only) | survival |
 | --- | --- | --- | --- |
@@ -586,15 +587,15 @@ birth-tick-matched whole-world hazard is a secondary check only.
   thing that moved, which is the point of the design and also its limit: it shows
   that *this* knob buys range and depletion and not recovery, not that no spatial
   mechanism can.
-- **All three raised levels overshoot.** Every raised price kills both herbivore
-  rigs before their first brood, so the matrix contains no observation of a world
-  that has concentrated grazing *and* a breeding herbivore. The response between
-  0.00036 and 0.0018 is unsampled, and that is where an informative answer would
-  be.
-- **150 simulated minutes.** Recovery's absence is a statement about this
-  horizon. Depletion is absorbing *at 150 minutes*; A's held-out stage showed 300
-  minutes changes nothing qualitatively for the control, but the raised-price arms
-  were not run long.
+- **Both raised levels overshoot for the grazer.** Every raised price kills the
+  founder grazers before their first brood, and the gliders too except in
+  `fast-leaf` at 0.0018, so the matrix contains no observation of a world with
+  concentrated grazing *and* a breeding grazer. The response between 0.00036
+  and 0.0018 is unsampled, and that is where an informative answer would be.
+- **150 simulated minutes.** Recovery's rarity is a statement about this
+  horizon: 13 crossings in 72 raised-price runs, mechanism unresolved. A's
+  held-out stage showed 300 minutes changes nothing qualitatively for the
+  control, but the raised-price arms were not run long.
 - **Six training seeds, three matched apex arms, two configurations.** No
   held-out seed was touched, nothing was tuned, and no configuration is proposed.
 - **The four extinctions are four events.** Three fell in arm 1 and one in arm 2,

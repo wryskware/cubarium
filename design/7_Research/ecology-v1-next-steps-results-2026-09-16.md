@@ -315,8 +315,9 @@ one log line:
   a whole-world neural population.
 - The cube shows G's work and none of E's or F's. The display world is the
   legacy controller in `fast-leaf` at the shipped movement price; nothing in
-  E or F changes a number the display produces. The soil-band cue will only
-  appear once a stand below the horizon actually dies.
+  E or F changes a number the display produces. The soil-band cue appears
+  only where a stand below the horizon has more dead wood than living wood,
+  which no fresh world shows until a stand there begins to die.
 
 ## Next recommendation
 

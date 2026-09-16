@@ -184,10 +184,12 @@ Served material by channel, summed over the twelve layouts (m):
 | generation 9 | 4.183 | 2.598 | 2.652 | 0 |
 
 The two controls are scripted to graze only, so their zeros are the script and not the body.
-The two policies are not, and they split their intake roughly 44 / 28 / 28 across foliage,
-fruit and litter — which is what a `diet = 0.7` generalist with `cap_foliage = 0.7` and
-`cap_detrital = 0.3` looks like from the inside, and is a direct measurement of the body the
-training note misnamed.
+The two policies are not: generation 9 splits its intake 44 / 28 / 28 across foliage, fruit
+and litter and the initial centre about 50 / 26 / 23. Both use all three channels the
+`diet = 0.7` generalist (`cap_foliage = 0.7`, `cap_detrital = 0.3`) can reach, which is a
+direct measurement that the body the training note misnamed is a generalist; the exact
+split is each controller's behaviour on these layouts, not a signature of the body
+(scoped after review).
 
 ### Astra's three branches
 
@@ -217,10 +219,12 @@ supported, and it is compatible with branch 2.** The stationary grazer's best wi
 comfortably *while the patch lasts*. Its trailing window is exactly 0.000 on every layout — by
 the end it is taking nothing at all — and it starves at ~10,400 ticks having eaten 0.98 m from
 one cell. So on `fast-leaf` a single cell funds a body for a few thousand ticks and then
-stops. Relocation is necessary; the mobile script shows it is also sufficient.
+stops. Relocation is necessary; the mobile script shows it is sufficient on eleven of the
+twelve layouts (it dies on `h2` and ends thin on `h6`).
 
-**The combined answer.** The body's budget is not binding, relocation is required and
-sufficient, and the trained controller relocates energetically while failing to eat. Branches
+**The combined answer.** The body's budget is not binding on eleven of twelve layouts,
+relocation is required and there sufficient, and the trained controller relocates
+energetically while failing to eat. Branches
 2 and 3 are both true and they are not in tension: the task is "walk to food and crop it", the
 control solves it, and generation 9 solves only the walking half.
 
