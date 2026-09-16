@@ -311,6 +311,15 @@ pub struct Design {
     /// this world's deep pools carry no food, so the floor sits where a non-swimmer starts
     /// paying a wading penalty rather than where an algae mat would be lit.
     pub wet_min: f64,
+    /// The pursuit stopping rule every world of this design runs
+    /// (`cubarium_core::hunter::PursuitStop`). A transient on the world, so it does not enter
+    /// any configuration hash. The shipped rule is the reach envelope; a factorial row retained
+    /// before 2026-09-16 was produced under `ForwardHalfSpace` and needs it named to reproduce.
+    ///
+    /// The factorial founds no apex, so today it reaches the hunt-intent pass of nobody; it is
+    /// part of the design so that a row states the world it ran in rather than the world its
+    /// reader assumes.
+    pub pursuit_stop: cubarium_core::hunter::PursuitStop,
 }
 
 impl Design {
@@ -432,8 +441,13 @@ pub fn ecology_config(seed: u64) -> Result<WorldConfig, String> {
 /// world is created dry and rain has to arrive before the basins exist. The stocks are
 /// averaged over the same window rather than read at tick 0, because what matters is the food
 /// standing in the cell in the regime the clones will live in.
-pub fn warm_up(config: &WorldConfig, ticks: u64) -> Result<Landscape, String> {
+pub fn warm_up(
+    config: &WorldConfig,
+    ticks: u64,
+    pursuit_stop: cubarium_core::hunter::PursuitStop,
+) -> Result<Landscape, String> {
     let mut world = World::new(config.clone())?;
+    world.set_pursuit_stop(pursuit_stop);
     let mut depth = vec![0.0; CELL_COUNT];
     let mut foliage = vec![0.0; CELL_COUNT];
     let mut litter = vec![0.0; CELL_COUNT];
@@ -769,10 +783,13 @@ fn run_inner(arm: Arm, seed: u64, design: Design, ledger: bool) -> Result<ArmRun
     let e_r = config.organism.reserve_energy_density;
     let algae_band = 0.5 * config.water.algae_depth;
 
-    let land = warm_up(&config, design.warm_up_ticks)?;
+    let land = warm_up(&config, design.warm_up_ticks, design.pursuit_stop)?;
     let placements = choose_cells(&land, design.wet_min)?;
 
     let mut world = World::new(config.clone())?;
+    // The pursuit stopping rule, before the first tick and on the same world the clones live
+    // in, so the warm-up and the measured horizon are one contract.
+    world.set_pursuit_stop(design.pursuit_stop);
     let roster = Roster::of(&world)?;
     let legacy_founders = world.population();
     let specs = plan(arm, &roster, &placements);
@@ -1138,14 +1155,19 @@ pub fn command(
     println!("ecology {ECOLOGY}");
     println!("seeds {seeds:?}  arms {:?}", arms.iter().map(|a| a.label()).collect::<Vec<_>>());
     println!(
-        "design ticks {} warm-up {} probe/{} drain/{} wet_min {}",
-        design.ticks, design.warm_up_ticks, design.probe_every, design.drain_every, design.wet_min
+        "design ticks {} warm-up {} probe/{} drain/{} wet_min {} pursuit-stop {}",
+        design.ticks,
+        design.warm_up_ticks,
+        design.probe_every,
+        design.drain_every,
+        design.wet_min,
+        design.pursuit_stop.as_str()
     );
 
     if cells_only {
         for seed in &seeds {
             let config = ecology_config(*seed)?;
-            let land = warm_up(&config, design.warm_up_ticks)?;
+            let land = warm_up(&config, design.warm_up_ticks, design.pursuit_stop)?;
             println!("\nseed {seed}");
             println!("| depth band (d) | cells | of those, carrying foliage |");
             println!("| --- | --- | --- |");

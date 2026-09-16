@@ -124,6 +124,14 @@ impl MeanByController {
     }
 }
 
+/// The pursuit stopping rule a report written before 2026-09-16 implies: the forward
+/// half-space, which was the only rule this workspace had. Named rather than taken from
+/// `PursuitStop::default()` so that adopting a new shipped rule cannot relabel a retained
+/// report (`design/7_Research/ecology-v1-predicate-adoption-2026-09-16.md`).
+fn half_space_name() -> String {
+    cubarium_core::hunter::PursuitStop::ForwardHalfSpace.as_str().to_string()
+}
+
 /// Everything one population comparison ran under.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PopulationPlan {
@@ -138,6 +146,21 @@ pub struct PopulationPlan {
     pub horizon_ticks: u64,
     pub sample_every: u64,
     pub apex_introduce_tick: u64,
+    /// The pursuit stopping rule every world of this comparison ran
+    /// (`cubarium_core::hunter::PursuitStop`), by name.
+    ///
+    /// **This report depends on it.** Every arm above zero introduces an apex cohort at
+    /// `apex_introduce_tick`, so the rule the hunt-intent pass evaluates is a variable of the
+    /// experiment, not decoration — which is why it is recorded here, once, for the whole
+    /// report: one report, one rule.
+    ///
+    /// Absent on every report written before this field existed, and what that absence means is
+    /// **`forward_half_space`** — the rule this workspace shipped until 2026-09-16, which is
+    /// what those runs in fact evaluated. Deliberately not `PursuitStop::default()`, which is
+    /// the envelope now: reading a retained report under today's default would relabel a
+    /// comparison it never ran.
+    #[serde(default = "half_space_name")]
+    pub pursuit_stop: String,
     pub seeds: Vec<u64>,
     pub arms: Vec<u32>,
     pub mixes: Vec<String>,
@@ -583,10 +606,14 @@ fn trial(
     horizon: u64,
     sample_every: u64,
     introduce_tick: u64,
+    pursuit_stop: cubarium_core::hunter::PursuitStop,
 ) -> PopulationRow {
     let start = Instant::now();
     let done = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        run_trial(ecology, policy, seed, arm, mix, copies, horizon, sample_every, introduce_tick, start)
+        run_trial(
+            ecology, policy, seed, arm, mix, copies, horizon, sample_every, introduce_tick,
+            pursuit_stop, start,
+        )
     }));
     match done {
         Ok(row) => row,
@@ -677,6 +704,7 @@ fn run_trial(
     horizon: u64,
     sample_every: u64,
     introduce_tick: u64,
+    pursuit_stop: cubarium_core::hunter::PursuitStop,
     start: Instant,
 ) -> PopulationRow {
     // The calibrated ecology at this seed. Nothing else about it moves: the 24 founders of
@@ -700,6 +728,10 @@ fn run_trial(
             return refused(seed, arm, mix, "invalid", format!("world creation refused: {e}"), start);
         }
     };
+    // The pursuit stopping rule, before the first tick. A transient on the world, so the
+    // config and its hash are untouched; the shipped rule is the reach envelope and naming it
+    // changes nothing. It reaches the apex arms of this comparison and nothing else.
+    world.set_pursuit_stop(pursuit_stop);
     let founders_at_tick0 = world.population();
     let material_before = world.state.external_material_in;
 
@@ -930,6 +962,7 @@ pub fn run_stage(
     horizon: u64,
     sample_every: u64,
     introduce_tick: u64,
+    pursuit_stop: cubarium_core::hunter::PursuitStop,
     workers: usize,
     wall_seconds: u64,
     out: &Path,
@@ -970,6 +1003,7 @@ pub fn run_stage(
         horizon_ticks: horizon,
         sample_every,
         apex_introduce_tick: introduce_tick,
+        pursuit_stop: pursuit_stop.as_str().to_string(),
         seeds: seeds.to_vec(),
         arms: arms.to_vec(),
         mixes: vec!["neural".into(), "legacy".into()],
@@ -1010,6 +1044,7 @@ pub fn run_stage(
                         horizon,
                         sample_every,
                         introduce_tick,
+                        pursuit_stop,
                     );
                     results.lock().expect("population results mutex").push((i, row));
                 }
@@ -1239,6 +1274,7 @@ pub fn print_report(report: &PopulationReport) {
 mod tests {
     use super::*;
     use crate::es::tensor;
+    use cubarium_core::hunter::PursuitStop;
 
     /// The two arms must differ in **exactly one thing**: which controller drives the imported
     /// copies. Same seed, same founders, same bodies, same imported material — so a difference
@@ -1247,8 +1283,8 @@ mod tests {
     fn the_two_arms_are_matched_in_everything_but_the_controller() {
         let eco = Ecology::defaults();
         let policy = tensor::policy(&tensor::initial_center(7)).expect("a policy");
-        let neural = run_trial(&eco, &policy, 1001, 0, Mix::Neural, 4, 400, 200, 0, Instant::now());
-        let legacy = run_trial(&eco, &policy, 1001, 0, Mix::Legacy, 4, 400, 200, 0, Instant::now());
+        let neural = run_trial(&eco, &policy, 1001, 0, Mix::Neural, 4, 400, 200, 0, Default::default(), Instant::now());
+        let legacy = run_trial(&eco, &policy, 1001, 0, Mix::Legacy, 4, 400, 200, 0, Default::default(), Instant::now());
 
         assert_eq!(neural.status, "completed", "{:?}", neural.reason);
         assert_eq!(legacy.status, "completed", "{:?}", legacy.reason);
@@ -1271,8 +1307,8 @@ mod tests {
     fn a_bodys_controller_is_read_from_the_world_not_from_how_it_was_founded() {
         let eco = Ecology::defaults();
         let policy = tensor::policy(&tensor::initial_center(7)).expect("a policy");
-        let neural = run_trial(&eco, &policy, 1001, 0, Mix::Neural, 4, 200, 100, 0, Instant::now());
-        let legacy = run_trial(&eco, &policy, 1001, 0, Mix::Legacy, 4, 200, 100, 0, Instant::now());
+        let neural = run_trial(&eco, &policy, 1001, 0, Mix::Neural, 4, 200, 100, 0, Default::default(), Instant::now());
+        let legacy = run_trial(&eco, &policy, 1001, 0, Mix::Legacy, 4, 200, 100, 0, Default::default(), Instant::now());
 
         assert_eq!(neural.copies_neural_at_tick0, 4, "the four copies are the neural bodies");
         assert_eq!(neural.founders_neural_at_tick0, 0, "and the founders are not");
@@ -1282,13 +1318,44 @@ mod tests {
         assert_eq!(legacy.births_of_neural_parents, 0);
     }
 
+    /// **The pursuit stopping rule is applied, not merely recorded.** An apex arm under the
+    /// rule before 2026-09-16 is a different world from the same arm under the shipped rule —
+    /// which is exactly why the plan has to record which one it ran — and an arm handed the
+    /// shipped rule is the arm that was handed nothing.
+    #[test]
+    fn an_apex_arm_runs_the_pursuit_rule_it_was_handed() {
+        const TICKS: u64 = 24_000;
+        let eco = Ecology::defaults();
+        let policy = tensor::policy(&tensor::initial_center(7)).expect("a policy");
+        let arm = |stop| {
+            run_trial(&eco, &policy, 1002, 2, Mix::Legacy, 2, TICKS, 600, 500, stop, Instant::now())
+        };
+        let shipped = arm(PursuitStop::ReachEnvelope);
+        let unnamed = arm(PursuitStop::default());
+        let before = arm(PursuitStop::ForwardHalfSpace);
+
+        for row in [&shipped, &unnamed, &before] {
+            assert_eq!(row.status, "completed", "{:?}", row.reason);
+            assert_eq!(row.apex_introduced, 2, "the arm has an apex cohort to hunt with");
+        }
+        assert_eq!(
+            shipped.population_series, unnamed.population_series,
+            "naming the shipped rule is what an arm that names nothing already runs"
+        );
+        assert_ne!(
+            shipped.population_series, before.population_series,
+            "an arm handed the rule before 2026-09-16 must run it: if the argument were only \
+             recorded and never set on the world, these two worlds would be identical"
+        );
+    }
+
     /// The same `(seed, arm, mix)` reproduces: the comparison is a measurement, not a draw.
     #[test]
     fn a_trial_reproduces_from_its_seed() {
         let eco = Ecology::defaults();
         let policy = tensor::policy(&tensor::initial_center(7)).expect("a policy");
-        let a = run_trial(&eco, &policy, 1002, 1, Mix::Neural, 2, 400, 200, 100, Instant::now());
-        let b = run_trial(&eco, &policy, 1002, 1, Mix::Neural, 2, 400, 200, 100, Instant::now());
+        let a = run_trial(&eco, &policy, 1002, 1, Mix::Neural, 2, 400, 200, 100, Default::default(), Instant::now());
+        let b = run_trial(&eco, &policy, 1002, 1, Mix::Neural, 2, 400, 200, 100, Default::default(), Instant::now());
         assert_eq!(a.population_series, b.population_series);
         assert_eq!(a.neural_series, b.neural_series);
         assert_eq!(a.births, b.births);

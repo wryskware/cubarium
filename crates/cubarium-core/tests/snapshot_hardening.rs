@@ -45,9 +45,15 @@ fn stepped_world(ticks: u64) -> World {
 /// than synthesising wood, a reserve or a remains pool for a world that never had them. The
 /// migration ladder that ran from version 8 to version 15 is gone; the frozen mirror shapes
 /// stay in the tree only for the refusal tests that name their versions.
+///
+/// **Version 17 is the same rule applied to a change of semantics.** The payload did not move,
+/// but the shipped pursuit stopping rule did (2026-09-16), and a world's bytes do not carry it
+/// — so a schema-16 world is refused by number like every predecessor rather than resumed
+/// under a predicate it never ran
+/// (`crates/cubarium-core/tests/pursuit_predicate_adoption.rs`).
 #[test]
-fn the_schema_version_is_sixteen_and_every_predecessor_is_refused() {
-    assert_eq!(SCHEMA_VERSION, 16);
+fn the_schema_version_is_current_and_every_predecessor_is_refused() {
+    assert_eq!(SCHEMA_VERSION, 17);
     assert_eq!(cubarium_core::SCHEMA_V14, 14);
     assert_eq!(cubarium_core::SCHEMA_V13, 13);
     assert_eq!(cubarium_core::SCHEMA_V12, 12);

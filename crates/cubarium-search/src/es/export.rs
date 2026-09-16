@@ -40,6 +40,17 @@ pub struct PolicyFile {
     /// *not* "unknown". There was exactly one motor contract in this workspace until
     /// workstream T, so a file with no motor reads as `sweep`, which is what it in fact ran.
     /// [`PolicyFile::check_motor`] refuses a mismatch by name.
+    ///
+    /// **There is deliberately no sibling field for the pursuit stopping rule**
+    /// (`cubarium_core::hunter::PursuitStop`), and none should be added while the fixtures stay
+    /// as they are. Every training and held-out layout clears `founders` and places exactly one
+    /// grazer (`super::fixture::Layout::config`, `Layout::place`), so no episode world holds a
+    /// hunter, the hunt-intent pass the rule lives in is never reached, and **a trained policy
+    /// is predicate-independent**: the same weights score identically under either rule. A
+    /// field here would move every protocol hash and every policy's contract for something no
+    /// episode can observe, so `es-evaluate` does not offer the switch either
+    /// (`design/7_Research/ecology-v1-predicate-adoption-2026-09-16.md`). A layout that ever
+    /// *does* found a hunter changes that argument and not before.
     #[serde(default)]
     pub motor: Option<String>,
     pub generation: u64,

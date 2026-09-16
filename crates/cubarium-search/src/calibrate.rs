@@ -374,6 +374,17 @@ pub struct StagePlan {
     /// reproduces the retained rows bit for bit.
     #[serde(default = "sweep_name")]
     pub motor: String,
+    /// The pursuit stopping rule every run of this stage used
+    /// (`cubarium_core::hunter::PursuitStop`), by name. Absent on every stage written before
+    /// this field existed, and what that absence means is **`forward_half_space`** — the rule
+    /// this workspace shipped until 2026-09-16, which is what those runs in fact evaluated.
+    /// It is deliberately not `PursuitStop::default()`, which is the *envelope* now: reading a
+    /// retained plan under today's default would relabel it as a stage it never ran.
+    ///
+    /// A transient on the world, so it does not enter [`config_hash`]; a `forward_half_space`
+    /// stage reproduces the retained rows bit for bit, which is the check this workstream ran.
+    #[serde(default = "half_space_name")]
+    pub pursuit_stop: String,
     pub build_id: String,
     pub horizon_ticks: u64,
     pub sample_every: u64,
@@ -692,6 +703,7 @@ pub fn run_stage(
         plant_record: options.plant_record,
         no_animals: options.no_animals,
         motor: options.motor.name().to_string(),
+        pursuit_stop: options.pursuit_stop.as_str().to_string(),
         build_id: BUILD_ID.to_string(),
         horizon_ticks,
         sample_every,
@@ -849,6 +861,13 @@ pub fn run_stage(
 /// The motor contract a stage written before workstream T implies: there was one.
 fn sweep_name() -> String {
     cubarium_core::MotorModel::Sweep.name().to_string()
+}
+
+/// The pursuit stopping rule a stage written before 2026-09-16 implies: the forward
+/// half-space, which was the only rule the workspace had. Named rather than taken from
+/// `PursuitStop::default()` so that adopting a new shipped rule cannot relabel a retained plan.
+fn half_space_name() -> String {
+    cubarium_core::hunter::PursuitStop::ForwardHalfSpace.as_str().to_string()
 }
 
 pub fn config_hash(config: &WorldConfig) -> u64 {

@@ -1,5 +1,6 @@
-//! The **pursuit stopping predicate**, paired: the shipped forward half-space against the
-//! reach envelope its own comment names.
+//! The **pursuit stopping predicate**, paired: the forward half-space that shipped until
+//! 2026-09-16 against the reach envelope its own comment names, which is the shipped rule now
+//! (`crates/cubarium-core/tests/pursuit_predicate_adoption.rs`).
 //!
 //! The strike record (`design/7_Research/ecology-v1-apex-reach-2026-09-16.md`) measured the
 //! rule in `crate::world::step`'s hunt-intent pass — `body.x < capture_offset_body.x ·
@@ -12,9 +13,7 @@
 //!
 //! - the two rules **are** the two written predicates, and they differ exactly where the note
 //!   says they do — for a prey short of the claws and out of reach;
-//! - the switch is **off by default**: a two-apex world hashes identically, tick for tick, over
-//!   9,000 ticks whether the default is left alone or named;
-//! - naming the variant is **not vacuous**: the same world diverges, and every record it makes
+//! - naming either rule is **not vacuous**: the same world diverges, and every record it makes
 //!   carries the rule it was made under;
 //! - a hand-built prey **ahead but outside reach** no longer satisfies the hold under the
 //!   variant, and the burst is delivered — measured as the hunter's own realised speed over its
@@ -220,9 +219,10 @@ fn the_two_rules_are_the_two_written_predicates_and_differ_where_the_note_says()
         "`effector_distance <= tolerance` is not"
     );
 
-    // The default is the shipped rule, everywhere it is read from.
-    assert_eq!(PursuitStop::default(), PursuitStop::ForwardHalfSpace);
-    assert_eq!(empty_world().pursuit_stop(), PursuitStop::ForwardHalfSpace);
+    // The shipped rule — the default, everywhere it is read from — is the envelope from
+    // 2026-09-16. `pursuit_predicate_adoption.rs` is where the adoption itself is fixed.
+    assert_eq!(PursuitStop::default(), PursuitStop::ReachEnvelope);
+    assert_eq!(empty_world().pursuit_stop(), PursuitStop::ReachEnvelope);
 }
 
 // ---------------------------------------------------------------- default byte-identity
@@ -249,37 +249,13 @@ fn two_apex_world(stop: Option<PursuitStop>) -> World {
     world
 }
 
-/// Nine thousand ticks of a two-apex world, comparing the state hash at every 500-tick boundary
-/// of a world that never heard of the switch against one that names the default. The run is
-/// only evidence if the predicate was actually reached, so the paid attempts are counted.
-#[test]
-fn naming_the_default_rule_is_byte_identical_over_nine_thousand_ticks_of_a_two_apex_world() {
-    let mut untouched = two_apex_world(None);
-    let mut named = two_apex_world(Some(PursuitStop::ForwardHalfSpace));
-    assert_eq!(untouched.pursuit_stop(), PursuitStop::ForwardHalfSpace);
-    assert_eq!(named.pursuit_stop(), PursuitStop::ForwardHalfSpace);
-    let mut attempts = 0usize;
-    for tick in 1..=9_000u64 {
-        untouched.step();
-        named.step();
-        untouched.drain_events();
-        named.drain_events();
-        untouched.drain_hunter_events();
-        named.drain_hunter_events();
-        attempts += untouched.drain_strike_records().0.len();
-        named.drain_strike_records();
-        if tick.is_multiple_of(500) {
-            assert_eq!(
-                state_hash(&untouched.state),
-                state_hash(&named.state),
-                "the state hash diverged at tick {tick} from naming the default rule"
-            );
-        }
-    }
-    assert!(attempts > 0, "no paid attempt was made, so the run is not evidence");
-}
+// The "naming the default changes nothing over 9,000 ticks" run this file used to carry now
+// lives in `pursuit_predicate_adoption.rs`, where it is checked against hashes pinned by the
+// commit before the default was flipped — a strictly stronger claim on the same fixture, and
+// one that has to name the rule the retained rows ran under. Duplicating a 9,000-tick two-apex
+// run here would buy nothing.
 
-/// And the variant is not vacuous: the same world, the same seed, the same introductions, run
+/// The two rules are not the same world: the same seed, the same introductions, run
 /// under the envelope, is a different world — and says so on every record it makes.
 #[test]
 fn the_variant_moves_the_same_two_apex_world_and_every_record_names_the_rule_it_ran_under() {
@@ -442,3 +418,4 @@ fn a_frame_can_be_read_under_either_rule_and_the_record_reads_under_its_own() {
     );
     assert_eq!(record.held_at_intent(), record.intent.unwrap().pursuit_holds(record.stop));
 }
+

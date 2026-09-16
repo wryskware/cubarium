@@ -224,6 +224,8 @@ enum Command {
         /// into every exported policy, which is refused by name under the other contract.
         #[arg(long, default_value = "sweep")]
         motor: String,
+        // No `--pursuit-stop`: an evaluation layout founds no hunter, so the rule is
+        // unreachable in an episode (`es::fixture::Layout`).
         #[arg(long)]
         out: PathBuf,
     },
@@ -252,6 +254,16 @@ enum Command {
         /// The tick every arm introduces its apex cohort on.
         #[arg(long, default_value_t = 6_000)]
         introduce_tick: u64,
+        /// The pursuit stopping rule the run's world uses: `reach-envelope` is the shipped
+        /// rule — `ContactMeasure::in_contact()`, the reach envelope the predicate's own
+        /// comment has always named, adopted on 2026-09-16 — and `half-space` is the rule
+        /// before it, `body.x < capture_offset_body.x + tolerance`, which held a member at its
+        /// resting effort and suppressed the strike burst it had already paid for. A transient
+        /// on the world: it does not enter the config hash, and naming `half-space` is how a
+        /// row retained before the adoption is reproduced bit for bit. This changes what the
+        /// world does, deliberately.
+        #[arg(long, default_value = "reach-envelope")]
+        pursuit_stop: String,
         #[arg(long, default_value_t = 8)]
         workers: usize,
         /// Hard wall cap. Trials not started by then are recorded as skipped, never extended.
@@ -312,12 +324,13 @@ enum Command {
         /// strike geometry.
         #[arg(long, default_value_t = false)]
         no_ledger: bool,
-        /// The pursuit's stopping predicate. `half-space` is the shipped rule, `body.x <
-        /// capture_offset_body.x + tolerance`, which holds a member at its resting effort and
-        /// suppresses the burst it has paid for; `reach-envelope` is the paired variant, the
-        /// `in_contact()` the predicate's own comment names. The default runs the world exactly
-        /// as it ships. This changes what the world does, deliberately.
-        #[arg(long, default_value = "half-space")]
+        /// The pursuit's stopping predicate. `reach-envelope` is the **shipped rule** since
+        /// 2026-09-16 — the `in_contact()` the predicate's own comment names — and is the
+        /// default, so a bare audit runs the world exactly as it ships. `half-space` is the
+        /// rule before that date, `body.x < capture_offset_body.x + tolerance`, which held a
+        /// member at its resting effort and suppressed the burst it had paid for; name it to
+        /// reproduce a row retained under it. This changes what the world does, deliberately.
+        #[arg(long, default_value = "reach-envelope")]
         pursuit_stop: String,
         /// The motor contract. `sweep` is the shipped outer-point model, where an apex member's
         /// turn radius is its 14.8 px grasp; `inertial` is workstream T's paired disc model,
@@ -395,6 +408,16 @@ enum Command {
         /// deliberately.
         #[arg(long, default_value = "sweep")]
         motor: String,
+        /// The pursuit stopping rule the run's world uses: `reach-envelope` is the shipped
+        /// rule — `ContactMeasure::in_contact()`, the reach envelope the predicate's own
+        /// comment has always named, adopted on 2026-09-16 — and `half-space` is the rule
+        /// before it, `body.x < capture_offset_body.x + tolerance`, which held a member at its
+        /// resting effort and suppressed the strike burst it had already paid for. A transient
+        /// on the world: it does not enter the config hash, and naming `half-space` is how a
+        /// row retained before the adoption is reproduced bit for bit. This changes what the
+        /// world does, deliberately.
+        #[arg(long, default_value = "reach-envelope")]
+        pursuit_stop: String,
         #[arg(long, default_value_t = 125_000)]
         ticks: u64,
         #[arg(long, default_value_t = 500)]
@@ -430,6 +453,17 @@ enum Command {
         /// Comma-separated plant-only ages, in ticks. `0` is the status quo.
         #[arg(long, default_value = "0,48000,96000,180000")]
         ages: String,
+        /// The pursuit stopping rule the run's world uses: `reach-envelope` is the shipped
+        /// rule — `ContactMeasure::in_contact()`, the reach envelope the predicate's own
+        /// comment has always named, adopted on 2026-09-16 — and `half-space` is the rule
+        /// before it, `body.x < capture_offset_body.x + tolerance`, which held a member at its
+        /// resting effort and suppressed the strike burst it had already paid for. A transient
+        /// on the world: it does not enter the config hash, and naming `half-space` is how a
+        /// row retained before the adoption is reproduced bit for bit. This changes what the
+        /// world does, deliberately.
+        #[arg(long, default_value = "reach-envelope")]
+        pursuit_stop: String,
+
         /// The horizon each comparison arm runs after founding.
         #[arg(long, default_value_t = 180_000)]
         ticks: u64,
@@ -483,6 +517,17 @@ enum Command {
         /// Ticks between probes of where each clone is standing (20 = one simulated second).
         #[arg(long, default_value_t = 20)]
         probe_every: u64,
+        /// The pursuit stopping rule the run's world uses: `reach-envelope` is the shipped
+        /// rule — `ContactMeasure::in_contact()`, the reach envelope the predicate's own
+        /// comment has always named, adopted on 2026-09-16 — and `half-space` is the rule
+        /// before it, `body.x < capture_offset_body.x + tolerance`, which held a member at its
+        /// resting effort and suppressed the strike burst it had already paid for. A transient
+        /// on the world: it does not enter the config hash, and naming `half-space` is how a
+        /// row retained before the adoption is reproduced bit for bit. This changes what the
+        /// world does, deliberately.
+        #[arg(long, default_value = "reach-envelope")]
+        pursuit_stop: String,
+
         /// Ticks between drains of the core's 4,096-record closed-ledger buffer.
         #[arg(long, default_value_t = 250)]
         drain_every: u64,
@@ -569,6 +614,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             plant_record,
             no_animals,
             motor,
+            pursuit_stop,
             ticks,
             sample_every,
             introduce_tick,
@@ -577,6 +623,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             out,
         } => {
             let motor = cubarium_core::MotorModel::parse(&motor)?;
+            let pursuit_stop = cubarium_search::apex_audit::parse_pursuit_stop(&pursuit_stop)?;
             let names: Vec<String> = if candidates == "all" {
                 calibrate::CANDIDATES.iter().map(|c| c.name.to_string()).collect()
             } else {
@@ -607,6 +654,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     no_animals,
                     precondition: None,
                     motor,
+                    pursuit_stop,
                 },
                 ticks,
                 sample_every,
@@ -630,6 +678,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             seed_set,
             seeds,
             ages,
+            pursuit_stop,
             ticks,
             sample_every,
             workers,
@@ -648,6 +697,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(str::parse::<u64>)
                 .collect::<Result<_, _>>()?;
             let set = calibrate::SeedSet::parse(&seed_set)?;
+            // The `field` stage founds no animals at all, so the rule reaches nobody there; it
+            // is parsed for both stages so an unrecognised name is refused either way rather
+            // than accepted and ignored.
+            let pursuit_stop = cubarium_search::apex_audit::parse_pursuit_stop(&pursuit_stop)?;
             let dir = out.join(&stage);
             let report = match stage.as_str() {
                 "field" => precondition::run_field(&names, set, seeds, &ages, workers, wall_seconds, &dir)?,
@@ -658,6 +711,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &ages,
                     ticks,
                     sample_every,
+                    pursuit_stop,
                     workers,
                     wall_seconds,
                     &dir,
@@ -686,6 +740,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ticks,
             warm_up_ticks,
             probe_every,
+            pursuit_stop,
             drain_every,
             wet_min,
             workers,
@@ -695,7 +750,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &arms,
             &seed_set,
             seeds,
-            factorial::Design { ticks, warm_up_ticks, probe_every, drain_every, wet_min },
+            factorial::Design {
+                ticks,
+                warm_up_ticks,
+                probe_every,
+                drain_every,
+                wet_min,
+                pursuit_stop: cubarium_search::apex_audit::parse_pursuit_stop(&pursuit_stop)?,
+            },
             workers,
             cells_only,
             &out,
@@ -804,11 +866,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ticks,
             sample_every,
             introduce_tick,
+            pursuit_stop,
             workers,
             wall_seconds,
             out,
         } => {
             let ecology = es::Ecology::load(&config)?;
+            let pursuit_stop = cubarium_search::apex_audit::parse_pursuit_stop(&pursuit_stop)?;
             let arms: Vec<u32> =
                 arms.split(',').map(|s| s.trim().parse::<u32>()).collect::<Result<_, _>>()?;
             let seeds: Vec<u64> = TRAINING_SEEDS
@@ -824,6 +888,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ticks,
                 sample_every,
                 introduce_tick,
+                pursuit_stop,
                 workers,
                 wall_seconds,
                 &out,

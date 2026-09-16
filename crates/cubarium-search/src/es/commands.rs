@@ -872,6 +872,10 @@ pub fn evaluate(
     .into_iter()
     .map(|l| l.with_motor(motor))
     .collect();
+    // There is deliberately no `--pursuit-stop` here, and no pursuit rule on the policy file:
+    // no layout founds a hunter, so the rule is unreachable in an episode and a switch would
+    // be a control that names a difference it cannot make
+    // (`design/7_Research/ecology-v1-predicate-adoption-2026-09-16.md`).
     let cancel = AtomicBool::new(false);
     let started = Instant::now();
     let limits = Limits::until(&cancel, started + Duration::from_secs(wall_seconds));
