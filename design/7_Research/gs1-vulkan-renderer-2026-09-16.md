@@ -17,14 +17,25 @@ untouched.
 
 ## 1. The headline
 
-**640×360 at S = 2 runs at 60 fps on the board with no visual concession and
-0.14 CPU core-seconds per second.** `presenter-budget-2026-09-16.md` §5 found
-that configuration unreachable on the CPU — every lever stacked, including the
-unmeasured W3, still missed by 1.4–1.6× unless the plant and tall sway were
-quantised to the tick rate, which was "Wrysk's call, not FW-3's". The GPU does
-not raise that question: the sway runs at 60 Hz, the GPU spends 3.68 ms of a
-16.6 ms frame, and the CPU spends 142 ms of its wall second instead of the
-767 ms §5's best CPU stack needed.
+**640×360 at S = 2 runs at 60.3 fps on the panel with no visual concession, and
+the renderer's own claim on the host's wall second is 142 ms.**
+`presenter-budget-2026-09-16.md` §5 found that configuration unreachable on the
+CPU — every lever stacked, including the unmeasured W3, still missed by 1.4–1.6×
+unless the plant and tall sway were quantised to the tick rate, which was
+"Wrysk's call, not FW-3's". The GPU does not raise that question: the sway runs
+at 60 Hz, the GPU spends 3.68 ms of a 16.6 ms frame, and §5's best CPU stack for
+the same rung needed ~756 ms of the wall second (its 767 ms load less the tick's
+10.7) **with** the sway concession.
+
+Two honest qualifications on that 142 ms. It is the renderer alone — the upload,
+the instance buffer, the command buffer and the wait — measured with one scene
+presented repeatedly. Building a scene on top of it costs another ~350 ms in
+this package, but that is Stage A's synthetic producer walking 3,600 cells on one
+thread, not the `RenderView` adapter Stage B will write, so adding the two would
+be measuring the wrong thing. And the GPU time is not free to the *system* even
+though it is free to the host loop: the Adreno is otherwise unused, which is the
+whole point of the stack, but a future shader effect spends the same 13 ms of
+headroom.
 
 ## 2. The `Scene` type — the interface Stage B adapts to
 
@@ -141,8 +152,9 @@ not have, which the brief allowed for.
    draw_with_fruit` draws the ground-cover lattice **between** the soil and the
    water (lines 1069–1101 and 1103–08), so folding them would put the lattice on
    top of the pools. The extra pass covers the **world raster** — 57,600 pixels at
-   S = 1 — and never runs at panel resolution. Measured cost below: the whole
-   background half is under a millisecond.
+   S = 1 — and never runs at panel resolution, where only `present.frag` does. For
+   scale: the whole world raster, both full-screen passes and every instanced
+   quad, costs 0.88 ms at S = 1 against the present pass's own 0.74.
 
 2. *Sampling is nearest with the bend rounded to a whole source texel, where the
    CPU samples bilinearly.* At S = 1 with an integer anchor and an axis-aligned
@@ -167,7 +179,10 @@ the latter wholesale, so one number for both would mislead.
 |---|---|---|---|---|---|
 | 320×180 S = 1, ×6, live scene | 1.65 ms | 3.85 | 6.64 | **60.2** | 0.505 |
 | 320×180 S = 1, ×6, scene held | 1.62 ms | 3.75 | 12.83 | **60.3** | **0.157** |
+| 640×360 S = 2, ×3, live scene | 3.77 ms | 5.70 | 4.86 | **59.9** | 0.481 |
 | 640×360 S = 2, ×3, scene held | 3.68 ms | 5.66 | 10.96 | **60.3** | **0.142** |
+| 960×540 S = 3, ×2, scene held | 6.84 ms | 9.00 | 7.59 | **60.3** | **0.150** |
+| 1920×1080 S = 6, ×1, scene held | 22.96 ms | 25.20 | 7.92 | **30.2** | 0.074 |
 
 The world raster alone, headless, no present pass and no panel — 900 frames at
 every rung of `flat-world-plan` §6's ladder:
@@ -179,40 +194,61 @@ every rung of `flat-world-plan` §6's ladder:
 | 960×540 | 3 | ×2 | **6.02 ms** | 6.03 |
 | 1920×1080 | 6 | ×1 | **12.60 ms** | 15.38 (max 21.96) |
 
-The present pass, by difference at the two rungs measured both ways:
-`1.62 − 0.88 = 0.74 ms` and `3.68 − 2.90 = 0.78 ms`. It costs the same either
-way, as it must — it is 2.07 Mpixel of nearest `texelFetch` whatever the source
-is — so **+0.8 ms** is a safe figure to add to any row above.
+The present pass, by difference between the two tables:
 
-The scene passes go 0.88 → 2.90 ms for 4× the raster area, and 2.90 → 6.02 for
-2.25× more: sublinear, because the instance count does not change with `S` and
-roughly a third of the work is per-instance rather than per-pixel.
+| rung | scene passes | scene + present | present pass |
+|---|---|---|---|
+| 320×180 S = 1 | 0.88 | 1.62 | **0.74 ms** |
+| 640×360 S = 2 | 2.90 | 3.68 | **0.78 ms** |
+| 960×540 S = 3 | 6.02 | 6.84 | **0.82 ms** |
+| 1920×1080 S = 6 | 12.60 | 22.96 | **10.36 ms** |
+
+**The present pass is memory-bound, and that is what ends the ladder.** It writes
+the same 2.07 Mpixel at every rung, so its cost should be flat — and it is, at
+0.74–0.82 ms, right up to S = 3. At S = 6 it jumps thirteen-fold. The difference
+is what it *reads*: the world raster is 230 KB at S = 1 and 2.0 MB at S = 3,
+both of which the Adreno's caches absorb while a `k × k` block of output reads
+one texel; at S = 6 it is 8.3 MB read essentially once per output pixel. The
+scene passes themselves scale about as the plan predicts (0.88 → 2.90 → 6.02 for
+1×, 4×, 9× the area — sublinear, because the instance count does not change with
+`S` and a good third of the work is per-instance). It is the *upscale* that
+stops being free, and it stops being free exactly where the upscale stops being
+an upscale.
 
 Against the shared-loop budget `20 · tick_ms + fps · render_ms ≤ 1000` that
 `flat-world-plan` §6 and FW-P §5 are written against: the GPU path's claim on
-the host's wall second is **157 ms at S = 1 and 142 ms at S = 2**, against the
-520 ms (S = 1) and 767 ms (S = 2) the best CPU stacks needed — and the S = 2 CPU
-figure was the one that required quantising the sway to 20 Hz.
+the host's wall second is **157 ms at S = 1, 142 ms at S = 2 and 150 ms at
+S = 3** — flat, because what the host does per frame is write 4,000 instances and
+a command buffer whatever the raster is. The CPU stacks §5 priced needed 520 ms
+(S = 1) and 767 ms (S = 2), and the S = 2 figure was the one that required
+quantising the sway to 20 Hz.
 
-### How far it goes
+### How far the ladder goes — all four rungs, measured on the panel
 
-Adding the present pass's 0.8 ms to the table above and comparing with the
-16.6 ms a 60.37 Hz refresh allows:
-
-| rung | scene + present | share of a frame | 60 fps? |
+| rung | GPU per frame | share of a 16.6 ms refresh | sustained |
 |---|---|---|---|
-| 320×180 S = 1 | 1.62 ms (measured) | 10 % | yes, measured |
-| 640×360 S = 2 | 3.68 ms (measured) | 22 % | yes, measured |
-| 960×540 S = 3 | ~6.8 ms (derived) | 41 % | yes, on this evidence |
-| 1920×1080 S = 6 | ~13.4 ms p50, ~16.2 p95 (derived) | 81–98 % | **no** — the p95 is at the refresh and the max is over it |
+| 320×180 S = 1, ×6 | 1.62 ms | 10 % | **60.3 fps** |
+| 640×360 S = 2, ×3 | 3.68 ms | 22 % | **60.3 fps** |
+| **960×540 S = 3, ×2** | 6.84 ms | 41 % | **60.3 fps** |
+| 1920×1080 S = 6, ×1 | 22.96 ms | 138 % | 30.2 fps |
 
-`flat-world-plan` §6 gives the CPU `R ≤ 1.4 ms` at S = 3 with the presenter on
-all four A78s, which nothing in FW-P's stack comes near. **On the GPU, 960×540 at
-60 fps looks reachable and is the first thing to measure once the display is
-free**; the S = 3 and S = 6 rows above are the scene passes measured headless plus
-a present pass measured at two other rungs, not a panel run, and they are marked
-derived for that reason. S = 6 is where the renderer would have to stop waiting
-on its own fence before flipping — see §7.
+**960×540 at 60 fps works.** `flat-world-plan` §6 gives the CPU `R ≤ 1.4 ms` for
+that rung with the presenter split over all four A78s, which nothing in FW-P's
+stack comes near — §5's very best number, with every lever including the
+unmeasured W3 and the sway concession, is 3.16 ms for a *cube* frame, and the
+ring multiplies by `2.81 · S²` = 25.3. On the GPU it is 41 % of a frame and
+0.150 CPU core-seconds per second, and it is not a derivation: it ran for a
+minute on the panel at 60.3 fps.
+
+**1920×1080 at S = 6 is a 30 fps configuration, not a 60 fps one**, and the
+reason is the present pass rather than the world — see the table above. It is
+not obviously worth rescuing: at S = 6 the panel shows one world pixel per
+device pixel, which is the one rung where the pixel-art grid stops being visible
+at all, and §6 lists it for completeness rather than as a candidate. If it were
+wanted, the fix is not more GPU: it is to skip the present pass entirely by
+rendering the world raster *into* the scanout image at panel resolution, which
+`RingLayout { w: 1080, h: 1920, scale: 6 }` plus the quarter turn moved into the
+scene pass would do — a different renderer, not a tuning.
 
 ### The daemon's pacing
 
@@ -304,6 +340,16 @@ Screenshots (not in git; `/captures/` is ignored):
   cube's top face, which on a ring is one pixel row. The plan's §5 stratification
   decides this, not the renderer.
 
+**Corrections to make if this report is read alongside the session log.** Two
+"the display is busy" failures during the measurements were **mine, not a
+neighbour's**. The daemon decides its one-client rule at `accept`
+(`handoff/server.rs`, `if client.is_some()` on the newly accepted connection),
+not at `Attach`; the client held a second socket open purely to fill in a struct
+field before the real connect, and that placeholder *was* the attached client, so
+the real connection refused itself forty times and the log read exactly like
+contention with GS-2. Fixed, and the shim module now says so where someone would
+next be tempted to open a second socket.
+
 **For a viewing session.**
 
 * *The bend budgets are a cube constraint and should be re-measured.*
@@ -320,7 +366,8 @@ Screenshots (not in git; `/captures/` is ignored):
   the panel is mounted and nobody has looked at it yet.
 
 **Not attempted, and why.** The renderer holds one frame in flight: it waits on
-its fence before presenting. The spike observed that render and flip serialise
-to exactly one refresh and still hit 60 Hz, which both these configurations do
-with 10–13 ms of slack, so overlapping them buys nothing until `S` rises. At
-S = 6 it would be the first thing to do.
+its own fence before presenting. Every rung that reaches 60 fps does so with
+7–13 ms of slack in `Present..Presented`, so overlapping the render with the
+flip buys nothing at S = 1, 2 or 3. It would not rescue S = 6 either: there the
+GPU alone is 23 ms against a 16.6 ms refresh, and the cure named above is to
+delete the present pass rather than to hide it.
