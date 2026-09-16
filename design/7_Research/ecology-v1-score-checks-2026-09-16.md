@@ -110,9 +110,11 @@ water, the field reactions and the pair pass **before** it observes and decides
 tick `t` is one tick of plant growth older than the one the update at `t + 1` reads. Measured
 over **94,420** update ticks across all 24 episodes, the largest disagreement between the action
 reconstructed from the recorded pair and the action the world went on to hold is
-**1.84 × 10⁻⁵**, and it is below 10⁻⁵ on ten of the twelve layouts. Every effect below is
-between 60× and 160× larger than that, so the effects are real; they are also negligible, which
-is the point.
+**1.84 × 10⁻⁵**, and it is below 10⁻⁵ on ten of generation 9's twelve layouts. The two movement
+effects reported below are **59×** and **160×** that worst case, so they are real rather than
+sampling artefacts — and they are still negligible against the action's own variation, which is
+the point. The one effect that is *not* clear of the residual is the fruit channel's
+7 × 10⁻⁵, about 4× it; read that row as zero.
 
 ### The numbers
 
