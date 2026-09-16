@@ -1,3 +1,4 @@
+use cubarium_surface::{Scale, Topology};
 use serde::Serialize;
 
 use cubarium_surface::{ChartImage, MAX_LOCAL_RADIUS, SurfacePoint, Vec2, travel, unfold_with};
@@ -122,7 +123,7 @@ pub fn surface_reach(
     if max <= 0.0 {
         return None;
     }
-    unfold_with(&images[from.face.index()], from, to, max).map(|u| u.distance)
+    unfold_with(Topology::Cube, &images[from.face.index()], from, to, max).map(|u| u.distance)
 }
 
 /// The body basis `stamp_rig` uses: `+x` along the heading, `+y` its clockwise side.
@@ -230,7 +231,7 @@ pub fn measure_contact(
 ) -> Option<ContactMeasure> {
     let (forward, side) = body_basis(heading)?;
     let window = geometry.window(prey_extent);
-    let u = unfold_with(&images[root.face.index()], root, prey, window)?;
+    let u = unfold_with(Topology::Cube, &images[root.face.index()], root, prey, window)?;
     let delta = u.local - root.chart();
     let body = Vec2::new(forward.dot(delta), side.dot(delta));
     Some(ContactMeasure {
@@ -266,13 +267,13 @@ pub fn body_point(
     if reach + 1.0 >= MAX_LOCAL_RADIUS {
         return None;
     }
-    let swept = travel(root, chart_offset);
+    let swept = travel(Topology::Cube, root, chart_offset);
     if swept.reflections > 0 || swept.fallback || swept.ties > 0 {
         return None;
     }
     // The round trip: the root's own shortest image of that point must be the body coordinate
     // it was built from, or the renderer and the world disagree about where the claw is.
-    let u = unfold_with(&images[root.face.index()], root, swept.end, reach + 1.0)?;
+    let u = unfold_with(Topology::Cube, &images[root.face.index()], root, swept.end, reach + 1.0)?;
     let delta = u.local - root.chart();
     let back = Vec2::new(forward.dot(delta), side.dot(delta));
     if (back - offset_body).length() > GRASP_EPS {

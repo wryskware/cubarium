@@ -14,8 +14,9 @@
 //! Regenerate deliberately (and only with a reviewed reason) with
 //! `CUBARIUM_UPDATE_GOLDEN=1 cargo test -p cubarium-surface --test cube_by_value`.
 
+use cubarium_surface::{Scale, Topology};
 use cubarium_surface::{
-    CELL_COUNT, CellId, Edge, Face, FieldGraph, PixelImage, ScalarField, SurfacePoint, Travel,
+    CUBE_CELL_COUNT, CellId, Edge, Face, FieldGraph, PixelImage, ScalarField, SurfacePoint, Travel,
     Unfolded, Vec2, cell_of, chart_images, deposit, diffuse, travel, unfold, unfold_pixels,
 };
 
@@ -128,7 +129,7 @@ impl Rng {
 
     fn point(&mut self) -> SurfacePoint {
         let face = Face::ALL[(self.next_f64() * 5.0) as usize % 5];
-        SurfacePoint::new(face, self.next_f64() * 64.0, self.next_f64() * 64.0).canonicalize()
+        SurfacePoint::new(face, self.next_f64() * 64.0, self.next_f64() * 64.0).canonicalize(Topology::Cube)
     }
 
     fn disp(&mut self, reach: f64) -> Vec2 {
@@ -169,10 +170,10 @@ fn dump() -> String {
 
     // --- embed: every pixel centre on every chart, plus the named corners in full.
     for face in Face::ALL {
-        for y in 0..64u8 {
-            for x in 0..64u8 {
-                let p = SurfacePoint::pixel_center(face, x, y);
-                let e = p.embed();
+        for y in 0..64u16 {
+            for x in 0..64u16 {
+                let p = SurfacePoint::pixel_center(Topology::Cube, face, x, y);
+                let e = Topology::Cube.embed(Scale::ONE, &p);
                 d.bulk(&format!("{}({x},{y}) {} {} {}", face.index(), f(e[0]), f(e[1]), f(e[2])));
             }
         }
@@ -180,9 +181,9 @@ fn dump() -> String {
     for face in Face::ALL {
         for &(u, w) in &[(0.5f64, 0.5f64), (63.5, 0.5), (0.5, 63.5), (63.5, 63.5), (32.0, 32.0)] {
             let p = SurfacePoint::new(face, u, w);
-            let e = p.embed();
+            let e = Topology::Cube.embed(Scale::ONE, &p);
             d.row(&format!("embed {} -> {} {} {}", sp(&p), f(e[0]), f(e[1]), f(e[2])));
-            let t = p.embed_tangent(Vec2::new(1.0, -2.0));
+            let t = Topology::Cube.embed_tangent(Scale::ONE, &p, Vec2::new(1.0, -2.0));
             d.row(&format!("embed_tangent {} -> {} {} {}", sp(&p), f(t[0]), f(t[1]), f(t[2])));
         }
     }
@@ -193,7 +194,7 @@ fn dump() -> String {
     for i in 0..4000 {
         let a = rng.point();
         let b = rng.point();
-        let c = a.chord_sq(&b);
+        let c = Topology::Cube.chord_sq(&a, &b);
         if i < 8 {
             d.row(&format!("chord_sq {} {} -> {}", sp(&a), sp(&b), f(c)));
         } else {
@@ -205,13 +206,13 @@ fn dump() -> String {
     // --- travel: the named fixtures in full, then a broad swept set.
     for &(face, u, w, dx, dy) in NAMED_TRAVEL {
         let start = SurfacePoint::new(face, u, w);
-        let t = travel(start, Vec2::new(dx, dy));
+        let t = travel(Topology::Cube, start, Vec2::new(dx, dy));
         d.row(&format!("travel {} + {} -> {}", sp(&start), v(Vec2::new(dx, dy)), travel_row(&t)));
     }
     // Every connected half-edge at every pixel-centre parameter.
     for face in Face::ALL {
         for edge in Edge::ALL {
-            for k in 0..64u8 {
+            for k in 0..64u16 {
                 let s = f64::from(k) + 0.5;
                 let (start, disp) = match edge {
                     Edge::Top => (Vec2::new(s, 0.5), Vec2::new(0.0, -1.0)),
@@ -219,7 +220,7 @@ fn dump() -> String {
                     Edge::Bottom => (Vec2::new(s, 63.5), Vec2::new(0.0, 1.0)),
                     Edge::Left => (Vec2::new(0.5, s), Vec2::new(-1.0, 0.0)),
                 };
-                let t = travel(SurfacePoint::new(face, start.x, start.y), disp);
+                let t = travel(Topology::Cube, SurfacePoint::new(face, start.x, start.y), disp);
                 d.bulk(&travel_row(&t));
             }
         }
@@ -234,14 +235,14 @@ fn dump() -> String {
             // Vertex-directed: exactly at a chart corner.
             _ => Vec2::new(64.0 - start.u, -start.v),
         };
-        d.bulk(&travel_row(&travel(start, disp)));
+        d.bulk(&travel_row(&travel(Topology::Cube, start, disp)));
     }
     d.seal("travel");
 
     // --- chart images.
     for face in Face::ALL {
         let mut images = Vec::new();
-        chart_images(face, 2, &mut images);
+        chart_images(Topology::Cube, face, 2, &mut images);
         d.row(&format!("chart_images {} count {}", face.index(), images.len()));
         for img in &images {
             d.bulk(&format!(
@@ -263,11 +264,11 @@ fn dump() -> String {
     for i in 0..20000 {
         let a = rng.point();
         let b = if i % 2 == 0 {
-            travel(a, Vec2::from_screen_angle(rng.next_f64() * std::f64::consts::TAU) * (rng.next_f64() * 14.0)).end
+            travel(Topology::Cube, a, Vec2::from_screen_angle(rng.next_f64() * std::f64::consts::TAU) * (rng.next_f64() * 14.0)).end
         } else {
             rng.point()
         };
-        let row = match unfold(a, b, 12.0) {
+        let row = match unfold(Topology::Cube, a, b, 12.0) {
             Some(u) => {
                 hits += 1;
                 format!("unfold {} {} -> {}", sp(&a), sp(&b), unfolded_row(&u))
@@ -288,7 +289,7 @@ fn dump() -> String {
     ] {
         let a = SurfacePoint::new(fa, ua, va);
         let b = SurfacePoint::new(fb, ub, vb);
-        let row = match unfold(a, b, 12.0) {
+        let row = match unfold(Topology::Cube, a, b, 12.0) {
             Some(u) => unfolded_row(&u),
             None => "none".to_string(),
         };
@@ -300,8 +301,8 @@ fn dump() -> String {
     let mut out = Vec::new();
     for &(face, u, w) in ANCHORS {
         for radius in [0.0f64, 1.5, 6.0, 9.0, 12.0, 32.0] {
-            let anchor = SurfacePoint::new(face, u, w).canonicalize();
-            unfold_pixels(anchor, radius, &mut out);
+            let anchor = SurfacePoint::new(face, u, w).canonicalize(Topology::Cube);
+            unfold_pixels(Topology::Cube, anchor, radius, &mut out);
             d.row(&format!("unfold_pixels {} r={} -> {} pixels", sp(&anchor), f(radius), out.len()));
             for p in &out {
                 d.bulk(&pixel_row(p));
@@ -311,28 +312,28 @@ fn dump() -> String {
     d.seal("unfold_pixels");
 
     // --- the field graph: cells, neighbours, degrees, downhill, every edge.
-    let g = FieldGraph::new();
-    d.row(&format!("cells {CELL_COUNT}"));
+    let g = FieldGraph::new(Topology::Cube, Scale::ONE);
+    d.row(&format!("cells {CUBE_CELL_COUNT}"));
     d.row(&format!("edges {}", g.edges().len()));
-    let seam_edges = g.edges().iter().filter(|(a, b)| a.face() != b.face()).count();
+    let seam_edges = g.edges().iter().filter(|(a, b)| a.face(Topology::Cube, Scale::ONE) != b.face(Topology::Cube, Scale::ONE)).count();
     d.row(&format!("seam edges {seam_edges}"));
     let mut degrees = [0usize; 5];
-    for cell in CellId::all() {
+    for cell in CellId::all(Topology::Cube, Scale::ONE) {
         degrees[g.degree(cell)] += 1;
     }
     d.row(&format!("degree histogram {degrees:?}"));
-    let downhill_none = CellId::all().filter(|c| g.downhill(*c).is_none()).count();
+    let downhill_none = CellId::all(Topology::Cube, Scale::ONE).filter(|c| g.downhill(*c).is_none()).count();
     d.row(&format!("downhill none {downhill_none}"));
-    for cell in CellId::all() {
-        let c = cell.center();
+    for cell in CellId::all(Topology::Cube, Scale::ONE) {
+        let c = cell.center(Topology::Cube, Scale::ONE);
         d.bulk(&format!(
             "{} face={} cx={} cy={} centre={} cell_of={} ns={:?} down={:?}",
             cell.0,
-            cell.face().index(),
-            cell.cx(),
-            cell.cy(),
+            cell.face(Topology::Cube, Scale::ONE).index(),
+            cell.cx(Topology::Cube, Scale::ONE),
+            cell.cy(Topology::Cube, Scale::ONE),
             sp(&c),
-            cell_of(&c).0,
+            cell_of(Topology::Cube, Scale::ONE, &c).0,
             g.neighbors(cell).map(|n| n.map(|c| c.0)),
             g.downhill(cell).map(|c| c.0)
         ));
@@ -343,18 +344,18 @@ fn dump() -> String {
     d.seal("field_graph");
 
     // --- deposit and diffuse: the numbers a footprint actually writes.
-    let mut field = ScalarField::zeros();
+    let mut field = ScalarField::zeros(Topology::Cube, Scale::ONE);
     for (i, &(face, u, w)) in ANCHORS.iter().enumerate() {
-        let centre = SurfacePoint::new(face, u, w).canonicalize();
+        let centre = SurfacePoint::new(face, u, w).canonicalize(Topology::Cube);
         let radius = [1.0f64, 4.0, 9.0][i % 3];
-        let touched = deposit(&mut field, centre, radius, 1.0 + i as f64);
+        let touched = deposit(Topology::Cube, Scale::ONE, &mut field, centre, radius, 1.0 + i as f64);
         d.row(&format!("deposit {} r={} -> {touched} cells", sp(&centre), f(radius)));
     }
     d.row(&format!("field total {}", f(field.total())));
-    let mut scratch = ScalarField::zeros();
+    let mut scratch = ScalarField::zeros(Topology::Cube, Scale::ONE);
     let substeps = diffuse(&mut field, &mut scratch, &g, 0.9);
     d.row(&format!("diffuse substeps {substeps} total {}", f(field.total())));
-    for cell in CellId::all() {
+    for cell in CellId::all(Topology::Cube, Scale::ONE) {
         d.bulk(&format!("{} {}", cell.0, f(field.get(cell))));
     }
     d.seal("deposit_diffuse");

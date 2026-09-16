@@ -26,6 +26,7 @@
 //! clip would break: a root that skates, a berry that shows up mid-growth, a pose that narrows
 //! the admitted wind, a frame that jumps, a fallback that stopped being the old picture.
 
+use cubarium_surface::{Scale, Topology};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::ptr;
@@ -45,7 +46,7 @@ use cubarium::clock::DT;
 use cubarium::present::PRODUCER_SATURATION;
 use cubarium_core::view::RenderView;
 use cubarium_render::{Bend, Canvas, Mask, Pose, Sprite, stamp_layers_bent, stamp_pose};
-use cubarium_surface::{CELL_COUNT, CellId, Vec2};
+use cubarium_surface::{CUBE_CELL_COUNT, CellId, Vec2};
 
 // ---------------------------------------------------------------------------
 // fixtures (the patterns of `art_growth_clip.rs` and `art_water.rs`, copied so this file
@@ -112,15 +113,15 @@ fn saturation() -> f64 {
 fn bare_view(tick: u64) -> RenderView {
     RenderView {
         tick,
-        producer: vec![0.0; CELL_COUNT],
-        detritus: vec![0.0; CELL_COUNT],
-        fruit: vec![0.0; CELL_COUNT],
-        wood: vec![0.0; CELL_COUNT],
-        plant_reserve: vec![0.0; CELL_COUNT],
-        dead_wood: vec![0.0; CELL_COUNT],
-        carrion: vec![0.0; CELL_COUNT],
-        water: vec![0.0; CELL_COUNT],
-        rain: vec![0.0; CELL_COUNT],
+        producer: vec![0.0; CUBE_CELL_COUNT],
+        detritus: vec![0.0; CUBE_CELL_COUNT],
+        fruit: vec![0.0; CUBE_CELL_COUNT],
+        wood: vec![0.0; CUBE_CELL_COUNT],
+        plant_reserve: vec![0.0; CUBE_CELL_COUNT],
+        dead_wood: vec![0.0; CUBE_CELL_COUNT],
+        carrion: vec![0.0; CUBE_CELL_COUNT],
+        water: vec![0.0; CUBE_CELL_COUNT],
+        rain: vec![0.0; CUBE_CELL_COUNT],
         producer_max: PRODUCER_MAX,
         wood_max: 0.6,
         organisms: Vec::new(),
@@ -143,7 +144,7 @@ struct Site {
 /// cell center and a stamp reaches at most 9 px, so 3..=12 in both cell axes keeps every
 /// painted pixel on the cell's own face and the pixel windows below meaningful.
 fn interior(cell: CellId) -> bool {
-    (3..=12).contains(&cell.cx()) && (3..=12).contains(&cell.cy())
+    (3..=12).contains(&cell.cx(Topology::Cube, Scale::ONE)) && (3..=12).contains(&cell.cy(Topology::Cube, Scale::ONE))
 }
 
 /// A rank-2 slot of `species` in `band`, interior to one face.
@@ -153,15 +154,15 @@ fn interior(cell: CellId) -> bool {
 /// case. Water is made by *flooding* an interior side-face cell (`art_water.rs`'s recipe),
 /// which is how a cell's band becomes [`Band::Water`] at all.
 fn site_for(band: Band, species: &'static str) -> Site {
-    let cell = CellId::all()
+    let cell = CellId::all(Topology::Cube, Scale::ONE)
         .find(|&c| {
             interior(c)
                 && plant_cap(band, c) == Some(2)
                 && species_of(band, c) == species
                 && match band {
-                    Band::Canopy => c.face() == Face::Top && band_of(c) == Band::Canopy,
-                    Band::Water => c.face() != Face::Top,
-                    other => c.face() != Face::Top && band_of(c) == other,
+                    Band::Canopy => c.face(Topology::Cube, Scale::ONE) == Face::Top && band_of(c) == Band::Canopy,
+                    Band::Water => c.face(Topology::Cube, Scale::ONE) != Face::Top,
+                    other => c.face(Topology::Cube, Scale::ONE) != Face::Top && band_of(c) == other,
                 }
         })
         .unwrap_or_else(|| {
@@ -245,24 +246,24 @@ fn fed_view(tick: u64, site: Site, density: f64) -> RenderView {
 // canvas helpers
 // ---------------------------------------------------------------------------
 
-fn every_pixel() -> impl Iterator<Item = (Face, u8, u8)> {
+fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
     Face::ALL.into_iter().flat_map(|face| {
-        (0..FACE_SIZE as u8).flat_map(move |y| (0..FACE_SIZE as u8).map(move |x| (face, x, y)))
+        (0..FACE_SIZE as u16).flat_map(move |y| (0..FACE_SIZE as u16).map(move |x| (face, x, y)))
     })
 }
 
 /// The pixels a 16-px tile anchored in `cell` can reach.
-fn near(cell: CellId) -> Vec<(Face, u8, u8)> {
-    let centre = cell.center();
-    (0..FACE_SIZE as u8)
-        .flat_map(|y| (0..FACE_SIZE as u8).map(move |x| (cell.face(), x, y)))
+fn near(cell: CellId) -> Vec<(Face, u16, u16)> {
+    let centre = cell.center(Topology::Cube, Scale::ONE);
+    (0..FACE_SIZE as u16)
+        .flat_map(|y| (0..FACE_SIZE as u16).map(move |x| (cell.face(Topology::Cube, Scale::ONE), x, y)))
         .filter(|&(_, x, y)| {
             (f64::from(x) + 0.5 - centre.u).hypot(f64::from(y) + 0.5 - centre.v) <= 12.0
         })
         .collect()
 }
 
-fn max_diff_at(a: &Canvas, b: &Canvas, pixels: &[(Face, u8, u8)]) -> f32 {
+fn max_diff_at(a: &Canvas, b: &Canvas, pixels: &[(Face, u16, u16)]) -> f32 {
     pixels
         .iter()
         .flat_map(|&(f, x, y)| {
@@ -281,7 +282,7 @@ fn max_diff(a: &Canvas, b: &Canvas) -> f32 {
         .fold(0.0, f32::max)
 }
 
-fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u8, u8)> {
+fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u16, u16)> {
     every_pixel().filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y)).collect()
 }
 
@@ -1238,7 +1239,7 @@ fn the_presenter_plays_every_authored_step_as_the_documented_three_layer_stamp()
                         "{what} at {label}: the packet must be quiet"
                     );
                 }
-                let radial = site.cell.face() == Face::Top
+                let radial = site.cell.face(Topology::Cube, Scale::ONE) == Face::Top
                     && wind_response(site.species).spin_deg > 0.0;
                 if radial {
                     // A radial (top-face) species turns in place: never a bend, and at a
@@ -1372,10 +1373,10 @@ fn a_canopy_step_on_the_rim_of_the_top_face_opens_as_one_stamp_on_two_faces() {
     let mut checked = 0;
     for species in ["umbrellafrond", "bloomcrown"] {
         let plant = art.plant(species).expect(species);
-        let cell = CellId::all()
+        let cell = CellId::all(Topology::Cube, Scale::ONE)
             .find(|&c| {
-                c.face() == Face::Top
-                    && (c.cx() == 0 || c.cx() == 15 || c.cy() == 0 || c.cy() == 15)
+                c.face(Topology::Cube, Scale::ONE) == Face::Top
+                    && (c.cx(Topology::Cube, Scale::ONE) == 0 || c.cx(Topology::Cube, Scale::ONE) == 15 || c.cy(Topology::Cube, Scale::ONE) == 0 || c.cy(Topology::Cube, Scale::ONE) == 15)
                     && band_of(c) == Band::Canopy
                     && plant_cap(Band::Canopy, c) == Some(2)
                     && species_of(Band::Canopy, c) == species
@@ -1385,7 +1386,7 @@ fn a_canopy_step_on_the_rim_of_the_top_face_opens_as_one_stamp_on_two_faces() {
         let budget = plant_bend_budget(plant);
         for transition in &plant.transitions {
             let (from, to) = (transition.from, transition.to);
-            let what = format!("{species} grow{from}{to} at Top cell ({}, {})", cell.cx(), cell.cy());
+            let what = format!("{species} grow{from}{to} at Top cell ({}, {})", cell.cx(Topology::Cube, Scale::ONE), cell.cy(Topology::Cube, Scale::ONE));
             let density = density_for(Band::Canopy, to);
             // Three observes into the sprout's step (t = 0.75, the petals out and the ribs
             // long enough to reach a seam two pixels off), two into the wider one.
@@ -1481,7 +1482,7 @@ fn capture_the_canopy_steps_as_native_frames() {
     std::fs::write(format!("{dir}/manifest.txt"), manifest).unwrap();
     let cells: Vec<String> = sites
         .iter()
-        .map(|s| format!("{} at Top cell ({}, {}) anchor {:?}", s.species, s.cell.cx(), s.cell.cy(), slot_of(s.cell).at))
+        .map(|s| format!("{} at Top cell ({}, {}) anchor {:?}", s.species, s.cell.cx(Topology::Cube, Scale::ONE), s.cell.cy(Topology::Cube, Scale::ONE), slot_of(s.cell).at))
         .collect();
     std::fs::write(format!("{dir}/sites.txt"), cells.join("\n") + "\n").unwrap();
     eprintln!("frames in {dir}");
@@ -1616,7 +1617,7 @@ fn wilting_through_an_authored_step_replays_the_growing_pictures_backwards() {
 #[test]
 fn a_fruiting_plant_that_wilts_into_the_one_to_two_step_never_samples_its_fruit_clip() {
     let art = plants_only();
-    let ripe = vec![1.0f64; CELL_COUNT];
+    let ripe = vec![1.0f64; CUBE_CELL_COUNT];
     let mut checked = 0;
     for plant in &art.plants {
         if plant.fruit.is_none() {

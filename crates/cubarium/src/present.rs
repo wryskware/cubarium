@@ -14,6 +14,7 @@
 //! `f → 1` it approaches `pos`: the motion shown is one tick old, which is the price of
 //! showing it smoothly at all. Fields and trails are not interpolated.
 
+use cubarium_surface::{Scale, Topology};
 use std::sync::LazyLock;
 
 use cubarium_core::view::{OrganismView, RenderView};
@@ -142,8 +143,8 @@ pub fn mode_brightness(mode: Mode) -> f32 {
 pub fn draw_floor(canvas: &mut Canvas) {
     let floor = PALETTE.floor;
     for face in Face::ALL {
-        for y in 0..FACE_SIZE as u8 {
-            for x in 0..FACE_SIZE as u8 {
+        for y in 0..FACE_SIZE as u16 {
+            for x in 0..FACE_SIZE as u16 {
                 canvas.add(face, x, y, floor);
             }
         }
@@ -169,15 +170,15 @@ pub fn draw_ramp_field(
         return;
     }
     for face in Face::ALL {
-        for y in 0..FACE_SIZE as u8 {
-            for x in 0..FACE_SIZE as u8 {
-                let own = field.get(cell_of(&SurfacePoint::pixel_center(face, x, y)));
+        for y in 0..FACE_SIZE as u16 {
+            for x in 0..FACE_SIZE as u16 {
+                let own = field.get(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y)));
                 let value = if filter {
                     let mut sum = own * 4.0;
                     let mut weight = 4.0;
                     for edge in Edge::ALL {
-                        if let Some((nf, nx, ny)) = pixel_neighbor(face, x, y, edge) {
-                            sum += field.get(cell_of(&SurfacePoint::pixel_center(nf, nx, ny)));
+                        if let Some((nf, nx, ny)) = pixel_neighbor(Topology::Cube, face, x, y, edge) {
+                            sum += field.get(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, nf, nx, ny)));
                             weight += 1.0;
                         }
                     }
@@ -263,7 +264,7 @@ pub fn interpolate(
 /// transient coordinate, not a canonical one.
 fn anchor_on(face: Face, p: Vec2) -> SurfacePoint {
     let clamp = |c: f64| if c.is_finite() { c.clamp(0.0, FACE_EXTENT) } else { 0.0 };
-    SurfacePoint::new(face, clamp(p.x), clamp(p.y)).canonicalize()
+    SurfacePoint::new(face, clamp(p.x), clamp(p.y)).canonicalize(Topology::Cube)
 }
 
 /// Presentation state that outlives a single frame: one trail per live organism.
@@ -288,8 +289,8 @@ impl Presenter {
         Presenter {
             trails: HashMap::new(),
             travel: Travel::default(),
-            producer: ScalarField::zeros(),
-            detritus: ScalarField::zeros(),
+            producer: ScalarField::zeros(Topology::Cube, Scale::ONE),
+            detritus: ScalarField::zeros(Topology::Cube, Scale::ONE),
             scratch: Vec::new(),
             live: Vec::new(),
         }
@@ -433,15 +434,15 @@ mod tests {
     fn empty_view() -> RenderView {
         RenderView {
             tick: 0,
-            producer: vec![0.0; cubarium_surface::CELL_COUNT],
-            detritus: vec![0.0; cubarium_surface::CELL_COUNT],
-            fruit: vec![0.0; cubarium_surface::CELL_COUNT],
-            wood: vec![0.0; cubarium_surface::CELL_COUNT],
-            plant_reserve: vec![0.0; cubarium_surface::CELL_COUNT],
-            dead_wood: vec![0.0; cubarium_surface::CELL_COUNT],
-            carrion: vec![0.0; cubarium_surface::CELL_COUNT],
-            water: vec![0.0; cubarium_surface::CELL_COUNT],
-            rain: vec![0.0; cubarium_surface::CELL_COUNT],
+            producer: vec![0.0; cubarium_surface::CUBE_CELL_COUNT],
+            detritus: vec![0.0; cubarium_surface::CUBE_CELL_COUNT],
+            fruit: vec![0.0; cubarium_surface::CUBE_CELL_COUNT],
+            wood: vec![0.0; cubarium_surface::CUBE_CELL_COUNT],
+            plant_reserve: vec![0.0; cubarium_surface::CUBE_CELL_COUNT],
+            dead_wood: vec![0.0; cubarium_surface::CUBE_CELL_COUNT],
+            carrion: vec![0.0; cubarium_surface::CUBE_CELL_COUNT],
+            water: vec![0.0; cubarium_surface::CUBE_CELL_COUNT],
+            rain: vec![0.0; cubarium_surface::CUBE_CELL_COUNT],
             producer_max: 2.0,
             wood_max: 0.6,
             organisms: Vec::new(),
@@ -450,7 +451,7 @@ mod tests {
 
     /// The floor is on every pixel, so tests that care about what was *drawn* subtract
     /// it before looking.
-    fn above_floor(canvas: &Canvas, face: Face, x: u8, y: u8) -> [f32; 3] {
+    fn above_floor(canvas: &Canvas, face: Face, x: u16, y: u16) -> [f32; 3] {
         let px = canvas.get(face, x, y);
         [px[0] - PALETTE.floor[0], px[1] - PALETTE.floor[1], px[2] - PALETTE.floor[2]]
     }
@@ -462,8 +463,8 @@ mod tests {
     fn total(canvas: &Canvas) -> f64 {
         let mut t = 0.0;
         for face in Face::ALL {
-            for y in 0..64u8 {
-                for x in 0..64u8 {
+            for y in 0..64u16 {
+                for x in 0..64u16 {
                     let p = canvas.get(face, x, y);
                     t += f64::from(p[0]) + f64::from(p[1]) + f64::from(p[2]);
                 }
@@ -531,7 +532,7 @@ mod tests {
     #[test]
     fn detritus_below_the_threshold_paints_nothing() {
         let mut view = empty_view();
-        let cell = CellId::new(Face::Front, 4, 4).index();
+        let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 4, 4).index();
         view.detritus[cell] = DETRITUS_THRESHOLD;
         let mut p = Presenter::new();
         let mut canvas = Canvas::new();
@@ -547,13 +548,13 @@ mod tests {
         // above the floor, and nothing else.
         let mut lit = 0;
         for face in Face::ALL {
-            for y in 0..64u8 {
-                for x in 0..64u8 {
+            for y in 0..64u16 {
+                for x in 0..64u16 {
                     let px = above_floor(&canvas, face, x, y);
                     if px.iter().any(|&c| c.abs() > 1e-9) {
                         lit += 1;
                         assert_eq!(face, Face::Front);
-                        assert_eq!(cell_of(&SurfacePoint::pixel_center(face, x, y)).index(), cell);
+                        assert_eq!(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y)).index(), cell);
                         let want = PALETTE.detritus[0] * (0.5 / DETRITUS_SCALE) as f32;
                         assert!((px[0] - want).abs() < 1e-6, "{px:?}");
                     }
@@ -575,8 +576,8 @@ mod tests {
         // A saturated field paints the cyan end at the ramp's maximum brightness everywhere,
         // over the floor.
         for face in Face::ALL {
-            for y in 0..64u8 {
-                for x in 0..64u8 {
+            for y in 0..64u16 {
+                for x in 0..64u16 {
                     let px = above_floor(&canvas, face, x, y);
                     assert!(
                         (px[1] - PALETTE.producer_high[1] * RAMP_MAX_BRIGHTNESS).abs() < 1e-6,
@@ -608,8 +609,8 @@ mod tests {
         let mut canvas = Canvas::new();
         p.draw(&empty_view(), 0.0, &mut canvas);
         for face in Face::ALL {
-            for y in 0..64u8 {
-                for x in 0..64u8 {
+            for y in 0..64u16 {
+                for x in 0..64u16 {
                     assert_eq!(canvas.get(face, x, y), PALETTE.floor, "{face:?} {x},{y}");
                 }
             }
@@ -751,14 +752,14 @@ mod tests {
     fn a_path_across_a_seam_yields_anchors_on_both_faces() {
         // A real transported path, not a hand-built one: sweep off the Front/Right seam.
         let start = SurfacePoint::new(Face::Front, 63.0, 20.0);
-        let t = travel(start, Vec2::new(3.0, 0.0));
+        let t = travel(Topology::Cube, start, Vec2::new(3.0, 0.0));
         assert!(t.crossings >= 1, "this sweep must cross a seam: {t:?}");
         let heading = t.map.apply(Vec2::new(1.0, 0.0));
         let mut faces = std::collections::HashSet::new();
         for i in 0..=100 {
             let f = f64::from(i) / 101.0;
             let (a, h) = interpolate(&t.segments, t.end, heading, f);
-            assert!(a.is_canonical(), "f {f}: non-canonical anchor {a:?}");
+            assert!(a.is_canonical(Topology::Cube), "f {f}: non-canonical anchor {a:?}");
             assert!((h.length() - 1.0).abs() < 1e-9, "f {f}: heading {h:?} is not a unit vector");
             faces.insert(a.face);
         }
@@ -787,17 +788,17 @@ mod tests {
         for start in starts {
             for step in 0..24 {
                 let angle = f64::from(step) * std::f64::consts::TAU / 24.0;
-                let t = travel(start, Vec2::from_screen_angle(angle) * 5.0);
+                let t = travel(Topology::Cube, start, Vec2::from_screen_angle(angle) * 5.0);
                 let heading = t.map.apply(Vec2::from_screen_angle(angle));
                 for i in 0..=32 {
                     let f = f64::from(i) / 33.0;
                     let (a, _) = interpolate(&t.segments, t.end, heading, f);
-                    assert!(a.is_canonical(), "{start:?} angle {angle} f {f}: {a:?}");
+                    assert!(a.is_canonical(Topology::Cube), "{start:?} angle {angle} f {f}: {a:?}");
                 }
                 // Out-of-range fractions are clamped, never extrapolated.
                 for f in [-1.0, 1.0, 2.0, f64::NAN] {
                     let (a, _) = interpolate(&t.segments, t.end, heading, f);
-                    assert!(a.is_canonical(), "{start:?} f {f}: {a:?}");
+                    assert!(a.is_canonical(Topology::Cube), "{start:?} f {f}: {a:?}");
                 }
             }
         }
@@ -815,8 +816,8 @@ mod tests {
 
         let centroid = |canvas: &Canvas| {
             let (mut sum, mut weight) = (0.0f64, 0.0f64);
-            for y in 0..64u8 {
-                for x in 0..64u8 {
+            for y in 0..64u16 {
+                for x in 0..64u16 {
                     let px = above_floor(canvas, Face::Front, x, y);
                     let w = f64::from(px[0].max(0.0) + px[1].max(0.0) + px[2].max(0.0));
                     sum += w * f64::from(x);

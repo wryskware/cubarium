@@ -39,6 +39,7 @@
 //! cargo run --release -p cubarium-core --example food_stock_flow
 //! ```
 
+use cubarium_surface::{Scale, Topology};
 use cubarium_core::config::WorldConfig;
 use cubarium_core::genome::{Genome, decode};
 use cubarium_core::ids::OrganismId;
@@ -211,7 +212,7 @@ fn main() {
 /// The patch: one cell in the middle of the top face, where light is strongest and the
 /// producer field is at its most productive.
 fn patch() -> CellId {
-    CellId::new(Face::Top, 8, 8)
+    CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8)
 }
 
 struct Report {
@@ -437,7 +438,7 @@ fn fixture_config() -> WorldConfig {
 /// Empty every field cell but the patch, so the world's totals are the patch's own flows.
 fn strip_to_patch(world: &mut World) {
     let mut removed = 0.0;
-    for cell in CellId::all() {
+    for cell in CellId::all(Topology::Cube, Scale::ONE) {
         if cell == patch() {
             continue;
         }
@@ -459,13 +460,13 @@ fn place(world: &mut World, nth: usize) -> OrganismId {
     let cfg = world.config().clone();
     let genome = Genome::founder(0.5, &cfg.drives);
     let phenotype = decode(&genome, &cfg.organism);
-    let centre = patch().center();
+    let centre = patch().center(Topology::Cube, Scale::ONE);
     // Spread the bodies across the cell so the pair pass sees four separate animals rather
     // than four copies of one point; every one of them is still inside the same cell, which is
     // what feeding reads.
     let offset = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)][nth % 4];
     let pos = SurfacePoint::new(Face::Top, centre.u + offset.0, centre.v + offset.1);
-    assert_eq!(cell_of(&pos), patch(), "consumer {nth} landed outside the patch");
+    assert_eq!(cell_of(Topology::Cube, Scale::ONE, &pos), patch(), "consumer {nth} landed outside the patch");
     let structure = phenotype.structure_adult;
     let reserve = 0.5 * phenotype.reserve_max;
     let organism = Organism {

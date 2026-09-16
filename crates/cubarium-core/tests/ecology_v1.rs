@@ -12,6 +12,7 @@
 
 mod common;
 
+use cubarium_surface::{Scale, Topology};
 use common::{stored_energy, total_material};
 use cubarium_core::care::{CareCommand, CareDose, CareKind, CareTarget};
 use cubarium_core::config::{PlantConfig, WorldConfig};
@@ -24,7 +25,7 @@ use cubarium_core::{
     DT, FixedHunterProfile, HunterTarget, MotorBill, SnapshotError, World, decode_snapshot,
     ecology_hash, encode_snapshot, snapshot::SCHEMA_VERSION, snapshot::state_hash,
 };
-use cubarium_surface::{CELL_COUNT, CellId, Face, SurfacePoint, Vec2, cell_of};
+use cubarium_surface::{CUBE_CELL_COUNT, CellId, Face, SurfacePoint, Vec2, cell_of};
 
 // ---------------------------------------------------------------------------- fixtures
 
@@ -98,9 +99,9 @@ fn place(world: &mut World, cell: CellId, diet: f32, mouth_offset: f64) -> Organ
     genome.diet = diet;
     genome.clamp();
     let phenotype = decode(&genome, &cfg.organism);
-    let centre = cell.center();
-    let pos = SurfacePoint::new(cell.face(), centre.u + mouth_offset, centre.v);
-    assert_eq!(cell_of(&pos), cell, "the body landed outside its cell");
+    let centre = cell.center(Topology::Cube, Scale::ONE);
+    let pos = SurfacePoint::new(cell.face(Topology::Cube, Scale::ONE), centre.u + mouth_offset, centre.v);
+    assert_eq!(cell_of(Topology::Cube, Scale::ONE, &pos), cell, "the body landed outside its cell");
     let structure = phenotype.structure_adult;
     let id = world.state.organisms.insert(Organism {
         pos,
@@ -161,20 +162,20 @@ fn a1_material_is_closed_through_every_ecology_v1_transfer() {
     fn stand_and_neighbours(world: &mut World) {
         // One mature stand with a ring of bare neighbours, so income, senescence, ripening,
         // propagules and establishment all run.
-        let centre = CellId::new(Face::Top, 8, 8);
+        let centre = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8);
         paint(world, centre, 0.56, 0.6, 0.30);
     }
 
     fn doomed_stand(world: &mut World) {
         // Wood with no foliage and no reserve: maintenance is wholly unpaid, so this stand
         // diebacks every tick and eventually crosses `W_min` and dies.
-        let centre = CellId::new(Face::Front, 6, 6);
+        let centre = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 6, 6);
         paint(world, centre, 0.0, 0.05, 0.0);
     }
 
     fn charged_detritus(world: &mut World) {
         let before = total_material(world);
-        for cell in CellId::all() {
+        for cell in CellId::all(Topology::Cube, Scale::ONE) {
             let i = cell.index();
             world.state.fields.d[i] = 0.4;
             world.state.fields.de[i] = 2.0 * 0.4;
@@ -251,7 +252,7 @@ fn a1_material_is_closed_through_every_ecology_v1_transfer() {
             class: BRIGHT,
             // A stand with a full foliage load and an **empty** reserve: every surplus tick
             // takes `q_share` off the top (§4.4, repair cycle 1) and the rest tops it up.
-            stage: |world| paint(world, CellId::new(Face::Top, 8, 8), 0.56, 0.6, 0.0),
+            stage: |world| paint(world, CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8), 0.56, 0.6, 0.0),
             tune: |_| {},
             ticks: 4_000,
         },
@@ -260,7 +261,7 @@ fn a1_material_is_closed_through_every_ecology_v1_transfer() {
             class: BRIGHT,
             // `Q = q_cap · W` exactly, so `D_Q = 0`: the share branch and the final top-up
             // both clamp to zero and the whole surplus goes to foliage and wood.
-            stage: |world| paint(world, CellId::new(Face::Top, 8, 8), 0.56, 0.6, 0.30),
+            stage: |world| paint(world, CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8), 0.56, 0.6, 0.30),
             tune: |_| {},
             ticks: 4_000,
         },
@@ -269,7 +270,7 @@ fn a1_material_is_closed_through_every_ecology_v1_transfer() {
             class: BRIGHT,
             // Stripped foliage with a full reserve: the emergency draw runs every tick until
             // it reaches `p_reflush · P_cap`, then stops.
-            stage: |world| paint(world, CellId::new(Face::Top, 8, 8), 0.0, 0.6, 0.30),
+            stage: |world| paint(world, CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8), 0.0, 0.6, 0.30),
             tune: |_| {},
             ticks: 4_000,
         },
@@ -377,7 +378,7 @@ fn a1_every_stock_moves_only_through_the_transfer_that_names_it() {
         cfg
     }
 
-    let cell = CellId::new(Face::Top, 8, 8);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8);
     let i = cell.index();
     /// The exact-equality bound: every expression below is a handful of multiplications.
     const EXACT: f64 = 1e-15;
@@ -559,7 +560,7 @@ fn a1_every_stock_moves_only_through_the_transfer_that_names_it() {
         cfg.detritus.fall = 0.5;
         let mut world = World::new(cfg).expect("valid");
         let b = total_material(&world);
-        for c in CellId::all() {
+        for c in CellId::all(Topology::Cube, Scale::ONE) {
             let k = c.index();
             world.state.fields.d[k] = 0.4;
             world.state.fields.de[k] = 0.6;
@@ -585,7 +586,7 @@ fn a1_every_stock_moves_only_through_the_transfer_that_names_it() {
         }
         // And it really did move: the source cell is poorer than it started.
         assert!(
-            world.state.fields.d[CellId::new(Face::Front, 6, 0).index()] < 0.4,
+            world.state.fields.d[CellId::new(Topology::Cube, Scale::ONE, Face::Front, 6, 0).index()] < 0.4,
             "the fall arm must actually move something"
         );
     }
@@ -621,7 +622,7 @@ fn the_reflush_threshold_and_the_reserve_share_are_the_repaired_allocation() {
         cfg.detritus.fall = 0.0;
         cfg.nutrient.diffusion = 0.0;
         tune(&mut cfg);
-        (cfg, CellId::new(Face::Top, 8, 8))
+        (cfg, CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8))
     }
 
     fn staged(cfg: WorldConfig, cell: CellId, p: f64, w: f64, q: f64) -> World {
@@ -767,7 +768,7 @@ fn a2a_stored_energy_never_rises_without_a_light_path() {
     let before = total_material(&world);
     // Everything that holds energy, so there is something for the tick to spend: foliage,
     // wood, a reserve, standing fruit, charged litter and fresh remains.
-    for cell in CellId::all() {
+    for cell in CellId::all(Topology::Cube, Scale::ONE) {
         let i = cell.index();
         world.state.fields.n[i] = REFERENCE_NUTRIENT;
         world.state.fields.p[i] = 0.4;
@@ -811,19 +812,19 @@ fn a2b_the_energy_ledger_closes_every_tick_with_everything_on() {
     cfg.drives.feed_min = 0.001;
     let mut world = World::new(cfg).expect("valid");
     let before = total_material(&world);
-    for cell in CellId::all() {
+    for cell in CellId::all(Topology::Cube, Scale::ONE) {
         let i = cell.index();
         world.state.fields.n[i] = REFERENCE_NUTRIENT;
     }
     // A band of mature stands, a band of charged litter and a band of fresh remains, so every
     // channel has something to work on and the propagule ring has somewhere to go.
-    for u in 0..16u8 {
+    for u in 0..16u16 {
         // Three plant bands, so the repaired §4.4 (repair cycle 1) runs every branch inside
         // the full ledger: a **full** reserve that takes no share, a **part-full** one that
         // takes `q_share` off the top every surplus tick, and a **stripped** stand below
         // `p_reflush · P_cap` that draws its reserve down for the emergency reflush.
-        for v in 0..8u8 {
-            let i = CellId::new(Face::Top, u, v).index();
+        for v in 0..8u16 {
+            let i = CellId::new(Topology::Cube, Scale::ONE, Face::Top, u, v).index();
             let (p, q) = match v % 3 {
                 0 => (0.56, 0.30),
                 1 => (0.56, 0.05),
@@ -834,8 +835,8 @@ fn a2b_the_energy_ledger_closes_every_tick_with_everything_on() {
             world.state.ecology.plant_reserve[i] = q;
             world.state.fields.f[i] = 0.16;
         }
-        for v in 8..16u8 {
-            let i = CellId::new(Face::Top, u, v).index();
+        for v in 8..16u16 {
+            let i = CellId::new(Topology::Cube, Scale::ONE, Face::Top, u, v).index();
             world.state.fields.d[i] = 0.5;
             world.state.fields.de[i] = 2.0 * 0.5;
             world.state.ecology.carrion[i] = 0.4;
@@ -849,8 +850,8 @@ fn a2b_the_energy_ledger_closes_every_tick_with_everything_on() {
     // fund a birth inside the run, and one body with nothing at all, which starves on the
     // first tick so an ordinary death is inside the ledger too.
     let breeders = [
-        place(&mut world, CellId::new(Face::Top, 4, 4), 0.85, 0.0),
-        place(&mut world, CellId::new(Face::Top, 4, 12), 0.10, 0.0),
+        place(&mut world, CellId::new(Topology::Cube, Scale::ONE, Face::Top, 4, 4), 0.85, 0.0),
+        place(&mut world, CellId::new(Topology::Cube, Scale::ONE, Face::Top, 4, 12), 0.10, 0.0),
     ];
     for id in breeders {
         let o = world.state.organisms.get_mut(id).expect("placed");
@@ -861,9 +862,9 @@ fn a2b_the_energy_ledger_closes_every_tick_with_everything_on() {
     }
     // Two more mouths with **empty** reserves, so something actually eats: a full-reserve
     // breeder has no headroom and its every request is refused.
-    place(&mut world, CellId::new(Face::Top, 8, 4), 0.85, 0.0);
-    place(&mut world, CellId::new(Face::Top, 8, 12), 0.10, 0.0);
-    let doomed = place(&mut world, CellId::new(Face::Top, 6, 12), 0.10, 1.0);
+    place(&mut world, CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 4), 0.85, 0.0);
+    place(&mut world, CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 12), 0.10, 0.0);
+    let doomed = place(&mut world, CellId::new(Topology::Cube, Scale::ONE, Face::Top, 6, 12), 0.10, 1.0);
     {
         let o = world.state.organisms.get_mut(doomed).expect("placed");
         o.energy = 0.0;
@@ -871,10 +872,10 @@ fn a2b_the_energy_ledger_closes_every_tick_with_everything_on() {
     }
     let mut world = restage(world);
 
-    let feed_cell = CellId::new(Face::Top, 2, 12);
-    let clean_cell = CellId::new(Face::Top, 3, 12);
+    let feed_cell = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 2, 12);
+    let clean_cell = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 3, 12);
     let target = |c: CellId| {
-        let p = c.center();
+        let p = c.center(Topology::Cube, Scale::ONE);
         CareTarget { face: p.face.index() as u8, u: p.u, v: p.v }
     };
 
@@ -975,7 +976,7 @@ fn a3a_an_inert_fixture_moves_not_one_bit() {
         x ^= x << 17;
         (x >> 11) as f64 / (1u64 << 53) as f64
     };
-    for i in 0..CELL_COUNT {
+    for i in 0..CUBE_CELL_COUNT {
         world.state.fields.n[i] = next();
         world.state.fields.p[i] = next();
         world.state.fields.d[i] = next();
@@ -1070,7 +1071,7 @@ fn a3b_rates_are_validated_by_name_and_the_joint_endpoints_are_exact() {
             _ => cfg.detritus.carrion_decomposition = 1.0 / DT,
         }
         let mut world = World::new(cfg).expect("valid");
-        let source = CellId::new(Face::Front, 6, 6);
+        let source = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 6, 6);
         let before = total_material(&world);
         let i = source.index();
         if stock == "litter" {
@@ -1122,7 +1123,7 @@ fn a3b_rates_are_validated_by_name_and_the_joint_endpoints_are_exact() {
         }
         cfg.validate().expect("both rates are admitted below one per tick");
         let mut world = World::new(cfg).expect("valid");
-        let source = CellId::new(Face::Front, 6, 6);
+        let source = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 6, 6);
         let (si, x0, xe0) = (source.index(), 1.0f64, 1.5f64);
         let before = total_material(&world);
         if stock == "litter" {
@@ -1205,7 +1206,7 @@ fn a3b_rates_are_validated_by_name_and_the_joint_endpoints_are_exact() {
     let mut cfg = bare_config(BRIGHT.0, BRIGHT.1);
     cfg.producer.mortality = 1.0 / DT;
     let mut world = World::new(cfg).expect("valid");
-    let cell = CellId::new(Face::Top, 8, 8);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8);
     let before = total_material(&world);
     world.state.fields.n[cell.index()] = REFERENCE_NUTRIENT;
     book(&mut world, before);
@@ -1263,7 +1264,7 @@ fn a4_capabilities_decode_and_a_partial_bite_books_every_term() {
     cfg.producer.mortality = 0.0;
     cfg.fruit.ripen = 0.0;
     let mut world = World::new(cfg).expect("valid");
-    let cell = CellId::new(Face::Front, 6, 6);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 6, 6);
     paint(&mut world, cell, 1.0, 0.0, 0.0);
     let burrower = place(&mut world, cell, 0.10, 0.0);
     let mut world = restage(world);
@@ -1366,7 +1367,7 @@ fn a4_every_one_of_the_four_foods_books_material_and_energy_exactly() {
         ("litter", 2, 0.10),
         ("remains", 3, 0.10),
     ];
-    let cell = CellId::new(Face::Front, 6, 6);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 6, 6);
     let i = cell.index();
 
     for (name, which, diet) in foods {
@@ -1549,7 +1550,7 @@ fn a5_settlement_normalises_one_mouth_splits_the_stocks_and_shares_proportionall
     cfg.detritus.fall = 0.0;
     let e_r = cfg.organism.reserve_energy_density;
     let mut world = World::new(cfg).expect("valid");
-    let cell = CellId::new(Face::Front, 6, 6);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 6, 6);
     // Leaf, fruit, litter and remains all present and all plentiful, so a skimmer's three
     // channels all open at once — exactly the legacy decision §6.3 names.
     paint(&mut world, cell, 1.0, 0.6, 0.0);
@@ -1682,7 +1683,7 @@ fn a6_remains_route_to_c_rejects_route_to_d_and_no_stock_leaks_into_another() {
     cfg.detritus.carrion_decomposition = 0.0;
     cfg.detritus.decomposition = 0.0;
     let mut world = World::new(cfg).expect("valid");
-    let cell = CellId::new(Face::Front, 6, 6);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 6, 6);
     let id = place(&mut world, cell, 0.85, 0.0);
     {
         // Nothing to raise and nothing to eat: it starves on the first tick.
@@ -1807,7 +1808,7 @@ fn a6_remains_route_to_c_rejects_route_to_d_and_no_stock_leaks_into_another() {
     cfg.detritus.carrion_decomposition = 0.0;
     let mut world = World::new(cfg).expect("valid");
     let profile = FixedHunterProfile::lanternjaw_trial(world.config());
-    let spot = CellId::new(Face::Top, 8, 8).center();
+    let spot = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8).center(Topology::Cube, Scale::ONE);
     let hunter = world
         .start_hunter_trial(
             profile,
@@ -1830,7 +1831,7 @@ fn a6_remains_route_to_c_rejects_route_to_d_and_no_stock_leaks_into_another() {
         o.reserve = 0.0;
     }
     let mut world = restage(world);
-    let here = cell_of(&world.state.organisms.get(hunter).expect("alive").pos).index();
+    let here = cell_of(Topology::Cube, Scale::ONE, &world.state.organisms.get(hunter).expect("alive").pos).index();
     let mut rejected = 0.0;
     for _ in 0..200 {
         let d_before = world.state.fields.d[here];
@@ -1975,7 +1976,7 @@ fn a6_remains_route_to_c_rejects_route_to_d_and_no_stock_leaks_into_another() {
 fn a7_schema_sixteen_round_trips_and_every_older_schema_is_refused_by_name() {
     assert_eq!(SCHEMA_VERSION, 16);
     let mut world = bare_world(BRIGHT);
-    paint(&mut world, CellId::new(Face::Top, 8, 8), 0.56, 0.6, 0.30);
+    paint(&mut world, CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8), 0.56, 0.6, 0.30);
     let mut world = restage(world);
     for _ in 0..50 {
         world.step();
@@ -1991,7 +1992,7 @@ fn a7_schema_sixteen_round_trips_and_every_older_schema_is_refused_by_name() {
     assert_eq!(state_hash(&back), state_hash(&world.state));
     // The new pools really are in the payload.
     assert!(back.ecology.wood.iter().any(|&w| w > 0.0));
-    assert_eq!(back.ecology.wood.len(), CELL_COUNT);
+    assert_eq!(back.ecology.wood.len(), CUBE_CELL_COUNT);
 
     for old in 7..SCHEMA_VERSION {
         let mut relabelled = bytes.clone();
@@ -2032,7 +2033,7 @@ fn a7_schema_sixteen_round_trips_and_every_older_schema_is_refused_by_name() {
 #[test]
 fn a7b_the_ecology_hash_moves_with_every_ecology_stock_and_not_with_care() {
     let mut world = bare_world(BRIGHT);
-    paint(&mut world, CellId::new(Face::Top, 8, 8), 0.56, 0.6, 0.30);
+    paint(&mut world, CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8), 0.56, 0.6, 0.30);
     let mut world = restage(world);
     for _ in 0..40 {
         world.step();
@@ -2043,7 +2044,7 @@ fn a7b_the_ecology_hash_moves_with_every_ecology_stock_and_not_with_care() {
 
     // One entry of each ecology v1 vector, in three places apiece — a cell the fixture used,
     // a cell it did not, and the last cell — so a hash that covered only a prefix would fail.
-    let cells = [CellId::new(Face::Top, 8, 8).index(), 0, CELL_COUNT - 1];
+    let cells = [CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8).index(), 0, CUBE_CELL_COUNT - 1];
     type Poke = fn(&mut cubarium_core::world::EcologyV1State, usize);
     let pokes: [(&str, Poke); 5] = [
         ("wood", |e, i| e.wood[i] += 1e-9),
@@ -2131,7 +2132,7 @@ fn a8_two_runs_of_each_fixture_end_on_the_same_state_hash() {
             "a lone stand",
             || {
                 let mut w = bare_world(BRIGHT);
-                paint(&mut w, CellId::new(Face::Top, 8, 8), 0.0, 0.18, 0.0);
+                paint(&mut w, CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8), 0.0, 0.18, 0.0);
                 restage(w)
             },
             4_000,
@@ -2141,10 +2142,10 @@ fn a8_two_runs_of_each_fixture_end_on_the_same_state_hash() {
             || {
                 let mut w = bare_world(BRIGHT);
                 for (du, dv) in [(0i16, 0i16), (1, 0), (-1, 0), (0, 1), (0, -1)] {
-                    let c = CellId::new(
+                    let c = CellId::new(Topology::Cube, Scale::ONE, 
                         Face::Top,
-                        (8 + du) as u8,
-                        (8 + dv) as u8,
+                        (8 + du) as u16,
+                        (8 + dv) as u16,
                     );
                     paint(&mut w, c, 0.56, 0.6, 0.30);
                 }
@@ -2157,7 +2158,7 @@ fn a8_two_runs_of_each_fixture_end_on_the_same_state_hash() {
             || {
                 let mut w = bare_world(AVERAGE);
                 let before = total_material(&w);
-                for cell in CellId::all() {
+                for cell in CellId::all(Topology::Cube, Scale::ONE) {
                     let i = cell.index();
                     w.state.fields.d[i] = 0.4;
                     w.state.fields.de[i] = 0.8;
@@ -2181,7 +2182,7 @@ fn a8_two_runs_of_each_fixture_end_on_the_same_state_hash() {
                     *v = REFERENCE_NUTRIENT;
                 }
                 book(&mut w, before);
-                let cell = CellId::new(Face::Top, 8, 8);
+                let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8);
                 paint(&mut w, cell, 0.56, 0.6, 0.30);
                 place(&mut w, cell, 0.85, 0.0);
                 restage(w)
@@ -2243,17 +2244,17 @@ fn a9_one_donor_one_recipient_books_every_term_of_the_propagule() {
     let mut world = World::new(cfg).expect("valid");
     // A donor with exactly one establishing-or-bare neighbour: the interior of a face has
     // four, so the other three are given stands of their own.
-    let donor = CellId::new(Face::Top, 8, 8);
-    let recipient = CellId::new(Face::Top, 8, 9);
+    let donor = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8);
+    let recipient = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 9);
     paint(&mut world, donor, 0.56, 0.6, 0.30);
     // The donor's other three neighbours are **alive but not donors**: wood above `W_min` so
     // they are not recipients, and below `W_est` so they send nothing of their own. That makes
     // the centre stand the only donor in the world and gives it exactly one recipient, so every
     // number below is one transfer rather than a sum over a ring.
     for c in [
-        CellId::new(Face::Top, 8, 7),
-        CellId::new(Face::Top, 7, 8),
-        CellId::new(Face::Top, 9, 8),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 7),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 7, 8),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 9, 8),
     ] {
         paint(&mut world, c, 0.0, 0.5 * (alive_min + cfg_donor_min), 0.0);
     }
@@ -2411,15 +2412,15 @@ fn a9b_a_stand_that_dies_in_3d_receives_a_propagule_in_the_same_tick() {
     let m_w = cfg.plant.maintenance;
 
     let mut world = World::new(cfg).expect("valid");
-    let donor = CellId::new(Face::Top, 8, 8);
-    let doomed = CellId::new(Face::Top, 8, 9);
+    let donor = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8);
+    let doomed = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 9);
     // The donor's other three neighbours are alive but below `W_est`, so they are neither
     // recipients nor donors and the doomed cell is the donor's only recipient.
     paint(&mut world, donor, 0.0, 0.6, 0.30);
     for c in [
-        CellId::new(Face::Top, 8, 7),
-        CellId::new(Face::Top, 7, 8),
-        CellId::new(Face::Top, 9, 8),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 7),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 7, 8),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 9, 8),
     ] {
         paint(&mut world, c, 0.0, 0.2, 0.0);
     }
@@ -2524,14 +2525,14 @@ fn a9c_two_donors_split_their_own_budgets_and_a_shared_recipient_gets_both() {
     // ```
     // The row cells flanking the donors are alive-but-not-donors, so each donor has exactly
     // three recipients: its two private ones and the shared centre.
-    let a = CellId::new(Face::Top, 7, 8);
-    let b = CellId::new(Face::Top, 9, 8);
-    let shared = CellId::new(Face::Top, 8, 8);
+    let a = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 7, 8);
+    let b = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 9, 8);
+    let shared = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8);
     let private = [
-        CellId::new(Face::Top, 7, 7),
-        CellId::new(Face::Top, 7, 9),
-        CellId::new(Face::Top, 9, 7),
-        CellId::new(Face::Top, 9, 9),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 7, 7),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 7, 9),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 9, 7),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 9, 9),
     ];
 
     let mut world = World::new(cfg).expect("valid");
@@ -2543,7 +2544,7 @@ fn a9c_two_donors_split_their_own_budgets_and_a_shared_recipient_gets_both() {
     let floor = floor_fraction * reserve_cap * wood;
     paint(&mut world, a, 0.0, wood, 0.30);
     paint(&mut world, b, 0.0, wood, floor + 0.5 * rate * DT * 3.0);
-    for c in [CellId::new(Face::Top, 6, 8), CellId::new(Face::Top, 10, 8)] {
+    for c in [CellId::new(Topology::Cube, Scale::ONE, Face::Top, 6, 8), CellId::new(Topology::Cube, Scale::ONE, Face::Top, 10, 8)] {
         paint(&mut world, c, 0.0, 0.5 * (alive_min + donor_min), 0.0);
     }
     let mut world = restage(world);
@@ -2659,7 +2660,7 @@ fn the_exposed_body_bill_is_the_sum_of_every_bill_including_a_body_that_dies_thi
     // reconstruction dropped exactly this term.
     cfg.drives.turn_noise = 1.0;
     let mut world = World::new(cfg).expect("valid");
-    let cell = CellId::new(Face::Top, 8, 8);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8);
     paint(&mut world, cell, 0.56, 0.6, 0.30);
     // Three bodies with stores, and one with none at all.
     let live: Vec<OrganismId> = (0..3)

@@ -19,6 +19,7 @@
 //!   and then left to reflush and regrow. The trajectory it sampled is printed to stdout so
 //!   the picture can be read against the numbers.
 
+use cubarium_surface::{Scale, Topology};
 use std::path::PathBuf;
 
 use cubarium::art::{ArtPack, Band};
@@ -30,7 +31,7 @@ use cubarium_core::rng::Counter;
 use cubarium_core::view::RenderView;
 use cubarium_core::{DT, World};
 use cubarium_render::Canvas;
-use cubarium_surface::{CELL_COUNT, CellId, SurfacePoint, Vec2, cell_of};
+use cubarium_surface::{CUBE_CELL_COUNT, CellId, SurfacePoint, Vec2, cell_of};
 use cube_proto::{FACE_SIZE, Face, Frame};
 
 /// B0's measured bright stand (Run 3): the reference every synthetic panel is drawn at.
@@ -127,15 +128,15 @@ fn pack() -> ArtPack {
 fn empty_view(tick: u64) -> RenderView {
     RenderView {
         tick,
-        producer: vec![0.0; CELL_COUNT],
-        detritus: vec![0.0; CELL_COUNT],
-        fruit: vec![0.0; CELL_COUNT],
-        wood: vec![0.0; CELL_COUNT],
-        plant_reserve: vec![0.0; CELL_COUNT],
-        dead_wood: vec![0.0; CELL_COUNT],
-        carrion: vec![0.0; CELL_COUNT],
-        water: vec![0.0; CELL_COUNT],
-        rain: vec![0.0; CELL_COUNT],
+        producer: vec![0.0; CUBE_CELL_COUNT],
+        detritus: vec![0.0; CUBE_CELL_COUNT],
+        fruit: vec![0.0; CUBE_CELL_COUNT],
+        wood: vec![0.0; CUBE_CELL_COUNT],
+        plant_reserve: vec![0.0; CUBE_CELL_COUNT],
+        dead_wood: vec![0.0; CUBE_CELL_COUNT],
+        carrion: vec![0.0; CUBE_CELL_COUNT],
+        water: vec![0.0; CUBE_CELL_COUNT],
+        rain: vec![0.0; CUBE_CELL_COUNT],
         producer_max: WorldConfig::default().producer.max,
         wood_max: W_MAX,
         organisms: Vec::new(),
@@ -175,24 +176,24 @@ fn shot(v: &RenderView) -> Frame {
 }
 
 fn foliage_cell() -> CellId {
-    CellId::all()
+    CellId::all(Topology::Cube, Scale::ONE)
         .find(|&c| {
-            c.face() == Face::Front
+            c.face(Topology::Cube, Scale::ONE) == Face::Front
                 && band_of(c) == Band::Foliage
                 && rank_cap_of(c) == 2
-                && (3..=7).contains(&c.cy())
-                && (4..=11).contains(&c.cx())
+                && (3..=7).contains(&c.cy(Topology::Cube, Scale::ONE))
+                && (4..=11).contains(&c.cx(Topology::Cube, Scale::ONE))
         })
         .expect("a rank-2 front foliage slot")
 }
 
 fn canopy_cell() -> CellId {
-    CellId::all()
+    CellId::all(Topology::Cube, Scale::ONE)
         .find(|&c| {
             band_of(c) == Band::Canopy
                 && rank_cap_of(c) == 2
-                && (5..=10).contains(&c.cx())
-                && (5..=10).contains(&c.cy())
+                && (5..=10).contains(&c.cx(Topology::Cube, Scale::ONE))
+                && (5..=10).contains(&c.cy(Topology::Cube, Scale::ONE))
         })
         .expect("a rank-2 canopy slot")
 }
@@ -259,8 +260,8 @@ fn recovery(cell: CellId, samples: &[u64], horizon: u64) -> Vec<(u64, Frame, [f6
     genome.diet = 0.85;
     genome.clamp();
     let phenotype = decode(&genome, &cfg.organism);
-    let pos = cell.center();
-    assert_eq!(cell_of(&pos), cell);
+    let pos = cell.center(Topology::Cube, Scale::ONE);
+    assert_eq!(cell_of(Topology::Cube, Scale::ONE, &pos), cell);
     let grazer = world.state.organisms.insert(Organism {
         pos: SurfacePoint::new(pos.face, pos.u, pos.v),
         heading: Vec2::new(1.0, 0.0),
@@ -360,8 +361,8 @@ fn main() {
 
     // A tall column reads the mean structure of its whole foliage column, so the synthetic
     // column panels fill that column's cells rather than one of them.
-    let column_cells: Vec<CellId> = CellId::all()
-        .filter(|c| c.face() == column.face && c.cx() == column.cx && band_of(*c) == Band::Foliage)
+    let column_cells: Vec<CellId> = CellId::all(Topology::Cube, Scale::ONE)
+        .filter(|c| c.face(Topology::Cube, Scale::ONE) == column.face && c.cx(Topology::Cube, Scale::ONE) == column.cx && band_of(*c) == Band::Foliage)
         .collect();
 
     const CELL_CROP: usize = 22;
@@ -386,8 +387,8 @@ fn main() {
                 Some(cell) => crop(
                     &frame,
                     face,
-                    i32::from(cell.cx()) * 4 + 2 - (CELL_CROP as i32) / 2,
-                    i32::from(cell.cy()) * 4 + 2 - (CELL_CROP as i32) / 2,
+                    i32::from(cell.cx(Topology::Cube, Scale::ONE)) * 4 + 2 - (CELL_CROP as i32) / 2,
+                    i32::from(cell.cy(Topology::Cube, Scale::ONE)) * 4 + 2 - (CELL_CROP as i32) / 2,
                     CELL_CROP,
                     CELL_CROP,
                     CELL_SCALE,
@@ -413,8 +414,8 @@ fn main() {
         row.push(crop(
             &frame,
             Face::Front,
-            i32::from(foliage.cx()) * 4 + 2 - (CELL_CROP as i32) / 2,
-            i32::from(foliage.cy()) * 4 + 2 - (CELL_CROP as i32) / 2,
+            i32::from(foliage.cx(Topology::Cube, Scale::ONE)) * 4 + 2 - (CELL_CROP as i32) / 2,
+            i32::from(foliage.cy(Topology::Cube, Scale::ONE)) * 4 + 2 - (CELL_CROP as i32) / 2,
             CELL_CROP,
             CELL_CROP,
             CELL_SCALE,

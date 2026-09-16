@@ -22,6 +22,7 @@
 //! ground cover and the *water*, and the reed is hand-stamped on top through the public API —
 //! so a difference between two of these images can only be the plant.
 
+use cubarium_surface::{Scale, Topology};
 use std::path::{Path, PathBuf};
 
 use cube_proto::{FACE_SIZE, Face};
@@ -38,7 +39,7 @@ use cubarium::art_present::{
 use cubarium::present::PRODUCER_SATURATION;
 use cubarium_core::view::RenderView;
 use cubarium_render::{Bend, Canvas, Mask, stamp_layers_bent};
-use cubarium_surface::{CELL_COUNT, CellId, SurfacePoint, Vec2};
+use cubarium_surface::{CUBE_CELL_COUNT, CellId, SurfacePoint, Vec2};
 
 // ---------------------------------------------------------------------------
 // fixtures
@@ -92,15 +93,15 @@ fn saturation() -> f64 {
 fn bare_view(tick: u64) -> RenderView {
     RenderView {
         tick,
-        producer: vec![0.0; CELL_COUNT],
-        detritus: vec![0.0; CELL_COUNT],
-        fruit: vec![0.0; CELL_COUNT],
-        wood: vec![0.0; CELL_COUNT],
-        plant_reserve: vec![0.0; CELL_COUNT],
-        dead_wood: vec![0.0; CELL_COUNT],
-        carrion: vec![0.0; CELL_COUNT],
-        water: vec![0.0; CELL_COUNT],
-        rain: vec![0.0; CELL_COUNT],
+        producer: vec![0.0; CUBE_CELL_COUNT],
+        detritus: vec![0.0; CUBE_CELL_COUNT],
+        fruit: vec![0.0; CUBE_CELL_COUNT],
+        wood: vec![0.0; CUBE_CELL_COUNT],
+        plant_reserve: vec![0.0; CUBE_CELL_COUNT],
+        dead_wood: vec![0.0; CUBE_CELL_COUNT],
+        carrion: vec![0.0; CUBE_CELL_COUNT],
+        water: vec![0.0; CUBE_CELL_COUNT],
+        rain: vec![0.0; CUBE_CELL_COUNT],
         producer_max: PRODUCER_MAX,
         wood_max: 0.6,
         organisms: Vec::new(),
@@ -145,23 +146,23 @@ fn background(v: &RenderView, f: f64) -> Canvas {
 // pixels
 // ---------------------------------------------------------------------------
 
-fn every_pixel() -> impl Iterator<Item = (Face, u8, u8)> {
+fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
     Face::ALL.into_iter().flat_map(|face| {
-        (0..FACE_SIZE as u8).flat_map(move |y| (0..FACE_SIZE as u8).map(move |x| (face, x, y)))
+        (0..FACE_SIZE as u16).flat_map(move |y| (0..FACE_SIZE as u16).map(move |x| (face, x, y)))
     })
 }
 
 /// The pixels a 16-px tile anchored at `at` can reach, on `at`'s own face.
-fn window(at: SurfacePoint) -> Vec<(Face, u8, u8)> {
-    (0..FACE_SIZE as u8)
-        .flat_map(|y| (0..FACE_SIZE as u8).map(move |x| (at.face, x, y)))
+fn window(at: SurfacePoint) -> Vec<(Face, u16, u16)> {
+    (0..FACE_SIZE as u16)
+        .flat_map(|y| (0..FACE_SIZE as u16).map(move |x| (at.face, x, y)))
         .filter(|&(_, x, y)| {
             (f64::from(x) + 0.5 - at.u).hypot(f64::from(y) + 0.5 - at.v) <= 12.0
         })
         .collect()
 }
 
-fn max_diff_at(a: &Canvas, b: &Canvas, pixels: &[(Face, u8, u8)]) -> f32 {
+fn max_diff_at(a: &Canvas, b: &Canvas, pixels: &[(Face, u16, u16)]) -> f32 {
     pixels
         .iter()
         .flat_map(|&(f, x, y)| {
@@ -171,11 +172,11 @@ fn max_diff_at(a: &Canvas, b: &Canvas, pixels: &[(Face, u8, u8)]) -> f32 {
         .fold(0.0, f32::max)
 }
 
-fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u8, u8)> {
+fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u16, u16)> {
     every_pixel().filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y)).collect()
 }
 
-fn differing_at(a: &Canvas, b: &Canvas, pixels: &[(Face, u8, u8)]) -> Vec<(Face, u8, u8)> {
+fn differing_at(a: &Canvas, b: &Canvas, pixels: &[(Face, u16, u16)]) -> Vec<(Face, u16, u16)> {
     pixels.iter().copied().filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y)).collect()
 }
 
@@ -195,7 +196,7 @@ fn assert_same_canvas(a: &Canvas, b: &Canvas, what: &str) {
 /// the tile's `+x` lies along the heading and its `+y` along the heading turned a quarter
 /// turn, and the pivot — the anchor — is the tile centre `(8, 8)`. Only meaningful for
 /// pixels on `at`'s own face, which is why every fixture cell here is interior to Top.
-fn tile_at(at: SurfacePoint, heading: Vec2, x: u8, y: u8) -> Vec2 {
+fn tile_at(at: SurfacePoint, heading: Vec2, x: u16, y: u16) -> Vec2 {
     let d = Vec2::new(f64::from(x) + 0.5 - at.u, f64::from(y) + 0.5 - at.v);
     let side = Vec2::new(-heading.y, heading.x);
     Vec2::new(heading.dot(d) + 8.0, side.dot(d) + 8.0)
@@ -205,7 +206,7 @@ fn tile_at(at: SurfacePoint, heading: Vec2, x: u8, y: u8) -> Vec2 {
 /// centre and a stamp reaches at most 9 px, so 3..=12 in both cell axes keeps every painted
 /// pixel on the cell's own face — which is what makes [`tile_at`] and [`window`] meaningful.
 fn interior(cell: CellId) -> bool {
-    (3..=12).contains(&cell.cx()) && (3..=12).contains(&cell.cy())
+    (3..=12).contains(&cell.cx(Topology::Cube, Scale::ONE)) && (3..=12).contains(&cell.cy(Topology::Cube, Scale::ONE))
 }
 
 // ---------------------------------------------------------------------------
@@ -245,9 +246,9 @@ fn reed_cell() -> CellId {
     let budget = plant_bend_budget(plant);
     let response = wind_response(WATER_PLANT);
     let seconds = peak_seconds();
-    let best = CellId::all()
+    let best = CellId::all(Topology::Cube, Scale::ONE)
         .filter(|&c| {
-            c.face() == Face::Top && interior(c) && plant_cap(Band::Water, c) == Some(2)
+            c.face(Topology::Cube, Scale::ONE) == Face::Top && interior(c) && plant_cap(Band::Water, c) == Some(2)
         })
         .map(|c| {
             let slot = slot_of(c);
@@ -283,9 +284,9 @@ fn canopy_cell(species: &str) -> CellId {
     let response = wind_response(species);
     assert!(response.spin_deg > 0.0, "{species} is not a radial species");
     let seconds = peak_seconds();
-    let best = CellId::all()
+    let best = CellId::all(Topology::Cube, Scale::ONE)
         .filter(|&c| {
-            c.face() == Face::Top
+            c.face(Topology::Cube, Scale::ONE) == Face::Top
                 && interior(c)
                 && band_of(c) == Band::Canopy
                 && plant_cap(Band::Canopy, c) == Some(2)
@@ -498,12 +499,12 @@ fn a_flooded_top_face_reed_moves_at_a_gust_but_its_root_line_is_bit_identical() 
     // The root line: destination pixels whose tile row lies in 14.5..15.5, whose whole
     // bilinear support is at or below the root line and whose displacement is therefore
     // exactly zero. And the rows below the plant, which nothing may paint.
-    let root_line: Vec<(Face, u8, u8)> = near
+    let root_line: Vec<(Face, u16, u16)> = near
         .iter()
         .copied()
         .filter(|&(_, x, y)| (14.5..15.5).contains(&tile_at(slot.at, slot.heading, x, y).y))
         .collect();
-    let below: Vec<(Face, u8, u8)> = near
+    let below: Vec<(Face, u16, u16)> = near
         .iter()
         .copied()
         .filter(|&(_, x, y)| tile_at(slot.at, slot.heading, x, y).y >= 15.5)
@@ -590,7 +591,7 @@ fn the_gust_moves_only_the_reeds_own_pixels_not_the_water_or_the_ground_under_it
     }
     // The water and ground the reed does not cover are the plant-free image in *both*, so the
     // breeze reached neither: count them so the claim is not about an empty set.
-    let untouched: Vec<(Face, u8, u8)> = near
+    let untouched: Vec<(Face, u16, u16)> = near
         .iter()
         .copied()
         .filter(|&(fc, x, y)| {

@@ -17,6 +17,7 @@
 //! on a draw, a step that cuts at its ends, a reversal that replays the wrong progress, a
 //! fallback that stopped being the old picture, a root that skates.
 
+use cubarium_surface::{Scale, Topology};
 use std::path::{Path, PathBuf};
 use std::ptr;
 
@@ -33,7 +34,7 @@ use cubarium::clock::DT;
 use cubarium::present::PRODUCER_SATURATION;
 use cubarium_core::view::RenderView;
 use cubarium_render::{Bend, Canvas, Mask, Pose, stamp_layers_bent, stamp_pose};
-use cubarium_surface::{CELL_COUNT, CellId, SurfacePoint, Vec2};
+use cubarium_surface::{CUBE_CELL_COUNT, CellId, SurfacePoint, Vec2};
 
 // ---------------------------------------------------------------------------
 // fixtures (the patterns of `art_motion.rs`, copied so this file stands alone)
@@ -93,15 +94,15 @@ fn saturation() -> f64 {
 fn bare_view(tick: u64) -> RenderView {
     RenderView {
         tick,
-        producer: vec![0.0; CELL_COUNT],
-        detritus: vec![0.0; CELL_COUNT],
-        fruit: vec![0.0; CELL_COUNT],
-        wood: vec![0.0; CELL_COUNT],
-        plant_reserve: vec![0.0; CELL_COUNT],
-        dead_wood: vec![0.0; CELL_COUNT],
-        carrion: vec![0.0; CELL_COUNT],
-        water: vec![0.0; CELL_COUNT],
-        rain: vec![0.0; CELL_COUNT],
+        producer: vec![0.0; CUBE_CELL_COUNT],
+        detritus: vec![0.0; CUBE_CELL_COUNT],
+        fruit: vec![0.0; CUBE_CELL_COUNT],
+        wood: vec![0.0; CUBE_CELL_COUNT],
+        plant_reserve: vec![0.0; CUBE_CELL_COUNT],
+        dead_wood: vec![0.0; CUBE_CELL_COUNT],
+        carrion: vec![0.0; CUBE_CELL_COUNT],
+        water: vec![0.0; CUBE_CELL_COUNT],
+        rain: vec![0.0; CUBE_CELL_COUNT],
         producer_max: PRODUCER_MAX,
         wood_max: 0.6,
         organisms: Vec::new(),
@@ -120,14 +121,14 @@ fn one_cell_view(tick: u64, cell: CellId, density: f64) -> RenderView {
 /// The cell this file drives: a lanternstalk slot allowed to reach stage 2, in the middle of
 /// Front so its tile stays on one face and its plant is a stalk, not a radial crown.
 fn pilot_cell() -> CellId {
-    CellId::all()
+    CellId::all(Topology::Cube, Scale::ONE)
         .find(|&c| {
-            c.face() == Face::Front
+            c.face(Topology::Cube, Scale::ONE) == Face::Front
                 && band_of(c) == Band::Foliage
                 && plant_cap(Band::Foliage, c) == Some(2)
                 && species_of(Band::Foliage, c) == PILOT
-                && (4..=7).contains(&c.cy())
-                && (4..=11).contains(&c.cx())
+                && (4..=7).contains(&c.cy(Topology::Cube, Scale::ONE))
+                && (4..=11).contains(&c.cx(Topology::Cube, Scale::ONE))
         })
         .expect("the cube has a rank-2 lanternstalk slot in the middle of Front")
 }
@@ -136,24 +137,24 @@ fn pilot_cell() -> CellId {
 // canvas helpers
 // ---------------------------------------------------------------------------
 
-fn every_pixel() -> impl Iterator<Item = (Face, u8, u8)> {
+fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
     Face::ALL.into_iter().flat_map(|face| {
-        (0..FACE_SIZE as u8).flat_map(move |y| (0..FACE_SIZE as u8).map(move |x| (face, x, y)))
+        (0..FACE_SIZE as u16).flat_map(move |y| (0..FACE_SIZE as u16).map(move |x| (face, x, y)))
     })
 }
 
 /// The pixels a 16-px tile anchored in `cell` can reach.
-fn near(cell: CellId) -> Vec<(Face, u8, u8)> {
-    let centre = cell.center();
-    (0..FACE_SIZE as u8)
-        .flat_map(|y| (0..FACE_SIZE as u8).map(move |x| (cell.face(), x, y)))
+fn near(cell: CellId) -> Vec<(Face, u16, u16)> {
+    let centre = cell.center(Topology::Cube, Scale::ONE);
+    (0..FACE_SIZE as u16)
+        .flat_map(|y| (0..FACE_SIZE as u16).map(move |x| (cell.face(Topology::Cube, Scale::ONE), x, y)))
         .filter(|&(_, x, y)| {
             (f64::from(x) + 0.5 - centre.u).hypot(f64::from(y) + 0.5 - centre.v) <= 12.0
         })
         .collect()
 }
 
-fn max_diff_at(a: &Canvas, b: &Canvas, pixels: &[(Face, u8, u8)]) -> f32 {
+fn max_diff_at(a: &Canvas, b: &Canvas, pixels: &[(Face, u16, u16)]) -> f32 {
     pixels
         .iter()
         .flat_map(|&(f, x, y)| {
@@ -172,7 +173,7 @@ fn max_diff(a: &Canvas, b: &Canvas) -> f32 {
         .fold(0.0, f32::max)
 }
 
-fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u8, u8)> {
+fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u16, u16)> {
     every_pixel().filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y)).collect()
 }
 
@@ -765,15 +766,15 @@ fn a_growth_step_is_pure_and_independent_of_the_render_rate() {
     let step = drawn_step(&p, cell, 0.25).expect("in flight");
     assert_eq!((step.lower, step.upper), (Some(0), 1));
 
-    let before: Vec<Growth> = CellId::all().map(|c| p.growth_of(c)).collect();
-    let before_prev: Vec<Growth> = CellId::all().map(|c| p.growth_prev_of(c)).collect();
+    let before: Vec<Growth> = CellId::all(Topology::Cube, Scale::ONE).map(|c| p.growth_of(c)).collect();
+    let before_prev: Vec<Growth> = CellId::all(Topology::Cube, Scale::ONE).map(|c| p.growth_prev_of(c)).collect();
     let first = draw(&mut p, &v, 0.25);
     for _ in 0..25 {
         assert_same_canvas(&first, &draw(&mut p, &v, 0.25), "a repeated draw of one frame");
     }
-    assert_eq!(CellId::all().map(|c| p.growth_of(c)).collect::<Vec<_>>(), before, "a draw moved the growth");
+    assert_eq!(CellId::all(Topology::Cube, Scale::ONE).map(|c| p.growth_of(c)).collect::<Vec<_>>(), before, "a draw moved the growth");
     assert_eq!(
-        CellId::all().map(|c| p.growth_prev_of(c)).collect::<Vec<_>>(),
+        CellId::all(Topology::Cube, Scale::ONE).map(|c| p.growth_prev_of(c)).collect::<Vec<_>>(),
         before_prev,
         "a draw moved the previous-tick copy the frames interpolate from"
     );
@@ -1108,7 +1109,7 @@ fn the_fruit_accent_takes_no_part_in_a_growth_step() {
         pack().plant(PILOT).unwrap().fruit.is_some(),
         "the fixture plant must have a fruit clip for this to mean anything"
     );
-    let ripe = vec![1.0f64; CELL_COUNT];
+    let ripe = vec![1.0f64; CUBE_CELL_COUNT];
     let mut fruiting = ArtPresenter::new(plants_only());
     let mut plain = ArtPresenter::new(plants_only());
     fruiting.observe_with_fruit(&bare_view(0), Some(&ripe));
@@ -1144,7 +1145,7 @@ fn the_fruit_accent_takes_no_part_in_a_growth_step() {
 /// Tile coordinates of a face pixel centre for a 16×16 tile stamped at `at` with `heading`:
 /// the tile's `+x` lies along the heading and its `+y` along the heading turned a quarter
 /// turn, and the pivot — the anchor — is the tile centre `(8, 8)`.
-fn tile_at(at: SurfacePoint, heading: Vec2, x: u8, y: u8) -> Vec2 {
+fn tile_at(at: SurfacePoint, heading: Vec2, x: u16, y: u16) -> Vec2 {
     let d = Vec2::new(f64::from(x) + 0.5 - at.u, f64::from(y) + 0.5 - at.v);
     let side = Vec2::new(-heading.y, heading.x);
     Vec2::new(heading.dot(d) + 8.0, side.dot(d) + 8.0)
@@ -1200,11 +1201,11 @@ fn the_root_row_is_fixed_through_the_step_and_nothing_below_it_is_painted() {
     // The destination pixels whose own height is at or below the root line (displacement
     // exactly 0, bilinear support in rows 14 and 15), and the pixels whose support lies wholly
     // at or below row 15, which nothing may paint.
-    let root_row: Vec<(Face, u8, u8)> = near(cell)
+    let root_row: Vec<(Face, u16, u16)> = near(cell)
         .into_iter()
         .filter(|&(_, x, y)| (14.5..15.5).contains(&tile_at(slot.at, heading, x, y).y))
         .collect();
-    let below: Vec<(Face, u8, u8)> = near(cell)
+    let below: Vec<(Face, u16, u16)> = near(cell)
         .into_iter()
         .filter(|&(_, x, y)| tile_at(slot.at, heading, x, y).y >= 15.5)
         .collect();
@@ -1214,7 +1215,7 @@ fn the_root_row_is_fixed_through_the_step_and_nothing_below_it_is_painted() {
     let bg = background(&shown, f);
     let mut p = ArtPresenter::new(plants_only());
     p.observe(&bare_view(0));
-    let mut footprint: Option<(f64, Vec<(Face, u8, u8)>)> = None;
+    let mut footprint: Option<(f64, Vec<(Face, u16, u16)>)> = None;
     let mut seen = 0;
     for tick in 1..=200u64 {
         p.observe(&one_cell_view(tick, cell, DENSITY));
@@ -1245,7 +1246,7 @@ fn the_root_row_is_fixed_through_the_step_and_nothing_below_it_is_painted() {
         );
 
         // And the footprint of that row is the same every frame.
-        let painted: Vec<(Face, u8, u8)> = root_row
+        let painted: Vec<(Face, u16, u16)> = root_row
             .iter()
             .copied()
             .filter(|&(fc, x, y)| image.get(fc, x, y) != bg.get(fc, x, y))

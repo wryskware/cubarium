@@ -1,3 +1,4 @@
+use cubarium_surface::{Scale, Topology};
 use std::f64::consts::TAU;
 
 use cubarium_surface::{Vec2, cell_of};
@@ -335,7 +336,7 @@ impl World {
             ));
         };
 
-        let cell = cell_of(&pos);
+        let cell = cell_of(Topology::Cube, Scale::ONE, &pos);
         let at = cell.index();
         let cap = self.state.config.detritus.energy_cap;
         let material = founder.material_in;

@@ -1,5 +1,6 @@
 //! Production-path regression sweeps ported from the independently reviewed frozen study.
 //! Exact same-amplitude/quiet comparisons deliberately exclude the intended budget gain.
+use cubarium_surface::{Scale, Topology};
 use super::*;
 use crate::art::ArtPack;
 use cubarium_render::stamp_layers_bent_with_radius;
@@ -169,7 +170,7 @@ fn strict(old: &ArtPack, new: &ArtPack) -> serde_json::Value {
                 for h in [0.01, 0.5, 1., 7.9999999, 8., 8.0000001, 8.875, 9.] {
                     let calm = draw(new, &col, h, 0., 0.);
                     let windy = draw(new, &col, h, 0., budget.min(0.99));
-                    for y in tall_anchor(face, cx, 0).v.ceil() as u8..64 {
+                    for y in tall_anchor(face, cx, 0).v.ceil() as u16..64 {
                         for x in 0..64 {
                             assert_eq!(
                                 calm.get(face, x, y),
@@ -419,7 +420,7 @@ fn retained_endpoint_chart_preserves_vertex_and_physical_footprint() {
                                 assert!(p.iter().all(|v| v.is_finite()));
                                 if p.iter().any(|v| *v > 0.) {
                                     assert!(
-                                        cubarium_surface::unfold(
+                                        cubarium_surface::unfold(Topology::Cube, 
                                             center,
                                             SurfacePoint::new(
                                                 f,

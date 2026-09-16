@@ -13,6 +13,7 @@ mod reproduction;
 #[path = "hunter_compare/spatial.rs"]
 mod spatial;
 
+use cubarium_surface::{Scale, Topology};
 use anyhow::{Context, Result, anyhow, ensure};
 use clap::{Parser, ValueEnum};
 use cubarium_core::organism::DeathCause;
@@ -1216,7 +1217,7 @@ mod tests {
             .collect();
         let mut local = PairedLocal::new(&arms, &dir).unwrap();
         let cell =
-            cubarium_surface::cell_of(&opening.organisms.iter().next().unwrap().1.pos).index();
+            cubarium_surface::cell_of(Topology::Cube, Scale::ONE, &opening.organisms.iter().next().unwrap().1.pos).index();
         // Deliberate synthetic exposure to test orchestration/file ordering at
         // exactly a census boundary; spatial's separate fixture uses a REAL kill.
         let capture = recovery::Capture {

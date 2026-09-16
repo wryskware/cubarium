@@ -3,6 +3,7 @@
 //! centers of every face — all 20,480 of them — and agrees with the frame bytes the
 //! shim receives.
 
+use cubarium_surface::{Scale, Topology};
 use std::collections::HashSet;
 
 use cube_proto::{Face, Frame};
@@ -14,9 +15,9 @@ fn the_inversion_round_trips_every_pixel_center_on_every_face() {
     let mut checked = 0u32;
     for face in Face::ALL {
         let n = face_frame(face).normal;
-        for y in 0..64u8 {
-            for x in 0..64u8 {
-                let target = SurfacePoint::pixel_center(face, x, y).embed();
+        for y in 0..64u16 {
+            for x in 0..64u16 {
+                let target = Topology::Cube.embed(Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y));
 
                 // The embedding inverts exactly.
                 let (u, v) = invert_face(face, target).expect("a pixel center is on its face");
@@ -28,7 +29,7 @@ fn the_inversion_round_trips_every_pixel_center_on_every_face() {
                 let origin = [target[0] + n[0] * 4.0, target[1] + n[1] * 4.0, target[2] + n[2] * 4.0];
                 let hit = cast(origin, [-n[0], -n[1], -n[2]]).expect("the ray hits the cube");
                 assert_eq!(hit.face, face, "{face:?} ({x},{y})");
-                assert_eq!(hit.pixel(), (x, y), "{face:?} ({x},{y})");
+                assert_eq!(hit.pixel(), (x as u8, y as u8), "{face:?} ({x},{y})");
                 checked += 1;
             }
         }

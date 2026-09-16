@@ -7,6 +7,7 @@
 //! a row popping in whole, a reveal that is not monotone, a zero-weight layer that still
 //! costs footprint.
 
+use cubarium_surface::{Scale, Topology};
 use cube_proto::Face;
 use cubarium_render::{Canvas, Mask, Pose, Sprite, stamp_layers, stamp_pose, stamp_sprite};
 use cubarium_surface::{SurfacePoint, Vec2};
@@ -15,10 +16,10 @@ use cubarium_surface::{SurfacePoint, Vec2};
 // fixtures
 // ---------------------------------------------------------------------------
 
-fn every_pixel() -> impl Iterator<Item = (Face, u8, u8)> {
+fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
     Face::ALL
         .into_iter()
-        .flat_map(|face| (0..64u8).flat_map(move |y| (0..64u8).map(move |x| (face, x, y))))
+        .flat_map(|face| (0..64u16).flat_map(move |y| (0..64u16).map(move |x| (face, x, y))))
 }
 
 /// The largest per-channel difference between two images, in linear light.
@@ -89,8 +90,8 @@ fn tile_anchor() -> SurfacePoint {
 }
 
 /// The face pixel texel `(tx, ty)` of a tile at [`tile_anchor`] lands on.
-fn texel_pixel(tx: usize, ty: usize) -> (Face, u8, u8) {
-    (Face::Front, (tx + 24) as u8, (ty + 24) as u8)
+fn texel_pixel(tx: usize, ty: usize) -> (Face, u16, u16) {
+    (Face::Front, (tx + 24) as u16, (ty + 24) as u16)
 }
 
 fn draw_layers(
@@ -121,8 +122,8 @@ fn draw_tile(sprite: &Sprite, mask: Mask, background: &Canvas) -> Canvas {
 /// The pixels a tile at [`tile_anchor`] can reach: its footprint is under the nine-pixel
 /// budget, so everything it touches lies well inside this window. Reveal sweeps only have
 /// to look here, which is what keeps a four-hundred-step sweep cheap.
-fn tile_pixels() -> impl Iterator<Item = (Face, u8, u8)> {
-    (16..48u8).flat_map(move |y| (16..48u8).map(move |x| (Face::Front, x, y)))
+fn tile_pixels() -> impl Iterator<Item = (Face, u16, u16)> {
+    (16..48u16).flat_map(move |y| (16..48u16).map(move |x| (Face::Front, x, y)))
 }
 
 /// The largest reveal step a sweep takes, and the most a pixel's coverage may change over
@@ -188,7 +189,7 @@ fn a_still_pose_without_a_mask_stamps_bit_identically_to_stamp_sprite() {
             let touched = Face::ALL
                 .into_iter()
                 .filter(|&f| {
-                    (0..64u8).any(|y| (0..64u8).any(|x| expected.get(f, x, y) != [0.0; 3]))
+                    (0..64u16).any(|y| (0..64u16).any(|x| expected.get(f, x, y) != [0.0; 3]))
                 })
                 .count();
             assert!(
@@ -211,7 +212,7 @@ fn a_still_pose_without_a_mask_stamps_bit_identically_to_stamp_sprite() {
 fn two_opaque_layers_at_half_weight_replace_the_background_exactly() {
     let red = dot([255, 0, 0, 255]);
     let blue = dot([0, 0, 255, 255]);
-    let anchor = SurfacePoint::pixel_center(Face::Front, 32, 32);
+    let anchor = SurfacePoint::pixel_center(Topology::Cube, Face::Front, 32, 32);
     for background in [[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.4, 0.9, 0.2]] {
         let image = draw_layers(
             &filled(background),
@@ -276,7 +277,7 @@ fn three_layers_at_equal_weights_give_the_exact_mean_of_their_samples() {
     let third = 1.0f32 / 3.0;
     let image = draw_layers(
         &filled([0.8, 0.8, 0.8]),
-        SurfacePoint::pixel_center(Face::Front, 20, 40),
+        SurfacePoint::pixel_center(Topology::Cube, Face::Front, 20, 40),
         &[
             (Pose::still(&red), third),
             (Pose::still(&green), third),
@@ -306,7 +307,7 @@ fn a_layer_contributes_its_temporal_blend_and_not_a_held_frame() {
     let red = dot([255, 0, 0, 255]);
     let blue = dot([0, 0, 255, 255]);
     let green = dot([0, 255, 0, 255]);
-    let anchor = SurfacePoint::pixel_center(Face::Left, 10, 10);
+    let anchor = SurfacePoint::pixel_center(Topology::Cube, Face::Left, 10, 10);
     let swaying = Pose { first: &red, second: &blue, mix: 0.5 };
 
     // One layer at weight 1: the pose's own lerp, (0.5, 0, 0.5).

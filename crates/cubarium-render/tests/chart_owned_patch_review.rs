@@ -1,5 +1,6 @@
 //! Adversarial public-contract checks for chart-owned patch stamping.
 
+use cubarium_surface::{Scale, Topology};
 use cubarium_render::{
     Bend, Canvas, Mask, Pose, Sprite, stamp_layers_bent, stamp_pose_in_chart,
 };
@@ -42,12 +43,12 @@ fn retained_chart_candidates_stay_inside_the_recentered_physical_disk() {
                             continue;
                         }
                         let mut pixels = Vec::new();
-                        unfold_pixels(owner, query, &mut pixels);
+                        unfold_pixels(Topology::Cube, owner, query, &mut pixels);
                         for p in pixels {
                             if (p.local - center.chart()).length() <= 9.0
-                                && unfold(
+                                && unfold(Topology::Cube, 
                                     center,
-                                    SurfacePoint::pixel_center(p.face, p.x, p.y),
+                                    SurfacePoint::pixel_center(Topology::Cube, p.face, p.x, p.y),
                                     9.0,
                                 )
                                 .is_none()
@@ -90,12 +91,12 @@ fn retained_chart_candidates_stay_inside_the_recentered_physical_disk() {
                     continue;
                 }
                 let mut pixels = Vec::new();
-                unfold_pixels(owner, query, &mut pixels);
+                unfold_pixels(Topology::Cube, owner, query, &mut pixels);
                 for p in pixels {
                     if (p.local - center.chart()).length() <= 9.0
-                        && unfold(
+                        && unfold(Topology::Cube, 
                             center,
-                            SurfacePoint::pixel_center(p.face, p.x, p.y),
+                            SurfacePoint::pixel_center(Topology::Cube, p.face, p.x, p.y),
                             9.0,
                         )
                         .is_none()
@@ -139,11 +140,11 @@ fn recentered_vertex_patches_paint_only_their_physical_nine_pixel_disk() {
                 &mut Vec::new(),
             );
             for destination in Face::ALL {
-                for y in 0..64u8 {
-                    for x in 0..64u8 {
+                for y in 0..64u16 {
+                    for x in 0..64u16 {
                         if canvas.get(destination, x, y).iter().any(|channel| *channel > 0.0) {
                             assert!(
-                                unfold(center, SurfacePoint::pixel_center(destination, x, y), 9.0)
+                                unfold(Topology::Cube, center, SurfacePoint::pixel_center(Topology::Cube, destination, x, y), 9.0)
                                     .is_some(),
                                 "painted outside physical nine-pixel disk: {owner:?} -> {center:?}; {destination:?} {x},{y}",
                             );
@@ -169,8 +170,8 @@ fn coincident_chart_stamping_keeps_identity_blend_and_source_over_semantics() {
                 let bend = Bend { amplitude: 0.8, base: 32.0, root: 1.0, length: 40.0 };
                 let mut established = Canvas::new();
                 let mut retained = Canvas::new();
-                established.set(face, anchor.pixel().0, anchor.pixel().1, [0.1, 0.2, 0.3]);
-                retained.set(face, anchor.pixel().0, anchor.pixel().1, [0.1, 0.2, 0.3]);
+                established.set(face, anchor.pixel(Topology::Cube).0, anchor.pixel(Topology::Cube).1, [0.1, 0.2, 0.3]);
+                retained.set(face, anchor.pixel(Topology::Cube).0, anchor.pixel(Topology::Cube).1, [0.1, 0.2, 0.3]);
                 stamp_layers_bent(
                     &mut established,
                     anchor,

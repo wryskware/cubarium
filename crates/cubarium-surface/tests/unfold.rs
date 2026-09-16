@@ -10,6 +10,7 @@
 //! rigid rotations about the actual shared cube edges and validates the segment's edge
 //! crossings, with no access to the 2D transition table.
 
+use cubarium_surface::Topology;
 use cubarium_surface::{
     ChartImage, ChartPath, Edge, FACE_EXTENT, Face, GEOM_EPS, MAX_LOCAL_RADIUS, MAX_SEAMS,
     SurfacePoint, TangentMap, Vec2, chart_images, cross_seam, segment_is_valid,
@@ -47,7 +48,7 @@ fn near_pair() -> impl Strategy<Value = (SurfacePoint, SurfacePoint)> {
         0.0f64..28.0f64,
     )
         .prop_map(|(a, angle, len)| {
-            let b = travel(a, Vec2::from_screen_angle(angle) * len).end;
+            let b = travel(Topology::Cube, a, Vec2::from_screen_angle(angle) * len).end;
             (a, b)
         })
 }
@@ -76,7 +77,7 @@ fn unfolded_distance_matches_the_oracle_geodesic() {
     let two_seam = std::cell::Cell::new(0u32);
     runner(512, 0xa7)
         .run(&near_pair(), |(a, b)| {
-            let got = unfold(a, b, R);
+            let got = unfold(Topology::Cube, a, b, R);
             let want = oracle::geodesic(oracle_pt(a), oracle_pt(b), R);
             prop_assert_eq!(
                 got.is_some(),
@@ -98,9 +99,9 @@ fn unfolded_distance_matches_the_oracle_geodesic() {
             );
             // The 3D chord is a lower bound on surface distance.
             prop_assert!(
-                a.chord_sq(&b) <= got.distance * got.distance + 1e-9,
+                Topology::Cube.chord_sq(&a, &b) <= got.distance * got.distance + 1e-9,
                 "chord^2 {} exceeds distance^2 {}",
-                a.chord_sq(&b),
+                Topology::Cube.chord_sq(&a, &b),
                 got.distance * got.distance
             );
             // The image is consistent with the distance it reports.
@@ -118,7 +119,7 @@ fn unfolded_distance_matches_the_oracle_geodesic() {
                 2 => two_seam.set(two_seam.get() + 1),
                 _ => {}
             }
-            prop_assert_eq!(got.path.final_face(a.face), b.face, "path does not reach the target");
+            prop_assert_eq!(got.path.final_face(Topology::Cube, a.face), b.face, "path does not reach the target");
             // The map is a pure rotation: unfoldings never reflect.
             prop_assert_eq!(got.map.det(), 1, "unfolding reflected: {:?}", got.map);
             prop_assert!(got.map.as_quarter_turns().is_some());
@@ -127,7 +128,7 @@ fn unfolded_distance_matches_the_oracle_geodesic() {
             // opposite directions). A pair sitting exactly on a length tie between two
             // different chart paths could in principle pick non-inverse maps; that set has
             // measure zero for random floats.
-            let back = unfold(b, a, R).expect("symmetric");
+            let back = unfold(Topology::Cube, b, a, R).expect("symmetric");
             prop_assert!(
                 (back.distance - got.distance).abs() <= 1e-9,
                 "asymmetric distance: {} vs {}",
@@ -139,7 +140,7 @@ fn unfolded_distance_matches_the_oracle_geodesic() {
                 ((back.local - b.chart()).length() - back.distance).abs() <= 1e-9
             );
             prop_assert_eq!(
-                surface_distance(a, b, R).map(f64::to_bits),
+                surface_distance(Topology::Cube, a, b, R).map(f64::to_bits),
                 Some(got.distance.to_bits())
             );
             Ok(())
@@ -174,21 +175,21 @@ fn translating_a_pair_across_a_seam_preserves_its_distance() {
         (SurfacePoint::new(Face::Left, 30.0, 10.0), Vec2::new(0.0, -5.0), Vec2::new(0.0, -6.0)),
     ];
     for (a, offset, shift) in fixtures {
-        let b = travel(a, offset);
+        let b = travel(Topology::Cube, a, offset);
         assert!(!b.fallback);
-        let before = surface_distance(a, b.end, R).expect("pair within range");
-        let moved_a = travel(a, shift);
+        let before = surface_distance(Topology::Cube, a, b.end, R).expect("pair within range");
+        let moved_a = travel(Topology::Cube, a, shift);
         assert!(!moved_a.fallback);
         if moved_a.reflections > 0 {
             continue;
         }
         // The pair offset travels with the anchor: apply the accumulated tangent map.
-        let moved_b = travel(moved_a.end, moved_a.map.apply(offset));
+        let moved_b = travel(Topology::Cube, moved_a.end, moved_a.map.apply(offset));
         assert!(!moved_b.fallback);
         if moved_b.reflections > 0 || b.reflections > 0 {
             continue;
         }
-        let after = surface_distance(moved_a.end, moved_b.end, R).expect("pair within range");
+        let after = surface_distance(Topology::Cube, moved_a.end, moved_b.end, R).expect("pair within range");
         assert!(
             (before - after).abs() <= 1e-9,
             "{a:?} + {offset:?} was {before} apart, {after} after moving by {shift:?}"
@@ -218,11 +219,11 @@ fn heading_alignment_across_the_seams_around_top() {
     for (face, u, v, turns) in cases {
         let a = SurfacePoint::new(face, u, v);
         let step = Vec2::new(0.0, -6.0);
-        let tr = travel(a, step);
+        let tr = travel(Topology::Cube, a, step);
         assert_eq!(tr.end.face, Face::Top, "{face:?} should step onto Top");
         assert_eq!(tr.map, TangentMap::quarter_turns(turns), "{face:?}");
 
-        let uf = unfold(a, tr.end, R).expect("6 px apart");
+        let uf = unfold(Topology::Cube, a, tr.end, R).expect("6 px apart");
         assert!(
             (uf.distance - 6.0).abs() <= 1e-9,
             "{face:?}: distance {} for a 6 px step",
@@ -256,12 +257,12 @@ fn a_pair_forty_pixels_apart_is_out_of_range() {
     // Unfolded across the flat Front/Right seam these are (64 - 60) + 36 = 40 px apart.
     let a = SurfacePoint::new(Face::Front, 60.0, 32.0);
     let b = SurfacePoint::new(Face::Right, 36.0, 32.0);
-    assert!(unfold(a, b, R).is_none(), "40 px is beyond a 32 px query");
-    assert!(unfold(b, a, R).is_none());
+    assert!(unfold(Topology::Cube, a, b, R).is_none(), "40 px is beyond a 32 px query");
+    assert!(unfold(Topology::Cube, b, a, R).is_none());
     assert!(oracle::geodesic(oracle_pt(a), oracle_pt(b), R).is_none());
     // Shrinking the gap brings it back into range and both agree on the distance.
     let b = SurfacePoint::new(Face::Right, 20.0, 32.0);
-    let got = unfold(a, b, R).expect("24 px apart");
+    let got = unfold(Topology::Cube, a, b, R).expect("24 px apart");
     assert!((got.distance - 24.0).abs() <= 1e-9, "{got:?}");
     let want = oracle::geodesic(oracle_pt(a), oracle_pt(b), R).expect("in range");
     assert!((got.distance - want.distance).abs() <= 1e-9);
@@ -272,7 +273,7 @@ fn a_pair_forty_pixels_apart_is_out_of_range() {
 fn a_query_beyond_max_local_radius_panics() {
     let a = SurfacePoint::new(Face::Front, 32.0, 32.0);
     let b = SurfacePoint::new(Face::Front, 33.0, 32.0);
-    let _ = unfold(a, b, MAX_LOCAL_RADIUS + 1.0);
+    let _ = unfold(Topology::Cube, a, b, MAX_LOCAL_RADIUS + 1.0);
 }
 
 // --- chart images ----------------------------------------------------------------------
@@ -284,7 +285,7 @@ fn a_query_beyond_max_local_radius_panics() {
 fn one_seam_chart_images_place_the_seam_where_the_seam_is() {
     let mut images = Vec::new();
     for face in Face::ALL {
-        chart_images(face, 1, &mut images);
+        chart_images(Topology::Cube, face, 1, &mut images);
         assert_eq!(images[0].path, ChartPath::direct(), "identity image comes first");
         assert_eq!(images[0].target_face, face);
         assert_eq!(images[0].map, TangentMap::IDENTITY);
@@ -333,8 +334,8 @@ fn two_seam_chart_images_are_complete_and_consistent() {
     let mut one = Vec::new();
     let mut two = Vec::new();
     for face in Face::ALL {
-        chart_images(face, 1, &mut one);
-        chart_images(face, MAX_SEAMS, &mut two);
+        chart_images(Topology::Cube, face, 1, &mut one);
+        chart_images(Topology::Cube, face, MAX_SEAMS, &mut two);
         assert!(two.len() > one.len(), "{face:?}: no two-seam images");
         assert!(
             two.windows(2).all(|w| w[0].path < w[1].path),
@@ -352,7 +353,7 @@ fn two_seam_chart_images_are_complete_and_consistent() {
             assert_ne!(e1, seam.edge, "a path must not return through its entry edge");
             let seam2 = f1.neighbor(e1).expect("never the rim");
             assert_eq!(img.target_face, seam2.face);
-            assert_eq!(img.target_face, img.path.final_face(face));
+            assert_eq!(img.target_face, img.path.final_face(Topology::Cube, face));
 
             // Composing the first step's image with the second step's image (taken in the
             // intermediate chart) must reproduce this image.
@@ -362,7 +363,7 @@ fn two_seam_chart_images_are_complete_and_consistent() {
                 .copied()
                 .expect("one-seam image");
             let mut mid = Vec::new();
-            chart_images(f1, 1, &mut mid);
+            chart_images(Topology::Cube, f1, 1, &mut mid);
             let second: ChartImage = *mid
                 .iter()
                 .find(|i| i.path.len == 1 && i.path.steps()[0] == (f1, e1))
@@ -391,8 +392,8 @@ fn segment_validity_fixtures() {
     };
 
     // Inside one chart: only the empty path is valid.
-    assert!(segment_is_valid(Face::Front, Vec2::new(10.0, 10.0), Vec2::new(20.0, 20.0), &direct));
-    assert!(!segment_is_valid(
+    assert!(segment_is_valid(Topology::Cube, Face::Front, Vec2::new(10.0, 10.0), Vec2::new(20.0, 20.0), &direct));
+    assert!(!segment_is_valid(Topology::Cube, 
         Face::Front,
         Vec2::new(10.0, 10.0),
         Vec2::new(20.0, 20.0),
@@ -400,15 +401,15 @@ fn segment_validity_fixtures() {
     ));
 
     // Across the Front/Right seam: Right (6, 30) unfolds to (70, 30) in Front's chart.
-    assert!(segment_is_valid(
+    assert!(segment_is_valid(Topology::Cube, 
         Face::Front,
         Vec2::new(60.0, 30.0),
         Vec2::new(70.0, 30.0),
         &one(Face::Front, Edge::Right)
     ));
-    assert!(!segment_is_valid(Face::Front, Vec2::new(60.0, 30.0), Vec2::new(70.0, 30.0), &direct));
+    assert!(!segment_is_valid(Topology::Cube, Face::Front, Vec2::new(60.0, 30.0), Vec2::new(70.0, 30.0), &direct));
     // ... but not through the wrong edge.
-    assert!(!segment_is_valid(
+    assert!(!segment_is_valid(Topology::Cube, 
         Face::Front,
         Vec2::new(60.0, 30.0),
         Vec2::new(70.0, 30.0),
@@ -416,17 +417,17 @@ fn segment_validity_fixtures() {
     ));
 
     // Leaving through the open rim is never a valid unfolding.
-    assert!(!segment_is_valid(
+    assert!(!segment_is_valid(Topology::Cube, 
         Face::Front,
         Vec2::new(30.0, 60.0),
         Vec2::new(30.0, 70.0),
         &one(Face::Front, Edge::Bottom)
     ));
-    assert!(!segment_is_valid(Face::Front, Vec2::new(30.0, 60.0), Vec2::new(30.0, 70.0), &direct));
+    assert!(!segment_is_valid(Topology::Cube, Face::Front, Vec2::new(30.0, 60.0), Vec2::new(30.0, 70.0), &direct));
 
     // Boundary-inclusive within GEOM_EPS: a segment ending exactly on the chart edge is
     // still inside the observer's chart.
-    assert!(segment_is_valid(
+    assert!(segment_is_valid(Topology::Cube, 
         Face::Front,
         Vec2::new(30.0, 30.0),
         Vec2::new(FACE_EXTENT - GEOM_EPS / 2.0, 30.0),

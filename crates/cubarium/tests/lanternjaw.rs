@@ -30,6 +30,7 @@
 //! correct geometry. `heading_minus_x_is_a_half_turn_about_the_anchor` tests the half turn and
 //! records that the column mirror does *not* hold.
 
+use cubarium_surface::{Scale, Topology};
 use cube_proto::Face;
 use cubarium::lanternjaw::*;
 use cubarium_render::{Canvas, RigPart, Sprite, rig_radius, stamp_rig};
@@ -50,10 +51,10 @@ fn frames() -> impl Iterator<Item = f64> {
     (0..FPS * SWEEP_SECONDS).map(|i| i as f64 / FPS as f64)
 }
 
-fn every_pixel() -> impl Iterator<Item = (Face, u8, u8)> {
+fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
     Face::ALL
         .into_iter()
-        .flat_map(|face| (0..64u8).flat_map(move |y| (0..64u8).map(move |x| (face, x, y))))
+        .flat_map(|face| (0..64u16).flat_map(move |y| (0..64u16).map(move |x| (face, x, y))))
 }
 
 fn assert_identical(a: &Canvas, b: &Canvas, what: &str) {
@@ -82,7 +83,7 @@ fn filled(rgb: [f32; 3]) -> Canvas {
 /// A mid-face anchor on a pixel centre, so the body lattice lands on the face lattice and every
 /// half-turn or whole-pixel comparison below is exact rather than approximate.
 fn mid() -> SurfacePoint {
-    SurfacePoint::pixel_center(Face::Front, 32, 32)
+    SurfacePoint::pixel_center(Topology::Cube, Face::Front, 32, 32)
 }
 
 fn forward() -> Vec2 {
@@ -877,7 +878,7 @@ fn at_the_strike_the_near_limb_is_over_the_hull_and_the_far_limb_under_it() {
 
     // The hull's coverage, exactly: over black the pixel is `c`, over white it is
     // `c + (1 − c.a)`, so `c.a = 1 − (white − black)`.
-    let hull_coverage = |f: Face, x: u8, y: u8| -> f32 {
+    let hull_coverage = |f: Face, x: u16, y: u16| -> f32 {
         (0..3)
             .map(|c| 1.0 - (hull_white.get(f, x, y)[c] - hull_black.get(f, x, y)[c]))
             .fold(f32::MAX, f32::min)
@@ -964,7 +965,7 @@ fn at_the_strike_the_near_limb_is_over_the_hull_and_the_far_limb_under_it() {
     let mut near_at_back = Canvas::new();
     stamp_rig(&mut near_at_back, anchor, heading, &[(&behind[..], 1.0)], 1.0, &mut Vec::new());
 
-    let overlap: Vec<(Face, u8, u8)> = every_pixel()
+    let overlap: Vec<(Face, u16, u16)> = every_pixel()
         .filter(|&(f, x, y)| {
             near_only.get(f, x, y) != [0.0; 3] && hull_coverage(f, x, y) > 0.5
         })
@@ -977,7 +978,7 @@ fn at_the_strike_the_near_limb_is_over_the_hull_and_the_far_limb_under_it() {
     let (f, x, y) = *overlap
         .iter()
         .max_by(|&&a, &&b| {
-            let l = |p: (Face, u8, u8)| {
+            let l = |p: (Face, u16, u16)| {
                 near_only.get(p.0, p.1, p.2).into_iter().map(f64::from).sum::<f64>()
             };
             l(a).partial_cmp(&l(b)).unwrap()
@@ -1250,13 +1251,13 @@ fn heading_minus_x_is_a_half_turn_about_the_anchor() {
                 continue;
             }
             assert!(
-                (0..64u8).all(|y| (0..64u8).all(|x| ahead.get(face, x, y) == [0.0; 3])),
+                (0..64u16).all(|y| (0..64u16).all(|x| ahead.get(face, x, y) == [0.0; 3])),
                 "{mode:?} at {seconds}: the mid-face body reached {face:?}"
             );
         }
         let mut turned = 0usize;
-        for y in 1..64u8 {
-            for x in 1..64u8 {
+        for y in 1..64u16 {
+            for x in 1..64u16 {
                 let got = behind.get(Face::Front, x, y);
                 let want = ahead.get(Face::Front, 64 - x, 64 - y);
                 assert_eq!(
@@ -1272,8 +1273,8 @@ fn heading_minus_x_is_a_half_turn_about_the_anchor() {
         assert!(turned > 40, "{mode:?} at {seconds}: only {turned} pixels were compared");
 
         // The column-only mirror the brief asked for is a different picture.
-        let mirrored_differs = (1..64u8)
-            .any(|y| (1..64u8).any(|x| behind.get(Face::Front, x, y) != ahead.get(Face::Front, 64 - x, y)));
+        let mirrored_differs = (1..64u16)
+            .any(|y| (1..64u16).any(|x| behind.get(Face::Front, x, y) != ahead.get(Face::Front, 64 - x, y)));
         assert!(
             mirrored_differs,
             "{mode:?} at {seconds}: reversing the heading happened to mirror the body about the \
@@ -1312,8 +1313,8 @@ fn a_fractional_anchor_moves_the_body_by_sub_pixel_brightness_only() {
     // A whole pixel across is a whole pixel across.
     let at = |u: f64| drawn(seconds, mode, SurfacePoint::new(Face::Front, u, 32.5), forward(), 1.0);
     let (base, shifted) = (at(32.5), at(33.5));
-    for y in 0..64u8 {
-        for x in 1..64u8 {
+    for y in 0..64u16 {
+        for x in 1..64u16 {
             assert_eq!(
                 shifted.get(Face::Front, x, y),
                 base.get(Face::Front, x - 1, y),
@@ -1456,7 +1457,7 @@ fn move_never_jumps_more_than_the_wave_and_the_gait_allow_in_one_frame() {
                 continue;
             }
             assert!(
-                (0..64u8).all(|y| (0..64u8).all(|x| canvas.get(face, x, y) == [0.0; 3])),
+                (0..64u16).all(|y| (0..64u16).all(|x| canvas.get(face, x, y) == [0.0; 3])),
                 "at {seconds} the mid-face body reached {face:?}, so the Front-only scan below \
                  would miss part of it"
             );
@@ -1464,8 +1465,8 @@ fn move_never_jumps_more_than_the_wave_and_the_gait_allow_in_one_frame() {
         if let Some(before) = &previous {
             let mut sum = 0.0f64;
             let mut painted = 0usize;
-            for y in 0..64u8 {
-                for x in 0..64u8 {
+            for y in 0..64u16 {
+                for x in 0..64u16 {
                     let (a, b) = (before.get(Face::Front, x, y), canvas.get(Face::Front, x, y));
                     if a == [0.0; 3] && b == [0.0; 3] {
                         continue;

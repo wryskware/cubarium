@@ -29,8 +29,9 @@
 //! and asserts the tolerances the design note names: 0.01 on a face fraction (about seven
 //! sigma there) and 0.05 on the rim/interior ratio (about four sigma).
 
+use cubarium_surface::{Scale, Topology};
 use cubarium_surface::{
-    CELL_COUNT, CELLS_PER_FACE_EDGE, CellId, Face, SurfacePoint, Travel, Vec2, cell_of,
+    CUBE_CELL_COUNT, CELLS_PER_FACE_EDGE, CellId, Face, SurfacePoint, Travel, Vec2, cell_of,
     travel_into,
 };
 
@@ -63,7 +64,7 @@ fn walk(walkers: usize, steps: usize, burn_in: usize, seed: u64) -> Occupancy {
     let mut rng = Rng(seed);
     let mut occ = Occupancy {
         faces: [0; 5],
-        cells: vec![0; CELL_COUNT],
+        cells: vec![0; CUBE_CELL_COUNT],
         samples: 0,
         fallbacks: 0,
     };
@@ -82,15 +83,15 @@ fn walk(walkers: usize, steps: usize, burn_in: usize, seed: u64) -> Occupancy {
         for p in positions.iter_mut() {
             // A fresh uniform direction every step, fixed unit step length.
             let angle = rng.unit() * std::f64::consts::TAU;
-            travel_into(*p, Vec2::from_screen_angle(angle), &mut buf);
+            travel_into(Topology::Cube, *p, Vec2::from_screen_angle(angle), &mut buf);
             if buf.fallback {
                 occ.fallbacks += 1;
             }
-            assert!(buf.end.is_canonical(), "walker left the surface: {:?}", buf.end);
+            assert!(buf.end.is_canonical(Topology::Cube), "walker left the surface: {:?}", buf.end);
             *p = buf.end;
             if recording {
                 occ.faces[p.face.index()] += 1;
-                occ.cells[cell_of(p).index()] += 1;
+                occ.cells[cell_of(Topology::Cube, Scale::ONE, p).index()] += 1;
                 occ.samples += 1;
             }
         }
@@ -114,12 +115,12 @@ fn check(occ: &Occupancy, face_tol: f64, ratio_tol: f64) {
 
     // Every cell covers the same area, so every cell should hold the same occupancy; the
     // rim cells are where a mishandled reflection would pile walkers up or starve them.
-    let last = (CELLS_PER_FACE_EDGE - 1) as u8;
+    let last = (CELLS_PER_FACE_EDGE - 1) as u16;
     let mut rim = (0.0f64, 0usize);
     let mut interior = (0.0f64, 0usize);
-    for c in CellId::all() {
+    for c in CellId::all(Topology::Cube, Scale::ONE) {
         let n = occ.cells[c.index()] as f64;
-        if c.face() != Face::Top && c.cy() == last {
+        if c.face(Topology::Cube, Scale::ONE) != Face::Top && c.cy(Topology::Cube, Scale::ONE) == last {
             rim.0 += n;
             rim.1 += 1;
         } else {
@@ -129,7 +130,7 @@ fn check(occ: &Occupancy, face_tol: f64, ratio_tol: f64) {
         assert!(n > 0.0, "{c:?} was never visited");
     }
     assert_eq!(rim.1, 64);
-    assert_eq!(interior.1, CELL_COUNT - 64);
+    assert_eq!(interior.1, CUBE_CELL_COUNT - 64);
     let ratio = (rim.0 / rim.1 as f64) / (interior.0 / interior.1 as f64);
     eprintln!(
         "E1: {} samples, worst face deviation {worst_face:.5} (tol {face_tol}), rim/interior {ratio:.5} (tol {ratio_tol})",

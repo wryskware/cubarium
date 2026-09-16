@@ -1,5 +1,6 @@
 //! Public-API regressions for presentation history and visible transition boundaries.
 
+use cubarium_surface::{Scale, Topology};
 use std::path::Path;
 
 use cubarium::art::{ArtPack, Band};
@@ -9,7 +10,7 @@ use cubarium::art_present::{
 use cubarium::present::PRODUCER_SATURATION;
 use cubarium_core::view::RenderView;
 use cubarium_render::Canvas;
-use cubarium_surface::{CELL_COUNT, CellId};
+use cubarium_surface::{CUBE_CELL_COUNT, CellId};
 
 const PRODUCER_MAX: f64 = 10.0;
 
@@ -21,15 +22,15 @@ fn pack() -> ArtPack {
 fn view(tick: u64, density: f64) -> RenderView {
     let mut v = RenderView {
         tick,
-        producer: vec![density * PRODUCER_MAX * PRODUCER_SATURATION; CELL_COUNT],
-        detritus: vec![0.0; CELL_COUNT],
-        fruit: vec![0.0; CELL_COUNT],
-        wood: vec![0.0; CELL_COUNT],
-        plant_reserve: vec![0.0; CELL_COUNT],
-        dead_wood: vec![0.0; CELL_COUNT],
-        carrion: vec![0.0; CELL_COUNT],
-        water: vec![0.0; CELL_COUNT],
-        rain: vec![0.0; CELL_COUNT],
+        producer: vec![density * PRODUCER_MAX * PRODUCER_SATURATION; CUBE_CELL_COUNT],
+        detritus: vec![0.0; CUBE_CELL_COUNT],
+        fruit: vec![0.0; CUBE_CELL_COUNT],
+        wood: vec![0.0; CUBE_CELL_COUNT],
+        plant_reserve: vec![0.0; CUBE_CELL_COUNT],
+        dead_wood: vec![0.0; CUBE_CELL_COUNT],
+        carrion: vec![0.0; CUBE_CELL_COUNT],
+        water: vec![0.0; CUBE_CELL_COUNT],
+        rain: vec![0.0; CUBE_CELL_COUNT],
         producer_max: PRODUCER_MAX,
         wood_max: 0.6,
         organisms: Vec::new(),
@@ -40,7 +41,7 @@ fn view(tick: u64, density: f64) -> RenderView {
 }
 
 fn full_foliage_slot() -> CellId {
-    CellId::all()
+    CellId::all(Topology::Cube, Scale::ONE)
         .find(|&cell| band_of(cell) == Band::Foliage && plant_cap(Band::Foliage, cell) == Some(2))
         .expect("the fixture has a slot capable of all stages")
 }
@@ -126,7 +127,7 @@ fn drawing_at_30_60_or_120_fps_cannot_advance_growth_history() {
     presenter.observe(&view(0, 0.0));
     let rich = view(1, 1.0);
     presenter.observe(&rich);
-    let before: Vec<_> = CellId::all()
+    let before: Vec<_> = CellId::all(Topology::Cube, Scale::ONE)
         .map(|cell| presenter.growth_of(cell))
         .collect();
     let tall_before: Vec<_> = (0..presenter.columns().len())
@@ -137,7 +138,7 @@ fn drawing_at_30_60_or_120_fps_cannot_advance_growth_history() {
         for frame in 0..fps {
             presenter.draw(&rich, f64::from(frame) / f64::from(fps), &mut image);
         }
-        let after: Vec<_> = CellId::all()
+        let after: Vec<_> = CellId::all(Topology::Cube, Scale::ONE)
             .map(|cell| presenter.growth_of(cell))
             .collect();
         let tall_after: Vec<_> = (0..presenter.columns().len())

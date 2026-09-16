@@ -330,7 +330,7 @@ mod tests {
 
     fn images(face: Face) -> Vec<ChartImage> {
         let mut v = Vec::new();
-        chart_images(face, MAX_SEAMS, &mut v);
+        chart_images(Topology::Cube, face, MAX_SEAMS, &mut v);
         v
     }
 
@@ -345,14 +345,14 @@ mod tests {
         }
         fn point(&mut self) -> SurfacePoint {
             let f = Face::ALL[(self.next_f64() * 5.0) as usize % 5];
-            SurfacePoint::new(f, self.next_f64() * 64.0, self.next_f64() * 64.0).canonicalize()
+            SurfacePoint::new(f, self.next_f64() * 64.0, self.next_f64() * 64.0).canonicalize(Topology::Cube)
         }
         /// A point within roughly `reach` pixels of `a`, so that pairs land in range
         /// often and seams and vertices get hit.
         fn near(&mut self, a: SurfacePoint, reach: f64) -> SurfacePoint {
             let angle = self.next_f64() * std::f64::consts::TAU;
             let len = self.next_f64() * reach;
-            travel(a, Vec2::from_screen_angle(angle) * len).end
+            travel(Topology::Cube, a, Vec2::from_screen_angle(angle) * len).end
         }
     }
 
@@ -374,7 +374,7 @@ mod tests {
                 assert!(w[0].path < w[1].path, "images are in ChartPath order");
             }
             for img in &v {
-                assert_eq!(img.path.final_face(face), img.target_face);
+                assert_eq!(img.path.final_face(Topology::Cube, face), img.target_face);
                 assert_eq!(img.map.det(), 1, "chart images never reflect");
                 // The identity image is exactly the identity.
                 if img.path.len == 0 {
@@ -433,34 +433,34 @@ mod tests {
     fn direct_distance_inside_one_chart() {
         let a = SurfacePoint::new(Face::Front, 10.0, 10.0);
         let b = SurfacePoint::new(Face::Front, 13.0, 14.0);
-        let u = unfold(a, b, 12.0).expect("in range");
+        let u = unfold(Topology::Cube, a, b, 12.0).expect("in range");
         assert_eq!(u.path, ChartPath::direct());
         assert!((u.distance - 5.0).abs() < 1e-12);
         assert_eq!(u.map, TangentMap::IDENTITY);
         assert_eq!(u.local, Vec2::new(13.0, 14.0));
-        assert!(unfold(a, b, 4.0).is_none(), "out of range");
+        assert!(unfold(Topology::Cube, a, b, 4.0).is_none(), "out of range");
     }
 
     #[test]
     fn one_pixel_across_a_vertical_seam() {
-        let a = SurfacePoint::pixel_center(Face::Front, 63, 20);
-        let b = SurfacePoint::pixel_center(Face::Right, 0, 20);
-        let u = unfold(a, b, 12.0).expect("adjacent pixels");
+        let a = SurfacePoint::pixel_center(Topology::Cube, Face::Front, 63, 20);
+        let b = SurfacePoint::pixel_center(Topology::Cube, Face::Right, 0, 20);
+        let u = unfold(Topology::Cube, a, b, 12.0).expect("adjacent pixels");
         assert!((u.distance - 1.0).abs() < 1e-12, "{}", u.distance);
         assert_eq!(u.path.steps(), &[(Face::Front, Edge::Right)]);
     }
 
     #[test]
     fn one_pixel_across_a_twisted_top_seam() {
-        let a = SurfacePoint::pixel_center(Face::Right, 10, 0);
+        let a = SurfacePoint::pixel_center(Topology::Cube, Face::Right, 10, 0);
         let (f, x, y, _) = crate::cross_seam(Face::Right, Edge::Top, 10).expect("seam");
         assert_eq!(f, Face::Top);
-        let b = SurfacePoint::pixel_center(f, x, y);
-        let u = unfold(a, b, 12.0).expect("adjacent pixels");
+        let b = SurfacePoint::pixel_center(Topology::Cube, f, u16::from(x), u16::from(y));
+        let u = unfold(Topology::Cube, a, b, 12.0).expect("adjacent pixels");
         assert!((u.distance - 1.0).abs() < 1e-12, "{}", u.distance);
         assert_eq!(u.path.steps(), &[(Face::Right, Edge::Top)]);
         // The heading transport matches what travelling across the seam does.
-        let t = travel(a, u.local - a.chart());
+        let t = travel(Topology::Cube, a, u.local - a.chart());
         assert_eq!(t.map.inverse(), u.map);
     }
 
@@ -471,9 +471,9 @@ mod tests {
         for i in 0..40_000 {
             let a = rng.point();
             let b = if i % 2 == 0 { rng.near(a, 14.0) } else { rng.point() };
-            let Some(u) = unfold(a, b, 12.0) else { continue };
+            let Some(u) = unfold(Topology::Cube, a, b, 12.0) else { continue };
             // Walking the unfolded straight segment must actually arrive at the target.
-            let t = travel(a, u.local - a.chart());
+            let t = travel(Topology::Cube, a, u.local - a.chart());
             if t.ties > 0 {
                 continue;
             }
@@ -492,7 +492,7 @@ mod tests {
             let swept: f64 = t.segments.iter().map(PathSegment::length).sum();
             assert!((swept - u.distance).abs() < 1e-7);
             // And it is at least the 3D chord.
-            assert!(u.distance * u.distance >= a.chord_sq(&b) - 1e-6);
+            assert!(u.distance * u.distance >= Topology::Cube.chord_sq(&a, &b) - 1e-6);
             checked += 1;
         }
         assert!(checked > 2000, "only {checked} pairs were in range");
@@ -508,11 +508,11 @@ mod tests {
             let a = rng.point();
             let angle = rng.next_f64() * std::f64::consts::TAU;
             let len = rng.next_f64() * 12.0;
-            let t = travel(a, Vec2::from_screen_angle(angle) * len);
+            let t = travel(Topology::Cube, a, Vec2::from_screen_angle(angle) * len);
             if t.fallback || t.ties > 0 {
                 continue;
             }
-            let d = surface_distance(a, t.end, 12.0);
+            let d = surface_distance(Topology::Cube, a, t.end, 12.0);
             let d = d.unwrap_or_else(|| panic!("no unfolding for {a:?} -> {:?} (walked {len})", t.end));
             assert!(d <= len + 1e-7, "{a:?} -> {:?}: {d} > {len}", t.end);
         }
@@ -525,7 +525,7 @@ mod tests {
         for i in 0..40_000 {
             let a = rng.point();
             let b = if i % 2 == 0 { rng.near(a, 14.0) } else { rng.point() };
-            match (surface_distance(a, b, 12.0), surface_distance(b, a, 12.0)) {
+            match (surface_distance(Topology::Cube, a, b, 12.0), surface_distance(Topology::Cube, b, a, 12.0)) {
                 (Some(x), Some(y)) => {
                     assert!((x - y).abs() < 1e-9, "{a:?} {b:?}: {x} vs {y}");
                     checked += 1;
@@ -542,7 +542,7 @@ mod tests {
         let mut rng = Rng(0x9999_1111_2222_3333);
         for _ in 0..2000 {
             let a = rng.point();
-            let u = unfold(a, a, 12.0).expect("self");
+            let u = unfold(Topology::Cube, a, a, 12.0).expect("self");
             assert_eq!(u.path, ChartPath::direct());
             assert_eq!(u.distance, 0.0);
         }
@@ -553,26 +553,26 @@ mod tests {
         let front = Face::Front;
         let o = Vec2::new(32.0, 32.0);
         // A straight move to the right stays inside Front.
-        assert!(segment_is_valid(front, o, Vec2::new(40.0, 32.0), &ChartPath::direct()));
+        assert!(segment_is_valid(Topology::Cube, front, o, Vec2::new(40.0, 32.0), &ChartPath::direct()));
         // ...but claiming it crossed the right seam is wrong.
         let crossed = ChartPath { len: 1, steps: [(front, Edge::Right), PATH_FILLER] };
-        assert!(!segment_is_valid(front, o, Vec2::new(40.0, 32.0), &crossed));
+        assert!(!segment_is_valid(Topology::Cube, front, o, Vec2::new(40.0, 32.0), &crossed));
         // A move past the right edge really does cross it.
-        assert!(segment_is_valid(front, o, Vec2::new(70.0, 32.0), &crossed));
+        assert!(segment_is_valid(Topology::Cube, front, o, Vec2::new(70.0, 32.0), &crossed));
         // ...and is not a direct segment.
-        assert!(!segment_is_valid(front, o, Vec2::new(70.0, 32.0), &ChartPath::direct()));
+        assert!(!segment_is_valid(Topology::Cube, front, o, Vec2::new(70.0, 32.0), &ChartPath::direct()));
         // The open rim is never a valid step.
         let rim = ChartPath { len: 1, steps: [(front, Edge::Bottom), PATH_FILLER] };
-        assert!(!segment_is_valid(front, o, Vec2::new(32.0, 70.0), &rim));
+        assert!(!segment_is_valid(Topology::Cube, front, o, Vec2::new(32.0, 70.0), &rim));
         // A path whose first step names the wrong chart is rejected.
         let wrong = ChartPath { len: 1, steps: [(Face::Back, Edge::Right), PATH_FILLER] };
-        assert!(!segment_is_valid(front, o, Vec2::new(70.0, 32.0), &wrong));
+        assert!(!segment_is_valid(Topology::Cube, front, o, Vec2::new(70.0, 32.0), &wrong));
     }
 
     #[test]
     #[should_panic(expected = "MAX_LOCAL_RADIUS")]
     fn radius_above_the_local_bound_panics() {
         let a = SurfacePoint::new(Face::Front, 1.0, 1.0);
-        let _ = unfold(a, a, MAX_LOCAL_RADIUS + 1.0);
+        let _ = unfold(Topology::Cube, a, a, MAX_LOCAL_RADIUS + 1.0);
     }
 }

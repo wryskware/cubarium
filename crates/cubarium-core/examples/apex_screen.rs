@@ -1,3 +1,4 @@
+use cubarium_surface::{Scale, Topology};
 use std::collections::{BTreeMap, BTreeSet};
 
 use cubarium_core::encounter::{ApexEncounterEvent, ApexEncounterState};
@@ -94,7 +95,7 @@ fn add_prey(world: &mut World, count: u32) {
         let structure = 0.2;
         let reserve = 0.02;
         let pos = SurfacePoint::new(A.face, A.u + 2.0 + f64::from(i % 4), A.v + f64::from(i / 4))
-            .canonicalize();
+            .canonicalize(Topology::Cube);
         world.state.organisms.insert(Organism {
             pos,
             heading: Vec2::new(1.0, 0.0),

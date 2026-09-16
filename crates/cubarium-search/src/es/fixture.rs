@@ -35,6 +35,7 @@
 //! the serialized `WorldConfig` it is built on. It is recorded with every result, so a later
 //! run cannot quietly redefine the task and compare numbers across the change.
 
+use cubarium_surface::{Scale, Topology};
 use std::f64::consts::FRAC_1_SQRT_2;
 use std::path::Path;
 use std::sync::Arc;
@@ -158,7 +159,7 @@ impl Patch {
         let hi_y = (self.cy + self.half).min(15);
         for y in lo_y..=hi_y {
             for x in lo_x..=hi_x {
-                out.push(CellId::new(face, x, y));
+                out.push(CellId::new(Topology::Cube, Scale::ONE, face, u16::from(x), u16::from(y)));
             }
         }
         out
@@ -206,7 +207,7 @@ impl Layout {
     }
 
     pub fn start_cell(&self) -> CellId {
-        CellId::new(self.face(), self.start.0, self.start.1)
+        CellId::new(Topology::Cube, Scale::ONE, self.face(), u16::from(self.start.0), u16::from(self.start.1))
     }
 
     pub fn heading_vec(&self) -> Vec2 {
@@ -302,7 +303,7 @@ impl Layout {
         // 1. Empty the surface, booking the removal as an export. Ecology v1's pools go too:
         //    an unpainted cell is bare ground, with no stand, no dead wood and no remains.
         let mut removed = 0.0;
-        for cell in CellId::all() {
+        for cell in CellId::all(Topology::Cube, Scale::ONE) {
             let i = cell.index();
             let f = &mut world.state.fields;
             removed += f.p[i] + f.d[i] + f.f[i];
@@ -376,8 +377,8 @@ impl Layout {
     /// [`World::found_training_animal`] — the same routine, body for body, that the
     /// display's `--neural` seeding uses. There is one definition of this animal, not two.
     fn place(&self, world: &mut World) -> OrganismId {
-        let pos = self.start_cell().center();
-        assert_eq!(cell_of(&pos), self.start_cell(), "the grazer landed outside its start cell");
+        let pos = self.start_cell().center(Topology::Cube, Scale::ONE);
+        assert_eq!(cell_of(Topology::Cube, Scale::ONE, &pos), self.start_cell(), "the grazer landed outside its start cell");
         world
             .found_training_animal(pos, self.heading_vec())
             .expect("a fresh layout world has room for its one grazer")
@@ -605,7 +606,7 @@ mod tests {
             let (world, id) = l.build().unwrap_or_else(|e| panic!("{}: {e}", l.name));
             assert_eq!(world.population(), 1, "{}", l.name);
             let o = world.state.organisms.get(id).expect("the grazer");
-            assert_eq!(cell_of(&o.pos), l.start_cell(), "{}", l.name);
+            assert_eq!(cell_of(Topology::Cube, Scale::ONE, &o.pos), l.start_cell(), "{}", l.name);
             assert!((o.structure - o.phenotype.structure_adult).abs() < 1e-12, "{}", l.name);
             assert!((o.heading.length() - 1.0).abs() < 1e-12, "{}", l.name);
             // The layout's food is exactly what it declares, and it is all it declares.
@@ -622,7 +623,7 @@ mod tests {
                 l.name
             );
             let cfg = l.config();
-            for cell in CellId::all() {
+            for cell in CellId::all(Topology::Cube, Scale::ONE) {
                 let i = cell.index();
                 let p = world.state.fields.p[i];
                 assert!(
@@ -780,7 +781,7 @@ mod tests {
             let cfg = l.config();
             let eco_state = &world.state.ecology;
             let mut live = 0usize;
-            for cell in CellId::all() {
+            for cell in CellId::all(Topology::Cube, Scale::ONE) {
                 let i = cell.index();
                 let p = world.state.fields.p[i];
                 assert!(
@@ -801,7 +802,7 @@ mod tests {
             assert_eq!(live, l.route().len(), "{}: every painted cell is live", l.name);
             // The opening patch is at its declared fraction of *this* ecology's P_max.
             let opening = l.patches[0];
-            let centre = CellId::new(l.face(), opening.cx, opening.cy).index();
+            let centre = CellId::new(Topology::Cube, Scale::ONE, l.face(), u16::from(opening.cx), u16::from(opening.cy)).index();
             assert!(
                 (world.state.fields.p[centre] - opening.fill * cfg.producer.max).abs() < 1e-12,
                 "{}",

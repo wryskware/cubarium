@@ -24,6 +24,7 @@
 //! `crates/cubarium/tests/lanternjaw.rs`: they need `cubarium::lanternjaw`, and this crate is
 //! below that one in the dependency graph.
 
+use cubarium_surface::{Scale, Topology};
 use std::collections::HashSet;
 
 use cube_proto::Face;
@@ -37,10 +38,10 @@ use cubarium_surface::{MAX_LOCAL_RADIUS, PixelImage, SurfacePoint, Vec2, unfold_
 // canvas helpers
 // ---------------------------------------------------------------------------
 
-fn every_pixel() -> impl Iterator<Item = (Face, u8, u8)> {
+fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
     Face::ALL
         .into_iter()
-        .flat_map(|face| (0..64u8).flat_map(move |y| (0..64u8).map(move |x| (face, x, y))))
+        .flat_map(|face| (0..64u16).flat_map(move |y| (0..64u16).map(move |x| (face, x, y))))
 }
 
 /// Bit-for-bit equality, which is what "bit for bit" and "identical" in the docs mean.
@@ -60,8 +61,8 @@ fn max_diff(a: &Canvas, b: &Canvas) -> f32 {
 }
 
 /// The worst channel difference, with the pixel it happened at, for an assertion message.
-fn worst_diff(a: &Canvas, b: &Canvas) -> (f32, Face, u8, u8) {
-    let mut worst = (0.0f32, Face::Front, 0u8, 0u8);
+fn worst_diff(a: &Canvas, b: &Canvas) -> (f32, Face, u16, u16) {
+    let mut worst = (0.0f32, Face::Front, 0u16, 0u16);
     for (f, x, y) in every_pixel() {
         let (p, q) = (a.get(f, x, y), b.get(f, x, y));
         for c in 0..3 {
@@ -87,7 +88,7 @@ fn total_light(image: &Canvas) -> f64 {
 fn lit_faces(image: &Canvas) -> usize {
     Face::ALL
         .into_iter()
-        .filter(|&f| (0..64u8).any(|y| (0..64u8).any(|x| image.get(f, x, y) != [0.0; 3])))
+        .filter(|&f| (0..64u16).any(|y| (0..64u16).any(|x| image.get(f, x, y) != [0.0; 3])))
         .count()
 }
 
@@ -270,7 +271,7 @@ const HEADINGS: [(&str, Vec2); 4] = [
 ///   wider query visits pixels the ordinary stamp never looked at (`unfold_pixels` gives each
 ///   pixel its *shortest* valid unfolding, which cannot depend on how far the query reached);
 /// * against the ordinary `stamp_sprite`, bit for bit, on exactly the pixels its own radius
-///   enumerates (`unfold_pixels(root, sprite.extent())`) — so the rig has not shifted the
+///   enumerates (`unfold_pixels(Topology::Cube, root, sprite.extent())`) — so the rig has not shifted the
 ///   sample, changed a pixel's owner or composited a zero-alpha sample — with every remaining
 ///   difference required to lie *outside* that radius and to be no more than a filter tail.
 #[test]
@@ -293,8 +294,8 @@ fn one_part_at_the_root_is_an_ordinary_sprite_stamp_plus_the_tail_its_radius_cli
         for (where_, root) in ANCHORS {
             // The pixels the legacy stamp's own radius enumerates, where the two must agree.
             let mut legacy: Vec<PixelImage> = Vec::new();
-            unfold_pixels(root, sprite.extent(), &mut legacy);
-            let legacy: HashSet<(Face, u8, u8)> =
+            unfold_pixels(Topology::Cube, root, sprite.extent(), &mut legacy);
+            let legacy: HashSet<(Face, u16, u16)> =
                 legacy.iter().map(|p| (p.face, p.x, p.y)).collect();
             assert!(!legacy.is_empty());
 
@@ -493,7 +494,7 @@ fn the_pieces_of_a_cut_material_sum_to_the_uncut_sample() {
 /// not (a far limb glowing through the hull).
 #[test]
 fn equal_layers_sum_and_distinct_layers_source_over_in_ascending_order() {
-    let root = SurfacePoint::pixel_center(Face::Front, 32, 32);
+    let root = SurfacePoint::pixel_center(Topology::Cube, Face::Front, 32, 32);
     let heading = Vec2::new(1.0, 0.0);
     let pivot = Vec2::new(0.5, 0.5);
     let under = Sprite::from_premultiplied(1, 1, pivot, vec![[0.0, 0.5, 0.0, 1.0]]).unwrap();
@@ -724,11 +725,11 @@ fn a_part_hanging_over_the_open_rim_is_cut_and_never_reflected() {
 
     // The flat body really does reach past where the rim is, so the cut is not vacuous.
     assert!(
-        (34..64u8).any(|y| (0..64u8).any(|x| flat.get(Face::Front, x, y) != [0.0; 3])),
+        (34..64u16).any(|y| (0..64u16).any(|x| flat.get(Face::Front, x, y) != [0.0; 3])),
         "the fixture does not reach past the rim, so it proves nothing"
     );
     assert!(
-        (0..64u8).any(|x| rim.get(Face::Front, x, 63) != [0.0; 3]),
+        (0..64u16).any(|x| rim.get(Face::Front, x, 63) != [0.0; 3]),
         "the rim body painted nothing on the last row that exists"
     );
 
@@ -934,7 +935,7 @@ fn a_material_partition_is_never_duplicated_at_a_top_vertex() {
     let mid = SurfacePoint::new(Face::Front, 32.0, 32.0);
     let image = drawn(mid, heading, &adjacent, 1.0);
     let bare = ground();
-    for (x, y) in [(32u8, 30u8), (33, 30)] {
+    for (x, y) in [(32u16, 30u16), (33, 30)] {
         let px = image.get(Face::Front, x, y);
         let bg = bare.get(Face::Front, x, y);
         for c in 0..3 {
@@ -1002,7 +1003,7 @@ fn a_material_partition_is_never_duplicated_at_a_top_vertex() {
         // *image* need not span two faces — only the root's face must not own them both.)
         let mut canvas = Canvas::new();
         draw(&mut canvas, root, heading, &adjacent[..], 1.0);
-        let painted: Vec<(Face, u8, u8)> = every_pixel()
+        let painted: Vec<(Face, u16, u16)> = every_pixel()
             .filter(|&(f, x, y)| canvas.get(f, x, y) != [0.0; 3])
             .collect();
         assert!(!painted.is_empty(), "{where_}: the vertex fixture painted nothing");
@@ -1083,7 +1084,7 @@ fn visible_material_over_the_rim_is_drawn_and_off_surface_support_does_not_veto_
     // The flat body really does carry a second texel past where the rim is, so the clip is not
     // vacuous; and the near-rim body carries only the one.
     assert!(
-        (0..64u8).any(|y| y >= 34 && flat.get(Face::Front, 32, y) != [0.0; 3]),
+        (0..64u16).any(|y| y >= 34 && flat.get(Face::Front, 32, y) != [0.0; 3]),
         "the fixture's front texel must fall past the rim once the root is at v = 60"
     );
     assert!(

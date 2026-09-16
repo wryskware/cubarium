@@ -1,3 +1,4 @@
+use cubarium_surface::{Scale, Topology};
 use serde::{Deserialize, Serialize};
 
 use cubarium_surface::{FACE_EXTENT, Face, SurfacePoint};
@@ -64,7 +65,7 @@ impl HunterTarget {
         if self.u < 0.0 || self.u >= FACE_EXTENT || self.v < 0.0 || self.v >= FACE_EXTENT {
             return None;
         }
-        Some(SurfacePoint::new(face, self.u, self.v).canonicalize())
+        Some(SurfacePoint::new(face, self.u, self.v).canonicalize(Topology::Cube))
     }
 }
 

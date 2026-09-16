@@ -12,6 +12,7 @@
 //!
 //! Nothing here attaches a policy to the display world, and nothing here trains.
 
+use cubarium_surface::{Scale, Topology};
 use std::time::Instant;
 
 use cubarium_core::config::FounderKind;
@@ -75,7 +76,7 @@ fn probe_world() -> (World, OrganismId) {
             - before;
     }
     // A well-fed patch so grazing has something to bite.
-    for cell in cubarium_surface::CellId::all() {
+    for cell in cubarium_surface::CellId::all(Topology::Cube, Scale::ONE) {
         world.state.fields.p[cell.index()] = world.state.config.producer.max;
     }
     let world = World::from_state(world.state).expect("still valid");

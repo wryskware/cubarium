@@ -1,7 +1,8 @@
+use cubarium_surface::{Scale, Topology};
 use std::f64::consts::TAU;
 
 use cubarium_surface::{
-    CELL_COUNT, CellId, FACE_EXTENT, Face, FieldGraph, MAX_SEAMS, ScalarField, SurfacePoint,
+    CUBE_CELL_COUNT, CellId, FACE_EXTENT, Face, FieldGraph, MAX_SEAMS, ScalarField, SurfacePoint,
     Travel, Vec2, chart_images, face_frame,
 };
 
@@ -111,7 +112,7 @@ impl World {
             let energy = config.founders.initial_energy_fraction * phenotype.energy_max;
             external_material_in += structure + reserve;
             organisms.insert(Organism {
-                pos: SurfacePoint::new(face, u, v).canonicalize(),
+                pos: SurfacePoint::new(face, u, v).canonicalize(Topology::Cube),
                 heading,
                 ou: Vec2::ZERO,
                 structure,
@@ -205,26 +206,26 @@ impl World {
     fn assemble(state: WorldState, habitat: Habitat, initial_material: f64) -> World {
         let mut world = World {
             state,
-            graph: FieldGraph::new(),
+            graph: FieldGraph::new(Topology::Cube, Scale::ONE),
             habitat,
             images: std::array::from_fn(|i| {
                 let mut v = Vec::new();
-                chart_images(
+                chart_images(Topology::Cube, 
                     Face::from_index(i as u8).expect("five faces"),
                     MAX_SEAMS,
                     &mut v,
                 );
                 v
             }),
-            light: Box::new([0.0; CELL_COUNT]),
-            moisture: Box::new([0.0; CELL_COUNT]),
-            rain_source: Box::new([0.0; CELL_COUNT]),
-            rain: Box::new([0.0; CELL_COUNT]),
-            manual_rain: Box::new([0.0; CELL_COUNT]),
+            light: Box::new([0.0; CUBE_CELL_COUNT]),
+            moisture: Box::new([0.0; CUBE_CELL_COUNT]),
+            rain_source: Box::new([0.0; CUBE_CELL_COUNT]),
+            rain: Box::new([0.0; CUBE_CELL_COUNT]),
+            manual_rain: Box::new([0.0; CUBE_CELL_COUNT]),
             rain_envelope: care::rain_envelope(),
-            scratch: (ScalarField::zeros(), ScalarField::zeros()),
+            scratch: (ScalarField::zeros(Topology::Cube, Scale::ONE), ScalarField::zeros(Topology::Cube, Scale::ONE)),
             eco_scratch: EcoScratch::default(),
-            water_scratch: ScalarField::zeros(),
+            water_scratch: ScalarField::zeros(Topology::Cube, Scale::ONE),
             sense_rings: Vec::new(),
             neighbors: NeighborLists::default(),
             travel_buf: Travel::default(),
@@ -314,7 +315,7 @@ impl World {
         let reserve = TRAINING_START_RESERVE * phenotype.reserve_max;
         let energy = TRAINING_START_ENERGY * phenotype.energy_max;
         let id = self.state.organisms.insert(Organism {
-            pos: pos.canonicalize(),
+            pos: pos.canonicalize(Topology::Cube),
             heading,
             ou: Vec2::ZERO,
             structure,
@@ -392,9 +393,9 @@ pub(super) fn sense_depth(sense_radius: f64) -> usize {
 /// For every cell, the cells at graph distance exactly 1, 2 and 3 (breadth-first over the
 /// field graph, seams included, never across the open rim).
 pub(super) fn sense_rings(graph: &FieldGraph) -> Vec<[Vec<CellId>; SENSE_DEPTH_MAX]> {
-    CellId::all()
+    CellId::all(Topology::Cube, Scale::ONE)
         .map(|origin| {
-            let mut seen = vec![false; CELL_COUNT];
+            let mut seen = vec![false; CUBE_CELL_COUNT];
             seen[origin.index()] = true;
             let mut rings: [Vec<CellId>; SENSE_DEPTH_MAX] = Default::default();
             let mut frontier = vec![origin];

@@ -7,6 +7,7 @@
 //! The `-Y` plane is simply absent: the cube's bottom is open, and a ray that would only
 //! hit it shows background.
 
+use cubarium_surface::{Scale, Topology};
 use cube_proto::{FACE_SIZE, Face};
 use cubarium_surface::{FACE_EXTENT, face_frame};
 
@@ -173,7 +174,7 @@ impl Camera {
 
     /// Fill `out` with one entry per viewport pixel of a `size`×`size` square viewport:
     /// the face and pixel each ray lands on, or `None` for background.
-    pub fn trace_viewport(&self, size: usize, out: &mut Vec<Option<(Face, u8, u8)>>) {
+    pub fn trace_viewport(&self, size: usize, out: &mut Vec<Option<(Face, u16, u16)>>) {
         out.clear();
         out.reserve(size * size);
         let inv = 2.0 / size as f64;
@@ -184,7 +185,7 @@ impl Camera {
                 let (o, d) = self.ray(sx, sy);
                 out.push(cast(o, d).map(|h| {
                     let (x, y) = h.pixel();
-                    (h.face, x, y)
+                    (h.face, u16::from(x), u16::from(y))
                 }));
             }
         }
@@ -204,10 +205,10 @@ mod tests {
         let mut checked = 0u32;
         for face in Face::ALL {
             let n = face_frame(face).normal;
-            for y in 0..64u8 {
-                for x in 0..64u8 {
-                    let p = SurfacePoint::pixel_center(face, x, y);
-                    let target = p.embed();
+            for y in 0..64u16 {
+                for x in 0..64u16 {
+                    let p = SurfacePoint::pixel_center(Topology::Cube, face, x, y);
+                    let target = Topology::Cube.embed(Scale::ONE, &p);
 
                     // Straight inversion of the embedding.
                     let (u, v) = invert_face(face, target).expect("pixel center is on its face");
@@ -219,7 +220,7 @@ mod tests {
                     let origin = add(target, scale(n, 3.0));
                     let hit = cast(origin, scale(n, -1.0)).expect("a ray down the normal hits");
                     assert_eq!(hit.face, face, "{face:?} ({x},{y}) hit {:?}", hit.face);
-                    assert_eq!(hit.pixel(), (x, y), "{face:?} ({x},{y}) -> {:?}", hit.pixel());
+                    assert_eq!(hit.pixel(), (x as u8, y as u8), "{face:?} ({x},{y}) -> {:?}", hit.pixel());
                     assert!((hit.u - (f64::from(x) + 0.5)).abs() < 1e-9);
                     assert!((hit.v - (f64::from(y) + 0.5)).abs() < 1e-9);
                     checked += 1;

@@ -5,7 +5,8 @@
 //! rounding. Nothing here touches `N`, `P`, `D` or `De`; the coupling to the ecology runs
 //! the other way, through `Fields::react` (wet growth, drowning) and movement (wading).
 
-use cubarium_surface::{CELL_COUNT, FieldGraph, ScalarField};
+use cubarium_surface::{Scale, Topology};
+use cubarium_surface::{CUBE_CELL_COUNT, FieldGraph, ScalarField};
 
 use crate::DT;
 use crate::config::WaterConfig;
@@ -18,11 +19,11 @@ const EDGE_CAP: f64 = 0.25;
 #[derive(Clone, Copy)]
 pub struct Drivers<'a> {
     /// Terrain height `z` (`Habitat::terrain`).
-    pub terrain: &'a [f64; CELL_COUNT],
+    pub terrain: &'a [f64; CUBE_CELL_COUNT],
     /// This tick's light `L`, for evaporation.
-    pub light: &'a [f64; CELL_COUNT],
+    pub light: &'a [f64; CUBE_CELL_COUNT],
     /// This tick's moisture weather blob sum `B`, for rain.
-    pub rain_source: &'a [f64; CELL_COUNT],
+    pub rain_source: &'a [f64; CUBE_CELL_COUNT],
 }
 
 /// What one tick of water did, for the audit and telemetry.
@@ -64,19 +65,19 @@ pub fn step(
     w: &mut [f64],
     cfg: &WaterConfig,
     drivers: Drivers<'_>,
-    manual: Option<&[f64; CELL_COUNT]>,
-    rain: &mut [f32; CELL_COUNT],
+    manual: Option<&[f64; CUBE_CELL_COUNT]>,
+    rain: &mut [f32; CUBE_CELL_COUNT],
     graph: &FieldGraph,
     scratch: &mut ScalarField,
 ) -> WaterLedger {
-    debug_assert_eq!(w.len(), CELL_COUNT);
+    debug_assert_eq!(w.len(), CUBE_CELL_COUNT);
     let Drivers { terrain, light, rain_source } = drivers;
     let mut ledger = WaterLedger::default();
 
     // Rain.
     match manual {
         None => {
-            for i in 0..CELL_COUNT {
+            for i in 0..CUBE_CELL_COUNT {
                 let excess = rain_source[i] - cfg.rain_threshold;
                 let rate = if excess > 0.0 { cfg.rain_rate * excess } else { 0.0 };
                 rain[i] = rate as f32;
@@ -86,7 +87,7 @@ pub fn step(
             }
         }
         Some(manual) => {
-            for i in 0..CELL_COUNT {
+            for i in 0..CUBE_CELL_COUNT {
                 let excess = rain_source[i] - cfg.rain_threshold;
                 let natural = if excess > 0.0 { cfg.rain_rate * excess } else { 0.0 };
                 let rate = natural + manual[i];
@@ -141,7 +142,7 @@ pub fn step(
 
     // Evaporation.
     if cfg.evap > 0.0 {
-        for i in 0..CELL_COUNT {
+        for i in 0..CUBE_CELL_COUNT {
             let lost = (cfg.evap * light[i].max(cfg.evap_floor) * w[i] * DT).min(w[i]).max(0.0);
             w[i] -= lost;
             ledger.evap_out += lost;
@@ -153,8 +154,8 @@ pub fn step(
 
 /// Finite and nonnegative everywhere.
 pub fn check(w: &[f64]) -> Result<(), String> {
-    if w.len() != CELL_COUNT {
-        return Err(format!("w has {} cells, expected {CELL_COUNT}", w.len()));
+    if w.len() != CUBE_CELL_COUNT {
+        return Err(format!("w has {} cells, expected {CUBE_CELL_COUNT}", w.len()));
     }
     for (i, &x) in w.iter().enumerate() {
         if !x.is_finite() {
@@ -177,10 +178,10 @@ mod tests {
 
     struct Harness {
         cfg: WaterConfig,
-        terrain: Box<[f64; CELL_COUNT]>,
-        light: Box<[f64; CELL_COUNT]>,
-        source: Box<[f64; CELL_COUNT]>,
-        rain: Box<[f32; CELL_COUNT]>,
+        terrain: Box<[f64; CUBE_CELL_COUNT]>,
+        light: Box<[f64; CUBE_CELL_COUNT]>,
+        source: Box<[f64; CUBE_CELL_COUNT]>,
+        rain: Box<[f32; CUBE_CELL_COUNT]>,
         graph: FieldGraph,
         scratch: ScalarField,
     }
@@ -194,10 +195,10 @@ mod tests {
                 cfg: world.water,
                 terrain: habitat.terrain.clone(),
                 light: habitat.light_base.clone(),
-                source: Box::new([0.0; CELL_COUNT]),
-                rain: Box::new([0.0; CELL_COUNT]),
-                graph: FieldGraph::new(),
-                scratch: ScalarField::zeros(),
+                source: Box::new([0.0; CUBE_CELL_COUNT]),
+                rain: Box::new([0.0; CUBE_CELL_COUNT]),
+                graph: FieldGraph::new(Topology::Cube, Scale::ONE),
+                scratch: ScalarField::zeros(Topology::Cube, Scale::ONE),
             }
         }
 
@@ -205,7 +206,7 @@ mod tests {
             self.step_with(w, None)
         }
 
-        fn step_with(&mut self, w: &mut [f64], manual: Option<&[f64; CELL_COUNT]>) -> WaterLedger {
+        fn step_with(&mut self, w: &mut [f64], manual: Option<&[f64; CUBE_CELL_COUNT]>) -> WaterLedger {
             step(
                 w,
                 &self.cfg,
@@ -222,8 +223,8 @@ mod tests {
         w.iter().sum()
     }
 
-    fn face_rows(face: Face, cy: u8) -> impl Iterator<Item = usize> {
-        (0..16u8).map(move |cx| CellId::new(face, cx, cy).index())
+    fn face_rows(face: Face, cy: u16) -> impl Iterator<Item = usize> {
+        (0..16u16).map(move |cx| CellId::new(Topology::Cube, Scale::ONE, face, cx, cy).index())
     }
 
     #[test]
@@ -231,11 +232,11 @@ mod tests {
         let mut h = Harness::new(0.0);
         h.cfg.flow = 0.0;
         h.cfg.evap = 0.0;
-        let wet = CellId::new(Face::Front, 3, 3).index();
-        let damp = CellId::new(Face::Front, 9, 9).index();
+        let wet = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 3, 3).index();
+        let damp = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 9, 9).index();
         h.source[wet] = h.cfg.rain_threshold + 0.5;
         h.source[damp] = h.cfg.rain_threshold; // exactly at the threshold: dry
-        let mut w = vec![0.0; CELL_COUNT];
+        let mut w = vec![0.0; CUBE_CELL_COUNT];
         let ledger = h.step(&mut w);
         let expected = h.cfg.rain_rate * 0.5 * DT;
         assert!((w[wet] - expected).abs() < 1e-15, "{}", w[wet]);
@@ -249,7 +250,7 @@ mod tests {
         // No rain rate, no rain, whatever the weather.
         h.cfg.rain_rate = 0.0;
         h.source.fill(1.0);
-        let mut dry = vec![0.0; CELL_COUNT];
+        let mut dry = vec![0.0; CUBE_CELL_COUNT];
         let ledger = h.step(&mut dry);
         assert!(dry.iter().all(|&x| x == 0.0));
         assert_eq!(ledger.rain_in, 0.0);
@@ -261,15 +262,15 @@ mod tests {
         let mut h = Harness::new(0.0);
         h.cfg.flow = 0.0;
         h.cfg.evap = 0.0;
-        let wet = CellId::new(Face::Front, 3, 3).index();
-        let dry = CellId::new(Face::Front, 9, 9).index();
+        let wet = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 3, 3).index();
+        let dry = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 9, 9).index();
         h.source[wet] = h.cfg.rain_threshold + 0.5;
         let natural = h.cfg.rain_rate * 0.5;
-        let mut manual = Box::new([0.0f64; CELL_COUNT]);
+        let mut manual = Box::new([0.0f64; CUBE_CELL_COUNT]);
         manual[wet] = 0.25;
         manual[dry] = 0.125;
 
-        let mut w = vec![0.0; CELL_COUNT];
+        let mut w = vec![0.0; CUBE_CELL_COUNT];
         let ledger = h.step_with(&mut w, Some(&manual));
         // The published rate is the sum, so the visible shower and the deposited water agree.
         assert!((f64::from(h.rain[wet]) - (natural + 0.25)).abs() < 1e-6, "{}", h.rain[wet]);
@@ -283,10 +284,10 @@ mod tests {
         assert_eq!(ledger.evap_out, 0.0);
 
         // `None` and an all-zero array agree on the water; only the branch differs.
-        let zeros = Box::new([0.0f64; CELL_COUNT]);
-        let mut a = vec![0.0; CELL_COUNT];
+        let zeros = Box::new([0.0f64; CUBE_CELL_COUNT]);
+        let mut a = vec![0.0; CUBE_CELL_COUNT];
         let la = h.step_with(&mut a, None);
-        let mut b = vec![0.0; CELL_COUNT];
+        let mut b = vec![0.0; CUBE_CELL_COUNT];
         let lb = h.step_with(&mut b, Some(&zeros));
         assert_eq!(a, b);
         assert_eq!(la.rain_in, lb.rain_in);
@@ -300,7 +301,7 @@ mod tests {
         h.cfg.evap = 0.0;
         // A scattered deterministic field, including some very shallow cells.
         let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
-        let mut w: Vec<f64> = (0..CELL_COUNT)
+        let mut w: Vec<f64> = (0..CUBE_CELL_COUNT)
             .map(|_| {
                 x ^= x << 13;
                 x ^= x >> 7;
@@ -323,8 +324,8 @@ mod tests {
     fn water_on_a_top_row_side_cell_reaches_the_bottom_row_within_bounded_ticks() {
         let mut h = Harness::new(0.0);
         h.cfg.evap = 0.0;
-        let mut w = vec![0.0; CELL_COUNT];
-        w[CellId::new(Face::Right, 6, 0).index()] = 1.0;
+        let mut w = vec![0.0; CUBE_CELL_COUNT];
+        w[CellId::new(Topology::Cube, Scale::ONE, Face::Right, 6, 0).index()] = 1.0;
         let mut ticks = 0;
         loop {
             h.step(&mut w);
@@ -349,29 +350,29 @@ mod tests {
         // top face has no downhill neighbors on the side faces (z drops there, so water
         // *does* leave the top over the seams — so pin it: run with only the top face's
         // interior by giving side faces a huge terrain wall).
-        for i in 0..CELL_COUNT {
-            if CellId(i as u16).face() != Face::Top {
+        for i in 0..CUBE_CELL_COUNT {
+            if CellId(i as u16).face(Topology::Cube, Scale::ONE) != Face::Top {
                 h.terrain[i] = 10.0;
             }
         }
-        let mut w = vec![0.0; CELL_COUNT];
-        for cy in 6..10u8 {
-            for cx in 6..10u8 {
-                w[CellId::new(Face::Top, cx, cy).index()] = 1.0;
+        let mut w = vec![0.0; CUBE_CELL_COUNT];
+        for cy in 6..10u16 {
+            for cx in 6..10u16 {
+                w[CellId::new(Topology::Cube, Scale::ONE, Face::Top, cx, cy).index()] = 1.0;
             }
         }
         let before = total(&w);
         for _ in 0..40_000 {
             h.step(&mut w);
         }
-        let top: Vec<f64> = (0..CELL_COUNT)
-            .filter(|&i| CellId(i as u16).face() == Face::Top)
+        let top: Vec<f64> = (0..CUBE_CELL_COUNT)
+            .filter(|&i| CellId(i as u16).face(Topology::Cube, Scale::ONE) == Face::Top)
             .map(|i| w[i])
             .collect();
         let mean = top.iter().sum::<f64>() / top.len() as f64;
         assert!((mean - before / 256.0).abs() < 1e-9);
         assert!(top.iter().all(|&x| (x - mean).abs() < 1e-6), "not level: {:?}", top.iter().cloned().fold((f64::MAX, f64::MIN), |(lo, hi), x| (lo.min(x), hi.max(x))));
-        assert!(w.iter().enumerate().all(|(i, &x)| CellId(i as u16).face() == Face::Top || x == 0.0));
+        assert!(w.iter().enumerate().all(|(i, &x)| CellId(i as u16).face(Topology::Cube, Scale::ONE) == Face::Top || x == 0.0));
         // A level field is a fixed point, bit for bit.
         let snapshot = w.clone();
         h.step(&mut w);
@@ -384,12 +385,12 @@ mod tests {
         h.cfg.flow = 0.0;
         h.cfg.evap_floor = 0.2;
         h.light.fill(0.0);
-        let bright = CellId::new(Face::Top, 2, 2).index();
-        let dim = CellId::new(Face::Top, 4, 4).index();
-        let dark = CellId::new(Face::Top, 6, 6).index();
+        let bright = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 2, 2).index();
+        let dim = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 4, 4).index();
+        let dark = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 6, 6).index();
         h.light[bright] = 1.0;
         h.light[dim] = 0.5;
-        let mut w = vec![0.0; CELL_COUNT];
+        let mut w = vec![0.0; CUBE_CELL_COUNT];
         w[bright] = 2.0;
         w[dim] = 2.0;
         w[dark] = 2.0;
@@ -406,20 +407,20 @@ mod tests {
         h2.cfg.flow = 0.0;
         h2.cfg.evap_floor = 0.2;
         h2.light.fill(0.1);
-        let mut w2 = vec![1.0; CELL_COUNT];
+        let mut w2 = vec![1.0; CUBE_CELL_COUNT];
         let l2 = h2.step(&mut w2);
-        assert!((l2.evap_out - CELL_COUNT as f64 * h2.cfg.evap * 0.2 * DT).abs() < 1e-9);
+        assert!((l2.evap_out - CUBE_CELL_COUNT as f64 * h2.cfg.evap * 0.2 * DT).abs() < 1e-9);
         // A zero floor restores the bare light law.
         h2.cfg.evap_floor = 0.0;
-        let mut w3 = vec![1.0; CELL_COUNT];
+        let mut w3 = vec![1.0; CUBE_CELL_COUNT];
         let l3 = h2.step(&mut w3);
-        assert!((l3.evap_out - CELL_COUNT as f64 * h2.cfg.evap * 0.1 * DT).abs() < 1e-9);
+        assert!((l3.evap_out - CUBE_CELL_COUNT as f64 * h2.cfg.evap * 0.1 * DT).abs() < 1e-9);
     }
 
     #[test]
     fn check_rejects_negative_and_non_finite_depths() {
-        assert!(check(&vec![0.0; CELL_COUNT]).is_ok());
-        let mut w = vec![0.0; CELL_COUNT];
+        assert!(check(&vec![0.0; CUBE_CELL_COUNT]).is_ok());
+        let mut w = vec![0.0; CUBE_CELL_COUNT];
         w[5] = -1e-3;
         assert!(check(&w).unwrap_err().contains("negative"));
         w[5] = f64::NAN;

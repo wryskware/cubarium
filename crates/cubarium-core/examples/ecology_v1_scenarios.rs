@@ -31,6 +31,7 @@
 //!
 //! Subcommands: `b0 b1a b1b b2 b3 b4a b4b b5 b6a b6b b7`, or `all`.
 
+use cubarium_surface::{Scale, Topology};
 use std::collections::BTreeSet;
 
 use cubarium_core::config::WorldConfig;
@@ -261,10 +262,10 @@ fn place_genome(
     edit(&mut genome);
     genome.clamp();
     let phenotype = decode(&genome, &cfg.organism);
-    let centre = cell.center();
+    let centre = cell.center(Topology::Cube, Scale::ONE);
     let offset = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)][nth % 4];
-    let pos = SurfacePoint::new(cell.face(), centre.u + offset.0, centre.v + offset.1);
-    assert_eq!(cell_of(&pos), cell, "the body landed outside its cell");
+    let pos = SurfacePoint::new(cell.face(Topology::Cube, Scale::ONE), centre.u + offset.0, centre.v + offset.1);
+    assert_eq!(cell_of(Topology::Cube, Scale::ONE, &pos), cell, "the body landed outside its cell");
     let id = world.state.organisms.insert(Organism {
         pos,
         heading: Vec2::new(1.0, 0.0),
@@ -378,7 +379,7 @@ fn run_b0_arm(class: Class, propagules: bool, verbose: bool) -> Baseline {
     let seed = Stand::seed(&cfg, class);
     let mut world = World::new(cfg).expect("the staged config is valid");
     nutrient_everywhere(&mut world);
-    let focal = CellId::new(Face::Top, 8, 8);
+    let focal = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8);
     paint(&mut world, focal, seed);
     let mut world = restage(world);
 
@@ -533,7 +534,7 @@ fn b1a() {
     hungry_gate(&mut cfg);
     let mut world = World::new(cfg).expect("valid");
     nutrient_everywhere(&mut world);
-    let cell = CellId::new(Face::Top, 8, 8);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8);
     paint(&mut world, cell, stand);
     let grazer = place(&mut world, cell, 0.85, 0);
     let mut world = restage(world);
@@ -629,12 +630,12 @@ fn b1a() {
 
 fn region(centre: CellId, half: i32) -> Vec<CellId> {
     let mut out = Vec::new();
-    let (cu, cv) = (i32::from(centre.cx()), i32::from(centre.cy()));
+    let (cu, cv) = (i32::from(centre.cx(Topology::Cube, Scale::ONE)), i32::from(centre.cy(Topology::Cube, Scale::ONE)));
     for du in -half..=half {
         for dv in -half..=half {
             let (u, v) = (cu + du, cv + dv);
             if (0..16).contains(&u) && (0..16).contains(&v) {
-                out.push(CellId::new(centre.face(), u as u8, v as u8));
+                out.push(CellId::new(Topology::Cube, Scale::ONE, centre.face(Topology::Cube, Scale::ONE), u as u16, v as u16));
             }
         }
     }
@@ -647,7 +648,7 @@ fn run_b1b(class: Class) {
     hungry_gate(&mut cfg);
     let mut world = World::new(cfg).expect("valid");
     nutrient_everywhere(&mut world);
-    let centre = CellId::new(Face::Top, 8, 8);
+    let centre = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8);
     let cells = region(centre, 2);
     for c in &cells {
         paint(&mut world, *c, stand);
@@ -679,7 +680,7 @@ fn run_b1b(class: Class) {
     );
     for tick in 0..=HORIZON {
         if let Some(o) = world.state.organisms.get(grazer) {
-            visited.insert(cell_of(&o.pos).0);
+            visited.insert(cell_of(Topology::Cube, Scale::ONE, &o.pos).0);
         }
         if tick % (SAMPLE * 4) == 0 {
             let p_total: f64 = cells.iter().map(|c| world.state.fields.p[c.index()]).sum();
@@ -779,9 +780,9 @@ fn b2() {
     let mut world = World::new(cfg).expect("valid");
     nutrient_everywhere(&mut world);
     let stands = [
-        CellId::new(Face::Top, 5, 8),
-        CellId::new(Face::Top, 8, 8),
-        CellId::new(Face::Top, 11, 8),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 5, 8),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 11, 8),
     ];
     for c in stands {
         paint(&mut world, c, stand);
@@ -797,7 +798,7 @@ fn b2() {
     let mut died = None;
     for tick in 0..HORIZON {
         if let Some(o) = world.state.organisms.get(grazer) {
-            let here = cell_of(&o.pos);
+            let here = cell_of(Topology::Cube, Scale::ONE, &o.pos);
             visited.insert(here.0);
             let index = stands.iter().position(|c| *c == here);
             if index != on {
@@ -829,7 +830,7 @@ fn b2() {
     for (i, c) in stands.iter().enumerate() {
         println!(
             "{:<10} {:>10} {:>10.4} {:>12} {:>10.4} {:>10.4}",
-            format!("({},{})", c.cx(), c.cy()),
+            format!("({},{})", c.cx(Topology::Cube, Scale::ONE), c.cy(Topology::Cube, Scale::ONE)),
             ticks_on[i],
             minima[i],
             q_at_departure[i].map_or("—".to_string(), |q| format!("{q:.4}")),
@@ -858,7 +859,7 @@ fn run_b3(class: Class, stand: Stand, label: &str, verbose: bool) -> (Option<u64
     let mut cfg = class_config(class);
     let mut world = World::new(cfg.clone()).expect("valid");
     nutrient_everywhere(&mut world);
-    let cell = CellId::new(Face::Top, 8, 8);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8);
     paint(&mut world, cell, stand);
     // The defoliation, by fiat, as an **internal transfer**: the foliage becomes litter in its
     // own cell, carrying `e_v` per unit under the `e_d_max` cap, exactly as senescence does.
@@ -981,7 +982,7 @@ fn run_b4a(verbose: bool) -> Killed {
     // stays dead. Painting one cell in an otherwise bare world is exactly that isolation.
     let mut world = World::new(cfg).expect("valid");
     nutrient_everywhere(&mut world);
-    let cell = CellId::new(Face::Top, 8, 8);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8);
     paint(&mut world, cell, stand);
     let ids: Vec<OrganismId> = (0..3).map(|k| place(&mut world, cell, 0.85, k)).collect();
     let mut world = restage(world);
@@ -1109,7 +1110,7 @@ fn run_b4b(killed: &Killed, stand: Stand, label: &str) {
     let mut cfg = class_config(Class::Bright);
     let mut world = World::new(cfg.clone()).expect("valid");
     nutrient_everywhere(&mut world);
-    let centre = CellId::new(Face::Top, 8, 8);
+    let centre = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8);
     let ring: Vec<CellId> = region(centre, 1).into_iter().filter(|c| *c != centre).collect();
     for c in &ring {
         paint(&mut world, *c, stand);
@@ -1228,7 +1229,7 @@ fn b5() {
             cfg.plant.propagule_rate = 0.0;
             let mut world = World::new(cfg).expect("valid");
             nutrient_everywhere(&mut world);
-            let cell = CellId::new(Face::Top, 8, 8);
+            let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8);
             let before = material(&world);
             match food {
                 0 => {
@@ -1356,7 +1357,7 @@ fn run_b6(renewal: bool, half: i32, label: &str) {
     }
     let mut world = World::new(cfg).expect("valid");
     nutrient_everywhere(&mut world);
-    let centre = CellId::new(Face::Top, 8, 8);
+    let centre = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8);
     let cells = region(centre, half);
     for c in &cells {
         paint(&mut world, *c, stand);
@@ -1587,8 +1588,8 @@ fn run_b7(dim: bool, stand: Stand, label: &str) {
     cfg.plant.propagule_rate = WorldConfig::default().plant.propagule_rate;
     let mut world = World::new(cfg).expect("valid");
     nutrient_everywhere(&mut world);
-    let donor = CellId::new(Face::Top, 8, 8);
-    let bare = CellId::new(Face::Top, 8, 9);
+    let donor = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8);
+    let bare = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 9);
     paint(&mut world, donor, stand);
     let mut world = restage(world);
     // After the last restage, because a `World::from_state` round trip rebuilds the habitat

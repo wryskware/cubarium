@@ -23,8 +23,8 @@ fn draw(sprite: &Sprite, anchor: SurfacePoint, mask: Mask, bend: Bend) -> Canvas
 fn max_difference(a: &Canvas, b: &Canvas) -> f32 {
     let mut difference = 0.0f32;
     for face in Face::ALL {
-        for y in 0..64u8 {
-            for x in 0..64u8 {
+        for y in 0..64u16 {
+            for x in 0..64u16 {
                 for (a, b) in a.get(face, x, y).into_iter().zip(b.get(face, x, y)) {
                     difference = difference.max((a - b).abs());
                 }

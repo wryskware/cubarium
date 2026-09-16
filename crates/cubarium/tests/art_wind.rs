@@ -14,6 +14,7 @@
 //! because they need the shipped pack and the presenter's documented column geometry:
 //! the per-asset footprint sweep and the synthetic striped column.
 
+use cubarium_surface::{Scale, Topology};
 use std::path::{Path, PathBuf};
 
 use cube_proto::{FACE_SIZE, Face};
@@ -41,7 +42,7 @@ use cubarium_render::{
     Bend, Canvas, Mask, Pose, Sprite, srgb_decode, stamp_layers_bent,
     stamp_layers_bent_with_radius,
 };
-use cubarium_surface::{CELL_COUNT, CellId, SurfacePoint, Vec2, travel};
+use cubarium_surface::{CUBE_CELL_COUNT, CellId, SurfacePoint, Vec2, travel};
 
 // ---------------------------------------------------------------------------
 // fixtures
@@ -80,15 +81,15 @@ fn saturation() -> f64 {
 fn bare_view(tick: u64) -> RenderView {
     RenderView {
         tick,
-        producer: vec![0.0; CELL_COUNT],
-        detritus: vec![0.0; CELL_COUNT],
-        fruit: vec![0.0; CELL_COUNT],
-        wood: vec![0.0; CELL_COUNT],
-        plant_reserve: vec![0.0; CELL_COUNT],
-        dead_wood: vec![0.0; CELL_COUNT],
-        carrion: vec![0.0; CELL_COUNT],
-        water: vec![0.0; CELL_COUNT],
-        rain: vec![0.0; CELL_COUNT],
+        producer: vec![0.0; CUBE_CELL_COUNT],
+        detritus: vec![0.0; CUBE_CELL_COUNT],
+        fruit: vec![0.0; CUBE_CELL_COUNT],
+        wood: vec![0.0; CUBE_CELL_COUNT],
+        plant_reserve: vec![0.0; CUBE_CELL_COUNT],
+        dead_wood: vec![0.0; CUBE_CELL_COUNT],
+        carrion: vec![0.0; CUBE_CELL_COUNT],
+        water: vec![0.0; CUBE_CELL_COUNT],
+        rain: vec![0.0; CUBE_CELL_COUNT],
         producer_max: PRODUCER_MAX,
         wood_max: 0.6,
         organisms: Vec::new(),
@@ -129,24 +130,24 @@ fn organism(id: OrganismId, at: SurfacePoint) -> OrganismView {
     }
 }
 
-fn every_pixel() -> impl Iterator<Item = (Face, u8, u8)> {
+fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
     Face::ALL.into_iter().flat_map(|face| {
-        (0..FACE_SIZE as u8).flat_map(move |y| (0..FACE_SIZE as u8).map(move |x| (face, x, y)))
+        (0..FACE_SIZE as u16).flat_map(move |y| (0..FACE_SIZE as u16).map(move |x| (face, x, y)))
     })
 }
 
 /// The pixels a 16-px tile anchored in `cell` can reach.
-fn near(cell: CellId) -> Vec<(Face, u8, u8)> {
-    let centre = cell.center();
-    (0..FACE_SIZE as u8)
-        .flat_map(|y| (0..FACE_SIZE as u8).map(move |x| (cell.face(), x, y)))
+fn near(cell: CellId) -> Vec<(Face, u16, u16)> {
+    let centre = cell.center(Topology::Cube, Scale::ONE);
+    (0..FACE_SIZE as u16)
+        .flat_map(|y| (0..FACE_SIZE as u16).map(move |x| (cell.face(Topology::Cube, Scale::ONE), x, y)))
         .filter(|&(_, x, y)| {
             (f64::from(x) + 0.5 - centre.u).hypot(f64::from(y) + 0.5 - centre.v) <= 12.0
         })
         .collect()
 }
 
-fn max_diff_at(a: &Canvas, b: &Canvas, pixels: &[(Face, u8, u8)]) -> f32 {
+fn max_diff_at(a: &Canvas, b: &Canvas, pixels: &[(Face, u16, u16)]) -> f32 {
     pixels
         .iter()
         .flat_map(|&(f, x, y)| {
@@ -160,7 +161,7 @@ fn max_diff(a: &Canvas, b: &Canvas) -> f32 {
     max_diff_at(a, b, &every_pixel().collect::<Vec<_>>())
 }
 
-fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u8, u8)> {
+fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u16, u16)> {
     every_pixel().filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y)).collect()
 }
 
@@ -373,12 +374,12 @@ fn the_chart_breeze_agrees_in_three_dimensions_on_both_sides_of_every_seam() {
                     cube_proto::Edge::Left => (epsilon, along, Vec2::new(-2.0 * epsilon, 0.0)),
                 };
                 let here = SurfacePoint::new(face, u, v);
-                let crossed = travel(here, delta);
+                let crossed = travel(Topology::Cube, here, delta);
                 assert_eq!(crossed.crossings, 1, "the fixture must cross a real seam");
                 assert_eq!(crossed.reflections, 0);
                 let there = crossed.end;
-                let mine = here.embed_tangent(wind_chart(face, u, v));
-                let theirs = there.embed_tangent(wind_chart(there.face, there.u, there.v));
+                let mine = Topology::Cube.embed_tangent(Scale::ONE, &here, wind_chart(face, u, v));
+                let theirs = Topology::Cube.embed_tangent(Scale::ONE, &there, wind_chart(there.face, there.u, there.v));
                 for axis in 0..3 {
                     assert!(
                         (mine[axis] - theirs[axis]).abs() < 1e-5,
@@ -817,13 +818,13 @@ fn a_synthetic_striped_column_composites_every_row_exactly_once_under_one_bend()
             // Everything the column can paint: the base tile's lowest row up to the cap's top.
             let span = -7.5..=(4.0 * height + 11.5);
             let mut exact = 0;
-            for y in 0..FACE_SIZE as u8 {
+            for y in 0..FACE_SIZE as u16 {
                 let h = v0 - 0.5 - f64::from(y);
                 if !span.contains(&h) {
                     continue;
                 }
                 let (mut red, mut lit, mut blue) = (0.0f64, 0.0f64, 0.0f64);
-                for x in 0..FACE_SIZE as u8 {
+                for x in 0..FACE_SIZE as u16 {
                     let p = image.get(column.face, x, y);
                     red += f64::from(p[0]);
                     lit += f64::from(p[1]);
@@ -887,10 +888,10 @@ fn a_vine_takes_its_host_columns_amplitude_and_only_adds_light() {
         // The trunk's own pixels are untouched: the vine paints its own columns only. A tile
         // column `tx` lands on face column `u0 + tx − 8` plus the subpixel bend, so the trunk's
         // three columns stay below this split and the vine's one stays above it.
-        let split = anchor.u as u8 + (VINE_COLUMN - TRUNK_COLUMN) - 1;
+        let split = anchor.u as u16 + u16::from(VINE_COLUMN - TRUNK_COLUMN) - 1;
         let mut vine_rows = 0;
-        for y in 0..FACE_SIZE as u8 {
-            for x in 0..FACE_SIZE as u8 {
+        for y in 0..FACE_SIZE as u16 {
+            for x in 0..FACE_SIZE as u16 {
                 let (a, b) = (bare.get(column.face, x, y), vined.get(column.face, x, y));
                 if x < split {
                     assert_eq!(a, b, "the vine moved a trunk pixel at ({x}, {y})");
@@ -903,7 +904,7 @@ fn a_vine_takes_its_host_columns_amplitude_and_only_adds_light() {
             // In every row the vine paints, its stripe sits exactly the authored distance from
             // the trunk's: both were displaced by the same `D` at the same height.
             let trunk = centroid(&bare, column.face, y, 0..split);
-            let vine = centroid(&vined, column.face, y, split..FACE_SIZE as u8);
+            let vine = centroid(&vined, column.face, y, split..FACE_SIZE as u16);
             if let (Some(trunk), Some(vine)) = (trunk, vine) {
                 assert!(
                     (vine - trunk - f64::from(VINE_COLUMN - TRUNK_COLUMN)).abs() < 2e-5,
@@ -934,7 +935,7 @@ const STRIPE_BLUE: [u8; 4] = [230, 170, 110, 50];
 /// The stripe a face row must show: the trunk repeats every 4 px and every tile of the column
 /// is stamped 4 px apart, so the source row of *any* tile that could own this face row has the
 /// same index modulo 4.
-fn stripe_of(v0: f64, y: u8) -> usize {
+fn stripe_of(v0: f64, y: u16) -> usize {
     (f64::from(y) + 8.0 - v0).rem_euclid(4.0) as usize
 }
 
@@ -1037,7 +1038,7 @@ fn draw_striped_column(
 
 /// The horizontal centre of mass of one face row's green over `columns`, in face pixels, or
 /// `None` where the row is dark.
-fn centroid(image: &Canvas, face: Face, y: u8, columns: std::ops::Range<u8>) -> Option<f64> {
+fn centroid(image: &Canvas, face: Face, y: u16, columns: std::ops::Range<u16>) -> Option<f64> {
     let (mut light, mut moment) = (0.0f64, 0.0f64);
     for x in columns {
         let v = f64::from(image.get(face, x, y)[1]);
@@ -1062,7 +1063,7 @@ fn a_quiet_tick_bends_nothing_anywhere_on_the_cube() {
     let quiet = active_seconds() + WIND_TRAVEL_SECONDS + 1.0;
     assert_eq!(wind_strength(quiet), 0.0);
     let mut checked = 0;
-    for cell in CellId::all() {
+    for cell in CellId::all(Topology::Cube, Scale::ONE) {
         let slot = slot_of(cell);
         for band in [Band::Soil, Band::Foliage, Band::Canopy, Band::Water] {
             let name = species_of(band, cell);
@@ -1073,7 +1074,7 @@ fn a_quiet_tick_bends_nothing_anywhere_on_the_cube() {
             checked += 1;
         }
     }
-    assert_eq!(checked, CELL_COUNT * 4);
+    assert_eq!(checked, CUBE_CELL_COUNT * 4);
     for column in tall_columns() {
         assert_eq!(
             tall_amplitude(&column, presenter.column_budget(&column), quiet),
@@ -1134,7 +1135,7 @@ fn the_rising_breeze_moves_plant_pixels_and_leaves_the_ground_bodies_and_rain_al
 
     let full_calm = image(pack(), calm);
     let full_windy = image(pack(), windy);
-    let mut plant_pixels: Vec<(Face, u8, u8)> = differing(&full_calm, &bare_calm);
+    let mut plant_pixels: Vec<(Face, u16, u16)> = differing(&full_calm, &bare_calm);
     plant_pixels.extend(differing(&full_windy, &bare_windy));
     let moved = differing(&full_calm, &full_windy);
     assert!(moved.len() > 40, "the breeze moved only {} pixels", moved.len());
@@ -1157,7 +1158,7 @@ fn the_painted_root_row_of_every_side_species_is_identical_windy_and_calm() {
     let anchor = SurfacePoint::new(Face::Front, 32.0, 32.0);
     // With a `(8, 8)` pivot at an integer chart position, tile row `ty` lands on face row
     // `ty + 24`; the rows at or below the root are those with `16 − (ty + 0.5) ≤ root`.
-    let root_rows: Vec<u8> = (0..16u8)
+    let root_rows: Vec<u16> = (0..16u16)
         .filter(|&ty| TILE_ROWS - (f64::from(ty) + 0.5) <= PLANT_BEND_ROOT)
         .map(|ty| ty + 24)
         .collect();
@@ -1189,7 +1190,7 @@ fn the_painted_root_row_of_every_side_species_is_identical_windy_and_calm() {
             for frame in clip.frames.iter().step_by(6) {
                 let mut calm = Canvas::new();
                 stamp(&mut calm, frame, anchor, Vec2::new(1.0, 0.0), MOTIF_OPACITY, Mask::None, Bend::NONE);
-                let painted = (24..40u8)
+                let painted = (24..40u16)
                     .any(|x| calm.get(Face::Front, x, root_rows[0]) != [0.0; 3]);
                 for sign in [-1.0, 1.0] {
                     let bend = plant_bend(tip, Vec2::new(sign, 0.0), Vec2::new(1.0, 0.0));
@@ -1197,7 +1198,7 @@ fn the_painted_root_row_of_every_side_species_is_identical_windy_and_calm() {
                     let mut windy = Canvas::new();
                     stamp(&mut windy, frame, anchor, Vec2::new(1.0, 0.0), MOTIF_OPACITY, Mask::None, bend);
                     for &y in &root_rows {
-                        for x in 20..44u8 {
+                        for x in 20..44u16 {
                             assert_eq!(
                                 windy.get(Face::Front, x, y),
                                 calm.get(Face::Front, x, y),
@@ -1299,11 +1300,11 @@ fn a_plants_pixels_never_jump_between_two_frames_at_sixty_fps() {
 
 /// A rank-2 slot of `name` in the middle of a side face.
 fn full_plant_cell(name: &str) -> Option<CellId> {
-    CellId::all().find(|&c| {
-        c.face() == Face::Front
-            && c.cy() >= 4
-            && c.cy() <= 8
-            && (4..=11).contains(&c.cx())
+    CellId::all(Topology::Cube, Scale::ONE).find(|&c| {
+        c.face(Topology::Cube, Scale::ONE) == Face::Front
+            && c.cy(Topology::Cube, Scale::ONE) >= 4
+            && c.cy(Topology::Cube, Scale::ONE) <= 8
+            && (4..=11).contains(&c.cx(Topology::Cube, Scale::ONE))
             && plant_cap(band_of(c), c) == Some(2)
             && species_of(band_of(c), c) == name
     })
@@ -1366,11 +1367,11 @@ fn a_paused_frame_and_a_second_presenter_draw_the_identical_windy_image() {
 /// heading — a plant carried sideways, or one bent, differs from that hand stamp.
 #[test]
 fn a_canopy_plant_turns_about_its_pivot_and_is_never_carried_sideways() {
-    let cell = CellId::all()
+    let cell = CellId::all(Topology::Cube, Scale::ONE)
         .find(|&c| {
-            c.face() == Face::Top
-                && (5..=10).contains(&c.cx())
-                && (5..=10).contains(&c.cy())
+            c.face(Topology::Cube, Scale::ONE) == Face::Top
+                && (5..=10).contains(&c.cx(Topology::Cube, Scale::ONE))
+                && (5..=10).contains(&c.cy(Topology::Cube, Scale::ONE))
                 && plant_cap(band_of(c), c) == Some(2)
                 && wind_response(species_of(band_of(c), c)).spin_deg > 0.0
         })
@@ -1695,13 +1696,13 @@ fn the_shifted_strips_are_opted_into_by_the_art_and_still_composite_each_row_onc
             let grown = tall_grown_px(height);
             let whole = height.fract() == 0.0;
             let span = -7.5..=(4.0 * height + 11.5);
-            for y in 0..FACE_SIZE as u8 {
+            for y in 0..FACE_SIZE as u16 {
                 let h = v0 - 0.5 - f64::from(y);
                 if !span.contains(&h) {
                     continue;
                 }
                 let (mut red, mut lit, mut blue) = (0.0f64, 0.0f64, 0.0f64);
-                for x in 0..FACE_SIZE as u8 {
+                for x in 0..FACE_SIZE as u16 {
                     let p = image.get(column.face, x, y);
                     red += f64::from(p[0]);
                     lit += f64::from(p[1]);

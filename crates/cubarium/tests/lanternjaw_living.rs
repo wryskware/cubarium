@@ -68,6 +68,7 @@
 //!   amplitude of 0 contributes 0 exactly", "a weight of 0 contributes 0 exactly"), so the
 //!   identity is asserted texel for texel.
 
+use cubarium_surface::{Scale, Topology};
 use std::panic::AssertUnwindSafe;
 
 use cubarium::lanternjaw::*;
@@ -101,10 +102,10 @@ const INSTANTS: [f64; 13] = [
     11.99,
 ];
 
-fn every_pixel() -> impl Iterator<Item = (Face, u8, u8)> {
+fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
     Face::ALL
         .into_iter()
-        .flat_map(|face| (0..64u8).flat_map(move |y| (0..64u8).map(move |x| (face, x, y))))
+        .flat_map(|face| (0..64u16).flat_map(move |y| (0..64u16).map(move |x| (face, x, y))))
 }
 
 fn assert_identical(a: &Canvas, b: &Canvas, what: &str) {
@@ -136,7 +137,7 @@ fn total_light(image: &Canvas) -> f64 {
 fn lit_faces(image: &Canvas) -> usize {
     Face::ALL
         .into_iter()
-        .filter(|&f| (0..64u8).any(|y| (0..64u8).any(|x| image.get(f, x, y) != [0.0; 3])))
+        .filter(|&f| (0..64u16).any(|y| (0..64u16).any(|x| image.get(f, x, y) != [0.0; 3])))
         .count()
 }
 
@@ -151,7 +152,7 @@ fn filled(rgb: [f32; 3]) -> Canvas {
 /// A mid-face anchor on a pixel centre, so the body lattice lands on the face lattice and every
 /// whole-pixel comparison below is exact rather than approximate.
 fn mid() -> SurfacePoint {
-    SurfacePoint::pixel_center(Face::Front, 32, 32)
+    SurfacePoint::pixel_center(Topology::Cube, Face::Front, 32, 32)
 }
 
 fn forward() -> Vec2 {
@@ -2020,11 +2021,11 @@ fn a_scaled_body_over_the_open_rim_is_cut_and_never_reflected() {
             scale,
         );
         assert!(
-            (34..64u8).any(|y| (0..64u8).any(|x| flat.get(Face::Front, x, y) != [0.0; 3])),
+            (34..64u16).any(|y| (0..64u16).any(|x| flat.get(Face::Front, x, y) != [0.0; 3])),
             "at scale {scale} the body does not reach past where the rim is, so nothing is cut"
         );
         assert!(
-            (0..64u8).any(|x| rim.get(Face::Front, x, 63) != [0.0; 3]),
+            (0..64u16).any(|x| rim.get(Face::Front, x, 63) != [0.0; 3]),
             "at scale {scale} the body at the rim painted nothing on the last row that exists"
         );
         for (f, x, y) in every_pixel() {
@@ -2068,8 +2069,8 @@ fn a_fractional_anchor_moves_a_scaled_body_by_sub_pixel_brightness_only() {
         )
     };
     let (base, shifted) = (at_u(32.5), at_u(33.5));
-    for y in 0..64u8 {
-        for x in 1..64u8 {
+    for y in 0..64u16 {
+        for x in 1..64u16 {
             assert_eq!(
                 shifted.get(Face::Front, x, y),
                 base.get(Face::Front, x - 1, y),

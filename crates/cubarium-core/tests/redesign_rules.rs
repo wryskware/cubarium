@@ -13,12 +13,13 @@
 
 mod common;
 
+use cubarium_surface::{Scale, Topology};
 use cubarium_core::config::{FounderKind, WorldConfig};
 use cubarium_core::genome::{self, FORM_UNSET, Genome, MAX_FORMS};
 use cubarium_core::ids::OrganismId;
 use cubarium_core::organism::Mode;
 use cubarium_core::{DT, World};
-use cubarium_surface::{CELL_COUNT, CellId, Face, SurfacePoint, Vec2};
+use cubarium_surface::{CUBE_CELL_COUNT, CellId, Face, SurfacePoint, Vec2};
 
 // ---------------------------------------------------------------------------------------
 // Fixtures
@@ -113,7 +114,7 @@ fn sole_id(world: &World) -> OrganismId {
 fn set_fields(world: &mut World, n: f64, p: f64, d: f64, de: f64, f: f64) {
     let before: f64 = common::total_material(world);
     let fields = &mut world.state.fields;
-    for c in 0..CELL_COUNT {
+    for c in 0..CUBE_CELL_COUNT {
         fields.n[c] = n;
         fields.p[c] = p;
         fields.d[c] = d;
@@ -128,7 +129,7 @@ fn set_fields(world: &mut World, n: f64, p: f64, d: f64, de: f64, f: f64) {
 /// still holds after the injection.
 fn set_water(world: &mut World, depth: f64) {
     let before: f64 = world.state.fields.w.iter().sum();
-    for c in 0..CELL_COUNT {
+    for c in 0..CUBE_CELL_COUNT {
         world.state.fields.w[c] = depth;
     }
     let after: f64 = world.state.fields.w.iter().sum();
@@ -143,7 +144,7 @@ fn set_cell_water(world: &mut World, cell: CellId, depth: f64) {
 
 /// Embedded height of a cell center (Top = 1, rim = −1), the `h` of the design documents.
 fn cell_height(c: CellId) -> f64 {
-    c.center().embed()[1]
+    Topology::Cube.embed(Scale::ONE, &c.center(Topology::Cube, Scale::ONE))[1]
 }
 
 /// A deterministic pseudo-random stream, so conservation is not checked on a suspiciously
@@ -163,7 +164,7 @@ fn ragged_litter(world: &mut World, seed: u64) {
     let cap = world.state.config.detritus.energy_cap;
     let before: f64 = common::total_material(world);
     let mut s = seed;
-    for c in 0..CELL_COUNT {
+    for c in 0..CUBE_CELL_COUNT {
         let d = 0.05 + 2.0 * splitmix(&mut s);
         let de = cap * d * splitmix(&mut s);
         world.state.fields.d[c] = d;
@@ -222,7 +223,7 @@ fn detritus_fall_matches_the_spec_downhill_transfer() {
     // from the world.
     let mut want_d = d_before.clone();
     let mut want_de = de_before.clone();
-    for c in 0..CELL_COUNT {
+    for c in 0..CUBE_CELL_COUNT {
         let Some(down) = spec_downhill(&neighbors, c) else { continue };
         want_d[c] -= fraction * d_before[c];
         want_de[c] -= fraction * de_before[c];
@@ -232,7 +233,7 @@ fn detritus_fall_matches_the_spec_downhill_transfer() {
 
     world.step();
 
-    for c in 0..CELL_COUNT {
+    for c in 0..CUBE_CELL_COUNT {
         let tol = 1e-12 * want_d[c].abs().max(1.0);
         assert!(
             (world.state.fields.d[c] - want_d[c]).abs() <= tol,
@@ -254,7 +255,7 @@ fn detritus_fall_matches_the_spec_downhill_transfer() {
 /// height when that height is strictly lower, and nothing at all on the top face.
 fn spec_downhill(neighbors: &[[Option<u16>; 4]], c: usize) -> Option<usize> {
     let cell = CellId(c as u16);
-    if cell.face() == Face::Top {
+    if cell.face(Topology::Cube, Scale::ONE) == Face::Top {
         return None;
     }
     let own = cell_height(cell);
@@ -283,7 +284,7 @@ fn detritus_never_moves_upward_or_onto_the_top_face() {
     // full field cannot do this: a cell above may receive more than it sheds.)
     let neighbours = world.cell_neighbors();
     for (source, outgoing) in neighbours.iter().enumerate() {
-        for c in 0..CELL_COUNT {
+        for c in 0..CUBE_CELL_COUNT {
             world.state.fields.d[c] = 0.0;
             world.state.fields.de[c] = 0.0;
         }
@@ -297,7 +298,7 @@ fn detritus_never_moves_upward_or_onto_the_top_face() {
         let total: f64 = world.state.fields.d.iter().sum();
         assert!((total - 1.0).abs() <= 1e-12, "source {source}: ΣD became {total}");
 
-        for c in 0..CELL_COUNT {
+        for c in 0..CUBE_CELL_COUNT {
             let got = world.state.fields.d[c];
             if c == source || got == 0.0 {
                 continue;
@@ -307,7 +308,7 @@ fn detritus_never_moves_upward_or_onto_the_top_face() {
                 outgoing.iter().flatten().any(|n| *n as usize == c),
                 "source {source} sent detritus to {c}, which is not one of its graph neighbours"
             );
-            assert_ne!(target.face(), Face::Top, "source {source} sent detritus onto the top face (cell {c})");
+            assert_ne!(target.face(Topology::Cube, Scale::ONE), Face::Top, "source {source} sent detritus onto the top face (cell {c})");
             assert!(
                 cell_height(target) < own_h - 1e-9,
                 "source {source} (h = {own_h}) sent {got} upward to cell {c} (h = {})",
@@ -315,7 +316,7 @@ fn detritus_never_moves_upward_or_onto_the_top_face() {
             );
         }
 
-        if cell.face() == Face::Top || cell.cy() == 15 {
+        if cell.face(Topology::Cube, Scale::ONE) == Face::Top || cell.cy(Topology::Cube, Scale::ONE) == 15 {
             assert_eq!(
                 world.state.fields.d[source], 1.0,
                 "cell {source} has no downhill neighbour (top face or bottom row) and must keep its litter"
@@ -331,7 +332,7 @@ fn falling_detritus_never_raises_the_litters_mean_height() {
     let mut world = World::new(cfg).expect("config");
     ragged_litter(&mut world, 0x5EED_0003);
 
-    let top_cells: Vec<usize> = (0..CELL_COUNT).filter(|c| CellId(*c as u16).face() == Face::Top).collect();
+    let top_cells: Vec<usize> = (0..CUBE_CELL_COUNT).filter(|c| CellId(*c as u16).face(Topology::Cube, Scale::ONE) == Face::Top).collect();
     let top_before: f64 = top_cells.iter().map(|c| world.state.fields.d[*c]).sum();
     let moment = |d: &Vec<f64>| -> f64 { d.iter().enumerate().map(|(c, x)| x * cell_height(CellId(c as u16))).sum() };
     let mut previous = moment(&world.state.fields.d);
@@ -360,8 +361,8 @@ fn a_side_face_column_empties_into_the_bottom_row() {
     cfg.detritus.fall = 1.0 / DT;
     let mut world = World::new(cfg).expect("config");
 
-    let top = CellId::new(Face::Front, 8, 0);
-    let floor = CellId::new(Face::Front, 8, 15);
+    let top = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 0);
+    let floor = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 15);
     let before: f64 = common::total_material(&world);
     world.state.fields.d[top.index()] = 1.0;
     world.state.fields.de[top.index()] = 1.0;
@@ -374,7 +375,7 @@ fn a_side_face_column_empties_into_the_bottom_row() {
 
     assert_eq!(world.state.fields.d[floor.index()], 1.0, "the column should have landed whole on the bottom row");
     assert_eq!(world.state.fields.de[floor.index()], 1.0, "its energy travels in the same proportion");
-    for c in 0..CELL_COUNT {
+    for c in 0..CUBE_CELL_COUNT {
         if c == floor.index() {
             continue;
         }
@@ -402,7 +403,7 @@ fn a_fall_of_zero_leaves_the_fields_bit_identical() {
         world.step();
     }
 
-    for c in 0..CELL_COUNT {
+    for c in 0..CUBE_CELL_COUNT {
         assert_eq!(world.state.fields.d[c].to_bits(), d0[c].to_bits(), "cell {c}: D moved with fall = 0");
         assert_eq!(world.state.fields.de[c].to_bits(), de0[c].to_bits(), "cell {c}: De moved with fall = 0");
     }
@@ -415,7 +416,7 @@ fn a_fall_of_zero_leaves_the_fields_bit_identical() {
     ragged_litter(&mut moving, 0x5EED_0004);
     moving.step();
     assert!(
-        (0..CELL_COUNT).any(|c| moving.state.fields.d[c].to_bits() != d0[c].to_bits()),
+        (0..CUBE_CELL_COUNT).any(|c| moving.state.fields.d[c].to_bits() != d0[c].to_bits()),
         "control: with fall = 0.02 the same litter must move"
     );
 }
@@ -468,7 +469,7 @@ fn without_rain_the_surface_stays_dry_forever() {
     for tick in 1..=2000u32 {
         world.step();
         for (c, w) in world.state.fields.w.iter().enumerate() {
-            assert_eq!(*w, 0.0, "tick {tick}: cell {c} (face {:?}) got wet with rain_rate = 0", CellId(c as u16).face());
+            assert_eq!(*w, 0.0, "tick {tick}: cell {c} (face {:?}) got wet with rain_rate = 0", CellId(c as u16).face(Topology::Cube, Scale::ONE));
         }
     }
     assert_eq!(world.state.rain_in_total, 0.0, "no rain may be booked at rain_rate = 0");
@@ -493,7 +494,7 @@ fn water_on_a_side_face_runs_downhill() {
     cfg.habitat.basin_gain = 0.0;
     let mut world = World::new(cfg).expect("config");
 
-    let source = CellId::new(Face::Front, 8, 4);
+    let source = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 4);
     // Shallow enough that `depth_gain · w` (0.1) never exceeds the 0.125 of `h` between two
     // vertically adjacent side cells, so no surface level can ever tilt uphill.
     set_cell_water(&mut world, source, 0.25);
@@ -521,7 +522,7 @@ fn water_on_a_side_face_runs_downhill() {
         previous = now;
     }
 
-    let floor = cell_height(CellId::new(Face::Front, 8, 15));
+    let floor = cell_height(CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 15));
     assert!(
         previous < floor + 0.2,
         "after 100 s the water should stand on the floor row (h = {floor}); its mean height is {previous}, from {start}"
@@ -546,7 +547,7 @@ fn evaporation_keeps_its_floor_where_there_is_no_light() {
     for tick in 1..=200u32 {
         world.step();
         want *= per_tick;
-        for c in 0..CELL_COUNT {
+        for c in 0..CUBE_CELL_COUNT {
             let got = world.state.fields.w[c];
             assert!(
                 (got - want).abs() <= 1e-12 * want,
@@ -575,9 +576,9 @@ fn algae_fixture() -> (World, CellId, CellId, CellId) {
     plain_producer(&mut cfg);
     let mut world = World::new(cfg).expect("config");
 
-    let dry = CellId::new(Face::Front, 2, 2);
-    let wet = CellId::new(Face::Front, 6, 6);
-    let flooded = CellId::new(Face::Front, 10, 10);
+    let dry = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 2, 2);
+    let wet = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 6, 6);
+    let flooded = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 10, 10);
 
     let before: f64 = common::total_material(&world);
     for c in [dry, wet, flooded] {
@@ -731,9 +732,9 @@ fn fruit_ripens_only_above_the_fruit_minimum() {
     let cfg = world.state.config.clone();
     let threshold = cfg.fruit.fruit_min * cfg.producer.max;
 
-    let below = CellId::new(Face::Front, 2, 2);
-    let at = CellId::new(Face::Front, 6, 6);
-    let above = CellId::new(Face::Front, 10, 10);
+    let below = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 2, 2);
+    let at = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 6, 6);
+    let above = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 10, 10);
     let p_below = threshold - 0.01;
     let p_above = 0.6;
 
@@ -780,8 +781,8 @@ fn feeding_probe(diet: f32, fruit_here: f64, headroom: f64) -> (World, OrganismI
     let mut world = World::new(cfg).expect("config");
 
     let id = sole_id(&world);
-    let cell = CellId::new(Face::Front, 8, 8);
-    let centre = cell.center();
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8);
+    let centre = cell.center(Topology::Cube, Scale::ONE);
     {
         let o = world.state.organisms.get_mut(id).expect("probe");
         o.pos = centre;
@@ -1152,13 +1153,13 @@ fn depth_drive_run(depth: f32, ticks: u32) -> (f64, f64) {
         // Across the slope, so any vertical progress is the depth drive's doing.
         Vec2::new(1.0, 0.0),
     );
-    let h0 = world.state.organisms.get(id).expect("probe").pos.embed()[1];
+    let h0 = Topology::Cube.embed(Scale::ONE, &world.state.organisms.get(id).expect("probe").pos)[1];
     for _ in 0..ticks {
         world.step();
     }
     let o = world.state.organisms.get(id).expect("alive");
     assert_eq!(o.pos.face, Face::Front, "the probe must stay on the side face it started on");
-    (h0, o.pos.embed()[1])
+    (h0, Topology::Cube.embed(Scale::ONE, &o.pos)[1])
 }
 
 #[test]
@@ -1184,15 +1185,15 @@ fn the_depth_drive_carries_a_soil_genome_downward() {
 /// A rich cell exactly two graph hops away in `+u`, with the whole adjacent ring flat, so
 /// only a sensor that reaches past its neighbours can find it.
 fn two_hop_patch(sense_radius: f64, ticks: u32) -> (SurfacePoint, SurfacePoint, Vec2, Vec2) {
-    let own = CellId::new(Face::Front, 8, 8);
-    let rich = CellId::new(Face::Front, 10, 8);
+    let own = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8);
+    let rich = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 10, 8);
     let (mut world, id) = steering_probe(
         |cfg| {
             cfg.organism.sense_radius = sense_radius;
             cfg.drives.w_depth = 0.0; // only `∇P` may steer
         },
         probe_kind(0.85, 0.5, 1.0, 1.0, 0.0, 0),
-        own.center(),
+        own.center(Topology::Cube, Scale::ONE),
         // Pointing away from the patch: reaching it requires a deliberate turn.
         Vec2::new(-1.0, 0.0),
     );

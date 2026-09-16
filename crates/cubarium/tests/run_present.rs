@@ -146,8 +146,8 @@ fn the_presenter_paints_only_what_the_spec_lists() {
 
     let mut body_faces = std::collections::HashSet::new();
     for face in Face::ALL {
-        for y in 0..64u8 {
-            for x in 0..64u8 {
+        for y in 0..64u16 {
+            for x in 0..64u16 {
                 let px = canvas.get(face, x, y);
                 for c in px {
                     assert!(c.is_finite() && c >= 0.0, "{face:?} {x},{y}: {px:?}");
@@ -172,8 +172,8 @@ fn the_presenter_paints_only_what_the_spec_lists() {
     let mut blank = Presenter::new();
     blank.draw(&empty, 0.0, &mut canvas);
     for face in Face::ALL {
-        for y in 0..64u8 {
-            for x in 0..64u8 {
+        for y in 0..64u16 {
+            for x in 0..64u16 {
                 assert_eq!(canvas.get(face, x, y), PALETTE.floor, "{face:?} {x},{y}");
             }
         }

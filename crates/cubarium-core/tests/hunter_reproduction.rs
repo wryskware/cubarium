@@ -5,6 +5,7 @@
 //! world's public state — never from the implementation's expressions. These are mechanism
 //! tests; nothing here is evidence about balance.
 
+use cubarium_surface::{Scale, Topology};
 use cubarium_core::hunter::{EscrowKey, FixedHunterProfile, FundingBlocked, HunterEvent, HunterTarget, Reproduction};
 use cubarium_core::ids::OrganismId;
 use cubarium_core::organism::{DeathCause, Mode, Organism, Origin};
@@ -71,7 +72,7 @@ fn place_bystander(world: &mut World, pos: SurfacePoint) -> OrganismId {
     phenotype.speed_max = 0.0;
     phenotype.structure_adult = 1.8;
     let id = world.state.organisms.insert(Organism {
-        pos: pos.canonicalize(),
+        pos: pos.canonicalize(Topology::Cube),
         heading: Vec2::new(1.0, 0.0),
         ou: Vec2::ZERO,
         structure: 1.8,

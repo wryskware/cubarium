@@ -1,6 +1,7 @@
+use cubarium_surface::{Scale, Topology};
 use std::f64::consts::TAU;
 
-use cubarium_surface::{CELL_COUNT, Vec2, cell_of, travel_into, unfold_with};
+use cubarium_surface::{CUBE_CELL_COUNT, Vec2, cell_of, travel_into, unfold_with};
 
 use crate::accounting::{self, EnergyCorrection};
 use crate::care::{self};
@@ -330,7 +331,7 @@ impl World {
             //     else, so `rain[c]` publishes what actually falls and the depth is inside
             //     `rain_in_total` once. With no shower running the water stage is handed
             //     `None` and executes the pre-care arithmetic operation for operation.
-            let manual: Option<&[f64; CELL_COUNT]> = if care.showers.is_empty() {
+            let manual: Option<&[f64; CUBE_CELL_COUNT]> = if care.showers.is_empty() {
                 None
             } else {
                 manual_rain.fill(0.0);
@@ -438,7 +439,7 @@ impl World {
                         ecology,
                         light,
                         images,
-                        &sense_rings[cell_of(&o.pos).index()],
+                        &sense_rings[cell_of(Topology::Cube, Scale::ONE, &o.pos).index()],
                         neighbors.lists.get(id.slot as usize).map_or(&[][..], |l| &l[..]),
                         &mut sensed_cells,
                         &mut sensed_bodies,
@@ -446,7 +447,7 @@ impl World {
                     decisions.push((id, decision));
                     continue;
                 }
-                let cell = cell_of(&o.pos);
+                let cell = cell_of(Topology::Cube, Scale::ONE, &o.pos);
                 let here = cell.index();
                 let chart = o.pos.chart();
                 let mut obs = Observation {
@@ -455,7 +456,7 @@ impl World {
                     // `D_eff + C_eff` (§9): litter and remains are one detrital channel to a
                     // mouth and to an eye, each contributing only its own edible portion.
                     d_here: edible_here(fields, ecology, here, e_r),
-                    height: o.pos.embed()[1],
+                    height: Topology::Cube.embed(Scale::ONE, &o.pos)[1],
                     up: up_direction(o.pos.face),
                     ..Observation::default()
                 };
@@ -464,8 +465,8 @@ impl World {
                 let depth = sense_depth(o.phenotype.sense_radius);
                 for ring in &sense_rings[here][..depth] {
                     for neighbor in ring {
-                        let center = neighbor.center();
-                        let Some(view) = unfold_with(
+                        let center = neighbor.center(Topology::Cube, Scale::ONE);
+                        let Some(view) = unfold_with(Topology::Cube, 
                             &images[o.pos.face.index()],
                             o.pos,
                             center,
@@ -666,7 +667,7 @@ impl World {
                             else {
                                 continue;
                             };
-                            if let Some(d) = cubarium_surface::surface_distance(
+                            if let Some(d) = cubarium_surface::surface_distance(Topology::Cube, 
                                 oa.pos,
                                 ob.pos,
                                 cubarium_surface::MAX_LOCAL_RADIUS,
@@ -899,7 +900,7 @@ impl World {
                             .expect("defender remained alive");
                         defender_injury = defend_injury.min(o.structure);
                         o.structure -= defender_injury;
-                        fields.d[cell_of(&o.pos).index()] += defender_injury;
+                        fields.d[cell_of(Topology::Cube, Scale::ONE, &o.pos).index()] += defender_injury;
                         if retaliates {
                             o.energy -= profile.strike_energy_cost;
                             heat(profile.strike_energy_cost);
@@ -911,7 +912,7 @@ impl World {
                                 .expect("attacker remained alive");
                             attacker_injury = attack_injury.min(o.structure);
                             o.structure -= attacker_injury;
-                            fields.d[cell_of(&o.pos).index()] += attacker_injury;
+                            fields.d[cell_of(Topology::Cube, Scale::ONE, &o.pos).index()] += attacker_injury;
                             if let Some(rec) = budgets.at(attacker) {
                                 rec.injury_structure += attacker_injury;
                             }
@@ -1292,7 +1293,7 @@ impl World {
                 // Wading (`design/water.md`, `design/fauna-v2.md`): speed is divided by
                 // `1 + w · (1 − swim)` of the cell the organism stands in before it moves; a
                 // swimmer ignores the pool.
-                let wading = 1.0 + fields.w[cell_of(&o.pos).index()] * (1.0 - o.phenotype.swim);
+                let wading = 1.0 + fields.w[cell_of(Topology::Cube, Scale::ONE, &o.pos).index()] * (1.0 - o.phenotype.swim);
                 let mut speed_cap = d.effort * o.phenotype.speed_max / wading;
                 // A hunter's burst and a threatened prey's dash are the only boosts, and both
                 // raise `speed_cap`. Since R0b that *is* the whole motor budget, so a
@@ -1345,7 +1346,7 @@ impl World {
                     a.feedback.res_mag += motion.motor_magnitude();
                     a.feedback.ticks = a.feedback.ticks.saturating_add(1);
                 }
-                travel_into(o.pos, motion.heading * (motion.speed * dt), travel_buf);
+                travel_into(Topology::Cube, o.pos, motion.heading * (motion.speed * dt), travel_buf);
                 o.pos = travel_buf.end;
                 // Transport is a change of chart, applied to the *resolved* heading: it costs
                 // nothing and consumes no turn budget.
@@ -1403,7 +1404,7 @@ impl World {
                         // Burn only what the shortfall needs, never the whole allowance.
                         let burned = (shortfall / per_unit).min(allowance);
                         o.reserve -= burned;
-                        fields.n[cell_of(&o.pos).index()] += burned;
+                        fields.n[cell_of(Topology::Cube, Scale::ONE, &o.pos).index()] += burned;
                         // The same transaction the physiology pass runs: the reserve material
                         // carried `e_r` per unit, `η_ox` of it becomes usable, the rest is heat.
                         let released = e_r * burned;
@@ -1623,16 +1624,16 @@ impl World {
             //    The scavenge channel serves litter and remains together: the request is made
             //    against `D_eff + C_eff` and the served bite is split between the two stocks
             //    in proportion to their edible shares.
-            let mut fruit = vec![0.0f64; CELL_COUNT];
-            let mut graze = vec![0.0f64; CELL_COUNT];
-            let mut scavenge = vec![0.0f64; CELL_COUNT];
+            let mut fruit = vec![0.0f64; CUBE_CELL_COUNT];
+            let mut graze = vec![0.0f64; CUBE_CELL_COUNT];
+            let mut scavenge = vec![0.0f64; CUBE_CELL_COUNT];
             // The pre-settlement detrital picture of every contested cell: each stock's
             // edible portion, and each stock's energy density. Captured before a single
             // transfer is applied, so every mouth in a cell reads the same food.
-            let mut litter_eff = vec![0.0f64; CELL_COUNT];
-            let mut carrion_eff = vec![0.0f64; CELL_COUNT];
-            let mut litter_density = vec![0.0f64; CELL_COUNT];
-            let mut carrion_density = vec![0.0f64; CELL_COUNT];
+            let mut litter_eff = vec![0.0f64; CUBE_CELL_COUNT];
+            let mut carrion_eff = vec![0.0f64; CUBE_CELL_COUNT];
+            let mut litter_density = vec![0.0f64; CUBE_CELL_COUNT];
+            let mut carrion_density = vec![0.0f64; CUBE_CELL_COUNT];
             let mut requests: Vec<(usize, OrganismId, f64, f64, f64)> = Vec::new();
             for (id, d) in &decisions {
                 if d.fruit_effort <= 0.0 && d.graze_effort <= 0.0 && d.scavenge_effort <= 0.0 {
@@ -1656,7 +1657,7 @@ impl World {
                 // §6.3: one mouth. Normalise only when the efforts overcommit it, so a
                 // single-channel feeder is untouched.
                 let norm = if asked > 1.0 { 1.0 / asked } else { 1.0 };
-                let cell = cell_of(&o.pos).index();
+                let cell = cell_of(Topology::Cube, Scale::ONE, &o.pos).index();
                 let headroom = (o.phenotype.reserve_max - o.reserve).max(0.0);
                 // Type-II intake: what a mouth can take falls off as the cell empties, so a
                 // poor cell is poor food even to an organism standing in it. `K_P = 0` gives
@@ -1933,7 +1934,7 @@ impl World {
                             rec.gut_battery_credit += step.energy_gain;
                         }
                         // §8: a digestion reject is feces, and feces are litter, energy-free.
-                        fields.d[cell_of(&o.pos).index()] += step.to_detritus;
+                        fields.d[cell_of(Topology::Cube, Scale::ONE, &o.pos).index()] += step.to_detritus;
                         heat(step.heat);
                         let member = &mut hunters.members[index];
                         member.gut_material -= step.material;
@@ -2127,7 +2128,7 @@ impl World {
                         .unwrap_or(0.0);
                     let burned = (org_cfg.oxidation_rate * dt - already).max(0.0).min(o.reserve);
                     o.reserve -= burned;
-                    fields.n[cell_of(&o.pos).index()] += burned;
+                    fields.n[cell_of(Topology::Cube, Scale::ONE, &o.pos).index()] += burned;
                     // The reserve material carried `e_r` per unit; `η_ox` of it becomes usable.
                     let released = e_r * burned;
                     let room = (o.phenotype.energy_max - o.energy).max(0.0);
@@ -2315,7 +2316,7 @@ impl World {
                 // entry is keyed by the full id, so a reused slot could not inherit it even if
                 // this removal were ever missed.
                 neural.remove(*id);
-                let cell = cell_of(&o.pos).index();
+                let cell = cell_of(Topology::Cube, Scale::ONE, &o.pos).index();
                 // The body: structure carries no energy, the reserve carries `e_r` per unit.
                 // Ecology v1 §8: an ordinary death is **animal remains**, not plant litter.
                 // A detrital digester can eat it; a foliage digester cannot; decomposition
@@ -2613,7 +2614,7 @@ impl World {
                     key,
                     mut counter,
                 ) = placement;
-                travel_into(from, direction * cfg.drives.birth_offset_px, travel_buf);
+                travel_into(Topology::Cube, from, direction * cfg.drives.birth_offset_px, travel_buf);
                 counters.travel_ties += travel_buf.ties;
                 counters.travel_fallbacks += u32::from(travel_buf.fallback);
                 let heading = travel_buf
@@ -2862,7 +2863,7 @@ fn neural_decision(
     e_r: f64,
     fields: &crate::fields::Fields,
     eco: &crate::fields::EcologyV1State,
-    light: &[f64; CELL_COUNT],
+    light: &[f64; CUBE_CELL_COUNT],
     images: &[Vec<cubarium_surface::ChartImage>; 5],
     rings: &[Vec<cubarium_surface::CellId>; super::SENSE_DEPTH_MAX],
     neighbours: &[crate::pairs::Neighbor],
@@ -2871,7 +2872,7 @@ fn neural_decision(
 ) -> Decision {
     use crate::neural::action::{Action7, Capability, Envelope};
 
-    let here = cell_of(&o.pos).index();
+    let here = cell_of(Topology::Cube, Scale::ONE, &o.pos).index();
     let omega_max = f64::from(o.phenotype.drives.turn_rate_max_deg).to_radians();
     let radius_px = motor::turn_radius_px(o, None);
     // `motor_avail` and `ω_attain` share the world's own affordability calculation rather than
@@ -3006,7 +3007,7 @@ pub(super) fn sample_observation(
     e_r: f64,
     fields: &crate::fields::Fields,
     eco: &crate::fields::EcologyV1State,
-    light: &[f64; CELL_COUNT],
+    light: &[f64; CUBE_CELL_COUNT],
     images: &[Vec<cubarium_surface::ChartImage>; 5],
     rings: &[Vec<cubarium_surface::CellId>; super::SENSE_DEPTH_MAX],
     neighbours: &[crate::pairs::Neighbor],
@@ -3016,16 +3017,16 @@ pub(super) fn sample_observation(
     bodies: &mut Vec<crate::neural::SensedBody>,
 ) -> crate::neural::Observation70 {
     let org_cfg = &cfg.organism;
-    let here = cell_of(&o.pos).index();
+    let here = cell_of(Topology::Cube, Scale::ONE, &o.pos).index();
     let chart = o.pos.chart();
     cells.clear();
     bodies.clear();
     let depth = sense_depth(o.phenotype.sense_radius);
     for (hop, ring) in rings[..depth].iter().enumerate() {
         for neighbor in ring {
-            let center = neighbor.center();
+            let center = neighbor.center(Topology::Cube, Scale::ONE);
             let Some(view) =
-                unfold_with(&images[o.pos.face.index()], o.pos, center, CELL_UNFOLD_RADIUS)
+                unfold_with(Topology::Cube, &images[o.pos.face.index()], o.pos, center, CELL_UNFOLD_RADIUS)
             else {
                 continue;
             };
@@ -3074,7 +3075,7 @@ pub(super) fn sample_observation(
         water: fields.w[here],
         w_flood: cfg.water.flood,
         light: light[here],
-        height: o.pos.embed()[1],
+        height: Topology::Cube.embed(Scale::ONE, &o.pos)[1],
         up: up_direction(o.pos.face),
         extent: o.phenotype.extent,
         sense_radius: o.phenotype.sense_radius,

@@ -26,6 +26,7 @@
 //! stand's pixels first move, the foliage loss that first moves them, and what an ungrazed
 //! average-light stand draws.
 
+use cubarium_surface::{Scale, Topology};
 use std::path::PathBuf;
 
 use cubarium::art::{ArtPack, Band};
@@ -39,7 +40,7 @@ use cubarium_core::rng::Counter;
 use cubarium_core::view::RenderView;
 use cubarium_core::{DT, World};
 use cubarium_render::Canvas;
-use cubarium_surface::{CELL_COUNT, CellId, SurfacePoint, Vec2, cell_of};
+use cubarium_surface::{CUBE_CELL_COUNT, CellId, SurfacePoint, Vec2, cell_of};
 use cube_proto::{FACE_SIZE, Face, Frame};
 
 /// The three shoulders the sheet compares. 0.85 is what ships.
@@ -147,15 +148,15 @@ fn pack() -> ArtPack {
 fn empty_view(tick: u64) -> RenderView {
     RenderView {
         tick,
-        producer: vec![0.0; CELL_COUNT],
-        detritus: vec![0.0; CELL_COUNT],
-        fruit: vec![0.0; CELL_COUNT],
-        wood: vec![0.0; CELL_COUNT],
-        plant_reserve: vec![0.0; CELL_COUNT],
-        dead_wood: vec![0.0; CELL_COUNT],
-        carrion: vec![0.0; CELL_COUNT],
-        water: vec![0.0; CELL_COUNT],
-        rain: vec![0.0; CELL_COUNT],
+        producer: vec![0.0; CUBE_CELL_COUNT],
+        detritus: vec![0.0; CUBE_CELL_COUNT],
+        fruit: vec![0.0; CUBE_CELL_COUNT],
+        wood: vec![0.0; CUBE_CELL_COUNT],
+        plant_reserve: vec![0.0; CUBE_CELL_COUNT],
+        dead_wood: vec![0.0; CUBE_CELL_COUNT],
+        carrion: vec![0.0; CUBE_CELL_COUNT],
+        water: vec![0.0; CUBE_CELL_COUNT],
+        rain: vec![0.0; CUBE_CELL_COUNT],
         producer_max: WorldConfig::default().producer.max,
         wood_max: W_MAX,
         organisms: Vec::new(),
@@ -174,13 +175,13 @@ fn stand(tick: u64, cell: CellId, w: f64, p: f64) -> RenderView {
 }
 
 fn foliage_cell() -> CellId {
-    CellId::all()
+    CellId::all(Topology::Cube, Scale::ONE)
         .find(|&c| {
-            c.face() == Face::Front
+            c.face(Topology::Cube, Scale::ONE) == Face::Front
                 && band_of(c) == Band::Foliage
                 && rank_cap_of(c) == 2
-                && (3..=7).contains(&c.cy())
-                && (4..=11).contains(&c.cx())
+                && (3..=7).contains(&c.cy(Topology::Cube, Scale::ONE))
+                && (4..=11).contains(&c.cx(Topology::Cube, Scale::ONE))
         })
         .expect("a rank-2 front foliage slot")
 }
@@ -200,9 +201,9 @@ fn shot(v: &RenderView, full: f64) -> Frame {
 // the measurements
 // ---------------------------------------------------------------------------
 
-fn every_pixel() -> impl Iterator<Item = (Face, u8, u8)> {
+fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
     Face::ALL.into_iter().flat_map(|f| {
-        (0..FACE_SIZE as u8).flat_map(move |y| (0..FACE_SIZE as u8).map(move |x| (f, x, y)))
+        (0..FACE_SIZE as u16).flat_map(move |y| (0..FACE_SIZE as u16).map(move |x| (f, x, y)))
     })
 }
 
@@ -374,8 +375,8 @@ fn recovery(cell: CellId, horizon: u64) -> [Vec<Frame>; SHOULDERS.len()] {
     genome.diet = 0.85;
     genome.clamp();
     let phenotype = decode(&genome, &cfg.organism);
-    let pos = cell.center();
-    assert_eq!(cell_of(&pos), cell);
+    let pos = cell.center(Topology::Cube, Scale::ONE);
+    assert_eq!(cell_of(Topology::Cube, Scale::ONE, &pos), cell);
     let grazer = world.state.organisms.insert(Organism {
         pos: SurfacePoint::new(pos.face, pos.u, pos.v),
         heading: Vec2::new(1.0, 0.0),
@@ -568,8 +569,8 @@ fn main() {
         crop(
             frame,
             Face::Front,
-            i32::from(cell.cx()) * 4 + 2 - (CELL_CROP as i32) / 2,
-            i32::from(cell.cy()) * 4 + 2 - (CELL_CROP as i32) / 2,
+            i32::from(cell.cx(Topology::Cube, Scale::ONE)) * 4 + 2 - (CELL_CROP as i32) / 2,
+            i32::from(cell.cy(Topology::Cube, Scale::ONE)) * 4 + 2 - (CELL_CROP as i32) / 2,
             CELL_CROP,
             CELL_CROP,
             CELL_SCALE,

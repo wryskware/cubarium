@@ -22,18 +22,18 @@ impl Canvas {
     }
 
     #[inline]
-    pub fn get(&self, face: Face, x: u8, y: u8) -> [f32; 3] {
+    pub fn get(&self, face: Face, x: u16, y: u16) -> [f32; 3] {
         self.faces[face.index()][usize::from(y) * FACE_SIZE + usize::from(x)]
     }
 
     #[inline]
-    pub fn set(&mut self, face: Face, x: u8, y: u8, rgb: [f32; 3]) {
+    pub fn set(&mut self, face: Face, x: u16, y: u16, rgb: [f32; 3]) {
         self.faces[face.index()][usize::from(y) * FACE_SIZE + usize::from(x)] = rgb;
     }
 
     /// Additive blend (linear light adds); clamping happens at encode time.
     #[inline]
-    pub fn add(&mut self, face: Face, x: u8, y: u8, rgb: [f32; 3]) {
+    pub fn add(&mut self, face: Face, x: u16, y: u16, rgb: [f32; 3]) {
         let p = &mut self.faces[face.index()][usize::from(y) * FACE_SIZE + usize::from(x)];
         p[0] += rgb[0];
         p[1] += rgb[1];
@@ -136,8 +136,8 @@ mod tests {
     fn encode_matches_canvas_values_everywhere() {
         let mut c = Canvas::new();
         for (i, face) in Face::ALL.into_iter().enumerate() {
-            for y in 0..64u8 {
-                for x in 0..64u8 {
+            for y in 0..64u16 {
+                for x in 0..64u16 {
                     let t = ((i as f32) * 13.0 + f32::from(x) * 0.7 + f32::from(y) * 0.3) % 1.0;
                     c.set(face, x, y, [t, t * 0.5, 1.0 - t]);
                 }
@@ -146,8 +146,8 @@ mod tests {
         let mut f = Frame::black();
         c.encode(&mut f);
         for face in Face::ALL {
-            for y in 0..64u8 {
-                for x in 0..64u8 {
+            for y in 0..64u16 {
+                for x in 0..64u16 {
                     let v = c.get(face, x, y);
                     let want = [srgb_encode(v[0]), srgb_encode(v[1]), srgb_encode(v[2])];
                     assert_eq!(f.get(face, usize::from(x), usize::from(y)), want);

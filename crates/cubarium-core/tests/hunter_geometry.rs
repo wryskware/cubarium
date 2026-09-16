@@ -6,6 +6,7 @@
 //! Nothing here is evidence about balance. `capture_min = capture_max = 1` in these fixtures
 //! so the settlement path is deterministic; everything else is the trial profile.
 
+use cubarium_surface::{Scale, Topology};
 use cubarium_core::genome::{Genome, decode};
 use cubarium_core::hunter::{
     AttemptOutcome, ContactGeometry, FixedHunterProfile, HunterEvent, HunterPhase, HunterTarget,
@@ -47,7 +48,7 @@ fn target_of(pos: SurfacePoint) -> HunterTarget {
 fn images() -> [Vec<ChartImage>; 5] {
     std::array::from_fn(|i| {
         let mut v = Vec::new();
-        chart_images(Face::from_index(i as u8).expect("five faces"), MAX_SEAMS, &mut v);
+        chart_images(Topology::Cube, Face::from_index(i as u8).expect("five faces"), MAX_SEAMS, &mut v);
         v
     })
 }
@@ -73,7 +74,7 @@ fn place_prey(world: &mut World, pos: SurfacePoint, s: f64, r: f64, e: f64) -> O
     phenotype.speed_max = 0.0;
     phenotype.structure_adult = s;
     let id = world.state.organisms.insert(Organism {
-        pos: pos.canonicalize(),
+        pos: pos.canonicalize(Topology::Cube),
         heading: Vec2::new(1.0, 0.0),
         ou: Vec2::ZERO,
         structure: s,
@@ -132,7 +133,7 @@ fn every_published_grasp_centre_round_trips_through_the_root_chart() {
         for u in [1.5, 16.5, 32.5, 47.5, 62.5] {
             for v in [1.5, 16.5, 32.5, 47.5, 62.5] {
                 for angle in 0..8 {
-                    let root = SurfacePoint::new(face, u, v).canonicalize();
+                    let root = SurfacePoint::new(face, u, v).canonicalize(Topology::Cube);
                     let heading = Vec2::from_screen_angle(
                         angle as f64 * std::f64::consts::TAU / 8.0,
                     );
@@ -142,7 +143,7 @@ fn every_published_grasp_centre_round_trips_through_the_root_chart() {
                                 published += 1;
                                 // The root's own shortest image of that point is the body
                                 // coordinate it was built from — not merely *a* short path.
-                                let u = unfold_with(&images[root.face.index()], root, point, 32.0)
+                                let u = unfold_with(Topology::Cube, &images[root.face.index()], root, point, 32.0)
                                     .expect("a published centre is reachable from the root");
                                 let (forward, side) = basis(heading);
                                 let delta = u.local - root.chart();
@@ -152,7 +153,7 @@ fn every_published_grasp_centre_round_trips_through_the_root_chart() {
                                     "{face:?} ({u:?},{v}) angle {angle}: published {back:?} for {offset:?}"
                                 );
                                 // And the sweep that produced it neither reflected nor guessed.
-                                let swept = travel(root, chart_offset(heading, offset));
+                                let swept = travel(Topology::Cube, root, chart_offset(heading, offset));
                                 assert_eq!(swept.reflections, 0);
                                 assert!(!swept.fallback);
                                 assert_eq!(swept.ties, 0);
@@ -160,7 +161,7 @@ fn every_published_grasp_centre_round_trips_through_the_root_chart() {
                             None => {
                                 refused += 1;
                                 // A refusal is always explained by the sweep itself.
-                                let swept = travel(root, chart_offset(heading, offset));
+                                let swept = travel(Topology::Cube, root, chart_offset(heading, offset));
                                 let off_surface =
                                     swept.reflections > 0 || swept.fallback || swept.ties > 0;
                                 let inconsistent = !off_surface;
@@ -207,7 +208,7 @@ fn contact_is_decided_at_the_published_grasp_and_not_at_the_thorax() {
         let profile = certain(&world);
         let hunter = world.start_hunter_trial(profile.clone(), target_of(spot)).expect("started").id;
         aim(&mut world, hunter, Vec2::new(1.0, 0.0), 1.0);
-        let near = travel(spot, chart_offset(Vec2::new(1.0, 0.0), Vec2::new(6.0, 0.0))).end;
+        let near = travel(Topology::Cube, spot, chart_offset(Vec2::new(1.0, 0.0), Vec2::new(6.0, 0.0))).end;
         let prey = place_prey(&mut world, near, 0.5, 0.3, 0.4);
         for _ in 0..200 {
             world.step();
@@ -261,7 +262,7 @@ fn a_juvenile_grasps_at_its_own_published_scale() {
     let hunter = world.start_hunter_trial(profile.clone(), target_of(spot)).expect("started").id;
     aim(&mut world, hunter, Vec2::new(1.0, 0.0), 1.0);
     shrink(&mut world, hunter, child_structure);
-    let adult_grasp = travel(spot, chart_offset(Vec2::new(1.0, 0.0), profile.capture_offset_body)).end;
+    let adult_grasp = travel(Topology::Cube, spot, chart_offset(Vec2::new(1.0, 0.0), profile.capture_offset_body)).end;
     // R0d: the claim here is about *reach*, not about patience. At the calibrated pace
     // (1.0 BL/s) a juvenile simply walks the 8 px from its own grasp to the adult one inside
     // 200 ticks and eats, which proves nothing about the published scale — so the member is

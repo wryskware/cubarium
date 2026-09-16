@@ -7,9 +7,10 @@
 //! [`EcologyV1State`], a **trailing** extension of `WorldState` rather than a change to the
 //! wire shape of `Fields`. The two are always stepped together.
 
+use cubarium_surface::{Scale, Topology};
 use serde::{Deserialize, Serialize};
 
-use cubarium_surface::{CELL_COUNT, CellId, FieldGraph, ScalarField, diffuse};
+use cubarium_surface::{CUBE_CELL_COUNT, CellId, FieldGraph, ScalarField, diffuse};
 
 use crate::DT;
 use crate::config::WorldConfig;
@@ -34,7 +35,7 @@ pub struct Fields {
 
 /// A dry surface: the default for `Fields::w` when a serialized state lacks it.
 fn dry() -> Vec<f64> {
-    vec![0.0; CELL_COUNT]
+    vec![0.0; CUBE_CELL_COUNT]
 }
 
 /// `Q_0` as a fraction of `Q_max` in a cell that starts alive
@@ -130,10 +131,10 @@ impl EcologyV1State {
     /// cells that start alive, no dead wood and no remains.
     pub fn new(
         cfg: &WorldConfig,
-        light0: &[f64; CELL_COUNT],
-        moisture0: &[f64; CELL_COUNT],
+        light0: &[f64; CUBE_CELL_COUNT],
+        moisture0: &[f64; CUBE_CELL_COUNT],
     ) -> EcologyV1State {
-        let wood: Vec<f64> = (0..CELL_COUNT)
+        let wood: Vec<f64> = (0..CUBE_CELL_COUNT)
             .map(|i| initial_wood(cfg, light0[i], moisture0[i]))
             .collect();
         let plant_reserve = wood
@@ -178,8 +179,8 @@ impl EcologyV1State {
             ("carrion", &self.carrion),
             ("carrion_energy", &self.carrion_energy),
         ] {
-            if v.len() != CELL_COUNT {
-                return Err(format!("{name} has {} cells, expected {CELL_COUNT}", v.len()));
+            if v.len() != CUBE_CELL_COUNT {
+                return Err(format!("{name} has {} cells, expected {CUBE_CELL_COUNT}", v.len()));
             }
             for (i, &x) in v.iter().enumerate() {
                 if !x.is_finite() {
@@ -190,7 +191,7 @@ impl EcologyV1State {
                 }
             }
         }
-        for i in 0..CELL_COUNT {
+        for i in 0..CUBE_CELL_COUNT {
             let cap = carrion_energy_cap * self.carrion[i] + 1e-9;
             if self.carrion_energy[i] > cap {
                 return Err(format!(
@@ -232,7 +233,7 @@ impl Default for EcoScratch {
             de5: dry(),
             c5: dry(),
             ce5: dry(),
-            class: vec![CellClass::Bare; CELL_COUNT],
+            class: vec![CellClass::Bare; CUBE_CELL_COUNT],
             budget: dry(),
             incoming: dry(),
         }
@@ -272,8 +273,8 @@ impl Fields {
     ///
     /// The wood those cells start with is [`EcologyV1State::new`]'s; both read
     /// [`initial_wood`], so a cell has foliage exactly when it has a stand to carry it.
-    pub fn new(cfg: &WorldConfig, light0: &[f64; CELL_COUNT], moisture0: &[f64; CELL_COUNT]) -> Fields {
-        let p = (0..CELL_COUNT)
+    pub fn new(cfg: &WorldConfig, light0: &[f64; CUBE_CELL_COUNT], moisture0: &[f64; CUBE_CELL_COUNT]) -> Fields {
+        let p = (0..CUBE_CELL_COUNT)
             .map(|i| {
                 let w0 = initial_wood(cfg, light0[i], moisture0[i]);
                 if w0 <= 0.0 {
@@ -283,12 +284,12 @@ impl Fields {
                 cfg.producer.initial_fraction * p_cap
             })
             .collect();
-        let d: Vec<f64> = (0..CELL_COUNT)
+        let d: Vec<f64> = (0..CUBE_CELL_COUNT)
             .map(|i| cfg.detritus.initial_dark * (1.0 - light0[i].clamp(0.0, 1.0)))
             .collect();
         let de = d.iter().map(|d| cfg.detritus.energy_cap * d).collect();
         Fields {
-            n: vec![cfg.nutrient.initial; CELL_COUNT],
+            n: vec![cfg.nutrient.initial; CUBE_CELL_COUNT],
             p,
             d,
             de,
@@ -341,13 +342,13 @@ impl Fields {
         &mut self,
         eco: &mut EcologyV1State,
         cfg: &WorldConfig,
-        light: &[f64; CELL_COUNT],
-        moisture: &[f64; CELL_COUNT],
+        light: &[f64; CUBE_CELL_COUNT],
+        moisture: &[f64; CUBE_CELL_COUNT],
         graph: &FieldGraph,
         scratch: &mut (ScalarField, ScalarField),
         work: &mut EcoScratch,
     ) -> FieldLedger {
-        debug_assert_eq!(self.n.len(), CELL_COUNT);
+        debug_assert_eq!(self.n.len(), CUBE_CELL_COUNT);
         let mut ledger = FieldLedger::default();
         let pc = &cfg.producer;
         let pl = &cfg.plant;
@@ -359,7 +360,7 @@ impl Fields {
         let e_d_max = dc.energy_cap;
         let build = 1.0 + pl.build;
 
-        for i in 0..CELL_COUNT {
+        for i in 0..CUBE_CELL_COUNT {
             // Every delta below is a function of this cell's pre-tick values and of what an
             // earlier subphase wrote *in this same cell*, exactly as the §4.0 table allows.
             let n0 = self.n[i];
@@ -595,7 +596,7 @@ impl Fields {
             work.ce5.copy_from_slice(&eco.carrion_energy);
             let left_d = 1.0 - (dc.decomposition * DT).min(1.0);
             let left_c = 1.0 - (dc.carrion_decomposition * DT).min(1.0);
-            for cell in CellId::all() {
+            for cell in CellId::all(Topology::Cube, Scale::ONE) {
                 let Some(down) = graph.downhill(cell) else { continue };
                 let (here, there) = (cell.index(), down.index());
                 let out_d = (fall * left_d * work.pre_d[here]).clamp(0.0, work.d5[here]);
@@ -630,7 +631,7 @@ impl Fields {
             work.budget.fill(0.0);
             work.incoming.fill(0.0);
             let mut any = false;
-            for cell in CellId::all() {
+            for cell in CellId::all(Topology::Cube, Scale::ONE) {
                 let j = cell.index();
                 // A donor is alive **after 3d** — a stand that died this tick sends nothing.
                 if work.class[j] != CellClass::Alive || eco.wood[j] < pl.donor_min {
@@ -657,7 +658,7 @@ impl Fields {
                 }
             }
             if any {
-                for cell in CellId::all() {
+                for cell in CellId::all(Topology::Cube, Scale::ONE) {
                     let j = cell.index();
                     if work.budget[j] <= 0.0 {
                         continue;
@@ -682,7 +683,7 @@ impl Fields {
                     pl.propagule_split[1],
                     pl.propagule_split[2],
                 );
-                for i in 0..CELL_COUNT {
+                for i in 0..CUBE_CELL_COUNT {
                     let s = work.incoming[i];
                     if s <= 0.0 {
                         continue;
@@ -711,8 +712,8 @@ impl Fields {
         for (name, v) in
             [("N", &self.n), ("P", &self.p), ("D", &self.d), ("De", &self.de), ("F", &self.f)]
         {
-            if v.len() != CELL_COUNT {
-                return Err(format!("{name} has {} cells, expected {CELL_COUNT}", v.len()));
+            if v.len() != CUBE_CELL_COUNT {
+                return Err(format!("{name} has {} cells, expected {CUBE_CELL_COUNT}", v.len()));
             }
             for (i, &x) in v.iter().enumerate() {
                 if !x.is_finite() {
@@ -723,7 +724,7 @@ impl Fields {
                 }
             }
         }
-        for i in 0..CELL_COUNT {
+        for i in 0..CUBE_CELL_COUNT {
             let cap = energy_cap * self.d[i] + 1e-9;
             if self.de[i] > cap {
                 return Err(format!(
@@ -770,8 +771,8 @@ mod tests {
 
     struct Harness {
         cfg: WorldConfig,
-        light: Box<[f64; CELL_COUNT]>,
-        moisture: Box<[f64; CELL_COUNT]>,
+        light: Box<[f64; CUBE_CELL_COUNT]>,
+        moisture: Box<[f64; CUBE_CELL_COUNT]>,
         graph: FieldGraph,
         scratch: (ScalarField, ScalarField),
         work: EcoScratch,
@@ -804,8 +805,8 @@ mod tests {
                 cfg,
                 light: habitat.light_base.clone(),
                 moisture: habitat.moisture_base.clone(),
-                graph: FieldGraph::new(),
-                scratch: (ScalarField::zeros(), ScalarField::zeros()),
+                graph: FieldGraph::new(Topology::Cube, Scale::ONE),
+                scratch: (ScalarField::zeros(Topology::Cube, Scale::ONE), ScalarField::zeros(Topology::Cube, Scale::ONE)),
                 work: EcoScratch::default(),
                 eco,
             }
@@ -896,10 +897,10 @@ mod tests {
         let habitat = Habitat::new(&cfg.habitat, cfg.seed);
         let f = Fields::new(&cfg, &habitat.light_base, &habitat.moisture_base);
         let eco = EcologyV1State::new(&cfg, &habitat.light_base, &habitat.moisture_base);
-        assert_eq!(f.n.len(), CELL_COUNT);
+        assert_eq!(f.n.len(), CUBE_CELL_COUNT);
         let mut alive = 0;
         let mut bare = 0;
-        for i in 0..CELL_COUNT {
+        for i in 0..CUBE_CELL_COUNT {
             let (l, m) = (habitat.light_base[i], habitat.moisture_base[i]);
             assert_eq!(f.n[i], cfg.nutrient.initial);
             let want_w = cfg.plant.initial_wood * cfg.plant.wood_max * l * m;
@@ -933,8 +934,8 @@ mod tests {
     fn the_initial_litter_lies_where_it_is_dark() {
         let cfg = WorldConfig::default();
         assert_eq!(cfg.detritus.initial_dark, 1.2);
-        let mut light = Box::new([0.0f64; CELL_COUNT]);
-        let moisture = Box::new([1.0f64; CELL_COUNT]);
+        let mut light = Box::new([0.0f64; CUBE_CELL_COUNT]);
+        let moisture = Box::new([1.0f64; CUBE_CELL_COUNT]);
         light[0] = 1.0;
         light[1] = 0.0;
         light[2] = 0.25;
@@ -1145,7 +1146,7 @@ mod tests {
             x ^= x << 17;
             (x >> 11) as f64 / (1u64 << 53) as f64
         };
-        for i in 0..CELL_COUNT {
+        for i in 0..CUBE_CELL_COUNT {
             f.d[i] = next() * 2.0;
             // Anywhere from empty to exactly at the cap.
             f.de[i] = next() * energy_cap * f.d[i];
@@ -1168,7 +1169,7 @@ mod tests {
             let de: f64 = f.de.iter().sum();
             assert!((d - d0).abs() / d0 < 1e-12, "tick {tick}: D drifted to {d} from {d0}");
             assert!((de - de0).abs() / de0 < 1e-12, "tick {tick}: De drifted to {de} from {de0}");
-            for i in 0..CELL_COUNT {
+            for i in 0..CUBE_CELL_COUNT {
                 assert!(f.d[i] >= 0.0 && f.de[i] >= 0.0, "tick {tick} cell {i} went negative");
                 assert!(
                     f.de[i] <= cap * f.d[i] + 1e-12,
@@ -1218,8 +1219,8 @@ mod tests {
         let mut f = h.fields();
         f.d.iter_mut().for_each(|d| *d = 0.0);
         f.de.iter_mut().for_each(|de| *de = 0.0);
-        let source = CellId::new(Face::Right, 6, 0);
-        let sink = CellId::new(Face::Right, 6, 15);
+        let source = CellId::new(Topology::Cube, Scale::ONE, Face::Right, 6, 0);
+        let sink = CellId::new(Topology::Cube, Scale::ONE, Face::Right, 6, 15);
         f.d[source.index()] = 1.0;
         f.de[source.index()] = cap;
 
@@ -1234,7 +1235,7 @@ mod tests {
             f.d[sink.index()]
         );
         assert!(f.de[sink.index()] > cap - 1e-9, "its energy came with it: {}", f.de[sink.index()]);
-        for cell in CellId::all() {
+        for cell in CellId::all(Topology::Cube, Scale::ONE) {
             if cell == sink {
                 continue;
             }
@@ -1257,7 +1258,7 @@ mod tests {
         f.de.iter_mut().for_each(|de| *de = 0.0);
         // A canopy cell against the seam, a canopy cell in the middle, and a rim cell.
         let stayers =
-            [CellId::new(Face::Top, 0, 0), CellId::new(Face::Top, 8, 8), CellId::new(Face::Front, 3, 15)];
+            [CellId::new(Topology::Cube, Scale::ONE, Face::Top, 0, 0), CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8), CellId::new(Topology::Cube, Scale::ONE, Face::Front, 3, 15)];
         for c in stayers {
             f.d[c.index()] = 1.0;
         }
@@ -1307,7 +1308,7 @@ mod tests {
         let flood = cfg.water.flood;
         let mut h = Harness::new(cfg);
         // Pick a cell whose moisture leaves headroom for wetting and a real standing crop.
-        let cell = (0..CELL_COUNT)
+        let cell = (0..CUBE_CELL_COUNT)
             .find(|&i| h.moisture[i] < 0.6 && h.light[i] > 0.3)
             .expect("a dry-ish lit cell exists");
         let _ = Face::Top;
@@ -1347,7 +1348,7 @@ mod tests {
         let h = Harness::new(WorldConfig::default());
         let mut f = h.fields();
         assert!(f.w.iter().all(|&w| w == 0.0));
-        assert_eq!(f.w.len(), CELL_COUNT);
+        assert_eq!(f.w.len(), CUBE_CELL_COUNT);
         let cap = h.cfg.detritus.energy_cap;
         f.check(cap).unwrap();
         f.w[7] = -0.5;

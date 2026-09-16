@@ -15,6 +15,7 @@
 //! `SIGKILL`, power loss) still loses at most `capacity.checkpoint_seconds` of simulated
 //! time, because every snapshot is written atomically.
 
+use cubarium_surface::{Scale, Topology};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -196,7 +197,7 @@ fn open_world(run: &Run) -> Result<(World, Option<PathBuf>, Option<u64>)> {
 /// The cell a seeded copy aims for on its face: the middle of the 16x16 chart. Cell (8, 8)
 /// rather than the exact geometric centre, so the start is a whole cell the clearance check
 /// can be about.
-const SEED_CELL: u8 = 8;
+const SEED_CELL: u16 = 8;
 
 /// Is this cell clear ground to start a grazer on? Standing water above `water.flood` is
 /// the world's own "this is not ground" threshold — it is where producer growth starts
@@ -213,7 +214,7 @@ fn nearest_clear_cell(
 ) -> Option<cubarium_surface::CellId> {
     use cubarium_surface::{CELLS_PER_FACE_EDGE, CellId};
     let edge = CELLS_PER_FACE_EDGE as i32;
-    let (face, cx, cy) = (want.face(), i32::from(want.cx()), i32::from(want.cy()));
+    let (face, cx, cy) = (want.face(Topology::Cube, Scale::ONE), i32::from(want.cx(Topology::Cube, Scale::ONE)), i32::from(want.cy(Topology::Cube, Scale::ONE)));
     for r in 0..edge {
         let mut best: Option<CellId> = None;
         for y in (cy - r).max(0)..=(cy + r).min(edge - 1) {
@@ -222,7 +223,7 @@ fn nearest_clear_cell(
                 if (x - cx).abs().max((y - cy).abs()) != r {
                     continue;
                 }
-                let cell = CellId::new(face, x as u8, y as u8);
+                let cell = CellId::new(Topology::Cube, Scale::ONE, face, x as u16, y as u16);
                 if is_clear_ground(world, cell) && best.is_none() {
                     best = Some(cell);
                 }
@@ -268,7 +269,7 @@ fn seed_neural_animals(run: &Run, world: &mut World) -> Result<usize> {
     let east = cubarium_surface::Vec2::new(1.0, 0.0);
     for k in 0..run.neural_count {
         let face = cubarium_surface::Face::from_index((k % 5) as u8).expect("five faces");
-        let want = cubarium_surface::CellId::new(face, SEED_CELL, SEED_CELL);
+        let want = cubarium_surface::CellId::new(Topology::Cube, Scale::ONE, face, SEED_CELL, SEED_CELL);
         let cell = nearest_clear_cell(world, want).ok_or_else(|| {
             anyhow::anyhow!(
                 "--neural: no clear ground anywhere on {face:?} to start a neural animal on"
@@ -277,14 +278,14 @@ fn seed_neural_animals(run: &Run, world: &mut World) -> Result<usize> {
         if cell != want {
             eprintln!(
                 "cubarium: --neural copy {k} on {face:?}: the centre cell ({}, {}) is not clear                  ground; starting at ({}, {}) instead",
-                want.cx(),
-                want.cy(),
-                cell.cx(),
-                cell.cy()
+                want.cx(Topology::Cube, Scale::ONE),
+                want.cy(Topology::Cube, Scale::ONE),
+                cell.cx(Topology::Cube, Scale::ONE),
+                cell.cy(Topology::Cube, Scale::ONE)
             );
         }
         world
-            .found_neural_animal(cell.center(), east, policy.clone())
+            .found_neural_animal(cell.center(Topology::Cube, Scale::ONE), east, policy.clone())
             .map_err(|e| anyhow::anyhow!("--neural: seeding copy {k} on {face:?}: {e}"))?;
     }
     eprintln!(

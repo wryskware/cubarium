@@ -1,3 +1,4 @@
+use cubarium_surface::{Scale, Topology};
 use super::*;
 use crate::present::Presenter;
 use cube_proto::Face;
@@ -31,15 +32,15 @@ fn organism(slot: u32, hue: f32, mode: Mode) -> OrganismView {
 fn empty_view() -> RenderView {
     RenderView {
         tick: 0,
-        producer: vec![0.0; CELL_COUNT],
-        detritus: vec![0.0; CELL_COUNT],
-        fruit: vec![0.0; CELL_COUNT],
-        wood: vec![0.0; CELL_COUNT],
-        plant_reserve: vec![0.0; CELL_COUNT],
-        dead_wood: vec![0.0; CELL_COUNT],
-        carrion: vec![0.0; CELL_COUNT],
-        water: vec![0.0; CELL_COUNT],
-        rain: vec![0.0; CELL_COUNT],
+        producer: vec![0.0; CUBE_CELL_COUNT],
+        detritus: vec![0.0; CUBE_CELL_COUNT],
+        fruit: vec![0.0; CUBE_CELL_COUNT],
+        wood: vec![0.0; CUBE_CELL_COUNT],
+        plant_reserve: vec![0.0; CUBE_CELL_COUNT],
+        dead_wood: vec![0.0; CUBE_CELL_COUNT],
+        carrion: vec![0.0; CUBE_CELL_COUNT],
+        water: vec![0.0; CUBE_CELL_COUNT],
+        rain: vec![0.0; CUBE_CELL_COUNT],
         producer_max: 2.0,
         wood_max: 0.6,
         organisms: Vec::new(),
@@ -50,8 +51,8 @@ fn empty_view() -> RenderView {
 /// the soil band, so comparisons against it are only meaningful above the horizon.
 fn identical_above_horizon(a: &Canvas, b: &Canvas) -> bool {
     Face::ALL.into_iter().all(|face| {
-        (0..64u8).all(|y| {
-            (0..64u8)
+        (0..64u16).all(|y| {
+            (0..64u16)
                 .all(|x| soil_weight(face, x, y) > 0.0 || a.get(face, x, y) == b.get(face, x, y))
         })
     })
@@ -66,11 +67,11 @@ fn art_ground(view: &RenderView) -> Canvas {
 }
 
 /// Pixels of `after` that differ from `before`, as (face, x, y).
-fn added(before: &Canvas, after: &Canvas) -> Vec<(Face, u8, u8)> {
+fn added(before: &Canvas, after: &Canvas) -> Vec<(Face, u16, u16)> {
     let mut out = Vec::new();
     for face in Face::ALL {
-        for y in 0..64u8 {
-            for x in 0..64u8 {
+        for y in 0..64u16 {
+            for x in 0..64u16 {
                 if before.get(face, x, y) != after.get(face, x, y) {
                     out.push((face, x, y));
                 }
@@ -155,7 +156,7 @@ fn a_body_is_drawn_with_the_rig_its_form_names() {
     );
     let same = |a: &Canvas, b: &Canvas| {
         Face::ALL.into_iter().all(|face| {
-            (0..64u8).all(|y| (0..64u8).all(|x| a.get(face, x, y) == b.get(face, x, y)))
+            (0..64u16).all(|y| (0..64u16).all(|x| a.get(face, x, y) == b.get(face, x, y)))
         })
     };
     assert!(
@@ -297,7 +298,7 @@ fn a_quiet_world_draws_the_m2_image_above_the_horizon() {
 
     // And a cell exactly at its band's first threshold is still bare: the rule is
     // strict in every band.
-    for (cell, v) in CellId::all().zip(view.producer.iter_mut()) {
+    for (cell, v) in CellId::all(Topology::Cube, Scale::ONE).zip(view.producer.iter_mut()) {
         *v = saturation * stage_thresholds(band_of(cell))[0];
     }
     Presenter::new().draw(&view, 0.0, &mut plain);
@@ -308,7 +309,7 @@ fn a_quiet_world_draws_the_m2_image_above_the_horizon() {
         identical_above_horizon(&plain, &art),
         "a cell exactly at its first threshold grew a plant"
     );
-    for cell in CellId::all() {
+    for cell in CellId::all(Topology::Cube, Scale::ONE) {
         assert_eq!(presenter.stage_of(cell), None, "{cell:?} is not bare");
     }
 }
@@ -528,7 +529,7 @@ fn the_chart_field_joins_across_every_seam_under_the_real_tangent_transport() {
                     cubarium_surface::Edge::Left => (eps, along, Vec2::new(-2.0 * eps, 0.0)),
                 };
                 let here = SurfacePoint::new(face, u, v);
-                let crossed = cubarium_surface::travel(here, step);
+                let crossed = cubarium_surface::travel(Topology::Cube, here, step);
                 assert_eq!(crossed.crossings, 1, "{face:?} {edge:?} is not one seam");
                 let mine = wind_chart(here.face, here.u, here.v);
                 let theirs = wind_chart(crossed.end.face, crossed.end.u, crossed.end.v);
@@ -793,7 +794,7 @@ fn a_quiet_interval_draws_the_windless_image_and_a_packet_does_not() {
     );
     let mut moved = 0;
     let mut turned = 0;
-    for cell in CellId::all() {
+    for cell in CellId::all(Topology::Cube, Scale::ONE) {
         let band = band_of(cell);
         let Some(plant) = presenter.plant_for(band, cell) else {
             continue;
@@ -825,7 +826,7 @@ fn a_quiet_interval_draws_the_windless_image_and_a_packet_does_not() {
                 deg <= wind_response(&plant.name).spin_deg * (1.0 + WIND_SLOT_VARIATION) + 1e-9,
                 "{cell:?} turned {deg}°"
             );
-            assert_eq!(cell.face(), Face::Top, "only a radial plant turns");
+            assert_eq!(cell.face(Topology::Cube, Scale::ONE), Face::Top, "only a radial plant turns");
         }
     }
     assert!(moved > 100, "only {moved} slots bend at the packet's peak");
@@ -914,14 +915,14 @@ const AT_MID: f64 = 0.50;
 /// lanternstalk is the pilot species and the only plant of the shipped pack that carries
 /// an authored growth clip.
 fn growth_cell() -> CellId {
-    CellId::all()
+    CellId::all(Topology::Cube, Scale::ONE)
         .find(|&c| {
-            c.face() == Face::Front
+            c.face(Topology::Cube, Scale::ONE) == Face::Front
                 && band_of(c) == Band::Foliage
                 && plant_cap(Band::Foliage, c) == Some(2)
                 && species_of(Band::Foliage, c) == "lanternstalk"
-                && (4..=7).contains(&c.cy())
-                && (4..=11).contains(&c.cx())
+                && (4..=7).contains(&c.cy(Topology::Cube, Scale::ONE))
+                && (4..=11).contains(&c.cx(Topology::Cube, Scale::ONE))
         })
         .expect("a rank-2 lanternstalk slot in the middle of Front")
 }
@@ -955,8 +956,8 @@ fn drawn_with(p: &mut ArtPresenter, view: &RenderView, f: f64) -> Canvas {
 fn worst_diff(a: &Canvas, b: &Canvas) -> f32 {
     let mut worst = 0.0f32;
     for face in Face::ALL {
-        for y in 0..64u8 {
-            for x in 0..64u8 {
+        for y in 0..64u16 {
+            for x in 0..64u16 {
                 let (p, q) = (a.get(face, x, y), b.get(face, x, y));
                 for c in 0..3 {
                     worst = worst.max((p[c] - q[c]).abs());
@@ -1465,7 +1466,7 @@ fn a_growth_stamp_takes_the_slots_wind_and_still_never_moves_its_root() {
         worst_diff(&still, &windy) > 0.0,
         "the bend moved nothing at all"
     );
-    for x in 23..41u8 {
+    for x in 23..41u16 {
         assert_eq!(
             still.get(Face::Front, x, 38),
             windy.get(Face::Front, x, 38),
@@ -1479,13 +1480,13 @@ fn a_radial_slot_with_a_clip_plays_it_unmasked_too() {
     // The canopy species carry their own clips (2026-09-13), so the top face's rule is
     // exercised on the shipped umbrellafrond's 0 → 1 and compared against the same pack
     // with that plant's clips stripped — the radial reveal it used before.
-    let cell = CellId::all()
+    let cell = CellId::all(Topology::Cube, Scale::ONE)
         .find(|&c| {
-            c.face() == Face::Top
+            c.face(Topology::Cube, Scale::ONE) == Face::Top
                 && plant_cap(Band::Canopy, c) == Some(2)
                 && species_of(Band::Canopy, c) == CANOPY_PLANTS[0]
-                && (4..=11).contains(&c.cx())
-                && (4..=11).contains(&c.cy())
+                && (4..=11).contains(&c.cx(Topology::Cube, Scale::ONE))
+                && (4..=11).contains(&c.cy(Topology::Cube, Scale::ONE))
         })
         .expect("a rank-2 umbrellafrond slot in the middle of Top");
     let stripped = || {
@@ -1587,7 +1588,7 @@ fn plant_and_body_draw_cost() {
     for _ in 0..5 {
         presenter.draw(&view, 0.0, &mut canvas);
     }
-    let grown = CellId::all()
+    let grown = CellId::all(Topology::Cube, Scale::ONE)
         .filter(|&c| presenter.stage_of(c).is_some())
         .count();
     let frames = 60;

@@ -10,9 +10,10 @@
 //! would change the postcard shape of a nested type and defeat the schema 7 migration.
 //! Every dose below is a **total over the footprint**, never a per-cell amount.
 
+use cubarium_surface::{Scale, Topology};
 use serde::{Deserialize, Serialize};
 
-use cubarium_surface::{CELL_COUNT, CellId, FACE_EXTENT, Face, FieldGraph, SurfacePoint, cell_of};
+use cubarium_surface::{CUBE_CELL_COUNT, CellId, FACE_EXTENT, Face, FieldGraph, SurfacePoint, cell_of};
 
 use crate::DT;
 use crate::config::WorldConfig;
@@ -164,7 +165,7 @@ impl CareTarget {
         if self.u < 0.0 || self.u >= FACE_EXTENT || self.v < 0.0 || self.v >= FACE_EXTENT {
             return None;
         }
-        Some(cell_of(&SurfacePoint::new(face, self.u, self.v)))
+        Some(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::new(face, self.u, self.v)))
     }
 }
 
@@ -336,17 +337,17 @@ impl CareState {
                     s.weights.len()
                 ));
             }
-            if s.cells.len() > CELL_COUNT {
+            if s.cells.len() > CUBE_CELL_COUNT {
                 return Err(format!("care shower {} covers more cells than the surface has", s.seq));
             }
             // The persisted dose is range-checked like every other decoded value: a shower
             // whose dose is outside the documented bounds is refused, never clamped.
             s.dose().validate(&format!("care shower {}", s.seq))?;
             // A footprint is a set: a repeated cell would take its share twice.
-            let mut seen = vec![false; CELL_COUNT];
+            let mut seen = vec![false; CUBE_CELL_COUNT];
             for &c in &s.cells {
                 let i = usize::from(c);
-                if i >= CELL_COUNT {
+                if i >= CUBE_CELL_COUNT {
                     return Err(format!("care shower {} names cell {c}, out of range", s.seq));
                 }
                 if seen[i] {
@@ -398,7 +399,7 @@ impl CareState {
 /// `Σ w_c = 1` to within [`WEIGHT_TOLERANCE`]. Returned in `CellId` index order, so the
 /// order the doses are summed in is a property of the surface and not of the search.
 pub fn footprint(graph: &FieldGraph, center: CellId, hops: usize) -> Vec<(CellId, f64)> {
-    let mut seen = vec![false; CELL_COUNT];
+    let mut seen = vec![false; CUBE_CELL_COUNT];
     seen[center.index()] = true;
     let mut raw: Vec<(CellId, f64)> = vec![(center, 1.0)];
     let mut frontier = vec![center];
@@ -458,8 +459,8 @@ mod tests {
 
     #[test]
     fn an_interior_footprint_has_the_documented_cells_and_weights() {
-        let graph = FieldGraph::new();
-        let center = CellId::new(Face::Front, 8, 8);
+        let graph = FieldGraph::new(Topology::Cube, Scale::ONE);
+        let center = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8);
         let fp = footprint(&graph, center, FEED_HOPS);
         assert_eq!(fp.len(), 5, "an interior 1-hop footprint is the cell and four neighbours");
         let sum: f64 = fp.iter().map(|(_, w)| w).sum();
@@ -478,12 +479,12 @@ mod tests {
 
     #[test]
     fn a_footprint_never_repeats_a_cell_across_a_seam_and_always_normalizes() {
-        let graph = FieldGraph::new();
+        let graph = FieldGraph::new(Topology::Cube, Scale::ONE);
         for (name, center) in [
-            ("seam", CellId::new(Face::Front, 15, 8)),
-            ("rim", CellId::new(Face::Front, 8, 15)),
-            ("corner", CellId::new(Face::Front, 15, 15)),
-            ("top", CellId::new(Face::Top, 0, 0)),
+            ("seam", CellId::new(Topology::Cube, Scale::ONE, Face::Front, 15, 8)),
+            ("rim", CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 15)),
+            ("corner", CellId::new(Topology::Cube, Scale::ONE, Face::Front, 15, 15)),
+            ("top", CellId::new(Topology::Cube, Scale::ONE, Face::Top, 0, 0)),
         ] {
             for hops in [FEED_HOPS, RAIN_HOPS] {
                 let fp = footprint(&graph, center, hops);
@@ -500,8 +501,8 @@ mod tests {
 
     #[test]
     fn a_target_resolves_only_inside_the_charts() {
-        assert_eq!(CareTarget { face: 0, u: 0.0, v: 0.0 }.resolve(), Some(CellId::new(Face::Front, 0, 0)));
-        assert_eq!(CareTarget { face: 4, u: 63.9, v: 63.9 }.resolve(), Some(CellId::new(Face::Top, 15, 15)));
+        assert_eq!(CareTarget { face: 0, u: 0.0, v: 0.0 }.resolve(), Some(CellId::new(Topology::Cube, Scale::ONE, Face::Front, 0, 0)));
+        assert_eq!(CareTarget { face: 4, u: 63.9, v: 63.9 }.resolve(), Some(CellId::new(Topology::Cube, Scale::ONE, Face::Top, 15, 15)));
         assert_eq!(CareTarget { face: 5, u: 1.0, v: 1.0 }.resolve(), None);
         assert_eq!(CareTarget { face: 0, u: 64.0, v: 1.0 }.resolve(), None);
         assert_eq!(CareTarget { face: 0, u: -1e-9, v: 1.0 }.resolve(), None);

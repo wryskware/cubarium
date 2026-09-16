@@ -5,6 +5,7 @@
 
 mod common;
 
+use cubarium_surface::{Scale, Topology};
 use common::total_material;
 use cubarium_core::organism::Mode;
 use cubarium_core::{World, WorldConfig};
@@ -12,7 +13,7 @@ use cubarium_surface::{CellId, Face, Vec2, cell_of};
 
 /// The contested cell: Front, cell column 10, row 10.
 fn arena() -> CellId {
-    CellId::new(Face::Front, 10, 10)
+    CellId::new(Topology::Cube, Scale::ONE, Face::Front, 10, 10)
 }
 
 /// Strip every field of food — ecology v1's stands and remains included, so no cell can
@@ -61,7 +62,7 @@ fn contested_producer_is_split_in_equal_proportion() {
     config.organism.intake_half_saturation = 0.0;
     let mut world = World::new(config).expect("three founders are a valid world");
 
-    let center = arena().center();
+    let center = arena().center(Topology::Cube, Scale::ONE);
     for (_, o) in world.state.organisms.iter_mut() {
         o.pos = center;
         o.heading = Vec2::new(1.0, 0.0);
@@ -84,7 +85,7 @@ fn contested_producer_is_split_in_equal_proportion() {
     for (_, o) in world.state.organisms.iter() {
         assert_eq!(o.mode, Mode::Feeding, "an organism standing on food is not Feeding");
         assert_eq!(
-            cell_of(&o.pos),
+            cell_of(Topology::Cube, Scale::ONE, &o.pos),
             arena(),
             "an organism left the arena cell before settlement"
         );
@@ -156,7 +157,7 @@ fn a_full_organism_requests_nothing() {
     let mut world = World::new(config).expect("one founder is a valid world");
 
     for (_, o) in world.state.organisms.iter_mut() {
-        o.pos = arena().center();
+        o.pos = arena().center(Topology::Cube, Scale::ONE);
         o.heading = Vec2::new(1.0, 0.0);
         o.ou = Vec2::ZERO;
         o.reserve = o.phenotype.reserve_max;

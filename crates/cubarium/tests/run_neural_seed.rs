@@ -6,6 +6,7 @@
 
 mod support;
 
+use cubarium_surface::{Scale, Topology};
 use support::{Scratch, parse, run};
 
 /// An exported policy file the runner can read, written the way `es-export` writes one.
@@ -152,9 +153,9 @@ fn every_seeded_animal_leaves_its_starting_cell() {
     let mut seeded = Vec::new();
     for k in 0..4u8 {
         let face = Face::from_index(k).expect("four side faces");
-        let cell = CellId::new(face, 8, 8);
+        let cell = CellId::new(Topology::Cube, Scale::ONE, face, 8, 8);
         let id = world
-            .found_neural_animal(cell.center(), Vec2::new(1.0, 0.0), policy.clone())
+            .found_neural_animal(cell.center(Topology::Cube, Scale::ONE), Vec2::new(1.0, 0.0), policy.clone())
             .expect("a fresh world has room for four more");
         seeded.push((id, cell));
     }
@@ -167,7 +168,7 @@ fn every_seeded_animal_leaves_its_starting_cell() {
         world.drain_events();
         for (i, (id, _)) in seeded.iter().enumerate() {
             if let Some(o) = world.state.organisms.get(*id) {
-                visited[i].insert(cell_of(&o.pos));
+                visited[i].insert(cell_of(Topology::Cube, Scale::ONE, &o.pos));
             }
         }
     }
@@ -179,7 +180,7 @@ fn every_seeded_animal_leaves_its_starting_cell() {
             visited[i].len() >= 2,
             "copy {i} never left {start:?}: {} cells visited, now at {:?}",
             visited[i].len(),
-            cell_of(&o.pos)
+            cell_of(Topology::Cube, Scale::ONE, &o.pos)
         );
     }
 }

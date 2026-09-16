@@ -6,6 +6,7 @@
 //! No world reference, RNG, wall clock or transport is used. A single root-owned surface
 //! query keeps each event coherent at seams and clips, rather than reflects, at the rim.
 
+use cubarium_surface::{Scale, Topology};
 use std::collections::VecDeque;
 
 use cubarium_core::care::{
@@ -13,7 +14,7 @@ use cubarium_core::care::{
 };
 use cubarium_core::DT;
 use cubarium_render::{srgb_decode, Canvas};
-use cubarium_surface::{unfold_pixels, Face, PixelImage, SurfacePoint, Vec2, CELL_COUNT};
+use cubarium_surface::{unfold_pixels, Face, PixelImage, SurfacePoint, Vec2, CUBE_CELL_COUNT};
 
 use crate::art_present::present_seconds;
 
@@ -149,7 +150,7 @@ impl CareEffects {
             }
             .map(srgb_decode);
             let crumbs: [_; 6] = std::array::from_fn(|i| event.crumb(age, i));
-            unfold_pixels(event.target, QUERY_RADIUS, &mut self.scratch);
+            unfold_pixels(Topology::Cube, event.target, QUERY_RADIUS, &mut self.scratch);
             for pixel in &self.scratch {
                 let local = pixel.local - event.target.chart();
                 // One receipt layer, not additive sparkle: overlap cannot build a halo.
@@ -192,7 +193,7 @@ fn valid_applied(kind: CareKind, boundary: u64, q: &CareApplied) -> bool {
     .into_iter()
     .any(|v| !v.is_finite() || v < 0.0)
         || q.cells == 0
-        || q.cells as usize > CELL_COUNT
+        || q.cells as usize > CUBE_CELL_COUNT
     {
         return false;
     }

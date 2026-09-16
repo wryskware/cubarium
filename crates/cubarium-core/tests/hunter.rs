@@ -7,6 +7,7 @@
 //! capture and `= 0` for a certain miss. Nothing else about the profile is changed, and no
 //! test here is evidence about ecological balance.
 
+use cubarium_surface::{Scale, Topology};
 use cubarium_core::genome::{Genome, decode};
 use cubarium_core::hunter::{
     AttemptOutcome, FixedHunterProfile, HunterEvent, HunterMember, HunterPhase, HunterTarget,
@@ -116,7 +117,7 @@ fn place_prey(
         phenotype.structure_adult = s;
     }
     let id = world.state.organisms.insert(Organism {
-        pos: pos.canonicalize(),
+        pos: pos.canonicalize(Topology::Cube),
         heading: Vec2::new(1.0, 0.0),
         ou: Vec2::ZERO,
         structure: s,
@@ -198,7 +199,7 @@ fn effector_point(
     profile: &FixedHunterProfile,
     scale: f64,
 ) -> SurfacePoint {
-    travel(
+    travel(Topology::Cube, 
         root,
         body_offset(heading, profile.capture_offset_body, scale),
     )
@@ -278,7 +279,7 @@ fn add_hunter(
     let reserve_max = phenotype.reserve_max;
     let tick = world.tick();
     let id = world.state.organisms.insert(Organism {
-        pos: pos.canonicalize(),
+        pos: pos.canonicalize(Topology::Cube),
         heading,
         ou: Vec2::ZERO,
         structure,
@@ -625,7 +626,7 @@ fn a_control_deposit_over_a_full_cell_turns_the_excess_into_real_heat() {
     let profile = trial(&world);
     let spot = SurfacePoint::new(Face::Top, 32.0, 32.0);
     // A cell whose detritus energy is already at the cap has no room for seven more units.
-    let cell = cubarium_surface::cell_of(&spot).index();
+    let cell = cubarium_surface::cell_of(Topology::Cube, Scale::ONE, &spot).index();
     world.state.fields.d[cell] = 1.0;
     world.state.fields.de[cell] = 2.0;
     world.state.external_material_in += 1.0;
@@ -1354,7 +1355,7 @@ fn a_grasp_past_the_open_rim_never_captures_and_is_never_published() {
     // open rim of a side face, aimed at it.
     let spot = SurfacePoint::new(Face::Front, 32.0, 63.0);
     let heading = Vec2::new(0.0, 1.0);
-    let sweep = travel(spot, body_offset(heading, profile.capture_offset_body, 1.0));
+    let sweep = travel(Topology::Cube, spot, body_offset(heading, profile.capture_offset_body, 1.0));
     assert!(
         sweep.reflections > 0,
         "this fixture needs the reach to meet the rim"
@@ -1434,7 +1435,7 @@ fn threatened_prey_turns_away_and_may_briefly_outrun_its_own_maximum() {
         .id;
     aim(&mut world, hunter, Vec2::new(1.0, 0.0), 1.0);
     // Far enough to be sensed and stalked, close enough to stay sensed: no contact yet.
-    let prey_spot = travel(spot, Vec2::new(1.0, 0.0) * 10.0).end;
+    let prey_spot = travel(Topology::Cube, spot, Vec2::new(1.0, 0.0) * 10.0).end;
     let prey = place_prey(&mut world, prey_spot, 0.5, 0.3, 0.6, false);
     let speed_max = world
         .state
@@ -1672,7 +1673,7 @@ fn a_hunter_that_cannot_pay_the_handling_cost_digests_nothing_that_tick() {
 fn a_facultative_hunter_scavenges_at_its_allocated_fraction_and_a_specialist_does_not() {
     let litter = |world: &mut World, id: OrganismId| {
         let cell =
-            cubarium_surface::cell_of(&world.state.organisms.get(id).expect("alive").pos).index();
+            cubarium_surface::cell_of(Topology::Cube, Scale::ONE, &world.state.organisms.get(id).expect("alive").pos).index();
         world.state.fields.d[cell] = 2.0;
         world.state.fields.de[cell] = 4.0;
         world.state.external_material_in += 2.0;

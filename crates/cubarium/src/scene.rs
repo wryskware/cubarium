@@ -4,6 +4,7 @@
 //! never sees them — it is handed a cloned [`SceneView`] snapshot of the last completed
 //! tick. Every spatial step goes through `cubarium-surface`.
 
+use cubarium_surface::{Scale, Topology};
 use cube_proto::Face;
 use cubarium_render::{BodyShape, Canvas, Lobe, Trail, draw_trail, stamp_body};
 use cubarium_surface::{
@@ -165,7 +166,7 @@ impl BodyScene {
 
         // Steer, then sweep, then transport the heading through the travel's tangent map.
         self.heading = rotate_screen_ccw(self.heading, self.turn_rate * DT);
-        travel_into(self.pos, self.heading * (BODY_SPEED * DT), &mut self.travel_buf);
+        travel_into(Topology::Cube, self.pos, self.heading * (BODY_SPEED * DT), &mut self.travel_buf);
         self.trail.push_travel(&self.travel_buf, tick);
         self.pos = self.travel_buf.end;
         self.heading = self.travel_buf.map.apply(self.heading);
@@ -282,19 +283,19 @@ pub struct PatchScene {
 impl PatchScene {
     pub fn new(_seed: u64) -> PatchScene {
         PatchScene {
-            field: ScalarField::zeros(),
-            scratch: ScalarField::zeros(),
-            graph: FieldGraph::new(),
+            field: ScalarField::zeros(Topology::Cube, Scale::ONE),
+            scratch: ScalarField::zeros(Topology::Cube, Scale::ONE),
+            graph: FieldGraph::new(Topology::Cube, Scale::ONE),
         }
     }
 
     pub fn tick(&mut self, tick: u64) {
         if tick.is_multiple_of(PATCH_PERIOD_TICKS) {
             let (face, u, v) = PATCH_CENTERS[((tick / PATCH_PERIOD_TICKS) % 4) as usize];
-            deposit(&mut self.field, SurfacePoint::new(face, u, v), PATCH_RADIUS, PATCH_AMOUNT);
+            deposit(Topology::Cube, Scale::ONE, &mut self.field, SurfacePoint::new(face, u, v), PATCH_RADIUS, PATCH_AMOUNT);
         }
         diffuse(&mut self.field, &mut self.scratch, &self.graph, PATCH_DIFFUSION);
-        for c in cubarium_surface::CellId::all() {
+        for c in cubarium_surface::CellId::all(Topology::Cube, Scale::ONE) {
             let x = self.field.get(c);
             self.field.set(c, x * PATCH_DECAY);
         }
@@ -385,8 +386,8 @@ mod tests {
     fn lit_faces(canvas: &Canvas) -> HashSet<Face> {
         let mut f = HashSet::new();
         for face in Face::ALL {
-            for y in 0..64u8 {
-                for x in 0..64u8 {
+            for y in 0..64u16 {
+                for x in 0..64u16 {
                     let px = canvas.get(face, x, y);
                     if (0..3).any(|i| px[i] - PALETTE.floor[i] > 1e-9) {
                         f.insert(face);
@@ -435,7 +436,7 @@ mod tests {
             s.tick();
             let v = s.view();
             let a = v.bodies[0].anchor;
-            assert!(a.is_canonical(), "non-canonical anchor {a:?}");
+            assert!(a.is_canonical(Topology::Cube), "non-canonical anchor {a:?}");
             assert!((v.bodies[0].heading.length() - 1.0).abs() < 1e-9, "heading drifted");
             faces.insert(a.face);
         }
@@ -520,13 +521,13 @@ mod tests {
         render(&v, 0.0, &mut canvas, &mut scratch);
         let at_zero: Vec<f32> = Face::ALL
             .into_iter()
-            .flat_map(|f| (0..64u8).flat_map(move |y| (0..64u8).map(move |x| (f, x, y))))
+            .flat_map(|f| (0..64u16).flat_map(move |y| (0..64u16).map(move |x| (f, x, y))))
             .map(|(f, x, y)| canvas.get(f, x, y)[0])
             .collect();
         render(&v, 1.0f64.next_down(), &mut canvas, &mut scratch);
         let at_one: Vec<f32> = Face::ALL
             .into_iter()
-            .flat_map(|f| (0..64u8).flat_map(move |y| (0..64u8).map(move |x| (f, x, y))))
+            .flat_map(|f| (0..64u16).flat_map(move |y| (0..64u16).map(move |x| (f, x, y))))
             .map(|(f, x, y)| canvas.get(f, x, y)[0])
             .collect();
         assert_ne!(at_zero, at_one, "the interpolated body must move within the tick");

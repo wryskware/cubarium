@@ -481,17 +481,17 @@ mod tests {
     use crate::{FACE_EXTENT, Vec2, pixel_neighbor, travel};
 
     fn graph() -> FieldGraph {
-        FieldGraph::new()
+        FieldGraph::new(Topology::Cube, Scale::ONE)
     }
 
     #[test]
     fn cell_ids_round_trip() {
-        for cell in CellId::all() {
-            assert_eq!(CellId::new(cell.face(), cell.cx(), cell.cy()), cell);
-            assert_eq!(cell_of(&cell.center()), cell);
+        for cell in CellId::all(Topology::Cube, Scale::ONE) {
+            assert_eq!(CellId::new(Topology::Cube, Scale::ONE, cell.face(Topology::Cube, Scale::ONE), cell.cx(Topology::Cube, Scale::ONE), cell.cy(Topology::Cube, Scale::ONE)), cell);
+            assert_eq!(cell_of(Topology::Cube, Scale::ONE, &cell.center(Topology::Cube, Scale::ONE)), cell);
         }
-        assert_eq!(CellId::all().count(), CELL_COUNT);
-        assert_eq!(CELL_COUNT, 1280);
+        assert_eq!(CellId::all(Topology::Cube, Scale::ONE).count(), CUBE_CELL_COUNT);
+        assert_eq!(CUBE_CELL_COUNT, 1280);
     }
 
     #[test]
@@ -499,7 +499,7 @@ mod tests {
         let g = graph();
         assert_eq!(g.edges().len(), 2528, "2,400 in-chart + 128 seam edges");
         let mut rim = 0;
-        for cell in CellId::all() {
+        for cell in CellId::all(Topology::Cube, Scale::ONE) {
             match g.degree(cell) {
                 4 => {}
                 3 => rim += 1,
@@ -515,14 +515,14 @@ mod tests {
             assert!(a < b);
         }
         // Exactly 128 of them cross a seam.
-        let seam_edges = g.edges().iter().filter(|(a, b)| a.face() != b.face()).count();
+        let seam_edges = g.edges().iter().filter(|(a, b)| a.face(Topology::Cube, Scale::ONE) != b.face(Topology::Cube, Scale::ONE)).count();
         assert_eq!(seam_edges, 128);
     }
 
     #[test]
     fn adjacency_is_reciprocal_and_has_no_duplicates() {
         let g = graph();
-        for a in CellId::all() {
+        for a in CellId::all(Topology::Cube, Scale::ONE) {
             let ns = g.neighbors(a);
             for (i, n) in ns.iter().enumerate() {
                 let Some(b) = *n else { continue };
@@ -543,12 +543,12 @@ mod tests {
     #[test]
     fn only_the_rim_is_open() {
         let g = graph();
-        for cell in CellId::all() {
+        for cell in CellId::all(Topology::Cube, Scale::ONE) {
             for edge in Edge::ALL {
                 let open = g.neighbor(cell, edge).is_none();
                 let is_rim = edge == Edge::Bottom
-                    && cell.cy() == 15
-                    && cell.face() != Face::Top;
+                    && cell.cy(Topology::Cube, Scale::ONE) == 15
+                    && cell.face(Topology::Cube, Scale::ONE) != Face::Top;
                 assert_eq!(open, is_rim, "{cell:?} {edge:?}");
             }
         }
@@ -559,18 +559,18 @@ mod tests {
         // The cell graph must be the cell-resolution shadow of the pixel-level seam
         // contract: the cell across an edge contains the pixel across that edge.
         let g = graph();
-        for cell in CellId::all() {
+        for cell in CellId::all(Topology::Cube, Scale::ONE) {
             for edge in Edge::ALL {
                 // The first pixel of this cell's along-edge run, on the cell's own
                 // side of `edge`.
                 let (px, py) = match edge {
-                    Edge::Top => (cell.cx() * 4, cell.cy() * 4),
-                    Edge::Right => (cell.cx() * 4 + 3, cell.cy() * 4),
-                    Edge::Bottom => (cell.cx() * 4, cell.cy() * 4 + 3),
-                    Edge::Left => (cell.cx() * 4, cell.cy() * 4),
+                    Edge::Top => (cell.cx(Topology::Cube, Scale::ONE) * 4, cell.cy(Topology::Cube, Scale::ONE) * 4),
+                    Edge::Right => (cell.cx(Topology::Cube, Scale::ONE) * 4 + 3, cell.cy(Topology::Cube, Scale::ONE) * 4),
+                    Edge::Bottom => (cell.cx(Topology::Cube, Scale::ONE) * 4, cell.cy(Topology::Cube, Scale::ONE) * 4 + 3),
+                    Edge::Left => (cell.cx(Topology::Cube, Scale::ONE) * 4, cell.cy(Topology::Cube, Scale::ONE) * 4),
                 };
-                let want = pixel_neighbor(cell.face(), px, py, edge)
-                    .map(|(f, x, y)| CellId::new(f, x / 4, y / 4));
+                let want = pixel_neighbor(Topology::Cube, cell.face(Topology::Cube, Scale::ONE), px, py, edge)
+                    .map(|(f, x, y)| CellId::new(Topology::Cube, Scale::ONE, f, x / 4, y / 4));
                 assert_eq!(g.neighbor(cell, edge), want, "{cell:?} {edge:?}");
             }
         }
@@ -580,28 +580,28 @@ mod tests {
     fn top_seams_reverse_at_cell_resolution() {
         let g = graph();
         // Right.top cell k joins Top's right column cell 15 - k.
-        for k in 0..16u8 {
-            let a = CellId::new(Face::Right, k, 0);
+        for k in 0..16u16 {
+            let a = CellId::new(Topology::Cube, Scale::ONE, Face::Right, k, 0);
             let b = g.neighbor(a, Edge::Top).expect("seam");
-            assert_eq!((b.face(), b.cx(), b.cy()), (Face::Top, 15, 15 - k), "k={k}");
+            assert_eq!((b.face(Topology::Cube, Scale::ONE), b.cx(Topology::Cube, Scale::ONE), b.cy(Topology::Cube, Scale::ONE)), (Face::Top, 15, 15 - k), "k={k}");
         }
         // Back.top cell k joins Top's top row cell 15 - k.
-        for k in 0..16u8 {
-            let a = CellId::new(Face::Back, k, 0);
+        for k in 0..16u16 {
+            let a = CellId::new(Topology::Cube, Scale::ONE, Face::Back, k, 0);
             let b = g.neighbor(a, Edge::Top).expect("seam");
-            assert_eq!((b.face(), b.cx(), b.cy()), (Face::Top, 15 - k, 0), "k={k}");
+            assert_eq!((b.face(Topology::Cube, Scale::ONE), b.cx(Topology::Cube, Scale::ONE), b.cy(Topology::Cube, Scale::ONE)), (Face::Top, 15 - k, 0), "k={k}");
         }
         // Left.top cell k joins Top's left column cell k (not reversed, but twisted).
-        for k in 0..16u8 {
-            let a = CellId::new(Face::Left, k, 0);
+        for k in 0..16u16 {
+            let a = CellId::new(Topology::Cube, Scale::ONE, Face::Left, k, 0);
             let b = g.neighbor(a, Edge::Top).expect("seam");
-            assert_eq!((b.face(), b.cx(), b.cy()), (Face::Top, 0, k), "k={k}");
+            assert_eq!((b.face(Topology::Cube, Scale::ONE), b.cx(Topology::Cube, Scale::ONE), b.cy(Topology::Cube, Scale::ONE)), (Face::Top, 0, k), "k={k}");
         }
         // Front.top cell k joins Top's bottom row cell k.
-        for k in 0..16u8 {
-            let a = CellId::new(Face::Front, k, 0);
+        for k in 0..16u16 {
+            let a = CellId::new(Topology::Cube, Scale::ONE, Face::Front, k, 0);
             let b = g.neighbor(a, Edge::Top).expect("seam");
-            assert_eq!((b.face(), b.cx(), b.cy()), (Face::Top, k, 15), "k={k}");
+            assert_eq!((b.face(Topology::Cube, Scale::ONE), b.cx(Topology::Cube, Scale::ONE), b.cy(Topology::Cube, Scale::ONE)), (Face::Top, k, 15), "k={k}");
         }
     }
 
@@ -611,7 +611,7 @@ mod tests {
         // real surface, which is an independent check of the seam wiring.
         let g = graph();
         for &(a, b) in g.edges() {
-            let d = crate::surface_distance(a.center(), b.center(), 8.0);
+            let d = crate::surface_distance(Topology::Cube, a.center(Topology::Cube, Scale::ONE), b.center(Topology::Cube, Scale::ONE), 8.0);
             let d = d.unwrap_or_else(|| panic!("{a:?} and {b:?} are not within 8 pixels"));
             assert!((d - 4.0).abs() < 1e-9, "{a:?} {b:?}: {d}");
         }
@@ -621,36 +621,36 @@ mod tests {
     #[test]
     fn downhill_points_one_step_down_the_side_faces_only() {
         let g = graph();
-        let y = |c: CellId| c.center().embed()[1];
+        let y = |c: CellId| Topology::Cube.embed(Scale::ONE, &c.center(Topology::Cube, Scale::ONE))[1];
         let sides = [Face::Front, Face::Right, Face::Back, Face::Left];
 
         // Clause 1: the canopy is level, so no Top-face cell slides, seam-adjacent or not.
-        for cx in 0..16u8 {
-            for cy in 0..16u8 {
-                let c = CellId::new(Face::Top, cx, cy);
+        for cx in 0..16u16 {
+            for cy in 0..16u16 {
+                let c = CellId::new(Topology::Cube, Scale::ONE, Face::Top, cx, cy);
                 assert_eq!(g.downhill(c), None, "{c:?} on the level top face");
                 assert_eq!(y(c), 1.0, "top-face centers all sit at y = 1");
             }
         }
 
         for face in sides {
-            for cx in 0..16u8 {
+            for cx in 0..16u16 {
                 // Clause 3: the bottom row has nothing below it.
-                let rim = CellId::new(face, cx, 15);
+                let rim = CellId::new(Topology::Cube, Scale::ONE, face, cx, 15);
                 assert_eq!(g.downhill(rim), None, "{rim:?} is on the open rim");
 
                 // Clause 2: everything above it steps down exactly one row.
-                for cy in 0..15u8 {
-                    let c = CellId::new(face, cx, cy);
+                for cy in 0..15u16 {
+                    let c = CellId::new(Topology::Cube, Scale::ONE, face, cx, cy);
                     let d = g.downhill(c).unwrap_or_else(|| panic!("{c:?} has no downhill"));
                     assert!(y(d) < y(c) - 1e-9, "{c:?} -> {d:?}: {} !< {}", y(d), y(c));
                     assert!(
                         g.neighbors(c).iter().flatten().all(|m| y(*m) >= y(d)),
                         "{c:?} -> {d:?} is not the lowest neighbour"
                     );
-                    assert_ne!(d.face(), Face::Top, "{c:?} must never drain onto the canopy");
+                    assert_ne!(d.face(Topology::Cube, Scale::ONE), Face::Top, "{c:?} must never drain onto the canopy");
                     assert_eq!(
-                        (d.face(), d.cx(), d.cy()),
+                        (d.face(Topology::Cube, Scale::ONE), d.cx(Topology::Cube, Scale::ONE), d.cy(Topology::Cube, Scale::ONE)),
                         (face, cx, cy + 1),
                         "{c:?} should step to the cell directly below it"
                     );
@@ -659,7 +659,7 @@ mod tests {
         }
 
         // The relation is acyclic and terminates in the bottom row: follow it to the end.
-        for cell in CellId::all() {
+        for cell in CellId::all(Topology::Cube, Scale::ONE) {
             let mut c = cell;
             let mut steps = 0;
             while let Some(next) = g.downhill(c) {
@@ -667,11 +667,11 @@ mod tests {
                 steps += 1;
                 assert!(steps <= 16, "{cell:?} did not reach the rim in 16 steps");
             }
-            if cell.face() == Face::Top {
+            if cell.face(Topology::Cube, Scale::ONE) == Face::Top {
                 assert_eq!(steps, 0);
             } else {
-                assert_eq!(steps, 15 - usize::from(cell.cy()), "{cell:?}");
-                assert_eq!((c.face(), c.cy()), (cell.face(), 15), "{cell:?} ended at {c:?}");
+                assert_eq!(steps, 15 - usize::from(cell.cy(Topology::Cube, Scale::ONE)), "{cell:?}");
+                assert_eq!((c.face(Topology::Cube, Scale::ONE), c.cy(Topology::Cube, Scale::ONE)), (cell.face(Topology::Cube, Scale::ONE), 15), "{cell:?} ended at {c:?}");
             }
         }
     }
@@ -679,24 +679,24 @@ mod tests {
     #[test]
     fn constant_fields_stay_bit_identical() {
         let g = graph();
-        let mut scratch = ScalarField::zeros();
+        let mut scratch = ScalarField::zeros(Topology::Cube, Scale::ONE);
         for rate in [0.05, 0.25, 0.5, 1.0, 3.0] {
-            let mut f = ScalarField::constant(1.25);
+            let mut f = ScalarField::constant(Topology::Cube, Scale::ONE, 1.25);
             let n = diffuse(&mut f, &mut scratch, &g, rate);
             assert!(n >= 1);
-            assert_eq!(f, ScalarField::constant(1.25), "rate {rate}");
+            assert_eq!(f, ScalarField::constant(Topology::Cube, Scale::ONE, 1.25), "rate {rate}");
         }
     }
 
     #[test]
     fn diffusion_conserves_mass_and_nonnegativity() {
         let g = graph();
-        let mut scratch = ScalarField::zeros();
-        let mut f = ScalarField::zeros();
+        let mut scratch = ScalarField::zeros(Topology::Cube, Scale::ONE);
+        let mut f = ScalarField::zeros(Topology::Cube, Scale::ONE);
         // Sources at a top vertex, at the rim, and in the middle of a face.
-        f.set(CellId::new(Face::Front, 15, 0), 100.0);
-        f.set(CellId::new(Face::Front, 8, 15), 40.0);
-        f.set(CellId::new(Face::Top, 8, 8), 7.5);
+        f.set(CellId::new(Topology::Cube, Scale::ONE, Face::Front, 15, 0), 100.0);
+        f.set(CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 15), 40.0);
+        f.set(CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8), 7.5);
         let start = f.total();
         for step in 0..200 {
             let n = diffuse(&mut f, &mut scratch, &g, 0.9);
@@ -716,9 +716,9 @@ mod tests {
     #[test]
     fn substep_counts_follow_the_rate() {
         let g = graph();
-        let mut scratch = ScalarField::zeros();
-        let mut f = ScalarField::zeros();
-        f.set(CellId::new(Face::Front, 4, 4), 1.0);
+        let mut scratch = ScalarField::zeros(Topology::Cube, Scale::ONE);
+        let mut f = ScalarField::zeros(Topology::Cube, Scale::ONE);
+        f.set(CellId::new(Topology::Cube, Scale::ONE, Face::Front, 4, 4), 1.0);
         for (rate, want) in [(0.1, 1u32), (0.25, 1), (0.26, 2), (0.5, 2), (0.75, 3), (1.0, 4)] {
             assert_eq!(diffuse(&mut f, &mut scratch, &g, rate), want, "rate {rate}");
         }
@@ -734,15 +734,15 @@ mod tests {
         let g = graph();
         // The rim cells of the side faces never exchange downward.
         for face in [Face::Front, Face::Right, Face::Back, Face::Left] {
-            for cx in 0..16u8 {
-                assert_eq!(g.neighbor(CellId::new(face, cx, 15), Edge::Bottom), None);
+            for cx in 0..16u16 {
+                assert_eq!(g.neighbor(CellId::new(Topology::Cube, Scale::ONE, face, cx, 15), Edge::Bottom), None);
             }
         }
         // And a field that is uniform above the rim does not leak mass out of it.
-        let mut scratch = ScalarField::zeros();
-        let mut f = ScalarField::zeros();
-        for cx in 0..16u8 {
-            f.set(CellId::new(Face::Front, cx, 15), 1.0);
+        let mut scratch = ScalarField::zeros(Topology::Cube, Scale::ONE);
+        let mut f = ScalarField::zeros(Topology::Cube, Scale::ONE);
+        for cx in 0..16u16 {
+            f.set(CellId::new(Topology::Cube, Scale::ONE, Face::Front, cx, 15), 1.0);
         }
         let start = f.total();
         for _ in 0..50 {
@@ -762,8 +762,8 @@ mod tests {
             (SurfacePoint::new(Face::Back, 0.0, 0.0), 4.0),
         ];
         for (center, radius) in cases {
-            let mut f = ScalarField::zeros();
-            let n = deposit(&mut f, center, radius, 25.0);
+            let mut f = ScalarField::zeros(Topology::Cube, Scale::ONE);
+            let n = deposit(Topology::Cube, Scale::ONE, &mut f, center, radius, 25.0);
             assert!(n > 0);
             assert!(
                 (f.total() - 25.0).abs() < 1e-9,
@@ -772,9 +772,9 @@ mod tests {
             );
             assert!(f.is_nonnegative());
             // Everything landed near the center.
-            for cell in CellId::all() {
+            for cell in CellId::all(Topology::Cube, Scale::ONE) {
                 if f.get(cell) > 0.0 {
-                    let d = crate::surface_distance(center, cell.center(), radius);
+                    let d = crate::surface_distance(Topology::Cube, center, cell.center(Topology::Cube, Scale::ONE), radius);
                     assert!(d.is_some_and(|d| d <= radius), "{cell:?} is outside the footprint");
                 }
             }
@@ -783,12 +783,12 @@ mod tests {
 
     #[test]
     fn a_footprint_near_a_seam_deposits_the_same_total_as_one_in_the_middle() {
-        let mut middle = ScalarField::zeros();
-        deposit(&mut middle, SurfacePoint::new(Face::Front, 32.0, 32.0), 9.0, 1.0);
-        let mut seam = ScalarField::zeros();
-        deposit(&mut seam, SurfacePoint::new(Face::Front, 63.9, 32.0), 9.0, 1.0);
-        let mut rim = ScalarField::zeros();
-        deposit(&mut rim, SurfacePoint::new(Face::Front, 32.0, 63.9), 9.0, 1.0);
+        let mut middle = ScalarField::zeros(Topology::Cube, Scale::ONE);
+        deposit(Topology::Cube, Scale::ONE, &mut middle, SurfacePoint::new(Face::Front, 32.0, 32.0), 9.0, 1.0);
+        let mut seam = ScalarField::zeros(Topology::Cube, Scale::ONE);
+        deposit(Topology::Cube, Scale::ONE, &mut seam, SurfacePoint::new(Face::Front, 63.9, 32.0), 9.0, 1.0);
+        let mut rim = ScalarField::zeros(Topology::Cube, Scale::ONE);
+        deposit(Topology::Cube, Scale::ONE, &mut rim, SurfacePoint::new(Face::Front, 32.0, 63.9), 9.0, 1.0);
         for f in [&middle, &seam, &rim] {
             assert!((f.total() - 1.0).abs() < 1e-9, "{}", f.total());
         }
@@ -798,11 +798,11 @@ mod tests {
 
     #[test]
     fn a_tiny_radius_falls_back_to_the_containing_cell() {
-        let mut f = ScalarField::zeros();
+        let mut f = ScalarField::zeros(Topology::Cube, Scale::ONE);
         let center = SurfacePoint::new(Face::Left, 5.0, 7.0);
-        let n = deposit(&mut f, center, 0.5, 3.0);
+        let n = deposit(Topology::Cube, Scale::ONE, &mut f, center, 0.5, 3.0);
         assert_eq!(n, 1);
-        assert_eq!(f.get(cell_of(&center)), 3.0);
+        assert_eq!(f.get(cell_of(Topology::Cube, Scale::ONE, &center)), 3.0);
         assert!((f.total() - 3.0).abs() < 1e-12);
     }
 
@@ -812,10 +812,10 @@ mod tests {
         // total, and the weight profile must stay smooth: track the peak cell value.
         let mut peaks = Vec::new();
         for u in [56.0, 60.0, 63.0, FACE_EXTENT - 0.01] {
-            let mut f = ScalarField::zeros();
+            let mut f = ScalarField::zeros(Topology::Cube, Scale::ONE);
             // Sliding the point there with `travel` keeps it canonical, seam or not.
-            let start = travel(SurfacePoint::new(Face::Front, 32.0, 32.0), Vec2::new(u - 32.0, 0.0)).end;
-            deposit(&mut f, start, 9.0, 1.0);
+            let start = travel(Topology::Cube, SurfacePoint::new(Face::Front, 32.0, 32.0), Vec2::new(u - 32.0, 0.0)).end;
+            deposit(Topology::Cube, Scale::ONE, &mut f, start, 9.0, 1.0);
             assert!((f.total() - 1.0).abs() < 1e-9);
             peaks.push(f.max());
         }

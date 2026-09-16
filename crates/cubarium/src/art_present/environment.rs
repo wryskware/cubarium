@@ -1,5 +1,6 @@
 //! Ground cover, water, and rain rendering.
 
+use cubarium_surface::{Scale, Topology};
 use super::*;
 
 // --- Ground cover --------------------------------------------------------------------
@@ -13,7 +14,7 @@ use super::*;
 pub const GROUND_OPACITY: f32 = 0.30;
 /// Lattice pitch of the ground cover in pixels; the tiles are 8×8 with pivot (4, 4), so
 /// pitch 8 tiles the face without gaps.
-pub const GROUND_LATTICE: u8 = 8;
+pub const GROUND_LATTICE: u16 = 8;
 /// Seeds the per-lattice-point phase hash.
 const GROUND_SEED: u64 = 0x6772_6F75_6E64_0001;
 
@@ -33,10 +34,10 @@ pub fn ground_opacity(t: f64, band: Band) -> f32 {
 
 /// The pixel centers of the ground lattice on one face: `x ≡ 4 (mod 8)`, `y ≡ 4 (mod 8)`,
 /// 64 points.
-pub fn ground_points(face: Face) -> impl Iterator<Item = (Face, u8, u8)> {
+pub fn ground_points(face: Face) -> impl Iterator<Item = (Face, u16, u16)> {
     let half = GROUND_LATTICE / 2;
-    (0..FACE_SIZE as u8 / GROUND_LATTICE).flat_map(move |j| {
-        (0..FACE_SIZE as u8 / GROUND_LATTICE)
+    (0..FACE_SIZE as u16 / GROUND_LATTICE).flat_map(move |j| {
+        (0..FACE_SIZE as u16 / GROUND_LATTICE)
             .map(move |i| (face, i * GROUND_LATTICE + half, j * GROUND_LATTICE + half))
     })
 }
@@ -44,7 +45,7 @@ pub fn ground_points(face: Face) -> impl Iterator<Item = (Face, u8, u8)> {
 /// How much of a lattice point belongs to the band whose tile it draws: the soil weight
 /// for the soil tile, its complement for the foliage and canopy tiles, so the texture
 /// cross-fades through the horizon with the ground under it.
-pub fn ground_weight(face: Face, x: u8, y: u8, band: Band) -> f32 {
+pub fn ground_weight(face: Face, x: u16, y: u16, band: Band) -> f32 {
     let w = soil_weight(face, x, y);
     match band {
         Band::Soil => w,
@@ -54,7 +55,7 @@ pub fn ground_weight(face: Face, x: u8, y: u8, band: Band) -> f32 {
 
 /// A stable per-lattice-point offset into the tile's breath, in `[0, seconds)`, so a face
 /// of texture does not blink in lockstep.
-pub fn ground_phase_of(face: Face, x: u8, y: u8, seconds: f64) -> f64 {
+pub fn ground_phase_of(face: Face, x: u16, y: u16, seconds: f64) -> f64 {
     if !(seconds.is_finite() && seconds > 0.0) {
         return 0.0;
     }
@@ -154,15 +155,15 @@ static WATER_RAMP: LazyLock<([f32; 3], [f32; 3])> = LazyLock::new(|| {
 
 /// The shimmer phase of a pixel, in `[0, 2π)`, from a hash of its position: a fixed
 /// pattern that the time term slides through.
-pub fn water_phase(face: Face, x: u8, y: u8) -> f64 {
+pub fn water_phase(face: Face, x: u16, y: u16) -> f64 {
     WATER_PHASE[weight_index(face, x, y)]
 }
 
 static WATER_PHASE: LazyLock<Box<[f64]>> = LazyLock::new(|| {
     let mut phases = vec![0.0f64; 5 * FACE_PIXELS];
     for face in Face::ALL {
-        for y in 0..FACE_SIZE as u8 {
-            for x in 0..FACE_SIZE as u8 {
+        for y in 0..FACE_SIZE as u16 {
+            for x in 0..FACE_SIZE as u16 {
                 let key = (face.index() as u64) << 16 | u64::from(x) << 8 | u64::from(y);
                 phases[weight_index(face, x, y)] =
                     SplitMix64::new(WATER_SEED ^ key).next_f64() * std::f64::consts::TAU;
@@ -186,12 +187,12 @@ pub fn water_brightness(seconds: f64, phase: f64) -> f32 {
 /// weighted 4, each existing pixel neighbor's cell weighted 1, normalized over what is
 /// present (so the open rim does not darken). Exactly `cubarium_render::draw_field`'s
 /// filter.
-pub(super) fn filtered_at(field: &ScalarField, face: Face, x: u8, y: u8) -> f64 {
-    let mut sum = field.get(cell_of(&SurfacePoint::pixel_center(face, x, y))) * 4.0;
+pub(super) fn filtered_at(field: &ScalarField, face: Face, x: u16, y: u16) -> f64 {
+    let mut sum = field.get(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y))) * 4.0;
     let mut divisor = 4.0;
     for edge in Edge::ALL {
-        if let Some((nf, nx, ny)) = pixel_neighbor(face, x, y, edge) {
-            sum += field.get(cell_of(&SurfacePoint::pixel_center(nf, nx, ny)));
+        if let Some((nf, nx, ny)) = pixel_neighbor(Topology::Cube, face, x, y, edge) {
+            sum += field.get(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, nf, nx, ny)));
             divisor += 1.0;
         }
     }
@@ -210,15 +211,15 @@ pub(super) fn draw_water(
     seconds: f64,
 ) {
     for face in Face::ALL {
-        for y in 0..FACE_SIZE as u8 {
-            for x in 0..FACE_SIZE as u8 {
+        for y in 0..FACE_SIZE as u16 {
+            for x in 0..FACE_SIZE as u16 {
                 let w = filtered_at(water, face, x, y);
                 let a = water_coverage(w);
                 if a <= 0.0 {
                     continue;
                 }
                 let p_t = if saturation.is_finite() && saturation > 0.0 {
-                    producer.get(cell_of(&SurfacePoint::pixel_center(face, x, y))) / saturation
+                    producer.get(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y))) / saturation
                 } else {
                     0.0
                 };
@@ -313,15 +314,15 @@ pub fn rain_blink_on(seconds: f64) -> bool {
 /// face, so a streak's light is constant as it falls and the fall reads as smooth rather
 /// than as a pixel step. On the top face it is a single pixel at the origin weighted by
 /// [`rain_blink`], omitted when that is 0.
-pub fn rain_marks(cell: CellId, k: usize, seconds: f64) -> Vec<((u8, u8), f32)> {
+pub fn rain_marks(cell: CellId, k: usize, seconds: f64) -> Vec<((u16, u16), f32)> {
     let (dx, dy) = rain_origin(cell, k);
-    let x0 = i32::from(cell.cx()) * 4;
-    let y0 = i32::from(cell.cy()) * 4;
+    let x0 = i32::from(cell.cx(Topology::Cube, Scale::ONE)) * 4;
+    let y0 = i32::from(cell.cy(Topology::Cube, Scale::ONE)) * 4;
     let Some(up) = up_of(cell) else {
         let blink = rain_blink(seconds);
         return if blink > 0.0 {
             vec![(
-                ((x0 + i32::from(dx)) as u8, (y0 + i32::from(dy)) as u8),
+                ((x0 + i32::from(dx)) as u16, (y0 + i32::from(dy)) as u16),
                 blink,
             )]
         } else {
@@ -355,7 +356,7 @@ pub fn rain_marks(cell: CellId, k: usize, seconds: f64) -> Vec<((u8, u8), f32)> 
         // The head is wrapped within its cell; the two trailing pixels are not, so a
         // streak that reaches the edge of the face simply loses its tail.
         if in_face(x) && in_face(y) {
-            marks.push(((x as u8, y as u8), weight));
+            marks.push(((x as u16, y as u16), weight));
         }
     }
     marks
@@ -368,14 +369,14 @@ static RAIN_COLOR: LazyLock<[f32; 3]> = LazyLock::new(|| present::srgb_linear(RA
 /// shares its light between them instead of jumping.
 pub(super) fn draw_rain(canvas: &mut Canvas, rain: &[f32], seconds: f64) {
     let color = *RAIN_COLOR;
-    for (index, cell) in CellId::all().enumerate() {
+    for (index, cell) in CellId::all(Topology::Cube, Scale::ONE).enumerate() {
         let rate = rain.get(index).copied().unwrap_or(0.0);
         let n = rain_streaks(rate);
         if n == 0 {
             continue;
         }
         let scale = RAIN_OPACITY * rate.min(1.0);
-        let face = cell.face();
+        let face = cell.face(Topology::Cube, Scale::ONE);
         for k in 0..n {
             for ((x, y), weight) in rain_marks(cell, k, seconds) {
                 let alpha = (scale * weight).min(1.0);

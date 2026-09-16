@@ -1,5 +1,6 @@
 //! Renderer-only history trails made of actual transported path segments.
 
+use cubarium_surface::{Scale, Topology};
 use std::collections::VecDeque;
 
 use crate::Canvas;
@@ -113,8 +114,8 @@ pub fn draw_trail(canvas: &mut Canvas, trail: &Trail, now: u64, max_age_ticks: u
                 if f > 0.0 {
                     canvas.add(
                         face,
-                        x as u8,
-                        y as u8,
+                        x as u16,
+                        y as u16,
                         [
                             (color[0] * f).clamp(0.0, 1.0),
                             (color[1] * f).clamp(0.0, 1.0),
@@ -140,11 +141,11 @@ mod tests {
     use super::*;
     use cubarium_surface::{SurfacePoint, Vec2, travel};
 
-    fn lit(canvas: &Canvas) -> Vec<(Face, u8, u8, f32)> {
+    fn lit(canvas: &Canvas) -> Vec<(Face, u16, u16, f32)> {
         let mut v = Vec::new();
         for face in Face::ALL {
-            for y in 0..64u8 {
-                for x in 0..64u8 {
+            for y in 0..64u16 {
+                for x in 0..64u16 {
                     let p = canvas.get(face, x, y);
                     if p[0] != 0.0 || p[1] != 0.0 || p[2] != 0.0 {
                         v.push((face, x, y, p[0]));
@@ -161,7 +162,7 @@ mod tests {
         let mut p = SurfacePoint::new(cube_proto::Face::Front, 3.0, 3.0);
         let mut h = Vec2::new(0.93, 0.37).normalized().unwrap();
         for t in 0..steps {
-            let tr = travel(p, h * 3.7);
+            let tr = travel(Topology::Cube, p, h * 3.7);
             trail.push_travel(&tr, t);
             p = tr.end;
             h = tr.map.apply(h);
@@ -188,7 +189,7 @@ mod tests {
     #[test]
     fn a_segment_running_into_the_corner_lands_on_pixel_63() {
         let mut trail = Trail::new(8);
-        let tr = travel(SurfacePoint::new(cube_proto::Face::Front, 60.0, 60.0), Vec2::new(3.5, 3.5));
+        let tr = travel(Topology::Cube, SurfacePoint::new(cube_proto::Face::Front, 60.0, 60.0), Vec2::new(3.5, 3.5));
         trail.push_travel(&tr, 0);
         let mut canvas = Canvas::new();
         draw_trail(&mut canvas, &trail, 0, 160, [1.0, 1.0, 1.0]);
@@ -203,7 +204,7 @@ mod tests {
         let mut trail = Trail::new(16);
         // The same short segment traveled twice, at different ages.
         for tick in [0u64, 100] {
-            let tr = travel(SurfacePoint::new(cube_proto::Face::Left, 20.0, 20.0), Vec2::new(2.0, 0.0));
+            let tr = travel(Topology::Cube, SurfacePoint::new(cube_proto::Face::Left, 20.0, 20.0), Vec2::new(2.0, 0.0));
             trail.push_travel(&tr, tick);
         }
         let mut canvas = Canvas::new();
@@ -219,7 +220,7 @@ mod tests {
     #[test]
     fn segments_older_than_the_window_are_not_drawn() {
         let mut trail = Trail::new(16);
-        let tr = travel(SurfacePoint::new(cube_proto::Face::Back, 10.0, 10.0), Vec2::new(4.0, 0.0));
+        let tr = travel(Topology::Cube, SurfacePoint::new(cube_proto::Face::Back, 10.0, 10.0), Vec2::new(4.0, 0.0));
         trail.push_travel(&tr, 0);
         let mut canvas = Canvas::new();
         draw_trail(&mut canvas, &trail, 500, 160, [1.0, 1.0, 1.0]);
@@ -230,7 +231,7 @@ mod tests {
     fn prune_drops_only_the_old_front() {
         let mut trail = Trail::new(64);
         for t in 0..10u64 {
-            let tr = travel(SurfacePoint::new(cube_proto::Face::Front, 10.0, 10.0), Vec2::new(1.0, 0.0));
+            let tr = travel(Topology::Cube, SurfacePoint::new(cube_proto::Face::Front, 10.0, 10.0), Vec2::new(1.0, 0.0));
             trail.push_travel(&tr, t);
         }
         assert_eq!(trail.len(), 10);

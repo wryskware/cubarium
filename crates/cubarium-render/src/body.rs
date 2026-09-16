@@ -1,5 +1,6 @@
 //! Seam-aware body stamps.
 
+use cubarium_surface::{Scale, Topology};
 use crate::Canvas;
 use cubarium_surface::{PixelImage, SurfacePoint, Vec2, unfold_pixels};
 
@@ -48,7 +49,7 @@ impl BodyShape {
 /// Stamp `shape` at `anchor` with unit `heading` (in the anchor chart) in `color`
 /// (linear RGB, multiplied by coverage and added to the canvas).
 ///
-/// Normative: call `unfold_pixels(anchor, shape.extent() + 0.5, scratch)`; for each image
+/// Normative: call `unfold_pixels(Topology::Cube, anchor, shape.extent() + 0.5, scratch)`; for each image
 /// compute the body-frame point `R(heading)⁻¹ · (image.local - anchor.chart())` where
 /// `R(heading)` maps body `+x` to `heading` and body `+y` to the heading rotated one
 /// quarter turn clockwise on screen; add `color · coverage` when coverage > 0. Because
@@ -64,7 +65,7 @@ pub fn stamp_body(canvas: &mut Canvas, anchor: SurfacePoint, heading: Vec2, shap
     // (`rotate_heading`), so clockwise is its inverse `(x, y) -> (-y, x)`: with `h`
     // image-right `(1, 0)` the body's `+y` is image-down `(0, 1)`, as documented.
     let perp = Vec2::new(-h.y, h.x);
-    unfold_pixels(anchor, shape.extent() + 0.5, scratch);
+    unfold_pixels(Topology::Cube, anchor, shape.extent() + 0.5, scratch);
     let a = anchor.chart();
     for img in scratch.iter() {
         // `R` is orthonormal, so its inverse is its transpose: project onto the axes.
@@ -99,11 +100,11 @@ mod tests {
         }
     }
 
-    fn lit(canvas: &Canvas) -> Vec<(Face, u8, u8, f32)> {
+    fn lit(canvas: &Canvas) -> Vec<(Face, u16, u16, f32)> {
         let mut v = Vec::new();
         for face in Face::ALL {
-            for y in 0..64u8 {
-                for x in 0..64u8 {
+            for y in 0..64u16 {
+                for x in 0..64u16 {
                     let p = canvas.get(face, x, y);
                     if p[0] != 0.0 || p[1] != 0.0 || p[2] != 0.0 {
                         v.push((face, x, y, p[0]));
@@ -117,8 +118,8 @@ mod tests {
     fn total(canvas: &Canvas) -> f64 {
         let mut t = 0.0f64;
         for face in Face::ALL {
-            for y in 0..64u8 {
-                for x in 0..64u8 {
+            for y in 0..64u16 {
+                for x in 0..64u16 {
                     t += f64::from(canvas.get(face, x, y)[0]);
                 }
             }
@@ -159,7 +160,7 @@ mod tests {
 
         // Heading image-right: the lobe must land one pixel image-down.
         let mut canvas = Canvas::new();
-        let anchor = SurfacePoint::pixel_center(Face::Front, 32, 32);
+        let anchor = SurfacePoint::pixel_center(Topology::Cube, Face::Front, 32, 32);
         stamp_body(&mut canvas, anchor, Vec2::new(1.0, 0.0), &shape, [1.0; 3], &mut scratch);
         let l = lit(&canvas);
         assert_eq!(l.len(), 1, "expected exactly one lit pixel, got {l:?}");
@@ -178,7 +179,7 @@ mod tests {
         let shape = one_lobe(1.6);
         let mut scratch = Vec::new();
         let mut canvas = Canvas::new();
-        let anchor = SurfacePoint::pixel_center(Face::Front, 32, 32);
+        let anchor = SurfacePoint::pixel_center(Topology::Cube, Face::Front, 32, 32);
         stamp_body(&mut canvas, anchor, Vec2::new(1.0, 0.0), &shape, [1.0; 3], &mut scratch);
 
         // Every pixel offered by `unfold_pixels` is offered exactly once.
@@ -190,11 +191,11 @@ mod tests {
 
         // Coverage > 0 exactly where the pixel-center distance is below radius + 0.5 = 2.1:
         // the 13 offsets with |d| in {0, 1, sqrt 2, 2}.
-        let mut want: Vec<(u8, u8)> = Vec::new();
+        let mut want: Vec<(u16, u16)> = Vec::new();
         for dy in -3i32..=3 {
             for dx in -3i32..=3 {
                 if ((dx * dx + dy * dy) as f64).sqrt() < 2.1 {
-                    want.push(((32 + dx) as u8, (32 + dy) as u8));
+                    want.push(((32 + dx) as u16, (32 + dy) as u16));
                 }
             }
         }
@@ -276,7 +277,7 @@ mod tests {
         let mut scratch = Vec::new();
         stamp_body(
             &mut canvas,
-            SurfacePoint::pixel_center(Face::Front, 10, 10),
+            SurfacePoint::pixel_center(Topology::Cube, Face::Front, 10, 10),
             Vec2::ZERO,
             &one_lobe(2.0),
             [1.0; 3],

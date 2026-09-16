@@ -9,6 +9,7 @@
 //! widest pose and its largest query). A desktop capture is not a hardware observation and
 //! none of this measures the browser or shim transport.
 
+use cubarium_surface::{Scale, Topology};
 use std::{hint::black_box, path::Path, time::Instant};
 
 use cubarium::{
@@ -22,7 +23,7 @@ use cubarium_core::{
     view::{OrganismView, RenderView},
 };
 use cubarium_render::Canvas;
-use cubarium_surface::{CELL_COUNT, Face, SurfacePoint, Vec2};
+use cubarium_surface::{CUBE_CELL_COUNT, Face, SurfacePoint, Vec2};
 
 /// Ten seconds of presentation at 60 fps: a whole `move` gait and blink cycle and more than
 /// one 6 s hunt cycle, so the strike and its widest query are inside every measurement.
@@ -111,15 +112,15 @@ fn dense_view() -> RenderView {
     RenderView {
         // Six simulated seconds: inside a gust, not its quiet interval.
         tick: 121,
-        producer: vec![10.0; CELL_COUNT],
-        detritus: vec![1.5; CELL_COUNT],
-        fruit: vec![1.0; CELL_COUNT],
-        wood: vec![0.0; CELL_COUNT],
-        plant_reserve: vec![0.0; CELL_COUNT],
-        dead_wood: vec![0.0; CELL_COUNT],
-        carrion: vec![0.0; CELL_COUNT],
-        water: vec![1.0; CELL_COUNT],
-        rain: vec![1.0; CELL_COUNT],
+        producer: vec![10.0; CUBE_CELL_COUNT],
+        detritus: vec![1.5; CUBE_CELL_COUNT],
+        fruit: vec![1.0; CUBE_CELL_COUNT],
+        wood: vec![0.0; CUBE_CELL_COUNT],
+        plant_reserve: vec![0.0; CUBE_CELL_COUNT],
+        dead_wood: vec![0.0; CUBE_CELL_COUNT],
+        carrion: vec![0.0; CUBE_CELL_COUNT],
+        water: vec![1.0; CUBE_CELL_COUNT],
+        rain: vec![1.0; CUBE_CELL_COUNT],
         producer_max: 10.0,
         wood_max: 0.6,
         organisms: (0..200u32)

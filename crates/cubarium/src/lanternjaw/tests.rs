@@ -1,3 +1,4 @@
+use cubarium_surface::{Scale, Topology};
 use super::raster::HEAD;
 use super::*;
 use cubarium_render::{Canvas, RigPart, rig_radius};
@@ -691,7 +692,7 @@ fn at_the_strike_the_near_limb_is_over_the_hull_and_its_claw_reaches_past_it() {
     let rig = Lanternjaw::new();
     let mut parts = Vec::new();
     rig.parts(T_OPEN, Mode::Hunt, &mut parts);
-    let anchor = SurfacePoint::pixel_center(Face::Front, 32, 32);
+    let anchor = SurfacePoint::pixel_center(Topology::Cube, Face::Front, 32, 32);
     let heading = Vec2::new(1.0, 0.0);
     let subset = |keep: &dyn Fn(PartName) -> bool| {
         let chosen: Vec<RigPart<'_>> = parts
@@ -714,7 +715,7 @@ fn at_the_strike_the_near_limb_is_over_the_hull_and_its_claw_reaches_past_it() {
     let without_near = subset(&|n| n != PartName::NearLimb);
     let hull = subset(&|n| n.layer() == 2);
     let near = subset(&|n| n == PartName::NearLimb);
-    let light = |c: &Canvas, x: u8, y: u8| {
+    let light = |c: &Canvas, x: u16, y: u16| {
         c.get(Face::Front, x, y)
             .into_iter()
             .map(f64::from)
@@ -722,8 +723,8 @@ fn at_the_strike_the_near_limb_is_over_the_hull_and_its_claw_reaches_past_it() {
     };
 
     let mut over_hull = 0usize;
-    for x in 0..64u8 {
-        for y in 0..64u8 {
+    for x in 0..64u16 {
+        for y in 0..64u16 {
             if light(&hull, x, y) <= 0.0 || light(&near, x, y) <= 0.0 {
                 continue;
             }
@@ -743,8 +744,8 @@ fn at_the_strike_the_near_limb_is_over_the_hull_and_its_claw_reaches_past_it() {
     );
 
     // The brightest near-limb pixel is the claw, ahead of the hull's own front.
-    let (bx, by) = (0..64u8)
-        .flat_map(|x| (0..64u8).map(move |y| (x, y)))
+    let (bx, by) = (0..64u16)
+        .flat_map(|x| (0..64u16).map(move |y| (x, y)))
         .max_by(|&a, &b| {
             light(&near, a.0, a.1)
                 .partial_cmp(&light(&near, b.0, b.1))

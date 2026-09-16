@@ -6,6 +6,7 @@
 //! reads a live world, steps it, and writes back the same ecological bytes. Everything else
 //! checks that a command does exactly what the contract says and nothing else.
 
+use cubarium_surface::{Scale, Topology};
 use std::path::PathBuf;
 
 use cubarium_core::care::{
@@ -65,7 +66,7 @@ fn stored_energy(state: &WorldState) -> f64 {
 }
 
 fn target_of(cell: CellId) -> CareTarget {
-    let c = cell.center();
+    let c = cell.center(Topology::Cube, Scale::ONE);
     CareTarget { face: c.face.index() as u8, u: c.u, v: c.v }
 }
 
@@ -138,7 +139,7 @@ fn the_ecology_hash_masks_care_and_nothing_else() {
 
     // Feeding the world moves the ecology (litter arrives) **and** the care ledger. The
     // ecology part must move the hash; the ledger part must not.
-    let cell = CellId::new(Face::Top, 8, 8);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8);
     let receipt = world.apply_care(&command(1, world.tick(), CareKind::Feed, cell));
     assert!(receipt.outcome.applied().is_some(), "{:?}", receipt.outcome);
     assert_ne!(
@@ -165,7 +166,7 @@ fn feed_and_clean_keep_the_mass_and_energy_identities_exactly() {
     for _ in 0..200 {
         world.step();
     }
-    let cell = CellId::new(Face::Front, 8, 8);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8);
     let cap = world.config().detritus.energy_cap;
     let rho = cap;
 
@@ -199,16 +200,16 @@ fn feed_and_clean_keep_the_mass_and_energy_identities_exactly() {
     assert_eq!(world.care().allowance_used, q.material_in);
 
     // Only D and De moved, only over the footprint, and each cell got exactly its share.
-    let graph = FieldGraph::new();
+    let graph = FieldGraph::new(Topology::Cube, Scale::ONE);
     let fp = footprint(&graph, cell, 1);
-    let mut inside = vec![false; cubarium_surface::CELL_COUNT];
+    let mut inside = vec![false; cubarium_surface::CUBE_CELL_COUNT];
     for (c, w) in &fp {
         let i = c.index();
         inside[i] = true;
         assert!((world.state.fields.d[i] - d_cells_before[i] - FEED_MATERIAL * w).abs() < 1e-15);
         assert!((world.state.fields.de[i] - de_cells_before[i] - rho * (FEED_MATERIAL * w)).abs() < 1e-15);
     }
-    for i in 0..cubarium_surface::CELL_COUNT {
+    for i in 0..cubarium_surface::CUBE_CELL_COUNT {
         if !inside[i] {
             assert_eq!(world.state.fields.d[i], d_cells_before[i], "cell {i} is outside the footprint");
             assert_eq!(world.state.fields.de[i], de_cells_before[i], "cell {i} is outside the footprint");
@@ -297,15 +298,15 @@ fn feed_until_exhausted(world: &mut World, cell: CellId, from_seq: u64) -> (u64,
 #[test]
 fn the_allowance_buys_the_same_number_of_feeds_at_the_rim_as_inside() {
     for (name, cell, cells) in [
-        ("interior", CellId::new(Face::Front, 8, 8), 5),
-        ("seam", CellId::new(Face::Front, 15, 8), 5),
-        ("top corner", CellId::new(Face::Top, 0, 0), 5),
+        ("interior", CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8), 5),
+        ("seam", CellId::new(Topology::Cube, Scale::ONE, Face::Front, 15, 8), 5),
+        ("top corner", CellId::new(Topology::Cube, Scale::ONE, Face::Top, 0, 0), 5),
         // The 64 open-rim cells have degree three: weights 0.4, 0.2, 0.2, 0.2.
-        ("rim", CellId::new(Face::Front, 8, 15), 4),
-        ("rim corner", CellId::new(Face::Front, 0, 15), 4),
+        ("rim", CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 15), 4),
+        ("rim corner", CellId::new(Topology::Cube, Scale::ONE, Face::Front, 0, 15), 4),
     ] {
         let mut world = World::new(WorldConfig::default()).expect("valid");
-        let graph = FieldGraph::new();
+        let graph = FieldGraph::new(Topology::Cube, Scale::ONE);
         let fp = footprint(&graph, cell, 1);
         assert_eq!(fp.len(), cells, "{name} footprint");
         if cells == 4 {
@@ -331,7 +332,7 @@ fn the_allowance_buys_the_same_number_of_feeds_at_the_rim_as_inside() {
 #[test]
 fn the_feed_allowance_runs_out_and_a_clean_gives_it_back() {
     let mut world = World::new(WorldConfig::default()).expect("valid");
-    let cell = CellId::new(Face::Front, 8, 8);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8);
     let (mut seq, accepted, rejection) = feed_until_exhausted(&mut world, cell, 0);
     assert_eq!(rejection, "allowance exhausted");
     assert_eq!(accepted, 10, "30 m of allowance is ten 3 m feeds");
@@ -365,7 +366,7 @@ fn the_feed_allowance_runs_out_and_a_clean_gives_it_back() {
 #[test]
 fn cleaning_reports_nothing_to_remove_and_partial_removal_honestly() {
     let mut world = World::new(WorldConfig::default()).expect("valid");
-    let cell = CellId::new(Face::Front, 4, 4);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 4, 4);
     world.state.fields.d.fill(0.0);
     world.state.fields.de.fill(0.0);
 
@@ -398,12 +399,12 @@ fn the_rain_envelope_and_footprint_deliver_exactly_the_dose() {
     let total: f64 = e.iter().sum::<f64>() * cubarium_core::DT;
     assert!((total - 1.0).abs() < 1e-12, "the envelope integrates to {total} s");
 
-    let graph = FieldGraph::new();
+    let graph = FieldGraph::new(Topology::Cube, Scale::ONE);
     // An ordinary interior cell, a cell on a face seam, and a cell on the open bottom rim.
     for (name, cell, cells) in [
-        ("interior", CellId::new(Face::Front, 8, 8), 13),
-        ("seam", CellId::new(Face::Front, 15, 8), 13),
-        ("rim", CellId::new(Face::Front, 8, 15), 9),
+        ("interior", CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8), 13),
+        ("seam", CellId::new(Topology::Cube, Scale::ONE, Face::Front, 15, 8), 13),
+        ("rim", CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 15), 9),
     ] {
         let fp = footprint(&graph, cell, 2);
         assert_eq!(fp.len(), cells, "{name} footprint is {} cells", fp.len());
@@ -448,7 +449,7 @@ fn the_rain_envelope_and_footprint_deliver_exactly_the_dose() {
             "{name}: manual water is inside rain_in_total exactly once"
         );
         // Per cell it is the footprint weight's share, and nothing fell outside.
-        let mut inside = vec![false; cubarium_surface::CELL_COUNT];
+        let mut inside = vec![false; cubarium_surface::CUBE_CELL_COUNT];
         for (c, w) in &fp {
             inside[c.index()] = true;
             let got = world.state.fields.w[c.index()];
@@ -467,8 +468,8 @@ fn the_published_rain_rate_is_natural_plus_manual() {
     // The default config does rain naturally, so the published rate must be the sum.
     let mut with_care = World::new(WorldConfig::default()).expect("valid");
     let mut without = World::new(WorldConfig::default()).expect("valid");
-    let cell = CellId::new(Face::Front, 8, 8);
-    let graph = FieldGraph::new();
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8);
+    let graph = FieldGraph::new(Topology::Cube, Scale::ONE);
     let fp = footprint(&graph, cell, 2);
     let envelope = rain_envelope();
 
@@ -482,11 +483,11 @@ fn the_published_rain_rate_is_natural_plus_manual() {
     let care_rain = with_care.render_view().rain;
     let bare_rain = without.render_view().rain;
     assert!(bare_rain.iter().any(|&r| r > 0.0), "this test needs natural rain to be falling");
-    let mut inside = vec![0.0f64; cubarium_surface::CELL_COUNT];
+    let mut inside = vec![0.0f64; cubarium_surface::CUBE_CELL_COUNT];
     for (c, w) in &fp {
         inside[c.index()] = RAIN_DEPTH_TOTAL * w * envelope[0];
     }
-    for i in 0..cubarium_surface::CELL_COUNT {
+    for i in 0..cubarium_surface::CUBE_CELL_COUNT {
         let expected = (f64::from(bare_rain[i]) + inside[i]) as f32;
         let got = care_rain[i];
         assert!(
@@ -515,7 +516,7 @@ fn a_wrong_seq_or_a_wrong_boundary_changes_nothing_and_void_only_moves_the_curso
         world.step();
     }
     let before = state_hash(&world.state);
-    let cell = CellId::new(Face::Front, 8, 8);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8);
     let tick = world.tick();
 
     for seq in [0u64, 2, 7, u64::MAX] {
@@ -566,7 +567,7 @@ fn a_wrong_seq_or_a_wrong_boundary_changes_nothing_and_void_only_moves_the_curso
 #[test]
 fn a_shower_resumes_from_a_snapshot_at_the_next_undelivered_sample() {
     let mut original = World::new(still_water_config()).expect("valid");
-    let cell = CellId::new(Face::Front, 6, 9);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 6, 9);
     assert!(matches!(
         original.apply_care(&command(1, 0, CareKind::Rain, cell)).outcome,
         CareOutcome::Applied(_)
@@ -700,7 +701,7 @@ fn assert_shower_refused(state: WorldState, needle: &str) {
 fn a_normal_mid_shower_snapshot_round_trips_unchanged() {
     let mut world = World::new(still_water_config()).expect("valid");
     assert!(matches!(
-        world.apply_care(&command(1, 0, CareKind::Rain, CellId::new(Face::Back, 9, 4))).outcome,
+        world.apply_care(&command(1, 0, CareKind::Rain, CellId::new(Topology::Cube, Scale::ONE, Face::Back, 9, 4))).outcome,
         CareOutcome::Applied(_)
     ));
     for _ in 0..77 {
@@ -719,13 +720,13 @@ fn a_normal_mid_shower_snapshot_round_trips_unchanged() {
 #[test]
 fn a_target_names_the_cell_that_contains_it() {
     for cell in [
-        CellId::new(Face::Front, 0, 0),
-        CellId::new(Face::Top, 15, 15),
-        CellId::new(Face::Back, 7, 9),
-        CellId::new(Face::Left, 15, 0),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Front, 0, 0),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 15, 15),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Back, 7, 9),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Left, 15, 0),
     ] {
         let t = target_of(cell);
         assert_eq!(t.resolve(), Some(cell));
-        assert_eq!(cell_of(&cell.center()), cell);
+        assert_eq!(cell_of(Topology::Cube, Scale::ONE, &cell.center(Topology::Cube, Scale::ONE)), cell);
     }
 }

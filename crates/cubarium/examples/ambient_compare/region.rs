@@ -17,9 +17,10 @@
 //! where producer growth stops entirely (`crate::fields`). Counting cells in those two states is
 //! an exposure measure, not a claim about what grew.
 
+use cubarium_surface::{Scale, Topology};
 use anyhow::{Context, Result};
 use cubarium_core::{CareTarget, WorldState};
-use cubarium_surface::{CELL_COUNT, CellId, FieldGraph};
+use cubarium_surface::{CUBE_CELL_COUNT, CellId, FieldGraph};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 
@@ -89,7 +90,7 @@ pub struct Regions {
 
 impl Regions {
     pub fn new(state: &WorldState, targets: &[CareTarget]) -> Result<Self> {
-        let graph = FieldGraph::new();
+        let graph = FieldGraph::new(Topology::Cube, Scale::ONE);
         let mut regions = Vec::new();
         for &target in targets {
             let mut cells = BTreeSet::from([target.resolve().context("invalid ambient target")?]);
@@ -147,7 +148,7 @@ impl Regions {
             region.water_integral.add(water);
         }
         let mut total = 0.0;
-        for i in 0..CELL_COUNT {
+        for i in 0..CUBE_CELL_COUNT {
             let w = s.fields.w[i];
             total += w;
             if w >= flood {
@@ -166,7 +167,7 @@ impl Regions {
         let (flood, drowned) = (self.flood, 2.0 * self.flood);
         let mut a = 0;
         let mut b = 0;
-        for i in 0..CELL_COUNT {
+        for i in 0..CUBE_CELL_COUNT {
             let w = s.fields.w[i];
             if w >= flood {
                 a += 1;

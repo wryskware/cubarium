@@ -6,6 +6,7 @@
 //! The only staging is the apex cohort, which is an explicit, accounted input placed once at
 //! the start and never restocked.
 
+use cubarium_surface::{Scale, Topology};
 use std::collections::{BTreeMap, BTreeSet};
 use std::panic::AssertUnwindSafe;
 use std::time::Instant;
@@ -655,7 +656,7 @@ impl Recorder {
             if self.apex_ids.contains(&id) {
                 continue;
             }
-            let cell = cell_of(&o.pos).index() as u16;
+            let cell = cell_of(Topology::Cube, Scale::ONE, &o.pos).index() as u16;
             self.tracks.entry(id).or_default().observe(probe_index, cell);
             self.last_stores.insert(
                 id,

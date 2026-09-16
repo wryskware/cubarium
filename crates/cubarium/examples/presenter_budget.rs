@@ -17,7 +17,7 @@
 //! * **(B) the composite.** A cached background layer costs one `Canvas` copy per frame
 //!   instead of the passes that built it; this times that copy.
 //! * **(C) the pixel→cell geometry.** Every field pass recomputes
-//!   `cell_of(SurfacePoint::pixel_center(..))` for a pixel and its four neighbours, which
+//!   `cell_of(Topology::Cube, Scale::ONE, SurfacePoint::pixel_center(Topology::Cube, ..))` for a pixel and its four neighbours, which
 //!   is a constant of the raster. This times the recomputation against a table lookup.
 //! * **(D) the stamp footprints.** `unfold_pixels` is called once per stamp from an anchor
 //!   that never moves. This times the 1,280 plant-slot unfolds against cloning a cached
@@ -26,6 +26,7 @@
 //!   at once, pinned to four cores. That is the *ceiling* a row-band split could reach:
 //!   perfectly disjoint work, no join, no shared canvas.
 
+use cubarium_surface::{Scale, Topology};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -283,12 +284,12 @@ fn main() -> Result<()> {
         let t0 = Instant::now();
         let mut acc = 0usize;
         for face in Face::ALL {
-            for y in 0..FACE_SIZE as u8 {
-                for x in 0..FACE_SIZE as u8 {
-                    acc += cell_of(&SurfacePoint::pixel_center(face, x, y)).index();
+            for y in 0..FACE_SIZE as u16 {
+                for x in 0..FACE_SIZE as u16 {
+                    acc += cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y)).index();
                     for edge in cubarium_surface::Edge::ALL {
-                        if let Some((nf, nx, ny)) = pixel_neighbor(face, x, y, edge) {
-                            acc += cell_of(&SurfacePoint::pixel_center(nf, nx, ny)).index();
+                        if let Some((nf, nx, ny)) = pixel_neighbor(Topology::Cube, face, x, y, edge) {
+                            acc += cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, nf, nx, ny)).index();
                         }
                     }
                 }
@@ -303,14 +304,14 @@ fn main() -> Result<()> {
     // neighbours, `u16::MAX` where the neighbour does not exist.
     let mut table = vec![u16::MAX; 5 * FACE_SIZE * FACE_SIZE * 5];
     for face in Face::ALL {
-        for y in 0..FACE_SIZE as u8 {
-            for x in 0..FACE_SIZE as u8 {
+        for y in 0..FACE_SIZE as u16 {
+            for x in 0..FACE_SIZE as u16 {
                 let p = (face.index() * FACE_SIZE + usize::from(y)) * FACE_SIZE + usize::from(x);
-                table[p * 5] = cell_of(&SurfacePoint::pixel_center(face, x, y)).index() as u16;
+                table[p * 5] = cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y)).index() as u16;
                 for (i, edge) in cubarium_surface::Edge::ALL.into_iter().enumerate() {
-                    if let Some((nf, nx, ny)) = pixel_neighbor(face, x, y, edge) {
+                    if let Some((nf, nx, ny)) = pixel_neighbor(Topology::Cube, face, x, y, edge) {
                         table[p * 5 + 1 + i] =
-                            cell_of(&SurfacePoint::pixel_center(nf, nx, ny)).index() as u16;
+                            cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, nf, nx, ny)).index() as u16;
                     }
                 }
             }
@@ -332,12 +333,12 @@ fn main() -> Result<()> {
 
     // --- (D) the stamp footprints ------------------------------------------------------
     println!("\n(D) unfold_pixels for the 1,280 plant slots (radius 9 px, one per stamp)");
-    let anchors: Vec<SurfacePoint> = CellId::all().map(|c| slot_of(c).at).collect();
+    let anchors: Vec<SurfacePoint> = CellId::all(Topology::Cube, Scale::ONE).map(|c| slot_of(c).at).collect();
     let mut scratch: Vec<PixelImage> = Vec::new();
     let mut seam = 0usize;
     let mut pixels = 0usize;
     for a in &anchors {
-        unfold_pixels(*a, 9.0, &mut scratch);
+        unfold_pixels(Topology::Cube, *a, 9.0, &mut scratch);
         pixels += scratch.len();
         // The in-chart fast path needs the whole disk inside the face.
         let c = a.chart();
@@ -354,7 +355,7 @@ fn main() -> Result<()> {
     for _ in 0..args.frames.min(200) {
         let t0 = Instant::now();
         for a in &anchors {
-            unfold_pixels(*a, 9.0, &mut scratch);
+            unfold_pixels(Topology::Cube, *a, 9.0, &mut scratch);
             std::hint::black_box(&scratch);
         }
         xs.push(t0.elapsed());
@@ -364,7 +365,7 @@ fn main() -> Result<()> {
     let cache: Vec<Vec<PixelImage>> = anchors
         .iter()
         .map(|a| {
-            unfold_pixels(*a, 9.0, &mut scratch);
+            unfold_pixels(Topology::Cube, *a, 9.0, &mut scratch);
             scratch.clone()
         })
         .collect();
@@ -403,8 +404,8 @@ fn main() -> Result<()> {
         let t0 = Instant::now();
         let mut acc = 0u32;
         for face in Face::ALL {
-            for y in 0..FACE_SIZE as u8 {
-                for x in 0..FACE_SIZE as u8 {
+            for y in 0..FACE_SIZE as u16 {
+                for x in 0..FACE_SIZE as u16 {
                     let px = std::hint::black_box(&cached).get(face, x, y);
                     for c in px {
                         let t = c.clamp(0.0, 1.0) * N as f32;

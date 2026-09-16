@@ -6,6 +6,7 @@
 //! from the 3D cube embedding with Rodrigues rotations about the actual shared edges and
 //! knows nothing about `Face::neighbor`, `cross_seam` or any 2D transition table.
 
+use cubarium_surface::{Scale, Topology};
 use cubarium_surface::{
     Edge, FACE_EXTENT, Face, GEOM_EPS, MAX_CROSSINGS, SurfacePoint, TangentMap, Travel, Vec2,
     travel, travel_into,
@@ -89,7 +90,7 @@ fn compass() -> [Vec2; 8] {
 #[test]
 fn front_to_right_example() {
     // "Front (63.75, 20) moving (0.5, 0) finishes at Right (0.25, 20)."
-    let tr = travel(SurfacePoint::new(Face::Front, 63.75, 20.0), Vec2::new(0.5, 0.0));
+    let tr = travel(Topology::Cube, SurfacePoint::new(Face::Front, 63.75, 20.0), Vec2::new(0.5, 0.0));
     assert_point(tr.end, Face::Right, 0.25, 20.0, 1e-12, "front -> right");
     assert_eq!(tr.map, TangentMap::IDENTITY, "the vertical seams do not twist");
     assert_eq!((tr.crossings, tr.reflections, tr.ties), (1, 0, 0));
@@ -103,7 +104,7 @@ fn right_to_top_example_turns_up_into_top_leftward() {
     // "Right (10, 0.25) moving (0, -0.5) finishes at Top (63.75, 54); its upward
     // direction becomes Top-leftward." The along-edge parameter is reversed
     // continuously: 64 - 10 = 54, not 63 - 10.
-    let tr = travel(SurfacePoint::new(Face::Right, 10.0, 0.25), Vec2::new(0.0, -0.5));
+    let tr = travel(Topology::Cube, SurfacePoint::new(Face::Right, 10.0, 0.25), Vec2::new(0.0, -0.5));
     assert_point(tr.end, Face::Top, 63.75, 54.0, 1e-12, "right -> top");
     assert_eq!(tr.map, TangentMap::quarter_turns(1));
     assert_eq!(tr.map.apply(Vec2::new(0.0, -1.0)), Vec2::new(-1.0, 0.0), "up -> Top-left");
@@ -115,7 +116,7 @@ fn right_to_top_example_turns_up_into_top_leftward() {
 fn back_to_top_example_turns_up_into_top_downward() {
     // "Back (10, 0.25) moving (0, -0.5) finishes at Top (54, 0.25); its upward direction
     // becomes Top-downward."
-    let tr = travel(SurfacePoint::new(Face::Back, 10.0, 0.25), Vec2::new(0.0, -0.5));
+    let tr = travel(Topology::Cube, SurfacePoint::new(Face::Back, 10.0, 0.25), Vec2::new(0.0, -0.5));
     assert_point(tr.end, Face::Top, 54.0, 0.25, 1e-12, "back -> top");
     assert_eq!(tr.map, TangentMap::quarter_turns(2));
     assert_eq!(tr.map.apply(Vec2::new(0.0, -1.0)), Vec2::new(0.0, 1.0), "up -> Top-down");
@@ -143,8 +144,8 @@ fn swept_transport_matches_3d_geometry() {
     let reflected = std::cell::Cell::new(0u32);
     runner(384, 0x5e)
         .run(&(any_point(), any_displacement(200.0)), |(start, d)| {
-            let tr = travel(start, d);
-            prop_assert!(tr.end.is_canonical(), "end not canonical: {:?}", tr.end);
+            let tr = travel(Topology::Cube, start, d);
+            prop_assert!(tr.end.is_canonical(Topology::Cube), "end not canonical: {:?}", tr.end);
             prop_assert!(tr.end.u.is_finite() && tr.end.v.is_finite());
             prop_assert!(tr.crossings + tr.reflections <= MAX_CROSSINGS + 1);
             if tr.fallback {
@@ -217,9 +218,9 @@ fn swept_transport_matches_3d_geometry() {
                 prop_assert_eq!(s.reflections, tr.reflections, "reflection count");
                 let want = oracle::FaceSquare::of(s.face).embed(s.u, s.v);
                 prop_assert!(
-                    dist3(want, tr.end.embed()) <= 1e-7,
+                    dist3(want, Topology::Cube.embed(Scale::ONE, &tr.end)) <= 1e-7,
                     "3D endpoint {:?} vs oracle {want:?} ({:?} -> {:?} vs {:?})",
-                    tr.end.embed(),
+                    Topology::Cube.embed(Scale::ONE, &tr.end),
                     start,
                     tr.end,
                     (s.face, s.u, s.v)
@@ -228,7 +229,7 @@ fn swept_transport_matches_3d_geometry() {
                 // oracle's transported 3D tangent (a unit vector; a unit chart vector is
                 // 1/32 of a unit cube edge).
                 let dhat = d.normalized().expect("nonzero displacement");
-                let moved = tr.end.embed_tangent(tr.map.apply(dhat));
+                let moved = Topology::Cube.embed_tangent(Scale::ONE, &tr.end, tr.map.apply(dhat));
                 let moved = [moved[0] * 32.0, moved[1] * 32.0, moved[2] * 32.0];
                 prop_assert!(
                     dist3(moved, s.tangent) <= 1e-9,
@@ -241,7 +242,7 @@ fn swept_transport_matches_3d_geometry() {
 
             // Retracing the transported, reversed displacement returns to the start.
             if tr.ties == 0 {
-                let back = travel(tr.end, tr.map.apply(-d));
+                let back = travel(Topology::Cube, tr.end, tr.map.apply(-d));
                 if !back.fallback && back.ties == 0 {
                     prop_assert_eq!(back.end.face, start.face, "retrace landed elsewhere");
                     prop_assert!(
@@ -261,7 +262,7 @@ fn swept_transport_matches_3d_geometry() {
                 let mut m = TangentMap::IDENTITY;
                 let mut split_ok = true;
                 for _ in 0..4 {
-                    let step = travel(p, m.apply(d * 0.25));
+                    let step = travel(Topology::Cube, p, m.apply(d * 0.25));
                     if step.fallback || step.ties > 0 {
                         split_ok = false;
                         break;
@@ -319,8 +320,8 @@ fn travel_into_matches_travel() {
             next() * 64.0,
         );
         let d = Vec2::from_screen_angle(next() * std::f64::consts::TAU) * (next() * 120.0);
-        travel_into(start, d, &mut buf);
-        assert_eq!(buf, travel(start, d));
+        travel_into(Topology::Cube, start, d, &mut buf);
+        assert_eq!(buf, travel(Topology::Cube, start, d));
     }
 }
 
@@ -339,12 +340,12 @@ fn exact_vertex_starts_and_aims_are_bounded_and_deterministic() {
     // 64 becomes the largest double below 64) and leave in all eight compass directions.
     for vertex in TOP_VERTICES {
         for (face, cu, cv) in vertex {
-            let start = SurfacePoint::new(face, cu, cv).canonicalize();
-            assert!(start.is_canonical());
+            let start = SurfacePoint::new(face, cu, cv).canonicalize(Topology::Cube);
+            assert!(start.is_canonical(Topology::Cube));
             for dir in compass() {
-                let tr = travel(start, dir * 5.0);
+                let tr = travel(Topology::Cube, start, dir * 5.0);
                 let what = format!("{face:?} corner ({cu},{cv}) dir {dir:?}");
-                assert!(tr.end.is_canonical(), "{what}: {:?}", tr.end);
+                assert!(tr.end.is_canonical(Topology::Cube), "{what}: {:?}", tr.end);
                 assert!(tr.end.u.is_finite() && tr.end.v.is_finite(), "{what}");
                 assert!(
                     tr.crossings + tr.reflections <= MAX_CROSSINGS,
@@ -368,9 +369,9 @@ fn exact_vertex_starts_and_aims_are_bounded_and_deterministic() {
             let sv = if cv == 0.0 { 1.0 } else { -1.0 };
             let start = SurfacePoint::new(face, cu + 4.0 * su, cv + 4.0 * sv);
             let d = Vec2::new(-8.0 * su, -8.0 * sv);
-            let tr = travel(start, d);
+            let tr = travel(Topology::Cube, start, d);
             let what = format!("{face:?} aimed at ({cu},{cv})");
-            assert!(tr.end.is_canonical(), "{what}: {:?}", tr.end);
+            assert!(tr.end.is_canonical(Topology::Cube), "{what}: {:?}", tr.end);
             assert!(!tr.fallback, "{what}: fell back");
             assert!(tr.ties >= 1, "{what}: an exact vertex hit reported no tie");
             assert!(
@@ -386,10 +387,10 @@ fn exact_vertex_starts_and_aims_are_bounded_and_deterministic() {
             // ordered) resolves without any tie and without a fallback.
             for skew in [-0.02f64, 0.02] {
                 let d = Vec2::new(-8.0 * su, -(8.0 + skew) * sv);
-                let tr = travel(start, d);
+                let tr = travel(Topology::Cube, start, d);
                 assert!(!tr.fallback, "{what} skew {skew}: fell back");
                 assert_eq!(tr.ties, 0, "{what} skew {skew}: reported a tie");
-                assert!(tr.end.is_canonical(), "{what} skew {skew}: {:?}", tr.end);
+                assert!(tr.end.is_canonical(Topology::Cube), "{what} skew {skew}: {:?}", tr.end);
                 let total: f64 = tr.segments.iter().map(|s| s.length()).sum();
                 assert!((total - d.length()).abs() <= 1e-9, "{what} skew {skew}");
                 if tr.fallback {
@@ -413,7 +414,7 @@ fn lower_side_corner_crosses_and_reflects() {
     // Edge::Right (1) before Edge::Bottom (2), the point enters Right at (0, 64) with
     // half a pixel left in each axis, immediately reflects off the rim, and finishes at
     // Right (0.5, 63.5).
-    let tr = travel(SurfacePoint::new(Face::Front, 63.5, 63.5), Vec2::new(1.0, 1.0));
+    let tr = travel(Topology::Cube, SurfacePoint::new(Face::Front, 63.5, 63.5), Vec2::new(1.0, 1.0));
     assert_point(tr.end, Face::Right, 0.5, 63.5, 1e-12, "lower corner step");
     assert_eq!(tr.crossings, 1, "one seam crossing");
     assert_eq!(tr.reflections, 1, "one rim reflection");
@@ -424,7 +425,7 @@ fn lower_side_corner_crosses_and_reflects() {
     assert!((total - Vec2::new(1.0, 1.0).length()).abs() <= 1e-12, "swept {total}");
 
     // The same geometry at a different scale: Front (63.9, 63.9) + (0.2, 0.2).
-    let tr = travel(SurfacePoint::new(Face::Front, 63.9, 63.9), Vec2::new(0.2, 0.2));
+    let tr = travel(Topology::Cube, SurfacePoint::new(Face::Front, 63.9, 63.9), Vec2::new(0.2, 0.2));
     assert_point(tr.end, Face::Right, 0.1, 63.9, 1e-9, "exact tie variant");
     assert_eq!((tr.crossings, tr.reflections), (1, 1));
     assert!(tr.ties >= 1);
@@ -449,9 +450,9 @@ fn straight_paths_never_tunnel_through_the_open_bottom() {
         // Bias the start toward the lower rim, where tunnelling would show up.
         let start = SurfacePoint::new(face, next() * 64.0, 48.0 + next() * 16.0);
         let d = Vec2::from_screen_angle(next() * std::f64::consts::TAU) * (next() * 90.0);
-        travel_into(start, d, &mut buf);
+        travel_into(Topology::Cube, start, d, &mut buf);
         reflections += buf.reflections;
-        assert!(buf.end.is_canonical(), "{start:?} + {d:?} -> {:?}", buf.end);
+        assert!(buf.end.is_canonical(Topology::Cube), "{start:?} + {d:?} -> {:?}", buf.end);
         for s in &buf.segments {
             for p in [s.from, s.to] {
                 assert!(

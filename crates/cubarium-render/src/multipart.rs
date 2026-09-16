@@ -32,6 +32,7 @@
 //! mixes those premultiplied samples, then source-overs once — never two partially opaque
 //! whole-body redraws.
 
+use cubarium_surface::{Scale, Topology};
 use cubarium_surface::{MAX_LOCAL_RADIUS, PixelImage, SurfacePoint, Vec2, unfold_pixels};
 
 use crate::{Canvas, Sprite};
@@ -133,7 +134,7 @@ fn state_weight(w: f32) -> f32 {
 ///   (non-finite or negative reads 0); a state at weight 0 is not sampled and does not
 ///   enlarge the query. Nothing is drawn when every weight is 0, when `opacity` is not finite
 ///   or not positive, or when the radius is 0.
-/// * The query is `unfold_pixels(root, `[`rig_radius`]`, scratch)`. A [`rig_radius`] that is
+/// * The query is `unfold_pixels(Topology::Cube, root, `[`rig_radius`]`, scratch)`. A [`rig_radius`] that is
 ///   not finite (a participating part with a non-finite offset) or exceeds
 ///   `MAX_LOCAL_RADIUS` is a rig **configuration error** and **panics in every build**,
 ///   exactly as `unfold_pixels` rejects an illegal radius: silently clamping it would drop
@@ -311,7 +312,7 @@ fn stamp_rig_query(
         radius <= MAX_LOCAL_RADIUS,
         "rig radius {radius} with its minification reach exceeds MAX_LOCAL_RADIUS"
     );
-    unfold_pixels(root, radius, scratch);
+    unfold_pixels(Topology::Cube, root, radius, scratch);
     for pixel in scratch.iter() {
         let d = pixel.local - origin;
         // The mean over one `n × n` grid of the complete depth-composited body sample, each
@@ -429,7 +430,7 @@ mod tests {
     fn total_light(canvas: &Canvas) -> f64 {
         SurfaceFace::ALL
             .into_iter()
-            .flat_map(|f| (0..64u8).flat_map(move |y| (0..64u8).map(move |x| (f, x, y))))
+            .flat_map(|f| (0..64u16).flat_map(move |y| (0..64u16).map(move |x| (f, x, y))))
             .map(|(f, x, y)| canvas.get(f, x, y).into_iter().map(f64::from).sum::<f64>())
             .sum()
     }
@@ -495,8 +496,8 @@ mod tests {
         assert!(sprite.extent() < 7.58 && rig_radius(&[(&parts, 1.0)]) > 8.07);
         // And it is the *only* difference: every other pixel agrees bit for bit.
         for face in SurfaceFace::ALL {
-            for y in 0..64u8 {
-                for x in 0..64u8 {
+            for y in 0..64u16 {
+                for x in 0..64u16 {
                     if (face, x, y) == (Face::Front, 37, 37) {
                         continue;
                     }

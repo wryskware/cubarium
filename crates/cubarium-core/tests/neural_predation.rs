@@ -9,6 +9,7 @@
 //! The staging below is Astra's review fixture (`design/7_Research/assets/`), kept because it
 //! produces a certain capture rather than waiting for a favourable roll.
 
+use cubarium_surface::{Scale, Topology};
 use cubarium_core::genome::{Genome, decode};
 use cubarium_core::hunter::{FixedHunterProfile, HunterTarget};
 use cubarium_core::ids::OrganismId;
@@ -76,7 +77,7 @@ fn place_prey(
         phenotype.structure_adult = s;
     }
     let id = world.state.organisms.insert(Organism {
-        pos: pos.canonicalize(),
+        pos: pos.canonicalize(Topology::Cube),
         heading: Vec2::new(1.0, 0.0),
         ou: Vec2::ZERO,
         structure: s,
@@ -121,7 +122,7 @@ fn effector_point(
     profile: &FixedHunterProfile,
     scale: f64,
 ) -> SurfacePoint {
-    travel(
+    travel(Topology::Cube, 
         root,
         body_offset(heading, profile.capture_offset_body, scale),
     )

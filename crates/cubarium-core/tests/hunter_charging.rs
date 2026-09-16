@@ -12,6 +12,7 @@
 //! Nothing here is a balance claim. That charging can open a stock gate in a hand-built fixture
 //! is a mechanism fact; it says nothing about whether a real lineage survives.
 
+use cubarium_surface::{Scale, Topology};
 use std::path::PathBuf;
 
 use cubarium_core::hunter::{
@@ -287,7 +288,7 @@ fn the_policy_opens_exactly_the_band_between_the_reference_and_the_fixed_thresho
             set_energy_fraction(&mut world, id, fraction);
             let before = reserve_of(&world, id);
             let energy_before = world.state.organisms.get(id).unwrap().energy;
-            let cell = cell_of(&world.state.organisms.get(id).unwrap().pos);
+            let cell = cell_of(Topology::Cube, Scale::ONE, &world.state.organisms.get(id).unwrap().pos);
             let n_before = world.state.fields.n[cell.index()];
             world.step();
             // The premise of the exact boundary: nothing spent the battery before physiology.
@@ -442,7 +443,7 @@ fn a_zero_reserve_never_charges_and_no_energy_is_invented() {
         let (mut world, id) = founded(version, quiet_config());
         set_reserve(&mut world, id, 0.0);
         set_energy_fraction(&mut world, id, 0.6);
-        let cell = cell_of(&world.state.organisms.get(id).unwrap().pos);
+        let cell = cell_of(Topology::Cube, Scale::ONE, &world.state.organisms.get(id).unwrap().pos);
         let n_before = world.state.fields.n[cell.index()];
         let energy_before = world.state.organisms.get(id).unwrap().energy;
         world.step();
@@ -472,7 +473,7 @@ fn a_zero_oxidation_rate_transacts_nothing_and_records_nothing() {
         set_reserve(&mut world, id, full);
         // Below both thresholds, so the activation test passes and only the amount is zero.
         set_energy_fraction(&mut world, id, 0.1);
-        let cell = cell_of(&world.state.organisms.get(id).unwrap().pos);
+        let cell = cell_of(Topology::Cube, Scale::ONE, &world.state.organisms.get(id).unwrap().pos);
         let n_before = world.state.fields.n[cell.index()];
         world.step();
 

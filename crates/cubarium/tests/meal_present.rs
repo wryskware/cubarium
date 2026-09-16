@@ -9,6 +9,7 @@
 //! recycled with a new generation — is stated exactly. Nothing here is evidence about how
 //! often meals happen; that is the paired capture's job.
 
+use cubarium_surface::{Scale, Topology};
 use std::path::Path;
 
 use cubarium::art::ArtPack;
@@ -22,7 +23,7 @@ use cubarium_core::ids::OrganismId;
 use cubarium_core::organism::Mode;
 use cubarium_core::view::{OrganismView, RenderView};
 use cubarium_render::{Canvas, Mask, Pose, stamp_layers};
-use cubarium_surface::{CELL_COUNT, PathSegment, PixelImage, SurfacePoint, Vec2, travel};
+use cubarium_surface::{CUBE_CELL_COUNT, PathSegment, PixelImage, SurfacePoint, Vec2, travel};
 use cube_proto::{FACE_SIZE, Face};
 
 const PRODUCER_MAX: f64 = 10.0;
@@ -38,15 +39,15 @@ fn pack() -> ArtPack {
 fn bare_view(tick: u64) -> RenderView {
     RenderView {
         tick,
-        producer: vec![0.0; CELL_COUNT],
-        detritus: vec![0.0; CELL_COUNT],
-        fruit: vec![0.0; CELL_COUNT],
-        wood: vec![0.0; CELL_COUNT],
-        plant_reserve: vec![0.0; CELL_COUNT],
-        dead_wood: vec![0.0; CELL_COUNT],
-        carrion: vec![0.0; CELL_COUNT],
-        water: vec![0.0; CELL_COUNT],
-        rain: vec![0.0; CELL_COUNT],
+        producer: vec![0.0; CUBE_CELL_COUNT],
+        detritus: vec![0.0; CUBE_CELL_COUNT],
+        fruit: vec![0.0; CUBE_CELL_COUNT],
+        wood: vec![0.0; CUBE_CELL_COUNT],
+        plant_reserve: vec![0.0; CUBE_CELL_COUNT],
+        dead_wood: vec![0.0; CUBE_CELL_COUNT],
+        carrion: vec![0.0; CUBE_CELL_COUNT],
+        water: vec![0.0; CUBE_CELL_COUNT],
+        rain: vec![0.0; CUBE_CELL_COUNT],
         producer_max: PRODUCER_MAX,
         wood_max: 0.6,
         organisms: Vec::new(),
@@ -76,13 +77,13 @@ fn view_of(tick: u64, body: OrganismView) -> RenderView {
     v
 }
 
-fn every_pixel() -> impl Iterator<Item = (Face, u8, u8)> {
+fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
     Face::ALL.into_iter().flat_map(|f| {
-        (0..FACE_SIZE as u8).flat_map(move |y| (0..FACE_SIZE as u8).map(move |x| (f, x, y)))
+        (0..FACE_SIZE as u16).flat_map(move |y| (0..FACE_SIZE as u16).map(move |x| (f, x, y)))
     })
 }
 
-fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u8, u8)> {
+fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u16, u16)> {
     every_pixel()
         .filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y))
         .collect()
@@ -559,7 +560,7 @@ fn a_nibbling_bout_holds_one_feed_loop_through_the_one_tick_seeking_gaps_on_the_
             nibbling,
         );
         if !nibbling && tick >= onset_tick {
-            let travelled = travel(pos, Vec2::new(0.5, 0.0));
+            let travelled = travel(Topology::Cube, pos, Vec2::new(0.5, 0.0));
             o.moved = travelled.segments.clone();
             pos = travelled.end;
         }
@@ -769,7 +770,7 @@ fn a_bout_carried_across_a_seam_is_read_at_bout_time_on_both_faces() {
     let step = |tick: u64| -> OrganismView {
         let mut o = organism(id, Mode::Feeding, tick >= t + 2);
         if tick >= t + 12 {
-            let travelled = travel(start, Vec2::new(3.0, 0.0));
+            let travelled = travel(Topology::Cube, start, Vec2::new(3.0, 0.0));
             let segments: Vec<PathSegment> = travelled.segments.clone();
             o.pos = travelled.end;
             o.moved = if tick == t + 12 { segments } else { Vec::new() };

@@ -1,3 +1,4 @@
+use cubarium_surface::{Scale, Topology};
 use cubarium_core::dormancy::{
     ApexDormancyEvent, ApexDormancyState, MAINTENANCE_PER_STRUCTURE_SECOND, PREY_REQUIRED,
     RECHECK_TICKS, SUSTAIN_TICKS,
@@ -89,7 +90,7 @@ fn place_juvenile_prey(world: &mut World, n: u32, pos: SurfacePoint) {
         phenotype.maintenance = 0.0;
         let structure = 0.2;
         let reserve = 0.02;
-        let p = SurfacePoint::new(pos.face, pos.u + f64::from(i) * 0.1, pos.v).canonicalize();
+        let p = SurfacePoint::new(pos.face, pos.u + f64::from(i) * 0.1, pos.v).canonicalize(Topology::Cube);
         world.state.organisms.insert(Organism {
             pos: p,
             heading: Vec2::new(1.0, 0.0),

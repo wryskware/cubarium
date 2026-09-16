@@ -299,3 +299,27 @@ encode) goes to FW-3 with the row-band split (measured 3.7–3.9× on four
 cores). Verdict: 320×180 at 60 fps is reachable on the CPU with FW-3 alone;
 640×360 at 60 fps needs plant/column sway at the tick rate (Wrysk's call) or
 the GPU stack. The per-pass table is the GPU shader list.
+
+### GS-0 result and the GPU packages (2026-09-16)
+
+`design/7_Research/gpu-scanout-spike-2026-09-16.md`: Qualcomm's proprietary
+Vulkan (loaded by `ash::Entry::load()`, no ICD manifest needed) renders
+headless; a `VK_IMAGE_TILING_LINEAR` `B8G8R8A8` image exported as a dma-buf
+imports into KMS with a modifier-free `AddFB2` (pitch 4352) and page-flips at
+the panel's 60.37 Hz at 0.12 CPU core-seconds per second, contents verified
+byte-identical to the headless reference. Mesa cannot drive the GPU on this
+kernel; wgpu works but cannot export dma-bufs without dropping to hal; GLES via
+EGL on a GBM display works but adds moving parts; the readback fallback runs at
+30 fps and is a diagnostic only. Traps recorded in the spike report: never
+`dlopen` the GLES blob yourself, never enable the DRM-modifier extension (UBWC
+only, unscannable here), `eglGetDisplay(default)` segfaults.
+
+Decision: the panel's renderer is a Vulkan renderer in cubarium built on
+`ash` 0.38 + `drm` 0.15, rendering the ring world straight into scanout memory.
+Re-cut of the plan:
+
+| id | what | notes |
+|---|---|---|
+| GS-1 | `cubarium-gpu` crate: Vulkan device, sprite-atlas and field textures, instanced quads, the full-screen background shader from FW-P's pass table, a linear-image ring exported as dma-bufs; a desktop window path for development (Vulkan on the desktop) and the scanout path on the board | replaces FW-5 as the panel's presenter; FW-5 shrinks to the CPU ring presenter needed for PNG captures, tests and the web viewer |
+| GS-2 | the daemon imports dma-bufs handed over a Unix socket (`SCM_RIGHTS`) with (w, h, fourcc, pitch, offset), page-flips them, keeps bring-up/idle; UDP raster stays as fallback | the bonus GS-0 did not test; one small spike inside the package |
+| — | the 20 Hz sway question is moot on the GPU path: per-frame sway is free there | CPU path keeps FW-P's levers in FW-3 for the cube |

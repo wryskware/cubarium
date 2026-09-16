@@ -1,5 +1,6 @@
 //! Independent public-contract checks for the ambient wind sampler and asset budgets.
 
+use cubarium_surface::{Scale, Topology};
 use std::path::Path;
 
 use cubarium::art::{ArtPack, Band, Clip, Plant, Transition};
@@ -83,7 +84,7 @@ fn the_delayed_wind_field_agrees_across_real_surface_transport() {
                     Edge::Left => (epsilon, along, Vec2::new(-2.0 * epsilon, 0.0)),
                 };
                 let start = SurfacePoint::new(face, u, v);
-                let crossed = travel(start, delta);
+                let crossed = travel(Topology::Cube, start, delta);
                 assert_eq!(crossed.crossings, 1, "fixture must cross a real seam");
                 assert_eq!(crossed.reflections, 0);
                 for seconds in [0.0, 5.0, 13.0, 21.0, 37.0] {

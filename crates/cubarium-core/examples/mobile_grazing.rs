@@ -13,7 +13,7 @@
 //!
 //! # The fixture
 //!
-//! A **3×3 patch** of cells centred on `CellId::new(Face::Top, 8, 8)` — nine cells, 4 px each,
+//! A **3×3 patch** of cells centred on `CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8)` — nine cells, 4 px each,
 //! in the middle of the top face where light is strongest. Every *other* cell in the world is
 //! emptied of `P`, `F`, `D` and `De` and the removal is booked as an export, so the world's own
 //! totals are the patch's own totals and `check_invariants` still holds. Identical in all four
@@ -74,6 +74,7 @@
 //! says which cells are censored. One patch, one light level, one genotype, one seed: this is
 //! a capability measurement, not a world average and not an ecological claim.
 
+use cubarium_surface::{Scale, Topology};
 use std::time::{Duration, Instant};
 
 use cubarium_core::config::WorldConfig;
@@ -100,7 +101,7 @@ const WALL_BUDGET: Duration = Duration::from_secs(120);
 
 /// The patch centre. Light is strongest in the middle of the top face.
 fn centre() -> CellId {
-    CellId::new(Face::Top, 8, 8)
+    CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8)
 }
 
 /// The nine cells of the patch, centre last.
@@ -113,14 +114,14 @@ fn patch() -> Vec<CellId> {
 /// The tour: the eight border cells as a closed ring of neighbours, starting south-west.
 fn ring() -> [CellId; 8] {
     [
-        CellId::new(Face::Top, 7, 7),
-        CellId::new(Face::Top, 8, 7),
-        CellId::new(Face::Top, 9, 7),
-        CellId::new(Face::Top, 9, 8),
-        CellId::new(Face::Top, 9, 9),
-        CellId::new(Face::Top, 8, 9),
-        CellId::new(Face::Top, 7, 9),
-        CellId::new(Face::Top, 7, 8),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 7, 7),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 7),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 9, 7),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 9, 8),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 9, 9),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 9),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 7, 9),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 7, 8),
     ]
 }
 
@@ -312,7 +313,7 @@ fn run(arm: Arm, replay: &[Intent], started: Instant) -> Report {
     let mut closed = [false; 8];
     // A cell only starts recovering once the mouth has actually walked out of it.
     let mut gone = [false; 8];
-    let mut last_cell = cell_of(&world.state.organisms.get(id).expect("placed").pos);
+    let mut last_cell = cell_of(Topology::Cube, Scale::ONE, &world.state.organisms.get(id).expect("placed").pos);
 
     for tick in 0..TICKS {
         if started.elapsed() >= WALL_BUDGET {
@@ -323,7 +324,7 @@ fn run(arm: Arm, replay: &[Intent], started: Instant) -> Report {
             report.died_at = Some(tick);
             break;
         };
-        let here = cell_of(&o.pos);
+        let here = cell_of(Topology::Cube, Scale::ONE, &o.pos);
         let heading_before = o.heading;
         let pos_before = o.pos;
 
@@ -341,7 +342,7 @@ fn run(arm: Arm, replay: &[Intent], started: Instant) -> Report {
             } else {
                 // Travelling: face the goal's centre and walk. `toward` is a *request*; the
                 // resolver decides how much of the turn and how much of the walk happen.
-                let toward = (goal.center().chart() - pos_before.chart())
+                let toward = (goal.center(Topology::Cube, Scale::ONE).chart() - pos_before.chart())
                     .normalized()
                     .unwrap_or(heading_before);
                 Intent { heading: toward, effort: 1.0 }
@@ -419,7 +420,7 @@ fn run(arm: Arm, replay: &[Intent], started: Instant) -> Report {
             lap_saturated = true;
         }
 
-        let now = cell_of(&o.pos);
+        let now = cell_of(Topology::Cube, Scale::ONE, &o.pos);
         if now != last_cell {
             report.transitions += 1;
             last_cell = now;
@@ -654,7 +655,7 @@ fn fixture_config() -> WorldConfig {
 fn strip_to_patch(world: &mut World) {
     let keep = patch();
     let mut removed = 0.0;
-    for cell in CellId::all() {
+    for cell in CellId::all(Topology::Cube, Scale::ONE) {
         if keep.contains(&cell) {
             continue;
         }
@@ -676,15 +677,15 @@ fn place(world: &mut World) -> OrganismId {
     let cfg = world.config().clone();
     let genome = Genome::founder(0.5, &cfg.drives);
     let phenotype = decode(&genome, &cfg.organism);
-    let pos = ring()[0].center();
-    assert_eq!(cell_of(&pos), ring()[0], "the grazer landed outside its starting cell");
+    let pos = ring()[0].center(Topology::Cube, Scale::ONE);
+    assert_eq!(cell_of(Topology::Cube, Scale::ONE, &pos), ring()[0], "the grazer landed outside its starting cell");
     let structure = phenotype.structure_adult;
     let reserve = 0.5 * phenotype.reserve_max;
     let organism = Organism {
         pos,
         // Facing the second cell of the tour, so the first hop needs no turn at all and the
         // first measured cycle is not dominated by an arbitrary initial orientation.
-        heading: (ring()[1].center().chart() - pos.chart())
+        heading: (ring()[1].center(Topology::Cube, Scale::ONE).chart() - pos.chart())
             .normalized()
             .expect("neighbouring cell centres differ"),
         ou: Vec2::ZERO,

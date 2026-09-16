@@ -90,6 +90,7 @@
 //! never been observed and after that mutates nothing, so two draws of the same inputs
 //! give the same image and a thousand draws advance nothing.
 
+use cubarium_surface::{Scale, Topology};
 use std::sync::LazyLock;
 
 use cubarium_core::OrganismId;
@@ -101,7 +102,7 @@ use cubarium_render::{
     stamp_layers_bent_toned, stamp_pose,
 };
 use cubarium_surface::{
-    CELL_COUNT, CELLS_PER_FACE_EDGE, CellId, Edge, PixelImage, ScalarField, SurfacePoint, Vec2,
+    CUBE_CELL_COUNT, CELLS_PER_FACE_EDGE, CellId, Edge, PixelImage, ScalarField, SurfacePoint, Vec2,
     cell_of, pixel_neighbor,
 };
 use cube_proto::{FACE_SIZE, Face};
@@ -417,8 +418,8 @@ impl ArtPresenter {
     /// Build the presenter and lay out every cell's slot once.
     pub fn new(pack: ArtPack) -> ArtPresenter {
         let species = Species::resolve(&pack);
-        let slots: Vec<Slot> = CellId::all().map(slot_of).collect();
-        let bands = CellId::all().map(band_of).collect();
+        let slots: Vec<Slot> = CellId::all(Topology::Cube, Scale::ONE).map(slot_of).collect();
+        let bands = CellId::all(Topology::Cube, Scale::ONE).map(band_of).collect();
         let tall_species = TallSpecies::resolve(&pack);
         let columns = tall_columns();
         let tall = vec![
@@ -442,25 +443,25 @@ impl ArtPresenter {
         ArtPresenter {
             pack,
             species,
-            water: ScalarField::zeros(),
+            water: ScalarField::zeros(Topology::Cube, Scale::ONE),
             tall_species,
             columns,
             tall_prev: tall.clone(),
             tall_dead: tall.clone(),
             tall_dead_prev: tall.clone(),
             tall,
-            producer: ScalarField::zeros(),
-            detritus: ScalarField::zeros(),
-            soil: ScalarField::zeros(),
-            litter: vec![0.0; CELL_COUNT],
+            producer: ScalarField::zeros(Topology::Cube, Scale::ONE),
+            detritus: ScalarField::zeros(Topology::Cube, Scale::ONE),
+            soil: ScalarField::zeros(Topology::Cube, Scale::ONE),
+            litter: vec![0.0; CUBE_CELL_COUNT],
             layer: Canvas::new(),
             scratch: Vec::new(),
             slots,
             bands,
-            growth: vec![Growth::snapped(None, false); CELL_COUNT],
-            growth_prev: vec![Growth::snapped(None, false); CELL_COUNT],
-            dead: vec![Growth::snapped(None, false); CELL_COUNT],
-            dead_prev: vec![Growth::snapped(None, false); CELL_COUNT],
+            growth: vec![Growth::snapped(None, false); CUBE_CELL_COUNT],
+            growth_prev: vec![Growth::snapped(None, false); CUBE_CELL_COUNT],
+            dead: vec![Growth::snapped(None, false); CUBE_CELL_COUNT],
+            dead_prev: vec![Growth::snapped(None, false); CUBE_CELL_COUNT],
             bodies: std::collections::HashMap::new(),
             budgets,
             last_tick: None,
@@ -785,7 +786,7 @@ impl ArtPresenter {
                 }
             }
         }
-        for (index, cell) in CellId::all().enumerate() {
+        for (index, cell) in CellId::all(Topology::Cube, Scale::ONE).enumerate() {
             let band = cell_band(cell, view.water.get(index).copied());
             if band != self.bands[index] {
                 self.bands[index] = band;
@@ -1049,7 +1050,7 @@ impl ArtPresenter {
         // carcass reads as a denser patch of the fleck and wash treatment litter already has.
         self.litter.clear();
         self.litter
-            .extend((0..CELL_COUNT).map(|i| litter_density(view, i) * SOIL_SCALE));
+            .extend((0..CUBE_CELL_COUNT).map(|i| litter_density(view, i) * SOIL_SCALE));
         present::threshold_field(&mut self.detritus, &self.litter, DETRITUS_THRESHOLD);
         self.layer.clear();
         draw_field(
@@ -1073,8 +1074,8 @@ impl ArtPresenter {
             let scratch = &mut self.scratch;
             for face in Face::ALL {
                 for (face, x, y) in ground_points(face) {
-                    let point = SurfacePoint::pixel_center(face, x, y);
-                    let cell = cell_of(&point);
+                    let point = SurfacePoint::pixel_center(Topology::Cube, face, x, y);
+                    let cell = cell_of(Topology::Cube, Scale::ONE, &point);
                     let band = band_of(cell);
                     let Some(tile) = pack.ground_for(band) else {
                         continue;
@@ -1115,7 +1116,7 @@ impl ArtPresenter {
         let species = &self.species;
         let budgets = &self.budgets;
         let scratch = &mut self.scratch;
-        for (index, cell) in CellId::all().enumerate() {
+        for (index, cell) in CellId::all(Topology::Cube, Scale::ONE).enumerate() {
             // The growth this frame shows: between the last two observed states, at `f`.
             let growth = growth_between(self.growth_prev[index], self.growth[index], f);
             let dead = growth_between(self.dead_prev[index], self.dead[index], f);
@@ -1311,7 +1312,7 @@ impl ArtPresenter {
         // between. It is stamped *over* the band's scenery, not under it, because the litter
         // a stand's own decay produces would otherwise hide the only record that it died.
         // The band's plants, flecks and ground wash still read `D + C` and nothing else.
-        for (index, cell) in CellId::all().enumerate() {
+        for (index, cell) in CellId::all(Topology::Cube, Scale::ONE).enumerate() {
             let band = self.bands[index];
             if band != Band::Soil {
                 continue;
@@ -1580,8 +1581,8 @@ pub const FEED_STATE: usize = 2;
 fn add_above_horizon(canvas: &mut Canvas, layer: &Canvas) {
     let weight = &*SOIL_WEIGHT;
     for face in Face::ALL {
-        for y in 0..FACE_SIZE as u8 {
-            for x in 0..FACE_SIZE as u8 {
+        for y in 0..FACE_SIZE as u16 {
+            for x in 0..FACE_SIZE as u16 {
                 let k = 1.0 - weight[weight_index(face, x, y)];
                 if k <= 0.0 {
                     continue;
@@ -1611,8 +1612,8 @@ fn draw_soil_ground(canvas: &mut Canvas, detritus: &ScalarField) {
     let (low, high) = *SOIL_RAMP;
     let weight = &*SOIL_WEIGHT;
     for face in Face::ALL {
-        for y in 0..FACE_SIZE as u8 {
-            for x in 0..FACE_SIZE as u8 {
+        for y in 0..FACE_SIZE as u16 {
+            for x in 0..FACE_SIZE as u16 {
                 let w = weight[weight_index(face, x, y)];
                 if w <= 0.0 {
                     continue;
@@ -1633,7 +1634,7 @@ fn draw_soil_ground(canvas: &mut Canvas, detritus: &ScalarField) {
 }
 
 /// Compile-time reminder that the slot table is one entry per field cell.
-const _: () = assert!(CELL_COUNT == 1280);
+const _: () = assert!(CUBE_CELL_COUNT == 1280);
 
 #[cfg(test)]
 mod tests;

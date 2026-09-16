@@ -14,6 +14,7 @@
 //! average light `P = 0.0977, W = 0.1050`, bright `P = 0.4789, W = 0.3934`, against
 //! `W_max = 0.6`, `W_min = 0.02`, `α = 2`.
 
+use cubarium_surface::{Scale, Topology};
 use std::path::Path;
 
 use cube_proto::{FACE_SIZE, Face};
@@ -29,7 +30,7 @@ use cubarium::art_present::{
 };
 use cubarium_core::view::RenderView;
 use cubarium_render::Canvas;
-use cubarium_surface::{CELL_COUNT, CellId};
+use cubarium_surface::{CUBE_CELL_COUNT, CellId};
 
 // ---------------------------------------------------------------------------
 // the measured stands of B0, and the contract's constants
@@ -50,15 +51,15 @@ fn pack() -> ArtPack {
 fn empty_view(tick: u64) -> RenderView {
     RenderView {
         tick,
-        producer: vec![0.0; CELL_COUNT],
-        detritus: vec![0.0; CELL_COUNT],
-        fruit: vec![0.0; CELL_COUNT],
-        wood: vec![0.0; CELL_COUNT],
-        plant_reserve: vec![0.0; CELL_COUNT],
-        dead_wood: vec![0.0; CELL_COUNT],
-        carrion: vec![0.0; CELL_COUNT],
-        water: vec![0.0; CELL_COUNT],
-        rain: vec![0.0; CELL_COUNT],
+        producer: vec![0.0; CUBE_CELL_COUNT],
+        detritus: vec![0.0; CUBE_CELL_COUNT],
+        fruit: vec![0.0; CUBE_CELL_COUNT],
+        wood: vec![0.0; CUBE_CELL_COUNT],
+        plant_reserve: vec![0.0; CUBE_CELL_COUNT],
+        dead_wood: vec![0.0; CUBE_CELL_COUNT],
+        carrion: vec![0.0; CUBE_CELL_COUNT],
+        water: vec![0.0; CUBE_CELL_COUNT],
+        rain: vec![0.0; CUBE_CELL_COUNT],
         producer_max: 1.5,
         wood_max: W_MAX,
         organisms: Vec::new(),
@@ -78,25 +79,25 @@ fn stand(tick: u64, cell: CellId, w: f64, p: f64, wd: f64) -> RenderView {
 /// A foliage-band cell on Front whose rank lets it reach stage 2 and whose tile stays well
 /// inside one face, so what is drawn is one plant and nothing else.
 fn pilot() -> CellId {
-    CellId::all()
+    CellId::all(Topology::Cube, Scale::ONE)
         .find(|&c| {
-            c.face() == Face::Front
+            c.face(Topology::Cube, Scale::ONE) == Face::Front
                 && band_of(c) == Band::Foliage
                 && rank_cap_of(c) == 2
-                && (3..=7).contains(&c.cy())
-                && (4..=11).contains(&c.cx())
+                && (3..=7).contains(&c.cy(Topology::Cube, Scale::ONE))
+                && (4..=11).contains(&c.cx(Topology::Cube, Scale::ONE))
         })
         .expect("a rank-2 front foliage slot away from the edges")
 }
 
 /// A canopy (top-face) cell whose rank lets it reach stage 2.
 fn canopy_pilot() -> CellId {
-    CellId::all()
+    CellId::all(Topology::Cube, Scale::ONE)
         .find(|&c| {
             band_of(c) == Band::Canopy
                 && rank_cap_of(c) == 2
-                && (5..=10).contains(&c.cx())
-                && (5..=10).contains(&c.cy())
+                && (5..=10).contains(&c.cx(Topology::Cube, Scale::ONE))
+                && (5..=10).contains(&c.cy(Topology::Cube, Scale::ONE))
         })
         .expect("a rank-2 canopy slot away from the edges")
 }
@@ -110,14 +111,14 @@ fn snapped(v: &RenderView) -> Canvas {
     canvas
 }
 
-fn every_pixel() -> impl Iterator<Item = (Face, u8, u8)> {
+fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
     Face::ALL.into_iter().flat_map(|f| {
-        (0..FACE_SIZE as u8).flat_map(move |y| (0..FACE_SIZE as u8).map(move |x| (f, x, y)))
+        (0..FACE_SIZE as u16).flat_map(move |y| (0..FACE_SIZE as u16).map(move |x| (f, x, y)))
     })
 }
 
 /// The pixels where two images differ at all.
-fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u8, u8)> {
+fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u16, u16)> {
     every_pixel()
         .filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y))
         .collect()
@@ -255,7 +256,7 @@ fn the_fullness_ramp_is_monotone_flat_at_both_ends_and_total() {
 
 #[test]
 fn the_soil_band_reads_litter_plus_remains_and_the_structural_bands_do_not() {
-    let cell = CellId::all()
+    let cell = CellId::all(Topology::Cube, Scale::ONE)
         .find(|&c| band_of(c) == Band::Soil)
         .expect("a soil cell");
     let mut v = empty_view(0);
@@ -664,7 +665,7 @@ fn drawing_mutates_nothing_and_re_observing_a_tick_is_idempotent() {
 fn a_cell_that_grows_nothing_grows_no_dead_wood_either() {
     // The rank cap is what keeps the cube from becoming a wall of sprites; dead wood must
     // obey the same rule or a stand's death would put a plant where none ever stood.
-    let sprout_only = CellId::all()
+    let sprout_only = CellId::all(Topology::Cube, Scale::ONE)
         .find(|&c| band_of(c) == Band::Foliage && plant_cap(Band::Foliage, c).is_none())
         .expect("a sprout-only foliage slot");
     let bare = snapped(&empty_view(7));
@@ -685,9 +686,9 @@ fn a_cell_that_grows_nothing_grows_no_dead_wood_either() {
 fn the_structural_read_does_not_disturb_the_soil_or_the_water_band() {
     // Claim: soil and water keep exactly the image they had. A soil cell with wood and no
     // litter draws nothing; the same cell with litter draws its litter plant.
-    let soil = CellId::all()
+    let soil = CellId::all(Topology::Cube, Scale::ONE)
         .find(|&c| {
-            band_of(c) == Band::Soil && rank_cap_of(c) == 2 && (4..=11).contains(&c.cx())
+            band_of(c) == Band::Soil && rank_cap_of(c) == 2 && (4..=11).contains(&c.cx(Topology::Cube, Scale::ONE))
         })
         .expect("a rank-2 soil slot");
     let bare = snapped(&empty_view(7));
@@ -725,8 +726,8 @@ fn the_structural_read_does_not_disturb_the_soil_or_the_water_band() {
 /// A soil-band cell (the bottom five rows of a side face) whose rank lets it reach stage 2
 /// and whose tile stays well inside one face.
 fn soil_pilot() -> CellId {
-    CellId::all()
-        .find(|&c| band_of(c) == Band::Soil && rank_cap_of(c) == 2 && (4..=11).contains(&c.cx()))
+    CellId::all(Topology::Cube, Scale::ONE)
+        .find(|&c| band_of(c) == Band::Soil && rank_cap_of(c) == 2 && (4..=11).contains(&c.cx(Topology::Cube, Scale::ONE)))
         .expect("a rank-2 soil slot away from the edges")
 }
 
@@ -743,7 +744,7 @@ fn column_stand(tick: u64, column: &TallColumn, w: f64, p: f64, wd: f64) -> Rend
     let mut v = empty_view(tick);
     let (top, horizon) = foliage_rows(column.face).expect("a side face has foliage rows");
     for cy in top..=horizon {
-        let i = CellId::new(column.face, column.cx, cy).index();
+        let i = CellId::new(Topology::Cube, Scale::ONE, column.face, column.cx, cy).index();
         v.wood[i] = w;
         v.producer[i] = p;
         v.plant_reserve[i] = 0.5 * w;
@@ -758,10 +759,10 @@ fn column_stand(tick: u64, column: &TallColumn, w: f64, p: f64, wd: f64) -> Rend
 ///
 /// Front only, which is the face [`column_pilot`] picks: the rim geometry is written out
 /// rather than derived, because deriving it is the corner-cap machinery's own job.
-fn column_strip(column: &TallColumn) -> Vec<(Face, u8, u8)> {
+fn column_strip(column: &TallColumn) -> Vec<(Face, u16, u16)> {
     assert_eq!(column.face, Face::Front, "the rim rows below are Front's");
     let centre = i32::from(column.cx) * 4 + 2;
-    let near = move |x: u8| (i32::from(x) - centre).abs() <= 6;
+    let near = move |x: u16| (i32::from(x) - centre).abs() <= 6;
     every_pixel()
         .filter(|&(f, x, y)| match f {
             Face::Front => near(x),
@@ -773,7 +774,7 @@ fn column_strip(column: &TallColumn) -> Vec<(Face, u8, u8)> {
 
 /// The mean light one image *adds* to another over a set of pixels: what the thing that was
 /// drawn there actually put down, with the background it was drawn over divided out.
-fn mean_delta(over: &Canvas, under: &Canvas, pixels: &[(Face, u8, u8)]) -> [f32; 3] {
+fn mean_delta(over: &Canvas, under: &Canvas, pixels: &[(Face, u16, u16)]) -> [f32; 3] {
     let mut sum = [0.0f32; 3];
     for &(f, x, y) in pixels {
         let (a, b) = (over.get(f, x, y), under.get(f, x, y));

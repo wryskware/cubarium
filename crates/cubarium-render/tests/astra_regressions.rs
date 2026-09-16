@@ -1,6 +1,7 @@
 //! Independent image-level regression fixtures from the in-progress Astra review.
 //! These assert observable continuity and compositing properties, not mask formulas.
 
+use cubarium_surface::{Scale, Topology};
 use cubarium_render::{Canvas, Mask, Pose, Sprite, stamp_pose};
 use cubarium_surface::{SurfacePoint, Vec2};
 use cube_proto::Face;
@@ -22,7 +23,7 @@ fn draw(pose: Pose<'_>, anchor: SurfacePoint, scale: f64, mask: Mask) -> Canvas 
 
 fn pixels(image: &Canvas) -> impl Iterator<Item = [f32; 3]> + '_ {
     Face::ALL.into_iter().flat_map(move |face| {
-        (0..64u8).flat_map(move |y| (0..64u8).map(move |x| image.get(face, x, y)))
+        (0..64u16).flat_map(move |y| (0..64u16).map(move |x| image.get(face, x, y)))
     })
 }
 
@@ -60,7 +61,7 @@ fn opaque_pose_overlap_never_exposes_the_background() {
         image.set(Face::Front, 32, 32, [0.0, 0.0, 1.0]);
         stamp_pose(
             &mut image,
-            SurfacePoint::pixel_center(Face::Front, 32, 32),
+            SurfacePoint::pixel_center(Topology::Cube, Face::Front, 32, 32),
             Vec2::new(1.0, 0.0),
             Pose {
                 first: &red,
@@ -220,8 +221,8 @@ fn fractional_pose_blending_preserves_coverage_across_side_and_top_seams() {
                 );
             }
             for face in [Face::Front, adjacent] {
-                let visible = (0..64u8)
-                    .any(|y| (0..64u8).any(|x| seam.get(face, x, y).into_iter().any(|c| c > 0.0)));
+                let visible = (0..64u16)
+                    .any(|y| (0..64u16).any(|x| seam.get(face, x, y).into_iter().any(|c| c > 0.0)));
                 assert!(visible, "seam fixture must actually paint {face:?}");
             }
         }

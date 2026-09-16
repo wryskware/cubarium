@@ -9,12 +9,13 @@
 //! embedding (`face_frame` / `SurfacePoint::embed`), never from a seam table, so a wrong
 //! seam table cannot make a rotated run agree with itself.
 
+use cubarium_surface::{Scale, Topology};
 use cubarium_surface::{
-    CELL_COUNT, CELL_PIXELS, CELLS_PER_FACE_EDGE, CellId, Edge, Face, FieldGraph, ScalarField,
+    CUBE_CELL_COUNT, CELL_PIXELS, CELLS_PER_FACE_EDGE, CellId, Edge, Face, FieldGraph, ScalarField,
     SurfacePoint, cell_of, cross_seam, deposit, diffuse, face_frame,
 };
 
-const N: usize = CELL_COUNT;
+const N: usize = CUBE_CELL_COUNT;
 const SIDE_FACES: [Face; 4] = [Face::Front, Face::Right, Face::Back, Face::Left];
 
 // --- 3D helpers for the rotation permutations -------------------------------------------
@@ -46,13 +47,13 @@ fn vertex_spin(p: [f64; 3]) -> [f64; 3] {
 /// `None` when the image lands on the missing bottom face, which happens for the vertex
 /// spin (it is only a symmetry of the cone around its vertex, not of the whole surface).
 fn rotate_cell(cell: CellId, rot: fn([f64; 3]) -> [f64; 3]) -> Option<CellId> {
-    let q = rot(cell.center().embed());
+    let q = rot(Topology::Cube.embed(Scale::ONE, &cell.center(Topology::Cube, Scale::ONE)));
     for face in Face::ALL {
         let f = face_frame(face);
         if dot(f.normal, q) > 1.0 - 1e-9 {
             let a = dot(sub(q, f.center), f.tangent_u);
             let b = dot(sub(q, f.center), f.tangent_v);
-            return Some(cell_of(&SurfacePoint::new(
+            return Some(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::new(
                 face,
                 (a + 1.0) * 32.0,
                 (b + 1.0) * 32.0,
@@ -65,7 +66,7 @@ fn rotate_cell(cell: CellId, rot: fn([f64; 3]) -> [f64; 3]) -> Option<CellId> {
 }
 
 fn permutation(rot: fn([f64; 3]) -> [f64; 3]) -> Vec<Option<CellId>> {
-    let perm: Vec<Option<CellId>> = CellId::all().map(|c| rotate_cell(c, rot)).collect();
+    let perm: Vec<Option<CellId>> = CellId::all(Topology::Cube, Scale::ONE).map(|c| rotate_cell(c, rot)).collect();
     let mut seen = vec![false; N];
     for c in perm.iter().flatten() {
         assert!(!seen[c.index()], "cell permutation is not injective");
@@ -75,18 +76,18 @@ fn permutation(rot: fn([f64; 3]) -> [f64; 3]) -> Vec<Option<CellId>> {
 }
 
 /// The along-edge cell of `face` on `edge` at index `k`.
-fn edge_cell(face: Face, edge: Edge, k: u8) -> CellId {
-    let last = (CELLS_PER_FACE_EDGE - 1) as u8;
+fn edge_cell(face: Face, edge: Edge, k: u16) -> CellId {
+    let last = (CELLS_PER_FACE_EDGE - 1) as u16;
     match edge {
-        Edge::Top => CellId::new(face, k, 0),
-        Edge::Right => CellId::new(face, last, k),
-        Edge::Bottom => CellId::new(face, k, last),
-        Edge::Left => CellId::new(face, 0, k),
+        Edge::Top => CellId::new(Topology::Cube, Scale::ONE, face, k, 0),
+        Edge::Right => CellId::new(Topology::Cube, Scale::ONE, face, last, k),
+        Edge::Bottom => CellId::new(Topology::Cube, Scale::ONE, face, k, last),
+        Edge::Left => CellId::new(Topology::Cube, Scale::ONE, face, 0, k),
     }
 }
 
 fn is_rim_cell(c: CellId) -> bool {
-    c.face() != Face::Top && c.cy() == (CELLS_PER_FACE_EDGE - 1) as u8
+    c.face(Topology::Cube, Scale::ONE) != Face::Top && c.cy(Topology::Cube, Scale::ONE) == (CELLS_PER_FACE_EDGE - 1) as u16
 }
 
 // --- the graph ---------------------------------------------------------------------------
@@ -96,13 +97,13 @@ fn is_rim_cell(c: CellId) -> bool {
 /// seams)" (`src/field.rs`).
 #[test]
 fn graph_is_reciprocal_with_the_documented_degrees_and_edge_count() {
-    let g = FieldGraph::new();
+    let g = FieldGraph::new(Topology::Cube, Scale::ONE);
     assert_eq!(N, 1280, "five faces of 16x16 cells");
     assert_eq!(CELL_PIXELS, 4.0);
 
     let mut rim = 0;
     let mut undirected = 0;
-    for c in CellId::all() {
+    for c in CellId::all(Topology::Cube, Scale::ONE) {
         let degree = g.degree(c);
         if is_rim_cell(c) {
             rim += 1;
@@ -139,7 +140,7 @@ fn graph_is_reciprocal_with_the_documented_degrees_and_edge_count() {
     }
     // Counting the two populations separately: a within-chart edge joins two cells of the
     // same face, and there must be 128 seam edges (8 seams x 16 cells).
-    let seam_edges = edges.iter().filter(|(a, b)| a.face() != b.face()).count();
+    let seam_edges = edges.iter().filter(|(a, b)| a.face(Topology::Cube, Scale::ONE) != b.face(Topology::Cube, Scale::ONE)).count();
     assert_eq!(seam_edges, 128);
     assert_eq!(edges.len() - seam_edges, 2400);
 }
@@ -150,16 +151,16 @@ fn graph_is_reciprocal_with_the_documented_degrees_and_edge_count() {
 /// cell `k` to cell `15 - k`)" (`src/field.rs`).
 #[test]
 fn seam_neighbours_come_out_of_cross_seam_at_cell_resolution() {
-    let g = FieldGraph::new();
+    let g = FieldGraph::new(Topology::Cube, Scale::ONE);
     for face in Face::ALL {
         for edge in Edge::ALL {
             if face.neighbor(edge).is_none() {
                 continue;
             }
-            for k in 0..16u8 {
+            for k in 0..16u16 {
                 let cell = edge_cell(face, edge, k);
-                let (nf, nx, ny, _) = cross_seam(face, edge, k * 4).expect("connected");
-                let want = cell_of(&SurfacePoint::new(
+                let (nf, nx, ny, _) = cross_seam(face, edge, (k * 4) as u8).expect("connected");
+                let want = cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::new(
                     nf,
                     f64::from(nx) + 0.5,
                     f64::from(ny) + 0.5,
@@ -173,35 +174,35 @@ fn seam_neighbours_come_out_of_cross_seam_at_cell_resolution() {
         }
     }
     // Spelled out for the four seams around Top: the two reversed ones map k to 15 - k.
-    for k in 0..16u8 {
+    for k in 0..16u16 {
         assert_eq!(
             g.neighbor(edge_cell(Face::Right, Edge::Top, k), Edge::Top),
-            Some(CellId::new(Face::Top, 15, 15 - k)),
+            Some(CellId::new(Topology::Cube, Scale::ONE, Face::Top, 15, 15 - k)),
             "Right/Top is reversed"
         );
         assert_eq!(
             g.neighbor(edge_cell(Face::Back, Edge::Top, k), Edge::Top),
-            Some(CellId::new(Face::Top, 15 - k, 0)),
+            Some(CellId::new(Topology::Cube, Scale::ONE, Face::Top, 15 - k, 0)),
             "Back/Top is reversed"
         );
         assert_eq!(
             g.neighbor(edge_cell(Face::Front, Edge::Top, k), Edge::Top),
-            Some(CellId::new(Face::Top, k, 15)),
+            Some(CellId::new(Topology::Cube, Scale::ONE, Face::Top, k, 15)),
             "Front/Top runs straight through"
         );
         assert_eq!(
             g.neighbor(edge_cell(Face::Left, Edge::Top, k), Edge::Top),
-            Some(CellId::new(Face::Top, 0, k)),
+            Some(CellId::new(Topology::Cube, Scale::ONE, Face::Top, 0, k)),
             "Left/Top runs straight through"
         );
         // The four vertical seams join equal rows with no twist and no reversal.
         assert_eq!(
             g.neighbor(edge_cell(Face::Front, Edge::Right, k), Edge::Right),
-            Some(CellId::new(Face::Right, 0, k))
+            Some(CellId::new(Topology::Cube, Scale::ONE, Face::Right, 0, k))
         );
         assert_eq!(
             g.neighbor(edge_cell(Face::Back, Edge::Right, k), Edge::Right),
-            Some(CellId::new(Face::Left, 0, k))
+            Some(CellId::new(Topology::Cube, Scale::ONE, Face::Left, 0, k))
         );
     }
 }
@@ -210,30 +211,30 @@ fn seam_neighbours_come_out_of_cross_seam_at_cell_resolution() {
 
 #[test]
 fn a_constant_field_stays_bit_identical() {
-    let g = FieldGraph::new();
-    let mut f = ScalarField::constant(1.0);
-    let mut scratch = ScalarField::zeros();
+    let g = FieldGraph::new(Topology::Cube, Scale::ONE);
+    let mut f = ScalarField::constant(Topology::Cube, Scale::ONE, 1.0);
+    let mut scratch = ScalarField::zeros(Topology::Cube, Scale::ONE);
     for _ in 0..1000 {
         let substeps = diffuse(&mut f, &mut scratch, &g, 0.9);
         assert_eq!(substeps, 4, "rate 0.9 needs ceil(0.9 / 0.25) = 4 substeps");
     }
-    assert_eq!(*f.values, [1.0f64; CELL_COUNT], "a constant field drifted");
+    assert_eq!(*f.values, [1.0f64; CUBE_CELL_COUNT], "a constant field drifted");
 }
 
 #[test]
 fn diffusion_conserves_mass_and_stays_nonnegative() {
-    let g = FieldGraph::new();
-    let mut scratch = ScalarField::zeros();
+    let g = FieldGraph::new(Topology::Cube, Scale::ONE);
+    let mut scratch = ScalarField::zeros(Topology::Cube, Scale::ONE);
 
     // A delta at a cell touching a top vertex, one on the open rim, and one mid-face.
     let sources = [
-        CellId::new(Face::Front, 15, 0),
-        CellId::new(Face::Right, 7, 15),
-        CellId::new(Face::Top, 8, 8),
-        CellId::new(Face::Top, 0, 0),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Front, 15, 0),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Right, 7, 15),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 0, 0),
     ];
     for source in sources {
-        let mut f = ScalarField::zeros();
+        let mut f = ScalarField::zeros(Topology::Cube, Scale::ONE);
         f.set(source, 1.0);
         for step in 0..2000 {
             let substeps = diffuse(&mut f, &mut scratch, &g, 0.9);
@@ -253,7 +254,7 @@ fn diffusion_conserves_mass_and_stays_nonnegative() {
         // 2000 steps at rate 0.9 is far past mixing: nothing is still piled up. (The
         // slowest mode of this graph decays by roughly exp(-0.005) per step, so the
         // remaining deviation is many orders of magnitude below one cell's share.)
-        let uniform = 1.0 / CELL_COUNT as f64;
+        let uniform = 1.0 / CUBE_CELL_COUNT as f64;
         assert!(
             f.max() < 2.0 * uniform,
             "{source:?} did not mix: max {} vs uniform {uniform}",
@@ -262,7 +263,7 @@ fn diffusion_conserves_mass_and_stays_nonnegative() {
     }
 
     // A nonpositive or non-finite rate is a no-op.
-    let mut f = ScalarField::zeros();
+    let mut f = ScalarField::zeros(Topology::Cube, Scale::ONE);
     f.set(sources[0], 1.0);
     let before = f.clone();
     assert_eq!(diffuse(&mut f, &mut scratch, &g, 0.0), 0);
@@ -277,9 +278,9 @@ fn diffusion_conserves_mass_and_stays_nonnegative() {
 /// confirms it converges there.
 #[test]
 fn the_field_random_walk_is_doubly_stochastic_and_mixes_to_uniform() {
-    let g = FieldGraph::new();
+    let g = FieldGraph::new(Topology::Cube, Scale::ONE);
     let mut p = vec![0.0f64; N * N];
-    for c in CellId::all() {
+    for c in CellId::all(Topology::Cube, Scale::ONE) {
         for e in Edge::ALL {
             let target = g.neighbor(c, e).unwrap_or(c);
             p[c.index() * N + target.index()] += 0.25;
@@ -301,11 +302,11 @@ fn the_field_random_walk_is_doubly_stochastic_and_mixes_to_uniform() {
 
     // Power iteration from a delta at a rim cell (the most biased start available).
     let mut cur = vec![0.0f64; N];
-    cur[CellId::new(Face::Front, 0, 15).index()] = 1.0;
+    cur[CellId::new(Topology::Cube, Scale::ONE, Face::Front, 0, 15).index()] = 1.0;
     let mut next = vec![0.0f64; N];
     for _ in 0..20_000 {
         next.iter_mut().for_each(|x| *x = 0.0);
-        for c in CellId::all() {
+        for c in CellId::all(Topology::Cube, Scale::ONE) {
             let share = cur[c.index()] * 0.25;
             if share == 0.0 {
                 continue;
@@ -332,27 +333,27 @@ fn the_field_random_walk_is_doubly_stochastic_and_mixes_to_uniform() {
 /// "Check diffusion equivariance under cube rotations that preserve the open bottom."
 #[test]
 fn diffusion_commutes_with_the_yaw_rotations() {
-    let g = FieldGraph::new();
+    let g = FieldGraph::new(Topology::Cube, Scale::ONE);
     let perm = permutation(yaw);
     // The permutation is the documented one: Front -> Right -> Back -> Left and Top spins.
     let yawed = |c: CellId| rotate_cell(c, yaw).expect("yaw keeps every cell on the surface");
-    assert_eq!(yawed(CellId::new(Face::Front, 3, 5)).face(), Face::Right);
-    assert_eq!(yawed(CellId::new(Face::Right, 3, 5)).face(), Face::Back);
-    assert_eq!(yawed(CellId::new(Face::Back, 3, 5)).face(), Face::Left);
-    assert_eq!(yawed(CellId::new(Face::Left, 3, 5)).face(), Face::Front);
-    assert_eq!(yawed(CellId::new(Face::Top, 3, 5)).face(), Face::Top);
+    assert_eq!(yawed(CellId::new(Topology::Cube, Scale::ONE, Face::Front, 3, 5)).face(Topology::Cube, Scale::ONE), Face::Right);
+    assert_eq!(yawed(CellId::new(Topology::Cube, Scale::ONE, Face::Right, 3, 5)).face(Topology::Cube, Scale::ONE), Face::Back);
+    assert_eq!(yawed(CellId::new(Topology::Cube, Scale::ONE, Face::Back, 3, 5)).face(Topology::Cube, Scale::ONE), Face::Left);
+    assert_eq!(yawed(CellId::new(Topology::Cube, Scale::ONE, Face::Left, 3, 5)).face(Topology::Cube, Scale::ONE), Face::Front);
+    assert_eq!(yawed(CellId::new(Topology::Cube, Scale::ONE, Face::Top, 3, 5)).face(Topology::Cube, Scale::ONE), Face::Top);
     assert!(perm.iter().all(|c| c.is_some()), "a yaw maps the surface onto itself");
 
     let sources = [
-        CellId::new(Face::Front, 6, 9),
-        CellId::new(Face::Front, 15, 0),
-        CellId::new(Face::Top, 15, 15),
-        CellId::new(Face::Left, 2, 15),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Front, 6, 9),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Front, 15, 0),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Top, 15, 15),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Left, 2, 15),
     ];
     for source in sources {
-        let mut base = ScalarField::zeros();
+        let mut base = ScalarField::zeros(Topology::Cube, Scale::ONE);
         base.set(source, 1.0);
-        let mut scratch = ScalarField::zeros();
+        let mut scratch = ScalarField::zeros(Topology::Cube, Scale::ONE);
         for _ in 0..30 {
             diffuse(&mut base, &mut scratch, &g, 0.2);
         }
@@ -361,19 +362,19 @@ fn diffusion_commutes_with_the_yaw_rotations() {
         let mut rotated_base = base.clone();
         for turn in 1..=3 {
             image = perm[image.index()].expect("yaw stays on the surface");
-            let mut rotated_input = ScalarField::zeros();
+            let mut rotated_input = ScalarField::zeros(Topology::Cube, Scale::ONE);
             rotated_input.set(image, 1.0);
-            let mut scratch = ScalarField::zeros();
+            let mut scratch = ScalarField::zeros(Topology::Cube, Scale::ONE);
             for _ in 0..30 {
                 diffuse(&mut rotated_input, &mut scratch, &g, 0.2);
             }
             // Rotating the already-diffused field must give the same thing.
-            let mut want = ScalarField::zeros();
-            for c in CellId::all() {
+            let mut want = ScalarField::zeros(Topology::Cube, Scale::ONE);
+            for c in CellId::all(Topology::Cube, Scale::ONE) {
                 want.set(perm[c.index()].expect("yaw stays on the surface"), rotated_base.get(c));
             }
             rotated_base = want.clone();
-            for c in CellId::all() {
+            for c in CellId::all(Topology::Cube, Scale::ONE) {
                 assert!(
                     (rotated_input.get(c) - want.get(c)).abs() <= 1e-12,
                     "turn {turn} from {source:?}: cell {c:?} has {} but the rotated run has {}",
@@ -390,21 +391,21 @@ fn diffusion_commutes_with_the_yaw_rotations() {
 /// neighborhood before the lower boundary influences it."
 #[test]
 fn a_vertex_neighbourhood_is_three_fold_symmetric() {
-    let g = FieldGraph::new();
+    let g = FieldGraph::new(Topology::Cube, Scale::ONE);
     let perm = permutation(vertex_spin);
     // The three cells meeting the (1, 1, 1) vertex, cycled by the 120 degree spin.
-    let front = CellId::new(Face::Front, 15, 0);
-    let right = CellId::new(Face::Right, 0, 0);
-    let top = CellId::new(Face::Top, 15, 15);
+    let front = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 15, 0);
+    let right = CellId::new(Topology::Cube, Scale::ONE, Face::Right, 0, 0);
+    let top = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 15, 15);
     assert_eq!(perm[front.index()], Some(right));
     assert_eq!(perm[right.index()], Some(top));
     assert_eq!(perm[top.index()], Some(front));
 
-    let mut f = ScalarField::zeros();
+    let mut f = ScalarField::zeros(Topology::Cube, Scale::ONE);
     for c in [front, right, top] {
         f.add(c, 1.0);
     }
-    let mut scratch = ScalarField::zeros();
+    let mut scratch = ScalarField::zeros(Topology::Cube, Scale::ONE);
     // Eight substeps at the stable rate: influence spreads at most eight cells, which is
     // still inside the three-fold cone (the rim and the far seams are 16 cells away).
     for _ in 0..8 {
@@ -412,9 +413,9 @@ fn a_vertex_neighbourhood_is_three_fold_symmetric() {
     }
     assert!((f.total() - 3.0).abs() <= 1e-12);
 
-    let near = |c: CellId| -> Option<u8> {
-        let (cx, cy) = (c.cx(), c.cy());
-        match c.face() {
+    let near = |c: CellId| -> Option<u16> {
+        let (cx, cy) = (c.cx(Topology::Cube, Scale::ONE), c.cy(Topology::Cube, Scale::ONE));
+        match c.face(Topology::Cube, Scale::ONE) {
             Face::Front => Some((15 - cx).max(cy)),
             Face::Right => Some(cx.max(cy)),
             Face::Top => Some((15 - cx).max(15 - cy)),
@@ -422,7 +423,7 @@ fn a_vertex_neighbourhood_is_three_fold_symmetric() {
         }
     };
     let mut checked = 0;
-    for c in CellId::all() {
+    for c in CellId::all(Topology::Cube, Scale::ONE) {
         let Some(d) = near(c) else { continue };
         if d > 6 {
             continue;
@@ -456,8 +457,8 @@ fn deposit_conserves_its_amount_everywhere() {
         ("in a rim corner", SurfacePoint::new(Face::Left, 63.0, 63.0)),
     ];
     for (what, center) in cases {
-        let mut f = ScalarField::zeros();
-        let touched = deposit(&mut f, center, 10.0, 3.0);
+        let mut f = ScalarField::zeros(Topology::Cube, Scale::ONE);
+        let touched = deposit(Topology::Cube, Scale::ONE, &mut f, center, 10.0, 3.0);
         assert!(touched > 0, "{what}: nothing touched");
         assert!(f.is_nonnegative(), "{what}: negative weight");
         assert!(
@@ -468,29 +469,29 @@ fn deposit_conserves_its_amount_everywhere() {
         // `touched` counts the cells inside the footprint; a cell whose centre sits at
         // exactly `radius` is inside with weight zero, so only the inequality is implied.
         assert!(
-            f.values.iter().filter(|x| **x > 0.0).count() <= touched && touched <= CELL_COUNT,
+            f.values.iter().filter(|x| **x > 0.0).count() <= touched && touched <= CUBE_CELL_COUNT,
             "{what}: {touched} cells reported"
         );
     }
 
     // A radius below half a cell still lands everything in the containing cell.
-    let mut f = ScalarField::zeros();
+    let mut f = ScalarField::zeros(Topology::Cube, Scale::ONE);
     let center = SurfacePoint::new(Face::Back, 21.0, 45.0);
-    let touched = deposit(&mut f, center, 0.25, 2.0);
+    let touched = deposit(Topology::Cube, Scale::ONE, &mut f, center, 0.25, 2.0);
     assert_eq!(touched, 1);
-    assert!((f.get(cell_of(&center)) - 2.0).abs() <= 1e-12);
+    assert!((f.get(cell_of(Topology::Cube, Scale::ONE, &center)) - 2.0).abs() <= 1e-12);
 }
 
 /// The same footprint moved across a flat seam by a whole number of cells must produce the
 /// same weights: "the same event deposits the same total near a seam or rim".
 #[test]
 fn a_footprint_carried_across_a_flat_seam_keeps_its_weights() {
-    let mut here = ScalarField::zeros();
+    let mut here = ScalarField::zeros(Topology::Cube, Scale::ONE);
     // Front (34, 34) sits on a cell centre; adding 32 pixels of u (eight whole cells)
     // carries it across the flat Front/Right seam to Right (2, 34).
-    deposit(&mut here, SurfacePoint::new(Face::Front, 34.0, 34.0), 9.0, 1.0);
-    let mut there = ScalarField::zeros();
-    deposit(&mut there, SurfacePoint::new(Face::Right, 2.0, 34.0), 9.0, 1.0);
+    deposit(Topology::Cube, Scale::ONE, &mut here, SurfacePoint::new(Face::Front, 34.0, 34.0), 9.0, 1.0);
+    let mut there = ScalarField::zeros(Topology::Cube, Scale::ONE);
+    deposit(Topology::Cube, Scale::ONE, &mut there, SurfacePoint::new(Face::Right, 2.0, 34.0), 9.0, 1.0);
 
     let mut a: Vec<f64> = here.values.iter().copied().filter(|x| *x > 0.0).collect();
     let mut b: Vec<f64> = there.values.iter().copied().filter(|x| *x > 0.0).collect();
@@ -507,27 +508,27 @@ fn a_footprint_carried_across_a_flat_seam_keeps_its_weights() {
 #[test]
 fn cell_indexing_matches_the_documented_layout() {
     for face in Face::ALL {
-        for cy in 0..16u8 {
-            for cx in 0..16u8 {
-                let c = CellId::new(face, cx, cy);
+        for cy in 0..16u16 {
+            for cx in 0..16u16 {
+                let c = CellId::new(Topology::Cube, Scale::ONE, face, cx, cy);
                 assert_eq!(c.index(), face.index() * 256 + usize::from(cy) * 16 + usize::from(cx));
-                assert_eq!((c.face(), c.cx(), c.cy()), (face, cx, cy));
-                let centre = c.center();
+                assert_eq!((c.face(Topology::Cube, Scale::ONE), c.cx(Topology::Cube, Scale::ONE), c.cy(Topology::Cube, Scale::ONE)), (face, cx, cy));
+                let centre = c.center(Topology::Cube, Scale::ONE);
                 assert_eq!(centre.u, f64::from(cx) * CELL_PIXELS + 2.0);
                 assert_eq!(centre.v, f64::from(cy) * CELL_PIXELS + 2.0);
-                assert_eq!(cell_of(&centre), c);
+                assert_eq!(cell_of(Topology::Cube, Scale::ONE, &centre), c);
                 // Every pixel of the cell maps back to it.
-                for dy in 0..4u8 {
-                    for dx in 0..4u8 {
-                        let p = SurfacePoint::pixel_center(face, cx * 4 + dx, cy * 4 + dy);
-                        assert_eq!(cell_of(&p), c);
+                for dy in 0..4u16 {
+                    for dx in 0..4u16 {
+                        let p = SurfacePoint::pixel_center(Topology::Cube, face, cx * 4 + dx, cy * 4 + dy);
+                        assert_eq!(cell_of(Topology::Cube, Scale::ONE, &p), c);
                     }
                 }
             }
         }
     }
-    assert_eq!(CellId::all().count(), N);
+    assert_eq!(CellId::all(Topology::Cube, Scale::ONE).count(), N);
     for f in SIDE_FACES {
-        assert!(is_rim_cell(CellId::new(f, 5, 15)));
+        assert!(is_rim_cell(CellId::new(Topology::Cube, Scale::ONE, f, 5, 15)));
     }
 }

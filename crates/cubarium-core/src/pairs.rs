@@ -1,5 +1,6 @@
 //! Chord-filtered all-pairs neighbor lists with exact local unfolding.
 
+use cubarium_surface::{Scale, Topology};
 use cubarium_surface::{ChartImage, MAX_LOCAL_RADIUS, SurfacePoint, Vec2, unfold_with};
 
 use crate::ids::OrganismId;
@@ -36,7 +37,7 @@ pub struct Body {
 
 /// Normative: for every unordered pair `(i, j)` with `i < j` by slot, let
 /// `reach = max(sense_i, sense_j) + extent_i + extent_j`; skip if `chord_sq > reach²`;
-/// else `unfold(pos_i, pos_j, reach)` once and, when `Some`, add `j` to `i`'s list if
+/// else `unfold(Topology::Cube, pos_i, pos_j, reach)` once and, when `Some`, add `j` to `i`'s list if
 /// `distance ≤ sense_i + extent_i + extent_j` and `i` to `j`'s list if
 /// `distance ≤ sense_j + extent_i + extent_j` (the reverse `local` is
 /// `pos_j.chart() + map.inverse().apply(pos_i.chart() − local)`; unfolding is symmetric).
@@ -61,11 +62,11 @@ pub fn build(bodies: &[Body], images: &[Vec<ChartImage>; 5], max_neighbors: usiz
             *pairs_considered += 1;
             // `unfold` never looks past MAX_LOCAL_RADIUS; a larger reach would panic.
             let reach = (a.sense_radius.max(b.sense_radius) + a.extent + b.extent).min(MAX_LOCAL_RADIUS);
-            if a.pos.chord_sq(&b.pos) > reach * reach {
+            if Topology::Cube.chord_sq(&a.pos, &b.pos) > reach * reach {
                 continue;
             }
             *pairs_unfolded += 1;
-            let Some(u) = unfold_with(&images[a.pos.face.index()], a.pos, b.pos, reach) else {
+            let Some(u) = unfold_with(Topology::Cube, &images[a.pos.face.index()], a.pos, b.pos, reach) else {
                 continue;
             };
             let pad = a.extent + b.extent;
@@ -98,7 +99,7 @@ mod tests {
     fn images() -> [Vec<ChartImage>; 5] {
         std::array::from_fn(|i| {
             let mut v = Vec::new();
-            chart_images(Face::from_index(i as u8).expect("five faces"), MAX_SEAMS, &mut v);
+            chart_images(Topology::Cube, Face::from_index(i as u8).expect("five faces"), MAX_SEAMS, &mut v);
             v
         })
     }
@@ -174,7 +175,7 @@ mod tests {
             for b in &bodies[k + 1..] {
                 let pad = a.extent + b.extent;
                 let reach = (a.sense_radius.max(b.sense_radius) + pad).min(cubarium_surface::MAX_LOCAL_RADIUS);
-                let Some(u) = unfold(a.pos, b.pos, reach) else { continue };
+                let Some(u) = unfold(Topology::Cube, a.pos, b.pos, reach) else { continue };
                 if u.distance <= a.sense_radius + pad {
                     expected.push((a.id.slot, b.id));
                 }

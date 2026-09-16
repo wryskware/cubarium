@@ -1,4 +1,5 @@
 //! Fixed, paired observation regions. Never selects a more responsive site after care.
+use cubarium_surface::{Scale, Topology};
 use anyhow::{Context, Result, ensure};
 use cubarium_core::{CareTarget, OrganismId, WorldState, organism::Mode};
 use cubarium_surface::{CellId, FieldGraph, cell_of};
@@ -51,7 +52,7 @@ impl Region {
         let mut counts = Counts::default();
         let mut occupied = BTreeSet::new();
         for (id, organism) in state.organisms.iter() {
-            let cell = cell_of(&organism.pos);
+            let cell = cell_of(Topology::Cube, Scale::ONE, &organism.pos);
             let selected = if fixed_cohort {
                 self.cohort
                     .as_ref()
@@ -98,7 +99,7 @@ pub struct LocalObserver {
 
 impl LocalObserver {
     pub fn new(state: &WorldState, targets: &[CareTarget]) -> Result<Self> {
-        let graph = FieldGraph::new();
+        let graph = FieldGraph::new(Topology::Cube, Scale::ONE);
         let mut regions = Vec::new();
         for &target in targets {
             let mut cells = BTreeSet::from([target.resolve().context("invalid local target")?]);
@@ -156,7 +157,7 @@ impl LocalObserver {
             let members: Vec<_> = state
                 .organisms
                 .iter()
-                .filter(|(_, o)| region.cells.contains(&cell_of(&o.pos)))
+                .filter(|(_, o)| region.cells.contains(&cell_of(Topology::Cube, Scale::ONE, &o.pos)))
                 .collect();
             region.cohort = Some(members.iter().map(|(id, _)| *id).collect());
             region.cohort_opening = json!({"tick":state.tick,"target":region.target,
@@ -218,14 +219,14 @@ mod tests {
             observer.regions[0]
                 .cells
                 .iter()
-                .any(|c| c.face() == Face::Right)
+                .any(|c| c.face(Topology::Cube, Scale::ONE) == Face::Right)
         );
         assert_eq!(observer.regions[1].cells.len(), 16);
         assert!(
             observer.regions[1]
                 .cells
                 .iter()
-                .all(|c| c.face() == Face::Front)
+                .all(|c| c.face(Topology::Cube, Scale::ONE) == Face::Front)
         );
     }
 
@@ -246,7 +247,7 @@ mod tests {
             (ids[1], Mode::Resting, true),
         ] {
             let o = state.organisms.get_mut(id).unwrap();
-            o.pos = target.resolve().unwrap().center();
+            o.pos = target.resolve().unwrap().center(Topology::Cube, Scale::ONE);
             o.mode = mode;
             o.fed_this_tick = fed;
         }
@@ -273,7 +274,7 @@ mod tests {
         assert_eq!(totals["resting"], 3);
         // Moving away does not erase a fixed cohort member or add the replacement.
         state.organisms.get_mut(ids[0]).unwrap().pos = SurfacePoint::new(Face::Back, 32.0, 32.0);
-        state.organisms.get_mut(ids[2]).unwrap().pos = target.resolve().unwrap().center();
+        state.organisms.get_mut(ids[2]).unwrap().pos = target.resolve().unwrap().center(Topology::Cube, Scale::ONE);
         state.tick += 1;
         observer.observe(&state).unwrap();
         let cohort = observer.sample(&state).unwrap()["regions"][0]["first_pulse_cohort"].clone();

@@ -7,18 +7,19 @@
 //! litter. A standard dose is the pre-dose arithmetic bit for bit; the byte-for-byte proof of
 //! that against genuine pre-dose fixtures lives in `care_dose_migration.rs`.
 
+use cubarium_surface::{Scale, Topology};
 use cubarium_core::care::{
     ActiveShower, CLEAN_FRACTION, CLEAN_MATERIAL, CareCommand, CareDose, CareKind, CareOutcome,
     CareTarget, FEED_ALLOWANCE, FEED_MATERIAL, RAIN_DEPTH_TOTAL, RAIN_TICKS, footprint,
 };
 use cubarium_core::snapshot::{SnapshotError, state_hash};
 use cubarium_core::{World, WorldConfig, decode_snapshot, encode_snapshot};
-use cubarium_surface::{CELL_COUNT, CellId, Face, FieldGraph};
+use cubarium_surface::{CUBE_CELL_COUNT, CellId, Face, FieldGraph};
 
 // ---------------------------------------------------------------- helpers
 
 fn target_of(cell: CellId) -> CareTarget {
-    let c = cell.center();
+    let c = cell.center(Topology::Cube, Scale::ONE);
     CareTarget { face: c.face.index() as u8, u: c.u, v: c.v }
 }
 
@@ -52,11 +53,11 @@ fn still_water_config() -> WorldConfig {
 
 /// The documented interior / seam / open-rim trio, so every scaling claim is checked where the
 /// footprint is full, where it crosses a face boundary, and where it is short a neighbour.
-const PLACES: [(&str, Face, u8, u8); 3] =
+const PLACES: [(&str, Face, u16, u16); 3] =
     [("interior", Face::Front, 8, 8), ("seam", Face::Front, 15, 8), ("rim", Face::Front, 8, 15)];
 
 fn places() -> Vec<(&'static str, CellId)> {
-    PLACES.iter().map(|(n, f, u, v)| (*n, CellId::new(*f, *u, *v))).collect()
+    PLACES.iter().map(|(n, f, u, v)| (*n, CellId::new(Topology::Cube, Scale::ONE, *f, *u, *v))).collect()
 }
 
 /// Every dose the contract names, plus both bounds and the standard one.
@@ -128,7 +129,7 @@ fn a_standard_dose_is_bit_for_bit_the_nominal_amount() {
 /// semantic payload, so a viewer that starts sending the field changes nothing.
 #[test]
 fn an_explicit_standard_dose_is_the_same_command_as_no_dose_at_all() {
-    let cell = CellId::new(Face::Front, 8, 8);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8);
     let mut implicit = World::new(still_water_config()).expect("valid");
     let mut explicit = World::new(still_water_config()).expect("valid");
     for (seq, kind) in [(1, CareKind::Feed), (2, CareKind::Clean), (3, CareKind::Rain)] {
@@ -155,7 +156,7 @@ fn an_explicit_standard_dose_is_the_same_command_as_no_dose_at_all() {
 /// same at every dose, at a seam and on the open rim as in the interior.
 #[test]
 fn a_feed_dose_scales_the_total_and_leaves_the_footprint_alone() {
-    let graph = FieldGraph::new();
+    let graph = FieldGraph::new(Topology::Cube, Scale::ONE);
     for (name, cell) in places() {
         let fp = footprint(&graph, cell, 1);
         for permille in DOSES {
@@ -176,14 +177,14 @@ fn a_feed_dose_scales_the_total_and_leaves_the_footprint_alone() {
 
             // Per cell it is exactly `m · w_c`, with the same weights as any other dose, and
             // the energy is `rho · (m · w_c)` — the contract's grouping, not `(rho·m)·w`.
-            let mut inside = vec![false; CELL_COUNT];
+            let mut inside = vec![false; CUBE_CELL_COUNT];
             for (c, w) in &fp {
                 let i = c.index();
                 inside[i] = true;
                 assert_eq!(world.state.fields.d[i], before[i] + m * w, "{name} at {permille}");
                 assert_eq!(world.state.fields.de[i], de_before[i] + rho * (m * w));
             }
-            for i in 0..CELL_COUNT {
+            for i in 0..CUBE_CELL_COUNT {
                 assert!(inside[i] || world.state.fields.d[i] == before[i], "{name}: cell {i} moved");
             }
             // The ledgers book the actual sums, and the allowance books the same number.
@@ -202,7 +203,7 @@ fn a_feed_dose_scales_the_total_and_leaves_the_footprint_alone() {
 #[test]
 fn the_allowance_is_thirty_units_at_every_dose_and_refuses_rather_than_shrinking() {
     for (permille, expected) in [(250u16, 40u32), (500, 20), (1000, 10), (1500, 6), (2000, 5)] {
-        let cell = CellId::new(Face::Front, 8, 8);
+        let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8);
         let mut world = World::new(WorldConfig::default()).expect("valid");
         let mut seq = 0;
         let mut accepted = 0;
@@ -230,7 +231,7 @@ fn the_allowance_is_thirty_units_at_every_dose_and_refuses_rather_than_shrinking
 /// no ledger while still spending its sequence.
 #[test]
 fn a_dose_larger_than_the_remaining_allowance_is_refused_without_a_trace() {
-    let cell = CellId::new(Face::Front, 8, 8);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8);
     let mut world = World::new(WorldConfig::default()).expect("valid");
     for seq in 1..=9 {
         assert!(matches!(
@@ -270,7 +271,7 @@ fn a_dose_larger_than_the_remaining_allowance_is_refused_without_a_trace() {
 /// what any one cell holds. It remains litter cleanup, not sterilization.
 #[test]
 fn a_clean_dose_scales_the_cap_but_never_the_per_cell_half() {
-    let graph = FieldGraph::new();
+    let graph = FieldGraph::new(Topology::Cube, Scale::ONE);
     for (name, cell) in places() {
         let fp = footprint(&graph, cell, 1);
         for permille in DOSES {
@@ -320,7 +321,7 @@ fn a_clean_dose_scales_the_cap_but_never_the_per_cell_half() {
 /// and less than the dose asked for is a partial, never an "applied" that overstates itself.
 #[test]
 fn an_empty_or_sparse_footprint_is_refused_or_partial_at_every_dose() {
-    let cell = CellId::new(Face::Front, 4, 4);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 4, 4);
     for permille in DOSES {
         let mut world = World::new(WorldConfig::default()).expect("valid");
         world.state.fields.d.fill(0.0);
@@ -350,7 +351,7 @@ fn an_empty_or_sparse_footprint_is_refused_or_partial_at_every_dose() {
 /// clean over an empty footprint gives nothing back, and the allowance never turns into credit.
 #[test]
 fn only_material_actually_removed_restores_the_allowance() {
-    let cell = CellId::new(Face::Front, 8, 8);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8);
     let mut world = World::new(WorldConfig::default()).expect("valid");
     for seq in 1..=10 {
         world.apply_care(&dosed(seq, 0, CareKind::Feed, cell, 1000));
@@ -371,7 +372,7 @@ fn only_material_actually_removed_restores_the_allowance() {
     assert!((world.care().allowance_used - (used - q)).abs() < 1e-12);
 
     // And a clean that removes nothing restores nothing.
-    let far = CellId::new(Face::Back, 10, 10);
+    let far = CellId::new(Topology::Cube, Scale::ONE, Face::Back, 10, 10);
     world.state.fields.d.fill(0.0);
     world.state.fields.de.fill(0.0);
     let held = world.care().allowance_used;
@@ -388,7 +389,7 @@ fn only_material_actually_removed_restores_the_allowance() {
 /// 120-tick envelope: a bigger shower is not a longer one or a wider one.
 #[test]
 fn a_rain_dose_scales_the_depth_over_the_same_footprint_and_envelope() {
-    let graph = FieldGraph::new();
+    let graph = FieldGraph::new(Topology::Cube, Scale::ONE);
     for (name, cell) in places() {
         let fp = footprint(&graph, cell, 2);
         for permille in DOSES {
@@ -432,7 +433,7 @@ fn a_rain_dose_scales_the_depth_over_the_same_footprint_and_envelope() {
 /// a later command at a different dose cannot reach in and change it.
 #[test]
 fn a_nonstandard_shower_persists_its_own_dose_across_a_restart() {
-    let cell = CellId::new(Face::Front, 6, 9);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 6, 9);
     let mut original = World::new(still_water_config()).expect("valid");
     original.state.fields.w.fill(0.0);
     assert!(matches!(
@@ -478,7 +479,7 @@ fn a_nonstandard_shower_persists_its_own_dose_across_a_restart() {
 /// before the snapshot plus the depth after it is the whole shower, counted once.
 #[test]
 fn a_restart_delivers_exactly_the_remaining_samples_of_a_quarter_dose() {
-    let cell = CellId::new(Face::Top, 10, 10);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 10, 10);
     let mut world = World::new(still_water_config()).expect("valid");
     world.state.fields.w.fill(0.0);
     world.apply_care(&dosed(1, 0, CareKind::Rain, cell, 250));
@@ -511,7 +512,7 @@ fn a_restart_delivers_exactly_the_remaining_samples_of_a_quarter_dose() {
 /// spends its sequence, so a replay of the journal reaches the same cursor.
 #[test]
 fn a_wire_dose_outside_the_bounds_is_rejected_and_still_spends_its_seq() {
-    let cell = CellId::new(Face::Front, 8, 8);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8);
     for (seq, permille) in [(1u64, 0u16), (2, 249), (3, 2001), (4, 50_000), (5, u16::MAX)] {
         let mut world = World::new(WorldConfig::default()).expect("valid");
         world.state.care.admitted_seq = seq - 1;
@@ -576,7 +577,7 @@ fn a_crafted_shower_dose_is_refused_by_the_decoder() {
 /// shower is delivering are different worlds, and nothing downstream may treat them as one.
 #[test]
 fn the_dose_is_part_of_the_state_hash() {
-    let cell = CellId::new(Face::Front, 8, 8);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8);
     let build = |permille: u16| {
         let mut world = World::new(still_water_config()).expect("valid");
         world.apply_care(&dosed(1, 0, CareKind::Rain, cell, permille));

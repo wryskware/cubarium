@@ -30,10 +30,10 @@ const TILE: usize = 16;
 /// The pivot every authored plant and trunk tile carries: the tile centre.
 const PIVOT: Vec2 = Vec2 { x: 8.0, y: 8.0 };
 
-fn every_pixel() -> impl Iterator<Item = (Face, u8, u8)> {
+fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
     Face::ALL
         .into_iter()
-        .flat_map(|face| (0..64u8).flat_map(move |y| (0..64u8).map(move |x| (face, x, y))))
+        .flat_map(|face| (0..64u16).flat_map(move |y| (0..64u16).map(move |x| (face, x, y))))
 }
 
 /// Bit-for-bit equality, which is what "exactly" and "bit for bit" in the docs mean.
@@ -74,13 +74,13 @@ fn aligned_anchor() -> SurfacePoint {
 }
 
 /// The face pixel texel `(tx, ty)` of a tile at [`aligned_anchor`] lands on.
-fn texel_pixel(tx: usize, ty: usize) -> (Face, u8, u8) {
-    (Face::Front, (tx + 24) as u8, (ty + 24) as u8)
+fn texel_pixel(tx: usize, ty: usize) -> (Face, u16, u16) {
+    (Face::Front, (tx + 24) as u16, (ty + 24) as u16)
 }
 
 /// The tile-local `x` of the centre of face pixel column `x`, for a tile at
 /// [`aligned_anchor`].
-fn tile_x(x: u8) -> f64 {
+fn tile_x(x: u16) -> f64 {
     f64::from(x) + 0.5 - 32.0 + PIVOT.x
 }
 
@@ -248,7 +248,7 @@ fn every_identity_bend_draws_the_unbent_image_bit_for_bit() {
                     let touched = Face::ALL
                         .into_iter()
                         .filter(|&f| {
-                            (0..64u8).any(|y| (0..64u8).any(|x| expected.get(f, x, y) != [0.0; 3]))
+                            (0..64u16).any(|y| (0..64u16).any(|x| expected.get(f, x, y) != [0.0; 3]))
                         })
                         .count();
                     assert!(
@@ -359,7 +359,7 @@ fn each_rows_displacement_is_the_hermite_profile_of_its_height() {
                 let (f, _, y) = texel_pixel(0, ty);
                 let mut light = 0.0f64;
                 let mut moment = 0.0f64;
-                for x in 16..48u8 {
+                for x in 16..48u16 {
                     let v = f64::from(image.get(f, x, y)[1]);
                     light += v;
                     moment += v * (f64::from(x) + 0.5);
@@ -395,7 +395,7 @@ fn each_rows_displacement_is_the_hermite_profile_of_its_height() {
             for ty in saturated {
                 let (f, _, y) = texel_pixel(0, ty);
                 let (mut light, mut moment) = (0.0f64, 0.0f64);
-                for x in 16..48u8 {
+                for x in 16..48u16 {
                     let v = f64::from(image.get(f, x, y)[1]);
                     light += v;
                     moment += v * (f64::from(x) + 0.5);

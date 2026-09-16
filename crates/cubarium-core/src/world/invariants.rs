@@ -1,3 +1,4 @@
+use cubarium_surface::{Scale, Topology};
 use crate::organism::DeathCause;
 
 use super::*;
@@ -75,7 +76,7 @@ impl World {
             if !o.hunger_memory.is_finite() {
                 return Err(format!("{who}: hunger memory is not finite"));
             }
-            if !o.pos.is_canonical() {
+            if !o.pos.is_canonical(Topology::Cube) {
                 return Err(format!("{who}: position {:?} is not canonical", o.pos));
             }
             if !o.heading.is_finite() || (o.heading.length() - 1.0).abs() > HEADING_TOLERANCE {

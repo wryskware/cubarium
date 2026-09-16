@@ -3,6 +3,7 @@
 //! -- --ignored --nocapture --test-threads=1
 //! These timings depend on the host and are not ordinary correctness tests.
 
+use cubarium_surface::{Scale, Topology};
 use std::{hint::black_box, path::Path, time::Instant};
 
 use cubarium::{
@@ -15,7 +16,7 @@ use cubarium_core::{
     view::{OrganismView, RenderView},
 };
 use cubarium_render::Canvas;
-use cubarium_surface::{CELL_COUNT, CellId, Face, SurfacePoint, Vec2};
+use cubarium_surface::{CUBE_CELL_COUNT, CellId, Face, SurfacePoint, Vec2};
 
 /// Living wood at `W_max`, which is what the structural read calls a full-grown stand since
 /// ecology v1.
@@ -45,16 +46,16 @@ fn transition_draw_cost_at(
         tick: 121, // Six simulated seconds: inside a gust, not its quiet interval.
         producer: vec![
             if growing { 0.0 } else { fullness * WOOD_MAX };
-            CELL_COUNT
+            CUBE_CELL_COUNT
         ],
-        detritus: vec![if growing { 0.0 } else { 1.5 }; CELL_COUNT],
-        fruit: vec![if growing { 0.0 } else { 1.0 }; CELL_COUNT],
-        wood: vec![if growing { 0.0 } else { WOOD_MAX }; CELL_COUNT],
-        plant_reserve: vec![0.0; CELL_COUNT],
-        dead_wood: vec![if growing { 0.0 } else { dead }; CELL_COUNT],
-        carrion: vec![0.0; CELL_COUNT],
-        water: vec![if wet { 1.0 } else { 0.0 }; CELL_COUNT],
-        rain: vec![1.0; CELL_COUNT],
+        detritus: vec![if growing { 0.0 } else { 1.5 }; CUBE_CELL_COUNT],
+        fruit: vec![if growing { 0.0 } else { 1.0 }; CUBE_CELL_COUNT],
+        wood: vec![if growing { 0.0 } else { WOOD_MAX }; CUBE_CELL_COUNT],
+        plant_reserve: vec![0.0; CUBE_CELL_COUNT],
+        dead_wood: vec![if growing { 0.0 } else { dead }; CUBE_CELL_COUNT],
+        carrion: vec![0.0; CUBE_CELL_COUNT],
+        water: vec![if wet { 1.0 } else { 0.0 }; CUBE_CELL_COUNT],
+        rain: vec![1.0; CUBE_CELL_COUNT],
         producer_max: 10.0,
         wood_max: 0.6,
         organisms: (0..200u32)
@@ -84,7 +85,7 @@ fn transition_draw_cost_at(
         if !dead_soil {
             return;
         }
-        for cell in CellId::all().filter(|&c| band_of(c) == Band::Soil) {
+        for cell in CellId::all(Topology::Cube, Scale::ONE).filter(|&c| band_of(c) == Band::Soil) {
             view.wood[cell.index()] = 0.0;
             view.dead_wood[cell.index()] = WOOD_MAX;
         }

@@ -2,8 +2,9 @@
 //! `design/m2-world-spec.md` ("Capacity and IDs", "Controller" budding, "Tick order"
 //! step 9) and the doc comments on `World` and `Telemetry`.
 
+use cubarium_surface::{Scale, Topology};
 use cubarium_core::{TICK_HZ, World, WorldConfig};
-use cubarium_surface::{CELL_COUNT, cell_of};
+use cubarium_surface::{CUBE_CELL_COUNT, cell_of};
 
 /// Twenty simulated minutes.
 const TWENTY_MINUTES: u64 = 20 * 60 * TICK_HZ as u64;
@@ -13,7 +14,7 @@ const TWENTY_MINUTES: u64 = 20 * 60 * TICK_HZ as u64;
 fn check_organisms(world: &World, tick: u64) {
     for (id, o) in world.state.organisms.iter() {
         assert!(
-            o.pos.is_canonical(),
+            o.pos.is_canonical(Topology::Cube),
             "tick {tick}: organism {id:?} left the surface at {:?}",
             o.pos
         );
@@ -23,14 +24,14 @@ fn check_organisms(world: &World, tick: u64) {
             "tick {tick}: organism {id:?} heading {:?} has length {len}",
             o.heading
         );
-        let cell = cell_of(&o.pos);
+        let cell = cell_of(Topology::Cube, Scale::ONE, &o.pos);
         assert!(
-            cell.index() < CELL_COUNT,
-            "tick {tick}: organism {id:?} maps to cell {} of {CELL_COUNT}",
+            cell.index() < CUBE_CELL_COUNT,
+            "tick {tick}: organism {id:?} maps to cell {} of {CUBE_CELL_COUNT}",
             cell.index()
         );
         assert_eq!(
-            cell.face(),
+            cell.face(Topology::Cube, Scale::ONE),
             o.pos.face,
             "tick {tick}: organism {id:?} cell face disagrees with its chart"
         );

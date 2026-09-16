@@ -10,6 +10,7 @@
 //! column that pops a whole tile, a fade that cuts, an accent that lingers after the food
 //! is gone.
 
+use cubarium_surface::{Scale, Topology};
 use std::path::{Path, PathBuf};
 use std::ptr;
 
@@ -33,7 +34,7 @@ use cubarium_core::OrganismId;
 use cubarium_core::organism::Mode;
 use cubarium_core::view::{OrganismView, RenderView};
 use cubarium_render::{Canvas, Mask, Pose, Sprite, stamp_layers, stamp_layers_bent, stamp_pose};
-use cubarium_surface::{CELL_COUNT, CellId, PixelImage, SurfacePoint, Vec2, cell_of};
+use cubarium_surface::{CUBE_CELL_COUNT, CellId, PixelImage, SurfacePoint, Vec2, cell_of};
 
 // ---------------------------------------------------------------------------
 // fixtures
@@ -76,15 +77,15 @@ fn saturation() -> f64 {
 fn bare_view(tick: u64) -> RenderView {
     RenderView {
         tick,
-        producer: vec![0.0; CELL_COUNT],
-        detritus: vec![0.0; CELL_COUNT],
-        fruit: vec![0.0; CELL_COUNT],
-        wood: vec![0.0; CELL_COUNT],
-        plant_reserve: vec![0.0; CELL_COUNT],
-        dead_wood: vec![0.0; CELL_COUNT],
-        carrion: vec![0.0; CELL_COUNT],
-        water: vec![0.0; CELL_COUNT],
-        rain: vec![0.0; CELL_COUNT],
+        producer: vec![0.0; CUBE_CELL_COUNT],
+        detritus: vec![0.0; CUBE_CELL_COUNT],
+        fruit: vec![0.0; CUBE_CELL_COUNT],
+        wood: vec![0.0; CUBE_CELL_COUNT],
+        plant_reserve: vec![0.0; CUBE_CELL_COUNT],
+        dead_wood: vec![0.0; CUBE_CELL_COUNT],
+        carrion: vec![0.0; CUBE_CELL_COUNT],
+        water: vec![0.0; CUBE_CELL_COUNT],
+        rain: vec![0.0; CUBE_CELL_COUNT],
         producer_max: PRODUCER_MAX,
         wood_max: 0.6,
         organisms: Vec::new(),
@@ -112,13 +113,13 @@ fn one_cell_view(tick: u64, cell: CellId, density: f64) -> RenderView {
 /// A foliage slot allowed to reach stage 2, far enough from the face edges that its tile
 /// stays on one face.
 fn full_foliage_cell() -> CellId {
-    CellId::all()
+    CellId::all(Topology::Cube, Scale::ONE)
         .find(|&c| {
-            c.face() == Face::Front
+            c.face(Topology::Cube, Scale::ONE) == Face::Front
                 && band_of(c) == Band::Foliage
                 && plant_cap(Band::Foliage, c) == Some(2)
-                && (4..=7).contains(&c.cy())
-                && (4..=11).contains(&c.cx())
+                && (4..=7).contains(&c.cy(Topology::Cube, Scale::ONE))
+                && (4..=11).contains(&c.cx(Topology::Cube, Scale::ONE))
         })
         .expect("the cube has a rank-2 foliage slot in the middle of Front")
 }
@@ -127,26 +128,26 @@ fn full_foliage_cell() -> CellId {
 // canvas helpers
 // ---------------------------------------------------------------------------
 
-fn every_pixel() -> impl Iterator<Item = (Face, u8, u8)> {
+fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
     Face::ALL.into_iter().flat_map(|face| {
-        (0..FACE_SIZE as u8).flat_map(move |y| (0..FACE_SIZE as u8).map(move |x| (face, x, y)))
+        (0..FACE_SIZE as u16).flat_map(move |y| (0..FACE_SIZE as u16).map(move |x| (face, x, y)))
     })
 }
 
 /// The pixels a 16-px tile anchored in `cell` can reach: a tile's footprint is under the
 /// nine-pixel budget and a slot sits within a pixel of the cell centre, so everything it
 /// touches is within 11 px of that centre on the cell's own face.
-fn near(cell: CellId) -> Vec<(Face, u8, u8)> {
-    let centre = cell.center();
-    (0..FACE_SIZE as u8)
-        .flat_map(|y| (0..FACE_SIZE as u8).map(move |x| (cell.face(), x, y)))
+fn near(cell: CellId) -> Vec<(Face, u16, u16)> {
+    let centre = cell.center(Topology::Cube, Scale::ONE);
+    (0..FACE_SIZE as u16)
+        .flat_map(|y| (0..FACE_SIZE as u16).map(move |x| (cell.face(Topology::Cube, Scale::ONE), x, y)))
         .filter(|&(_, x, y)| {
             (f64::from(x) + 0.5 - centre.u).hypot(f64::from(y) + 0.5 - centre.v) <= 12.0
         })
         .collect()
 }
 
-fn max_diff_at(a: &Canvas, b: &Canvas, pixels: &[(Face, u8, u8)]) -> f32 {
+fn max_diff_at(a: &Canvas, b: &Canvas, pixels: &[(Face, u16, u16)]) -> f32 {
     pixels
         .iter()
         .flat_map(|&(f, x, y)| {
@@ -165,7 +166,7 @@ fn max_diff(a: &Canvas, b: &Canvas) -> f32 {
         .fold(0.0, f32::max)
 }
 
-fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u8, u8)> {
+fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u16, u16)> {
     every_pixel().filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y)).collect()
 }
 
@@ -627,7 +628,7 @@ fn a_fresh_presenter_snaps_a_rich_world_instead_of_replaying_its_growth() {
     let mut p = ArtPresenter::new(pack());
     let v = rich_view(500);
     let first = observe_draw(&mut p, &v, 0.5);
-    for cell in CellId::all() {
+    for cell in CellId::all(Topology::Cube, Scale::ONE) {
         let growth = p.growth_of(cell);
         assert_eq!(
             growth,
@@ -647,7 +648,7 @@ fn a_fresh_presenter_snaps_a_rich_world_instead_of_replaying_its_growth() {
         );
     }
     assert!(
-        CellId::all().any(|c| p.stage_of(c) == Some(2)),
+        CellId::all(Topology::Cube, Scale::ONE).any(|c| p.stage_of(c) == Some(2)),
         "the fixture must grow full plants"
     );
     assert!((0..p.columns().len()).any(|i| p.segments_of(i) > 0), "no column grew");
@@ -720,7 +721,7 @@ fn a_cell_that_turns_rich_grows_through_every_stage_at_the_documented_pace() {
 fn the_render_fraction_and_repeated_draws_never_move_the_growth() {
     let mut thirds = ArtPresenter::new(pack_without(true, true, true));
     let mut halves = ArtPresenter::new(pack_without(true, true, true));
-    let cells: Vec<CellId> = CellId::all().collect();
+    let cells: Vec<CellId> = CellId::all(Topology::Cube, Scale::ONE).collect();
     for tick in 0..=40u64 {
         let v = if tick == 0 { bare_view(0) } else { rich_view(tick) };
         thirds.observe(&v);
@@ -776,7 +777,7 @@ fn a_backwards_tick_snaps_and_draws_what_a_fresh_presenter_draws() {
     let expected = observe_draw(&mut fresh, &rewound, 0.4);
     let actual = observe_draw(&mut used, &rewound, 0.4);
     assert_same_canvas(&actual, &expected, "a rewound world must be drawn as a new one");
-    for cell in CellId::all() {
+    for cell in CellId::all(Topology::Cube, Scale::ONE) {
         assert_eq!(used.growth_of(cell), fresh.growth_of(cell), "{cell:?}");
     }
 }
@@ -962,13 +963,13 @@ fn growth_drawn_at_60_fps_never_steps_a_stage_in_one_frame() {
 
 /// The column's own axis: the chart direction in which its face's height rises, recovered
 /// from the documented heading rule (`stalk_heading(up) = (−up.y, up.x)`).
-fn column_up(face: Face, cx: u8) -> Vec2 {
+fn column_up(face: Face, cx: u16) -> Vec2 {
     let heading = tall_heading(face, cx);
     Vec2::new(heading.y, -heading.x)
 }
 
 /// How far up the column, in pixels above the horizon cell's centre, a pixel centre sits.
-fn up_px(face: Face, cx: u8, x: u8, y: u8) -> f64 {
+fn up_px(face: Face, cx: u16, x: u16, y: u16) -> f64 {
     let origin = tall_anchor(face, cx, 0).chart();
     let up = column_up(face, cx);
     let d = Vec2::new(f64::from(x) + 0.5 - origin.x, f64::from(y) + 0.5 - origin.y);
@@ -977,10 +978,10 @@ fn up_px(face: Face, cx: u8, x: u8, y: u8) -> f64 {
 
 /// A view whose only rich cells are one column's foliage cells, so that column is the only
 /// thing on the cube that grows.
-fn column_view(tick: u64, face: Face, cx: u8) -> RenderView {
+fn column_view(tick: u64, face: Face, cx: u16) -> RenderView {
     let mut v = bare_view(tick);
-    for cell in CellId::all() {
-        if cell.face() == face && cell.cx() == cx && band_of(cell) == Band::Foliage {
+    for cell in CellId::all(Topology::Cube, Scale::ONE) {
+        if cell.face(Topology::Cube, Scale::ONE) == face && cell.cx(Topology::Cube, Scale::ONE) == cx && band_of(cell) == Band::Foliage {
             v.producer[cell.index()] = saturation();
         }
     }
@@ -1107,8 +1108,8 @@ fn a_completed_trunk_segment_is_identical_while_the_column_is_still_growing() {
     // that are finished in both frames, so they must be the same pixels.
     let ceiling = tall_grown_px(height).min(4.0 * (height + 1.0) - 8.0) - 2.0;
     assert!(ceiling > 8.0, "the fixture leaves no settled rows to compare");
-    let settled: Vec<(Face, u8, u8)> = (0..FACE_SIZE as u8)
-        .flat_map(|y| (0..FACE_SIZE as u8).map(move |x| (column.face, x, y)))
+    let settled: Vec<(Face, u16, u16)> = (0..FACE_SIZE as u16)
+        .flat_map(|y| (0..FACE_SIZE as u16).map(move |x| (column.face, x, y)))
         .filter(|&(_, x, y)| up_px(column.face, column.cx, x, y) <= ceiling)
         .collect();
     let d = max_diff_at(&partial, &whole, &settled);
@@ -1259,7 +1260,7 @@ fn tall_grown_px_adds_four_pixels_a_segment_and_is_continuous_at_the_first() {
 
 #[test]
 fn a_falling_streak_keeps_constant_light_and_its_head_inside_its_cell() {
-    let cell = CellId::new(Face::Front, 7, 5);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 7, 5);
     let up = up_of(cell).expect("a side-face cell has an up");
     let down = Vec2::new(-up.x, -up.y);
     let k = 0;
@@ -1296,7 +1297,7 @@ fn a_falling_streak_keeps_constant_light_and_its_head_inside_its_cell() {
         }
         let head = marks[0].0;
         assert_eq!(
-            cell_of(&SurfacePoint::pixel_center(cell.face(), head.0, head.1)),
+            cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, cell.face(Topology::Cube, Scale::ONE), head.0, head.1)),
             cell,
             "the head left its cell at {seconds} s"
         );
@@ -1354,14 +1355,14 @@ fn a_top_face_sparkle_swells_to_one_and_dies_inside_its_window() {
     }
 
     // On the top face a streak is that sparkle, at one pixel, and nothing when it is dark.
-    let cell = CellId::new(Face::Top, 9, 6);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 9, 6);
     for &seconds in &[RAIN_BLINK / 2.0, RAIN_BLINK / 4.0, RAIN_BLINK + 0.02, RAIN_PERIOD / 2.0] {
         let marks = rain_marks(cell, 1, seconds);
         if rain_blink_on(seconds) {
             assert_eq!(marks.len(), 1, "a top-face streak is one pixel: {marks:?}");
             assert_eq!(marks[0].1, rain_blink(seconds), "the sparkle's weight is its blink");
             assert_eq!(
-                cell_of(&SurfacePoint::pixel_center(
+                cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, 
                     Face::Top,
                     marks[0].0 .0,
                     marks[0].0 .1
@@ -1630,14 +1631,14 @@ fn a_body_the_view_drops_is_forgotten() {
 
 /// A rank-2 lanternstalk slot: the foliage plant with a fruit clip.
 fn lanternstalk_cell() -> CellId {
-    CellId::all()
+    CellId::all(Topology::Cube, Scale::ONE)
         .find(|&c| {
-            c.face() == Face::Back
+            c.face(Topology::Cube, Scale::ONE) == Face::Back
                 && band_of(c) == Band::Foliage
                 && plant_cap(Band::Foliage, c) == Some(2)
                 && species_of(Band::Foliage, c) == "lanternstalk"
-                && (4..=7).contains(&c.cy())
-                && (4..=11).contains(&c.cx())
+                && (4..=7).contains(&c.cy(Topology::Cube, Scale::ONE))
+                && (4..=11).contains(&c.cx(Topology::Cube, Scale::ONE))
         })
         .expect("the cube has a rank-2 lanternstalk slot in the middle of Back")
 }
@@ -1651,8 +1652,8 @@ fn the_fruit_accent_fades_in_over_its_seconds_and_leaves_the_moment_the_food_doe
     let window = near(cell);
 
     let view_at = |tick: u64| one_cell_view(tick, cell, 1.0);
-    let dry = vec![0.0; CELL_COUNT];
-    let mut ripe = vec![0.0; CELL_COUNT];
+    let dry = vec![0.0; CUBE_CELL_COUNT];
+    let mut ripe = vec![0.0; CUBE_CELL_COUNT];
     ripe[cell.index()] = FRUIT_SHOW * 2.5;
     assert!(fruit_stage(Some(ripe[cell.index()])));
 
@@ -1731,7 +1732,7 @@ fn the_fruit_accent_fades_in_over_its_seconds_and_leaves_the_moment_the_food_doe
         &plain,
         "a world that publishes no fruit must show none",
     );
-    let mut under = vec![0.0; CELL_COUNT];
+    let mut under = vec![0.0; CUBE_CELL_COUNT];
     under[cell.index()] = FRUIT_SHOW;
     assert_same_canvas(
         &draw_fruit(&mut p, &v, 0.0, Some(&under)),
@@ -1750,7 +1751,7 @@ fn the_fruit_accent_fades_in_over_its_seconds_and_leaves_the_moment_the_food_doe
     let w = p.growth_prev_of(cell).fruit as f32;
     assert!(w > 0.2 && w < 0.8, "the fixture must be mid-fade, not at {w}");
     let blended = draw_fruit(&mut p, &v, 0.0, Some(&ripe));
-    let mut worst = (0.0f32, (Face::Top, 0u8, 0u8));
+    let mut worst = (0.0f32, (Face::Top, 0u16, 0u16));
     let plain_half = {
         let mut q = ArtPresenter::new(pack_without(true, false, false));
         q.observe_with_fruit(&view_at(0), Some(&dry));
@@ -1835,8 +1836,8 @@ fn tile_anchor() -> SurfacePoint {
     SurfacePoint::new(Face::Front, 32.0, 32.0)
 }
 
-fn tile_window() -> Vec<(Face, u8, u8)> {
-    (16..48u8).flat_map(|y| (16..48u8).map(move |x| (Face::Front, x, y))).collect()
+fn tile_window() -> Vec<(Face, u16, u16)> {
+    (16..48u16).flat_map(|y| (16..48u16).map(move |x| (Face::Front, x, y))).collect()
 }
 
 fn stamp_tile(sprite: &Sprite, mask: Mask, background: &Canvas) -> Canvas {
@@ -1952,7 +1953,7 @@ fn growth_sequence_capture() {
     std::fs::create_dir_all(&dir).expect("the capture directory must be writable");
 
     let foliage = full_foliage_cell();
-    let canopy = CellId::all()
+    let canopy = CellId::all(Topology::Cube, Scale::ONE)
         .find(|&c| band_of(c) == Band::Canopy && plant_cap(Band::Canopy, c) == Some(2))
         .expect("a rank-2 canopy slot");
     let fruity = lanternstalk_cell();
@@ -1963,8 +1964,8 @@ fn growth_sequence_capture() {
         for cell in [foliage, canopy, fruity] {
             v.producer[cell.index()] = saturation();
         }
-        for cell in CellId::all() {
-            if cell.face() == column.face && cell.cx() == column.cx && band_of(cell) == Band::Foliage
+        for cell in CellId::all(Topology::Cube, Scale::ONE) {
+            if cell.face(Topology::Cube, Scale::ONE) == column.face && cell.cx(Topology::Cube, Scale::ONE) == column.cx && band_of(cell) == Band::Foliage
             {
                 v.producer[cell.index()] = saturation();
             }

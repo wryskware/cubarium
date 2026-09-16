@@ -8,6 +8,7 @@
 //! can raise *this* tick — what it holds plus everything one tick of oxidation can convert out
 //! of its reserve — cover this tick's mandatory upkeep (`MotorBill::upkeep`)?
 
+use cubarium_surface::{Scale, Topology};
 use cubarium_core::config::FounderKind;
 use cubarium_core::motor::MotorBill;
 use cubarium_core::organism::DeathCause;
@@ -43,7 +44,7 @@ fn park(world: &mut World, id: cubarium_core::OrganismId) -> usize {
         u: 26.0,
         v: 26.0,
     };
-    cell_of(&world.state.organisms.get(id).expect("the founder").pos).index()
+    cell_of(Topology::Cube, Scale::ONE, &world.state.organisms.get(id).expect("the founder").pos).index()
 }
 
 /// A body whose cell still carries food, but not enough to matter, dies on the tick it first
@@ -161,7 +162,7 @@ fn paid(before: &cubarium_core::organism::Organism, after: &cubarium_core::organ
 /// A solo body that cannot feed: no mouth, no food underfoot, nothing to move toward.
 fn sealed(world: &mut World, id: cubarium_core::OrganismId) -> usize {
     let here = park(world, id);
-    for cell in cubarium_surface::CellId::all() {
+    for cell in cubarium_surface::CellId::all(Topology::Cube, Scale::ONE) {
         world.state.fields.p[cell.index()] = 0.0;
         world.state.fields.f[cell.index()] = 0.0;
         world.state.fields.d[cell.index()] = 0.0;

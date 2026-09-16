@@ -12,6 +12,7 @@
 //!    cell the controller's `feed_min` gate would refuse, but still takes only what the cell
 //!    holds, through the world's own type-II term and reserve headroom.
 
+use cubarium_surface::{Scale, Topology};
 use cubarium_core::diagnostic::ScriptedIntent;
 use cubarium_core::genome::{Genome, decode};
 use cubarium_core::ids::OrganismId;
@@ -61,7 +62,7 @@ fn an_empty_override_list_is_the_unchanged_trajectory() {
 /// A probe standing alone on an emptied world, so nothing but the script drives it.
 fn probe(config: WorldConfig, cell: CellId) -> (World, OrganismId) {
     let mut world = World::new(config).expect("valid");
-    for c in CellId::all() {
+    for c in CellId::all(Topology::Cube, Scale::ONE) {
         let i = c.index();
         let f = &mut world.state.fields;
         world.state.external_material_in -= f.p[i] + f.f[i] + f.d[i];
@@ -73,7 +74,7 @@ fn probe(config: WorldConfig, cell: CellId) -> (World, OrganismId) {
     let cfg = world.config().clone();
     let genome = Genome::founder(0.5, &cfg.drives);
     let phenotype = decode(&genome, &cfg.organism);
-    let pos = cell.center();
+    let pos = cell.center(Topology::Cube, Scale::ONE);
     let structure = phenotype.structure_adult;
     let reserve = 0.5 * phenotype.reserve_max;
     let id = world.state.organisms.insert(Organism {
@@ -106,7 +107,7 @@ fn a_scripted_heading_is_a_request_the_resolver_still_bounds() {
     let mut config = calm();
     config.founders.kinds.clear();
     config.founders.count = 0;
-    let (mut world, id) = probe(config, CellId::new(Face::Top, 8, 8));
+    let (mut world, id) = probe(config, CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8));
     let (extent, speed_max) = {
         let o = world.state.organisms.get(id).expect("placed");
         (o.phenotype.extent, o.phenotype.speed_max)
@@ -169,7 +170,7 @@ fn a_scripted_stillness_is_stillness_and_a_scripted_effort_is_paid() {
     config.founders.kinds.clear();
     config.founders.count = 0;
     config.organism.oxidation_rate = 0.0;
-    let (mut world, id) = probe(config, CellId::new(Face::Top, 8, 8));
+    let (mut world, id) = probe(config, CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8));
     let (pos, heading, bill) = {
         let o = world.state.organisms.get(id).expect("placed");
         (o.pos, o.heading, motor::MotorBill::of(o, world.config()))
@@ -195,7 +196,7 @@ fn a_scripted_graze_opens_the_gate_but_not_the_cell() {
     config.founders.kinds.clear();
     config.founders.count = 0;
     let feed_min = config.drives.feed_min;
-    let cell = CellId::new(Face::Top, 8, 8);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8);
 
     // A cell holding far less than the controller's gate would open on.
     let stock = feed_min * 0.25;
@@ -215,7 +216,7 @@ fn a_scripted_graze_opens_the_gate_but_not_the_cell() {
             world.step();
             world.drain_events();
             assert_eq!(
-                cell_of(&world.state.organisms.get(id).expect("alive").pos),
+                cell_of(Topology::Cube, Scale::ONE, &world.state.organisms.get(id).expect("alive").pos),
                 cell,
                 "the probe left its cell"
             );
@@ -241,7 +242,7 @@ fn a_scripted_intent_cannot_place_a_body_off_the_surface() {
     let mut config = calm();
     config.founders.kinds.clear();
     config.founders.count = 0;
-    let (mut world, id) = probe(config, CellId::new(Face::Top, 1, 1));
+    let (mut world, id) = probe(config, CellId::new(Topology::Cube, Scale::ONE, Face::Top, 1, 1));
     for _ in 0..600 {
         world.set_scripted_intents(vec![(
             id,
@@ -259,7 +260,7 @@ fn a_scripted_intent_cannot_place_a_body_off_the_surface() {
     }
     world.check_invariants().expect("a degenerate script broke the world");
     let o = world.state.organisms.get(id).expect("alive");
-    assert!(o.pos.is_canonical());
+    assert!(o.pos.is_canonical(Topology::Cube));
     assert!((o.heading.length() - 1.0).abs() < 1e-6);
     let _ = SurfacePoint::new(Face::Top, 0.0, 0.0);
 }

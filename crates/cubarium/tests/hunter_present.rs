@@ -11,6 +11,7 @@
 //!
 //! Nothing here is evidence about ecological balance; the world is a staged fixture.
 
+use cubarium_surface::{Scale, Topology};
 use cubarium::art::ArtPack;
 use cubarium::art_present::{ArtPresenter, present_seconds};
 use cubarium::clock::DT;
@@ -102,7 +103,7 @@ fn place_prey(
         phenotype.structure_adult = s;
     }
     let id = world.state.organisms.insert(Organism {
-        pos: pos.canonicalize(),
+        pos: pos.canonicalize(Topology::Cube),
         heading: Vec2::new(1.0, 0.0),
         ou: Vec2::ZERO,
         structure: s,
@@ -145,7 +146,7 @@ fn effector_point(
     profile: &FixedHunterProfile,
     scale: f64,
 ) -> SurfacePoint {
-    travel(
+    travel(Topology::Cube, 
         root,
         body_offset(heading, profile.capture_offset_body, scale),
     )
@@ -211,10 +212,10 @@ fn draw(p: &mut ArtPresenter, world: &World, f: f64) -> Canvas {
     canvas
 }
 
-fn every_pixel() -> impl Iterator<Item = (Face, u8, u8)> {
+fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
     Face::ALL
         .into_iter()
-        .flat_map(|f| (0..64u8).flat_map(move |y| (0..64u8).map(move |x| (f, x, y))))
+        .flat_map(|f| (0..64u16).flat_map(move |y| (0..64u16).map(move |x| (f, x, y))))
 }
 
 fn differing(a: &Canvas, b: &Canvas) -> usize {
@@ -229,7 +230,7 @@ fn identical(a: &Canvas, b: &Canvas) -> bool {
 
 /// Pixels within `r` of a surface point's own pixel that differ between two images.
 fn differing_near(a: &Canvas, b: &Canvas, at: SurfacePoint, r: f64) -> usize {
-    let (cx, cy) = at.pixel();
+    let (cx, cy) = at.pixel(Topology::Cube);
     every_pixel()
         .filter(|&(f, x, y)| {
             f == at.face
@@ -242,7 +243,7 @@ fn differing_near(a: &Canvas, b: &Canvas, at: SurfacePoint, r: f64) -> usize {
 fn lit_faces(image: &Canvas) -> usize {
     Face::ALL
         .into_iter()
-        .filter(|&f| (0..64u8).any(|y| (0..64u8).any(|x| image.get(f, x, y) != [0.0; 3])))
+        .filter(|&f| (0..64u16).any(|y| (0..64u16).any(|x| image.get(f, x, y) != [0.0; 3])))
         .count()
 }
 
@@ -602,7 +603,7 @@ fn a_certain_strike_settles_fully_extended_at_the_capture_boundary_and_the_prey_
     let mut at_fresh = Canvas::new();
     without_prey.draw(&view, 1.0, &mut at_fresh);
     let near_prey = |a: &Canvas, b: &Canvas| -> f32 {
-        let (cx, cy) = prey_pos.pixel();
+        let (cx, cy) = prey_pos.pixel(Topology::Cube);
         every_pixel()
             .filter(|&(f, x, y)| {
                 f == prey_pos.face
@@ -1218,7 +1219,7 @@ fn a_captured_prey_is_carried_to_the_events_settlement_position_and_meets_the_cl
         .find(|h| h.id == hunter)
         .unwrap();
     let (root, dir) = cubarium::present::interpolate(&o.moved, o.pos, o.heading, 1.0);
-    let claw = travel(
+    let claw = travel(Topology::Cube, 
         root,
         body_offset(dir, effectors(h.body_scale).near_claw, 1.0),
     )
@@ -1397,7 +1398,7 @@ fn a_juveniles_scale_is_the_cores_and_its_named_claw_is_where_the_core_tests_con
     assert!((h.geometry.ingestion_offset_body.x - e.mouth.x).abs() < 1e-9);
     // And the published capture centre is that claw carried from the root.
     if let Some(center) = h.capture_center {
-        let want = travel(h.pos, body_offset(h.heading, e.near_claw, 1.0)).end;
+        let want = travel(Topology::Cube, h.pos, body_offset(h.heading, e.near_claw, 1.0)).end;
         assert_eq!(center.face, want.face);
         assert!(
             (center.u - want.u).abs() < 1e-6 && (center.v - want.v).abs() < 1e-6,
@@ -1479,7 +1480,7 @@ fn retained(pos: SurfacePoint, heading: Vec2, at: SurfacePoint) -> HunterMemory 
         .find(|o| o.id == prey)
         .cloned()
         .expect("the staged prey is published");
-    prey_view.pos = pos.canonicalize();
+    prey_view.pos = pos.canonicalize(Topology::Cube);
     prey_view.heading = heading;
     prey_view.moved.clear();
     let h = world
@@ -1489,13 +1490,13 @@ fn retained(pos: SurfacePoint, heading: Vec2, at: SurfacePoint) -> HunterMemory 
         .unwrap();
     let mut m = HunterMemory::enter(HunterFrame::of(&h, view.tick));
     m.prey = Some(prey_view);
-    m.prey_at = Some(at.canonicalize());
+    m.prey_at = Some(at.canonicalize(Topology::Cube));
     m
 }
 
 /// Surface distance between two nearby points, through the surface's own unfolding.
 fn surface_distance(a: SurfacePoint, b: SurfacePoint) -> f64 {
-    cubarium_surface::unfold(a, b, cubarium_surface::MAX_LOCAL_RADIUS)
+    cubarium_surface::unfold(Topology::Cube, a, b, cubarium_surface::MAX_LOCAL_RADIUS)
         .expect("nearby")
         .distance
 }
@@ -1544,7 +1545,7 @@ fn a_retained_prey_crossing_a_seam_walks_one_chord_with_its_heading_transported(
         assert_eq!(start, p.pos);
         assert_eq!(h0, heading);
         let (end, h1) = m.retained_prey_pose(1.0).unwrap();
-        assert_eq!(end, at.canonicalize());
+        assert_eq!(end, at.canonicalize(Topology::Cube));
         assert!(
             (h1.x - transported.x).abs() < 1e-9 && (h1.y - transported.y).abs() < 1e-9,
             "{:?}→{:?}: heading {:?} carried as {:?}, expected {:?}",
@@ -1925,7 +1926,7 @@ fn a_capture_across_a_seam_carries_the_prey_over_the_seam_on_screen() {
         b.draw(&view, *f, &mut without);
         let lit: Vec<SurfacePoint> = every_pixel()
             .filter(|&(face, x, y)| with.get(face, x, y) != without.get(face, x, y))
-            .map(|(face, x, y)| SurfacePoint::pixel_center(face, x, y))
+            .map(|(face, x, y)| SurfacePoint::pixel_center(Topology::Cube, face, x, y))
             .collect();
         assert!(!lit.is_empty(), "the retained prey is drawn at f = {f}");
         // Every lit pixel is within the creature's own stamp of the chord point, and the
@@ -1934,7 +1935,7 @@ fn a_capture_across_a_seam_carries_the_prey_over_the_seam_on_screen() {
         let offsets: Vec<Vec2> = lit
             .iter()
             .map(|&q| {
-                cubarium_surface::unfold(*pose, q, cubarium_surface::MAX_LOCAL_RADIUS)
+                cubarium_surface::unfold(Topology::Cube, *pose, q, cubarium_surface::MAX_LOCAL_RADIUS)
                     .expect("nearby")
                     .local
                     - pose.chart()

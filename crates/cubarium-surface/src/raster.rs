@@ -165,19 +165,19 @@ fn unfold_pixels_general(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Edge, unfold};
+    use crate::{Edge, FACE_EXTENT, MAX_LOCAL_RADIUS, unfold};
 
     fn general(anchor: SurfacePoint, radius: f64) -> Vec<PixelImage> {
         let mut images = Vec::new();
-        chart_images(anchor.face, MAX_SEAMS, &mut images);
+        chart_images(Topology::Cube, anchor.face, MAX_SEAMS, &mut images);
         let mut v = Vec::new();
-        unfold_pixels_general(&images, anchor, radius, &mut v);
+        unfold_pixels_general(Topology::Cube, &images, anchor, radius, &mut v);
         v
     }
 
     fn direct(anchor: SurfacePoint, radius: f64) -> Vec<PixelImage> {
         let mut v = Vec::new();
-        unfold_pixels_direct(anchor, radius, &mut v);
+        unfold_pixels_direct(Topology::Cube, anchor, radius, &mut v);
         v
     }
 
@@ -209,12 +209,12 @@ mod tests {
                     SurfacePoint::new(face, 32.5, FACE_EXTENT - radius - 1e-9),
                 ];
                 for anchor in anchors {
-                    let anchor = anchor.canonicalize();
+                    let anchor = anchor.canonicalize(Topology::Cube);
                     let what = format!("{face:?} {anchor:?} r={radius}");
                     same(&direct(anchor, radius), &general(anchor, radius), &what);
                     // And the public entry point picks one of them, consistently.
                     let mut v = Vec::new();
-                    unfold_pixels(anchor, radius, &mut v);
+                    unfold_pixels(Topology::Cube, anchor, radius, &mut v);
                     same(&v, &general(anchor, radius), &what);
                 }
             }
@@ -237,16 +237,16 @@ mod tests {
             SurfacePoint::new(Face::Left, 3.5, 61.5),
         ];
         for anchor in anchors {
-            let anchor = anchor.canonicalize();
+            let anchor = anchor.canonicalize(Topology::Cube);
             for radius in [1.5, 6.0, 9.0] {
                 let mut got = Vec::new();
-                unfold_pixels(anchor, radius, &mut got);
+                unfold_pixels(Topology::Cube, anchor, radius, &mut got);
                 let mut want = Vec::new();
                 for face in Face::ALL {
-                    for y in 0..64u8 {
-                        for x in 0..64u8 {
-                            let p = SurfacePoint::pixel_center(face, x, y);
-                            if let Some(u) = unfold(anchor, p, radius) {
+                    for y in 0..64u16 {
+                        for x in 0..64u16 {
+                            let p = SurfacePoint::pixel_center(Topology::Cube, face, x, y);
+                            if let Some(u) = unfold(Topology::Cube, anchor, p, radius) {
                                 want.push(PixelImage {
                                     face,
                                     x,
@@ -277,10 +277,10 @@ mod tests {
         for _ in 0..400 {
             let face = Face::ALL[(rnd() * 5.0) as usize % 5];
             let anchor =
-                SurfacePoint::new(face, rnd() * 64.0, rnd() * 64.0).canonicalize();
+                SurfacePoint::new(face, rnd() * 64.0, rnd() * 64.0).canonicalize(Topology::Cube);
             let radius = 0.5 + rnd() * 11.5;
-            unfold_pixels(anchor, radius, &mut out);
-            let mut keys: Vec<(usize, u8, u8)> =
+            unfold_pixels(Topology::Cube, anchor, radius, &mut out);
+            let mut keys: Vec<(usize, u16, u16)> =
                 out.iter().map(|p| (p.face.index(), p.y, p.x)).collect();
             let sorted = keys.clone();
             keys.sort_unstable();
@@ -291,7 +291,7 @@ mod tests {
                 assert!(p.distance <= radius + GEOM_EPS);
                 // `local` is the pixel center as seen in the anchor's chart.
                 assert!(((p.local - anchor.chart()).length() - p.distance).abs() < 1e-9);
-                assert!(segment_is_valid(anchor.face, anchor.chart(), p.local, &p.path));
+                assert!(segment_is_valid(Topology::Cube, anchor.face, anchor.chart(), p.local, &p.path));
             }
         }
     }
@@ -303,7 +303,7 @@ mod tests {
         let mut counts = Vec::new();
         let mut out = Vec::new();
         for u in [10.0, 32.0, 63.5] {
-            unfold_pixels(SurfacePoint::new(Face::Front, u, 32.0), 6.0, &mut out);
+            unfold_pixels(Topology::Cube, SurfacePoint::new(Face::Front, u, 32.0), 6.0, &mut out);
             counts.push(out.len());
         }
         // Away from the open rim and the top vertices the count is stable.
@@ -315,9 +315,9 @@ mod tests {
     fn the_anchor_pixel_is_always_present() {
         let mut out = Vec::new();
         for face in Face::ALL {
-            for &(x, y) in &[(0u8, 0u8), (63, 0), (0, 63), (63, 63), (31, 31)] {
-                let anchor = SurfacePoint::pixel_center(face, x, y);
-                unfold_pixels(anchor, 3.0, &mut out);
+            for &(x, y) in &[(0u16, 0u16), (63, 0), (0, 63), (63, 63), (31, 31)] {
+                let anchor = SurfacePoint::pixel_center(Topology::Cube, face, x, y);
+                unfold_pixels(Topology::Cube, anchor, 3.0, &mut out);
                 let me = out.iter().find(|p| (p.face, p.x, p.y) == (face, x, y));
                 let me = me.unwrap_or_else(|| panic!("anchor pixel missing for {face:?} ({x},{y})"));
                 assert_eq!(me.distance, 0.0);
@@ -331,7 +331,7 @@ mod tests {
         // The Front/Right/Top vertex: pixels from all three charts, each exactly once.
         let anchor = SurfacePoint::new(Face::Front, 63.5, 0.5);
         let mut out = Vec::new();
-        unfold_pixels(anchor, 5.0, &mut out);
+        unfold_pixels(Topology::Cube, anchor, 5.0, &mut out);
         for face in [Face::Front, Face::Right, Face::Top] {
             assert!(out.iter().any(|p| p.face == face), "no {face:?} pixels");
         }
@@ -349,7 +349,7 @@ mod tests {
         // Set back from the vertex, reach around it: some pixels are owned by a
         // two-seam route (here Front -> Top -> Right) rather than the single seam.
         let anchor = SurfacePoint::new(Face::Front, 60.0, 3.0);
-        unfold_pixels(anchor, 9.0, &mut out);
+        unfold_pixels(Topology::Cube, anchor, 9.0, &mut out);
         assert!(out.iter().any(|p| p.path.len == 2), "no two-seam pixel");
 
         // Every listed step is a real seam, never the open rim.
@@ -364,7 +364,7 @@ mod tests {
     #[test]
     fn zero_radius_keeps_only_the_containing_pixel_when_centred() {
         let mut out = Vec::new();
-        unfold_pixels(SurfacePoint::pixel_center(Face::Front, 10, 10), 0.0, &mut out);
+        unfold_pixels(Topology::Cube, SurfacePoint::pixel_center(Topology::Cube, Face::Front, 10, 10), 0.0, &mut out);
         assert_eq!(out.len(), 1);
         assert_eq!((out[0].face, out[0].x, out[0].y), (Face::Front, 10, 10));
     }
@@ -373,6 +373,6 @@ mod tests {
     #[should_panic(expected = "MAX_LOCAL_RADIUS")]
     fn radius_above_the_local_bound_panics() {
         let mut out = Vec::new();
-        unfold_pixels(SurfacePoint::new(Face::Front, 1.0, 1.0), MAX_LOCAL_RADIUS + 1.0, &mut out);
+        unfold_pixels(Topology::Cube, SurfacePoint::new(Face::Front, 1.0, 1.0), MAX_LOCAL_RADIUS + 1.0, &mut out);
     }
 }

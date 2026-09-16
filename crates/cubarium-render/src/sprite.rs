@@ -1,5 +1,6 @@
 //! Authored RGBA sprites, composited through the existing surface atlas.
 
+use cubarium_surface::{Scale, Topology};
 use cubarium_surface::{PixelImage, SurfacePoint, Vec2, unfold_pixels};
 
 use crate::{Canvas, srgb_decode};
@@ -876,7 +877,7 @@ fn stamp_unfolded<const BENT: bool, const TINTED: bool>(
 ) {
     let side = Vec2::new(-h.y, h.x);
     let tile_height = reference.height as f64;
-    unfold_pixels(anchor, radius, scratch);
+    unfold_pixels(Topology::Cube, anchor, radius, scratch);
     for pixel in scratch.iter() {
         let d = pixel.local - anchor.chart();
         let local = Vec2::new(h.dot(d) / scale, side.dot(d) / scale);
@@ -967,8 +968,8 @@ pub fn stamp_pose_in_chart(
 ) {
     let extent = pose.extent();
     if owner.face != center.face
-        || !owner.is_canonical()
-        || !center.is_canonical()
+        || !owner.is_canonical(Topology::Cube)
+        || !center.is_canonical(Topology::Cube)
         || !opacity.is_finite()
         || opacity <= 0.0
         || extent == 0.0
@@ -987,7 +988,7 @@ pub fn stamp_pose_in_chart(
     let opacity = opacity.min(1.0);
     let side = Vec2::new(-h.y, h.x);
     let reference = pose.first;
-    unfold_pixels(owner, query, scratch);
+    unfold_pixels(Topology::Cube, owner, query, scratch);
     for pixel in scratch.iter() {
         let d = pixel.local - center.chart();
         if d.length() > radius + cubarium_surface::GEOM_EPS {
@@ -1040,7 +1041,7 @@ mod tests {
         canvas.set(Face::Front, 20, 20, [0.0, 0.0, 1.0]);
         stamp_sprite(
             &mut canvas,
-            SurfacePoint::pixel_center(Face::Front, 20, 20),
+            SurfacePoint::pixel_center(Topology::Cube, Face::Front, 20, 20),
             Vec2::new(1.0, 0.0),
             &s,
             1.0,
@@ -1177,8 +1178,8 @@ mod tests {
                     &mut vec![],
                 );
                 for face in Face::ALL {
-                    for y in 0..64u8 {
-                        for x in 0..64u8 {
+                    for y in 0..64u16 {
+                        for x in 0..64u16 {
                             assert_eq!(
                                 plain.get(face, x, y),
                                 bent.get(face, x, y),
@@ -1223,7 +1224,7 @@ mod tests {
                 bent.get(Face::Front, 32, 48),
                 "amplitude {amplitude}: the root row moved"
             );
-            for x in 0..64u8 {
+            for x in 0..64u16 {
                 assert_eq!(
                     still.get(Face::Front, x, 48),
                     bent.get(Face::Front, x, 48),
@@ -1236,8 +1237,8 @@ mod tests {
         let centroid = |canvas: &Canvas| {
             let mut sum = 0.0;
             let mut weight = 0.0;
-            for y in 0..36u8 {
-                for x in 0..64u8 {
+            for y in 0..36u16 {
+                for x in 0..64u16 {
                     let px = canvas.get(Face::Front, x, y);
                     let l = f64::from(px[0] + px[1] + px[2]);
                     if l > 0.0 {
@@ -1263,7 +1264,7 @@ mod tests {
     fn still_vs(a: &Canvas, b: &Canvas) -> usize {
         Face::ALL
             .into_iter()
-            .flat_map(|f| (0..64u8).flat_map(move |y| (0..64u8).map(move |x| (f, x, y))))
+            .flat_map(|f| (0..64u16).flat_map(move |y| (0..64u16).map(move |x| (f, x, y))))
             .filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y))
             .count()
     }
@@ -1296,7 +1297,7 @@ mod tests {
         // spread over more than one face.
         assert!((total(&middle) - total(&seam)).abs() < 1e-6, "seam lost light");
         assert!(
-            Face::ALL.into_iter().filter(|&f| (0..64u8).any(|y| (0..64u8).any(|x| seam.get(f, x, y) != [0.0; 3]))).count() >= 2,
+            Face::ALL.into_iter().filter(|&f| (0..64u16).any(|y| (0..64u16).any(|x| seam.get(f, x, y) != [0.0; 3]))).count() >= 2,
             "the seam stamp did not reach the neighbouring face"
         );
         // At a vertex the 90° angular deficit can only *lose* light (each pixel is
@@ -1425,8 +1426,8 @@ mod tests {
         let plain = draw(Bend::NONE, mask);
         let bent = draw(bend_of(2.0), mask);
         let rows = |canvas: &Canvas| {
-            (0..64u8)
-                .filter(|&y| (0..64u8).any(|x| canvas.get(Face::Front, x, y) != [0.0; 3]))
+            (0..64u16)
+                .filter(|&y| (0..64u16).any(|x| canvas.get(Face::Front, x, y) != [0.0; 3]))
                 .collect::<Vec<_>>()
         };
         assert_eq!(rows(&plain), rows(&bent), "the bend moved the strip's rows");
@@ -1457,8 +1458,8 @@ mod tests {
             let mut c = Canvas::new();
             // A non-black background, so "covers the same pixels" is a real claim.
             for face in Face::ALL {
-                for y in 0..64u8 {
-                    for x in 0..64u8 {
+                for y in 0..64u16 {
+                    for x in 0..64u16 {
                         c.set(face, x, y, [0.05, 0.02, 0.11]);
                     }
                 }
@@ -1480,8 +1481,8 @@ mod tests {
         let plain = {
             let mut c = Canvas::new();
             for face in Face::ALL {
-                for y in 0..64u8 {
-                    for x in 0..64u8 {
+                for y in 0..64u16 {
+                    for x in 0..64u16 {
                         c.set(face, x, y, [0.05, 0.02, 0.11]);
                     }
                 }
@@ -1505,8 +1506,8 @@ mod tests {
         let painted = |c: &Canvas| {
             let mut v = Vec::new();
             for face in Face::ALL {
-                for y in 0..64u8 {
-                    for x in 0..64u8 {
+                for y in 0..64u16 {
+                    for x in 0..64u16 {
                         if c.get(face, x, y) != background {
                             v.push((face, x, y));
                         }
@@ -1525,8 +1526,8 @@ mod tests {
             let mix = i as f32 / 8.0;
             let got = draw(mix);
             for face in Face::ALL {
-                for y in 0..64u8 {
-                    for x in 0..64u8 {
+                for y in 0..64u16 {
+                    for x in 0..64u16 {
                         let (a, b, g) = (
                             zero.get(face, x, y),
                             one.get(face, x, y),
@@ -1655,7 +1656,7 @@ mod tests {
                 let owner = SurfacePoint::new(face, u, v);
                 let center = SurfacePoint::new(face, u, v - 4.0);
                 let mut neighborhood = Vec::new();
-                unfold_pixels(center, FOOTPRINT_RADIUS, &mut neighborhood);
+                unfold_pixels(Topology::Cube, center, FOOTPRINT_RADIUS, &mut neighborhood);
                 let mut allowed = vec![false; 5 * 64 * 64];
                 for p in neighborhood {
                     allowed[p.face.index() * 4096 + usize::from(p.y) * 64 + usize::from(p.x)] = true;

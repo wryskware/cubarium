@@ -13,6 +13,7 @@
 //! lattice phase; the rim cuts and never reflects; and the scale gate admits exactly
 //! `SCALE_MIN..=SCALE_MAX`.
 
+use cubarium_surface::{Scale, Topology};
 use cubarium::lanternjaw::*;
 use cubarium_render::{Canvas, SUPERSAMPLE_REACH, stamp_rig_scaled};
 use cubarium_surface::{SurfacePoint, Vec2};
@@ -26,10 +27,10 @@ const SCALES: [f64; 4] = [
     SCALE_MAX,
 ];
 
-fn every_pixel() -> impl Iterator<Item = (Face, u8, u8)> {
+fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
     Face::ALL
         .into_iter()
-        .flat_map(|f| (0..64u8).flat_map(move |y| (0..64u8).map(move |x| (f, x, y))))
+        .flat_map(|f| (0..64u16).flat_map(move |y| (0..64u16).map(move |x| (f, x, y))))
 }
 
 fn total_light(image: &Canvas) -> f64 {
@@ -42,7 +43,7 @@ fn total_light(image: &Canvas) -> f64 {
 fn lit_faces(image: &Canvas) -> usize {
     Face::ALL
         .into_iter()
-        .filter(|&f| (0..64u8).any(|y| (0..64u8).any(|x| image.get(f, x, y) != [0.0; 3])))
+        .filter(|&f| (0..64u16).any(|y| (0..64u16).any(|x| image.get(f, x, y) != [0.0; 3])))
         .count()
 }
 
@@ -106,7 +107,7 @@ fn draw_part(pose: &LivingPose, name: PartName, anchor: SurfacePoint, scale: f64
 }
 
 fn mid() -> SurfacePoint {
-    SurfacePoint::pixel_center(Face::Front, 32, 32)
+    SurfacePoint::pixel_center(Topology::Cube, Face::Front, 32, 32)
 }
 
 #[test]

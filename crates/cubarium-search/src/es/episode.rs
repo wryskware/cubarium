@@ -64,6 +64,7 @@
 //!   oxidation, assimilation and handling terms that would close such a box are not exposed by
 //!   the core and are not measured.
 
+use cubarium_surface::{Scale, Topology};
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
@@ -430,7 +431,7 @@ pub fn run_prepared(
             episode.ticks = tick;
             break;
         };
-        let here = cell_of(&o.pos);
+        let here = cell_of(Topology::Cube, Scale::ONE, &o.pos);
         let heading_before = o.heading;
         let chart_before = o.pos.chart();
         let face_before = o.pos.face;
@@ -520,7 +521,7 @@ pub fn run_prepared(
 
         if let Driver::Control(Control::MobileScript) = driver {
             let goal = route[target % route.len()];
-            if cell_of(&o.pos) == goal && world.state.fields.p[goal.index()] < leave_below {
+            if cell_of(Topology::Cube, Scale::ONE, &o.pos) == goal && world.state.fields.p[goal.index()] < leave_below {
                 target += 1;
             }
         }
@@ -555,10 +556,10 @@ pub fn run_prepared(
 /// A unit heading from the body's chart position toward a goal cell's centre, when both are on
 /// the same face. Returns `None` across a seam, where the caller keeps its current heading.
 fn toward(goal: CellId, from: Vec2, face: cubarium_surface::Face) -> Option<Vec2> {
-    if goal.face() != face {
+    if goal.face(Topology::Cube, Scale::ONE) != face {
         return None;
     }
-    (goal.center().chart() - from).normalized()
+    (goal.center(Topology::Cube, Scale::ONE).chart() - from).normalized()
 }
 
 fn signed_turn(a: Vec2, b: Vec2) -> f64 {

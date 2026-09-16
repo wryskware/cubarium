@@ -38,6 +38,7 @@
 //! contact sheet that claims to show t = 1.55 s has to read the instant the frame was drawn
 //! at rather than assume one. The frame files themselves are `frame_NNNNNN.png` in `--out`.
 
+use cubarium_surface::Topology;
 use anyhow::{Result, ensure};
 use clap::{Parser, ValueEnum};
 use cubarium::{
@@ -445,8 +446,8 @@ fn draw_ground(canvas: &mut Canvas, ground: Ground) {
             // Broad quiet ground, no field-cell grid or analytical overlays.
             let base = srgb_linear(0x0017_1b35);
             for face in Face::ALL {
-                for y in 0..64u8 {
-                    for x in 0..64u8 {
+                for y in 0..64u16 {
+                    for x in 0..64u16 {
                         let wave =
                             0.32 + 0.06 * ((f64::from(x) + f64::from(y) * 0.7) * 0.12).sin() as f32;
                         canvas.add(face, x, y, base.map(|c| c * wave));
@@ -462,8 +463,8 @@ fn draw_ground(canvas: &mut Canvas, ground: Ground) {
         Ground::Water => srgb_linear(WATER_LOW_SRGB).map(|c| c * 0.45),
     };
     for face in Face::ALL {
-        for y in 0..64u8 {
-            for x in 0..64u8 {
+        for y in 0..64u16 {
+            for x in 0..64u16 {
                 canvas.add(face, x, y, flat);
             }
         }
@@ -542,7 +543,7 @@ fn main() -> Result<()> {
                         // The same shared transport the world's bodies use: the root
                         // trajectory travels, its heading is mapped, and the frame fraction
                         // interpolates along the path actually walked.
-                        let step = travel(body.anchor, body.heading * (body.speed * DT));
+                        let step = travel(Topology::Cube, body.anchor, body.heading * (body.speed * DT));
                         body.anchor = step.end;
                         body.heading = step.map.apply(body.heading);
                         body.moved = step.segments;

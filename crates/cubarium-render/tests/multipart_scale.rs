@@ -46,10 +46,10 @@ use cube_proto::Face;
 // canvas helpers (copied from tests/multipart.rs)
 // ---------------------------------------------------------------------------
 
-fn every_pixel() -> impl Iterator<Item = (Face, u8, u8)> {
+fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
     Face::ALL
         .into_iter()
-        .flat_map(|face| (0..64u8).flat_map(move |y| (0..64u8).map(move |x| (face, x, y))))
+        .flat_map(|face| (0..64u16).flat_map(move |y| (0..64u16).map(move |x| (face, x, y))))
 }
 
 /// Bit-for-bit equality, which is what "bit for bit" in the doc means.
@@ -83,7 +83,7 @@ fn total_light(image: &Canvas) -> f64 {
 fn lit_faces(image: &Canvas) -> usize {
     Face::ALL
         .into_iter()
-        .filter(|&f| (0..64u8).any(|y| (0..64u8).any(|x| image.get(f, x, y) != [0.0; 3])))
+        .filter(|&f| (0..64u16).any(|y| (0..64u16).any(|x| image.get(f, x, y) != [0.0; 3])))
         .count()
 }
 
@@ -228,8 +228,8 @@ fn front_centroid(image: &Canvas, root: SurfacePoint) -> Vec2 {
     let origin = root.chart();
     let mut mass = 0.0f64;
     let mut sum = Vec2::ZERO;
-    for y in 0..64u8 {
-        for x in 0..64u8 {
+    for y in 0..64u16 {
+        for x in 0..64u16 {
             let light: f64 = image
                 .get(Face::Front, x, y)
                 .into_iter()
@@ -256,7 +256,7 @@ fn only_front(image: &Canvas, what: &str) {
             continue;
         }
         assert!(
-            (0..64u8).all(|y| (0..64u8).all(|x| image.get(face, x, y) == [0.0; 3])),
+            (0..64u16).all(|y| (0..64u16).all(|x| image.get(face, x, y) == [0.0; 3])),
             "{what}: the body reached {face:?}, so a Front-only measurement would miss part of it"
         );
     }
@@ -412,8 +412,8 @@ fn a_half_scale_body_carries_a_quarter_of_the_light_inside_a_half_size_footprint
     // pixel-centre root puts `p` on half-integers), and at scale 0.5 it is `d ∈ {−2 … 2}`.
     let painted_span = |c: &Canvas| {
         let (mut lo, mut hi) = (i32::MAX, i32::MIN);
-        for y in 0..64u8 {
-            for x in 0..64u8 {
+        for y in 0..64u16 {
+            for x in 0..64u16 {
                 if c.get(Face::Front, x, y) != [0.0; 3] {
                     lo = lo.min(i32::from(x) - 32);
                     hi = hi.max(i32::from(x) - 32);
@@ -747,11 +747,11 @@ fn a_scaled_part_over_the_open_rim_is_cut_and_never_reflected() {
         );
 
         assert!(
-            (34..64u8).any(|y| (0..64u8).any(|x| flat.get(Face::Front, x, y) != [0.0; 3])),
+            (34..64u16).any(|y| (0..64u16).any(|x| flat.get(Face::Front, x, y) != [0.0; 3])),
             "at scale {scale} the fixture does not reach past where the rim is, so it proves nothing"
         );
         assert!(
-            (0..64u8).any(|x| rim.get(Face::Front, x, 63) != [0.0; 3]),
+            (0..64u16).any(|x| rim.get(Face::Front, x, 63) != [0.0; 3]),
             "at scale {scale} the rim body painted nothing on the last row that exists"
         );
 
@@ -895,8 +895,8 @@ fn the_filter_is_continuous_across_every_grid_transition() {
         for heading in [Vec2::new(1.0, 0.0), Vec2::new(0.6, -0.8)] {
             let a = draw_texel(sub, heading, lo, false);
             let b = draw_texel(sub, heading, hi, false);
-            let worst = (28..37u8)
-                .flat_map(|y| (28..37u8).map(move |x| (x, y)))
+            let worst = (28..37u16)
+                .flat_map(|y| (28..37u16).map(move |x| (x, y)))
                 .flat_map(|(x, y)| {
                     let (p, q) = (a.get(Face::Front, x, y), b.get(Face::Front, x, y));
                     (0..3).map(move |c| (p[c] - q[c]).abs())
@@ -942,8 +942,8 @@ fn the_automatic_query_keeps_the_minified_corner_tail() {
         ] {
             let auto = draw_texel(root, heading, scale, false);
             let wide = draw_texel(root, heading, scale, true);
-            for y in 28..37u8 {
-                for x in 28..37u8 {
+            for y in 28..37u16 {
+                for x in 28..37u16 {
                     assert_eq!(
                         auto.get(Face::Front, x, y),
                         wide.get(Face::Front, x, y),

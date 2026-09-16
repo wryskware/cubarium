@@ -10,6 +10,7 @@
 //! from the previous frame when one was observed, and conservatively from `entered_from`
 //! after a restart. Contract: `design/7_Research/lanternjaw-ecology-animation-contract-2026-09-13.md`.
 
+use cubarium_surface::{Scale, Topology};
 use cubarium_core::hunter::{FixedHunterProfile, HunterPhase, HunterRole, HunterView};
 use cubarium_core::view::OrganismView;
 use cubarium_surface::{MAX_LOCAL_RADIUS, PathSegment, SurfacePoint, Vec2, travel, unfold};
@@ -343,9 +344,9 @@ impl HunterMemory {
     ///
     /// **Normative.** With `p` its last published view and `q` the settlement position from
     /// the `Capture` event: no `q` ⇒ `(p.pos, p.heading)` throughout. Otherwise the prey
-    /// walks the **shortest valid surface chord** from `p.pos` to `q`: `u = unfold(p.pos, q,
+    /// walks the **shortest valid surface chord** from `p.pos` to `q`: `u = unfold(Topology::Cube, p.pos, q,
     /// MAX_LOCAL_RADIUS)` gives `q`'s image in `p`'s chart, `d = u.local − p.pos.chart()`, and
-    /// the pose at `f` is `t = travel(p.pos, f · d)` — `t.end` on whichever chart the point
+    /// the pose at `f` is `t = travel(Topology::Cube, p.pos, f · d)` — `t.end` on whichever chart the point
     /// falls, crossing seams exactly as a moving body does (chart transport, never a
     /// reflection: a valid unfolding never crosses the open rim), with the heading
     /// `t.map.apply(p.heading)`, the last published heading carried through the seams the
@@ -367,7 +368,7 @@ impl HunterMemory {
         let Some(q) = self.prey_at else {
             return Some((p.pos, p.heading));
         };
-        let Some(u) = unfold(p.pos, q, MAX_LOCAL_RADIUS) else {
+        let Some(u) = unfold(Topology::Cube, p.pos, q, MAX_LOCAL_RADIUS) else {
             return Some((q, p.heading));
         };
         if f <= 0.0 {
@@ -379,7 +380,7 @@ impl HunterMemory {
             return Some((q, u.map.inverse().apply(p.heading)));
         }
         let d = u.local - p.pos.chart();
-        let t = travel(p.pos, d * f);
+        let t = travel(Topology::Cube, p.pos, d * f);
         if t.reflections > 0 || t.fallback {
             return Some((q, p.heading));
         }

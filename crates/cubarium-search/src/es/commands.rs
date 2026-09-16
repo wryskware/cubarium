@@ -5,6 +5,7 @@
 //! touches the display world, migrates a world, or attaches a policy to anything outside its
 //! own fixture.
 
+use cubarium_surface::{Scale, Topology};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -298,7 +299,7 @@ pub fn smoke(config: Option<PathBuf>, out: Option<PathBuf>) -> Result<(), Boxed>
         let fields = &world.state.fields;
         let eco_state = &world.state.ecology;
         let mut stands = 0usize;
-        for cell in cubarium_surface::CellId::all() {
+        for cell in cubarium_surface::CellId::all(Topology::Cube, Scale::ONE) {
             let i = cell.index();
             let p = fields.p[i];
             let w = eco_state.wood[i];
@@ -895,7 +896,7 @@ pub fn evaluate(
                 let mut ids = vec![focal];
                 for cell in &extra_cells {
                     let mut o = template.clone();
-                    o.pos = cell.center();
+                    o.pos = cell.center(Topology::Cube, Scale::ONE);
                     let booked = o.structure + o.reserve;
                     let id = w.state.organisms.insert(o);
                     w.state.external_material_in += booked;

@@ -38,7 +38,7 @@ pub struct PreviewSink {
     net_h: usize,
     cube_size: usize,
     camera: Camera,
-    hits: Vec<Option<(Face, u8, u8)>>,
+    hits: Vec<Option<(Face, u16, u16)>>,
     hits_stale: bool,
     show_net: bool,
     show_cube: bool,

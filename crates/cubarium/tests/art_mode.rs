@@ -3,6 +3,7 @@
 //! API only, which is the point of an integration test: a wrong implementation that still
 //! type-checks has to survive these.
 
+use cubarium_surface::{Scale, Topology};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
@@ -21,7 +22,7 @@ use cubarium_core::OrganismId;
 use cubarium_core::organism::Mode;
 use cubarium_core::view::{OrganismView, RenderView};
 use cubarium_render::{Canvas, Sprite, stamp_sprite};
-use cubarium_surface::{CELL_COUNT, CellId, PixelImage, SurfacePoint, Vec2};
+use cubarium_surface::{CUBE_CELL_COUNT, CellId, PixelImage, SurfacePoint, Vec2};
 
 // ---------------------------------------------------------------------------
 // fixtures
@@ -50,19 +51,19 @@ fn producer_for_density(d: f64) -> f64 {
 }
 
 fn view(tick: u64, producer: Vec<f64>, detritus: Vec<f64>, organisms: Vec<OrganismView>) -> RenderView {
-    assert_eq!(producer.len(), CELL_COUNT);
-    assert_eq!(detritus.len(), CELL_COUNT);
+    assert_eq!(producer.len(), CUBE_CELL_COUNT);
+    assert_eq!(detritus.len(), CUBE_CELL_COUNT);
     RenderView {
         tick,
         producer,
         detritus,
-        fruit: vec![0.0; CELL_COUNT],
-        wood: vec![0.0; CELL_COUNT],
-        plant_reserve: vec![0.0; CELL_COUNT],
-        dead_wood: vec![0.0; CELL_COUNT],
-        carrion: vec![0.0; CELL_COUNT],
-        water: vec![0.0; CELL_COUNT],
-        rain: vec![0.0; CELL_COUNT],
+        fruit: vec![0.0; CUBE_CELL_COUNT],
+        wood: vec![0.0; CUBE_CELL_COUNT],
+        plant_reserve: vec![0.0; CUBE_CELL_COUNT],
+        dead_wood: vec![0.0; CUBE_CELL_COUNT],
+        carrion: vec![0.0; CUBE_CELL_COUNT],
+        water: vec![0.0; CUBE_CELL_COUNT],
+        rain: vec![0.0; CUBE_CELL_COUNT],
         producer_max: PRODUCER_MAX,
         wood_max: 0.6,
         organisms,
@@ -74,25 +75,25 @@ fn view(tick: u64, producer: Vec<f64>, detritus: Vec<f64>, organisms: Vec<Organi
 /// may grow anywhere while the ramp still has real structure in it.
 fn quiet_producer() -> Vec<f64> {
     let ceiling = producer_for_density(CANOPY_STAGES[0]);
-    (0..CELL_COUNT).map(|i| ceiling * (i % 20) as f64 / 20.0).collect()
+    (0..CUBE_CELL_COUNT).map(|i| ceiling * (i % 20) as f64 / 20.0).collect()
 }
 
 /// A detritus field with cells above and below the fleck threshold, and every cell below
 /// the soil's own first stage threshold so the soil band grows no plant either.
 fn mixed_detritus() -> Vec<f64> {
     let ceiling = SOIL_SCALE * SOIL_STAGES[0];
-    (0..CELL_COUNT).map(|i| ceiling * (i % 13) as f64 / 13.0).collect()
+    (0..CUBE_CELL_COUNT).map(|i| ceiling * (i % 13) as f64 / 13.0).collect()
 }
 
 /// Pixels of `after` that differ from `before` and are wholly above the horizon. The
 /// decided M2 image says nothing about the soil band, so comparisons against it are only
 /// meaningful where there is no soil.
-fn differing_above_horizon(a: &Canvas, b: &Canvas) -> Vec<(Face, u8, u8)> {
+fn differing_above_horizon(a: &Canvas, b: &Canvas) -> Vec<(Face, u16, u16)> {
     differing(a, b).into_iter().filter(|&(f, x, y)| soil_weight(f, x, y) == 0.0).collect()
 }
 
 fn flat(value: f64) -> Vec<f64> {
-    vec![value; CELL_COUNT]
+    vec![value; CUBE_CELL_COUNT]
 }
 
 fn organism(id: OrganismId, hue: f32, mode: Mode, pos: SurfacePoint) -> OrganismView {
@@ -125,14 +126,14 @@ fn clip_of(pack: &ArtPack, form: usize, state: usize) -> &Clip {
 // canvas helpers
 // ---------------------------------------------------------------------------
 
-fn every_pixel() -> impl Iterator<Item = (Face, u8, u8)> {
+fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
     Face::ALL.into_iter().flat_map(|face| {
-        (0..FACE_SIZE as u8).flat_map(move |y| (0..FACE_SIZE as u8).map(move |x| (face, x, y)))
+        (0..FACE_SIZE as u16).flat_map(move |y| (0..FACE_SIZE as u16).map(move |x| (face, x, y)))
     })
 }
 
 /// Pixels where the two canvases are not bit-for-bit the same value.
-fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u8, u8)> {
+fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u16, u16)> {
     every_pixel().filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y)).collect()
 }
 
@@ -582,10 +583,10 @@ fn an_empty_quiet_world_draws_exactly_the_m2_image_above_the_horizon() {
 #[test]
 fn a_rich_cell_adds_a_plant_and_nothing_else() {
     // A foliage cell that can grow at all: sprout-only slots (rank cap 0) stay bare by rule.
-    let cell = CellId::all()
-        .find(|&c| c.face() == Face::Front && c.cy() >= 5 && c.cy() <= 8 && c.cx() >= 6 && c.cx() <= 10 && rank_cap_of(c) >= 1)
+    let cell = CellId::all(Topology::Cube, Scale::ONE)
+        .find(|&c| c.face(Topology::Cube, Scale::ONE) == Face::Front && c.cy(Topology::Cube, Scale::ONE) >= 5 && c.cy(Topology::Cube, Scale::ONE) <= 8 && c.cx(Topology::Cube, Scale::ONE) >= 6 && c.cx(Topology::Cube, Scale::ONE) <= 10 && rank_cap_of(c) >= 1)
         .expect("a growable foliage cell near the middle of Front");
-    let center = cell.center();
+    let center = cell.center(Topology::Cube, Scale::ONE);
     let mut producer = quiet_producer();
     producer[cell.index()] = producer_for_density((FOLIAGE_STAGES[2] + 1.0) / 2.0);
     let v = view(9, producer, mixed_detritus(), Vec::new());

@@ -9,6 +9,7 @@
 //! ramp, a filter or a weight has to survive a second, independently written copy of the
 //! rule rather than agreeing with itself.
 
+use cubarium_surface::{Scale, Topology};
 use cube_proto::{FACE_SIZE, Face};
 use cubarium::art::ArtPack;
 use cubarium::art_present::{
@@ -23,7 +24,7 @@ use cubarium::present::{
 use cubarium_core::view::RenderView;
 use cubarium_render::{Canvas, draw_field};
 use cubarium_surface::{
-    CELL_COUNT, CELLS_PER_FACE_EDGE, CellId, Edge, ScalarField, SurfacePoint, Vec2, cell_of,
+    CUBE_CELL_COUNT, CELLS_PER_FACE_EDGE, CellId, Edge, ScalarField, SurfacePoint, Vec2, cell_of,
     pixel_neighbor,
 };
 
@@ -45,19 +46,19 @@ fn saturation() -> f64 {
 }
 
 fn view(producer: Vec<f64>, detritus: Vec<f64>) -> RenderView {
-    assert_eq!(producer.len(), CELL_COUNT);
-    assert_eq!(detritus.len(), CELL_COUNT);
+    assert_eq!(producer.len(), CUBE_CELL_COUNT);
+    assert_eq!(detritus.len(), CUBE_CELL_COUNT);
     RenderView {
         tick: 0,
         producer,
         detritus,
-        fruit: vec![0.0; CELL_COUNT],
-        wood: vec![0.0; CELL_COUNT],
-        plant_reserve: vec![0.0; CELL_COUNT],
-        dead_wood: vec![0.0; CELL_COUNT],
-        carrion: vec![0.0; CELL_COUNT],
-        water: vec![0.0; CELL_COUNT],
-        rain: vec![0.0; CELL_COUNT],
+        fruit: vec![0.0; CUBE_CELL_COUNT],
+        wood: vec![0.0; CUBE_CELL_COUNT],
+        plant_reserve: vec![0.0; CUBE_CELL_COUNT],
+        dead_wood: vec![0.0; CUBE_CELL_COUNT],
+        carrion: vec![0.0; CUBE_CELL_COUNT],
+        water: vec![0.0; CUBE_CELL_COUNT],
+        rain: vec![0.0; CUBE_CELL_COUNT],
         producer_max: PRODUCER_MAX,
         wood_max: 0.6,
         organisms: Vec::new(),
@@ -65,7 +66,7 @@ fn view(producer: Vec<f64>, detritus: Vec<f64>) -> RenderView {
 }
 
 fn flat(v: f64) -> Vec<f64> {
-    vec![v; CELL_COUNT]
+    vec![v; CUBE_CELL_COUNT]
 }
 
 fn draw(v: &RenderView) -> Canvas {
@@ -74,13 +75,13 @@ fn draw(v: &RenderView) -> Canvas {
     canvas
 }
 
-fn every_pixel() -> impl Iterator<Item = (Face, u8, u8)> {
+fn every_pixel() -> impl Iterator<Item = (Face, u16, u16)> {
     Face::ALL.into_iter().flat_map(|face| {
-        (0..FACE_SIZE as u8).flat_map(move |y| (0..FACE_SIZE as u8).map(move |x| (face, x, y)))
+        (0..FACE_SIZE as u16).flat_map(move |y| (0..FACE_SIZE as u16).map(move |x| (face, x, y)))
     })
 }
 
-fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u8, u8)> {
+fn differing(a: &Canvas, b: &Canvas) -> Vec<(Face, u16, u16)> {
     every_pixel().filter(|&(f, x, y)| a.get(f, x, y) != b.get(f, x, y)).collect()
 }
 
@@ -108,12 +109,12 @@ fn side_faces() -> impl Iterator<Item = Face> {
 /// The seam-filtered value of a field at a pixel: the pixel's own cell with weight 4 and
 /// each existing pixel-neighbor's cell with weight 1, normalized over the neighbors that
 /// exist. Written out again here rather than borrowed from the renderer.
-fn filtered(field: &ScalarField, face: Face, x: u8, y: u8) -> f64 {
-    let mut sum = field.get(cell_of(&SurfacePoint::pixel_center(face, x, y))) * 4.0;
+fn filtered(field: &ScalarField, face: Face, x: u16, y: u16) -> f64 {
+    let mut sum = field.get(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y))) * 4.0;
     let mut divisor = 4.0;
     for edge in Edge::ALL {
-        if let Some((nf, nx, ny)) = pixel_neighbor(face, x, y, edge) {
-            sum += field.get(cell_of(&SurfacePoint::pixel_center(nf, nx, ny)));
+        if let Some((nf, nx, ny)) = pixel_neighbor(Topology::Cube, face, x, y, edge) {
+            sum += field.get(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, nf, nx, ny)));
             divisor += 1.0;
         }
     }
@@ -167,12 +168,12 @@ fn expected_ground(v: &RenderView) -> Canvas {
 }
 
 fn field_from(values: &[f64]) -> ScalarField {
-    let mut field = ScalarField::zeros();
+    let mut field = ScalarField::zeros(Topology::Cube, Scale::ONE);
     field.values.copy_from_slice(values);
     field
 }
 
-fn add_scaled(canvas: &mut Canvas, layer: &Canvas, weight: impl Fn(Face, u8, u8) -> f32) {
+fn add_scaled(canvas: &mut Canvas, layer: &Canvas, weight: impl Fn(Face, u16, u16) -> f32) {
     for (face, x, y) in every_pixel() {
         let k = weight(face, x, y);
         if k <= 0.0 {
@@ -196,10 +197,10 @@ fn soil_is_the_bottom_five_cell_rows_of_every_side_face_and_no_top_cell() {
     // so rows 11..=15 are below -0.33 and rows 0..=10 are not. Five of sixteen.
     for face in side_faces() {
         let mut soil_rows = Vec::new();
-        for cy in 0..CELLS_PER_FACE_EDGE as u8 {
+        for cy in 0..CELLS_PER_FACE_EDGE as u16 {
             let mut band = None;
-            for cx in 0..CELLS_PER_FACE_EDGE as u8 {
-                let cell = CellId::new(face, cx, cy);
+            for cx in 0..CELLS_PER_FACE_EDGE as u16 {
+                let cell = CellId::new(Topology::Cube, Scale::ONE, face, cx, cy);
                 let h = height_of(cell);
                 // Every cell in a row of a side face sits at the same height.
                 let expected = 1.0 - (f64::from(cy) + 0.5) / 8.0;
@@ -221,7 +222,7 @@ fn soil_is_the_bottom_five_cell_rows_of_every_side_face_and_no_top_cell() {
     }
 
     // And the top face is the canopy, all of it, at exactly h = 1.
-    for cell in CellId::all().filter(|c| c.face() == Face::Top) {
+    for cell in CellId::all(Topology::Cube, Scale::ONE).filter(|c| c.face(Topology::Cube, Scale::ONE) == Face::Top) {
         assert_eq!(height_of(cell), 1.0, "{cell:?}");
         assert_eq!(band_of(cell), Band::Canopy, "{cell:?}");
     }
@@ -261,10 +262,10 @@ fn w_soil_is_one_below_the_horizon_zero_above_it_and_monotone_between() {
 
 #[test]
 fn the_horizon_is_the_same_row_on_all_four_side_faces_and_absent_from_the_top() {
-    for y in 0..FACE_SIZE as u8 {
+    for y in 0..FACE_SIZE as u16 {
         let front = soil_weight(Face::Front, 0, y);
         for face in side_faces() {
-            for x in 0..FACE_SIZE as u8 {
+            for x in 0..FACE_SIZE as u16 {
                 assert_eq!(
                     soil_weight(face, x, y),
                     front,
@@ -273,17 +274,17 @@ fn the_horizon_is_the_same_row_on_all_four_side_faces_and_absent_from_the_top() 
                 );
             }
             // And it is the pixel's own height, not its cell's.
-            let h = SurfacePoint::pixel_center(face, 0, y).embed()[1];
+            let h = Topology::Cube.embed(Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, 0, y))[1];
             assert_eq!(front, w_soil(h) as f32, "row {y} of {face:?}");
         }
-        for x in 0..FACE_SIZE as u8 {
+        for x in 0..FACE_SIZE as u16 {
             assert_eq!(soil_weight(Face::Top, x, y), 0.0, "the canopy has no soil");
         }
     }
 
     // The blend really is per pixel: the transition takes several pixel rows, and the
     // rows it spans are strictly inside one cell row's worth of the image.
-    let partial: Vec<u8> = (0..FACE_SIZE as u8)
+    let partial: Vec<u16> = (0..FACE_SIZE as u16)
         .filter(|&y| {
             let w = soil_weight(Face::Front, 0, y);
             w > 0.0 && w < 1.0
@@ -296,7 +297,7 @@ fn the_horizon_is_the_same_row_on_all_four_side_faces_and_absent_from_the_top() 
     // Everything above the blend is foliage and everything below it is soil.
     let (first, last) = (partial[0], partial[partial.len() - 1]);
     assert!((0..first).all(|y| soil_weight(Face::Front, 0, y) == 0.0));
-    assert!((last + 1..FACE_SIZE as u8).all(|y| soil_weight(Face::Front, 0, y) == 1.0));
+    assert!((last + 1..FACE_SIZE as u16).all(|y| soil_weight(Face::Front, 0, y) == 1.0));
 }
 
 // ---------------------------------------------------------------------------
@@ -364,7 +365,7 @@ fn a_saturated_world_with_no_detritus_still_has_a_bare_soil_band() {
     present::draw_floor(&mut ramp_only);
     present::draw_ramp_field(
         &mut ramp_only,
-        &ScalarField::constant(saturation()),
+        &ScalarField::constant(Topology::Cube, Scale::ONE, saturation()),
         saturation(),
         PALETTE.producer_low,
         PALETTE.producer_high,
@@ -385,7 +386,7 @@ fn detritus_brightens_the_soil_and_keeps_it_violet() {
     // A pixel deep in the soil, far from the horizon and from any seam.
     let (face, x, y) = (Face::Front, 32, 60);
     assert_eq!(soil_weight(face, x, y), 1.0);
-    assert_eq!(band_of(cell_of(&SurfacePoint::pixel_center(face, x, y))), Band::Soil);
+    assert_eq!(band_of(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y))), Band::Soil);
 
     let poor = bare.get(face, x, y);
     let full = rich.get(face, x, y);
@@ -409,8 +410,8 @@ fn the_foliage_ground_is_the_decided_image_and_the_soil_never_flecks() {
     // everywhere above the fleck threshold (so the soil grows plants where it is rich;
     // those pixels are excluded, the soil plants are tested in `tests/art_plants.rs`).
     let producer: Vec<f64> =
-        (0..CELL_COUNT).map(|i| saturation() * CANOPY_STAGES[0] * (i % 5) as f64 / 8.0).collect();
-    let detritus: Vec<f64> = (0..CELL_COUNT).map(|i| 0.06 + (i % 7) as f64 * 0.2).collect();
+        (0..CUBE_CELL_COUNT).map(|i| saturation() * CANOPY_STAGES[0] * (i % 5) as f64 / 8.0).collect();
+    let detritus: Vec<f64> = (0..CUBE_CELL_COUNT).map(|i| 0.06 + (i % 7) as f64 * 0.2).collect();
     let v = view(producer, detritus.clone());
     let canvas = draw(&v);
 
@@ -456,26 +457,26 @@ fn the_foliage_ground_is_the_decided_image_and_the_soil_never_flecks() {
 /// one pixel of its cell center, so nothing more than three cell rows away can reach it —
 /// and staying twelve pixels inside the face keeps the plants of the neighbouring faces
 /// out without having to reason about seams.
-fn plant_free(v: &RenderView, face: Face, x: u8, y: u8) -> bool {
-    const MARGIN: u8 = 12;
-    if !(MARGIN..FACE_SIZE as u8 - MARGIN).contains(&x) || y < MARGIN {
+fn plant_free(v: &RenderView, face: Face, x: u16, y: u16) -> bool {
+    const MARGIN: u16 = 12;
+    if !(MARGIN..FACE_SIZE as u16 - MARGIN).contains(&x) || y < MARGIN {
         return false;
     }
     // The bottom edge of a side face is the open rim: there is no face beyond it, so the
     // margin there would only throw away the deepest soil, which is what this is for.
-    if face == Face::Top && y >= FACE_SIZE as u8 - MARGIN {
+    if face == Face::Top && y >= FACE_SIZE as u16 - MARGIN {
         return false;
     }
-    let here = cell_of(&SurfacePoint::pixel_center(face, x, y));
+    let here = cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y));
     for dy in -3i32..=3 {
         for dx in -3i32..=3 {
-            let (cx, cy) = (i32::from(here.cx()) + dx, i32::from(here.cy()) + dy);
+            let (cx, cy) = (i32::from(here.cx(Topology::Cube, Scale::ONE)) + dx, i32::from(here.cy(Topology::Cube, Scale::ONE)) + dy);
             if !(0..CELLS_PER_FACE_EDGE as i32).contains(&cx)
                 || !(0..CELLS_PER_FACE_EDGE as i32).contains(&cy)
             {
                 continue;
             }
-            if would_grow(v, CellId::new(face, cx as u8, cy as u8)) {
+            if would_grow(v, CellId::new(Topology::Cube, Scale::ONE, face, cx as u16, cy as u16)) {
                 return false;
             }
         }
@@ -493,8 +494,8 @@ fn would_grow(v: &RenderView, cell: CellId) -> bool {
 
 /// Side-face pixels well above the horizon and well inside the face, where the only
 /// plants that could reach are the foliage's own.
-fn deep_foliage() -> impl Iterator<Item = (Face, u8, u8)> {
-    side_faces().flat_map(|face| (12..=33u8).flat_map(move |y| (12..52u8).map(move |x| (face, x, y))))
+fn deep_foliage() -> impl Iterator<Item = (Face, u16, u16)> {
+    side_faces().flat_map(|face| (12..=33u16).flat_map(move |y| (12..52u16).map(move |x| (face, x, y))))
 }
 
 // ---------------------------------------------------------------------------

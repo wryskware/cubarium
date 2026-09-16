@@ -1,6 +1,7 @@
 //! Godot-authored sprite/animation study on the real five-face output path.
 //! Explicit development choreography; this is not an evolving population.
 
+use cubarium_surface::{Scale, Topology};
 use anyhow::{Result, ensure};
 use clap::{Parser, ValueEnum};
 use cubarium::{
@@ -220,7 +221,7 @@ fn main() -> Result<()> {
                         let bend = 0.025 * (t * 0.17 + specimen.offset).sin() * DT;
                         let a = specimen.heading.screen_angle() + bend;
                         specimen.heading = Vec2::from_screen_angle(a);
-                        let step = travel(specimen.anchor, specimen.heading * (speed * DT));
+                        let step = travel(Topology::Cube, specimen.anchor, specimen.heading * (speed * DT));
                         specimen.anchor = step.end;
                         specimen.heading = step.map.apply(specimen.heading);
                         specimen.moved = step.segments;
@@ -233,8 +234,8 @@ fn main() -> Result<()> {
                 // Broad quiet ground, no field-cell grid or analytical overlays.
                 let ground = srgb_linear(0x171b35);
                 for face in Face::ALL {
-                    for y in 0..64u8 {
-                        for x in 0..64u8 {
+                    for y in 0..64u16 {
+                        for x in 0..64u16 {
                             let wave = 0.32
                                 + 0.06 * ((f64::from(x) + f64::from(y) * 0.7) * 0.12).sin() as f32;
                             canvas.add(face, x, y, ground.map(|c| c * wave));

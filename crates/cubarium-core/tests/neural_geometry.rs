@@ -6,6 +6,7 @@
 //! observation through `World::neural_observation`, which runs the same sampler the controller
 //! does, from the same neighbour lists and rings, without stepping.
 
+use cubarium_surface::{Scale, Topology};
 use cubarium_core::config::FounderKind;
 use cubarium_core::genome::{Genome, decode};
 use cubarium_core::ids::OrganismId;
@@ -40,7 +41,7 @@ fn place(world: &mut World, pos: SurfacePoint, heading: Vec2, size: f32) -> Orga
     let mut phenotype = decode(&genome, &cfg.organism);
     phenotype.sense_radius = 8.0;
     let id = world.state.organisms.insert(Organism {
-        pos: pos.canonicalize(),
+        pos: pos.canonicalize(Topology::Cube),
         heading: heading.normalized().expect("a heading"),
         ou: Vec2::ZERO,
         structure: phenotype.structure_adult,
@@ -99,7 +100,7 @@ fn paint(world: &mut World, id: OrganismId) {
     // out of that reserve on the next tick, by a habitat-dependent amount, so two cells on two
     // faces would diverge again between the painting and the observation.
     let mut removed = 0.0;
-    for cell in cubarium_surface::CellId::all() {
+    for cell in cubarium_surface::CellId::all(Topology::Cube, Scale::ONE) {
         let i = cell.index();
         removed += world.state.fields.p[i] + world.state.fields.f[i] + world.state.fields.d[i];
         world.state.fields.p[i] = 0.0;
@@ -120,8 +121,8 @@ fn paint(world: &mut World, id: OrganismId) {
         (o.pos, o.heading)
     };
     for (forward, side, stock) in painted_offsets() {
-        let there = travel(pos, body_offset(heading, forward, side)).end;
-        world.state.fields.p[cell_of(&there).index()] = stock;
+        let there = travel(Topology::Cube, pos, body_offset(heading, forward, side)).end;
+        world.state.fields.p[cell_of(Topology::Cube, Scale::ONE, &there).index()] = stock;
     }
 }
 
@@ -151,7 +152,7 @@ fn a_body_at_a_seam_senses_the_same_food_and_bodies_as_an_equivalent_flat_layout
         let id = place(&mut world, anchor, heading, 1.0);
         paint(&mut world, id);
         // A companion body two cells ahead, at the same body-relative offset in both worlds.
-        let companion = travel(anchor, body_offset(heading, 6.0, 0.0)).end;
+        let companion = travel(Topology::Cube, anchor, body_offset(heading, 6.0, 0.0)).end;
         place(&mut world, companion, heading, 1.0);
         // One step, so the pair pass has built this arrangement's neighbour lists.
         world.step();
@@ -234,10 +235,10 @@ fn the_seventeenth_neighbour_in_range_is_not_sensed_and_the_fixture_says_so() {
     // Every one of them is inside `r_sense`, so all seventeen are *in range*.
     for k in 0..16 {
         let a = std::f64::consts::PI * (0.6 + 0.8 * f64::from(k) / 15.0);
-        let spot = travel(anchor, body_offset(heading, 2.0 * a.cos(), 2.0 * a.sin())).end;
+        let spot = travel(Topology::Cube, anchor, body_offset(heading, 2.0 * a.cos(), 2.0 * a.sin())).end;
         place(&mut world, spot, heading, 0.6);
     }
-    let far = travel(anchor, body_offset(heading, 6.5, 0.0)).end;
+    let far = travel(Topology::Cube, anchor, body_offset(heading, 6.5, 0.0)).end;
     let seventeenth = place(&mut world, far, heading, 0.6);
 
     world.step();
@@ -256,7 +257,7 @@ fn the_seventeenth_neighbour_in_range_is_not_sensed_and_the_fixture_says_so() {
     );
     // And it really is in range: it is well inside the observer's sensing radius.
     let o = world.state.organisms.get(id).expect("alive");
-    let reach = cubarium_surface::unfold(o.pos, world.state.organisms.get(seventeenth).expect("alive").pos, 32.0)
+    let reach = cubarium_surface::unfold(Topology::Cube, o.pos, world.state.organisms.get(seventeenth).expect("alive").pos, 32.0)
         .expect("the two are on one chart");
     assert!(
         reach.distance < o.phenotype.sense_radius,

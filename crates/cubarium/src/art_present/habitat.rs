@@ -1,5 +1,6 @@
 //! Plant placement, bands, species selection, and presentation timing.
 
+use cubarium_surface::{Scale, Topology};
 use super::*;
 
 // --- Plant constants ---------------------------------------------------------------
@@ -366,10 +367,10 @@ pub const SOIL_MIN_BRIGHTNESS: f32 = 0.10;
 /// carpet in the viewer; 0.32 keeps it dark ground that richer litter warms.
 pub const SOIL_MAX_BRIGHTNESS: f32 = 0.32;
 
-/// The embedded height of a cell's center: `CellId::center().embed()[1]`, Top = 1 exactly
+/// The embedded height of a cell's center: Topology::Cube.embed(Scale::ONE, &`CellId::center())[1]`, Top = 1 exactly
 /// and the open rim = −0.984375 (the center of the bottom cell row).
 pub fn height_of(cell: CellId) -> f64 {
-    cell.center().embed()[1]
+    Topology::Cube.embed(Scale::ONE, &cell.center(Topology::Cube, Scale::ONE))[1]
 }
 
 /// The band of a height.
@@ -425,9 +426,9 @@ pub(super) const FACE_PIXELS: usize = FACE_SIZE * FACE_SIZE;
 pub(super) static SOIL_WEIGHT: LazyLock<Box<[f32]>> = LazyLock::new(|| {
     let mut w = vec![0.0f32; 5 * FACE_PIXELS];
     for face in Face::ALL {
-        for y in 0..FACE_SIZE as u8 {
-            for x in 0..FACE_SIZE as u8 {
-                let h = SurfacePoint::pixel_center(face, x, y).embed()[1];
+        for y in 0..FACE_SIZE as u16 {
+            for x in 0..FACE_SIZE as u16 {
+                let h = Topology::Cube.embed(Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y))[1];
                 w[weight_index(face, x, y)] = w_soil(h) as f32;
             }
         }
@@ -436,13 +437,13 @@ pub(super) static SOIL_WEIGHT: LazyLock<Box<[f32]>> = LazyLock::new(|| {
 });
 
 #[inline]
-pub(super) fn weight_index(face: Face, x: u8, y: u8) -> usize {
+pub(super) fn weight_index(face: Face, x: u16, y: u16) -> usize {
     face.index() * FACE_PIXELS + usize::from(y) * FACE_SIZE + usize::from(x)
 }
 
 /// The precomputed [`w_soil`] of one pixel center. 1 is wholly soil, 0 wholly
 /// foliage/canopy.
-pub fn soil_weight(face: Face, x: u8, y: u8) -> f32 {
+pub fn soil_weight(face: Face, x: u16, y: u16) -> f32 {
     SOIL_WEIGHT[weight_index(face, x, y)]
 }
 
@@ -521,7 +522,7 @@ pub struct Slot {
 pub fn slot_of(cell: CellId) -> Slot {
     let mut hash = SplitMix64::new(MOTIF_SEED ^ cell.index() as u64);
     let pick = (hash.next_u64() % 2) as usize;
-    let center = cell.center();
+    let center = cell.center(Topology::Cube, Scale::ONE);
     let at = SurfacePoint::new(
         center.face,
         center.u + hash.range(-1.0, 1.0),
@@ -564,9 +565,9 @@ pub fn stalk_heading(up: Vec2) -> Vec2 {
 /// The chart direction, at a cell's center, in which embedded height increases: "up"
 /// toward the canopy on the four side faces, `None` on the level top face.
 pub fn up_of(cell: CellId) -> Option<Vec2> {
-    let center = cell.center();
-    let du = center.embed_tangent(Vec2::new(1.0, 0.0))[1];
-    let dv = center.embed_tangent(Vec2::new(0.0, 1.0))[1];
+    let center = cell.center(Topology::Cube, Scale::ONE);
+    let du = Topology::Cube.embed_tangent(Scale::ONE, &center, Vec2::new(1.0, 0.0))[1];
+    let dv = Topology::Cube.embed_tangent(Scale::ONE, &center, Vec2::new(0.0, 1.0))[1];
     Vec2::new(du, dv).normalized()
 }
 

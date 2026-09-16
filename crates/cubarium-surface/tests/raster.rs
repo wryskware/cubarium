@@ -1,13 +1,14 @@
 //! Pixel ownership for seam-aware rasterization.
 //!
 //! `src/raster.rs` is normative: "the result equals the brute-force set
-//! `{ p : unfold(anchor, p, radius) }` over all 20,480 pixel centers", each pixel at most
+//! `{ p : unfold(Topology::Cube, anchor, p, radius) }` over all 20,480 pixel centers", each pixel at most
 //! once, sorted by `(face index, y, x)`, with the shortest valid unfolding and
 //! `ChartPath` order as the tie-break. Every test here compares `unfold_pixels` against
 //! exactly that brute force, including the fast-path/general-path agreement the doc
 //! demands ("the fast path and the general path must agree exactly") by using anchors
 //! both far from and on top of every seam, vertex and rim corner.
 
+use cubarium_surface::Topology;
 use cubarium_surface::{
     Face, MAX_LOCAL_RADIUS, MAX_SEAMS, PixelImage, SurfacePoint, chart_images, unfold_pixels,
     unfold_with,
@@ -18,15 +19,15 @@ use cubarium_surface::{
 /// which is the order `unfold_pixels` promises.
 fn brute_force(anchor: SurfacePoint, radius: f64) -> Vec<PixelImage> {
     let mut images = Vec::new();
-    chart_images(anchor.face, MAX_SEAMS, &mut images);
+    chart_images(Topology::Cube, anchor.face, MAX_SEAMS, &mut images);
     let mut out = Vec::new();
     let mut examined = 0usize;
     for face in Face::ALL {
-        for y in 0..64u8 {
-            for x in 0..64u8 {
+        for y in 0..64u16 {
+            for x in 0..64u16 {
                 examined += 1;
-                let p = SurfacePoint::pixel_center(face, x, y);
-                if let Some(u) = unfold_with(&images, anchor, p, radius) {
+                let p = SurfacePoint::pixel_center(Topology::Cube, face, x, y);
+                if let Some(u) = unfold_with(Topology::Cube, &images, anchor, p, radius) {
                     out.push(PixelImage {
                         face,
                         x,
@@ -44,7 +45,7 @@ fn brute_force(anchor: SurfacePoint, radius: f64) -> Vec<PixelImage> {
 }
 
 fn corner(face: Face, u: f64, v: f64) -> SurfacePoint {
-    SurfacePoint::new(face, u, v).canonicalize()
+    SurfacePoint::new(face, u, v).canonicalize(Topology::Cube)
 }
 
 /// Every kind of anchor the doc calls out: interior (single-chart fast path), next to each
@@ -52,7 +53,7 @@ fn corner(face: Face, u: f64, v: f64) -> SurfacePoint {
 /// incident charts, and in each lower rim corner.
 fn anchors() -> Vec<(String, SurfacePoint)> {
     let mut out: Vec<(String, SurfacePoint)> = Vec::new();
-    out.push(("interior".into(), SurfacePoint::pixel_center(Face::Front, 32, 32)));
+    out.push(("interior".into(), SurfacePoint::pixel_center(Topology::Cube, Face::Front, 32, 32)));
     out.push(("interior off-lattice".into(), SurfacePoint::new(Face::Front, 20.25, 41.75)));
     for face in [Face::Front, Face::Right, Face::Back, Face::Left] {
         out.push((format!("{face:?} vertical seam"), SurfacePoint::new(face, 63.5, 32.5)));
@@ -77,7 +78,7 @@ fn anchors() -> Vec<(String, SurfacePoint)> {
 
 fn assert_matches_brute_force(what: &str, anchor: SurfacePoint, radius: f64) -> Vec<PixelImage> {
     let mut got = Vec::new();
-    unfold_pixels(anchor, radius, &mut got);
+    unfold_pixels(Topology::Cube, anchor, radius, &mut got);
     let want = brute_force(anchor, radius);
     assert_eq!(
         got.len(),
@@ -115,7 +116,7 @@ fn assert_matches_brute_force(what: &str, anchor: SurfacePoint, radius: f64) -> 
 #[test]
 fn unfold_pixels_equals_brute_force_everywhere() {
     for (what, anchor) in anchors() {
-        assert!(anchor.is_canonical(), "{what}");
+        assert!(anchor.is_canonical(Topology::Cube), "{what}");
         for radius in [1.5f64, 5.0, 9.5] {
             let got = assert_matches_brute_force(&what, anchor, radius);
             assert!(!got.is_empty(), "{what} r={radius}: no pixels at all");
@@ -128,10 +129,10 @@ fn unfold_pixels_equals_brute_force_everywhere() {
 /// circumference).
 #[test]
 fn an_interior_disc_is_the_pixel_lattice_disc() {
-    let anchor = SurfacePoint::pixel_center(Face::Front, 32, 32);
+    let anchor = SurfacePoint::pixel_center(Topology::Cube, Face::Front, 32, 32);
     for radius in [1.5f64, 5.0, 9.5] {
         let mut got = Vec::new();
-        unfold_pixels(anchor, radius, &mut got);
+        unfold_pixels(Topology::Cube, anchor, radius, &mut got);
         // Every pixel is a direct image on the anchor's own chart.
         for p in &got {
             assert_eq!(p.face, Face::Front, "r={radius}");
@@ -169,10 +170,10 @@ fn an_interior_disc_is_the_pixel_lattice_disc() {
 fn a_stamp_carried_across_a_flat_seam_keeps_its_distances() {
     let radius = 9.5;
     let mut here = Vec::new();
-    unfold_pixels(SurfacePoint::new(Face::Front, 34.5, 34.5), radius, &mut here);
+    unfold_pixels(Topology::Cube, SurfacePoint::new(Face::Front, 34.5, 34.5), radius, &mut here);
     let mut there = Vec::new();
     // 34.5 + 32 = 66.5, i.e. Right (2.5, 34.5): eight whole pixels past the flat seam.
-    unfold_pixels(SurfacePoint::new(Face::Right, 2.5, 34.5), radius, &mut there);
+    unfold_pixels(Topology::Cube, SurfacePoint::new(Face::Right, 2.5, 34.5), radius, &mut there);
     assert_eq!(here.len(), there.len(), "the stamp changed size across the seam");
     let mut a: Vec<f64> = here.iter().map(|p| p.distance).collect();
     let mut b: Vec<f64> = there.iter().map(|p| p.distance).collect();
@@ -190,7 +191,7 @@ fn a_stamp_carried_across_a_flat_seam_keeps_its_distances() {
 fn a_footprint_around_a_top_vertex_owns_each_pixel_once() {
     let anchor = corner(Face::Front, 64.0, 0.0);
     let mut got = Vec::new();
-    unfold_pixels(anchor, 9.5, &mut got);
+    unfold_pixels(Topology::Cube, anchor, 9.5, &mut got);
     let mut seen = std::collections::HashSet::new();
     let mut faces = std::collections::HashSet::new();
     for p in &got {
@@ -218,7 +219,7 @@ fn a_footprint_around_a_top_vertex_owns_each_pixel_once() {
 #[should_panic]
 fn a_radius_beyond_max_local_radius_panics() {
     let mut out = Vec::new();
-    unfold_pixels(
+    unfold_pixels(Topology::Cube, 
         SurfacePoint::new(Face::Front, 32.0, 32.0),
         MAX_LOCAL_RADIUS + 0.5,
         &mut out,
@@ -229,17 +230,17 @@ fn a_radius_beyond_max_local_radius_panics() {
 #[should_panic]
 fn a_non_canonical_anchor_panics() {
     let mut out = Vec::new();
-    unfold_pixels(SurfacePoint::new(Face::Front, 64.0, 32.0), 4.0, &mut out);
+    unfold_pixels(Topology::Cube, SurfacePoint::new(Face::Front, 64.0, 32.0), 4.0, &mut out);
 }
 
 /// `out` is cleared and its capacity reused, so repeated stamping allocates nothing.
 #[test]
 fn the_output_buffer_is_reused() {
     let mut out = Vec::new();
-    unfold_pixels(SurfacePoint::new(Face::Front, 32.5, 32.5), 9.5, &mut out);
+    unfold_pixels(Topology::Cube, SurfacePoint::new(Face::Front, 32.5, 32.5), 9.5, &mut out);
     let big = out.len();
     let cap = out.capacity();
-    unfold_pixels(SurfacePoint::new(Face::Front, 32.5, 32.5), 1.5, &mut out);
+    unfold_pixels(Topology::Cube, SurfacePoint::new(Face::Front, 32.5, 32.5), 1.5, &mut out);
     assert!(out.len() < big, "the buffer was not cleared");
     assert!(out.capacity() >= cap, "the buffer lost its capacity");
 }

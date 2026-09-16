@@ -1,5 +1,6 @@
 //! Tall-plant placement, growth geometry, and drawing.
 
+use cubarium_surface::{Scale, Topology};
 use super::*;
 
 // --- Tall plants ---------------------------------------------------------------------
@@ -44,7 +45,7 @@ const TALL_SEED: u64 = 0x7461_6C6C_0000_0001;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TallColumn {
     pub face: Face,
-    pub cx: u8,
+    pub cx: u16,
     /// Which of [`TALL_PLANTS`].
     pub pick: usize,
     /// Whether a [`VINE_PLANT`] climbs it.
@@ -54,9 +55,9 @@ pub struct TallColumn {
 /// The foliage rows of a side face as `(top cy, horizon cy)`: the cell rows whose centers
 /// are foliage, top to bottom. `None` on the top face (all canopy) — and on any face with
 /// no foliage row.
-pub fn foliage_rows(face: Face) -> Option<(u8, u8)> {
-    let rows: Vec<u8> = (0..CELLS_PER_FACE_EDGE as u8)
-        .filter(|&cy| band_of(CellId::new(face, 0, cy)) == Band::Foliage)
+pub fn foliage_rows(face: Face) -> Option<(u16, u16)> {
+    let rows: Vec<u16> = (0..CELLS_PER_FACE_EDGE as u16)
+        .filter(|&cy| band_of(CellId::new(Topology::Cube, Scale::ONE, face, 0, cy)) == Band::Foliage)
         .collect();
     Some((*rows.first()?, *rows.last()?))
 }
@@ -65,7 +66,7 @@ pub fn foliage_rows(face: Face) -> Option<(u8, u8)> {
 ///
 /// **Normative**: one `SplitMix64` stream from the face and column, consumed as select,
 /// pick, vine. Never on the top face.
-pub fn tall_column_of(face: Face, cx: u8) -> Option<TallColumn> {
+pub fn tall_column_of(face: Face, cx: u16) -> Option<TallColumn> {
     foliage_rows(face)?;
     let mut hash = SplitMix64::new(TALL_SEED ^ (face.index() as u64) << 8 ^ u64::from(cx));
     let select = hash.next_f64();
@@ -85,7 +86,7 @@ pub fn tall_column_of(face: Face, cx: u8) -> Option<TallColumn> {
 /// **Normative**: the fourth value of the column's own `SplitMix64` stream (select, pick,
 /// vine, wind) — *appended*, so adding the wind moved no column, changed no species and
 /// grew no vine that was not there before.
-pub fn tall_wind_of(face: Face, cx: u8) -> f64 {
+pub fn tall_wind_of(face: Face, cx: u16) -> f64 {
     let mut hash = SplitMix64::new(TALL_SEED ^ (face.index() as u64) << 8 ^ u64::from(cx));
     let _select = hash.next_f64();
     let _pick = hash.next_u64();
@@ -98,26 +99,26 @@ pub fn tall_columns() -> Vec<TallColumn> {
     Face::ALL
         .into_iter()
         .flat_map(|face| {
-            (0..CELLS_PER_FACE_EDGE as u8).filter_map(move |cx| tall_column_of(face, cx))
+            (0..CELLS_PER_FACE_EDGE as u16).filter_map(move |cx| tall_column_of(face, cx))
         })
         .collect()
 }
 
 /// The mean producer density (clamped to `[0, 1]`) over a column's foliage cells.
-pub fn column_density(view: &RenderView, face: Face, cx: u8) -> f64 {
+pub fn column_density(view: &RenderView, face: Face, cx: u16) -> f64 {
     column_mean(view, face, cx, &|v, i| wood_density(v, i))
 }
 
 /// How tall the **dead** part of a column stands: the same mean over the same cells, of
 /// [`dead_wood_density`], at the same scale. A column whose stand died keeps the height its
 /// wood earned and loses it as `Wd` decomposes.
-pub fn column_dead_density(view: &RenderView, face: Face, cx: u8) -> f64 {
+pub fn column_dead_density(view: &RenderView, face: Face, cx: u16) -> f64 {
     column_mean(view, face, cx, &|v, i| dead_wood_density(v, i))
 }
 
 /// How full a column's canopy is: the mean [`foliage_fullness`] of the same cells, which is
 /// what dims its cap ([`foliage_ramp`]) when the stand around it is grazed.
-pub fn column_fullness(view: &RenderView, face: Face, cx: u8) -> f64 {
+pub fn column_fullness(view: &RenderView, face: Face, cx: u16) -> f64 {
     column_mean(view, face, cx, &|v, i| foliage_fullness(v, i))
 }
 
@@ -125,7 +126,7 @@ pub fn column_fullness(view: &RenderView, face: Face, cx: u8) -> f64 {
 fn column_mean(
     view: &RenderView,
     face: Face,
-    cx: u8,
+    cx: u16,
     read: &dyn Fn(&RenderView, usize) -> f64,
 ) -> f64 {
     let Some((top, horizon)) = foliage_rows(face) else {
@@ -134,7 +135,7 @@ fn column_mean(
     let mut sum = 0.0;
     let mut n = 0.0;
     for cy in top..=horizon {
-        let cell = CellId::new(face, cx, cy);
+        let cell = CellId::new(Topology::Cube, Scale::ONE, face, cx, cy);
         sum += read(view, cell.index()).clamp(0.0, 1.0);
         n += 1.0;
     }
@@ -190,7 +191,7 @@ pub fn next_tall(current: u8, t_col: f64) -> u8 {
 /// Where tile `i` of a column stands: the horizon cell's center moved `4 · i` pixels up
 /// the face. `i = 0` is the base, `1..=n` the trunks, `n + 1` the crown; with
 /// `n = `[`TALL_MAX_SEGMENTS`] the crown lands on the rim cell's center.
-pub fn tall_anchor(face: Face, cx: u8, i: u8) -> SurfacePoint {
+pub fn tall_anchor(face: Face, cx: u16, i: u8) -> SurfacePoint {
     tall_anchor_at(face, cx, f64::from(i))
 }
 
@@ -198,10 +199,10 @@ pub fn tall_anchor(face: Face, cx: u8, i: u8) -> SurfacePoint {
 /// pixels up the face. This is what lets a crown glide with its column instead of stepping
 /// a whole cell when a segment completes; `tall_anchor(face, cx, i)` is
 /// `tall_anchor_at(face, cx, i as f64)`.
-pub fn tall_anchor_at(face: Face, cx: u8, i: f64) -> SurfacePoint {
+pub fn tall_anchor_at(face: Face, cx: u16, i: f64) -> SurfacePoint {
     let (_, horizon) = foliage_rows(face).unwrap_or((0, 0));
-    let cell = CellId::new(face, cx, horizon);
-    let center = cell.center();
+    let cell = CellId::new(Topology::Cube, Scale::ONE, face, cx, horizon);
+    let center = cell.center(Topology::Cube, Scale::ONE);
     let up = up_of(cell).unwrap_or(Vec2::new(0.0, -1.0));
     let step = up * (4.0 * i);
     SurfacePoint::new(face, center.u + step.x, center.v + step.y)
@@ -209,13 +210,13 @@ pub fn tall_anchor_at(face: Face, cx: u8, i: f64) -> SurfacePoint {
 
 /// The heading tall tiles are stamped with: [`stalk_heading`] of the column's up, with no
 /// jitter so the segments stack straight.
-pub fn tall_heading(face: Face, cx: u8) -> Vec2 {
+pub fn tall_heading(face: Face, cx: u16) -> Vec2 {
     let (_, horizon) = foliage_rows(face).unwrap_or((0, 0));
-    stalk_heading(up_of(CellId::new(face, cx, horizon)).unwrap_or(Vec2::new(0.0, -1.0)))
+    stalk_heading(up_of(CellId::new(Topology::Cube, Scale::ONE, face, cx, horizon)).unwrap_or(Vec2::new(0.0, -1.0)))
 }
 
 /// A stable per-column offset into a tall clip, in `[0, seconds)`.
-pub fn tall_phase_of(face: Face, cx: u8, seconds: f64) -> f64 {
+pub fn tall_phase_of(face: Face, cx: u16, seconds: f64) -> f64 {
     if !(seconds.is_finite() && seconds > 0.0) {
         return 0.0;
     }

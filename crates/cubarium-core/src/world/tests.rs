@@ -1,4 +1,5 @@
-use cubarium_surface::{CELL_COUNT, CellId, Face, FieldGraph, SurfacePoint, Vec2, cell_of};
+use cubarium_surface::{Scale, Topology};
+use cubarium_surface::{CUBE_CELL_COUNT, CellId, Face, FieldGraph, SurfacePoint, Vec2, cell_of};
 
 use crate::DT;
 use crate::config::WorldConfig;
@@ -29,14 +30,14 @@ fn founder_diet() -> f64 {
 /// Move `count` founders onto one cell and empty them out, so they contest its producer.
 fn crowd_onto_cell(world: &mut World, cell: CellId, producer: f64) -> Vec<OrganismId> {
     let ids: Vec<OrganismId> = world.state.organisms.iter().map(|(id, _)| id).collect();
-    let base = cell.center();
+    let base = cell.center(Topology::Cube, Scale::ONE);
     for (k, id) in ids.iter().enumerate() {
         let o = world.state.organisms.get_mut(*id).expect("live founder");
         o.pos = SurfacePoint::new(base.face, base.u + k as f64 * 0.5, base.v);
         o.reserve = 0.0;
         o.hunger_memory = 1.0;
         o.mode = Mode::Seeking;
-        assert_eq!(cell_of(&o.pos), cell, "test bodies must share the cell");
+        assert_eq!(cell_of(Topology::Cube, Scale::ONE, &o.pos), cell, "test bodies must share the cell");
     }
     world.state.fields.p[cell.index()] = producer;
     ids
@@ -119,7 +120,7 @@ fn contested_feeding_splits_the_cell_and_conserves_material() {
     // contest it (three organisms would need `K_P` near zero or a crowd of ~180).
     cfg.organism.intake_half_saturation = 0.0;
     let mut world = World::new(cfg).expect("valid");
-    let cell = CellId::new(Face::Front, 0, 0);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 0, 0);
     let ids = crowd_onto_cell(&mut world, cell, 0.004);
 
     let before = world.mass_residual();
@@ -335,7 +336,7 @@ fn a_completed_gestation_places_a_child() {
     assert_eq!(child.1.reserve, 0.2);
     assert!((child.1.heading.length() - 1.0).abs() < 1e-12);
     let parent_pos = world.state.organisms.get(parent).expect("alive").pos;
-    let offset = cubarium_surface::surface_distance(parent_pos, child.1.pos, 16.0).expect("nearby");
+    let offset = cubarium_surface::surface_distance(Topology::Cube, parent_pos, child.1.pos, 16.0).expect("nearby");
     assert!((offset - 2.5).abs() < 0.1, "child placed {offset} px away");
     assert!((world.mass_residual() - residual).abs() < 1e-9);
 }
@@ -346,8 +347,8 @@ fn render_view_and_telemetry_describe_the_world() {
     world.step();
     let view = world.render_view();
     assert_eq!(view.tick, 1);
-    assert_eq!(view.producer.len(), CELL_COUNT);
-    assert_eq!(view.detritus.len(), CELL_COUNT);
+    assert_eq!(view.producer.len(), CUBE_CELL_COUNT);
+    assert_eq!(view.detritus.len(), CUBE_CELL_COUNT);
     assert_eq!(view.organisms.len(), world.population());
     assert!(view.organisms.iter().all(|o| !o.lobes.is_empty()));
     assert!(
@@ -470,10 +471,10 @@ fn the_intake_request_saturates_at_half_at_k_p() {
             .map(|(id, _)| id)
             .next()
             .expect("one founder");
-        let cell = CellId::new(Face::Front, 0, 0);
+        let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 0, 0);
         {
             let o = world.state.organisms.get_mut(id).expect("alive");
-            o.pos = cell.center();
+            o.pos = cell.center(Topology::Cube, Scale::ONE);
             o.reserve = 0.0;
             o.hunger_memory = 1.0;
             o.mode = Mode::Seeking;
@@ -529,15 +530,15 @@ fn poor_detritus_assimilates_less_and_still_closes() {
     let ids: Vec<OrganismId> = world.state.organisms.iter().map(|(id, _)| id).collect();
     // Two cells with the same detritus but energy densities of e_r/8 and e_r/2.
     let cells = [
-        CellId::new(Face::Front, 0, 0),
-        CellId::new(Face::Front, 4, 4),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Front, 0, 0),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Front, 4, 4),
     ];
     let densities = [e_r / 8.0, e_r / 2.0];
     // Enough detritus that even the poor cell's edible share clears `feed_min`.
     let detritus = 2.0;
     for (k, id) in ids.iter().enumerate() {
         let o = world.state.organisms.get_mut(*id).expect("alive");
-        o.pos = cells[k].center();
+        o.pos = cells[k].center(Topology::Cube, Scale::ONE);
         o.reserve = 0.0;
         o.hunger_memory = 1.0;
         o.mode = Mode::Seeking;
@@ -594,14 +595,14 @@ fn energy_free_detritus_is_not_food() {
     let mut world = World::new(cfg).expect("valid");
     let ids: Vec<OrganismId> = world.state.organisms.iter().map(|(id, _)| id).collect();
     let cells = [
-        CellId::new(Face::Front, 0, 0),
-        CellId::new(Face::Front, 8, 8),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Front, 0, 0),
+        CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8),
     ];
     // Same detritus, no energy versus fully charged.
     let energies = [0.0, 2.0];
     for (k, id) in ids.iter().enumerate() {
         let o = world.state.organisms.get_mut(*id).expect("alive");
-        o.pos = cells[k].center();
+        o.pos = cells[k].center(Topology::Cube, Scale::ONE);
         o.reserve = 0.0;
         o.hunger_memory = 1.0;
         o.mode = Mode::Seeking;
@@ -639,14 +640,14 @@ fn both_intake_channels_respect_the_reserve_ceiling() {
         .map(|(id, _)| id)
         .next()
         .expect("one founder");
-    let cell = CellId::new(Face::Front, 0, 0);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 0, 0);
     // Headroom of 0.0014 m: less than the two channels' requests together. Ecology v1 §6.3
     // shares one mouth, so with both channels open each asks at half the mouth rate; fruit
     // settles first, then grazing, then scavenging against what is left, and nothing may
     // push the reserve past `R_max`.
     let (reserve_max, headroom) = {
         let o = world.state.organisms.get_mut(id).expect("alive");
-        o.pos = cell.center();
+        o.pos = cell.center(Topology::Cube, Scale::ONE);
         o.hunger_memory = 1.0;
         o.mode = Mode::Seeking;
         o.reserve = o.phenotype.reserve_max - 0.0014;
@@ -813,7 +814,7 @@ fn the_field_dump_and_cell_graph_describe_every_cell() {
     assert_eq!(dump.p, world.state.fields.p);
     assert_eq!(dump.d, world.state.fields.d);
     assert_eq!(dump.de, world.state.fields.de);
-    assert_eq!(dump.organisms.len(), CELL_COUNT);
+    assert_eq!(dump.organisms.len(), CUBE_CELL_COUNT);
     let counted: u32 = dump.organisms.iter().map(|&c| u32::from(c)).sum();
     assert_eq!(
         counted,
@@ -821,11 +822,11 @@ fn the_field_dump_and_cell_graph_describe_every_cell() {
         "every organism is counted once"
     );
     for (_, o) in world.state.organisms.iter() {
-        assert!(dump.organisms[cell_of(&o.pos).index()] > 0);
+        assert!(dump.organisms[cell_of(Topology::Cube, Scale::ONE, &o.pos).index()] > 0);
     }
 
     let neighbors = world.cell_neighbors();
-    assert_eq!(neighbors.len(), CELL_COUNT);
+    assert_eq!(neighbors.len(), CUBE_CELL_COUNT);
     // The open rim leaves 64 cells with three neighbors; everyone else has four.
     let rim = neighbors
         .iter()
@@ -893,7 +894,7 @@ fn the_water_budget_closes_every_tick_and_cumulatively() {
     // The view and telemetry carry the same water.
     let view = world.render_view();
     assert_eq!(view.water, world.state.fields.w);
-    assert_eq!(view.rain.len(), CELL_COUNT);
+    assert_eq!(view.rain.len(), CUBE_CELL_COUNT);
     let sample = world.telemetry();
     assert!((sample.water - total).abs() < 1e-12);
     assert!((sample.water_by_face.iter().sum::<f64>() - total).abs() < 1e-9);
@@ -932,7 +933,7 @@ fn wading_halves_the_motor_budget_at_unit_depth() {
             o.mode = Mode::Seeking;
             o.hunger_memory = 1.0;
             o.reserve = 0.0;
-            cell_of(&o.pos)
+            cell_of(Topology::Cube, Scale::ONE, &o.pos)
         };
         world.state.fields.w[cell.index()] = depth;
         // Keep the cell's food below the feeding threshold so the mode stays Seeking.
@@ -997,9 +998,9 @@ fn report_water_by_band_after_two_hours() {
         pop_min = pop_min.min(world.population());
         if tick % 20 == 0 {
             samples += 1;
-            let ponds = CellId::all()
+            let ponds = CellId::all(Topology::Cube, Scale::ONE)
                 .filter(|c| {
-                    c.face() == Face::Top && (1..15).contains(&c.cx()) && (1..15).contains(&c.cy())
+                    c.face(Topology::Cube, Scale::ONE) == Face::Top && (1..15).contains(&c.cx(Topology::Cube, Scale::ONE)) && (1..15).contains(&c.cy(Topology::Cube, Scale::ONE))
                 })
                 .filter(|c| world.state.fields.w[c.index()] > 0.5)
                 .count();
@@ -1016,17 +1017,17 @@ fn report_water_by_band_after_two_hours() {
     let w = &world.state.fields.w;
     let (mut soil, mut foliage, mut canopy, mut floor) = ((0.0, 0), (0.0, 0), (0.0, 0), (0.0, 0));
     let mut top_cells: Vec<(f64, CellId)> = Vec::new();
-    for cell in CellId::all() {
-        let h = cell.center().embed()[1];
+    for cell in CellId::all(Topology::Cube, Scale::ONE) {
+        let h = Topology::Cube.embed(Scale::ONE, &cell.center(Topology::Cube, Scale::ONE))[1];
         let i = cell.index();
-        if cell.face() == Face::Top {
+        if cell.face(Topology::Cube, Scale::ONE) == Face::Top {
             canopy.0 += w[i];
             canopy.1 += 1;
             top_cells.push((w[i], cell));
         } else if h < -0.33 {
             soil.0 += w[i];
             soil.1 += 1;
-            if cell.cy() == 15 {
+            if cell.cy(Topology::Cube, Scale::ONE) == 15 {
                 floor.0 += w[i];
                 floor.1 += 1;
             }
@@ -1039,8 +1040,8 @@ fn report_water_by_band_after_two_hours() {
     top_cells.sort_by(|a, b| b.0.total_cmp(&a.0));
     let pools_floor = (0..64).filter(|_| true).count();
     let _ = pools_floor;
-    let floor_cells: Vec<f64> = CellId::all()
-        .filter(|c| c.face() != Face::Top && c.cy() == 15)
+    let floor_cells: Vec<f64> = CellId::all(Topology::Cube, Scale::ONE)
+        .filter(|c| c.face(Topology::Cube, Scale::ONE) != Face::Top && c.cy(Topology::Cube, Scale::ONE) == 15)
         .map(|c| w[c.index()])
         .collect();
     let floor_pools = floor_cells.iter().filter(|&&x| x > 0.5).count();
@@ -1069,7 +1070,7 @@ fn report_water_by_band_after_two_hours() {
         top_cells
             .iter()
             .take(3)
-            .map(|(x, c)| (format!("{x:.3}"), c.cx(), c.cy()))
+            .map(|(x, c)| (format!("{x:.3}"), c.cx(Topology::Cube, Scale::ONE), c.cy(Topology::Cube, Scale::ONE)))
             .collect::<Vec<_>>()
     );
     println!(
@@ -1252,12 +1253,12 @@ fn frozen_feeder(diet: f32, p: f64, f: f64, d: f64, de: f64) -> (World, Organism
         .map(|(id, _)| id)
         .next()
         .expect("one founder");
-    let cell = CellId::new(Face::Front, 4, 4);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 4, 4);
     {
         let o = world.state.organisms.get_mut(id).expect("alive");
         o.genome.diet = diet;
         o.phenotype = decode(&o.genome, &world.state.config.organism);
-        o.pos = cell.center();
+        o.pos = cell.center(Topology::Cube, Scale::ONE);
         o.reserve = 0.0;
         o.hunger_memory = 1.0;
         o.mode = Mode::Seeking;
@@ -1441,7 +1442,7 @@ fn the_depth_term_points_up_the_side_faces_and_vanishes_on_top() {
         // Moving along `up` really raises the embedded height.
         let low = SurfacePoint::new(face, 32.0, 40.0);
         let higher = SurfacePoint::new(face, 32.0 + up.x * 4.0, 40.0 + up.y * 4.0);
-        assert!(higher.embed()[1] > low.embed()[1]);
+        assert!(Topology::Cube.embed(Scale::ONE, &higher)[1] > Topology::Cube.embed(Scale::ONE, &low)[1]);
     }
     // A canopy-bound organism low on a wall heads up; a soil-bound one high up heads down.
     // No food anywhere (no producers, no litter), so nothing stops it to feed on the way.
@@ -1507,14 +1508,14 @@ fn sensing_reaches_the_configured_depth_and_finds_food_two_cells_out() {
     assert_eq!(sense_depth(4.0), 1);
     assert_eq!(sense_depth(12.0), 3);
     assert_eq!(sense_depth(0.0), 1);
-    let rings = sense_rings(&FieldGraph::new());
-    let origin = CellId::new(Face::Front, 8, 8);
+    let rings = sense_rings(&FieldGraph::new(Topology::Cube, Scale::ONE));
+    let origin = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8);
     assert_eq!(rings[origin.index()][0].len(), 4);
     assert_eq!(rings[origin.index()][1].len(), 8);
     assert_eq!(rings[origin.index()][2].len(), 12);
     for (d, ring) in rings[origin.index()].iter().enumerate() {
         for c in ring {
-            let dist = (i32::from(c.cx()) - 8).abs() + (i32::from(c.cy()) - 8).abs();
+            let dist = (i32::from(c.cx(Topology::Cube, Scale::ONE)) - 8).abs() + (i32::from(c.cy(Topology::Cube, Scale::ONE)) - 8).abs();
             assert_eq!(
                 dist as usize,
                 d + 1,
@@ -1524,17 +1525,17 @@ fn sensing_reaches_the_configured_depth_and_finds_food_two_cells_out() {
         }
     }
     // A seam-adjacent cell's rings cross onto the neighbouring face and never the rim.
-    let corner = CellId::new(Face::Front, 15, 15);
+    let corner = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 15, 15);
     assert!(
         rings[corner.index()][0]
             .iter()
-            .any(|c| c.face() == Face::Right)
+            .any(|c| c.face(Topology::Cube, Scale::ONE) == Face::Right)
     );
     assert!(
         rings[corner.index()]
             .iter()
             .flatten()
-            .all(|c| c.face() != Face::Top)
+            .all(|c| c.face(Topology::Cube, Scale::ONE) != Face::Top)
     );
 
     // Food two cells away, none adjacent: a 6 px sensor turns toward it; a 4 px one
@@ -1564,7 +1565,7 @@ fn sensing_reaches_the_configured_depth_and_finds_food_two_cells_out() {
             .map(|(id, _)| id)
             .next()
             .expect("founder");
-        let here = CellId::new(Face::Front, 8, 8);
+        let here = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8);
         {
             let o = world.state.organisms.get_mut(id).expect("alive");
             o.genome.sense = sense;
@@ -1573,14 +1574,14 @@ fn sensing_reaches_the_configured_depth_and_finds_food_two_cells_out() {
             o.genome.drives.turn_noise = 0.0;
             o.genome.drives.w_depth = 0.0;
             o.phenotype = decode(&o.genome, &world.state.config.organism);
-            o.pos = here.center();
+            o.pos = here.center(Topology::Cube, Scale::ONE);
             o.heading = Vec2::new(1.0, 0.0);
             o.reserve = 0.0;
             o.hunger_memory = 1.0;
             o.mode = Mode::Seeking;
         }
         // Rich cells straight "up" the chart, two hops away, nothing at one hop.
-        world.state.fields.p[CellId::new(Face::Front, 8, 6).index()] = 1.5;
+        world.state.fields.p[CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 6).index()] = 1.5;
         let (extent, speed_max) = {
             let o = world.state.organisms.get(id).expect("alive");
             (o.phenotype.extent, o.phenotype.speed_max)
@@ -1647,7 +1648,7 @@ fn a_swimmer_ignores_pools_while_a_wader_is_slowed() {
             o.mode = Mode::Seeking;
             o.hunger_memory = 1.0;
             o.reserve = 0.0;
-            cell_of(&o.pos)
+            cell_of(Topology::Cube, Scale::ONE, &o.pos)
         };
         world.state.fields.w[cell.index()] = depth;
         world.state.fields.p[cell.index()] = 0.0;
@@ -1790,7 +1791,7 @@ fn telemetry_counts_each_form_and_its_mean_height() {
             .organisms
             .iter()
             .filter(|(_, o)| o.phenotype.form == form as u8)
-            .map(|(_, o)| o.pos.embed()[1])
+            .map(|(_, o)| Topology::Cube.embed(Scale::ONE, &o.pos)[1])
             .sum::<f64>()
             / f64::from(sample.population_by_form[form]);
         assert!((sample.mean_height_by_form[form] - expected).abs() < 1e-12);
@@ -1842,8 +1843,8 @@ fn report_fauna_by_form_after_a_short_run() {
     // Edible litter on the soil floor at tick 0, against the feeding threshold.
     {
         let f = &world.state.fields;
-        let floor: Vec<f64> = CellId::all()
-            .filter(|c| c.face() != Face::Top && c.cy() == 15)
+        let floor: Vec<f64> = CellId::all(Topology::Cube, Scale::ONE)
+            .filter(|c| c.face(Topology::Cube, Scale::ONE) != Face::Top && c.cy(Topology::Cube, Scale::ONE) == 15)
             .map(|c| edible_detritus(f.d[c.index()], f.de[c.index()], e_r))
             .collect();
         let mean = floor.iter().sum::<f64>() / floor.len() as f64;
@@ -1900,16 +1901,16 @@ fn report_fauna_by_form_after_a_short_run() {
                     "    t {:>4.0}s form {form}: n {} h {:+.2} R/Rmax {:.2} E/Emax {:.2} m_h {:.2} modes rest/seek/feed {:?} D_eff here {:.3} P here {:.3} fed {}",
                     tick as f64 * DT,
                     members.len(),
-                    mean(&|o| o.pos.embed()[1]),
+                    mean(&|o| Topology::Cube.embed(Scale::ONE, &o.pos)[1]),
                     mean(&|o| o.reserve / o.phenotype.reserve_max),
                     mean(&|o| o.energy / o.phenotype.energy_max),
                     mean(&|o| o.hunger_memory),
                     modes,
                     mean(&|o| {
-                        let c = cell_of(&o.pos).index();
+                        let c = cell_of(Topology::Cube, Scale::ONE, &o.pos).index();
                         edible_detritus(f.d[c], f.de[c], e_r)
                     }),
-                    mean(&|o| f.p[cell_of(&o.pos).index()]),
+                    mean(&|o| f.p[cell_of(Topology::Cube, Scale::ONE, &o.pos).index()]),
                     members.iter().filter(|o| o.fed_this_tick).count(),
                 );
             }
@@ -1989,11 +1990,11 @@ fn report_fauna_by_form_after_a_short_run() {
     }
     let fields = &world.state.fields;
     let (mut soil, mut foliage, mut canopy) = (0.0, 0.0, 0.0);
-    for cell in CellId::all() {
+    for cell in CellId::all(Topology::Cube, Scale::ONE) {
         let f = fields.f[cell.index()];
-        if cell.face() == Face::Top {
+        if cell.face(Topology::Cube, Scale::ONE) == Face::Top {
             canopy += f;
-        } else if cell.center().embed()[1] < -0.33 {
+        } else if Topology::Cube.embed(Scale::ONE, &cell.center(Topology::Cube, Scale::ONE))[1] < -0.33 {
             soil += f;
         } else {
             foliage += f;
@@ -2039,9 +2040,9 @@ fn the_training_body_is_the_unit_adult_the_fixtures_founded() {
     let mut world = World::new(cfg.clone()).expect("a world with no founders");
     let before = world.state.external_material_in;
 
-    let cell = CellId::new(Face::Top, 3, 8);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Top, 3, 8);
     let id = world
-        .found_training_animal(cell.center(), Vec2::new(1.0, 0.0))
+        .found_training_animal(cell.center(Topology::Cube, Scale::ONE), Vec2::new(1.0, 0.0))
         .expect("an empty world has room");
 
     // What the fixture's own `place` computed, written out here independently.
@@ -2050,8 +2051,8 @@ fn the_training_body_is_the_unit_adult_the_fixtures_founded() {
     let o = world.state.organisms.get(id).expect("the body is there");
     assert_eq!(o.genome, genome, "the genotype is the founder at hue 0.5");
     assert_eq!(o.phenotype, phenotype);
-    assert_eq!(o.pos, cell.center());
-    assert_eq!(cell_of(&o.pos), cell);
+    assert_eq!(o.pos, cell.center(Topology::Cube, Scale::ONE));
+    assert_eq!(cell_of(Topology::Cube, Scale::ONE, &o.pos), cell);
     assert_eq!(o.heading, Vec2::new(1.0, 0.0));
     assert_eq!(o.ou, Vec2::ZERO);
     assert_eq!(o.born_tick, 0);
@@ -2104,7 +2105,7 @@ fn a_refused_neural_founding_leaves_the_world_exactly_as_it_was() {
     world.state.quiet.policy = crate::quiet::QuietPolicy::PostBirthPauseV1;
     let policy = crate::neural::Policy::new(crate::neural::Gru32::zeros());
     let err = world
-        .found_neural_animal(CellId::new(Face::Top, 8, 8).center(), Vec2::new(1.0, 0.0), policy)
+        .found_neural_animal(CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8).center(Topology::Cube, Scale::ONE), Vec2::new(1.0, 0.0), policy)
         .expect_err("the quiet extension refuses a neural animal");
     assert!(err.contains("quiet extension"), "{err}");
     world.state.quiet.policy = crate::quiet::QuietPolicy::Off;
@@ -2124,11 +2125,11 @@ fn founding_past_the_capacity_cap_is_refused_by_name() {
     let mut world = World::new(cfg).expect("a tiny world");
     for _ in 0..2 {
         world
-            .found_training_animal(CellId::new(Face::Top, 8, 8).center(), Vec2::new(1.0, 0.0))
+            .found_training_animal(CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8).center(Topology::Cube, Scale::ONE), Vec2::new(1.0, 0.0))
             .expect("inside the cap");
     }
     let err = world
-        .found_training_animal(CellId::new(Face::Top, 8, 8).center(), Vec2::new(1.0, 0.0))
+        .found_training_animal(CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8).center(Topology::Cube, Scale::ONE), Vec2::new(1.0, 0.0))
         .expect_err("the third exceeds the cap");
     assert!(err.contains("2 of its 2 organisms"), "{err}");
     world.check_invariants().expect("the world stays consistent");

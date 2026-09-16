@@ -6,6 +6,7 @@
 //! boundary for every authored frame and midframe on every near-corner slot of every side
 //! at ± the full family wind budget, physically supported within nine pixels, and must
 //! change nothing about atlas texels, growth or any interior column.
+use cubarium_surface::{Scale, Topology};
 use super::*;
 use crate::art::{ArtPack, CORNER_CAP_OWNER_HOSTS, CORNER_CAP_OWNER_V1};
 use cubarium_surface::unfold;
@@ -53,7 +54,7 @@ fn rgb8(c: &Canvas) -> Frame {
     f
 }
 /// Largest linear channel difference and where it is.
-fn worst(a: &Canvas, b: &Canvas) -> (f32, Option<(Face, u8, u8)>) {
+fn worst(a: &Canvas, b: &Canvas) -> (f32, Option<(Face, u16, u16)>) {
     let mut best = 0.0f32;
     let mut at = None;
     for face in Face::ALL {
@@ -108,7 +109,7 @@ fn all_corner_slots() -> Vec<TallColumn> {
         .into_iter()
         .filter(|f| *f != Face::Top)
         .flat_map(|face| {
-            [0u8, 1, 14, 15].into_iter().flat_map(move |cx| {
+            [0u16, 1, 14, 15].into_iter().flat_map(move |cx| {
                 (0..2).map(move |pick| TallColumn {
                     face,
                     cx,
@@ -369,9 +370,9 @@ fn flagged_cap_pixels_lie_within_nine_physical_pixels_of_the_centre_and_the_owne
                             for x in 0..64 {
                                 if with.get(f, x, y) != without.get(f, x, y) {
                                     assert!(
-                                        unfold(
+                                        unfold(Topology::Cube, 
                                             centre,
-                                            SurfacePoint::pixel_center(f, x as u8, y as u8),
+                                            SurfacePoint::pixel_center(Topology::Cube, f, x as u16, y as u16),
                                             9.0
                                         )
                                         .is_some(),
@@ -468,21 +469,21 @@ fn the_top_corner_pixel_trace_of_the_selected_left_column_matches_the_review() {
 fn the_flag_does_not_touch_growth_or_what_the_presenter_observes() {
     use crate::present::PRODUCER_SATURATION;
     use cubarium_core::view::RenderView;
-    use cubarium_surface::CELL_COUNT;
+    use cubarium_surface::CUBE_CELL_COUNT;
     let mut flagged = ArtPresenter::new(pack());
     let mut plain = ArtPresenter::new(legacy_pack());
     for tick in WIND_QUIET_TICK..WIND_QUIET_TICK + 400 {
         let v = RenderView {
             tick,
-            producer: vec![10.0 * PRODUCER_SATURATION; CELL_COUNT],
-            detritus: vec![SOIL_SCALE; CELL_COUNT],
-            fruit: vec![0.0; CELL_COUNT],
-            wood: vec![0.0; CELL_COUNT],
-            plant_reserve: vec![0.0; CELL_COUNT],
-            dead_wood: vec![0.0; CELL_COUNT],
-            carrion: vec![0.0; CELL_COUNT],
-            water: vec![0.0; CELL_COUNT],
-            rain: vec![0.0; CELL_COUNT],
+            producer: vec![10.0 * PRODUCER_SATURATION; CUBE_CELL_COUNT],
+            detritus: vec![SOIL_SCALE; CUBE_CELL_COUNT],
+            fruit: vec![0.0; CUBE_CELL_COUNT],
+            wood: vec![0.0; CUBE_CELL_COUNT],
+            plant_reserve: vec![0.0; CUBE_CELL_COUNT],
+            dead_wood: vec![0.0; CUBE_CELL_COUNT],
+            carrion: vec![0.0; CUBE_CELL_COUNT],
+            water: vec![0.0; CUBE_CELL_COUNT],
+            rain: vec![0.0; CUBE_CELL_COUNT],
             producer_max: 10.0,
             wood_max: 0.6,
             organisms: Vec::new(),
@@ -492,7 +493,7 @@ fn the_flag_does_not_touch_growth_or_what_the_presenter_observes() {
         for i in 0..flagged.columns().len() {
             assert_eq!(flagged.tall_growth_of(i), plain.tall_growth_of(i));
         }
-        for cell in CellId::all() {
+        for cell in CellId::all(Topology::Cube, Scale::ONE) {
             assert_eq!(flagged.stage_of(cell), plain.stage_of(cell));
         }
     }

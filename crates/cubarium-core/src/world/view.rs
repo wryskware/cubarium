@@ -1,4 +1,5 @@
-use cubarium_surface::{CELL_COUNT, CellId, cell_of};
+use cubarium_surface::{Scale, Topology};
+use cubarium_surface::{CUBE_CELL_COUNT, CellId, cell_of};
 
 use crate::config::WorldConfig;
 use crate::events::LifeEvent;
@@ -97,9 +98,9 @@ impl World {
     /// Every cell's material fields plus its live organism count, for the observer's
     /// field dump. Cells are in `CellId` index order, 1,280 entries each.
     pub fn field_dump(&self) -> FieldDump {
-        let mut organisms = vec![0u16; CELL_COUNT];
+        let mut organisms = vec![0u16; CUBE_CELL_COUNT];
         for (_, o) in self.state.organisms.iter() {
-            organisms[cell_of(&o.pos).index()] += 1;
+            organisms[cell_of(Topology::Cube, Scale::ONE, &o.pos).index()] += 1;
         }
         let fields = &self.state.fields;
         let eco = &self.state.ecology;
@@ -124,7 +125,7 @@ impl World {
     /// cell indices with `None` at the open rim. Static for the life of the world: an
     /// analyzer reads it once and computes graph distances without this crate.
     pub fn cell_neighbors(&self) -> Vec<[Option<u16>; 4]> {
-        CellId::all()
+        CellId::all(Topology::Cube, Scale::ONE)
             .map(|cell| {
                 let n = self.graph.neighbors(cell);
                 std::array::from_fn(|e| n[e].map(|c| c.0))
@@ -145,7 +146,7 @@ impl World {
             }
         }
         let mut population_by_face = [0u32; 5];
-        let mut occupied = vec![false; CELL_COUNT];
+        let mut occupied = vec![false; CUBE_CELL_COUNT];
         let mut occupied_cells = 0;
         let mut escrows = 0;
         let (mut organism_material, mut organism_energy) = (0.0, 0.0);
@@ -156,8 +157,8 @@ impl World {
             population_by_face[o.pos.face.index()] += 1;
             let form = (o.phenotype.form as usize).min(7);
             population_by_form[form] += 1;
-            height_by_form[form] += o.pos.embed()[1];
-            let cell = cell_of(&o.pos).index();
+            height_by_form[form] += Topology::Cube.embed(Scale::ONE, &o.pos)[1];
+            let cell = cell_of(Topology::Cube, Scale::ONE, &o.pos).index();
             if !occupied[cell] {
                 occupied[cell] = true;
                 occupied_cells += 1;
@@ -177,8 +178,8 @@ impl World {
         let mut producer_by_face = [0.0f64; 5];
         let mut detritus_by_face = [0.0f64; 5];
         let mut water_by_face = [0.0f64; 5];
-        for cell in CellId::all() {
-            let face = cell.face().index();
+        for cell in CellId::all(Topology::Cube, Scale::ONE) {
+            let face = cell.face(Topology::Cube, Scale::ONE).index();
             producer_by_face[face] += fields.p[cell.index()];
             detritus_by_face[face] += fields.d[cell.index()];
             water_by_face[face] += fields.w[cell.index()];
@@ -307,7 +308,7 @@ impl World {
         let o = self.state.organisms.get(id)?;
         let cfg = &self.state.config;
         let dt = crate::DT;
-        let here = cubarium_surface::cell_of(&o.pos).index();
+        let here = cubarium_surface::cell_of(Topology::Cube, Scale::ONE, &o.pos).index();
         let wading = 1.0 + self.state.fields.w[here] * (1.0 - o.phenotype.swim);
         let bill = crate::motor::MotorBill::of(o, cfg);
         let u_full =

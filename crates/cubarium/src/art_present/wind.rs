@@ -1,5 +1,6 @@
 //! Shared wind field and bend budgets.
 
+use cubarium_surface::{Scale, Topology};
 use super::*;
 
 // --- Wind ----------------------------------------------------------------------------
@@ -150,7 +151,7 @@ pub fn wind_chart(face: Face, u: f64, v: f64) -> Vec2 {
 /// put a branch cut somewhere on the surface, and the plants either side of that cut would
 /// lean in opposite directions.
 pub fn wind_phase(point: SurfacePoint) -> f64 {
-    let p = point.embed();
+    let p = Topology::Cube.embed(Scale::ONE, &point);
     let phase = 0.5 * (p[0] + p[2]);
     if phase.is_finite() { phase } else { 0.0 }
 }

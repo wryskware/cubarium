@@ -1,6 +1,7 @@
 //! Read-only bridge from genuine settlement events to paired spatial observations.
 //! The counter map retains only living full IDs; it is never fed back into World.
 
+use cubarium_surface::{Scale, Topology};
 use super::recovery;
 use anyhow::{Context, Result, ensure};
 use cubarium_core::{
@@ -8,7 +9,7 @@ use cubarium_core::{
     hunter::{AttemptOutcome, body_point, measure_contact},
 };
 use cubarium_surface::{
-    CELL_COUNT, CellId, ChartImage, Face, FieldGraph, MAX_SEAMS, cell_of, chart_images,
+    CUBE_CELL_COUNT, CellId, ChartImage, Face, FieldGraph, MAX_SEAMS, cell_of, chart_images,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -16,8 +17,8 @@ pub const ON_ARMS: [usize; 2] = [3, 5];
 
 /// Radius three in the existing surface field graph, including the center.
 pub fn neighborhoods() -> Vec<Vec<usize>> {
-    let graph = FieldGraph::new();
-    CellId::all()
+    let graph = FieldGraph::new(Topology::Cube, Scale::ONE);
+    CellId::all(Topology::Cube, Scale::ONE)
         .map(|center| {
             let mut seen = BTreeSet::from([center]);
             let mut frontier = vec![center];
@@ -39,10 +40,10 @@ pub fn neighborhoods() -> Vec<Vec<usize>> {
 
 pub fn counts(states: [&WorldState; recovery::ARMS]) -> recovery::Counts {
     states.map(|state| {
-        let mut counts = vec![0; CELL_COUNT];
+        let mut counts = vec![0; CUBE_CELL_COUNT];
         for (id, organism) in state.organisms.iter() {
             if !state.hunters.contains(id) {
-                counts[cell_of(&organism.pos).index()] += 1;
+                counts[cell_of(Topology::Cube, Scale::ONE, &organism.pos).index()] += 1;
             }
         }
         counts
@@ -59,7 +60,7 @@ pub fn local_forms(
         let mut counts = [0; 8];
         for (id, organism) in state.organisms.iter() {
             if !state.hunters.contains(id)
-                && cells.binary_search(&cell_of(&organism.pos).index()).is_ok()
+                && cells.binary_search(&cell_of(Topology::Cube, Scale::ONE, &organism.pos).index()).is_ok()
             {
                 counts[usize::from(organism.phenotype.form).min(7)] += 1;
             }
@@ -131,25 +132,25 @@ mod tests {
     #[test]
     fn graph_neighborhoods_cross_seams_but_not_the_open_rim() {
         let neighborhoods = neighborhoods();
-        let interior = CellId::new(Face::Front, 8, 8);
+        let interior = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 8);
         assert_eq!(neighborhoods[interior.index()].len(), 25);
-        let rim = CellId::new(Face::Front, 8, 15);
+        let rim = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 15);
         assert_eq!(neighborhoods[rim.index()].len(), 16);
         assert!(
             neighborhoods[rim.index()]
                 .iter()
-                .all(|&i| CellId(i as u16).face() == Face::Front)
+                .all(|&i| CellId(i as u16).face(Topology::Cube, Scale::ONE) == Face::Front)
         );
-        let seam = CellId::new(Face::Front, 8, 0);
+        let seam = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 8, 0);
         assert!(
             neighborhoods[seam.index()]
                 .iter()
-                .any(|&i| CellId(i as u16).face() == Face::Top)
+                .any(|&i| CellId(i as u16).face(Topology::Cube, Scale::ONE) == Face::Top)
         );
-        let vertex = CellId::new(Face::Front, 0, 0);
+        let vertex = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 0, 0);
         let faces: BTreeSet<_> = neighborhoods[vertex.index()]
             .iter()
-            .map(|&i| CellId(i as u16).face().index())
+            .map(|&i| CellId(i as u16).face(Topology::Cube, Scale::ONE).index())
             .collect();
         assert_eq!(
             faces,
@@ -177,8 +178,8 @@ mod tests {
             })
             .unwrap();
         assert_eq!(captures.len(), 1);
-        assert_eq!(captures[0].cell, cell_of(&evidence.prey_pos).index());
-        assert_ne!(captures[0].cell, cell_of(&evidence.hunter_pos).index());
+        assert_eq!(captures[0].cell, cell_of(Topology::Cube, Scale::ONE, &evidence.prey_pos).index());
+        assert_ne!(captures[0].cell, cell_of(Topology::Cube, Scale::ONE, &evidence.hunter_pos).index());
         assert_eq!(captures[0].id.attempt, 1);
         assert_eq!(before, cubarium_core::snapshot::state_hash(&state));
         assert!(
@@ -260,7 +261,7 @@ mod tests {
         let (state, _, _) = capture_fixture();
         let states = [&state; 6];
         let counts = counts(states);
-        let all: Vec<_> = (0..CELL_COUNT).collect();
+        let all: Vec<_> = (0..CUBE_CELL_COUNT).collect();
         let forms = local_forms(states, &all);
         let expected = (state.organisms.len() - state.hunters.members.len()) as u32;
         for arm in 0..6 {
@@ -313,7 +314,7 @@ impl CaptureAudit {
                 .collect(),
             images: std::array::from_fn(|face| {
                 let mut images = Vec::new();
-                chart_images(
+                chart_images(Topology::Cube, 
                     Face::from_index(face as u8).unwrap(),
                     MAX_SEAMS,
                     &mut images,
@@ -413,7 +414,7 @@ impl CaptureAudit {
                     "invalid capture inventory"
                 );
                 ensure!(
-                    evidence.prey_pos.is_canonical() && evidence.hunter_pos.is_canonical(),
+                    evidence.prey_pos.is_canonical(Topology::Cube) && evidence.hunter_pos.is_canonical(Topology::Cube),
                     "capture position is not finite/canonical"
                 );
                 ensure!(
@@ -497,7 +498,7 @@ impl CaptureAudit {
                 );
                 captures.push(recovery::Capture {
                     arm,
-                    cell: cell_of(&evidence.prey_pos).index(),
+                    cell: cell_of(Topology::Cube, Scale::ONE, &evidence.prey_pos).index(),
                     id: recovery::CaptureId {
                         hunter_slot: hunter.slot,
                         hunter_generation: hunter.generation,

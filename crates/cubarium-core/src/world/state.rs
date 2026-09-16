@@ -1,6 +1,7 @@
+use cubarium_surface::{Scale, Topology};
 use serde::{Deserialize, Serialize};
 
-use cubarium_surface::CELL_COUNT;
+use cubarium_surface::CUBE_CELL_COUNT;
 
 use crate::accounting::{EnergyCorrection, EnergyLedgers, Ledger};
 use crate::care::CareState;
@@ -129,9 +130,9 @@ impl WorldState {
             ("d", &self.fields.d),
             ("de", &self.fields.de),
         ] {
-            if v.len() != CELL_COUNT {
+            if v.len() != CUBE_CELL_COUNT {
                 return Err(format!(
-                    "field {name} has {} cells, expected {CELL_COUNT}",
+                    "field {name} has {} cells, expected {CUBE_CELL_COUNT}",
                     v.len()
                 ));
             }
@@ -220,7 +221,7 @@ impl WorldState {
             if !o.hunger_memory.is_finite() {
                 return Err(format!("{who}: hunger memory is not finite"));
             }
-            if !o.pos.is_canonical() {
+            if !o.pos.is_canonical(Topology::Cube) {
                 return Err(format!("{who}: position {:?} is not canonical", o.pos));
             }
             if !o.heading.is_finite() || (o.heading.length() - 1.0).abs() > HEADING_TOLERANCE {

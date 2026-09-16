@@ -10,6 +10,7 @@
 //! The reference for the discrete answers is `cube_proto::cross_seam` itself: this file
 //! pins the continuous `travel` to the discrete contract the shim already owns and tests.
 
+use cubarium_surface::Topology;
 use cubarium_surface::{
     Edge, Face, FACE_EXTENT, GEOM_EPS, SurfacePoint, TangentMap, Vec2, cross_seam,
     pixel_neighbor, travel,
@@ -21,7 +22,7 @@ const SIDE_FACES: [Face; 4] = [Face::Front, Face::Right, Face::Back, Face::Left]
 /// unit displacement pointing straight out through that edge. Half a pixel of the step is
 /// spent reaching the chart boundary and half is spent past it, so the landing pixel is
 /// the neighbouring chart's edge pixel.
-fn start_and_step(face: Face, edge: Edge, t: u8) -> (SurfacePoint, Vec2) {
+fn start_and_step(face: Face, edge: Edge, t: u16) -> (SurfacePoint, Vec2) {
     let s = f64::from(t) + 0.5;
     match edge {
         Edge::Top => (SurfacePoint::new(face, s, 0.5), Vec2::new(0.0, -1.0)),
@@ -56,14 +57,14 @@ fn every_connected_half_edge_lands_where_cross_seam_says() {
     let mut checked = 0;
     for face in Face::ALL {
         for edge in Edge::ALL {
-            for t in 0..64u8 {
-                let Some((nf, nx, ny, turns)) = cross_seam(face, edge, t) else {
+            for t in 0..64u16 {
+                let Some((nf, nx, ny, turns)) = cross_seam(face, edge, t as u8) else {
                     continue;
                 };
                 let (start, step) = start_and_step(face, edge, t);
-                let tr = travel(start, step);
+                let tr = travel(Topology::Cube, start, step);
                 assert_eq!(tr.end.face, nf, "{face:?}/{edge:?} t={t}: face");
-                assert_eq!(tr.end.pixel(), (nx, ny), "{face:?}/{edge:?} t={t}: pixel");
+                assert_eq!(tr.end.pixel(Topology::Cube), (u16::from(nx), u16::from(ny)), "{face:?}/{edge:?} t={t}: pixel");
                 assert_eq!(
                     tr.map,
                     TangentMap::quarter_turns(turns),
@@ -73,7 +74,7 @@ fn every_connected_half_edge_lands_where_cross_seam_says() {
                 assert_eq!(tr.reflections, 0, "{face:?}/{edge:?} t={t}: reflections");
                 assert_eq!(tr.ties, 0, "{face:?}/{edge:?} t={t}: ties");
                 assert!(!tr.fallback, "{face:?}/{edge:?} t={t}: fallback");
-                assert!(tr.end.is_canonical(), "{face:?}/{edge:?} t={t}: {:?}", tr.end);
+                assert!(tr.end.is_canonical(Topology::Cube), "{face:?}/{edge:?} t={t}: {:?}", tr.end);
                 // One segment in each chart, together exactly the displacement length.
                 assert_eq!(tr.segments.len(), 2, "{face:?}/{edge:?} t={t}: segments");
                 let total: f64 = tr.segments.iter().map(|s| s.length()).sum();
@@ -97,10 +98,10 @@ fn crossing_a_seam_is_invertible() {
             if face.neighbor(edge).is_none() {
                 continue;
             }
-            for t in 0..64u8 {
+            for t in 0..64u16 {
                 let (start, step) = start_and_step(face, edge, t);
-                let out = travel(start, step);
-                let back = travel(out.end, out.map.apply(-step));
+                let out = travel(Topology::Cube, start, step);
+                let back = travel(Topology::Cube, out.end, out.map.apply(-step));
                 assert_eq!(back.end.face, start.face, "{face:?}/{edge:?} t={t}");
                 assert_close(back.end.u, start.u, 1e-12, "u after return");
                 assert_close(back.end.v, start.v, 1e-12, "v after return");
@@ -123,9 +124,9 @@ fn crossing_a_seam_is_invertible() {
 fn the_four_open_bottom_edges_reflect() {
     for face in SIDE_FACES {
         assert!(face.neighbor(Edge::Bottom).is_none(), "{face:?} bottom is open");
-        for t in 0..64u8 {
+        for t in 0..64u16 {
             let (start, step) = start_and_step(face, Edge::Bottom, t);
-            let tr = travel(start, step);
+            let tr = travel(Topology::Cube, start, step);
             assert_eq!(tr.end.face, face, "{face:?} t={t}: reflection changed chart");
             assert_eq!(tr.reflections, 1, "{face:?} t={t}: reflections");
             assert_eq!(tr.crossings, 0, "{face:?} t={t}: crossings");
@@ -164,10 +165,10 @@ fn the_along_edge_parameter_reverses_on_exactly_the_two_twisted_top_seams() {
     for face in Face::ALL {
         for edge in Edge::ALL {
             let Some(seam) = face.neighbor(edge) else { continue };
-            for t in 0..64u8 {
+            for t in 0..64u16 {
                 let (start, step) = start_and_step(face, edge, t);
                 let s = f64::from(t) + 0.5;
-                let tr = travel(start, step);
+                let tr = travel(Topology::Cube, start, step);
                 // Half a pixel past the entry edge, so the entry parameter is unchanged
                 // along that edge and reading it back off the end point is exact.
                 let got = entry_param(seam.edge, tr.end);
@@ -203,8 +204,8 @@ fn the_along_edge_parameter_reverses_on_exactly_the_two_twisted_top_seams() {
 #[test]
 fn pixel_neighbor_matches_the_discrete_contract() {
     for face in Face::ALL {
-        for y in 0..64u8 {
-            for x in 0..64u8 {
+        for y in 0..64u16 {
+            for x in 0..64u16 {
                 for edge in Edge::ALL {
                     let on_edge = match edge {
                         Edge::Top => y == 0,
@@ -212,18 +213,19 @@ fn pixel_neighbor_matches_the_discrete_contract() {
                         Edge::Bottom => y == 63,
                         Edge::Left => x == 0,
                     };
-                    let got = pixel_neighbor(face, x, y, edge);
+                    let got = pixel_neighbor(Topology::Cube, face, x, y, edge);
                     if !on_edge {
                         let (dx, dy) = edge.outward();
                         let want = (
                             face,
-                            (i32::from(x) + dx) as u8,
-                            (i32::from(y) + dy) as u8,
+                            (i32::from(x) + dx) as u16,
+                            (i32::from(y) + dy) as u16,
                         );
                         assert_eq!(got, Some(want), "{face:?} ({x},{y}) {edge:?}");
                     } else {
-                        let t = edge.coord_of(x, y);
-                        let want = cross_seam(face, edge, t).map(|(f, nx, ny, _)| (f, nx, ny));
+                        let t = edge.coord_of(x as u8, y as u8);
+                        let want = cross_seam(face, edge, t)
+                            .map(|(f, nx, ny, _)| (f, u16::from(nx), u16::from(ny)));
                         assert_eq!(got, want, "{face:?} ({x},{y}) {edge:?}");
                     }
                 }
@@ -233,10 +235,10 @@ fn pixel_neighbor_matches_the_discrete_contract() {
     // The rim is the only place a neighbour is missing.
     let mut missing = 0;
     for face in Face::ALL {
-        for x in 0..64u8 {
+        for x in 0..64u16 {
             for edge in Edge::ALL {
-                for y in 0..64u8 {
-                    if pixel_neighbor(face, x, y, edge).is_none() {
+                for y in 0..64u16 {
+                    if pixel_neighbor(Topology::Cube, face, x, y, edge).is_none() {
                         missing += 1;
                         assert_eq!(edge, Edge::Bottom);
                         assert_eq!(y, 63);

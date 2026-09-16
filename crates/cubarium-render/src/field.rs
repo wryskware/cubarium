@@ -1,5 +1,6 @@
 //! Substrate rendering from a scalar field.
 
+use cubarium_surface::{Scale, Topology};
 use crate::Canvas;
 use cube_proto::{FACE_SIZE, Face};
 use cubarium_surface::{Edge, ScalarField, SurfacePoint, cell_of, pixel_neighbor};
@@ -15,17 +16,17 @@ pub fn draw_field(canvas: &mut Canvas, field: &ScalarField, scale: f64, color: [
         return;
     }
     for face in Face::ALL {
-        for y in 0..FACE_SIZE as u8 {
-            for x in 0..FACE_SIZE as u8 {
-                let own = field.get(cell_of(&SurfacePoint::pixel_center(face, x, y)));
+        for y in 0..FACE_SIZE as u16 {
+            for x in 0..FACE_SIZE as u16 {
+                let own = field.get(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y)));
                 let value = if filter {
                     // Weight 4 for the pixel's own cell, 1 for each pixel neighbor's cell,
                     // normalized over the neighbors that exist so the open rim is not dark.
                     let mut sum = own * 4.0;
                     let mut weight = 4.0;
                     for edge in Edge::ALL {
-                        if let Some((nf, nx, ny)) = pixel_neighbor(face, x, y, edge) {
-                            sum += field.get(cell_of(&SurfacePoint::pixel_center(nf, nx, ny)));
+                        if let Some((nf, nx, ny)) = pixel_neighbor(Topology::Cube, face, x, y, edge) {
+                            sum += field.get(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, nf, nx, ny)));
                             weight += 1.0;
                         }
                     }
@@ -51,8 +52,8 @@ mod tests {
     fn sample(canvas: &Canvas) -> Vec<f32> {
         let mut v = Vec::with_capacity(5 * 64 * 64);
         for face in Face::ALL {
-            for y in 0..64u8 {
-                for x in 0..64u8 {
+            for y in 0..64u16 {
+                for x in 0..64u16 {
                     v.push(canvas.get(face, x, y)[0]);
                 }
             }
@@ -62,7 +63,7 @@ mod tests {
 
     #[test]
     fn the_filter_preserves_a_constant_field_everywhere() {
-        let field = ScalarField::constant(3.0);
+        let field = ScalarField::constant(Topology::Cube, Scale::ONE, 3.0);
         let mut filtered = Canvas::new();
         draw_field(&mut filtered, &field, 6.0, [1.0, 1.0, 1.0], true);
         let mut plain = Canvas::new();
@@ -77,15 +78,15 @@ mod tests {
 
     #[test]
     fn values_clamp_at_the_scale_and_zero_stays_black() {
-        let mut field = ScalarField::zeros();
-        field.set(CellId::new(Face::Front, 4, 4), 100.0);
+        let mut field = ScalarField::zeros(Topology::Cube, Scale::ONE);
+        field.set(CellId::new(Topology::Cube, Scale::ONE, Face::Front, 4, 4), 100.0);
         let mut canvas = Canvas::new();
         draw_field(&mut canvas, &field, 6.0, [0.12, 0.5, 0.2], false);
         // The 4x4 pixels of that cell are saturated; everything else is black.
         let mut lit = 0;
         for face in Face::ALL {
-            for y in 0..64u8 {
-                for x in 0..64u8 {
+            for y in 0..64u16 {
+                for x in 0..64u16 {
                     let p = canvas.get(face, x, y);
                     if p != [0.0; 3] {
                         lit += 1;
@@ -101,8 +102,8 @@ mod tests {
 
     #[test]
     fn the_filter_softens_a_cell_edge_without_touching_the_field() {
-        let mut field = ScalarField::zeros();
-        field.set(CellId::new(Face::Front, 4, 4), 6.0);
+        let mut field = ScalarField::zeros(Topology::Cube, Scale::ONE);
+        field.set(CellId::new(Topology::Cube, Scale::ONE, Face::Front, 4, 4), 6.0);
         let before = field.clone();
         let mut canvas = Canvas::new();
         draw_field(&mut canvas, &field, 6.0, [1.0, 1.0, 1.0], true);
@@ -118,7 +119,7 @@ mod tests {
 
     #[test]
     fn a_nonpositive_scale_draws_nothing() {
-        let field = ScalarField::constant(3.0);
+        let field = ScalarField::constant(Topology::Cube, Scale::ONE, 3.0);
         let mut canvas = Canvas::new();
         draw_field(&mut canvas, &field, 0.0, [1.0; 3], true);
         assert!(sample(&canvas).iter().all(|&v| v == 0.0));
@@ -126,10 +127,10 @@ mod tests {
 
     #[test]
     fn a_diffused_deposit_reaches_more_than_one_face() {
-        let graph = FieldGraph::new();
-        let mut field = ScalarField::zeros();
-        let mut scratch = ScalarField::zeros();
-        cubarium_surface::deposit(
+        let graph = FieldGraph::new(Topology::Cube, Scale::ONE);
+        let mut field = ScalarField::zeros(Topology::Cube, Scale::ONE);
+        let mut scratch = ScalarField::zeros(Topology::Cube, Scale::ONE);
+        cubarium_surface::deposit(Topology::Cube, Scale::ONE, 
             &mut field,
             SurfacePoint::new(Face::Front, 62.0, 32.0),
             10.0,
@@ -142,8 +143,8 @@ mod tests {
         draw_field(&mut canvas, &field, 6.0, [0.12, 0.5, 0.2], true);
         let mut faces = std::collections::HashSet::new();
         for face in Face::ALL {
-            for y in 0..64u8 {
-                for x in 0..64u8 {
+            for y in 0..64u16 {
+                for x in 0..64u16 {
                     if canvas.get(face, x, y) != [0.0; 3] {
                         faces.insert(face);
                     }

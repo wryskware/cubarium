@@ -37,6 +37,7 @@
 //! difference between the matched pair, which is the population-level quantity the comparison
 //! is actually about. The limitation is stated here, in the row, and in the result note.
 
+use cubarium_surface::{Scale, Topology};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Mutex;
@@ -284,11 +285,11 @@ fn copy_placements(seed: u64, count: usize) -> Vec<(CellId, Vec2)> {
             let key = 1_000 + i;
             let face = (draw(seed, stream::APEX_PLACEMENT, key, 0) % 5) as u8;
             // Cells 2..=13 on both axes: inside the face, never on a seam row.
-            let x = 2 + (unit(seed, stream::APEX_PLACEMENT, key, 1) * 12.0) as u8;
-            let y = 2 + (unit(seed, stream::APEX_PLACEMENT, key, 2) * 12.0) as u8;
+            let x = 2 + (unit(seed, stream::APEX_PLACEMENT, key, 1) * 12.0) as u16;
+            let y = 2 + (unit(seed, stream::APEX_PLACEMENT, key, 2) * 12.0) as u16;
             let angle = std::f64::consts::TAU * unit(seed, stream::APEX_PLACEMENT, key, 3);
             (
-                CellId::new(Face::from_index(face).unwrap_or(Face::Front), x.min(13), y.min(13)),
+                CellId::new(Topology::Cube, Scale::ONE, Face::from_index(face).unwrap_or(Face::Front), x.min(13), y.min(13)),
                 Vec2::new(angle.cos(), angle.sin()),
             )
         })
@@ -527,7 +528,7 @@ impl Recorder {
             if self.apex_ids.contains(&id) {
                 continue;
             }
-            self.visited.entry(id).or_default().insert(cell_of(&o.pos).index() as u16);
+            self.visited.entry(id).or_default().insert(cell_of(Topology::Cube, Scale::ONE, &o.pos).index() as u16);
         }
     }
 
@@ -707,7 +708,7 @@ fn run_trial(
     let mut copies_founded = 0usize;
     let mut imported: BTreeSet<OrganismId> = BTreeSet::new();
     for (cell, heading) in copy_placements(seed, copies) {
-        let pos = cell.center();
+        let pos = cell.center(Topology::Cube, Scale::ONE);
         let founded = match mix {
             Mix::Neural => world.found_neural_animal(pos, heading, policy.clone()),
             Mix::Legacy => world.found_training_animal(pos, heading),
@@ -1308,7 +1309,7 @@ mod tests {
             assert_eq!(a.len(), 4);
             for ((cell, heading), (cell_b, _)) in a.iter().zip(&b) {
                 assert_eq!(cell, cell_b);
-                let (x, y) = (cell.cx(), cell.cy());
+                let (x, y) = (cell.cx(Topology::Cube, Scale::ONE), cell.cy(Topology::Cube, Scale::ONE));
                 assert!((2..=13).contains(&x) && (2..=13).contains(&y), "{x},{y}");
                 assert!((heading.length() - 1.0).abs() < 1e-12);
             }

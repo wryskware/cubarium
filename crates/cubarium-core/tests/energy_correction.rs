@@ -13,6 +13,7 @@
 //! Nothing here asserts that a migrated world's opening raw totals are accurate. They are
 //! not: compensation begins at migration.
 
+use cubarium_surface::{Scale, Topology};
 use std::path::PathBuf;
 
 use cubarium_core::accounting::{EnergyCorrection, Ledger};
@@ -72,7 +73,7 @@ impl Windowed {
 }
 
 fn target_of(cell: CellId) -> CareTarget {
-    let c = cell.center();
+    let c = cell.center(Topology::Cube, Scale::ONE);
     CareTarget { face: c.face.index() as u8, u: c.u, v: c.v }
 }
 
@@ -268,7 +269,7 @@ fn a_partial_correction_and_an_in_flight_shower_survive_a_restart() {
     for _ in 0..120 {
         original.step();
     }
-    let cell = CellId::new(Face::Front, 6, 9);
+    let cell = CellId::new(Topology::Cube, Scale::ONE, Face::Front, 6, 9);
     let tick = original.tick();
     assert!(matches!(
         original.apply_care(&command(1, tick, CareKind::Feed, cell)).outcome,

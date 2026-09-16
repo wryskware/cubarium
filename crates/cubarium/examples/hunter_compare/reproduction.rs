@@ -19,6 +19,7 @@
 //! The bookkeeping is bounded: one open escrow per living parent, a size cache pruned to the
 //! living lineage, and scalar counters. No event history is retained.
 
+use cubarium_surface::{Scale, Topology};
 use anyhow::{Result, bail, ensure};
 use cubarium_core::hunter::{FundingBlocked, Reproduction};
 use cubarium_core::organism::DeathCause;
@@ -1004,7 +1005,7 @@ mod tests {
         phenotype.speed_max = 0.0;
         phenotype.structure_adult = 1.8;
         let id = world.state.organisms.insert(Organism {
-            pos: pos.canonicalize(),
+            pos: pos.canonicalize(Topology::Cube),
             heading: Vec2::new(1.0, 0.0),
             ou: Vec2::ZERO,
             structure: 1.8,
@@ -1619,7 +1620,7 @@ mod tests {
             phenotype.speed_max = 0.0;
             phenotype.structure_adult = 0.5;
             world.state.organisms.insert(Organism {
-                pos: grasp.canonicalize(),
+                pos: grasp.canonicalize(Topology::Cube),
                 heading: Vec2::new(1.0, 0.0),
                 ou: Vec2::ZERO,
                 structure: 0.5,

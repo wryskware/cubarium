@@ -12,6 +12,7 @@
 //! seconds 0–18), its quiet interval (18–30), then the next packet's rise. Spatial delays
 //! shift those boundaries slightly at each root.
 
+use cubarium_surface::{Scale, Topology};
 use std::path::PathBuf;
 
 use cube_proto::Frame;
@@ -25,7 +26,7 @@ use cubarium::present::PRODUCER_SATURATION;
 use cubarium::sink::png::write_net_png;
 use cubarium_core::view::RenderView;
 use cubarium_render::Canvas;
-use cubarium_surface::{CELL_COUNT, CellId, Face};
+use cubarium_surface::{CUBE_CELL_COUNT, CellId, Face};
 
 const PRODUCER_MAX: f64 = 10.0;
 const FRAMES_PER_TICK: u64 = 3;
@@ -42,15 +43,15 @@ fn saturation() -> f64 {
 fn bare_view(tick: u64) -> RenderView {
     RenderView {
         tick,
-        producer: vec![0.0; CELL_COUNT],
-        detritus: vec![0.0; CELL_COUNT],
-        fruit: vec![0.0; CELL_COUNT],
-        wood: vec![0.0; CELL_COUNT],
-        plant_reserve: vec![0.0; CELL_COUNT],
-        dead_wood: vec![0.0; CELL_COUNT],
-        carrion: vec![0.0; CELL_COUNT],
-        water: vec![0.0; CELL_COUNT],
-        rain: vec![0.0; CELL_COUNT],
+        producer: vec![0.0; CUBE_CELL_COUNT],
+        detritus: vec![0.0; CUBE_CELL_COUNT],
+        fruit: vec![0.0; CUBE_CELL_COUNT],
+        wood: vec![0.0; CUBE_CELL_COUNT],
+        plant_reserve: vec![0.0; CUBE_CELL_COUNT],
+        dead_wood: vec![0.0; CUBE_CELL_COUNT],
+        carrion: vec![0.0; CUBE_CELL_COUNT],
+        water: vec![0.0; CUBE_CELL_COUNT],
+        rain: vec![0.0; CUBE_CELL_COUNT],
         producer_max: PRODUCER_MAX,
         wood_max: 0.6,
         organisms: Vec::new(),
@@ -59,14 +60,14 @@ fn bare_view(tick: u64) -> RenderView {
 
 /// The first rank-2 slot of `species` on `face`, away from the face edges.
 fn slot_for(face: Face, species: &str, band: Band) -> CellId {
-    CellId::all()
+    CellId::all(Topology::Cube, Scale::ONE)
         .find(|&c| {
-            c.face() == face
+            c.face(Topology::Cube, Scale::ONE) == face
                 && band_of(c) == band
                 && plant_cap(band, c) == Some(2)
                 && species_of(band, c) == species
-                && (2..=13).contains(&c.cx())
-                && (2..=13).contains(&c.cy())
+                && (2..=13).contains(&c.cx(Topology::Cube, Scale::ONE))
+                && (2..=13).contains(&c.cy(Topology::Cube, Scale::ONE))
         })
         .unwrap_or_else(|| panic!("a rank-2 {species} slot on {face:?}"))
 }
@@ -101,8 +102,8 @@ fn spiretree_before_after_capture() {
     for (kind, column) in [("bare", bare), ("vine", vined)] {
         let view_at = |tick: u64| {
             let mut v = bare_view(tick);
-            for cell in CellId::all() {
-                if cell.face() == column.face && cell.cx() == column.cx && band_of(cell) == Band::Foliage {
+            for cell in CellId::all(Topology::Cube, Scale::ONE) {
+                if cell.face(Topology::Cube, Scale::ONE) == column.face && cell.cx(Topology::Cube, Scale::ONE) == column.cx && band_of(cell) == Band::Foliage {
                     v.producer[cell.index()] = saturation();
                 }
             }
@@ -174,8 +175,8 @@ fn wind_and_growth_capture() {
     // A second lanternstalk on Right, fed late so its authored growth clip plays in wind.
     let pilot = slot_for(Face::Right, "lanternstalk", Band::Foliage);
     // A reed: a deep pool in a bottom foliage cell of Left.
-    let reed = CellId::all()
-        .find(|&c| c.face() == Face::Left && plant_cap(Band::Water, c) == Some(2) && c.cy() == 10)
+    let reed = CellId::all(Topology::Cube, Scale::ONE)
+        .find(|&c| c.face(Topology::Cube, Scale::ONE) == Face::Left && plant_cap(Band::Water, c) == Some(2) && c.cy(Topology::Cube, Scale::ONE) == 10)
         .expect("a reed slot");
     let column = a_column(Face::Front, true);
     let column2 = a_column(Face::Back, false);
@@ -195,8 +196,8 @@ fn wind_and_growth_capture() {
         }
         v.water[reed.index()] = 1.2;
         for c in [column, column2] {
-            for cell in CellId::all() {
-                if cell.face() == c.face && cell.cx() == c.cx && band_of(cell) == Band::Foliage {
+            for cell in CellId::all(Topology::Cube, Scale::ONE) {
+                if cell.face(Topology::Cube, Scale::ONE) == c.face && cell.cx(Topology::Cube, Scale::ONE) == c.cx && band_of(cell) == Band::Foliage {
                     v.producer[cell.index()] = saturation();
                 }
             }
