@@ -11,6 +11,7 @@
 //! rule the note says it is** (the assessment tests, which simulate nothing).
 
 use cubarium_core::World;
+use cubarium_core::hunter::PursuitStop;
 use cubarium_search::calibrate;
 use cubarium_search::census::{
     self, Assessment, DEPTH_BANDS, DEPTH_CONTROL, DEPTH_TREATMENT, RunFacts, Verdict,
@@ -188,7 +189,7 @@ fn a_control_run_reproduces_the_ordinary_harness_world() {
         let m = reference.metrics.as_ref().expect("the reference completed");
         let mv = reference.movement.as_ref().expect("the reference recorded movement");
 
-        let row = census::run_one(candidate, seed, arm, DEPTH_CONTROL, protocol)
+        let row = census::run_one(candidate, seed, arm, DEPTH_CONTROL, protocol, PursuitStop::ReachEnvelope)
             .expect("the control run");
 
         assert_eq!(row.final_state_hash, m.final_state_hash, "{candidate}/{seed}/arm {arm}: hash");
@@ -217,10 +218,10 @@ fn a_treatment_run_is_a_different_world_and_a_control_run_is_not() {
         apex_founders: 0,
         apex_introduce_tick: 500,
     };
-    let control = census::run_one("fast-leaf", 1001, 0, DEPTH_CONTROL, protocol).expect("control");
-    let again = census::run_one("fast-leaf", 1001, 0, DEPTH_CONTROL, protocol).expect("control");
+    let control = census::run_one("fast-leaf", 1001, 0, DEPTH_CONTROL, protocol, PursuitStop::ReachEnvelope).expect("control");
+    let again = census::run_one("fast-leaf", 1001, 0, DEPTH_CONTROL, protocol, PursuitStop::ReachEnvelope).expect("control");
     let treatment =
-        census::run_one("fast-leaf", 1001, 0, DEPTH_TREATMENT, protocol).expect("treatment");
+        census::run_one("fast-leaf", 1001, 0, DEPTH_TREATMENT, protocol, PursuitStop::ReachEnvelope).expect("treatment");
     assert_eq!(control.final_state_hash, again.final_state_hash, "the control is deterministic");
     assert_ne!(
         control.final_state_hash, treatment.final_state_hash,
@@ -244,7 +245,7 @@ fn a_treatment_run_is_a_different_world_and_a_control_run_is_not() {
 #[test]
 fn the_plan_still_carries_rs_two_levels_at_arm_zero() {
     let seeds = [1001u64, 1002, 1003, 1004, 1005, 1006];
-    let jobs = census::plan(&seeds);
+    let jobs = census::plan(&seeds, census::LADDER_ARM, &census::DEPTH_LEVELS);
     let mut keys: Vec<(String, u32, u64, u32)> = jobs
         .iter()
         .map(|j| (j.candidate.to_string(), j.depth.to_bits(), j.seed, j.arm))

@@ -49,7 +49,7 @@ use std::time::Instant;
 
 use cubarium_core::encounter::ApexEncounterEvent;
 use cubarium_core::genome::decode;
-use cubarium_core::hunter::{FixedHunterProfile, HunterEvent};
+use cubarium_core::hunter::{FixedHunterProfile, HunterEvent, PursuitStop};
 use cubarium_core::organism::DeathCause;
 use cubarium_core::{BodyBudget, LifeEvent, OrganismId, World};
 use cubarium_surface::cell_of;
@@ -104,9 +104,17 @@ pub fn depth_band(depth: f64) -> usize {
 /// further up, exactly the confound this ladder exists to remove.
 pub const DEPTH_LEVELS: [f32; 6] = [0.10, 0.20, 0.30, 0.40, 0.55, 0.75];
 
-/// The one apex arm this campaign runs. R measured 1-2 prey deaths per run by predation in
-/// every cell and wrote that nothing there turned on the apex; the three arms bought its
-/// 36-row hash reproduction, and this campaign buys three more rungs with them instead.
+/// The arm workstream Y's ladder ran, and this command's default. R measured 1-2 prey deaths
+/// per run by predation in every cell and wrote that nothing there turned on the apex; the
+/// three arms bought its 36-row hash reproduction, and Y bought three more rungs with them
+/// instead.
+///
+/// Y then re-read R's own rows by arm and found that R's `fast-leaf` result — both the
+/// lineage and the grazer cost — lives in the arms Y did not run. `--arm` exists so workstream
+/// XY2 can run the same ladder at arm 2 without re-implementing it. Moving the arm is **the
+/// apex-arm treatment**: it changes predator presence, predator count, predation deaths,
+/// carrion recycling and every feedback they carry at once, and is never a statement about
+/// predation alone.
 pub const LADDER_ARM: u32 = 0;
 
 /// A body is a tick-0 **founder** or a **descendant**. Two values, and identity decides
@@ -358,19 +366,65 @@ pub struct Job {
 /// The whole design, in a fixed order, so the same matrix always produces the same rows in the
 /// same places whatever order the workers finish in.
 ///
-/// Workstream Y's ladder: [`DEPTH_LEVELS`] x [`CONFIGURATIONS`] x the seeds x [`LADDER_ARM`].
-/// R's two levels at arm 0 are still cells of it, which is what makes the row-for-row
-/// reproduction of R's arm-0 rows possible.
-pub fn plan(seeds: &[u64]) -> Vec<Job> {
-    let mut jobs = Vec::with_capacity(seeds.len() * DEPTH_LEVELS.len() * CONFIGURATIONS.len());
-    for depth in DEPTH_LEVELS {
+/// Workstream Y's ladder: `levels` x [`CONFIGURATIONS`] x the seeds x one `arm`. R's two levels
+/// at the same arm are still cells of it, which is what makes the row-for-row reproduction of
+/// R's rows possible.
+///
+/// `levels` is [`DEPTH_LEVELS`] for the whole ladder and a subset of it for a run whose only
+/// job is to reproduce R's rows at the levels R ran; `arm` is [`LADDER_ARM`] for Y's campaign
+/// and 2 for XY2's.
+pub fn plan(seeds: &[u64], arm: u32, levels: &[f32]) -> Vec<Job> {
+    let mut jobs = Vec::with_capacity(seeds.len() * levels.len() * CONFIGURATIONS.len());
+    for depth in levels {
         for candidate in CONFIGURATIONS {
             for seed in seeds {
-                jobs.push(Job { candidate, depth, seed: *seed, arm: LADDER_ARM });
+                jobs.push(Job { candidate, depth: *depth, seed: *seed, arm });
             }
         }
     }
     jobs
+}
+
+/// Parse a comma-separated `--levels` list against [`DEPTH_LEVELS`]. A level off the ladder is
+/// refused rather than added: this command measures Y's six rungs or a subset of them, and a
+/// seventh rung would be a different campaign.
+pub fn parse_levels(text: &str) -> Result<Vec<f32>, String> {
+    let mut out: Vec<f32> = Vec::new();
+    for token in text.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        let value: f32 = token.parse().map_err(|e| format!("--levels {token}: {e}"))?;
+        let Some(rung) = DEPTH_LEVELS.iter().copied().find(|r| r.to_bits() == value.to_bits())
+        else {
+            return Err(format!("--levels {token} is not one of the ladder's rungs {DEPTH_LEVELS:?}"));
+        };
+        if !out.iter().any(|r| r.to_bits() == rung.to_bits()) {
+            out.push(rung);
+        }
+    }
+    if out.is_empty() {
+        return Err("--levels named no rung".into());
+    }
+    // Always bottom to top, whatever order they were typed in, so the rows and the tables are
+    // in the ladder's own order.
+    out.sort_by_key(|r| DEPTH_LEVELS.iter().position(|d| d.to_bits() == r.to_bits()));
+    Ok(out)
+}
+
+/// The pursuit predicate a run puts its worlds on, by name.
+///
+/// **The shipped rule is the reach envelope** (`PursuitStop::ReachEnvelope`, schema 17, adopted
+/// by workstream V), and it is this flag's default, as every other command in this binary
+/// defaults to the shipped rule. `half-space` is `PursuitStop::ForwardHalfSpace`, the rule
+/// retained rows written before V's adoption ran under, and it exists so a row from before the
+/// adoption can be reproduced rather than only compared. At an arm with no apex the rule is
+/// unreachable and the two names produce the same world.
+pub fn parse_pursuit_stop(text: &str) -> Result<PursuitStop, String> {
+    match text {
+        "reach-envelope" | "reach_envelope" => Ok(PursuitStop::ReachEnvelope),
+        "half-space" | "forward_half_space" | "half_space" => Ok(PursuitStop::ForwardHalfSpace),
+        other => Err(format!(
+            "--pursuit-stop {other} is not one of reach-envelope, half-space"
+        )),
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -476,6 +530,13 @@ pub struct Row {
     pub depth: f64,
     /// `control` or `treatment`.
     pub level: String,
+    /// The pursuit predicate this run's worlds ran under, by the core's own name:
+    /// `reach_envelope` (shipped, schema 17) or `forward_half_space` (the rule R's retained
+    /// rows ran). Rows written before this field existed carry no `pursuit_stop`, which is
+    /// why it is `default`ed rather than required, and it is never compared against a retained
+    /// row that does not carry it.
+    #[serde(default)]
+    pub pursuit_stop: String,
     pub build_id: String,
     pub protocol: Protocol,
     pub move_cost: f64,
@@ -1000,6 +1061,7 @@ pub fn run_one(
     arm: u32,
     depth: f32,
     protocol: Protocol,
+    stop: PursuitStop,
 ) -> Result<Row, String> {
     let start = Instant::now();
     protocol.validate()?;
@@ -1028,6 +1090,13 @@ pub fn run_one(
     let move_cost = config.organism.move_cost;
 
     let mut world = World::new(config).map_err(|e| format!("world creation refused: {e}"))?;
+    // A transient, set before the first step and never persisted. At an arm with no apex it is
+    // unreachable and both names give the same world; at an arm with one it is the difference
+    // between R's rows and the world the cube runs.
+    world.set_pursuit_stop(stop);
+    if world.pursuit_stop() != stop {
+        return Err(format!("the world refused the pursuit rule {}", stop.as_str()));
+    }
     let skimmer_founders_by_form = world
         .state
         .organisms
@@ -1087,6 +1156,7 @@ pub fn run_one(
         arm,
         depth: f64::from(depth),
         level: if depth == DEPTH_CONTROL { "control".into() } else { "treatment".into() },
+        pursuit_stop: stop.as_str().to_string(),
         build_id: BUILD_ID.to_string(),
         protocol,
         move_cost,
@@ -1570,9 +1640,11 @@ pub const ROW_REPRODUCTION_EXCLUDED: [&str; 2] = ["build_id", "elapsed_ms"];
 /// Compare every field R's row carries, except [`ROW_REPRODUCTION_EXCLUDED`], against this
 /// campaign's row for the same `(candidate, seed, arm, depth)`.
 ///
-/// Arm 0 has no predator, so these 24 rows are also a second measurement of workstream V's
-/// pursuit-predicate adoption (schema 17): if it reaches anything without a predator, they
-/// say so.
+/// At arm 0 there is no predator, so the rows Y checked were also a second measurement of
+/// workstream V's pursuit-predicate adoption (schema 17): if it reached anything without a
+/// predator, they would have said so. At an arm with a predator the rule **is** reachable, so a
+/// row checked there must be run under the rule the retained row ran (`--pursuit-stop
+/// half-space`) or the comparison is between two conditions rather than two builds.
 fn check_rows_against(rows: &[Row], path: &Path) -> RowReproduction {
     let mut out = RowReproduction {
         source: path.display().to_string(),
@@ -1682,9 +1754,24 @@ pub struct Args {
     )]
     pub retained: String,
     /// R's retained rows. Every row of this campaign at a level R also ran must reproduce
-    /// R's arm-0 row of the same cell, field for field.
+    /// R's row of the same `(candidate, seed, arm, depth)`, field for field. Empty skips the
+    /// check, for a run whose condition R never ran and which therefore has no target.
     #[arg(long, default_value = "runs/ecology-v1-depth-census/runs.jsonl")]
-    pub census_rows: PathBuf,
+    pub census_rows: String,
+    /// The apex arm every trial runs. R's design had three; Y's ladder ran
+    /// [`LADDER_ARM`] and XY2's runs 2. It is **the apex-arm treatment**: predator presence,
+    /// predator count, predation, carrion recycling and their feedbacks move together.
+    #[arg(long, default_value_t = LADDER_ARM)]
+    pub arm: u32,
+    /// Which of the ladder's rungs to run, comma-separated. All six is the ladder; a subset is
+    /// a run whose only job is to reproduce retained rows at the levels they were run at.
+    #[arg(long, default_value = "0.10,0.20,0.30,0.40,0.55,0.75")]
+    pub levels: String,
+    /// The pursuit predicate every world runs under: `reach-envelope` is the shipped rule
+    /// (schema 17, workstream V), `half-space` is the rule retained rows written before that
+    /// adoption ran. At an arm with no apex it is unreachable and the two agree.
+    #[arg(long, default_value = "reach-envelope")]
+    pub pursuit_stop: String,
     #[arg(long, default_value = "runs/ecology-v1-depth-ladder")]
     pub out: PathBuf,
 }
@@ -1694,7 +1781,7 @@ pub fn run_command(args: Args) -> Result<(), String> {
     let protocol = Protocol {
         horizon_ticks: args.ticks,
         sample_every: args.sample_every,
-        apex_founders: 0,
+        apex_founders: args.arm,
         apex_introduce_tick: args.introduce_tick,
     };
     let retained: Vec<PathBuf> = args
@@ -1704,13 +1791,20 @@ pub fn run_command(args: Args) -> Result<(), String> {
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
         .collect();
+    let census_rows = match args.census_rows.trim() {
+        "" => None,
+        p => Some(PathBuf::from(p)),
+    };
     command(
         args.seeds,
         args.workers,
         protocol,
         args.wall_seconds,
         &retained,
-        &args.census_rows,
+        census_rows.as_deref(),
+        args.arm,
+        &parse_levels(&args.levels)?,
+        parse_pursuit_stop(&args.pursuit_stop)?,
         &args.out,
     )
 }
@@ -1723,18 +1817,25 @@ pub fn command(
     protocol: Protocol,
     wall_seconds: u64,
     retained: &[PathBuf],
-    census_rows: &Path,
+    census_rows: Option<&Path>,
+    arm: u32,
+    levels: &[f32],
+    stop: PursuitStop,
     out: &Path,
 ) -> Result<(), String> {
     if workers == 0 || workers > 8 {
         return Err("--workers must be in 1..=8 for this brief's compute cap".into());
     }
+    if !ARMS.contains(&arm) {
+        return Err(format!("apex arm {arm} is not one of {ARMS:?}"));
+    }
     let seeds = calibrate::SeedSet::Training.seeds(seed_count)?;
-    let jobs = plan(&seeds);
+    let jobs = plan(&seeds, arm, levels);
     println!("build {BUILD_ID}");
-    println!("seeds {seeds:?}   arm {LADDER_ARM}   configurations {CONFIGURATIONS:?}");
+    println!("seeds {seeds:?}   arm {arm}   configurations {CONFIGURATIONS:?}");
     println!(
-        "ladder {DEPTH_LEVELS:?}   control {DEPTH_CONTROL}   arm {LADDER_ARM} only   trials {}",
+        "ladder {levels:?}   control {DEPTH_CONTROL}   arm {arm} only   pursuit {}   trials {}",
+        stop.as_str(),
         jobs.len()
     );
     println!(
@@ -1768,7 +1869,7 @@ pub fn command(
                     }
                     let job = jobs[i];
                     let protocol = Protocol { apex_founders: job.arm, ..protocol };
-                    match run_one(job.candidate, job.seed, job.arm, job.depth, protocol) {
+                    match run_one(job.candidate, job.seed, job.arm, job.depth, protocol, stop) {
                         Ok(row) => {
                             if let Ok(mut w) = writer.lock()
                                 && let Ok(text) = serde_json::to_string(&row)
@@ -1822,7 +1923,8 @@ pub fn command(
 
     let reproduction: Vec<Reproduction> =
         retained.iter().map(|p| check_against(&disk, p)).collect();
-    let row_reproduction = vec![check_rows_against(&disk, census_rows)];
+    let row_reproduction: Vec<RowReproduction> =
+        census_rows.map(|p| vec![check_rows_against(&disk, p)]).unwrap_or_default();
     print_reproduction(&reproduction, &row_reproduction);
     let clean = reproduction.iter().all(|r| r.mismatches.is_empty() && r.matched > 0)
         && row_reproduction.iter().all(|r| r.mismatches.is_empty() && r.matched > 0);
@@ -1836,11 +1938,17 @@ pub fn command(
                 .collect()
         };
         let control = facts(DEPTH_CONTROL);
-        for depth in DEPTH_LEVELS.into_iter().skip(1) {
-            assessments.push((
-                format!("{candidate} @ {depth:.2}"),
-                Assessment::of(&control, &facts(depth)),
-            ));
+        for depth in levels.iter().copied() {
+            if depth.to_bits() == DEPTH_CONTROL.to_bits() {
+                continue;
+            }
+            let rung = facts(depth);
+            // A rung this run did not produce is not a verdict of "no"; it is not a cell.
+            if rung.is_empty() || control.is_empty() {
+                continue;
+            }
+            assessments
+                .push((format!("{candidate} @ {depth:.2}"), Assessment::of(&control, &rung)));
         }
     }
 
@@ -1908,7 +2016,15 @@ fn print_reproduction(checks: &[Reproduction], rows: &[RowReproduction]) {
             println!("| | | **{m}** | |");
         }
     }
-    println!("\n### R's own arm-0 rows, field for field\n");
+    if rows.is_empty() {
+        println!(
+            "\n### R's own rows, field for field\n\nNo target: this run's condition is one R \
+             never ran, so `--census-rows` was left empty rather than pointed at rows it \
+             cannot be expected to reproduce."
+        );
+        return;
+    }
+    println!("\n### R's own rows, field for field\n");
     println!("| R's rows | rows checked | matched | fields compared | not in that file | excluded |");
     println!("| --- | --- | --- | --- | --- | --- |");
     for r in rows {
