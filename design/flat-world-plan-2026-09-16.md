@@ -31,10 +31,11 @@ Read-only audit: no source file was changed to write it.
 5. **Candidate first flat world: 640×360, upscaled 3×, at world scale S = 2** —
    sprite tile 32 px, field cell 8 px. Gated on FW-0's measured board numbers,
    not fixed here. 320×180 is the cube world stretched and wastes the panel.
-6. `world_scale` S multiplies every length. Hold `cell = 4·S` and set the cylinder
-   radius `r = w/(2π·32·S)`, and every raster from 320×180 to 1920×1080 has the
-   same 3,600 cells, the same noise scale and the same ecology — weather included,
-   because the cylinder's area is exactly the cube's 20 units².
+6. `world_scale` S multiplies every length. Hold `cell = 4·S` and embed on an
+   isotropic cylinder (`r = w/(2π·32·S)`, `y_e = (h/2 − v)/(32·S)`), and every
+   raster from 320×180 to 1920×1080 has the same 3,600 cells, the same noise scale
+   and the same ecology — weather defaults included, because the ring covers 87.0%
+   of the sphere against the cube's 83.3%.
 7. Sim and render share **one host loop**, so the budget is
    `20·tick_ms + fps·render_ms <= 1000 ms`, not two independent budgets. Render
    work is `∝ S²`; the tick is S-invariant.
@@ -382,7 +383,7 @@ the consumers; this is the corrected list.
 | **classic controller** | `height: o.pos.embed()[1]`, `up: up_direction(o.pos.face)` (`world/step.rs:449-460`) | both become `Topology` methods; flat `up` is the constant `(0, −1)` |
 | **neural controller** | the same two fields in `SelfState` (`world/step.rs:3068-3079`) | identical treatment; a policy trained on cube height reads the same channel |
 | **depth preference** | `obs.up * (w_depth · (h_pref − obs.height))` steers every organism (`controller.rs:228-235`) | works unchanged *given* a topology height and up; with a wrong height it silently steers the whole population into a wall |
-| noise sampling | 3D noise on `[-1,1]^3` (`habitat.rs:43-75`) | **the same wave sum on a cylinder** (below): seamless across the wrap by construction, no periodic-noise work, and arc length per pixel is `1/(32S)` by choice of radius |
+| noise sampling | 3D noise on `[-1,1]^3` (`habitat.rs:43-75`) | **the same wave sum on a cylinder** (below): seamless across the wrap by construction, no periodic-noise work, and one pixel is `1/(32S)` embedded units on **both** axes, so patches are round |
 | **weather blobs** | orbital: `center` rotated about `axis` at `rate` rad/tick, plus a per-minute random-walk tilt (`habitat.rs:110-196`); sampled by `dot(b.center, dir)` against an angular cap (`habitat.rs:198-225`) | **unchanged — see §5a.** On the cylinder embedding `normalize()` preserves azimuth and maps height monotonically to latitude, so `Weather::new`, `advance` and `sample` all work verbatim. No new model, no new validation, no RNG change |
 | band thresholds | `Canopy` iff `h >= 1.0` — true only on the Top face (`art_present/habitat.rs:380`) | needs a `canopy_top` threshold. **No value can be validated from current code**; propose `0.67` as an explicit new default for review, not as a derived number |
 | detritus fall / downhill | gravity's tangential component vanishes on the level Top face, so `downhill` is `None` there (`field.rs:135-151`, `design/stratified-world.md:47-52`): **the cube canopy deliberately never drains**, and the bottom row of the side faces has nothing below it | **decided: the flat world mirrors both exceptions.** `downhill(c) = None` when `cy == 0`, otherwise the neighbour at `(cx, cy+1)`. The top cell row is the canopy and holds its water and detritus exactly as the cube's level Top does; the bottom row has no cell below it and keeps its litter, exactly as the cube's rim row does. No toggle, no new config |
@@ -402,58 +403,66 @@ raster. Recommend keeping the cap and raising `founders` proportionally.
 
 ## 5a. The cylinder embedding, and why weather needs no change
 
-The ring embeds as a **cylinder**, which is the single decision that makes the
-whole weather system carry over untouched:
+The ring embeds as an **isotropic cylinder** — one pixel is `1/(32·S)` embedded
+units on *both* axes:
 
-> `θ = 2π·u/w`, `r = w / (2π·32·S)`, `y = 1 − 2v/h`,
-> `embed(p) = [r·cos θ, y, r·sin θ]`
+> `θ = 2π·u/w`, `r = w / (2π·32·S)`, `y_e = (h/2 − v) / (32·S)`,
+> `embed(p) = [r·cos θ, y_e, r·sin θ]`
 
-with `y` in slot 1 because that is where the cube puts height
-(`habitat.rs:94`, `p[1]`). The radius is chosen so **arc length per pixel is
-`1/(32·S)` embedded units** — the cube's feature scale — so the habitat wave sum
-(`habitat.rs:43-75`) samples at the cube's frequency and is **seamless across the
-wrap by construction**: `u = 0` and `u = w` are the same point in 3D. No periodic
-noise, no seeded tiling, no special case. This replaces §6's former "condition 1";
-the `S` divisor is now inside `r`.
+with the vertical in slot 1 because that is where the cube puts height
+(`habitat.rs:94`, `p[1]`). The radius makes arc length per pixel `1/(32·S)`, the
+cube's feature scale, and `y_e` uses the same divisor, so the habitat wave sum
+(`habitat.rs:43-75`) samples at the cube's frequency in every direction and is
+**seamless across the wrap by construction**: `u = 0` and `u = w` are the same
+point in 3D. No periodic noise, no seeded tiling, no special case. This replaces
+§6's former "condition 1"; the `S` divisor is now inside `r` and `y_e`.
+
+**`embed()` and `height()` are different functions on a ring, and that is the
+point.** `Topology::height(p) = 1 − 2v/h` stays exactly as §5 decided and drives
+light, moisture, the bands, `downhill` and both controllers' `height` channel;
+`embed()` drives *position* — noise and weather — and nothing else. They coincide
+on the cube, where height *is* `embed()[1]`, which is why `habitat.rs:94` could
+read the embedding directly; on a ring the two must be asked for separately.
+
+**Decision, 2026-09-16: the anisotropic variant is rejected.** Reusing
+`y = 1 − 2v/h` inside `embed()` would have stretched every noise patch and every
+shower `90/32 = 2.81×` vertically at the 16:9 ladder. The stratified design needs
+height only as a **scalar**, and there is no reason for the picture to stretch.
+**The visible effect of the decision: habitat patches and showers are round, and
+a shower crosses the world as a moving cell rather than reading as a horizontal
+band.**
 
 **Weather is unchanged.** `normalize()` of a cylinder point preserves azimuth and
-maps `y` monotonically to latitude, so the existing spherical blob model —
+maps `y_e` monotonically to latitude, so the existing spherical blob model —
 `Weather::new`, `advance` with its orbit and per-minute walk, and `sample` with
 its angular cap — runs verbatim on `habitat.positions`. **No draw changes, so RNG
 stream parity is trivially exact** rather than something to engineer; a
 stream-parity test is still worth writing, but it should pass on day one. The
-previous revision's planar blob model and its extra `WorldState::validate` checks
-are deleted.
+earlier planar blob model and its extra `WorldState::validate` checks are deleted.
 
-**The defaults transfer exactly, and that is not a coincidence.** The cylinder's
-lateral area is `2πr × 2 = (w/32S) × 2`, which on §6's 16:9 ladder is `10 × 2 =
-20` embedded units² — **precisely the cube's `5 × 2 × 2 = 20`**, at every S. So
-`blobs_per_channel` stays **3** and `amplitude` stays as it is; the previous
-revision's derived "3 → 8" is retracted.
+**The numbers, at 320×180 and S = 1** (`r = 1.59155`, `H_e = h/(32S) = 5.625`, so
+`y_e ∈ [−2.8125, +2.8125]`):
 
-**The distortion, stated and accepted for v1.** Two effects, both consequences of
-using one embedding for both height and position:
+| quantity | ring (isotropic) | cube | note |
+|---|---|---|---|
+| latitude span | `±60.50°` | ±90° less the missing bottom face | was `±32.15°` when anisotropic |
+| share of the sphere the world occupies | **87.0%** | 83.3% (5 of 6 faces' directions) | within 4 points |
+| a `blob_radius_deg = 55` cap | 21.3% of the sphere | 21.3% | the config is unchanged |
+| **world covered per blob** | **24.5%** | **25.6%** | within 5% — so `blobs_per_channel` stays **3** and `amplitude` stays as it is |
+| lateral area | `2πr · H_e = 56.25` units² | 20 units² | intrinsic area is 2.81× the cube's, but it is the *solid angle* that sets blob coverage, and that matches |
 
-- *Latitude compression.* With `r = 1.5915` and `y ∈ [−1, 1]` the world occupies
-  only `±32.15°` of latitude against a full `360°` of longitude. A default
-  `blob_radius_deg = 55` therefore spans the whole height while covering about 15%
-  of the width: **showers read as horizontal bands rather than round cells.** In
-  *area* terms the cap is well matched (a 55° cap is 21% of the sphere against the
-  world's 53%), so coverage is right and only the shape is wrong.
-  `blob_radius_deg` is the knob if a shower reads too tall.
-- *Poleward slowing.* `dφ/dy = r/(r² + y²)` is `0.628` at the equator and `0.451`
-  at `y = ±1`, so a blob drifts about 28% slower in latitude near the top and
-  bottom rows than in the middle.
+The area row is why the earlier "3 → 8" derivation was wrong in both directions:
+intrinsic surface area is the wrong frame for a model that lives on the unit
+sphere after `normalize()`. The solid-angle comparison above is the right one, and
+it says the cube's weather defaults transfer to the ring untouched.
 
-Both are accepted for the first version. The same compression makes the
-**embedding anisotropic** — a noise feature of a given embedded size spans
-`32S` px horizontally but `90S` px vertically at the ladder, a `90/32 = 2.81×`
-vertical stretch, so habitat patches read as horizontal bands too. That suits a
-stratified side view, and it is the price of `y = 1 − 2v/h`. If it is ever
-unwanted, the fix is one line and touches nothing else: `Topology::height()` is
-already separate from `embed()` (§5), so `embed`'s `y` can become
-`(h/2 − v)/(32S)` for an isotropic cylinder while `height()` keeps `1 − 2v/h`.
-**Flagged for Wrysk, not changed here.**
+**One distortion remains, stated and accepted for v1.** `dφ/dy_e = r/(r² + y_e²)`
+falls from `0.6283` at the equator to `0.1524` at `y_e = ±2.8125`, so a blob whose
+orbit carries it over the top or bottom rows sweeps through them about **4.1×
+faster in pixels** than it crosses the middle of the world. Showers therefore move
+quickly across the canopy and the soil floor and linger in the foliage band. That
+is accepted for the first version; `weather.periods_min` and `blob_radius_deg` are
+the knobs if it reads badly, and nothing about it needs a code change.
 
 ## 6. World resolution: the trade, and the recommendation
 
@@ -845,3 +854,13 @@ complicating it, which was the stated reason for the change.
 
 Repair 1's items 4 and 6, and repair 2's items 2 and 4, are marked in place as
 superseded, so the historical sections are not mistaken for current state.
+
+**Amended 2026-09-16, after this table was written:** Wrysk chose the isotropic
+embedding that item 1's entry above had flagged and left untaken. `embed()`'s
+vertical is now `y_e = (h/2 − v)/(32·S)`, not `1 − 2v/h`, so this row's figures —
+the `±32.15°` latitude span, the `2πr × 2 = 20` area, the 28% poleward slowing and
+the "showers read as bands" conclusion — are **superseded by §5a's recomputed
+numbers**. The blob defaults still transfer unchanged (`blobs_per_channel` 3), but
+for the solid-angle reason §5a now gives rather than the area coincidence recorded
+here. Reason for the record: the stratified design needs height only as a scalar,
+and there is no reason for the picture to stretch.
