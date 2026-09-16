@@ -175,8 +175,8 @@ as much, eats about twice as often, ends the prey population about 2 % lower,
 one apex reached 97 % of its minimum reproduction age, and a new
 `GraspUnmapped` outcome appears in 5 of 969 attempts where a charging body's
 grasp lands off the surface at the open rim. It does **not** make the apex
-viable: all 32 still starve at 12.9 % of their bill and readiness overlap
-stays zero.
+viable: all 32 still starve (usable energy earned 18.5 % of the whole bill
+by E's ratio) and readiness overlap stays zero.
 
 ## R — the skimmer at depth 0.55 in a reproducing world: refuted, a trade not an addition
 
@@ -237,7 +237,7 @@ minutes — is there a depth that rescues the skimmer's lineage without taking
 the grazer's horizon population? — plus splitting the ledger's margin bins by
 generation and recording form-3 served material by channel.
 
-## S — a plant-only preconditioned opening: no age removes the crossings; one age changes the founders' fate
+## S — a plant-only preconditioned opening: no tested age removes the crossings; one age changes the founders' fate
 
 Full note: [ecology-v1-precondition-2026-09-16.md](ecology-v1-precondition-2026-09-16.md);
 frames [ecology-v1-precondition-2026-09-16.png](assets/ecology-v1-precondition-2026-09-16.png)
@@ -406,26 +406,32 @@ practice, and the world-level change is small and gate-clean.
 
 ## What this does and does not establish
 
-- **Established by measurement:** the apex's pursuit stopping predicate is
-  the cause of its near-zero strike motion (held 89 → 5 %, captures +76 %,
-  ledger not worse), and once it charges the next term is the turn radius
-  its grasp sets; the ES optimiser and update are faithful and the residence
-  variation they see is real and two orders of magnitude too small, with the
-  adapter's turn deadband the measured place weights lose their effect; the
-  skimmer's depth rescues its lineage and pays for it out of the grazer, in
-  both configurations; no plant-only age removes the ungrazed depletion
-  crossings, one age (48,000 ticks) makes every grazer founder breed, and
-  every arm converges to the same grazed standing crop whatever it opened on.
+- **Established by measurement:** the apex's pursuit stopping predicate
+  suppresses its paid burst (held 89 → 5 %; the capture gain is an
+  exploratory replication; the usable earned share of the bill rises 11.1 →
+  18.5 %), and once it charges the next term is the turn radius its grasp
+  sets; the ES update is reproduced exactly and correlated-direction
+  cancellation is not where variation is lost, candidate variation is real
+  and useful residence is still small (about 18× below a route-follower),
+  and the adapter's turn deadband is a measured clipping site and the leading
+  adapter hypothesis; the skimmer's depth rescues its lineage and pays for it
+  out of the grazer, in both configurations; no *tested* plant-only age
+  removes the ungrazed depletion crossings, one age (48,000 ticks) makes every
+  grazer founder breed in a much greener, still-transient coupled field, and
+  every arm converges to the same grazed coupled state whatever it opened on.
 - **Established by T:** under the inertial model the corrected apex closes
-  the gap, reaches prey it never could, and lives past its reproduction age
-  gate, still starving at a fifth of its bill; the world absorbs the model
-  with every gate kept and a 6 % leaner `fast-leaf`.
-- **Not established:** whether the apex can ever fund itself (the reserve
-  stock fraction is now the first refusing term); whether a wider turn deadband lets a
-  policy express residence (a fresh campaign under a new protocol, not run);
-  whether some skimmer depth between 0.10 and 0.55 rescues the lineage without
-  the grazer's loss (a ladder, not run); what a §11 seeded at the grazed
-  standing crop would do (a different measurement from S's).
+  the gap and reaches prey it never could, two members pass the reproduction
+  age threshold, and all 32 still starve at 27 % of their bill by E's ratio;
+  the world absorbs the model with every gate kept and a 6 % leaner
+  `fast-leaf`; the apex arm is not isolated from the world change.
+- **Not established:** the estimator's variance, the pair count and the rank
+  reduction (untested, not ruled out); whether the apex can ever fund itself
+  (the reserve stock fraction is now the first refusing term); whether the
+  turn deadband change lets a policy express residence (a trajectory replay
+  and a fresh campaign under a new protocol, not run); whether some skimmer
+  depth between 0.10 and 0.55 rescues the lineage without the grazer's loss
+  (a ladder, not run); what a coupled grazed opening would do (S's next
+  measurement, not a uniform total).
 - **The cube is untouched by this round**: build `77c42e8`, `fast-leaf`,
   shipped price, shipped predicate, shipped motor, shipped roster, shipped
   §11, shoulder 0.95 by override.

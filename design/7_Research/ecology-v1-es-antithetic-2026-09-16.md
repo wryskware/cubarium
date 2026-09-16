@@ -4,7 +4,7 @@ last_reviewed: 2026-09-16
 decision_refs: []
 ---
 
-# The optimiser is doing its job: nothing cancels, nothing is erased, and the variation it has
+# The optimiser is doing its job: nothing cancels, nothing is erased, and the variation it has to work with is two orders of magnitude too small
 
 > **Correction after Astra's round-4 review (P1).** Three claims below are
 > stronger than the measurement. (1) The exact replay and the retained ÷
@@ -32,7 +32,6 @@ decision_refs: []
 > dwell and `t_min` do not); and, cheaply, bootstrap or split the retained
 > sixteen pair contributions for gradient-direction stability before calling
 > sixteen pairs sufficient.
-# to work with is two orders of magnitude too small
 
 Workstream Q of the ecology v1 round-4 next steps
 ([brief](../handoffs/ecology-v1-es-antithetic-opus-2026-09-16.md)), item 2 of the reconciled
