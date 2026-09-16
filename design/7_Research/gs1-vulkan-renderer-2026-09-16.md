@@ -11,9 +11,14 @@ into a desktop readback and onto the Tachyon's panel. Stage B — the adapter
 from the world's `RenderView` — is **not** here and is not blocked by anything
 in it.
 
-Branch `tachyon-screen`, commits `b507843`, `ca6d674`, `419056e`, `4c1a3a0`,
-`ded6909`. The CPU presenter, the cube path and `crates/cubarium/**` are
-untouched.
+Branch `tachyon-screen`, commits `b507843` (the crate, the `Scene` type, the
+passes), `ca6d674` (the synthetic world, the scanout target, the golden image),
+`419056e` (the fragment-coordinate fix §5 describes), `4c1a3a0` (GS-2's socket),
+`ded6909` and `c675b5f` (two client bugs), `dcb1ea2` and `1311a8f` (this
+report and the measured ladder). Everything is under `crates/cubarium-gpu/**`
+plus one workspace member line and the lock entries it implies. The CPU
+presenter, the cube path, `crates/cubarium/**` and `crates/cubarium-surface/**`
+are untouched.
 
 ## 1. The headline
 
