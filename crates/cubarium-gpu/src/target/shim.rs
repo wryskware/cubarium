@@ -132,6 +132,7 @@ impl ShimScanout {
             )
         }?;
         let mut client = ShimScanout {
+            // Replaced by the retrying connect below, which is the one that attaches.
             socket: connect()?,
             slots: Vec::with_capacity(SLOTS),
             free: 0,
@@ -143,23 +144,28 @@ impl ShimScanout {
         for i in 0..SLOTS {
             let mut image = dmabuf::export_linear(gpu, PANEL.0, PANEL.1, shader_encode)?;
             let fd = image.fd.take().expect("a freshly exported image has its fd");
-            if i == 0 {
-                // The daemon takes one client at a time and answers a second with
-                // `Error { Busy }` and a close, which reaches this side as a broken
-                // pipe on the very next write. A finished run's registration outlives
-                // its process by a moment, so the first attach waits rather than
-                // failing -- waiting is the rule on this device, for the socket exactly
-                // as for DRM master.
-                client.socket = connect_when_free(&image, fd.as_fd())?;
-            }
             let target = TargetImage {
                 image: image.image,
                 view: image.view,
                 framebuffer: crate::render::framebuffer(d, pass, image.view, PANEL.0, PANEL.1)?,
             };
-            // The daemon imports the fd and may close ours at once, so it is dropped
-            // here rather than kept: the framebuffer it made is what lives on.
-            let id = client.attach(&image, fd.as_fd())?;
+            // The first attach doubles as the connection: the daemon takes one client
+            // at a time and answers a second with `Error { Busy }` and a close, which
+            // reaches this side as a broken pipe on the very next write. A finished
+            // run's registration outlives its process by a moment, so it waits rather
+            // than failing -- waiting is the rule on this device, for the socket
+            // exactly as for DRM master. There is no way to ask whether the slot is
+            // free without attaching, so the retry owns the first one.
+            let id = if i == 0 {
+                let (socket, reply) = connect_when_free(&image, fd.as_fd())?;
+                client.socket = socket;
+                client.free |= reply.released;
+                reply.slot
+            } else {
+                client.attach(&image, fd.as_fd())?
+            };
+            // The daemon has imported the fd, so ours is dropped here rather than kept:
+            // the framebuffer it made is what lives on.
             drop(fd);
             client.slots.push(Slot {
                 id,
@@ -348,15 +354,16 @@ fn connect() -> Result<OwnedFd> {
 }
 
 /// Connect and attach the first image, waiting out a daemon that still has another
-/// client registered. Returns the socket the attach succeeded on.
-fn connect_when_free(image: &LinearImage, fd: BorrowedFd<'_>) -> Result<OwnedFd> {
+/// client registered. Returns the socket the attach succeeded on and its `Attached`
+/// reply, so the caller does **not** attach the same image a second time.
+fn connect_when_free(image: &LinearImage, fd: BorrowedFd<'_>) -> Result<(OwnedFd, Reply)> {
     let mut last = String::new();
     for attempt in 0..BUSY_RETRIES {
         let socket = connect()?;
         match attach_on(&socket, image, fd) {
             Ok(reply) if !reply.is_busy() => {
                 reply.expect(REPLY_ATTACHED)?;
-                return Ok(socket);
+                return Ok((socket, reply));
             }
             Ok(reply) => last = format!("the daemon is busy: {}", reply.message),
             // The close that follows `Error { Busy }` can break the write itself.
