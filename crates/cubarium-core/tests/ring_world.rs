@@ -271,3 +271,38 @@ fn off_world_care_and_apex_targets_are_refused() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Field reactions cover every ring cell (regression for the cube-shaped loops)
+// ---------------------------------------------------------------------------
+
+/// FW-5 found three production loops in `fields.rs` iterating the cube's 1,280
+/// cells whatever the topology, so on a ring the row holding cell index 1,280
+/// (row 16 at 80 cells across) received the detritus of every cell above it and
+/// never shed its own: a permanent dam ~3× its neighbours after 3,000 ticks.
+/// After the fix every row's detritus is within a modest factor of its
+/// neighbours', and the last ring cell sheds like the first.
+#[test]
+fn detritus_falls_through_every_ring_row_not_only_the_first_1280_cells() {
+    let mut world = World::new(ring_config()).expect("ring world");
+    for _ in 0..3_000 {
+        world.step();
+    }
+    let view = world.render_view();
+    let cols = (W as usize) / 4;
+    let rows = (H as usize) / 4;
+    assert_eq!(view.detritus.len(), cols * rows);
+    let row_mean =
+        |r: usize| view.detritus[r * cols..(r + 1) * cols].iter().sum::<f64>() / cols as f64;
+    // The cube's loop bound landed on row 1280 / 80 = 16.
+    let dam = 1280 / cols;
+    let (above, at, below) = (row_mean(dam - 1), row_mean(dam), row_mean(dam + 1));
+    let neighbours = 0.5 * (above + below);
+    assert!(
+        at < 1.5 * neighbours,
+        "row {dam} holds {at:.3} against neighbours {above:.3}/{below:.3}: the dam is back"
+    );
+    // Rows past the old bound shed too: the second-to-last row is not a sink either.
+    let (r1, r2) = (row_mean(rows - 3), row_mean(rows - 2));
+    assert!(r2 < 3.0 * r1 + 0.05, "row {} holds {r2:.3} against {r1:.3} above it", rows - 2);
+}

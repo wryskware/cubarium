@@ -7,6 +7,7 @@
 //! [`EcologyV1State`], a **trailing** extension of `WorldState` rather than a change to the
 //! wire shape of `Fields`. The two are always stepped together.
 
+#[cfg(test)]
 use cubarium_surface::{Scale, Topology};
 use serde::{Deserialize, Serialize};
 
@@ -599,7 +600,7 @@ impl Fields {
             work.ce5.copy_from_slice(&eco.carrion_energy);
             let left_d = 1.0 - (dc.decomposition * DT).min(1.0);
             let left_c = 1.0 - (dc.carrion_decomposition * DT).min(1.0);
-            for cell in CellId::all(Topology::Cube, Scale::ONE) {
+            for cell in CellId::all(graph.topology(), graph.scale()) {
                 let Some(down) = graph.downhill(cell) else { continue };
                 let (here, there) = (cell.index(), down.index());
                 let out_d = (fall * left_d * work.pre_d[here]).clamp(0.0, work.d5[here]);
@@ -634,7 +635,7 @@ impl Fields {
             work.budget.fill(0.0);
             work.incoming.fill(0.0);
             let mut any = false;
-            for cell in CellId::all(Topology::Cube, Scale::ONE) {
+            for cell in CellId::all(graph.topology(), graph.scale()) {
                 let j = cell.index();
                 // A donor is alive **after 3d** — a stand that died this tick sends nothing.
                 if work.class[j] != CellClass::Alive || eco.wood[j] < pl.donor_min {
@@ -661,7 +662,7 @@ impl Fields {
                 }
             }
             if any {
-                for cell in CellId::all(Topology::Cube, Scale::ONE) {
+                for cell in CellId::all(graph.topology(), graph.scale()) {
                     let j = cell.index();
                     if work.budget[j] <= 0.0 {
                         continue;
