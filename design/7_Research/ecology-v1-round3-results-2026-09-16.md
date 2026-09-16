@@ -78,10 +78,12 @@ the binary wet-probe fraction (67 → 65 %) but moves the water depth under the
 body (0.31 → 0.05 d) and the algae-band fraction (34 → 7 %); future notes
 should report water depth, not the wet flag. **Interaction, a sign reversal:**
 on uncensored net margin the founder's 0.60 wins 25 of 32 pairs at depth 0.10
-and loses 26 of 32 at depth 0.55, in 4 of 4 worlds. That reconciles J with F:
-F's association (foliage-diet skimmers do better) is real, and real only for a
-body not parked in a pool; J saw the opposite sign because every clone it
-compared had `depth` 0.10. The T0-versus-T1 contrast is J's counterbalanced
+and loses 26 of 32 at depth 0.55, in 4 of 4 worlds. That makes J and F consistent:
+F's association (foliage-diet skimmers do better) is plausibly real for a
+body not parked in a pool, and J saw the opposite sign because every clone it
+compared had `depth` 0.10; the cause of F's descendant association is not
+identified here (sterile cold-founded clones for 4,500 s against a reproducing
+150-minute census), and F's census with only depth changed is still required. The T0-versus-T1 contrast is J's counterbalanced
 pair on the same cells and seeds and agrees qualitatively (low diet wins 25 of
 32 pairs against J's 29; established 27 against 7; 4 of 4 worlds), with hashes
 necessarily different because each run now holds all four treatments.
@@ -392,10 +394,11 @@ overstated what follows. Repair 1, all report-level plus one doc line:
 
 ## Next recommendation (reconciled with Astra)
 
-Astra's order, which Fable accepts: the apex predicate pair first; the
-antithetic-pair analysis instead of the already-answered spread; the depth
-census before any roster decision; a whole-field preconditioning comparison
-instead of a per-cell fit; detrital calibration later; the errata done now.
+Astra's order, which Fable accepts and which the numbering below now follows:
+the apex predicate pair first; the antithetic-pair ES analysis second (instead
+of the already-answered spread); the depth census third, before any roster
+decision; the whole-field preconditioning comparison fourth, instead of a
+per-cell fit; detrital calibration later; the errata done now.
 Three items would be visible on the cube and are Wrysk's; what Fable and Astra
 would tell him is stated at each. None runs on the cube until he has seen the
 result.
@@ -414,7 +417,11 @@ result.
    reach the ten captures per life that break even to show the rule is wrong
    (that is a later ecological gate); do not touch escape speed, sense radius,
    strike duration or the mating radius in that arm.
-2. **Skimmer depth** (O): F's six-seed, 150-minute census with the roster
+2. **The ES search** (L): the antithetic-pair reduction on the retained
+   generation reports (no simulation), then deadband occupancy under a
+   σ-scale perturbation; then decide whether the reduction, the update or the
+   adapter is the next change; no score change.
+3. **Skimmer depth** (O): F's six-seed, 150-minute census with the roster
    skimmer's `depth` 0.10 → 0.55 and every other value fixed; measure founder
    survival and brood, descendant census by form × diet bin × guild, net
    margin, water-depth distribution, and the effect on the other kinds.
@@ -424,17 +431,13 @@ result.
    (the cube's skimmers would stop dying on the rim); do not bundle it with a
    wet-floor producer, which is a separate ecology design (a new stock, food
    web and visible layer), not the repair O needs.
-3. **Foliage seeding** (M): a whole-field plant-only preconditioning
+4. **Foliage seeding** (M): a whole-field plant-only preconditioning
    comparison, not a per-cell equilibrium fit — save plant-only states at a
    few ages, found identical rosters into them and into status quo, and give
    Wrysk the opening frames and early founder outcomes before he chooses
    between preconditioning (A, with a declared procedure), leaving §11, or B
    as a mere initialiser. This is his call; Astra advises neither as a
    contract change yet.
-4. **The ES search** (L): the antithetic-pair reduction on the retained
-   generation reports (no simulation), then deadband occupancy under a
-   σ-scale perturbation; then decide whether the reduction, the update or the
-   adapter is the next change; no score change.
 5. **Detrital funding** (O, M), after the niche decision: on a fixed body,
    habitat and control, vary one declared detrital capacity or energy term at
    a time and measure the ledger chain served litter → digestible → credited
@@ -443,3 +446,5 @@ result.
    §4 replenishes it. O answered the question negatively only for the current
    skimmer at current parameters.
 6. **Errata in A, F and I** — done in this repair, not a research campaign.
+
+Nothing in this list touches the cube.
