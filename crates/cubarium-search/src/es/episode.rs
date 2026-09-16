@@ -130,7 +130,8 @@ pub enum Driver {
     Control(Control),
 }
 
-/// The three controls the fixture protocol requires (brief §3).
+/// The three controls the fixture protocol requires (brief §3), plus the dwell ladder's
+/// parametrised fourth.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Control {
     /// Stand still, take nothing: what the starting stores alone buy.
@@ -142,14 +143,27 @@ pub enum Control {
     /// dwelling on a cell until its `P` falls below the world's own `feed_min`, then walking to
     /// the next one on ordinary paid motion through `motor::resolve`.
     MobileScript,
+    /// [`Control::MobileScript`] with the **departure rule replaced by a counter**: leave a
+    /// route cell after exactly `d` ticks standing on it, whatever is left in it. Everything
+    /// else — the route order, the heading request, the full grazing effort, the paid motion
+    /// through `motor::resolve` — is the mobile script's, so a ladder of `d` values differs in
+    /// residence and in nothing else.
+    ///
+    /// `d` counts ticks on which the body **finished** the tick on the goal cell, which is
+    /// also every tick on which it fed from that cell: the feeding settlement runs after the
+    /// move (`ecology-v1-contract.md` §6.2), and the arrival tick already grazes there.
+    /// `Dwell(0)` is not a control: it would never leave a cell it never counts, so the ladder
+    /// starts at 1.
+    Dwell(u32),
 }
 
 impl Control {
-    pub fn name(self) -> &'static str {
+    pub fn name(self) -> String {
         match self {
-            Control::NoIntake => "no-intake",
-            Control::StationaryGrazing => "stationary-grazing",
-            Control::MobileScript => "mobile-script",
+            Control::NoIntake => "no-intake".into(),
+            Control::StationaryGrazing => "stationary-grazing".into(),
+            Control::MobileScript => "mobile-script".into(),
+            Control::Dwell(d) => format!("dwell-{d}"),
         }
     }
 }
@@ -377,7 +391,7 @@ pub fn run_prepared(
                 bud: Some(false),
             })]);
         }
-        Driver::Control(Control::MobileScript) => {}
+        Driver::Control(Control::MobileScript | Control::Dwell(_)) => {}
     }
 
     let route_p_start: f64 = route.iter().map(|c| world.state.fields.p[c.index()]).sum();
@@ -414,6 +428,8 @@ pub fn run_prepared(
     };
     let mut visited: BTreeSet<u16> = BTreeSet::new();
     let mut target = 0usize;
+    // Ticks finished on the current goal cell, for `Control::Dwell` only.
+    let mut dwelled = 0u64;
 
     for tick in 0..horizon {
         if tick.is_multiple_of(CANCEL_CHECK_TICKS) && limits.expired() {
@@ -436,11 +452,12 @@ pub fn run_prepared(
         let face_before = o.pos.face;
         let bill = MotorBill::of(o, &cfg);
 
-        if let Driver::Control(Control::MobileScript) = driver {
+        if let Driver::Control(Control::MobileScript | Control::Dwell(_)) = driver {
             // The disclosed rule, in full: dwell and crop until the cell falls below the
             // world's own `feed_min`, then face the next route cell's centre and walk. The
             // heading is a *request*; `motor::resolve` decides how much of the turn and how
-            // much of the walk the body can pay for this tick.
+            // much of the walk the body can pay for this tick. `Dwell(d)` runs exactly this
+            // approach and this intent; only the departure test below differs.
             let goal = route[target % route.len()];
             let intent = if here == goal {
                 ScriptedIntent {
@@ -518,11 +535,27 @@ pub fn run_prepared(
             break;
         };
 
-        if let Driver::Control(Control::MobileScript) = driver {
-            let goal = route[target % route.len()];
-            if cell_of(&o.pos) == goal && world.state.fields.p[goal.index()] < leave_below {
-                target += 1;
+        match driver {
+            Driver::Control(Control::MobileScript) => {
+                let goal = route[target % route.len()];
+                if cell_of(&o.pos) == goal && world.state.fields.p[goal.index()] < leave_below {
+                    target += 1;
+                }
             }
+            Driver::Control(Control::Dwell(d)) => {
+                // The counter is the whole difference. A tick finished on the goal cell is a
+                // tick fed from it, so `dwelled` and "ticks on this food cell" are the same
+                // number, and the body leaves on the tick that makes it `d`.
+                let goal = route[target % route.len()];
+                if cell_of(&o.pos) == goal {
+                    dwelled += 1;
+                    if dwelled >= u64::from(*d) {
+                        target += 1;
+                        dwelled = 0;
+                    }
+                }
+            }
+            _ => {}
         }
     }
 

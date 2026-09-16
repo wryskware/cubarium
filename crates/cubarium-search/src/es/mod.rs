@@ -17,6 +17,8 @@
 //! - [`budget`]: the matched feasibility experiment over the world's per-organism ledger.
 //! - [`intake`]: the per-tick intake diagnostic — why a trained controller travels and does
 //!   not eat, separated at the sites the tick decides it.
+//! - [`scorecheck`]: the two falsification checks the score hypothesis had to survive —
+//!   the frozen controller's response to food, and the current score's dwell gradient.
 //! - [`trainer`]: stable job identities, bounded workers, the reduction and the checkpoint.
 //! - [`export`]: a trained centre as a self-contained policy the core can attach.
 //! - [`commands`]: the development commands behind the `es-*` subcommands.
@@ -33,6 +35,7 @@ pub mod fixture;
 pub mod intake;
 pub mod optimizer;
 pub mod rng;
+pub mod scorecheck;
 pub mod tensor;
 pub mod trainer;
 
