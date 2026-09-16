@@ -298,6 +298,13 @@ enum Command {
         /// strike geometry.
         #[arg(long, default_value_t = false)]
         no_ledger: bool,
+        /// The pursuit's stopping predicate. `half-space` is the shipped rule, `body.x <
+        /// capture_offset_body.x + tolerance`, which holds a member at its resting effort and
+        /// suppresses the burst it has paid for; `reach-envelope` is the paired variant, the
+        /// `in_contact()` the predicate's own comment names. The default runs the world exactly
+        /// as it ships. This changes what the world does, deliberately.
+        #[arg(long, default_value = "half-space")]
+        pursuit_stop: String,
         #[arg(long, default_value_t = 8)]
         workers: usize,
         #[arg(long, default_value_t = 600)]
@@ -619,6 +626,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             introduce_tick,
             founder_age_seconds,
             no_ledger,
+            pursuit_stop,
             workers,
             wall_seconds,
             out,
@@ -629,6 +637,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 introduce_tick,
                 founder_age_seconds,
                 ledger: !no_ledger,
+                stop: cubarium_search::apex_audit::parse_pursuit_stop(&pursuit_stop)?,
             };
             cubarium_search::apex_audit::run(
                 config.split(',').map(|s| PathBuf::from(s.trim())).filter(|p| !p.as_os_str().is_empty()).collect(),

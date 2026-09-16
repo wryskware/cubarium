@@ -1177,12 +1177,25 @@ impl World {
                         // claws and so never held anything. It went unnoticed only because
                         // `closing = strike_speed_px_s · strike_seconds` was 1 px, inside the
                         // 2.6 px tolerance. The pace calibration makes the lunge 16.67 px, so
-                        // a member charged straight through point-blank prey and missed. The
-                        // predicate is now the envelope itself, which is what `in_contact`
-                        // already means everywhere else in this file.
-                        let inside = organisms.get(t).and_then(admission).is_some_and(|c| {
-                            c.body.x < geometry.capture_offset_body.x + c.tolerance
-                        });
+                        // a member charged straight through point-blank prey and missed.
+                        //
+                        // The shipped rule is nevertheless still a one-sided **forward
+                        // half-space**, `body.x < capture_offset_body.x + tolerance`, and not
+                        // the envelope: a prey *short* of the claws satisfies it as readily as
+                        // one inside them. The strike record measured it true at the burst's
+                        // start on 408 of 449 paid attempts, which drops the member to
+                        // `rest_effort` and suppresses the burst it has just paid for
+                        // (`design/7_Research/ecology-v1-apex-reach-2026-09-16.md` §5).
+                        // `PursuitStop` names both readings and
+                        // `ContactMeasure::pursuit_holds` is the one place either is written;
+                        // an ordinary world runs `ForwardHalfSpace` and is byte-identical to
+                        // one that never heard of the switch (`crate::World::set_pursuit_stop`,
+                        // `crates/cubarium-core/tests/hunter_pursuit_predicate.rs`).
+                        let stop = strikes.pursuit_stop();
+                        let inside = organisms
+                            .get(t)
+                            .and_then(admission)
+                            .is_some_and(|c| geometry.pursuit_holds(stop, &c));
                         let hold = inside || m.phase == HunterPhase::Windup;
                         if let Some(d) = decisions.iter_mut().find(|(id, _)| *id == m.id) {
                             // The intent to face the target, **not** the heading it ends the

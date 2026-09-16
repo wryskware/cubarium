@@ -156,13 +156,23 @@ impl StrikeFrame {
         frame
     }
 
-    /// Whether the pursuit's own stopping rule held this member still at this instant:
-    /// `body.x < capture_offset_body.x · scale + tolerance`, transcribed from the predicate in
-    /// `crate::world::step`'s hunt intent pass. A member for which this is true asks for its
-    /// resting effort and is pushed **no strike burst**, whatever phase it is in. This reads
-    /// the rule; it does not change it.
-    pub fn pursuit_holds(&self) -> Option<bool> {
-        Some(self.body_forward? < self.capture_forward + self.tolerance?)
+    /// Whether the pursuit's own stopping rule held this member still at this instant, under
+    /// `stop`. A member for which this is true asks for its resting effort and is pushed **no
+    /// strike burst**, whatever phase it is in.
+    ///
+    /// This does not re-derive either rule: it rebuilds the [`super::ContactMeasure`] this
+    /// frame recorded and asks [`super::ContactMeasure::pursuit_holds`], the one place both
+    /// rules are written and the same call `crate::world::step`'s hunt-intent pass makes. Read
+    /// it with [`StrikeRecord::stop`] and it says what the world actually did; read it with the
+    /// other rule and it says what the other rule would have done at the same instant.
+    pub fn pursuit_holds(&self, stop: super::PursuitStop) -> Option<bool> {
+        let measure = super::ContactMeasure {
+            body: Vec2::new(self.body_forward?, self.body_side?),
+            root_distance: self.root_distance?,
+            effector_distance: self.effector_distance?,
+            tolerance: self.tolerance?,
+        };
+        Some(measure.pursuit_holds(stop, self.capture_forward))
     }
 
     /// How far past the grasp the prey stood: `effector_distance − tolerance`. Positive is out
@@ -270,6 +280,13 @@ pub struct StrikeRecord {
     pub hunter_turn_strike: Option<f64>,
     /// The class this record's own geometry puts it in.
     pub class: StrikeClass,
+    /// **Which pursuit stopping rule the world was running when this attempt was made.**
+    /// Carried on the record so a held/delivered reading is never taken under a rule the world
+    /// did not run, and so two arms of a paired experiment are distinguishable in one file.
+    /// `#[serde(default)]` is [`super::PursuitStop::ForwardHalfSpace`], which is what every
+    /// artifact recorded before this field existed ran under.
+    #[serde(default)]
+    pub stop: super::PursuitStop,
 }
 
 impl StrikeRecord {
@@ -282,6 +299,18 @@ impl StrikeRecord {
     /// How much it moved across the whole attempt: `resolution − intent`.
     pub fn separation_change_total(&self) -> Option<f64> {
         Some(self.resolution.effector_distance? - self.intent?.effector_distance?)
+    }
+
+    /// Whether the pursuit held this member at the gesture, **under the rule this attempt was
+    /// actually made under**. `None` when the frame carried no measure.
+    pub fn held_at_intent(&self) -> Option<bool> {
+        self.intent?.pursuit_holds(self.stop)
+    }
+
+    /// The same at the boundary the paid burst began on. This is the reading that decides
+    /// whether the burst the member had just paid 0.08 e for was requested or suppressed.
+    pub fn held_at_strike(&self) -> Option<bool> {
+        self.strike?.pursuit_holds(self.stop)
     }
 
     fn classify(&self) -> StrikeClass {
@@ -314,11 +343,23 @@ struct OpenAttempt {
     attack_counter: Option<u64>,
 }
 
-/// The opt-in, transient per-attempt recorder. Never persisted, never hashed, never read back
-/// by the tick.
+/// The apex strike path's transient, opt-in state: the per-attempt recorder, and the pursuit
+/// stopping rule this world runs. Never persisted, never hashed, never checkpointed.
+///
+/// The two live together because they are the same instrument: the rule is what the record
+/// exists to measure, an arm that changes one always reads the other, and a record is only
+/// legible beside the rule it was made under — which is why [`StrikeRecord::stop`] is copied
+/// from here at close. The rule is **not** a [`crate::WorldConfig`] field by design: adding one
+/// would change `calibrate::config_hash` for every existing TOML and break the provenance of
+/// every retained row, and this is an experiment, not a contract change.
 #[derive(Clone, Debug, Default)]
 pub struct StrikeRecorder {
     on: bool,
+    /// The rule `crate::world::step`'s hunt-intent pass evaluates. Default
+    /// [`super::PursuitStop::ForwardHalfSpace`] — the shipped rule — and **independent of
+    /// `on`**: turning recording on or off never moves it, and running the variant does not
+    /// require recording.
+    stop: super::PursuitStop,
     open: Vec<OpenAttempt>,
     closed: Vec<StrikeRecord>,
     /// Closed records discarded because nobody drained them. Never silently zero.
@@ -332,6 +373,19 @@ pub struct StrikeRecorder {
 impl StrikeRecorder {
     pub fn enabled(&self) -> bool {
         self.on
+    }
+
+    /// The pursuit stopping rule this world runs.
+    pub fn pursuit_stop(&self) -> super::PursuitStop {
+        self.stop
+    }
+
+    /// Run the pursuit's stopping predicate under `stop` from the next tick on. Records already
+    /// closed keep the rule they were made under; an attempt still in flight is closed under
+    /// the rule in force when it resolves, so a mid-attempt change is visible rather than
+    /// silently retconned.
+    pub fn set_pursuit_stop(&mut self, stop: super::PursuitStop) {
+        self.stop = stop;
     }
 
     /// Turning it off drops everything in flight: a half-recorded attempt is not a record.
@@ -457,6 +511,7 @@ impl StrikeRecorder {
                 (Some(a), Some(b)) => a != b,
                 _ => false,
             },
+            stop: self.stop,
             hunter_crossed_face: intent
                 .is_some_and(|f| f.hunter_pos.face.index() != resolution.hunter_pos.face.index()),
             target_speed_windup: speed(
