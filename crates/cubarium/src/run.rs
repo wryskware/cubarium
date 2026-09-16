@@ -59,9 +59,13 @@ pub fn run(command: Command) -> Result<()> {
 
 fn run_demo(demo: &Demo, stop: &AtomicBool) -> Result<()> {
     let kind: SceneKind = demo.scene.into();
-    let mut scenes = Scenes::new(kind, demo.seed);
-
     let (topology, scale) = demo.shape();
+    // FW-5 built every M1 fixture from a `(topology, scale)`, so the field-bearing
+    // scenes size their `ScalarField` and their `FieldGraph` from the surface the
+    // substrate pass will read. `Scenes::new` is `Scenes::on(Cube, ONE, ..)` exactly,
+    // so a cube demo is the same fixture set it always was.
+    let mut scenes = Scenes::on(topology, scale, kind, demo.seed);
+
     let shape = WorldShape::new(topology, scale);
     let mut sink: Box<dyn FrameSink> = match demo.sink {
         SinkArg::Preview => {

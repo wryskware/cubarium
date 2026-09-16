@@ -466,25 +466,13 @@ impl Demo {
         check_fps(self.fps)?;
         check_preview_topology(Some(self.topology.0), self.sink == SinkArg::Preview)?;
         check_world_scale(Some(self.topology.0), Some(self.world_scale))?;
-        // The M1 fixtures are cube geometry, not a world: `Scenes` builds the patch
-        // scene's `ScalarField` at the cube's 1,280 cells and deposits into it through
-        // `Topology::Cube`, while the substrate pass reads the cells of the canvas it is
-        // drawing on. On a ring those disagree and the pass indexes past the field — a
-        // panic, which is never an acceptable answer to a command line. `body` and
-        // `vertex` carry no field and do draw on a ring, so only the two field-bearing
-        // scenes are refused, by name, until the fixtures are built from a topology.
-        if matches!(self.topology.0, Topology::Ring { .. })
-            && matches!(self.scene, SceneArg::Patch | SceneArg::All)
-        {
-            anyhow::bail!(
-                "--scene {:?} is a cube fixture: its patch field is built at the cube's \
-                 1,280 cells, so it cannot be drawn on a ring. Use --scene body or \
-                 --scene vertex for a ring fixture, or `cubarium run --fresh --topology \
-                 {} --sink png` to capture a real ring world.",
-                self.scene,
-                self.topology
-            );
-        }
+        // FW-4 refused `--scene patch` and `--scene all` on a ring here, because
+        // `Scenes::new` built the patch scene's `ScalarField` at the cube's 1,280 cells
+        // while the substrate pass read the cells of the canvas it drew on, and on a ring
+        // those disagree and the pass indexes past the field. FW-5 built all four
+        // fixtures from a `(topology, scale)` (`Scenes::on`) and `run_demo` now names the
+        // demo's own shape, so there is nothing left to refuse: every scene draws on
+        // every surface the contract accepts.
         self.topology
             .0
             .validate(Scale::new(self.world_scale))
@@ -909,28 +897,21 @@ mod topology_tests {
         assert!(err.contains("--require-resume"), "{err}");
     }
 
-    /// The demo's two field-bearing fixtures are cube geometry and would index past a
-    /// cube-sized field on a ring; the two that carry no field draw there.
+    /// FW-4's guard is lifted: FW-5 built every M1 fixture from a `(topology, scale)`,
+    /// so all four scenes are accepted on a ring as they always were on a cube. The
+    /// fixtures themselves are exercised by `scene.rs`'s own ring tests; what this pins
+    /// is that the command line no longer refuses them, and at both ladder rungs.
     #[test]
-    fn the_demos_field_bearing_fixtures_are_refused_on_a_ring() {
-        for scene in ["patch", "all"] {
-            let err = parse_demo([
-                "cubarium", "demo", "--sink", "png", "--seconds", "1", "--scene", scene,
-                "--topology", "ring:320x180",
-            ])
-            .validate()
-            .unwrap_err()
-            .to_string();
-            assert!(err.contains("cube fixture"), "{scene}: {err}");
-            assert!(err.contains("--scene body"), "{scene}: {err}");
-        }
-        for scene in ["body", "vertex"] {
-            parse_demo([
-                "cubarium", "demo", "--sink", "png", "--seconds", "1", "--scene", scene,
-                "--topology", "ring:320x180",
-            ])
-            .validate()
-            .unwrap_or_else(|e| panic!("{scene} has no field and draws on a ring: {e}"));
+    fn every_demo_fixture_is_accepted_on_a_ring() {
+        for scene in ["body", "vertex", "patch", "all"] {
+            for (ring, s) in [("ring:320x180", "1"), ("ring:640x360", "2")] {
+                parse_demo([
+                    "cubarium", "demo", "--sink", "png", "--seconds", "1", "--scene", scene,
+                    "--topology", ring, "--world-scale", s,
+                ])
+                .validate()
+                .unwrap_or_else(|e| panic!("{scene} on {ring} S={s}: {e}"));
+            }
         }
         // And every scene is still fine on a cube.
         for scene in ["body", "vertex", "patch", "all"] {
