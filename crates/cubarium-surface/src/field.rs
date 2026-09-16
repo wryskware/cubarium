@@ -31,11 +31,7 @@ impl CellId {
     pub fn new(topo: Topology, scale: Scale, face: Face, cx: u16, cy: u16) -> CellId {
         let (nx, ny) = topo.cells(scale, face);
         assert!(cx < nx && cy < ny, "cell ({cx}, {cy}) out of range for {topo:?}");
-        let chart = topo
-            .charts()
-            .iter()
-            .position(|f| *f == face)
-            .expect("the topology has this chart");
+        let chart = topo.chart_index(face);
         let per_chart = usize::from(nx) * usize::from(ny);
         CellId((chart * per_chart + usize::from(cy) * usize::from(nx) + usize::from(cx)) as u16)
     }

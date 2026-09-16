@@ -21,7 +21,9 @@ pub const CELL_PIXELS: f64 = 4.0;        // pixels per cell edge at S = 1 (moved
 pub const FOOTPRINT_PIXELS: f64 = 9.0;   // the stamp budget at S = 1
 pub const EMBED_PIXELS: f64 = 32.0;      // embedded units per pixel at S = 1
 
-pub struct Scale { /* private f64 */ }   // Copy, Debug, PartialEq, PartialOrd, Default = ONE, serde
+pub struct Scale { /* private f64 */ }   // Copy, Debug, PartialEq, PartialOrd, Default = ONE
+                                         // serde(transparent): it *is* its multiplier on the wire,
+                                         // so a config writes `world_scale = 2.0`
 pub const Scale::ONE: Scale;             // S = 1
 pub const fn Scale::new(world: f64) -> Scale;      // unchecked; validate() accepts or refuses
 pub const fn Scale::world(self) -> f64;            // S
@@ -32,6 +34,7 @@ pub fn Scale::embed_divisor(self) -> f64;          // 32·S
 pub enum Topology { Cube, Ring { w: u16, h: u16 } } // Copy, Debug, Eq, Hash, Default = Cube, serde
 
 pub fn Topology::charts(self) -> &'static [Face];
+pub fn Topology::chart_index(self, face: Face) -> usize;   // for indexing a per-chart array
 pub fn Topology::has_chart(self, face: Face) -> bool;
 pub fn Topology::extent(self, face: Face) -> (f64, f64);
 pub fn Topology::neighbor(self, face: Face, edge: Edge) -> Option<Seam>;

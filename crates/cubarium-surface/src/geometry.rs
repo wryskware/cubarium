@@ -33,6 +33,8 @@ pub const EMBED_PIXELS: f64 = 32.0;
 /// (`design/flat-world-plan-2026-09-16.md` §2).
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+// A scale *is* its multiplier on the wire, so a config can write `world_scale = 2.0`.
+#[cfg_attr(feature = "serde", serde(transparent))]
 pub struct Scale {
     world: f64,
 }
@@ -119,6 +121,19 @@ impl Topology {
         match self {
             Topology::Cube => &CUBE_CHARTS,
             Topology::Ring { .. } => &RING_CHARTS,
+        }
+    }
+
+    /// Position of `face` in [`Topology::charts`], for indexing a per-chart array.
+    /// A cube's charts are in `Face` index order, so this is `face.index()` there.
+    #[inline]
+    pub fn chart_index(self, face: Face) -> usize {
+        match self {
+            Topology::Cube => face.index(),
+            Topology::Ring { .. } => {
+                debug_assert_eq!(face, Face::Front, "a ring has only Face::Front");
+                0
+            }
         }
     }
 
