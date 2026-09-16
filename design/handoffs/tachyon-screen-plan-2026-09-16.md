@@ -450,3 +450,19 @@ is the next lever and what 960×540 needs; ground cover overlaps fourfold at
 `--sink gpu` still refuses a cube; the `systemctl reboot` test with AutoBoot
 waits for Wrysk to be near the board. No renderer work is queued: the next
 step on the look is Wrysk's answers to the landscape questions.
+
+### SYNC-2 and the merge to main (2026-09-16)
+
+`main` at `ac03da2` (41 commits: ecology v1 round 5, workstreams X/Y/Z) merged
+into `tachyon-screen` as `775e0be`; `main` fast-forwarded to it. Two conflicts
+(lifecycle.rs, episode.rs) and three call sites main had added against the
+cube-only signatures. The action-adapter suite's pinned whole-state hash test
+was deleted at Wrysk's direction rather than re-recorded (a world's bytes are
+not a promise this project makes; the remaining pins are issue #13). 152 test
+binaries green, 2,019 tests.
+
+The led-cube-shim branch is not merged yet: its main checkout carries another
+session's uncommitted `Cargo.toml`/`Cargo.lock` edits that the branch also
+touches. The landscape direction is held for a fresh thread. Every open item
+from this plan is now a GitHub issue (wryskware/cubarium #1–#17,
+wryskware/led-cube-shim #1–#2); `design/backlog.md` points there.

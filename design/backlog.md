@@ -6,6 +6,10 @@ decision_refs: []
 
 # Backlog
 
+> Since 2026-09-16 the backlog is tracked as GitHub issues on wryskware/cubarium
+> (labels `backlog`, `tachyon`, `gpu`, `art`). §1 is issue #14, §2 is #15, §3 is #16, §4 is
+> folded into #14. This file stays as the long-form spec for those items.
+
 Deferred work Wrysk has named but not scheduled. Each item says who asked, when, and
 what "done" looks like. Fable keeps this current; anything picked up moves to a handoff.
 
