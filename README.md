@@ -208,6 +208,23 @@ Design authority follows [Lore's vault rules](design/0_Canon/README.md) and the
 [decision ledger](design/0_Canon/DECISIONS.md). `.lore.toml` enables `lore-v1` in
 `annotate` mode. A detailed proposal is not an accepted decision.
 
+## The Tachyon panel
+
+The ring world also runs as a shelf piece on the Tachyon's 1080×1920 panel:
+`cube-screen-shim` (root) owns KMS and cubarium runs as the unprivileged system
+user `cubarium`, rendering on the Adreno with Vulkan and handing the daemon
+dma-buf descriptors over `/run/cube-screen-shim/frames.sock`. The board boots
+straight into the world it was last showing — a plain `cubarium run` resumes the
+newest snapshot and founds a new world only in a directory that holds none.
+
+[**docs/tachyon.md**](docs/tachyon.md) is the whole story: install, rebuild, the
+service layout, the resume rules, the measured steady state, the
+`CUBARIUM_EXTRA_ARGS` look knob, and the `ssh -L` tunnel for the loopback
+viewer (which is off by default — it costs the panel 59.5 fps → 16.5). The
+scripts are `scripts/tachyon-deploy.sh`, `scripts/tachyon-install.sh` and
+`scripts/tachyon-status.sh`; the unit and the fresh-world config are in
+`config/tachyon/`.
+
 ## Development checkpoints and live updates
 
 Wrysk's working preference (2026-09-13): commit scoped work and use lightweight
