@@ -400,7 +400,7 @@ fn open_sink(
                     "--sink gpu draws the baked sprite art; pass --art <dir> (e.g. assets/atelier)"
                 )
             })?;
-            Box::new(crate::sink::GpuSink::new(
+            let mut gpu = crate::sink::GpuSink::new(
                 shape,
                 art,
                 crate::sink::GpuSinkOptions {
@@ -411,7 +411,27 @@ fn open_sink(
                     capture: run.gpu_capture.clone(),
                     fill_profile: run.gpu_fill_profile,
                 },
-            )?)
+            )?;
+            // The cheap viewer: the same page on the same port as `--mirror-web`, fed from
+            // the raster the GPU has already drawn instead of from a CPU rasterisation
+            // nothing else needs. `--care` is not offered on it — care is drawn onto the
+            // canvas, and this sink has no canvas — so `Run::validate` keeps the two apart.
+            if run.gpu_web_rate > 0.0 {
+                let web = WebSink::with_world(
+                    run.web_port,
+                    speed_note(run.speed),
+                    source.clone(),
+                    None,
+                    shape,
+                )?;
+                eprintln!(
+                    "cubarium: serving the viewer at {} from the GPU's own raster, {} fps",
+                    web.url(),
+                    run.gpu_web_rate
+                );
+                gpu = gpu.with_web(web, run.gpu_web_rate);
+            }
+            Box::new(gpu)
         }
     };
     if !run.mirror_web {

@@ -55,7 +55,8 @@ use crate::art_present::{
     tall_between, tall_grown_px, trunk_strip, turn_heading, w_soil, wood_shade,
 };
 use crate::lanternjaw::Lanternjaw;
-use crate::sink::{FrameSink, Output, WorldShape};
+use crate::sink::{FrameSink, Output, WebSink, WorldShape};
+use cube_proto::Raster;
 
 #[path = "gpu/target.rs"]
 mod target;
@@ -116,6 +117,22 @@ pub struct GpuSink {
     fill_layers: [f64; cubarium_gpu::scene::LAYER_COUNT],
     /// Where to write a PNG of every rendered raster, for captures and the fidelity test.
     capture: Option<PathBuf>,
+    /// The operator's viewer, fed from **this renderer's own readback** instead of from a
+    /// CPU rasterisation, and the seconds between the frames it is fed.
+    ///
+    /// W2 measured `--mirror-web` at 59.5 -> 16.5 fps on the board, and all of the loss was
+    /// CPU: `FanOutSink::wants_pixels` is true if any child wants pixels, so mirroring made
+    /// the host pay for the whole canvas draw and PNG encode that `--sink gpu` exists to
+    /// skip. This pays nothing of that. It copies the raster the GPU has already drawn —
+    /// 640x360x4 bytes — at a rate an operator chooses, and the panel keeps its own.
+    web: Option<(WebSink, f64)>,
+    /// The scratch the readback is turned into; one `Raster`, reused.
+    web_raster: Option<Raster>,
+    /// When the viewer was last fed.
+    web_last: Option<std::time::Instant>,
+    /// Frames fed to the viewer, and the milliseconds they cost, for `finish`.
+    web_frames: u64,
+    web_ms: f64,
 }
 
 /// The knobs `--sink gpu` takes, as one value rather than seven positional arguments.
@@ -264,7 +281,54 @@ impl GpuSink {
             build_ms: 0.0,
             present_ms: 0.0,
             capture,
+            web: None,
+            web_raster: None,
+            web_last: None,
+            web_frames: 0,
+            web_ms: 0.0,
         })
+    }
+
+    /// Feed `web` from this renderer's own readback, at most `rate` times a second.
+    ///
+    /// A non-positive or non-finite rate attaches nothing, which is the flag's own
+    /// default: an operator asks for the viewer, and until they do the panel does not
+    /// even read its raster back.
+    pub fn with_web(mut self, web: WebSink, rate: f64) -> GpuSink {
+        if rate.is_finite() && rate > 0.0 {
+            self.web = Some((web, 1.0 / rate));
+        }
+        self
+    }
+
+    /// Hand the viewer this frame if enough time has passed since the last one.
+    ///
+    /// The readback is `vkCmdCopyImageToBuffer` of the world raster into a host buffer and
+    /// a wait — the GPU has finished the frame by the time this runs, so the wait is for
+    /// the copy alone — then one pass turning RGBA into the viewer's RGB. At 2 fps on a
+    /// 640x360 raster that is 1.8 MB/s of copy against the 60 Hz the panel is getting.
+    fn feed_web(&mut self) -> Result<()> {
+        let Some((_, period)) = &self.web else { return Ok(()) };
+        let period = *period;
+        let now = std::time::Instant::now();
+        if self.web_last.is_some_and(|t| (now - t).as_secs_f64() < period) {
+            return Ok(());
+        }
+        self.web_last = Some(now);
+        let rgba = self.renderer.read_raster(&self.gpu)?;
+        let (w, h) = (self.layout.w as u16, self.layout.h as u16);
+        let raster = self
+            .web_raster
+            .get_or_insert_with(|| Raster::black(w, h));
+        for (rgb, px) in raster.as_bytes_mut().chunks_exact_mut(3).zip(rgba.chunks_exact(4)) {
+            rgb.copy_from_slice(&px[..3]);
+        }
+        if let Some((web, _)) = self.web.as_mut() {
+            web.submit(Output::Ring(raster))?;
+        }
+        self.web_frames += 1;
+        self.web_ms += (std::time::Instant::now() - now).as_secs_f64() * 1e3;
+        Ok(())
     }
 
     /// Keep the column heights the presenter is about to advance past.
@@ -322,6 +386,7 @@ impl GpuSink {
             let path = dir.join(format!("gpu-{:06}.png", self.frames));
             cubarium_gpu::target::write_png(&path, self.layout.w, self.layout.h, &rgba)?;
         }
+        self.feed_web()?;
         Ok(())
     }
 
@@ -1158,6 +1223,18 @@ impl FrameSink for GpuSink {
         self.observed = Some(view.tick);
     }
 
+    fn observe_counts(&mut self, population: usize, neural: usize) {
+        if let Some((web, _)) = self.web.as_mut() {
+            web.observe_counts(population, neural);
+        }
+    }
+
+    fn observe_tick(&mut self, tick: u64) {
+        if let Some((web, _)) = self.web.as_mut() {
+            web.observe_tick(tick);
+        }
+    }
+
     fn observe_view(&mut self, view: &RenderView, seconds: f64, f: f64) -> Result<()> {
         // A sink attached to a resumed world may see a frame before its first tick; the
         // presenter snaps on its own first observe, exactly as the CPU one does.
@@ -1223,6 +1300,17 @@ impl FrameSink for GpuSink {
                     by_layer.join(", ")
                 );
             }
+        }
+        if self.web_frames > 0 {
+            eprintln!(
+                "cubarium: --sink gpu fed the viewer {} frame(s) from its own readback, \
+                 {:.2} ms each",
+                self.web_frames,
+                self.web_ms / self.web_frames as f64
+            );
+        }
+        if let Some((web, _)) = self.web.as_mut() {
+            web.finish()?;
         }
         self.target.finish(&self.gpu, &mut self.renderer)
     }

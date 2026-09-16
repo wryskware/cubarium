@@ -295,6 +295,16 @@ pub struct Run {
     /// the `S x S` block rule applied to the bend as well. See `--gpu-bend-substep`.
     #[arg(long, default_value_t = false)]
     pub no_gpu_bend_substep: bool,
+    /// Serve the operator's viewer from `--sink gpu`'s **own raster**, at this many
+    /// frames a second (`2` is plenty to watch a world by). 0, the default, serves none.
+    ///
+    /// This is the cheap viewer. `--mirror-web` makes `FanOutSink` want pixels, which
+    /// makes the host pay for the whole CPU rasterisation and PNG encode that `--sink gpu`
+    /// exists to skip — measured on the board at 59.5 -> 16.5 fps. This copies the frame
+    /// the GPU has already drawn, so the panel keeps its rate; the page, the port and the
+    /// `ssh -L 7393:127.0.0.1:7393` line are the same ones `--mirror-web` gives.
+    #[arg(long, default_value_t = 0.0)]
+    pub gpu_web_rate: f64,
     /// Measure where `--sink gpu`'s sprite fill goes — quad area against the art that
     /// can actually paint in it — and print it at exit. A diagnostic: it walks the
     /// frame's instances on the CPU, which is the adapter's own scarce resource.
@@ -455,6 +465,28 @@ impl Run {
             "--fresh and --require-resume ask for opposite things: one demands a new world, \
              the other demands an old one"
         );
+        anyhow::ensure!(
+            self.gpu_web_rate.is_finite() && self.gpu_web_rate >= 0.0 && self.gpu_web_rate <= 60.0,
+            "--gpu-web-rate is frames per second for the viewer, 0 (none) to 60"
+        );
+        if self.gpu_web_rate > 0.0 {
+            // Two viewers on one port, and one of them the expensive kind. Refused rather
+            // than silently preferring one: an operator who asked for both is asking for
+            // the cheap one and does not know the other exists.
+            anyhow::ensure!(
+                !self.mirror_web,
+                "--gpu-web-rate and --mirror-web are two viewers on one port. \
+                 --mirror-web forces the CPU rasterisation the GPU sink exists to skip \
+                 (59.5 -> 16.5 fps on the panel); --gpu-web-rate serves the GPU's own \
+                 raster instead. Ask for one."
+            );
+            anyhow::ensure!(
+                self.sink == RunSinkArg::Gpu,
+                "--gpu-web-rate serves --sink gpu's own raster; this run's sink is {}. \
+                 Use --sink web, or --mirror-web beside another sink.",
+                self.sink.name()
+            );
+        }
         anyhow::ensure!(self.every >= 1, "--every must be at least 1");
         anyhow::ensure!(self.scale >= 1, "--scale must be at least 1");
         // A count of zero asks for a seeding that seeds nothing; that is a typo, not a
@@ -944,6 +976,50 @@ mod topology_tests {
                 .validate()
                 .unwrap();
         }
+    }
+
+    /// The two viewers are one port and one of them is the expensive kind, so asking for
+    /// both is refused rather than silently resolved; and the cheap one only exists where
+    /// there is a GPU raster to serve.
+    #[test]
+    fn the_gpu_fed_viewer_is_refused_beside_the_cpu_rasterised_one() {
+        let err = parse_run([
+            "cubarium", "run", "--fresh", "--sink", "gpu", "--topology", "ring:320x180",
+            "--art", "assets/atelier", "--gpu-web-rate", "2", "--mirror-web",
+        ])
+        .validate()
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("two viewers on one port"), "{err}");
+
+        let err = parse_run([
+            "cubarium", "run", "--fresh", "--sink", "png", "--out", "/tmp/x",
+            "--seconds", "1", "--gpu-web-rate", "2",
+        ])
+        .validate()
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("this run's sink is png"), "{err}");
+
+        for bad in ["--gpu-web-rate=-1", "--gpu-web-rate=61", "--gpu-web-rate=nan"] {
+            let r = parse_run([
+                "cubarium", "run", "--fresh", "--sink", "gpu", "--topology", "ring:320x180",
+                "--art", "assets/atelier", bad,
+            ]);
+            assert!(r.validate().is_err(), "{bad}");
+        }
+
+        // The documented pair parses, and 0 (the default) is not a viewer at all.
+        parse_run([
+            "cubarium", "run", "--fresh", "--sink", "gpu", "--topology", "ring:640x360",
+            "--world-scale", "2", "--art", "assets/atelier", "--gpu-web-rate", "2",
+        ])
+        .validate()
+        .unwrap();
+        parse_run(["cubarium", "run", "--fresh", "--sink", "png", "--out", "/tmp/x",
+                   "--seconds", "1"])
+            .validate()
+            .unwrap();
     }
 
     /// A ring the surface contract cannot accept is refused with the contract's own
