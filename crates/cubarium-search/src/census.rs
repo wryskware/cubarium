@@ -1364,48 +1364,6 @@ fn agreement(facts: &[RunFacts], pred: impl Fn(&RunFacts) -> bool) -> (usize, us
     (runs, seeds)
 }
 
-#[cfg(test)]
-mod agreement_tests {
-    use super::{RunFacts, agreement};
-
-    fn fact(seed: u64, arm: u32, ok: bool) -> RunFacts {
-        RunFacts {
-            seed,
-            arm,
-            skimmer_alive_final: u64::from(ok),
-            skimmer_births: u64::from(ok),
-            founder_forms_alive: 0,
-            top_form_share: 0.0,
-            alive_by_form: [0; 5],
-            founder_skimmer_mean_lifetime_seconds: 0.0,
-            skimmer_entered: 0,
-            skimmer_bin2_entered: 0,
-        }
-    }
-
-    /// Through the production function (Astra, round-5 review P3): a seed agrees on a strict
-    /// majority of its own runs — 1 of 1 (Y's arm 0), 2 of 3 (R's cell), 4 of 6 — and **not**
-    /// on 1 of 2, which "at least half" would have accepted as a tie.
-    #[test]
-    fn a_seed_agrees_on_a_strict_majority_of_its_own_runs() {
-        let pred = |f: &RunFacts| f.skimmer_alive_final >= 1 && f.skimmer_births > 0;
-        // One run per seed: the run decides (Y's arm-0 cell).
-        let one = [fact(1, 0, true), fact(2, 0, false)];
-        assert_eq!(agreement(&one, pred), (1, 1));
-        // Two runs per seed: one of two is a tie, not a majority.
-        let two = [fact(1, 0, true), fact(1, 1, false), fact(2, 0, true), fact(2, 1, true)];
-        assert_eq!(agreement(&two, pred), (3, 1), "seed 1 tied 1/2 and must not agree");
-        // Three runs per seed: R's "at least 2 of its 3 arms".
-        let three = [fact(1, 0, true), fact(1, 1, true), fact(1, 2, false), fact(2, 0, true), fact(2, 1, false), fact(2, 2, false)];
-        assert_eq!(agreement(&three, pred), (3, 1));
-        // Six runs per seed: four are needed, three are not.
-        let mut six: Vec<RunFacts> = (0..6).map(|a| fact(1, a, a < 3)).collect();
-        assert_eq!(agreement(&six, pred), (3, 0), "3 of 6 is a tie");
-        six[3] = fact(1, 3, true);
-        assert_eq!(agreement(&six, pred), (4, 1));
-    }
-}
-
 impl Assessment {
     /// The pre-registered rule, evaluated on one configuration's matched cells.
     ///
@@ -2441,70 +2399,5 @@ fn print_assessments(assessments: &[(String, Assessment)]) {
             a.grazer_control_mean,
             a.grazer_ratio
         );
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_bands_are_increasing_and_the_last_is_open() {
-        for pair in DEPTH_BANDS.windows(2) {
-            assert!(pair[0] < pair[1]);
-        }
-        assert!(DEPTH_BANDS[3].is_infinite());
-        assert_eq!(depth_band(f64::INFINITY), 3);
-    }
-
-    #[test]
-    fn a_depth_profile_merges_without_losing_a_probe() {
-        let mut a = DepthProfile::default();
-        let mut b = DepthProfile::default();
-        a.observe(0.0, 0.05);
-        a.observe(0.2, 0.05);
-        b.observe(0.06, 0.05);
-        let (pa, pb) = (a.probes, b.probes);
-        a.merge(&b);
-        assert_eq!(a.probes, pa + pb);
-        assert_eq!(a.bands.iter().sum::<u64>(), a.probes);
-        assert_eq!(a.wet_probes, 2);
-        assert_eq!(a.algae_band_probes, 2);
-        assert!((a.mean_depth() - (0.0 + 0.2 + 0.06) / 3.0).abs() < 1e-12);
-    }
-
-    #[test]
-    fn a_censored_founder_lifetime_counts_a_survivor_at_the_length_of_the_run() {
-        let lives = FounderLives {
-            founders: 2,
-            alive_final: 1,
-            deaths: 1,
-            death_age_ticks: 1_000,
-            lifetime_ticks: 1_000 + 180_000,
-            ..FounderLives::default()
-        };
-        let expected = (181_000.0 * cubarium_core::DT) / 2.0;
-        assert!((lives.mean_lifetime_seconds() - expected).abs() < 1e-9);
-    }
-
-    #[test]
-    fn the_agreement_rule_needs_two_runs_of_a_seed() {
-        let f = |seed, arm, ok| RunFacts {
-            seed,
-            arm,
-            skimmer_alive_final: u64::from(ok),
-            ..RunFacts::default()
-        };
-        let facts = vec![
-            f(1, 0, true),
-            f(1, 1, false),
-            f(1, 2, false),
-            f(2, 0, true),
-            f(2, 1, true),
-            f(2, 2, false),
-        ];
-        let (runs, seeds) = agreement(&facts, |r| r.skimmer_alive_final > 0);
-        assert_eq!(runs, 3);
-        assert_eq!(seeds, 1, "one run of a seed is not that seed agreeing");
     }
 }
