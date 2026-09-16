@@ -528,9 +528,77 @@ pub fn turn_radius_px_in(
     apex: Option<&crate::hunter::ContactGeometry>,
     model: MotorModel,
 ) -> f64 {
+    turn_radius_px_in_with(organism, apex, model, ApexTurnRadius::Grasp)
+}
+
+/// **Which radius an apex member's grasp puts in the turn budget** under
+/// [`MotorModel::Sweep`] — the one variable of workstream U
+/// (`design/7_Research/ecology-v1-apex-grasp-2026-09-16.md`).
+///
+/// [`MotorModel::Sweep`] charges the outermost *contacting* point, and for a lanternjaw that
+/// is its 14.8 px grasp rather than its 9 px lobes. Workstream P measured 64 % of the
+/// member's boosted motor budget going into turn sweep at that radius, and T measured the
+/// whole grasp-free disc model recovering the closure. This rule is the **intermediate**: the
+/// grasp stops being a turn radius while everything else about `Sweep` — the additive
+/// envelope, [`ROTATION_COST_SCALE`], the grasp's own *reach* in the strike — is untouched.
+///
+/// [`Grasp`](ApexTurnRadius::Grasp) is the shipped rule and the default, so a world that never
+/// names one is byte-identical to the build before this existed. It is meaningless under
+/// [`MotorModel::Inertial`], which already drops the grasp.
+///
+/// **No ordinary body is reachable by it, by construction:** an organism with no apex contact
+/// geometry is handed `apex = None` and both rules return its lobe extent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ApexTurnRadius {
+    /// `max(lobes, |capture_offset| + capture_reach)` — the shipped rule.
+    #[default]
+    Grasp,
+    /// `lobes` — the member's own body, with the grasp left to the strike that uses it.
+    Lobes,
+}
+
+impl ApexTurnRadius {
+    /// The CLI spelling, and what a record writes.
+    pub fn name(self) -> &'static str {
+        match self {
+            ApexTurnRadius::Grasp => "grasp",
+            ApexTurnRadius::Lobes => "lobes",
+        }
+    }
+
+    /// The spelling back. An unrecognised name is refused rather than silently defaulted: a
+    /// paired arm that quietly ran the shipped half is worse than one that did not run.
+    pub fn parse(s: &str) -> Result<ApexTurnRadius, String> {
+        match s.trim() {
+            "grasp" => Ok(ApexTurnRadius::Grasp),
+            "lobes" => Ok(ApexTurnRadius::Lobes),
+            other => Err(format!(
+                "unknown apex turn radius `{other}`: expected `grasp` (the shipped rule, the \
+                 outermost contacting point) or `lobes` (the member's own extent)"
+            )),
+        }
+    }
+
+    /// Is this the shipped rule?
+    pub fn is_grasp(self) -> bool {
+        matches!(self, ApexTurnRadius::Grasp)
+    }
+}
+
+/// [`turn_radius_px_in`] under a named [`ApexTurnRadius`] as well as a named [`MotorModel`].
+///
+/// The only place the two rules of [`ApexTurnRadius`] are written. Under
+/// [`MotorModel::Inertial`] the argument cannot matter — that model already ignores `apex` —
+/// and under [`MotorModel::Sweep`] it decides whether the grasp joins the lobes in the `max`.
+pub fn turn_radius_px_in_with(
+    organism: &Organism,
+    apex: Option<&crate::hunter::ContactGeometry>,
+    model: MotorModel,
+    apex_radius: ApexTurnRadius,
+) -> f64 {
     let lobes = finite_non_negative(organism.phenotype.extent);
     match model {
-        MotorModel::Sweep => match apex {
+        MotorModel::Sweep => match apex.filter(|_| apex_radius.is_grasp()) {
             Some(g) => lobes.max(finite_non_negative(
                 g.capture_offset_body.length() + g.capture_reach_px,
             )),

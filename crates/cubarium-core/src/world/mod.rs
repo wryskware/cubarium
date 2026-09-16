@@ -90,6 +90,12 @@ pub struct World {
     /// [`crate::motor::MotorModel::Sweep`], the shipped contract, so a world that never names a
     /// model is byte-identical to the build before the switch existed.
     pub(crate) motor_model: crate::motor::MotorModel,
+    /// Which radius an apex member's grasp puts in the turn budget under
+    /// [`crate::motor::MotorModel::Sweep`] (`crate::motor::ApexTurnRadius`). Transient like
+    /// every field above: never persisted, never hashed, never in [`WorldConfig`]. The default
+    /// is [`crate::motor::ApexTurnRadius::Grasp`], the shipped rule, so a world that never
+    /// names one is byte-identical to the build before the switch existed.
+    pub(crate) apex_turn_radius: crate::motor::ApexTurnRadius,
     pub(crate) initial_material: f64,
 }
 
@@ -107,5 +113,21 @@ impl World {
     /// The motor contract in force, [`crate::motor::MotorModel::Sweep`] unless one was named.
     pub fn motor_model(&self) -> crate::motor::MotorModel {
         self.motor_model
+    }
+
+    /// Run this world with the apex's grasp counted, or not counted, as a turn radius
+    /// (`design/7_Research/ecology-v1-apex-grasp-2026-09-16.md`).
+    ///
+    /// Opt-in and transient exactly as [`World::set_motor_model`] is: nothing in a snapshot
+    /// records it, so a resumed world runs [`crate::motor::ApexTurnRadius::Grasp`] until it is
+    /// told otherwise. It reaches no ordinary body: only a hunter member has the contact
+    /// geometry the rule chooses between.
+    pub fn set_apex_turn_radius(&mut self, rule: crate::motor::ApexTurnRadius) {
+        self.apex_turn_radius = rule;
+    }
+
+    /// The rule in force, [`crate::motor::ApexTurnRadius::Grasp`] unless one was named.
+    pub fn apex_turn_radius(&self) -> crate::motor::ApexTurnRadius {
+        self.apex_turn_radius
     }
 }

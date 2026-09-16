@@ -326,6 +326,13 @@ enum Command {
         /// world exactly as it ships. This changes what the world does, deliberately.
         #[arg(long, default_value = "sweep")]
         motor: String,
+        /// Which radius an apex member's 14.8 px grasp puts in the turn budget under `--motor
+        /// sweep`. `grasp` is the shipped rule, `max(lobes, |capture_offset| + capture_reach)`;
+        /// `lobes` is workstream U's paired variant, the member's own 9 px extent, with the
+        /// grasp left to the strike that reaches with it. No ordinary body is affected either
+        /// way. The default runs the world exactly as it ships.
+        #[arg(long, default_value = "grasp")]
+        apex_turn_radius: String,
         #[arg(long, default_value_t = 8)]
         workers: usize,
         #[arg(long, default_value_t = 600)]
@@ -750,6 +757,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             no_ledger,
             pursuit_stop,
             motor,
+            apex_turn_radius,
             workers,
             wall_seconds,
             out,
@@ -762,6 +770,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ledger: !no_ledger,
                 stop: cubarium_search::apex_audit::parse_pursuit_stop(&pursuit_stop)?,
                 motor: cubarium_search::apex_audit::parse_motor(&motor)?,
+                apex_turn_radius: cubarium_search::apex_audit::parse_apex_turn_radius(
+                    &apex_turn_radius,
+                )?,
             };
             cubarium_search::apex_audit::run(
                 config.split(',').map(|s| PathBuf::from(s.trim())).filter(|p| !p.as_os_str().is_empty()).collect(),
