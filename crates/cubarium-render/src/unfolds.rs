@@ -65,6 +65,9 @@ pub struct Unfolds {
 /// plant slots and 320 ground stamps need, and a hard stop for anything that moves.
 const DEFAULT_CAPACITY: usize = 1 << 20;
 
+/// Below this the dead space is not worth a rebuild.
+const COMPACT_FLOOR: usize = 1 << 16;
+
 impl Unfolds {
     /// A plain scratch buffer: every stamp unfolds, exactly as before.
     pub fn new() -> Unfolds {
@@ -150,7 +153,25 @@ impl Unfolds {
             self.live -= old.len as usize;
         }
         self.live += self.scratch.len();
+        if self.pool.len() > 2 * self.live && self.pool.len() > COMPACT_FLOOR {
+            self.compact();
+            let e = &self.map[&key];
+            return &self.pool[e.start as usize..e.start as usize + e.len as usize];
+        }
         &self.pool[start..start + self.scratch.len()]
+    }
+
+    /// Drop the runs left behind by entries that grew. Rare: an anchor's radius settles
+    /// within a few seconds of wind, after which nothing grows and nothing is abandoned.
+    fn compact(&mut self) {
+        let mut pool = Vec::with_capacity(self.live);
+        for e in self.map.values_mut() {
+            let (start, len) = (e.start as usize, e.len as usize);
+            e.start = pool.len() as u32;
+            pool.extend_from_slice(&self.pool[start..start + len]);
+        }
+        debug_assert_eq!(pool.len(), self.live);
+        self.pool = pool;
     }
 }
 
