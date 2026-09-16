@@ -83,7 +83,7 @@ a resume regression and the host's motor check
 ([V](ecology-v1-predicate-adoption-opus-2026-09-16.md): landed; the selected `fast-leaf` keeps all six gates and moves under half a body, captures 29 → 49 over the eight apex rows, the unselected `baseline` arm 2 loses its guild gate), the motor
 only after isolation, a host contract, the adapter diagonal and a
 recalibration; then the turn deadband alone in training ([X](ecology-v1-turn-deadband-opus-2026-09-16.md), in flight), the skimmer depth
-ladder ([Y](ecology-v1-depth-ladder-opus-2026-09-16.md), in flight), and a coupled grazed-field opening. A light physics engine is on
+ladder ([Y](ecology-v1-depth-ladder-opus-2026-09-16.md), in flight), and a coupled grazed-field opening ([Z](ecology-v1-grazed-opening-opus-2026-09-16.md), in flight). Astra cleared the round-4 addendum (U, W, V) at `4ce48f4`. A light physics engine is on
 [the backlog](../backlog.md). The [ecology v1 contract](../ecology-v1-contract.md)
 and its [implementation review](../7_Research/ecology-v1-implementation-review-2026-09-15.md)
 stand as the accepted baseline.
