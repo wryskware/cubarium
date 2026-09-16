@@ -393,8 +393,10 @@ pub const ANCHORS: [(Face, u8, u8); CLONES] = [
 /// **The placement is deliberately neutral about food and about habitat.** Two earlier
 /// versions were not, and both were refused by the world rather than by taste:
 ///
-/// 1. *Four deepest pools against four dry cells.* Every one of the four deepest pools held
-///    **no foliage at all**. Ecology v1 grows foliage only in a cell that carries wood
+/// 1. *Four deepest pools against four dry cells.* The deepest pools hold **no foliage at
+///    all**: over the four training seeds, 39 of the 40 deepest cells carry zero mean
+///    foliage and the fortieth carries 0.025 m against a typical dry cell's 0.2. Ecology v1
+///    grows foliage only in a cell that carries wood
 ///    (`crates/cubarium-core/src/fields.rs:398-409`: subphase 3a runs only for
 ///    `CellClass::Alive`, and the income term is proportional to the foliage already there),
 ///    and `water.algae_light` raises a *living* cell's light floor rather than creating a

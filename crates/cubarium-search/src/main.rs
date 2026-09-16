@@ -666,6 +666,20 @@ fn factorial_command(
             for (hi, cells, fed) in factorial::landscape_census(&land) {
                 println!("| <= {hi} | {cells} | {fed} |");
             }
+            // The ten deepest cells, so "is there food in the pools?" is answered by the ten
+            // that matter rather than by a band average.
+            let mut deepest: Vec<usize> = (0..cubarium_surface::CELL_COUNT).collect();
+            deepest.sort_by(|&a, &b| {
+                land.depth[b].partial_cmp(&land.depth[a]).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            println!(
+                "ten deepest cells: {}",
+                deepest[..10]
+                    .iter()
+                    .map(|&i| format!("{:.2}d/{:.3}P", land.depth[i], land.foliage[i]))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
             let cells = factorial::choose_cells(&land, design.wet_min)?;
             println!();
             println!("| slot | cell | face | class | mean depth | mean foliage | mean litter |");
