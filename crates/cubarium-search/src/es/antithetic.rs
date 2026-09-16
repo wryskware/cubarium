@@ -54,6 +54,8 @@
 //! movement channel is capability-masked, so `Action7::squash(&head, cap).0[THRUST] == 0.0`
 //! *is* the deadband predicate. No copy of the squash lives here.
 
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use cubarium_core::neural::action::{DEADBAND, THRUST, TURN};
@@ -62,7 +64,8 @@ use cubarium_core::neural::{Action7, Capability, Gru32, HIDDEN};
 use serde::{Deserialize, Serialize};
 
 use super::episode::Episode;
-use super::optimizer::Adam;
+use super::optimizer::{self, Adam};
+use super::rng::perturbation;
 use super::scorecheck::Sample;
 use super::trainer::{Aggregate, GenerationReport, Protocol};
 
@@ -177,10 +180,22 @@ pub struct Reduction {
 
 /// The layout names of a report, in the order its jobs were dispatched.
 ///
-/// The trainer writes `candidates.len() × layouts.len()` jobs, layout-innermost, so the first
-/// candidate's jobs already name every layout once, in plan order.
+/// The trainer writes `candidates.len() × layouts.len()` jobs, layout-innermost, so first
+/// appearance over the whole job list is the plan's order. It is taken over *every* job rather
+/// than over the first candidate's block so that a candidate missing a layout is caught by
+/// [`candidate_episodes`] instead of quietly shrinking the layout set — and with it the
+/// minimum that every score in the report was taken over.
 pub fn layout_order(report: &GenerationReport) -> Result<Vec<String>, String> {
-    todo!("layout_order")
+    if report.jobs.is_empty() {
+        return Err(format!("generation {} has no jobs", report.generation));
+    }
+    let mut out: Vec<String> = Vec::new();
+    for job in &report.jobs {
+        if !out.contains(&job.layout) {
+            out.push(job.layout.clone());
+        }
+    }
+    Ok(out)
 }
 
 /// One candidate's episodes, in layout order. Errors rather than guessing if a layout is
@@ -190,7 +205,21 @@ pub fn candidate_episodes<'a>(
     label: &str,
     layouts: &[String],
 ) -> Result<Vec<&'a Episode>, String> {
-    todo!("candidate_episodes")
+    let mut out = Vec::with_capacity(layouts.len());
+    for want in layouts {
+        let job = report
+            .jobs
+            .iter()
+            .find(|j| j.candidate == label && &j.layout == want)
+            .ok_or_else(|| {
+                format!(
+                    "generation {}: candidate {label} has no episode on layout {want}",
+                    report.generation
+                )
+            })?;
+        out.push(&job.episode);
+    }
+    Ok(out)
 }
 
 /// Reduce one generation report. `aggregate` must be the protocol's, because the score's
@@ -199,17 +228,193 @@ pub fn reduce_generation(
     report: &GenerationReport,
     aggregate: Aggregate,
 ) -> Result<(GenerationRow, Vec<PairRow>), String> {
-    todo!("reduce_generation")
+    let layouts = layout_order(report)?;
+    let m = report.candidate_scores.len();
+    if m < 2 || m % 2 != 0 {
+        return Err(format!("generation {} has {m} candidate scores, not 2n", report.generation));
+    }
+    let n = m / 2;
+
+    // Every candidate's episodes, in candidate index order, checked against the score the
+    // report recorded. A disagreement means the rows and the scores are not the same run.
+    let mut episodes: Vec<Vec<&Episode>> = Vec::with_capacity(m);
+    for ci in 0..m {
+        let label = if ci % 2 == 0 {
+            super::trainer::Candidate::Plus(ci / 2).label()
+        } else {
+            super::trainer::Candidate::Minus(ci / 2).label()
+        };
+        let eps = candidate_episodes(report, &label, &layouts)?;
+        let seen = report.jobs.iter().filter(|j| j.candidate == label).count();
+        if seen != layouts.len() {
+            return Err(format!(
+                "generation {}: {label} has {seen} episodes over {} layouts",
+                report.generation,
+                layouts.len()
+            ));
+        }
+        let owned: Vec<Episode> = eps.iter().map(|e| (*e).clone()).collect();
+        let recomputed = super::trainer::score_by(aggregate, &owned);
+        if recomputed != report.candidate_scores[ci] {
+            return Err(format!(
+                "generation {}: {label} scores {} from its episodes but the report says {}",
+                report.generation, recomputed, report.candidate_scores[ci]
+            ));
+        }
+        episodes.push(eps);
+    }
+
+    let u = optimizer::centered_rank_utilities(
+        &(0..n)
+            .map(|p| report.candidate_scores[2 * p])
+            .chain((0..n).map(|p| report.candidate_scores[2 * p + 1]))
+            .collect::<Vec<f64>>(),
+    );
+
+    let mut binding_counts = vec![0usize; layouts.len()];
+    let mut pairs = Vec::with_capacity(n);
+    for p in 0..n {
+        let plus = &episodes[2 * p];
+        let minus = &episodes[2 * p + 1];
+        let mean = |e: &[&Episode], f: &dyn Fn(&Episode) -> f64| -> f64 {
+            e.iter().map(|x| f(x)).sum::<f64>() / e.len() as f64
+        };
+        let ticks_plus: Vec<u64> = plus.iter().map(|e| e.ticks).collect();
+        let ticks_minus: Vec<u64> = minus.iter().map(|e| e.ticks).collect();
+        let d_ticks: Vec<i64> = ticks_plus
+            .iter()
+            .zip(&ticks_minus)
+            .map(|(a, b)| *a as i64 - *b as i64)
+            .collect();
+        let binding = |t: &[u64]| -> usize {
+            let mut best = 0;
+            for (i, v) in t.iter().enumerate() {
+                if *v < t[best] {
+                    best = i;
+                }
+            }
+            best
+        };
+        let binding_plus = binding(&ticks_plus);
+        let binding_minus = binding(&ticks_minus);
+        binding_counts[binding_plus] += 1;
+        binding_counts[binding_minus] += 1;
+
+        let intake = |e: &Episode| e.intake_producer;
+        let intake_rate = |e: &Episode| {
+            if e.ticks == 0 { 0.0 } else { e.intake_producer / e.ticks as f64 }
+        };
+        let opening = |e: &Episode| e.ticks_in_opening as f64;
+        let opening_fraction = |e: &Episode| {
+            if e.ticks == 0 { 0.0 } else { e.ticks_in_opening as f64 / e.ticks as f64 }
+        };
+
+        let d_score = report.candidate_scores[2 * p] - report.candidate_scores[2 * p + 1];
+        let d_mean_ticks = mean(plus, &|e| e.ticks as f64) - mean(minus, &|e| e.ticks as f64);
+        let minimum_masked =
+            d_score != 0.0 && d_mean_ticks != 0.0 && (d_score > 0.0) != (d_mean_ticks > 0.0);
+
+        pairs.push(PairRow {
+            generation: report.generation,
+            pair: p,
+            score_plus: report.candidate_scores[2 * p],
+            score_minus: report.candidate_scores[2 * p + 1],
+            d_score,
+            ticks_plus,
+            ticks_minus,
+            d_ticks: d_ticks.clone(),
+            layouts_favouring_plus: d_ticks.iter().filter(|d| **d > 0).count(),
+            binding_plus,
+            binding_minus,
+            d_mean_ticks,
+            minimum_masked,
+            d_intake: mean(plus, &intake) - mean(minus, &intake),
+            d_intake_rate: mean(plus, &intake_rate) - mean(minus, &intake_rate),
+            d_opening: mean(plus, &opening) - mean(minus, &opening),
+            d_opening_fraction: mean(plus, &opening_fraction) - mean(minus, &opening_fraction),
+            u_plus: u[p],
+            u_minus: u[n + p],
+            weight: u[p] - u[n + p],
+        });
+    }
+
+    let scores = &report.candidate_scores;
+    let score_mean = scores.iter().sum::<f64>() / m as f64;
+    let ss: f64 = scores.iter().map(|s| (s - score_mean).powi(2)).sum();
+    let mut best = 0;
+    for (i, s) in scores.iter().enumerate() {
+        if *s > scores[best] {
+            best = i;
+        }
+    }
+    let count = |f: &dyn Fn(&PairRow) -> f64| {
+        pairs.iter().filter(|r| r.concordant(f(r)) == Some(true)).count()
+    };
+    let row = GenerationRow {
+        generation: report.generation,
+        pairs: n,
+        score_min: scores.iter().cloned().fold(f64::INFINITY, f64::min),
+        score_max: scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
+        score_mean,
+        score_sd: (ss / m as f64).sqrt(),
+        score_sd_sample: (ss / (m - 1) as f64).sqrt(),
+        center_score: report.center_score,
+        best_candidate: scores[best],
+        best_candidate_pair: best / 2,
+        best_candidate_plus: best % 2 == 0,
+        informative_pairs: pairs.iter().filter(|r| r.informative()).count(),
+        zero_weight_pairs: pairs.iter().filter(|r| !r.informative()).count(),
+        concordant_intake: count(&|r| r.d_intake),
+        concordant_intake_rate: count(&|r| r.d_intake_rate),
+        concordant_opening: count(&|r| r.d_opening),
+        concordant_opening_fraction: count(&|r| r.d_opening_fraction),
+        minimum_masked: pairs.iter().filter(|r| r.minimum_masked).count(),
+        binding_counts,
+        sum_abs_weight: pairs.iter().map(|r| r.weight.abs()).sum(),
+        root_sum_sq_weight: pairs.iter().map(|r| r.weight * r.weight).sum::<f64>().sqrt(),
+        gradient_norm: report.gradient_norm,
+        update_rms: report.update_rms,
+    };
+    Ok((row, pairs))
 }
 
 /// Reduce a whole run. Every report must name the same layouts.
 pub fn reduce(reports: &[GenerationReport], aggregate: Aggregate) -> Result<Reduction, String> {
-    todo!("reduce")
+    let mut layouts: Option<Vec<String>> = None;
+    let mut generations = Vec::with_capacity(reports.len());
+    let mut pairs = Vec::new();
+    for report in reports {
+        let mine = layout_order(report)?;
+        match &layouts {
+            None => layouts = Some(mine),
+            Some(first) if *first != mine => {
+                return Err(format!(
+                    "generation {} names layouts {mine:?}, the run names {first:?}",
+                    report.generation
+                ));
+            }
+            Some(_) => {}
+        }
+        let (row, mut rows) = reduce_generation(report, aggregate)?;
+        generations.push(row);
+        pairs.append(&mut rows);
+    }
+    Ok(Reduction { layouts: layouts.unwrap_or_default(), generations, pairs })
 }
 
 /// Read a run's `generations.jsonl`, one [`GenerationReport`] per line.
 pub fn read_reports(path: &Path) -> Result<Vec<GenerationReport>, Boxed> {
-    todo!("read_reports")
+    let mut out = Vec::new();
+    for (i, line) in BufReader::new(File::open(path)?).lines().enumerate() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let report: GenerationReport = serde_json::from_str(&line)
+            .map_err(|e| format!("{}:{}: {e}", path.display(), i + 1))?;
+        out.push(report);
+    }
+    Ok(out)
 }
 
 // ---------------------------------------------------------------------------------------
@@ -241,7 +446,29 @@ pub fn cancellation<F>(weights: &[f64], dim: usize, eps: F) -> Cancellation
 where
     F: FnMut(usize, &mut [f64]),
 {
-    todo!("cancellation")
+    let mut eps = eps;
+    let mut sum = vec![0.0; dim];
+    let mut one = vec![0.0; dim];
+    let mut no_cancellation_norm = 0.0;
+    let mut orthogonal_sq = 0.0;
+    for (i, w) in weights.iter().enumerate() {
+        eps(i, &mut one);
+        let len = one.iter().map(|x| x * x).sum::<f64>().sqrt();
+        no_cancellation_norm += w.abs() * len;
+        orthogonal_sq += w * w * len * len;
+        for j in 0..dim {
+            sum[j] += w * one[j];
+        }
+    }
+    let summed_norm = sum.iter().map(|x| x * x).sum::<f64>().sqrt();
+    let orthogonal_norm = orthogonal_sq.sqrt();
+    Cancellation {
+        summed_norm,
+        no_cancellation_norm,
+        orthogonal_norm,
+        retained: if no_cancellation_norm > 0.0 { summed_norm / no_cancellation_norm } else { 0.0 },
+        excess: if orthogonal_norm > 0.0 { summed_norm / orthogonal_norm } else { 0.0 },
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -271,8 +498,9 @@ pub struct Geometry {
     pub progress_toward_best: f64,
     /// `‖theta_after − best_candidate‖ / ‖theta_before − best_candidate‖`.
     pub distance_ratio_to_best: f64,
-    /// Mean over pairs of `|progress|` along each pair's own preferred direction, so the best
-    /// candidate is not the only witness.
+    /// Mean over informative pairs of the step's signed progress along each pair's own
+    /// *preferred* direction (`sign(w_i)·sigma·epsilon_i`), so the best candidate is not the
+    /// only witness to where the step went.
     pub mean_progress_toward_preferred: f64,
 }
 
@@ -288,7 +516,91 @@ pub fn replay(
     protocol: &Protocol,
     aggregate: Aggregate,
 ) -> Result<(Vec<Geometry>, Vec<f64>, Adam), String> {
-    todo!("replay")
+    let dim = theta0.len();
+    let mut theta = theta0.to_vec();
+    let mut adam = Adam::new(dim);
+    let mut out = Vec::with_capacity(reports.len());
+    let mut eps = vec![0.0; dim];
+
+    for report in reports {
+        let (row, pairs) = reduce_generation(report, aggregate)?;
+        let n = pairs.len();
+        if n != protocol.pairs {
+            return Err(format!(
+                "generation {} holds {n} pairs, the protocol names {}",
+                report.generation, protocol.pairs
+            ));
+        }
+        let generation = report.generation;
+        let seed = protocol.train_seed;
+        let sigma = protocol.sigma;
+        let plus: Vec<f64> = (0..n).map(|p| report.candidate_scores[2 * p]).collect();
+        let minus: Vec<f64> = (0..n).map(|p| report.candidate_scores[2 * p + 1]).collect();
+        let g = optimizer::gradient(&plus, &minus, dim, sigma, |i, out| {
+            perturbation(seed, generation, i as u64, out);
+        });
+        let gradient_norm_recomputed = g.iter().map(|x| x * x).sum::<f64>().sqrt();
+        let weights: Vec<f64> = pairs.iter().map(|r| r.weight).collect();
+        let cancel = cancellation(&weights, dim, |i, out| {
+            perturbation(seed, generation, i as u64, out);
+        });
+
+        let before = theta.clone();
+        adam.ascend(&mut theta, &g);
+        let step: Vec<f64> = theta.iter().zip(&before).map(|(a, b)| a - b).collect();
+        let step_norm = step.iter().map(|x| x * x).sum::<f64>().sqrt();
+
+        // The offset from the centre to the generation's best candidate.
+        let sign = if row.best_candidate_plus { 1.0 } else { -1.0 };
+        perturbation(seed, generation, row.best_candidate_pair as u64, &mut eps);
+        let offset: Vec<f64> = eps.iter().map(|e| sign * sigma * e).collect();
+        let best_sq: f64 = offset.iter().map(|x| x * x).sum();
+        let best_distance = best_sq.sqrt();
+        let dot: f64 = step.iter().zip(&offset).map(|(a, b)| a * b).sum();
+        let missed: f64 = step
+            .iter()
+            .zip(&offset)
+            .map(|(a, b)| (a - b) * (a - b))
+            .sum::<f64>()
+            .sqrt();
+
+        let mut progress_sum = 0.0;
+        let mut informative = 0.0;
+        for (i, w) in weights.iter().enumerate() {
+            if *w == 0.0 {
+                continue;
+            }
+            perturbation(seed, generation, i as u64, &mut eps);
+            let s = w.signum() * sigma;
+            let d: f64 = step.iter().zip(&eps).map(|(a, e)| a * s * e).sum();
+            let len_sq: f64 = eps.iter().map(|e| (s * e) * (s * e)).sum();
+            progress_sum += d / len_sq;
+            informative += 1.0;
+        }
+
+        out.push(Geometry {
+            generation,
+            gradient_norm_recorded: report.gradient_norm,
+            gradient_norm_recomputed,
+            cancellation: cancel,
+            step_norm,
+            step_rms: step_norm / (dim as f64).sqrt(),
+            best_distance,
+            cos_step_best: if step_norm > 0.0 && best_distance > 0.0 {
+                dot / (step_norm * best_distance)
+            } else {
+                0.0
+            },
+            progress_toward_best: if best_sq > 0.0 { dot / best_sq } else { 0.0 },
+            distance_ratio_to_best: if best_distance > 0.0 { missed / best_distance } else { 0.0 },
+            mean_progress_toward_preferred: if informative > 0.0 {
+                progress_sum / informative
+            } else {
+                0.0
+            },
+        });
+    }
+    Ok((out, theta, adam))
 }
 
 // ---------------------------------------------------------------------------------------
@@ -302,7 +614,7 @@ pub fn replay(
 /// tanh, so it is inside below `atanh(d)` in absolute value. These are reported as margins only
 /// — membership itself is always decided by the core's own adapter, never by these numbers.
 pub fn deadband_head_edges() -> (f64, f64) {
-    todo!("deadband_head_edges")
+    (((DEADBAND / (1.0 - DEADBAND)).ln()), 0.5 * ((1.0 + DEADBAND) / (1.0 - DEADBAND)).ln())
 }
 
 /// One driver's occupancy over one observation set, from one hidden-state start.
@@ -343,7 +655,44 @@ pub fn deadband_rows(
     cap: &Capability,
     samples: &[Sample],
 ) -> Vec<DeadbandRow> {
-    todo!("deadband_rows")
+    let mut rows = Vec::with_capacity(2);
+    for start in ["reset", "carried"] {
+        let mut row = DeadbandRow {
+            candidate: candidate.to_string(),
+            start: start.to_string(),
+            samples: 0,
+            thrust_inside: 0,
+            turn_inside: 0,
+            both_inside: 0,
+            mean_head_thrust: 0.0,
+            mean_abs_head_turn: 0.0,
+        };
+        let mut sum_thrust = 0.0;
+        let mut sum_abs_turn = 0.0;
+        for s in samples {
+            assert_eq!(s.obs.len(), OBS_LEN, "a sample's observation is the world's own");
+            assert_eq!(s.hidden.len(), HIDDEN, "a sample's hidden state is the animal's own");
+            let mut x = [0.0f64; OBS_LEN];
+            x.copy_from_slice(&s.obs);
+            let mut h = [0.0f64; HIDDEN];
+            if start == "carried" {
+                h.copy_from_slice(&s.hidden);
+            }
+            let (thrust, turn, head_thrust, head_turn) = movement_inside(weights, cap, &x, &h);
+            row.samples += 1;
+            row.thrust_inside += u64::from(thrust);
+            row.turn_inside += u64::from(turn);
+            row.both_inside += u64::from(thrust && turn);
+            sum_thrust += head_thrust;
+            sum_abs_turn += head_turn.abs();
+        }
+        if row.samples > 0 {
+            row.mean_head_thrust = sum_thrust / row.samples as f64;
+            row.mean_abs_head_turn = sum_abs_turn / row.samples as f64;
+        }
+        rows.push(row);
+    }
+    rows
 }
 
 /// Whether one forward pass lands each movement channel inside the deadband, and the raw head
@@ -354,7 +703,302 @@ pub fn movement_inside(
     x: &[f64; OBS_LEN],
     hidden: &[f64; HIDDEN],
 ) -> (bool, bool, f64, f64) {
-    todo!("movement_inside")
+    let mut h = *hidden;
+    let head = weights.forward(x, &mut h);
+    // `band` maps anything under DEADBAND to exactly 0.0 and neither movement channel is
+    // capability-masked, so the adapter's own zero *is* the membership test.
+    let held = Action7::squash(&head, cap).0;
+    (held[THRUST] == 0.0, held[TURN] == 0.0, head[THRUST], head[TURN])
+}
+
+
+// ---------------------------------------------------------------------------------------
+// The two experiments, as callable functions. They read a retained run and write one JSON
+// each; neither trains, and neither touches the trainer's score, update, sampler or protocol.
+// ---------------------------------------------------------------------------------------
+
+/// Everything deliverable 1 produced.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AntitheticReport {
+    pub build: String,
+    pub run: String,
+    pub protocol_hash: u64,
+    pub train_seed: u64,
+    pub sigma: f64,
+    pub learning_rate: f64,
+    pub aggregate: String,
+    pub generations_completed: u64,
+    pub layouts: Vec<String>,
+    /// `theta0` came from the run's own `centers/center-00000.json`, and this says whether it
+    /// also equals `tensor::initial_center(train_seed)` bit for bit.
+    pub theta0_is_the_seeded_center: bool,
+    /// The largest absolute disagreement between the replayed final centre and the
+    /// checkpoint's. Anything but exactly 0 means the replay is not the run.
+    pub replay_max_abs_theta_error: f64,
+    pub replay_matches_checkpoint: bool,
+    pub generations: Vec<GenerationRow>,
+    pub geometry: Vec<Geometry>,
+    pub pairs: Vec<PairRow>,
+}
+
+/// Deliverable 1: the antithetic-pair reduction over a retained run. No simulation.
+pub fn run_reduction(run: &Path, out: &Path) -> Result<AntitheticReport, Boxed> {
+    let checkpoint: super::trainer::Checkpoint =
+        serde_json::from_str(&std::fs::read_to_string(run.join("checkpoint.json"))?)?;
+    let reports = read_reports(&run.join("generations.jsonl"))?;
+    let aggregate = checkpoint.protocol.aggregate;
+    let reduction = reduce(&reports, aggregate)?;
+
+    let first: super::export::PolicyFile =
+        serde_json::from_str(&std::fs::read_to_string(run.join("centers/center-00000.json"))?)?;
+    let theta0 = first.theta.clone();
+    let seeded = super::tensor::initial_center(checkpoint.train_seed);
+    let (geometry, theta, _) = replay(&theta0, &reports, &checkpoint.protocol, aggregate)?;
+    let err = theta
+        .iter()
+        .zip(&checkpoint.theta)
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f64, f64::max);
+
+    let report = AntitheticReport {
+        build: crate::evaluate::BUILD_ID.to_string(),
+        run: run.display().to_string(),
+        protocol_hash: checkpoint.protocol_hash,
+        train_seed: checkpoint.train_seed,
+        sigma: checkpoint.protocol.sigma,
+        learning_rate: checkpoint.protocol.learning_rate,
+        aggregate: aggregate.as_str().to_string(),
+        generations_completed: checkpoint.generation_completed,
+        layouts: reduction.layouts.clone(),
+        theta0_is_the_seeded_center: theta0 == seeded,
+        replay_max_abs_theta_error: err,
+        replay_matches_checkpoint: theta == checkpoint.theta,
+        generations: reduction.generations,
+        geometry,
+        pairs: reduction.pairs,
+    };
+    write_json(out, &report)?;
+    print_reduction(&report);
+    Ok(report)
+}
+
+/// Everything deliverable 2 produced.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DeadbandReport {
+    pub build: String,
+    pub run: String,
+    pub generation: u64,
+    pub config: String,
+    pub config_hash: String,
+    pub sigma: f64,
+    pub pairs: usize,
+    pub horizon_ticks: u64,
+    pub per_stratum: usize,
+    pub layouts: Vec<String>,
+    pub samples: usize,
+    pub on_food_samples: usize,
+    /// Reproduced from the recording, so this set can be checked against workstream L's.
+    pub max_reconstruction_residual: f64,
+    pub thrust_head_edge: f64,
+    pub turn_head_edge: f64,
+    pub wall_seconds: f64,
+    pub rows: Vec<DeadbandRow>,
+}
+
+/// Deliverable 2: deadband occupancy of `theta ± sigma·epsilon` over workstream L's recorded
+/// observation set, against the centre's.
+///
+/// The observation set is rebuilt rather than reloaded: L's `sweep.json` retains the sweep rows
+/// and the per-trajectory counters, not the 768 observation/hidden pairs themselves. The
+/// recording call, the policy, the horizon, the layout list and the per-stratum count are L's,
+/// and [`DeadbandReport::max_reconstruction_residual`] is the column that says so.
+#[allow(clippy::too_many_arguments)]
+pub fn run_deadband(
+    run: &Path,
+    generation: u64,
+    config: &Path,
+    horizon: u64,
+    per_stratum: usize,
+    workers: usize,
+    wall_seconds: u64,
+    out: &Path,
+) -> Result<DeadbandReport, Boxed> {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::time::{Duration, Instant};
+
+    let started = Instant::now();
+    let eco = super::fixture::Ecology::load(config)?;
+    let checkpoint: super::trainer::Checkpoint =
+        serde_json::from_str(&std::fs::read_to_string(run.join("checkpoint.json"))?)?;
+    let file: super::export::PolicyFile = serde_json::from_str(&std::fs::read_to_string(
+        run.join(format!("centers/center-{generation:05}.json")),
+    )?)?;
+    file.check_ecology(&eco)?;
+    if file.generation != generation {
+        return Err(Boxed::from(format!("that file is generation {}", file.generation)));
+    }
+    let theta = file.theta.clone();
+    let center = super::tensor::policy(&theta)?;
+
+    let mut layouts = super::fixture::training_layouts_on(&eco);
+    layouts.extend(super::fixture::holdout_layouts_on(&eco));
+
+    // 1. Record the centre's own trajectories: exactly workstream L's observation set.
+    let cursor = AtomicUsize::new(0);
+    let done: Mutex<Vec<super::scorecheck::Recording>> = Mutex::new(Vec::new());
+    let failures: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    let cancel = AtomicBool::new(false);
+    let limits = super::episode::Limits::until(&cancel, started + Duration::from_secs(wall_seconds));
+    std::thread::scope(|scope| {
+        for _ in 0..workers.max(1) {
+            scope.spawn(|| {
+                loop {
+                    let next = cursor.fetch_add(1, Ordering::Relaxed);
+                    let Some(layout) = layouts.get(next) else { return };
+                    let cap = match super::scorecheck::capability_of(layout) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            failures.lock().expect("f").push(e.to_string());
+                            continue;
+                        }
+                    };
+                    let job = format!("deadband/center-{generation}/{}", layout.name);
+                    match super::scorecheck::record(
+                        layout, &center, &cap, horizon, limits, per_stratum, &job,
+                    ) {
+                        Ok(r) => done.lock().expect("d").push(r),
+                        Err(e) => failures.lock().expect("f").push(e.to_string()),
+                    }
+                }
+            });
+        }
+    });
+    let failures = failures.into_inner().expect("f");
+    if !failures.is_empty() {
+        return Err(Boxed::from(format!("{} episode(s) failed: {}", failures.len(), failures.join("; "))));
+    }
+    let mut done = done.into_inner().expect("d");
+    done.sort_by(|a, b| a.layout.cmp(&b.layout));
+    let residual = done.iter().map(|r| r.max_reconstruction_residual).fold(0.0f64, f64::max);
+    let samples: Vec<Sample> = done.iter().flat_map(|r| r.samples.iter().cloned()).collect();
+    let on_food = samples.iter().filter(|s| s.on_food).count();
+
+    // 2. The centre and generation `generation`'s own 2n candidates, forward over that set.
+    // Neither movement channel is capability-masked, so one capability serves every row; it is
+    // taken from a real body rather than assumed.
+    let cap = super::scorecheck::capability_of(&layouts[0])?;
+    let n = checkpoint.protocol.pairs;
+    let sigma = checkpoint.protocol.sigma;
+    let mut rows = deadband_rows("center", &center.weights, &cap, &samples);
+    let mut eps = vec![0.0; theta.len()];
+    for p in 0..n {
+        perturbation(checkpoint.train_seed, generation, p as u64, &mut eps);
+        for (label, sign) in [(super::trainer::Candidate::Plus(p), 1.0f64), (super::trainer::Candidate::Minus(p), -1.0)] {
+            let moved: Vec<f64> =
+                theta.iter().zip(&eps).map(|(t, e)| t + sign * sigma * e).collect();
+            let policy = super::tensor::policy(&moved)?;
+            rows.extend(deadband_rows(&label.label(), &policy.weights, &cap, &samples));
+        }
+    }
+
+    let (thrust_head_edge, turn_head_edge) = deadband_head_edges();
+    let report = DeadbandReport {
+        build: crate::evaluate::BUILD_ID.to_string(),
+        run: run.display().to_string(),
+        generation,
+        config: config.display().to_string(),
+        config_hash: eco.hex(),
+        sigma,
+        pairs: n,
+        horizon_ticks: horizon,
+        per_stratum,
+        layouts: done.iter().map(|r| r.layout.clone()).collect(),
+        samples: samples.len(),
+        on_food_samples: on_food,
+        max_reconstruction_residual: residual,
+        thrust_head_edge,
+        turn_head_edge,
+        wall_seconds: started.elapsed().as_secs_f64(),
+        rows,
+    };
+    write_json(out, &report)?;
+    print_deadband(&report);
+    Ok(report)
+}
+
+fn write_json<T: Serialize>(out: &Path, value: &T) -> Result<(), Boxed> {
+    if let Some(dir) = out.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(out, serde_json::to_vec_pretty(value)?)?;
+    Ok(())
+}
+
+fn print_reduction(r: &AntitheticReport) {
+    println!("# the antithetic-pair reduction on {} ({})", r.run, r.build);
+    println!(
+        "# protocol {:016x}, seed {}, sigma {}, lr {}, aggregate {}, layouts {:?}",
+        r.protocol_hash, r.train_seed, r.sigma, r.learning_rate, r.aggregate, r.layouts
+    );
+    println!(
+        "# replay from centers/center-00000.json: matches checkpoint {} (max |dtheta| {:e}), theta0 is the seeded centre {}",
+        r.replay_matches_checkpoint, r.replay_max_abs_theta_error, r.theta0_is_the_seeded_center
+    );
+    println!(
+        "{:>3} {:>7} {:>7} {:>7} {:>6} {:>7} {:>7} {:>6} {:>6} {:>6} {:>6} {:>6} {:>7} {:>7} {:>7}",
+        "gen", "min", "max", "sd", "centre", "best", "next", "cnc-i", "cnc-r", "cnc-o", "mask", "w=0",
+        "retain", "excess", "prog"
+    );
+    for (i, g) in r.generations.iter().enumerate() {
+        let geo = &r.geometry[i];
+        let next = r.generations.get(i + 1).and_then(|n| n.center_score);
+        println!(
+            "{:>3} {:>7.0} {:>7.0} {:>7.0} {:>6} {:>7.0} {:>7} {:>5}/{} {:>5}/{} {:>5}/{} {:>6} {:>6} {:>7.3} {:>7.3} {:>7.4}",
+            g.generation,
+            g.score_min,
+            g.score_max,
+            g.score_sd,
+            g.center_score.map(|s| format!("{s:.0}")).unwrap_or_else(|| "-".into()),
+            g.best_candidate,
+            next.map(|s| format!("{s:.0}")).unwrap_or_else(|| "-".into()),
+            g.concordant_intake,
+            g.informative_pairs,
+            g.concordant_intake_rate,
+            g.informative_pairs,
+            g.concordant_opening_fraction,
+            g.informative_pairs,
+            g.minimum_masked,
+            g.zero_weight_pairs,
+            geo.cancellation.retained,
+            geo.cancellation.excess,
+            geo.progress_toward_best
+        );
+    }
+}
+
+fn print_deadband(r: &DeadbandReport) {
+    println!(
+        "# deadband occupancy, generation {} +/- {} eps, {} samples ({} on food) over {} layouts",
+        r.generation, r.sigma, r.samples, r.on_food_samples, r.layouts.len()
+    );
+    println!(
+        "# head edges: thrust {:.4}, |turn| {:.6}; reconstruction residual {:e}; {:.1} s",
+        r.thrust_head_edge, r.turn_head_edge, r.max_reconstruction_residual, r.wall_seconds
+    );
+    println!("{:>10} {:>8} {:>8} {:>8} {:>8} {:>10} {:>10}", "candidate", "start", "thrust", "turn", "both", "head-thr", "|head-turn|");
+    for row in &r.rows {
+        println!(
+            "{:>10} {:>8} {:>8.4} {:>8.4} {:>8.4} {:>10.4} {:>10.5}",
+            row.candidate,
+            row.start,
+            row.thrust_fraction(),
+            row.turn_fraction(),
+            row.both_inside as f64 / row.samples.max(1) as f64,
+            row.mean_head_thrust,
+            row.mean_abs_head_turn
+        );
+    }
 }
 
 #[cfg(test)]
