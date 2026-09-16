@@ -404,6 +404,66 @@ asked for the physics model, no trained policy is installed anywhere and the
 one that exists cannot forage, so the retraining cost is currently zero in
 practice, and the world-level change is small and gate-clean.
 
+## U — the grasp-only apex turn radius under the shipped motor: refuted as the principal defect
+
+[Note](ecology-v1-apex-grasp-2026-09-16.md) ·
+[brief](../handoffs/ecology-v1-apex-grasp-opus-2026-09-16.md) · merged at
+`8a8e1be`. Item 1 of the recommendation below, run after Astra's clearance:
+under `Sweep`, P's corrected predicate, eight held-out seeds and both
+configurations, a paired arm whose apex `turn_radius_px` is its 9 px lobe
+extent rather than its 14.8 px grasp (`ApexTurnRadius::{Grasp, Lobes}`, a
+`World` transient beside the motor model and the pursuit stop; `apex-audit
+--apex-turn-radius`). Default off is byte-identical against T's six pinned
+hashes, run green before the implementation; the off arm reproduces P's and
+T's retained rows field for field; Fable's re-run of the on arm reproduces
+U's file field for field (only per-row timings differ). 13 new tests; 554 core
+and 278 search pass.
+
+**The prey world is identical between the arms, row for row** (745 at
+introduction in both), which T's arm A could not say (628 against 745).
+Against that clean pair:
+
+| | `sweep` | `grasp-only` | `inertial` (T, retained) |
+| --- | ---: | ---: | ---: |
+| gap change per burst (+ = grew) | +0.212 px | −0.031 px | −0.574 px |
+| contacts | 140 | 165 | 207 |
+| captures per life | 2.09 | 2.44 | 2.91 |
+| delivered translation / rotation (px/s) | 4.57 / 7.90 | 5.62 / 10.47 | 8.55 / 15.45 |
+| E's usable-energy ratio | 18.5 % | 25.8 % | 27.0 % |
+| lives past the 24,000-tick age gate | 0 / 32 | 4 / 32 | 3 / 32 |
+| death cause | starvation 32/32 | starvation 32/32 | starvation 32/32 |
+
+**Refuted by Astra's rule.** The switch recovers 31 % of `Inertial`'s closure
+and 42 % of its captures pooled, and that third rests on one run
+(`fast-leaf/9006`: 9 → 27 captures alone); without it pooled captures fall
+below the shipped arm and the gap still grows. Paired sign tests over the 16
+runs do not separate either hunting limb from run-to-run variation (gap 9/16,
+captures 9/14). Two limbs are robust and they are the member's own budget,
+not its luck: it turns more and pays less for turning (translation billed up
+in 13/16, turn billed down in 11/16), and E's ratio rises in 12/16. **The one
+robust behavioural change is the age gate:** no life reached 24,000 ticks
+with the grasp counted; four do without it, in three runs, two of them the
+runs `Inertial` crossed in. T had credited that to the disc model; the grasp
+correction alone produces it in the identical prey world.
+
+**What this supports:** the disc model, not the geometry correction alone, is
+what gave the apex its hunting gain. Two qualifications: (a) T's arm A is
+still confounded by its thinner prey world, so this is a *lower* bound (a
+third at most) on how much geometry explains, and it cannot apportion the rest
+between the quadrature envelope and the thinner world — an `Inertial` arm in
+which only the apex runs the disc model is the named next experiment; (b) the
+geometry correction stands on its own as a correctness fix (the apex is told
+9 px by its observation and bounded by 14.8 px by its envelope), byte-identical
+for every non-apex body, and it buys the age-gate change. U also found T's
+gap-bin table printing 221/0/0 for `sweep` at 12–16 px where the rows say
+221/4/0; T's sentence about captures stands.
+
+**Fable's decision, pending Astra's read:** hold the `Lobes` default. It is
+only worth shipping on its own if `Sweep` stays the contract, and under
+`Inertial` it is moot. The motor question now turns on the isolation arm
+above, which is cheap and runs before any host contract or recalibration is
+paid for.
+
 ## What this does and does not establish
 
 - **Established by measurement:** the apex's pursuit stopping predicate
@@ -483,6 +543,8 @@ would tell him is stated at each.
    defect: it recovers most of `Inertial`'s −0.57 px closure and 2.9 captures
    per life in the identical prey world; refutation: it stays near +0.21 px
    and 2.1. About one minute of simulation; dispatched as workstream U.
+   **Result (U, above): refuted.** A third at most, resting on one run; the
+   age gate is the one robust change.
 2. **Adopt the reach-envelope predicate separately.** *What we would tell
    Wrysk: yes.* The half-space contradicts its own reach meaning and
    suppresses 89 % of paid bursts; the added seeds replicate the direction.
@@ -495,8 +557,11 @@ would tell him is stated at each.
    tell Wrysk: the inertial model is a faithful implementation of the
    approximation you asked for, and it should not go on the cube from this
    evidence yet.* If the grasp-only pair captures most of the benefit, take
-   that geometry correction and keep `Sweep`. If it does not and the disc
-   model remains the desired physics, then: a host production default, resume
+   that geometry correction and keep `Sweep`. It did not (U). The disc model
+   remains the physics Wrysk asked for, so the next step is the isolation U
+   names: an `Inertial` arm in which only the apex runs the disc model, in the
+   identical prey world, to apportion T's gain between the envelope and the
+   thinner world. Only after that: a host production default, resume
    and status rule; `check_motor` in the host's neural seeding; an action
    adapter that can request the quadratic envelope's diagonal; the
    fifteen-candidate screen and held-out selection rerun; then one fresh
