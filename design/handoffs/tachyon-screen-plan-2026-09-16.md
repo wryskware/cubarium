@@ -253,3 +253,25 @@ existing rim reflection, embedded as a cylinder so the existing 3D noise and
 the existing spherical weather model work unchanged. This removes the
 horizontal-wall reflection, the corner rule and the planar weather spec
 from the flat-world plan.
+
+### FW-0 result and the presenter budget (2026-09-16)
+
+Measured on the board (`design/7_Research/flat-world-fw0-2026-09-16.md`):
+one cube frame costs 15.3 ms on an A78 (13.9 ms of it in `ArtPresenter::draw`,
+near population-independent, so it is the per-cell background passes), a world
+tick costs 0.53 ms, and the real loop confirms it: the cube world holds 59.9 fps
+at 60 and saturates at 64 fps. An A78 is only 1.74× slower than the desktop
+core on this code, and 4.84× faster than an A55.
+
+Consequence: with the presenter as it is, the ring at 320×180 tops out near
+23 fps on one core and 640×360 at S = 2 is out of reach even with a perfect
+four-core split. The board is not the problem; the presenter's full-frame
+passes are. Before the scale is chosen, a presenter budget pass (FW-P) profiles
+`ArtPresenter::draw` by pass and proposes what to cache or move: slowly changing
+layers rendered at the tick rate or on dirty cells rather than at 60 fps,
+row-band parallelism (FW-3), and, if still short, the background passes on the
+GPU as part of FW-9 rather than "longer term".
+
+Device gotcha for every later package: `core_ctl` isolates idle big cores, so
+`taskset -c 7` fails with `EINVAL` on an idle board; pin to `4-7` or retry
+under load (`render_bench --pin` does).
