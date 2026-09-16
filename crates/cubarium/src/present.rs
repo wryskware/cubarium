@@ -24,10 +24,10 @@ use cubarium_render::{
     BodyShape, Canvas, Lobe, PixelCells, Trail, draw_field, draw_trail, srgb_decode, stamp_body,
 };
 use cubarium_surface::{
-    Edge, FACE_EXTENT, PathSegment, PixelImage, ScalarField, SurfacePoint, Travel, Vec2, cell_of,
+    Edge, PathSegment, PixelImage, ScalarField, SurfacePoint, Travel, Vec2, cell_of,
     pixel_neighbor,
 };
-use cube_proto::{FACE_SIZE, Face};
+use cube_proto::Face;
 use std::collections::HashMap;
 
 // --- Appearance constants ----------------------------------------------------------
@@ -142,9 +142,10 @@ pub fn mode_brightness(mode: Mode) -> f32 {
 /// producer still reads as night rather than as a dead panel.
 pub fn draw_floor(canvas: &mut Canvas) {
     let floor = PALETTE.floor;
-    for face in Face::ALL {
-        for y in 0..FACE_SIZE as u16 {
-            for x in 0..FACE_SIZE as u16 {
+    let width = canvas.width();
+    for &face in canvas.charts() {
+        for y in canvas.rows_of(face) {
+            for x in 0..width {
                 canvas.add(face, x, y, floor);
             }
         }
@@ -169,16 +170,21 @@ pub fn draw_ramp_field(
     if scale_to.is_nan() || scale_to <= 0.0 {
         return;
     }
-    for face in Face::ALL {
-        for y in 0..FACE_SIZE as u16 {
-            for x in 0..FACE_SIZE as u16 {
-                let own = field.get(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y)));
+    // The topology and the scale come from the canvas, so the ramp can never be sampled
+    // against a different world than the one it paints (FW-3 §1).
+    let topo = canvas.topology();
+    let world = canvas.scale();
+    let width = canvas.width();
+    for &face in canvas.charts() {
+        for y in canvas.rows_of(face) {
+            for x in 0..width {
+                let own = field.get(cell_of(topo, world, &SurfacePoint::pixel_center(topo, face, x, y)));
                 let value = if filter {
                     let mut sum = own * 4.0;
                     let mut weight = 4.0;
                     for edge in Edge::ALL {
-                        if let Some((nf, nx, ny)) = pixel_neighbor(Topology::Cube, face, x, y, edge) {
-                            sum += field.get(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, nf, nx, ny)));
+                        if let Some((nf, nx, ny)) = pixel_neighbor(topo, face, x, y, edge) {
+                            sum += field.get(cell_of(topo, world, &SurfacePoint::pixel_center(topo, nf, nx, ny)));
                             weight += 1.0;
                         }
                     }
@@ -272,13 +278,30 @@ pub fn interpolate(
     heading: Vec2,
     f: f64,
 ) -> (SurfacePoint, Vec2) {
+    interpolate_on(Topology::Cube, moved, pos, heading, f)
+}
+
+/// [`interpolate`] on a named topology: the same rule, with the interpolated point made
+/// canonical against *that* chart's extent instead of the cube's 64.
+///
+/// **Normative**: `interpolate_on(Topology::Cube, ..)` **is** [`interpolate`], bit for
+/// bit. On a ring a body walks one 320-wide chart whose left and right edges are the same
+/// place, so a path that crossed the wrap arrives as two segments on the same chart and
+/// the point is clamped only at the two rims.
+pub fn interpolate_on(
+    topo: Topology,
+    moved: &[PathSegment],
+    pos: SurfacePoint,
+    heading: Vec2,
+    f: f64,
+) -> (SurfacePoint, Vec2) {
     if moved.is_empty() {
         return (pos, heading);
     }
     let f = if f.is_finite() { f.clamp(0.0, 1.0) } else { 0.0 };
     let total: f64 = moved.iter().map(PathSegment::length).sum();
     if total.is_nan() || total <= 0.0 {
-        return (anchor_on(moved[0].face, moved[0].from), heading);
+        return (anchor_on(topo, moved[0].face, moved[0].from), heading);
     }
     let target = f * total;
     let mut walked = 0.0;
@@ -290,7 +313,7 @@ pub fn interpolate(
             let delta = seg.to - seg.from;
             let point = seg.from + delta * t;
             let dir = delta.normalized().unwrap_or(heading);
-            return (anchor_on(seg.face, point), dir);
+            return (anchor_on(topo, seg.face, point), dir);
         }
         walked += len;
     }
@@ -300,9 +323,10 @@ pub fn interpolate(
 /// A chart point as a canonical [`SurfacePoint`]. Interpolated points can land exactly on
 /// a chart boundary (a segment ends there whenever the path crossed a seam), which is a
 /// transient coordinate, not a canonical one.
-fn anchor_on(face: Face, p: Vec2) -> SurfacePoint {
-    let clamp = |c: f64| if c.is_finite() { c.clamp(0.0, FACE_EXTENT) } else { 0.0 };
-    SurfacePoint::new(face, clamp(p.x), clamp(p.y)).canonicalize(Topology::Cube)
+fn anchor_on(topo: Topology, face: Face, p: Vec2) -> SurfacePoint {
+    let (w, h) = topo.extent(face);
+    let clamp = |c: f64, extent: f64| if c.is_finite() { c.clamp(0.0, extent) } else { 0.0 };
+    SurfacePoint::new(face, clamp(p.x, w), clamp(p.y, h)).canonicalize(topo)
 }
 
 /// Presentation state that outlives a single frame: one trail per live organism.
@@ -364,10 +388,28 @@ impl Presenter {
         }
     }
 
+    /// Resize the field caches to the canvas being drawn on.
+    ///
+    /// The caches are per-cell copies of the view's own vectors, so their only shape is a
+    /// cell count. This is called once per draw and is a no-op whenever the count already
+    /// matches — which it always does on a cube, so the cube's path is untouched.
+    fn fit(&mut self, topo: Topology, scale: Scale) {
+        let cells = topo.cell_count(scale);
+        if self.producer.values.len() != cells {
+            self.producer = ScalarField::zeros(topo, scale);
+            self.detritus = ScalarField::zeros(topo, scale);
+        }
+    }
+
     /// Draw the ambient image: floor, substrate, detritus, trails, bodies, in that
     /// order. `f` is the clock's interpolation fraction for this frame (see
     /// [`interpolate`]); pass 0 to draw the state of the last completed tick exactly.
+    ///
+    /// The world being drawn is the **canvas's**: its topology and scale size the field
+    /// caches, choose the pixel→cell map and canonicalize every interpolated body anchor.
     pub fn draw(&mut self, view: &RenderView, f: f64, canvas: &mut Canvas) {
+        self.fit(canvas.topology(), canvas.scale());
+        let topo = canvas.topology();
         canvas.clear();
 
         // The night floor, under everything.
@@ -406,7 +448,7 @@ impl Presenter {
             let color = hue_color(o.hue);
             let shape = body_shape(o);
             // Between ticks the body walks the path it took during the last tick.
-            let (anchor, heading) = interpolate(&o.moved, o.pos, o.heading, f);
+            let (anchor, heading) = interpolate_on(topo, &o.moved, o.pos, o.heading, f);
             stamp_body(
                 canvas,
                 anchor,
