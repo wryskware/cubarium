@@ -5,14 +5,17 @@
 
 use std::{hint::black_box, path::Path, time::Instant};
 
-use cubarium::{art::ArtPack, art_present::ArtPresenter};
+use cubarium::{
+    art::{ArtPack, Band},
+    art_present::{ArtPresenter, band_of},
+};
 use cubarium_core::{
     OrganismId,
     organism::Mode,
     view::{OrganismView, RenderView},
 };
 use cubarium_render::Canvas;
-use cubarium_surface::{CELL_COUNT, Face, SurfacePoint, Vec2};
+use cubarium_surface::{CELL_COUNT, CellId, Face, SurfacePoint, Vec2};
 
 /// Living wood at `W_max`, which is what the structural read calls a full-grown stand since
 /// ecology v1.
@@ -25,7 +28,19 @@ const FULL_FOLIAGE: f64 = WOOD_MAX;
 /// what this presenter stamped before ecology v1; anything between 0 and the shoulder stamps
 /// the living-wood silhouette *as well*, which is this feature's worst case per cell.
 /// `dead` adds standing dead wood in every cell on top, a third stamp.
-fn transition_draw_cost_at(growing: bool, wet: bool, fullness: f64, dead: f64, what: &str) {
+///
+/// `dead_soil` instead kills every cell of the **soil band** — the bottom five rows of each
+/// side face, 320 cells — leaving the rest of the scene ungrazed: no living wood there and
+/// dead wood at `W_max`, which is the one arrangement that stamps the soil band's dead-wood
+/// mark in every cell that can carry one, and the mark's own worst case.
+fn transition_draw_cost_at(
+    growing: bool,
+    wet: bool,
+    fullness: f64,
+    dead: f64,
+    dead_soil: bool,
+    what: &str,
+) {
     let mut view = RenderView {
         tick: 121, // Six simulated seconds: inside a gust, not its quiet interval.
         producer: vec![
@@ -65,6 +80,16 @@ fn transition_draw_cost_at(growing: bool, wet: bool, fullness: f64, dead: f64, w
             })
             .collect(),
     };
+    let kill_the_soil = |view: &mut RenderView| {
+        if !dead_soil {
+            return;
+        }
+        for cell in CellId::all().filter(|&c| band_of(c) == Band::Soil) {
+            view.wood[cell.index()] = 0.0;
+            view.dead_wood[cell.index()] = WOOD_MAX;
+        }
+    };
+    kill_the_soil(&mut view);
     let pack = ArtPack::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/atelier"))
         .expect("shipped art pack");
     let mut presenter = ArtPresenter::new(pack);
@@ -80,6 +105,7 @@ fn transition_draw_cost_at(growing: bool, wet: bool, fullness: f64, dead: f64, w
     view.dead_wood.fill(if growing { dead } else { 0.0 });
     view.detritus.fill(if growing { 1.5 } else { 0.0 });
     view.fruit.fill(if growing { 1.0 } else { 0.0 });
+    kill_the_soil(&mut view);
 
     // Three interpolated renders per ecology tick, twelve seconds of growth/wilting.
     // Observe is outside the measured span: compare these draw timings with the existing
@@ -111,7 +137,29 @@ fn transition_draw_cost_at(growing: bool, wet: bool, fullness: f64, dead: f64, w
 /// The pre-ecology comparison point: every stand ungrazed, so no silhouette is stamped and
 /// the frame is the one this presenter drew before the feature existed.
 fn transition_draw_cost(growing: bool, wet: bool) {
-    transition_draw_cost_at(growing, wet, FULL_FOLIAGE / WOOD_MAX, 0.0, "full canopy");
+    transition_draw_cost_at(
+        growing,
+        wet,
+        FULL_FOLIAGE / WOOD_MAX,
+        0.0,
+        false,
+        "full canopy",
+    );
+}
+
+/// The soil band's dead-wood mark at its own worst: every one of the 320 soil cells carrying
+/// a dead stand, over an otherwise ungrazed scene.
+#[test]
+#[ignore = "release-only timing study; run alone with --test-threads=1"]
+fn crowded_dead_soil_draw_cost() {
+    transition_draw_cost_at(
+        true,
+        false,
+        FULL_FOLIAGE / WOOD_MAX,
+        0.0,
+        true,
+        "every soil cell dead",
+    );
 }
 
 /// Ecology v1's worst case: every cell half-grazed, so every cell stamps its foliage *and*
@@ -119,7 +167,7 @@ fn transition_draw_cost(growing: bool, wet: bool) {
 #[test]
 #[ignore = "release-only timing study; run alone with --test-threads=1"]
 fn crowded_half_grazed_draw_cost() {
-    transition_draw_cost_at(true, false, 0.5, 0.0, "half-grazed");
+    transition_draw_cost_at(true, false, 0.5, 0.0, false, "half-grazed");
 }
 
 /// Worse still, and not a state the ecology sustains: every cell half-grazed *and* carrying
@@ -127,7 +175,7 @@ fn crowded_half_grazed_draw_cost() {
 #[test]
 #[ignore = "release-only timing study; run alone with --test-threads=1"]
 fn crowded_half_grazed_over_dead_wood_draw_cost() {
-    transition_draw_cost_at(true, false, 0.5, WOOD_MAX, "half-grazed over dead wood");
+    transition_draw_cost_at(true, false, 0.5, WOOD_MAX, false, "half-grazed over dead wood");
 }
 
 #[test]

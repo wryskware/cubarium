@@ -406,6 +406,11 @@ pub struct ArtPresenter {
     /// Whether the meal onset is drawn at all; off, bodies use their original shared clip
     /// clock (a review switch for paired captures and tests, not a setting).
     meal_onset: bool,
+    /// The fullness shoulder this presenter's [`foliage_ramp_at`] uses: [`FOLIAGE_FULL`]
+    /// unless a study built it with [`ArtPresenter::with_foliage_full`] or the process was
+    /// started with [`FOLIAGE_FULL_ENV`]. Fixed at construction either way, so it cannot
+    /// move under a running presenter.
+    foliage_full: f64,
 }
 
 impl ArtPresenter {
@@ -465,7 +470,30 @@ impl ArtPresenter {
             meals: Meals::new(),
             outgoing_prey: std::collections::BTreeMap::new(),
             meal_onset: true,
+            foliage_full: foliage_full_default(),
         }
+    }
+
+    /// This presenter with the foliage shoulder ([`FOLIAGE_FULL`]) moved, for the shoulder
+    /// study `design/7_Research/ecology-v1-presentation-2-2026-09-16.md` and for nothing
+    /// else: the shipped display and every other caller draw at the decided value.
+    ///
+    /// It is a construction-time argument on purpose. The shoulder changes what a *stage*
+    /// sprite's colour is at a given fullness, not what the presenter remembers, so moving
+    /// it mid-run would be a cut in the middle of the one thing this presentation is not
+    /// allowed to cut. A non-finite or non-positive value keeps [`FOLIAGE_FULL`].
+    pub fn with_foliage_full(mut self, full: f64) -> ArtPresenter {
+        self.foliage_full = if full.is_finite() && full > 0.0 {
+            full
+        } else {
+            FOLIAGE_FULL
+        };
+        self
+    }
+
+    /// The foliage shoulder this presenter draws at: [`FOLIAGE_FULL`] unless a study moved it.
+    pub fn foliage_full(&self) -> f64 {
+        self.foliage_full
     }
 
     /// This presenter with the meal onset ([`crate::meal_present`]) switched off, so ordinary
@@ -1082,6 +1110,7 @@ impl ArtPresenter {
         // Plants: scenery that follows the fields. These are not organisms — nothing in
         // the world knows about them, they never move, and they are not eaten. They are
         // how a rich cell reads as overgrown rather than as merely brighter.
+        let foliage_full = self.foliage_full;
         let pack = &self.pack;
         let species = &self.species;
         let budgets = &self.budgets;
@@ -1156,7 +1185,7 @@ impl ArtPresenter {
                 colour: living_wood_tone(),
                 shade: wood_shade(),
                 mix: if structural(band) {
-                    1.0 - foliage_ramp(foliage_fullness(view, index))
+                    1.0 - foliage_ramp_at(foliage_fullness(view, index), foliage_full)
                 } else {
                     0.0
                 },
@@ -1273,6 +1302,51 @@ impl ArtPresenter {
             }
         }
 
+        // The soil band's dead-wood mark. Below the horizon a stand's stage is litter's, not
+        // wood's ([`structural`]), so a stand that dies there has nothing to carry a dead
+        // silhouette — and before this it left no trace at all. It gets a *stub* instead:
+        // the cell's own plant, stage 0, cut to its bottom [`SOIL_SNAG_PX`] rows, in the dead
+        // tone, at a strength that is [`soil_snag`] — nothing where a living stand at least
+        // as large stands, whole where the stand is gone, fading in over the dieback in
+        // between. It is stamped *over* the band's scenery, not under it, because the litter
+        // a stand's own decay produces would otherwise hide the only record that it died.
+        // The band's plants, flecks and ground wash still read `D + C` and nothing else.
+        for (index, cell) in CellId::all().enumerate() {
+            let band = self.bands[index];
+            if band != Band::Soil {
+                continue;
+            }
+            let opacity = soil_snag_opacity(view, index);
+            if opacity <= 0.0 {
+                continue;
+            }
+            let slot = &self.slots[index];
+            let Some(plant) = species.index(band, slot.pick).map(|i| &pack.plants[i]) else {
+                continue;
+            };
+            let (bend, heading) =
+                slot_wind(slot, &plant.name, budget_in(budgets, &plant.name), seconds);
+            let pose = stage_pose(plant, 0, cell, seconds);
+            stamp_layers_bent_toned(
+                canvas,
+                slot.at,
+                heading,
+                &[(pose, 1.0)],
+                1.0,
+                opacity,
+                Mask::Axial {
+                    reveal: SOIL_SNAG_PX,
+                },
+                bend,
+                Tone {
+                    colour: dead_wood_tone(),
+                    shade: wood_shade(),
+                    mix: 1.0,
+                },
+                scratch,
+            );
+        }
+
         // Tall plants: columns of base, trunks and crown up the side faces, the crown of a
         // full column carried onto the top face by the shared surface.
         {
@@ -1315,7 +1389,8 @@ impl ArtPresenter {
                 );
                 // The crown dims with the stand's own foliage fullness: a stripped column
                 // keeps its trunk and loses its head.
-                let cap = foliage_ramp(column_fullness(view, column.face, column.cx));
+                let cap =
+                    foliage_ramp_at(column_fullness(view, column.face, column.cx), foliage_full);
                 draw_column(
                     canvas, column, height, plant, vine, seconds, amplitude, cap, None, scratch,
                 );

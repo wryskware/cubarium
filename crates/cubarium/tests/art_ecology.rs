@@ -20,10 +20,12 @@ use cube_proto::{FACE_SIZE, Face};
 use cubarium::art::{ArtPack, Band};
 use cubarium::art_present::{
     ArtPresenter, CANOPY_STAGES, DEAD_WOOD_OPACITY, FOLIAGE_FULL, FOLIAGE_PER_WOOD,
-    FOLIAGE_STAGES, MOTIF_OPACITY, SOIL_SCALE, STAGE_HYST, WOOD_SHAPE, band_of, dead_wood_density,
-    dead_wood_tone, foliage_fullness, foliage_ramp, litter_density, next_stage, plant_cap,
-    living_wood_tone, plant_density, rank_cap_of, stage_thresholds, structural, wood_density,
-    wood_for_density, wood_fraction,
+    FOLIAGE_FULL_RANGE, FOLIAGE_STAGES, SOIL_SCALE, STAGE_HYST, TallColumn, WOOD_SHAPE, band_of,
+    column_dead_density, dead_wood_density, dead_wood_tone, foliage_fullness, foliage_full_default,
+    foliage_full_from_env, foliage_ramp, foliage_ramp_at, foliage_rows, litter_density,
+    living_wood_tone, next_stage, plant_cap, plant_density, rank_cap_of, soil_snag,
+    stage_thresholds, structural, tall_columns, tall_target, wood_density, wood_for_density,
+    wood_fraction,
 };
 use cubarium_core::view::RenderView;
 use cubarium_render::Canvas;
@@ -707,4 +709,474 @@ fn the_structural_read_does_not_disturb_the_soil_or_the_water_band() {
     let w = wood_for_density(0.6, W_MAX);
     let v = stand(7, pilot(), w, w, 0.0);
     assert!((wood_density(&v, pilot().index()) - 0.6).abs() < 1e-9);
+}
+
+// ---------------------------------------------------------------------------
+// 5. the soil band's dead-wood mark, the dead tall column, and the shoulder hook
+//
+// Astra's finding 7 on `design/7_Research/ecology-v1-presentation-2026-09-15.md`: the soil
+// band (the bottom five rows of each side face) read `D + C` alone, so a stand that died
+// below the horizon left no trace at all; and the dead tall column had no pixel-level test.
+// These are written from the brief
+// `design/handoffs/ecology-v1-presentation-2-opus-2026-09-16.md` deliverables 2-4 and from
+// the public doc comments, before the drawing they judge existed.
+// ---------------------------------------------------------------------------
+
+/// A soil-band cell (the bottom five rows of a side face) whose rank lets it reach stage 2
+/// and whose tile stays well inside one face.
+fn soil_pilot() -> CellId {
+    CellId::all()
+        .find(|&c| band_of(c) == Band::Soil && rank_cap_of(c) == 2 && (4..=11).contains(&c.cx()))
+        .expect("a rank-2 soil slot away from the edges")
+}
+
+/// A front tall column away from the face edges.
+fn column_pilot() -> TallColumn {
+    tall_columns()
+        .into_iter()
+        .find(|c| c.face == Face::Front && (4..=11).contains(&c.cx))
+        .expect("a front tall column away from the face edges")
+}
+
+/// A view whose whole tall column carries one stand: `w` living wood, `p` foliage, `wd` dead.
+fn column_stand(tick: u64, column: &TallColumn, w: f64, p: f64, wd: f64) -> RenderView {
+    let mut v = empty_view(tick);
+    let (top, horizon) = foliage_rows(column.face).expect("a side face has foliage rows");
+    for cy in top..=horizon {
+        let i = CellId::new(column.face, column.cx, cy).index();
+        v.wood[i] = w;
+        v.producer[i] = p;
+        v.plant_reserve[i] = 0.5 * w;
+        v.dead_wood[i] = wd;
+    }
+    v
+}
+
+/// The pixels a column can reach: six pixels either side of its centre line on its own face
+/// — wider than any bend the wind can add — plus the two rows of the top face across the rim
+/// it grows over, which a full-height column's last trunk segment unfolds onto.
+///
+/// Front only, which is the face [`column_pilot`] picks: the rim geometry is written out
+/// rather than derived, because deriving it is the corner-cap machinery's own job.
+fn column_strip(column: &TallColumn) -> Vec<(Face, u8, u8)> {
+    assert_eq!(column.face, Face::Front, "the rim rows below are Front's");
+    let centre = i32::from(column.cx) * 4 + 2;
+    let near = move |x: u8| (i32::from(x) - centre).abs() <= 6;
+    every_pixel()
+        .filter(|&(f, x, y)| match f {
+            Face::Front => near(x),
+            Face::Top => near(x) && usize::from(y) + 2 >= FACE_SIZE,
+            _ => false,
+        })
+        .collect()
+}
+
+/// The mean light one image *adds* to another over a set of pixels: what the thing that was
+/// drawn there actually put down, with the background it was drawn over divided out.
+fn mean_delta(over: &Canvas, under: &Canvas, pixels: &[(Face, u8, u8)]) -> [f32; 3] {
+    let mut sum = [0.0f32; 3];
+    for &(f, x, y) in pixels {
+        let (a, b) = (over.get(f, x, y), under.get(f, x, y));
+        for (k, s) in sum.iter_mut().enumerate() {
+            *s += a[k] - b[k];
+        }
+    }
+    let n = pixels.len().max(1) as f32;
+    [sum[0] / n, sum[1] / n, sum[2] / n]
+}
+
+/// How saturated a colour is: the gap between its brightest and dimmest channels as a share
+/// of the brightest, so a dim ash and a bright ash score the same.
+fn saturation(c: [f32; 3]) -> f32 {
+    let hi = c.iter().cloned().fold(f32::MIN, f32::max);
+    let lo = c.iter().cloned().fold(f32::MAX, f32::min);
+    if hi > 0.0 { (hi - lo) / hi } else { 0.0 }
+}
+
+#[test]
+fn the_soil_band_marks_a_dead_stand_and_leaves_the_litter_ramp_alone() {
+    let cell = soil_pilot();
+    let i = cell.index();
+    let bare = snapped(&empty_view(7));
+    // Present for dead wood standing where no living stand does.
+    let dead = snapped(&stand(7, cell, 0.0, 0.0, BRIGHT.1));
+    assert!(
+        !differing(&dead, &bare).is_empty(),
+        "{cell:?}: a stand that died below the horizon left no trace"
+    );
+    // Absent at `Wd = 0`, whatever else the cell holds.
+    for (w, p) in [(0.0, 0.0), (BRIGHT.1, BRIGHT.0)] {
+        assert!(
+            differing(&snapped(&stand(7, cell, w, p, 0.0)), &bare).is_empty(),
+            "{cell:?}: the soil band painted something with no dead wood (W = {w}, P = {p})"
+        );
+    }
+    // Separate from the litter ramp: dead wood is not folded into `D + C`, so neither the
+    // soil band's density nor its plants' own reading moves when a stand dies there.
+    let mut with_dead = empty_view(7);
+    with_dead.detritus[i] = 0.5 * SOIL_SCALE;
+    let litter_only = with_dead.clone();
+    with_dead.dead_wood[i] = BRIGHT.1;
+    assert_eq!(
+        litter_density(&with_dead, i),
+        litter_density(&litter_only, i),
+        "dead wood moved the litter reading"
+    );
+    assert_eq!(
+        plant_density(&with_dead, i, Band::Soil),
+        litter_density(&litter_only, i),
+        "the soil band's plants stopped reading litter plus remains"
+    );
+    // And it is a *mark*, not a plant: it touches fewer pixels than the band's own litter
+    // plant does at full litter.
+    let mut full_litter = empty_view(7);
+    full_litter.detritus[i] = SOIL_SCALE;
+    let mark = differing(&dead, &bare).len();
+    let plant = differing(&snapped(&full_litter), &bare).len();
+    assert!(
+        mark > 0 && mark < plant,
+        "{cell:?}: the mark covers {mark} pixels against the litter plant's {plant}"
+    );
+}
+
+#[test]
+fn the_soil_mark_is_monotone_in_its_stock_and_reaches_soil_at_zero() {
+    let cell = soil_pilot();
+    let bare = snapped(&empty_view(7));
+    let mut prev = f64::INFINITY;
+    let mut first = 0.0;
+    for (n, wd) in [0.6, 0.39, 0.25, 0.15, 0.08, 0.04, 0.02, 0.01, 0.004, 0.0]
+        .into_iter()
+        .enumerate()
+    {
+        let light = painted(&stand(7, cell, 0.0, 0.0, wd), &bare);
+        if n == 0 {
+            first = light;
+        }
+        assert!(
+            light <= prev + 1e-9,
+            "{cell:?}: Wd = {wd} marked more ({light}) than the step above it ({prev})"
+        );
+        prev = light;
+    }
+    assert!(first > 0.0, "{cell:?}: the sweep never marked anything");
+    assert!(
+        differing(&snapped(&stand(7, cell, 0.0, 0.0, 0.0)), &bare).is_empty(),
+        "{cell:?}: the mark at zero still paints"
+    );
+}
+
+#[test]
+fn the_soil_mark_is_pairwise_distinct_from_litter_alone_and_from_empty_ground() {
+    let cell = soil_pilot();
+    let i = cell.index();
+    let litter = 0.5 * SOIL_SCALE;
+    let view = |d: f64, wd: f64| {
+        let mut v = empty_view(7);
+        v.detritus[i] = d;
+        v.dead_wood[i] = wd;
+        v
+    };
+    let names = ["empty", "litter only", "dead wood only", "litter and dead wood"];
+    let images: Vec<Canvas> = [(0.0, 0.0), (litter, 0.0), (0.0, BRIGHT.1), (litter, BRIGHT.1)]
+        .into_iter()
+        .map(|(d, wd)| snapped(&view(d, wd)))
+        .collect();
+    for a in 0..images.len() {
+        for b in (a + 1)..images.len() {
+            assert!(
+                !differing(&images[a], &images[b]).is_empty(),
+                "{cell:?}: '{}' and '{}' draw the same image",
+                names[a],
+                names[b]
+            );
+        }
+    }
+    // The mark survives the litter its own decay produces: it is not hidden by the band's
+    // living scenery.
+    let added = differing(&images[3], &images[1]);
+    assert!(
+        !added.is_empty(),
+        "{cell:?}: litter hides the mark completely"
+    );
+    // It is ash, not a plant colour. Compare what each one *adds* to the image it is drawn
+    // over, so the background it stands on divides out: the mark's own light is cool and far
+    // less saturated than the band's plant's own light.
+    let marked = mean_delta(&images[2], &images[0], &differing(&images[2], &images[0]));
+    let planted = mean_delta(&images[1], &images[0], &differing(&images[1], &images[0]));
+    assert!(
+        marked[2] > marked[0],
+        "the mark's own light is not cool: {marked:?}"
+    );
+    assert!(
+        saturation(marked) < 0.5 * saturation(planted),
+        "the mark ({marked:?}, {}) is not much less saturated than the band's plant \
+         ({planted:?}, {})",
+        saturation(marked),
+        saturation(planted)
+    );
+}
+
+#[test]
+fn the_soil_mark_never_shows_under_a_living_stand_and_fades_in_as_one_dies() {
+    let cell = soil_pilot();
+    let i = cell.index();
+    let bare = snapped(&empty_view(7));
+    // A living stand at least as big as the dead one shows no mark - which is what keeps
+    // `the_structural_read_does_not_disturb_the_soil_or_the_water_band` true.
+    for w in [BRIGHT.1, 2.0 * BRIGHT.1] {
+        let v = stand(7, cell, w, BRIGHT.0, BRIGHT.1);
+        assert_eq!(soil_snag(&v, i), 0.0, "a living stand of W = {w} still marked");
+        assert!(
+            differing(&snapped(&v), &bare).is_empty(),
+            "a living stand of W = {w} drew a mark in the soil band"
+        );
+    }
+    // Through a dieback the mark arrives continuously rather than popping in at the instant
+    // `W` reaches zero: `soil_snag` rises monotonically and the image never steps.
+    let mut previous: Option<Canvas> = None;
+    let mut prev_snag = -1.0;
+    for n in 0..=20 {
+        let t = f64::from(n) / 20.0;
+        let v = stand(7, cell, BRIGHT.1 * (1.0 - t), 0.0, BRIGHT.1 * t);
+        let snag = soil_snag(&v, i);
+        assert!(
+            snag >= prev_snag - 1e-12,
+            "the mark went backwards at t = {t} of the dieback"
+        );
+        prev_snag = snag;
+        let image = snapped(&v);
+        if let Some(prev) = &previous {
+            assert!(
+                max_diff(prev, &image) < 0.1,
+                "the mark jumped at t = {t} of the dieback"
+            );
+        }
+        previous = Some(image);
+    }
+    assert!(prev_snag > 0.0, "the dieback never produced a mark");
+}
+
+#[test]
+fn a_dead_tall_column_stands_in_ash_at_a_height_from_its_dead_wood() {
+    let column = column_pilot();
+    let strip = column_strip(&column);
+    let bare = snapped(&empty_view(7));
+    let index = tall_columns()
+        .iter()
+        .position(|c| c == &column)
+        .expect("the pilot column is one of the cube's columns");
+    let heights_of = |v: &RenderView| {
+        let mut p = ArtPresenter::new(pack());
+        p.observe(v);
+        (p.tall_growth_of(index).target, p.tall_dead_growth_of(index).target)
+    };
+
+    // Distinct from empty ground, and standing at the height the stock earns.
+    let dead = column_stand(7, &column, 0.0, 0.0, W_MAX);
+    let (living_h, dead_h) = heights_of(&dead);
+    assert_eq!(living_h, 0, "a dead column grew a living one");
+    assert_eq!(
+        dead_h,
+        tall_target(column_dead_density(&dead, column.face, column.cx)),
+        "the dead column's height is not the one its stock reads"
+    );
+    assert!(dead_h > 0, "the dead column never stood");
+    let dead_img = snapped(&dead);
+    assert!(
+        !differing(&dead_img, &bare).is_empty(),
+        "the dead column drew nothing"
+    );
+
+    // Distinct from the living column at the same stock: with a whole canopy the living one
+    // carries a crown above its trunk, which the dead one never draws.
+    let living = column_stand(7, &column, W_MAX, W_MAX, 0.0);
+    let (live_h, live_dead_h) = heights_of(&living);
+    assert_eq!(
+        (live_h, live_dead_h),
+        (dead_h, 0),
+        "the two columns do not stand at the same height"
+    );
+    let living_img = snapped(&living);
+    assert!(
+        !differing(&dead_img, &living_img).is_empty(),
+        "the dead column is the living column's image"
+    );
+    assert!(
+        !strip.is_empty() && strip.iter().any(|&(f, x, y)| dead_img.get(f, x, y) != bare.get(f, x, y)),
+        "the dead column painted nothing in its own strip"
+    );
+
+    // Isolating the column from the cells it stands in. Between two stocks that both
+    // saturate every cell's own silhouette (stage 2, at the band's ceiling, and a whole
+    // canopy on the living side) every per-cell pixel is identical, so the pixels that
+    // differ are *exactly* the column's extra trunk segments and, on the living side, its
+    // crown. This is the only way to read the column alone: a side face has no row that the
+    // topmost foliage cell's own plant cannot reach.
+    let low = 0.25;
+    assert!(
+        wood_fraction(low, W_MAX) > FOLIAGE_STAGES[2],
+        "the low stock must already saturate a cell's own silhouette"
+    );
+    let short = snapped(&column_stand(7, &column, 0.0, 0.0, low));
+    let live_short = snapped(&column_stand(7, &column, low, low, 0.0));
+    let grew_dead = differing(&dead_img, &short);
+    let grew_living = differing(&living_img, &live_short);
+    assert!(
+        !grew_dead.is_empty(),
+        "the dead column did not grow with its stock"
+    );
+    assert!(
+        heights_of(&column_stand(7, &column, 0.0, 0.0, low)).1 < dead_h,
+        "the shorter stock did not read as a shorter column"
+    );
+    let stray: Vec<_> = grew_dead.iter().filter(|p| !strip.contains(p)).collect();
+    assert!(
+        stray.is_empty(),
+        "the dead column's growth painted outside its own strip: {:?}",
+        &stray[..stray.len().min(8)]
+    );
+    // No crown: the living column's own growth covers strictly more than the dead one's,
+    // because its cap rides a segment above the trunk the dead column stops at.
+    assert!(
+        grew_living.len() > grew_dead.len(),
+        "the dead column paints as much as the living one ({} against {})",
+        grew_dead.len(),
+        grew_living.len()
+    );
+    // Ash-toned: over exactly the pixels the dead column's own trunk added, its light is
+    // cool and much less saturated than the living column's over the same pixels.
+    let ash = mean_delta(&dead_img, &short, &grew_dead);
+    let alive = mean_delta(&living_img, &live_short, &grew_dead);
+    assert!(ash[2] > ash[0], "the dead column's light is not cool: {ash:?}");
+    assert!(
+        saturation(ash) < 0.5 * saturation(alive),
+        "the dead column ({ash:?}, {}) is not much less saturated than the living one \
+         ({alive:?}, {})",
+        saturation(ash),
+        saturation(alive)
+    );
+    assert!(
+        !differing(&live_short, &short).is_empty(),
+        "a short living column and a short dead one draw the same image"
+    );
+
+    // Fading monotonically with the stock, to soil at zero.
+    let mut prev = f64::INFINITY;
+    for wd in [W_MAX, 0.39, 0.25, 0.15, 0.08, 0.04, 0.02, 0.0] {
+        let light = painted(&column_stand(7, &column, 0.0, 0.0, wd), &bare);
+        assert!(
+            light <= prev + 1e-9,
+            "Wd = {wd} painted more ({light}) than the step above it ({prev})"
+        );
+        prev = light;
+    }
+    assert!(
+        differing(&snapped(&column_stand(7, &column, 0.0, 0.0, 0.0)), &bare).is_empty(),
+        "the dead column at zero still paints"
+    );
+}
+
+#[test]
+fn the_foliage_shoulder_is_overridable_for_a_study_and_ships_unchanged() {
+    // The ramp at the shipped shoulder is exactly the ramp the presenter ships with.
+    for f in [0.0, 0.1, 0.5, 0.8, FOLIAGE_FULL, 0.9, 1.0, f64::NAN] {
+        assert_eq!(
+            foliage_ramp_at(f, FOLIAGE_FULL),
+            foliage_ramp(f),
+            "the shoulder hook changed the shipped ramp at f = {f}"
+        );
+    }
+    assert_eq!(FOLIAGE_FULL, 0.85, "the default shoulder moved");
+    assert_eq!(
+        ArtPresenter::new(pack()).foliage_full(),
+        FOLIAGE_FULL,
+        "a presenter no longer ships at the decided shoulder"
+    );
+    // A higher shoulder means a stand must be fuller before it draws a whole canopy: the
+    // ramp is non-increasing in the shoulder at every fullness.
+    for f in [0.1, 0.3, 0.5, 0.7, 0.86, 0.9, 0.95] {
+        let (a, b, c) = (
+            foliage_ramp_at(f, 0.85),
+            foliage_ramp_at(f, 0.95),
+            foliage_ramp_at(f, 1.0),
+        );
+        assert!(a >= b && b >= c, "the ramp rose with the shoulder at f = {f}");
+    }
+    assert!(foliage_ramp_at(0.9, 0.85) == 1.0 && foliage_ramp_at(0.9, 1.0) < 1.0);
+    // A nonsense shoulder is a stripped stand rather than a panic or a NaN.
+    for full in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let r = foliage_ramp_at(0.5, full);
+        assert!(r.is_finite() && (0.0..=1.0).contains(&r), "shoulder {full} gave {r}");
+    }
+    // The override is a construction-time study hook, and at the shipped value it is the
+    // shipped image, pixel for pixel.
+    let bright = stand(7, pilot(), BRIGHT.1, BRIGHT.0, 0.0);
+    let shot = |full: f64| {
+        let mut p = ArtPresenter::new(pack()).with_foliage_full(full);
+        p.observe(&bright);
+        let mut canvas = Canvas::new();
+        p.draw(&bright, 0.0, &mut canvas);
+        canvas
+    };
+    assert!(
+        differing(&shot(FOLIAGE_FULL), &snapped(&bright)).is_empty(),
+        "the override at the shipped shoulder is not the shipped image"
+    );
+    // And a raised shoulder actually changes what an ungrazed average-light stand draws:
+    // `P/W = 0.93` is above 0.85 and below 0.95, which is the cost the study measures.
+    let average = stand(7, pilot(), AVERAGE.1, AVERAGE.0, 0.0);
+    let at = |full: f64| {
+        let mut p = ArtPresenter::new(pack()).with_foliage_full(full);
+        p.observe(&average);
+        let mut canvas = Canvas::new();
+        p.draw(&average, 0.0, &mut canvas);
+        canvas
+    };
+    assert!(
+        !differing(&at(0.85), &at(0.95)).is_empty(),
+        "raising the shoulder left the average-light stand untouched"
+    );
+}
+
+#[test]
+fn the_shoulder_environment_variable_moves_the_viewing_session_and_nothing_else() {
+    // The reading, exercised through the same pure function the constructor uses, with the
+    // string injected rather than the process environment touched.
+    assert_eq!(foliage_full_from_env(None), (FOLIAGE_FULL, None));
+    for text in ["0.95", " 0.95 ", "0.5", "1", "1.0"] {
+        let (full, complaint) = foliage_full_from_env(Some(text));
+        assert_eq!(
+            full,
+            text.trim().parse::<f64>().unwrap(),
+            "{text} was not honoured"
+        );
+        assert!(complaint.is_none(), "{text} complained: {complaint:?}");
+        assert!(FOLIAGE_FULL_RANGE.contains(&full));
+    }
+    // Out of range is clamped and said out loud; nonsense keeps the decided value and is
+    // said out loud. Neither panics, and neither leaves the range.
+    for (text, want) in [
+        ("0.1", *FOLIAGE_FULL_RANGE.start()),
+        ("3", *FOLIAGE_FULL_RANGE.end()),
+        ("-1", *FOLIAGE_FULL_RANGE.start()),
+        ("banana", FOLIAGE_FULL),
+        ("", FOLIAGE_FULL),
+        ("nan", FOLIAGE_FULL),
+        ("inf", FOLIAGE_FULL),
+    ] {
+        let (full, complaint) = foliage_full_from_env(Some(text));
+        assert_eq!(full, want, "{text} read as {full}");
+        assert!(complaint.is_some(), "{text} was accepted silently");
+        assert!(FOLIAGE_FULL_RANGE.contains(&full));
+    }
+    // A presenter built at a value the variable could carry draws that shoulder, and the
+    // constructor's own default is the decided one (this suite does not set the variable).
+    assert_eq!(foliage_full_default(), FOLIAGE_FULL);
+    let injected = foliage_full_from_env(Some("0.95")).0;
+    assert_eq!(
+        ArtPresenter::new(pack()).with_foliage_full(injected).foliage_full(),
+        0.95,
+        "the constructor did not honour a value from the variable's own code path"
+    );
 }
