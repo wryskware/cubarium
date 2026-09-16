@@ -26,7 +26,7 @@ the hypothesis standing.
 | --- | --- | --- | --- | --- | --- |
 | O depth × diet factorial | Opus 5 medium | worktree, merged `10d3e2a` | 35 s / 3 min | 180 KiB / 10 MiB | search 199 |
 | L score falsification checks | Opus 5 high | `main` (`14345d9`…`f52d441`) | 22 s / 8 min | 0.8 MiB / 30 | core 502, search 199 |
-| M plant budget | Opus 5 high | worktree | *(pending)* | | |
+| M plant budget | Opus 5 high | worktree, merged `4819a5c` | 2.5 min / 8 min | 13 MiB / 60 | core 517, search 217, host 596, render 101 |
 | N apex strike reach | Opus 5 high | worktree, merged `9c608b5` | 58 s / 6 min | 2.6 MiB / 20 | core 508, search 205 |
 
 Fable's verification so far: O's whole design re-run and matched by
@@ -35,6 +35,11 @@ after merge. L's dwell-1000 rung re-run from its ignored test and matched to
 the tick on both layout sets (36,000 and 27,362). N's death arm re-run and
 compared field for field with its retained rows (identical, timing keys
 excluded); its 12 new tests pass on the branch and the suites after merge.
+M's herbivore-present arm re-run for one seed of each configuration with the
+plant record on: matches M's rows and I's original arm-0 rows by
+`final_state_hash` (4 of 4). All four merges were conflict-free; the shared
+build cache's stale-artifact race and the ancestor-checkout worktree hand-out
+recurred and were handled as before.
 
 ## O — the depth × diet factorial
 
@@ -165,9 +170,82 @@ check (b) leaves open. L's numbers reproduce H's independently (generation 9
 on food 0.116 and 0.085 on H's two per-tick layouts; the no-intake control
 dying at the pinned 7,420).
 
-## M — the plant budget of a depleted cell
+## M — the plant budget of a depleted cell: over-seeding confirmed, no crossing grazed
 
-*(pending)*
+Full note: [ecology-v1-plant-budget-2026-09-16.md](ecology-v1-plant-budget-2026-09-16.md).
+Commits `bdc2fcd` (record, split, tests), `933d92d` (note); merged `4819a5c`.
+The per-cell plant budget is recorded **where §4.1–4.8 are computed**
+(`crates/cubarium-core/src/fields.rs::react`, not `world/step.rs` as the brief
+assumed — recomputing the equations in the recorder would have been a second
+implementation of the contract, the class of proxy this workstream exists to
+remove; four three-line withdrawal hooks in `step.rs` at the §6.4 site);
+opt-in, hanging off the transient `EcoScratch`, inert by hash (12 of 12 rows
+byte-identical in every metrics block with the record on and off, and equal
+to I's retained rows), cost +1.4 % of run time, per-cell identity residual
+≤ 1.2e-11 over 180,000 ticks. The depletion counter is now split by **exact
+withdrawal since the last recovery**, with I's probe flag kept beside it.
+`--no-animals` empties the founder roster for the absent arm. Tests first: 9
+core (also green in debug with the per-tick audits live) and 12 search.
+
+| arm | config | crossings | with exact withdrawal | without | without **and** negative budget | I's probe called "visited" |
+| --- | --- | --- | --- | --- | --- | --- |
+| herbivores present | baseline | 68 | **0** | 68 | **68** | 41 |
+| herbivores present | `fast-leaf` | 5 | **0** | 5 | **5** | 1 |
+| herbivores absent | baseline | 382 | 0 | 382 | **382** | 0 |
+| herbivores absent | `fast-leaf` | 180 | 0 | 180 | **180** | 0 |
+
+**Verdict: confirmed on both branches of Astra's rule.** Not one of the 73
+present-arm crossing cells lost a metre of foliage to any mouth in 180,000
+ticks, while the same runs withdrew 1,500–2,400 m per run from 663–1,113
+*other* cells. The same cells cross without herbivores (73 of 73 overlap;
+present-only crossings 0 in every one of the 12 seeds), at the same or an
+earlier time (73 of 73; median about 9,000 ticks earlier), with a negative
+measured plant budget over the 6,000 ticks before the crossing and over the
+whole run, in both arms. Neither refutation branch fired: crossings rose 5.6×
+and 36× without herbivores and no crossing cell's budget was positive. I's
+probe flag called 42 of 73 crossings "visited" and the exact counter finds a
+bite in none, so the old split **over**-stated grazing, the opposite of the
+direction Astra worried about. Mechanism at the crossing cells (absent arm,
+medians against other watched cells): opening foliage 0.065 against 0.101,
+static `L·μ` 0.27 against 0.42 driven by low **moisture** not low light, `N`
+0.20 against 0.26, wood 0.08 against 0.30, whole-run gross income 0.45
+against 6.06; 71 of 73 thinned while alive. §11 seeds 15 % (baseline) and 9 %
+(`fast-leaf`) of watched cells above what the plant step alone sustains, and
+the crossing cells at about 25× what they hold at the horizon. **At the
+shipped price the depletion counter measures the seeding, not grazing**; A's,
+F's and I's counts are correct as counts and the sentences around them should
+be re-read that way.
+
+**Limits M flagged:** the absent arm is not "the same world without grazing"
+— removing the founders removes their faeces and carcasses, so its `N` is much
+lower — which is why the confirmation rests on the 73 present-arm crossings
+having zero withdrawal and a negative budget *in the herbivore-present world*;
+foliage at 180,000 ticks is a state, not a proven equilibrium; one price, two
+configurations, arm 0, training seeds; 33 of the 68 baseline crossings come
+from one seed; only 2 recoveries in 24 runs, so the "since the last recovery"
+clause is exercised by the hand-built tests, not the campaign; no critical
+`L·μ` is defined or used anywhere.
+
+**The owner's options, stated and not decided (§11 untouched):**
+- **A, a plant-only warm-up before founding animals.** The absent arm's first
+  crossing is at tick 42,000–55,000 and the median at about 145,000, with
+  most crossings after 120,000, so an adequate warm-up is of the order of
+  the whole 150-minute horizon. Visible: the display opens on a world that
+  has already sorted itself, no uniform green-then-fade, but founders meet
+  3.6–4.2× the seeded standing foliage.
+- **B, seed each cell below its own measured local equilibrium.** Today's
+  opening foliage over watched cells: total 107, median 0.099, spread (CV)
+  0.39; the plant-only world at the horizon: total 389–447, median 0.45–0.46,
+  CV 0.46–0.53. Visible: dim dry cells open visibly thinner than bright wet
+  ones and nothing is seeded into a deficit, and the world opens 3.6–4.2×
+  greener overall, which is a presentation decision too.
+- Not supported: keeping §11 as is and reading the counter as a grazing
+  signal.
+
+**Named next, not launched:** fit the local equilibrium as a per-cell
+function of the habitat from the `--no-animals --plant-record` path, re-seed
+from the fit, and verify the counter goes to zero plant-only and stays small
+with herbivores.
 
 ## N — why an apex strike ends out of reach: the pursuit stopping rule
 
@@ -241,8 +319,65 @@ is Fable's; the display's apex is unchanged by this workstream.
 
 ## What this does and does not establish
 
-*(after L, M, N)*
+- **Established by measurement:** the forager's score already rewards
+  staying (a 53–111 % dwell gradient) and its frozen controller's movement
+  does not respond to food (effects 0.06–0.19 of the action's own spread),
+  so the binding constraint is between the objective and the search, not in
+  the objective; the apex's paid bursts are suppressed by the pursuit
+  stopping predicate on 408 of 449 attempts and its realised strike speed is
+  near zero, while the escape multiple is exonerated; the counted depletions
+  at the shipped price are seeding artefacts in dim, dry, low-wood cells with
+  a negative plant budget and zero withdrawal, confirmed in the
+  herbivore-present world itself; the skimmer body thrives once its depth
+  preference leaves the wet rim, and there the foliage diet wins, reconciling
+  J and F.
+- **Not established:** why the ES search does not convert the behavioural
+  gradient (optimiser step, deadband, or the local landscape around
+  generation 9); what reading the pursuit predicate as the envelope would do
+  to captures, phase occupancy and the apex's bill; whether the skimmer's
+  founding-time rescue survives a reproducing lineage, and whether `depth`
+  0.10 is a roster bug or a world bug (the wet floor grows no producer);
+  whether any setting lets a detrital diet fund a body; the fit that would
+  replace §11's uniform seeding.
+- **The cube is untouched by this round**: build `77c42e8`, `fast-leaf`,
+  shipped price, shoulder 0.95 by override. On M's result, the slow fading of
+  its dim dry cells is the seeding relaxing, not grazing; on O's, its skimmers
+  are starving on the rim by roster design; on N's, any apex spawned from the
+  viewer stops short of nearly every prey it pays to strike.
 
-## Next recommendation
+## Next recommendation (Fable's, before Astra's opinion)
 
-*(after L, M, N, reconciled with Astra)*
+Four of the five items are now design changes with a measured cause behind
+them, so each gets a paired experiment or a fit first and then a decision.
+None runs on the cube until Wrysk has seen the result.
+
+1. **Apex pursuit predicate** (N): run N's paired arm with `inside` read as
+   the reach envelope, scored on N's rows plus K's ledger (held fraction, gap
+   closed, class histogram, captures per life, phase occupancy, energy
+   margin). If captures per life approach the ~10 that break even and the
+   bill does not explode, propose the one-line predicate change to Wrysk as a
+   correction of a rule to its own comment; it would be visible on the cube
+   whenever an apex is spawned.
+2. **Skimmer depth** (O): re-run F's 150-minute reproduction census with the
+   roster skimmer's `depth` at 0.55 and nothing else changed, six seeds, arms
+   0/1/2. If the lineage persists, propose the roster change to Wrysk (the
+   cube's skimmers would stop dying on the rim); separately, write the
+   question of whether the wet floor should grow a producer at all as a
+   design note, because O shows the skimmer's designed larder does not exist.
+3. **Foliage seeding** (M): fit the local equilibrium per cell from the
+   plant-only path, re-seed from the fit in a branch, verify the counter goes
+   to zero plant-only and stays small with herbivores, and produce one
+   contact-sheet-style opening frame beside today's so Wrysk can see option
+   B's visible consequence before deciding between A, B and leaving §11.
+   This is his call.
+4. **The ES search** (L): no simulation first — measure the within-generation
+   score spread from the retained `es-eco-v1` checkpoints; then how much of
+   the action sits inside the adapter deadband under a σ-scale perturbation.
+   Only then decide whether the optimiser (σ, pairs, generations) or the
+   adapter is the next change; no score change.
+5. **Detrital funding** (O, M): using the plant record and the ledger, ask
+   whether any setting of decomposition, energy cap and mouth rate lets litter
+   pay for a body in `fast-leaf`; until it does, ecology v1 has one working
+   guild.
+6. **Re-read A, F and I's depletion sentences** as measurements of the
+   seeding, with a one-paragraph erratum in each note pointing at M.

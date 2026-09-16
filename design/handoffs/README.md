@@ -58,9 +58,15 @@ the forager fails to *stay* on food, not to eat it (score, not observation);
 the apex starves on a 3 % capture rate and never fills its reserve whatever its
 age; the price ladder is refuted and the counted depletions turn out to be
 unvisited dim cells declining from an over-seeded start; the skimmer's founder
-diet is the better one for its body and F's association was survivorship. Next:
-two written proposals (training score; foliage seeding and what a depletion
-is) for Astra's review, plus the apex-reach and `depth` measurements. The [ecology v1 contract](../ecology-v1-contract.md)
+diet is the better one for its body and F's association was survivorship. Round 3 followed
+([round-3 result](../7_Research/ecology-v1-round3-results-2026-09-16.md)): the
+score hypothesis is falsified (the current score already pays for staying; the
+controller's movement does not respond to food; no score change proposed); the
+apex's pursuit stopping predicate suppresses the burst it pays for; the counted
+depletions are seeding artefacts confirmed by exact per-cell withdrawal (none
+grazed); the skimmer thrives once its depth preference leaves the wet rim.
+Next: paired experiments for the predicate and the skimmer depth, the local
+equilibrium fit for seeding (Wrysk's call), the ES search diagnosis. The [ecology v1 contract](../ecology-v1-contract.md)
 and its [implementation review](../7_Research/ecology-v1-implementation-review-2026-09-15.md)
 stand as the accepted baseline.
 
