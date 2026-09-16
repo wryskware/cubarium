@@ -102,6 +102,10 @@ pub struct TargetImage {
 
 pub struct Renderer {
     pub layout: RingLayout,
+    /// Let the wind's displacement land between source texels at `S ≥ 2`
+    /// (`--gpu-bend-substep`). Off by default: a whole-texel bend is what keeps every
+    /// sprite texel on an exact `S × S` block, and the two are identical at `S = 1`.
+    pub bend_substep: bool,
     // --- the world raster ---
     raster_image: vk::Image,
     raster_memory: vk::DeviceMemory,
@@ -380,6 +384,7 @@ impl Renderer {
 
         Ok(Renderer {
             layout,
+            bend_substep: false,
             raster_image,
             raster_memory,
             raster_view,
@@ -472,6 +477,7 @@ impl Renderer {
             scene.fields.producer_max,
             scene.seconds,
             scene.f,
+            self.bend_substep,
         )]);
 
         // Instances, concatenated in draw order; `first_instance` then selects a layer.
@@ -876,13 +882,14 @@ fn sprite_pipeline(
     let attributes = [
         attribute(0, F::R32G32_SFLOAT, 0),              // anchor
         attribute(1, F::R32G32_SFLOAT, 8),              // heading
-        attribute(2, F::R16G16B16A16_UINT, 16),         // frame0 x, y, w, h
-        attribute(3, F::R16G16B16A16_UINT, 24),         // frame1 x, y + pivot x, y
-        attribute(4, F::R32G32_SFLOAT, 32),             // mix, opacity
-        attribute(5, F::R32G32B32A32_SFLOAT, 40),       // bend
-        attribute(6, F::R32G32_SFLOAT, 56),             // mask floor, reveal
-        attribute(7, F::R32G32B32_SFLOAT, 64),          // tone colour
-        attribute(8, F::R32G32B32_SFLOAT, 76),          // shade floor, reference, tone mix
+        attribute(2, F::R16G16B16A16_UINT, 16),         // frames 0 and 1, by origin
+        attribute(3, F::R16G16B16A16_UINT, 24),         // frames 2 and 3
+        attribute(4, F::R16G16B16A16_UINT, 32),         // size w, h + pivot x, y
+        attribute(5, F::R32G32B32A32_SFLOAT, 40),       // the four frame weights
+        attribute(6, F::R32G32B32A32_SFLOAT, 56),       // bend amplitude, base, root, length
+        attribute(7, F::R32G32B32A32_SFLOAT, 72),       // mask floor, reveal, flags, opacity
+        attribute(8, F::R32G32B32A32_SFLOAT, 88),       // tone colour rgb + tone mix
+        attribute(9, F::R32G32_SFLOAT, 104),            // shade floor, reference
     ];
     let vi = vk::PipelineVertexInputStateCreateInfo::default()
         .vertex_binding_descriptions(&bindings)

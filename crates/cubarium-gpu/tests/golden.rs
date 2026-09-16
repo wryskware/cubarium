@@ -163,10 +163,10 @@ fn every_sprite_texel_covers_a_whole_scale_by_scale_block() {
             cubarium_gpu::scene::SpriteInstance {
                 anchor: [32.0 * scale as f32, 20.0 * scale as f32],
                 heading: [1.0, 0.0],
-                frame0: [rect.x, rect.y, rect.w, rect.h],
-                frame1: [rect.x, rect.y],
+                frames: [[rect.x, rect.y], [0, 0], [0, 0], [0, 0]],
+                size: [rect.w, rect.h],
                 pivot: [rect.w / 2, rect.h / 2],
-                mix: 0.0,
+                weights: [1.0, 0.0, 0.0, 0.0],
                 opacity: 1.0,
                 ..Default::default()
             },

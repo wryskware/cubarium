@@ -3,29 +3,34 @@
 // One instanced quad per stamp. The quad is built in the tile's *own* coordinates and
 // rotated by the instance heading, so it is tight around the sprite (plus the bend's
 // reach) rather than a conservative axis-aligned box: ~1.2x overdraw instead of 2.25x.
+//
+// Nothing is interpolated. Every varying is `flat`, and the fragment recomputes its own
+// tile coordinate from `gl_FragCoord` — see `sprite.frag`.
 
 layout(location = 0) in vec2  iAnchor;
 layout(location = 1) in vec2  iHeading;
-layout(location = 2) in uvec4 iFrame0;      // x, y, w, h in atlas texels
-layout(location = 3) in uvec4 iFrame1Pivot; // frame1.x, frame1.y, pivot.x, pivot.y
-layout(location = 4) in vec2  iBlend;       // mix, opacity
-layout(location = 5) in vec4  iBend;        // amplitude, base, root, length
-layout(location = 6) in vec2  iMask;        // floor, reveal
-layout(location = 7) in vec3  iToneColour;
-layout(location = 8) in vec3  iToneShade;   // shade floor, shade reference, tone mix
+layout(location = 2) in uvec4 iFrames01;   // frame0.xy, frame1.xy
+layout(location = 3) in uvec4 iFrames23;   // frame2.xy, frame3.xy
+layout(location = 4) in uvec4 iSizePivot;  // size.xy, pivot.xy
+layout(location = 5) in vec4  iWeights;
+layout(location = 6) in vec4  iBend;       // amplitude, base, root, length
+layout(location = 7) in vec4  iMask;       // floor, reveal, flags, opacity
+layout(location = 8) in vec4  iTone;       // colour.rgb, mix
+layout(location = 9) in vec2  iShade;      // floor, reference
 
-layout(location = 0) flat out vec4  vPlace;   // the snapped anchor, then the heading
-layout(location = 1) flat out uvec4 vFrame0;
-layout(location = 2) flat out uvec4 vFrame1Pivot;
-layout(location = 3) flat out vec2  vBlend;
-layout(location = 4) flat out vec4  vBend;
-layout(location = 5) flat out vec2  vMask;
-layout(location = 6) flat out vec3  vToneColour;
-layout(location = 7) flat out vec3  vToneShade;
+layout(location = 0) flat out vec4  vPlace;      // the snapped anchor, then the heading
+layout(location = 1) flat out uvec4 vFrames01;
+layout(location = 2) flat out uvec4 vFrames23;
+layout(location = 3) flat out uvec4 vSizePivot;
+layout(location = 4) flat out vec4  vWeights;
+layout(location = 5) flat out vec4  vBend;
+layout(location = 6) flat out vec4  vMask;
+layout(location = 7) flat out vec4  vTone;
+layout(location = 8) flat out vec2  vShade;
 
 void main() {
-    vec2 pivot = vec2(iFrame1Pivot.zw);
-    vec2 tile  = vec2(iFrame0.zw);
+    vec2 pivot = vec2(iSizePivot.zw);
+    vec2 tile  = vec2(iSizePivot.xy);
     // The bend displaces along tile +x only, so only x needs the headroom. One extra
     // texel each way covers the half-open edge of the nearest-neighbour footprint.
     float pad = abs(iBend.x) + 1.0;
@@ -41,12 +46,13 @@ void main() {
     vec2 px = anchor + u.grid.z * (corner.x * iHeading + corner.y * side);
 
     vPlace = vec4(anchor, iHeading);
-    vFrame0 = iFrame0;
-    vFrame1Pivot = iFrame1Pivot;
-    vBlend = iBlend;
+    vFrames01 = iFrames01;
+    vFrames23 = iFrames23;
+    vSizePivot = iSizePivot;
+    vWeights = iWeights;
     vBend = iBend;
     vMask = iMask;
-    vToneColour = iToneColour;
-    vToneShade = iToneShade;
+    vTone = iTone;
+    vShade = iShade;
     gl_Position = vec4(px * u.raster.zw * 2.0 - 1.0, 0.0, 1.0);
 }

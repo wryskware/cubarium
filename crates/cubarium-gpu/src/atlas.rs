@@ -15,13 +15,19 @@ use std::path::Path;
 
 use anyhow::{Context, Result, anyhow, bail};
 
-/// One frame's rectangle in the atlas, in atlas texels.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// One frame's rectangle in the atlas, in atlas texels, and how far it paints.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FrameRect {
     pub x: u16,
     pub y: u16,
     pub w: u16,
     pub h: u16,
+    /// `cubarium_render::Sprite::extent`: the distance from the pivot to the furthest
+    /// painted texel's far corner, plus the half-texel of bilinear support the CPU
+    /// sprite carries. A radial growth mask reveals out to `extent + 0.5`
+    /// (`art_present::draw_with_fruit`), so it has to be measured from the art rather
+    /// than assumed to be half the tile.
+    pub extent: f32,
 }
 
 /// A baked animation: a contiguous run of frames plus the clock `pack.json` gives it.
@@ -285,18 +291,44 @@ impl Atlas {
     }
 
     /// Append `count` frames of `w × h` laid left to right from `(x, y)`, returning
-    /// the first one's index.
+    /// the first one's index. Each frame's extent is measured from its own alpha.
     fn push_frames(&mut self, x: u32, y: u32, w: u16, count: u32, h: u16) -> u32 {
         let first = self.frames.len() as u32;
         for i in 0..count {
-            self.frames.push(FrameRect {
+            let rect = FrameRect {
                 x: (x + i * u32::from(w)) as u16,
                 y: y as u16,
                 w,
                 h,
-            });
+                extent: 0.0,
+            };
+            let extent = self.measure_extent(rect);
+            self.frames.push(FrameRect { extent, ..rect });
         }
         first
+    }
+
+    /// `Sprite::from_rgba`'s extent, on the atlas bytes: over every texel with `α > 0`,
+    /// the largest `hypot(x + 0.5 − pivot.x, y + 0.5 − pivot.y) + TEXEL_SUPPORT`, with
+    /// the pivot at the tile's centre and `TEXEL_SUPPORT = 0.5 · √2` as
+    /// `cubarium_render::sprite` defines it.
+    fn measure_extent(&self, rect: FrameRect) -> f32 {
+        const TEXEL_SUPPORT: f64 = std::f64::consts::SQRT_2 / 2.0;
+        let (px, py) = (f64::from(rect.w) / 2.0, f64::from(rect.h) / 2.0);
+        let mut extent = 0.0f64;
+        for ty in 0..u32::from(rect.h) {
+            for tx in 0..u32::from(rect.w) {
+                let i = (((u32::from(rect.y) + ty) * self.width + u32::from(rect.x) + tx) * 4 + 3)
+                    as usize;
+                if self.rgba.get(i).copied().unwrap_or(0) == 0 {
+                    continue;
+                }
+                let dx = f64::from(tx) + 0.5 - px;
+                let dy = f64::from(ty) + 0.5 - py;
+                extent = extent.max(dx.hypot(dy) + TEXEL_SUPPORT);
+            }
+        }
+        extent as f32
     }
 
     /// The rect of a frame index.

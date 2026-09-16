@@ -97,13 +97,23 @@ pub struct SceneUniforms {
     pub algae: [f32; 4],
     /// `(SOIL_TOP, HORIZON, DETRITUS_THRESHOLD, SOIL_SCALE)`.
     pub bands: [f32; 4],
-    /// `(PRODUCER_SATURATION, WATER_SHIMMER, WATER_SHIMMER_SECONDS, 0)`.
+    /// `(PRODUCER_SATURATION, WATER_SHIMMER, WATER_SHIMMER_SECONDS, bend_substep)`.
+    ///
+    /// `bend_substep` is 1 when the wind's displacement may land between source texels
+    /// (`--gpu-bend-substep`) and 0 when it is rounded to a whole one, which is the
+    /// default and the only setting that keeps every texel on an exact `S × S` block.
     pub knobs: [f32; 4],
 }
 
 impl SceneUniforms {
     /// The block for one frame of a ring.
-    pub fn new(layout: crate::RingLayout, producer_max: f32, seconds: f64, f: f32) -> SceneUniforms {
+    pub fn new(
+        layout: crate::RingLayout,
+        producer_max: f32,
+        seconds: f64,
+        f: f32,
+        bend_substep: bool,
+    ) -> SceneUniforms {
         let rgb = |hex: u32, w: f32| {
             let c = srgb_linear(hex);
             [c[0], c[1], c[2], w]
@@ -140,7 +150,12 @@ impl SceneUniforms {
             water_high: rgb(WATER_HIGH_SRGB, WATER_BRIGHT),
             algae: rgb(ALGAE_SRGB, ALGAE_TINT),
             bands: [SOIL_TOP, HORIZON, DETRITUS_THRESHOLD, SOIL_SCALE],
-            knobs: [PRODUCER_SATURATION, WATER_SHIMMER, WATER_SHIMMER_SECONDS, 0.0],
+            knobs: [
+                PRODUCER_SATURATION,
+                WATER_SHIMMER,
+                WATER_SHIMMER_SECONDS,
+                if bend_substep { 1.0 } else { 0.0 },
+            ],
         }
     }
 }

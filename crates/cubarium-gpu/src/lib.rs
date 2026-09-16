@@ -33,6 +33,7 @@
 //! Only the last pass runs at panel resolution. Everything above it runs at the world
 //! raster's 57,600 (S = 1) or 230,400 (S = 2) pixels.
 
+pub mod adapter;
 pub mod atlas;
 pub mod palette;
 pub mod render;
@@ -41,10 +42,11 @@ pub mod synthetic;
 pub mod target;
 pub mod vk;
 
+pub use adapter::{PoseRef, Stamp, StampMask, StampTone};
 pub use atlas::{Atlas, Clip, FrameRect, PlantClip};
 pub use render::{FrameTiming, PresentTransform, Renderer, TargetImage};
 pub use scene::{
-    Fields, LAYER_COUNT, LAYERS, Layer, NO_MASK_FLOOR, NO_MASK_REVEAL, RingLayout, Scene,
-    SpriteInstance,
+    Fields, LAYER_COUNT, LAYERS, Layer, MASK_AXIAL, MASK_RADIAL, NO_MASK_FLOOR, NO_MASK_REVEAL,
+    RingLayout, Scene, SpriteInstance,
 };
 pub use vk::Gpu;

@@ -116,7 +116,24 @@ pub struct Fields {
 ///
 /// Every field is in the units the CPU presenter uses, so the adapter is a
 /// transcription rather than a translation. This is the layout the vertex buffer
-/// takes verbatim — `#[repr(C)]` and `Pod`, 88 bytes.
+/// takes verbatim — `#[repr(C)]` and `Pod`, 112 bytes, ten vertex attributes.
+///
+/// # Four frame slots, and why exactly four
+///
+/// `art_present` composites `Σ wᵢ · poseᵢ.sample(..)` and **then** one source-over, and
+/// each pose is itself a two-frame blend. A weighted sum of poses whose members are
+/// themselves lerps is just a weighted sum of the underlying frames — pose `i` at weight
+/// `wᵢ` with blend `mᵢ` contributes `wᵢ(1 − mᵢ)` of frame A and `wᵢmᵢ` of frame B — so
+/// `[(frame, weight); 4]` expresses **two whole poses** exactly.
+///
+/// Two is what the presenter needs almost everywhere. An idle plant is one pose; a
+/// fruiting one is two (`tall.rs::stage_layers`); and an authored growth step is three
+/// *named* layers but never three *live* ones, because `growth_weights` has
+/// `GROW_BLEND = 0.12 < ½`, so `w_from` and `w_to` are never both positive
+/// (`growth.rs`'s own normative note). The one case that can exceed it is a body whose
+/// state changed twice inside `BODY_FADE_SECONDS = 0.3 s`, where `BodyMemory::layers_at`
+/// returns three: the driver then drops the lightest and renormalises, and counts how
+/// often it did (`sink/gpu.rs`).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
 pub struct SpriteInstance {
@@ -127,67 +144,124 @@ pub struct SpriteInstance {
     /// tile upright and unrotated; the tile's `+y` is `(−heading.y, heading.x)`,
     /// exactly `sprite.rs`'s `side`.
     pub heading: [f32; 2],
-    /// The atlas rect of the pose's first frame: `x, y, w, h` in atlas texels.
-    pub frame0: [u16; 4],
-    /// The atlas origin of the second frame; it has `frame0`'s size, as both come
-    /// from one clip.
-    pub frame1: [u16; 2],
-    /// The tile's pivot in source texels — `(8, 8)` for every tile in `assets/atelier`.
+    /// Up to four atlas frames, by their origin in atlas texels. All four share
+    /// [`SpriteInstance::size`] and [`SpriteInstance::pivot`], which every frame of one
+    /// pack does.
+    pub frames: [[u16; 2]; 4],
+    /// The frames' `w, h` in atlas texels.
+    pub size: [u16; 2],
+    /// The tile's pivot in source texels — `(8, 8)` for every 16×16 tile in
+    /// `assets/atelier`, `(4, 4)` for a ground tile.
     pub pivot: [u16; 2],
-    /// `Pose::mix`: 0 draws `frame0` exactly, 1 draws `frame1` exactly.
-    pub mix: f32,
+    /// Each frame's weight in the composite. They should sum to 1 for an exact lerp; a
+    /// zero weight costs nothing but a compare.
+    pub weights: [f32; 4],
+    /// `cubarium_render::Bend` as `(amplitude, base, root, length)`, in source texels
+    /// along the tile's `+x`.
+    pub bend: [f32; 4],
+    /// `Mask` floor, in source rows above the tile's bottom edge. [`NO_MASK_FLOOR`]
+    /// for `Mask::Axial` and `Mask::None`; ignored when [`Self::mask_flags`] is radial.
+    pub mask_floor: f32,
+    /// `Mask` reveal — rows above the bottom edge for an axial or strip mask, distance
+    /// from the pivot for a radial one. [`NO_MASK_REVEAL`] is `Mask::None`.
+    pub mask_reveal: f32,
+    /// [`MASK_AXIAL`] or [`MASK_RADIAL`]. A ring **does** have radial plants: FW-5's
+    /// `ArtGeometry::is_radial` calls a cell radial when its band is `Canopy`, and a
+    /// ring's canopy is its top `1 − CANOPY_TOP` of rows, not a face the ring lacks.
+    pub mask_flags: f32,
     /// Multiplies the premultiplied sample, exactly the CPU `opacity`.
     pub opacity: f32,
-    /// `Bend::amplitude` in source texels, along the tile's `+x`.
-    pub bend_amplitude: f32,
-    /// `Bend::base`: the tile's bottom edge above the plant's root line.
-    pub bend_base: f32,
-    /// `Bend::root`: heights at or below this do not move.
-    pub bend_root: f32,
-    /// `Bend::length`: the height above the root at which the full amplitude is reached.
-    pub bend_length: f32,
-    /// `Mask` floor, in source rows above the tile's bottom edge. [`NO_MASK_FLOOR`]
-    /// for `Mask::Axial` and `Mask::None`.
-    pub mask_floor: f32,
-    /// `Mask` reveal, in source rows above the tile's bottom edge. [`NO_MASK_REVEAL`]
-    /// is `Mask::None`.
-    pub mask_reveal: f32,
     /// `Tone::colour`, linear light.
     pub tone_colour: [f32; 3],
-    /// `Shade::floor`.
-    pub tone_shade_floor: f32,
-    /// `Shade::reference`.
-    pub tone_shade_reference: f32,
     /// `Tone::mix`; 0 is the untoned stamp, bit for bit.
     pub tone_mix: f32,
+    /// `Shade::floor`.
+    pub shade_floor: f32,
+    /// `Shade::reference`.
+    pub shade_reference: f32,
 }
 
 /// The `mask_floor` of an unmasked or purely axial stamp.
 pub const NO_MASK_FLOOR: f32 = -1.0e9;
 /// The `mask_reveal` of `Mask::None`.
 pub const NO_MASK_REVEAL: f32 = 1.0e9;
+/// [`SpriteInstance::mask_flags`] for `Mask::None`, `Mask::Axial` and `Mask::Strip`.
+pub const MASK_AXIAL: f32 = 0.0;
+/// [`SpriteInstance::mask_flags`] for `Mask::Radial`: the reveal is measured from the
+/// pivot outward instead of from the tile's bottom edge.
+pub const MASK_RADIAL: f32 = 1.0;
 
 impl Default for SpriteInstance {
     fn default() -> Self {
         SpriteInstance {
             anchor: [0.0, 0.0],
             heading: [1.0, 0.0],
-            frame0: [0, 0, 0, 0],
-            frame1: [0, 0],
+            frames: [[0, 0]; 4],
+            size: [0, 0],
             pivot: [0, 0],
-            mix: 0.0,
-            opacity: 1.0,
-            bend_amplitude: 0.0,
-            bend_base: 0.0,
-            bend_root: 0.0,
-            bend_length: 0.0,
+            weights: [1.0, 0.0, 0.0, 0.0],
+            bend: [0.0; 4],
             mask_floor: NO_MASK_FLOOR,
             mask_reveal: NO_MASK_REVEAL,
+            mask_flags: MASK_AXIAL,
+            opacity: 1.0,
             tone_colour: [0.0, 0.0, 0.0],
-            tone_shade_floor: 1.0,
-            tone_shade_reference: 1.0,
             tone_mix: 0.0,
+            shade_floor: 1.0,
+            shade_reference: 1.0,
         }
+    }
+}
+
+impl SpriteInstance {
+    /// Add one pose — two frames and the blend between them — at `weight`, as
+    /// `cubarium_render::stamp_layers` takes `(Pose, f32)`.
+    ///
+    /// Returns `false` and changes nothing when all four slots are already spoken for,
+    /// which is the caller's cue to drop its lightest layer and renormalise rather than
+    /// to silently lose one.
+    #[must_use]
+    pub fn push_pose(&mut self, a: u32, b: u32, mix: f32, weight: f32, atlas: &crate::Atlas) -> bool {
+        if !(weight.is_finite() && weight > 0.0) {
+            return true;
+        }
+        let mix = if mix.is_finite() { mix.clamp(0.0, 1.0) } else { 0.0 };
+        // A pose at the exact start or end of its blend is one frame, not two: taking
+        // the fast path here is what keeps an idle plant inside two slots.
+        let pairs: &[(u32, f32)] = &if mix <= 0.0 {
+            [(a, weight), (b, 0.0)]
+        } else if mix >= 1.0 {
+            [(b, weight), (a, 0.0)]
+        } else {
+            [(a, weight * (1.0 - mix)), (b, weight * mix)]
+        };
+        let wanted = pairs.iter().filter(|(_, w)| *w > 0.0).count();
+        let used = self.used();
+        if used + wanted > self.frames.len() {
+            return false;
+        }
+        let mut slot = used;
+        for (frame, w) in pairs.iter().copied().filter(|(_, w)| *w > 0.0) {
+            let rect = atlas.rect(frame);
+            if slot == 0 {
+                self.size = [rect.w, rect.h];
+                self.pivot = [rect.w / 2, rect.h / 2];
+            }
+            self.frames[slot] = [rect.x, rect.y];
+            self.weights[slot] = w;
+            slot += 1;
+        }
+        true
+    }
+
+    /// How many frame slots carry weight.
+    pub fn used(&self) -> usize {
+        self.weights.iter().filter(|w| **w > 0.0).count()
+    }
+
+    /// An instance with no frames at all: what a builder starts from.
+    pub fn empty() -> SpriteInstance {
+        SpriteInstance { weights: [0.0; 4], ..Default::default() }
     }
 }
 
@@ -267,9 +341,8 @@ impl Scene {
         let w = self.layout.w as f32;
         // Half the tile's diagonal plus the bend, in raster pixels: a bound on how
         // far from the anchor the stamp can paint.
-        let tile = f32::from(instance.frame0[2].max(instance.frame0[3]));
-        let radius =
-            (0.5 * tile + instance.bend_amplitude.abs() + 1.0) * self.layout.scale as f32;
+        let tile = f32::from(instance.size[0].max(instance.size[1]));
+        let radius = (0.5 * tile + instance.bend[0].abs() + 1.0) * self.layout.scale as f32;
         let list = &mut self.layers[layer as usize];
         list.push(instance);
         if instance.anchor[0] - radius < 0.0 {
@@ -320,7 +393,7 @@ mod tests {
     #[test]
     fn a_stamp_reaching_past_a_rim_is_pushed_twice_and_one_in_the_middle_once() {
         let mut scene = Scene::new(RingLayout::RING_320);
-        let tile = SpriteInstance { frame0: [0, 0, 16, 16], ..Default::default() };
+        let tile = SpriteInstance { size: [16, 16], ..Default::default() };
         scene.push(Layer::Plants, SpriteInstance { anchor: [160.0, 90.0], ..tile });
         assert_eq!(scene.layers[Layer::Plants as usize].len(), 1);
         scene.push(Layer::Plants, SpriteInstance { anchor: [2.0, 90.0], ..tile });
@@ -332,7 +405,7 @@ mod tests {
 
     #[test]
     fn the_instance_is_a_plain_flat_record_the_vertex_buffer_can_take() {
-        assert_eq!(std::mem::size_of::<SpriteInstance>(), 88);
+        assert_eq!(std::mem::size_of::<SpriteInstance>(), 112);
         let _: &[u8] = bytemuck::bytes_of(&SpriteInstance::default());
     }
 }

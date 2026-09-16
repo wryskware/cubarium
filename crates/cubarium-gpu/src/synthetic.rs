@@ -426,8 +426,7 @@ impl SyntheticWorld {
                     (idle, slot.phase)
                 };
                 let mut sprite = instance(atlas, clip, seconds + phase, anchor, slot.heading, opacity);
-                sprite.bend_amplitude = bend as f32;
-                sprite.bend_length = PLANT_BEND_LENGTH;
+                sprite.bend = [bend as f32, 0.0, 0.0, PLANT_BEND_LENGTH];
                 self.scene.push(Layer::Plants, sprite);
             }
         }
@@ -463,10 +462,8 @@ impl SyntheticWorld {
                     [1.0, 0.0],
                     opacity,
                 );
-                sprite.bend_amplitude = amplitude as f32;
                 // `tall_bend_base(i) = 4i − 8`: the tile's bottom edge above the root.
-                sprite.bend_base = 4.0 * i - 8.0;
-                sprite.bend_length = TALL_BEND_LENGTH;
+                sprite.bend = [amplitude as f32, 4.0 * i - 8.0, 0.0, TALL_BEND_LENGTH];
                 sprite.mask_floor = floor;
                 sprite.mask_reveal = reveal;
                 world.push(Layer::Tall, sprite);
@@ -731,18 +728,9 @@ fn instance(
     opacity: f32,
 ) -> SpriteInstance {
     let (a, b, mix) = clip.pose(seconds);
-    let ra = atlas.rect(a);
-    let rb = atlas.rect(b);
-    SpriteInstance {
-        anchor,
-        heading,
-        frame0: [ra.x, ra.y, ra.w, ra.h],
-        frame1: [rb.x, rb.y],
-        pivot: [ra.w / 2, ra.h / 2],
-        mix,
-        opacity,
-        ..Default::default()
-    }
+    let mut sprite = SpriteInstance { anchor, heading, opacity, ..SpriteInstance::empty() };
+    assert!(sprite.push_pose(a, b, mix, 1.0, atlas), "one pose always fits four slots");
+    sprite
 }
 
 /// A rain streak: one source texel of the atlas's white pixel, in the rain colour, so
@@ -753,14 +741,12 @@ fn rain_mark(solid: crate::atlas::FrameRect, anchor: [f32; 2], alpha: f32) -> Sp
         anchor,
         heading: [1.0, 0.0],
         // A 1×1 tile with a pivot at its corner is exactly one S × S block.
-        frame0: [solid.x, solid.y, 1, 1],
-        frame1: [solid.x, solid.y],
+        frames: [[solid.x, solid.y], [0, 0], [0, 0], [0, 0]],
+        size: [1, 1],
         pivot: [0, 0],
-        mix: 0.0,
+        weights: [1.0, 0.0, 0.0, 0.0],
         opacity: alpha,
         tone_colour: rain,
-        tone_shade_floor: 1.0,
-        tone_shade_reference: 1.0,
         tone_mix: 1.0,
         ..Default::default()
     }
