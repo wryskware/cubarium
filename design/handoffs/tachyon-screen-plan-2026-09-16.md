@@ -350,3 +350,18 @@ cube. Decision (Fable): the ring's default founder count scales with cell
 count (24 × 2.81 ≈ 67) so a fresh ring world starts as dense as a fresh cube;
 this is a fresh-world default in W2's config, not a tuning of a running world.
 `evap_floor` stays where the backlog keeps it until the panel is seen.
+
+### GS-1 result (2026-09-16)
+
+`design/7_Research/gs1-vulkan-renderer-2026-09-16.md`: `crates/cubarium-gpu`
+renders a synthetic ring scene on the Adreno through GS-2's socket at 60 fps
+for 320×180 S=1, 640×360 S=2 and 960×540 S=3 (0.14–0.16 CPU core-s/s; GPU
+1.6/3.7/6.8 ms); 1920×1080 S=6 runs at 30 fps because the present pass reads
+8 MB per frame. `Scene` = tick-rate `Fields` + frame-rate `SpriteInstance`
+layers; `Scene::push` handles the seam by pushing a second instance one
+circumference away; integer `scale` only (S = 1.5 refused; the pixel-art
+rule). Decisions (Fable): Stage B adds two more frame slots so multi-pose
+stamps composite as the CPU does; `canopy_top` = 0.67 as the plan's default;
+the bend budget on the ring and the quarter-turn direction are settled by
+Wrysk looking at the panel. Stage B (adapter from `RenderView`, hunters as
+per-part instances, a GPU sink in the runner) follows FW-4.
