@@ -82,7 +82,7 @@ reach-envelope predicate adopted separately as the shipped rule with schema 17,
 a resume regression and the host's motor check
 ([V](ecology-v1-predicate-adoption-opus-2026-09-16.md), in flight), the motor
 only after isolation, a host contract, the adapter diagonal and a
-recalibration; then the turn deadband alone in training, the skimmer depth
+recalibration; then the turn deadband alone in training ([X](ecology-v1-turn-deadband-opus-2026-09-16.md), in flight), the skimmer depth
 ladder, and a coupled grazed-field opening. A light physics engine is on
 [the backlog](../backlog.md). The [ecology v1 contract](../ecology-v1-contract.md)
 and its [implementation review](../7_Research/ecology-v1-implementation-review-2026-09-15.md)
