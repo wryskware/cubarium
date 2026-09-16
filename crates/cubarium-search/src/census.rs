@@ -673,13 +673,11 @@ impl Recorder {
                 let lives = &mut self.founder_lives[usize::from(form).min(4)];
                 lives.alive_final += 1;
                 lives.lifetime_ticks += o.age_ticks(now);
-                lives.births += u64::from(o.births);
             }
         }
-        // A founder's own `births` counter is the complete count; the brood tally above only
-        // sees the ones emitted while it was a founder parent, and a founder that died carries
-        // its count away with it. Both are recorded: `FounderBroods` is I's gate, unchanged,
-        // and `founder_lives.births` is this campaign's per-form total.
+        // `founder_lives.births` is counted **only** at the birth event, where every child of
+        // a tick-0 founder passes exactly once. Adding a survivor's own `births` counter here
+        // as well would count its brood twice, and it is the same brood.
 
         let foliage: f64 = world.state.fields.p.iter().sum();
         let litter: f64 = world.state.fields.d.iter().sum();
@@ -1513,7 +1511,7 @@ fn print_tables(rows: &[Row]) {
                 .filter_map(|r| r.founder_broods.first_brood_tick_by_form[3])
                 .collect();
             println!(
-                "| {candidate} | {} | {:.1} | {:.2} | {:.1} | {:.1} | {:.1} | **{:.1}** | {:.1} | \
+                "| {candidate} | {:.2} | {:.1} | {:.2} | {:.1} | {:.1} | {:.1} | **{:.1}** | {:.1} | \
                  {} | {:.2} | {:.2} | {} |",
                 cell[0].depth,
                 mean_of(&cell, |r| r.final_population as f64),
@@ -1564,7 +1562,7 @@ fn print_tables(rows: &[Row]) {
                 founder.merge(&r.founder_skimmer_depth);
             }
             println!(
-                "| {candidate} | {} | {:.3} | {:.3} | {:.3} | **{:.3}** | {:.3} | {:.0} % | {:.0} % |",
+                "| {candidate} | {:.2} | {:.3} | {:.3} | {:.3} | **{:.3}** | {:.3} | {:.0} % | {:.0} % |",
                 cell[0].depth,
                 pooled[0].mean_depth(),
                 pooled[1].mean_depth(),
@@ -1599,7 +1597,7 @@ fn print_tables(rows: &[Row]) {
                 }
                 let n = bodies as f64;
                 println!(
-                    "| {candidate} | {} | {} | {} | {bodies} | {:+.4} | {:+.6} | {:.2} |",
+                    "| {candidate} | {:.2} | {} | {} | {bodies} | {:+.4} | {:+.6} | {:.2} |",
                     cell.first().map_or(0.0, |r| r.depth),
                     form_name(form),
                     crate::movement::DIET_BINS[usize::from(bin).min(2)],
@@ -1629,7 +1627,7 @@ fn print_tables(rows: &[Row]) {
                 let n = with.len() as f64;
                 let m = |f: fn(&Snapshot) -> f64| with.iter().map(|s| f(s)).sum::<f64>() / n;
                 println!(
-                    "| {candidate} | {} | {} | {:.1} | {:.1} | {:.1} | {:.1} | **{:.1}** |",
+                    "| {candidate} | {:.2} | {} | {:.1} | {:.1} | {:.1} | {:.1} | **{:.1}** |",
                     cell[0].depth,
                     with[0].tick,
                     m(|s| s.population as f64),
@@ -1642,24 +1640,65 @@ fn print_tables(rows: &[Row]) {
         }
     }
 
-    println!("\n### Per seed: form-3 bodies alive at the horizon, of the 3 arms\n");
-    println!("| cand | depth | 1001 | 1002 | 1003 | 1004 | 1005 | 1006 |");
-    println!("| --- | --- | --- | --- | --- | --- | --- | --- |");
+    for (form, what) in [(3usize, "form-3 bodies"), (0, "form-0 (grazer) bodies")] {
+        println!("\n### Per seed: {what} alive at the horizon — arms with any, and the total\n");
+        println!("| cand | depth | 1001 | 1002 | 1003 | 1004 | 1005 | 1006 |");
+        println!("| --- | --- | --- | --- | --- | --- | --- | --- |");
+        for candidate in CONFIGURATIONS {
+            for level in ["control", "treatment"] {
+                let cell = cell_rows(rows, candidate, level);
+                if cell.is_empty() {
+                    continue;
+                }
+                let mut line = format!("| {candidate} | {:.2} ", cell[0].depth);
+                let seeds: BTreeSet<u64> = cell.iter().map(|r| r.seed).collect();
+                for seed in seeds {
+                    let mine: Vec<&&Row> = cell.iter().filter(|r| r.seed == seed).collect();
+                    let arms = mine.iter().filter(|r| r.alive_by_form[form] > 0).count();
+                    let bodies: u64 = mine.iter().map(|r| r.alive_by_form[form]).sum();
+                    line.push_str(&format!("| {arms}/{} ({bodies}) ", mine.len()));
+                }
+                println!("{line}|");
+            }
+        }
+    }
+
+    println!("\n### The founder skimmers themselves (5 per run, 90 per cell)\n");
+    println!(
+        "| cand | depth | alive at the horizon | died | mean age at death | mean lifetime \
+         (survivors at the horizon) | broods |"
+    );
+    println!("| --- | --- | --- | --- | --- | --- | --- |");
     for candidate in CONFIGURATIONS {
         for level in ["control", "treatment"] {
             let cell = cell_rows(rows, candidate, level);
             if cell.is_empty() {
                 continue;
             }
-            let mut line = format!("| {candidate} | {} ", cell[0].depth);
-            let seeds: BTreeSet<u64> = cell.iter().map(|r| r.seed).collect();
-            for seed in seeds {
-                let mine: Vec<&&Row> = cell.iter().filter(|r| r.seed == seed).collect();
-                let arms = mine.iter().filter(|r| r.alive_by_form[3] > 0).count();
-                let bodies: u64 = mine.iter().map(|r| r.alive_by_form[3]).sum();
-                line.push_str(&format!("| {arms}/{} ({bodies}) ", mine.len()));
+            let mut lives = FounderLives::default();
+            for r in &cell {
+                let l = r.founder_lives[3];
+                lives.founders += l.founders;
+                lives.alive_final += l.alive_final;
+                lives.deaths += l.deaths;
+                lives.death_age_ticks += l.death_age_ticks;
+                lives.lifetime_ticks += l.lifetime_ticks;
+                lives.births += l.births;
             }
-            println!("{line}|");
+            println!(
+                "| {candidate} | {:.2} | {} of {} | {} | {:.0} s | {:.0} s | {} |",
+                cell[0].depth,
+                lives.alive_final,
+                lives.founders,
+                lives.deaths,
+                if lives.deaths == 0 {
+                    0.0
+                } else {
+                    lives.death_age_ticks as f64 * cubarium_core::DT / lives.deaths as f64
+                },
+                lives.mean_lifetime_seconds(),
+                lives.births
+            );
         }
     }
 }
