@@ -17,8 +17,9 @@
 //!    Two cells of the factorial appear in more than one arm (the grazer is already at 0.85,
 //!    and the arm-A high half is arm B's skimmer); those are free internal controls and are
 //!    asserted to be identical rather than left to chance.
-//! 4. **Diet and habitat are crossed, not confounded.** Each diet in arm A, and each body in
-//!    arms B and C, gets the same number of wet-floor and dry-vegetated starts.
+//! 4. **The placement is neutral**: the eight cells come from fixed anchors spread over all
+//!    five faces, not from ranking the landscape by food or by water. Selecting on either
+//!    would hand one diet the better ground.
 //! 5. **Nothing reproduces and nothing mutates among the clones**, and **the ledger closes**
 //!    for every one of them, or the yields reported from it mean nothing.
 //! 6. **A row reproduces**: the same arm at the same seed, run twice, is the same row.
@@ -27,14 +28,15 @@ use std::collections::BTreeSet;
 
 use cubarium_core::WorldConfig;
 use cubarium_search::factorial::{
-    self, Arm, CLONES, DIET_HIGH, DIET_LOW, Design, Placement, Roster,
+    self, Arm, CLONES, DIET_HIGH, DIET_LOW, Design, Landscape, Placement, Roster,
 };
-use cubarium_surface::CellId;
+use cubarium_surface::{CELL_COUNT, CellId, Face};
 
-/// A design small enough to run inside a test: long enough that bodies feed, move and are
-/// billed, far short of the campaign's horizon.
+/// A design small enough to run inside a test: long enough that bodies feed, move, are billed
+/// and — for the ordinary founders, whose `bud_min_age_seconds` is 120 — breed at least once,
+/// far short of the campaign's horizon.
 fn tiny() -> Design {
-    Design { ticks: 2_000, warm_up_ticks: 600, probe_every: 20, drain_every: 200 }
+    Design { ticks: 4_000, warm_up_ticks: 600, probe_every: 20, drain_every: 200, wet_min: 0.05 }
 }
 
 fn fast_leaf(seed: u64) -> WorldConfig {
@@ -44,40 +46,30 @@ fn fast_leaf(seed: u64) -> WorldConfig {
         .expect("and it builds a config")
 }
 
-/// A synthetic landscape: eight cells that pool, plenty that stay dry, foliage everywhere.
-/// Pure, so the placement rule is tested without running a world.
-fn synthetic() -> (Vec<f64>, Vec<f64>) {
-    let n = cubarium_surface::CELL_COUNT;
-    let mut depth = vec![0.0; n];
-    let mut foliage = vec![0.0; n];
-    // Wet cells spread over three faces so the separation rule has something to reject: two
-    // of them are neighbours and must not both be chosen.
-    for (i, cell) in [
-        CellId::new(cubarium_surface::Face::Front, 2, 2),
-        CellId::new(cubarium_surface::Face::Front, 3, 2), // adjacent to the one above
-        CellId::new(cubarium_surface::Face::Front, 12, 12),
-        CellId::new(cubarium_surface::Face::Right, 4, 9),
-        CellId::new(cubarium_surface::Face::Back, 7, 7),
-        CellId::new(cubarium_surface::Face::Left, 1, 14),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        depth[cell.index()] = 1.0 - 0.01 * i as f64;
+/// A synthetic landscape: everything alive, a handful of cells holding water, and one face
+/// where the cell under an anchor is dead so the outward search has to move. Pure, so the
+/// placement rule is tested without running a world.
+fn synthetic() -> Landscape {
+    let mut land = Landscape {
+        depth: vec![0.0; CELL_COUNT],
+        foliage: vec![0.2; CELL_COUNT],
+        litter: vec![0.1; CELL_COUNT],
+    };
+    for cell in [
+        CellId::new(Face::Front, 4, 4),
+        CellId::new(Face::Front, 5, 4),
+        CellId::new(Face::Front, 4, 5),
+    ] {
+        land.foliage[cell.index()] = 0.0; // the Front (4,4) anchor's own cell, and its ring 1
     }
-    // Dry, vegetated cells: a foliage gradient over the Top face, again with two neighbours.
-    for cx in 0..16u8 {
-        for cy in 0..16u8 {
-            let cell = CellId::new(cubarium_surface::Face::Top, cx, cy);
-            foliage[cell.index()] = f64::from(cx) + 0.5 * f64::from(cy);
-        }
+    for cell in [CellId::new(Face::Right, 8, 5), CellId::new(Face::Back, 12, 11)] {
+        land.depth[cell.index()] = 0.4;
     }
-    (depth, foliage)
+    land
 }
 
 fn placements() -> [Placement; CLONES] {
-    let (depth, foliage) = synthetic();
-    factorial::choose_cells(&depth, &foliage, 0.05, 1e-3).expect("the synthetic landscape places")
+    factorial::choose_cells(&synthetic(), 0.05).expect("the synthetic landscape places")
 }
 
 fn roster(seed: u64) -> Roster {
@@ -107,16 +99,20 @@ fn the_three_arms_stand_in_the_same_eight_cells_in_the_same_order() {
 }
 
 #[test]
-fn the_eight_cells_are_four_wet_four_dry_distinct_and_separated() {
+fn the_eight_cells_are_distinct_separated_alive_and_spread_over_every_face() {
+    let land = synthetic();
     let cells = placements();
-    let wet = cells.iter().filter(|p| p.wet).count();
-    assert_eq!(wet, 4, "four cells that pool");
-    assert_eq!(cells.len() - wet, 4, "four that stay dry");
     let distinct: BTreeSet<u16> = cells.iter().map(|p| p.cell).collect();
     assert_eq!(distinct.len(), CLONES, "eight distinct cells");
-    // Interleaved: wet, dry, wet, dry, … so a slot's parity is its class.
+    let faces: BTreeSet<Face> = cells.iter().map(|p| CellId(p.cell).face()).collect();
+    assert_eq!(faces.len(), 5, "all five faces carry a clone");
     for (i, p) in cells.iter().enumerate() {
-        assert_eq!(p.wet, i % 2 == 0, "slot {i}: the classes interleave");
+        assert!(land.foliage[CellId(p.cell).index()] > 0.0, "slot {i}: placed in a living cell");
+        assert_eq!(
+            CellId(p.cell).face(),
+            CellId(p.anchor).face(),
+            "slot {i}: a cell is found on its anchor's own face"
+        );
     }
     for i in 0..CLONES {
         for j in (i + 1)..CLONES {
@@ -131,13 +127,44 @@ fn the_eight_cells_are_four_wet_four_dry_distinct_and_separated() {
     }
 }
 
+/// Habitat is measured, not assigned: the two cells the synthetic landscape floods are the
+/// two that come back `wet`, and nothing about the placement selected for them.
 #[test]
-fn a_landscape_without_four_pools_is_refused_rather_than_placed_anyway() {
-    let (_, foliage) = synthetic();
-    let dry = vec![0.0; cubarium_surface::CELL_COUNT];
-    let err = factorial::choose_cells(&dry, &foliage, 0.05, 1e-3)
-        .expect_err("a world with no standing water cannot host this design");
-    assert!(err.contains("wet"), "the refusal names what is missing: {err}");
+fn the_habitat_class_is_read_off_the_cell_and_not_chosen() {
+    let cells = placements();
+    let wet: BTreeSet<u16> = cells.iter().filter(|p| p.wet).map(|p| p.cell).collect();
+    let expect: BTreeSet<u16> =
+        [CellId::new(Face::Right, 8, 5).0, CellId::new(Face::Back, 12, 11).0].into();
+    assert_eq!(wet, expect, "exactly the flooded cells read wet");
+    // And the threshold is the one it was given, not a constant hidden in the rule.
+    let none = factorial::choose_cells(&synthetic(), 10.0).expect("places");
+    assert!(none.iter().all(|p| !p.wet), "a higher floor leaves nothing wet");
+}
+
+/// An anchor whose own cell is dead steps outward to the nearest living one rather than
+/// placing a clone where nothing grows.
+#[test]
+fn a_dead_anchor_cell_steps_outward_to_the_nearest_living_one() {
+    let cells = placements();
+    let front = CellId(cells[0].cell);
+    assert_eq!(CellId(cells[0].anchor), CellId::new(Face::Front, 4, 4), "the anchor is fixed");
+    assert_ne!(front, CellId::new(Face::Front, 4, 4), "but its own cell is dead");
+    let d = (i32::from(front.cx()) - 4).abs().max((i32::from(front.cy()) - 4).abs());
+    assert_eq!(d, 1, "and the nearest living cell is one ring out");
+}
+
+#[test]
+fn a_face_with_nothing_growing_on_it_is_refused_rather_than_placed_anyway() {
+    let mut land = synthetic();
+    for cx in 0..16u8 {
+        for cy in 0..16u8 {
+            land.foliage[CellId::new(Face::Top, cx, cy).index()] = 0.0;
+        }
+    }
+    let err = factorial::choose_cells(&land, 0.05)
+        .expect_err("a face with no living cell cannot host its clone");
+    assert!(err.contains("Top"), "the refusal names the face: {err}");
+    assert!(err.contains("living"), "and what is missing: {err}");
 }
 
 // --- 2. arm A changes only diet ---------------------------------------------------------
@@ -161,7 +188,7 @@ fn arm_a_is_the_roster_skimmer_with_only_diet_changed() {
 }
 
 #[test]
-fn arm_a_is_four_and_four_and_each_diet_gets_two_wet_and_two_dry() {
+fn arm_a_is_four_and_four_interleaved_over_the_eight_cells() {
     let r = roster(1);
     let cells = placements();
     let a = factorial::plan(Arm::A, &r, &cells);
@@ -169,11 +196,22 @@ fn arm_a_is_four_and_four_and_each_diet_gets_two_wet_and_two_dry() {
     let high: Vec<_> = a.iter().filter(|s| s.genome.diet == DIET_HIGH).collect();
     assert_eq!(low.len(), 4, "four at the founder's 0.60");
     assert_eq!(high.len(), 4, "four at 0.85");
-    for (what, half) in [("0.60", &low), ("0.85", &high)] {
-        let wet = half.iter().filter(|s| s.wet_start).count();
-        assert_eq!(wet, 2, "{what}: two wet-floor starts");
-        assert_eq!(half.len() - wet, 2, "{what}: and two dry-vegetated starts");
-    }
+    // Interleaved by location in pairs, so the two halves are spread over the surface rather
+    // than one half sitting on one side of the world.
+    assert_eq!(
+        low.iter().map(|s| s.slot).collect::<Vec<_>>(),
+        vec![0, 1, 4, 5],
+        "the 0.60 half's slots"
+    );
+    assert_eq!(
+        high.iter().map(|s| s.slot).collect::<Vec<_>>(),
+        vec![2, 3, 6, 7],
+        "the 0.85 half's slots"
+    );
+    let faces = |half: &[&factorial::CloneSpec]| {
+        half.iter().map(|s| s.cell.face()).collect::<BTreeSet<_>>().len()
+    };
+    assert!(faces(&low) >= 3 && faces(&high) >= 3, "each half stands on at least three faces");
 }
 
 #[test]
@@ -197,8 +235,11 @@ fn arm_b_holds_diet_at_the_foliage_end_and_varies_the_body() {
     for form in factorial::FORMS {
         let of_form: Vec<_> = b.iter().filter(|s| s.form == form).collect();
         assert_eq!(of_form.len(), 2, "form {form}: two of each body");
-        let wet = of_form.iter().filter(|s| s.wet_start).count();
-        assert_eq!(wet, 1, "form {form}: one wet start and one dry");
+        assert_ne!(
+            of_form[0].cell.face(),
+            of_form[1].cell.face(),
+            "form {form}: its two clones stand on different faces"
+        );
     }
 }
 
@@ -224,7 +265,11 @@ fn arm_c_is_the_roster_pairing_untouched() {
     for form in factorial::FORMS {
         let of_form: Vec<_> = c.iter().filter(|s| s.form == form).collect();
         assert_eq!(of_form.len(), 2, "form {form}: two of each");
-        assert_eq!(of_form.iter().filter(|s| s.wet_start).count(), 1, "form {form}: one wet");
+        assert_ne!(
+            of_form[0].cell.face(),
+            of_form[1].cell.face(),
+            "form {form}: its two clones stand on different faces"
+        );
     }
 }
 
@@ -267,7 +312,11 @@ fn every_arm_b_body_is_a_pure_foliage_feeder() {
     let cfg = fast_leaf(1);
     for spec in factorial::plan(Arm::B, &r, &cells) {
         let p = cubarium_core::genome::decode(&spec.genome, &cfg.organism);
-        assert!((p.cap_foliage - 0.85).abs() < 1e-12, "slot {}: cap_foliage", spec.slot);
+        assert!(
+            (p.cap_foliage - f64::from(DIET_HIGH)).abs() < 1e-12,
+            "slot {}: cap_foliage",
+            spec.slot
+        );
         assert_eq!(p.cap_detrital, 0.0, "slot {}: the detrital gate is shut", spec.slot);
     }
 }

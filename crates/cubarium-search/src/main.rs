@@ -18,6 +18,7 @@ use clap::{Parser, Subcommand};
 use cubarium_search::calibrate;
 use cubarium_search::es;
 use cubarium_search::evaluate::{BUILD_ID, Protocol, Status, evaluate};
+use cubarium_search::factorial;
 use cubarium_search::metrics::Scoring;
 use cubarium_search::params;
 use cubarium_search::population;
@@ -349,6 +350,44 @@ enum Command {
         #[arg(long, default_value = "runs/ecology-v1-calibration/selected")]
         out: PathBuf,
     },
+    /// Run the controlled form x diet factorial: cloned founders at matched cells in whole
+    /// `fast-leaf` worlds, mutation and reproduction off for the clones, measured with the
+    /// core's per-body ledger (workstream J).
+    Factorial {
+        /// Comma-separated arms: `A` (diet within body), `B` (body within diet), `C` (the
+        /// founder pairing).
+        #[arg(long, default_value = "A,B,C")]
+        arms: String,
+        /// `training` or `holdout`. The held-out set is for the final validation only.
+        #[arg(long, default_value = "training")]
+        seed_set: String,
+        /// How many seeds of that set, from the front.
+        #[arg(long, default_value_t = 4)]
+        seeds: usize,
+        #[arg(long, default_value_t = 90_000)]
+        ticks: u64,
+        /// Ticks of the clone-free warm-up that finds each seed's pools. A world is created
+        /// dry; the basins only exist once rain has arrived.
+        #[arg(long, default_value_t = 24_000)]
+        warm_up_ticks: u64,
+        /// Ticks between probes of where each clone is standing (20 = one simulated second).
+        #[arg(long, default_value_t = 20)]
+        probe_every: u64,
+        /// Ticks between drains of the core's 4,096-record closed-ledger buffer.
+        #[arg(long, default_value_t = 250)]
+        drain_every: u64,
+        /// Mean warm-up water depth at or above which a cell is the wet stratum (d). The
+        /// default is where a non-swimmer starts paying a measurable wading penalty.
+        #[arg(long, default_value_t = 0.05)]
+        wet_min: f64,
+        #[arg(long, default_value_t = 8)]
+        workers: usize,
+        /// Print the eight cells each seed's landscape offers, and run nothing.
+        #[arg(long, default_value_t = false)]
+        cells_only: bool,
+        #[arg(long, default_value = "runs/ecology-v1-diet-factorial")]
+        out: PathBuf,
+    },
     /// Re-run one recorded row and check it reproduces.
     Replay {
         /// The `evals.jsonl` written by a search.
@@ -471,6 +510,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("load with: cubarium run --config {}", path.display());
             Ok(())
         }
+        Command::Factorial {
+            arms,
+            seed_set,
+            seeds,
+            ticks,
+            warm_up_ticks,
+            probe_every,
+            drain_every,
+            wet_min,
+            workers,
+            cells_only,
+            out,
+        } => factorial_command(
+            &arms,
+            &seed_set,
+            seeds,
+            factorial::Design { ticks, warm_up_ticks, probe_every, drain_every, wet_min },
+            workers,
+            cells_only,
+            &out,
+        ),
         Command::Replay { record, index } => replay(&record, index),
         Command::EsProtocol { config } => es::commands::protocol(config),
         Command::EsControls { workers, wall_seconds, config, out } => {
@@ -569,6 +629,84 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
     }
+}
+
+/// The controlled form × diet factorial (workstream J). `--cells-only` prints the eight cells
+/// each seed's own landscape offers and runs nothing, which is how a design is checked before
+/// compute is spent on it.
+fn factorial_command(
+    arms: &str,
+    seed_set: &str,
+    seeds: usize,
+    design: factorial::Design,
+    workers: usize,
+    cells_only: bool,
+    out: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let arms: Vec<factorial::Arm> =
+        arms.split(',').map(str::trim).filter(|s| !s.is_empty()).map(factorial::Arm::parse).collect::<
+            Result<_, _>,
+        >()?;
+    let seeds = calibrate::SeedSet::parse(seed_set)?.seeds(seeds)?;
+    println!("build {BUILD_ID}");
+    println!("ecology {}", factorial::ECOLOGY);
+    println!("seeds {seeds:?}  arms {:?}", arms.iter().map(|a| a.label()).collect::<Vec<_>>());
+    println!(
+        "design ticks {} warm-up {} probe/{} drain/{}",
+        design.ticks, design.warm_up_ticks, design.probe_every, design.drain_every
+    );
+
+    if cells_only {
+        for seed in &seeds {
+            let config = factorial::ecology_config(*seed)?;
+            let land = factorial::warm_up(&config, design.warm_up_ticks)?;
+            println!("\nseed {seed}");
+            println!("| depth band (d) | cells | of those, carrying foliage |");
+            println!("| --- | --- | --- |");
+            for (hi, cells, fed) in factorial::landscape_census(&land) {
+                println!("| <= {hi} | {cells} | {fed} |");
+            }
+            let cells = factorial::choose_cells(&land, design.wet_min)?;
+            println!();
+            println!("| slot | cell | face | class | mean depth | mean foliage | mean litter |");
+            println!("| --- | --- | --- | --- | --- | --- | --- |");
+            for (slot, p) in cells.iter().enumerate() {
+                let cell = cubarium_surface::CellId(p.cell);
+                println!(
+                    "| {slot} | {} | {:?} ({},{}) | {} | {:.4} | {:.4} | {:.4} |",
+                    p.cell,
+                    cell.face(),
+                    cell.cx(),
+                    cell.cy(),
+                    if p.wet { "wet" } else { "dry" },
+                    p.mean_depth,
+                    p.mean_foliage,
+                    p.mean_litter
+                );
+            }
+        }
+        return Ok(());
+    }
+
+    let report = factorial::run(&arms, &seeds, design, workers, out)?;
+    let rows: Vec<factorial::ArmRun> = {
+        let text = std::fs::read_to_string(out.join("runs.jsonl"))?;
+        let mut rows: Vec<factorial::ArmRun> =
+            text.lines().filter(|l| !l.is_empty()).map(serde_json::from_str).collect::<Result<_, _>>()?;
+        rows.sort_by_key(|r| (r.arm, r.seed));
+        rows
+    };
+    factorial::print_report(&rows);
+    println!("\nruns {} in {:.1} s on {workers} workers", report.runs, report.wall_seconds);
+    println!("simulated ticks {}", report.simulated_ticks);
+    println!(
+        "worst |material residual| {:.3e}   worst |energy residual| {:.3e}",
+        report.worst_material_residual, report.worst_energy_residual
+    );
+    println!("clone births {}   dropped ledger records {}", report.clone_births, report.dropped_records);
+    println!("rows    {}", out.join("runs.jsonl").display());
+    println!("summary {}", out.join("summary.json").display());
+    Ok(())
 }
 
 fn print_params() -> Result<(), Box<dyn std::error::Error>> {
