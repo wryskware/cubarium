@@ -3,11 +3,9 @@
 //! value), §9's FW-3 row ("**adopt** `Scale::footprint_radius()` at both check sites …
 //! a `scale = 2` stamp draws instead of vanishing") and the FW-1 freeze.
 //!
-//! **Status at the time of writing.** FW-3 has shaped the canvas by topology, so stamps
-//! now run on a ring, but it has *not* adopted the scale at the two budget check sites:
-//! `sprite.rs` still compares `extent · scale` against a private `FOOTPRINT_RADIUS = 9.0`.
-//! The budget value and the `S = 1` behaviour are pinned here in full; the `S = 2` stamp is
-//! written and `#[ignore]`d, and is the test for the remaining adoption.
+//! FW-3 landed both halves while this file was being written: the canvas is shaped by the
+//! topology and carries the scale, and the budget check sites read
+//! `Scale::footprint_radius()`. Every test here runs, including the `S = 2` stamp.
 
 use cubarium_render::{Canvas, Sprite, stamp_sprite};
 use cubarium_surface::{FOOTPRINT_PIXELS, Face, Scale, SurfacePoint, Topology, Vec2};
@@ -161,13 +159,10 @@ fn an_over_budget_stamp_draws_nothing() {
     assert!(canvas.pixels().iter().all(|p| *p == [0.0; 3]), "an over-budget stamp must not draw");
 }
 
-/// **pending FW-3.** §9's FW-3 row: "adopt `Scale::footprint_radius()` at both check sites
-/// … a `scale = 2` stamp draws instead of vanishing". The canvas now carries the scale
-/// (`Canvas::scale()`), but `sprite.rs` still compares `extent · scale` against a private
-/// `FOOTPRINT_RADIUS = 9.0`, so on a world at `S = 2` — where the budget is 18 — the stamp
-/// still vanishes. Ignored until that adoption lands; it is the test for it.
+/// §9's FW-3 row: "adopt `Scale::footprint_radius()` at both check sites … a `scale = 2`
+/// stamp draws instead of vanishing". The same sprite that is over budget on an `S = 1`
+/// world draws on an `S = 2` one, and stays inside that world's own 18 px budget.
 #[test]
-#[ignore = "pending FW-3: the sprite check sites still compare against the constant 9.0"]
 fn a_scale_two_stamp_draws_on_a_world_at_s2() {
     let topo = Topology::Ring { w: 640, h: 360 };
     let scale = Scale::new(2.0);
