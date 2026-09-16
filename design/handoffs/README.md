@@ -80,7 +80,7 @@ the grasp-only apex pair under the shipped motor first
 ([U](ecology-v1-apex-grasp-opus-2026-09-16.md): refuted, a third at most on one run; the age gate is the one robust change), then the disc model on the apex alone in the identical prey world ([W](ecology-v1-apex-motor-isolation-opus-2026-09-16.md): the apex's own envelope opens the gap; the prey's disc contract is what closed it, 15/15; the disc model is a physics decision for every body, not an apex repair), the
 reach-envelope predicate adopted separately as the shipped rule with schema 17,
 a resume regression and the host's motor check
-([V](ecology-v1-predicate-adoption-opus-2026-09-16.md), in flight), the motor
+([V](ecology-v1-predicate-adoption-opus-2026-09-16.md): landed; the selected `fast-leaf` keeps all six gates and moves under half a body, captures 29 → 49 over the eight apex rows, the unselected `baseline` arm 2 loses its guild gate), the motor
 only after isolation, a host contract, the adapter diagonal and a
 recalibration; then the turn deadband alone in training ([X](ecology-v1-turn-deadband-opus-2026-09-16.md), in flight), the skimmer depth
 ladder, and a coupled grazed-field opening. A light physics engine is on

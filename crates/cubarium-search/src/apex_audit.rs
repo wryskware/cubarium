@@ -514,16 +514,26 @@ impl StrikeStats {
 ///
 /// Two stated names and nothing else: an unrecognised one is refused rather than silently
 /// defaulted to the shipped rule, because a paired arm that quietly ran the wrong half is worse
-/// than one that did not run.
+/// than one that did not run. `reach-envelope` is the shipped rule from 2026-09-16;
+/// `half-space` is the rule before it, kept so the retained rows stay reproducible.
 pub fn parse_pursuit_stop(name: &str) -> Result<PursuitStop, String> {
     match name.trim() {
         "half-space" => Ok(PursuitStop::ForwardHalfSpace),
         "reach-envelope" => Ok(PursuitStop::ReachEnvelope),
         other => Err(format!(
-            "--pursuit-stop must be `half-space` (the shipped rule) or `reach-envelope` (the \
-             paired variant), not `{other}`"
+            "--pursuit-stop must be `reach-envelope` (the shipped rule) or `half-space` (the \
+             rule before 2026-09-16), not `{other}`"
         )),
     }
+}
+
+/// The pursuit stopping rule a row or report written before the `pursuit_stop` field existed
+/// ran under: the forward half-space, the only rule this workspace had until 2026-09-16
+/// (workstreams K and N's retained files). Deliberately independent of
+/// [`PursuitStop::default`], which became the reach envelope on that date: reading those
+/// artifacts under today's default would relabel them as something they never ran.
+fn rule_before_the_adoption() -> PursuitStop {
+    PursuitStop::ForwardHalfSpace
 }
 
 /// The **initial-gap bin edges**, in px of `effector_distance` at the intent frame.
@@ -789,8 +799,10 @@ pub struct AuditRow {
     /// Whether the per-body store ledger was recording. When it is off, every `budget` and
     /// `tail` below is `None` and no `death_cause` is known.
     pub ledger: bool,
-    /// The pursuit stopping rule this run's hunt-intent pass evaluated.
-    #[serde(default)]
+    /// The pursuit stopping rule this run's hunt-intent pass evaluated. Absent on a row
+    /// written before the field existed, which ran the half-space
+    /// ([`rule_before_the_adoption`]), not today's default.
+    #[serde(default = "rule_before_the_adoption")]
     pub pursuit_stop: PursuitStop,
     /// The motor contract this run's envelope and bill used (`cubarium_core::MotorModel`), by
     /// name. Absent on a row written before the switch existed, which is `sweep`.
@@ -872,8 +884,10 @@ pub struct AuditReport {
     pub introduce_tick: u64,
     pub founder_age_seconds: f64,
     pub ledger: bool,
-    /// The pursuit stopping rule every row of this report ran under.
-    #[serde(default)]
+    /// The pursuit stopping rule every row of this report ran under. Absent from a report
+    /// written before the field existed, which ran the half-space
+    /// ([`rule_before_the_adoption`]), not today's default.
+    #[serde(default = "rule_before_the_adoption")]
     pub pursuit_stop: PursuitStop,
     /// The motor contract every row of this report ran under (`cubarium_core::MotorModel`),
     /// by name. Absent from a report written before the switch existed, which is `sweep`.
@@ -919,8 +933,9 @@ pub struct Arm {
     /// calibration's `--ledger` and `--plant-record` are independent instruments.
     pub ledger: bool,
     /// **Which pursuit stopping rule the arm runs** (`crate::World::set_pursuit_stop`). This is
-    /// the one variable of the paired predicate experiment; `ForwardHalfSpace` is the shipped
-    /// rule and is byte-identical to an arm that never set it.
+    /// the one variable of the paired predicate experiment; `ReachEnvelope` is the shipped
+    /// rule from 2026-09-16 and is byte-identical to an arm that never set it;
+    /// `ForwardHalfSpace` reproduces the rows retained before that date.
     pub stop: PursuitStop,
     /// **Which motor contract the arm runs** (`cubarium_core::MotorModel`,
     /// `crate::World::set_motor_model`). The one variable of workstream T's paired arm;
@@ -1826,5 +1841,16 @@ mod tests {
         assert!(!r.ready_pair_ever_met());
         let r = row(500, 400, 1, 3, 0);
         assert!(r.ready_pair_ever_met());
+    }
+
+    /// A row or report with no `pursuit_stop` (K's and N's retained files) ran the half-space,
+    /// and must still read as it even though the shipped default is now the envelope.
+    #[test]
+    fn a_rule_less_retained_row_reads_as_the_half_space_not_todays_default() {
+        assert_ne!(rule_before_the_adoption(), PursuitStop::default());
+        let mut json = serde_json::to_value(row(1, 0, 0, 0, 0)).expect("a row serialises");
+        json.as_object_mut().expect("an object").remove("pursuit_stop");
+        let back: AuditRow = serde_json::from_value(json).expect("a rule-less row still reads");
+        assert_eq!(back.pursuit_stop, PursuitStop::ForwardHalfSpace);
     }
 }

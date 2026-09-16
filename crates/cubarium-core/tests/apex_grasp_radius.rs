@@ -44,6 +44,12 @@ fn remembering_policy() -> Gru32 {
 /// turns, so every motor path the switch could touch is live in it.
 fn paired_world(rule: Option<ApexTurnRadius>) -> World {
     let mut world = World::new(WorldConfig::default()).expect("valid");
+    // The six pinned hashes were printed under the forward half-space, the shipped pursuit
+    // rule until 2026-09-16; naming it keeps this a statement about the switch under test
+    // rather than about the predicate the world ships today (workstream V re-pinned
+    // `motor_inertial.rs` the same way; the adoption has its own pins in
+    // `pursuit_predicate_adoption.rs`).
+    world.set_pursuit_stop(cubarium_core::hunter::PursuitStop::ForwardHalfSpace);
     let profile = FixedHunterProfile::lanternjaw_trial(world.config());
     for _ in 0..1_000 {
         world.step();
