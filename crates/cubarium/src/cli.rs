@@ -4,8 +4,62 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use cubarium_surface::{Scale, Topology};
 
 use crate::scene::SceneKind;
+
+/// `--topology`: `cube`, or `ring:WxH`.
+///
+/// Spelled on the command line the way a panel is spelled — `ring:320x180` — rather than
+/// as the config file's `topology = { Ring = { w = 320, h = 180 } }`, which is serde's
+/// shape for the same value. Both reach the same [`Topology`]; the config file is the
+/// place to write one down, and this flag is the place to try one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TopologyArg(pub Topology);
+
+impl std::str::FromStr for TopologyArg {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<TopologyArg, String> {
+        let text = text.trim();
+        if text.eq_ignore_ascii_case("cube") {
+            return Ok(TopologyArg(Topology::Cube));
+        }
+        let rest = text
+            .strip_prefix("ring:")
+            .or_else(|| text.strip_prefix("Ring:"))
+            .ok_or_else(|| {
+                format!("`{text}` is not a topology: write `cube` or `ring:WxH`, e.g. ring:320x180")
+            })?;
+        let (w, h) = rest
+            .split_once(['x', 'X'])
+            .ok_or_else(|| format!("`{text}`: a ring is spelled ring:WxH, e.g. ring:320x180"))?;
+        let parse = |s: &str, which: &str| -> Result<u16, String> {
+            s.trim()
+                .parse::<u16>()
+                .map_err(|_| format!("`{text}`: the ring's {which} must be 1..=65535"))
+        };
+        Ok(TopologyArg(Topology::Ring { w: parse(w, "width")?, h: parse(h, "height")? }))
+    }
+}
+
+impl std::fmt::Display for TopologyArg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            Topology::Cube => write!(f, "cube"),
+            Topology::Ring { w, h } => write!(f, "ring:{w}x{h}"),
+        }
+    }
+}
+
+/// The word `/status`, the resume refusal and every message use for a topology: `cube` or
+/// `ring`, never the Rust spelling of the variant.
+pub fn topology_name(topo: Topology) -> &'static str {
+    match topo {
+        Topology::Cube => "cube",
+        Topology::Ring { .. } => "ring",
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "cubarium", about = "Cubarium host: clock, fixture scenes, output sinks")]
@@ -54,6 +108,12 @@ pub struct Demo {
     /// Port for the `web` sink (a viewer page at http://127.0.0.1:<port>/).
     #[arg(long, default_value_t = 7393)]
     pub web_port: u16,
+    /// The surface the fixtures are drawn on: `cube`, or `ring:WxH` (e.g. `ring:320x180`).
+    #[arg(long, default_value_t = TopologyArg(Topology::Cube))]
+    pub topology: TopologyArg,
+    /// The world scale `S`. Ring only; a cube is pinned to 1.
+    #[arg(long, default_value_t = 1.0)]
+    pub world_scale: f64,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
@@ -193,6 +253,18 @@ pub struct Run {
     /// How many copies of the training animal `--neural` seeds. Must be at least 1.
     #[arg(long, default_value_t = 4)]
     pub neural_count: usize,
+    /// The surface a **new** world is created on: `cube`, or `ring:WxH` (e.g.
+    /// `ring:320x180`). Overrides the config file's `topology`. A resume keeps the
+    /// snapshot's own topology and refuses a different one by name, like every other
+    /// schema refusal — a world's shape is not an operational override.
+    #[arg(long)]
+    pub topology: Option<TopologyArg>,
+    /// The world scale `S` of a **new** world: every length in pixels is multiplied by it,
+    /// so `ring:640x360 --world-scale 2` is the same 3,600-cell world as `ring:320x180` at
+    /// twice the resolution. Ring only; a cube is pinned to 1. Overrides the config file's
+    /// `world_scale`.
+    #[arg(long)]
+    pub world_scale: Option<f64>,
 }
 
 /// `--fps` outside [`crate::clock::MIN_FPS`]..=[`crate::clock::MAX_FPS`] is a typo, not a
@@ -207,7 +279,56 @@ fn check_fps(fps: u32) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `--sink preview` cannot show a ring: both halves of the window are cube pictures.
+/// Refused here, at argument validation, as well as at the sink's own construction — this
+/// catches the spelling the operator actually typed, and names it.
+fn check_preview_topology(topology: Option<Topology>, preview: bool) -> anyhow::Result<()> {
+    if let (true, Some(topo @ Topology::Ring { .. })) = (preview, topology) {
+        let (w, h) = match topo {
+            Topology::Ring { w, h } => (w, h),
+            Topology::Cube => unreachable!(),
+        };
+        anyhow::bail!(
+            "--sink preview cannot show a ring world ({w}x{h}): the preview window is the \
+             unfolded cube net beside a ray-cast cube, neither of which means anything on a \
+             flat world. Use --sink web for the loopback viewer, or --sink png to capture \
+             the raster."
+        );
+    }
+    Ok(())
+}
+
+/// `--world-scale` must be a positive finite number, and a cube is pinned to 1 — the
+/// cube's 32-pixel local radius and 9-pixel stamp budget are completeness proofs, not
+/// tunables. `Topology::validate` refuses the pair again when the world is built; this is
+/// the early, named refusal for the value the operator typed.
+fn check_world_scale(topology: Option<Topology>, world_scale: Option<f64>) -> anyhow::Result<()> {
+    let Some(s) = world_scale else { return Ok(()) };
+    anyhow::ensure!(
+        s.is_finite() && s > 0.0,
+        "--world-scale must be a positive finite number, not {s}"
+    );
+    if matches!(topology, Some(Topology::Cube) | None) && s != 1.0 {
+        anyhow::bail!(
+            "--world-scale {s} needs a ring: a cube world is pinned to scale 1, because its \
+             32-pixel local radius and 9-pixel stamp budget are proofs about a 64-pixel \
+             chart. Add --topology ring:WxH, or drop --world-scale."
+        );
+    }
+    Ok(())
+}
+
 impl Run {
+    /// The topology this run asks a **new** world to have, if it named one.
+    pub fn topology(&self) -> Option<Topology> {
+        self.topology.map(|t| t.0)
+    }
+
+    /// The scale this run asks a **new** world to have, if it named one.
+    pub fn scale(&self) -> Option<Scale> {
+        self.world_scale.map(Scale::new)
+    }
+
     /// The telemetry path after the documented default is applied.
     pub fn telemetry_path(&self) -> PathBuf {
         self.telemetry.clone().unwrap_or_else(|| self.state.join("telemetry.jsonl"))
@@ -269,6 +390,18 @@ impl Run {
         // request. `--neural-count` without `--neural` is harmless and stays accepted.
         anyhow::ensure!(self.neural_count >= 1, "--neural-count must be at least 1");
         check_fps(self.fps)?;
+        check_preview_topology(self.topology(), self.sink == RunSinkArg::Preview)?;
+        check_world_scale(self.topology(), self.world_scale)?;
+        // A world's shape belongs to the world, and `--fresh` is the only moment a run
+        // chooses one. Refused rather than ignored on a resume: silently dropping it would
+        // leave the operator believing they had asked for a ring and got one.
+        if (self.topology.is_some() || self.world_scale.is_some()) && self.require_resume {
+            anyhow::bail!(
+                "--topology and --world-scale describe a world to create, and \
+                 --require-resume demands an existing one. A resumed world keeps the shape \
+                 its snapshot records."
+            );
+        }
         Ok(())
     }
 }
@@ -283,7 +416,18 @@ impl Demo {
         anyhow::ensure!(self.every >= 1, "--every must be at least 1");
         anyhow::ensure!(self.scale >= 1, "--scale must be at least 1");
         check_fps(self.fps)?;
+        check_preview_topology(Some(self.topology.0), self.sink == SinkArg::Preview)?;
+        check_world_scale(Some(self.topology.0), Some(self.world_scale))?;
+        self.topology
+            .0
+            .validate(Scale::new(self.world_scale))
+            .map_err(|e| anyhow::anyhow!("--topology {}: {e}", self.topology))?;
         Ok(())
+    }
+
+    /// The surface the fixtures draw on.
+    pub fn shape(&self) -> (Topology, Scale) {
+        (self.topology.0, Scale::new(self.world_scale))
     }
 }
 

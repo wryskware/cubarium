@@ -56,7 +56,7 @@ fn the_index_route_serves_the_embedded_page() {
 fn the_frame_route_serves_the_tick_and_the_submitted_frame() {
     let mut sink = WebSink::new(0).expect("binding an ephemeral port");
     let frame = distinct_frame(3);
-    sink.submit(&frame).unwrap();
+    sink.submit(Output::Cube(&frame)).unwrap();
 
     let (status, head, body) = get(sink.addr(), "/frame");
     assert_eq!(status, "HTTP/1.1 200 OK");
@@ -98,7 +98,7 @@ fn the_frame_route_answers_before_any_frame_is_submitted() {
 fn the_mailbox_keeps_only_the_newest_frame() {
     let mut sink = WebSink::new(0).expect("binding an ephemeral port");
     for seed in 0..8u8 {
-        sink.submit(&distinct_frame(seed)).unwrap();
+        sink.submit(Output::Cube(&distinct_frame(seed))).unwrap();
     }
     let newest = distinct_frame(7);
     let (seq, held) = sink.newest().expect("a frame in the mailbox");
@@ -120,7 +120,7 @@ fn submit_never_blocks_on_a_client() {
     let frame = distinct_frame(1);
     let t0 = std::time::Instant::now();
     for _ in 0..200 {
-        sink.submit(&frame).unwrap();
+        sink.submit(Output::Cube(&frame)).unwrap();
     }
     assert!(
         t0.elapsed() < Duration::from_millis(500),
@@ -142,7 +142,7 @@ fn a_stalled_client_never_stalls_submit() {
     let frame = distinct_frame(5);
     let t0 = std::time::Instant::now();
     for _ in 0..200 {
-        sink.submit(&frame).unwrap();
+        sink.submit(Output::Cube(&frame)).unwrap();
     }
     let elapsed = t0.elapsed();
     assert!(
@@ -169,8 +169,8 @@ fn the_status_route_reports_the_world_tick_the_sequence_and_the_source() {
         speed: 2.5,
     };
     let mut sink = WebSink::with_source(0, "2.5× time", source).expect("binding a port");
-    sink.submit(&distinct_frame(2)).unwrap();
-    sink.submit(&distinct_frame(3)).unwrap();
+    sink.submit(Output::Cube(&distinct_frame(2))).unwrap();
+    sink.submit(Output::Cube(&distinct_frame(3))).unwrap();
     sink.observe_tick(4242);
 
     let (status, head, body) = get(sink.addr(), "/status");
@@ -344,7 +344,7 @@ fn idle_and_connected_shutdowns_do_not_need_a_wakeup_client() {
 #[test]
 fn a_query_string_still_reaches_the_frame_route() {
     let mut sink = WebSink::new(0).expect("binding an ephemeral port");
-    sink.submit(&distinct_frame(9)).unwrap();
+    sink.submit(Output::Cube(&distinct_frame(9))).unwrap();
     let (status, _, body) = get(sink.addr(), "/frame?t=12345");
     assert_eq!(status, "HTTP/1.1 200 OK");
     assert_eq!(body.len(), FRAME_BODY_BYTES);

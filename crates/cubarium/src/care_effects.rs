@@ -6,7 +6,7 @@
 //! No world reference, RNG, wall clock or transport is used. A single root-owned surface
 //! query keeps each event coherent at seams and clips, rather than reflects, at the rim.
 
-use cubarium_surface::Topology;
+use cubarium_surface::{Scale, Topology};
 use std::collections::VecDeque;
 
 use cubarium_core::care::{
@@ -14,7 +14,7 @@ use cubarium_core::care::{
 };
 use cubarium_core::DT;
 use cubarium_render::{srgb_decode, Canvas};
-use cubarium_surface::{unfold_pixels, Face, PixelImage, SurfacePoint, Vec2, CUBE_CELL_COUNT};
+use cubarium_surface::{unfold_pixels, Face, PixelImage, SurfacePoint, Vec2};
 
 use crate::art_present::present_seconds;
 
@@ -75,15 +75,45 @@ impl Effect {
 /// Bounded presentation history. Duplicate/stale sequence numbers cannot replay a flourish.
 /// Draw never consumes events: common instants are identical at any draw frequency, even
 /// when a diagnostic samples an earlier instant. New receipts evict the oldest at the cap.
-#[derive(Default)]
 pub(super) struct CareEffects {
     events: VecDeque<Effect>,
     high_water: u64,
     latest_boundary: u64,
     scratch: Vec<PixelImage>,
+    /// The world's shape. A flourish is an unfolded footprint, so it has to be unfolded on
+    /// the surface it will be composited onto — and the query radius has to be one that
+    /// surface accepts.
+    topology: Topology,
+    scale: Scale,
+    /// The world's cell count: the bound a receipt's `cells` is sanity-checked against.
+    cells: usize,
+    /// [`QUERY_RADIUS`] capped at what this topology's `unfold_pixels` accepts.
+    radius: f64,
+}
+
+impl Default for CareEffects {
+    fn default() -> CareEffects {
+        CareEffects::new(Topology::default(), Scale::ONE)
+    }
 }
 
 impl CareEffects {
+    pub(super) fn new(topology: Topology, scale: Scale) -> CareEffects {
+        CareEffects {
+            events: VecDeque::new(),
+            high_water: 0,
+            latest_boundary: 0,
+            scratch: Vec::new(),
+            topology,
+            scale,
+            cells: topology.cell_count(scale),
+            // A ring narrow or short enough to accept less than the flourish's 8 pixels is
+            // legal (`Topology::validate` only requires room for the 9-pixel stamp budget
+            // at `S = 1` when `S = 1`), so the query is clamped rather than asserted: a
+            // smaller flourish is a picture decision, a panic is not.
+            radius: QUERY_RADIUS.min(topology.max_local_radius()),
+        }
+    }
     /// Observe one authoritative receipt after application, for fresh and replayed input.
     /// Identity/boundary/target mismatch is inert. Matched rejected/zero receipts consume
     /// their sequence without adding pixels; malformed quantities are never visualized.
@@ -93,12 +123,8 @@ impl CareEffects {
             || command.seq != receipt.seq
             || command.apply_after_tick != receipt.tick
             || receipt.tick < self.latest_boundary
-            // FW-2 mechanical follow-through: the host is cube-only until FW-4 widens the
-            // care chain, so it names the cube explicitly rather than silently assuming it.
-            || command
-                .target
-                .resolve(Topology::Cube, cubarium_surface::Scale::ONE)
-                .is_none()
+            // Against this world, not against a cube: on a ring, (200, 120) is a cell.
+            || command.target.resolve(self.topology, self.scale).is_none()
         {
             return;
         }
@@ -107,7 +133,7 @@ impl CareEffects {
         let Some(applied) = receipt.outcome.applied() else {
             return;
         };
-        if !valid_applied(command.kind, receipt.tick, applied) {
+        if !valid_applied(command.kind, receipt.tick, applied, self.cells) {
             return;
         }
         let strength = match command.kind {
@@ -155,7 +181,7 @@ impl CareEffects {
             }
             .map(srgb_decode);
             let crumbs: [_; 6] = std::array::from_fn(|i| event.crumb(age, i));
-            unfold_pixels(Topology::Cube, event.target, QUERY_RADIUS, &mut self.scratch);
+            unfold_pixels(self.topology, event.target, self.radius, &mut self.scratch);
             for pixel in &self.scratch {
                 let local = pixel.local - event.target.chart();
                 // One receipt layer, not additive sparkle: overlap cannot build a halo.
@@ -187,7 +213,7 @@ fn ease(t: f64) -> f64 {
     t * t * (3.0 - 2.0 * t)
 }
 
-fn valid_applied(kind: CareKind, boundary: u64, q: &CareApplied) -> bool {
+fn valid_applied(kind: CareKind, boundary: u64, q: &CareApplied, cells: usize) -> bool {
     if [
         q.material_in,
         q.energy_in,
@@ -198,7 +224,7 @@ fn valid_applied(kind: CareKind, boundary: u64, q: &CareApplied) -> bool {
     .into_iter()
     .any(|v| !v.is_finite() || v < 0.0)
         || q.cells == 0
-        || q.cells as usize > CUBE_CELL_COUNT
+        || q.cells as usize > cells
     {
         return false;
     }

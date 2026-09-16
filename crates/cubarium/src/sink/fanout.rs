@@ -11,9 +11,8 @@
 //! disjunction: the preview window closing still stops the host.
 
 use anyhow::Result;
-use cube_proto::Frame;
 
-use super::FrameSink;
+use super::{FrameSink, Output};
 
 /// Hands each frame to every child sink in order.
 pub struct FanOutSink(Vec<Box<dyn FrameSink>>);
@@ -34,11 +33,13 @@ impl FanOutSink {
 }
 
 impl FrameSink for FanOutSink {
-    fn submit(&mut self, frame: &Frame) -> Result<()> {
+    fn submit(&mut self, out: Output<'_>) -> Result<()> {
         let mut first: Option<anyhow::Error> = None;
         for sink in &mut self.0 {
-            // The same borrow every time: no child can observe different bytes.
-            if let Err(e) = sink.submit(frame)
+            // The same borrow every time: no child can observe different bytes. `Output`
+            // is `Copy` because it is a pair of references, so this is that one borrow
+            // handed round, not a per-child copy of the pixels.
+            if let Err(e) = sink.submit(out)
                 && first.is_none()
             {
                 first = Some(e);
@@ -91,6 +92,7 @@ impl FrameSink for FanOutSink {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cube_proto::Frame;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -116,9 +118,9 @@ mod tests {
     }
 
     impl FrameSink for Probe {
-        fn submit(&mut self, frame: &Frame) -> Result<()> {
+        fn submit(&mut self, out: Output<'_>) -> Result<()> {
             self.seen.fetch_add(1, Ordering::Relaxed);
-            self.got.lock().unwrap().push(frame.clone());
+            self.got.lock().unwrap().push(out.frame().expect("a cube frame").clone());
             match self.fail {
                 Some(m) => Err(anyhow::anyhow!("{m}")),
                 None => Ok(()),
@@ -156,7 +158,7 @@ mod tests {
         let mut fan = FanOutSink::new(vec![Box::new(a), Box::new(b)]);
         assert_eq!(fan.len(), 2);
         for seed in 0..4u8 {
-            fan.submit(&frame(seed)).unwrap();
+            fan.submit(Output::Cube(&frame(seed))).unwrap();
         }
         let (ga, gb) = (got_a.lock().unwrap(), got_b.lock().unwrap());
         assert_eq!(ga.len(), 4);
@@ -177,7 +179,7 @@ mod tests {
         let (seen_b, seen_c) = (Arc::clone(&b.seen), Arc::clone(&c.seen));
         let mut fan = FanOutSink::new(vec![Box::new(a), Box::new(b), Box::new(c)]);
 
-        let err = fan.submit(&frame(1)).unwrap_err().to_string();
+        let err = fan.submit(Output::Cube(&frame(1))).unwrap_err().to_string();
         assert_eq!(err, "first sink is down", "the first error propagates");
         assert_eq!(seen_b.load(Ordering::Relaxed), 1, "the second child was still tried");
         assert_eq!(seen_c.load(Ordering::Relaxed), 1, "the third child was still tried");

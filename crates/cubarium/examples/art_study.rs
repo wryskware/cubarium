@@ -9,7 +9,7 @@ use cubarium::{
     clock::{Clock, DT, Step},
     present::{draw_floor, interpolate, srgb_linear},
     rng::SplitMix64,
-    sink::{FrameSink, PngSink, PreviewSink, ShimSink, WebSink},
+    sink::{FrameSink, Output, PngSink, PreviewSink, ShimSink, WebSink, WorldShape},
 };
 use cubarium_render::{Canvas, stamp_sprite};
 use cubarium_surface::{PathSegment, SurfacePoint, Vec2, travel};
@@ -115,7 +115,7 @@ fn main() -> Result<()> {
             );
             Box::new(web)
         }
-        Sink::Preview => Box::new(PreviewSink::new(4, &args.out)?),
+        Sink::Preview => Box::new(PreviewSink::new(4, &args.out, WorldShape::CUBE)?),
         Sink::Png => Box::new(PngSink::new(&args.out, args.every)?),
         Sink::Shim => Box::new(ShimSink::new(args.addr.clone())),
     };
@@ -269,7 +269,7 @@ fn main() -> Result<()> {
                     );
                 }
                 canvas.encode(&mut frame);
-                sink.submit(&frame)?;
+                sink.submit(Output::Cube(&frame))?;
                 frames += 1;
             }
             Step::Sleep(duration) => std::thread::sleep(duration),

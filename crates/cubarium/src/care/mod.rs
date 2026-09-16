@@ -37,6 +37,8 @@ use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+use cubarium_surface::{Face, Topology};
+
 use crate::clock::TICK_HZ;
 
 /// The dose type is the **core's**, not a host copy: the host validates and records an amount,
@@ -119,7 +121,8 @@ impl CareKind {
         [CareKind::Feed, CareKind::Rain, CareKind::Clean, CareKind::SpawnApex];
 }
 
-/// A canonical surface point: which face and which pixel of its 64×64 chart.
+/// A canonical surface point: which chart, and which pixel of it.
+///
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CareTarget {
     pub face: u8,
@@ -128,14 +131,28 @@ pub struct CareTarget {
 }
 
 impl CareTarget {
-    /// `face` in 0..5 and both chart coordinates in 0..64. A target outside the charts has
-    /// no cell to land on, so it is refused rather than clamped onto some other cell.
+    /// [`CareTarget::validate_on`] against [`Topology::default`], which is the cube.
+    ///
+    /// Kept as the no-argument spelling because the cube is what a caller with no world in
+    /// hand means — the apex draw's own bounds, and every cube fixture. Anything that has
+    /// a world validates against *that* world instead.
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.face > 4 {
-            return Err("face must be 0..4");
+        self.validate_on(Topology::default())
+    }
+
+    /// A chart this topology has, and both coordinates inside that chart's pixel extent:
+    /// five 64×64 charts on a cube, one `w×h` chart on a ring. A target outside them has
+    /// no cell to land on, so it is refused rather than clamped onto some other cell.
+    pub fn validate_on(&self, topo: Topology) -> Result<(), &'static str> {
+        let Some(face) = Face::from_index(self.face) else {
+            return Err("face must name one of the world's charts");
+        };
+        if !topo.has_chart(face) {
+            return Err("face must name one of the world's charts");
         }
-        if self.u >= 64 || self.v >= 64 {
-            return Err("u and v must be 0..63");
+        let (w, h) = topo.extent(face);
+        if f64::from(self.u) >= w || f64::from(self.v) >= h {
+            return Err("u and v must be inside the chart's pixel extent");
         }
         Ok(())
     }
@@ -451,12 +468,20 @@ pub struct CareShared {
     /// and exactly right in the world's own time.
     world_tick: AtomicU64,
     journal: Arc<JournalStatus>,
+    /// The world's shape, fixed for the run. Every target this service admits — a
+    /// request's, and the apex draw's own — is bounded by it.
+    topology: Topology,
 }
 
 impl CareShared {
     /// This run's epoch: the process start stamp in the journal's first record.
     pub fn epoch(&self) -> &str {
         &self.epoch
+    }
+
+    /// The topology every admitted target is validated against.
+    pub fn topology(&self) -> Topology {
+        self.topology
     }
 
     /// The world's last completed tick, as the loop last published it.
@@ -539,15 +564,23 @@ impl CareShared {
             z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
             z ^ (z >> 31)
         };
+        // The draw is over *this world's* charts and pixels: five 64-pixel charts on a
+        // cube, one `w`-by-`h` chart on a ring. Anything narrower would put every apex in
+        // the ring's leftmost 64 columns.
+        let charts = self.topology.charts();
+        let (w, h) = self.topology.extent(charts[0]);
+        let (w, h) = (w as u64, h as u64);
         let mut draw_target = || CareTarget {
-            face: (next() % 5) as u8,
-            u: (next() % 64) as u8,
-            v: (next() % 64) as u8,
+            face: charts[(next() % charts.len() as u64) as usize].index() as u8,
+            u: (next() % w) as u8,
+            v: (next() % h) as u8,
         };
         let first = draw_target();
         let second = if count == 2 {
             let mut candidate = draw_target();
-            if candidate == first { candidate.u = candidate.u.wrapping_add(1) % 64; }
+            if candidate == first {
+                candidate.u = ((u64::from(candidate.u) + 1) % w) as u8;
+            }
             Some(candidate)
         } else { None };
         (first, second)
@@ -562,11 +595,11 @@ impl CareShared {
         second_target: Option<CareTarget>,
         dose: CareDose,
     ) -> SubmitOutcome {
-        if let Err(reason) = target.validate() {
+        if let Err(reason) = target.validate_on(self.topology) {
             return SubmitOutcome::Invalid(reason);
         }
         if let Some(target) = second_target
-            && let Err(reason) = target.validate()
+            && let Err(reason) = target.validate_on(self.topology)
         {
             return SubmitOutcome::Invalid(reason);
         }
@@ -746,6 +779,16 @@ pub struct CareService {
 impl CareService {
     /// A service for one run. `epoch` is the stamp the journal's first record carries.
     pub fn new(epoch: impl Into<String>, journal: Arc<JournalStatus>) -> CareService {
+        CareService::for_world(epoch, journal, Topology::default())
+    }
+
+    /// [`CareService::new`] for a world of a named topology: what every admitted target,
+    /// and the apex draw's own, is bounded by.
+    pub fn for_world(
+        epoch: impl Into<String>,
+        journal: Arc<JournalStatus>,
+        topology: Topology,
+    ) -> CareService {
         let (tx, prepared) = sync_channel(PREPARED_CAPACITY);
         let shared = Arc::new(CareShared {
             epoch: epoch.into(),
@@ -762,6 +805,7 @@ impl CareService {
             cv: Condvar::new(),
             world_tick: AtomicU64::new(0),
             journal,
+            topology,
         });
         CareService { shared, prepared }
     }
@@ -1361,7 +1405,7 @@ mod tests {
             .join(format!("cubarium-care-worker-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let journal = Journal::open(&dir, "e", "b").unwrap();
+        let journal = Journal::open(&dir, "e", "b", Topology::Cube).unwrap();
         let worker = JournalWorker::spawn(journal);
         let command = PlannedCommand::standard(1, 40, CareKind::Feed, target(), "e.1", 1);
         assert!(worker.submit(JournalJob::Accept(vec![command.clone()])));

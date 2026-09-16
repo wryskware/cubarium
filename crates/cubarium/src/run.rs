@@ -18,7 +18,7 @@ use cubarium_surface::PixelImage;
 use crate::clock::{Clock, Step};
 use crate::cli::{Command, Demo, SinkArg};
 use crate::scene::{SceneKind, Scenes, render};
-use crate::sink::{FrameSink, PngSink, PreviewSink, ShimSink, WebSink};
+use crate::sink::{FrameSink, Output, PngSink, ShimSink, WebSink, WorldShape};
 
 /// The status a shell reports for a process killed by SIGINT.
 const SIGINT_EXIT: i32 = 130;
@@ -61,16 +61,26 @@ fn run_demo(demo: &Demo, stop: &AtomicBool) -> Result<()> {
     let kind: SceneKind = demo.scene.into();
     let mut scenes = Scenes::new(kind, demo.seed);
 
+    let (topology, scale) = demo.shape();
+    let shape = WorldShape::new(topology, scale);
     let mut sink: Box<dyn FrameSink> = match demo.sink {
-        SinkArg::Preview => Box::new(PreviewSink::new(demo.scale, &demo.out)?),
+        SinkArg::Preview => {
+            Box::new(crate::sink::PreviewSink::new(demo.scale, &demo.out, shape)?)
+        }
         SinkArg::Shim => Box::new(ShimSink::new(demo.addr.clone())),
         SinkArg::Png => Box::new(PngSink::new(&demo.out, demo.every)?),
-        SinkArg::Web => Box::new(WebSink::new(demo.web_port)?),
+        SinkArg::Web => Box::new(WebSink::with_world(
+            demo.web_port,
+            String::new(),
+            crate::sink::web::Source::default(),
+            None,
+            shape,
+        )?),
     };
 
     let limit =
         (demo.seconds > 0.0).then(|| Duration::from_secs_f64(demo.seconds));
-    let stats = drive(&mut scenes, sink.as_mut(), limit, demo.fps, stop)?;
+    let stats = drive(&mut scenes, sink.as_mut(), limit, demo.fps, stop, shape)?;
     sink.finish()?;
 
     eprintln!(
@@ -97,16 +107,21 @@ pub struct RunStats {
 /// `stop` being set from another thread (the SIGINT handler, or a test). The simulation
 /// runs at 20 Hz whatever `fps` is; each frame is drawn at the clock's interpolation
 /// fraction of the tick in progress.
+/// The surface is `shape`: the fixtures are cube geometry, so a ring canvas draws whatever
+/// of them lands on its one chart. That is what `--topology ring:WxH` on `demo` is for —
+/// exercising the raster path end to end without a world.
 pub fn drive(
     scenes: &mut Scenes,
     sink: &mut dyn FrameSink,
     limit: Option<Duration>,
     fps: u32,
     stop: &AtomicBool,
+    shape: WorldShape,
 ) -> Result<RunStats> {
-    let mut canvas = Canvas::cube();
+    let mut canvas = Canvas::new(shape.topology, shape.scale);
     let mut scratch: Vec<PixelImage> = Vec::new();
     let mut frame = Frame::black();
+    let mut raster = shape.raster();
     let start = Instant::now();
     let mut clock = Clock::with_fps(start, fps);
     let mut stats = RunStats::default();
@@ -134,8 +149,16 @@ pub fn drive(
                 render(&view, f, &mut canvas, &mut scratch);
                 // Exactly one encode per rendered frame; the identical bytes go to the
                 // active sink.
-                canvas.encode(&mut frame);
-                sink.submit(&frame)?;
+                match raster.as_mut() {
+                    Some(r) => {
+                        canvas.encode_raster(r);
+                        sink.submit(Output::Ring(r))?;
+                    }
+                    None => {
+                        canvas.encode(&mut frame);
+                        sink.submit(Output::Cube(&frame))?;
+                    }
+                }
                 stats.frames += 1;
             }
             Step::Sleep(d) => std::thread::sleep(d),
@@ -168,8 +191,8 @@ mod tests {
     }
 
     impl FrameSink for Recorder {
-        fn submit(&mut self, frame: &Frame) -> Result<()> {
-            self.frames.push(frame.clone());
+        fn submit(&mut self, out: Output<'_>) -> Result<()> {
+            self.frames.push(out.frame().expect("a cube frame").clone());
             Ok(())
         }
     }
@@ -180,7 +203,8 @@ mod tests {
         let mut rec = Recorder::default();
         let stop = AtomicBool::new(false);
         let stats =
-            drive(&mut scenes, &mut rec, Some(Duration::from_millis(600)), 60, &stop).unwrap();
+            drive(&mut scenes, &mut rec, Some(Duration::from_millis(600)), 60, &stop, WorldShape::CUBE)
+                .unwrap();
         assert!(stats.ticks >= 8, "ticks {}", stats.ticks);
         assert!(stats.frames >= 12, "frames {}", stats.frames);
         assert_eq!(rec.frames.len() as u64, stats.frames);
@@ -199,7 +223,7 @@ mod tests {
     fn a_sink_that_asks_to_quit_stops_the_loop() {
         struct Once(u32);
         impl FrameSink for Once {
-            fn submit(&mut self, _f: &Frame) -> Result<()> {
+            fn submit(&mut self, _f: Output<'_>) -> Result<()> {
                 self.0 += 1;
                 Ok(())
             }
@@ -209,7 +233,8 @@ mod tests {
         }
         let mut scenes = Scenes::new(SceneKind::Body, 1);
         let mut sink = Once(0);
-        let stats = drive(&mut scenes, &mut sink, None, 60, &AtomicBool::new(false)).unwrap();
+        let stats = drive(&mut scenes, &mut sink, None, 60, &AtomicBool::new(false), WorldShape::CUBE)
+            .unwrap();
         assert_eq!(stats.frames, 3);
     }
 
@@ -217,7 +242,7 @@ mod tests {
     fn a_stop_flag_set_from_another_thread_ends_the_demo_loop() {
         struct Counter(u64);
         impl FrameSink for Counter {
-            fn submit(&mut self, _f: &Frame) -> Result<()> {
+            fn submit(&mut self, _f: Output<'_>) -> Result<()> {
                 self.0 += 1;
                 Ok(())
             }
@@ -231,7 +256,7 @@ mod tests {
         let mut scenes = Scenes::new(SceneKind::Body, 1);
         let mut sink = Counter(0);
         // No time limit: only the flag can end this loop.
-        let stats = drive(&mut scenes, &mut sink, None, 60, &stop).unwrap();
+        let stats = drive(&mut scenes, &mut sink, None, 60, &stop, WorldShape::CUBE).unwrap();
         setter.join().unwrap();
         assert!(stats.frames > 0, "the loop must have rendered before it stopped");
         assert!(

@@ -15,7 +15,7 @@
 use std::time::{Duration, Instant};
 
 use cube_proto::{FACE_SIZE, Face, Frame};
-use cubarium::sink::{FrameSink, WebSink};
+use cubarium::sink::{FrameSink, Output, WebSink};
 
 const BASE: [[u8; 3]; 5] = [
     [58, 10, 14],  // Front  red
@@ -72,7 +72,7 @@ fn main() -> anyhow::Result<()> {
     let mut tick = 0u64;
     loop {
         let t0 = Instant::now();
-        sink.submit(&pattern(tick))?;
+        sink.submit(Output::Cube(&pattern(tick)))?;
         tick += 1;
         if let Some(rest) = frame_time.checked_sub(t0.elapsed()) {
             std::thread::sleep(rest);

@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use cube_proto::{FRAME_BYTES, Face, Format, Frame, HEADER_BYTES, decode};
 use cubarium::sink::web::FRAME_BODY_BYTES;
-use cubarium::sink::{FanOutSink, FrameSink, ShimSink, WebSink};
+use cubarium::sink::{FanOutSink, FrameSink, Output, ShimSink, WebSink};
 
 /// A frame whose bytes are unique per index, touching all five faces. Same shape as the
 /// fixture in `shim_sink.rs`, so a byte comparison here means something.
@@ -58,7 +58,7 @@ fn the_shim_and_the_viewer_receive_the_identical_frame_bytes() {
     let mut rx = vec![0u8; HEADER_BYTES + FRAME_BYTES + 64];
     for i in 0..5u8 {
         let frame = distinctive(i);
-        fan.submit(&frame).expect("submit never fails");
+        fan.submit(Output::Cube(&frame)).expect("submit never fails");
 
         // Receive before the next submit, so the shim's newest-frame mailbox has no
         // chance to coalesce and every submitted frame reaches the wire.

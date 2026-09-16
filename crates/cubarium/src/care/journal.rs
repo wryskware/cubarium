@@ -64,6 +64,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 
+use cubarium_surface::Topology;
+
 use super::{CareDose, CareKind, CareTarget, OutcomeRecord, PlannedCommand};
 use crate::state::JOURNAL_NAME;
 
@@ -289,13 +291,17 @@ impl Journal {
     /// back to the verified prefix, and append this run's `epoch` record.
     ///
     /// The caller must already hold the state lock: this both reads and rewrites the file.
-    pub fn open(dir: &Path, epoch: &str, build: &str) -> Result<Journal> {
+    /// `topology` is the world this journal belongs to: every recovered target is
+    /// range-checked against *that* world, so a history written for one shape can never
+    /// replay into another. A journal written before `u`/`v` were widened carries the same
+    /// JSON numbers it always did (0..=63 on a cube), so it recovers unchanged.
+    pub fn open(dir: &Path, epoch: &str, build: &str, topology: Topology) -> Result<Journal> {
         let hooks = installed()
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
             .unwrap_or_default();
-        Journal::open_with_hooks(dir, epoch, build, hooks)
+        Journal::open_with_hooks(dir, epoch, build, topology, hooks)
     }
 
     /// [`Journal::open`] with the durable-path test hooks attached.
@@ -303,6 +309,7 @@ impl Journal {
         dir: &Path,
         epoch: &str,
         build: &str,
+        topology: Topology,
         hooks: JournalHooks,
     ) -> Result<Journal> {
         let path = dir.join(JOURNAL_NAME);
@@ -329,7 +336,7 @@ impl Journal {
             );
         }
 
-        let verified = verify(&raw).map_err(|e| {
+        let verified = verify(&raw, topology).map_err(|e| {
             anyhow::anyhow!(
                 "{}: {e}\nthe care journal cannot be trusted; move it aside deliberately \
                  rather than letting a world resume from a history it cannot reconstruct",
@@ -800,7 +807,7 @@ struct Verified {
 /// recovery would destroy exactly the evidence someone would need. So it refuses, the
 /// bytes are preserved, and a human decides — the same treatment as interior corruption,
 /// wherever in the file it sits.
-fn verify(raw: &[u8]) -> std::result::Result<Verified, String> {
+fn verify(raw: &[u8], topology: Topology) -> std::result::Result<Verified, String> {
     let mut complete: Vec<(usize, usize)> = Vec::new();
     let mut start = 0usize;
     for (i, &b) in raw.iter().enumerate() {
@@ -818,7 +825,7 @@ fn verify(raw: &[u8]) -> std::result::Result<Verified, String> {
         if line.iter().all(|b| b.is_ascii_whitespace()) {
             continue;
         }
-        match parse_record(line) {
+        match parse_record(line, topology) {
             Ok(Record::Epoch) => {}
             Ok(Record::Accepted(command)) => out.accepted.push(command),
             Ok(Record::Outcome { seq }) => {
@@ -844,7 +851,7 @@ enum Record {
     Outcome { seq: u64 },
 }
 
-fn parse_record(line: &[u8]) -> std::result::Result<Record, String> {
+fn parse_record(line: &[u8], topology: Topology) -> std::result::Result<Record, String> {
     let value: serde_json::Value =
         serde_json::from_slice(line).map_err(|e| format!("not JSON: {e}"))?;
     let object = value.as_object().ok_or_else(|| "not a JSON object".to_string())?;
@@ -914,7 +921,7 @@ fn parse_record(line: &[u8]) -> std::result::Result<Record, String> {
                 let target = CareTarget {
                     face: component(target, "face")?, u: component(target, "u")?, v: component(target, "v")?,
                 };
-                target.validate().map_err(|e| e.to_string())?;
+                target.validate_on(topology).map_err(|e| e.to_string())?;
                 Ok(target)
             };
             let (target, second_target) = if rec == "accepted_apex_v1" {
@@ -986,7 +993,7 @@ mod tests {
     fn opening_writes_an_epoch_record_and_reopening_keeps_the_history() {
         let dir = scratch("epoch");
         {
-            let mut j = Journal::open(&dir, "stamp-1", "0.1.0+abc").unwrap();
+            let mut j = Journal::open(&dir, "stamp-1", "0.1.0+abc", Topology::Cube).unwrap();
             j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap();
         }
         let text = contents(&dir);
@@ -996,7 +1003,7 @@ mod tests {
         assert!(text.contains(r#""rec":"accepted","seq":1,"apply_after_tick":100"#), "{text}");
         assert!(text.contains(r#""kind":"feed""#), "{text}");
 
-        let j = Journal::open(&dir, "stamp-2", "0.1.0+abc").unwrap();
+        let j = Journal::open(&dir, "stamp-2", "0.1.0+abc", Topology::Cube).unwrap();
         assert_eq!(j.accepted_records().len(), 1, "the earlier run's record survives");
         assert_eq!(j.truncated_bytes(), 0);
         assert_eq!(contents(&dir).lines().count(), 3, "epoch, accepted, epoch");
@@ -1007,7 +1014,7 @@ mod tests {
     fn a_torn_final_line_is_truncated_back_to_the_verified_prefix() {
         let dir = scratch("torn");
         {
-            let mut j = Journal::open(&dir, "stamp-1", "b").unwrap();
+            let mut j = Journal::open(&dir, "stamp-1", "b", Topology::Cube).unwrap();
             j.append_accepted(&[command(1, 100, CareKind::Feed), command(2, 100, CareKind::Rain)])
                 .unwrap();
         }
@@ -1020,7 +1027,7 @@ mod tests {
         )
         .unwrap();
 
-        let j = Journal::open(&dir, "stamp-2", "b").unwrap();
+        let j = Journal::open(&dir, "stamp-2", "b", Topology::Cube).unwrap();
         assert!(j.truncated_bytes() > 0, "the torn tail must be reported");
         assert_eq!(j.accepted_records().len(), 2, "seq 3 was never a record");
         let after = contents(&dir);
@@ -1038,14 +1045,14 @@ mod tests {
     fn an_invalid_interior_line_refuses_to_start() {
         let dir = scratch("interior");
         {
-            let mut j = Journal::open(&dir, "s", "b").unwrap();
+            let mut j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
             j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap();
         }
         let mut lines: Vec<String> = contents(&dir).lines().map(str::to_string).collect();
         lines.insert(1, "{\"rec\":\"accepted\",\"seq\":".to_string());
         std::fs::write(dir.join(JOURNAL_NAME), format!("{}\n", lines.join("\n"))).unwrap();
 
-        let err = Journal::open(&dir, "s2", "b").unwrap_err();
+        let err = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap_err();
         let text = format!("{err:#}");
         assert!(text.contains("line 2"), "{text}");
         assert!(text.contains(JOURNAL_NAME), "the refusal names the file: {text}");
@@ -1056,7 +1063,7 @@ mod tests {
     fn an_unknown_record_kind_in_the_middle_is_also_a_refusal() {
         let dir = scratch("unknown-kind");
         {
-            let mut j = Journal::open(&dir, "s", "b").unwrap();
+            let mut j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
             j.append_accepted(&[command(1, 10, CareKind::Clean)]).unwrap();
             j.append_outcomes(&[OutcomeRecord {
                 seq: 1,
@@ -1070,14 +1077,14 @@ mod tests {
         let mut lines: Vec<String> = contents(&dir).lines().map(str::to_string).collect();
         lines.insert(2, r#"{"rec":"nonsense","seq":9}"#.to_string());
         std::fs::write(dir.join(JOURNAL_NAME), format!("{}\n", lines.join("\n"))).unwrap();
-        assert!(Journal::open(&dir, "s2", "b").is_err());
+        assert!(Journal::open(&dir, "s2", "b", Topology::Cube).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn the_replay_schedule_is_validated_whole_before_a_single_tick_is_stepped() {
         let dir = scratch("replay");
-        let mut j = Journal::open(&dir, "s", "b").unwrap();
+        let mut j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
         j.append_accepted(&[
             command(1, 100, CareKind::Feed),
             command(2, 100, CareKind::Clean),
@@ -1107,7 +1114,7 @@ mod tests {
     #[test]
     fn a_hole_or_a_backwards_boundary_in_the_schedule_refuses_to_start() {
         let dir = scratch("replay-holes");
-        let mut j = Journal::open(&dir, "s", "b").unwrap();
+        let mut j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
         // seq 1 then seq 3: the reserved seq 2 never reached the file.
         j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap();
         j.append_accepted(&[command(3, 140, CareKind::Rain)]).unwrap();
@@ -1117,7 +1124,7 @@ mod tests {
         drop(j);
 
         let dir2 = scratch("replay-backwards");
-        let mut j = Journal::open(&dir2, "s", "b").unwrap();
+        let mut j = Journal::open(&dir2, "s", "b", Topology::Cube).unwrap();
         j.append_accepted(&[command(1, 140, CareKind::Feed), command(2, 100, CareKind::Clean)])
             .unwrap();
         let err = j.replay_plan(0, 100).unwrap_err().to_string();
@@ -1134,7 +1141,7 @@ mod tests {
         let dir = scratch("short-mid-json");
         let hooks = JournalHooks::default();
         {
-            let mut j = Journal::open_with_hooks(&dir, "s", "b", hooks.clone()).unwrap();
+            let mut j = Journal::open_with_hooks(&dir, "s", "b", Topology::Cube, hooks.clone()).unwrap();
             j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap();
             hooks.short_write(40);
             let err = j.append_accepted(&[command(2, 100, CareKind::Rain)]).unwrap_err();
@@ -1143,7 +1150,7 @@ mod tests {
         let raw = std::fs::read_to_string(dir.join(JOURNAL_NAME)).unwrap();
         assert!(!raw.ends_with('\n'), "the injected write stopped mid-record: {raw:?}");
 
-        let j = Journal::open(&dir, "s2", "b").unwrap();
+        let j = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap();
         assert_eq!(j.truncated_bytes(), 40, "exactly the torn suffix is dropped");
         assert_eq!(j.accepted_records().len(), 1, "only the complete record survives");
         assert_eq!(j.accepted_records()[0].seq, 1);
@@ -1164,14 +1171,14 @@ mod tests {
         let batch = [command(1, 100, CareKind::Feed), command(2, 100, CareKind::Clean)];
         let first_len = accepted_line(&batch[0]).len() + 1;
         {
-            let mut j = Journal::open_with_hooks(&dir, "s", "b", hooks.clone()).unwrap();
+            let mut j = Journal::open_with_hooks(&dir, "s", "b", Topology::Cube, hooks.clone()).unwrap();
             hooks.short_write(first_len as u64);
             assert!(j.append_accepted(&batch).is_err());
         }
         let raw = std::fs::read_to_string(dir.join(JOURNAL_NAME)).unwrap();
         assert!(raw.ends_with('\n'), "the write stopped exactly on a record boundary");
 
-        let j = Journal::open(&dir, "s2", "b").unwrap();
+        let j = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap();
         assert_eq!(j.truncated_bytes(), 0, "there was no torn suffix to drop");
         assert_eq!(j.accepted_records().len(), 1);
         assert_eq!(j.accepted_records()[0].seq, 1);
@@ -1186,7 +1193,7 @@ mod tests {
     #[test]
     fn the_bound_reserves_room_for_the_outcomes_already_accepted_commands_owe() {
         let dir = scratch("bound");
-        let mut j = Journal::open(&dir, "s", "b").unwrap();
+        let mut j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
         let status = j.status();
         assert_eq!(status.limit(), JOURNAL_LIMIT);
         assert!(!status.would_overflow(1), "an empty journal has room");
@@ -1219,13 +1226,13 @@ mod tests {
         let hooks = JournalHooks::default();
         hooks.fail_after_sync(1);
         {
-            let mut j = Journal::open_with_hooks(&dir, "s", "b", hooks.clone()).unwrap();
+            let mut j = Journal::open_with_hooks(&dir, "s", "b", Topology::Cube, hooks.clone()).unwrap();
             let err = j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap_err();
             assert!(err.to_string().contains("durable"), "{err}");
             assert_eq!(j.status().outstanding(), 1, "an ambiguous write still owes an outcome");
         }
         // The whole point: reopening finds the record the writer reported a failure for.
-        let j = Journal::open(&dir, "s2", "b").unwrap();
+        let j = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap();
         assert_eq!(j.accepted_records().len(), 1);
         assert_eq!(j.accepted_records()[0].seq, 1);
         std::fs::remove_dir_all(&dir).unwrap();
@@ -1237,10 +1244,10 @@ mod tests {
         let hooks = JournalHooks::default();
         hooks.fail_before_write(1);
         {
-            let mut j = Journal::open_with_hooks(&dir, "s", "b", hooks).unwrap();
+            let mut j = Journal::open_with_hooks(&dir, "s", "b", Topology::Cube, hooks).unwrap();
             assert!(j.append_accepted(&[command(1, 100, CareKind::Rain)]).is_err());
         }
-        let j = Journal::open(&dir, "s2", "b").unwrap();
+        let j = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap();
         assert!(j.accepted_records().is_empty(), "nothing was written");
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -1252,7 +1259,7 @@ mod tests {
         let base = |name: &str| {
             let dir = scratch(name);
             {
-                let mut j = Journal::open(&dir, "s", "b").unwrap();
+                let mut j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
                 j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap();
             }
             dir
@@ -1265,7 +1272,7 @@ mod tests {
         let suffix = br#"{"rec":"accepted","seq":2,"app"#;
         f.write_all(suffix).unwrap();
         drop(f);
-        let j = Journal::open(&dir, "s2", "b").unwrap();
+        let j = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap();
         assert_eq!(j.truncated_bytes(), suffix.len() as u64);
         assert_eq!(j.accepted_records().len(), 1);
         assert!(contents(&dir).starts_with(&intact));
@@ -1277,7 +1284,7 @@ mod tests {
         let before = contents(&dir);
         let damaged = format!("{before}{{\"rec\":\"accepted\",\"seq\":\n");
         std::fs::write(dir.join(JOURNAL_NAME), &damaged).unwrap();
-        let err = format!("{:#}", Journal::open(&dir, "s2", "b").unwrap_err());
+        let err = format!("{:#}", Journal::open(&dir, "s2", "b", Topology::Cube).unwrap_err());
         assert!(err.contains("not an interrupted write"), "{err}");
         assert_eq!(contents(&dir), damaged, "the evidence must be preserved, not repaired");
         std::fs::remove_dir_all(&dir).unwrap();
@@ -1288,7 +1295,7 @@ mod tests {
         let before = contents(&dir);
         let damaged = format!("{before}{{\"rec\":\"scheduled\",\"seq\":2}}\n");
         std::fs::write(dir.join(JOURNAL_NAME), &damaged).unwrap();
-        let err = format!("{:#}", Journal::open(&dir, "s2", "b").unwrap_err());
+        let err = format!("{:#}", Journal::open(&dir, "s2", "b", Topology::Cube).unwrap_err());
         assert!(err.contains("unknown record kind"), "{err}");
         assert_eq!(contents(&dir), damaged);
         std::fs::remove_dir_all(&dir).unwrap();
@@ -1300,7 +1307,7 @@ mod tests {
     fn a_journal_at_capacity_reopens_without_growing_and_still_replays() {
         let dir = scratch("at-capacity");
         {
-            let mut j = Journal::open(&dir, "s", "b").unwrap();
+            let mut j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
             j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap();
         }
         // Pad to exactly the bound with a comment-free filler line that still parses.
@@ -1320,7 +1327,7 @@ mod tests {
         assert_eq!(padded.len() as u64, JOURNAL_LIMIT);
         std::fs::write(dir.join(JOURNAL_NAME), &padded).unwrap();
 
-        let mut j = Journal::open(&dir, "s2", "b").unwrap();
+        let mut j = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap();
         assert!(!j.care_available(), "a full journal accepts no new care");
         assert_eq!(
             std::fs::metadata(dir.join(JOURNAL_NAME)).unwrap().len(),
@@ -1355,7 +1362,7 @@ mod tests {
             file.write_all(&chunk).unwrap();
         }
         drop(file);
-        let err = format!("{:#}", Journal::open(&dir, "s", "b").unwrap_err());
+        let err = format!("{:#}", Journal::open(&dir, "s", "b", Topology::Cube).unwrap_err());
         assert!(err.contains("larger than its"), "{err}");
         assert!(err.contains("Move it aside deliberately"), "{err}");
         std::fs::remove_dir_all(&dir).unwrap();
@@ -1366,7 +1373,7 @@ mod tests {
     #[test]
     fn the_central_write_guard_refuses_a_record_that_would_cross_the_bound() {
         let dir = scratch("central-guard");
-        let mut j = Journal::open(&dir, "s", "b").unwrap();
+        let mut j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
         // Claim the file is one byte short of the bound without touching the disk.
         j.status().set_for_test(JOURNAL_LIMIT - 1, 0);
         let err = j.append_outcomes(&[OutcomeRecord {
@@ -1390,7 +1397,7 @@ mod tests {
         let dir = scratch("enospc-partial");
         let hooks = JournalHooks::default();
         {
-            let mut j = Journal::open_with_hooks(&dir, "s", "b", hooks.clone()).unwrap();
+            let mut j = Journal::open_with_hooks(&dir, "s", "b", Topology::Cube, hooks.clone()).unwrap();
             // Armed after the open, so the epoch record lands normally and the injected
             // failure is squarely on the care write.
             hooks.enospc(1);
@@ -1419,7 +1426,7 @@ mod tests {
                 "a poisoned writer must not touch the file again, in any job"
             );
         }
-        let j = Journal::open(&dir, "s2", "b").unwrap();
+        let j = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap();
         assert!(j.truncated_bytes() > 0, "the half record is repaired away");
         assert!(j.accepted_records().is_empty(), "no complete record survived");
         assert_eq!(j.max_seq(), None, "seq 1 was never applied, and is not consumed");
@@ -1430,13 +1437,13 @@ mod tests {
         let dir = scratch("enospc-complete");
         let hooks = JournalHooks::default();
         {
-            let mut j = Journal::open_with_hooks(&dir, "s", "b", hooks.clone()).unwrap();
+            let mut j = Journal::open_with_hooks(&dir, "s", "b", Topology::Cube, hooks.clone()).unwrap();
             hooks.fail_after_sync(1);
             let err = j.append_accepted(&[command(7, 100, CareKind::Rain)]).unwrap_err();
             assert!(!err.is_full(), "{err:?}");
             assert!(j.poisoned().is_some());
         }
-        let j = Journal::open(&dir, "s2", "b").unwrap();
+        let j = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap();
         assert_eq!(j.accepted_records().len(), 1);
         let plan = j.replay_plan(6, 100).unwrap();
         assert_eq!(plan.len(), 1);
@@ -1451,7 +1458,7 @@ mod tests {
     #[test]
     fn the_configured_limit_is_refused_without_attempting_a_write_or_poisoning() {
         let dir = scratch("configured-limit");
-        let mut j = Journal::open(&dir, "s", "b").unwrap();
+        let mut j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
         let before = std::fs::read(dir.join(JOURNAL_NAME)).unwrap();
         j.status().set_for_test(JOURNAL_LIMIT - 1, 0);
 
@@ -1475,7 +1482,7 @@ mod tests {
         let dir = scratch("dir-barrier");
         let hooks = JournalHooks::default();
         assert_eq!(hooks.dir_sync_count(), 0);
-        let mut j = Journal::open_with_hooks(&dir, "s", "b", hooks.clone()).unwrap();
+        let mut j = Journal::open_with_hooks(&dir, "s", "b", Topology::Cube, hooks.clone()).unwrap();
         assert_eq!(
             hooks.dir_sync_count(),
             1,
@@ -1490,7 +1497,7 @@ mod tests {
         let dir2 = scratch("dir-barrier-fails");
         let hooks = JournalHooks::default();
         hooks.fail_dir_sync(1);
-        let err = format!("{:#}", Journal::open_with_hooks(&dir2, "s", "b", hooks).unwrap_err());
+        let err = format!("{:#}", Journal::open_with_hooks(&dir2, "s", "b", Topology::Cube, hooks).unwrap_err());
         assert!(err.contains("no \ncommand may be accepted") || err.contains("command may be accepted"), "{err}");
         assert!(
             !dir2.join(JOURNAL_NAME).exists()
@@ -1505,12 +1512,12 @@ mod tests {
     fn an_empty_and_a_newline_only_journal_are_both_fine() {
         let dir = scratch("empty");
         std::fs::write(dir.join(JOURNAL_NAME), b"").unwrap();
-        let j = Journal::open(&dir, "s", "b").unwrap();
+        let j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
         assert!(j.accepted_records().is_empty());
         assert_eq!(j.truncated_bytes(), 0);
         drop(j);
         std::fs::write(dir.join(JOURNAL_NAME), b"\n\n").unwrap();
-        let j = Journal::open(&dir, "s", "b").unwrap();
+        let j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
         assert!(j.accepted_records().is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -1524,7 +1531,7 @@ mod tests {
     fn a_standard_dose_stays_a_legacy_record_and_a_nonstandard_one_gets_its_own_kind() {
         let dir = scratch("dose-records");
         {
-            let mut j = Journal::open(&dir, "s", "b").unwrap();
+            let mut j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
             j.append_accepted(&[
                 command(1, 100, CareKind::Feed),
                 dosed(2, 100, CareKind::Rain, 1500),
@@ -1546,7 +1553,7 @@ mod tests {
 
         // And every one of them reads back as the amount it was written with — a mixed
         // old/new journal, which is what any upgraded world's journal actually is.
-        let j = Journal::open(&dir, "s2", "b").unwrap();
+        let j = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap();
         let plan = j.replay_plan(0, 100).unwrap();
         assert_eq!(
             plan.iter().map(|c| (c.seq, c.dose.permille())).collect::<Vec<_>>(),
@@ -1561,14 +1568,14 @@ mod tests {
     fn the_documented_bounds_round_trip_through_the_journal() {
         let dir = scratch("dose-bounds");
         {
-            let mut j = Journal::open(&dir, "s", "b").unwrap();
+            let mut j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
             j.append_accepted(&[
                 dosed(1, 10, CareKind::Feed, CareDose::MIN_PERMILLE),
                 dosed(2, 10, CareKind::Feed, CareDose::MAX_PERMILLE),
             ])
             .unwrap();
         }
-        let j = Journal::open(&dir, "s2", "b").unwrap();
+        let j = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap();
         assert_eq!(
             j.accepted_records().iter().map(|c| c.dose.permille()).collect::<Vec<_>>(),
             vec![CareDose::MIN_PERMILLE, CareDose::MAX_PERMILLE]
@@ -1623,12 +1630,12 @@ mod tests {
         for (name, line) in cases {
             let dir = scratch(name);
             {
-                let mut j = Journal::open(&dir, "s", "b").unwrap();
+                let mut j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
                 j.append_accepted(&[command(1, 100, CareKind::Feed)]).unwrap();
             }
             let damaged = format!("{}{line}\n", contents(&dir));
             std::fs::write(dir.join(JOURNAL_NAME), &damaged).unwrap();
-            let err = format!("{:#}", Journal::open(&dir, "s2", "b").unwrap_err());
+            let err = format!("{:#}", Journal::open(&dir, "s2", "b", Topology::Cube).unwrap_err());
             assert!(err.contains("cannot be trusted"), "{name}: {err}");
             assert_eq!(
                 contents(&dir),
@@ -1645,7 +1652,7 @@ mod tests {
     fn a_half_written_dosed_record_is_still_just_a_torn_tail() {
         let dir = scratch("dose-torn");
         {
-            let mut j = Journal::open(&dir, "s", "b").unwrap();
+            let mut j = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
             j.append_accepted(&[dosed(1, 100, CareKind::Rain, 1500)]).unwrap();
         }
         let intact = contents(&dir);
@@ -1654,7 +1661,7 @@ mod tests {
         f.write_all(suffix).unwrap();
         drop(f);
 
-        let j = Journal::open(&dir, "s2", "b").unwrap();
+        let j = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap();
         assert_eq!(j.truncated_bytes(), suffix.len() as u64);
         assert_eq!(j.accepted_records().len(), 1);
         assert_eq!(j.accepted_records()[0].dose.permille(), 1500, "the complete record is intact");
@@ -1694,12 +1701,12 @@ mod tests {
         apex.target = CareTarget { face: 0, u: 3, v: 61 };
         apex.second_target = Some(CareTarget { face: 4, u: 52, v: 8 });
         {
-            let mut journal = Journal::open(&dir, "s", "b").unwrap();
+            let mut journal = Journal::open(&dir, "s", "b", Topology::Cube).unwrap();
             journal.append_accepted(&[apex.clone()]).unwrap();
         }
         let raw = contents(&dir);
         assert!(raw.contains(r#""rec":"accepted_apex_v1""#), "{raw}");
-        let reopened = Journal::open(&dir, "s2", "b").unwrap();
+        let reopened = Journal::open(&dir, "s2", "b", Topology::Cube).unwrap();
         assert_eq!(reopened.accepted_records(), &[apex]);
         assert_eq!(reopened.replay_plan(0, 77).unwrap().len(), 1);
         std::fs::remove_dir_all(&dir).unwrap();

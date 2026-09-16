@@ -14,7 +14,7 @@ use minifb::{Key, KeyRepeat, MouseButton, MouseMode, Window, WindowOptions};
 use crate::net::{NET_COLS, NET_ROWS, face_at, net_origin, net_size};
 use crate::raycast::Camera;
 
-use super::FrameSink;
+use super::{FrameSink, Output, WorldShape};
 
 /// Window background and the net's separator color.
 const BACKGROUND: u32 = 0x0010_1012;
@@ -50,7 +50,28 @@ pub struct PreviewSink {
 }
 
 impl PreviewSink {
-    pub fn new(scale: usize, capture_dir: impl Into<PathBuf>) -> Result<PreviewSink> {
+    /// The window, for a world of this shape.
+    ///
+    /// **A ring world is refused here**, before a window exists. Both halves of this
+    /// preview are cube pictures: the net is the unfolded five-face cross, and the other
+    /// half is a ray-cast of an actual cube, whose camera has no meaning on a flat world.
+    /// Showing a ring in either would be a lie about what is being simulated, and the
+    /// window is a development tool with two working alternatives — so the refusal names
+    /// them rather than drawing something wrong.
+    pub fn new(
+        scale: usize,
+        capture_dir: impl Into<PathBuf>,
+        shape: WorldShape,
+    ) -> Result<PreviewSink> {
+        if shape.is_ring() {
+            let (w, h) = shape.chart_size();
+            anyhow::bail!(
+                "--sink preview cannot show a ring world ({w}x{h}): both halves of the \
+                 preview window are pictures of a cube — the unfolded net and a ray-cast \
+                 cube whose camera has no meaning on a flat world. Use --sink web for the \
+                 loopback viewer, or --sink png to capture the raster."
+            );
+        }
         let scale = scale.max(1);
         let (net_w, net_h) = net_size(scale, SEPARATOR);
         let cube_size = CUBE_PIXELS * scale;
@@ -250,7 +271,13 @@ impl PreviewSink {
 }
 
 impl FrameSink for PreviewSink {
-    fn submit(&mut self, frame: &Frame) -> Result<()> {
+    fn submit(&mut self, out: Output<'_>) -> Result<()> {
+        // Unreachable by construction: a ring never gets this far, because `new` refused
+        // it. Named rather than silently ignored, so a future sink wiring mistake is a
+        // message and not a frozen window.
+        let frame = out
+            .frame()
+            .ok_or_else(|| anyhow::anyhow!("the preview window shows cube frames only"))?;
         self.handle_input(frame);
         self.draw(frame);
         self.window

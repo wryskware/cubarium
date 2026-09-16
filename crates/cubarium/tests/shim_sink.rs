@@ -6,7 +6,7 @@ use std::net::UdpSocket;
 use std::time::Duration;
 
 use cube_proto::{FRAME_BYTES, Face, Format, Frame, HEADER_BYTES, decode};
-use cubarium::sink::{FrameSink, ShimSink};
+use cubarium::sink::{FrameSink, Output, ShimSink};
 
 /// Build a frame whose bytes are unique per index, touching all five faces.
 fn distinctive(i: u8) -> Frame {
@@ -31,7 +31,7 @@ fn the_shim_sink_sends_the_exact_encoded_frame_bytes_with_increasing_sequence() 
 
     for i in 0..6u8 {
         let frame = distinctive(i);
-        sink.submit(&frame).expect("submit never fails");
+        sink.submit(Output::Cube(&frame)).expect("submit never fails");
 
         // Receive before submitting the next frame, so the newest-frame mailbox has no
         // chance to coalesce and every submitted frame reaches the wire.
@@ -79,7 +79,7 @@ fn the_mailbox_coalesces_without_inventing_or_corrupting_frames() {
     let mut sink = ShimSink::new(addr.to_string());
     let submitted: Vec<Frame> = (0..40u8).map(distinctive).collect();
     for f in &submitted {
-        sink.submit(f).unwrap();
+        sink.submit(Output::Cube(f)).unwrap();
     }
     assert!(sink.wait_for_sent(1, Duration::from_secs(3)), "the worker sent nothing");
     sink.finish().unwrap();
@@ -107,7 +107,7 @@ fn a_dead_shim_is_not_fatal() {
     let frame = Frame::black();
     let t0 = std::time::Instant::now();
     for _ in 0..100 {
-        sink.submit(&frame).expect("submit never fails when the shim is down");
+        sink.submit(Output::Cube(&frame)).expect("submit never fails when the shim is down");
     }
     assert!(t0.elapsed() < Duration::from_secs(1), "submit must not block on the socket");
     sink.finish().expect("clean shutdown with a dead shim");

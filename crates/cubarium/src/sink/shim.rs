@@ -9,18 +9,34 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use anyhow::Result;
-use cube_proto::{CubeClient, Frame};
+use cube_proto::{CubeClient, Frame, Raster};
 
-use super::FrameSink;
+use super::{FrameSink, Output};
 
 /// First retry delay after a send or connect failure.
 pub const BACKOFF_START: Duration = Duration::from_millis(100);
 /// The retry delay doubles up to this ceiling.
 pub const BACKOFF_MAX: Duration = Duration::from_secs(5);
 
+/// One image waiting in the mailbox, in the shape the world has. Owned rather than
+/// borrowed, because the worker reads it on its own thread long after `submit` returned.
+enum Payload {
+    Cube(Frame),
+    Ring(Raster),
+}
+
+impl Payload {
+    fn of(out: Output<'_>) -> Payload {
+        match out {
+            Output::Cube(f) => Payload::Cube(f.clone()),
+            Output::Ring(r) => Payload::Ring(r.clone()),
+        }
+    }
+}
+
 #[derive(Default)]
 struct Mailbox {
-    slot: Mutex<Option<Frame>>,
+    slot: Mutex<Option<Payload>>,
     ready: Condvar,
 }
 
@@ -104,13 +120,13 @@ impl ShimSink {
 }
 
 impl FrameSink for ShimSink {
-    fn submit(&mut self, frame: &Frame) -> Result<()> {
+    fn submit(&mut self, out: Output<'_>) -> Result<()> {
         let mut slot = self.shared.mailbox.slot.lock().expect("shim mailbox poisoned");
         if slot.is_some() {
             // The worker is still busy; the newest frame wins.
             self.shared.dropped.fetch_add(1, Ordering::Relaxed);
         }
-        *slot = Some(frame.clone());
+        *slot = Some(Payload::of(out));
         drop(slot);
         self.shared.mailbox.ready.notify_one();
         Ok(())
@@ -193,7 +209,16 @@ fn worker_loop(shared: &Shared, addr: &str) {
         }
 
         if let Some(c) = client.as_mut() {
-            match c.send(&frame) {
+            // A cube goes out as one `encode_full` datagram (format 0); a ring goes out
+            // as `encode_raster` strips (format 2), **all of them under one `seq`**, so a
+            // receiver can tell a torn image from the next one. `sent` counts images, not
+            // datagrams, on both paths — it is what `finish` reports and what the
+            // newest-frame mailbox is about.
+            let sent = match &frame {
+                Payload::Cube(f) => c.send(f),
+                Payload::Ring(r) => c.send_raster(r),
+            };
+            match sent {
                 Ok(()) => {
                     if reported {
                         eprintln!("cubarium: shim send recovered");
@@ -244,7 +269,7 @@ mod tests {
         let frame = Frame::black();
         let t0 = std::time::Instant::now();
         for _ in 0..50 {
-            sink.submit(&frame).unwrap();
+            sink.submit(Output::Cube(&frame)).unwrap();
         }
         assert!(t0.elapsed() < Duration::from_millis(500), "submit blocked on I/O");
     }
@@ -254,10 +279,23 @@ mod tests {
         let mut sink = ShimSink::new("this-host-does-not-exist.invalid:7392");
         let frame = Frame::black();
         for _ in 0..5 {
-            sink.submit(&frame).unwrap();
+            sink.submit(Output::Cube(&frame)).unwrap();
         }
         std::thread::sleep(Duration::from_millis(150));
         assert!(sink.errors() > 0, "the worker should have reported a connect failure");
         sink.finish().unwrap();
+    }
+
+    /// A ring world goes through the same mailbox, the same worker and the same backoff:
+    /// only the datagram the worker writes changes.
+    #[test]
+    fn a_ring_raster_goes_through_the_same_mailbox() {
+        let mut sink = ShimSink::new("127.0.0.1:1");
+        let raster = Raster::black(320, 180);
+        let t0 = std::time::Instant::now();
+        for _ in 0..50 {
+            sink.submit(Output::Ring(&raster)).unwrap();
+        }
+        assert!(t0.elapsed() < Duration::from_millis(500), "submit blocked on I/O");
     }
 }

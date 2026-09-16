@@ -1469,7 +1469,7 @@ fn capture_the_canopy_steps_as_native_frames() {
             let mut canvas = Canvas::cube();
             p.draw(&v, f, &mut canvas);
             canvas.encode(&mut frame);
-            sink.submit(&frame).unwrap();
+            sink.submit(cubarium::sink::Output::Cube(&frame)).unwrap();
             let steps: Vec<String> = sites
                 .iter()
                 .map(|s| match drawn_step(&p, s.cell, f) {

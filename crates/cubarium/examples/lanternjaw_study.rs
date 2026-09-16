@@ -50,7 +50,7 @@ use cubarium::{
         attack_channels,
     },
     present::{draw_floor, interpolate, srgb_linear},
-    sink::{FrameSink, PngSink, PreviewSink, ShimSink, WebSink},
+    sink::{FrameSink, Output, PngSink, PreviewSink, ShimSink, WebSink, WorldShape},
 };
 use cubarium_render::{Canvas, stamp_sprite};
 use cubarium_surface::{PathSegment, SurfacePoint, Vec2, travel};
@@ -505,7 +505,7 @@ fn main() -> Result<()> {
             );
             Box::new(web)
         }
-        Sink::Preview => Box::new(PreviewSink::new(4, &args.out)?),
+        Sink::Preview => Box::new(PreviewSink::new(4, &args.out, WorldShape::CUBE)?),
         Sink::Png => Box::new(PngSink::new(&args.out, args.every)?),
         Sink::Shim => Box::new(ShimSink::new(args.addr.clone())),
     };
@@ -607,7 +607,7 @@ fn main() -> Result<()> {
                     }
                 }
                 canvas.encode(&mut frame);
-                sink.submit(&frame)?;
+                sink.submit(Output::Cube(&frame))?;
                 // The frame schedule is wall-clock paced, so a capture's own instant is the
                 // only honest label for it: print the manifest the contact sheets read.
                 if args.sink == Sink::Png && frames.is_multiple_of(args.every) {

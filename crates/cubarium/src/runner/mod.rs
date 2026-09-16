@@ -29,10 +29,12 @@ use cube_proto::Frame;
 use crate::art::ArtPack;
 use crate::art_present::ArtPresenter;
 use crate::care;
-use crate::cli::{Run, RunSinkArg};
+use crate::cli::{Run, RunSinkArg, topology_name};
 use crate::clock::{Clock, Step, TICK_HZ};
 use crate::present::Presenter;
-use crate::sink::{FanOutSink, FrameSink, PngSink, PreviewSink, ShimSink, WebSink, web};
+use crate::sink::{
+    FanOutSink, FrameSink, Output, PngSink, PreviewSink, ShimSink, WebSink, WorldShape, web,
+};
 use crate::state::{self, Checkpointer};
 
 mod care_runtime;
@@ -153,6 +155,27 @@ fn open_world(run: &Run) -> Result<(World, Option<PathBuf>, Option<u64>)> {
             if let Some(file_config) = &from_file {
                 merge_operational(&mut state.config, file_config);
             }
+            // A world's shape is not an operational override: `merge_operational` copies
+            // `capacity` and `weather.moving` out of the file and nothing else, so a
+            // `--config` or `--topology` naming a different surface would be silently
+            // ignored. Refused by name instead, like every other schema refusal — the
+            // standing rule is fresh, never migrate.
+            let asked = run
+                .topology()
+                .or_else(|| from_file.as_ref().map(|c| c.topology));
+            if let Some(asked) = asked
+                && asked != state.config.topology
+            {
+                anyhow::bail!(
+                    "{}: this world is a {} world and the run asked for a {} world. A world's \
+                     shape is fixed when it is created, and nothing migrates one surface onto \
+                     another: resume it as it is, or use --fresh with a --state directory of \
+                     its own.",
+                    path.display(),
+                    topology_name(state.config.topology),
+                    topology_name(asked),
+                );
+            }
             let world =
                 World::from_state(state).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
             return Ok((world, Some(path), Some(tick)));
@@ -187,6 +210,15 @@ fn open_world(run: &Run) -> Result<(World, Option<PathBuf>, Option<u64>)> {
     let mut config = from_file.unwrap_or_default();
     if let Some(seed) = run.seed {
         config.seed = seed;
+    }
+    // The command line wins over the file for a world being created, exactly as `--seed`
+    // does. Validation is the config's own: `WorldConfig::validate` checks the
+    // (topology, scale) pair before any bound below it.
+    if let Some(topology) = run.topology() {
+        config.topology = topology;
+    }
+    if let Some(scale) = run.scale() {
+        config.world_scale = scale;
     }
     let world = World::new(config).map_err(|e| anyhow::anyhow!("invalid world config: {e}"))?;
     Ok((world, None, None))
@@ -247,6 +279,16 @@ fn seed_neural_animals(run: &Run, world: &mut World) -> Result<usize> {
     let Some(path) = run.neural.as_ref() else {
         return Ok(0);
     };
+    // Every constant below is a cube's: one copy per face in `Face` index order, aimed at
+    // cell (8, 8) of a 16×16 chart, searched outward inside that chart's edge. A ring has
+    // one chart and a different cell grid, so none of them means anything there. Refused
+    // by name rather than quietly seeding five animals into one corner of the ring.
+    anyhow::ensure!(
+        world.topology() == Topology::Cube,
+        "--neural seeds one trained animal per cube face, at the centre of that face's \
+         16x16 cell chart; this world is a ring, which has one chart and a different grid. \
+         Seeding a ring world is not written yet: start the world without --neural."
+    );
     let text = std::fs::read_to_string(path)
         .with_context(|| format!("reading the policy file {}", path.display()))?;
     let file: cubarium_search::es::export::PolicyFile = serde_json::from_str(&text)
@@ -326,23 +368,26 @@ fn open_sink(
     run: &Run,
     source: &web::Source,
     care: Option<std::sync::Arc<care::CareShared>>,
+    shape: WorldShape,
 ) -> Result<Option<Box<dyn FrameSink>>> {
     let primary: Box<dyn FrameSink> = match run.sink {
         RunSinkArg::None => return Ok(None),
-        RunSinkArg::Preview => Box::new(PreviewSink::new(run.scale, &run.out)?),
+        RunSinkArg::Preview => Box::new(PreviewSink::new(run.scale, &run.out, shape)?),
         RunSinkArg::Shim => Box::new(ShimSink::new(run.addr.clone())),
         RunSinkArg::Png => Box::new(PngSink::new(&run.out, run.every)?),
-        RunSinkArg::Web => Box::new(WebSink::with_care(
+        RunSinkArg::Web => Box::new(WebSink::with_world(
             run.web_port,
             speed_note(run.speed),
             source.clone(),
             care.clone(),
+            shape,
         )?),
     };
     if !run.mirror_web {
         return Ok(Some(primary));
     }
-    let web = WebSink::with_care(run.web_port, speed_note(run.speed), source.clone(), care)?;
+    let web =
+        WebSink::with_world(run.web_port, speed_note(run.speed), source.clone(), care, shape)?;
     // `--web-port 0` binds an ephemeral port, so the URL has to be reported to be usable.
     eprintln!(
         "cubarium: mirroring the same frames to the viewer at {}",
@@ -597,6 +642,7 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
     // Read before the sink opens: `--mirror-web`'s `/status` names the tick this run
     // started at, and nothing steps the world between here and the loop.
     let start_tick = world.tick();
+    let shape = WorldShape::new(world.topology(), world.scale());
     let mut sink = open_sink(
         run,
         &source_of(run, start_tick, loaded_from.as_deref()),
@@ -605,6 +651,7 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
         care.as_ref()
             .filter(|rt| rt.intake_allowed)
             .map(|rt| rt.service.shared()),
+        shape,
     )?;
     let headless = sink.is_none();
     let pace = Pace::of(run.speed);
@@ -623,8 +670,12 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
     }
     let tick_limit = (run.seconds > 0.0).then(|| (run.seconds * f64::from(TICK_HZ)).round() as u64);
 
-    let mut canvas = Canvas::cube();
+    // The canvas *is* the world's raster: five 64×64 charts for a cube, one `w×h` image
+    // for a ring. One of the two encode targets below is live, never both — a cube world
+    // never allocates a raster and a ring world never allocates a `Frame`.
+    let mut canvas = Canvas::new(world.topology(), world.scale());
     let mut frame = Frame::black();
+    let mut raster = shape.raster();
     let mut view: Option<RenderView> = None;
     let mut frames = 0u64;
     let started = Instant::now();
@@ -798,8 +849,16 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
                             }
                             // Exactly one encode per rendered frame; the identical bytes
                             // reach whichever sink is active.
-                            canvas.encode(&mut frame);
-                            s.submit(&frame)?;
+                            match raster.as_mut() {
+                                Some(r) => {
+                                    canvas.encode_raster(r);
+                                    s.submit(Output::Ring(r))?;
+                                }
+                                None => {
+                                    canvas.encode(&mut frame);
+                                    s.submit(Output::Cube(&frame))?;
+                                }
+                            }
                             frames += 1;
                         }
                     }

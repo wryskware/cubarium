@@ -359,7 +359,8 @@ pub(super) fn open_care(
     lock: &std::sync::Arc<state::StateLock>,
 ) -> Result<CareRuntime> {
     let epoch = care_epoch();
-    let journal = care::Journal::open(&run.state, &epoch, build_id)?;
+    let (topology, scale) = (world.topology(), world.scale());
+    let journal = care::Journal::open(&run.state, &epoch, build_id, topology)?;
     let admitted = world.care().admitted_seq;
     let plan = journal.replay_plan(admitted, world.tick())?;
     // After the journal's maximum, never after the snapshot's cursor: the journal has
@@ -378,11 +379,11 @@ pub(super) fn open_care(
     }
     let status = journal.status();
     let worker = care::JournalWorker::spawn_holding(journal, Some(std::sync::Arc::clone(lock)));
-    let service = care::CareService::new(epoch, status);
+    let service = care::CareService::for_world(epoch, status, topology);
     Ok(CareRuntime {
         service,
         worker,
-        effects: care_effects::CareEffects::default(),
+        effects: care_effects::CareEffects::new(topology, scale),
         next_seq,
         replay: plan.into(),
         inflight: Vec::new(),

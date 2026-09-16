@@ -24,16 +24,17 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use cube_proto::{FRAME_BYTES, Frame};
+use cube_proto::{FRAME_BYTES, Frame, Raster};
 
-use super::FrameSink;
+use super::{FrameSink, Output, WorldShape};
 use crate::care::{self, CareKind, CareShared, CareTarget};
 
 /// The viewer page, embedded so a running host has no runtime asset dependency.
 pub const INDEX_HTML: &str = include_str!("index.html");
 
-/// Length of a `/frame` body: an 8-byte little-endian render sequence then the encoded
-/// frame.
+/// Length of a `/frame` body on a **cube** world: an 8-byte little-endian render sequence
+/// then the encoded frame. A ring world's body is `8 + w·h·3`; the page reads the size it
+/// must expect from `/status` rather than from a constant.
 pub const FRAME_BODY_BYTES: usize = 8 + FRAME_BYTES;
 
 /// Backoff on resource/socket errors, and the non-Unix fallback wait.
@@ -57,8 +58,31 @@ const MAX_HANDLERS: usize = 32;
 /// Longest request head accepted. A `GET` from the viewer page is a few hundred bytes.
 const MAX_REQUEST_BYTES: usize = 8 * 1024;
 
-/// The newest frame and the render sequence it was submitted under.
-type Slot = Option<Arc<(u64, Frame)>>;
+/// One rendered image, owned, in the shape the world has. The server hands its bytes to
+/// whichever connection asks; it never converts between the two.
+pub(crate) enum Image {
+    Cube(Frame),
+    Ring(Raster),
+}
+
+impl Image {
+    fn of(out: Output<'_>) -> Image {
+        match out {
+            Output::Cube(f) => Image::Cube(f.clone()),
+            Output::Ring(r) => Image::Ring(r.clone()),
+        }
+    }
+
+    fn bytes(&self) -> &[u8] {
+        match self {
+            Image::Cube(f) => f.as_bytes().as_slice(),
+            Image::Ring(r) => r.as_bytes(),
+        }
+    }
+}
+
+/// The newest image and the render sequence it was submitted under.
+type Slot = Option<Arc<(u64, Image)>>;
 
 /// A read-only description of the host process behind this viewer, fixed for the life of
 /// the sink. It answers "whose world am I looking at?" for a viewer that may be one of
@@ -152,6 +176,10 @@ struct Shared {
     /// it still cannot reach the world: it can only put a validated request in a bounded
     /// queue the simulation owner drains at a boundary of its own choosing.
     care: Option<Arc<CareShared>>,
+    /// The world's shape, fixed for the life of the sink. `/status` reports it so the page
+    /// can pick its mode and size its canvas before the first `/frame` answer, and the
+    /// care routes validate a target against it.
+    shape: WorldShape,
 }
 
 impl Shared {
@@ -163,8 +191,12 @@ impl Shared {
     /// so a status poll cannot delay `submit` either.
     fn status_json(&self) -> String {
         let submitted = self.ticks.load(Ordering::Relaxed);
+        let (w, h) = self.shape.chart_size();
+        // `--world-scale` is validated finite and positive before a run starts.
+        let scale = serde_json::Number::from_f64(self.shape.scale.world())
+            .map_or("null".to_string(), |n| n.to_string());
         format!(
-            r#"{{"world_tick":{},"population":{},"neural_animals":{},"render_seq":{},"frames_served":{},"source":{}}}"#,
+            r#"{{"world_tick":{},"population":{},"neural_animals":{},"render_seq":{},"frames_served":{},"topology":"{}","w":{w},"h":{h},"scale":{scale},"source":{}}}"#,
             self.world_tick.load(Ordering::Relaxed),
             self.population.load(Ordering::Relaxed),
             self.neural_animals.load(Ordering::Relaxed),
@@ -172,8 +204,20 @@ impl Shared {
             // `/frame` prefix; before the first submit both read 0.
             submitted.saturating_sub(1),
             self.served.load(Ordering::Relaxed),
+            self.shape.name(),
             self.source.to_json(),
         )
+    }
+
+    /// The `/frame` body's length for this world: the 8-byte sequence plus the image.
+    fn frame_body_bytes(&self) -> usize {
+        let (w, h) = self.shape.chart_size();
+        match self.shape.topology {
+            cubarium_surface::Topology::Cube => FRAME_BODY_BYTES,
+            cubarium_surface::Topology::Ring { .. } => {
+                8 + usize::from(w) * usize::from(h) * 3
+            }
+        }
     }
 }
 
@@ -212,6 +256,20 @@ impl WebSink {
         source: Source,
         care: Option<Arc<CareShared>>,
     ) -> Result<WebSink> {
+        WebSink::with_world(port, note, source, care, WorldShape::CUBE)
+    }
+
+    /// [`WebSink::with_care`] for a world of a named shape. The shape is what `/status`
+    /// reports as `topology`, `w`, `h` and `scale`, what sizes the `/frame` body, and what
+    /// a care target is validated against — all of which the page needs before it has
+    /// polled a frame, so it is given here and never inferred from the first image.
+    pub fn with_world(
+        port: u16,
+        note: impl Into<String>,
+        source: Source,
+        care: Option<Arc<CareShared>>,
+        shape: WorldShape,
+    ) -> Result<WebSink> {
         let note = note.into();
         let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port)))
             .with_context(|| format!("binding the web viewer to 127.0.0.1:{port}"))?;
@@ -236,6 +294,7 @@ impl WebSink {
             source,
             port: addr.port(),
             care,
+            shape,
         });
         let server = {
             let shared = Arc::clone(&shared);
@@ -301,9 +360,26 @@ impl WebSink {
         &self.shared.note
     }
 
-    /// The newest frame in the mailbox and its render sequence, if one has been submitted.
+    /// The world shape this viewer reports and serves.
+    pub fn shape(&self) -> WorldShape {
+        self.shared.shape
+    }
+
+    /// The newest cube frame in the mailbox and its render sequence, if one has been
+    /// submitted. `None` on a ring world, whose images are rasters.
     pub fn newest(&self) -> Option<(u64, Frame)> {
-        self.shared.newest().map(|a| (a.0, a.1.clone()))
+        self.shared.newest().and_then(|a| match &a.1 {
+            Image::Cube(f) => Some((a.0, f.clone())),
+            Image::Ring(_) => None,
+        })
+    }
+
+    /// The newest raster and its render sequence, on a ring world.
+    pub fn newest_raster(&self) -> Option<(u64, Raster)> {
+        self.shared.newest().and_then(|a| match &a.1 {
+            Image::Ring(r) => Some((a.0, r.clone())),
+            Image::Cube(_) => None,
+        })
     }
 
     fn stop(&mut self) {
@@ -315,9 +391,9 @@ impl WebSink {
 }
 
 impl FrameSink for WebSink {
-    fn submit(&mut self, frame: &Frame) -> Result<()> {
+    fn submit(&mut self, out: Output<'_>) -> Result<()> {
         let seq = self.shared.ticks.fetch_add(1, Ordering::Relaxed);
-        let next = Arc::new((seq, frame.clone()));
+        let next = Arc::new((seq, Image::of(out)));
         let mut slot = self.shared.slot.lock().expect("web mailbox poisoned");
         // The newest frame always wins; nothing here waits on a client.
         *slot = Some(next);
@@ -499,7 +575,7 @@ fn handle(shared: &Shared, mut stream: TcpStream) {
             INDEX_HTML.as_bytes(),
         ),
         Some(("GET", "/frame")) => {
-            let body = frame_body(&shared.newest());
+            let body = frame_body(&shared.newest(), shared.frame_body_bytes());
             shared.served.fetch_add(1, Ordering::Relaxed);
             respond(
                 &mut stream,
@@ -661,7 +737,7 @@ fn care_route(
             let outcome = care.register();
             json(stream, outcome.http_status(), &outcome.body())
         }
-        CareRoute::Submit => match parse_care_request(&body) {
+        CareRoute::Submit => match parse_care_request(&body, shared.shape.topology) {
             Err(message) => json_error(stream, "400 Bad Request", message),
             Ok(CareRequest::Care {
                 client,
@@ -714,7 +790,10 @@ enum CareRequest {
 /// clamped, and none of them is treated as omission — a page that sent `null` because its
 /// selector was empty asked a question this host cannot answer, and telling it so is the only
 /// answer that cannot deliver an amount nobody chose.
-fn parse_care_request(body: &[u8]) -> Result<CareRequest, &'static str> {
+fn parse_care_request(
+    body: &[u8],
+    topology: cubarium_surface::Topology,
+) -> Result<CareRequest, &'static str> {
     let value: serde_json::Value =
         serde_json::from_slice(body).map_err(|_| "the request body is not JSON")?;
     let client = value
@@ -761,7 +840,8 @@ fn parse_care_request(body: &[u8]) -> Result<CareRequest, &'static str> {
         u: component("u")?,
         v: component("v")?,
     };
-    target.validate()?;
+    // Against *this* world: a 320-pixel ring accepts u = 200, a cube refuses it.
+    target.validate_on(topology)?;
     let dose = match value.get("dose_permille") {
         None => care::CareDose::STANDARD,
         Some(raw) => {
@@ -782,22 +862,28 @@ fn parse_care_request(body: &[u8]) -> Result<CareRequest, &'static str> {
     })
 }
 
-/// The `/frame` body: 8-byte little-endian render sequence then the frame bytes. With no
-/// frame yet, sequence 0 and a black frame, so the page has something valid to draw
-/// immediately. The layout is fixed: the page checks this length.
-fn frame_body(slot: &Slot) -> Vec<u8> {
-    let mut body = Vec::with_capacity(FRAME_BODY_BYTES);
+/// The `/frame` body: 8-byte little-endian render sequence then the image bytes — the
+/// cube's 61,440 encoded frame bytes, or a ring's `w·h·3` raster bytes. With no image yet,
+/// sequence 0 and a black one of the right size, so the page has something valid to draw
+/// immediately.
+///
+/// `expect` is the world's own body length, from [`Shared::frame_body_bytes`]. The page
+/// checks the length it computes from `/status` against what arrives, so a mailbox holding
+/// the wrong shape — which nothing can produce, since one sink serves one world — would be
+/// visible rather than drawn as garbage.
+fn frame_body(slot: &Slot, expect: usize) -> Vec<u8> {
+    let mut body = Vec::with_capacity(expect);
     match slot {
         Some(entry) => {
             body.extend_from_slice(&entry.0.to_le_bytes());
-            body.extend_from_slice(entry.1.as_bytes());
+            body.extend_from_slice(entry.1.bytes());
         }
         None => {
             body.extend_from_slice(&0u64.to_le_bytes());
-            body.resize(FRAME_BODY_BYTES, 0);
+            body.resize(expect, 0);
         }
     }
-    debug_assert_eq!(body.len(), FRAME_BODY_BYTES);
+    debug_assert_eq!(body.len(), expect);
     body
 }
 

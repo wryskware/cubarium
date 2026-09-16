@@ -2024,7 +2024,7 @@ fn capture_a_seam_crossing_capture_as_native_frames() {
             let mut canvas = Canvas::cube();
             p.draw(&view, f, &mut canvas);
             canvas.encode(&mut frame);
-            sink.submit(&frame).unwrap();
+            sink.submit(cubarium::sink::Output::Cube(&frame)).unwrap();
             manifest.push_str(&format!(
                 "tick {} f {:.3} phase {:?}\n",
                 view.tick, f, h.phase
@@ -2075,7 +2075,7 @@ fn capture_a_real_attack_as_native_frames() {
             let mut canvas = Canvas::cube();
             p.draw(&view, f, &mut canvas);
             canvas.encode(&mut frame);
-            sink.submit(&frame).unwrap();
+            sink.submit(cubarium::sink::Output::Cube(&frame)).unwrap();
             manifest.push_str(&format!(
                 "tick {} f {:.3} phase {:?}\n",
                 view.tick, f, phase

@@ -88,7 +88,13 @@ fn care_flourishes_follow_durable_application_and_boundary_replay_only() {
         if route == "uncertain" {
             hooks.fail_after_sync.store(1, Ordering::Relaxed);
         }
-        let journal = care::Journal::open_with_hooks(&dir, "visual-test", "test", hooks).unwrap();
+        let journal = care::Journal::open_with_hooks(
+            &dir,
+            "visual-test",
+            "test",
+            cubarium_surface::Topology::Cube,
+            hooks,
+        ).unwrap();
         let service = care::CareService::new("visual-test".to_string(), journal.status());
         let mut rt = CareRuntime {
             service,
