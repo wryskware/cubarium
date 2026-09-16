@@ -910,16 +910,23 @@ fn parse_record(line: &[u8], topology: Topology) -> std::result::Result<Record, 
             if (rec == "accepted_apex_v1") != (kind == CareKind::SpawnApex) {
                 return Err("the record kind and command kind disagree".to_string());
             }
-            let component = |target: &serde_json::Value, key: &str| -> std::result::Result<u8, String> {
+            // `u` and `v` are JSON numbers and always were: widening them from `u8` to
+            // `u16` changes no byte a journal ever carried, so every pre-widening record
+            // (0..=63 on a cube) parses to exactly the target it always parsed to.
+            let component = |target: &serde_json::Value, key: &str| -> std::result::Result<u16, String> {
                 let n = target
                     .get(key)
                     .and_then(serde_json::Value::as_u64)
                     .ok_or_else(|| format!("target has no `{key}`"))?;
-                u8::try_from(n).map_err(|_| format!("target `{key}` is out of range: {n}"))
+                u16::try_from(n).map_err(|_| format!("target `{key}` is out of range: {n}"))
+            };
+            let chart = |target: &serde_json::Value| -> std::result::Result<u8, String> {
+                let n = component(target, "face")?;
+                u8::try_from(n).map_err(|_| format!("target `face` is out of range: {n}"))
             };
             let read_target = |target: &serde_json::Value| -> std::result::Result<CareTarget, String> {
                 let target = CareTarget {
-                    face: component(target, "face")?, u: component(target, "u")?, v: component(target, "v")?,
+                    face: chart(target)?, u: component(target, "u")?, v: component(target, "v")?,
                 };
                 target.validate_on(topology).map_err(|e| e.to_string())?;
                 Ok(target)
@@ -1007,6 +1014,89 @@ mod tests {
         assert_eq!(j.accepted_records().len(), 1, "the earlier run's record survives");
         assert_eq!(j.truncated_bytes(), 0);
         assert_eq!(contents(&dir).lines().count(), 3, "epoch, accepted, epoch");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// **The widening's compatibility proof.** These four lines are the exact bytes a
+    /// build with `CareTarget { u: u8, v: u8 }` wrote — copied verbatim, not regenerated —
+    /// including the `accepted_apex_v1` two-target form and the `accepted_dose_v1` form.
+    /// After `u` and `v` became `u16`, they still parse, still recover their sequence and
+    /// boundary, and still name **the same cell**: the record's `u` and `v` were always
+    /// JSON integers, so only the accepted range grew.
+    #[test]
+    fn a_journal_written_before_the_widening_still_replays_onto_the_same_cells() {
+        let dir = scratch("pre-widening");
+        // Written by the pre-FW-4 host. Do not regenerate these: the point is that they
+        // are bytes this build never produced.
+        let history = concat!(
+            r#"{"rec":"epoch","epoch":"stamp-0","build":"0.1.0+pre-widening"}"#,
+            "\n",
+            r#"{"rec":"accepted","seq":1,"apply_after_tick":100,"client":"c-7","request":1,"kind":"feed","target":{"face":0,"u":0,"v":0}}"#,
+            "\n",
+            r#"{"rec":"accepted_dose_v1","seq":2,"apply_after_tick":140,"client":"c-7","request":2,"kind":"rain","target":{"face":4,"u":63,"v":63},"dose_permille":1500}"#,
+            "\n",
+            r#"{"rec":"accepted_apex_v1","seq":3,"apply_after_tick":180,"client":"c-7","request":3,"kind":"spawn_apex","targets":[{"face":1,"u":12,"v":34},{"face":3,"u":52,"v":8}]}"#,
+            "\n",
+        );
+        std::fs::write(dir.join(JOURNAL_NAME), history).unwrap();
+
+        let j = Journal::open(&dir, "stamp-1", "b", Topology::Cube).unwrap();
+        assert_eq!(j.truncated_bytes(), 0, "every line is complete; nothing may be dropped");
+        let recovered = j.accepted_records();
+        assert_eq!(recovered.len(), 3);
+
+        assert_eq!(recovered[0].target, CareTarget { face: 0, u: 0, v: 0 });
+        assert_eq!(recovered[0].kind, CareKind::Feed);
+        assert_eq!((recovered[0].seq, recovered[0].apply_after_tick), (1, 100));
+        assert_eq!(recovered[0].dose, CareDose::STANDARD, "a bare `accepted` is standard");
+        assert_eq!(recovered[0].client, "c-7");
+
+        // The far corner of the cube's last chart: the largest target the old byte could
+        // hold, and the one a narrowing mistake would have wrapped to 0.
+        assert_eq!(recovered[1].target, CareTarget { face: 4, u: 63, v: 63 });
+        assert_eq!(recovered[1].dose.permille(), 1500);
+
+        assert_eq!(recovered[2].target, CareTarget { face: 1, u: 12, v: 34 });
+        assert_eq!(recovered[2].second_target, Some(CareTarget { face: 3, u: 52, v: 8 }));
+
+        // And the whole schedule replays, in order, at the boundaries it was written with.
+        let plan = j.replay_plan(0, 0).expect("a contiguous schedule");
+        assert_eq!(
+            plan.iter().map(|c| (c.seq, c.apply_after_tick)).collect::<Vec<_>>(),
+            vec![(1, 100), (2, 140), (3, 180)]
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The widening is what makes a ring addressable at all, and the journal is where that
+    /// has to survive a restart: `u = 300` on a 320-pixel row round-trips, and the same
+    /// record is refused by a cube world because cube charts stop at 63.
+    #[test]
+    fn a_ring_target_past_the_cubes_63_round_trips_and_a_cube_refuses_it() {
+        let ring = Topology::Ring { w: 320, h: 180 };
+        let dir = scratch("ring-target");
+        let far = CareTarget { face: 0, u: 300, v: 170 };
+        {
+            let mut j = Journal::open(&dir, "s", "b", ring).unwrap();
+            j.append_accepted(&[PlannedCommand::standard(
+                1,
+                100,
+                CareKind::Feed,
+                far,
+                "c-1",
+                1,
+            )])
+            .unwrap();
+        }
+        assert!(contents(&dir).contains(r#""target":{"face":0,"u":300,"v":170}"#), "{}", contents(&dir));
+
+        let j = Journal::open(&dir, "s2", "b", ring).unwrap();
+        assert_eq!(j.accepted_records()[0].target, far);
+
+        // The same file against a cube world: the target is outside every cube chart, so
+        // the history is refused rather than silently landing on some other cell.
+        let err = format!("{:#}", Journal::open(&dir, "s3", "b", Topology::Cube).unwrap_err());
+        assert!(err.contains("pixel extent"), "{err}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

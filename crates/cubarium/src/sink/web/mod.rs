@@ -828,15 +828,19 @@ fn parse_care_request(
     let kind =
         CareKind::parse(kind_name).ok_or("`kind` must be feed, rain, clean or spawn_apex")?;
     let target = value.get("target").ok_or("`target` must be {face, u, v}")?;
-    let component = |key: &str| -> Result<u8, &'static str> {
+    // `u` and `v` are JSON integers and always were; only the accepted range grew, from a
+    // byte to the world's own extent. A page that sent `{"face":0,"u":12,"v":34}` before
+    // the widening sends exactly the same bytes and gets exactly the same cell.
+    let component = |key: &str| -> Result<u16, &'static str> {
         target
             .get(key)
             .and_then(serde_json::Value::as_u64)
-            .and_then(|n| u8::try_from(n).ok())
+            .and_then(|n| u16::try_from(n).ok())
             .ok_or("`target` must be {face, u, v} with small non-negative integers")
     };
     let target = CareTarget {
-        face: component("face")?,
+        face: u8::try_from(component("face")?)
+            .map_err(|_| "`target` must be {face, u, v} with small non-negative integers")?,
         u: component("u")?,
         v: component("v")?,
     };

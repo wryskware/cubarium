@@ -123,11 +123,15 @@ impl CareKind {
 
 /// A canonical surface point: which chart, and which pixel of it.
 ///
+/// `u` and `v` are `u16` because a ring chart is as wide as the world: a 320-pixel row
+/// cannot name its right-hand half in a byte, and a clamped or truncated coordinate would
+/// be a command aimed at a cell nobody chose. On a cube they still only ever hold 0..=63,
+/// and every cube value round-trips through the journal and the HTTP body unchanged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CareTarget {
     pub face: u8,
-    pub u: u8,
-    pub v: u8,
+    pub u: u16,
+    pub v: u16,
 }
 
 impl CareTarget {
@@ -572,14 +576,14 @@ impl CareShared {
         let (w, h) = (w as u64, h as u64);
         let mut draw_target = || CareTarget {
             face: charts[(next() % charts.len() as u64) as usize].index() as u8,
-            u: (next() % w) as u8,
-            v: (next() % h) as u8,
+            u: (next() % w) as u16,
+            v: (next() % h) as u16,
         };
         let first = draw_target();
         let second = if count == 2 {
             let mut candidate = draw_target();
             if candidate == first {
-                candidate.u = ((u64::from(candidate.u) + 1) % w) as u8;
+                candidate.u = ((u64::from(candidate.u) + 1) % w) as u16;
             }
             Some(candidate)
         } else { None };
