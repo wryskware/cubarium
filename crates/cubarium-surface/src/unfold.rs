@@ -1,21 +1,29 @@
 //! Local straight-line unfoldings: surface distance and chart images for nearby points.
 
-use crate::travel::{earliest_exit, edge_point, seam_turns};
-use crate::{Edge, FACE_EXTENT, Face, GEOM_EPS, Seam, SurfacePoint, TangentMap, Vec2};
+use crate::travel::{earliest_exit, edge_len, edge_point};
+use crate::{Edge, Face, GEOM_EPS, Seam, SurfacePoint, TangentMap, Topology, Vec2};
 
-/// Largest supported query radius in pixels. Within this radius every shortest path
-/// crosses at most [`MAX_SEAMS`] seams (both points are well inside one face width of
-/// each other, and the open bottom offers no shortcut), so enumerating chart paths of
-/// that length is complete. Callers asking for more get a panic, not a wrong answer.
+/// Largest supported query radius in pixels **on the cube**. Within this radius every
+/// shortest path crosses at most [`MAX_SEAMS`] seams (both points are well inside one
+/// face width of each other, and the open bottom offers no shortcut), so enumerating
+/// chart paths of that length is complete. Callers asking for more get a panic, not a
+/// wrong answer.
+///
+/// This is a completeness *proof*, not a tunable: nothing about the world scale may
+/// touch it. A ring has its own, chosen, cap — see [`Topology::max_local_radius`], which
+/// is what the functions here actually assert against.
 pub const MAX_LOCAL_RADIUS: f64 = 32.0;
 
-/// Seam crossings enumerated per chart path.
+/// Seam crossings enumerated per chart path on the cube. A ring never needs two: its
+/// three images (direct, `+w`, `−w`) are one crossing apart, and
+/// [`Topology::validate`] guarantees at most two of them are ever in range.
 pub const MAX_SEAMS: u8 = 2;
 
 /// A sequence of at most [`MAX_SEAMS`] seam crossings starting in the observer's chart.
 /// Each step names the chart being exited and the edge it exits through; the entry
-/// chart/edge follow from `Face::neighbor`. Ordering is lexicographic on `(len, steps)`,
-/// which is the tie-break rule for equal-length unfoldings; `direct()` sorts first.
+/// chart/edge follow from [`Topology::neighbor`]. Ordering is lexicographic on
+/// `(len, steps)`, which is the tie-break rule for equal-length unfoldings; `direct()`
+/// sorts first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ChartPath {
     pub len: u8,
@@ -34,11 +42,11 @@ impl ChartPath {
     }
 
     /// The chart the path ends in, starting from `observer_face`.
-    pub fn final_face(&self, observer_face: Face) -> Face {
+    pub fn final_face(&self, topo: Topology, observer_face: Face) -> Face {
         let mut f = observer_face;
         for &(face, edge) in self.steps() {
             debug_assert_eq!(face, f);
-            f = face.neighbor(edge).expect("chart paths never cross the open rim").face;
+            f = topo.neighbor(face, edge).expect("chart paths never cross an open rim").face;
         }
         f
     }
@@ -70,24 +78,34 @@ impl ChartImage {
     }
 }
 
-/// All chart images reachable from `observer_face` by at most `max_seams` (≤ [`MAX_SEAMS`])
-/// seam crossings, including the identity image of the observer's own chart, in
-/// [`ChartPath`] order. Paths never cross the open rim and never immediately return
-/// through the edge they entered by. The same target face may appear under several
-/// paths (for example Top via Front→Top and via Front→Right→Top); all are kept because
-/// each is the valid image for a different region.
+/// All chart images reachable from `observer_face` by at most `max_seams` seam crossings,
+/// including the identity image of the observer's own chart, in [`ChartPath`] order.
+/// Paths never cross an open rim and never immediately return through the edge they
+/// entered by. The same target face may appear under several paths (for example Top via
+/// Front→Top and via Front→Right→Top); all are kept because each is the valid image for
+/// a different region.
+///
+/// **A cube** enumerates up to [`MAX_SEAMS`] crossings: 11 images from a side face, 13
+/// from Top. **A ring** enumerates exactly three — the direct image and the translations
+/// by `+w` (exiting `Edge::Right`) and `−w` (exiting `Edge::Left`) — because its only
+/// seam is the chart to itself and a second crossing could only produce `±2w`, which
+/// [`Topology::validate`]'s width bound puts permanently out of range.
 ///
 /// Derivation of a one-seam image (normative): for the observer chart exiting through
 /// edge `e` into `(n, e2, reversed)`, the rotation `R` is the quarter-turn count from
-/// `cross_seam(observer_face, e, 0)`; the image rotation is `R.inverse()` (it carries
-/// target-chart tangents back into the observer chart); `origin` is fixed by requiring
-/// that the entry point at along-edge parameter `s'` on `e2` maps onto the exit point at
-/// parameter `s` on `e` (with `s' = 64 - s` when reversed) for `s = 0`, and debug-checked
-/// for `s = 64`. Two-seam images compose the second chart's image within the first.
-pub fn chart_images(observer_face: Face, max_seams: u8, out: &mut Vec<ChartImage>) {
+/// [`Topology::seam_turns`]; the image rotation is `R.inverse()` (it carries target-chart
+/// tangents back into the observer chart); `origin` is fixed by requiring that the entry
+/// point at along-edge parameter `s'` on `e2` maps onto the exit point at parameter `s`
+/// on `e` (with `s' = edge_len - s` when reversed) for `s = 0`, and debug-checked for
+/// `s = edge_len`. Two-seam images compose the second chart's image within the first.
+pub fn chart_images(topo: Topology, observer_face: Face, max_seams: u8, out: &mut Vec<ChartImage>) {
     // Longer paths are not enumerated; asking for more is a caller bug, not a panic.
     debug_assert!(max_seams <= MAX_SEAMS, "max_seams {max_seams} exceeds MAX_SEAMS");
-    let max_seams = max_seams.min(MAX_SEAMS);
+    let max_seams = match topo {
+        Topology::Cube => max_seams.min(MAX_SEAMS),
+        // One crossing is the whole wrap; a second would only name ±2w.
+        Topology::Ring { .. } => max_seams.min(1),
+    };
     out.clear();
     out.push(ChartImage {
         path: ChartPath::direct(),
@@ -99,7 +117,7 @@ pub fn chart_images(observer_face: Face, max_seams: u8, out: &mut Vec<ChartImage
         return;
     }
     for e in Edge::ALL {
-        let Some((seam, origin1, map1)) = seam_image(observer_face, e) else {
+        let Some((seam, origin1, map1)) = seam_image(topo, observer_face, e) else {
             continue;
         };
         out.push(ChartImage {
@@ -116,7 +134,7 @@ pub fn chart_images(observer_face: Face, max_seams: u8, out: &mut Vec<ChartImage
             if e3 == seam.edge {
                 continue;
             }
-            let Some((seam2, origin2, map2)) = seam_image(seam.face, e3) else {
+            let Some((seam2, origin2, map2)) = seam_image(topo, seam.face, e3) else {
                 continue;
             };
             out.push(ChartImage {
@@ -139,22 +157,26 @@ const PATH_FILLER: (Face, Edge) = (Face::Front, Edge::Top);
 /// `map` carries neighbour tangents into `face`'s chart (the inverse of the rotation a
 /// travelling tangent picks up on the way out), and `origin` is fixed by making the
 /// neighbour's entry point at along-edge parameter `s'` land on the exit point at `s`.
-fn seam_image(face: Face, edge: Edge) -> Option<(Seam, Vec2, TangentMap)> {
-    let seam = face.neighbor(edge)?;
-    let turns = seam_turns(face, edge).expect("the seam exists");
+/// On a ring this comes out as the pure translation by `±w` with `map = IDENTITY`.
+fn seam_image(topo: Topology, face: Face, edge: Edge) -> Option<(Seam, Vec2, TangentMap)> {
+    let seam = topo.neighbor(face, edge)?;
+    let turns = topo.seam_turns(face, edge).expect("the seam exists");
     let map = TangentMap::quarter_turns(turns).inverse();
 
-    let entry_param = |s: f64| if seam.reversed { FACE_EXTENT - s } else { s };
-    let origin = edge_point(edge, 0.0) - map.apply(edge_point(seam.edge, entry_param(0.0)));
+    let here = topo.extent(face);
+    let there = topo.extent(seam.face);
+    let len = edge_len(edge, here);
+    let entry_param = |s: f64| if seam.reversed { len - s } else { s };
+    let origin = edge_point(edge, 0.0, here) - map.apply(edge_point(seam.edge, entry_param(0.0), there));
 
     debug_assert!(
         {
             // The far end of the shared edge must land on the far end of the exit edge,
             // which also pins both shared corners of the two charts.
-            let far = origin + map.apply(edge_point(seam.edge, entry_param(FACE_EXTENT)));
-            (far - edge_point(edge, FACE_EXTENT)).length() < 1e-9
+            let far = origin + map.apply(edge_point(seam.edge, entry_param(len), there));
+            (far - edge_point(edge, len, here)).length() < 1e-9
         },
-        "seam image {face:?}.{edge:?} -> {seam:?} does not match at s = 64"
+        "seam image {face:?}.{edge:?} -> {seam:?} does not match at s = {len}"
     );
     debug_assert_eq!(map.det(), 1, "chart images never reflect");
     Some((seam, origin, map))
@@ -179,11 +201,11 @@ pub struct Unfolded {
 /// Normative check: sweep the segment chart by chart. In each chart (expressed in that
 /// chart's own coordinates through the running affine map) the segment must exit through
 /// the listed edge (earliest exit, ties within `GEOM_EPS` accepted if the listed edge is
-/// among the tied edges) and, for the final chart, must end inside `[0, 64]²` (boundary
-/// inclusive within `GEOM_EPS`). The empty path is valid iff the segment stays inside the
-/// observer's chart. Reflection is never valid for an unfolding: a segment that would leave
-/// through the open rim is invalid.
-pub fn segment_is_valid(observer_face: Face, observer: Vec2, image: Vec2, path: &ChartPath) -> bool {
+/// among the tied edges) and, for the final chart, must end inside `[0, w] × [0, h]`
+/// (boundary inclusive within `GEOM_EPS`). The empty path is valid iff the segment stays
+/// inside the observer's chart. Reflection is never valid for an unfolding: a segment
+/// that would leave through an open rim is invalid.
+pub fn segment_is_valid(topo: Topology, observer_face: Face, observer: Vec2, image: Vec2, path: &ChartPath) -> bool {
     if !observer.is_finite() || !image.is_finite() {
         return false;
     }
@@ -206,7 +228,7 @@ pub fn segment_is_valid(observer_face: Face, observer: Vec2, image: Vec2, path: 
         let here = inv.apply(observer - origin);
         let dir = inv.apply(d_obs);
 
-        let Some(exit) = earliest_exit(here, dir, sweep_len) else {
+        let Some(exit) = earliest_exit(here, dir, sweep_len, topo.extent(face)) else {
             return false;
         };
         // The exit must lie on the segment, at or after this chart's entry.
@@ -217,8 +239,8 @@ pub fn segment_is_valid(observer_face: Face, observer: Vec2, image: Vec2, path: 
         if !exit.includes(step_edge) {
             return false;
         }
-        let Some((seam, origin_next, map_next)) = seam_image(face, step_edge) else {
-            // The open rim is never a valid unfolding step.
+        let Some((seam, origin_next, map_next)) = seam_image(topo, face, step_edge) else {
+            // An open rim is never a valid unfolding step.
             return false;
         };
         origin += map.apply(origin_next);
@@ -228,35 +250,45 @@ pub fn segment_is_valid(observer_face: Face, observer: Vec2, image: Vec2, path: 
     }
 
     // The endpoint must lie inside the final chart.
+    let (w, h) = topo.extent(face);
     let end = map.inverse().apply(image - origin);
-    (-GEOM_EPS..=FACE_EXTENT + GEOM_EPS).contains(&end.x)
-        && (-GEOM_EPS..=FACE_EXTENT + GEOM_EPS).contains(&end.y)
+    (-GEOM_EPS..=w + GEOM_EPS).contains(&end.x) && (-GEOM_EPS..=h + GEOM_EPS).contains(&end.y)
 }
 
 /// Shortest valid unfolding of `target` as seen from `observer`, or `None` when no valid
-/// unfolding has length ≤ `max_distance`. Panics if `max_distance > MAX_LOCAL_RADIUS`.
-/// Candidates are pre-rejected when the 3D chord exceeds `max_distance` (with a `GEOM_EPS`
-/// margin). Equal-length candidates (within `GEOM_EPS`) resolve by `ChartPath` order.
+/// unfolding has length ≤ `max_distance`. Panics if `max_distance` exceeds
+/// [`Topology::max_local_radius`]. Candidates are pre-rejected when
+/// [`Topology::chord_sq`] exceeds `max_distance` (with a `GEOM_EPS` margin).
+/// Equal-length candidates (within `GEOM_EPS`) resolve by [`ChartPath`] order.
 /// Both points must be canonical.
-pub fn unfold(observer: SurfacePoint, target: SurfacePoint, max_distance: f64) -> Option<Unfolded> {
+pub fn unfold(topo: Topology, observer: SurfacePoint, target: SurfacePoint, max_distance: f64) -> Option<Unfolded> {
     let mut images = Vec::new();
-    chart_images(observer.face, MAX_SEAMS, &mut images);
-    unfold_with(&images, observer, target, max_distance)
+    chart_images(topo, observer.face, MAX_SEAMS, &mut images);
+    unfold_with(topo, &images, observer, target, max_distance)
 }
 
-/// [`unfold`] using precomputed `chart_images(observer.face, MAX_SEAMS, ..)`; the caller
-/// caches those per face to keep the hot path allocation-free.
-pub fn unfold_with(images: &[ChartImage], observer: SurfacePoint, target: SurfacePoint, max_distance: f64) -> Option<Unfolded> {
+/// [`unfold`] using precomputed `chart_images(topo, observer.face, MAX_SEAMS, ..)`; the
+/// caller caches those per face to keep the hot path allocation-free.
+pub fn unfold_with(
+    topo: Topology,
+    images: &[ChartImage],
+    observer: SurfacePoint,
+    target: SurfacePoint,
+    max_distance: f64,
+) -> Option<Unfolded> {
+    let local_radius = topo.max_local_radius();
     assert!(
-        max_distance <= MAX_LOCAL_RADIUS,
-        "max_distance {max_distance} exceeds MAX_LOCAL_RADIUS"
+        max_distance <= local_radius,
+        "max_distance {max_distance} exceeds the local radius {local_radius} of {topo:?} \
+         (MAX_LOCAL_RADIUS on the cube)"
     );
-    debug_assert!(observer.is_canonical(), "unfold from non-canonical {observer:?}");
-    debug_assert!(target.is_canonical(), "unfold to non-canonical {target:?}");
+    debug_assert!(observer.is_canonical(topo), "unfold from non-canonical {observer:?}");
+    debug_assert!(target.is_canonical(topo), "unfold to non-canonical {target:?}");
 
     let limit = max_distance + GEOM_EPS;
-    // A 3D chord is a lower bound on surface distance: reject far pairs before unfolding.
-    if observer.chord_sq(&target) > limit * limit {
+    // A lower bound on surface distance (exact on a ring): reject far pairs before
+    // unfolding them.
+    if topo.chord_sq(&observer, &target) > limit * limit {
         return None;
     }
     let here = observer.chart();
@@ -276,7 +308,7 @@ pub fn unfold_with(images: &[ChartImage], observer: SurfacePoint, target: Surfac
         if best.as_ref().is_some_and(|b| distance >= b.distance - GEOM_EPS) {
             continue;
         }
-        if !segment_is_valid(observer.face, here, local, &img.path) {
+        if !segment_is_valid(topo, observer.face, here, local, &img.path) {
             continue;
         }
         best = Some(Unfolded { local, map: img.map, distance, path: img.path });
@@ -285,9 +317,10 @@ pub fn unfold_with(images: &[ChartImage], observer: SurfacePoint, target: Surfac
 }
 
 /// Surface distance between two canonical points if it is ≤ `max_distance`.
-/// Symmetric: `surface_distance(a, b, r) == surface_distance(b, a, r)` within `GEOM_EPS`.
-pub fn surface_distance(a: SurfacePoint, b: SurfacePoint, max_distance: f64) -> Option<f64> {
-    unfold(a, b, max_distance).map(|u| u.distance)
+/// Symmetric: `surface_distance(t, a, b, r) == surface_distance(t, b, a, r)` within
+/// `GEOM_EPS`.
+pub fn surface_distance(topo: Topology, a: SurfacePoint, b: SurfacePoint, max_distance: f64) -> Option<f64> {
+    unfold(topo, a, b, max_distance).map(|u| u.distance)
 }
 
 #[cfg(test)]

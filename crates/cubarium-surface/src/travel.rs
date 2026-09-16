@@ -1,9 +1,9 @@
 //! Swept continuous transport across seams with rim reflection.
 
-use crate::{Edge, FACE_EXTENT, Face, GEOM_EPS, NUDGE, SurfacePoint, TangentMap, Vec2, cross_seam};
+use crate::{Edge, Face, GEOM_EPS, NUDGE, SurfacePoint, TangentMap, Topology, Vec2};
 
-/// The earliest boundary hit of the ray `p + t·d` against the chart square `[0, 64]²`,
-/// counting only edges whose outward component of `d` is positive.
+/// The earliest boundary hit of the ray `p + t·d` against the chart rectangle
+/// `[0, w] × [0, h]`, counting only edges whose outward component of `d` is positive.
 ///
 /// Because the chart is convex this is the exit parameter of the whole line, independent
 /// of where inside the chart the sweep started, so callers may hand in a point that is
@@ -34,24 +34,24 @@ impl Exit {
 
 /// Parameter at which `p + t·d` reaches the line of `edge`, when `d` leaves through it.
 #[inline]
-fn edge_exit_t(p: Vec2, d: Vec2, edge: Edge) -> Option<f64> {
+fn edge_exit_t(p: Vec2, d: Vec2, edge: Edge, extent: (f64, f64)) -> Option<f64> {
     let t = match edge {
         Edge::Top if d.y < 0.0 => -p.y / d.y,
-        Edge::Right if d.x > 0.0 => (FACE_EXTENT - p.x) / d.x,
-        Edge::Bottom if d.y > 0.0 => (FACE_EXTENT - p.y) / d.y,
+        Edge::Right if d.x > 0.0 => (extent.0 - p.x) / d.x,
+        Edge::Bottom if d.y > 0.0 => (extent.1 - p.y) / d.y,
         Edge::Left if d.x < 0.0 => -p.x / d.x,
         _ => return None,
     };
     t.is_finite().then_some(t)
 }
 
-/// Earliest exit of `p + t·d` from `[0, 64]²`. `sweep_len` is `|d|`, used to convert the
-/// `GEOM_EPS` pixel tie tolerance into a parameter tolerance.
-pub(crate) fn earliest_exit(p: Vec2, d: Vec2, sweep_len: f64) -> Option<Exit> {
+/// Earliest exit of `p + t·d` from `[0, w] × [0, h]`. `sweep_len` is `|d|`, used to
+/// convert the `GEOM_EPS` pixel tie tolerance into a parameter tolerance.
+pub(crate) fn earliest_exit(p: Vec2, d: Vec2, sweep_len: f64, extent: (f64, f64)) -> Option<Exit> {
     let mut ts = [f64::INFINITY; 4];
     let mut tmin = f64::INFINITY;
     for e in Edge::ALL {
-        if let Some(t) = edge_exit_t(p, d, e) {
+        if let Some(t) = edge_exit_t(p, d, e, extent) {
             ts[e as usize] = t;
             tmin = tmin.min(t);
         }
@@ -69,14 +69,24 @@ pub(crate) fn earliest_exit(p: Vec2, d: Vec2, sweep_len: f64) -> Option<Exit> {
     Some(Exit { edge, t: tmin, tied })
 }
 
+/// The length of `edge` in its chart: the width for the horizontal edges, the height for
+/// the vertical ones. On the cube every edge is 64 pixels.
+#[inline]
+pub(crate) fn edge_len(edge: Edge, extent: (f64, f64)) -> f64 {
+    match edge {
+        Edge::Top | Edge::Bottom => extent.0,
+        Edge::Right | Edge::Left => extent.1,
+    }
+}
+
 /// The chart point on `edge` at along-edge parameter `s` (`u` for `Top`/`Bottom`,
 /// `v` for `Left`/`Right`).
 #[inline]
-pub(crate) fn edge_point(edge: Edge, s: f64) -> Vec2 {
+pub(crate) fn edge_point(edge: Edge, s: f64, extent: (f64, f64)) -> Vec2 {
     match edge {
         Edge::Top => Vec2::new(s, 0.0),
-        Edge::Right => Vec2::new(FACE_EXTENT, s),
-        Edge::Bottom => Vec2::new(s, FACE_EXTENT),
+        Edge::Right => Vec2::new(extent.0, s),
+        Edge::Bottom => Vec2::new(s, extent.1),
         Edge::Left => Vec2::new(0.0, s),
     }
 }
@@ -90,22 +100,15 @@ pub(crate) fn edge_param(edge: Edge, p: Vec2) -> f64 {
     }
 }
 
-/// Quarter turns a tangent vector rotates when crossing out of `face` through `edge`.
-/// Taken from `cross_seam` at `t = 0`; the turn count does not depend on `t`.
+/// Snap a hit point onto `edge` exactly and keep the along-edge parameter inside the chart.
 #[inline]
-pub(crate) fn seam_turns(face: Face, edge: Edge) -> Option<u8> {
-    cross_seam(face, edge, 0).map(|(_, _, _, turns)| turns)
-}
-
-/// Snap a hit point onto `edge` exactly and keep the along-edge parameter inside `[0, 64]`.
-#[inline]
-fn snap_to_edge(mut p: Vec2, edge: Edge) -> Vec2 {
-    p.x = p.x.clamp(0.0, FACE_EXTENT);
-    p.y = p.y.clamp(0.0, FACE_EXTENT);
+fn snap_to_edge(mut p: Vec2, edge: Edge, extent: (f64, f64)) -> Vec2 {
+    p.x = p.x.clamp(0.0, extent.0);
+    p.y = p.y.clamp(0.0, extent.1);
     match edge {
         Edge::Top => p.y = 0.0,
-        Edge::Right => p.x = FACE_EXTENT,
-        Edge::Bottom => p.y = FACE_EXTENT,
+        Edge::Right => p.x = extent.0,
+        Edge::Bottom => p.y = extent.1,
         Edge::Left => p.x = 0.0,
     }
     p
@@ -113,8 +116,8 @@ fn snap_to_edge(mut p: Vec2, edge: Edge) -> Vec2 {
 
 /// Upper bound on seam crossings plus reflections in one [`travel`] call before the
 /// forward-progress fallback engages. A displacement of `d` pixels can legitimately
-/// cross at most about `d / 64 + 2` charts; the bound is generous so that only genuine
-/// vertex loops trigger it.
+/// cross at most about `d / chart_width + 2` charts; the bound is generous so that only
+/// genuine vertex loops trigger it.
 pub const MAX_CROSSINGS: u32 = 64;
 
 /// One straight piece of a swept path, entirely inside one chart. `from` and `to` are
@@ -172,41 +175,43 @@ impl Default for SurfacePoint {
 /// 1. `start` must be canonical. A non-finite displacement is treated as zero with
 ///    `fallback = true`.
 /// 2. Repeat: find the earliest parameter `t ∈ [0, 1]` at which the remaining straight
-///    segment leaves the chart `[0, 64]²` through an edge whose outward component of the
-///    remaining displacement is positive. If none (or `t > 1`), the sweep ends inside the
-///    chart: emit the final segment and stop.
+///    segment leaves the chart `[0, w] × [0, h]` through an edge whose outward component
+///    of the remaining displacement is positive. If none (or `t > 1`), the sweep ends
+///    inside the chart: emit the final segment and stop.
 /// 3. If two edges are hit within `GEOM_EPS` (pixel distance along the sweep), it is a
 ///    vertex tie: choose the lowest `Edge` index (`Top < Right < Bottom < Left`) and count
 ///    it in `ties`. Emit the segment up to the hit point, with the hit coordinate set
 ///    exactly to the boundary value.
-/// 4. If the edge is a side face's `Edge::Bottom`: reflect. Negate the `y` component of the
-///    remaining displacement, compose `REFLECT_Y` into `map`, stay in the chart at the hit
-///    point (`v == 64`), count a reflection.
-/// 5. Otherwise cross the seam given by `Face::neighbor`: the along-edge parameter `s`
-///    (`u` for Top/Bottom edges, `v` for Left/Right edges) becomes `64 - s` when the seam
-///    is reversed; the entry point lies on the neighbor's entry edge at that parameter
-///    (`Top: (s', 0)`, `Right: (64, s')`, `Bottom: (s', 64)`, `Left: (0, s')`); the
-///    remaining displacement rotates by the quarter turns `cross_seam(face, edge, 0)`
-///    reports (the turn count does not depend on `t`); compose that rotation into `map`;
-///    count a crossing.
+/// 4. If the edge has no neighbour — a cube side face's `Edge::Bottom`, a ring's
+///    `Edge::Top` or `Edge::Bottom` — reflect. Negate the `y` component of the remaining
+///    displacement, compose `REFLECT_Y` into `map`, stay in the chart at the hit point,
+///    count a reflection.
+/// 5. Otherwise cross the seam given by [`Topology::neighbor`]: the along-edge parameter
+///    `s` (`u` for Top/Bottom edges, `v` for Left/Right edges) becomes `edge_len - s` when
+///    the seam is reversed; the entry point lies on the neighbor's entry edge at that
+///    parameter (`Top: (s', 0)`, `Right: (w, s')`, `Bottom: (s', h)`, `Left: (0, s')`); the
+///    remaining displacement rotates by the quarter turns [`Topology::seam_turns`] reports
+///    (the turn count does not depend on `t`); compose that rotation into `map`; count a
+///    crossing. **A ring's vertical edge is a seam of the chart to itself** — same chart,
+///    unreversed, zero quarter turns — so the wrap is this branch, not a new one.
 /// 6. If `crossings + reflections` exceeds [`MAX_CROSSINGS`]: set `fallback`, drop the
 ///    remaining displacement, move each boundary coordinate of the current point inward
 ///    by `NUDGE`, and stop.
-/// 7. Canonicalize `end` (a coordinate equal to 64 becomes `64.next_down()`).
+/// 7. Canonicalize `end` (a coordinate equal to the extent becomes its `next_down()`).
 ///
 /// Properties tests rely on: segment lengths sum to the displacement length; retracing
 /// (`travel(end, map.apply(-displacement_remaining...))`) returns to the start away from
 /// ties; speed and angles are preserved across seams; a straight path never tunnels
-/// through the open bottom.
-pub fn travel(start: SurfacePoint, displacement: Vec2) -> Travel {
+/// through a rim.
+pub fn travel(topo: Topology, start: SurfacePoint, displacement: Vec2) -> Travel {
     let mut out = Travel::default();
-    travel_into(start, displacement, &mut out);
+    travel_into(topo, start, displacement, &mut out);
     out
 }
 
 /// [`travel`] into a reused buffer: clears `out.segments` (keeping its capacity) and
 /// overwrites every field.
-pub fn travel_into(start: SurfacePoint, displacement: Vec2, out: &mut Travel) {
+pub fn travel_into(topo: Topology, start: SurfacePoint, displacement: Vec2, out: &mut Travel) {
     out.segments.clear();
     out.map = TangentMap::IDENTITY;
     out.crossings = 0;
@@ -214,12 +219,13 @@ pub fn travel_into(start: SurfacePoint, displacement: Vec2, out: &mut Travel) {
     out.ties = 0;
     out.fallback = false;
 
-    debug_assert!(start.is_canonical(), "travel from non-canonical {start:?}");
+    debug_assert!(start.is_canonical(topo), "travel from non-canonical {start:?}");
     let mut face = start.face;
+    let mut extent = topo.extent(face);
     // Keep the sweep total even if a caller hands in a slightly out-of-range point.
     let mut p = Vec2::new(
-        if start.u.is_finite() { start.u.clamp(0.0, FACE_EXTENT) } else { 0.0 },
-        if start.v.is_finite() { start.v.clamp(0.0, FACE_EXTENT) } else { 0.0 },
+        if start.u.is_finite() { start.u.clamp(0.0, extent.0) } else { 0.0 },
+        if start.v.is_finite() { start.v.clamp(0.0, extent.1) } else { 0.0 },
     );
 
     let mut d = displacement;
@@ -230,7 +236,7 @@ pub fn travel_into(start: SurfacePoint, displacement: Vec2, out: &mut Travel) {
 
     loop {
         let sweep_len = d.length();
-        let hit = earliest_exit(p, d, sweep_len).filter(|e| e.t <= 1.0);
+        let hit = earliest_exit(p, d, sweep_len, extent).filter(|e| e.t <= 1.0);
         let Some(exit) = hit else {
             // The sweep ends inside this chart.
             let end = p + d;
@@ -245,14 +251,14 @@ pub fn travel_into(start: SurfacePoint, displacement: Vec2, out: &mut Travel) {
             out.ties += 1;
         }
         let t = exit.t.clamp(0.0, 1.0);
-        let hp = snap_to_edge(p + d * t, exit.edge);
+        let hp = snap_to_edge(p + d * t, exit.edge, extent);
         if hp != p {
             out.segments.push(PathSegment { face, from: p, to: hp });
         }
         let remaining = d * (1.0 - t);
 
-        match face.neighbor(exit.edge) {
-            // The open bottom rim of a side face: pure specular reflection in place.
+        match topo.neighbor(face, exit.edge) {
+            // An open rim: pure specular reflection in place.
             None => {
                 d = Vec2::new(remaining.x, -remaining.y);
                 out.map = out.map.then(TangentMap::REFLECT_Y);
@@ -261,39 +267,40 @@ pub fn travel_into(start: SurfacePoint, displacement: Vec2, out: &mut Travel) {
             }
             Some(seam) => {
                 let s = edge_param(exit.edge, hp);
-                let s2 = if seam.reversed { FACE_EXTENT - s } else { s };
-                let turns = seam_turns(face, exit.edge).expect("seam exists");
+                let s2 = if seam.reversed { edge_len(exit.edge, extent) - s } else { s };
+                let turns = topo.seam_turns(face, exit.edge).expect("seam exists");
                 let rot = TangentMap::quarter_turns(turns);
-                p = edge_point(seam.edge, s2);
+                face = seam.face;
+                extent = topo.extent(face);
+                p = edge_point(seam.edge, s2, extent);
                 d = rot.apply(remaining);
                 out.map = out.map.then(rot);
-                face = seam.face;
                 out.crossings += 1;
             }
         }
 
         if out.crossings + out.reflections > MAX_CROSSINGS {
             out.fallback = true;
-            p = nudge_inward(p);
+            p = nudge_inward(p, extent);
             break;
         }
     }
 
-    out.end = SurfacePoint::new(face, p.x, p.y).canonicalize();
+    out.end = SurfacePoint::new(face, p.x, p.y).canonicalize(topo);
 }
 
 /// Move every coordinate that sits on a chart boundary inward by [`NUDGE`].
-fn nudge_inward(p: Vec2) -> Vec2 {
-    let fix = |c: f64| {
+fn nudge_inward(p: Vec2, extent: (f64, f64)) -> Vec2 {
+    let fix = |c: f64, e: f64| {
         if c <= 0.0 {
             NUDGE
-        } else if c >= FACE_EXTENT {
-            FACE_EXTENT - NUDGE
+        } else if c >= e {
+            e - NUDGE
         } else {
             c
         }
     };
-    Vec2::new(fix(p.x), fix(p.y))
+    Vec2::new(fix(p.x, extent.0), fix(p.y, extent.1))
 }
 
 #[cfg(test)]

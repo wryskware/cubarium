@@ -1,29 +1,43 @@
-//! The scalar field graph: 16×16 cells per face with reciprocal seam edges.
+//! The scalar field graph: 16×16 cells per cube face, or one `w/4S × h/4S` ring grid.
 
 use crate::{
-    ChartImage, Edge, Face, MAX_SEAMS, SurfacePoint, chart_images, cross_seam, face_frame,
-    unfold_with,
+    ChartImage, Edge, Face, MAX_SEAMS, Scale, SurfacePoint, Topology, chart_images, cross_seam,
+    face_frame, unfold_with,
 };
 
 /// Height differences below this are treated as level (see [`FieldGraph::downhill`]).
 const DOWNHILL_EPS: f64 = 1e-9;
 
-/// Cells along one face edge.
+/// Cells along one cube face edge.
 pub const CELLS_PER_FACE_EDGE: usize = 16;
-/// Pixels along one cell edge.
-pub const CELL_PIXELS: f64 = 4.0;
-/// Total cells: five faces × 16 × 16.
-pub const CELL_COUNT: usize = 5 * CELLS_PER_FACE_EDGE * CELLS_PER_FACE_EDGE;
 
-/// A field cell: `face.index() * 256 + cy * 16 + cx`.
+/// Cells on a cube: five faces × 16 × 16. **A runtime cell count is
+/// [`Topology::cell_count`]**; this constant is only for cube-only literals and fixtures,
+/// which no ring world may use (`1,280 = 2^8·5` cannot be factored 16:9 with square
+/// cells, so no ring raster reproduces it).
+pub const CUBE_CELL_COUNT: usize = 5 * CELLS_PER_FACE_EDGE * CELLS_PER_FACE_EDGE;
+
+/// A field cell: a plain index, decoded through the topology.
+///
+/// On a cube that is `face.index() * 256 + cy * 16 + cx`; on a ring, `cy * cells_x + cx`.
+/// The index is a `u16`, so a topology may not exceed 65,535 cells — a bound
+/// [`Topology::validate`] enforces.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CellId(pub u16);
 
 impl CellId {
-    pub fn new(face: Face, cx: u8, cy: u8) -> CellId {
-        assert!(cx < 16 && cy < 16, "cell ({cx}, {cy}) out of range");
-        CellId((face.index() * 256 + usize::from(cy) * 16 + usize::from(cx)) as u16)
+    /// The cell at `(cx, cy)` of `face`. Panics if the cell is outside the chart's grid.
+    pub fn new(topo: Topology, scale: Scale, face: Face, cx: u16, cy: u16) -> CellId {
+        let (nx, ny) = topo.cells(scale, face);
+        assert!(cx < nx && cy < ny, "cell ({cx}, {cy}) out of range for {topo:?}");
+        let chart = topo
+            .charts()
+            .iter()
+            .position(|f| *f == face)
+            .expect("the topology has this chart");
+        let per_chart = usize::from(nx) * usize::from(ny);
+        CellId((chart * per_chart + usize::from(cy) * usize::from(nx) + usize::from(cx)) as u16)
     }
 
     #[inline]
@@ -31,97 +45,145 @@ impl CellId {
         self.0 as usize
     }
 
+    /// The chart this cell belongs to.
     #[inline]
-    pub fn face(self) -> Face {
-        Face::from_index((self.0 / 256) as u8).expect("valid cell face")
+    pub fn face(self, topo: Topology, scale: Scale) -> Face {
+        let (nx, ny) = topo.cells(scale, Face::Front);
+        let per_chart = usize::from(nx) * usize::from(ny);
+        topo.charts()[self.index() / per_chart]
     }
 
+    /// The cell's column within its chart.
     #[inline]
-    pub fn cx(self) -> u8 {
-        (self.0 % 16) as u8
+    pub fn cx(self, topo: Topology, scale: Scale) -> u16 {
+        let (nx, ny) = topo.cells(scale, Face::Front);
+        let per_chart = usize::from(nx) * usize::from(ny);
+        ((self.index() % per_chart) % usize::from(nx)) as u16
     }
 
+    /// The cell's row within its chart.
     #[inline]
-    pub fn cy(self) -> u8 {
-        ((self.0 % 256) / 16) as u8
+    pub fn cy(self, topo: Topology, scale: Scale) -> u16 {
+        let (nx, ny) = topo.cells(scale, Face::Front);
+        let per_chart = usize::from(nx) * usize::from(ny);
+        ((self.index() % per_chart) / usize::from(nx)) as u16
     }
 
-    /// The cell's center: `(cx*4 + 2, cy*4 + 2)`.
-    pub fn center(self) -> SurfacePoint {
+    /// The cell's center: half a cell in from its top-left corner.
+    pub fn center(self, topo: Topology, scale: Scale) -> SurfacePoint {
+        let cp = cell_pixels(topo, scale);
         SurfacePoint::new(
-            self.face(),
-            f64::from(self.cx()) * CELL_PIXELS + 2.0,
-            f64::from(self.cy()) * CELL_PIXELS + 2.0,
+            self.face(topo, scale),
+            f64::from(self.cx(topo, scale)) * cp + cp / 2.0,
+            f64::from(self.cy(topo, scale)) * cp + cp / 2.0,
         )
     }
 
     /// Every cell in index order.
-    pub fn all() -> impl Iterator<Item = CellId> {
-        (0..CELL_COUNT as u16).map(CellId)
+    pub fn all(topo: Topology, scale: Scale) -> impl Iterator<Item = CellId> {
+        (0..topo.cell_count(scale) as u16).map(CellId)
     }
 }
 
-/// The cell containing a point (floor of `u/4`, `v/4`; a transient 64 clamps to 15).
-pub fn cell_of(p: &SurfacePoint) -> CellId {
-    let c = |x: f64| (x / CELL_PIXELS).floor().clamp(0.0, 15.0) as u8;
-    CellId::new(p.face, c(p.u), c(p.v))
+/// Pixels per cell edge: 4 on the cube (pinned to `S = 1`), `4·S` on a ring.
+#[inline]
+fn cell_pixels(topo: Topology, scale: Scale) -> f64 {
+    match topo {
+        Topology::Cube => crate::CELL_PIXELS,
+        Topology::Ring { .. } => scale.cell_pixels(),
+    }
 }
 
-/// Cardinal adjacency of cells across the whole surface, derived once from
-/// `Face::neighbor` and `cross_seam` at cell resolution.
+/// The cell containing a point (floor of `u/cell_pixels`, `v/cell_pixels`; a transient
+/// coordinate equal to the extent clamps to the last cell).
+pub fn cell_of(topo: Topology, scale: Scale, p: &SurfacePoint) -> CellId {
+    let cp = cell_pixels(topo, scale);
+    let (nx, ny) = topo.cells(scale, p.face);
+    let c = |x: f64, n: u16| (x / cp).floor().clamp(0.0, f64::from(n - 1)) as u16;
+    CellId::new(topo, scale, p.face, c(p.u, nx), c(p.v, ny))
+}
+
+/// Cardinal adjacency of cells across the whole surface, derived once from the topology.
 ///
 /// Normative derivation: the neighbor of cell `(face, cx, cy)` across `edge` is the
-/// adjacent cell in the same chart when one exists; otherwise it is the cell containing
-/// the pixel `cross_seam(face, edge, t)` returns for `t = 4·k` where `k` is the cell's
-/// along-edge index (`cx` for Top/Bottom, `cy` for Left/Right). Reversal at the Right/Top
-/// and Back/Top seams therefore comes out of `cross_seam` (`63 - t` at pixel resolution
-/// maps cell `k` to cell `15 - k`). The open rim yields `None`.
+/// adjacent cell in the same chart when one exists. Otherwise, **on a cube**, it is the
+/// cell containing the pixel `cross_seam(face, edge, t)` returns for `t = 4·k` where `k`
+/// is the cell's along-edge index (`cx` for Top/Bottom, `cy` for Left/Right) — reversal at
+/// the Right/Top and Back/Top seams therefore comes out of `cross_seam` (`63 - t` at pixel
+/// resolution maps cell `k` to cell `15 - k`) — and the open rim yields `None`. **On a
+/// ring**, `Edge::Right` at the last column is `(0, cy)` and `Edge::Left` at column 0 is
+/// `(cells_x - 1, cy)`: every row is a ring. The two horizontal rims yield `None`.
 ///
 /// Invariants: the relation is reciprocal (`b` across `e` of `a` implies `a` is across
-/// some edge of `b`), every cell has degree 4 except the 64 rim cells with degree 3, and
-/// there are exactly 2,528 undirected edges (2,400 within charts, 128 across seams).
+/// some edge of `b`); on a cube every cell has degree 4 except the 64 rim cells with
+/// degree 3, and there are exactly 2,528 undirected edges (2,400 within charts, 128 across
+/// seams); on a ring there are **no corners** — every cell has degree 4 except the top and
+/// bottom rows at degree 3 — and `cells_x·cells_y + cells_x·(cells_y − 1)` edges
+/// (7,120 at 80×45).
 pub struct FieldGraph {
-    neighbors: Box<[[Option<CellId>; 4]; CELL_COUNT]>,
+    topology: Topology,
+    scale: Scale,
+    neighbors: Box<[[Option<CellId>; 4]]>,
     edges: Vec<(CellId, CellId)>,
-    downhill: Box<[Option<CellId>; CELL_COUNT]>,
+    downhill: Box<[Option<CellId>]>,
 }
 
 impl FieldGraph {
-    pub fn new() -> FieldGraph {
-        let mut neighbors: Box<[[Option<CellId>; 4]; CELL_COUNT]> =
-            vec![[None; 4]; CELL_COUNT].into_boxed_slice().try_into().expect("CELL_COUNT cells");
+    pub fn new(topo: Topology, scale: Scale) -> FieldGraph {
+        assert!(
+            topo.validate(scale).is_ok(),
+            "field graph for an invalid world: {}",
+            topo.validate(scale).unwrap_err()
+        );
+        let count = topo.cell_count(scale);
+        let mut neighbors: Box<[[Option<CellId>; 4]]> = vec![[None; 4]; count].into_boxed_slice();
 
-        let last = (CELLS_PER_FACE_EDGE - 1) as u8;
-        for cell in CellId::all() {
-            let (face, cx, cy) = (cell.face(), cell.cx(), cell.cy());
+        for cell in CellId::all(topo, scale) {
+            let (face, cx, cy) = (cell.face(topo, scale), cell.cx(topo, scale), cell.cy(topo, scale));
+            let (nx, ny) = topo.cells(scale, face);
+            let (last_x, last_y) = (nx - 1, ny - 1);
             for edge in Edge::ALL {
                 let inside = match edge {
                     Edge::Top => (cy > 0).then(|| (cx, cy - 1)),
-                    Edge::Right => (cx < last).then(|| (cx + 1, cy)),
-                    Edge::Bottom => (cy < last).then(|| (cx, cy + 1)),
+                    Edge::Right => (cx < last_x).then(|| (cx + 1, cy)),
+                    Edge::Bottom => (cy < last_y).then(|| (cx, cy + 1)),
                     Edge::Left => (cx > 0).then(|| (cx - 1, cy)),
                 };
                 let n = match inside {
-                    Some((nx, ny)) => Some(CellId::new(face, nx, ny)),
-                    None => {
-                        // A boundary cell: ask the seam contract at pixel resolution for
-                        // the first pixel of this cell's along-edge run.
-                        let k = match edge {
-                            Edge::Top | Edge::Bottom => cx,
-                            Edge::Right | Edge::Left => cy,
-                        };
-                        let t = k * CELL_PIXELS as u8;
-                        cross_seam(face, edge, t).map(|(nf, nx, ny, _)| {
-                            CellId::new(nf, nx / CELL_PIXELS as u8, ny / CELL_PIXELS as u8)
-                        })
-                    }
+                    Some((mx, my)) => Some(CellId::new(topo, scale, face, mx, my)),
+                    None => match topo {
+                        Topology::Cube => {
+                            // A boundary cell: ask the seam contract at pixel resolution for
+                            // the first pixel of this cell's along-edge run.
+                            let k = match edge {
+                                Edge::Top | Edge::Bottom => cx,
+                                Edge::Right | Edge::Left => cy,
+                            };
+                            let t = (k * crate::CELL_PIXELS as u16) as u8;
+                            cross_seam(face, edge, t).map(|(nf, px, py, _)| {
+                                CellId::new(
+                                    topo,
+                                    scale,
+                                    nf,
+                                    u16::from(px) / crate::CELL_PIXELS as u16,
+                                    u16::from(py) / crate::CELL_PIXELS as u16,
+                                )
+                            })
+                        }
+                        // Every row of a ring is a ring; the top and bottom are solid.
+                        Topology::Ring { .. } => match edge {
+                            Edge::Right => Some(CellId::new(topo, scale, face, 0, cy)),
+                            Edge::Left => Some(CellId::new(topo, scale, face, last_x, cy)),
+                            Edge::Top | Edge::Bottom => None,
+                        },
+                    },
                 };
                 neighbors[cell.index()][edge as usize] = n;
             }
         }
 
-        let mut edges: Vec<(CellId, CellId)> = Vec::with_capacity(2 * 2528);
-        for cell in CellId::all() {
+        let mut edges: Vec<(CellId, CellId)> = Vec::with_capacity(2 * count);
+        for cell in CellId::all(topo, scale) {
             for n in neighbors[cell.index()].iter().flatten() {
                 edges.push(if cell < *n { (cell, *n) } else { (*n, cell) });
             }
@@ -129,37 +191,69 @@ impl FieldGraph {
         edges.sort_unstable();
         edges.dedup();
 
-        let mut downhill: Box<[Option<CellId>; CELL_COUNT]> =
-            vec![None; CELL_COUNT].into_boxed_slice().try_into().expect("CELL_COUNT cells");
-        for cell in CellId::all() {
-            // Gravity is `(0, -1, 0)`; only its component in the face's tangent plane can
-            // move material along the surface. That component is
-            // `|g| · sqrt(1 - n_y²)` for the outward unit normal `n`, so it vanishes
-            // exactly on the level Top face and is full strength on the four side faces.
-            let n = face_frame(cell.face()).normal;
-            if 1.0 - n[1] * n[1] <= DOWNHILL_EPS {
-                continue;
-            }
-            let y = cell.center().embed()[1];
-            let mut best: Option<(CellId, f64)> = None;
-            for m in neighbors[cell.index()].iter().flatten() {
-                let ny = m.center().embed()[1];
-                if ny < y - DOWNHILL_EPS && best.is_none_or(|(_, by)| ny < by) {
-                    best = Some((*m, ny));
+        let mut downhill: Box<[Option<CellId>]> = vec![None; count].into_boxed_slice();
+        for cell in CellId::all(topo, scale) {
+            match topo {
+                Topology::Cube => {
+                    // Gravity is `(0, -1, 0)`; only its component in the face's tangent plane
+                    // can move material along the surface. That component is
+                    // `|g| · sqrt(1 - n_y²)` for the outward unit normal `n`, so it vanishes
+                    // exactly on the level Top face and is full strength on the four side faces.
+                    let n = face_frame(cell.face(topo, scale)).normal;
+                    if 1.0 - n[1] * n[1] <= DOWNHILL_EPS {
+                        continue;
+                    }
+                    let y = topo.embed(scale, &cell.center(topo, scale))[1];
+                    let mut best: Option<(CellId, f64)> = None;
+                    for m in neighbors[cell.index()].iter().flatten() {
+                        let my = topo.embed(scale, &m.center(topo, scale))[1];
+                        if my < y - DOWNHILL_EPS && best.is_none_or(|(_, by)| my < by) {
+                            best = Some((*m, my));
+                        }
+                    }
+                    downhill[cell.index()] = best.map(|(c, _)| c);
+                }
+                Topology::Ring { .. } => {
+                    // The top row is the canopy and never drains; every other cell drains to
+                    // the cell below it, which the bottom row does not have.
+                    if cell.cy(topo, scale) > 0 {
+                        downhill[cell.index()] = neighbors[cell.index()][Edge::Bottom as usize];
+                    }
                 }
             }
-            downhill[cell.index()] = best.map(|(c, _)| c);
         }
 
-        let graph = FieldGraph { neighbors, edges, downhill };
+        let graph = FieldGraph { topology: topo, scale, neighbors, edges, downhill };
         debug_assert!(graph.is_reciprocal(), "cell adjacency is not reciprocal");
-        debug_assert_eq!(graph.edges.len(), 2528, "expected 2,400 in-chart + 128 seam edges");
+        debug_assert_eq!(
+            graph.edges.len(),
+            expected_edges(topo, scale),
+            "unexpected edge count for {topo:?}"
+        );
         graph
+    }
+
+    /// The topology this graph was built for.
+    #[inline]
+    pub fn topology(&self) -> Topology {
+        self.topology
+    }
+
+    /// The world scale this graph was built for.
+    #[inline]
+    pub fn scale(&self) -> Scale {
+        self.scale
+    }
+
+    /// Cells in this graph.
+    #[inline]
+    pub fn cell_count(&self) -> usize {
+        self.neighbors.len()
     }
 
     /// Every named neighbour names this cell back across some edge (debug check).
     fn is_reciprocal(&self) -> bool {
-        CellId::all().all(|a| {
+        CellId::all(self.topology, self.scale).all(|a| {
             self.neighbors[a.index()]
                 .iter()
                 .flatten()
@@ -167,7 +261,7 @@ impl FieldGraph {
         })
     }
 
-    /// Neighbor across `edge`, or `None` at the open rim.
+    /// Neighbor across `edge`, or `None` at an open rim.
     #[inline]
     pub fn neighbor(&self, cell: CellId, edge: Edge) -> Option<CellId> {
         self.neighbors[cell.index()][edge as usize]
@@ -181,9 +275,8 @@ impl FieldGraph {
 
     /// The cell one step downhill, or `None` where nothing can slide.
     ///
-    /// Normative rule, precomputed once per graph. Write `y(c)` for the embedded height
-    /// of a cell center (`c.center().embed()[1]`) and `n` for the outward unit normal of
-    /// the cell's face.
+    /// **Cube** (normative, precomputed once per graph). Write `y(c)` for the embedded
+    /// height of a cell center and `n` for the outward unit normal of the cell's face.
     ///
     /// 1. Gravity `(0, −1, 0)` only moves surface material through its component in the
     ///    face's tangent plane, whose magnitude is `sqrt(1 − n_y²)`. On the Top face that
@@ -198,10 +291,15 @@ impl FieldGraph {
     ///    is open — and its in-face and cross-seam neighbors are level with it, so it
     ///    has no downhill neighbor either. Material there stays put.
     ///
-    /// Consequences a consumer may rely on: the relation is acyclic, every side cell
-    /// outside the bottom row has exactly one downhill step, that step lands on a cell of
-    /// the same face (side faces are axis-aligned, so a step down never crosses a seam),
-    /// and no downhill step ever points at the Top face.
+    /// **Ring**: the same two exceptions, stated directly (`design/flat-world-plan-2026-09-16.md`
+    /// §5). `downhill(c)` is `None` when `cy == 0` — the top cell row is the canopy and
+    /// holds its water and detritus exactly as the cube's level Top does — and otherwise
+    /// the neighbour at `(cx, cy + 1)`, which the bottom row does not have, so it keeps
+    /// its litter exactly as the cube's rim row does.
+    ///
+    /// Consequences a consumer may rely on: the relation is acyclic, every cell outside
+    /// the first and last rows has exactly one downhill step, that step lands on a cell of
+    /// the same chart, and no downhill step ever points at the cube's Top face.
     #[inline]
     pub fn downhill(&self, cell: CellId) -> Option<CellId> {
         self.downhill[cell.index()]
@@ -217,25 +315,44 @@ impl FieldGraph {
     }
 }
 
-impl Default for FieldGraph {
-    fn default() -> Self {
-        FieldGraph::new()
+/// The undirected edge count the derivation above must produce.
+fn expected_edges(topo: Topology, scale: Scale) -> usize {
+    match topo {
+        // 2,400 within charts + 128 across seams.
+        Topology::Cube => 2528,
+        Topology::Ring { .. } => {
+            let (nx, ny) = topo.cells(scale, Face::Front);
+            let (nx, ny) = (usize::from(nx), usize::from(ny));
+            // Every row is a ring, so the wrap adds one horizontal edge per row.
+            nx * ny + nx * (ny - 1)
+        }
     }
 }
 
-/// One scalar per cell.
+/// One scalar per cell, sized at construction from [`Topology::cell_count`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScalarField {
-    pub values: Box<[f64; CELL_COUNT]>,
+    pub values: Box<[f64]>,
 }
 
 impl ScalarField {
-    pub fn zeros() -> ScalarField {
-        ScalarField { values: Box::new([0.0; CELL_COUNT]) }
+    pub fn zeros(topo: Topology, scale: Scale) -> ScalarField {
+        ScalarField::constant(topo, scale, 0.0)
     }
 
-    pub fn constant(x: f64) -> ScalarField {
-        ScalarField { values: Box::new([x; CELL_COUNT]) }
+    pub fn constant(topo: Topology, scale: Scale, x: f64) -> ScalarField {
+        ScalarField { values: vec![x; topo.cell_count(scale)].into_boxed_slice() }
+    }
+
+    /// Cells in this field.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
     }
 
     #[inline]
@@ -306,26 +423,34 @@ pub fn diffuse(field: &mut ScalarField, scratch: &mut ScalarField, graph: &Field
 }
 
 /// Add `amount` to the field with a raised-cosine footprint of surface radius `radius`
-/// pixels (≤ `MAX_LOCAL_RADIUS`) around `center`, normalized over the cells actually
-/// present so the field total rises by exactly `amount` (to rounding). Returns the number
-/// of cells touched.
+/// pixels (≤ [`Topology::max_local_radius`]) around `center`, normalized over the cells
+/// actually present so the field total rises by exactly `amount` (to rounding). Returns
+/// the number of cells touched.
 ///
 /// Normative: weight of cell `c` is `w = 0.5·(1 + cos(π·d/radius))` for its center's
 /// surface distance `d ≤ radius` from `center` (via [`crate::unfold`]), else 0; each
-/// touched cell receives `amount · w / Σw`. A footprint clipped by the rim or covering
-/// a vertex deposits the same total as one in the middle of a face. If no cell is within
-/// range (radius below half a cell), the containing cell receives everything.
-pub fn deposit(field: &mut ScalarField, center: SurfacePoint, radius: f64, amount: f64) -> usize {
-    debug_assert!(center.is_canonical(), "deposit at non-canonical {center:?}");
+/// touched cell receives `amount · w / Σw`. A footprint clipped by a rim, covering a cube
+/// vertex or straddling a ring's wrap deposits the same total as one in the middle of a
+/// chart. If no cell is within range (radius below half a cell), the containing cell
+/// receives everything.
+pub fn deposit(
+    topo: Topology,
+    scale: Scale,
+    field: &mut ScalarField,
+    center: SurfacePoint,
+    radius: f64,
+    amount: f64,
+) -> usize {
+    debug_assert!(center.is_canonical(topo), "deposit at non-canonical {center:?}");
     let mut images: Vec<ChartImage> = Vec::new();
-    chart_images(center.face, MAX_SEAMS, &mut images);
+    chart_images(topo, center.face, MAX_SEAMS, &mut images);
 
     // (cell, raised-cosine weight) for every cell center inside the footprint.
     let mut touched: Vec<(CellId, f64)> = Vec::new();
     let mut total = 0.0f64;
     if radius > 0.0 {
-        for cell in CellId::all() {
-            let Some(u) = unfold_with(&images, center, cell.center(), radius) else {
+        for cell in CellId::all(topo, scale) {
+            let Some(u) = unfold_with(topo, &images, center, cell.center(topo, scale), radius) else {
                 continue;
             };
             if u.distance > radius {
@@ -340,12 +465,12 @@ pub fn deposit(field: &mut ScalarField, center: SurfacePoint, radius: f64, amoun
     }
     if touched.is_empty() || !total.is_finite() || total <= 0.0 {
         // Below half a cell: the containing cell takes everything.
-        field.add(cell_of(&center), amount);
+        field.add(cell_of(topo, scale, &center), amount);
         return 1;
     }
-    let scale = amount / total;
+    let share = amount / total;
     for &(cell, w) in &touched {
-        field.add(cell, w * scale);
+        field.add(cell, w * share);
     }
     touched.len()
 }

@@ -1,16 +1,16 @@
 //! Pixel ownership for seam-aware rasterization.
 
 use crate::{
-    ChartImage, ChartPath, FACE_EXTENT, Face, GEOM_EPS, MAX_LOCAL_RADIUS, MAX_SEAMS, SurfacePoint,
-    Vec2, chart_images, segment_is_valid,
+    ChartImage, ChartPath, Face, GEOM_EPS, MAX_SEAMS, SurfacePoint, Topology, Vec2, chart_images,
+    segment_is_valid,
 };
 
 /// One destination pixel and its owning unfolding relative to an anchor.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PixelImage {
     pub face: Face,
-    pub x: u8,
-    pub y: u8,
+    pub x: u16,
+    pub y: u16,
     /// The pixel center in the anchor's chart coordinates under the owning unfolding.
     /// Renderers evaluate body masks at `local - anchor.chart()` rotated into the body frame.
     pub local: Vec2,
@@ -22,53 +22,62 @@ pub struct PixelImage {
 /// Every surface pixel whose center lies within surface distance `radius` of `anchor`,
 /// each exactly once, with its shortest valid unfolding (ties by `ChartPath` order).
 /// Output is sorted by `(face index, y, x)`; `out` is cleared first and its capacity
-/// reused. Panics if `radius > MAX_LOCAL_RADIUS` or the anchor is not canonical.
+/// reused. Panics if `radius` exceeds [`Topology::max_local_radius`] or the anchor is not
+/// canonical.
 ///
-/// Normative: the result equals the brute-force set `{ p : unfold(anchor, p, radius) }`
-/// over all 20,480 pixel centers. Implementations may take the single-chart fast path
-/// when the anchor is at least `radius` from every chart edge (then every pixel is a
+/// Normative: the result equals the brute-force set `{ p : unfold(topo, anchor, p, radius) }`
+/// over every pixel centre of every chart. Implementations may take the single-chart fast
+/// path when the anchor is at least `radius` from every chart edge (then every pixel is a
 /// direct image), and otherwise iterate the pixels of each chart image's preimage
 /// bounding box with chord pre-rejection; the fast path and the general path must agree
-/// exactly. A pixel visible through two images (a creature near a top vertex, or a
-/// footprint reaching around a corner) keeps only its shortest one, so a stamp gets one
-/// contribution per pixel and a shape may show a localized discontinuity at a vertex
-/// rather than doubled brightness.
-pub fn unfold_pixels(anchor: SurfacePoint, radius: f64, out: &mut Vec<PixelImage>) {
-    assert!(radius <= MAX_LOCAL_RADIUS, "radius {radius} exceeds MAX_LOCAL_RADIUS");
-    assert!(anchor.is_canonical(), "unfold_pixels from non-canonical {anchor:?}");
+/// exactly. A pixel visible through two images (a creature near a cube top vertex, or a
+/// footprint reaching around a corner, or a body straddling a ring's wrap) keeps only its
+/// shortest one, so a stamp gets one contribution per pixel and a shape may show a
+/// localized discontinuity at a vertex rather than doubled brightness.
+pub fn unfold_pixels(topo: Topology, anchor: SurfacePoint, radius: f64, out: &mut Vec<PixelImage>) {
+    let local_radius = topo.max_local_radius();
+    assert!(
+        radius <= local_radius,
+        "radius {radius} exceeds the local radius {local_radius} of {topo:?} \
+         (MAX_LOCAL_RADIUS on the cube)"
+    );
+    assert!(anchor.is_canonical(topo), "unfold_pixels from non-canonical {anchor:?}");
     out.clear();
     // A negative radius selects nothing; NaN already failed the assert above.
     if radius < 0.0 {
         return;
     }
     let a = anchor.chart();
+    let (w, h) = topo.extent(anchor.face);
     // Well inside the chart: every pixel within reach is a direct image.
-    let margin = a.x.min(FACE_EXTENT - a.x).min(a.y).min(FACE_EXTENT - a.y);
+    let margin = a.x.min(w - a.x).min(a.y).min(h - a.y);
     if margin >= radius {
-        unfold_pixels_direct(anchor, radius, out);
+        unfold_pixels_direct(topo, anchor, radius, out);
     } else {
         let mut images = Vec::new();
-        chart_images(anchor.face, MAX_SEAMS, &mut images);
-        unfold_pixels_general(&images, anchor, radius, out);
+        chart_images(topo, anchor.face, MAX_SEAMS, &mut images);
+        unfold_pixels_general(topo, &images, anchor, radius, out);
     }
 }
 
 /// Pixel indices whose centers can lie within `radius` of chart coordinate `c`, clipped
-/// to `0..64`. The range is a superset; callers still test the real distance.
+/// to `0..extent`. The range is a superset; callers still test the real distance.
 #[inline]
-fn index_range(c: f64, radius: f64) -> std::ops::RangeInclusive<u8> {
-    let lo = (c - radius - 0.5).ceil().clamp(0.0, 63.0) as u8;
-    let hi = (c + radius - 0.5).floor().clamp(0.0, 63.0) as u8;
+fn index_range(c: f64, radius: f64, extent: f64) -> std::ops::RangeInclusive<u16> {
+    let last = extent - 1.0;
+    let lo = (c - radius - 0.5).ceil().clamp(0.0, last) as u16;
+    let hi = (c + radius - 0.5).floor().clamp(0.0, last) as u16;
     lo..=hi
 }
 
 /// The fast path: the anchor is at least `radius` from every chart edge, so the whole
 /// disk lies in the anchor's own chart and every owning path is `ChartPath::direct()`.
-fn unfold_pixels_direct(anchor: SurfacePoint, radius: f64, out: &mut Vec<PixelImage>) {
+fn unfold_pixels_direct(topo: Topology, anchor: SurfacePoint, radius: f64, out: &mut Vec<PixelImage>) {
     let a = anchor.chart();
+    let (w, h) = topo.extent(anchor.face);
     let limit = radius + GEOM_EPS;
-    for y in index_range(a.y, limit) {
-        for x in index_range(a.x, limit) {
+    for y in index_range(a.y, limit, h) {
+        for x in index_range(a.x, limit, w) {
             let local = Vec2::new(f64::from(x) + 0.5, f64::from(y) + 0.5);
             let distance = (local - a).length();
             if distance > limit {
@@ -91,6 +100,7 @@ fn unfold_pixels_direct(anchor: SurfacePoint, radius: f64, out: &mut Vec<PixelIm
 /// straight unfolded segment really does follow that image's chart path, then give each
 /// pixel to its shortest such image.
 fn unfold_pixels_general(
+    topo: Topology,
     images: &[ChartImage],
     anchor: SurfacePoint,
     radius: f64,
@@ -102,15 +112,16 @@ fn unfold_pixels_general(
         // The anchor's position in the target chart's own coordinates: the disk of
         // candidates is centred there, because the image map is an isometry.
         let ap = img.preimage_point(a);
-        for y in index_range(ap.y, limit) {
-            for x in index_range(ap.x, limit) {
+        let (w, h) = topo.extent(img.target_face);
+        for y in index_range(ap.y, limit, h) {
+            for x in index_range(ap.x, limit, w) {
                 let p = Vec2::new(f64::from(x) + 0.5, f64::from(y) + 0.5);
                 let distance = (p - ap).length();
                 if distance > limit {
                     continue;
                 }
                 let local = img.image_point(p);
-                if !segment_is_valid(anchor.face, a, local, &img.path) {
+                if !segment_is_valid(topo, anchor.face, a, local, &img.path) {
                     continue;
                 }
                 out.push(PixelImage {

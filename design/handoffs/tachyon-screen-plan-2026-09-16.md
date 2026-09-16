@@ -288,3 +288,14 @@ which driver renders headless (Qualcomm Vulkan/GLES or Mesa), whether a
 rendered image can be exported as a dma-buf and scanned out through KMS, and
 the readback fallback's cost. FW-P still runs; its per-pass breakdown is the
 shader list.
+
+### FW-P result (2026-09-16)
+
+`design/7_Research/presenter-budget-2026-09-16.md`: 98 % of the frame is
+background (plants 52 %, water 15 %, ramp 11 %, columns 9 %); the per-frame
+part (bodies, rain) is under 2 %. Mechanical waste worth ~4.7 ms of the 15.3
+(pixel→cell recomputed per pixel, unfolds recomputed per stamp, `powf` in the
+encode) goes to FW-3 with the row-band split (measured 3.7–3.9× on four
+cores). Verdict: 320×180 at 60 fps is reachable on the CPU with FW-3 alone;
+640×360 at 60 fps needs plant/column sway at the tick rate (Wrysk's call) or
+the GPU stack. The per-pass table is the GPU shader list.

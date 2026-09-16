@@ -1,11 +1,12 @@
-//! Continuous surface points, the cube embedding, and pixel-level seam neighbors.
+//! Continuous surface points, the cube face frames, and pixel-level seam neighbors.
 
-use crate::{Edge, Face, FACE_EXTENT, Vec2};
+use crate::{Edge, Face, Topology, Vec2};
 
 /// A continuous position on the surface: one chart plus local coordinates in pixel units.
 ///
-/// Canonical points satisfy `0 <= u < 64` and `0 <= v < 64` (finite). Transient points
-/// produced during a sweep may sit exactly on a boundary (`u == 64` or `v == 64`).
+/// Canonical points satisfy `0 <= u < w` and `0 <= v < h` for the chart's extent
+/// ([`Topology::extent`]; 64×64 on the cube). Transient points produced during a sweep
+/// may sit exactly on a boundary (`u == w` or `v == h`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SurfacePoint {
@@ -20,48 +21,52 @@ impl SurfacePoint {
         SurfacePoint { face, u, v }
     }
 
-    /// The center `(x + 0.5, y + 0.5)` of pixel `(x, y)` on `face`. Panics if `x` or `y`
-    /// is 64 or more.
-    pub fn pixel_center(face: Face, x: u8, y: u8) -> SurfacePoint {
-        assert!(x < 64 && y < 64, "pixel ({x}, {y}) out of range");
+    /// The center `(x + 0.5, y + 0.5)` of pixel `(x, y)` on `face`. Panics if the pixel
+    /// is outside the chart's extent.
+    pub fn pixel_center(topo: Topology, face: Face, x: u16, y: u16) -> SurfacePoint {
+        let (w, h) = topo.extent(face);
+        assert!(
+            f64::from(x) < w && f64::from(y) < h,
+            "pixel ({x}, {y}) out of range for {topo:?}"
+        );
         SurfacePoint::new(face, f64::from(x) + 0.5, f64::from(y) + 0.5)
     }
 
-    /// Finite and inside `[0, 64)` on both axes.
+    /// Finite and inside `[0, w) × [0, h)`.
     #[inline]
-    pub fn is_canonical(&self) -> bool {
-        self.u.is_finite()
-            && self.v.is_finite()
-            && (0.0..FACE_EXTENT).contains(&self.u)
-            && (0.0..FACE_EXTENT).contains(&self.v)
+    pub fn is_canonical(&self, topo: Topology) -> bool {
+        let (w, h) = topo.extent(self.face);
+        self.u.is_finite() && self.v.is_finite() && (0.0..w).contains(&self.u) && (0.0..h).contains(&self.v)
     }
 
-    /// Map a coordinate equal to 64 onto the largest double below 64 so the point is
-    /// canonical. Coordinates outside `[0, 64]` are a caller bug and are clamped in
-    /// release builds (debug builds panic).
-    pub fn canonicalize(self) -> SurfacePoint {
+    /// Map a coordinate equal to the chart extent onto the largest double below it so the
+    /// point is canonical. Coordinates outside `[0, extent]` are a caller bug and are
+    /// clamped in release builds (debug builds panic).
+    pub fn canonicalize(self, topo: Topology) -> SurfacePoint {
+        let (w, h) = topo.extent(self.face);
         debug_assert!(
-            (0.0..=FACE_EXTENT).contains(&self.u) && (0.0..=FACE_EXTENT).contains(&self.v),
-            "canonicalize called on {self:?}"
+            (0.0..=w).contains(&self.u) && (0.0..=h).contains(&self.v),
+            "canonicalize called on {self:?} in {topo:?}"
         );
-        let fix = |c: f64| {
-            if c >= FACE_EXTENT {
-                FACE_EXTENT.next_down()
+        let fix = |c: f64, extent: f64| {
+            if c >= extent {
+                extent.next_down()
             } else if c < 0.0 || c.is_nan() {
                 0.0
             } else {
                 c
             }
         };
-        SurfacePoint::new(self.face, fix(self.u), fix(self.v))
+        SurfacePoint::new(self.face, fix(self.u, w), fix(self.v, h))
     }
 
-    /// The pixel containing this point: floor of each coordinate, with 64 clamped to 63
-    /// for transient boundary points.
+    /// The pixel containing this point: floor of each coordinate, with a transient
+    /// boundary coordinate clamped to the last pixel.
     #[inline]
-    pub fn pixel(&self) -> (u8, u8) {
-        let px = |c: f64| c.floor().clamp(0.0, 63.0) as u8;
-        (px(self.u), px(self.v))
+    pub fn pixel(&self, topo: Topology) -> (u16, u16) {
+        let (w, h) = topo.extent(self.face);
+        let px = |c: f64, extent: f64| c.floor().clamp(0.0, extent - 1.0) as u16;
+        (px(self.u, w), px(self.v, h))
     }
 
     /// Local coordinates as a vector.
@@ -69,54 +74,9 @@ impl SurfacePoint {
     pub fn chart(&self) -> Vec2 {
         Vec2::new(self.u, self.v)
     }
-
-    /// Position on the unit cube `[-1, 1]^3`, matching `cube_proto::geometry::pixel_direction`
-    /// at pixel centers: with `a = u/32 - 1` and `b = v/32 - 1`,
-    ///
-    /// | Face | Position | Tangent +u | Tangent +v | Normal |
-    /// | --- | --- | --- | --- | --- |
-    /// | Front | `(a, -b, 1)` | `+X` | `-Y` | `+Z` |
-    /// | Right | `(1, -b, -a)` | `-Z` | `-Y` | `+X` |
-    /// | Back | `(-a, -b, -1)` | `-X` | `-Y` | `-Z` |
-    /// | Left | `(-1, -b, a)` | `+Z` | `-Y` | `-X` |
-    /// | Top | `(a, 1, b)` | `+X` | `+Z` | `+Y` |
-    ///
-    /// Multiply by 32 to convert unit-cube lengths into pixels.
-    pub fn embed(&self) -> [f64; 3] {
-        let f = face_frame(self.face);
-        let a = self.u / 32.0 - 1.0;
-        let b = self.v / 32.0 - 1.0;
-        [
-            f.center[0] + a * f.tangent_u[0] + b * f.tangent_v[0],
-            f.center[1] + a * f.tangent_u[1] + b * f.tangent_v[1],
-            f.center[2] + a * f.tangent_u[2] + b * f.tangent_v[2],
-        ]
-    }
-
-    /// A chart tangent vector expressed in unit-cube 3D coordinates (pixel units are
-    /// preserved: the result has the same length as `t` scaled by 1/32).
-    pub fn embed_tangent(&self, t: Vec2) -> [f64; 3] {
-        let f = face_frame(self.face);
-        let (a, b) = (t.x / 32.0, t.y / 32.0);
-        [
-            a * f.tangent_u[0] + b * f.tangent_v[0],
-            a * f.tangent_u[1] + b * f.tangent_v[1],
-            a * f.tangent_u[2] + b * f.tangent_v[2],
-        ]
-    }
-
-    /// Squared straight-line 3D chord between the two points, in pixel units squared.
-    /// This is a lower bound on squared surface distance, never a metric for
-    /// interactions on its own: a chord may pass through the cube.
-    pub fn chord_sq(&self, other: &SurfacePoint) -> f64 {
-        let a = self.embed();
-        let b = other.embed();
-        let d = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-        (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) * 1024.0
-    }
 }
 
-/// The rigid frame of one face chart on the unit cube (see [`SurfacePoint::embed`]).
+/// The rigid frame of one face chart on the unit cube (see [`Topology::embed`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FaceFrame {
     /// Chart center `(u, v) = (32, 32)`.
@@ -129,7 +89,18 @@ pub struct FaceFrame {
     pub normal: [f64; 3],
 }
 
-/// The embedding table above as explicit vectors.
+/// The cube embedding table as explicit vectors: with `a = u/32 - 1` and `b = v/32 - 1`,
+///
+/// | Face | Position | Tangent +u | Tangent +v | Normal |
+/// | --- | --- | --- | --- | --- |
+/// | Front | `(a, -b, 1)` | `+X` | `-Y` | `+Z` |
+/// | Right | `(1, -b, -a)` | `-Z` | `-Y` | `+X` |
+/// | Back | `(-a, -b, -1)` | `-X` | `-Y` | `-Z` |
+/// | Left | `(-1, -b, a)` | `+Z` | `-Y` | `-X` |
+/// | Top | `(a, 1, b)` | `+X` | `+Z` | `+Y` |
+///
+/// A ring has no face frames: its chart embeds as a cylinder, not as a plane of the unit
+/// cube (see [`Topology::embed`]).
 pub const fn face_frame(face: Face) -> FaceFrame {
     match face {
         Face::Front => FaceFrame {
@@ -166,18 +137,24 @@ pub const fn face_frame(face: Face) -> FaceFrame {
 }
 
 /// The pixel adjacent to `(face, x, y)` across `edge` at pixel resolution, crossing a
-/// seam through `cross_seam` when the pixel lies on that edge of the chart. `None` only
-/// across the open bottom rim. Used by seam-aware pixel filters; never a distance metric.
+/// seam when the pixel lies on that edge of the chart. `None` only across an open rim:
+/// the cube's four bottom edges, the ring's top and bottom rows.
 ///
 /// Rules: if the pixel is not on `edge`, the answer is the neighboring pixel inside the
-/// same chart. If it is on `edge`, the answer is `cross_seam(face, edge, t)` with `t` the
-/// pixel's along-edge index, or `None` for a side face's `Edge::Bottom`.
-pub fn pixel_neighbor(face: Face, x: u8, y: u8, edge: Edge) -> Option<(Face, u8, u8)> {
-    assert!(x < 64 && y < 64, "pixel ({x}, {y}) out of range");
+/// same chart. If it is on `edge`, the cube asks `cross_seam(face, edge, t)` with `t` the
+/// pixel's along-edge index, and the ring wraps `x` to the other end of the same row.
+/// Used by seam-aware pixel filters; never a distance metric.
+pub fn pixel_neighbor(topo: Topology, face: Face, x: u16, y: u16, edge: Edge) -> Option<(Face, u16, u16)> {
+    let (w, h) = topo.extent(face);
+    assert!(
+        f64::from(x) < w && f64::from(y) < h,
+        "pixel ({x}, {y}) out of range for {topo:?}"
+    );
+    let (last_x, last_y) = ((w as u16) - 1, (h as u16) - 1);
     let on_edge = match edge {
         Edge::Top => y == 0,
-        Edge::Right => x == 63,
-        Edge::Bottom => y == 63,
+        Edge::Right => x == last_x,
+        Edge::Bottom => y == last_y,
         Edge::Left => x == 0,
     };
     if !on_edge {
@@ -188,28 +165,41 @@ pub fn pixel_neighbor(face: Face, x: u8, y: u8, edge: Edge) -> Option<(Face, u8,
             Edge::Left => (face, x - 1, y),
         });
     }
-    let t = match edge {
-        Edge::Top | Edge::Bottom => x,
-        Edge::Right | Edge::Left => y,
-    };
-    let (f, nx, ny, _) = crate::cross_seam(face, edge, t)?;
-    Some((f, nx, ny))
+    match topo {
+        Topology::Cube => {
+            let t = match edge {
+                Edge::Top | Edge::Bottom => x as u8,
+                Edge::Right | Edge::Left => y as u8,
+            };
+            let (f, nx, ny, _) = crate::cross_seam(face, edge, t)?;
+            Some((f, u16::from(nx), u16::from(ny)))
+        }
+        Topology::Ring { .. } => match edge {
+            // The wrap: the same row, the other end. The rims have no neighbour.
+            Edge::Right => Some((face, 0, y)),
+            Edge::Left => Some((face, last_x, y)),
+            Edge::Top | Edge::Bottom => None,
+        },
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cross_seam;
+    use crate::{Scale, SurfacePoint, cross_seam};
+
+    const CUBE: Topology = Topology::Cube;
+    const RING: Topology = Topology::Ring { w: 320, h: 180 };
 
     #[test]
     fn interior_neighbors_stay_in_chart() {
-        assert_eq!(pixel_neighbor(Face::Front, 10, 10, Edge::Top), Some((Face::Front, 10, 9)));
-        assert_eq!(pixel_neighbor(Face::Front, 10, 10, Edge::Right), Some((Face::Front, 11, 10)));
-        assert_eq!(pixel_neighbor(Face::Front, 10, 10, Edge::Bottom), Some((Face::Front, 10, 11)));
-        assert_eq!(pixel_neighbor(Face::Front, 10, 10, Edge::Left), Some((Face::Front, 9, 10)));
+        assert_eq!(pixel_neighbor(CUBE, Face::Front, 10, 10, Edge::Top), Some((Face::Front, 10, 9)));
+        assert_eq!(pixel_neighbor(CUBE, Face::Front, 10, 10, Edge::Right), Some((Face::Front, 11, 10)));
+        assert_eq!(pixel_neighbor(CUBE, Face::Front, 10, 10, Edge::Bottom), Some((Face::Front, 10, 11)));
+        assert_eq!(pixel_neighbor(CUBE, Face::Front, 10, 10, Edge::Left), Some((Face::Front, 9, 10)));
         // On an edge, but asked for a direction that does not leave the chart.
-        assert_eq!(pixel_neighbor(Face::Front, 0, 0, Edge::Bottom), Some((Face::Front, 0, 1)));
-        assert_eq!(pixel_neighbor(Face::Front, 0, 0, Edge::Right), Some((Face::Front, 1, 0)));
+        assert_eq!(pixel_neighbor(CUBE, Face::Front, 0, 0, Edge::Bottom), Some((Face::Front, 0, 1)));
+        assert_eq!(pixel_neighbor(CUBE, Face::Front, 0, 0, Edge::Right), Some((Face::Front, 1, 0)));
     }
 
     #[test]
@@ -218,8 +208,9 @@ mod tests {
             for edge in Edge::ALL {
                 for t in 0..64u8 {
                     let (x, y) = edge.pixel(t);
-                    let got = pixel_neighbor(face, x, y, edge);
-                    let want = cross_seam(face, edge, t).map(|(f, nx, ny, _)| (f, nx, ny));
+                    let got = pixel_neighbor(CUBE, face, u16::from(x), u16::from(y), edge);
+                    let want = cross_seam(face, edge, t)
+                        .map(|(f, nx, ny, _)| (f, u16::from(nx), u16::from(ny)));
                     assert_eq!(got, want, "{face:?} {edge:?} t={t}");
                 }
             }
@@ -229,15 +220,15 @@ mod tests {
     #[test]
     fn open_rim_has_no_neighbor() {
         for face in [Face::Front, Face::Right, Face::Back, Face::Left] {
-            for x in 0..64u8 {
-                assert_eq!(pixel_neighbor(face, x, 63, Edge::Bottom), None);
+            for x in 0..64u16 {
+                assert_eq!(pixel_neighbor(CUBE, face, x, 63, Edge::Bottom), None);
             }
         }
         // Top has no open edge.
         for edge in Edge::ALL {
             for t in 0..64u8 {
                 let (x, y) = edge.pixel(t);
-                assert!(pixel_neighbor(Face::Top, x, y, edge).is_some());
+                assert!(pixel_neighbor(CUBE, Face::Top, u16::from(x), u16::from(y), edge).is_some());
             }
         }
     }
@@ -245,16 +236,47 @@ mod tests {
     #[test]
     fn embedding_matches_pixel_direction() {
         for face in Face::ALL {
-            for y in 0..64u8 {
-                for x in 0..64u8 {
-                    let p = SurfacePoint::pixel_center(face, x, y);
-                    let want = cube_proto::geometry::pixel_direction(face, x, y);
-                    let got = p.embed();
+            for y in 0..64u16 {
+                for x in 0..64u16 {
+                    let p = SurfacePoint::pixel_center(CUBE, face, x, y);
+                    let want = cube_proto::geometry::pixel_direction(face, x as u8, y as u8);
+                    let got = CUBE.embed(Scale::ONE, &p);
                     for k in 0..3 {
                         assert!((got[k] - want[k]).abs() < 1e-12, "{face:?} ({x},{y}) axis {k}");
                     }
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_ring_wraps_sideways_and_stops_at_the_rims() {
+        for y in [0u16, 1, 90, 179] {
+            assert_eq!(pixel_neighbor(RING, Face::Front, 319, y, Edge::Right), Some((Face::Front, 0, y)));
+            assert_eq!(pixel_neighbor(RING, Face::Front, 0, y, Edge::Left), Some((Face::Front, 319, y)));
+            assert_eq!(pixel_neighbor(RING, Face::Front, 5, y, Edge::Right), Some((Face::Front, 6, y)));
+        }
+        for x in [0u16, 1, 160, 319] {
+            assert_eq!(pixel_neighbor(RING, Face::Front, x, 0, Edge::Top), None);
+            assert_eq!(pixel_neighbor(RING, Face::Front, x, 179, Edge::Bottom), None);
+            assert_eq!(pixel_neighbor(RING, Face::Front, x, 1, Edge::Top), Some((Face::Front, x, 0)));
+        }
+        // The wrap is reciprocal at every row.
+        for y in 0..180u16 {
+            let right = pixel_neighbor(RING, Face::Front, 319, y, Edge::Right).expect("wrap");
+            assert_eq!(pixel_neighbor(RING, right.0, right.1, right.2, Edge::Left), Some((Face::Front, 319, y)));
+        }
+    }
+
+    #[test]
+    fn ring_points_canonicalize_against_the_ring_extent() {
+        let p = SurfacePoint::new(Face::Front, 320.0, 180.0).canonicalize(RING);
+        assert_eq!(p.pixel(RING), (319, 179));
+        assert!(p.is_canonical(RING));
+        assert!(!SurfacePoint::new(Face::Front, 320.0, 10.0).is_canonical(RING));
+        assert!(SurfacePoint::new(Face::Front, 300.0, 10.0).is_canonical(RING));
+        // 300 is off the cube but on the ring: the extent is the topology's, not a constant.
+        assert!(!SurfacePoint::new(Face::Front, 300.0, 10.0).is_canonical(CUBE));
+        assert_eq!(SurfacePoint::pixel_center(RING, Face::Front, 319, 179), SurfacePoint::new(Face::Front, 319.5, 179.5));
     }
 }
