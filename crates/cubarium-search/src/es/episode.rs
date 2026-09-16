@@ -283,6 +283,15 @@ pub fn run(
 /// A hook that may corrupt a running world, for the fault-injection regression only.
 pub type Fault<'a> = &'a (dyn Fn(&mut World, u64) + Sync);
 
+/// A hook run **once**, on the freshly built world, before the driver is attached and before
+/// the first tick.
+///
+/// It exists for measurements that have to be switched on before anything happens — the
+/// per-body budget recorder is the one this milestone needed — and deliberately cannot see a
+/// tick number, so it can neither script behaviour nor react to the run. Nothing that changes
+/// what the world *does* belongs in here; a driver does that, in the open.
+pub type Prepare<'a> = &'a (dyn Fn(&mut World) + Sync);
+
 /// [`run`], with a hook that may corrupt the world at a chosen tick.
 ///
 /// This exists for one reason: the invariant checks above must be exercised in **release**,
@@ -298,7 +307,25 @@ pub fn run_with_fault(
     job: &str,
     fault: Option<Fault<'_>>,
 ) -> Result<Episode, EpisodeError> {
+    run_prepared(layout, driver, horizon, limits, job, None, fault)
+}
+
+/// [`run_with_fault`], with a hook that runs on the built world before the first tick.
+#[doc(hidden)]
+#[allow(clippy::too_many_arguments)]
+pub fn run_prepared(
+    layout: &Layout,
+    driver: &Driver,
+    horizon: u64,
+    limits: Limits<'_>,
+    job: &str,
+    prepare: Option<Prepare<'_>>,
+    fault: Option<Fault<'_>>,
+) -> Result<Episode, EpisodeError> {
     let (mut world, id) = layout.build().expect("a frozen layout builds");
+    if let Some(prepare) = prepare {
+        prepare(&mut world);
+    }
     let cfg = world.config().clone();
     let e_r = cfg.organism.reserve_energy_density;
     let leave_below = cfg.drives.feed_min;

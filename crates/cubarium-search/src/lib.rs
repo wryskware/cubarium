@@ -6,6 +6,7 @@
 //! the same conservation audits the host does.
 //!
 //! - [`params`]: the joint parameter vector, its bounds, and what is deliberately excluded.
+//! - [`apex_audit`]: why two introduced apex adults never mate, counted at the predicate.
 //! - [`calibrate`]: the ecology v1 calibration matrix — declared candidates × seeds × matched
 //!   zero/one/two-apex arms, with the ecology v1 component vector and a config export.
 //! - [`evaluate`]: one candidate on one seed, to a hard tick horizon, with component metrics.
@@ -22,6 +23,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod apex_audit;
 pub mod calibrate;
 pub mod es;
 pub mod evaluate;

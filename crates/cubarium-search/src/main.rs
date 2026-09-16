@@ -245,6 +245,54 @@ enum Command {
         #[arg(long, default_value = "runs/es-eco-v1-fastleaf/population")]
         out: PathBuf,
     },
+    /// The matched feasibility experiment: four drivers on the same twelve layouts, measured
+    /// with the world's own per-organism store ledger.
+    EsBudget {
+        /// The trained policy to compare. Its recorded config hash must be `--config`'s.
+        #[arg(long, default_value = "runs/es-eco-v1-fastleaf/selected/center-00009-policy.json")]
+        policy: PathBuf,
+        /// The ecology every fixture world is built on. Required: this experiment is about one
+        /// named ecology, and a silent default would make the comparison meaningless.
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long, default_value_t = cubarium_search::es::HORIZON_TICKS)]
+        horizon: u64,
+        /// The training seed whose unperturbed centre is the fourth driver: the policy the ES
+        /// run actually started from.
+        #[arg(long, default_value_t = 20_260_915)]
+        initial_seed: u64,
+        #[arg(long, default_value_t = 8)]
+        workers: usize,
+        #[arg(long, default_value_t = 900)]
+        wall_seconds: u64,
+        #[arg(long, default_value = "runs/ecology-v1-budget/feasibility.json")]
+        out: PathBuf,
+    },
+    /// Re-run the two-apex arm and report why no two adults mated: readiness overlap, the
+    /// minimum ready-pair distance, and the first failing predicate per candidate pair.
+    ApexAudit {
+        /// One or more `cubarium run --config` TOMLs, comma-separated. The screen's two are
+        /// `runs/ecology-v1-calibration/selected/{baseline,fast-leaf}.toml`.
+        #[arg(long)]
+        config: String,
+        /// How many of `HELDOUT_SEEDS`, from the front.
+        #[arg(long, default_value_t = 4)]
+        seeds: usize,
+        /// Adults introduced. The screen's two-apex arm is `2`.
+        #[arg(long, default_value_t = 2)]
+        apex: u32,
+        #[arg(long, default_value_t = 180_000)]
+        ticks: u64,
+        /// The tick the cohort is introduced on, exactly as the screen introduced it.
+        #[arg(long, default_value_t = 6_000)]
+        introduce_tick: u64,
+        #[arg(long, default_value_t = 8)]
+        workers: usize,
+        #[arg(long, default_value_t = 600)]
+        wall_seconds: u64,
+        #[arg(long, default_value = "runs/ecology-v1-budget/apex-audit.json")]
+        out: PathBuf,
+    },
     /// Print every declared ecology v1 calibration candidate and what it moves.
     CalibrateCandidates,
     /// Run one stage of the ecology v1 calibration matrix: declared candidates × seeds ×
@@ -456,6 +504,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             let probe = es::commands::EvalProbe { reset_hidden_every, copies };
             es::commands::evaluate(policy, &set, horizon, wall_seconds, probe, config, out)
+        }
+        Command::EsBudget { policy, config, horizon, initial_seed, workers, wall_seconds, out } => {
+            es::budget::run(policy, config, horizon, initial_seed, workers, wall_seconds, out)
+        }
+        Command::ApexAudit { config, seeds, apex, ticks, introduce_tick, workers, wall_seconds, out } => {
+            cubarium_search::apex_audit::run(
+                config.split(',').map(|s| PathBuf::from(s.trim())).filter(|p| !p.as_os_str().is_empty()).collect(),
+                seeds, apex, ticks, introduce_tick, workers, wall_seconds, out,
+            )
         }
         Command::EsExport { checkpoint, config, generation, out, verify_ticks } => {
             es::commands::export(checkpoint, config, generation, out, verify_ticks)
