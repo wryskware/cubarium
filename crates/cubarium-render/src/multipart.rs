@@ -32,8 +32,7 @@
 //! mixes those premultiplied samples, then source-overs once — never two partially opaque
 //! whole-body redraws.
 
-use cubarium_surface::Topology;
-use cubarium_surface::{MAX_LOCAL_RADIUS, PixelImage, SurfacePoint, Vec2, unfold_pixels};
+use cubarium_surface::{PixelImage, SurfacePoint, Vec2, unfold_pixels};
 
 use crate::{Canvas, Sprite};
 
@@ -134,7 +133,7 @@ fn state_weight(w: f32) -> f32 {
 ///   (non-finite or negative reads 0); a state at weight 0 is not sampled and does not
 ///   enlarge the query. Nothing is drawn when every weight is 0, when `opacity` is not finite
 ///   or not positive, or when the radius is 0.
-/// * The query is `unfold_pixels(Topology::Cube, root, `[`rig_radius`]`, scratch)`. A [`rig_radius`] that is
+/// * The query is `unfold_pixels(canvas.topology(), root, `[`rig_radius`]`, scratch)`. A [`rig_radius`] that is
 ///   not finite (a participating part with a non-finite offset) or exceeds
 ///   `MAX_LOCAL_RADIUS` is a rig **configuration error** and **panics in every build**,
 ///   exactly as `unfold_pixels` rejects an illegal radius: silently clamping it would drop
@@ -277,15 +276,17 @@ fn stamp_rig_query(
         return;
     }
     let opacity = opacity.min(1.0);
+    let topo = canvas.topology();
+    let local_radius = topo.max_local_radius();
     let radius = match override_radius {
         // Test support: `unfold_pixels` itself rejects an illegal radius, as documented.
         Some(radius) => radius,
         None => {
             let radius = rig_radius(states) * scale;
             assert!(
-                radius.is_finite() && radius <= MAX_LOCAL_RADIUS,
+                radius.is_finite() && radius <= local_radius,
                 "rig radius {radius} is not finite and at most MAX_LOCAL_RADIUS \
-                 ({MAX_LOCAL_RADIUS}): a rig configuration error, not a drawable frame"
+                 ({local_radius}): a rig configuration error, not a drawable frame"
             );
             radius
         }
@@ -309,11 +310,11 @@ fn stamp_rig_query(
         radius
     };
     assert!(
-        radius <= MAX_LOCAL_RADIUS,
+        radius <= local_radius,
         "rig radius {radius} with its minification reach exceeds MAX_LOCAL_RADIUS"
     );
-    unfold_pixels(Topology::Cube, root, radius, scratch);
-    for pixel in scratch.iter() {
+    unfold_pixels(topo, root, radius, scratch);
+    for pixel in canvas.band_pixels(scratch) {
         let d = pixel.local - origin;
         // The mean over one `n × n` grid of the complete depth-composited body sample, each
         // sample at a chart offset inside the destination pixel (`(0, 0)` exactly for `n = 1`).
@@ -459,8 +460,8 @@ mod tests {
         }];
         let root = cubarium_surface::SurfacePoint::new(Face::Front, 32.05, 32.05);
         let heading = Vec2::new(1.0, 0.0);
-        let mut rig = Canvas::new();
-        let mut legacy = Canvas::new();
+        let mut rig = Canvas::cube();
+        let mut legacy = Canvas::cube();
         stamp_rig(
             &mut rig,
             root,
@@ -526,7 +527,7 @@ mod tests {
         }];
         let heading = Vec2::new(1.0, 1.0);
         let light_at = |u: f64, v: f64| {
-            let mut canvas = Canvas::new();
+            let mut canvas = Canvas::cube();
             stamp_rig(
                 &mut canvas,
                 cubarium_surface::SurfacePoint::new(Face::Front, u, v),
@@ -567,7 +568,7 @@ mod tests {
         }];
         assert!(rig_radius(&[(&parts, 1.0)]).is_nan());
         stamp_rig(
-            &mut Canvas::new(),
+            &mut Canvas::cube(),
             cubarium_surface::SurfacePoint::new(Face::Front, 32.5, 32.5),
             Vec2::new(1.0, 0.0),
             &[(&parts, 1.0)],

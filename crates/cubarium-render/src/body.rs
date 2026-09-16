@@ -1,6 +1,5 @@
 //! Seam-aware body stamps.
 
-use cubarium_surface::Topology;
 use crate::Canvas;
 use cubarium_surface::{PixelImage, SurfacePoint, Vec2, unfold_pixels};
 
@@ -49,7 +48,7 @@ impl BodyShape {
 /// Stamp `shape` at `anchor` with unit `heading` (in the anchor chart) in `color`
 /// (linear RGB, multiplied by coverage and added to the canvas).
 ///
-/// Normative: call `unfold_pixels(Topology::Cube, anchor, shape.extent() + 0.5, scratch)`; for each image
+/// Normative: call `unfold_pixels(canvas.topology(), anchor, shape.extent() + 0.5, scratch)`; for each image
 /// compute the body-frame point `R(heading)⁻¹ · (image.local - anchor.chart())` where
 /// `R(heading)` maps body `+x` to `heading` and body `+y` to the heading rotated one
 /// quarter turn clockwise on screen; add `color · coverage` when coverage > 0. Because
@@ -65,9 +64,9 @@ pub fn stamp_body(canvas: &mut Canvas, anchor: SurfacePoint, heading: Vec2, shap
     // (`rotate_heading`), so clockwise is its inverse `(x, y) -> (-y, x)`: with `h`
     // image-right `(1, 0)` the body's `+y` is image-down `(0, 1)`, as documented.
     let perp = Vec2::new(-h.y, h.x);
-    unfold_pixels(Topology::Cube, anchor, shape.extent() + 0.5, scratch);
+    unfold_pixels(canvas.topology(), anchor, shape.extent() + 0.5, scratch);
     let a = anchor.chart();
-    for img in scratch.iter() {
+    for img in canvas.band_pixels(scratch) {
         // `R` is orthonormal, so its inverse is its transpose: project onto the axes.
         let d = img.local - a;
         let body = Vec2::new(h.dot(d), perp.dot(d));
@@ -83,6 +82,7 @@ pub fn stamp_body(canvas: &mut Canvas, anchor: SurfacePoint, heading: Vec2, shap
 mod tests {
     use super::*;
     use cube_proto::Face;
+    use cubarium_surface::Topology;
     use std::collections::HashSet;
 
     fn one_lobe(radius: f64) -> BodyShape {
@@ -159,7 +159,7 @@ mod tests {
         let mut scratch = Vec::new();
 
         // Heading image-right: the lobe must land one pixel image-down.
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         let anchor = SurfacePoint::pixel_center(Topology::Cube, Face::Front, 32, 32);
         stamp_body(&mut canvas, anchor, Vec2::new(1.0, 0.0), &shape, [1.0; 3], &mut scratch);
         let l = lit(&canvas);
@@ -167,7 +167,7 @@ mod tests {
         assert_eq!((l[0].0, l[0].1, l[0].2), (Face::Front, 32, 33), "chart offset (0, +1)");
 
         // Heading image-up `(0, -1)`: the lobe must land one pixel image-right.
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         stamp_body(&mut canvas, anchor, Vec2::new(0.0, -1.0), &shape, [1.0; 3], &mut scratch);
         let l = lit(&canvas);
         assert_eq!(l.len(), 1, "expected exactly one lit pixel, got {l:?}");
@@ -178,7 +178,7 @@ mod tests {
     fn centered_lobe_lights_the_expected_pixels_each_once() {
         let shape = one_lobe(1.6);
         let mut scratch = Vec::new();
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         let anchor = SurfacePoint::pixel_center(Topology::Cube, Face::Front, 32, 32);
         stamp_body(&mut canvas, anchor, Vec2::new(1.0, 0.0), &shape, [1.0; 3], &mut scratch);
 
@@ -215,7 +215,7 @@ mod tests {
         let heading = Vec2::new(1.0, 0.0);
         let mut scratch = Vec::new();
 
-        let mut mid = Canvas::new();
+        let mut mid = Canvas::cube();
         stamp_body(
             &mut mid,
             SurfacePoint::new(Face::Front, 31.9, 32.5),
@@ -227,7 +227,7 @@ mod tests {
         let mid_faces: HashSet<Face> = lit(&mid).into_iter().map(|p| p.0).collect();
         assert_eq!(mid_faces.len(), 1);
 
-        let mut seam = Canvas::new();
+        let mut seam = Canvas::cube();
         stamp_body(
             &mut seam,
             SurfacePoint::new(Face::Front, 63.9, 32.5),
@@ -250,7 +250,7 @@ mod tests {
     fn a_top_vertex_stamp_never_lights_a_pixel_twice() {
         let shape = asymmetric();
         let mut scratch = Vec::new();
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         // The Top/Front/Right corner region: three charts meet.
         stamp_body(
             &mut canvas,
@@ -273,7 +273,7 @@ mod tests {
 
     #[test]
     fn a_zero_heading_draws_nothing() {
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         let mut scratch = Vec::new();
         stamp_body(
             &mut canvas,

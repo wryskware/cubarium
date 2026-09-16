@@ -3,7 +3,6 @@
 use std::collections::VecDeque;
 
 use crate::Canvas;
-use cube_proto::{FACE_SIZE, Face, NUM_FACES};
 use cubarium_surface::{PathSegment, Travel};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -72,11 +71,14 @@ impl Trail {
 ///
 /// Normative rasterization: walk the segment in steps of at most 0.5 pixels, lighting
 /// the pixel containing each sample; this keeps slow sub-pixel motion from shimmering
-/// and never marks a pixel outside `[0, 64)` (a coordinate exactly 64 belongs to pixel 63).
+/// and never marks a pixel outside the chart (a coordinate exactly at the chart's
+/// extent belongs to the last pixel).
 pub fn draw_trail(canvas: &mut Canvas, trail: &Trail, now: u64, max_age_ticks: u64, color: [f32; 3]) {
+    let topo = canvas.topology();
+    let (w, h) = (usize::from(canvas.width()), usize::from(canvas.height()));
     // Brightness is resolved per pixel as a maximum before anything reaches the canvas,
     // so overlapping segments never accumulate.
-    let mut bright = vec![0.0f32; NUM_FACES * FACE_SIZE * FACE_SIZE];
+    let mut bright = vec![0.0f32; topo.charts().len() * w * h];
     for ts in trail.segments() {
         let age = now.saturating_sub(ts.tick);
         if max_age_ticks > 0 && age > max_age_ticks {
@@ -92,29 +94,32 @@ pub fn draw_trail(canvas: &mut Canvas, trail: &Trail, now: u64, max_age_ticks: u
             continue;
         }
         let seg = ts.segment;
+        if !topo.has_chart(seg.face) {
+            continue;
+        }
         let d = seg.to - seg.from;
         // At most half a pixel per step, so slow sub-pixel motion never skips or shimmers.
         let steps = ((d.length() / 0.5).ceil() as u32).max(1);
-        let base = seg.face.index() * FACE_SIZE * FACE_SIZE;
+        let base = topo.chart_index(seg.face) * w * h;
         for i in 0..=steps {
             let p = seg.from + d * (f64::from(i) / f64::from(steps));
-            let (x, y) = pixel_of(p.x, p.y);
-            let cell = &mut bright[base + y * FACE_SIZE + x];
+            let (x, y) = pixel_of(p.x, p.y, w, h);
+            let cell = &mut bright[base + y * w + x];
             if fade > *cell {
                 *cell = fade;
             }
         }
     }
-    for face in Face::ALL {
-        let base = face.index() * FACE_SIZE * FACE_SIZE;
-        for y in 0..FACE_SIZE {
-            for x in 0..FACE_SIZE {
-                let f = bright[base + y * FACE_SIZE + x];
+    for &face in canvas.charts() {
+        let base = topo.chart_index(face) * w * h;
+        for y in canvas.rows_of(face) {
+            for x in 0..w {
+                let f = bright[base + usize::from(y) * w + x];
                 if f > 0.0 {
                     canvas.add(
                         face,
                         x as u16,
-                        y as u16,
+                        y,
                         [
                             (color[0] * f).clamp(0.0, 1.0),
                             (color[1] * f).clamp(0.0, 1.0),
@@ -127,16 +132,18 @@ pub fn draw_trail(canvas: &mut Canvas, trail: &Trail, now: u64, max_age_ticks: u
     }
 }
 
-/// The pixel containing a chart coordinate; a coordinate exactly 64 (or any transient
-/// boundary value) belongs to pixel 63, and nothing ever lands outside `[0, 64)`.
+/// The pixel containing a chart coordinate; a coordinate exactly at the chart extent (or
+/// any transient boundary value) belongs to the last pixel, and nothing ever lands
+/// outside the chart.
 #[inline]
-fn pixel_of(u: f64, v: f64) -> (usize, usize) {
-    let clamp = |c: f64| c.floor().clamp(0.0, (FACE_SIZE - 1) as f64) as usize;
-    (clamp(u), clamp(v))
+fn pixel_of(u: f64, v: f64, w: usize, h: usize) -> (usize, usize) {
+    let clamp = |c: f64, n: usize| c.floor().clamp(0.0, (n - 1) as f64) as usize;
+    (clamp(u, w), clamp(v, h))
 }
 
 #[cfg(test)]
 mod tests {
+    use cube_proto::Face;
     use cubarium_surface::Topology;
     use super::*;
     use cubarium_surface::{SurfacePoint, Vec2, travel};
@@ -174,7 +181,7 @@ mod tests {
     fn trail_pixels_stay_inside_their_charts() {
         let (trail, now) = wandering_trail(400);
         assert!(trail.len() > 400, "a wandering path should split at seams");
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         draw_trail(&mut canvas, &trail, now, 160, [0.1, 0.35, 0.3]);
         let pixels = lit(&canvas);
         assert!(!pixels.is_empty());
@@ -191,7 +198,7 @@ mod tests {
         let mut trail = Trail::new(8);
         let tr = travel(Topology::Cube, SurfacePoint::new(cube_proto::Face::Front, 60.0, 60.0), Vec2::new(3.5, 3.5));
         trail.push_travel(&tr, 0);
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         draw_trail(&mut canvas, &trail, 0, 160, [1.0, 1.0, 1.0]);
         for (_, x, y, _) in lit(&canvas) {
             assert!(x < 64 && y < 64);
@@ -207,7 +214,7 @@ mod tests {
             let tr = travel(Topology::Cube, SurfacePoint::new(cube_proto::Face::Left, 20.0, 20.0), Vec2::new(2.0, 0.0));
             trail.push_travel(&tr, tick);
         }
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         draw_trail(&mut canvas, &trail, 100, 200, [1.0, 1.0, 1.0]);
         // Ages 100 and 0 give fades 0.5 and 1.0; the maximum wins, nothing sums to 1.5.
         let peak = lit(&canvas).iter().map(|p| p.3).fold(0.0f32, f32::max);
@@ -222,7 +229,7 @@ mod tests {
         let mut trail = Trail::new(16);
         let tr = travel(Topology::Cube, SurfacePoint::new(cube_proto::Face::Back, 10.0, 10.0), Vec2::new(4.0, 0.0));
         trail.push_travel(&tr, 0);
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         draw_trail(&mut canvas, &trail, 500, 160, [1.0, 1.0, 1.0]);
         assert!(lit(&canvas).is_empty());
     }

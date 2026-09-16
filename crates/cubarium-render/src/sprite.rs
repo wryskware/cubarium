@@ -1,6 +1,5 @@
 //! Authored RGBA sprites, composited through the existing surface atlas.
 
-use cubarium_surface::Topology;
 use cubarium_surface::{PixelImage, SurfacePoint, Vec2, unfold_pixels};
 
 use crate::{Canvas, srgb_decode};
@@ -877,8 +876,8 @@ fn stamp_unfolded<const BENT: bool, const TINTED: bool>(
 ) {
     let side = Vec2::new(-h.y, h.x);
     let tile_height = reference.height as f64;
-    unfold_pixels(Topology::Cube, anchor, radius, scratch);
-    for pixel in scratch.iter() {
+    unfold_pixels(canvas.topology(), anchor, radius, scratch);
+    for pixel in canvas.band_pixels(scratch) {
         let d = pixel.local - anchor.chart();
         let local = Vec2::new(h.dot(d) / scale, side.dot(d) / scale);
         // The material row is never displaced, so the sample only moves along tile +x.
@@ -966,10 +965,11 @@ pub fn stamp_pose_in_chart(
     bend: Bend,
     scratch: &mut Vec<PixelImage>,
 ) {
+    let topo = canvas.topology();
     let extent = pose.extent();
     if owner.face != center.face
-        || !owner.is_canonical(Topology::Cube)
-        || !center.is_canonical(Topology::Cube)
+        || !owner.is_canonical(topo)
+        || !center.is_canonical(topo)
         || !opacity.is_finite()
         || opacity <= 0.0
         || extent == 0.0
@@ -982,14 +982,14 @@ pub fn stamp_pose_in_chart(
     let bend = if bend.is_identity() { Bend::NONE } else { bend };
     let radius = (extent + bend.amplitude.abs()).min(FOOTPRINT_RADIUS);
     let query = radius + (owner.chart() - center.chart()).length();
-    if query > cubarium_surface::MAX_LOCAL_RADIUS {
+    if query > topo.max_local_radius() {
         return;
     }
     let opacity = opacity.min(1.0);
     let side = Vec2::new(-h.y, h.x);
     let reference = pose.first;
-    unfold_pixels(Topology::Cube, owner, query, scratch);
-    for pixel in scratch.iter() {
+    unfold_pixels(topo, owner, query, scratch);
+    for pixel in canvas.band_pixels(scratch) {
         let d = pixel.local - center.chart();
         if d.length() > radius + cubarium_surface::GEOM_EPS {
             continue;
@@ -1025,6 +1025,7 @@ pub fn stamp_pose_in_chart(
 mod tests {
     use super::*;
     use cube_proto::Face;
+    use cubarium_surface::Topology;
 
     fn total(canvas: &Canvas) -> f64 {
         Face::ALL
@@ -1037,7 +1038,7 @@ mod tests {
     #[test]
     fn alpha_uses_linear_source_over_and_does_not_add_a_halo() {
         let s = Sprite::from_rgba(1, 1, Vec2::new(0.5, 0.5), &[255, 0, 0, 128]).unwrap();
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         canvas.set(Face::Front, 20, 20, [0.0, 0.0, 1.0]);
         stamp_sprite(
             &mut canvas,
@@ -1059,8 +1060,8 @@ mod tests {
             255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
         ];
         let s = Sprite::from_rgba(4, 1, Vec2::new(2.0, 0.5), &pixels).unwrap();
-        let mut middle = Canvas::new();
-        let mut seam = Canvas::new();
+        let mut middle = Canvas::cube();
+        let mut seam = Canvas::cube();
         stamp_sprite(
             &mut middle,
             SurfacePoint::new(Face::Front, 32.0, 32.5),
@@ -1152,7 +1153,7 @@ mod tests {
             Bend { amplitude: 3.0, base: 0.0, root: f64::NAN, length: 13.0 },
         ];
         for anchor in anchors {
-            let mut plain = Canvas::new();
+            let mut plain = Canvas::cube();
             stamp_layers(
                 &mut plain,
                 anchor,
@@ -1165,7 +1166,7 @@ mod tests {
             );
             for bend in identities {
                 assert!(bend.is_identity(), "{bend:?}");
-                let mut bent = Canvas::new();
+                let mut bent = Canvas::cube();
                 stamp_layers_bent(
                     &mut bent,
                     anchor,
@@ -1202,7 +1203,7 @@ mod tests {
         // row 15) is 0.5 px above the root line, which the profile holds still; its top row
         // (tile row 1) is past `root + length` and takes the whole amplitude.
         let draw = |amplitude: f64| {
-            let mut canvas = Canvas::new();
+            let mut canvas = Canvas::cube();
             stamp_layers_bent(
                 &mut canvas,
                 anchor,
@@ -1272,9 +1273,9 @@ mod tests {
     #[test]
     fn a_bent_stamp_conserves_its_light_across_a_seam_and_at_a_vertex() {
         let s = stem();
-        let mut middle = Canvas::new();
-        let mut seam = Canvas::new();
-        let mut vertex = Canvas::new();
+        let mut middle = Canvas::cube();
+        let mut seam = Canvas::cube();
+        let mut vertex = Canvas::cube();
         let bend = bend_of(2.0);
         for (canvas, anchor) in [
             (&mut middle, SurfacePoint::new(Face::Front, 32.5, 32.5)),
@@ -1364,8 +1365,8 @@ mod tests {
                 let amplitude = room * f64::from(k) / 8.0;
                 for amplitude in [amplitude, -amplitude] {
                     let bend = bend_of(amplitude);
-                    let mut budgeted = Canvas::new();
-                    let mut generous = Canvas::new();
+                    let mut budgeted = Canvas::cube();
+                    let mut generous = Canvas::cube();
                     stamp_layers_bent(
                         &mut budgeted,
                         anchor,
@@ -1405,7 +1406,7 @@ mod tests {
         let s = stem();
         let anchor = SurfacePoint::new(Face::Front, 32.5, 32.5);
         let draw = |bend: Bend, mask: Mask| {
-            let mut canvas = Canvas::new();
+            let mut canvas = Canvas::cube();
             stamp_layers_bent(
                 &mut canvas,
                 anchor,
@@ -1455,7 +1456,7 @@ mod tests {
             mix,
         };
         let draw = |mix: f32| {
-            let mut c = Canvas::new();
+            let mut c = Canvas::cube();
             // A non-black background, so "covers the same pixels" is a real claim.
             for face in Face::ALL {
                 for y in 0..64u16 {
@@ -1479,7 +1480,7 @@ mod tests {
             c
         };
         let plain = {
-            let mut c = Canvas::new();
+            let mut c = Canvas::cube();
             for face in Face::ALL {
                 for y in 0..64u16 {
                     for x in 0..64u16 {
@@ -1547,7 +1548,7 @@ mod tests {
         }
         // And a nonsense tone is the untoned stamp, not a panic.
         for bad in [f32::NAN, -1.0, 0.0] {
-            let mut c = Canvas::new();
+            let mut c = Canvas::cube();
             stamp_layers_bent_toned(
                 &mut c,
                 anchor,
@@ -1560,7 +1561,7 @@ mod tests {
                 tone(bad),
                 &mut Vec::new(),
             );
-            let mut d = Canvas::new();
+            let mut d = Canvas::cube();
             stamp_layers_bent(
                 &mut d,
                 anchor,
@@ -1591,8 +1592,8 @@ mod tests {
                 let anchor = SurfacePoint::new(face, u, v);
                 for amplitude in [0.0, -0.4, 0.4, f64::NAN, f64::INFINITY] {
                     for mask in [Mask::None, Mask::Axial { reveal: 8.25 }, Mask::Strip { floor: 4.0, reveal: 12.0 }] {
-                        let mut original = Canvas::new();
-                        let mut retained = Canvas::new();
+                        let mut original = Canvas::cube();
+                        let mut retained = Canvas::cube();
                         let bend = bend_of(amplitude);
                         stamp_layers_bent(&mut original, anchor, Vec2::new(0.0, -1.0),
                             &[(Pose::still(&sprite), 1.0)], 1.0, 0.7, mask, bend, &mut Vec::new());
@@ -1610,7 +1611,7 @@ mod tests {
         let sprite = stem();
         let good = SurfacePoint::new(Face::Front, 32.5, 32.5);
         let draw = |owner, center, heading, opacity, bend| {
-            let mut canvas = Canvas::new();
+            let mut canvas = Canvas::cube();
             stamp_pose_in_chart(&mut canvas, owner, center, heading, Pose::still(&sprite),
                 opacity, Mask::None, bend, &mut Vec::new());
             canvas
@@ -1663,7 +1664,7 @@ mod tests {
                 }
                 for amplitude in [-0.9, 0.0, 0.9] {
                     let draw = |mix| {
-                        let mut canvas = Canvas::new();
+                        let mut canvas = Canvas::cube();
                         stamp_pose_in_chart(&mut canvas, owner, center, Vec2::new(1.0, 0.0),
                             Pose { first: &first, second: &second, mix }, 0.7,
                             Mask::Axial { reveal: 11.75 },

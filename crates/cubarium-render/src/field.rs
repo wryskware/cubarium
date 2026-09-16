@@ -1,8 +1,6 @@
 //! Substrate rendering from a scalar field.
 
-use cubarium_surface::{Scale, Topology};
 use crate::Canvas;
-use cube_proto::{FACE_SIZE, Face};
 use cubarium_surface::{Edge, ScalarField, SurfacePoint, cell_of, pixel_neighbor};
 
 /// Add `color · min(value / scale, 1)` for each pixel from its cell (nearest-cell sample).
@@ -15,18 +13,24 @@ pub fn draw_field(canvas: &mut Canvas, field: &ScalarField, scale: f64, color: [
     if scale.is_nan() || scale <= 0.0 {
         return;
     }
-    for face in Face::ALL {
-        for y in 0..FACE_SIZE as u16 {
-            for x in 0..FACE_SIZE as u16 {
-                let own = field.get(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y)));
+    let topo = canvas.topology();
+    let world = canvas.scale();
+    let width = canvas.width();
+    let at = |face, x, y| {
+        field.get(cell_of(topo, world, &SurfacePoint::pixel_center(topo, face, x, y)))
+    };
+    for &face in canvas.charts() {
+        for y in canvas.rows_of(face) {
+            for x in 0..width {
+                let own = at(face, x, y);
                 let value = if filter {
                     // Weight 4 for the pixel's own cell, 1 for each pixel neighbor's cell,
                     // normalized over the neighbors that exist so the open rim is not dark.
                     let mut sum = own * 4.0;
                     let mut weight = 4.0;
                     for edge in Edge::ALL {
-                        if let Some((nf, nx, ny)) = pixel_neighbor(Topology::Cube, face, x, y, edge) {
-                            sum += field.get(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, nf, nx, ny)));
+                        if let Some((nf, nx, ny)) = pixel_neighbor(topo, face, x, y, edge) {
+                            sum += at(nf, nx, ny);
                             weight += 1.0;
                         }
                     }
@@ -47,7 +51,8 @@ pub fn draw_field(canvas: &mut Canvas, field: &ScalarField, scale: f64, color: [
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cubarium_surface::{CellId, FieldGraph, diffuse};
+    use cube_proto::Face;
+    use cubarium_surface::{CellId, FieldGraph, Scale, Topology, diffuse};
 
     fn sample(canvas: &Canvas) -> Vec<f32> {
         let mut v = Vec::with_capacity(5 * 64 * 64);
@@ -64,9 +69,9 @@ mod tests {
     #[test]
     fn the_filter_preserves_a_constant_field_everywhere() {
         let field = ScalarField::constant(Topology::Cube, Scale::ONE, 3.0);
-        let mut filtered = Canvas::new();
+        let mut filtered = Canvas::cube();
         draw_field(&mut filtered, &field, 6.0, [1.0, 1.0, 1.0], true);
-        let mut plain = Canvas::new();
+        let mut plain = Canvas::cube();
         draw_field(&mut plain, &field, 6.0, [1.0, 1.0, 1.0], false);
         let (a, b) = (sample(&filtered), sample(&plain));
         assert_eq!(a.len(), 20_480);
@@ -80,7 +85,7 @@ mod tests {
     fn values_clamp_at_the_scale_and_zero_stays_black() {
         let mut field = ScalarField::zeros(Topology::Cube, Scale::ONE);
         field.set(CellId::new(Topology::Cube, Scale::ONE, Face::Front, 4, 4), 100.0);
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         draw_field(&mut canvas, &field, 6.0, [0.12, 0.5, 0.2], false);
         // The 4x4 pixels of that cell are saturated; everything else is black.
         let mut lit = 0;
@@ -105,7 +110,7 @@ mod tests {
         let mut field = ScalarField::zeros(Topology::Cube, Scale::ONE);
         field.set(CellId::new(Topology::Cube, Scale::ONE, Face::Front, 4, 4), 6.0);
         let before = field.clone();
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         draw_field(&mut canvas, &field, 6.0, [1.0, 1.0, 1.0], true);
         assert_eq!(field.total(), before.total());
         // A pixel just outside the cell now picks up a share.
@@ -120,7 +125,7 @@ mod tests {
     #[test]
     fn a_nonpositive_scale_draws_nothing() {
         let field = ScalarField::constant(Topology::Cube, Scale::ONE, 3.0);
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         draw_field(&mut canvas, &field, 0.0, [1.0; 3], true);
         assert!(sample(&canvas).iter().all(|&v| v == 0.0));
     }
@@ -139,7 +144,7 @@ mod tests {
         for _ in 0..20 {
             diffuse(&mut field, &mut scratch, &graph, 0.15);
         }
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         draw_field(&mut canvas, &field, 6.0, [0.12, 0.5, 0.2], true);
         let mut faces = std::collections::HashSet::new();
         for face in Face::ALL {

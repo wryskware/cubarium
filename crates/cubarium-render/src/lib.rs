@@ -24,7 +24,7 @@ mod sprite;
 mod trail;
 
 pub use body::{BodyShape, Lobe, stamp_body};
-pub use canvas::{Canvas, srgb_decode, srgb_encode};
+pub use canvas::{Bands, Canvas, srgb_decode, srgb_encode};
 pub use field::draw_field;
 pub use multipart::{
     MAX_GRID, MIN_RIG_SCALE, RIG_MARGIN, RigPart, SUPERSAMPLE_REACH, grid_schedule, rig_radius,
