@@ -1,0 +1,52 @@
+---
+design_status: exploration
+last_reviewed: 2026-09-16
+decision_refs: []
+---
+
+# Backlog
+
+Deferred work Wrysk has named but not scheduled. Each item says who asked, when, and
+what "done" looks like. Fable keeps this current; anything picked up moves to a handoff.
+
+## 1. Operator controls: a running list of user-configurable parameters, and a GUI for them
+
+Wrysk, 2026-09-16: "keep a running list of user configurable parameters. at some point,
+we'll add them to the webpage so it can be adjusted, or the daemon restarted with those
+settings from a gui." Not now.
+
+**Done looks like:** the viewer page (port 7393) exposes these controls, either live where
+the presenter can take them at runtime, or as a "restart the daemon with these settings"
+form that writes the launch line `scripts/run-cube.sh` uses. Until then this list is the
+spec. Add to it whenever a new knob lands.
+
+| knob | where it lives today | live or restart | notes |
+| --- | --- | --- | --- |
+| foliage shoulder `CUBARIUM_FOLIAGE_FULL` (0.5..=1.0, ships 0.85; 0.95 recommended by G, on the cube since 2026-09-16) | env var, read once at first presenter build (`art_present/habitat.rs`) | restart | 1.0 vetoed (bare wood on ungrazed stands). Logged at startup when overridden; not in `/status`. |
+| world config TOML `--config <toml>` (every `WorldConfig` field: plant, producer, organism, drives, detritus, weather, founders, capacity, seed) | `cubarium run --config`; selected ecologies under `runs/ecology-v1-calibration/selected/` (`baseline.toml`, `fast-leaf.toml`) | restart, fresh world only (never migrate) | Policy files are refused by name against a different ecology. |
+| `--seed <n>` | CLI, overrides `config.seed` on a fresh world | restart | |
+| `--speed <x>` (0 = unlimited, no clock) | CLI | restart | |
+| `--fps <n>` | CLI | restart | |
+| `--care` (care journal / care effects on) | CLI | restart | |
+| `--neural <policy.json>` + `--neural-count <n>` | CLI, fresh world only | restart | Refused on resume and across ecologies. |
+| `--sink shim|web|none`, `--mirror-web`, `--web-port`, `--addr`, `--art <dir>` | CLI | restart | |
+| `--telemetry`, `--fields`, `--events`, `--out`, `--every`, `--scale` | CLI (diagnostic outputs) | restart | |
+| apex spawn controls (introduce one or two adults, paid lifecycle, never restocked) | viewer page | live | Present since ecology v1. |
+| `organism.move_cost` (ships 0.00036; F measured 0.0018 and 0.006, both overshoot) | `WorldConfig` via TOML; calibration `--prices` axis | restart | Candidate for a slider once the finer ladder (I) reports. |
+
+## 2. Artwork pass
+
+Wrysk, 2026-09-16, on G's soil-band dead-wood stub (a cut-down stage-0 mushroom in the ash
+tone): "i think a purpose drawn one is better, but lets put that in a backlog too and do a
+artwork pass later."
+
+**Done looks like:** one authored tile set for a dead-wood snag in the soil band (and its
+fade), under `assets/atelier`, replacing the `Mask::Axial` cut in `habitat.rs`; the
+`art_ecology` soil-mark tests re-pointed at it. Also queued for the same pass, from B's and
+G's notes: the stripped-canopy silhouette is less articulated than the side-face plant; the
+water band shows nothing for dead wood; a tall dead column has no authored crown.
+
+## 3. Deferred decisions
+
+- Shoulder 0.85 vs 0.95: Wrysk does not want to tune now; 0.95 stays on the cube by env
+  override, 0.85 stays the shipped default. Revisit when the GUI exists.
