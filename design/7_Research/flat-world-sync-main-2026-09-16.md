@@ -253,7 +253,9 @@ Nothing `main` added is a new *per-cell* vector sized at the cube — the only o
 
 - `cargo test --workspace --exclude cubarium-gpu --no-fail-fast`: **1,956 passed, 0 failed,
   31 ignored** over 147 test binaries (FW-2 recorded 1,655 / 0 / 25 at its freeze; the
-  difference is FW-3's, FW-5's, FW-6's, GS-1's and `main`'s own new tests). Every FW-6 `ring_*` test passes
+  difference is FW-3's, FW-5's, FW-6's, GS-1's and `main`'s own new tests). Re-run on the
+  integrated branch tip after `de16e69`, with GS-1b's two commits in: **1,959 passed, 0 failed,
+  32 ignored** over 148 binaries. Every FW-6 `ring_*` test passes
   (`ring_travel`, `ring_field`, `ring_raster`, `ring_canvas`, `ring_stamp_scale`, `ring_world`,
   `ring_weather`, `ring_schema17`, `ring_sinks`, `ring_care`, `ring_present`).
 - `cubarium-gpu` is GS-1b's, still in flight, and was excluded on both sides of the merge.
@@ -291,5 +293,5 @@ Nothing `main` added is a new *per-cell* vector sized at the cube — the only o
 | `96e66fc` | this report, and the plan's §4 note |
 | `de16e69` | the integration merge into `tachyon-screen`, which had moved two GS-1b commits on while SYNC-1 ran |
 
-(The numbers in §7 and §4 were measured on `96e66fc`, before GS-1b's two commits joined it;
-`de16e69` changes no file either of the tables above names.)
+(§4's numbers were measured on `96e66fc`, before GS-1b's two commits joined it; `de16e69`
+changes no file either of the tables above names. §7 carries both test runs.)
