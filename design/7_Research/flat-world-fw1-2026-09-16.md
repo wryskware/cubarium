@@ -206,7 +206,7 @@ and one reflection.
 
 | | before | after |
 |---|---|---|
-| `cargo test --workspace` | 1,472 passed, 0 failed, 23 ignored | 1,510 passed, 0 failed, 23 ignored |
+| `cargo test --workspace` | 1,472 passed, 0 failed, 23 ignored | **1,514 passed, 0 failed, 23 ignored** |
 | `cubarium-surface` unit tests (`#[test]`) | 54 | 95 |
 | `cubarium-surface` integration tests (`#[test]`) | 40 | 41 (`cube_by_value.rs` is the new one) |
 
@@ -215,8 +215,19 @@ The 42 new tests are the by-value golden plus the ring exercises in
 FW-6's reserved paths `tests/{ring_travel,ring_field,ring_raster}.rs` were not
 created.
 
-`cargo clippy --workspace --all-targets` reports the same warnings as before the
-change (all pre-existing, in files this package did not touch).
+**Both runs exclude `cubarium-gpu`** (`--exclude cubarium-gpu`), which GS-1 was
+creating in this worktree while FW-1 finished and which does not yet compile:
+its `src/target/{kms,scanout}.rs` are missing and `atlas.rs` has a `png`
+`BufRead` bound to fix. Nothing in it touches the surface crate. Every other
+package is green.
+
+`cargo clippy --workspace --exclude cubarium-gpu --all-targets`, compared
+file-by-file against a full run of the same command on a clean checkout of
+`e088cae^`: **128 warnings in 49 files before, 126 in 48 files after**. No file
+gained a warning and no new file appeared; the two that went are redundant
+same-type casts in `corner_cap_present_tests.rs` that the widening removed.
+`cubarium-surface` itself is clippy-clean, with and without the `serde`
+feature.
 
 ## 7. What §2 needed deciding, or was wrong as written
 
