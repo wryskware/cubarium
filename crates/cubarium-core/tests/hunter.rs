@@ -2289,12 +2289,21 @@ fn observations_do_not_move_a_profile_three_hunter_world() {
     // `reflush_below`), and a fresh world's foliage is set by the wood that carries it. The
     // claim — that *observing* a world never moves it — is unchanged and is anchored to this
     // build's own numbers.
+    // Re-recorded for the ring world (`design/flat-world-plan-2026-09-16.md` §4). The schema
+    // 12 projection carries `config`, and `WorldConfig` gained `topology` and `world_scale`
+    // and went to version 9, so **no** hash that covers the config can be equal across this
+    // change — which is exactly why §4 replaces hash comparison with `CubeProjection`. That
+    // the two worlds themselves did not move is shown by
+    // `tests/cube_projection.rs::a_cube_world_is_unchanged_by_the_ring_work`, which compares a
+    // 6,000-tick cube run against a snapshot written by a build with no topology in it and
+    // finds no differing field. The claim here — that *observing* a world never moves it — is
+    // unchanged and is anchored to this build's own numbers.
     assert_eq!(
-        hunt_hash, 14_789_154_998_038_686_881,
+        hunt_hash, 7_424_989_416_957_462_349,
         "a hunt-and-digest world moved"
     );
     assert_eq!(
-        birth_hash, 5_973_878_847_541_680_162,
+        birth_hash, 14_793_747_053_647_923_190,
         "a funded-birth world moved"
     );
 }

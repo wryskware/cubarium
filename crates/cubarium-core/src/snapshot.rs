@@ -9,9 +9,12 @@ pub mod v11;
 pub mod v12;
 pub mod v13;
 pub mod v14;
+pub mod v16;
 pub mod v7;
 pub mod v8;
 pub mod v9;
+
+pub mod projection;
 
 pub mod care_v1;
 
@@ -23,6 +26,8 @@ pub use v11::{SCHEMA_V11, WorldStateV11};
 pub use v12::{SCHEMA_V12, WorldStateV12};
 pub use v13::{SCHEMA_V13, WorldStateV13};
 pub use v14::{SCHEMA_V14, WorldStateV14};
+pub use v16::{CONFIG_VERSION_V16, SCHEMA_V16, WorldStateV16, decode_v16};
+pub use projection::{ConfigProjection, CubeProjection, first_difference, projection_hash};
 
 /// Bumped whenever `WorldState` or any nested type changes shape.
 ///
@@ -38,12 +43,23 @@ pub use v14::{SCHEMA_V14, WorldStateV14};
 /// the care/no-care comparison. Their `From<WorldStateVn> for WorldState` conversions are
 /// gone: a conversion into the current shape is exactly the migration the rule forbids.
 ///
+/// **Version 17 is the ring world** (`design/flat-world-plan-2026-09-16.md` §4). The cause
+/// is one shape change and nothing else: [`crate::config::WorldConfig`] gains `topology` and
+/// `world_scale`, and `WorldConfig` is inside the payload. The same standing rule applies —
+/// **schema 17 refuses every older snapshot by name**, 7 through 16, and migrates nothing.
+/// A world whose cells were counted for a different surface cannot be re-anchored to this
+/// one, and pretending otherwise would be exactly the synthesis the rule forbids.
+///
+/// [`v16`] is frozen beside `v7..v14` for the one reader that is allowed to look inside a
+/// schema 16 payload: the `CubeProjection` comparator, which is how a cube world's behaviour
+/// is shown to be unchanged across a break that makes any hash comparison impossible.
+///
 /// Historical shape notes, kept because the mirrors still encode them: version 8 appends
 /// `care`; 9 appends `energy_correction`; 10 appends `hunters`; 11 reshapes the hunter
 /// extension; 12 reshapes `care` for the persisted shower dose; 13 appends ordinary quiet;
 /// 14 appends apex dormancy and encounters; 15 appends the recurrent extension; 16 appends
-/// [`crate::fields::EcologyV1State`].
-pub const SCHEMA_VERSION: u32 = 16;
+/// [`crate::fields::EcologyV1State`]; 17 appends two fields to `WorldConfig`.
+pub const SCHEMA_VERSION: u32 = 17;
 pub const MAGIC: [u8; 4] = *b"CUBW";
 /// Fixed header length: magic 4, schema 4, build-id length 2, then the build id bytes,
 /// then payload length 8 and CRC32 4 (all little-endian).
@@ -105,7 +121,7 @@ pub fn encode_snapshot(state: &WorldState, build_id: &str) -> Vec<u8> {
 /// decode cleanly and silently drop whatever was appended — a care dose, a hunter extension, an
 /// ordinary quiet timer. The length is the only evidence a non-self-describing format offers
 /// that the reader and the writer agreed about the shape, so it is checked.
-fn decode_exact<'a, T>(payload: &'a [u8], schema: u32) -> Result<T, SnapshotError>
+pub(crate) fn decode_exact<'a, T>(payload: &'a [u8], schema: u32) -> Result<T, SnapshotError>
 where
     T: serde::Deserialize<'a>,
 {
@@ -124,11 +140,11 @@ where
 /// Validate magic, schema, length, CRC, exact decode, then `state.validate()`; every failure is a
 /// distinct error so the loader can report why a snapshot was refused.
 ///
-/// **Exactly one schema decodes: [`SCHEMA_VERSION`].** Every older version — 7 through 15 —
+/// **Exactly one schema decodes: [`SCHEMA_VERSION`].** Every older version — 7 through 16 —
 /// is [`SnapshotError::UnsupportedSchema`] carrying the version it read, so a caller can say
 /// which world it was and that it has to be restarted rather than converted
 /// (`design/ecology-v1-contract.md` §15.1). `SnapshotMeta.schema` still reports what was read.
-/// A schema 16 payload with trailing bytes — a newer shape relabelled 16 — is refused too.
+/// A schema 17 payload with trailing bytes — a newer shape relabelled 17 — is refused too.
 pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), SnapshotError> {
     let take = |at: usize, n: usize| -> Result<&[u8], SnapshotError> {
         bytes.get(at..at + n).ok_or(SnapshotError::Truncated)
@@ -541,7 +557,7 @@ mod tests {
         let bytes = encode_snapshot(&state(), "b");
         for old in [
             SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13,
-            SCHEMA_V14, 15,
+            SCHEMA_V14, 15, SCHEMA_V16,
         ] {
             let mut relabelled = bytes.clone();
             relabelled[4..8].copy_from_slice(&old.to_le_bytes());
@@ -551,10 +567,10 @@ mod tests {
                 "schema {old} must be refused by name"
             );
         }
-        assert_eq!(SCHEMA_VERSION, 16);
+        assert_eq!(SCHEMA_VERSION, 17);
     }
 
-    /// A newer payload relabelled 16 is refused too: the length is the only evidence a
+    /// A newer payload relabelled 17 is refused too: the length is the only evidence a
     /// non-self-describing format offers that reader and writer agreed about the shape.
     #[test]
     fn a_relabelled_schema_sixteen_payload_is_refused() {
