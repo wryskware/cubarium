@@ -115,7 +115,6 @@ fn a_ring_render_view_carries_the_topology_and_the_world_s_cell_count() {
 /// it cannot work. This is the test for FW-5's first step; remove the `#[ignore]` when the
 /// presenter is built from the world's own cell count.
 #[test]
-#[ignore = "pending FW-5: Presenter::new allocates its caches at Topology::Cube"]
 fn the_presenter_draws_a_ring_world() {
     let world = world_of(ring(), 10);
     let view = world.render_view();
