@@ -35,7 +35,7 @@ use cube_proto::{FACE_SIZE, Face};
 use cubarium::art::{ArtPack, Band, Clip, Plant};
 use cubarium::art_present::{
     ArtPresenter, GROW_BLEND, GrowthStep, PLANT_REVEAL_PX, REED_DEPTH, REED_SCALE, SOIL_SCALE,
-    WIND_PEAK_TICK, WIND_PERIOD, WIND_RESPONSE,
+    WIND_PEAK_TICK, WIND_PERIOD,
     WIND_SLOT_VARIATION, band_of, band_opacity, effective_tip, growth_between,
     growth_step, growth_weights, next_stage, plant_bend_budget, plant_cap, plant_phase_of,
     present_seconds, slot_of, slot_wind, species_of, stage_opacity, stage_thresholds, up_of,
@@ -54,9 +54,6 @@ use cubarium_surface::{CUBE_CELL_COUNT, CellId, Vec2};
 // ---------------------------------------------------------------------------
 
 const PRODUCER_MAX: f64 = 10.0;
-/// Render frames per simulated tick at 60 fps with a 20 Hz clock.
-const FRAMES_PER_TICK: u64 = 3;
-
 /// The measured bend budgets of the shipped pack, as `art/README.md` and Package 2
 /// decision 6 of the brief record them (px, two decimals). The new art may not *narrow*
 /// the wind these admit.
@@ -130,47 +127,6 @@ struct Site {
     cell: CellId,
     band: Band,
     species: &'static str,
-}
-
-/// A cell whose 16-px tile stays well inside one face: the anchor is within ±1 px of the
-/// cell center and a stamp reaches at most 9 px, so 3..=12 in both cell axes keeps every
-/// painted pixel on the cell's own face and the pixel windows below meaningful.
-fn interior(cell: CellId) -> bool {
-    (3..=12).contains(&cell.cx(Topology::Cube, Scale::ONE)) && (3..=12).contains(&cell.cy(Topology::Cube, Scale::ONE))
-}
-
-/// A rank-2 slot of `species` in `band`, interior to one face.
-///
-/// Soil and foliage are the cell's own geometry on a side face, so their plants stand up
-/// toward the canopy and reveal along the stalk. Canopy is the **top** face, the radial
-/// case. Water is made by *flooding* an interior side-face cell (`art_water.rs`'s recipe),
-/// which is how a cell's band becomes [`Band::Water`] at all.
-fn site_for(band: Band, species: &'static str) -> Site {
-    let cell = CellId::all(Topology::Cube, Scale::ONE)
-        .find(|&c| {
-            interior(c)
-                && plant_cap(band, c) == Some(2)
-                && species_of(band, c) == species
-                && match band {
-                    Band::Canopy => c.face(Topology::Cube, Scale::ONE) == Face::Top && band_of(c) == Band::Canopy,
-                    Band::Water => c.face(Topology::Cube, Scale::ONE) != Face::Top,
-                    other => c.face(Topology::Cube, Scale::ONE) != Face::Top && band_of(c) == other,
-                }
-        })
-        .unwrap_or_else(|| {
-            panic!("the cube has no interior rank-2 {species} slot in the {} band", band.name())
-        });
-    Site { cell, band, species }
-}
-
-/// The site of a plant, by its band and asset name.
-fn site_of(plant: &Plant) -> Site {
-    let species = WIND_RESPONSE
-        .iter()
-        .map(|(n, _)| *n)
-        .find(|n| *n == plant.name.as_str())
-        .unwrap_or_else(|| panic!("{} has no wind response, so no site is defined", plant.name));
-    site_for(plant.band, species)
 }
 
 /// A density, as a fraction of the band's scale, that warrants exactly `stage` — strictly
@@ -1001,69 +957,6 @@ fn a_canopy_step_on_the_rim_of_the_top_face_opens_as_one_stamp_on_two_faces() {
         }
     }
     assert_eq!(checked, 4, "both clips of both canopy species must be drawn on the rim");
-}
-
-/// Native 64 px frames of both canopy species climbing sprout → stage 1 → stage 2 through
-/// their authored clips and then wilting back through them, three frames per tick (60 fps
-/// over the 20 Hz clock), on the presenter's own published-view path with the two cells
-/// fed and nothing else. Ignored: writes files. `CANOPY_CAPTURE_DIR` names the directory.
-#[test]
-#[ignore = "review capture, not behaviour"]
-fn capture_the_canopy_steps_as_native_frames() {
-    use cubarium::sink::{FrameSink, PngSink};
-    let dir = std::env::var("CANOPY_CAPTURE_DIR").unwrap_or_else(|_| {
-        let d = std::env::temp_dir().join(format!("canopy-growth-{}", std::process::id()));
-        d.to_string_lossy().into_owned()
-    });
-    std::fs::create_dir_all(&dir).unwrap();
-    let art = plants_only();
-    let sites: Vec<Site> = ["umbrellafrond", "bloomcrown"]
-        .iter()
-        .map(|s| site_of(art.plant(s).unwrap()))
-        .collect();
-    let view = |tick: u64, density: f64| {
-        let mut v = bare_view(tick);
-        for site in &sites {
-            v.producer[site.cell.index()] = density * saturation();
-        }
-        wood_from_producer(&mut v);
-        v
-    };
-    let mut p = ArtPresenter::new(plants_only());
-    let mut sink = PngSink::new(&dir, 1).unwrap();
-    let mut frame = cube_proto::Frame::black();
-    let mut manifest = String::new();
-    p.observe(&view(0, 0.0));
-    // 12 s up (three 4 s steps), 1 s held full-grown, then 6 s starved back to a sprout.
-    let up = density_for(Band::Canopy, 2);
-    let down = density_for(Band::Canopy, 0);
-    for tick in 1..=400u64 {
-        let v = view(tick, if tick <= 260 { up } else { down });
-        p.observe(&v);
-        for k in 0..FRAMES_PER_TICK {
-            let f = k as f64 / FRAMES_PER_TICK as f64;
-            let mut canvas = Canvas::cube();
-            p.draw(&v, f, &mut canvas);
-            canvas.encode(&mut frame);
-            sink.submit(cubarium::sink::Output::Cube(&frame)).unwrap();
-            let steps: Vec<String> = sites
-                .iter()
-                .map(|s| match drawn_step(&p, s.cell, f) {
-                    Some(step) => format!("{}:{:?}>{}@{:.3}", s.species, step.lower, step.upper, step.t),
-                    None => format!("{}:idle", s.species),
-                })
-                .collect();
-            manifest.push_str(&format!("tick {tick} f {f:.3} {}\n", steps.join(" ")));
-        }
-    }
-    sink.finish().unwrap();
-    std::fs::write(format!("{dir}/manifest.txt"), manifest).unwrap();
-    let cells: Vec<String> = sites
-        .iter()
-        .map(|s| format!("{} at Top cell ({}, {}) anchor {:?}", s.species, s.cell.cx(Topology::Cube, Scale::ONE), s.cell.cy(Topology::Cube, Scale::ONE), slot_of(s.cell).at))
-        .collect();
-    std::fs::write(format!("{dir}/sites.txt"), cells.join("\n") + "\n").unwrap();
-    eprintln!("frames in {dir}");
 }
 
 // ---------------------------------------------------------------------------

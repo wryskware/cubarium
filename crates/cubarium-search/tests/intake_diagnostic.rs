@@ -15,7 +15,6 @@
 //! cargo test -p cubarium-search --release --test intake_diagnostic -- --ignored --nocapture
 //! ```
 
-use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
 use cubarium_core::{CARRION, CHANNELS, FOLIAGE, FRUIT, IntakeLimit, LITTER, MOUTHS, MOUTH_GRAZE};
@@ -188,37 +187,3 @@ fn a_shut_mouthed_policy_reads_as_the_effort_and_not_the_cell() {
 }
 
 // --- the experiment -----------------------------------------------------------------------
-
-/// Workstream H's experiment: three drivers on the twelve `fast-leaf` layouts, horizon 36,000,
-/// the trace and the ledger on, eight workers.
-///
-/// Overridable by environment for a re-run of one row: `CUBARIUM_INTAKE_CONFIG`,
-/// `CUBARIUM_INTAKE_POLICY`, `CUBARIUM_INTAKE_OUT`, `CUBARIUM_INTAKE_HORIZON`,
-/// `CUBARIUM_INTAKE_WORKERS`, `CUBARIUM_INTAKE_PER_TICK` (a comma-separated layout list).
-#[test]
-#[ignore = "the workstream H experiment, not a check"]
-fn the_intake_experiment() {
-    fn var(name: &str, default: &str) -> String {
-        std::env::var(name).unwrap_or_else(|_| default.to_string())
-    }
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let config = root.join(var(
-        "CUBARIUM_INTAKE_CONFIG",
-        "runs/ecology-v1-calibration/selected/fast-leaf.toml",
-    ));
-    let policy = root.join(var(
-        "CUBARIUM_INTAKE_POLICY",
-        "runs/es-eco-v1-fastleaf/selected/center-00009-policy.json",
-    ));
-    let out = root.join(var("CUBARIUM_INTAKE_OUT", "runs/ecology-v1-intake/intake.json"));
-    let horizon: u64 = var("CUBARIUM_INTAKE_HORIZON", "36000").parse().expect("a horizon");
-    let workers: usize = var("CUBARIUM_INTAKE_WORKERS", "8").parse().expect("a worker count");
-    let per_tick: Vec<String> = var("CUBARIUM_INTAKE_PER_TICK", "t1-corridor,h1-holdout")
-        .split(',')
-        .filter(|s| !s.is_empty())
-        .map(String::from)
-        .collect();
-
-    intake::run(policy, config, horizon, 20_260_915, workers, 900, out, &per_tick)
-        .expect("the experiment ran");
-}

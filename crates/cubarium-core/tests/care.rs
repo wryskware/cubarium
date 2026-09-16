@@ -1,10 +1,8 @@
 //! Optional care: the invariants of `design/7_Research/care-contract-2026-09-12.md`
 //! (revision 2).
 //!
-//! The load-bearing test here is [`zero_care_reproduces_the_pre_change_binarys_next_600_ticks`]:
-//! two fixtures produced by the *pre-change* schema 7 release build prove that schema 8
-//! reads a live world, steps it, and writes back the same ecological bytes. Everything else
-//! checks that a command does exactly what the contract says and nothing else.
+//! Every test checks that one command does exactly what the contract says and nothing else,
+//! on a world this build creates.
 
 use cubarium_surface::{Scale, Topology};
 

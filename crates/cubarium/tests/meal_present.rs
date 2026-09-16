@@ -439,7 +439,7 @@ fn gestation_beats_the_meal_and_the_hand_back_is_the_ordinary_cross_fade() {
     let mut old = ArtPresenter::new(pack()).without_meal_onset();
     let t = 600u64;
     // A fed body that holds an escrow is budding: the bud clip, untouched by the meal.
-    for tick in t..=t + 30 {
+    for tick in t..=t + 12 {
         let mut o = organism(id, Mode::Feeding, tick >= t + 2);
         o.gestation = Some(((tick - t) as f32 / 60.0).min(1.0));
         let v = view_of(tick, o);

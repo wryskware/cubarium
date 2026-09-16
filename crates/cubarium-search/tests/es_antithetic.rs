@@ -23,18 +23,13 @@
 //! round, and a subcommand is the one edit that would have collided. `run_reduction` and
 //! `run_deadband` are public, so promoting them later is a one-liner.
 
-use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
 use cubarium_search::es::antithetic;
 use cubarium_search::es::optimizer::Adam;
 use cubarium_search::es::tensor::{self, PARAMS};
 use cubarium_search::es::trainer::{self, Aggregate, Plan, Protocol};
-use cubarium_search::es::{fixture, training_layouts};
-
-fn repo() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
-}
+use cubarium_search::es::training_layouts;
 
 /// A real generation, run through the real trainer on a short horizon, then read back through
 /// the reduction. The pair weights the reduction extracts must rebuild the gradient norm the
@@ -108,33 +103,4 @@ fn a_report_whose_episodes_disagree_with_its_scores_is_refused() {
         antithetic::reduce_generation(&spread, Aggregate::Min).is_ok(),
         "the protocol's own aggregate reduces"
     );
-}
-
-/// Deliverable 1, on the retained run. Reads `runs/`, writes `runs/`, simulates nothing.
-#[test]
-#[ignore = "reads a retained run and writes runs/; a measurement, not a check"]
-fn the_antithetic_pair_reduction() {
-    let run = repo().join("runs/es-eco-v1-fastleaf");
-    let out = repo().join("runs/ecology-v1-es-antithetic/pairs.json");
-    let report = antithetic::run_reduction(&run, &out).expect("reduced");
-    assert!(
-        report.replay_matches_checkpoint,
-        "the replay must be the run: max |dtheta| {:e}",
-        report.replay_max_abs_theta_error
-    );
-    assert_eq!(report.generations.len(), report.generations_completed as usize);
-}
-
-/// Deliverable 2, on generation 9's frozen weights over workstream L's observation set.
-#[test]
-#[ignore = "simulates twelve episodes and writes runs/; a measurement, not a check"]
-fn the_deadband_occupancy_under_a_sigma_scale_perturbation() {
-    let run = repo().join("runs/es-eco-v1-fastleaf");
-    let config = repo().join("runs/ecology-v1-calibration/selected/fast-leaf.toml");
-    let out = repo().join("runs/ecology-v1-es-antithetic/deadband.json");
-    let report =
-        antithetic::run_deadband(&run, 9, &config, fixture::HORIZON_TICKS, 32, 8, 240, &out)
-            .expect("measured");
-    assert_eq!(report.rows.len(), 2 * (1 + 2 * report.pairs));
-    assert!(report.samples > 0);
 }

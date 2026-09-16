@@ -24,7 +24,7 @@ use cubarium::present::{
 use cubarium_core::view::RenderView;
 use cubarium_render::{Canvas, draw_field};
 use cubarium_surface::{
-    CUBE_CELL_COUNT, CELLS_PER_FACE_EDGE, CellId, Edge, ScalarField, SurfacePoint, Vec2, cell_of,
+    CUBE_CELL_COUNT, CELLS_PER_FACE_EDGE, CellId, Edge, ScalarField, SurfacePoint, cell_of,
     pixel_neighbor,
 };
 
@@ -503,54 +503,3 @@ fn deep_foliage() -> impl Iterator<Item = (Face, u16, u16)> {
 // ---------------------------------------------------------------------------
 // cost
 // ---------------------------------------------------------------------------
-
-/// Not a correctness test: the number the brief asks for. Run with
-/// `cargo test --release -p cubarium --test art_bands -- --ignored band_draw_cost`.
-#[test]
-#[ignore = "timing, not behaviour"]
-fn band_draw_cost() {
-    use cubarium_core::OrganismId;
-    use cubarium_core::organism::Mode;
-    use cubarium_core::view::OrganismView;
-
-    let mut v = view(flat(PRODUCER_MAX), flat(SOIL_SCALE));
-    v.organisms = (0..200u32)
-        .map(|slot| OrganismView {
-            id: OrganismId { slot, generation: 1 },
-            pos: SurfacePoint::new(
-                Face::ALL[slot as usize % 5],
-                1.0 + f64::from(slot % 61),
-                1.0 + f64::from((slot * 7) % 61),
-            ),
-            heading: Vec2::new(1.0, 0.0),
-            lobes: vec![(0.0, 0.0, 1.4), (2.0, 0.0, 0.9)],
-            hue: (slot % 100) as f32 / 100.0,
-            mode: Mode::Seeking,
-            fed: false,
-            juvenile: slot % 3 == 0,
-            gestation: (slot % 5 == 0).then_some(0.5),
-            form: (slot % 4) as u8,
-            moved: Vec::new(),
-        })
-        .collect();
-
-    let mut presenter = ArtPresenter::new(pack());
-    let mut canvas = Canvas::cube();
-    for _ in 0..5 {
-        presenter.draw(&v, 0.0, &mut canvas);
-    }
-    let frames = 60u64;
-    let t0 = std::time::Instant::now();
-    for i in 0..frames {
-        v.tick = i;
-        presenter.draw(&v, 0.5, &mut canvas);
-    }
-    let per = t0.elapsed().as_secs_f64() / frames as f64;
-    println!(
-        "ArtPresenter::draw with bands: {:.3} ms/frame (1280 motifs, 200 organisms) = {:.0}% \
-         of a 60 fps budget",
-        per * 1e3,
-        per / (1.0 / 60.0) * 100.0
-    );
-    assert!(per < 1.0 / 60.0, "draw took {:.3} ms, past the whole 60 fps budget", per * 1e3);
-}

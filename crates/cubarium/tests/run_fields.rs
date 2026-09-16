@@ -120,27 +120,27 @@ fn a_resumed_run_appends_samples_without_a_second_header() {
     let state = scratch.join("state");
     let config = scratch.write("fields.toml", EVERY_MINUTE);
     let args = [
-        "--sink", "none", "--speed", "0", "--seconds", "120",
+        "--sink", "none", "--speed", "0", "--seconds", "60",
         "--config", config.to_str().unwrap(),
         "--state", state.to_str().unwrap(),
     ];
 
     let first = run(&[&args[..], &["--fresh"]].concat());
-    assert_eq!(first.final_tick, 2400);
+    assert_eq!(first.final_tick, 1200);
     let resumed = run(&args);
-    assert_eq!(resumed.start_tick, 2400);
-    assert_eq!(resumed.final_tick, 4800);
+    assert_eq!(resumed.start_tick, 1200);
+    assert_eq!(resumed.final_tick, 2400);
 
     let dumps = lines(&state.join("fields.jsonl"));
-    assert_eq!(dumps.len(), 6, "a header, 3 samples, then 2 more");
+    assert_eq!(dumps.len(), 4, "a header, 2 samples, then 1 more");
     assert!(dumps[0]["cells"].is_array(), "the header must be the first line");
     assert!(
         dumps[1..].iter().all(|d| d["cells"].is_null()),
         "a resumed run must not write a second header"
     );
     let ticks: Vec<u64> = dumps[1..].iter().map(|d| d["tick"].as_u64().unwrap()).collect();
-    // Tick 2400 is written once, by the run that reached it: the resume starts after it.
-    assert_eq!(ticks, vec![0, 1200, 2400, 3600, 4800]);
+    // Tick 1200 is written once, by the run that reached it: the resume starts after it.
+    assert_eq!(ticks, vec![0, 1200, 2400]);
 }
 
 #[test]

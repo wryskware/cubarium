@@ -16,7 +16,7 @@ use cubarium::art_present::{
     TALL_HYST, next_tall, rain_blink, rain_blink_on, tall_rise, rain_fall, rain_marks, rain_origin, rain_streaks, soil_weight,
     stage_thresholds, tall_anchor, tall_column_of, tall_columns, tall_target, up_of,
     water_brightness, water_coverage, present_seconds,
-    WIND_QUIET_TICK, plant_bend_budget, slot_of, slot_wind, wind_fixture_tick, wind_strength,
+    WIND_QUIET_TICK, plant_bend_budget, slot_of, slot_wind,
     wood_from_producer,
 };
 use cubarium::clock::DT;
@@ -599,54 +599,6 @@ fn tall_tiles_are_stamped_at_full_motif_opacity_in_the_column_heading() {
         // stalk_heading(up) = (−up.y, up.x)
         assert!((h.x + up.y).abs() < 1e-9 && (h.y - up.x).abs() < 1e-9);
     }
-}
-
-/// Not a correctness test: the draw-cost number for the report. Run with
-/// `cargo test --release -p cubarium --test art_water -- --ignored everything_on_draw_cost --nocapture`.
-#[test]
-#[ignore]
-fn everything_on_draw_cost() {
-    use cubarium_core::OrganismId;
-    use cubarium_core::organism::Mode;
-    use cubarium_core::view::OrganismView;
-    let organisms = (0..200u32)
-        .map(|slot| OrganismView {
-            id: OrganismId { slot, generation: 1 },
-            pos: SurfacePoint::new(Face::ALL[(slot % 5) as usize], (slot % 13) as f64 * 4.5 + 3.0, (slot % 11) as f64 * 5.5 + 3.0),
-            heading: Vec2::new(1.0, 0.0),
-            lobes: vec![],
-            hue: (slot % 7) as f32 / 7.0,
-            mode: Mode::Seeking,
-            fed: false,
-            juvenile: slot % 3 == 0,
-            gestation: if slot % 5 == 0 { Some(0.5) } else { None },
-            form: (slot % 4) as u8,
-            moved: Vec::new(),
-        })
-        .collect();
-    // Inside a wind packet by default (`wind_fixture_tick`); `CUBARIUM_WIND_TICK` puts the
-    // same fixture in a quiet interval, where the added wind is exactly zero.
-    let base = wind_fixture_tick();
-    let mut v = view(base, flat(saturation()), flat(1.5), flat(1.0), vec![1.0; CUBE_CELL_COUNT]);
-    v.organisms = organisms;
-    let mut p = ArtPresenter::new(pack());
-    let mut canvas = Canvas::cube();
-    p.observe(&v);
-    p.draw(&v, 0.0, &mut canvas);
-    let frames = 60;
-    let start = std::time::Instant::now();
-    for i in 0..frames {
-        v.tick = base + i;
-        p.observe(&v);
-        p.draw(&v, 0.37, &mut canvas);
-    }
-    let ms = start.elapsed().as_secs_f64() * 1e3 / frames as f64;
-    println!(
-        "ArtPresenter::draw everything on: {ms:.3} ms/frame (all wet, raining, rich, all columns tall, 200 organisms, wind {:.3} at tick {base}) = {:.0}% of a 60 fps budget",
-        wind_strength(present_seconds(base, 0.37)),
-        ms / (1000.0 / 60.0) * 100.0
-    );
-    assert!(ms < 1000.0 / 60.0, "{ms} ms/frame exceeds the 60 fps budget");
 }
 
 #[test]

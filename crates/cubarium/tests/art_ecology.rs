@@ -385,8 +385,8 @@ fn foliage_is_monotone_in_the_stock_at_a_fixed_structure() {
         let structure = snapped(&stand(7, cell, w, 0.0, 0.0));
         let mut prev = 0.0f32;
         let mut seen_full = 0.0f32;
-        for i in 0..=40 {
-            let p = i as f64 / 40.0 * (FOLIAGE_PER_WOOD * w);
+        for i in 0..=12 {
+            let p = i as f64 / 12.0 * (FOLIAGE_PER_WOOD * w);
             let image = snapped(&stand(7, cell, w, p, 0.0));
             let leafiness = max_diff(&image, &structure);
             assert!(

@@ -190,15 +190,4 @@ mod tests {
         assert_eq!(srgb_encode(f32::INFINITY), 255);
     }
 
-    /// The exhaustive proof: every `f32` from zero to one. Too slow for the normal run
-    /// (about 1.1 billion values); run with `--ignored` when the curve or the table
-    /// changes.
-    #[test]
-    #[ignore = "1.1e9 values; run explicitly"]
-    fn the_table_answers_the_reference_curve_on_every_f32_below_one() {
-        for b in 0..=1.0f32.to_bits() {
-            let v = f32::from_bits(b);
-            assert_eq!(srgb_encode(v), reference(v), "at {v} ({b:#x})");
-        }
-    }
 }

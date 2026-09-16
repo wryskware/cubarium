@@ -913,7 +913,7 @@ fn the_authored_step_moves_less_than_a_fraction_of_a_baked_sample_per_frame_at_6
     }
     assert!(jump > 0.0, "the pilot clip does not move at all between samples");
 
-    // The frames the sweep walks: every tick of the 0 → 1 step, at 60 fps.
+    // The frames the sweep walks: the ticks of the 0 → 1 step, at 60 fps.
     let ticks: Vec<u64> = (1..=200).collect();
 
     // `sway`: the same frames, with the plant snapped idle at each stage it blends with.

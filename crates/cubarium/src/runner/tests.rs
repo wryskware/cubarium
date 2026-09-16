@@ -5,7 +5,6 @@ use crate::care_effects;
 use crate::cli::TopologyArg;
 use clap::Parser;
 use cubarium_core::Telemetry;
-use cubarium_core::care::{CareCommand, CareKind, CareTarget};
 
 #[test]
 fn apex_commands_apply_and_replay_exactly_at_the_journaled_locations() {
@@ -179,87 +178,6 @@ fn care_flourishes_follow_durable_application_and_boundary_replay_only() {
         // Only this test's unique scratch journal is removed; no live state.
         std::fs::remove_dir_all(&dir).unwrap();
     }
-}
-
-/// Reproducible native-resolution review images, using real applied care and
-/// the actual art presenter. No HTTP, live state or display transport.
-#[test]
-#[ignore = "writes isolated native-resolution care review captures"]
-fn capture_care_flourishes_on_the_authored_world() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let pack = ArtPack::load(&root.join("assets/atelier")).unwrap();
-    let mut presenter = ArtPresenter::new(pack);
-    let mut effects = care_effects::CareEffects::default();
-    let mut world = World::new(WorldConfig::default()).unwrap();
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let dir = std::env::temp_dir().join(format!("cubarium-care-flourishes-{nonce}"));
-    std::fs::create_dir(&dir).unwrap();
-    let mut receipt_log = Vec::new();
-    for _ in 0..510 {
-        if world.tick() == 400 || world.tick() == 470 {
-            let command = CareCommand::standard(
-                if world.tick() == 400 { 1 } else { 2 },
-                world.tick(),
-                if world.tick() == 400 {
-                    CareKind::Feed
-                } else {
-                    CareKind::Clean
-                },
-                CareTarget {
-                    face: 0,
-                    u: 32.0,
-                    v: 48.0,
-                },
-            );
-            let receipt = world.apply_care(&command);
-            effects.observe(&command, &receipt);
-            receipt_log.push(serde_json::json!({
-                    "seq":receipt.seq,"tick":receipt.tick,"kind":command.kind.as_str(),
-                    "outcome":receipt.outcome.as_str(),"applied":receipt.outcome.applied().map(care_applied_json),
-                }));
-        }
-        world.step();
-        world.drain_events();
-        let view = world.render_view();
-        presenter.observe(&view);
-        if ![
-            401, 403, 407, 411, 419, 431, 447, 455, 471, 475, 483, 495, 507,
-        ]
-        .contains(&world.tick())
-        {
-            continue;
-        }
-        let hash = cubarium_core::snapshot::state_hash(&world.state);
-        let mut canvas = Canvas::cube();
-        presenter.draw(&view, 0.5, &mut canvas);
-        for variant in ["base", "flourish"] {
-            if variant == "flourish" {
-                effects.draw(view.tick, 0.5, &mut canvas);
-            }
-            let mut frame = Frame::black();
-            canvas.encode(&mut frame);
-            let mut rgb = Vec::new();
-            crate::net::net_rgb8(&frame, &mut rgb);
-            crate::sink::png::write_net_png(
-                &dir.join(format!("{}-{variant}.png", world.tick())),
-                &rgb,
-            )
-            .unwrap();
-        }
-        assert_eq!(cubarium_core::snapshot::state_hash(&world.state), hash);
-    }
-    std::fs::write(
-        dir.join("receipts.json"),
-        serde_json::to_vec_pretty(&receipt_log).unwrap(),
-    )
-    .unwrap();
-    eprintln!(
-        "care-flourish captures: {} (Front32,48; base and flourish share ecology)",
-        dir.display()
-    );
 }
 
 #[test]
