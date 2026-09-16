@@ -258,6 +258,22 @@ impl World {
         if !self.state.apex_encounters.parentage.is_empty() {
             held.push("the apex encounter extension holds paired parentage");
         }
+        // Transient state keyed to bodies, too (Astra, round-5 review P2): a scripted intent,
+        // a live body-budget ledger or intake trace, or an undrained life event would either
+        // go stale against a removed id or publish a record spanning the removed and the fresh
+        // cohorts. Refused by name rather than reset, so the caller decides.
+        if !self.scripted.is_empty() {
+            held.push("scripted intents are set for bodies");
+        }
+        if self.budgets.enabled() {
+            held.push("the body-budget ledger is recording");
+        }
+        if self.budgets.trace_target().is_some() {
+            held.push("an intake trace is targeting a body");
+        }
+        if !self.events.is_empty() {
+            held.push("life events are queued and undrained");
+        }
         if !held.is_empty() {
             return Err(format!(
                 "cannot remove the population: {}; this operator removes the ordinary roster \

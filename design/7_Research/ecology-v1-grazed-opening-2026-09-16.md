@@ -6,6 +6,30 @@ decision_refs: []
 
 # Workstream Z — the coupled grazed opening: burn in with an ordinary roster, remove it, found again
 
+> **Corrections after Astra's round-5 part-2 review (2026-09-16).** (1) "Every arm
+> of every opening ends between 222 and 248" is true of every
+> *configuration/opening mean*, not of every row: retained late means span
+> 211–338 (baseline seed 1006's status quo ends at 337.7 after its herbivore
+> collapse; the same seed at coupled 180,000 at 211.0). The denominator
+> conclusion stands at the mean. (2) "Gives every grazer founder a brood" is true
+> of the selected `fast-leaf` 96,000 candidate and every tested `fast-leaf` age,
+> not of every coupled arm (baseline 48,000 is 9.7 of 10). (3) The preservation
+> of the over-seeded cells under a coupled burn-in is a **net effect consistent
+> with** S §4.2's recycling reading, not a confirmation of recycling as the
+> cause: coupled against plant-only changes the whole animal regime — grazing,
+> excretion, death, litter and nutrient feedback — at once. (4) "Both
+> configurations agree at 96,000" is a group-mean reading: baseline seed 1006
+> alone opens at 316.7 and settles at 216.5, a 46 % gap. (5) The retained plan
+> and rows now name their transients (`pursuit_stop: reach_envelope`, `motor:
+> sweep`), added to the artifact at integration; the row struct carries the two
+> fields from `9e9355d`'s successor onward. (6) `World::remove_all_animals` now
+> also refuses, by name, scripted intents, a recording body-budget ledger, an
+> intake-trace target and undrained life events (transient body-keyed state);
+> Z's burn-in had none of them, so no row moves. (7) An **adoption gate** for a
+> held-out confirmation is appended at the end of this note, separately from the
+> pre-registered reading rule, which is not rewritten.
+
+
 Evidence, not a decision. **Nothing here changes §11, `producer.initial_fraction` or any
 equation, no `WorldConfig` field was added, and no uniform total is proposed for §11.** §7
 states what Wrysk would be choosing and does not choose it.
@@ -28,7 +52,7 @@ as written, including where it falls awkwardly.
 **already at the grazed standing crop**: it opens at ΣP 204–256 against a late-window standing
 crop of 222–230, moves by at most 13 % of its own opening over the first simulated hour
 (−12.9 % to +9.4 %) against the status quo's **+117 %** and the plant-only opening's **−40 %**,
-gives every grazer founder a brood at tick 3,001,
+gives every grazer founder a brood at tick 3,001 in the selected `fast-leaf` cell (9.7 of 10 at baseline 48,000),
 doubles the surviving founder lineages, and **loses no seed's herbivore guild** — at a cost the
 status quo does not pay in founder broods (39–46 against 43–56) and, at 180,000 ticks, in
 terminal starved cells.
@@ -160,7 +184,7 @@ seeds. Tables regenerate with
 | fast-leaf | coupled-grazed 180,000 | 229.2 | 0.162 | 23.3 | 46.3 | 12.7 | 0.698 | 65.3 | 3.5 | **229.2** | 1.00 |
 
 **Read the last two columns together, in that order.** The absolute column is the comparable
-one: every arm of every opening ends between **222 and 248**, which is S §5's grazed standing
+one: every configuration/opening *mean* ends between **222 and 248** (rows span 211–338), which is S §5's grazed standing
 crop measured a second way and from a third direction. The ratio column is the same number
 divided by a denominator that differs by a factor of **3.7** between the status quo and the
 plant-only opening — 2.31 and 0.63 are the *same* late foliage. That is the denominator problem
@@ -478,3 +502,42 @@ each, 408 KiB of `burn-in.jsonl`, and the two exported configs. Build `078594b`,
 | the row drops the per-crossing rows and the all-cell table from the plant-budget summary | 48 arms of them is the 28 MiB S's `compare.jsonl` cost, and no claim in this note needs them; the aggregate split is carried in full |
 | the crossings are counted **twice**, on the arm's own reference and on a fixed §11 one | the own-reference count moves with the opening, so reporting only it would have made the verdict an artefact of the counter. S had to add the common reference in a post-hoc script; here it is a second counter inside the run, which also makes it testable |
 | the reading rule was applied exactly as pre-registered, including where it reads badly | §5's three caveats are the honest output of having fixed the rule first. Rewriting clause 1 to "9.7 is close enough" or clause 3's tolerance to something narrower after seeing the numbers would have destroyed the only thing pre-registration buys |
+
+## Adoption gate, registered before any held-out file is opened (Fable, after Astra's part-2 review)
+
+The pre-registered reading rule above selected a candidate; it is not an
+adoption gate, because it has no clause for the two costs it found. This gate
+is appended, not substituted, and it is what a held-out confirmation of the
+96,000-tick coupled-grazed opening is read against. Design (Astra's proposal,
+adopted): all eight untouched `HELDOUT_SEEDS` (9001–9008), selected `fast-leaf`
+only, exactly two matched openings per seed — status quo (age 0) and
+coupled-grazed 96,000 — arm 0, Sweep, reach envelope, 180,000 ticks after
+founding, `sample_every` 600, roster, price, ledger and plant recorder fixed;
+each burn-in re-run, not loaded; the opening hash and the named transients
+recorded on every row. Sixteen arms and eight burn-ins.
+
+1. **Z's three clauses, frozen** (founder gains; opening within 20 % of the
+   late field; terminal starved cells within 1.33 of the status quo), read
+   **seed-wise**: the directional lineage (≥ 1.5×), evenness and opening-gap
+   clauses must hold in at least 6 of 8 held-out seeds; "every grazer founder
+   breeds" remains all 80 founders.
+2. **Skimmer clause:** no held-out seed with zero skimmer founders breeding,
+   and a mean of at least 3 of 5. *Fable's default; Wrysk may tighten it if
+   the wet-floor lineage matters more to him than the smoother opening.*
+3. **Founder broods:** reported as the paired distribution, **non-gating**
+   — fewer broods beside more surviving founder lineages is lower churn, not
+   ecological harm. *Fable's default, by the standing rule to make routine
+   calls and state their effect; Wrysk may set a maximum loss instead.*
+4. **No held-out herbivore-guild loss** (hard clause); all four forms and
+   three guilds at the horizon reported; absolute opening and late foliage,
+   opening CV/p10/p90, and the first-hour whole-field trajectory kept; frames
+   at founding and +1 h from one fixed held-out seed and face chosen before
+   the run (9001, Front), so the visible choice is not the prettiest seed.
+
+If every clause passes: the 96,000-tick coupled preconditioning is
+technically ready as a **fresh-world opening procedure** — not a §11 equation
+or a uniform seeding constant — and the remaining decision is Wrysk's: whether
+about fifteen seconds of startup and a thinner wet band at founding are worth
+the founder-distribution change. If the skimmer clause fails: do not tune the
+age on held-out seeds; return to the training seeds to locate the
+96,000–180,000 trade-off and reserve a new confirmation set.

@@ -404,3 +404,58 @@ fn a_world_whose_extensions_hold_bodies_refuses_by_name() {
     assert_eq!(state_hash(&w.state), before, "a refused removal touches nothing");
     assert_eq!(w.population(), population, "and removes nobody");
 }
+
+/// The removal door also refuses transient body-keyed state (Astra, round-5 review P2): a
+/// scripted intent, a recording body-budget ledger, an intake trace target or an undrained
+/// life event. Each is refused by name and the world is left as it was; clearing it lets the
+/// removal proceed.
+#[test]
+fn removal_refuses_transient_body_keyed_state_by_name_and_leaves_the_world_as_it_was() {
+    use cubarium_core::diagnostic::ScriptedIntent;
+    let mut world = World::new(WorldConfig::default()).expect("valid");
+    for _ in 0..200 {
+        world.step();
+    }
+    let id = world.state.organisms.iter().map(|(id, _)| id).next().expect("a founder");
+
+    // Undrained events: step until the world has queued one (a birth or a death), then the
+    // removal must refuse by name and leave the world exactly as it was.
+    let mut refused_for_events = false;
+    for _ in 0..12_000 {
+        world.step();
+        if world.pending_events() == 0 {
+            continue;
+        }
+        let before = state_hash(&world.state);
+        let err = world.remove_all_animals().err().expect("undrained events are refused");
+        assert!(err.contains("undrained"), "{err}");
+        assert_eq!(state_hash(&world.state), before, "refusal must not move the world");
+        refused_for_events = true;
+        break;
+    }
+    assert!(refused_for_events, "twelve thousand ticks queued no life event");
+    world.drain_events();
+    let before = state_hash(&world.state);
+
+    world.set_scripted_intents(vec![(id, ScriptedIntent::default())]);
+    let err = world.remove_all_animals().err().expect("a scripted intent is refused");
+    assert!(err.contains("scripted"), "{err}");
+    assert_eq!(state_hash(&world.state), before);
+    world.set_scripted_intents(Vec::new());
+
+    world.record_body_budgets(true);
+    let err = world.remove_all_animals().err().expect("a recording ledger is refused");
+    assert!(err.contains("ledger"), "{err}");
+    assert_eq!(state_hash(&world.state), before);
+    world.record_body_budgets(false);
+
+    world.trace_intake(Some(id));
+    let err = world.remove_all_animals().err().expect("an intake trace is refused");
+    assert!(err.contains("intake trace"), "{err}");
+    assert_eq!(state_hash(&world.state), before);
+    world.trace_intake(None);
+
+    let removed = world.remove_all_animals().expect("nothing holds a body now");
+    assert!(!removed.is_empty());
+    assert!(world.state.organisms.iter().next().is_none());
+}

@@ -196,6 +196,25 @@ pub struct StagePlan {
     pub trials: usize,
     pub workers: usize,
     pub wall_seconds_cap: u64,
+    /// The pursuit stopping rule every arm of this stage ran under, by name. Absent on S's
+    /// retained plan (`runs/ecology-v1-precondition`), which ran the half-space; Z's retained
+    /// plan (`runs/ecology-v1-grazed-opening`) was written without the field under the reach
+    /// envelope and carries it explicitly since integration, so no artifact is re-read through
+    /// a default it did not run (Astra, round-5 review P3).
+    #[serde(default = "half_space_name")]
+    pub pursuit_stop: String,
+    /// The motor contract every arm ran under, by name. Absent means `sweep`, which every
+    /// retained precondition artifact ran.
+    #[serde(default = "sweep_name")]
+    pub motor: String,
+}
+
+fn half_space_name() -> String {
+    cubarium_core::hunter::PursuitStop::ForwardHalfSpace.as_str().to_string()
+}
+
+fn sweep_name() -> String {
+    cubarium_core::MotorModel::Sweep.name().to_string()
 }
 
 /// A completed stage.
@@ -583,6 +602,8 @@ pub fn run_field(
             trials: jobs.len(),
             workers,
             wall_seconds_cap: wall_seconds,
+            pursuit_stop: cubarium_core::hunter::PursuitStop::default().as_str().to_string(),
+            motor: sweep_name(),
         },
         wall_seconds: wall,
         completed: done.load(Ordering::SeqCst),
@@ -728,6 +749,8 @@ pub fn run_compare(
             trials: jobs.len(),
             workers,
             wall_seconds_cap: wall_seconds,
+            pursuit_stop: pursuit_stop.as_str().to_string(),
+            motor: sweep_name(),
         },
         wall_seconds: wall,
         completed: done.load(Ordering::SeqCst),
@@ -977,6 +1000,14 @@ pub struct GrazedHorizon {
 pub struct GrazedRow {
     pub candidate: String,
     pub seed: u64,
+    /// The pursuit stopping rule and motor contract this arm ran under, by name (Astra,
+    /// round-5 review P3). Z's retained rows were written without the fields under the reach
+    /// envelope and Sweep and carry them explicitly since integration; the serde defaults
+    /// name what a row without them ran only where that is its actual history.
+    #[serde(default = "half_space_name")]
+    pub pursuit_stop: String,
+    #[serde(default = "sweep_name")]
+    pub motor: String,
     /// Ticks of coupled burn-in before the founding. `0` is the status-quo arm.
     pub age: u64,
     pub build_id: String,
@@ -1478,6 +1509,8 @@ pub fn grazed_run(
     let refused = |reason: String, elapsed: u64| GrazedRow {
         candidate: c.name.to_string(),
         seed,
+        pursuit_stop: pursuit_stop.as_str().to_string(),
+        motor: sweep_name(),
         age,
         build_id: BUILD_ID.to_string(),
         elapsed_ms: elapsed,
@@ -1609,6 +1642,8 @@ pub fn grazed_run(
     GrazedRow {
         candidate: c.name.to_string(),
         seed,
+        pursuit_stop: pursuit_stop.as_str().to_string(),
+        motor: sweep_name(),
         age,
         build_id: BUILD_ID.to_string(),
         elapsed_ms: ms(start),
@@ -1990,6 +2025,8 @@ pub fn run_grazed(
             trials: jobs.len(),
             workers,
             wall_seconds_cap: wall_seconds,
+            pursuit_stop: pursuit_stop.as_str().to_string(),
+            motor: sweep_name(),
         },
         wall_seconds: wall,
         completed: done.load(Ordering::SeqCst),

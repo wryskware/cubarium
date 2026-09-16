@@ -23,6 +23,7 @@ this is the reading across them and the decisions it supports.
 | X | [turn deadband](../handoffs/ecology-v1-turn-deadband-opus-2026-09-16.md) | Opus 5, high | 17 s replay + 140 s training | 5.1 MiB | `16f94c2` (+ `997fb24`) |
 | Y | [depth ladder](../handoffs/ecology-v1-depth-ladder-opus-2026-09-16.md) | Opus 5, medium | 254 s | 0.8 MiB | `80a3b20` |
 | Z | [grazed opening](../handoffs/ecology-v1-grazed-opening-opus-2026-09-16.md) | Opus 5, high | 304 s | 6.5 MiB | `261240a` |
+| XY2 | [follow-ups](../handoffs/ecology-v1-round5-followups-opus-2026-09-16.md) | Opus 5, medium | 451 s training + 112 s replays + 333 s ladder | 11.8 MiB | `8dac862` |
 
 Fable's verification at each merge: the crate suites on the branch; a re-run
 of the campaign with the branch's binary compared field for field against
@@ -226,17 +227,21 @@ residuals ≤ 9e−10.
 | coupled-grazed 96,000 | 221 | 22.3 | 13.2 | 0.69 | 64 | 3.2 | 230 | 1.04 |
 | coupled-grazed 180,000 | 229 | 23.3 | 12.7 | 0.70 | 65 | 3.5 | 229 | 1.00 |
 
-**The denominator, settled.** Every arm of every opening ends at 222–248
-absolute foliage — S's grazed standing crop from a third direction — so
+**The denominator, settled at the mean.** Every configuration/opening mean
+ends at 222–248 absolute foliage (rows span 211–338; one baseline seed's
+herbivore collapse is the top of that range) — S's grazed standing crop from
+a third direction — so
 S's 2.31 and 0.63 were the same late field over openings 3.7× apart. **The
 first hour:** the status quo greens by +117 % of its opening, the plant-only
 opening browns by −40 %, the coupled-grazed openings move by −13 % to +9 %.
 S's transient is not inverted; it is removed. Terminal starved cells on the
 common §11 reference stay near the status quo at every coupled age (10.8 →
-19.5 against S's plant-only 180,000 at 82.7), which is S §4.2's recycling
-mechanism seen from the other side. **By kind:** grazer founders breeding
-0.3 → 10 of 10 and first broods at the 3,001-tick floor in 6 of 6 seeds,
-S's gains from a different opening; two costs S's opening did not have —
+19.5 against S's plant-only 180,000 at 82.7), a net effect consistent with
+S §4.2's recycling reading — not a confirmation of recycling as the cause,
+since a coupled burn-in changes the whole animal regime at once. **By kind:** grazer founders breeding
+0.3 → 10 of 10 in the selected `fast-leaf` cell (9.7 at baseline 48,000)
+and first broods at the 3,001-tick floor in 6 of 6 seeds, S's gains from a
+different opening; two costs S's opening did not have —
 the skimmer founders fall to 1.3–3.5 of 5 at 48,000 and 96,000 (the burn-in
 grazes the wet band down; the frames show it) and recover only at 180,000,
 and founder broods fall in nearly every paired seed while lineages, forms
@@ -249,7 +254,9 @@ of the late field ∧ starved cells within noise): `fast-leaf` reads *better
 target* at 96,000 and *not* at 48,000 and 180,000 (starved-cell excesses of
 +1.3 and +2.2 cells against a tight sd of 1.33); `baseline` reads *better
 target* at 96,000 and 180,000 and *not* at 48,000 (one grazer founder in one
-seed against an equality clause). **The one age both agree on is 96,000.**
+seed against an equality clause). **The one age both agree on is 96,000**,
+as a group-mean reading (baseline seed 1006 alone opens 46 % above where it
+settles).
 Z applied the rule as written and says where it reads badly: clause 3's
 baseline tolerance is manufactured by one seed's guild collapse, and the
 rule has no clause for the two costs found. **No §11 change and no
@@ -270,6 +277,63 @@ through the real presenter. At the founding the coupled-grazed reed bed is
 visibly thinner than the plant-only one; an hour later all three are much
 alike.
 
+## XY2 — the two cheap follow-ups: X's gain does not replicate, and the shipped predicate has halved R's arm-2 effect
+
+[Note](ecology-v1-round5-followups-2026-09-16.md) ·
+[brief](../handoffs/ecology-v1-round5-followups-opus-2026-09-16.md) · merged
+at `8dac862`. Both parts pre-registered before a row existed; Astra's
+directions registered while Part 1's training ran and before any output
+was read. Fable's verification: 321 search on the branch; the arm-2 ladder
+re-run with the branch binary reproduces all 72 rows field for field; the
+training runs were not re-run (deterministic, and XY2's analysis script
+reproduced X's retained tables number for number before touching its own).
+
+**Part 1 — X's second training seed: not replicated.** At `--train-seed
+20260916`, with its own `cub-act-1` control, the direction reverses on every
+column: `cub-act-2` higher in **0 of 16** generations on mean population
+score and on intake per lived tick (X's seed: 15 of 16), held-out minimum
+9,592 → 6,555 (X's: 6,914 → 7,870), higher on 0 of 8 held-out layouts. The
+registered rule's second branch fires. The weights × adapter 2 × 2 of the
+four selected centres, registered before the second seed was read, says
+where the difference lives: swapping only the adapter moves `t_min` by
+−223/+124 (seed 1) and −3,124/+167 (seed 2); swapping which run's weights
+moves it by +132/+479 and **−6,918/−3,627**. **Not expression — the search
+reached a different region, better once and much worse once.** The number
+behind it: the seed-2 `cub-act-1` centre already turns on 0.9997 of its
+measurable ticks, so the deadband was not clipping that policy and there was
+nothing to release. **No training default proposed**, and none is
+supportable: the seed is the replicate (n = 2, one each way), the
+generation-wise p-values are descriptive, and `es-population` refuses
+`cub-act-2` so no whole-world evaluation exists. XY2 also notes, unchased:
+the seed-2 `cub-act-1` control survives two held-out horizons outright, the
+first policy in this line to survive any, and nothing explains why that
+seed. **Fable's reading:** the deadband line is closed. Q's channel finding
+was real and its inference to residence was not; the released band neither
+helps frozen weights nor reliably helps the search. The interesting object is
+the surviving seed-2 control, not the adapter.
+
+**Part 2 — Y's ladder at arm 2: no rung acceptable, and the predicate is
+load-bearing.** R's 24 arm-2 rows reproduce field for field under
+`--pursuit-stop half-space` (1,056 comparisons, 0 mismatches), which also
+establishes that across every shipped change since R's build, the only thing
+that moves an arm-2 world is the pursuit predicate. Under the shipped reach
+envelope: `fast-leaf` L never holds (best 4 of 6 seeds at 0.75, the one rung
+where V also holds at 0.58×; Y's arm-0 best rung 0.40 falls to 3 of 6);
+`baseline` 0.55 establishes in 6 of 6 and takes the grazer to 0.22×. **At the
+same seeds and build, `fast-leaf` at 0.55 reads 3 of 6 lineage, 3.3
+skimmers, grazer 0.82× under the shipped rule against 5 of 6, 8.3, 0.46×
+under R's half-space:** both halves of the effect that motivated this
+campaign are halved by the predicate the cube now runs, which doubles to
+trebles predation at arm 2 and changes the state hash in 23 of 24 cells.
+Named throughout as the apex-arm treatment; predation deaths cross-tabulated
+by prey form from the census's existing cells are under 6 % of prey deaths in
+every cell, so the mechanism is stated as unresolved. Per-rung channel and
+margin sequences reported raw and not called monotone. **No roster change
+proposed.** **Fable's reading:** R's fast-leaf result was a property of the
+old predicate in the arms with predators; under the shipped rule the skimmer
+question is back to Astra's world-level branch, and the depth line is closed
+until someone wants a wet-floor producer.
+
 ## What this does and does not establish
 
 - The turn band is not where frozen weights lose residence (replay: on-food
@@ -283,6 +347,11 @@ alike.
   apex-arm treatment matters for `fast-leaf`.
 - Sixteen pairs' sufficiency remains untested; the split-half spread is
   reported, not concluded on.
+- The released turn band does not replicate as a training advantage; the
+  difference between seeds is in the weights, not the adapter. Closed.
+- Under the shipped predicate no skimmer depth is acceptable in either arm,
+  and R's arm-2 effect was largely a property of the old predicate. Closed
+  at the genome; open only as a world question.
 - A coupled-grazed opening at 96,000 ticks gives S's founder gains without
   S's first-hour browning, at near the status quo's starved-cell count, at
   about 15 s per core; it costs the skimmer founders at the shorter ages
@@ -295,7 +364,7 @@ alike.
 
 ## Next recommendation (Fable, pending Astra)
 
-1. **X, second training seed** (140 s): the retained command with `--adapter
+1. ~~X, second training seed~~ **Done (XY2): not replicated; closed.** Was: the retained command with `--adapter
    cub-act-2 --train-seed <second>` and its `cub-act-1` control at the same
    seed (a second control is owed too, 140 s), the seed being the replicate;
    plus the selected centres of both seeds replayed under both adapters as a
@@ -303,7 +372,7 @@ alike.
    co-adaptation). No training default from this: a favourable second seed
    still lacks whole-world evaluation while `es-population` refuses
    `cub-act-2`; the host stays on `cub-act-1` regardless.
-2. **Y, the ladder at arm 2** (4 min): same design, two apex adults
+2. ~~Y, the ladder at arm 2~~ **Done (XY2): no rung; the predicate halved R's effect; closed at the genome.** Was: same design, two apex adults
    introduced, under the shipped predicate with R's arm-2 rows reproduced
    under the half-space and the predicate contrast reported at 0.10 and
    0.55; an acceptable rung would be a candidate for held-out confirmation,
@@ -313,6 +382,8 @@ alike.
    gains without its transient, and the frames show what it looks like; it
    is not proposed as a change, and if he wants it, it is a declared opening
    age on a fresh world, at about 15 s per core, with the skimmer and
-   founder-brood costs stated. A held-out-seed confirmation at 96,000 would
-   precede any adoption.
+   founder-brood costs stated. A held-out-seed confirmation at 96,000 against
+   the adoption gate now registered at the end of Z's note (Astra's design;
+   Fable's defaults for the two owner-choice clauses, stated) precedes any
+   adoption.
 4. The motor decision remains Wrysk's, on the terms in the round-4 result.

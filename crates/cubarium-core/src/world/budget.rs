@@ -445,6 +445,11 @@ pub struct BudgetRecorder {
 impl BudgetRecorder {
     /// Whether this world records per-body budgets at all.
     #[inline]
+    /// The body an intake trace is targeting, if one is (`World::trace_intake`).
+    pub fn trace_target(&self) -> Option<OrganismId> {
+        self.target
+    }
+
     pub fn enabled(&self) -> bool {
         self.on
     }

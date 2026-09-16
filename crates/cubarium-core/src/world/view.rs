@@ -90,6 +90,12 @@ impl World {
     /// Take the births and deaths committed since the last drain, in commit order (a tick's
     /// deaths before its births, each in slot order). The buffer is transient: nothing in the
     /// world reads it back, and a host that never drains it simply lets it grow.
+    /// How many life events are queued and undrained. Read-only: the queue is what
+    /// [`World::drain_events`] takes and what `World::remove_all_animals` refuses over.
+    pub fn pending_events(&self) -> usize {
+        self.events.len()
+    }
+
     pub fn drain_events(&mut self) -> Vec<LifeEvent> {
         std::mem::take(&mut self.events)
     }
