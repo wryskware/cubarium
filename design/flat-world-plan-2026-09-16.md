@@ -17,22 +17,24 @@ Read-only audit: no source file was changed to write it.
    `CellId`+`CELL_COUNT`, `Canvas`, `FrameSink::submit(&Frame)`, and the
    world/view/presenter caches that are shaped five-by-`CELL_COUNT` at birth.
 2. Recommended abstraction: a `Copy` **enum** `cubarium_surface::Topology { Cube,
-   Flat { w, h } }` **plus a `Scale`** (cell pixels and world scale) in the same
+   Ring { w, h } }` **plus a `Scale`** (cell pixels and world scale) in the same
    surface contract — not a trait, not a generic, so `SurfacePoint`, `WorldState`
    and `Canvas` stay concrete and the 1,591 existing tests survive.
-3. `Face` stays the chart id; flat has one chart, `Face::Front`. Three forced
+3. `Face` stays the chart id; a ring has one chart, `Face::Front`. Three forced
    widenings: pixel indices `u8 → u16`, `CELL_COUNT` to a runtime count, and a
    checked `cell_count() <= u16::MAX` bound on `CellId`.
-4. Flat edges are **not** identity: a wall bounce composes `REFLECT_Y` on
-   horizontal walls, `REFLECT_X` on vertical ones, and both at a corner
-   (`= quarter_turns(2)`). Only `unfold` is identity on a plane. §5 now *decides*
-   the canopy drain and specifies the planar weather model normatively (§5a).
+4. **The world is a ring: left and right join, top and bottom are solid.** That
+   needs no new geometry — the vertical edge is a seam of the chart to itself
+   (identity map, translation by `∓w`), the rims reuse the existing `REFLECT_Y`
+   bounce, and a ring corner *is* the cube's lower side corner, tie rule included.
+   §5 decides the canopy drain; §5a embeds the ring as a cylinder.
 5. **Candidate first flat world: 640×360, upscaled 3×, at world scale S = 2** —
    sprite tile 32 px, field cell 8 px. Gated on FW-0's measured board numbers,
    not fixed here. 320×180 is the cube world stretched and wastes the panel.
-6. `world_scale` S multiplies every length. Hold `cell = 4·S` **and scale the
-   habitat noise coordinates by S** and every raster from 320×180 to 1920×1080
-   has the same 3,600 cells and the same ecology.
+6. `world_scale` S multiplies every length. Hold `cell = 4·S` and set the cylinder
+   radius `r = w/(2π·32·S)`, and every raster from 320×180 to 1920×1080 has the
+   same 3,600 cells, the same noise scale and the same ecology — weather included,
+   because the cylinder's area is exactly the cube's 20 units².
 7. Sim and render share **one host loop**, so the budget is
    `20·tick_ms + fps·render_ms <= 1000 ms`, not two independent budgets. Render
    work is `∝ S²`; the tick is S-invariant.
@@ -111,7 +113,7 @@ transported directions.
 
 ```rust
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Topology { Cube, Flat { w: u16, h: u16 } }
+pub enum Topology { Cube, Ring { w: u16, h: u16 } }
 ```
 
 with `charts()`, `extent(face) -> (f64, f64)`, `cells(face) -> (u16, u16)`,
@@ -133,76 +135,78 @@ Why an enum and not the alternatives:
   dispatch, matched once per call and hoisted out of inner loops. The set of
   topologies is closed and lives in one crate — open extension is not wanted.
 
-**The `Flat { w, h }` arm.** One chart (`Face::Front`); `extent = (w, h)`;
-`chart_images` returns one direct image, so `unfold` collapses to segment length
-(and *there* the tangent map is genuinely `IDENTITY`) and `unfold_pixels` always
-takes the direct fast path clipped to `0..w`/`0..h`. `embed()` becomes
-`[u/(32S), v/(32S), 0]` (see §6).
+**The `Ring { w, h }` arm.** *(Renamed from `Flat` on Wrysk's direction of
+2026-09-16 — the `FW-` package ids and this file's name keep the earlier "flat"
+label; the topology is `Ring` everywhere in code.)* **The left and right edges
+join; the top and bottom stay solid.** The whole point of the shape is that it
+needs no new machinery: a ring is one chart whose right edge is a seam **to
+itself**, and the cube already transports across seams and reflects at an open
+rim.
+
+- **One chart**, `Face::Front`, `extent = (w, h)`.
+- **The vertical seam is the chart to itself:** exiting at `u = w` enters at
+  `u = 0` and vice versa, along-edge parameter unchanged, **zero quarter turns,
+  `TangentMap::IDENTITY`** — a pure translation by `∓w`. That is exactly the
+  `Front right → Right left` row of the seam table in `design/surface-topology.md`
+  with the neighbour being the same chart, so `travel` takes its **existing**
+  `Some(seam)` branch (`travel.rs:263-275`) with no new code path: `edge_param`,
+  `edge_point` and `seam_turns` simply answer for the ring's own extent.
+- **The only reflection is the existing rim bounce**, `REFLECT_Y`
+  (`travel.rs:254-258`), now at both `v = 0` and `v = h` instead of the cube's
+  single bottom rim. There is **no `REFLECT_X` and no corner rule** — the
+  previous revision's per-axis algebra and its "inverted tie rule" are deleted.
+- **Corners need nothing new either.** A ring corner is a point where the
+  vertical seam meets a horizontal rim, which is precisely the cube's *lower side
+  corner*: "at a lower side corner the unfolded boundary is straight; test a step
+  that both crosses a vertical seam and reflects, including an exact tie"
+  (`design/surface-topology.md`, "The open bottom and exact corners"). The
+  existing lowest-`Edge` tie rule applies unchanged, and
+  `lower_corner_crosses_a_vertical_seam_and_reflects` (`travel.rs:478-492`) is the
+  precedent the ring's fixture mirrors.
+
+**Unfolding: at most two images.** `chart_images` returns the direct image and
+the two translations by `±w`; the shortest wins, exactly as today. To guarantee no
+third image can ever be nearest, `Topology::validate()` requires
+
+> `w >= 2 · max_local_radius() + 2 · CELL_PIXELS`
+
+and `Ring::max_local_radius() = min(h, w − 2·CELL_PIXELS) / 2` satisfies it by
+construction. At 320×180, S = 1 that is `min(180, 312)/2 = 90`, and the stamp
+budget `9·S <= max_local_radius()` holds with room to spare (`18 <= 180` at
+640×360, S = 2). `MAX_SEAMS` stays 2 and is not consulted: the ring enumerates its
+own three images directly.
 
 **Distance is a topology method, not a scaled embedding.** `chord_sq` multiplies
 the embedded chord by a hardcoded `1024 = 32²` to reach pixel units
-(`point.rs:108-116`); with a flat embedding divided by `32S` that constant is
-right only at `S = 1`, and patching it to `1024·S²` would leave distance
-depending on a scale factor it has no business knowing. Make it
+(`point.rs:108-116`), which is right only for the cube's `/32` embedding. Make it
 `Topology::chord_sq(a, b) -> f64` in squared **pixels**: the cube arm is today's
-body verbatim; the flat arm is `(Δu)² + (Δv)²` straight from the chart
-coordinates — exact, cheaper, and independent of the embedding. The embedding is
-then used for exactly two things on a plane: habitat noise sampling and weather
-blob state. Pair rejection stops being a conservative bound and becomes the true
-distance (`pairs.rs:64`).
+body verbatim; the ring arm is
+
+> `min(|Δu|, w − |Δu|)² + Δv²`
+
+taken straight from the chart coordinates — exact, cheaper, wrap-aware, and
+independent of the embedding. Pair rejection stops being a conservative bound and
+becomes the true distance (`pairs.rs:64`).
 
 **Local-radius bounds are per topology; the cube's proof is not rescaled.**
 `MAX_LOCAL_RADIUS = 32.0` is a *completeness* proof, not a tunable: within it
 "every shortest path crosses at most `MAX_SEAMS` seams … so enumerating chart
 paths of that length is complete" (`unfold.rs:5-13`). Nothing about `S` may touch
-it. Two consequences, stated as rules:
+it. Two rules follow:
 
-- **`world_scale` is a flat-only parameter. `Topology::Cube` pins `S = 1`**, so
+- **`world_scale` is a ring-only parameter. `Topology::Cube` pins `S = 1`**, so
   the cube keeps its 32-px bound, its 9-px stamp budget and its proof untouched.
   Validation refuses a cube world with `world_scale != 1`.
-- `Topology::max_local_radius()` for `Flat { w, h }` has no seam argument at all —
-  one chart, direct images only — so completeness is trivial and the bound exists
-  only to keep `unfold_pixels` cost finite. Set it to `min(w, h) / 2` (beyond
-  that a radius reaches past the far wall and means nothing), with the stamp
-  budget `9·S` required to satisfy `9·S <= max_local_radius()`; at S = 2 on
-  640×360 that is `18 <= 180`, comfortably inside.
+- `Ring::max_local_radius()` is a **chosen performance cap**, not a limit of
+  meaning: `unfold_pixels` cost grows with the square of the radius, and the cap
+  is also what keeps the image count at two. No radius is meaningless on a ring.
 
-**Wall reflection is not identity — this is the part to get right.** The existing
-rim bounce does two things at once (`travel.rs:254-258`): it negates the
-component of the *remaining* displacement normal to the edge
-(`d = Vec2::new(remaining.x, -remaining.y)`) and it composes
-`TangentMap::REFLECT_Y` into `out.map`. A rectangle has walls on both axes, so:
-
-| wall hit | remaining displacement | composed into `out.map` |
-|---|---|---|
-| `Edge::Top` (`v=0`) or `Edge::Bottom` (`v=h`) | `(x, −y)` | `REFLECT_Y` |
-| `Edge::Left` (`u=0`) or `Edge::Right` (`u=w`) | `(−x, y)` | `REFLECT_X` |
-| exact corner (`Exit::is_tie`, both edges within `GEOM_EPS`) | `(−x, −y)` | `REFLECT_X.then(REFLECT_Y) = TangentMap::quarter_turns(2)` |
-
-The two reflections are diagonal matrices and commute, so the corner case is
-order-independent and the composed map has `det = +1` — a sweep aimed exactly
-into a corner returns along its incoming direction, the planar analogue of the
-cube's documented vertex behaviour. **The cube's tie rule is inverted here and
-must be stated as a deliberate deviation:** on the cube a tie picks the *lowest*
-`Edge` index and crosses one seam (`design/surface-topology.md`, "exact
-corners"); on a plane a tie means both walls were reached at once and **both**
-reflections apply in a single step. A near-corner (two exits at distinct but
-adjacent `t`) falls out of the existing loop as two successive reflections and
-must give the same final direction as the exact tie; that pair is a required
-test. Forward progress is unchanged: after a bounce `p` sits exactly on the wall
-with the normal component pointing inward, so the same edge yields no further
-exit at `t ≥ 0`, and reflections already count toward `MAX_CROSSINGS`
-(`travel.rs:118,278-282`) with `nudge_inward` as the counted fallback. A flat
-world bounces far more often than the cube's single rim, so any latent weakness
-in reflection handling surfaces immediately rather than rarely.
-
-**A capacity bound Astra is right to demand.** `CellId` is a `u16`
-(`field.rs:18-21`), so a topology may not exceed 65,535 cells. At `cell = 4 px` a
-1920×1080 flat world would want 129,600 — over the limit. `Topology::validate()`
-must compute `cell_count()` with checked multiplication and refuse anything above
-`u16::MAX`, with the error naming the raster and the cell size. The §6 ladder
-(`cell = 4·S`) stays at 3,600 and is far inside it, but an arbitrary
-`Flat { w, h }` from a config file is not.
+**A capacity bound.** `CellId` is a `u16` (`field.rs:18-21`), so a topology may
+not exceed 65,535 cells. At `cell = 4 px` a 1920×1080 world would want 129,600 —
+over the limit. `Topology::validate()` computes `cell_count()` with checked
+multiplication and refuses anything above `u16::MAX`, naming the raster and the
+cell size. The §6 ladder (`cell = 4·S`) stays at 3,600 and is far inside it, but
+an arbitrary `Ring { w, h }` from a config file is not.
 
 **Two forced widenings.**
 
@@ -233,13 +237,15 @@ derived from it, all in FW-1, and FW-1 exercises `S = 2` from its first commit
 while keeping the `S = 1` cube goldens. Later packages choose a *value*; they
 never change the geometry.
 
-**Cell size for a flat world: `4·S` px.** At S = 1, 320×180 → 80×45 = 3,600
-cells and **7,075** undirected edges (`79·45 + 80·44`), not a scaled 2,528. The
-adjacency builder emits `None` per absent edge independently (`field.rs:98-119`),
-so a rectangle has 3,354 interior cells of degree 4, **242 non-corner border
-cells of degree 3, and 4 corner cells of degree 2** — the corners are a real case
-the conservative outgoing-flux limiter must be tested against. `w` and `h` must be
-multiples of `cell_pixels()`; every raster in §6 is.
+**Cell size for a ring world: `4·S` px.** At S = 1, 320×180 → 80×45 = 3,600
+cells. **Every row is a ring**, so the horizontal wrap adds one edge per row:
+`80·45 + 80·44 = 7,120` undirected edges. Degrees are simpler than a rectangle's —
+**there are no corners**: 3,440 interior cells of degree 4, and the 80 + 80 cells
+of the top and bottom rows at degree 3, since `field.rs:98-119` emits `None` only
+for the two horizontal rims. (The previous revision's degree-2 corner case is
+deleted with the walls that created it.) `downhill` is unchanged from §5's
+decision: `None` on the top row, else `(cx, cy+1)`. `w` and `h` must be multiples
+of `cell_pixels()`; every raster in §6 is.
 
 ## 3. Render and host
 
@@ -248,7 +254,7 @@ multiples of `cell_pixels()`; every raster in §6 is.
 | `Canvas` | `Box<[[[f32;3]; 4096]; 5]>` | `Canvas::new(topo)`, flat `Vec<[f32;3]>` of `w·h`, same `get/set/add` on `(Face::Front, x, y)` |
 | per-pixel loops | `for face in Face::ALL { for y in 0..64 { for x in 0..64` (129 lines) | one new `Canvas::pixels() -> impl Iterator<Item=(Face,u16,u16)>`; each triple loop becomes one line and is then topology-correct for free |
 | encode | `Canvas::encode(&mut Frame)` | add `Canvas::encode_raster(&mut Raster)`; sRGB encode is shared and untouched |
-| `FrameSink` | `submit(&mut self, frame: &Frame)` | `submit(&mut self, out: Output<'_>)` with `enum Output<'a> { Cube(&'a Frame), Flat(&'a Raster) }` — the trait must stay object-safe for `FanOutSink(Vec<Box<dyn FrameSink>>)` (`sink/fanout.rs:19`); a generic would monomorphise the whole host per topology |
+| `FrameSink` | `submit(&mut self, frame: &Frame)` | `submit(&mut self, out: Output<'_>)` with `enum Output<'a> { Cube(&'a Frame), Ring(&'a Raster) }` — the trait must stay object-safe for `FanOutSink(Vec<Box<dyn FrameSink>>)` (`sink/fanout.rs:19`); a generic would monomorphise the whole host per topology |
 | `ShimSink` | `CubeClient` + `Frame` mailbox | the same worker and mailbox, sending a `Raster` in wire format 2 (strips); the newest-frame mailbox and backoff are unchanged |
 | `PngSink` | `net_rgb8` → 256×128 PNG | flat writes the raster directly as a `w×h` PNG; `net.rs` untouched |
 | `WebSink` | `/frame` = 8-byte seq + 61,440 frame bytes | `/frame` = 8-byte seq + the raster bytes; `/status` gains `"topology"` so the page picks a mode |
@@ -301,7 +307,8 @@ decode (`world/state.rs:108`). The flat work is to extend it, and to replace the
 
 - `config.topology` is one this build supports and `Topology::validate()` passes:
   dimensions positive, multiples of `cell_pixels()`, `cell_count() <= u16::MAX`,
-  and `world_scale == 1` for `Cube`;
+  `w >= 2·max_local_radius() + 2·CELL_PIXELS` for `Ring`, and `world_scale == 1`
+  for `Cube`;
 - every `Fields` vector (`fields.rs:19-32`) and every ecology v1 vector has length
   exactly `cell_count()` — these are the only per-cell serialized arrays;
 - **care's persisted state is not a per-cell vector.** `CareState.showers[].cells`
@@ -310,8 +317,10 @@ decode (`world/state.rs:108`). The flat work is to extend it, and to replace the
   `CELL_COUNT` at `care.rs:340,345-349`, including a `vec![false; CELL_COUNT]`
   duplicate set. Each of those becomes `cell_count()`. The first draft wrongly
   said the care state has `cell_count()` length;
-- every organism's `pos.face` is a chart the topology has — `Face::Front` for
-  flat — with `u < w`, `v < h`.
+- every organism's `pos.face` is a chart the topology has — `Face::Front` for a
+  ring — with `u < w`, `v < h`. Weather keeps today's finiteness-only check
+  (`world/state.rs:193-208`): the blob model is unchanged (§5a), so there is
+  nothing topology-specific left to validate.
 
 `CareTarget` (`crates/cubarium/src/care/mod.rs:122-140`) is a **host** command
 type and is not in `WorldState`, so it is not validated here at all; its widening
@@ -351,7 +360,7 @@ comparator therefore needs a cross-schema procedure, not just a masked hash:
 3. Compare the two projections field-by-field and hash them for a one-line CI
    signal. Equality is the cube regression evidence used throughout §9.
 4. **Negative tests are part of the definition**, in FW-6's reserved
-   `flat_schema17.rs`: perturb one organism field, one allocator free-list entry,
+   `ring_schema17.rs`: perturb one organism field, one allocator free-list entry,
    one weather blob, one field vector, one extension state and one non-added
    config field, and assert equality **fails** in every case. A comparator that
    cannot fail is not evidence.
@@ -371,112 +380,78 @@ the consumers; this is the corrected list.
 | **classic controller** | `height: o.pos.embed()[1]`, `up: up_direction(o.pos.face)` (`world/step.rs:449-460`) | both become `Topology` methods; flat `up` is the constant `(0, −1)` |
 | **neural controller** | the same two fields in `SelfState` (`world/step.rs:3068-3079`) | identical treatment; a policy trained on cube height reads the same channel |
 | **depth preference** | `obs.up * (w_depth · (h_pref − obs.height))` steers every organism (`controller.rs:228-235`) | works unchanged *given* a topology height and up; with a wrong height it silently steers the whole population into a wall |
-| noise sampling | 3D noise on `[-1,1]^3` (`habitat.rs:43-75`) | same wave sum at `[u/32S, v/32S, 0]` — the `S` divisor is required, see §6 |
-| **weather blobs** | orbital: `center` rotated about `axis` at `rate` rad/tick, plus a per-minute random-walk tilt (`habitat.rs:110-196`); sampled by `dot(b.center, dir)` against an angular cap (`habitat.rs:198-225`) | **decided — see §5a for the normative model.** The spherical metric does not transfer: `normalize([u/32S, v/32S, 0])` collapses the plane to a polar *fan* about the origin. §5a specifies a planar blob reusing the same `Blob`/`Weather` structs. Owned by **FW-2** |
+| noise sampling | 3D noise on `[-1,1]^3` (`habitat.rs:43-75`) | **the same wave sum on a cylinder** (below): seamless across the wrap by construction, no periodic-noise work, and arc length per pixel is `1/(32S)` by choice of radius |
+| **weather blobs** | orbital: `center` rotated about `axis` at `rate` rad/tick, plus a per-minute random-walk tilt (`habitat.rs:110-196`); sampled by `dot(b.center, dir)` against an angular cap (`habitat.rs:198-225`) | **unchanged — see §5a.** On the cylinder embedding `normalize()` preserves azimuth and maps height monotonically to latitude, so `Weather::new`, `advance` and `sample` all work verbatim. No new model, no new validation, no RNG change |
 | band thresholds | `Canopy` iff `h >= 1.0` — true only on the Top face (`art_present/habitat.rs:380`) | needs a `canopy_top` threshold. **No value can be validated from current code**; propose `0.67` as an explicit new default for review, not as a derived number |
 | detritus fall / downhill | gravity's tangential component vanishes on the level Top face, so `downhill` is `None` there (`field.rs:135-151`, `design/stratified-world.md:47-52`): **the cube canopy deliberately never drains**, and the bottom row of the side faces has nothing below it | **decided: the flat world mirrors both exceptions.** `downhill(c) = None` when `cy == 0`, otherwise the neighbour at `(cx, cy+1)`. The top cell row is the canopy and holds its water and detritus exactly as the cube's level Top does; the bottom row has no cell below it and keeps its litter, exactly as the cube's rim row does. No toggle, no new config |
 | water flow / pools | no flux across the open rim (`water.rs`) | the bottom wall becomes a moat the cube never had; expect standing water along the bottom row and re-check `evap_floor` |
 | pair rejection | conservative chord bound (`pairs.rs:64`) | exact Euclidean; strictly fewer candidate pairs |
-| founders | random face + `unit·FACE_EXTENT` (`lifecycle.rs:69-72`) | one chart; the face draw must be **kept and discarded** or every seed shifts |
-| seam-carried sprites | `unfold_pixels` owns pixels across seams | no seams; bodies clip at four walls. Simpler, never worse |
+| founders | random face + `unit·FACE_EXTENT` (`lifecycle.rs:69-72`) | one chart, `unit·w` and `unit·h`; the face draw must be **kept and discarded** or every seed shifts |
+| seam-carried sprites | `unfold_pixels` owns pixels across seams | **one seam, the wrap.** A body straddling `u = 0` is carried by the existing unfolding machinery with at most two images; bodies clip only at the top and bottom rims |
 | tall columns / rigs | per side face, `Face::ALL` order (`art_present/mod.rs:365`) | choose columns along `u`; the three-quarter rigs already read as walking along a wall |
 | ray-cast preview | `raycast.rs` | not ported; cube-only |
 
-The calls now made in this document: the **planar weather model** (§5a) and the
-**canopy drain** (decided above). Still open and needing Wrysk's eye rather than a
+The calls now made in this document: the **canopy drain** (decided above) and
+the **cylinder embedding** (§5a), which is what lets weather stay untouched. Still open and needing Wrysk's eye rather than a
 rule: the **canopy threshold**, **water against the new bottom wall**, and
 **organism density** — the same 512-organism cap over 3,600
 cells instead of 1,280 thins the world by 2.81× in ecological terms, whatever the
 raster. Recommend keeping the cap and raising `founders` proportionally.
 
-## 5a. The planar weather model (normative)
+## 5a. The cylinder embedding, and why weather needs no change
 
-Flat weather reuses the persisted structs unchanged, so the cube path and the
-snapshot shape are untouched: `Blob { center: [f64;3], axis: [f64;3], rate: f64 }`
-and `Weather { light, moisture, last_walk_minute }` (`habitat.rs:110-127`). Only
-the *interpretation* of the three fields changes with the topology.
+The ring embeds as a **cylinder**, which is the single decision that makes the
+whole weather system carry over untouched:
 
-| field | cube meaning | flat meaning |
-|---|---|---|
-| `center` | unit direction of the cap centre on the sphere | the blob centre embedded on the plane: `[u/(32S), v/(32S), 0.0]` — the same embedding cells use, so `z == 0` always |
-| `axis` | unit orbit axis, perpendicular to `center` | the unit heading of travel in the plane, `[cos φ, sin φ, 0.0]` |
-| `rate` | angular speed, rad/tick | linear speed in embedded units per tick |
+> `θ = 2π·u/w`, `r = w / (2π·32·S)`, `y = 1 − 2v/h`,
+> `embed(p) = [r·cos θ, y, r·sin θ]`
 
-**Everything below is in embedded units, including the walls.** The plane occupies
-`[0, w/(32S)] × [0, h/(32S)]` in the embedding, which for §6's 16:9 ladder
-(`w = 320S`, `h = 180S`) is `10 × 5.625` at every S — so every quantity below is
-S-invariant, which is what keeps §6's constant-ecology claim true. For a general
-`Flat { w, h }` the extents are `W_e = w/(32S)` and `H_e = h/(32S)`; nothing here
-mixes them with pixels.
+with `y` in slot 1 because that is where the cube puts height
+(`habitat.rs:94`, `p[1]`). The radius is chosen so **arc length per pixel is
+`1/(32·S)` embedded units** — the cube's feature scale — so the habitat wave sum
+(`habitat.rs:43-75`) samples at the cube's frequency and is **seamless across the
+wrap by construction**: `u = 0` and `u = w` are the same point in 3D. No periodic
+noise, no seeded tiling, no special case. This replaces §6's former "condition 1";
+the `S` divisor is now inside `r`.
 
-**Initialization** (`Weather::new`, `habitat.rs:136-156`). The cube draws four
-`unit` values per blob at the reserved block `u64::MAX − 8 + k, k ∈ 0..4` (centre
-`z`, centre azimuth, axis `z`, axis azimuth), light blobs keyed `0..n`, moisture
-`n..2n`. Flat **consumes the same four draws in the same order** so the stream
-stays aligned: draw 0 → `u = unit · w`; draw 1 → `v = unit · h`; **draw 2 is
-consumed and discarded** (the cube's axis `z` has no planar counterpart); draw 3 →
-`φ = TAU · unit`. `period_min` is cycled from `cfg.periods_min` exactly as today,
-and
+**Weather is unchanged.** `normalize()` of a cylinder point preserves azimuth and
+maps `y` monotonically to latitude, so the existing spherical blob model —
+`Weather::new`, `advance` with its orbit and per-minute walk, and `sample` with
+its angular cap — runs verbatim on `habitat.positions`. **No draw changes, so RNG
+stream parity is trivially exact** rather than something to engineer; a
+stream-parity test is still worth writing, but it should pass on day one. The
+previous revision's planar blob model and its extra `WorldState::validate` checks
+are deleted.
 
-> `rate = W_e / (period_min · 60 · TICK_HZ)`  where `W_e = w/(32S)`
+**The defaults transfer exactly, and that is not a coincidence.** The cylinder's
+lateral area is `2πr × 2 = (w/32S) × 2`, which on §6's 16:9 ladder is `10 × 2 =
+20` embedded units² — **precisely the cube's `5 × 2 × 2 = 20`**, at every S. So
+`blobs_per_channel` stays **3** and `amplitude` stays as it is; the previous
+revision's derived "3 → 8" is retracted.
 
-— one traversal of the world **width** per period, in the same embedded units the
-centre is stored in. At the default 20-minute period, 20 Hz and the §6 ladder that
-is `10/24000 ≈ 4.17e-4` units/tick ≈ 0.43 px/s at S = 1, crossing 320 px in 20
-minutes. There is no zero-period case to handle: `WorldConfig::validate` already
-rejects an empty `periods_min` and any non-positive period whenever
-`blobs_per_channel > 0` (`config.rs:772-778`), so `rate > 0` wherever a blob
-exists. Add one new check beside it:
+**The distortion, stated and accepted for v1.** Two effects, both consequences of
+using one embedding for both height and position:
 
-> `rate < min(W_e, H_e) / 2`
+- *Latitude compression.* With `r = 1.5915` and `y ∈ [−1, 1]` the world occupies
+  only `±32.15°` of latitude against a full `360°` of longitude. A default
+  `blob_radius_deg = 55` therefore spans the whole height while covering about 15%
+  of the width: **showers read as horizontal bands rather than round cells.** In
+  *area* terms the cap is well matched (a 55° cap is 21% of the sphere against the
+  world's 53%), so coverage is right and only the shape is wrong.
+  `blob_radius_deg` is the knob if a shower reads too tall.
+- *Poleward slowing.* `dφ/dy = r/(r² + y²)` is `0.628` at the equator and `0.451`
+  at `y = ±1`, so a blob drifts about 28% slower in latitude near the top and
+  bottom rows than in the middle.
 
-so a single tick can cross at most one wall per axis. The margin is enormous —
-`4.17e-4` against `2.81` — but the bound is what lets the reflection below be a
-single fold rather than a loop.
-
-**Per tick** (`Weather::advance`). `cfg.moving == false` freezes centres in both
-topologies, unchanged. Otherwise `center += axis · rate`, then **one fold per
-axis, independently**, in embedded units:
-
-> `fold(x, L)`: if `x < 0` then `(−x, flip)`; if `x > L` then `(2L − x, flip)`;
-> else `(x, keep)` — and `flip` negates that axis's component of `axis`.
-
-Applied to `center[0]` against `W_e` and `center[1]` against `H_e` separately, so
-a corner is simply both folds in the same tick and needs no special case. This is
-§2's wall algebra (`REFLECT_X`, `REFLECT_Y`, both at a corner) expressed on the
-weather's own state, which is the consistency argument for reusing the rule. The
-`rate` bound above guarantees one fold per axis suffices; a violation is a
-validation error, not a loop.
-
-**Persisted geometry is validated, not merely finite.** `WorldState::validate`
-checks only that blob `center`, `axis` and `rate` are finite
-(`world/state.rs:193-208`). Flat worlds add: `center[2] == 0.0`,
-`0 <= center[0] <= W_e`, `0 <= center[1] <= H_e`, `axis[2] == 0.0`, and `axis`
-unit to a stated tolerance. The cube arm keeps today's finiteness-only check, so
-cube refusal behaviour is unchanged.
-
-**Per simulated minute.** The cube draws one `unit(seed, Stream::Weather, key,
-minute)` per blob and tilts by `walk_deg_per_min`. Flat draws **the same single
-value with the same key and counter** and applies a bounded heading walk:
-
-> `θ = walk_deg_per_min.to_radians() · (2·unit − 1)`, then `axis ← rotate(axis, θ)`
-
-— uniform in `[−step, +step]`, one draw per blob per minute, so the RNG stream is
-consumed identically to the cube and a stream-parity test can assert it.
-
-**Sampling** (`Weather::sample`, `habitat.rs:204-227`). Same raised-cosine
-profile, planar argument: `radius = blob_radius_deg.to_radians()` read as a radius
-in **embedded units** (equivalently `radius · 32 · S` pixels), and
-`cap(d) = 0.5·(1 + cos(π·d/radius))` for `d = |p_cell − b.center| <= radius`, else
-0. `amplitude`, the `light`/`moisture` sums, `rain_source` as the bare moisture
-sum and therefore `rain_threshold` all keep their meanings, so `design/water.md`'s
-tuning carries over. The `[f64; CELL_COUNT]` out-params become slices.
-
-**One default needs changing.** `blob_radius_deg = 55°` is 0.96 embedded units,
-about 31 px of radius at S = 1. The flat plane is 56.25 unit² against the cube's
-20 unit² — the same 2.81× as the cell count — so `blobs_per_channel = 3` leaves
-the flat world mostly dry. Set the flat default to **8** (`2.81 × 3`) to keep
-shower coverage per cell at the cube's value; the cube default is unchanged.
+Both are accepted for the first version. The same compression makes the
+**embedding anisotropic** — a noise feature of a given embedded size spans
+`32S` px horizontally but `90S` px vertically at the ladder, a `90/32 = 2.81×`
+vertical stretch, so habitat patches read as horizontal bands too. That suits a
+stratified side view, and it is the price of `y = 1 − 2v/h`. If it is ever
+unwanted, the fix is one line and touches nothing else: `Topology::height()` is
+already separate from `embed()` (§5), so `embed`'s `y` can become
+`(h/2 − v)/(32S)` for an isotropic cylinder while `height()` keeps `1 − 2v/h`.
+**Flagged for Wrysk, not changed here.**
 
 ## 6. World resolution: the trade, and the recommendation
 
@@ -498,16 +473,16 @@ Every row divides exactly: `w/(4S) = 80`, `h/(4S) = 45`. Resolution then buys
 pixels, not ecology — **but only under three conditions**, and the first draft
 stated the conclusion without them:
 
-1. **Noise coordinates must scale with S.** The habitat waves have wavelengths in
-   embedding units and are sampled at `p = position/32`
-   (`habitat.rs:43-75,83-104`). Sampling a flat world at a fixed `/32` while the
-   cells grow as `4S` changes the number of light/moisture patches per cell by a
-   factor of S — different patchiness, different ecology. Sample at `/(32·S)`.
+1. **Noise scale is handled by the cylinder radius**, not by a divisor in the
+   sampler: `r = w/(2π·32·S)` makes arc length per pixel `1/(32S)` at every S
+   (§5a), so the patch count per cell is S-invariant without touching
+   `habitat.rs:43-75`.
 2. **Radii already expressed in cells stay invariant, and that is checkable:**
    `sense_depth` is `ceil(r_sense / CELL_PIXELS)`
    (`world/lifecycle.rs:383-389`), so with `r_sense = 6S` and `cell = 4S` it is 2
    hops at every S. Any radius still written in bare pixels must be moved onto S.
-3. `cell_count()` stays 3,600 and inside the `u16` `CellId` bound (§2).
+3. `cell_count()` stays 3,600 and inside the `u16` `CellId` bound (§2), and the
+   two-image rule `w >= 2·max_local_radius() + 2·CELL_PIXELS` holds (§2).
 
 What scales with what: **with cells** (constant here) — diffusion, water flow,
 rain, habitat, detritus fall, `RenderView` vectors, snapshot payload. **With
@@ -656,10 +631,11 @@ calibration recorded on 2026-09-14 is preserved exactly.
 **`MAX_LOCAL_RADIUS` is not on that list.** It is per topology and never scaled
 (§2): the cube's 32 px is a completeness proof tied to `MAX_SEAMS`
 (`unfold.rs:5-13`) and `Topology::Cube` pins `S = 1`, so nothing multiplies it.
-A plane has no seams, so no radius is *meaningless* there; `Flat`'s
-`min(w, h) / 2` is a **chosen performance cap** — `unfold_pixels` cost grows with
-the square of the radius — and the validation `9·S <= max_local_radius()` is what
-ties the stamp budget to it. The two call sites that today validate config radii
+A ring has one seam and needs no path enumeration, so no radius is *meaningless*
+there; `Ring::max_local_radius() = min(h, w − 2·CELL_PIXELS)/2` is a **chosen
+performance cap** — `unfold_pixels` cost grows with the square of the radius — that
+also keeps the image count at two, and the validation `9·S <= max_local_radius()`
+is what ties the stamp budget to it. The two call sites that today validate config radii
 against the constant (`config.rs:863,917`) take the topology's value instead.
 
 One caution remains: scale the *defaults*, never a value read from a TOML file,
@@ -709,21 +685,21 @@ crate; **FW-4** owns the care chain end to end. "Files" are exclusive after the
 FW-6 reservation below.
 
 **FW-6 reserves these exact paths**, and every implementation package's glob
-excludes `tests/flat_*.rs`:
-`cubarium-surface/tests/{flat_travel,flat_field,flat_raster}.rs`;
-`cubarium-core/tests/{flat_world,flat_weather,flat_schema17}.rs`;
-`cubarium-render/tests/{flat_canvas,flat_stamp_scale}.rs`;
-`cubarium/tests/{flat_sinks,flat_present,flat_care}.rs`.
+excludes `tests/ring_*.rs`:
+`cubarium-surface/tests/{ring_travel,ring_field,ring_raster}.rs`;
+`cubarium-core/tests/{ring_world,ring_embedding,ring_schema17}.rs`;
+`cubarium-render/tests/{ring_canvas,ring_stamp_scale}.rs`;
+`cubarium/tests/{ring_sinks,ring_present,ring_care}.rs`.
 
-| id | objective | owns (decision) | files (exclusive; no `tests/flat_*.rs`) | interface exposed | verification | size | effort |
+| id | objective | owns (decision) | files (exclusive; no `tests/ring_*.rs`) | interface exposed | verification | size | effort |
 |---|---|---|---|---|---|---|---|
-| FW-0 | Vendor `cube-proto` with `Raster` + wire format 2. **Measure four numbers on the board, pinned:** serial cube render `R` on one A78, the same render split across four A78 cores, `tick_ms`, and end-to-end achieved fps and ticks/s for a real run | the S and `--fps` values in §6 | `vendor/cube-proto/**`, `vendor/cube-proto.rev` | `Raster { width, height, data }` | `cargo test --workspace`; all four numbers recorded with their pinning, and the S they select | small | medium |
-| FW-1 | `Topology` + `Scale`: cell pixels, `world_scale` (flat-only; cube pinned to 1), `footprint_radius() = 9·S`, per-topology `max_local_radius()` and `chord_sq()`; `u16` pixel indices; runtime cell count with the `u16::MAX` check; flat travel with per-axis and corner wall reflection; flat `downhill` (`cy == 0` ⇒ `None`); the `CubeProjection` type and exporter | the whole geometry contract, incl. the corner tie deviation and **the stamp-budget value** | `crates/cubarium-surface/**` | §2's API; `CUBE_CELL_COUNT`; `CubeProjection` | cube identical by value; flat exercised at **S = 1 and S = 2 from the first commit**; pre-change projection fixture captured from `main` before merge | large | **high** |
-| FW-2 | Topology and scale through the world: config, schema 17, extended `WorldState::validate` (runtime `cell_count()` in `care.rs:340,345-349` included), height/`up`, both controllers, **§5a's planar weather**, the decided canopy `downhill`, S-scaled noise, flat `blobs_per_channel` default, founders, core care state | the ecological calls as written in §5/§5a | `crates/cubarium-core/**` | `WorldConfig.{topology,world_scale}`, `World::topology()`, `RenderView.topology` | cube run equal by `CubeProjection`; RNG stream parity test for weather init and the per-minute draw; flat run reaches steady state | large | **high** |
+| FW-0 | Vendor `cube-proto` with `Raster` + wire format 2. **Measure, pinned: serial `R` and `tick_ms` now; the four-A78 render number re-measured after FW-3** (the parallel presenter does not exist until then), plus end-to-end fps and ticks/s. **S is provisional until that rerun** | the S and `--fps` values in §6 | `vendor/cube-proto/**`, `vendor/cube-proto.rev` | `Raster { width, height, data }` | `cargo test --workspace`; each number recorded with its pinning and its date, and the S it selects | small | medium |
+| FW-1 | `Topology` + `Scale`: cell pixels, `world_scale` (ring-only; cube pinned to 1), `footprint_radius() = 9·S`, per-topology `max_local_radius()` and `chord_sq()` (ring: `min(|Δu|, w−|Δu|)² + Δv²`); `u16` pixel indices; runtime cell count with the `u16::MAX` and two-image checks; **the ring's self-seam through the existing `Some(seam)` branch**, rims at `v = 0` and `v = h` through the existing `REFLECT_Y`; ring `downhill` (`cy == 0` ⇒ `None`); the cylinder `embed()`; the `CubeProjection` type and exporter | the whole geometry contract and **the stamp-budget value** | `crates/cubarium-surface/**` | §2's API; `CUBE_CELL_COUNT`; `CubeProjection` | cube results identical by value; ring exercised at **S = 1 and S = 2 from the first commit**; a ring corner fixture mirroring `lower_corner_crosses_a_vertical_seam_and_reflects`; pre-change projection fixture captured from `main` before merge | large | **high** |
+| FW-2 | Topology and scale through the world: config, schema 17, extended `WorldState::validate` (runtime `cell_count()` at `care.rs:340,345-349`), height/`up`, both controllers, the decided canopy `downhill`, the cylinder embedding fed to habitat and **weather unchanged**, founders, **and both cube-hardcoded core resolvers: `CareTarget::resolve` (`care.rs:148-168`, used at `world/care.rs:60`) and `HunterTarget::resolve` for `SpawnApex` (`hunter/state.rs:47-67`) — core types with `f64` `u`/`v`, distinct from FW-4's host `CareTarget`** | the ecological calls as written in §5/§5a | `crates/cubarium-core/**` | `WorldConfig.{topology,world_scale}`, `World::topology()`, `RenderView.topology` | cube run equal by `CubeProjection`; RNG stream parity (expected exact — no draw changes); **feed/rain/clean/apex targets beyond pixel 63 resolve on a ring and are refused off-world**; ring run reaches steady state | large | **high** |
 | FW-3 | `Canvas` by topology, `Canvas::pixels()`, `encode_raster`; **adopt** `Scale::footprint_radius()` at both check sites (`sprite.rs:61-64,810-818`) and the `scale` stamp path; port `field/trail/sprite/body/multipart`; deterministic row-band parallel hook | adoption only — the value is FW-1's | `crates/cubarium-render/**` | `Canvas::new(topo)`, `pixels()`, `encode_raster` | same-seed cube canvas bit-identical; a `scale = 2` stamp draws instead of vanishing | medium | **high** |
 | FW-4 | `Output` enum + sinks (shim/png/web), viewer flat mode, CLI/config, preview refusal, **the whole care chain: `CareTarget.{u,v}` widened to `u16` and validated against the topology extent (`care/mod.rs:122-140`), `PlannedCommand` journal and web-request compatibility (`care/mod.rs:146-162`), and the canvas flourish** | the care wire and journal shape | `crates/cubarium/src/{sink/**,cli.rs,net.rs,run.rs,runner/**,care/**,care_effects.rs}`, `sink/web/index.html` | `enum Output`, `topology`/`world_scale` TOML, the widened `CareTarget` | flat PNG capture; viewer screenshot; a journal written before the widening still replays; the measured split that picks `--fps` | medium | medium |
 | FW-5 | Presenter for flat: `RenderView.topology` consumed, `ArtPresenter` built from the world's cell count, bands, horizon, water/rain, motifs, columns, bodies | presenter cache lifetime | `crates/cubarium/src/{present.rs,art_present/**,lanternjaw/**,scene.rs}` | — | flat capture reviewed by Wrysk; cube capture diffed to zero | large | **high** |
-| FW-6 | Independent test authoring at the reserved paths: wall reflection incl. exact and near corner, corner-cell flux, capacity refusal, extended `validate`, §5a's weather incl. stream parity, care widening, sink/raster, presenter goldens | — | only the reserved `tests/flat_*.rs` paths above | — | written without reading FW-1..FW-5's own tests | medium | **high** |
+| FW-6 | Independent test authoring at the reserved paths: the ring self-seam and both rims incl. the corner tie, two-image unfolding, ring-row field flux, capacity and two-image refusals, extended `validate`, the cylinder embedding's wrap continuity, **feed/rain/clean/apex targets beyond pixel 63**, care widening, sink/raster, presenter goldens, and **the `CubeProjection` negative tests of §4 in `ring_schema17.rs`** | — | only the reserved `tests/ring_*.rs` paths above | — | written without reading FW-1..FW-5's own tests; every negative test shown to fail on a perturbation | medium | **high** |
 | FW-7 | Pack v6 (`tile` as data), baker at `TILE = 16·S`, `art.rs`/`tall.rs`/`lanternjaw` constants made tile-relative, S-scaled default builder; re-bake at S = 2 | — | `art/**`, `assets/atelier/**`, `crates/cubarium/src/art.rs` | `pack.json` v6 | S = 1 pack still loads and renders bit-identically; 640×360 capture; reproducible Godot bake | large | **high** |
 | FW-8 | Biomes: region field, four parameter sets, `mechanisms.biomes` off by default, presentation by dominant biome | biome parameter sets | `crates/cubarium-core/src/biome.rs` (new), `crates/cubarium/src/art_present/habitat.rs` | `HabitatConfig.biomes` | toggle off ⇒ `CubeProjection` unchanged; toggle on ⇒ short run showing distinct regions | medium | medium |
 | FW-9 | **GPU hybrid (approved follow-on, not the first version).** Sim and sprite stamping stay on the CPU at world resolution; the display daemon renders on the Adreno — EGL surfaceless into a dma-buf imported into KMS — and does the integer upscale, the rotation and panel-resolution post-effects there. The CPU gather remains the fallback, chosen per display | the renderer choice per display | the `led-cube-shim` repo's `cube-screen-shim` and `cube-proto` crates, plus cubarium's `sink/` raster encoder for the auxiliary layers | **auxiliary layers beside RGB in the raster strip format** — candidates: emissive, water mask, height/stratum, rain — with a layer id in the strip header; **FW-4 publishes which layers cubarium emits** | byte-identical output to the CPU gather with no effects enabled; measured ms/frame on the GPU path | large | **high** |
@@ -821,8 +797,13 @@ Two further corrections not in the findings, folded into the same pass:
 ## Review repair 2 (Astra, 2026-09-16)
 
 Round one's findings 1–3 are confirmed closed. Round two raised two blocking and
-four should-fix items; all six are accepted and none is rebutted. Astra's two
-decisions in item 2 are adopted verbatim and written up normatively in §5a.
+four should-fix items; all six are accepted and none is rebutted.
+
+**This section records what round two changed, not the current state.** Its
+item 2 specified a *planar* weather model and item 4 described a rectangle with
+four walls; both are **superseded by Review repair 3**, in which Wrysk made the
+world a ring — the weather model reverts to the unchanged spherical one on a
+cylinder embedding (§5a) and the walls on the `u` axis become a seam (§2).
 
 | # | finding | verdict | what changed |
 |---|---|---|---|
@@ -838,3 +819,27 @@ tree before the change; all were accurate, including the three that identified
 statements in the previous revision as simply wrong — the nonexistent `check`,
 the care state's supposed per-cell length, and the implicit rescaling of the
 cube's 32-pixel completeness proof.
+
+## Review repair 3 (Astra round three, plus Wrysk's ring, 2026-09-16)
+
+Astra returned *rework* with three blocking and three should-fix items; findings
+5 and 7 were resolved by the coordinator in `9cbf508` before this pass. Every
+citation was checked against the tree and all were accurate. **Wrysk then changed
+the shape**: the world's left and right edges join and the top and bottom stay
+solid. That supersedes finding 1 entirely and simplifies §2 rather than
+complicating it, which was the stated reason for the change.
+
+| # | finding | verdict | what changed |
+|---|---|---|---|
+| — | **Wrysk: the world is a ring, not a rectangle** | **adopted** | `Topology::Flat` → **`Topology::Ring { w, h }`** (renamed once in §2; the `FW-` ids and this file's name keep the "flat" label). §2 is rewritten: the vertical edge is a **seam of the chart to itself** — identity `TangentMap`, zero quarter turns, translation by `∓w`, the `Front right → Right left` row of `design/surface-topology.md` with the neighbour being the same chart — so `travel` uses its **existing** `Some(seam)` branch (`travel.rs:263-275`) and the only reflection left is the existing rim `REFLECT_Y` (`travel.rs:254-258`) at `v = 0` and `v = h`. **`REFLECT_X`, the corner algebra and the inverted tie rule are deleted**: a ring corner *is* the cube's lower side corner, so the lowest-`Edge` tie rule and `lower_corner_crosses_a_vertical_seam_and_reflects` (`travel.rs:478-492`) carry over unchanged. `unfold` gets at most two images (direct and `±w`), guaranteed by validating `w >= 2·max_local_radius() + 2·CELL_PIXELS`, with `Ring::max_local_radius() = min(h, w − 2·CELL_PIXELS)/2` satisfying it by construction. `chord_sq` becomes `min(|Δu|, w − |Δu|)² + Δv²` in pixels. The field graph's rows are rings: 3,600 cells, **7,120** edges (`80·45 + 80·44`), 3,440 interior cells at degree 4, the 160 top and bottom cells at degree 3, and **no corners** — repair 1's degree-2 case is deleted with the walls that created it. `downhill` is unchanged (top row `None`, else `(cx, cy+1)`) |
+| 1 | **BLOCKING** — planar weather not dimensionally implementable: centre in embedded units but reflected at pixel-space `u = w`; `rate` hardcoded width 10 although `Flat{w,h}` is general; "zero or empty period" contradicts `config.rs:765-778` | **superseded by the ring; the underlying error is real and its cause removed** | The planar blob model is **deleted**, together with its rate formula, its fold rule and its extra `WorldState::validate` checks. §5a now specifies a **cylinder embedding** — `θ = 2π·u/w`, `r = w/(2π·32·S)`, `y = 1 − 2v/h`, `embed = [r cos θ, y, r sin θ]` — on which `normalize()` preserves azimuth and maps height monotonically to latitude, so the **existing spherical blob model runs verbatim**: no new state, no new units, no dimensional mismatch to make, and **no draw changes, so RNG stream parity is exact by construction** rather than engineered (the parity note is kept as a test worth writing). Two further results are recorded: the cylinder's lateral area is `2πr × 2 = 20` embedded units² — **exactly the cube's `5 × 2 × 2`, at every S** — so `blobs_per_channel` stays **3** and repair 2's derived "3 → 8" is retracted; and the wave sum is **seamless across the wrap by construction** (`u = 0` and `u = w` are one point in 3D), which retires §6's former "noise must be divided by S" condition into the choice of `r`. The distortion is stated and accepted for v1: the world spans only `±32.15°` of latitude against 360° of longitude, so a 55° blob covers the full height while spanning ~15% of the width (showers read as bands; in *area* the cap is well matched, 21% of the sphere against the world's 53%), and `dφ/dy` falls from `0.628` at the equator to `0.451` at `y = ±1`, so blobs drift ~28% slower in latitude near the rims. The same compression makes the embedding anisotropic (`90/32 = 2.81×` vertical stretch of noise patches); the one-line isotropic alternative is named and **flagged for Wrysk, not taken**, since `Topology::height()` is already separate from `embed()` |
+| 2 | **BLOCKING** — the care chain is still partly unowned: cube-hardcoded `CareTarget::resolve` (`cubarium-core/src/care.rs:148-168`) used at `world/care.rs:60`, and `HunterTarget::resolve` for `SpawnApex` (`hunter/state.rs:47-67`) | **accepted** | Both core resolvers are named explicitly in **FW-2**'s objective, with the nuance that these are *core* types carrying `f64` `u`/`v` and are distinct from FW-4's host `CareTarget` with its `u8` fields — two types, one name, two owners. FW-4 keeps the host side unchanged. **"feed/rain/clean/apex targets beyond pixel 63 resolve on a ring and are refused off-world"** is added to both FW-2's and FW-6's verification |
+| 3 | **BLOCKING** — `CubeProjection` too loose: omits `ou`, structure, birth tick, hunger memory, mode, escrow, births, phenotype, ancestry, origin, turn counter (`organism.rs:46-67`), the allocator state (`ids.rs:15-23`), weather and every extension (`world/state.rs:23-99`), and excluding all config drops behaviour-bearing configuration | **accepted; the enumeration was the mistake** | §4 redefines it as **`WorldState` verbatim with exactly one substitution**: `config: ConfigProjection`, itself `WorldConfig` minus *only* `topology` and `world_scale`. Everything else is carried whole at its own type, including `organisms: Slots<Organism>` with `entries`, `free` and `live`, plus `weather` and all seven extension states — the field list is spelled out. The cross-schema procedure is also made concrete: the post-change build reads the pre-change **payload** through the frozen `v16.rs` mirror and `decode_exact`, the mechanism the existing schema-refusal tests already use, so `decode_snapshot`'s refusal of schema 16 is untouched and no patch to `main` is needed — the fixture is one snapshot file from an unmodified `main` run. **Negative tests are made part of the definition** (FW-6's `ring_schema17.rs`): perturb one organism field, one free-list entry, one weather blob, one field vector, one extension state and one non-added config field, and equality must fail in every case — "a comparator that cannot fail is not evidence" |
+| 4 | Should-fix — §7 still told implementers to scale `MAX_LOCAL_RADIUS`, contradicting §2's pinned cube proof | **accepted** | `MAX_LOCAL_RADIUS` is removed from §7's list of `world_scale`-multiplied defaults, and a new paragraph states that it is per topology and never scaled: the cube's 32 px is a completeness proof tied to `MAX_SEAMS` (`unfold.rs:5-13`) and `Cube` pins `S = 1`. `Ring::max_local_radius()` is described as a **chosen performance cap** (quadratic `unfold_pixels` cost) that also holds the image count at two — explicitly *not* a limit of meaning. The two config sites that validate radii against the constant (`config.rs:863,917`) take the topology's value instead |
+| 5 | Should-fix — FW-0 measured a four-core number that cannot exist yet | **resolved by the coordinator** (`9cbf508`) | FW-0's row now reads: serial `R` and `tick_ms` now; the four-A78 render number re-measured after FW-3; **S provisional until that rerun**. Its verification requires each number with its pinning and its date |
+| 6 | Should-fix — the §6 FW-9 paragraph said FW-9 does not touch cubarium's wire side, but its row extends the raster encoder and the strip protocol | **accepted** | Reworded: FW-9 does not **offload cubarium's presenter**, while it *does* extend cubarium's side of the wire with the auxiliary layers and a strip-format layer id |
+| 7 | Should-fix — stale six-A55 line in the handoff | **resolved by the coordinator** (`9cbf508`) | No change here |
+| 8 | Note — commit order `950f294 → b781a1c → 5a81e05 → 9cbf508` is correct | **no action** | Recorded |
+
+Repair 1's items 4 and 6, and repair 2's items 2 and 4, are marked in place as
+superseded, so the historical sections are not mistaken for current state.
