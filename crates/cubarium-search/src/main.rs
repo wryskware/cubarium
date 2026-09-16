@@ -16,6 +16,7 @@ use std::time::Instant;
 
 use clap::{Parser, Subcommand};
 use cubarium_search::calibrate;
+use cubarium_search::census;
 use cubarium_search::es;
 use cubarium_search::evaluate::{BUILD_ID, Protocol, Status, evaluate};
 use cubarium_search::factorial;
@@ -414,6 +415,9 @@ enum Command {
         #[arg(long, default_value = "runs/ecology-v1-diet-factorial")]
         out: PathBuf,
     },
+    /// Run workstream R's depth census: F's 150-minute variety census with the roster
+    /// skimmer's `depth` overridden search-side at tick 0 and nothing else changed.
+    Census(census::Args),
     /// Re-run one recorded row and check it reproduces.
     Replay {
         /// The `evals.jsonl` written by a search.
@@ -561,6 +565,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             cells_only,
             &out,
         )?),
+        Command::Census(args) => Ok(census::run_command(args)?),
         Command::Replay { record, index } => replay(&record, index),
         Command::EsProtocol { config } => es::commands::protocol(config),
         Command::EsControls { workers, wall_seconds, config, out } => {

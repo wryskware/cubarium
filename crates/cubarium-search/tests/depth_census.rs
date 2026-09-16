@@ -165,7 +165,7 @@ fn a_depth_outside_the_genomes_bounds_is_refused_rather_than_clamped() {
 fn a_control_run_reproduces_the_ordinary_harness_world() {
     let options = RunOptions { ledger: true, plant_record: false, no_animals: false };
     for (candidate, seed, arm, introduce) in
-        [("baseline", 1001u64, 0u32, 6_000u64), ("fast-leaf", 1002, 2, 500)]
+        [("baseline", 1001u64, 0u32, 500u64), ("fast-leaf", 1002, 2, 500)]
     {
         let protocol = Protocol {
             horizon_ticks: 2_000,
@@ -206,7 +206,7 @@ fn a_treatment_run_is_a_different_world_and_a_control_run_is_not() {
         horizon_ticks: 2_000,
         sample_every: 100,
         apex_founders: 0,
-        apex_introduce_tick: 6_000,
+        apex_introduce_tick: 500,
     };
     let control = census::run_one("fast-leaf", 1001, 0, DEPTH_CONTROL, protocol).expect("control");
     let again = census::run_one("fast-leaf", 1001, 0, DEPTH_CONTROL, protocol).expect("control");
