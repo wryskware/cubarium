@@ -15,6 +15,8 @@
 //! - [`factorial`]: the controlled form × diet factorial — cloned founders at matched cells
 //!   with mutation and reproduction off, measured with the core's per-body ledger.
 //! - [`metrics`]: the component metrics and the scalar rank derived from them.
+//! - [`plant_budget`]: workstream M's counter split by **exact** consumer withdrawal, and the
+//!   measured plant budget of the cells that cross.
 //! - [`movement`]: the spatial-coupling measures — visits, residence, revisit intervals, the
 //!   per-cell depletion/recovery crossing counter, and the variety census.
 //! - [`search`]: the bounded genetic search and every limit it runs under.
@@ -38,6 +40,7 @@ pub mod factorial;
 pub mod metrics;
 pub mod movement;
 pub mod params;
+pub mod plant_budget;
 pub mod population;
 pub mod rng;
 pub mod search;

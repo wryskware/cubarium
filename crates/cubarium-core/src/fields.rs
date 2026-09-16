@@ -204,6 +204,172 @@ impl EcologyV1State {
     }
 }
 
+/// One cell's plant budget, accumulated over a run in the terms of
+/// `design/ecology-v1-contract.md` §4: what the plant step drew from `N`, what it spent, what
+/// it moved between `Q` and `P`, and what a mouth withdrew at the §6.4 withdrawal site.
+///
+/// **Read-only.** Nothing here is read back by the tick, persisted, hashed or snapshotted:
+/// every write is `+=` into a buffer the world only hands out. Workstream E's
+/// [`crate::world::BudgetRecorder`] is the model; this is its per-cell counterpart, opened by
+/// [`crate::world::World::record_plant_budgets`].
+///
+/// Material only (metres). Every term is a *flow over the run*, except the four `*_sum` state
+/// fields, which are sums over the ticks the cell was alive and are divided by
+/// [`Self::ticks_alive`] to read the mean the plant step actually used.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PlantCellBudget {
+    /// Ticks this cell entered subphase 3a as [`CellClass::Alive`]. The denominator of every
+    /// `*_sum` below.
+    pub ticks_alive: u64,
+    /// Stand deaths (§4.7) in this cell over the run.
+    pub deaths: u32,
+
+    // --- what the plant step actually saw (sums over `ticks_alive`) ----------------------
+    /// `algae_light(W, L, cfg)`: the light 3a used, weather and algae floor included — not
+    /// the static habitat `L₀`.
+    pub light_effective_sum: f64,
+    /// The wet and drown factors of §4.1.
+    pub wet_sum: f64,
+    pub drown_sum: f64,
+    /// `N⁻`, the nutrient the Monod term was evaluated at, and that term itself.
+    pub nutrient_sum: f64,
+    pub monod_sum: f64,
+    /// `P⁻`, `Q⁻`, `W⁻` and `P_cap = min(P_max, α·W⁻)`.
+    pub p_sum: f64,
+    pub q_sum: f64,
+    pub w_sum: f64,
+    pub p_cap_sum: f64,
+
+    // --- the foliage budget: every term that moves `P` ------------------------------------
+    /// `A` (§4.1): gross material drawn out of `N` by the cell this tick. The income the
+    /// whole stand lives on, before maintenance takes its share.
+    pub income: f64,
+    /// §4.4 foliage growth paid out of `A`.
+    pub foliage_from_income: f64,
+    /// §4.4 foliage growth paid out of the reserve — the emergency reflush. This is the
+    /// `Q → P` transfer; the material charged to `Q` is `(1 + c_g)` times this.
+    pub foliage_from_reserve: f64,
+    /// §4.8 starter foliage from a landed propagule.
+    pub foliage_from_propagule: f64,
+    /// §4.5 senescence `m_p · P · dt` into litter.
+    pub senescence: f64,
+    /// 3c ripening: foliage turned into fruit.
+    pub ripened: f64,
+    /// §4.7 stand death: the foliage the dying cell dropped into litter.
+    pub death_foliage: f64,
+    /// §6.4 **exact** consumer withdrawal from `P`, booked at the withdrawal site with the
+    /// cell the mouth was standing in — not attributed from a sampled position.
+    pub withdrawal_foliage: f64,
+
+    // --- what happens beside the foliage --------------------------------------------------
+    /// §4.3 maintenance `m_w · W · dt`, split by what paid it and what nothing paid.
+    pub maintenance_from_income: f64,
+    pub maintenance_from_reserve: f64,
+    pub maintenance_unpaid: f64,
+    /// §4.4 reserve terms: `q_share` off the top, the refill from what growth left, and a
+    /// propagule's starter reserve.
+    pub reserve_share: f64,
+    pub reserve_refill: f64,
+    pub reserve_from_propagule: f64,
+    /// §4.8 reserve this cell spent as a donor.
+    pub reserve_to_propagule: f64,
+    /// §4.7 reserve the dying stand dropped into litter.
+    pub death_reserve: f64,
+    /// §4.4 wood growth, §4.6 dieback `κ · unpaid` into dead wood, §4.7 the dying stand's
+    /// remaining wood, and §4.8 wood from a landed propagule.
+    pub wood_growth: f64,
+    pub dieback_wood: f64,
+    pub death_wood: f64,
+    pub wood_from_propagule: f64,
+
+    // --- the other three §6.4 channels, at the same exact site ----------------------------
+    pub withdrawal_fruit: f64,
+    pub withdrawal_litter: f64,
+    pub withdrawal_carrion: f64,
+}
+
+impl PlantCellBudget {
+    /// Everything that put foliage into this cell: income-fed growth, the reserve reflush and
+    /// a propagule's starter foliage.
+    pub fn foliage_in(&self) -> f64 {
+        self.foliage_from_income + self.foliage_from_reserve + self.foliage_from_propagule
+    }
+
+    /// Everything the *plant step* took out: senescence, ripening and the death dump.
+    /// Consumer withdrawal is deliberately not part of it — the split is the whole point.
+    pub fn foliage_out(&self) -> f64 {
+        self.senescence + self.ripened + self.death_foliage
+    }
+
+    /// The plant budget proper: what the plant put into its own foliage minus what the plant
+    /// took back out, with no consumer term. Negative means the cell cannot hold what it has.
+    pub fn plant_budget(&self) -> f64 {
+        self.foliage_in() - self.foliage_out()
+    }
+
+    /// Mean over `ticks_alive`, or `0.0` for a cell that was never alive.
+    pub fn mean(&self, sum: f64) -> f64 {
+        if self.ticks_alive == 0 { 0.0 } else { sum / self.ticks_alive as f64 }
+    }
+}
+
+/// The per-cell plant budget of one run: [`PlantCellBudget`] per cell, plus the opening stocks
+/// the closing identity is checked against.
+///
+/// The identity, per cell, is exactly the set of terms §4 names:
+///
+/// ```text
+/// P − P₀ = foliage_in − foliage_out − withdrawal_foliage
+/// Q − Q₀ = reserve_share + reserve_refill + reserve_from_propagule
+///          − maintenance_from_reserve − (1 + c_g)·foliage_from_reserve
+///          − reserve_to_propagule − death_reserve
+/// W − W₀ = wood_growth + wood_from_propagule − dieback_wood − death_wood
+/// ```
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PlantBudgetRecord {
+    pub cells: Vec<PlantCellBudget>,
+    /// The stocks as they stood when the record was opened.
+    pub p_open: Vec<f64>,
+    pub q_open: Vec<f64>,
+    pub w_open: Vec<f64>,
+    /// The tick the record was opened at, and how many ticks it has seen since.
+    pub opened_at: u64,
+    pub ticks: u64,
+}
+
+impl PlantBudgetRecord {
+    fn new(p: &[f64], q: &[f64], w: &[f64], tick: u64) -> PlantBudgetRecord {
+        PlantBudgetRecord {
+            cells: vec![PlantCellBudget::default(); CELL_COUNT],
+            p_open: p.to_vec(),
+            q_open: q.to_vec(),
+            w_open: w.to_vec(),
+            opened_at: tick,
+            ticks: 0,
+        }
+    }
+
+    /// The largest absolute residual of the three identities above, over every cell. The
+    /// record is exact when this is zero to rounding; the tests hold it under 1e-9.
+    pub fn max_residual(&self, p: &[f64], q: &[f64], w: &[f64], build: f64) -> f64 {
+        let mut worst = 0.0f64;
+        for i in 0..self.cells.len() {
+            let c = &self.cells[i];
+            let rp = (p[i] - self.p_open[i]) - (c.foliage_in() - c.foliage_out() - c.withdrawal_foliage);
+            let rq = (q[i] - self.q_open[i])
+                - (c.reserve_share + c.reserve_refill + c.reserve_from_propagule
+                    - c.maintenance_from_reserve
+                    - (1.0 + build) * c.foliage_from_reserve
+                    - c.reserve_to_propagule
+                    - c.death_reserve);
+            let rw = (w[i] - self.w_open[i])
+                - (c.wood_growth + c.wood_from_propagule - c.dieback_wood - c.death_wood);
+            worst = worst.max(rp.abs()).max(rq.abs()).max(rw.abs());
+        }
+        worst
+    }
+}
+
 /// Reusable per-tick working storage for the cross-cell subphases 3f and 3h. Held by the
 /// world so a 36,000-tick run allocates none of it per tick; never persisted, never hashed.
 #[derive(Clone, Debug)]
@@ -221,6 +387,10 @@ pub struct EcoScratch {
     /// 3h's immutable donor-budget snapshot and the per-recipient incoming sum.
     budget: Vec<f64>,
     incoming: Vec<f64>,
+    /// Workstream M's per-cell plant budget, or `None` — which is every ordinary world.
+    /// `Option`, not a flag: an unopened record costs one null check per cell per subphase
+    /// and no memory at all.
+    plant: Option<Box<PlantBudgetRecord>>,
 }
 
 impl Default for EcoScratch {
@@ -235,7 +405,32 @@ impl Default for EcoScratch {
             class: vec![CellClass::Bare; CELL_COUNT],
             budget: dry(),
             incoming: dry(),
+            plant: None,
         }
+    }
+}
+
+impl EcoScratch {
+    /// Open workstream M's per-cell plant budget on the stocks as they stand now, or close it.
+    /// Opening twice restarts the record; closing frees it.
+    pub(crate) fn record_plant_budget(
+        &mut self,
+        on: bool,
+        p: &[f64],
+        q: &[f64],
+        w: &[f64],
+        tick: u64,
+    ) {
+        self.plant = on.then(|| Box::new(PlantBudgetRecord::new(p, q, w, tick)));
+    }
+
+    pub(crate) fn plant_budget(&self) -> Option<&PlantBudgetRecord> {
+        self.plant.as_deref()
+    }
+
+    /// The write handle the §6.4 withdrawal site books an exact bite through.
+    pub(crate) fn plant_budget_mut(&mut self) -> Option<&mut PlantBudgetRecord> {
+        self.plant.as_deref_mut()
     }
 }
 
@@ -349,6 +544,9 @@ impl Fields {
     ) -> FieldLedger {
         debug_assert_eq!(self.n.len(), CELL_COUNT);
         let mut ledger = FieldLedger::default();
+        if let Some(rec) = work.plant.as_deref_mut() {
+            rec.ticks += 1;
+        }
         let pc = &cfg.producer;
         let pl = &cfg.plant;
         let dc = &cfg.detritus;
@@ -493,6 +691,33 @@ impl Fields {
                 } else {
                     de = want;
                 }
+
+                // Workstream M's read-only per-cell plant budget: the §4.1-4.5 terms of this
+                // cell's own arithmetic, written where they were computed rather than
+                // reconstructed afterwards from a proxy. Nothing below is read back.
+                if let Some(rec) = work.plant.as_deref_mut() {
+                    let c = &mut rec.cells[i];
+                    c.ticks_alive += 1;
+                    c.light_effective_sum += lit;
+                    c.wet_sum += wet;
+                    c.drown_sum += drown;
+                    c.nutrient_sum += n0;
+                    c.monod_sum += monod;
+                    c.p_sum += p0;
+                    c.q_sum += q0;
+                    c.w_sum += w0;
+                    c.p_cap_sum += p_cap;
+                    c.income += a;
+                    c.maintenance_from_income += paid_a;
+                    c.maintenance_from_reserve += paid_q;
+                    c.maintenance_unpaid += unpaid;
+                    c.reserve_share += share_q;
+                    c.reserve_refill += refill_q;
+                    c.foliage_from_income += grow_p_income;
+                    c.foliage_from_reserve += grow_p_reserve;
+                    c.wood_growth += grow_w;
+                    c.senescence += shed;
+                }
             }
 
             // --- 3c: ripening and drop, on every cell, today's rule. Ripening reads the
@@ -502,6 +727,11 @@ impl Fields {
             let dropped = (fc.drop * f0 * DT).clamp(0.0, f0);
             ledger.light_in += (e_f - e_v) * ripened;
             p -= ripened;
+            if ripened > 0.0
+                && let Some(rec) = work.plant.as_deref_mut()
+            {
+                rec.cells[i].ripened += ripened;
+            }
             let f_next = f0 + ripened - dropped;
             d += dropped;
             let want = de + e_f * dropped;
@@ -518,6 +748,9 @@ impl Fields {
                 let died_back = w.min(pl.dieback * unpaid).max(0.0);
                 w -= died_back;
                 wd = wd0 + died_back;
+                if let Some(rec) = work.plant.as_deref_mut() {
+                    rec.cells[i].dieback_wood += died_back;
+                }
                 if w < pl.alive_min {
                     wd += w;
                     let fallen = p + q;
@@ -527,6 +760,13 @@ impl Fields {
                     let kept = want.min(room);
                     de += kept;
                     ledger.heat_out += want - kept;
+                    if let Some(rec) = work.plant.as_deref_mut() {
+                        let c = &mut rec.cells[i];
+                        c.deaths += 1;
+                        c.death_foliage += p;
+                        c.death_reserve += q;
+                        c.death_wood += w;
+                    }
                     w = 0.0;
                     p = 0.0;
                     q = 0.0;
@@ -676,6 +916,9 @@ impl Fields {
                     }
                     eco.plant_reserve[j] -= work.budget[j];
                     ledger.propagule_sent += work.budget[j];
+                    if let Some(rec) = work.plant.as_deref_mut() {
+                        rec.cells[j].reserve_to_propagule += work.budget[j];
+                    }
                 }
                 let (w_frac, p_frac, q_frac) = (
                     pl.propagule_split[0],
@@ -694,6 +937,12 @@ impl Fields {
                     eco.plant_reserve[i] += q_frac * net;
                     self.n[i] += pl.build * net;
                     ledger.heat_out += e_v * pl.build * net;
+                    if let Some(rec) = work.plant.as_deref_mut() {
+                        let c = &mut rec.cells[i];
+                        c.wood_from_propagule += w_frac * net;
+                        c.foliage_from_propagule += p_frac * net;
+                        c.reserve_from_propagule += q_frac * net;
+                    }
                     if !crossed_before && eco.wood[i] >= pl.alive_min && eco.wood[i] > 0.0 {
                         eco.recolonisations_total += 1;
                     }

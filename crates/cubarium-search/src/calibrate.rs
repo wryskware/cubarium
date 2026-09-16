@@ -362,6 +362,12 @@ pub struct StagePlan {
     /// Absent on every stage before it, which is what `false` means there.
     #[serde(default)]
     pub ledger: bool,
+    /// Whether this stage ran with workstream M's per-cell plant budget on, and whether it
+    /// founded no animals at all. Absent on every stage before M.
+    #[serde(default)]
+    pub plant_record: bool,
+    #[serde(default)]
+    pub no_animals: bool,
     pub build_id: String,
     pub horizon_ticks: u64,
     pub sample_every: u64,
@@ -598,8 +604,9 @@ pub fn run_stage(
     arms: &[u32],
     // One or more `organism.move_cost` levels. `&[DEFAULT_MOVE_COST]` is the screen's matrix.
     prices: &[f64],
-    // Workstream E's per-body budget ledger. Off is every stage before workstream I.
-    ledger: bool,
+    // What this stage records beside its ordinary metrics, and whether it founds animals at
+    // all. `RunOptions::default()` is every stage before workstream I.
+    options: RunOptions,
     horizon_ticks: u64,
     sample_every: u64,
     apex_introduce_tick: u64,
@@ -675,7 +682,9 @@ pub fn run_stage(
     let plan = StagePlan {
         stage: stage.to_string(),
         prices: prices.to_vec(),
-        ledger,
+        ledger: options.ledger,
+        plant_record: options.plant_record,
+        no_animals: options.no_animals,
         build_id: BUILD_ID.to_string(),
         horizon_ticks,
         sample_every,
@@ -723,7 +732,7 @@ pub fn run_stage(
                         apex_introduce_tick,
                     };
                     let evaluation =
-                        evaluate_with(&job.values, job.seed, protocol, RunOptions { ledger });
+                        evaluate_with(&job.values, job.seed, protocol, options);
                     let row = CalibrationRow {
                         candidate: job.candidate.name.to_string(),
                         axes: job.candidate.axes.to_string(),
@@ -908,6 +917,8 @@ pub fn print_report(report: &StageReport) {
     );
     println!("movement prices {:?}", report.plan.prices);
     println!("per-body ledger  {}", if report.plan.ledger { "on" } else { "off" });
+    println!("plant record     {}", if report.plan.plant_record { "on" } else { "off" });
+    println!("founders         {}", if report.plan.no_animals { "none (plant-only)" } else { "ordinary" });
     println!(
         "\n{:<24} {:>9} {:>3} {:>4} {:>6} {:>9} {:>9} {:>8} {:>8} {:>7} {:>7}  gates",
         "candidate", "move_cost", "arm", "ok", "extinc", "foliage/0", "wood", "pop", "births",
@@ -1176,7 +1187,7 @@ mod tests {
             1,
             &[0],
             &[0.5],
-            false,
+            RunOptions::default(),
             100,
             50,
             10,

@@ -333,6 +333,15 @@ enum Command {
         /// trainer do not need.
         #[arg(long, default_value_t = false)]
         ledger: bool,
+        /// Record workstream M's per-cell plant budget: every §4 plant flow and every §6.4
+        /// consumer withdrawal, booked in the cell it happened in. Off by default.
+        #[arg(long, default_value_t = false)]
+        plant_record: bool,
+        /// Found no animals at all — `founders.kinds` empty and `founders.count` zero — so the
+        /// world is plants, water and weather. Workstream M's herbivore-absent arm. This
+        /// changes the world, and its hash, deliberately.
+        #[arg(long, default_value_t = false)]
+        no_animals: bool,
         #[arg(long, default_value_t = 125_000)]
         ticks: u64,
         #[arg(long, default_value_t = 500)]
@@ -468,6 +477,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             arms,
             prices,
             ledger,
+            plant_record,
+            no_animals,
             ticks,
             sample_every,
             introduce_tick,
@@ -499,7 +510,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 seeds,
                 &arms,
                 &prices,
-                ledger,
+                cubarium_search::evaluate::RunOptions { ledger, plant_record, no_animals },
                 ticks,
                 sample_every,
                 introduce_tick,

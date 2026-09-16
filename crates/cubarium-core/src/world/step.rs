@@ -1860,6 +1860,9 @@ impl World {
                     if q > 0.0 {
                         let rho = e_f;
                         fields.f[cell] -= q;
+                        if let Some(rec) = eco_scratch.plant_budget_mut() {
+                            rec.cells[cell].withdrawal_fruit += q;
+                        }
                         let q_d = cap_h * q;
                         let to_reserve = eta_m * q_d;
                         o.reserve += to_reserve;
@@ -1898,6 +1901,11 @@ impl World {
                     if q > 0.0 {
                         let rho = e_v;
                         fields.p[cell] -= q;
+                        // Workstream M's exact per-cell withdrawal: the cell the mouth is
+                        // standing in, at the site the stock actually loses the bite.
+                        if let Some(rec) = eco_scratch.plant_budget_mut() {
+                            rec.cells[cell].withdrawal_foliage += q;
+                        }
                         let q_d = cap_h * q;
                         let to_reserve = eta_m * q_d;
                         o.reserve += to_reserve;
@@ -1950,6 +1958,9 @@ impl World {
                             let rho = carried / q;
                             fields.d[cell] -= q;
                             fields.de[cell] -= carried;
+                            if let Some(rec) = eco_scratch.plant_budget_mut() {
+                                rec.cells[cell].withdrawal_litter += q;
+                            }
                             let eta =
                                 if e_r > 0.0 { eta_m * (rho / e_r).min(1.0) } else { eta_m };
                             let q_d = cap_d * q;
@@ -1991,6 +2002,9 @@ impl World {
                             let rho = carried / q;
                             ecology.carrion[cell] -= q;
                             ecology.carrion_energy[cell] -= carried;
+                            if let Some(rec) = eco_scratch.plant_budget_mut() {
+                                rec.cells[cell].withdrawal_carrion += q;
+                            }
                             let eta =
                                 if e_r > 0.0 { eta_m * (rho / e_r).min(1.0) } else { eta_m };
                             let q_d = cap_d * q;
