@@ -972,6 +972,112 @@ pub fn run(
     Ok(report)
 }
 
+/// The `factorial` subcommand, whole. It lives here rather than in `main.rs` so that the
+/// binary carries one dispatch line for this workstream and nothing else, and so that nobody
+/// editing another subcommand has to merge around it.
+///
+/// `cells_only` prints each seed's landscape — the depth-band census, the ten deepest cells
+/// with their foliage, and the eight cells the anchors resolve to — and runs nothing. That is
+/// how a placement design is checked before any compute is spent on it, and it is what
+/// refused two earlier designs (see [`choose_cells`]).
+pub fn command(
+    arms: &str,
+    seed_set: &str,
+    seeds: usize,
+    design: Design,
+    workers: usize,
+    cells_only: bool,
+    out: &Path,
+) -> Result<(), String> {
+    let arms: Vec<Arm> = arms
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(Arm::parse)
+        .collect::<Result<_, _>>()?;
+    let seeds = crate::calibrate::SeedSet::parse(seed_set)?.seeds(seeds)?;
+    println!("build {BUILD_ID}");
+    println!("ecology {ECOLOGY}");
+    println!("seeds {seeds:?}  arms {:?}", arms.iter().map(|a| a.label()).collect::<Vec<_>>());
+    println!(
+        "design ticks {} warm-up {} probe/{} drain/{} wet_min {}",
+        design.ticks, design.warm_up_ticks, design.probe_every, design.drain_every, design.wet_min
+    );
+
+    if cells_only {
+        for seed in &seeds {
+            let config = ecology_config(*seed)?;
+            let land = warm_up(&config, design.warm_up_ticks)?;
+            println!("\nseed {seed}");
+            println!("| depth band (d) | cells | of those, carrying foliage |");
+            println!("| --- | --- | --- |");
+            for (hi, cells, fed) in landscape_census(&land) {
+                println!("| <= {hi} | {cells} | {fed} |");
+            }
+            // The ten deepest cells, so "is there food in the pools?" is answered by the ten
+            // that matter rather than by a band average that can hide them.
+            let mut deepest: Vec<usize> = (0..CELL_COUNT).collect();
+            deepest.sort_by(|&a, &b| {
+                land.depth[b].partial_cmp(&land.depth[a]).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            println!(
+                "ten deepest cells: {}",
+                deepest[..10]
+                    .iter()
+                    .map(|&i| format!("{:.2}d/{:.3}P", land.depth[i], land.foliage[i]))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+            println!();
+            println!("| slot | cell | face | class | mean depth | mean foliage | mean litter |");
+            println!("| --- | --- | --- | --- | --- | --- | --- |");
+            for (slot, p) in choose_cells(&land, design.wet_min)?.iter().enumerate() {
+                let cell = CellId(p.cell);
+                println!(
+                    "| {slot} | {} | {:?} ({},{}) | {} | {:.4} | {:.4} | {:.4} |",
+                    p.cell,
+                    cell.face(),
+                    cell.cx(),
+                    cell.cy(),
+                    if p.wet { "wet" } else { "dry" },
+                    p.mean_depth,
+                    p.mean_foliage,
+                    p.mean_litter
+                );
+            }
+        }
+        return Ok(());
+    }
+
+    let report = run(&arms, &seeds, design, workers, out)?;
+    // Read the rows back from the file that was just written rather than from memory: if the
+    // tables in the note and the rows on disk could disagree, the note would be the one that
+    // is wrong, and this makes that impossible.
+    let path = out.join("runs.jsonl");
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let mut rows: Vec<ArmRun> = text
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(serde_json::from_str)
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    rows.sort_by_key(|r| (r.arm, r.seed));
+    print_report(&rows);
+    println!("\nruns {} in {:.1} s on {workers} workers", report.runs, report.wall_seconds);
+    println!("simulated ticks {}", report.simulated_ticks);
+    println!(
+        "worst |material residual| {:.3e}   worst |energy residual| {:.3e}",
+        report.worst_material_residual, report.worst_energy_residual
+    );
+    println!(
+        "clone births {}   dropped ledger records {}",
+        report.clone_births, report.dropped_records
+    );
+    println!("rows    {}", path.display());
+    println!("summary {}", out.join("summary.json").display());
+    Ok(())
+}
+
 /// The per-arm tables the note prints: one line per cell of the factorial.
 pub fn print_report(rows: &[ArmRun]) {
     let mut by_arm: BTreeMap<Arm, Vec<&ArmRun>> = BTreeMap::new();

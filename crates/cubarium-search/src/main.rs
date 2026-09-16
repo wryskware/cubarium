@@ -522,7 +522,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             workers,
             cells_only,
             out,
-        } => factorial_command(
+        } => Ok(factorial::command(
             &arms,
             &seed_set,
             seeds,
@@ -530,7 +530,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             workers,
             cells_only,
             &out,
-        ),
+        )?),
         Command::Replay { record, index } => replay(&record, index),
         Command::EsProtocol { config } => es::commands::protocol(config),
         Command::EsControls { workers, wall_seconds, config, out } => {
@@ -629,98 +629,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
     }
-}
-
-/// The controlled form × diet factorial (workstream J). `--cells-only` prints the eight cells
-/// each seed's own landscape offers and runs nothing, which is how a design is checked before
-/// compute is spent on it.
-fn factorial_command(
-    arms: &str,
-    seed_set: &str,
-    seeds: usize,
-    design: factorial::Design,
-    workers: usize,
-    cells_only: bool,
-    out: &std::path::Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let arms: Vec<factorial::Arm> =
-        arms.split(',').map(str::trim).filter(|s| !s.is_empty()).map(factorial::Arm::parse).collect::<
-            Result<_, _>,
-        >()?;
-    let seeds = calibrate::SeedSet::parse(seed_set)?.seeds(seeds)?;
-    println!("build {BUILD_ID}");
-    println!("ecology {}", factorial::ECOLOGY);
-    println!("seeds {seeds:?}  arms {:?}", arms.iter().map(|a| a.label()).collect::<Vec<_>>());
-    println!(
-        "design ticks {} warm-up {} probe/{} drain/{}",
-        design.ticks, design.warm_up_ticks, design.probe_every, design.drain_every
-    );
-
-    if cells_only {
-        for seed in &seeds {
-            let config = factorial::ecology_config(*seed)?;
-            let land = factorial::warm_up(&config, design.warm_up_ticks)?;
-            println!("\nseed {seed}");
-            println!("| depth band (d) | cells | of those, carrying foliage |");
-            println!("| --- | --- | --- |");
-            for (hi, cells, fed) in factorial::landscape_census(&land) {
-                println!("| <= {hi} | {cells} | {fed} |");
-            }
-            // The ten deepest cells, so "is there food in the pools?" is answered by the ten
-            // that matter rather than by a band average.
-            let mut deepest: Vec<usize> = (0..cubarium_surface::CELL_COUNT).collect();
-            deepest.sort_by(|&a, &b| {
-                land.depth[b].partial_cmp(&land.depth[a]).unwrap_or(std::cmp::Ordering::Equal)
-            });
-            println!(
-                "ten deepest cells: {}",
-                deepest[..10]
-                    .iter()
-                    .map(|&i| format!("{:.2}d/{:.3}P", land.depth[i], land.foliage[i]))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            );
-            let cells = factorial::choose_cells(&land, design.wet_min)?;
-            println!();
-            println!("| slot | cell | face | class | mean depth | mean foliage | mean litter |");
-            println!("| --- | --- | --- | --- | --- | --- | --- |");
-            for (slot, p) in cells.iter().enumerate() {
-                let cell = cubarium_surface::CellId(p.cell);
-                println!(
-                    "| {slot} | {} | {:?} ({},{}) | {} | {:.4} | {:.4} | {:.4} |",
-                    p.cell,
-                    cell.face(),
-                    cell.cx(),
-                    cell.cy(),
-                    if p.wet { "wet" } else { "dry" },
-                    p.mean_depth,
-                    p.mean_foliage,
-                    p.mean_litter
-                );
-            }
-        }
-        return Ok(());
-    }
-
-    let report = factorial::run(&arms, &seeds, design, workers, out)?;
-    let rows: Vec<factorial::ArmRun> = {
-        let text = std::fs::read_to_string(out.join("runs.jsonl"))?;
-        let mut rows: Vec<factorial::ArmRun> =
-            text.lines().filter(|l| !l.is_empty()).map(serde_json::from_str).collect::<Result<_, _>>()?;
-        rows.sort_by_key(|r| (r.arm, r.seed));
-        rows
-    };
-    factorial::print_report(&rows);
-    println!("\nruns {} in {:.1} s on {workers} workers", report.runs, report.wall_seconds);
-    println!("simulated ticks {}", report.simulated_ticks);
-    println!(
-        "worst |material residual| {:.3e}   worst |energy residual| {:.3e}",
-        report.worst_material_residual, report.worst_energy_residual
-    );
-    println!("clone births {}   dropped ledger records {}", report.clone_births, report.dropped_records);
-    println!("rows    {}", out.join("runs.jsonl").display());
-    println!("summary {}", out.join("summary.json").display());
-    Ok(())
 }
 
 fn print_params() -> Result<(), Box<dyn std::error::Error>> {
