@@ -21,18 +21,16 @@ serde_json = "1"
 drm = { version = "0.15", optional = true }
 rustix = { version = "1", features = ["event", "fs"], optional = true }
 
-[dependencies.winit]
-version = "0.30"
-optional = true
-
 [features]
 default = ["scanout"]
 # The board: linear B8G8R8A8 images exported as dma-bufs, imported into KMS and
 # page-flipped at DP-1. Linux only; the crate builds without it everywhere.
 scanout = ["dep:drm", "dep:rustix"]
-# The desktop development window. Not built on the board (winit is not in its
-# crate cache and it has no compositor to show a window in).
-window = ["dep:winit"]
+# The desktop development window. Its `winit` half lives in the standalone
+# `crates/cubarium-gpu/window` crate (its own workspace) so that a 110-package
+# GUI tail does not land in the shared `Cargo.lock` for a feature the board
+# never builds; this feature only turns on the swapchain plumbing here.
+window = []
 
 [[example]]
 name = "synthetic"

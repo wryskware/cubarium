@@ -37,6 +37,7 @@ pub mod atlas;
 pub mod palette;
 pub mod render;
 pub mod scene;
+pub mod synthetic;
 pub mod target;
 pub mod vk;
 
