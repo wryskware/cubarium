@@ -27,6 +27,7 @@ fn frame(tick: u64, separation: Option<f64>) -> StrikeFrame {
         hunter_heading: Vec2::new(1.0, 0.0),
         scale: 1.0,
         advertised_reach: 14.83,
+        capture_forward: 13.2794,
         target: separation.map(|_| id(1)),
         target_pos: separation.map(|_| spot),
         target_heading: separation.map(|_| Vec2::new(1.0, 0.0)),
@@ -35,6 +36,10 @@ fn frame(tick: u64, separation: Option<f64>) -> StrikeFrame {
         effector_distance: separation,
         tolerance: separation.map(|_| TOLERANCE),
         in_reach: separation.is_some_and(|d| d <= TOLERANCE),
+        // Placed straight ahead of the grasp, so the pursuit's stopping rule is false for a
+        // prey past the tolerance and true for one inside it.
+        body_forward: separation.map(|d| 13.2794 + d),
+        body_side: separation.map(|_| 0.0),
         grasp_mapped: true,
     }
 }
@@ -67,6 +72,8 @@ fn record(
         hunter_speed_strike: Some(hunter_speed),
         target_turn_windup: Some(0.0),
         target_turn_strike: Some(0.0),
+        hunter_turn_windup: Some(0.0),
+        hunter_turn_strike: Some(0.0),
         class,
     }
 }
@@ -104,6 +111,27 @@ fn every_attempt_is_counted_once_in_each_table() {
     assert_eq!(caught.resolved_in_reach, 1);
     assert_eq!(out.resolved_in_reach, 0);
     assert!(caught.intent_separation.mean().unwrap() < out.intent_separation.mean().unwrap());
+}
+
+/// The pursuit's own stopping rule is counted per bucket, from the record's body-frame
+/// coordinate, so a verdict about the burst can say how often one was pushed at all. The
+/// fixture places prey straight ahead of the grasp: one 1 px short of the claws (held, because
+/// its forward coordinate is inside `capture_forward + tolerance`) and one 9 px past them.
+#[test]
+fn the_pursuit_stopping_rule_is_counted_from_the_body_frame_coordinate() {
+    let held = record(StrikeClass::ResolvedInReach, AttemptOutcome::Captured, 1.0, 1.0, 1.0, 0.0, 1.0);
+    let pushed =
+        record(StrikeClass::BeganOutOfReach, AttemptOutcome::OutOfReach, 9.0, 9.0, 9.0, 1.0, 6.0);
+    assert_eq!(held.intent.unwrap().pursuit_holds(), Some(true));
+    assert_eq!(pushed.intent.unwrap().pursuit_holds(), Some(false));
+    let a = audit(vec![held, pushed]);
+    let total: u64 = a.by_class.iter().map(|(_, s)| s.held_at_intent).sum();
+    assert_eq!(total, 1, "exactly one of the two attempts was held by the pursuit rule");
+    let (_, resolved) = a.by_class.iter().find(|(c, _)| *c == StrikeClass::ResolvedInReach).unwrap();
+    assert_eq!((resolved.held_at_intent, resolved.held_at_strike), (1, 1));
+    // The forward coordinate itself is averaged, so the table can say how far short of its own
+    // claws a member committed.
+    assert!((resolved.intent_body_forward.mean().unwrap() - (13.2794 + 1.0)).abs() < 1e-9);
 }
 
 /// The reporting order is fixed, so two runs' tables line up, and a class with no attempts is

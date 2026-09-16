@@ -272,6 +272,13 @@ fn a_prey_just_beyond_the_grasp_records_out_of_reach_with_the_separation_the_geo
         close(frame.effector_distance.expect(name), tolerance + gap, 1e-9, name);
         close(frame.tolerance.expect(name), tolerance, 1e-12, name);
         close(frame.overshoot().expect(name), gap, 1e-9, name);
+        // The prey is abreast of the claws, so its forward body coordinate is the grasp's own
+        // and the pursuit's stopping rule holds — which is *why* no burst was pushed here and
+        // the frozen hunter stayed where the test put it. The record says so rather than the
+        // fixture asserting it.
+        close(frame.body_forward.expect(name), profile.capture_offset_body.x, 1e-9, name);
+        close(frame.body_side.expect(name), profile.capture_offset_body.y + tolerance + gap, 1e-9, name);
+        assert_eq!(frame.pursuit_holds(), Some(true), "{name}: the pursuit stopping rule holds");
     }
     // Neither body moved, so the attempt neither closed nor lost ground.
     close(record.separation_change_over_strike().expect("both frames"), 0.0, 1e-9, "over the burst");
@@ -384,6 +391,7 @@ fn frame(
         hunter_heading: Vec2::new(1.0, 0.0),
         scale: 1.0,
         advertised_reach: 14.83,
+        capture_forward: 13.2794,
         target: target.map(|(id, _, _)| id),
         target_pos: target.map(|(_, p, _)| p),
         target_heading: target.map(|_| Vec2::new(1.0, 0.0)),
@@ -392,6 +400,8 @@ fn frame(
         effector_distance: target.map(|(_, _, d)| d),
         tolerance: target.map(|_| tolerance),
         in_reach: target.is_some_and(|(_, _, d)| d <= tolerance),
+        body_forward: target.map(|(_, _, d)| 13.2794 + d),
+        body_side: target.map(|_| 0.0),
         grasp_mapped: true,
     }
 }

@@ -324,6 +324,12 @@ pub struct ApexLife {
 /// **every** record; this cap only bounds the artifact, and what it left out is counted.
 pub const MAX_KEPT_RECORDS: usize = 4_000;
 
+/// The trial profile's `strike_seconds`, restated here so the sweep this module derives is
+/// divided by the same burst length the three frames are exactly that far apart by. It is read
+/// back from the profile at every use site that has one; this is the fallback for the
+/// aggregate, and `run_one` asserts the two agree.
+pub const STRIKE_SECONDS: f64 = 1.0;
+
 /// One quantity over a set of attempts: enough to report a mean without hiding the spread, and
 /// the extremes a verdict's deciding rows come from. `n` counts only the attempts that
 /// actually carried the quantity, so a mean is never diluted by a missing frame.
@@ -393,8 +399,22 @@ pub struct StrikeStats {
     /// Attempts in which the prey, or the hunter, changed cube face during the attempt.
     pub target_crossed_face: u64,
     pub hunter_crossed_face: u64,
+    /// Attempts whose **intent** frame satisfied the pursuit's own stopping rule, i.e. in
+    /// which the member asked for its resting effort and was pushed no strike burst
+    /// ([`StrikeFrame::pursuit_holds`]). The same at the strike frame.
+    pub held_at_intent: u64,
+    pub held_at_strike: u64,
     pub advertised_reach: Series,
     pub tolerance: Series,
+    /// The prey's forward coordinate in the hunter's body basis at the intent frame, against
+    /// `capture_forward`: how far short of its own claws the member was when it committed.
+    pub intent_body_forward: Series,
+    /// `advertised_reach · |Δheading| / strike_seconds`: the sweep the hunter's own turn cost
+    /// it during the burst, in the same px/s the envelope `|v| + r·|ω| ≤ u` bounds.
+    pub hunter_sweep_strike: Series,
+    /// `hunter_speed_strike + hunter_sweep_strike`: the whole motor magnitude the burst
+    /// actually delivered, against the profile's `strike_speed_px_s`.
+    pub hunter_motor_strike: Series,
     pub intent_separation: Series,
     pub intent_overshoot: Series,
     pub strike_separation: Series,
@@ -428,6 +448,25 @@ impl StrikeStats {
         if r.hunter_crossed_face {
             self.hunter_crossed_face += 1;
         }
+        if r.intent.and_then(|f| f.pursuit_holds()).unwrap_or(false) {
+            self.held_at_intent += 1;
+        }
+        if r.strike.and_then(|f| f.pursuit_holds()).unwrap_or(false) {
+            self.held_at_strike += 1;
+        }
+        self.intent_body_forward.push_opt(r.intent.and_then(|f| f.body_forward));
+        // The strike frame's own reach is the radius the turn is priced at, and the burst is
+        // exactly `strike_seconds` long by construction of the three frames.
+        let sweep = r.hunter_turn_strike.map(|t| {
+            r.strike.map_or(r.resolution.advertised_reach, |f| f.advertised_reach) * t.abs()
+                / STRIKE_SECONDS
+        });
+        self.hunter_sweep_strike.push_opt(sweep);
+        self.hunter_motor_strike
+            .push_opt(match (r.hunter_speed_strike, sweep) {
+                (Some(v), Some(w)) => Some(v + w),
+                _ => None,
+            });
         self.advertised_reach.push(r.resolution.advertised_reach);
         self.tolerance.push_opt(r.resolution.tolerance);
         self.intent_separation.push_opt(r.intent.and_then(|f| f.effector_distance));
@@ -451,8 +490,13 @@ impl StrikeStats {
         self.resolved_in_reach += other.resolved_in_reach;
         self.target_crossed_face += other.target_crossed_face;
         self.hunter_crossed_face += other.hunter_crossed_face;
+        self.held_at_intent += other.held_at_intent;
+        self.held_at_strike += other.held_at_strike;
         self.advertised_reach.add(&other.advertised_reach);
         self.tolerance.add(&other.tolerance);
+        self.intent_body_forward.add(&other.intent_body_forward);
+        self.hunter_sweep_strike.add(&other.hunter_sweep_strike);
+        self.hunter_motor_strike.add(&other.hunter_motor_strike);
         self.intent_separation.add(&other.intent_separation);
         self.intent_overshoot.add(&other.intent_overshoot);
         self.strike_separation.add(&other.strike_separation);
@@ -654,6 +698,13 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
     // so the apex genome does not shift under a candidate's parameters.
     let profile = FixedHunterProfile::lanternjaw_trial(&evaluate::base_config(seed));
     profile.validate().map_err(|e| format!("hunter profile rejected: {e}"))?;
+    if ledger && (profile.strike_seconds - STRIKE_SECONDS).abs() > 1e-12 {
+        return Err(format!(
+            "the sweep this audit derives divides by STRIKE_SECONDS = {STRIKE_SECONDS}, but the \
+             profile's strike_seconds is {}",
+            profile.strike_seconds
+        ));
+    }
     config.validate().map_err(|e| format!("config rejected: {e}"))?;
     let mut world = World::new(config).map_err(|e| format!("world creation refused: {e}"))?;
     world.record_body_budgets(ledger);
@@ -1086,13 +1137,14 @@ pub fn run(
             strikes.recorded, strikes.dropped, strikes.unreadable
         );
         println!(
-            "{:<28} {:>7} {:>8} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9}",
-            "class", "n", "e paid", "sep@int", "sep@str", "sep@res", "over@res", "prey px/s", "hunt px/s",
+            "{:<28} {:>6} {:>7} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
+            "class", "n", "e paid", "sep@int", "sep@str", "sep@res", "over@res", "fwd@int",
+            "held", "prey v", "hunt v", "hunt |m|",
         );
         let cell = |s: Option<f64>| s.map_or_else(|| "—".to_string(), |v| format!("{v:.2}"));
         for (class, st) in strikes.classes_in_order() {
             println!(
-                "{:<28} {:>7} {:>8.3} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9}",
+                "{:<28} {:>6} {:>7.3} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
                 class.as_str(),
                 st.count,
                 st.energy_paid,
@@ -1100,18 +1152,22 @@ pub fn run(
                 cell(st.strike_separation.mean()),
                 cell(st.resolution_separation.mean()),
                 cell(st.resolution_overshoot.mean()),
+                cell(st.intent_body_forward.mean()),
+                st.held_at_strike,
                 cell(st.prey_speed_strike.mean()),
                 cell(st.hunter_speed_strike.mean()),
+                cell(st.hunter_motor_strike.mean()),
             );
         }
         println!();
         println!(
-            "{:<28} {:>7} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9}",
-            "outcome", "n", "sep@int", "sep@str", "sep@res", "tol", "reach", "prey px/s", "hunt px/s",
+            "{:<28} {:>6} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
+            "outcome", "n", "sep@int", "sep@str", "sep@res", "tol", "reach", "fwd@int", "held",
+            "prey v", "hunt |m|",
         );
         for (outcome, st) in &strikes.by_outcome {
             println!(
-                "{:<28} {:>7} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9}",
+                "{:<28} {:>6} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
                 outcome.as_str(),
                 st.count,
                 cell(st.intent_separation.mean()),
@@ -1119,8 +1175,10 @@ pub fn run(
                 cell(st.resolution_separation.mean()),
                 cell(st.tolerance.mean()),
                 cell(st.advertised_reach.mean()),
+                cell(st.intent_body_forward.mean()),
+                st.held_at_strike,
                 cell(st.prey_speed_strike.mean()),
-                cell(st.hunter_speed_strike.mean()),
+                cell(st.hunter_motor_strike.mean()),
             );
         }
     }

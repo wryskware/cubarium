@@ -74,6 +74,11 @@ pub struct StrikeFrame {
     /// `(|capture_offset_body| + capture_reach_px) · scale`: how far from its own root this
     /// member's grasp closes. The reach the profile advertises, at this member's size.
     pub advertised_reach: f64,
+    /// `capture_offset_body.x · scale`: how far **forward** of the root the grasp centre sits.
+    /// Recorded separately from the reach because the pursuit's own stopping rule is written
+    /// against this coordinate and not against the distance
+    /// (`crate::world::step`, "the pursuit stopping distance").
+    pub capture_forward: f64,
     /// The target this attempt was aimed at, by full ID, at this instant.
     pub target: Option<OrganismId>,
     pub target_pos: Option<SurfacePoint>,
@@ -90,6 +95,12 @@ pub struct StrikeFrame {
     /// `effector_distance <= tolerance`: the contact test, evaluated at this instant. This is
     /// [`crate::hunter::ContactMeasure::in_contact`] and nothing looser.
     pub in_reach: bool,
+    /// The prey's position **in the hunter's own body basis**, unfolded from the root: `+x`
+    /// along the heading, `+y` its clockwise side. This is the coordinate the contact test and
+    /// the pursuit stopping rule are both written in, so a record can say which of them a
+    /// given instant satisfied without re-deriving either.
+    pub body_forward: Option<f64>,
+    pub body_side: Option<f64>,
     /// Whether a grasp centre exists on the surface here at all, i.e. whether a capture at
     /// this instant could have been drawn where the artwork puts it.
     pub grasp_mapped: bool,
@@ -113,6 +124,7 @@ impl StrikeFrame {
             hunter_heading: hunter.heading,
             scale: geometry.scale,
             advertised_reach,
+            capture_forward: geometry.capture_offset_body.x,
             target: target.map(|(id, _)| id),
             target_pos: None,
             target_heading: None,
@@ -121,6 +133,8 @@ impl StrikeFrame {
             effector_distance: None,
             tolerance: None,
             in_reach: false,
+            body_forward: None,
+            body_side: None,
             grasp_mapped: false,
         };
         let Some((id, prey)) = target else {
@@ -136,8 +150,19 @@ impl StrikeFrame {
             frame.effector_distance = Some(m.effector_distance);
             frame.tolerance = Some(m.tolerance);
             frame.in_reach = m.in_contact();
+            frame.body_forward = Some(m.body.x);
+            frame.body_side = Some(m.body.y);
         }
         frame
+    }
+
+    /// Whether the pursuit's own stopping rule held this member still at this instant:
+    /// `body.x < capture_offset_body.x · scale + tolerance`, transcribed from the predicate in
+    /// `crate::world::step`'s hunt intent pass. A member for which this is true asks for its
+    /// resting effort and is pushed **no strike burst**, whatever phase it is in. This reads
+    /// the rule; it does not change it.
+    pub fn pursuit_holds(&self) -> Option<bool> {
+        Some(self.body_forward? < self.capture_forward + self.tolerance?)
     }
 
     /// How far past the grasp the prey stood: `effector_distance − tolerance`. Positive is out
@@ -237,6 +262,12 @@ pub struct StrikeRecord {
     /// `None` across a face change, where two chart headings are not comparable.
     pub target_turn_windup: Option<f64>,
     pub target_turn_strike: Option<f64>,
+    /// The hunter's own heading change over the same two phases, radians in `[0, π]`. A
+    /// member's turn is priced against the *same* motor budget as its travel
+    /// (`|v| + r · |ω| ≤ u`) at the radius its claws imply, so this is not decoration: it is
+    /// the other half of what the burst could have spent.
+    pub hunter_turn_windup: Option<f64>,
+    pub hunter_turn_strike: Option<f64>,
     /// The class this record's own geometry puts it in.
     pub class: StrikeClass,
 }
@@ -450,6 +481,14 @@ impl StrikeRecorder {
             ),
             target_turn_windup: turn(target_at(intent), target_at(strike)),
             target_turn_strike: turn(target_at(strike), target_at(Some(resolution))),
+            hunter_turn_windup: turn(
+                intent.map(|f| (f.hunter_pos, f.hunter_heading)),
+                strike.map(|f| (f.hunter_pos, f.hunter_heading)),
+            ),
+            hunter_turn_strike: turn(
+                strike.map(|f| (f.hunter_pos, f.hunter_heading)),
+                Some((resolution.hunter_pos, resolution.hunter_heading)),
+            ),
             class: StrikeClass::Unreadable,
         };
         record.class = record.classify();
