@@ -1228,6 +1228,8 @@ mod tests {
                     ..crate::metrics::Components::default()
                 }),
                 movement: None,
+                opening: None,
+                founding_state_hash: None,
             },
         };
         let (gates, retention, extinctions, _, _) = gates_for(&[&row]);

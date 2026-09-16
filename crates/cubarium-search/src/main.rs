@@ -22,6 +22,7 @@ use cubarium_search::factorial;
 use cubarium_search::metrics::Scoring;
 use cubarium_search::params;
 use cubarium_search::population;
+use cubarium_search::precondition;
 use cubarium_search::search::{self, Budget, TRAINING_SEEDS, Variation};
 
 #[derive(Parser, Debug)]
@@ -359,6 +360,39 @@ enum Command {
         #[arg(long, default_value = "runs/ecology-v1-calibration")]
         out: PathBuf,
     },
+    /// Workstream S: the fixed-age preconditioned opening. `--stage field` runs each
+    /// (candidate, seed) plant-only to the last declared age, saves the whole field at every
+    /// age and measures how settled it is; `--stage compare` founds the ordinary roster at
+    /// each age and runs the ordinary horizon after it, with age 0 as the status quo.
+    Precondition {
+        /// `field` (the operator and its settling measures) or `compare` (the arms).
+        #[arg(long, default_value = "field")]
+        stage: String,
+        /// Comma-separated candidate names, or `all`.
+        #[arg(long, default_value = "baseline,fast-leaf")]
+        candidates: String,
+        /// `training` or `holdout`. The held-out set is for the final validation only.
+        #[arg(long, default_value = "training")]
+        seed_set: String,
+        /// How many seeds of that set, from the front.
+        #[arg(long, default_value_t = 6)]
+        seeds: usize,
+        /// Comma-separated plant-only ages, in ticks. `0` is the status quo.
+        #[arg(long, default_value = "0,48000,96000,180000")]
+        ages: String,
+        /// The horizon each comparison arm runs after founding.
+        #[arg(long, default_value_t = 180_000)]
+        ticks: u64,
+        #[arg(long, default_value_t = 600)]
+        sample_every: u64,
+        #[arg(long, default_value_t = 8)]
+        workers: usize,
+        /// Hard wall cap. Trials not started by then are recorded as skipped, never extended.
+        #[arg(long, default_value_t = 1_800)]
+        wall_seconds: u64,
+        #[arg(long, default_value = "runs/ecology-v1-precondition")]
+        out: PathBuf,
+    },
     /// Export one candidate as a complete `WorldConfig` TOML `cubarium run --config` accepts.
     CalibrateExport {
         #[arg(long)]
@@ -512,7 +546,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 seeds,
                 &arms,
                 &prices,
-                cubarium_search::evaluate::RunOptions { ledger, plant_record, no_animals },
+                cubarium_search::evaluate::RunOptions {
+                    ledger,
+                    plant_record,
+                    no_animals,
+                    precondition: None,
+                },
                 ticks,
                 sample_every,
                 introduce_tick,
@@ -527,6 +566,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "replay  cargo run --release -p cubarium-search -- replay --record {} --index 0",
                 dir.join("evals.jsonl").display()
             );
+            Ok(())
+        }
+        Command::Precondition {
+            stage,
+            candidates,
+            seed_set,
+            seeds,
+            ages,
+            ticks,
+            sample_every,
+            workers,
+            wall_seconds,
+            out,
+        } => {
+            let names: Vec<String> = if candidates == "all" {
+                calibrate::CANDIDATES.iter().map(|c| c.name.to_string()).collect()
+            } else {
+                candidates.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+            };
+            let ages: Vec<u64> = ages
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::parse::<u64>)
+                .collect::<Result<_, _>>()?;
+            let set = calibrate::SeedSet::parse(&seed_set)?;
+            let dir = out.join(&stage);
+            let report = match stage.as_str() {
+                "field" => precondition::run_field(&names, set, seeds, &ages, workers, wall_seconds, &dir)?,
+                "compare" => precondition::run_compare(
+                    &names,
+                    set,
+                    seeds,
+                    &ages,
+                    ticks,
+                    sample_every,
+                    workers,
+                    wall_seconds,
+                    &dir,
+                )?,
+                other => return Err(format!("unknown --stage {other}; use `field` or `compare`").into()),
+            };
+            precondition::print_report(&report);
+            println!("rows and states under {}", dir.display());
             Ok(())
         }
         Command::CalibrateExport { candidate, seed, selected, why, out } => {
