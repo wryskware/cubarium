@@ -64,6 +64,11 @@ const REPLY_ATTACHED: u8 = 1;
 const REPLY_PRESENTED: u8 = 2;
 const REPLY_DETACHED: u8 = 3;
 const REPLY_ERROR: u8 = 4;
+/// `Error { Busy }`: another client is attached.
+const ERROR_BUSY: u8 = 6;
+/// How long to wait out a busy daemon, and how often.
+const BUSY_RETRIES: u32 = 40;
+const BUSY_WAIT: std::time::Duration = std::time::Duration::from_millis(100);
 
 struct Slot {
     /// The slot number the **daemon** assigned in its `Attached` reply. It is not the
@@ -112,15 +117,6 @@ impl ShimScanout {
             )
         })?;
 
-        let socket = rustix::net::socket(
-            rustix::net::AddressFamily::UNIX,
-            rustix::net::SocketType::SEQPACKET,
-            None,
-        )
-        .context("socket(AF_UNIX, SOCK_SEQPACKET)")?;
-        rustix::net::connect(&socket, &rustix::net::SocketAddrUnix::new(SOCKET)?)
-            .with_context(|| format!("connect {SOCKET} (is cube-screen-shim running?)"))?;
-
         let view_format = if shader_encode {
             dmabuf::FORMAT
         } else {
@@ -136,7 +132,7 @@ impl ShimScanout {
             )
         }?;
         let mut client = ShimScanout {
-            socket,
+            socket: connect()?,
             slots: Vec::with_capacity(SLOTS),
             free: 0,
             transform,
@@ -147,6 +143,15 @@ impl ShimScanout {
         for i in 0..SLOTS {
             let mut image = dmabuf::export_linear(gpu, PANEL.0, PANEL.1, shader_encode)?;
             let fd = image.fd.take().expect("a freshly exported image has its fd");
+            if i == 0 {
+                // The daemon takes one client at a time and answers a second with
+                // `Error { Busy }` and a close, which reaches this side as a broken
+                // pipe on the very next write. A finished run's registration outlives
+                // its process by a moment, so the first attach waits rather than
+                // failing -- waiting is the rule on this device, for the socket exactly
+                // as for DRM master.
+                client.socket = connect_when_free(&image, fd.as_fd())?;
+            }
             let target = TargetImage {
                 image: image.image,
                 view: image.view,
@@ -256,67 +261,27 @@ impl ShimScanout {
     /// `slot` is **reserved on the way in** — the daemon picks and says so in its
     /// `Attached` reply — so the request carries 0 and the answer is authoritative.
     fn attach(&mut self, image: &LinearImage, fd: BorrowedFd<'_>) -> Result<u8> {
-        let request = request(TAG_ATTACH, 0, 0, PANEL.0, PANEL.1, FOURCC_XR24, image.pitch, image.offset);
-        let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
-        let mut control = rustix::net::SendAncillaryBuffer::new(&mut space);
-        let fds = [fd];
-        if !control.push(rustix::net::SendAncillaryMessage::ScmRights(&fds)) {
-            bail!("the ancillary buffer would not take the dma-buf fd");
-        }
-        rustix::net::sendmsg(
-            &self.socket,
-            &[IoSlice::new(&request)],
-            &mut control,
-            rustix::net::SendFlags::empty(),
-        )
-        .context("sendmsg(Attach)")?;
-        self.read_reply(REPLY_ATTACHED)
+        let reply = attach_on(&self.socket, image, fd)?;
+        self.free |= reply.released;
+        reply.expect(REPLY_ATTACHED)?;
+        Ok(reply.slot)
     }
 
     /// `Present` describes nothing: every geometry field is reserved and must be zero,
     /// because the daemon already has the slot's description from `Attach`.
     fn present(&mut self, slot: u8) -> Result<()> {
         self.seq = self.seq.wrapping_add(1);
-        let request = request(TAG_PRESENT, slot, self.seq, 0, 0, 0, 0, 0);
-        let mut control = rustix::net::SendAncillaryBuffer::default();
-        rustix::net::sendmsg(
-            &self.socket,
-            &[IoSlice::new(&request)],
-            &mut control,
-            rustix::net::SendFlags::empty(),
-        )
-        .context("sendmsg(Present)")?;
-        self.read_reply(REPLY_PRESENTED)?;
-        Ok(())
+        send(&self.socket, &request(TAG_PRESENT, slot, self.seq, 0, 0, 0, 0, 0), None)
+            .context("sendmsg(Present)")?;
+        self.read_reply(REPLY_PRESENTED)
     }
 
-    /// Read one reply, fold its `released` mask into the free set, and check its tag.
-    fn read_reply(&mut self, expect: u8) -> Result<u8> {
-        let mut buffer = [0u8; 12 + 512];
-        let mut control = rustix::net::RecvAncillaryBuffer::default();
-        let received = rustix::net::recvmsg(
-            &self.socket,
-            &mut [IoSliceMut::new(&mut buffer)],
-            &mut control,
-            rustix::net::RecvFlags::empty(),
-        )
-        .context("recvmsg")?;
-        if received.bytes < 12 {
-            bail!("the daemon sent a {}-byte reply; the header is 12", received.bytes);
-        }
-        let (tag, slot, released, code) = (buffer[0], buffer[1], buffer[2], buffer[3]);
+    /// Read one reply and fold its `released` mask into the free set.
+    fn read_reply(&mut self, expect: u8) -> Result<()> {
+        let reply = recv(&self.socket)?;
         // `released` is the only signal a buffer is free.
-        self.free |= released;
-        if tag == REPLY_ERROR {
-            let len = u32::from_le_bytes(buffer[8..12].try_into().unwrap()) as usize;
-            let end = (12 + len).min(received.bytes);
-            let message = String::from_utf8_lossy(&buffer[12..end]);
-            bail!("the daemon refused slot {slot} with code {code}: {message}");
-        }
-        if tag != expect {
-            bail!("expected reply tag {expect}, got {tag}");
-        }
-        Ok(slot)
+        self.free |= reply.released;
+        reply.expect(expect)
     }
 
     pub fn destroy(&mut self, gpu: &Gpu) {
@@ -324,14 +289,9 @@ impl ShimScanout {
         unsafe { let _ = d.device_wait_idle(); }
         for i in 0..self.slots.len() {
             let request = request(TAG_DETACH, self.slots[i].id, 0, 0, 0, 0, 0, 0);
-            let mut control = rustix::net::SendAncillaryBuffer::default();
-            let _ = rustix::net::sendmsg(
-                &self.socket,
-                &[IoSlice::new(&request)],
-                &mut control,
-                rustix::net::SendFlags::empty(),
-            );
-            let _ = self.read_reply(REPLY_DETACHED);
+            if send(&self.socket, &request, None).is_ok() {
+                let _ = self.read_reply(REPLY_DETACHED);
+            }
         }
         unsafe {
             for slot in &self.slots {
@@ -344,6 +304,120 @@ impl ShimScanout {
         }
         self.slots.clear();
     }
+}
+
+/// One decoded reply.
+struct Reply {
+    tag: u8,
+    slot: u8,
+    released: u8,
+    code: u8,
+    message: String,
+}
+
+impl Reply {
+    /// `Ok` when this is the reply that was asked for; the daemon's own text otherwise.
+    fn expect(&self, tag: u8) -> Result<()> {
+        if self.tag == REPLY_ERROR {
+            bail!("the daemon refused the request with code {}: {}", self.code, self.message);
+        }
+        if self.tag != tag {
+            bail!("expected reply tag {tag}, got {}", self.tag);
+        }
+        Ok(())
+    }
+
+    /// Whether this is `Error { Busy }`: another client is still attached, which is
+    /// worth waiting out rather than failing on.
+    fn is_busy(&self) -> bool {
+        self.tag == REPLY_ERROR && self.code == ERROR_BUSY
+    }
+}
+
+/// A connected, unattached client socket.
+fn connect() -> Result<OwnedFd> {
+    let socket = rustix::net::socket(
+        rustix::net::AddressFamily::UNIX,
+        rustix::net::SocketType::SEQPACKET,
+        None,
+    )
+    .context("socket(AF_UNIX, SOCK_SEQPACKET)")?;
+    rustix::net::connect(&socket, &rustix::net::SocketAddrUnix::new(SOCKET)?)
+        .with_context(|| format!("connect {SOCKET} (is cube-screen-shim running?)"))?;
+    Ok(socket)
+}
+
+/// Connect and attach the first image, waiting out a daemon that still has another
+/// client registered. Returns the socket the attach succeeded on.
+fn connect_when_free(image: &LinearImage, fd: BorrowedFd<'_>) -> Result<OwnedFd> {
+    let mut last = String::new();
+    for attempt in 0..BUSY_RETRIES {
+        let socket = connect()?;
+        match attach_on(&socket, image, fd) {
+            Ok(reply) if !reply.is_busy() => {
+                reply.expect(REPLY_ATTACHED)?;
+                return Ok(socket);
+            }
+            Ok(reply) => last = format!("the daemon is busy: {}", reply.message),
+            // The close that follows `Error { Busy }` can break the write itself.
+            Err(e) => last = format!("{e:#}"),
+        }
+        if attempt + 1 < BUSY_RETRIES {
+            std::thread::sleep(BUSY_WAIT);
+        }
+    }
+    bail!("no free client slot on {SOCKET} after {BUSY_RETRIES} tries: {last}")
+}
+
+/// Send `Attach` with the one descriptor it must carry, and read the answer.
+fn attach_on(socket: &OwnedFd, image: &LinearImage, fd: BorrowedFd<'_>) -> Result<Reply> {
+    let request = request(TAG_ATTACH, 0, 0, PANEL.0, PANEL.1, FOURCC_XR24, image.pitch, image.offset);
+    send(socket, &request, Some(fd)).context("sendmsg(Attach)")?;
+    recv(socket)
+}
+
+/// One datagram, with at most one descriptor.
+fn send(socket: &OwnedFd, request: &[u8; 32], fd: Option<BorrowedFd<'_>>) -> Result<()> {
+    let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
+    let mut control = rustix::net::SendAncillaryBuffer::new(&mut space);
+    let fds = fd.map(|f| [f]);
+    if let Some(fds) = &fds
+        && !control.push(rustix::net::SendAncillaryMessage::ScmRights(fds))
+    {
+        bail!("the ancillary buffer would not take the dma-buf fd");
+    }
+    rustix::net::sendmsg(
+        socket,
+        &[IoSlice::new(request)],
+        &mut control,
+        rustix::net::SendFlags::empty(),
+    )?;
+    Ok(())
+}
+
+/// One reply datagram.
+fn recv(socket: &OwnedFd) -> Result<Reply> {
+    let mut buffer = [0u8; 12 + 512];
+    let mut control = rustix::net::RecvAncillaryBuffer::default();
+    let received = rustix::net::recvmsg(
+        socket,
+        &mut [IoSliceMut::new(&mut buffer)],
+        &mut control,
+        rustix::net::RecvFlags::empty(),
+    )
+    .context("recvmsg")?;
+    if received.bytes < 12 {
+        bail!("the daemon sent a {}-byte reply; the header is 12", received.bytes);
+    }
+    let len = u32::from_le_bytes(buffer[8..12].try_into().unwrap()) as usize;
+    let end = (12 + len).min(received.bytes);
+    Ok(Reply {
+        tag: buffer[0],
+        slot: buffer[1],
+        released: buffer[2],
+        code: buffer[3],
+        message: String::from_utf8_lossy(&buffer[12..end]).into_owned(),
+    })
 }
 
 /// The 32-byte request header.
