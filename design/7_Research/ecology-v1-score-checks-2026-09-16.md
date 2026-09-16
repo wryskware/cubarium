@@ -280,13 +280,10 @@ whether it exists.)
 
 Three candidates, in the order their cost says to try them, none launched:
 
-1. **Measure the score spread across candidates inside a generation** (cheapest; no new training
-   run — the checkpoints already hold it). Sixteen antithetic pairs over 10,215 parameters at a
-   fixed `σ`. If the 32 perturbed candidates' `t_min` values sit within a few hundred ticks of the
-   centre's, the perturbations are not producing behavioural variation the centred-rank
-   reduction can exploit, and `σ`, the population size or the parameterisation is what binds —
-   not the score's shape. This is the one measurement that would distinguish "the objective is
-   wrong" from "the optimiser cannot move".
+1. ~~Measure the score spread across candidates inside a generation.~~ **Answered from the
+   retained reports** (see the correction above): the spread is wide (sd 643 in generation 9)
+   and intake-correlated, so the perturbations do produce exploitable variation. The task that
+   replaces it is the antithetic-pair reduction named in "The next task this implies".
 2. **Measure how much of the action is inside the adapter's deadband under a `σ`-scale
    perturbation.** Under a reset hidden state both frozen policies request *exactly zero* turn,
    because the raw turn head is inside the ±0.05 deadband. If a `σ`-sized perturbation of the
@@ -314,9 +311,11 @@ residence, not before.
 - **Nothing about the score's gradient near generation 9's own behaviour**, as set out above.
 - **Nothing about what the proposed auxiliary would do to a training run.** It was computed, not
   optimised. No candidate was ever ranked by it.
-- **Nothing about the observation or the adapter being adequate.** Check (a) says the policy does
-  not use `v[0]`; it does not say a policy *could* use it well enough, and the reset-state
-  deadband finding hints that the turn channel's operating point may itself be a problem.
+- **Nothing about the observation or the adapter being adequate.** Check (a) says the frozen
+  policy's measured one-step use of `v[0]` is far below the behavioural scale (the adapter
+  deadband); it does not say the policy makes no use of it under sustained input or recurrent
+  integration, nor that a policy *could* use it well enough, and the reset-state deadband
+  finding hints that the turn channel's operating point may itself be a problem.
 - **Nothing about a longer horizon, a second ecology or a different genotype.** One of each.
 - The recorded observation is one tick of field dynamics older than the controller's exact input
   (residual ≤ 1.84 × 10⁻⁵, quantified above). The sweep's baselines are real observations the

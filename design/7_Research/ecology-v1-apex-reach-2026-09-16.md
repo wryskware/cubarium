@@ -308,10 +308,12 @@ px/s mean by the shared motor envelope. The paired arm decides that.)
 
 - **Strike kinematics are not implicated as constants.** `strike_speed_px_s` = 16.667 and
   `strike_seconds` = 1.0 would close the mean 8.32 px gap in 0.5 s against a motionless prey and
-  in 1.25 s against one at its escape cap. They are adequate; they are simply not applied in
+  in 1.25 s against one at its escape cap — longer than the 1.0 s strike, so their adequacy
+  for a delivered lunge is untested; what is established is that they are not applied in
   91 % of paid attempts, and where applied they are further clipped by the shared motor envelope
   at a 14.83 px turn radius (delivered 5.7 px/s mean, 13.31 px/s max).
-- **The escape multiple is exonerated quantitatively.** `escape_speed_multiple` = 2.0 puts the
+- **The escape multiple is exonerated as the cause of the current motion, not yet as adequate
+  after the correction.** `escape_speed_multiple` = 2.0 puts the
   prey's ceiling at exactly 10.00 px/s, which the record confirms as the observed maximum. The
   mean realised prey burst speed is 3.29 px/s (probe 5.59). A delivered burst out-closes the prey
   at its ceiling by 6.67 px/s. Raising or lowering this constant changes nothing while the

@@ -431,15 +431,20 @@ configurations the counter measures the seeding, not the herbivores.
 
 ## 9. Next task, named and not launched
 
-**Measure the local equilibrium directly, as a per-cell function of the
-habitat, and check that a cell seeded at it stays there.** Option B needs a rule
-a cell can be seeded by, not a table read off one 180,000-tick run: run the
-plant-only arm on the six training seeds with the record on, fit `P` at the
-horizon against that cell's own measured effective light, moisture, `N` and
-`W`, then re-seed from the fit and verify that the depletion counter goes to
-zero in a plant-only world and stays small with herbivores. That is one command
-of the existing `--no-animals --plant-record` path plus a fit, and it is what
-turns this evidence into a §11 proposal Wrysk can accept or refuse.
+**A whole-field plant-only preconditioning comparison, not a per-cell fit**
+(revised after Astra's round-3 review; the first version proposed fitting the
+tick-180,000 `P` per cell and calling it a local equilibrium, which the option
+text above now withdraws). Save plant-only whole-field states at several ages
+spanning the first crossing through 180,000 ticks on the six training seeds
+with the record on; measure moving-window changes in total and per-cell `P`,
+`W`, `Q`, `N`, exact plant income and loss, threshold crossings and spatial
+variance; found identical rosters into status quo and a small number of those
+states; and give Wrysk the opening frames and the early founder outcomes. That
+is the existing `--no-animals --plant-record` path plus a state save and a
+founding, and it is what turns this evidence into a §11 proposal (option A
+with a declared, deterministic, seed- and config-bound procedure) that Wrysk
+can accept or refuse. A per-cell endpoint fit, if ever used, is an initialiser
+and not an equilibrium rule.
 
 Beside it, and independent of the seeding decision: **the depletion counter
 should be re-read everywhere it has been quoted.** A, F and I's depletion and
