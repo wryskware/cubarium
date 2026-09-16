@@ -73,7 +73,17 @@ at the grazer's expense (refuted as a roster change); no plant-only age
 removes the ungrazed crossings but 48,000 ticks makes every grazer founder
 breed, and every arm converges to the same grazed standing crop. Wrysk's
 direction on movement physics (disc bodies, energy-equivalent rotation, no
-claw radius) is workstream T, in flight. A light physics engine is on
+claw radius) landed as workstream T: the disc model closes the apex's gap
+and lifts captures 39 % with every gate kept, but is not isolated from the
+world change and has no production contract, so Astra's cleared order is:
+the grasp-only apex pair under the shipped motor first
+([U](ecology-v1-apex-grasp-opus-2026-09-16.md), in flight), the
+reach-envelope predicate adopted separately as the shipped rule with schema 17,
+a resume regression and the host's motor check
+([V](ecology-v1-predicate-adoption-opus-2026-09-16.md), in flight), the motor
+only after isolation, a host contract, the adapter diagonal and a
+recalibration; then the turn deadband alone in training, the skimmer depth
+ladder, and a coupled grazed-field opening. A light physics engine is on
 [the backlog](../backlog.md). The [ecology v1 contract](../ecology-v1-contract.md)
 and its [implementation review](../7_Research/ecology-v1-implementation-review-2026-09-15.md)
 stand as the accepted baseline.
