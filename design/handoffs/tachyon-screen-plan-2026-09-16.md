@@ -396,3 +396,20 @@ the sampler); 640×360 S=2 at 59.9 fps for five minutes as `particle`;
 960×540 at 46 fps (the adapter's walk, not the GPU, is the limit). Open:
 the art scale on the panel (`--gpu-art-scale 2`), the ring bend budgets, a
 hunter never yet drawn on the GPU, the adapter split for 960×540.
+
+### W2 result (2026-09-16)
+
+`design/7_Research/tachyon-w2-deploy-2026-09-16.md`: `cubarium.service` runs
+as the unprivileged user `cubarium` (groups `video`, `render`, CPU affinity
+4–7, `KillSignal=SIGINT` because the host's ctrl-c handler only listens for
+SIGINT) and a plain `cubarium run` already means resume-if-present-else-fresh
+by construction, so no wrapper. Fresh rings found 67 founders spent kind by
+kind in `world.toml`. Restart resumes at the same tick; the panel blacks on
+stop and returns on start; 59.7 fps as the service. `--mirror-web` forces
+the CPU rasterisation and costs 72 % of the frame rate, so it lives in
+`CUBARIUM_EXTRA_ARGS` for operators; a web sink fed from the GPU raster is
+a later item. **The board did not return from its `systemctl reboot` at
+14:54Z** and needs a physical power cycle; the boot-to-world check and the
+ten-minute steady state are still owed, and the first question after power
+returns is whether a plain reboot hangs this board at all (suspect: a
+shutdown-time hang in the msm KMS/GPU path with a dma-buf client attached).
