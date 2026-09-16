@@ -198,3 +198,15 @@ Default world raster for the panel: **320×180** (6× integer blocks on the
 1920×1080 logical canvas), configurable in the world config; a fresh world
 per the standing rule. The edge rule is solid walls (specular reflection,
 as the cube's open bottom rim already does), not wraparound.
+
+### Addendum: treat 1920×1080 as a new world (Wrysk, 2026-09-16)
+
+The 320×180 default above is withdrawn as a default; it is one candidate.
+Wrysk: the source artwork is already higher resolution than the screen and
+the tiny sprite sheets are a downscale for the 64×64 faces, so the world
+should be rescaled and the artwork re-baked at a higher resolution, pixel-art
+style kept, using the real estate; biome and terrain variation are wanted.
+FW-A now also evaluates the world resolution (480×270, 640×360, 960×540,
+1920×1080) against six A55 cores, the art re-bake path and its scale
+constants, and a bounded first-version biome/terrain package separable from
+the topology work.
