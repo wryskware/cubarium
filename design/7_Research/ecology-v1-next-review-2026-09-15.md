@@ -6,33 +6,23 @@ decision_refs: []
 
 # Ecology v1 next — independent finished-work review
 
-**Latest status — after repair 1: substantially cleared; no P1 remains.** The host
-ecology guard is correct and exercised end to end: `seed_neural_animals` hashes
-`--config` as loaded (or the shipped defaults) before founding a body
-(`crates/cubarium/src/runner/mod.rs:245-266`), and the focused release suite passes all
-seven tests, including mismatch in both directions, absent provenance, and a matching
-file with `--seed` overridden (`crates/cubarium/tests/run_neural_seed.rs:187-267`). That
-is the right identity boundary: a fresh host applies the seed only after loading the file
-(`runner/mod.rs:186-190`), just as ES layouts replace the base seed, while
-`merge_operational` can affect only a resumed world and `--neural` is refused on resume
-before seeding (`runner/mod.rs:145-157,495-508`). The body identity, dimensional
-comparison, feasibility-control design, gate scope, post-hoc selection, movement law,
-residual arithmetic, hash caveat, presentation vetoes and apex audit are now accurately
-corrected or carried forward, and the reconciled six-step recommendation states my order
-without distortion. Two **P2 report claims remain stronger than the evidence**. First,
-the consolidated result still says depletion/recovery are absent “because nothing holds
-an animal to a place” (`ecology-v1-next-results-2026-09-15.md:322-328`), and the
-calibration note still says the 10 px radius means the adults essentially never meet
-(`ecology-v1-calibration-2026-09-15.md:624-631`); the same repaired documents elsewhere
-correctly say neither cause was isolated. Those sentences should remain hypotheses until
-the matched movement arm and apex opportunity audit. Second, the training note concludes
-“does not destabilise,” “better forager,” and “ecologically invisible” after also stating
-that four bodies in twenty-eight across two seeds cannot detect a population effect and
-that per-controller food intake was not measured
-(`ecology-v1-training-2026-09-15.md:384-420,424-427`). The supported wording is “no
-destabilisation detected at this tested scale” and “longer-lived, wider-ranging
-controller.” These residuals do not block retaining the artifacts or beginning the
-matched measurement. Earlier findings below are retained as history.
+**Latest status — after repair 2: cleared at P1/P2; one P3 wording precision
+remains.** The consolidated result now labels cheap, wide-ranging movement as the
+leading but untested hypothesis rather than the cause of absent depletion/recovery
+(`ecology-v1-next-results-2026-09-15.md:322-328`), and the training note now limits its
+claim to no detected destabilisation at this tested scale and a longer-lived,
+wider-ranging controller (`ecology-v1-training-2026-09-15.md:424-431`). Both are
+accurate. The calibration note also correctly lists the full mating predicate, records
+the missing opportunity measurements, and treats radius, early death and readiness as
+unseparated candidates (`ecology-v1-calibration-2026-09-15.md:624-631`). The remaining
+**P3** is its adjacent statement that the predator “cannot exert” top-down control and
+that this is why paired arm differences are small (`:631-634`): the same rows record
+1.2–2.6% of deaths by predation, and this campaign did not isolate the cause of the
+sub-0.2-standard-deviation population differences. “No numerical response and no
+detectable population-level top-down effect” is supported; impossibility and the causal
+“which is why” are not. This is a narrow editorial residual, not a reason to reopen the
+artifacts, host repair or reconciled next steps. Earlier findings below are retained as
+history.
 
 **Disposition: keep the presentation work and the bounded experiment artifacts, but
 correct the scientific interpretation and one host compatibility seam before treating

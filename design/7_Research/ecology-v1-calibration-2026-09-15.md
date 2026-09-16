@@ -628,9 +628,10 @@ for a later assignment to act on, not proposals; nothing here is implemented.
    adults within `MATING_RADIUS_PX` = 10, both `Perched`, both stock- and interval-ready,
    neither committed (`world/step.rs:600-665`), and no ready-pair distance, simultaneous
    readiness or per-predicate failure count was recorded; the radius is one candidate
-   among early death and lack of readiness (corrected after review). The predator therefore cannot respond to prey density
-   and cannot exert the top-down control the arms exist to measure — which is why the
-   paired arm differences are all under 0.2 seed standard deviations. The apex constants
+   among early death and lack of readiness (corrected after review). The predator therefore shows no numerical response, and no
+   population-level top-down effect is detectable: the paired arm differences are all
+   under 0.2 seed standard deviations, though 1.2–2.6 % of deaths are by predation and
+   this campaign did not isolate why the differences are small. The apex constants
    were held unsearched by the brief; this is their measured effect.
 6. **The second plant food channel does not open.** Fruit ripens only above
    `fruit_min·P_max = 0.45 m` in a cell and the mean cell foliage is 0.17–0.32 m across
