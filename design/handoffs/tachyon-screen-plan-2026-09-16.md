@@ -12,10 +12,13 @@ the end); this file is the shared contract they are held to.
 
 ## Goal
 
-Show the running Cubarium world on the AMOLED panel attached to the Particle
-Tachyon, the same way the LED cube shows it: a daemon on the display device owns
-the panel at the DRM/KMS level, accepts frames over UDP, and the simulation host
-does nothing but send `cube_proto` frames. Touch is out of scope for phase 1.
+A standalone shelf piece: the Tachyon boots, brings up the panel, and runs the
+Cubarium world on its own, with nothing else on the network. Same shape as the
+LED cube: a daemon on the device owns the panel at the DRM/KMS level and accepts
+`cube_proto` frames over UDP; cubarium runs on the same device as a second
+service and sends to loopback. Wrysk stated this on 2026-09-16: no wifi
+streaming from the desktop, cubarium itself runs on the device. Touch is out of
+scope for phase 1.
 
 ## What the device is (measured 2026-09-16, do not re-derive)
 
@@ -46,10 +49,10 @@ Two cautions from the probe:
 ## Architecture
 
 ```
- cubarium run --sink shim --addr tachyon-8968c731.local:7392   (desktop, unchanged)
-        │  cube_proto datagram: 5 × 64×64 RGB8 (61,456 B) or per-face (12,304 B)
-        ▼  UDP over wifi (or loopback when cubarium runs on the Tachyon)
- ┌─ cube-screen-shim (on the Tachyon, root, systemd) ────────────────────┐
+ cubarium.service: cubarium run --sink shim --addr 127.0.0.1:7392   (on the Tachyon)
+        │  cube_proto datagram: 5 × 64×64 RGB8 (61,456 B)
+        ▼  UDP over loopback
+ ┌─ cube-screen-shim.service (on the Tachyon, root, systemd) ─────────────┐
  │ ingest: UDP, latest-frame-wins, stale seq dropped     (as led-cube-shim) │
  │ layout: panel pixel → (face,x,y) LUT: "net" or "cube", integer scale     │
  │ kms:    DRM master on card0/DP-1, 2 XRGB8888 dumb buffers, vsync flips   │
@@ -62,7 +65,7 @@ Decisions, with the reasoning:
 1. **Reuse `cube_proto` unchanged as the wire format.** The screen is a
    different *layout* of the same five faces, exactly as the LED modules are
    a layout of them. Cubarium's `ShimSink` therefore needs no change; the
-   desktop points `--addr` at the Tachyon. A future flat (non-cube) world
+   on-device service points `--addr` at loopback. A future flat (non-cube) world
    would add a second payload format to the shim's ingest, not change this
    daemon's shape.
 2. **The daemon lives in the `led-cube-shim` repo** as a new crate
@@ -85,12 +88,24 @@ Decisions, with the reasoning:
    `root:video`, no logind session. Unit at
    `/etc/systemd/system/cube-screen-shim.service`, `Restart=always`,
    binary in `/usr/local/bin`.
-6. **Bind ingest on `0.0.0.0:7392`** so the desktop can send over wifi. LAN
-   only; there is no auth in `cube_proto` and none is added.
+6. **Bind ingest on `127.0.0.1:7392`.** Cubarium runs on the same board, so
+   the shim never needs to listen on the network; the config can widen it for
+   a desktop-driven test. There is no auth in `cube_proto` and none is added.
 7. **No power limiter, gamma 1.0, brightness 1.0** by default. AMOLED needs
    none of the LED cube's electrical caps; keep `[color]` for taste.
 8. **Fresh, never migrate** applies: nothing in cubarium's world schema
    changes.
+9. **Cubarium is a second systemd service on the device** (`cubarium.service`,
+   root, after `cube-screen-shim.service`), running `cubarium run --sink shim
+   --addr 127.0.0.1:7392` with a persistent `--state` directory so a reboot
+   resumes the same world (resume is an existing feature; a schema bump still
+   refuses old worlds, per the standing rule). Build natively on the board
+   first; set up cross-compilation only if native release builds prove too
+   slow to iterate on, and say so with the measured build time.
+10. **Frame rate and speed are measured, not assumed.** The board is six
+   Cortex-A55 cores. W2 measures achieved render fps and sim tick rate and
+   picks `--fps` (60 if it holds, else 30) and leaves `--speed` at 1 unless
+   the sim cannot keep real time.
 
 ### Layout spec (normative, W3 tests against this)
 
@@ -122,7 +137,7 @@ is XRGB8888 (bytes B, G, R, X) into the back buffer's stride.
 | id | what | where | model / effort | after |
 |---|---|---|---|---|
 | W1 | `cube-screen-shim` daemon: crate, config, layouts, ingest, idle, KMS on `msm_drm`, systemd unit, native build + deploy on the Tachyon, `outputs` and `test-pattern` verified on the panel if it is up | `led-cube-shim` worktree `.claude/worktrees/tachyon-screen` (branch `tachyon-screen`) | Opus, high | now |
-| W2 | Cubarium side: README/docs for the Tachyon target, `scripts/tachyon-*.sh` helpers (deploy, run-against-tachyon), end-to-end run from the desktop, measured wifi loss with the shim's counters, per-face send mode in `ShimSink` only if loss demands it, feasibility of running cubarium itself on the Tachyon (native build, fps, CPU) | `cubarium` worktree `.claude/worktrees/tachyon-screen` (branch `tachyon-screen`) | Opus, medium | W1 |
+| W2 | Cubarium on the device: native build, `cubarium.service`, persistent state dir, deploy/status scripts, docs, measured fps/tick rate/CPU, the `--fps` choice, a boot-to-world check | `cubarium` worktree `.claude/worktrees/tachyon-screen` (branch `tachyon-screen`) | Opus, high | W1 |
 | W3 | Independent test authoring for W1: layout LUT math against the spec above, ingest/stale-seq behaviour, idle phases, config defaults; no reading of W1's tests first | `led-cube-shim` worktree | Opus, high | W1 |
 
 Fable owns integration: reads the diffs, runs both workspaces' tests, watches
@@ -137,18 +152,20 @@ quiet moment, per Wrysk.
   `cube-screen-shim test-pattern faces` shows F/R/B/L/T upright with the red
   dot top-left and green dot top-right in every cell (the same pattern that
   verified the cube).
-- End to end: `cubarium demo --sink shim --addr tachyon-8968c731.local:7392`
-  from the desktop, world visible on the panel, shim log reporting ~60 fps
-  presented and the received/stale counters.
+- End to end on the device: both services enabled, `systemctl reboot`, and
+  within a minute the world is on the panel with no hands on it. The shim log
+  reports the presented fps and received/stale counters; cubarium's log
+  reports render fps and tick rate.
 - A photo or capture of the panel is the acceptance evidence for the visual
-  parts; the number that matters is frames received vs. stale-dropped over a
-  minute on wifi.
+  parts; the numbers that matter are render fps and sim ticks per real second
+  on the board.
 
 ## Out of scope for phase 1
 
 Touch input (no kernel input device exists yet), a flat non-cube world,
 camera animation in `cube` mode, HDR/colour management, audio, running the
-shim as a non-root user, any change to cubarium's world schema.
+services as a non-root user, streaming frames from the desktop over wifi,
+any change to cubarium's world schema.
 
 ## Briefs
 
