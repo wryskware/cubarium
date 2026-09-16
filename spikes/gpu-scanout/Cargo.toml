@@ -1,0 +1,31 @@
+[package]
+name = "gpu-scanout"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Deliberately its own workspace root: this is a throwaway spike that must not
+# perturb the cubarium workspace's lockfile or feature unification.
+[workspace]
+
+[dependencies]
+anyhow = "1"
+ash = "0.38"
+drm = "0.15"
+rustix = { version = "1", features = ["event", "mm", "fs"] }
+khronos-egl = { version = "6", features = ["dynamic"] }
+libloading = "0.8"
+glow = "0.16"
+bytemuck = "1"
+wgpu = { version = "27", optional = true }
+pollster = { version = "0.4", optional = true }
+
+[features]
+wgpu-path = ["dep:wgpu", "dep:pollster"]
+
+[[bin]]
+name = "wgpu_headless"
+required-features = ["wgpu-path"]
+
+[profile.release]
+debug = 1
