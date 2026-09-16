@@ -333,6 +333,14 @@ enum Command {
         /// way. The default runs the world exactly as it ships.
         #[arg(long, default_value = "grasp")]
         apex_turn_radius: String,
+        /// The motor contract the **apex members alone** run, leaving every ordinary body on
+        /// `--motor`. Omitted — the default — every body runs `--motor`, which is what the world
+        /// ships. Naming one makes the prey world at introduction identical between the two
+        /// halves of a motor pair, which `--motor` alone cannot do: workstream T's inertial arm
+        /// held 628 prey at introduction against the shipped arm's 745. Same two names as
+        /// `--motor`; no ordinary body is affected either way.
+        #[arg(long)]
+        apex_motor: Option<String>,
         #[arg(long, default_value_t = 8)]
         workers: usize,
         #[arg(long, default_value_t = 600)]
@@ -758,6 +766,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             pursuit_stop,
             motor,
             apex_turn_radius,
+            apex_motor,
             workers,
             wall_seconds,
             out,
@@ -773,6 +782,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 apex_turn_radius: cubarium_search::apex_audit::parse_apex_turn_radius(
                     &apex_turn_radius,
                 )?,
+                apex_motor: apex_motor
+                    .as_deref()
+                    .map(cubarium_search::apex_audit::parse_apex_motor)
+                    .transpose()?,
             };
             cubarium_search::apex_audit::run(
                 config.split(',').map(|s| PathBuf::from(s.trim())).filter(|p| !p.as_os_str().is_empty()).collect(),
