@@ -206,6 +206,86 @@ Nothing left running, no held-out seed touched, `state/`, port 7393, the shim an
 - Six training seeds, one arm, 150 simulated minutes. No held-out seed is touched and nothing is
   tuned.
 
+
+## Addendum to the pre-registration — Astra's directions, registered before any result was read
+
+*Astra's review of X and Y reached this workstream through Fable while Part 1's two training
+arms were running and **before a line of either arm's output had been read**; no row of Part 2
+existed. Everything in this addendum was committed at that moment. The registered rules and
+thresholds above are **unchanged** — nothing whose rows had begun was altered — and this section
+only adds, qualifies and names.*
+
+**1. The registered rules and thresholds stand exactly as committed.** No clause, threshold,
+column or branch above is edited.
+
+**2. Part 1: the sixteen paired generations are descriptive, not inferential.** Sixteen
+sequential generations of one run are one autocorrelated trajectory, not sixteen independent
+observations, so the paired-by-generation sign-test p-values — X's and this part's alike — are
+reported as **descriptive summaries of a within-run pattern** and are not read as evidence about
+a population of runs. The **seed is the independent repeat**, and with X's seed and this part's
+there are **n = 2**. Accordingly, if the registered rule's label *replicated* fires, the note
+states it as **"the same directional pattern in a second pre-chosen training run"** and not as
+statistical replication. The rule's arithmetic is unchanged; only the words the verdict is
+reported in are fixed here.
+
+**3. Part 1, added: the 2 × 2 of weights × adapter.** For **each** seed (20260915 and 20260916),
+each arm's **selected centre** — by the selection rule registered above — is replayed on the same
+four training layouts under **both** adapters with the intake and dwell trace, through
+`es-turn-band`'s own machinery, weights untouched. That is four weight sets × two adapters, and
+the reported columns are X's own: **`t_min`, on-food fraction, mean dwell bout and producer
+intake per lived tick.**
+
+> **The reading, registered here:** if swapping **only the adapter** on the same weights
+> reproduces the gain, the effect is **expression**. If `cub-act-2`-trained weights keep their
+> advantage under **both** adapters, the search reached a **different region**. If the advantage
+> depends on the pairing — weights and adapter together — it is an **interaction**, i.e.
+> co-adaptation. Anything that does not fall cleanly in one of the three is reported as such.
+
+This is registered **before this workstream has looked at any second-seed result**. Its one
+enabling code change is named: `es-turn-band` currently refuses a run whose centre file is not
+`cub-act-1`; it is changed to check the centre file against **the run's own recorded adapter**
+(`checkpoint.protocol.adapter`), which is what that check always meant, and nothing else about
+the replay moves.
+
+**4. Part 2: the treatment is named "the apex-arm treatment", not an apex mechanism.** Moving
+from arm 0 to arm 2 changes predator presence, predator count, predation deaths, carrion
+recycling and every feedback they carry **at once**. No sentence in this note attributes a
+difference between arms to predation alone.
+
+**5. Part 2: the predicate is reported, not assimilated.** R's rows and this ladder are **not**
+treated as one predicate. The half-space and reach-envelope runs at the two reproduction depths
+(0.10 and 0.55), same seeds and same build, are compared **explicitly and cell by cell**, and
+what V's adoption does at arm 2 is reported as its own measurement rather than folded into the
+ladder.
+
+**6. Part 2: the per-rung sequences are reported raw and are not called monotone.** The
+served-by-channel and margin sequences are reported rung by rung as numbers; Astra found that
+Y's arm-0 sequences are **not** monotone at every rung, so no sentence in this note describes any
+sequence as monotone unless the rung-by-rung numbers it cites are, and the direction is described
+as a direction rather than as a law.
+
+**7. Part 2: predation deaths by prey form are cross-tabulated.** `movement::Census`'s cells
+already carry `deaths_by_cause` per `(form, diet bin, guild)`, over every body and not only the
+founders, so the cross-tabulation is read out of the rows this campaign already writes. **No
+extra run and no new world state is added for it.** If any part of the mechanism is not in the
+rows, the note says the mechanism remains unresolved rather than adding a rerun.
+
+**8. Neither part proposes a default or a roster change**, and two specific limits are stated in
+the result:
+
+- a second favourable `cub-act-2` seed would still **lack any whole-world evaluation**, because
+  `es-population` — the only path from a policy to a whole calibrated world — **refuses
+  `cub-act-2` by name** (X's deliverable-1 disclosure), so nothing here can say what the adapter
+  does to a population;
+- an acceptable rung in Part 2 would be a **candidate for held-out confirmation only**, never a
+  roster value: six training seeds, one arm, one horizon.
+
+**9. One note on a concurrent change on `main`.** Fable is making `World::set_action_adapter`
+fallible there, so that it refuses a change that mismatches an interned policy. This worktree is
+unaffected: it sets the adapter only through `es::fixture::Layout::with_adapter`, before any
+policy is attached, and never after. Nothing in this workstream depends on the infallible
+signature.
+
 ---
 
 *Everything above was written before either part was launched. Everything below is what they
