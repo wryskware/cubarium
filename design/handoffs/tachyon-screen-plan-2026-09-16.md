@@ -25,7 +25,7 @@ scope for phase 1.
 | fact | value |
 |---|---|
 | host | `root@tachyon-8968c731.local`, wlan0 `192.168.68.68` |
-| SoC / CPU | Qualcomm QCM6490, 6 usable cores (Cortex-A55 class), 7.3 GB RAM |
+| SoC / CPU | Qualcomm QCM6490, 8 cores: 4× Cortex-A55 at 1.96 GHz + 3× Cortex-A78 at 2.40 GHz + 1× Cortex-A78 at 2.71 GHz (measured from sysfs 2026-09-16; an earlier "6 usable A55" reading came from a restricted nproc), 7.3 GB RAM; Adreno GPU and Hexagon NPU present, unused by this plan |
 | OS | Ubuntu 20.04.6 headless, kernel 5.4.219 (Qualcomm downstream), glibc 2.31 |
 | DRM | `/dev/dri/card0`, driver name `msm_drm`; `modetest -M msm_drm` works, plain `modetest` does not |
 | connectors | `DP-1` (the only real output) and `Virtual-1` (forced off) |

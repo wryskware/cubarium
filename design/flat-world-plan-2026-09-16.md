@@ -13,40 +13,35 @@ Read-only audit: no source file was changed to write it.
 
 ## Summary
 
-1. Cubarium is coupled to the cube through **four hubs**, not the whole tree:
-   `SurfacePoint`/`Face` (the chart id), `CellId`+`CELL_COUNT` (the field grid),
-   `Canvas` (five fixed 64×64 buffers), and `FrameSink::submit(&Frame)`.
+1. Cubarium is coupled to the cube through **five hubs**: `SurfacePoint`/`Face`,
+   `CellId`+`CELL_COUNT`, `Canvas`, `FrameSink::submit(&Frame)`, and the
+   world/view/presenter caches that are shaped five-by-`CELL_COUNT` at birth.
 2. Recommended abstraction: a `Copy` **enum** `cubarium_surface::Topology { Cube,
-   Flat { w, h } }`, passed by value into the surface free functions and owned by
-   `WorldConfig`, `FieldGraph` and `Canvas`. Not a trait, not a generic:
-   `SurfacePoint`, `WorldState` and `Canvas` stay concrete, so serde, `Copy`,
-   `Box<dyn FrameSink>` and all 1,591 existing tests survive.
-3. `Face` stays the chart id; a flat world has exactly one chart, `Face::Front`.
-   Two forced widenings: pixel indices `u8 → u16`, and `CELL_COUNT` from a const
-   to a runtime count.
-4. Flat geometry: one chart, four solid edges using the **same** specular
-   reflection the open rim uses today, `TangentMap::IDENTITY` everywhere,
-   `embed() = [u/32, v/32, 0]` so `chord_sq` becomes exact Euclidean.
-5. **Recommended first flat world: 640×360, upscaled 3× by the daemon, at world
-   scale S = 2** — sprite tile 32 px, field cell 8 px. Not 320×180: that is the
-   cube world stretched, and it wastes the panel.
-6. A second parameter does the real work: **`world_scale` S**, which multiplies
-   every length (sprite tile, cell size, body extent, sense radius, px/s speed).
-   Hold `cell = 4·S` and **every** raster from 320×180 to 1920×1080 has the same
-   3,600 field cells and the same ecology; only the picture sharpens.
-7. That gives one clean law: **render cost ∝ S², simulation cost ≈ constant.**
-   S = 2 is 11.25× the cube's pixel work; S = 6 (native 1080p) is 101× and is not
-   a first version.
-8. Genuine higher-resolution art is **authoring, not a bake flag**: the 148
-   `art/parts/*.svg` are pixel art drawn on integer grids (`bud.svg` is 4×4), so
-   `svg/scale` only makes bigger blocks. Bake at S× first to unblock the code,
-   redraw parts file-by-file afterwards — the runtime never notices.
+   Flat { w, h } }` **plus a `Scale`** (cell pixels and world scale) in the same
+   surface contract — not a trait, not a generic, so `SurfacePoint`, `WorldState`
+   and `Canvas` stay concrete and the 1,591 existing tests survive.
+3. `Face` stays the chart id; flat has one chart, `Face::Front`. Three forced
+   widenings: pixel indices `u8 → u16`, `CELL_COUNT` to a runtime count, and a
+   checked `cell_count() <= u16::MAX` bound on `CellId`.
+4. Flat edges are **not** identity: a wall bounce composes `REFLECT_Y` on
+   horizontal walls, `REFLECT_X` on vertical ones, and both at a corner
+   (`= quarter_turns(2)`). Only `unfold` is identity on a plane.
+5. **Candidate first flat world: 640×360, upscaled 3×, at world scale S = 2** —
+   sprite tile 32 px, field cell 8 px. Gated on FW-0's measured board numbers,
+   not fixed here. 320×180 is the cube world stretched and wastes the panel.
+6. `world_scale` S multiplies every length. Hold `cell = 4·S` **and scale the
+   habitat noise coordinates by S** and every raster from 320×180 to 1920×1080
+   has the same 3,600 cells and the same ecology.
+7. Sim and render share **one host loop**, so the budget is
+   `20·tick_ms + fps·render_ms <= 1000 ms`, not two independent budgets. Render
+   work is `∝ S²`; the tick is S-invariant.
+8. Genuine higher-resolution art is authoring, not a bake flag: the 148
+   `art/parts/*.svg` are pixel art on integer grids. A runtime `scale` path
+   exists but is blocked by a hard 9-pixel stamp budget that must scale with S.
 9. Biome/terrain variation is real but **separable**: one low-frequency region
-   field offsetting habitat parameters that are already per-cell, behind a
-   toggle, off by default. The first flat world ships without it.
-10. Total: **nine packages — 4 large, 4 medium, 1 small**; four at high reasoning
-    effort. FW-2∥FW-3 and FW-4∥FW-5 pair off on disjoint crates; FW-7 (art) and
-    FW-8 (biomes) follow and can slip without blocking the panel.
+   field offsetting per-cell habitat parameters, behind a toggle, off by default.
+10. Total: **nine packages — 4 large, 4 medium, 1 small**; five at high effort.
+    Parallel pairs start only after FW-1's contract is frozen.
 
 ## 1. How deep the cube goes
 
@@ -84,6 +79,7 @@ through `PixelImage`, not through points.
 | `Canvas` | `crates/cubarium-render/src/canvas.rs:9` | `Box<[[[f32;3]; 4096]; 5]>`; every presenter pass writes through `get/set/add` |
 | `FrameSink::submit(&Frame)` | `crates/cubarium/src/sink/mod.rs:22` | all five sinks, one `Box<dyn FrameSink>` fan-out |
 | `unfold_pixels` / `PixelImage` | `crates/cubarium-surface/src/raster.rs:10,36` | all sprite, body, care and motif stamping |
+| **world / view / presenter caches** | `crates/cubarium-core/src/world/mod.rs:44-53`, `src/view.rs:34-61`, `crates/cubarium/src/art_present/mod.rs:416-423` | `World` holds `images: [Vec<ChartImage>; 5]` and five `Box<[f64; CELL_COUNT]>` weather caches; `RenderView` carries **no** topology, so the presenter cannot learn the shape from it; `ArtPresenter::new` lays out every slot and band through the **global** `CellId::all()` at construction |
 
 Two whole subsystems are cube-only and should stay so: `cubarium-surface-oracle`
 (the rigid-rotation 3D reference; a plane needs no oracle) and `cubarium-search`
@@ -136,15 +132,49 @@ Why an enum and not the alternatives:
   topologies is closed and lives in one crate — open extension is not wanted.
 
 **The `Flat { w, h }` arm.** One chart (`Face::Front`); `extent = (w, h)`;
-`travel` keeps its sweep loop but its `earliest_exit` sees four *closed* edges and
-applies the rim's existing specular reflection to all four, so `MAX_CROSSINGS`,
-the fallback counters and the "never tunnels" property carry over unchanged;
-`TangentMap` is always `IDENTITY`, so nothing rotates; `chart_images` returns one
-direct image, so `unfold` collapses to `segment length` and `unfold_pixels`
-always takes the direct fast path clipped to `0..w`/`0..h`. `embed()` becomes
-`[u/32, v/32, 0]`, which keeps `chord_sq`'s `×1024` factor exact — on a plane the
-chord bound is the true distance, so pair rejection stops being conservative and
-becomes exact (`point.rs:111`). `MAX_LOCAL_RADIUS = 32` still bounds sensing (12 px).
+`chart_images` returns one direct image, so `unfold` collapses to segment length
+(and *there* the tangent map is genuinely `IDENTITY`) and `unfold_pixels` always
+takes the direct fast path clipped to `0..w`/`0..h`. `embed()` becomes
+`[u/32S, v/32S, 0]` (see §6), which keeps `chord_sq`'s `×1024` factor exact — on a
+plane the chord bound is the true distance, so pair rejection stops being
+conservative and becomes exact (`point.rs:111`).
+
+**Wall reflection is not identity — this is the part to get right.** The existing
+rim bounce does two things at once (`travel.rs:254-258`): it negates the
+component of the *remaining* displacement normal to the edge
+(`d = Vec2::new(remaining.x, -remaining.y)`) and it composes
+`TangentMap::REFLECT_Y` into `out.map`. A rectangle has walls on both axes, so:
+
+| wall hit | remaining displacement | composed into `out.map` |
+|---|---|---|
+| `Edge::Top` (`v=0`) or `Edge::Bottom` (`v=h`) | `(x, −y)` | `REFLECT_Y` |
+| `Edge::Left` (`u=0`) or `Edge::Right` (`u=w`) | `(−x, y)` | `REFLECT_X` |
+| exact corner (`Exit::is_tie`, both edges within `GEOM_EPS`) | `(−x, −y)` | `REFLECT_X.then(REFLECT_Y) = TangentMap::quarter_turns(2)` |
+
+The two reflections are diagonal matrices and commute, so the corner case is
+order-independent and the composed map has `det = +1` — a sweep aimed exactly
+into a corner returns along its incoming direction, the planar analogue of the
+cube's documented vertex behaviour. **The cube's tie rule is inverted here and
+must be stated as a deliberate deviation:** on the cube a tie picks the *lowest*
+`Edge` index and crosses one seam (`design/surface-topology.md`, "exact
+corners"); on a plane a tie means both walls were reached at once and **both**
+reflections apply in a single step. A near-corner (two exits at distinct but
+adjacent `t`) falls out of the existing loop as two successive reflections and
+must give the same final direction as the exact tie; that pair is a required
+test. Forward progress is unchanged: after a bounce `p` sits exactly on the wall
+with the normal component pointing inward, so the same edge yields no further
+exit at `t ≥ 0`, and reflections already count toward `MAX_CROSSINGS`
+(`travel.rs:118,278-282`) with `nudge_inward` as the counted fallback. A flat
+world bounces far more often than the cube's single rim, so any latent weakness
+in reflection handling surfaces immediately rather than rarely.
+
+**A capacity bound Astra is right to demand.** `CellId` is a `u16`
+(`field.rs:18-21`), so a topology may not exceed 65,535 cells. At `cell = 4 px` a
+1920×1080 flat world would want 129,600 — over the limit. `Topology::validate()`
+must compute `cell_count()` with checked multiplication and refuse anything above
+`u16::MAX`, with the error naming the raster and the cell size. The §6 ladder
+(`cell = 4·S`) stays at 3,600 and is far inside it, but an arbitrary
+`Flat { w, h }` from a config file is not.
 
 **Two forced widenings.**
 
@@ -154,16 +184,34 @@ becomes exact (`point.rs:111`). `MAX_LOCAL_RADIUS = 32` still bounds sensing (12
   change on the cube, and the compiler finds every site.
 - `CELL_COUNT` from a const to a runtime count. `1,280 = 2^8·5` cannot be
   factored 16:9 with square cells, so no flat raster reproduces it.
-  `ScalarField.values` becomes `Box<[f64]>` sized at construction and `CellId`
-  becomes a plain index decoded through the topology. **Mitigation that saves
-  ~240 of the 430 sites:** keep `pub const CUBE_CELL_COUNT: usize = 1280` for the
-  cube-only tests and fixtures (186 lines in `cubarium/tests`, 28 in
-  `cubarium-core/tests`, 26 in examples) and convert only production code.
+  `ScalarField.values` becomes `Box<[f64]>` sized at construction, `CellId`
+  becomes a plain index decoded through the topology, and `World`'s five
+  `Box<[f64; CELL_COUNT]>` weather caches and `[Vec<ChartImage>; 5]` become
+  runtime-sized (`world/mod.rs:48-53`). **A partial mitigation, stated honestly:**
+  `pub const CUBE_CELL_COUNT: usize = 1280` lets cube-only tests and fixtures keep
+  their literals as a symbol rename (186 lines in `cubarium/tests`, 28 in
+  `cubarium-core/tests`, 26 in examples). It does *not* preserve them
+  semantically — `for c in 0..CELL_COUNT { state.fields.d[c] }`
+  (`cubarium-core/tests/redesign_rules.rs:116,418`) iterates a runtime-length
+  vector and is correct only because the test builds a cube world. Any test that
+  becomes topology-parameterised must take its count from the world, not a const.
 
-**Cell size for a flat world: stays 4 px.** 320×180 → 80×45 = 3,600 cells, all
-interior cells degree 4, the four border rows degree 3, no seam edges, `downhill`
-unchanged. `w` and `h` must be multiples of `CELL_PIXELS`; 320×180 and the
-fallback 192×108 both are, and both divide 1920×1080 by an integer (6× and 10×).
+**Cell geometry and world scale belong in this contract, not downstream.**
+`CELL_PIXELS` is a surface constant read by `CellId::center` and `cell_of`
+(`field.rs:11-16,49-68`), so a later package cannot change the cell size without
+owning `cubarium-surface`. `Topology` therefore ships beside a `Scale { world: f64 }`
+with `cell_pixels() = 4.0 · world`, `footprint_radius()` and `max_local_radius()`
+derived from it, all in FW-1, and FW-1 exercises `S = 2` from its first commit
+while keeping the `S = 1` cube goldens. Later packages choose a *value*; they
+never change the geometry.
+
+**Cell size for a flat world: `4·S` px.** At S = 1, 320×180 → 80×45 = 3,600
+cells and **7,075** undirected edges (`79·45 + 80·44`), not a scaled 2,528. The
+adjacency builder emits `None` per absent edge independently (`field.rs:98-119`),
+so a rectangle has 3,354 interior cells of degree 4, **242 non-corner border
+cells of degree 3, and 4 corner cells of degree 2** — the corners are a real case
+the conservative outgoing-flux limiter must be tested against. `w` and `h` must be
+multiples of `cell_pixels()`; every raster in §6 is.
 
 ## 3. Render and host
 
@@ -199,53 +247,74 @@ refusal. `--sink preview` with a flat topology is refused at argument validation
 
 ## 4. Persistence
 
-`WorldState.config` is inside the postcard payload
-(`crates/cubarium-core/src/world/state.rs:23-24`), so putting `topology` in
-`WorldConfig` puts it in the snapshot header's payload automatically and no
-header change is strictly required. Recommended anyway: also widen the
-**fixed header** with a topology word next to the schema, so a loader can refuse a
-flat snapshot without decoding the payload
-(`snapshot.rs:46-48`, `HEADER_FIXED_BYTES`).
+**Correction to the first draft: the persisted fields are already length-prefixed.**
+`Fields` holds `Vec<f64>` per channel (`crates/cubarium-core/src/fields.rs:19-32`),
+and the fixed-size `Box<[f64; CELL_COUNT]>` arrays live in `Habitat` and `World`
+(`habitat.rs:26-33`, `world/mod.rs:48-53`), which are rebuilt on load and never
+serialized. `ScalarField` is therefore **not** a serialization cause. The real
+cause is simpler: `WorldState.config` is inside the payload
+(`world/state.rs:22-28`) and `WorldConfig` gains `topology` and `world_scale`, so
+the postcard shape changes.
 
-This is a **schema bump to 17 and `CONFIG_VERSION` 9, refusing 7..=16 by name** —
-not a migration. It is forced twice over: `ScalarField` changes from
-`[f64; 1280]` (postcard writes fixed arrays with no length prefix) to a
-length-prefixed slice, and `WorldConfig` gains a field. That matches the standing
-rule of 2026-09-15 and the existing test
-`every_older_schema_is_refused_by_name` (`snapshot.rs:539`); add 16 to its list
-and freeze a `v16.rs` mirror beside `v7..v14`.
+That is still a hard bump to **schema 17 / `CONFIG_VERSION` 9, refusing 7..=16 by
+name**, matching `every_older_schema_is_refused_by_name` (`snapshot.rs:539`);
+freeze a `v16.rs` mirror beside `v7..v14`.
 
-On positions: keep `SurfacePoint`'s `face` byte in the record rather than
-introducing a second position type. It costs one byte per organism, keeps the
-struct `Copy` and the serde derives as they are, and the loader validates
-`face == Face::Front` for a flat world. A face-less flat position type would
-fork `SurfacePoint`, `OrganismView`, `PathSegment` and every test fixture for one
-byte.
+**Do not widen the fixed header.** `HEADER_FIXED_BYTES` is 22 and the layout
+`[magic][schema u32][id_len u16][id][payload_len u64][crc32 u32][payload]`
+(`snapshot.rs:48-50,78-97`) is parsed with hardcoded offsets outside Rust, by
+`scripts/reduce-quiet-compare.mjs:112-126`. Inserting a topology word there breaks
+that tool for no gain, because the schema number already refuses a mismatched
+build. Validate **after decode** instead, in `WorldState::check`:
+
+- `config.topology` is one the build supports, and `Topology::validate()` passes
+  (dimensions positive, multiples of `cell_pixels()`, `cell_count() <= u16::MAX`);
+- every `Fields` vector, every ecology vector and the care state have length
+  exactly `cell_count()`;
+- every organism's `pos.face` and every care target's `face`
+  (`crates/cubarium/src/care/mod.rs:125-135`) is a chart the topology has —
+  `face == Face::Front` for flat — and `u < w`, `v < h`.
+
+Keep the `face` byte in `SurfacePoint`: one byte per organism against forking the
+position type, `OrganismView`, `PathSegment` and every fixture.
+
+**The cube regression check has to change too.** `ecology_hash` hashes
+`postcard::to_allocvec` of the whole masked `WorldState`, config included
+(`snapshot.rs:193-199`), so adding two config fields changes it for cube worlds
+as well — a pre/post equality claim is impossible. Replace it with a **normalized
+cube-state comparator** written once in FW-1's test pass: a digest over
+everything *except* `config`, plus an explicit assertion that the two configs
+differ only in the new fields at their cube defaults. That comparator, not
+`ecology_hash`, is the standing evidence in §9.
 
 ## 5. Ecology and art: what is not mechanical
 
-Everything below reads `p[1]` — the cube's embedded height — and it is the one
-place a flat port changes the world rather than the coordinates.
+Everything below reads the cube's embedded height, and it is the one place a flat
+port changes the world rather than the coordinates. The first draft under-counted
+the consumers; this is the corrected list.
 
 | system | cube | flat — recommended |
 |---|---|---|
-| light / moisture | `L₀ = light_base + light_height_gain·y + noise`, `y = cell.center().embed()[1]` (`habitat.rs:94-98`) | **design call: `height(p) = 1 − 2v/h`.** The panel is a side view: canopy at the top row, foliage in the middle, soil at the bottom edge. Keeps the whole stratified design (`design/stratified-world.md`) with no other change |
-| noise sampling | 3D noise on `[-1,1]^3` so seams are invisible (`habitat.rs:63-70`) | sample the same wave sum at `[u/32, v/32, 0]`: identical feature size in pixels, no seams to hide |
-| band thresholds | `Canopy` iff `h >= 1.0` — true only on the Top face (`art_present/habitat.rs:380`) | **design call:** `h >= canopy_top` with a configured default (`0.67`), else a flat world has a one-row canopy |
-| detritus fall | to the graph neighbour with the lowest `h` (`design/stratified-world.md`) | works unchanged: downhill is "one cell toward larger `v`" |
-| water flow / pools | `z = h + basin_gain·n_b`, no flux across the open rim (`water.rs`) | works unchanged; the bottom edge becomes the moat the cube's rim never had, so **expect standing water along the bottom row** and re-check `evap_floor`. Flag for a short run |
-| pair rejection | conservative chord bound (`pairs.rs:64`) | exact Euclidean; strictly fewer candidate pairs, same results |
-| founders | random face + `unit·FACE_EXTENT` (`lifecycle.rs:69-72`) | one chart, `unit·w`, `unit·v`; the random stream draw for the face must be **kept and discarded** or the seed stream shifts — state which, in the brief |
-| seam-carried sprites | `unfold_pixels` owns pixels across seams; bodies clip at the rim | no seams; bodies clip at all four edges. Visibly *simpler*, never worse |
-| tall columns / rigs | columns chosen per side face, `Face::ALL` order (`art_present/mod.rs:365`) | choose columns along `u`; the three-quarter rigs already read as "walking along a wall", which is exactly the flat view |
+| light / moisture | `y = cell.center().embed()[1]` (`habitat.rs:94-98`) | **design call: `height(p) = 1 − 2v/h`.** The panel is a side view: canopy at the top row, soil at the bottom edge. Keeps `design/stratified-world.md` intact |
+| **classic controller** | `height: o.pos.embed()[1]`, `up: up_direction(o.pos.face)` (`world/step.rs:449-460`) | both become `Topology` methods; flat `up` is the constant `(0, −1)` |
+| **neural controller** | the same two fields in `SelfState` (`world/step.rs:3068-3079`) | identical treatment; a policy trained on cube height reads the same channel |
+| **depth preference** | `obs.up * (w_depth · (h_pref − obs.height))` steers every organism (`controller.rs:228-235`) | works unchanged *given* a topology height and up; with a wrong height it silently steers the whole population into a wall |
+| noise sampling | 3D noise on `[-1,1]^3` (`habitat.rs:43-75`) | same wave sum at `[u/32S, v/32S, 0]` — the `S` divisor is required, see §6 |
+| **weather blobs** | `normalize(positions[i])`, `dot(b.center, dir)`, angular cap `cap(θ)` with `blob_radius_deg` (`habitat.rs:198-225`) | **BLOCKING design call: this is a spherical metric.** `normalize([u/32, v/32, 0])` collapses the plane to a polar *fan* around the origin, not a moving blob. A flat world needs a **planar weather metric**: blob centres drifting in the plane, a raised-cosine cap on planar distance in pixels (`blob_radius_px = blob_radius_deg` reinterpreted through `world_scale`), and a stated edge rule (drift reflects, matching the walls). Owned by **FW-2** |
+| band thresholds | `Canopy` iff `h >= 1.0` — true only on the Top face (`art_present/habitat.rs:380`) | needs a `canopy_top` threshold. **No value can be validated from current code**; propose `0.67` as an explicit new default for review, not as a derived number |
+| detritus fall / downhill | gravity's tangential component vanishes on the level Top face, so `downhill` is `None` there (`field.rs:135-151`, `design/stratified-world.md:47-52`): **the cube canopy deliberately never drains** | on a plane every cell has a lower neighbour, so a flat canopy drains completely to the bottom wall. **Explicit decision required, owned by FW-2:** either accept it (the top rows become a shedding ridge and the bottom a litter bank) or reproduce the cube's behaviour with a `downhill_floor` on the top band. Recommend **accept, and measure**, because the drain is what makes a side view read as gravity |
+| water flow / pools | no flux across the open rim (`water.rs`) | the bottom wall becomes a moat the cube never had; expect standing water along the bottom row and re-check `evap_floor` |
+| pair rejection | conservative chord bound (`pairs.rs:64`) | exact Euclidean; strictly fewer candidate pairs |
+| founders | random face + `unit·FACE_EXTENT` (`lifecycle.rs:69-72`) | one chart; the face draw must be **kept and discarded** or every seed shifts |
+| seam-carried sprites | `unfold_pixels` owns pixels across seams | no seams; bodies clip at four walls. Simpler, never worse |
+| tall columns / rigs | per side face, `Face::ALL` order (`art_present/mod.rs:365`) | choose columns along `u`; the three-quarter rigs already read as walking along a wall |
 | ray-cast preview | `raycast.rs` | not ported; cube-only |
 
-The visible risks that need a design call rather than a port: the **canopy
-threshold**, **water pooling against the new bottom wall**, and **organism
-density** — the same 512-organism cap over 3,600 cells instead of 1,280 thins the
-world by 2.81× in ecological terms, whatever the raster (§6). Recommend keeping
-the cap and raising `founders` proportionally on a fresh flat world, then judging
-by eye.
+The visible risks needing a call rather than a port: the **planar weather
+metric**, the **canopy drain**, the **canopy threshold**, **water against the new
+bottom wall**, and **organism density** — the same 512-organism cap over 3,600
+cells instead of 1,280 thins the world by 2.81× in ecological terms, whatever the
+raster. Recommend keeping the cap and raising `founders` proportionally.
 
 ## 6. World resolution: the trade, and the recommendation
 
@@ -253,7 +322,7 @@ The display daemon integer-upscales, so the sim raster is the free variable.
 Introduce a second, independent knob: **`world_scale` S**, one factor that
 multiplies every length in the world — sprite tile, field cell, body extent,
 sense radius, speed in px/s, stamp and deposit radii. Choose `S = 6/k` for an
-upscale factor `k` and the world is the *same* world at a different sharpness.
+upscale factor `k`.
 
 | raster | upscale `k` | `S` | sprite tile | cell px | field cells | raster px | × cube | render ∝ |
 |---|---|---|---|---|---|---|---|---|
@@ -263,56 +332,64 @@ upscale factor `k` and the world is the *same* world at a different sharpness.
 | 960×540 | 2 | 3 | 48 | 12 | 3,600 | 518,400 | 25.3× | 9.0 |
 | 1920×1080 | 1 | 6 | 96 | 24 | 3,600 | 2,073,600 | 101× | 36.0 |
 
-Every row divides exactly: `w/(4S) = 80`, `h/(4S) = 45` in all five. That is the
-key result — **holding `cell = 4·S` keeps the field grid, the ecology, the
-diffusion substeps, the water flow, the `RenderView` vectors and the snapshot
-size constant across the whole range.** Resolution buys pixels, not ecology.
+Every row divides exactly: `w/(4S) = 80`, `h/(4S) = 45`. Resolution then buys
+pixels, not ecology — **but only under three conditions**, and the first draft
+stated the conclusion without them:
 
-What scales with what:
+1. **Noise coordinates must scale with S.** The habitat waves have wavelengths in
+   embedding units and are sampled at `p = position/32`
+   (`habitat.rs:43-75,83-104`). Sampling a flat world at a fixed `/32` while the
+   cells grow as `4S` changes the number of light/moisture patches per cell by a
+   factor of S — different patchiness, different ecology. Sample at `/(32·S)`.
+2. **Radii already expressed in cells stay invariant, and that is checkable:**
+   `sense_depth` is `ceil(r_sense / CELL_PIXELS)`
+   (`world/lifecycle.rs:383-389`), so with `r_sense = 6S` and `cell = 4S` it is 2
+   hops at every S. Any radius still written in bare pixels must be moved onto S.
+3. `cell_count()` stays 3,600 and inside the `u16` `CellId` bound (§2).
 
-- **With cells (constant here):** diffusion, water flow, rain, habitat
-  evaluation, detritus fall, `RenderView` field vectors, snapshot payload.
-- **With organisms (constant here):** the O(n²) pair pass (512 → 130,816),
-  controller, motor, neural. Note the *stamp* per organism is not constant: a
-  body extent of `9·S` px covers `∝ S²` pixels, so per-organism raster work rises
-  with S at the same rate as the background passes.
-- **With raster area:** the ground/ramp/water/rain passes and the per-organism
-  stamps — both `∝ S²`. Hence one law: **render ∝ S², sim ≈ constant.**
+What scales with what: **with cells** (constant here) — diffusion, water flow,
+rain, habitat, detritus fall, `RenderView` vectors, snapshot payload. **With
+organisms** (constant here) — the O(n²) pair pass, controller, motor, neural.
+**With raster area** — the ground/ramp/water/rain passes *and* the per-organism
+stamps, since a body extent of `9·S` px covers `∝ S²` pixels. Hence:
+**render ∝ S², tick ≈ constant.**
 
-**Device estimate.** Let `R` be the measured single-core cost of one *cube*
-render on the board (20,480 px, art mode). Flat render ≈ `2.81 · S² · R`, and the
-budget is 16.6 ms at 60 fps or 33.3 ms at 30 fps. The presenter is off the sim's
-critical path and writes disjoint pixels, so splitting it over four A55 cores by
-row bands is deterministic and worth roughly 3.5×. The decision rule:
+**The budget is shared, not split.** `Step::Tick` and `Step::Render` alternate on
+one thread in one loop (`crates/cubarium/src/runner/mod.rs:733-801`), so the real
+constraint per wall second is
 
-| S | 1 core, 60 fps needs | 4 cores, 60 fps needs | 4 cores, 30 fps needs |
-|---|---|---|---|
-| 1 | `R ≤ 5.9 ms` | `R ≤ 20 ms` | `R ≤ 41 ms` |
-| 2 | `R ≤ 1.5 ms` | `R ≤ 5.2 ms` | `R ≤ 10 ms` |
-| 3 | `R ≤ 0.66 ms` | `R ≤ 2.3 ms` | `R ≤ 4.6 ms` |
-| 6 | `R ≤ 0.16 ms` | `R ≤ 0.58 ms` | `R ≤ 1.2 ms` |
+> `20 · tick_ms + fps · render_ms <= 1000 ms`
 
-The 20 Hz simulation has a 50 ms budget and does not move with S at all; on a
-6-core A55 board a tick that meets the 20 ms desktop p99 target should land
-around 15–25 ms, so the sim is not the constraint and lowering the *sim* rate
-buys nothing here. Lowering the *render* rate to 30 fps doubles the affordable S²
-— it is the first knob, and it costs only motion smoothness, because the shim
-holds the last frame and keeps presenting at panel rate.
+with `render_ms ≈ 2.81 · S² · R` for a measured single-core cube render `R`. At
+the architecture doc's `tick_ms = 20` target the tick alone takes 400 ms, leaving
+600 ms, so `R_max = 600 / (fps · 2.81 · S²)`:
 
-**Recommendation: 640×360 at S = 2 for the first flat world**, because
+| S | 60 fps, serial | 30 fps, serial | 60 fps, presenter on 4 cores (×3.5) | 30 fps, ×3.5 |
+|---|---|---|---|---|
+| 1 | `R ≤ 3.6 ms` | `R ≤ 7.1 ms` | `R ≤ 12.5 ms` | `R ≤ 24.9 ms` |
+| 1.5 | `R ≤ 1.6 ms` | `R ≤ 3.2 ms` | `R ≤ 5.5 ms` | `R ≤ 11.1 ms` |
+| **2** | `R ≤ 0.9 ms` | `R ≤ 1.8 ms` | `R ≤ 3.1 ms` | `R ≤ 6.2 ms` |
+| 3 | `R ≤ 0.40 ms` | `R ≤ 0.79 ms` | `R ≤ 1.4 ms` | `R ≤ 2.8 ms` |
+| 6 | `R ≤ 0.10 ms` | `R ≤ 0.20 ms` | `R ≤ 0.35 ms` | `R ≤ 0.69 ms` |
 
-- 3× is an integer upscale, so the pixel-art grid stays visible (each world pixel
-  is a 3×3 block); 1920×1080 at S = 6 has no pixel-art read at all;
-- S = 2 is an *integer* art scale: every 4-px and 16-px constant in the tall-plant
-  and rig code doubles exactly (4→8, 16→32, tile rows 10/15→20/30) with no
-  rounding, which S = 1.5 does not give;
-- creatures read at ~32 world px ≈ 96 device px — four times today's linear
-  detail, which is the "more real estate" Wrysk asked for;
-- 11.25× the cube's pixel work is absorbable by row parallelism plus 30 fps even
-  on a pessimistic `R`, and if it is not, 480×270 is a config edit, not a rewrite.
+Two consequences the shared loop makes visible. A slower tick eats the render
+budget directly: at `tick_ms = 40` only 200 ms remains and every figure above
+divides by three, so **the sim rate is not free after all** — dropping the sim to
+10 Hz would buy back 200 ms, at the cost of the 20 Hz contract in
+`design/architecture.md`. And parallelising the presenter is worth more than any
+other knob, because it is the only term that can leave the main thread; it writes
+disjoint pixels off the sim's critical path, so a deterministic row-band split is
+sound.
 
-Both `topology` and `world_scale` are world config, fixed at `--fresh`, so the
-trade can be re-run on the board with a number instead of a redesign.
+**640×360 at S = 2 is the recommended candidate, explicitly gated.** Its case:
+3× is an integer upscale so the pixel-art grid stays visible; S = 2 is an integer
+art scale, so every 4-px and 16-px constant doubles exactly (4→8, 16→32, tile
+rows 10/15→20/30) where S = 1.5 would round; creatures read ~32 world px ≈ 96
+device px. But the table above shows it needs `R ≤ 3.1 ms` even with a parallel
+presenter, and **no `R` or `tick_ms` has been measured on the board**. FW-0 must
+produce both before the value is fixed; 480×270 and 30 fps are the documented
+fallbacks and are config edits, not rewrites. The *contract* carries S from FW-1
+either way (§2), so only the number moves.
 
 ## 7. The artwork pipeline, and what a rescale costs
 
@@ -328,13 +405,31 @@ Today (`art/README.md`, `art/bake.gd`, `art/PLANTS.md`):
 | stamp | `cubarium-render/src/sprite.rs` (`stamp_layers_bent`), `crates/cubarium/src/lanternjaw/raster.rs` | `unfold_pixels` radius; pivot in chart px |
 | tall plants | `crates/cubarium/src/art_present/tall.rs` | the worst offender: `4·i` px per tile, `tall_grown_px(n) = 4n+8`, "eleven cells tall", tile rows 10 and 15 named explicitly (`tall.rs:190-296`) |
 
-**The honest finding.** Raising `svg/scale` in the `.import` files and `TILE` in
-the baker produces sprites that are S× *bigger blocks of the same art* — no new
-detail, because the sources are already pixel art at 1 unit = 1 pixel. Genuine
-higher-resolution artwork means redrawing those 148 SVG paths on an S× finer
-grid. Each file is small (a handful of `<path>` elements), but it is authoring
-work, not a bake parameter. The staging that follows from that:
+**A cheaper stage exists before any re-bake.** `stamp_sprite`/`stamp_pose`
+already take a `scale: f64` (`cubarium-render/src/sprite.rs:317-326`), so an
+integer nearest-neighbour `scale = 2.0` path can draw the existing pack v5 at
+S = 2 with no new assets — call it **Stage A0**, and it is the fastest way to see
+a flat world at 640×360. It is blocked by one hard gate: `FOOTPRINT_RADIUS = 9.0`
+is checked both when a sprite is built (`sprite.rs:18-22,61-64`, which returns
+`Err("sprite extent … exceeds the 9-pixel surface budget")`) and again at stamp
+time as `extent * scale > FOOTPRINT_RADIUS`, which **silently draws nothing**
+(`sprite.rs:810-818`). At `scale = 2` every creature disappears. The constant is
+documented as "not review-tunable — it is the radius the shared unfolding is
+proven correct for", so it must become `9.0 · world_scale`, derived in FW-1's
+`Scale` and validated against `max_local_radius()` (which bounds `S ≤ 3.5` at
+today's 32). **That work lives in `cubarium-render` and therefore in FW-3**, which
+owns that crate; FW-7 consumes the interface and must not edit it. The first
+draft's FW-7 omitted the render crate entirely — that was the gap.
 
+**The honest finding about the art itself.** Raising `svg/scale` in the `.import`
+files and `TILE` in the baker produces sprites that are S× *bigger blocks of the
+same art* — no new detail, because the sources are already pixel art at 1 unit =
+1 pixel. Genuine higher-resolution artwork means redrawing those 148 SVG paths on
+an S× finer grid. Each file is small (a handful of `<path>` elements), but it is
+authoring work, not a bake parameter. The staging that follows:
+
+- **Stage A0 (no assets):** `scale = 2.0` on pack v5 with a scaled footprint
+  budget. Proves the flat world at 640×360 before any Godot run.
 - **Stage A (code, mechanical):** bake at `TILE = 16·S`, `GROUND_TILE = 8·S`,
   `svg/scale = S`; `pack.json` v6 makes `tile`, `ground_tile` and `pivot` data
   the loader honours instead of asserting; every hard `16`/`8`/`4` in `art.rs`,
