@@ -92,6 +92,71 @@ pub const FOLIAGE_PER_WOOD: f64 = 1.0;
 /// **exactly** the image it drew before this feature existed, in one stamp.
 pub const FOLIAGE_FULL: f64 = 0.85;
 
+/// The one environment variable that moves the foliage shoulder for a viewing session, read
+/// **once per process** when the first [`ArtPresenter`](super::ArtPresenter) is built.
+///
+/// It exists because the shoulder's cost — how far a bright stand can be depleted before the
+/// picture moves — is a judgement about a picture, and Wrysk judges pictures on the cube.
+/// Unset, the display draws at [`FOLIAGE_FULL`] exactly, which is what ships; there is no
+/// CLI flag and the default is not changed by anything here.
+pub const FOLIAGE_FULL_ENV: &str = "CUBARIUM_FOLIAGE_FULL";
+
+/// The range a shoulder read from [`FOLIAGE_FULL_ENV`] is clamped into. Below 0.5 a stand
+/// would be drawing bare wood while still carrying half its leaves; above 1 the fullness
+/// ratio cannot reach the shoulder at all and no canopy would ever be whole.
+pub const FOLIAGE_FULL_RANGE: std::ops::RangeInclusive<f64> = 0.5..=1.0;
+
+/// One process-wide reading of [`FOLIAGE_FULL_ENV`], so the value cannot change under a
+/// running presenter and the complaint about a bad one is printed once.
+static FOLIAGE_FULL_ENV_READING: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+
+/// The shoulder a presenter is built at when nothing asks for another one: [`FOLIAGE_FULL`],
+/// or [`FOLIAGE_FULL_ENV`]'s value if the process was started with it.
+pub fn foliage_full_default() -> f64 {
+    *FOLIAGE_FULL_ENV_READING.get_or_init(|| {
+        let (full, complaint) =
+            foliage_full_from_env(std::env::var(FOLIAGE_FULL_ENV).ok().as_deref());
+        if let Some(complaint) = complaint {
+            eprintln!("{complaint}");
+        }
+        full
+    })
+}
+
+/// [`FOLIAGE_FULL_ENV`]'s reading, as `(shoulder, one complaint to print)`.
+///
+/// **Normative**: nothing set is [`FOLIAGE_FULL`] and no complaint; a finite float is
+/// clamped into [`FOLIAGE_FULL_RANGE`], and complains only if the clamp moved it; anything
+/// else is [`FOLIAGE_FULL`] and complains. It never panics and never yields a value outside
+/// the range.
+///
+/// Pure in its argument so the behaviour can be tested without a process environment.
+pub fn foliage_full_from_env(value: Option<&str>) -> (f64, Option<String>) {
+    let Some(raw) = value else {
+        return (FOLIAGE_FULL, None);
+    };
+    let text = raw.trim();
+    match text.parse::<f64>() {
+        Ok(v) if v.is_finite() => {
+            let full = v.clamp(*FOLIAGE_FULL_RANGE.start(), *FOLIAGE_FULL_RANGE.end());
+            let complaint = (full != v).then(|| {
+                format!(
+                    "{FOLIAGE_FULL_ENV}={text} is outside {:?}; drawing the foliage shoulder at {full}",
+                    FOLIAGE_FULL_RANGE
+                )
+            });
+            (full, complaint)
+        }
+        _ => (
+            FOLIAGE_FULL,
+            Some(format!(
+                "{FOLIAGE_FULL_ENV}={text} is not a number; drawing the foliage shoulder at \
+                 the decided {FOLIAGE_FULL}"
+            )),
+        ),
+    }
+}
+
 /// Living structure: a dim warm ember, the one warm value in a cube whose ground ramps
 /// indigo to cyan and whose soil ramps dark plum to violet-mauve ([`SOIL_LOW_SRGB`],
 /// [`SOIL_HIGH_SRGB`]). Review-tunable *within the Outrun family* of
@@ -125,6 +190,23 @@ pub fn wood_shade() -> cubarium_render::Shade {
 /// dead wood is scenery that is on its way out, and at 1 a field of standing dead wood
 /// reads as busy as a living forest.
 pub const DEAD_WOOD_OPACITY: f32 = 0.70;
+
+/// How loud the **soil band's** dead-wood mark is against the band's own scenery, as a share
+/// of [`band_opacity`]`(Band::Soil)`. Review-tunable.
+///
+/// The same factor the standing dead silhouette takes above the horizon: below it the mark
+/// is the only thing dead wood draws, and it should read as a remnant rather than as a
+/// second plant.
+pub const SOIL_SNAG_OPACITY: f32 = DEAD_WOOD_OPACITY;
+
+/// How many of the soil plant's own tile rows the mark keeps, counted up from the tile's
+/// bottom edge ([`cubarium_render::Mask::Axial`], against [`PLANT_REVEAL_PX`] for the whole
+/// plant). Review-tunable.
+///
+/// Two rows and the fade of a third: a *stub*, half a cell tall, which no living plant in
+/// the band can be mistaken for even at stage 0 — and small enough that a field of dead
+/// stands below the horizon reads as stubble rather than as a second litter layer.
+pub const SOIL_SNAG_PX: f64 = 2.5;
 
 /// Fruit density (m per cell) above which a full-grown plant with a `fruit` clip shows
 /// it. Low on purpose: with frugivores about, the fruit a rich cell holds at any moment
@@ -614,6 +696,35 @@ pub fn dead_wood_density(view: &RenderView, index: usize) -> f64 {
     )
 }
 
+/// How strongly the **soil band** marks a stand that died in it:
+/// `clamp(`[`dead_wood_density`]` − `[`wood_density`]`, 0, 1)`.
+///
+/// **Normative**, and 0 in every band but [`Band::Soil`] as far as the drawing is concerned
+/// — the structural bands carry a whole dead silhouette instead ([`structural`]).
+///
+/// The rule the brief states is "`Wd > 0` and `W = 0`", and that is exactly what this reads
+/// at both ends: full strength where a stand is wholly dead, nothing where there is no dead
+/// wood, and nothing where a living stand at least as large is standing in the same cell —
+/// which is what keeps the soil band's *living* image the one it has always had, wood or no
+/// wood. Between those ends it is the same difference read through the same cube root
+/// [`wood_fraction`] uses, so a stand that dies below the horizon has its mark **fade in over
+/// the dieback** instead of cutting in at the instant `W` reaches zero. A cut is the one
+/// thing this presentation is not allowed (contract §12), and `W` reaching zero is precisely
+/// when `Wd` is largest, so a hard gate would be the loudest cut on the cube.
+///
+/// It is deliberately *not* litter: `D + C` still drive the band's plants, its flecks and its
+/// ground wash on their own ([`litter_density`]), and a cell's litter neither creates this
+/// mark nor hides it.
+pub fn soil_snag(view: &RenderView, index: usize) -> f64 {
+    (dead_wood_density(view, index) - wood_density(view, index)).clamp(0.0, 1.0)
+}
+
+/// The opacity the soil band's dead-wood mark is stamped at:
+/// [`band_opacity`]`(Band::Soil) · `[`SOIL_SNAG_OPACITY`]` · `[`soil_snag`].
+pub fn soil_snag_opacity(view: &RenderView, index: usize) -> f32 {
+    (band_opacity(Band::Soil) * SOIL_SNAG_OPACITY * soil_snag(view, index) as f32).clamp(0.0, 1.0)
+}
+
 /// How full a living stand's canopy is: `f = clamp(P / (`[`FOLIAGE_PER_WOOD`]` * W), 0, 1)`,
 /// and 0 where there is no wood to carry foliage.
 ///
@@ -638,10 +749,25 @@ pub fn foliage_fullness(view: &RenderView, index: usize) -> f64 {
 /// stripped one can flicker, and a grazed stand thins and refills continuously. A `NaN`
 /// fullness is a stripped stand.
 pub fn foliage_ramp(f: f64) -> f32 {
-    if f.is_nan() {
+    foliage_ramp_at(f, FOLIAGE_FULL)
+}
+
+/// [`foliage_ramp`] at a chosen shoulder, for the shoulder study
+/// (`design/7_Research/ecology-v1-presentation-2-2026-09-16.md`) and for nothing else.
+///
+/// **Normative**: identical to [`foliage_ramp`] at `full = `[`FOLIAGE_FULL`], non-increasing
+/// in `full` at every fullness (a higher shoulder asks a stand to be fuller before it draws
+/// a whole canopy), and a stripped stand for a non-finite or non-positive `full`.
+///
+/// This exists because the shoulder is the one mapping constant whose cost — how far a
+/// bright stand can be depleted before the picture moves — can only be judged from a picture.
+/// It is reachable from [`ArtPresenter::with_foliage_full`] at construction; there is no
+/// runtime setting and the shipped display always draws at [`FOLIAGE_FULL`].
+pub fn foliage_ramp_at(f: f64, full: f64) -> f32 {
+    if f.is_nan() || !(full.is_finite() && full > 0.0) {
         return 0.0;
     }
-    hermite(f / FOLIAGE_FULL) as f32
+    hermite(f / full) as f32
 }
 
 /// The stage a slot is in after this tick, from the stage it was in.
@@ -722,7 +848,9 @@ pub fn wood_from_producer(view: &mut RenderView) {
 /// Only the foliage and canopy bands are. The soil band's plants are litter scenery — their
 /// stage comes from `D + C`, not from `W`, and painting a wood silhouette under a mushroom
 /// whose size is set by litter would say something the stocks do not. The water band's reeds
-/// stand by depth. Both keep exactly the image they had before ecology v1.
+/// stand by depth. Both keep exactly the image they had before ecology v1 **for every living
+/// stand**; the soil band additionally carries [`soil_snag`], a stub in the dead tone where a
+/// stand has died, so that a stand dying below the horizon is not invisible.
 pub fn structural(band: Band) -> bool {
     matches!(band, Band::Foliage | Band::Canopy)
 }
