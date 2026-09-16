@@ -103,23 +103,84 @@ pub struct GpuSink {
     /// and the daemon's vsync pacing).
     frames: u64,
     gpu_ms: f64,
+    /// The GPU's own three stages (`Renderer::gpu_split`): uploads, the world raster
+    /// pass, the present pass. Summed here and divided at `finish`, so a report can say
+    /// which of the two passes `--gpu-art-scale` actually costs.
+    gpu_stages: [f64; 3],
     build_ms: f64,
     present_ms: f64,
+    /// `Renderer::fill`'s three sums, accumulated: quad pixels, whole-tile pixels,
+    /// opaque pixels. Zero unless `--gpu-fill-profile` is on.
+    fill: [f64; 3],
+    /// The quad pixels of `fill[0]` split by layer, in `LAYERS` order.
+    fill_layers: [f64; cubarium_gpu::scene::LAYER_COUNT],
     /// Where to write a PNG of every rendered raster, for captures and the fidelity test.
     capture: Option<PathBuf>,
 }
 
+/// The knobs `--sink gpu` takes, as one value rather than seven positional arguments.
+///
+/// Every `Option` means "the sink decides", and what it decides depends on the world:
+/// the substep bend is on by default on a ring at `S >= 2` and the art scale is the CPU
+/// presenter's 1. A `Some` is an operator overriding that, either way.
+#[derive(Clone, Debug)]
+pub struct GpuSinkOptions {
+    /// Where the frames go.
+    pub target: GpuTargetKind,
+    /// `--gpu-bend-substep` / `--no-gpu-bend-substep`; `None` takes the default for the
+    /// world (see [`GpuSink::substep_default`]).
+    pub bend_substep: Option<bool>,
+    /// `--gpu-filter bilinear`: the CPU presenter's sampler, for the comparison.
+    pub filter_bilinear: bool,
+    /// `--gpu-art-scale`; `None` is the CPU presenter's 1.
+    pub art_scale: Option<f32>,
+    /// `--gpu-capture`: a PNG of every rendered raster.
+    pub capture: Option<PathBuf>,
+    /// `--gpu-fill-profile`: measure the sprite fill each frame and report it at exit.
+    pub fill_profile: bool,
+}
+
+impl Default for GpuSinkOptions {
+    fn default() -> GpuSinkOptions {
+        GpuSinkOptions {
+            target: GpuTargetKind::Headless,
+            bend_substep: None,
+            filter_bilinear: false,
+            art_scale: None,
+            capture: None,
+            fill_profile: false,
+        }
+    }
+}
+
 impl GpuSink {
+    /// Whether the wind's displacement lands between source texels by default on this
+    /// world.
+    ///
+    /// **On at `S >= 2`, off at `S = 1`.** At `S = 1` the two are the same picture — one
+    /// source texel is one raster pixel and there is nothing between two of them to land
+    /// on — so the question only arises at the ladder's higher rungs, and there Wrysk
+    /// asked for the smoother sway (`tachyon-screen-plan`, viewing session 1: "the
+    /// higher resolution deserves smoother sway than whole-texel steps"). The `S x S`
+    /// block rule is kept for everything except the bend's own displacement.
+    pub fn substep_default(scale: u32) -> bool {
+        scale >= 2
+    }
+
     /// Open the device, load the pack and build the renderer for this world.
     pub fn new(
         shape: WorldShape,
         art: &std::path::Path,
-        kind: GpuTargetKind,
-        bend_substep: bool,
-        filter_bilinear: bool,
-        art_scale: Option<f32>,
-        capture: Option<PathBuf>,
+        options: GpuSinkOptions,
     ) -> Result<GpuSink> {
+        let GpuSinkOptions {
+            target: kind,
+            bend_substep,
+            filter_bilinear,
+            art_scale,
+            capture,
+            fill_profile,
+        } = options;
         let Topology::Ring { w, h } = shape.topology else {
             bail!(
                 "--sink gpu draws one raster and a cube is five charts with seams; \
@@ -145,8 +206,10 @@ impl GpuSink {
         let gpu = Gpu::open(&[]).context("opening the Vulkan device for --sink gpu")?;
         eprintln!("cubarium: --sink gpu on {}", gpu.name);
         let mut renderer = Renderer::new(&gpu, &atlas, layout)?;
-        renderer.bend_substep = bend_substep;
+        renderer.bend_substep =
+            bend_substep.unwrap_or_else(|| GpuSink::substep_default(layout.scale));
         renderer.filter_bilinear = filter_bilinear;
+        renderer.fill_profile = fill_profile;
         // Default 1: what `art_present` does, whatever the world's S. `--gpu-art-scale`
         // is how the plan's "the sprite tile scales with S" gets looked at on the panel.
         renderer.art_scale = art_scale.unwrap_or(1.0);
@@ -195,6 +258,9 @@ impl GpuSink {
             dropped_frames: 0,
             frames: 0,
             gpu_ms: 0.0,
+            gpu_stages: [0.0; 3],
+            fill: [0.0; 3],
+            fill_layers: [0.0; cubarium_gpu::scene::LAYER_COUNT],
             build_ms: 0.0,
             present_ms: 0.0,
             capture,
@@ -235,6 +301,20 @@ impl GpuSink {
         let done = std::time::Instant::now();
         self.frames += 1;
         self.gpu_ms += ms;
+        if let Some(split) = self.renderer.gpu_split(&self.gpu) {
+            for (acc, stage) in self.gpu_stages.iter_mut().zip(split) {
+                *acc += stage;
+            }
+        }
+        if self.renderer.fill_profile {
+            let f = self.renderer.fill();
+            self.fill[0] += f.quad_px;
+            self.fill[1] += f.tile_px;
+            self.fill[2] += f.opaque_px;
+            for (acc, layer) in self.fill_layers.iter_mut().zip(f.per_layer) {
+                *acc += layer;
+            }
+        }
         self.build_ms += (built - started).as_secs_f64() * 1e3;
         self.present_ms += (done - built).as_secs_f64() * 1e3;
         if let Some(dir) = &self.capture {
@@ -1112,6 +1192,37 @@ impl FrameSink for GpuSink {
                     ),
                 }
             );
+            eprintln!(
+                "cubarium: --sink gpu GPU stages: uploads {:.2} ms, world raster {:.2} ms, \
+                 present {:.2} ms",
+                self.gpu_stages[0] / n,
+                self.gpu_stages[1] / n,
+                self.gpu_stages[2] / n,
+            );
+            if self.renderer.fill_profile {
+                let raster = f64::from(self.layout.w) * f64::from(self.layout.h);
+                eprintln!(
+                    "cubarium: --sink gpu fill: quads {:.2} Mpx/frame ({:.1}x the raster), \
+                     whole-tile quads would be {:.2} Mpx ({:.2}x), painted texels {:.2} Mpx \
+                     ({:.0}% of the quads)",
+                    self.fill[0] / n / 1.0e6,
+                    self.fill[0] / n / raster,
+                    self.fill[1] / n / 1.0e6,
+                    self.fill[1] / self.fill[0].max(1.0),
+                    self.fill[2] / n / 1.0e6,
+                    100.0 * self.fill[2] / self.fill[0].max(1.0),
+                );
+                let by_layer: Vec<String> = cubarium_gpu::scene::LAYERS
+                    .iter()
+                    .map(|l| {
+                        format!("{l:?} {:.2}", self.fill_layers[*l as usize] / n / 1.0e6)
+                    })
+                    .collect();
+                eprintln!(
+                    "cubarium: --sink gpu fill by layer, Mpx/frame: {}",
+                    by_layer.join(", ")
+                );
+            }
         }
         self.target.finish(&self.gpu, &mut self.renderer)
     }

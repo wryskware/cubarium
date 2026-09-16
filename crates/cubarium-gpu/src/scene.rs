@@ -116,7 +116,7 @@ pub struct Fields {
 ///
 /// Every field is in the units the CPU presenter uses, so the adapter is a
 /// transcription rather than a translation. This is the layout the vertex buffer
-/// takes verbatim — `#[repr(C)]` and `Pod`, 120 bytes, ten vertex attributes.
+/// takes verbatim — `#[repr(C)]` and `Pod`, 136 bytes, eleven vertex attributes.
 ///
 /// # Four frame slots, and why exactly four
 ///
@@ -188,6 +188,21 @@ pub struct SpriteInstance {
     pub scale: f32,
     /// Which texture the frames index: [`SOURCE_ATLAS`] or [`SOURCE_SCRATCH`].
     pub source: f32,
+    /// The union of the **opaque bounding boxes** ([`crate::atlas::FrameRect::bbox`]) of
+    /// the frames this instance carries weight in, in source texels, as
+    /// `(x0, y0, x1, y1)` half-open.
+    ///
+    /// The vertex shader builds the quad around this instead of around the whole tile.
+    /// A pack tile is 16×16 and most of it is clear, so the difference is the whole
+    /// fill story at `--gpu-art-scale 2`, where one tile covers `32·S` raster pixels a
+    /// side. It is a *drawn* quantity and not a hint: an instance whose box is wrong is
+    /// an instance that loses texels, which is why it is a union over the live frames
+    /// and never over the clip.
+    ///
+    /// A scratch frame (a rig part, rasterised fresh each frame and uploaded into the
+    /// scratch page) has no atlas measurement, so it takes the whole tile — the quad it
+    /// always had.
+    pub bbox: [f32; 4],
 }
 
 /// The `mask_floor` of an unmasked or purely axial stamp.
@@ -230,6 +245,7 @@ impl Default for SpriteInstance {
             shade_reference: 1.0,
             scale: 1.0,
             source: SOURCE_ATLAS,
+            bbox: [0.0, 0.0, 0.0, 0.0],
         }
     }
 }
@@ -270,9 +286,60 @@ impl SpriteInstance {
             }
             self.frames[slot] = [rect.x, rect.y];
             self.weights[slot] = w;
+            self.cover(rect.bbox);
             slot += 1;
         }
         true
+    }
+
+    /// Grow [`SpriteInstance::bbox`] to contain one more frame's opaque box.
+    ///
+    /// An empty box (`x1 == x0`) contributes nothing, so a frame that paints no texel
+    /// at all — a fully cleared vine strip row, a growth clip's first frame — does not
+    /// drag the quad back out to the tile's corner.
+    pub fn cover(&mut self, bbox: [u16; 4]) {
+        if bbox[2] <= bbox[0] || bbox[3] <= bbox[1] {
+            return;
+        }
+        let b = [
+            f32::from(bbox[0]),
+            f32::from(bbox[1]),
+            f32::from(bbox[2]),
+            f32::from(bbox[3]),
+        ];
+        if self.bbox[2] <= self.bbox[0] || self.bbox[3] <= self.bbox[1] {
+            self.bbox = b;
+        } else {
+            self.bbox = [
+                self.bbox[0].min(b[0]),
+                self.bbox[1].min(b[1]),
+                self.bbox[2].max(b[2]),
+                self.bbox[3].max(b[3]),
+            ];
+        }
+    }
+
+    /// The quad this instance rasterises, in **source texels**: `(width, height)` of the
+    /// box `sprite.vert` builds, including the bend's reach and the one texel of filter
+    /// support on each side. The fill profile's numerator.
+    ///
+    /// It does not model the mask clamp the vertex shader also applies, nor the
+    /// `--gpu-filter bilinear` mode's wider pad, so it is the nearest sampler's quad —
+    /// which is the one the panel draws.
+    pub fn quad_texels(&self) -> (f32, f32) {
+        let (x0, y0, x1, y1) = if self.bbox[2] > self.bbox[0] && self.bbox[3] > self.bbox[1] {
+            (self.bbox[0], self.bbox[1], self.bbox[2], self.bbox[3])
+        } else {
+            (0.0, 0.0, f32::from(self.size[0]), f32::from(self.size[1]))
+        };
+        // `sprite.vert`'s `reach`, without its sub-pixel slack: a stamp with no bend or
+        // no bend length pads by nothing, and the rounded bend by half a texel more.
+        let pad = if self.bend[0] != 0.0 && self.bend[3] > 0.0 {
+            self.bend[0].abs() + 0.5
+        } else {
+            0.0
+        };
+        (((x1 - x0) + 2.0 * pad).max(0.0), (y1 - y0).max(0.0))
     }
 
     /// How many frame slots carry weight.
@@ -431,7 +498,34 @@ mod tests {
 
     #[test]
     fn the_instance_is_a_plain_flat_record_the_vertex_buffer_can_take() {
-        assert_eq!(std::mem::size_of::<SpriteInstance>(), 120);
+        // 136 bytes: the 120 GS-1b measured plus GS-1c's `bbox`, the opaque box the
+        // vertex shader builds its quad around. `render.rs`'s attribute table has the
+        // matching `attribute(10, .., 120)` and this assertion is what catches a field
+        // inserted above it.
+        assert_eq!(std::mem::size_of::<SpriteInstance>(), 136);
+        assert_eq!(std::mem::offset_of!(SpriteInstance, bbox), 120);
         let _: &[u8] = bytemuck::bytes_of(&SpriteInstance::default());
+    }
+
+    /// The quad is the opaque box, not the tile: a pack tile is mostly clear and the
+    /// difference is the whole fill story at `--gpu-art-scale 2`. What is pinned here is
+    /// that the union only ever grows, that an empty box contributes nothing, and that
+    /// an instance with no box at all falls back to the whole tile — which is the quad
+    /// the shader drew before the box existed.
+    #[test]
+    fn the_opaque_box_is_the_union_of_the_live_frames_and_falls_back_to_the_tile() {
+        let mut i = SpriteInstance { size: [16, 16], ..SpriteInstance::empty() };
+        assert_eq!(i.quad_texels(), (16.0, 16.0), "no box and no bend: the whole tile");
+        i.cover([0, 0, 0, 0]);
+        assert_eq!(i.quad_texels(), (16.0, 16.0), "an empty box is not a box");
+        i.cover([5, 3, 11, 14]);
+        assert_eq!(i.bbox, [5.0, 3.0, 11.0, 14.0]);
+        assert_eq!(i.quad_texels(), (6.0, 11.0));
+        i.cover([6, 2, 9, 12]);
+        assert_eq!(i.bbox, [5.0, 2.0, 11.0, 14.0], "the union grows both ways");
+        i.bend = [2.5, 0.0, 0.0, 13.0];
+        assert_eq!(i.quad_texels(), (12.0, 12.0), "the bend's reach pads x only");
+        i.bend = [2.5, 0.0, 0.0, 0.0];
+        assert_eq!(i.quad_texels(), (6.0, 12.0), "a bend with no length displaces nothing");
     }
 }

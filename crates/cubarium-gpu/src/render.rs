@@ -42,6 +42,10 @@ const PRESENT_FRAG: &[u8] = include_bytes!("../shaders/present.frag.spv");
 /// The side of the per-frame scratch page, in texels.
 pub const SCRATCH_SIDE: u32 = 256;
 
+/// Timestamp slots per frame: top of pipe, after the uploads, after the world raster
+/// pass, bottom of pipe. See [`Renderer::gpu_split`].
+const QUERY_SLOTS: u32 = 4;
+
 /// The world raster's format. `_SRGB` is the whole of the encode: the attachment
 /// converts on write and blending happens in linear light, which is what the CPU
 /// canvas does by hand and then pays 1.37 ms of `powf` for.
@@ -83,6 +87,30 @@ impl PresentTransform {
         };
         [col0[0], col0[1], col1[0], col1[1], off[0], off[1], if self.encode_srgb { 1.0 } else { 0.0 }, 0.0]
     }
+}
+
+/// Where a frame's sprite fill goes: what the quads cover against what the art in them
+/// can actually paint. All three are **raster pixels summed over every instance**, so
+/// they count overdraw rather than area of the image.
+///
+/// Measured only when [`Renderer::fill_profile`] is set (`--gpu-fill-profile`): it is a
+/// walk over the frame's instances with a hash lookup each, which is the adapter's own
+/// scarce resource and has no business on the shipped path.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FillProfile {
+    /// What the quads this renderer builds rasterise.
+    pub quad_px: f64,
+    /// What a quad around the **whole tile** would have rasterised — the fill before
+    /// the opaque box, and the ratio worth quoting.
+    pub tile_px: f64,
+    /// What the instances' **painted** source texels cover: `α > 0` texels only, at the
+    /// same scale. The floor no quad can go below.
+    pub opaque_px: f64,
+    /// Instances counted.
+    pub instances: usize,
+    /// [`FillProfile::quad_px`] split by [`Layer`], in `LAYERS` order: where the fill
+    /// actually goes, which is the question a budget is answered with.
+    pub per_layer: [f64; crate::scene::LAYER_COUNT],
 }
 
 /// How long one frame took, as the GPU and the CPU each saw it.
@@ -132,6 +160,15 @@ pub struct Renderer {
     /// presenter's rule and the reference the fidelity test compares against; `S` is the
     /// plan's, and is what the synthetic scene used.
     pub art_scale: f32,
+    /// Measure [`FillProfile`] each frame (`--gpu-fill-profile`). Off by default.
+    pub fill_profile: bool,
+    /// The last recorded frame's profile; all zeroes while [`Renderer::fill_profile`]
+    /// is off.
+    fill: FillProfile,
+    /// Frame origin in atlas texels → how many of that frame's texels paint. Built once
+    /// from the atlas, so the profile costs a lookup rather than a second pass over the
+    /// pack's pixels.
+    opaque_by_origin: HashMap<[u16; 2], u32>,
     // --- the world raster ---
     raster_image: vk::Image,
     raster_memory: vk::DeviceMemory,
@@ -197,7 +234,7 @@ impl Renderer {
             d.create_query_pool(
                 &vk::QueryPoolCreateInfo::default()
                     .query_type(vk::QueryType::TIMESTAMP)
-                    .query_count(2),
+                    .query_count(QUERY_SLOTS),
                 None,
             )
         }?;
@@ -447,6 +484,13 @@ impl Renderer {
             bend_substep: false,
             filter_bilinear: false,
             art_scale: 1.0,
+            fill_profile: false,
+            fill: FillProfile::default(),
+            opaque_by_origin: atlas
+                .frames
+                .iter()
+                .map(|f| ([f.x, f.y], f.opaque))
+                .collect(),
             raster_image,
             raster_memory,
             raster_view,
@@ -602,21 +646,29 @@ impl Renderer {
         )]);
 
         // Instances, concatenated in draw order; `first_instance` then selects a layer.
+        // Written layer by layer straight into the mapped buffer: a scratch `Vec` here
+        // was an allocation and a second 530 KB copy on every frame, and GS-1b's report
+        // already names per-frame allocation as the adapter's largest single cost.
         let mut offsets = [(0u32, 0u32); crate::scene::LAYER_COUNT];
-        let mut flat: Vec<SpriteInstance> = Vec::with_capacity(scene.instance_count());
+        let mut total = 0usize;
         for layer in LAYERS {
             let list = &scene.layers[layer as usize];
-            offsets[layer as usize] = (flat.len() as u32, list.len() as u32);
-            flat.extend_from_slice(list);
+            offsets[layer as usize] = (total as u32, list.len() as u32);
+            total += list.len();
         }
-        if flat.len() > self.instance_capacity {
+        if total > self.instance_capacity {
             bail!(
-                "{} instances exceeds the renderer's capacity of {}",
-                flat.len(),
+                "{total} instances exceeds the renderer's capacity of {}",
                 self.instance_capacity
             );
         }
-        self.instances.write(&flat);
+        for layer in LAYERS {
+            self.instances
+                .write_at(offsets[layer as usize].0 as usize, &scene.layers[layer as usize]);
+        }
+        if self.fill_profile {
+            self.fill = self.profile(scene);
+        }
 
         let target = target
             .map(|(image, extent, format, layout, xform)| {
@@ -637,7 +689,7 @@ impl Renderer {
                 &vk::CommandBufferBeginInfo::default()
                     .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
             )?;
-            d.cmd_reset_query_pool(cb, self.queries, 0, 2);
+            d.cmd_reset_query_pool(cb, self.queries, 0, QUERY_SLOTS);
             d.cmd_write_timestamp(cb, vk::PipelineStageFlags::TOP_OF_PIPE, self.queries, 0);
 
             if upload {
@@ -693,6 +745,7 @@ impl Renderer {
             }
 
             // --- the world raster ---
+            d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, 1);
             begin(d, cb, self.scene_pass, self.raster_framebuffer, self.layout.w, self.layout.h);
             d.cmd_bind_descriptor_sets(
                 cb,
@@ -721,6 +774,7 @@ impl Renderer {
             sprites(Layer::Rain);
             sprites(Layer::Bodies);
             d.cmd_end_render_pass(cb);
+            d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, 2);
 
             // --- the panel ---
             if let Some((image, extent, xform, pass, pipeline)) = target {
@@ -745,25 +799,84 @@ impl Renderer {
                 d.cmd_end_render_pass(cb);
             }
 
-            d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, 1);
+            d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, 3);
             d.end_command_buffer(cb)?;
         }
-        Ok(flat.len())
+        Ok(total)
     }
 
-    /// Milliseconds between this frame's two timestamps, or `NaN` if the queries are
-    /// not ready.
+    /// The last recorded frame's fill profile; zeroes unless [`Renderer::fill_profile`]
+    /// is on.
+    pub fn fill(&self) -> FillProfile {
+        self.fill
+    }
+
+    /// [`FillProfile`] of one frame's instances.
+    ///
+    /// The three numbers are the same sum with a different area each: the quad
+    /// `sprite.vert` builds, the quad it would have built around the whole tile, and
+    /// the instance's painted texels. A stamp's own `scale` (a juvenile's 0.7, a rig
+    /// part's) multiplies the renderer's `S · art_scale`, exactly as the shader does,
+    /// so the areas are raster pixels and comparable across rungs.
+    fn profile(&self, scene: &Scene) -> FillProfile {
+        let world = self.layout.scale as f32 * self.art_scale;
+        let mut p = FillProfile { instances: scene.instance_count(), ..FillProfile::default() };
+        for layer in LAYERS {
+            for i in &scene.layers[layer as usize] {
+                let k = f64::from((world * i.scale.max(1e-3)).powi(2));
+                let (qw, qh) = i.quad_texels();
+                let quad = f64::from(qw * qh) * k;
+                p.quad_px += quad;
+                p.per_layer[layer as usize] += quad;
+                // The quad before the opaque box: the whole tile, with GS-1b's one texel
+                // of pad on each axis plus the bend's reach.
+                let pad = f64::from(i.bend[0].abs() + 1.0);
+                p.tile_px += (f64::from(i.size[0]) + 2.0 * pad) * (f64::from(i.size[1]) + 2.0) * k;
+                let opaque: u32 = i
+                    .frames
+                    .iter()
+                    .zip(i.weights)
+                    .filter(|(_, w)| *w > 0.0)
+                    .filter_map(|(o, _)| self.opaque_by_origin.get(o).copied())
+                    .max()
+                    .unwrap_or(0);
+                p.opaque_px += f64::from(opaque) * k;
+            }
+        }
+        p
+    }
+
+    /// Milliseconds between this frame's first and last timestamps, or `NaN` if the
+    /// queries are not ready.
     pub fn gpu_ms(&self, gpu: &Gpu) -> f64 {
-        let mut ts = [0u64; 2];
+        self.gpu_split(gpu).map_or(f64::NAN, |s| s[0] + s[1] + s[2])
+    }
+
+    /// The frame's three GPU stages in milliseconds — **uploads**, the **world raster**
+    /// pass and the **present** pass — or `None` if the queries are not ready.
+    ///
+    /// The split is between render passes, not inside one. This is a tiler: everything
+    /// recorded inside a render pass is deferred to that pass's binning and resolve, so
+    /// a timestamp between two draws inside the raster pass would measure nothing.
+    /// Between passes it is exact, and it is the split that matters here — the present
+    /// pass writes the panel's whole 1080x1920 and is fixed, while the raster pass is
+    /// where the sprite fill lives and is what `--gpu-art-scale` multiplies.
+    pub fn gpu_split(&self, gpu: &Gpu) -> Option<[f64; 3]> {
+        let mut ts = [0u64; QUERY_SLOTS as usize];
         if unsafe {
             gpu.device
                 .get_query_pool_results(self.queries, 0, &mut ts, vk::QueryResultFlags::TYPE_64)
         }
         .is_err()
         {
-            return f64::NAN;
+            return None;
         }
-        ts[1].wrapping_sub(ts[0]) as f64 * f64::from(gpu.timestamp_period) / 1.0e6
+        let ns = f64::from(gpu.timestamp_period) / 1.0e6;
+        Some([
+            ts[1].wrapping_sub(ts[0]) as f64 * ns,
+            ts[2].wrapping_sub(ts[1]) as f64 * ns,
+            ts[3].wrapping_sub(ts[2]) as f64 * ns,
+        ])
     }
 
     /// Copy the world raster into a host buffer, `w · 4` bytes per row. For the golden
@@ -1044,6 +1157,7 @@ fn sprite_pipeline(
         attribute(7, F::R32G32B32A32_SFLOAT, 72),       // mask floor, reveal, flags, opacity
         attribute(8, F::R32G32B32A32_SFLOAT, 88),       // tone colour rgb + tone mix
         attribute(9, F::R32G32B32A32_SFLOAT, 104),      // shade floor, reference, scale, source
+        attribute(10, F::R32G32B32A32_SFLOAT, 120),     // the opaque box, x0 y0 x1 y1
     ];
     let vi = vk::PipelineVertexInputStateCreateInfo::default()
         .vertex_binding_descriptions(&bindings)

@@ -281,11 +281,25 @@ pub struct Run {
     /// equal to the world scale. The two have not been reconciled; this shows both.
     #[arg(long)]
     pub gpu_art_scale: Option<f32>,
-    /// Let the wind's displacement land between source texels at `--world-scale` 2 and
-    /// above, instead of rounding it to a whole one. Off by default: a whole-texel bend
-    /// is what keeps every sprite texel on an exact S x S block. A viewing-session knob.
-    #[arg(long, default_value_t = false)]
+    /// Let the wind's displacement land between source texels instead of rounding it to
+    /// a whole one.
+    ///
+    /// **On by default on a ring at `--world-scale` 2 and above**, where Wrysk asked for
+    /// a smoother sway than whole-texel steps, and where the bend budgets a ring's
+    /// topology admits are wide enough for a whole texel to be a jump. At `S = 1` the two
+    /// are the same picture. `--no-gpu-bend-substep` turns it off; naming either flag
+    /// overrides the default.
+    #[arg(long, default_value_t = false, conflicts_with = "no_gpu_bend_substep")]
     pub gpu_bend_substep: bool,
+    /// Round the wind's displacement to a whole source texel, whatever the world scale:
+    /// the `S x S` block rule applied to the bend as well. See `--gpu-bend-substep`.
+    #[arg(long, default_value_t = false)]
+    pub no_gpu_bend_substep: bool,
+    /// Measure where `--sink gpu`'s sprite fill goes — quad area against the art that
+    /// can actually paint in it — and print it at exit. A diagnostic: it walks the
+    /// frame's instances on the CPU, which is the adapter's own scarce resource.
+    #[arg(long, default_value_t = false)]
+    pub gpu_fill_profile: bool,
     /// Write a PNG of every `--sink gpu` frame into this directory. Captures and the
     /// fidelity comparison; not for a run anyone is watching.
     #[arg(long)]
@@ -365,6 +379,17 @@ fn check_world_scale(topology: Option<Topology>, world_scale: Option<f64>) -> an
 }
 
 impl Run {
+    /// What the two bend-substep flags say, or `None` for "the sink's own default for
+    /// this world" (`GpuSink::substep_default`). Naming neither leaves the choice where
+    /// it belongs: with the world's scale, which the command line does not always know.
+    pub fn bend_substep(&self) -> Option<bool> {
+        match (self.gpu_bend_substep, self.no_gpu_bend_substep) {
+            (true, _) => Some(true),
+            (_, true) => Some(false),
+            _ => None,
+        }
+    }
+
     /// The topology this run asks a **new** world to have, if it named one.
     pub fn topology(&self) -> Option<Topology> {
         self.topology.map(|t| t.0)

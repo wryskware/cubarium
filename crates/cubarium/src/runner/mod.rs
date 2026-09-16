@@ -403,11 +403,14 @@ fn open_sink(
             Box::new(crate::sink::GpuSink::new(
                 shape,
                 art,
-                run.gpu_target.unwrap_or_else(crate::sink::GpuTargetKind::detect),
-                run.gpu_bend_substep,
-                run.gpu_filter == crate::cli::GpuFilterArg::Bilinear,
-                run.gpu_art_scale,
-                run.gpu_capture.clone(),
+                crate::sink::GpuSinkOptions {
+                    target: run.gpu_target.unwrap_or_else(crate::sink::GpuTargetKind::detect),
+                    bend_substep: run.bend_substep(),
+                    filter_bilinear: run.gpu_filter == crate::cli::GpuFilterArg::Bilinear,
+                    art_scale: run.gpu_art_scale,
+                    capture: run.gpu_capture.clone(),
+                    fill_profile: run.gpu_fill_profile,
+                },
             )?)
         }
     };
@@ -682,6 +685,16 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
         shape,
     )?;
     let headless = sink.is_none();
+    // Whether anything will ever read *this* presenter's state.
+    //
+    // `--sink gpu` carries its own `ArtPresenter` and is handed the same `RenderView` at
+    // the same two instants (`observe_world`, `observe_view`), so the run's own presenter
+    // would be observed every tick and drawn never. `ArtPresenter::observe` on a 3,600-cell
+    // ring is the most expensive thing in a tick — measured on the board at ~8.8 ms, which
+    // at 20 Hz is ~2.9 ms of every 60 Hz frame — and paying it twice cost the panel about
+    // 10 fps at `--gpu-art-scale 2`. `wants_pixels` is a property of the sink's kind and
+    // not of its connections, so this is decided once here rather than guessed per tick.
+    let presenting = sink.as_ref().is_some_and(|s| s.wants_pixels());
     let pace = Pace::of(run.speed);
 
     if let Some(log) = fields.as_mut()
@@ -744,9 +757,11 @@ pub fn run_world_until(run: &Run, stop: &AtomicBool) -> Result<RunOutcome> {
         if !headless {
             // Trails are simulated history: they are fed per tick, not per frame.
             let published = world.render_view();
-            presenter.observe(&published);
-            // The owning world's hunter membership, by full id (empty without a trial).
-            presenter.observe_hunters(&published, &world.hunter_view(), &hunted)?;
+            if presenting {
+                presenter.observe(&published);
+                // The owning world's hunter membership, by full id (empty without a trial).
+                presenter.observe_hunters(&published, &world.hunter_view(), &hunted)?;
+            }
             // A sink that draws the world itself gets the same two things at the same
             // instant, one way only.
             if let Some(s) = sink.as_mut() {

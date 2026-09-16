@@ -15,7 +15,7 @@ use cubarium_core::view::RenderView;
 use cubarium_surface::{Scale, Topology};
 
 pub use fanout::FanOutSink;
-pub use gpu::{GpuSink, GpuTargetKind};
+pub use gpu::{GpuSink, GpuSinkOptions, GpuTargetKind};
 pub use png::PngSink;
 pub use preview::PreviewSink;
 pub use shim::ShimSink;

@@ -271,10 +271,20 @@ pub struct HostBuffer {
 impl HostBuffer {
     /// Copy a `Pod` slice into the buffer, truncated at its size.
     pub fn write<T: bytemuck::Pod>(&self, data: &[T]) {
+        self.write_at(0, data);
+    }
+
+    /// Copy a `Pod` slice in at element `first`, truncated at the buffer's size.
+    ///
+    /// This is how the instance buffer is filled: one call per layer, straight from the
+    /// scene's own vectors, so a frame's four thousand instances are copied **once**
+    /// rather than concatenated into a scratch `Vec` and copied again.
+    pub fn write_at<T: bytemuck::Pod>(&self, first: usize, data: &[T]) {
+        let offset = first * std::mem::size_of::<T>();
         let bytes = bytemuck::cast_slice(data);
-        let n = bytes.len().min(self.size as usize);
+        let n = bytes.len().min((self.size as usize).saturating_sub(offset));
         if n > 0 {
-            unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), self.ptr, n) };
+            unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), self.ptr.add(offset), n) };
         }
     }
 

@@ -116,7 +116,18 @@ fn both_with(
     let world = ring_world(w, h, scale, ticks);
     let view = world.render_view();
     let shape = WorldShape::new(view.topology, view.scale);
-    let mut sink = match GpuSink::new(shape, &art(), GpuTargetKind::Headless, false, bilinear, None, None) {
+    // `bend_substep: Some(false)` explicitly, not the sink's default. GS-1c made the
+    // sub-texel bend the default on a ring at S >= 2 because Wrysk asked for a smoother
+    // sway on the panel; this comparison is the *adapter's* evidence and its numbers are
+    // quoted across four reports, so it keeps naming the whole-texel bend it was
+    // measured with. The substep's own cost against the CPU is measured separately.
+    let options = cubarium::sink::GpuSinkOptions {
+        target: GpuTargetKind::Headless,
+        bend_substep: Some(false),
+        filter_bilinear: bilinear,
+        ..Default::default()
+    };
+    let mut sink = match GpuSink::new(shape, &art(), options) {
         Ok(sink) => sink,
         Err(e) => {
             eprintln!("no GPU here ({e:#}); the fidelity comparison was not run");

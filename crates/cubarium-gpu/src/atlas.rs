@@ -28,6 +28,20 @@ pub struct FrameRect {
     /// (`art_present::draw_with_fruit`), so it has to be measured from the art rather
     /// than assumed to be half the tile.
     pub extent: f32,
+    /// The frame's **opaque bounding box** in its own source texels: the half-open
+    /// `[x0, x1) × [y0, y1)` of columns and rows that carry any texel with `α > 0`,
+    /// `(0, 0, 0, 0)` for a frame that paints nothing at all.
+    ///
+    /// This is the fill lever. A pack tile is 16×16 and 82 % of the atlas is clear, so
+    /// a quad built around the whole tile rasterises several fragments for every one
+    /// that can paint; `sprite.vert` builds its quad around this box instead, plus the
+    /// bend's reach and one texel of filter support on each side — which is what makes
+    /// the tighter quad a *superset* of the fragments that ever painted.
+    pub bbox: [u16; 4],
+    /// How many texels of the frame carry `α > 0`. Reported, not drawn: it is the
+    /// numerator of the fill profile in `sink/gpu.rs` — the art that can actually land
+    /// in a quad, against the quad's own area.
+    pub opaque: u32,
 }
 
 /// A baked animation: a contiguous run of frames plus the clock `pack.json` gives it.
@@ -322,7 +336,10 @@ impl Atlas {
     }
 
     /// Append `count` frames of `w × h` laid left to right from `(x, y)`, returning
-    /// the first one's index. Each frame's extent is measured from its own alpha.
+    /// the first one's index. Each frame's extent, opaque bounding box and opaque texel
+    /// count are measured from its own alpha, once, here — `copy_derived` calls this
+    /// after it has written its bytes, so a derived vine strip is measured from what it
+    /// actually paints rather than from the clip it was cut out of.
     fn push_frames(&mut self, x: u32, y: u32, w: u16, count: u32, h: u16) -> u32 {
         let first = self.frames.len() as u32;
         for i in 0..count {
@@ -332,21 +349,28 @@ impl Atlas {
                 w,
                 h,
                 extent: 0.0,
+                bbox: [0; 4],
+                opaque: 0,
             };
-            let extent = self.measure_extent(rect);
-            self.frames.push(FrameRect { extent, ..rect });
+            let (extent, bbox, opaque) = self.measure(rect);
+            self.frames.push(FrameRect { extent, bbox, opaque, ..rect });
         }
         first
     }
 
-    /// `Sprite::from_rgba`'s extent, on the atlas bytes: over every texel with `α > 0`,
-    /// the largest `hypot(x + 0.5 − pivot.x, y + 0.5 − pivot.y) + TEXEL_SUPPORT`, with
-    /// the pivot at the tile's centre and `TEXEL_SUPPORT = 0.5 · √2` as
-    /// `cubarium_render::sprite` defines it.
-    fn measure_extent(&self, rect: FrameRect) -> f32 {
+    /// One pass over a frame's alpha: its extent, its opaque bounding box and how many
+    /// texels it paints.
+    ///
+    /// The extent is `Sprite::from_rgba`'s: over every texel with `α > 0`, the largest
+    /// `hypot(x + 0.5 − pivot.x, y + 0.5 − pivot.y) + TEXEL_SUPPORT`, with the pivot at
+    /// the tile's centre and `TEXEL_SUPPORT = 0.5 · √2` as `cubarium_render::sprite`
+    /// defines it. The box is the half-open span of painted columns and rows.
+    fn measure(&self, rect: FrameRect) -> (f32, [u16; 4], u32) {
         const TEXEL_SUPPORT: f64 = std::f64::consts::SQRT_2 / 2.0;
         let (px, py) = (f64::from(rect.w) / 2.0, f64::from(rect.h) / 2.0);
         let mut extent = 0.0f64;
+        let (mut x0, mut y0, mut x1, mut y1) = (u32::from(rect.w), u32::from(rect.h), 0u32, 0u32);
+        let mut opaque = 0u32;
         for ty in 0..u32::from(rect.h) {
             for tx in 0..u32::from(rect.w) {
                 let i = (((u32::from(rect.y) + ty) * self.width + u32::from(rect.x) + tx) * 4 + 3)
@@ -354,12 +378,22 @@ impl Atlas {
                 if self.rgba.get(i).copied().unwrap_or(0) == 0 {
                     continue;
                 }
+                opaque += 1;
+                x0 = x0.min(tx);
+                y0 = y0.min(ty);
+                x1 = x1.max(tx + 1);
+                y1 = y1.max(ty + 1);
                 let dx = f64::from(tx) + 0.5 - px;
                 let dy = f64::from(ty) + 0.5 - py;
                 extent = extent.max(dx.hypot(dy) + TEXEL_SUPPORT);
             }
         }
-        extent as f32
+        let bbox = if opaque == 0 {
+            [0; 4]
+        } else {
+            [x0 as u16, y0 as u16, x1 as u16, y1 as u16]
+        };
+        (extent as f32, bbox, opaque)
     }
 
     /// Copy a clip's frames to `(x, y)`, clearing whole rows or keeping only a range of

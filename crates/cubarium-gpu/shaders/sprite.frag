@@ -98,16 +98,15 @@ void main() {
         discard;
     }
 
-    bool fromScratch = vShade.w > 0.5;
-    vec4 rgba = frameAt(vFrames01.xy, src, tile, vWeights.x, fromScratch)
-              + frameAt(vFrames01.zw, src, tile, vWeights.y, fromScratch)
-              + frameAt(vFrames23.xy, src, tile, vWeights.z, fromScratch)
-              + frameAt(vFrames23.zw, src, tile, vWeights.w, fromScratch);
-
     // `Mask`, in the sprite's own material coordinates so a reveal covers the same
     // material however the wind displaces it. Axial and strip read the row; radial reads
     // the distance from the pivot, which is what a canopy plant opening from its centre
     // needs -- and a ring has canopy cells, unlike the cube where only Top did.
+    //
+    // It is evaluated **before** the frames, because it depends only on `src` and the
+    // instance: a fragment the mask rejects costs no `texelFetch` at all. A tall
+    // column's trunk strip reveals four rows of a sixteen-row tile, so this is most of
+    // the Tall layer's sampling.
     float cover;
     if (vMask.z > 0.5) {
         float r = length(src - pivot);
@@ -116,7 +115,14 @@ void main() {
         float h = tile.y - src.y;
         cover = unit(vMask.y - h + 0.5) * unit(h - vMask.x + 0.5) * unit(vMask.y - max(vMask.x, 0.0));
     }
-    if (cover <= 0.0) { discard; }
+    float opacity = vMask.w;
+    if (cover <= 0.0 || opacity <= 0.0) { discard; }
+
+    bool fromScratch = vShade.w > 0.5;
+    vec4 rgba = frameAt(vFrames01.xy, src, tile, vWeights.x, fromScratch)
+              + frameAt(vFrames01.zw, src, tile, vWeights.y, fromScratch)
+              + frameAt(vFrames23.xy, src, tile, vWeights.z, fromScratch)
+              + frameAt(vFrames23.zw, src, tile, vWeights.w, fromScratch);
     rgba *= cover;
 
     // `Tone`: travel toward one colour at the same alpha, carrying the art's own light
@@ -128,7 +134,6 @@ void main() {
         rgba.rgb += (vTone.rgb * s - rgba.rgb) * vTone.w;
     }
 
-    float opacity = vMask.w;
     if (rgba.a * opacity <= 0.0) { discard; }
     outColour = rgba * opacity;
 }

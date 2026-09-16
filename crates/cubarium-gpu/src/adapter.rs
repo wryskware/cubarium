@@ -160,6 +160,10 @@ impl Stamp {
                 opacity: self.opacity,
                 scale: self.scale,
                 source: SOURCE_SCRATCH,
+                // A rig part is rasterised fresh every frame into the scratch page, so
+                // there is no measured box for it: the quad is the whole tile, exactly
+                // as it was before the box existed.
+                bbox: [0.0, 0.0, f32::from(frame.size[0]), f32::from(frame.size[1])],
                 ..SpriteInstance::empty()
             };
             self.apply(&mut instance);
@@ -227,6 +231,10 @@ impl Stamp {
             }
             instance.frames[slot] = [rect.x, rect.y];
             instance.weights[slot] = weight * renormalise;
+            // The quad is built around the union of the *kept* frames' opaque boxes. A
+            // dropped frame is a frame with no weight, so it cannot paint and does not
+            // widen the quad.
+            instance.cover(rect.bbox);
         }
         self.apply(&mut instance);
         (instance, dropped)
