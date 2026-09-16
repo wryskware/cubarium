@@ -45,90 +45,10 @@ impl World {
         let cap = config.capacity.max_organisms;
         let mut organisms = Slots::with_capacity(cap as usize);
         let mut external_material_in = 0.0;
-        // The founder roster: `(draw key, kind)` per founder. With kinds, the kind index is
-        // folded into the high bits of the key so each kind's draws are their own stream and
-        // a seed stays reproducible when another kind's count changes; without kinds the
-        // v1 path keeps `key = index`.
-        let roster: Vec<(u64, Option<&FounderKind>)> = if config.founders.kinds.is_empty() {
-            (0..u64::from(config.founders.count))
-                .map(|i| (i, None))
-                .collect()
-        } else {
-            config
-                .founders
-                .kinds
-                .iter()
-                .enumerate()
-                .flat_map(|(k, kind)| {
-                    (0..u64::from(kind.count)).map(move |j| (((k as u64) << 32) | j, Some(kind)))
-                })
-                .collect()
-        };
-        for (index, kind) in roster.into_iter().take(cap as usize) {
-            let seed = config.seed;
-            let face_index = (unit(seed, Stream::Founders, index, 0) * 5.0).floor();
-            let face = Face::from_index(face_index as u8).unwrap_or(Face::Front);
-            let u = unit(seed, Stream::Founders, index, 1) * FACE_EXTENT;
-            let v = unit(seed, Stream::Founders, index, 2) * FACE_EXTENT;
-            let heading = Vec2::from_screen_angle(unit(seed, Stream::Founders, index, 3) * TAU);
-            let hue = unit(seed, Stream::Founders, index, 4) as f32;
-
-            let mut genome =
-                Genome::founder(kind.and_then(|k| k.hue).unwrap_or(hue), &config.drives);
-            // Founders sense at the configured radius; the genome bounds still apply.
-            genome.sense = config.organism.sense_radius as f32;
-            if let Some(k) = kind {
-                // A kind fixes the loci it names; the rest keep the v1 founder values. The
-                // rig follows the kind, or the hue tercile when the kind leaves it open.
-                if let Some(x) = k.diet {
-                    genome.diet = x;
-                }
-                if let Some(x) = k.depth {
-                    genome.depth = x;
-                }
-                if let Some(x) = k.speed {
-                    genome.speed = x;
-                }
-                if let Some(x) = k.size {
-                    genome.size = x;
-                }
-                if let Some(x) = k.metabolism {
-                    genome.metabolism = x;
-                }
-                if let Some(x) = k.swim {
-                    genome.swim = x;
-                }
-                if let Some(x) = k.form {
-                    genome.form = x;
-                } else {
-                    genome.form = crate::genome::form_of_hue(genome.hue);
-                }
-            }
-            genome.clamp();
-            let phenotype = decode(&genome, &config.organism);
-            let structure = phenotype.structure_adult;
-            let reserve = config.founders.initial_reserve_fraction * phenotype.reserve_max;
-            let energy = config.founders.initial_energy_fraction * phenotype.energy_max;
-            external_material_in += structure + reserve;
-            organisms.insert(Organism {
-                pos: SurfacePoint::new(face, u, v).canonicalize(),
-                heading,
-                ou: Vec2::ZERO,
-                structure,
-                reserve,
-                energy,
-                born_tick: 0,
-                hunger_memory: (1.0 - reserve / phenotype.reserve_max).clamp(0.0, 1.0),
-                mode: Mode::Resting,
-                escrow: None,
-                births: 0,
-                genome,
-                phenotype,
-                parent: None,
-                origin: Origin::Founder,
-                turn_counter: Counter::default(),
-                fed_this_tick: false,
-            });
+        for (index, kind) in roster_keys(&config).into_iter().take(cap as usize) {
+            let founder = founder_body(&config, index, kind, 0);
+            external_material_in += founder.structure + founder.reserve;
+            organisms.insert(founder);
         }
 
         // The residual is measured against the field material present at creation; the
@@ -202,6 +122,63 @@ impl World {
         Ok(World::assemble(state, habitat, initial_material))
     }
 
+    /// Perform the **ordinary founding** — the same roster [`World::new`] would place for this
+    /// world's own config and seed — on an existing world, at whatever tick it has reached.
+    ///
+    /// This is the door workstream M's option A needs (`design/handoffs/
+    /// ecology-v1-precondition-opus-2026-09-16.md`, deliverable 1): advance the §4 plant
+    /// dynamics with no animals for a declared number of ticks, then found the animals into
+    /// that grown field. `World::new` can only found at creation; the two named-genome doors
+    /// place a *training* body (`TRAINING_START_RESERVE`, `Mode::Seeking`) rather than a
+    /// founder with `founders.initial_reserve_fraction` and `Mode::Resting`, so neither of
+    /// them can put the ordinary cohort into a world that has already run.
+    ///
+    /// The bodies are built by the same private helper [`World::new`] uses, so the two cannot
+    /// drift: same `(seed, Stream::Founders, index)` draws, same kind overrides, same adult
+    /// stores, same `Origin::Founder`, and `structure + reserve` per founder booked into
+    /// `external_material_in` exactly as the constructor books it. The one thing that follows
+    /// the clock is `born_tick`, which is the world's current tick: a founder placed at tick
+    /// 96,000 was not born at tick 0.
+    ///
+    /// The roster is read from **this world's** `config.founders`. A caller that emptied it to
+    /// run plants-only must write it back before founding — which is also what makes the
+    /// founded world's config, and therefore its `state_hash`, the ordinary one. Founding into
+    /// an untouched tick-0 world reproduces [`World::new`] bit for bit
+    /// (`crates/cubarium-core/tests/found_roster.rs`).
+    ///
+    /// Refuses, by name and without touching the world, when animals are already present (a
+    /// second roster would double the cohort and double-book its material) and when the config
+    /// declares no roster at all (a silent empty founding is the exact failure a cleared-and-
+    /// not-restored config would produce).
+    pub fn found_roster(&mut self) -> Result<Vec<crate::ids::OrganismId>, String> {
+        if !self.state.organisms.is_empty() {
+            return Err(format!(
+                "cannot found the roster: this world already holds {} organisms; the ordinary \
+                 founding places a cohort into an empty world",
+                self.state.organisms.len()
+            ));
+        }
+        let config = self.state.config.clone();
+        let keys = roster_keys(&config);
+        if keys.is_empty() {
+            return Err(
+                "cannot found the roster: this world's config declares no founders (no kinds \
+                 and a zero count), so there is no roster to found"
+                    .to_string(),
+            );
+        }
+        let cap = config.capacity.max_organisms as usize;
+        let tick = self.state.tick;
+        let mut ids = Vec::with_capacity(keys.len().min(cap));
+        for (index, kind) in keys.into_iter().take(cap) {
+            let founder = founder_body(&config, index, kind, tick);
+            self.state.external_material_in += founder.structure + founder.reserve;
+            ids.push(self.state.organisms.insert(founder));
+        }
+        self.moved.resize_with(self.state.organisms.slot_count(), Vec::new);
+        Ok(ids)
+    }
+
     fn assemble(state: WorldState, habitat: Habitat, initial_material: f64) -> World {
         let mut world = World {
             state,
@@ -259,6 +236,109 @@ impl World {
             .resize_with(world.state.organisms.slot_count(), Vec::new);
         world.sense_rings = sense_rings(&world.graph);
         world
+    }
+}
+
+// --- the shared roster -------------------------------------------------------------------
+//
+// One definition of "the founder roster this config describes", used by `World::new` at
+// creation and by `World::found_roster` afterwards. They must be the *same* body: a
+// preconditioned opening founded from a second implementation would be a different cohort
+// from the one every result so far was measured in.
+
+/// The founder roster as `(draw key, kind)` per founder. With kinds, the kind index is folded
+/// into the high bits of the key so each kind's draws are their own stream and a seed stays
+/// reproducible when another kind's count changes; without kinds the v1 path keeps
+/// `key = index`.
+fn roster_keys(config: &WorldConfig) -> Vec<(u64, Option<&FounderKind>)> {
+    if config.founders.kinds.is_empty() {
+        (0..u64::from(config.founders.count)).map(|i| (i, None)).collect()
+    } else {
+        config
+            .founders
+            .kinds
+            .iter()
+            .enumerate()
+            .flat_map(|(k, kind)| {
+                (0..u64::from(kind.count)).map(move |j| (((k as u64) << 32) | j, Some(kind)))
+            })
+            .collect()
+    }
+}
+
+/// One founder of the roster: placed uniformly by area from `Stream::Founders` at `index`,
+/// carrying the founder genome with the kind's fixed loci written over it, adult, with
+/// `R = initial_reserve_fraction · R_max` and `E = initial_energy_fraction · E_max`.
+///
+/// `born_tick` is the caller's: tick 0 from the constructor, the world's current tick from
+/// [`World::found_roster`].
+fn founder_body(
+    config: &WorldConfig,
+    index: u64,
+    kind: Option<&FounderKind>,
+    born_tick: u64,
+) -> Organism {
+    let seed = config.seed;
+    let face_index = (unit(seed, Stream::Founders, index, 0) * 5.0).floor();
+    let face = Face::from_index(face_index as u8).unwrap_or(Face::Front);
+    let u = unit(seed, Stream::Founders, index, 1) * FACE_EXTENT;
+    let v = unit(seed, Stream::Founders, index, 2) * FACE_EXTENT;
+    let heading = Vec2::from_screen_angle(unit(seed, Stream::Founders, index, 3) * TAU);
+    let hue = unit(seed, Stream::Founders, index, 4) as f32;
+
+    let mut genome = Genome::founder(kind.and_then(|k| k.hue).unwrap_or(hue), &config.drives);
+    // Founders sense at the configured radius; the genome bounds still apply.
+    genome.sense = config.organism.sense_radius as f32;
+    if let Some(k) = kind {
+        // A kind fixes the loci it names; the rest keep the v1 founder values. The rig follows
+        // the kind, or the hue tercile when the kind leaves it open.
+        if let Some(x) = k.diet {
+            genome.diet = x;
+        }
+        if let Some(x) = k.depth {
+            genome.depth = x;
+        }
+        if let Some(x) = k.speed {
+            genome.speed = x;
+        }
+        if let Some(x) = k.size {
+            genome.size = x;
+        }
+        if let Some(x) = k.metabolism {
+            genome.metabolism = x;
+        }
+        if let Some(x) = k.swim {
+            genome.swim = x;
+        }
+        if let Some(x) = k.form {
+            genome.form = x;
+        } else {
+            genome.form = crate::genome::form_of_hue(genome.hue);
+        }
+    }
+    genome.clamp();
+    let phenotype = decode(&genome, &config.organism);
+    let structure = phenotype.structure_adult;
+    let reserve = config.founders.initial_reserve_fraction * phenotype.reserve_max;
+    let energy = config.founders.initial_energy_fraction * phenotype.energy_max;
+    Organism {
+        pos: SurfacePoint::new(face, u, v).canonicalize(),
+        heading,
+        ou: Vec2::ZERO,
+        structure,
+        reserve,
+        energy,
+        born_tick,
+        hunger_memory: (1.0 - reserve / phenotype.reserve_max).clamp(0.0, 1.0),
+        mode: Mode::Resting,
+        escrow: None,
+        births: 0,
+        genome,
+        phenotype,
+        parent: None,
+        origin: Origin::Founder,
+        turn_counter: Counter::default(),
+        fed_this_tick: false,
     }
 }
 

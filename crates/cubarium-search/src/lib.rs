@@ -19,6 +19,8 @@
 //! - [`metrics`]: the component metrics and the scalar rank derived from them.
 //! - [`plant_budget`]: workstream M's counter split by **exact** consumer withdrawal, and the
 //!   measured plant budget of the cells that cross.
+//! - [`precondition`]: workstream S's fixed-age preconditioned opening — the plant-only
+//!   operator, how settled the field it produces is, and the comparison against the status quo.
 //! - [`movement`]: the spatial-coupling measures — visits, residence, revisit intervals, the
 //!   per-cell depletion/recovery crossing counter, and the variety census.
 //! - [`search`]: the bounded genetic search and every limit it runs under.
@@ -45,6 +47,7 @@ pub mod movement;
 pub mod params;
 pub mod plant_budget;
 pub mod population;
+pub mod precondition;
 pub mod rng;
 pub mod search;
 
