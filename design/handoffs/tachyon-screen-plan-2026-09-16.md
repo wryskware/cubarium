@@ -323,3 +323,14 @@ Re-cut of the plan:
 | GS-1 | `cubarium-gpu` crate: Vulkan device, sprite-atlas and field textures, instanced quads, the full-screen background shader from FW-P's pass table, a linear-image ring exported as dma-bufs; a desktop window path for development (Vulkan on the desktop) and the scanout path on the board | replaces FW-5 as the panel's presenter; FW-5 shrinks to the CPU ring presenter needed for PNG captures, tests and the web viewer |
 | GS-2 | the daemon imports dma-bufs handed over a Unix socket (`SCM_RIGHTS`) with (w, h, fourcc, pitch, offset), page-flips them, keeps bring-up/idle; UDP raster stays as fallback | the bonus GS-0 did not test; one small spike inside the package |
 | — | the 20 Hz sway question is moot on the GPU path: per-frame sway is free there | CPU path keeps FW-P's levers in FW-3 for the cube |
+
+### Daemon stays; cubarium runs unprivileged (Wrysk, 2026-09-16)
+
+Wrysk confirmed keeping `cube-screen-shim` as the KMS owner (bring-up, reopen
+on panel loss, black on sim exit) with cubarium as a dma-buf client, and wants
+cubarium to run as a normal user. On the board `/dev/kgsl-3d0` is world-rw
+and `/dev/dri/renderD128` is group `render`; the handoff socket becomes group
+`video`, mode 0660 (GS-2 follow-up). W2 therefore installs a system user
+`cubarium` in groups `video` and `render`, `cubarium.service` with
+`User=cubarium`, state under `/var/lib/cubarium` owned by that user, and no
+capability beyond that. The daemon keeps root.
