@@ -48,7 +48,7 @@ fn the_host_care_target_is_still_the_cube_chart() {
     assert!(HostCareTarget { face: 0, u: 0, v: 64 }.validate().is_err(), "v is 0..63 today");
     // The type itself is the thing FW-4 has to widen: `u8` cannot even name pixel 200 of a
     // 320-pixel ring row, let alone 319.
-    assert_eq!(std::mem::size_of::<HostCareTarget>(), 3, "face + u8 + u8");
+    assert_eq!(std::mem::size_of::<HostCareTarget>(), 6, "face + u16 + u16, widened by FW-4");
 }
 
 // ---------------------------------------------------------------------------
