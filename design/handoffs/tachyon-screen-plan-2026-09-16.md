@@ -275,3 +275,16 @@ GPU as part of FW-9 rather than "longer term".
 Device gotcha for every later package: `core_ctl` isolates idle big cores, so
 `taskset -c 7` fails with `EINVAL` on an idle board; pin to `4-7` or retry
 under load (`render_bench --pin` does).
+
+### Full GPU render stack (Wrysk, 2026-09-16)
+
+After FW-0's numbers Wrysk chose a full GPU render stack for the panel over
+the hybrid: cubarium does sim plus GPU rendering on the Adreno; the daemon
+stays the KMS owner (bring-up, idle, page flips) and receives frames as
+dma-buf file descriptors over a Unix socket (zero-copy), with the UDP raster
+path kept as the remote/fallback route. The CPU rasterizer stays for the LED
+cube and for byte-exact tests. First step is a spike (GS-0) on the board:
+which driver renders headless (Qualcomm Vulkan/GLES or Mesa), whether a
+rendered image can be exported as a dma-buf and scanned out through KMS, and
+the readback fallback's cost. FW-P still runs; its per-pass breakdown is the
+shader list.
