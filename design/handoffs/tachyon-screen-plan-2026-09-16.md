@@ -413,3 +413,40 @@ a later item. **The board did not return from its `systemctl reboot` at
 ten-minute steady state are still owed, and the first question after power
 returns is whether a plain reboot hangs this board at all (suspect: a
 shutdown-time hang in the msm KMS/GPU path with a dma-buf client attached).
+
+### GS-1c result (2026-09-16)
+
+`design/7_Research/gs1c-renderer-followups-2026-09-16.md`, commits
+`cda60f2`, `fd61086`, `c5994f9`, `cc45d39`, `f52d2c1`, `bf7e0b5`, `68a608e`
+(all path-only; Fable checked each `--stat`). Integration check by Fable:
+148 test binaries green across the workspace excluding `cubarium-gpu`, the
+GPU crate green, the board's two services active with `cubarium` running as
+its own user at `--gpu-art-scale 2`, the daemon reporting 60.0 fps with
+58,197 flips since attach (about sixteen minutes of continuous 60 fps, which
+covers the ten-minute steady state W2 owed).
+
+What landed: the 32-pixel look at the 60 fps cap (fill 13.13 → 3.54 Mpx per
+frame through an opaque box, mask clamp, early discard, a pad sized to the
+bend's own reach, and the runner's duplicate `ArtPresenter` no longer observed
+every tick); ring bend budgets measured against `min(9·S, max_local_radius)`
+(cube bit-identical; on the panel only tendrilfan and glasscane change, and
+`WIND_RESPONSE` is now the binding constraint, a viewing-session number for
+Wrysk); `--gpu-bend-substep` default on a ring at S ≥ 2; a hunter drawn on the
+GPU and diffed against the CPU (145 vs 144 pixels in the same box, review pair
+under `crates/cubarium-gpu/tests/golden/`); FW-4's demo guard lifted (all four
+scenes run on a ring); `--gpu-web-rate <fps>` serves the viewer from the GPU
+readback at no measurable cost (59.8 fps against 16.5 for `--mirror-web`,
+which stays the only route to the care buttons).
+
+One correction to W2's unit: `Environment=` splits its own line on whitespace,
+so the assignment must be quoted (`Environment="CUBARIUM_EXTRA_ARGS=--gpu-art-scale 2"`)
+while the `$CUBARIUM_EXTRA_ARGS` reference in `ExecStart` must not be. Fixed in
+`config/tachyon/cubarium.service`, on the board, and in `docs/tachyon.md`.
+
+Left open (from the report): the adapter's walk is the frame's largest CPU
+term (5.5–6.3 ms against 4.0 ms of GPU), so the row-band split of the adapter
+is the next lever and what 960×540 needs; ground cover overlaps fourfold at
+`--gpu-art-scale 2` (41 % of the sprite fill) if pixels are ever needed back;
+`--sink gpu` still refuses a cube; the `systemctl reboot` test with AutoBoot
+waits for Wrysk to be near the board. No renderer work is queued: the next
+step on the look is Wrysk's answers to the landscape questions.
