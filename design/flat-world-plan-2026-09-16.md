@@ -623,7 +623,7 @@ samples or 200 tick samples from
 `crates/cubarium/examples/render_bench.rs`, on a world built from
 `WorldConfig::default()` with `seed = 1` and stepped 3,000 ticks headless
 first (population 24), drawn through the shipped `assets/atelier` pack —
-which is the presentation the flat world inherits (§7), not the plain M2
+which is the presentation the ring world inherits (§7), not the plain M2
 discs. Pinning is the bench's own `--pin`, which reports the mask it
 obtained; `taskset` could not be used on the big cores, see the note below.
 
