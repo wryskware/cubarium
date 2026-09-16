@@ -375,3 +375,24 @@ higher resolution deserves smoother sway than whole-texel steps; deferred
 S ≥ 2 (the bend displacement may move in 1/S steps without breaking the
 S×S block rule for everything else), and the bend budgets on the ring are
 open, not bound by the cube's 9 px footprint.
+
+### SYNC-1 and GS-1b results (2026-09-16)
+
+SYNC-1 merged `main` (100 commits, ecology v1 rounds 2–5) as `b02524f`
+plus an integration merge `de16e69`; eight conflicts, both intents kept; the
+cube proof redone against `main`'s head `15a2210` gives the same projection
+hash `10304345502826573087` (the two fixtures differ in one byte, the schema
+field). Design call accepted: **schema 18** (both lines had spent 17 on
+different things; a number must mean one shape to refuse by name). Consequence
+noted: every ES checkpoint and exported policy written before the ring world is
+foreign to this build by `config_hash`; consistent with always-fresh. A second
+sync is owed before the final merge (`main` is 17 commits further, touching
+two of the eight conflict sites).
+
+GS-1b: the live ring world renders on the GPU via `--sink gpu` (adapter,
+three `FrameSink` hooks, fidelity test: bilinear sampling matches the CPU
+within 0.5 per channel, the pixel-art sampler differs by 16 and all of it is
+the sampler); 640×360 S=2 at 59.9 fps for five minutes as `particle`;
+960×540 at 46 fps (the adapter's walk, not the GPU, is the limit). Open:
+the art scale on the panel (`--gpu-art-scale 2`), the ring bend budgets, a
+hunter never yet drawn on the GPU, the adapter split for 960×540.
