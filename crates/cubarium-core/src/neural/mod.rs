@@ -18,7 +18,7 @@ pub mod gru;
 pub mod obs;
 pub mod state;
 
-pub use action::{Action7, Capability, MOUTH_CHANNELS};
+pub use action::{Action7, ActionAdapter, Capability, MOUTH_CHANNELS};
 pub use gru::{GRU_PARAMETERS, Gru32, HIDDEN, Policy};
 pub use obs::{OBS_LEN, Observation70, SECTORS, SelfState, SensedBody, SensedCell};
 pub use state::{AnimalState, Feedback, NeuralState};
@@ -30,29 +30,58 @@ pub use state::{AnimalState, Feedback, NeuralState};
 /// of those invalidates trained weights, so the digest changes with them. World *coefficients*
 /// (speed, costs, `K_P`) deliberately do not enter it: they change what a policy is good at,
 /// not what its inputs and outputs mean.
-pub const PROFILE_TEXT: &str = concat!(
-    "cub-obs-1|cub-act-1|gru32-reset-after-1|motor:r0b-99a2bfc|10hz",
-    "|obs:p_here,f_here,d_here,food_near[6][3],food_far[6][3],",
-    "body[6](presence,rel_size),crowd(fwd,side),water,light,height,up(fwd,side),",
-    "reserve,energy,development,gestating,age,motor_avail,",
-    "ate(graze,fruit,scavenge),moved,turned,delivered",
-    "|act:thrust,turn,graze,fruit,scavenge,attack,reproduce",
-    // Ecology v1 (`design/ecology-v1-contract.md` §15.2). The observation and action
-    // *layouts* do not move — `d_here` is still "edible detrital material here", now
-    // `D_eff + C_eff` — but what a channel means to the body does: the mouth masks come from
-    // the two digestive capabilities, every channel bites at one shared `mouth_rate`, and
-    // the `ate` feedback is normalised by that rate. Wrysk decided on 2026-09-15 that
-    // training was cheap enough that old policies need not reload, so the digest breaks and
-    // every existing policy file, every `runs/es-*` centre and the R3a display seed is
-    // refused **by name** rather than silently reinterpreted.
-    "|eco:v1",
-);
+macro_rules! profile_text {
+    ($act:literal) => {
+        concat!(
+            "cub-obs-1|",
+            $act,
+            "|gru32-reset-after-1|motor:r0b-99a2bfc|10hz",
+            "|obs:p_here,f_here,d_here,food_near[6][3],food_far[6][3],",
+            "body[6](presence,rel_size),crowd(fwd,side),water,light,height,up(fwd,side),",
+            "reserve,energy,development,gestating,age,motor_avail,",
+            "ate(graze,fruit,scavenge),moved,turned,delivered",
+            "|act:thrust,turn,graze,fruit,scavenge,attack,reproduce",
+            // Ecology v1 (`design/ecology-v1-contract.md` §15.2). The observation and action
+            // *layouts* do not move — `d_here` is still "edible detrital material here", now
+            // `D_eff + C_eff` — but what a channel means to the body does: the mouth masks
+            // come from the two digestive capabilities, every channel bites at one shared
+            // `mouth_rate`, and the `ate` feedback is normalised by that rate. Wrysk decided
+            // on 2026-09-15 that training was cheap enough that old policies need not
+            // reload, so the digest breaks and every existing policy file, every `runs/es-*`
+            // centre and the R3a display seed is refused **by name** rather than silently
+            // reinterpreted.
+            "|eco:v1",
+        )
+    };
+}
+
+pub const PROFILE_TEXT: &str = profile_text!("cub-act-1");
+
+/// The same text under the released-turn-band adapter
+/// (`design/handoffs/ecology-v1-turn-deadband-opus-2026-09-16.md`). It is built by the **same**
+/// macro from the same pieces, so the two texts cannot differ in anything but the adapter
+/// token, and [`ActionAdapter`] is the only thing that chooses between them.
+pub const PROFILE_TEXT_CUB_ACT_2: &str = profile_text!("cub-act-2");
+
+/// The profile text a named adapter is authored against.
+pub fn profile_text(adapter: ActionAdapter) -> &'static str {
+    match adapter {
+        ActionAdapter::CubAct1 => PROFILE_TEXT,
+        ActionAdapter::CubAct2 => PROFILE_TEXT_CUB_ACT_2,
+    }
+}
 
 /// FNV-1a 64 over [`PROFILE_TEXT`]. Stored in every [`Policy`] and in the extension header; a
 /// policy whose digest differs from this build's is refused *by name* on load, never
 /// reinterpreted.
 pub fn schema_digest() -> u64 {
-    fnv1a(PROFILE_TEXT.as_bytes())
+    schema_digest_in(ActionAdapter::CubAct1)
+}
+
+/// [`schema_digest`] under a named [`ActionAdapter`]. `CubAct1` is [`schema_digest`] itself,
+/// byte for byte, so every retained policy, centre and protocol keeps the digest it has.
+pub fn schema_digest_in(adapter: ActionAdapter) -> u64 {
+    fnv1a(profile_text(adapter).as_bytes())
 }
 
 pub(crate) fn fnv1a(bytes: &[u8]) -> u64 {

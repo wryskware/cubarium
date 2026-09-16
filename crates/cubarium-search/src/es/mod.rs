@@ -23,6 +23,8 @@
 //!   the frozen controller's response to food, and the current score's dwell gradient.
 //! - [`trainer`]: stable job identities, bounded workers, the reduction and the checkpoint.
 //! - [`export`]: a trained centre as a self-contained policy the core can attach.
+//! - [`turnband`]: the paired replay of one weight set under both action adapters, and the
+//!   gradient-direction stability of the retained pair contributions.
 //! - [`commands`]: the development commands behind the `es-*` subcommands.
 //!
 //! Nothing here attaches a policy to the display world, migrates a world, or trains during a
@@ -41,6 +43,7 @@ pub mod rng;
 pub mod scorecheck;
 pub mod tensor;
 pub mod trainer;
+pub mod turnband;
 
 pub use episode::{Control, Driver, Episode, EpisodeError, Limits};
 pub use fixture::{

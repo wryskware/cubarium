@@ -173,7 +173,43 @@ enum Command {
         /// into every exported policy, which is refused by name under the other contract.
         #[arg(long, default_value = "sweep")]
         motor: String,
+        /// The action adapter every fixture world decodes a raw head with: `cub-act-1` is the
+        /// shipped adapter (deadband 0.05 on thrust and turn), `cub-act-2` is workstream X's
+        /// released turn band (0.05 on thrust, 0.0 on turn). It moves the protocol hash and the
+        /// policy digest (a `cub-act-1` protocol keeps the hash it has always had) and is
+        /// written into every exported policy, which is refused by name under the other
+        /// adapter.
+        #[arg(long, default_value = "cub-act-1")]
+        adapter: String,
         #[arg(long, default_value = "runs/es-first")]
+        out: PathBuf,
+    },
+    /// Workstream X: replay one generation's centre and candidates on their own training
+    /// layouts under **both** action adapters, weights untouched, and measure the retained pair
+    /// contributions' gradient-direction stability.
+    EsTurnBand {
+        /// The retained training run: its `checkpoint.json`, `centers/` and nothing else.
+        #[arg(long, default_value = "runs/es-eco-v1-fastleaf")]
+        run: PathBuf,
+        /// The ecology the run was trained in. Required: replaying in another world would
+        /// compare two tasks, and the policy files are checked against this by name.
+        #[arg(long)]
+        config: PathBuf,
+        /// Which recorded centre to replay, with its own `2n` candidates.
+        #[arg(long, default_value_t = 9)]
+        generation: u64,
+        #[arg(long, default_value_t = cubarium_search::es::HORIZON_TICKS)]
+        horizon: u64,
+        #[arg(long, default_value_t = 8)]
+        workers: usize,
+        #[arg(long, default_value_t = 600)]
+        wall_seconds: u64,
+        /// Workstream Q's retained pair reduction, for the stability half.
+        #[arg(long, default_value = "runs/ecology-v1-es-antithetic/pairs.json")]
+        pairs: PathBuf,
+        #[arg(long, default_value_t = 1_000)]
+        bootstrap: usize,
+        #[arg(long, default_value = "runs/ecology-v1-turn-deadband")]
         out: PathBuf,
     },
     /// Export a checkpoint's centre as a policy and verify it round-trips and runs.
@@ -224,6 +260,14 @@ enum Command {
         /// into every exported policy, which is refused by name under the other contract.
         #[arg(long, default_value = "sweep")]
         motor: String,
+        /// The action adapter every fixture world decodes a raw head with: `cub-act-1` is the
+        /// shipped adapter (deadband 0.05 on thrust and turn), `cub-act-2` is workstream X's
+        /// released turn band (0.05 on thrust, 0.0 on turn). It moves the protocol hash and the
+        /// policy digest (a `cub-act-1` protocol keeps the hash it has always had) and is
+        /// written into every exported policy, which is refused by name under the other
+        /// adapter.
+        #[arg(long, default_value = "cub-act-1")]
+        adapter: String,
         #[arg(long)]
         out: PathBuf,
     },
@@ -257,6 +301,13 @@ enum Command {
         /// Hard wall cap. Trials not started by then are recorded as skipped, never extended.
         #[arg(long, default_value_t = 600)]
         wall_seconds: u64,
+        /// The action adapter the whole world runs. Only `cub-act-1` — the shipped adapter and
+        /// the display host's — is accepted here: this command's stage runner
+        /// (`crate::population`) is owned by another workstream this round and was not opened
+        /// to the switch, so naming `cub-act-2` is refused rather than silently ignored. A
+        /// `cub-act-2` policy file is in any case refused by name by `PolicyFile::policy`.
+        #[arg(long, default_value = "cub-act-1")]
+        adapter: String,
         #[arg(long, default_value = "runs/es-eco-v1-fastleaf/population")]
         out: PathBuf,
     },
@@ -721,6 +772,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             overwrite,
             config,
             motor,
+            adapter,
             out,
         } => es::commands::train(
             pairs,
@@ -735,6 +787,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             overwrite,
             config,
             cubarium_core::MotorModel::parse(&motor)?,
+            cubarium_core::neural::ActionAdapter::parse(&adapter)?,
             out,
         ),
         Command::EsEvaluate {
@@ -746,11 +799,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             copies,
             config,
             motor,
+            adapter,
             out,
         } => {
             let probe = es::commands::EvalProbe { reset_hidden_every, copies };
             let motor = cubarium_core::MotorModel::parse(&motor)?;
-            es::commands::evaluate(policy, &set, horizon, wall_seconds, probe, config, motor, out)
+            let adapter = cubarium_core::neural::ActionAdapter::parse(&adapter)?;
+            es::commands::evaluate(
+                policy, &set, horizon, wall_seconds, probe, config, motor, adapter, out,
+            )
         }
         Command::EsBudget { policy, config, horizon, initial_seed, workers, wall_seconds, out } => {
             es::budget::run(policy, config, horizon, initial_seed, workers, wall_seconds, out)
@@ -792,6 +849,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 seeds, arm, workers, wall_seconds, out,
             )
         }
+        Command::EsTurnBand {
+            run,
+            config,
+            generation,
+            horizon,
+            workers,
+            wall_seconds,
+            pairs,
+            bootstrap,
+            out,
+        } => es::turnband::run(
+            run, config, generation, horizon, workers, wall_seconds, pairs, bootstrap, out,
+        ),
         Command::EsExport { checkpoint, config, generation, out, verify_ticks } => {
             es::commands::export(checkpoint, config, generation, out, verify_ticks)
         }
@@ -806,8 +876,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             introduce_tick,
             workers,
             wall_seconds,
+            adapter,
             out,
         } => {
+            // The stage runner is another workstream's file this round, so it was not opened
+            // to the switch. Refuse the other adapter by name rather than run `cub-act-1` under
+            // a `cub-act-2` flag.
+            if cubarium_core::neural::ActionAdapter::parse(&adapter)?
+                != cubarium_core::neural::ActionAdapter::CubAct1
+            {
+                return Err(
+                    "es-population runs the shipped `cub-act-1` adapter only: its stage runner \
+                     (crates/cubarium-search/src/population.rs) was not opened to the action \
+                     adapter switch in workstream X. Evaluate a cub-act-2 policy with \
+                     `es-evaluate --adapter cub-act-2`."
+                        .into(),
+                );
+            }
             let ecology = es::Ecology::load(&config)?;
             let arms: Vec<u32> =
                 arms.split(',').map(|s| s.trim().parse::<u32>()).collect::<Result<_, _>>()?;

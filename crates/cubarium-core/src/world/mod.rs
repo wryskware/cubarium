@@ -102,6 +102,13 @@ pub struct World {
     /// [`World::motor_model`], so a world that never names one is byte-identical to the build
     /// before the override existed.
     pub(crate) apex_motor_model: Option<crate::motor::MotorModel>,
+    /// Which action adapter decodes a neural body's raw head this tick
+    /// (`crate::neural::ActionAdapter`). Transient like every field above: never persisted,
+    /// never hashed, never in [`WorldConfig`]. The default is
+    /// [`crate::neural::ActionAdapter::CubAct1`], the shipped adapter, so a world that never
+    /// names one is byte-identical to the build before the switch existed. It reaches no
+    /// legacy body: only a neural animal has a raw head to decode.
+    pub(crate) action_adapter: crate::neural::ActionAdapter,
     pub(crate) initial_material: f64,
 }
 
@@ -156,5 +163,24 @@ impl World {
     /// The contract a member runs when it is not the world's own; `None` unless one was named.
     pub fn apex_motor_model(&self) -> Option<crate::motor::MotorModel> {
         self.apex_motor_model
+    }
+
+    /// Run this world's neural animals under a named action adapter
+    /// (`design/7_Research/ecology-v1-turn-deadband-2026-09-16.md`).
+    ///
+    /// Opt-in and transient exactly as [`World::set_motor_model`] is: nothing in a snapshot
+    /// records it, so a resumed world runs [`crate::neural::ActionAdapter::CubAct1`] — the
+    /// shipped adapter, and the display host's — until it is told otherwise. Set it **before**
+    /// attaching a policy: `World::attach_neural_policy` refuses, by name, a policy whose
+    /// schema digest is not the adapter in force, so a world that changes adapter after
+    /// attaching is refused at the next attachment rather than quietly running the wrong
+    /// decode. Changing it mid-run is legal and makes one run of two animals.
+    pub fn set_action_adapter(&mut self, adapter: crate::neural::ActionAdapter) {
+        self.action_adapter = adapter;
+    }
+
+    /// The adapter in force, [`crate::neural::ActionAdapter::CubAct1`] unless one was named.
+    pub fn action_adapter(&self) -> crate::neural::ActionAdapter {
+        self.action_adapter
     }
 }

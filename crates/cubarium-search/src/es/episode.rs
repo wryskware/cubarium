@@ -324,6 +324,91 @@ pub fn run_with_fault(
     run_prepared(layout, driver, horizon, limits, job, None, fault)
 }
 
+/// One trajectory's per-tick measurement, collected **only** when a caller asks for it.
+///
+/// Every field is a count or a sum over the ticks of one episode. Nothing here is part of the
+/// score, of the ordering, or of what the body does: switching it on turns the world's own
+/// per-tick intake trace on for the one traced body and reads it, and
+/// `a_traced_episode_is_the_same_episode` is the check on that claim.
+///
+/// The turn columns are measured exactly as [`Episode::turn_sweep_rad`] is, from the two stored
+/// headings, and they exclude exactly the same ticks: a seam crossing, where a chart transport
+/// and a real turn cannot be separated, and the tick a body dies on, which has no post-step
+/// heading. `turn_measured_ticks` is the denominator, so a fraction computed from these columns
+/// is a fraction of the ticks the turn could actually be read on.
+///
+/// `on_food` is **workstream H's** definition, taken from the world's own settlement rather
+/// than re-derived: a tick the body finished on a cell holding at least one of the four stocks
+/// (`P`, `F`, `D_eff`, `C_eff`) at or above `drives.feed_min`
+/// (`cubarium_core::IntakeTick::above_threshold`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Trajectory {
+    /// Ticks whose physical turn could be measured.
+    pub turn_measured_ticks: u64,
+    /// Of those, ticks whose resolved turn is not exactly zero.
+    pub turn_active_ticks: u64,
+    /// `Σ |turn|` over the measured ticks, rad. Equal to [`Episode::turn_sweep_rad`].
+    pub turn_abs_rad: f64,
+    /// Ticks the world's intake trace covered: one per tick the body was there to feed.
+    pub traced_ticks: u64,
+    /// Of those, ticks on food.
+    pub on_food_ticks: u64,
+    /// Maximal runs of consecutive on-food ticks. A run that is still open at the end of the
+    /// episode is counted, and its length is in `dwell_bout_ticks`.
+    pub dwell_bouts: u64,
+    /// `Σ` of those runs' lengths, which is `on_food_ticks` — kept so the mean bout reads
+    /// without a second source.
+    pub dwell_bout_ticks: u64,
+    /// The longest run.
+    pub dwell_bout_max: u64,
+    /// Rows the world's recorder dropped. Must be 0; a non-zero value means the drain cadence
+    /// below is too slow for `MAX_TRACE_ROWS` and the on-food columns are incomplete.
+    pub trace_rows_dropped: u64,
+}
+
+impl Trajectory {
+    /// Ticks with a non-zero resolved turn, as a fraction of the ticks the turn was measurable
+    /// on. `None` when nothing was measurable.
+    pub fn turn_active_fraction(&self) -> Option<f64> {
+        (self.turn_measured_ticks > 0)
+            .then(|| self.turn_active_ticks as f64 / self.turn_measured_ticks as f64)
+    }
+
+    /// Mean `|omega|` over the measured ticks, rad/s.
+    pub fn mean_abs_omega(&self) -> Option<f64> {
+        (self.turn_measured_ticks > 0)
+            .then(|| self.turn_abs_rad / (self.turn_measured_ticks as f64 * DT))
+    }
+
+    /// On-food ticks as a fraction of the traced ticks.
+    pub fn on_food_fraction(&self) -> Option<f64> {
+        (self.traced_ticks > 0).then(|| self.on_food_ticks as f64 / self.traced_ticks as f64)
+    }
+
+    /// Mean length of a dwell bout, ticks. `None` when the body never stood on food.
+    pub fn mean_dwell_bout(&self) -> Option<f64> {
+        (self.dwell_bouts > 0).then(|| self.dwell_bout_ticks as f64 / self.dwell_bouts as f64)
+    }
+}
+
+/// How often a traced episode drains the world's intake recorder. Half
+/// [`cubarium_core::MAX_TRACE_ROWS`], so the recorder can never fill between drains and
+/// `Trajectory::trace_rows_dropped` stays 0.
+pub const TRACE_DRAIN_TICKS: u64 = 2_048;
+
+/// [`run`], with the per-tick trajectory measurement switched on.
+pub fn run_traced(
+    layout: &Layout,
+    driver: &Driver,
+    horizon: u64,
+    limits: Limits<'_>,
+    job: &str,
+) -> Result<(Episode, Trajectory), EpisodeError> {
+    let mut trace = Trajectory::default();
+    let episode = run_prepared_traced(layout, driver, horizon, limits, job, None, None, Some(&mut trace))?;
+    Ok((episode, trace))
+}
+
 /// [`run_with_fault`], with a hook that runs on the built world before the first tick.
 #[doc(hidden)]
 #[allow(clippy::too_many_arguments)]
@@ -335,6 +420,22 @@ pub fn run_prepared(
     job: &str,
     prepare: Option<Prepare<'_>>,
     fault: Option<Fault<'_>>,
+) -> Result<Episode, EpisodeError> {
+    run_prepared_traced(layout, driver, horizon, limits, job, prepare, fault, None)
+}
+
+/// [`run_prepared`], with the optional per-tick [`Trajectory`].
+#[doc(hidden)]
+#[allow(clippy::too_many_arguments)]
+pub fn run_prepared_traced(
+    layout: &Layout,
+    driver: &Driver,
+    horizon: u64,
+    limits: Limits<'_>,
+    job: &str,
+    prepare: Option<Prepare<'_>>,
+    fault: Option<Fault<'_>>,
+    mut trace: Option<&mut Trajectory>,
 ) -> Result<Episode, EpisodeError> {
     let (mut world, id) = layout.build().expect("a frozen layout builds");
     if let Some(prepare) = prepare {
@@ -393,6 +494,14 @@ pub fn run_prepared(
         }
         Driver::Control(Control::MobileScript | Control::Dwell(_)) => {}
     }
+
+    // The world's own per-tick intake trace, for the traced body only. Transient, never read
+    // back by the tick, and the episode below is byte-identical with it on or off.
+    if trace.is_some() {
+        world.trace_intake(Some(id));
+    }
+    // The open dwell bout, carried across drains.
+    let mut bout: u64 = 0;
 
     let route_p_start: f64 = route.iter().map(|c| world.state.fields.p[c.index()]).sum();
     let mut episode = Episode {
@@ -524,12 +633,23 @@ pub fn run_prepared(
                 0.0
             }
         };
+        if let Some(t) = trace.as_deref_mut()
+            && after.is_some_and(|o| o.pos.face == face_before)
+        {
+            t.turn_measured_ticks += 1;
+            t.turn_abs_rad += turn;
+            if turn != 0.0 {
+                t.turn_active_ticks += 1;
+            }
+        }
         episode.travelled_px += travelled;
         episode.turn_sweep_rad += turn;
         episode.upkeep_billed += bill.upkeep(DT);
         episode.motion_billed += bill.motor_cost(travelled / DT, extent * turn / DT, DT);
 
-        let Some(o) = after else {
+        // The organism's position, copied out, so the trace drain below can take the world
+        // mutably without holding a borrow into its organism table.
+        let Some(after_pos) = after.map(|o| o.pos) else {
             episode.alive = false;
             episode.died_on_last_tick = true;
             break;
@@ -538,7 +658,9 @@ pub fn run_prepared(
         match driver {
             Driver::Control(Control::MobileScript) => {
                 let goal = route[target % route.len()];
-                if cell_of(&o.pos) == goal && world.state.fields.p[goal.index()] < leave_below {
+                if cell_of(&after_pos) == goal
+                    && world.state.fields.p[goal.index()] < leave_below
+                {
                     target += 1;
                 }
             }
@@ -547,7 +669,7 @@ pub fn run_prepared(
                 // tick fed from it, so `dwelled` and "ticks on this food cell" are the same
                 // number, and the body leaves on the tick that makes it `d`.
                 let goal = route[target % route.len()];
-                if cell_of(&o.pos) == goal {
+                if cell_of(&after_pos) == goal {
                     dwelled += 1;
                     if dwelled >= u64::from(*d) {
                         target += 1;
@@ -556,6 +678,20 @@ pub fn run_prepared(
                 }
             }
             _ => {}
+        }
+
+        if let Some(t) = trace.as_deref_mut()
+            && (tick + 1).is_multiple_of(TRACE_DRAIN_TICKS)
+        {
+            drain_trace_into(&mut world, t, &mut bout);
+        }
+    }
+
+    if let Some(t) = trace.as_deref_mut() {
+        drain_trace_into(&mut world, t, &mut bout);
+        if bout > 0 {
+            t.dwell_bouts += 1;
+            t.dwell_bout_max = t.dwell_bout_max.max(bout);
         }
     }
 
@@ -583,6 +719,28 @@ pub fn run_prepared(
     episode.distinct_cells = visited.len();
     episode.body_lengths = if extent > 0.0 { episode.travelled_px / extent } else { 0.0 };
     Ok(episode)
+}
+
+/// Fold the world's recorded intake rows into a [`Trajectory`], carrying the open dwell bout.
+///
+/// A bout is a maximal run of consecutive on-food ticks. It is closed — counted, and its length
+/// folded in — on the first row that is not on food, and the caller closes whatever is still
+/// open when the episode ends.
+fn drain_trace_into(world: &mut cubarium_core::World, t: &mut Trajectory, bout: &mut u64) {
+    let (rows, dropped) = world.drain_intake_trace();
+    t.trace_rows_dropped += dropped;
+    for row in &rows {
+        t.traced_ticks += 1;
+        if row.above_threshold.iter().any(|b| *b) {
+            t.on_food_ticks += 1;
+            t.dwell_bout_ticks += 1;
+            *bout += 1;
+        } else if *bout > 0 {
+            t.dwell_bouts += 1;
+            t.dwell_bout_max = t.dwell_bout_max.max(*bout);
+            *bout = 0;
+        }
+    }
 }
 
 /// A unit heading from the body's chart position toward a goal cell's centre, when both are on

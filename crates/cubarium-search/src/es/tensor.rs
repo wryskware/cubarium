@@ -19,7 +19,7 @@
 //! the world still evaluates gates in `(r, z, n)` order for each animal in slot order.
 
 use cubarium_core::neural::gru::{GATES, GRU_PARAMETERS, HIDDEN, INPUT, OUTPUT, Z};
-use cubarium_core::neural::{Gru32, Policy};
+use cubarium_core::neural::{ActionAdapter, Gru32, Policy};
 
 use super::rng::{gaussian, stream};
 
@@ -81,8 +81,17 @@ pub fn flatten(w: &Gru32) -> Vec<f64> {
 
 /// A policy from a parameter vector, stamped with this build's schema digest.
 pub fn policy(theta: &[f64]) -> Result<Policy, String> {
-    let policy = Policy::new(unflatten(theta)?);
-    policy.validate()?;
+    policy_in(theta, ActionAdapter::CubAct1)
+}
+
+/// [`policy`], stamped for a named [`ActionAdapter`]. `CubAct1` is [`policy`] itself.
+///
+/// The **weights are untouched**: the adapter changes only which schema digest the policy
+/// carries, and so which world will accept it. That is exactly what a paired replay of one
+/// weight set under two adapters needs.
+pub fn policy_in(theta: &[f64], adapter: ActionAdapter) -> Result<Policy, String> {
+    let policy = Policy::new_in(unflatten(theta)?, adapter);
+    policy.validate_in(adapter)?;
     Ok(policy)
 }
 
