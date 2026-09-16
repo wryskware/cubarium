@@ -543,8 +543,9 @@ enum Command {
         #[arg(long, default_value = "runs/ecology-v1-diet-factorial")]
         out: PathBuf,
     },
-    /// Run workstream R's depth census: F's 150-minute variety census with the roster
-    /// skimmer's `depth` overridden search-side at tick 0 and nothing else changed.
+    /// Run the depth census: F's 150-minute variety census with the roster skimmer's `depth`
+    /// overridden search-side at tick 0 and nothing else changed. Workstream Y widened it to
+    /// a six-rung ladder at apex arm 0; R's two levels are still rungs of it.
     Census(census::Args),
     /// Re-run one recorded row and check it reproduces.
     Replay {
