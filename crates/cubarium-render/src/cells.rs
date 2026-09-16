@@ -161,7 +161,7 @@ mod tests {
         let cells = PixelCells::new(topo, scale);
         let mut field = ScalarField::zeros(topo, scale);
         for (i, v) in field.values.iter_mut().enumerate() {
-            *v = (i as f64 * 0.318_309_886_183_790_7).sin() * 1e7 + (i % 3) as f64 * 1e-9;
+            *v = (i as f64 * 0.417_913_1).sin() * 1e7 + (i % 3) as f64 * 1e-9;
         }
         for &face in topo.charts() {
             for y in 0..64u16 {

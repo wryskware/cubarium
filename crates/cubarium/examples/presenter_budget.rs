@@ -474,5 +474,73 @@ fn main() -> Result<()> {
         }
     }
 
+    // --- (F) the deterministic row-band split ------------------------------------------
+    // (E) is the ceiling: four presenters drawing four whole, independent images. This is
+    // the real thing — one image, cut into row bands, each band drawn by its own presenter
+    // on its own core and spliced back. The composite is checked against the serial image
+    // before anything is timed, because a split that is faster and different is worthless.
+    if cores.len() > 1 {
+        println!("\n(F) one image over {} row bands, one core each", cores.len());
+        let frames = args.frames.min(200);
+        let n = cores.len();
+        let mut serial_canvas = Canvas::cube();
+        let one = draw_ms(&mut p, &view, &mut serial_canvas, frames);
+        row("serial, one core", one, 0.0);
+
+        let mut band_presenters = Vec::new();
+        for _ in 0..n {
+            band_presenters.push(presenter(&art, &world, &view)?);
+        }
+        let mut canvas = Canvas::cube();
+        let mut bands = canvas.bands(n);
+        let view_ref = &view;
+
+        // Correctness first: one frame, split, against the serial image.
+        p.draw(&view, 0.0, &mut serial_canvas);
+        canvas.split_into(&mut bands);
+        std::thread::scope(|s| {
+            for (band, bp) in bands.iter_mut().zip(band_presenters.iter_mut()) {
+                s.spawn(move || bp.draw(view_ref, 0.0, band));
+            }
+        });
+        canvas.gather(&bands);
+        println!(
+            "    composite vs serial: {}",
+            if canvas.pixels() == serial_canvas.pixels() {
+                "bit-identical"
+            } else {
+                "DIFFERS"
+            }
+        );
+
+        let cpus = cores.clone();
+        let mut xs = Vec::with_capacity(frames);
+        for i in 0..frames + 30 {
+            let f = (i % 20) as f64 / 20.0;
+            let t0 = Instant::now();
+            canvas.split_into(&mut bands);
+            std::thread::scope(|s| {
+                for ((band, bp), &cpu) in
+                    bands.iter_mut().zip(band_presenters.iter_mut()).zip(cpus.iter())
+                {
+                    s.spawn(move || {
+                        pin(&[cpu]);
+                        bp.draw(view_ref, f, band);
+                    });
+                }
+            });
+            canvas.gather(&bands);
+            if i >= 30 {
+                xs.push(t0.elapsed());
+            }
+        }
+        let split = median_ms(xs);
+        row("split over the bands, wall clock", split, one);
+        println!("    speedup: {:.2}x on {n} bands ({:.0} % efficiency)", one / split, 100.0 * one / (split * n as f64));
+        if !serial.is_empty() {
+            pin(&serial);
+        }
+    }
+
     Ok(())
 }

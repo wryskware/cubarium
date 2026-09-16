@@ -218,7 +218,7 @@ pub(super) fn draw_water(
             for x in 0..width {
                 let w = filtered_at(cells, water, face, x, y);
                 // FW-P's W5: a dry pixel leaves here rather than inside `water_coverage`.
-                if !(w > 0.0) {
+                if w.is_nan() || w <= 0.0 {
                     continue;
                 }
                 let a = water_coverage(w);
