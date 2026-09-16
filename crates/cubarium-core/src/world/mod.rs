@@ -85,5 +85,27 @@ pub struct World {
     /// Transient diagnostic intent overrides (`crate::diagnostic`). Empty in every ordinary
     /// world, never persisted, never set by the world itself.
     pub(crate) scripted: Vec<(crate::ids::OrganismId, ScriptedIntent)>,
+    /// The motor contract this world runs (`crate::motor::MotorModel`). Transient like every
+    /// field above: never persisted, never hashed, never in [`WorldConfig`]. The default is
+    /// [`crate::motor::MotorModel::Sweep`], the shipped contract, so a world that never names a
+    /// model is byte-identical to the build before the switch existed.
+    pub(crate) motor_model: crate::motor::MotorModel,
     pub(crate) initial_material: f64,
+}
+
+impl World {
+    /// Run this world under a named motor contract
+    /// (`design/7_Research/ecology-v1-motor-inertial-2026-09-16.md`).
+    ///
+    /// Opt-in and transient: nothing in a snapshot records it, so a resumed world runs
+    /// [`crate::motor::MotorModel::Sweep`] until it is told otherwise. Set it before the first
+    /// tick of an experiment; changing it mid-run is legal but makes one run of two worlds.
+    pub fn set_motor_model(&mut self, model: crate::motor::MotorModel) {
+        self.motor_model = model;
+    }
+
+    /// The motor contract in force, [`crate::motor::MotorModel::Sweep`] unless one was named.
+    pub fn motor_model(&self) -> crate::motor::MotorModel {
+        self.motor_model
+    }
 }

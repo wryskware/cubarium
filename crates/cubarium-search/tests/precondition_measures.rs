@@ -145,6 +145,7 @@ fn a_comparison_arm_opens_on_the_state_the_operator_saved() {
                 plant_record: true,
                 no_animals: false,
                 precondition: Some(age.age),
+                motor: cubarium_core::MotorModel::Sweep,
             },
         );
         assert_eq!(evaluation.status, Status::Completed, "the arm ran: {:?}", evaluation.reason);
@@ -184,7 +185,7 @@ fn founding_at_age_zero_through_the_door_reproduces_the_shipped_run() {
         apex_founders: 0,
         apex_introduce_tick: 0,
     };
-    let base = RunOptions { ledger: true, plant_record: true, no_animals: false, precondition: None };
+    let base = RunOptions { ledger: true, plant_record: true, no_animals: false, precondition: None, motor: cubarium_core::MotorModel::Sweep };
     let shipped = evaluate_with(&values, SEED, protocol, base);
     let through_door = evaluate_with(&values, SEED, protocol, RunOptions { precondition: Some(0), ..base });
 
@@ -250,6 +251,7 @@ fn a_run_cannot_both_found_nobody_and_found_after_a_prefix() {
             plant_record: false,
             no_animals: true,
             precondition: Some(600),
+            motor: cubarium_core::MotorModel::Sweep,
         },
     );
     assert_eq!(evaluation.status, Status::Invalid, "the two options exclude each other");

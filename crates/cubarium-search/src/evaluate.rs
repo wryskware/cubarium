@@ -298,6 +298,15 @@ pub struct RunOptions {
     ///
     /// Not compatible with `no_animals`, which never founds at all.
     pub precondition: Option<u64>,
+    /// **Which motor contract the run's world uses**
+    /// (`cubarium_core::MotorModel`, `crate::World::set_motor_model`). The default is
+    /// `Sweep`, the shipped contract, and a run under it is byte-identical to every row
+    /// produced before the switch existed — the two arms of workstream T's pairing differ in
+    /// exactly this field (`design/7_Research/ecology-v1-motor-inertial-2026-09-16.md`).
+    ///
+    /// It is a transient on the world, not a configuration: it does not enter
+    /// [`crate::calibrate::config_hash`] and no retained row's hash moves because of it.
+    pub motor: cubarium_core::MotorModel,
 }
 
 /// Advance a world's plant dynamics with no animals in it, the ordinary §4 tick and nothing
@@ -441,6 +450,9 @@ fn run(
         }
     };
 
+    // The motor contract, before the first tick. A transient on the world, so the config and
+    // its hash are untouched; `MotorModel::Sweep` is the default and changes nothing.
+    world.set_motor_model(options.motor);
     // Workstream S's fixed-age preconditioned opening, before anything is introduced or
     // recorded: the plants run alone to the declared age, then the ordinary roster is founded
     // into the field they grew. At age 0 nothing is stepped and the door reproduces the

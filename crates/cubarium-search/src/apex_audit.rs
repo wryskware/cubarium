@@ -49,7 +49,7 @@ use cubarium_core::hunter::{
     StrikeRecord,
 };
 use cubarium_core::organism::DeathCause;
-use cubarium_core::{BodyBudget, OrganismId, World, WorldConfig};
+use cubarium_core::{BodyBudget, MotorModel, OrganismId, World, WorldConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::calibrate;
@@ -791,6 +791,10 @@ pub struct AuditRow {
     /// The pursuit stopping rule this run's hunt-intent pass evaluated.
     #[serde(default)]
     pub pursuit_stop: PursuitStop,
+    /// The motor contract this run's envelope and bill used (`cubarium_core::MotorModel`), by
+    /// name. Absent on a row written before the switch existed, which is `sweep`.
+    #[serde(default = "sweep_name")]
+    pub motor: String,
     pub horizon_ticks: u64,
     /// Ticks actually simulated: the horizon, or fewer if the world emptied.
     pub ticks: u64,
@@ -844,6 +848,10 @@ pub struct AuditReport {
     /// The pursuit stopping rule every row of this report ran under.
     #[serde(default)]
     pub pursuit_stop: PursuitStop,
+    /// The motor contract every row of this report ran under (`cubarium_core::MotorModel`),
+    /// by name. Absent from a report written before the switch existed, which is `sweep`.
+    #[serde(default = "sweep_name")]
+    pub motor: String,
     pub horizon_ticks: u64,
     pub workers: usize,
     pub wall_seconds: f64,
@@ -870,11 +878,27 @@ pub struct Arm {
     /// the one variable of the paired predicate experiment; `ForwardHalfSpace` is the shipped
     /// rule and is byte-identical to an arm that never set it.
     pub stop: PursuitStop,
+    /// **Which motor contract the arm runs** (`cubarium_core::MotorModel`,
+    /// `crate::World::set_motor_model`). The one variable of workstream T's paired arm;
+    /// `Sweep` is the shipped contract and is byte-identical to an arm that never set it.
+    pub motor: MotorModel,
+}
+
+/// The name a report written before the motor switch existed implies: there was one contract.
+fn sweep_name() -> String {
+    MotorModel::Sweep.name().to_string()
+}
+
+/// The motor contract named on the command line. Like `--pursuit-stop`, an unrecognised name
+/// is refused rather than silently defaulted: a paired arm that quietly ran the shipped half
+/// is worse than one that did not run.
+pub fn parse_motor(name: &str) -> Result<MotorModel, String> {
+    MotorModel::parse(name)
 }
 
 /// Run one `(configuration, seed)` arm of the audit.
 fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
-    let Arm { apex, horizon, introduce_tick, founder_age_seconds, ledger, stop } = arm;
+    let Arm { apex, horizon, introduce_tick, founder_age_seconds, ledger, stop, motor } = arm;
     let start = Instant::now();
     let mut config: WorldConfig = (*eco.base).clone();
     config.seed = seed;
@@ -907,6 +931,10 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
     // The one variable of the paired arm. Independent of the ledger: the rule is what the world
     // runs, the record is what watches it, and the default is byte-identical to not calling it.
     world.set_pursuit_stop(stop);
+    // The other variable of the paired arms, and transient in exactly the same way: the motor
+    // contract is what the world runs, it is not in the config, and `Sweep` is byte-identical
+    // to not calling this at all.
+    world.set_motor_model(motor);
     let dt = cubarium_core::DT;
     let age_ticks = (founder_age_seconds / dt).round().max(0.0) as u64;
 
@@ -1081,6 +1109,7 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
         founder_age_seconds,
         ledger,
         pursuit_stop: stop,
+        motor: motor.name().to_string(),
         horizon_ticks: horizon,
         ticks,
         collapsed_at,
@@ -1188,7 +1217,7 @@ pub fn run(
     wall_seconds: u64,
     out: PathBuf,
 ) -> Result<(), Boxed> {
-    let Arm { apex, horizon, introduce_tick, founder_age_seconds, ledger, stop } = arm;
+    let Arm { apex, horizon, introduce_tick, founder_age_seconds, ledger, stop, motor } = arm;
     if configs.is_empty() {
         return Err("--config must name at least one world configuration TOML".into());
     }
@@ -1475,6 +1504,7 @@ pub fn run(
         founder_age_seconds,
         ledger,
         pursuit_stop: stop,
+        motor: motor.name().to_string(),
         horizon_ticks: horizon,
         workers,
         wall_seconds: started.elapsed().as_secs_f64(),
@@ -1508,6 +1538,7 @@ mod tests {
             founder_age_seconds: 0.0,
             ledger: true,
             pursuit_stop: PursuitStop::ForwardHalfSpace,
+            motor: MotorModel::Sweep.name().to_string(),
             population_at_introduction: 0,
             prey_deaths_predation: 0,
             horizon_ticks: 180_000,

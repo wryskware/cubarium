@@ -667,6 +667,7 @@ pub fn run_compare(
                         plant_record: true,
                         no_animals: false,
                         precondition: Some(job.age),
+                        motor: cubarium_core::MotorModel::Sweep,
                     };
                     let evaluation = evaluate_with(&job.values, job.seed, protocol, options);
                     if evaluation.status == crate::evaluate::Status::Completed {

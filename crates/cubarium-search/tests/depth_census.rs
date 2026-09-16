@@ -163,7 +163,7 @@ fn a_depth_outside_the_genomes_bounds_is_refused_rather_than_clamped() {
 /// on the roster.
 #[test]
 fn a_control_run_reproduces_the_ordinary_harness_world() {
-    let options = RunOptions { ledger: true, plant_record: false, no_animals: false, precondition: None };
+    let options = RunOptions { ledger: true, plant_record: false, no_animals: false, precondition: None, motor: cubarium_core::MotorModel::Sweep };
     for (candidate, seed, arm, introduce) in
         [("baseline", 1001u64, 0u32, 500u64), ("fast-leaf", 1002, 2, 500)]
     {
