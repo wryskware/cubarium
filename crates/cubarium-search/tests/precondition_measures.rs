@@ -285,3 +285,201 @@ fn an_age_off_the_probe_cadence_is_refused_before_anything_runs() {
     .expect_err("an age that cannot be read at must be refused");
     assert!(e.contains("probe cadence"), "and the refusal must say why: {e}");
 }
+
+// =========================================================================================
+// workstream Z: the coupled grazed opening
+// =========================================================================================
+//
+// The grazed stage's claims are different from S's and are tested from their own definitions,
+// pre-registered in
+// `design/7_Research/ecology-v1-grazed-opening-preregistration-2026-09-16.md`:
+//
+// 8.  **The status-quo arm is the constructor's world**, untouched: no burn-in, no removal,
+//     and a founding hash equal to `World::new`'s. That is what makes it a reproduction of
+//     S's retained age-0 rows and not a near-copy.
+// 9.  **A burnt-in arm opens on a genuinely grazed field**, its removal is booked, and the
+//     world's own conservation audits still close at the founding instant and at the horizon.
+// 10. **The burn-in stage and the arm agree**: the opening the arm founds is the opening the
+//     stage saved, by `founding_state_hash`, and the saved file decodes back to it.
+// 11. **The common reference does not move with the opening**: it is the ordinary world's
+//     tick-0 foliage, the same vector at every age, which is what makes the second crossing
+//     count and the terminal starved cells comparable across openings at all.
+// 12. **A coupled burn-in refuses an empty world by name**, because a "burn-in" with nobody
+//     in it is the plant-only prefix this stage exists to be different from.
+
+/// A burn-in small enough to run in a test, on the probe cadence, and long enough that the
+/// coupled field has genuinely moved away from its §11 seeding.
+const GRAZED_AGES: [u64; 2] = [600, 1_200];
+const GRAZED_HORIZON: u64 = 600;
+
+fn grazed(age: u64) -> cubarium_search::precondition::GrazedRow {
+    let c = candidate("baseline").expect("baseline is a declared candidate");
+    precondition::grazed_run(
+        c,
+        SEED,
+        age,
+        GRAZED_HORIZON,
+        100,
+        cubarium_core::hunter::PursuitStop::default(),
+    )
+}
+
+// --- 8. the status-quo arm ----------------------------------------------------------------
+
+#[test]
+fn the_status_quo_arm_is_the_constructors_world_untouched() {
+    let c = candidate("baseline").expect("baseline is a declared candidate");
+    let row = grazed(0);
+    assert!(row.completed, "the status-quo arm runs: {:?}", row.reason);
+    assert!(row.burn_in.is_none(), "age 0 has no burn-in population to remove");
+
+    let reference = World::new(c.config(SEED).expect("its config builds"))
+        .expect("the shipped defaults build a world");
+    assert_eq!(
+        row.opening.founding_state_hash,
+        state_hash(&reference.state),
+        "the status-quo arm opens on the world the constructor builds, bit for bit"
+    );
+    let horizon = row.horizon.expect("it ran to its horizon");
+    assert_eq!(horizon.ticks_run, GRAZED_HORIZON, "and for the declared number of ticks");
+    assert!(horizon.max_abs_mass_residual < 1e-9, "with the material box closed");
+    assert!(horizon.max_abs_water_residual < 1e-9, "and the water budget too");
+    assert_eq!(
+        horizon.founder_broods.founders_by_form.iter().sum::<u64>(),
+        24,
+        "the ordinary 24 founders are the cohort the broods are counted over"
+    );
+}
+
+// --- 9. a burnt-in arm --------------------------------------------------------------------
+
+#[test]
+fn a_burnt_in_arm_opens_on_a_grazed_field_and_its_removal_is_booked() {
+    let status_quo = grazed(0);
+    let row = grazed(GRAZED_AGES[1]);
+    assert!(row.completed, "the burnt-in arm runs: {:?}", row.reason);
+
+    let burn = row.burn_in.as_ref().expect("a burnt-in arm removed a population");
+    assert_eq!(burn.ticks, GRAZED_AGES[1], "it burnt in for the declared age");
+    assert!(burn.population > 0, "and had a population to remove");
+    assert_eq!(
+        burn.population_by_form.iter().sum::<u32>(),
+        burn.population,
+        "whose composition accounts for every body"
+    );
+    assert!(burn.material_removed > 0.0, "the bodies were made of something");
+    assert!(
+        burn.mass_residual.abs() < 1e-9,
+        "and the material box closes across the removal: {}",
+        burn.mass_residual
+    );
+    assert_ne!(
+        burn.coupled_state_hash, burn.emptied_state_hash,
+        "the removal changed the world it was applied to"
+    );
+
+    assert_ne!(
+        row.opening.founding_state_hash, status_quo.opening.founding_state_hash,
+        "a burnt-in arm does not open on the constructor's world"
+    );
+    assert_ne!(
+        row.opening.foliage, status_quo.opening.foliage,
+        "the field the founders meet is the one the burn-in grazed"
+    );
+    let horizon = row.horizon.expect("it ran to its horizon");
+    assert!(horizon.max_abs_mass_residual < 1e-9, "the horizon's material box closes too");
+    assert!(horizon.max_abs_water_residual < 1e-9, "as does its water budget");
+    assert!(
+        horizon.depletion_split.max_identity_residual < 1e-9,
+        "and the plant record's own identity: {}",
+        horizon.depletion_split.max_identity_residual
+    );
+    assert!(
+        !row.trajectory.is_empty() && row.trajectory[0].ticks_since_founding == 0,
+        "the opening hour's trajectory starts at the founding"
+    );
+}
+
+// --- 10. the burn-in stage and the arm agree ----------------------------------------------
+
+#[test]
+fn the_arm_opens_on_the_state_the_burn_in_stage_saved() {
+    let out = dir("grazed-openings");
+    let c = candidate("baseline").expect("baseline is a declared candidate");
+    let run = precondition::grazed_burn_in_run(
+        c,
+        SEED,
+        &GRAZED_AGES,
+        cubarium_core::hunter::PursuitStop::default(),
+        &out,
+    )
+    .expect("the coupled burn-in runs");
+    assert_eq!(run.ages.len(), GRAZED_AGES.len(), "one saved opening per declared age");
+    assert_eq!(run.removals.len(), GRAZED_AGES.len(), "and one accounted removal per age");
+
+    for saved in &run.ages {
+        // The file is the state it claims to be.
+        let bytes = std::fs::read(out.join(&saved.snapshot)).expect("the saved opening is on disk");
+        let (_, decoded) = decode_snapshot(&bytes).expect("it decodes");
+        assert_eq!(
+            state_hash(&decoded),
+            saved.snapshot_state_hash,
+            "the saved opening decodes back to the hash it was written under"
+        );
+        assert_eq!(
+            saved.snapshot_state_hash, saved.founding_state_hash,
+            "and what was saved is the founded opening itself"
+        );
+        // And the arm, which re-runs its own burn-in rather than loading the file, lands on it.
+        let row = grazed(saved.age);
+        assert!(row.completed, "the arm at age {} runs: {:?}", saved.age, row.reason);
+        assert_eq!(
+            row.opening.founding_state_hash, saved.founding_state_hash,
+            "the arm at age {} opens on the state the stage saved for it",
+            saved.age
+        );
+    }
+}
+
+// --- 11. the common reference is fixed ----------------------------------------------------
+
+#[test]
+fn the_common_reference_does_not_move_with_the_opening() {
+    // Two arms of the same (candidate, seed) at different ages read their terminal starved
+    // cells against the same §11 seeding. The counts may differ — that is the measurement —
+    // but the denominator must not, and the cells it watches must not either.
+    let a = grazed(0);
+    let b = grazed(GRAZED_AGES[1]);
+    assert_eq!(
+        a.opening.watched_cells, b.opening.watched_cells,
+        "the common reference watches the same cells whatever the opening is"
+    );
+    let ha = a.horizon.expect("the status-quo arm ran");
+    let hb = b.horizon.expect("the burnt-in arm ran");
+    assert_eq!(
+        ha.crossings_common.cells_watched, hb.crossings_common.cells_watched,
+        "and the common counter's denominator is the same in both"
+    );
+    // The arm's own reference is the thing that moves, which is exactly why both are reported.
+    assert_ne!(
+        a.opening.foliage, b.opening.foliage,
+        "the openings the two arms' own references are taken from differ, which is the whole \
+         reason a common one is needed"
+    );
+}
+
+// --- 12. the refusal ----------------------------------------------------------------------
+
+#[test]
+fn a_coupled_burn_in_refuses_a_world_with_nobody_in_it() {
+    // A "coupled" burn-in of a plant-only world is the plant-only prefix this stage exists to
+    // be different from, so it must not be possible to run one by accident.
+    let c = candidate("baseline").expect("baseline is a declared candidate");
+    let mut config = c.config(SEED).expect("its config builds");
+    config.founders.kinds.clear();
+    config.founders.count = 0;
+    let mut world = World::new(config).expect("a world with no founders is an ordinary world");
+    let e = precondition::burn_in(&mut world, 20, 1_000)
+        .expect_err("a burn-in with nobody in the world must refuse");
+    assert!(e.contains("holds nobody"), "and the refusal must say why: {e}");
+}

@@ -195,6 +195,96 @@ impl World {
         Ok(ids)
     }
 
+    /// Remove **every animal** from this world and hand the bodies back, leaving the field
+    /// exactly as it stands.
+    ///
+    /// This is the mirror of [`World::found_roster`] and the other half of the door
+    /// workstream Z's *coupled grazed opening* needs (`design/handoffs/
+    /// ecology-v1-grazed-opening-opus-2026-09-16.md`, deliverable 1): burn a field in with an
+    /// ordinary roster so the plants settle against **grazing** rather than against nobody,
+    /// take that burn-in population out again, and found the identical fresh roster into the
+    /// field it left. Workstream S measured that a plant-only prefix settles the plants
+    /// against the wrong regime — every arm converges on a grazed standing crop about half
+    /// the ungrazed one, so the founders halve the opening within the first simulated hour.
+    /// Neither existing door reaches that: [`World::found_roster`] refuses a populated world,
+    /// and `evaluate::precondition` is plant-only and refuses one too.
+    ///
+    /// **What it touches.** The organism slots and the private recurrent state keyed to them
+    /// (`neural`), and nothing else. The foliage, wood, plant reserve, nutrient, litter,
+    /// litter energy, fruit, carrion, carrion energy, dead wood and water are untouched cell
+    /// for cell; so are the weather, the clock, the cumulative birth and death counters, the
+    /// water ledgers and the energy ledgers. A removed body is **not** a death: it deposits
+    /// no carrion, emits no [`crate::events::LifeEvent`], and does not move
+    /// `deaths_total`. It leaves the world.
+    ///
+    /// **The books.** Every removed body's [`Organism::material`] — structure, reserve and
+    /// any escrow, which is the same sum [`World::mass_residual`] adds over the population —
+    /// is subtracted from `external_material_in`, which is therefore the world's *net*
+    /// external material and can go negative in a world that fed its population from its own
+    /// field before exporting it. That is the exact mirror of the `+=` the founding does, it
+    /// needs no second counter, and it is what keeps the conservation identity of a
+    /// burn-in-then-found world inside its 1e−9 acceptance — including across a snapshot,
+    /// because [`World::from_state`] re-derives the baseline from the same net term.
+    ///
+    /// The bodies' **stored energy** leaves with them and is deliberately booked nowhere: it
+    /// was not dissipated, so calling it heat would be a fabrication. The world's energy
+    /// audit is measured over an interval against a reading taken when recording opens
+    /// (`evaluate::Recorder`), so a removal that happens *before* the founding it precedes
+    /// does not enter it. The energy that left is on the record instead: it is carried by the
+    /// returned bodies, and the caller reports it.
+    ///
+    /// **The refusal**, by name and without touching the world: an extension holding state
+    /// keyed to the bodies this would remove — hunter members (a carried carcass is material
+    /// inside the identity), open quiet pauses, dormant apexes, paired gestations or
+    /// parentage. This operator empties the ordinary roster and its descendants and has no
+    /// accounted policy for any of those; dropping one silently would corrupt exactly the
+    /// ledger the extension exists to keep. Removing from an empty world is **not** a
+    /// refusal: it is a no-op that books zero, which is what the status-quo arm of a
+    /// comparison does.
+    pub fn remove_all_animals(&mut self) -> Result<Vec<Organism>, String> {
+        let mut held: Vec<&str> = Vec::new();
+        if !self.state.hunters.members.is_empty() {
+            held.push("the hunter extension holds members");
+        }
+        if !self.state.quiet.pauses.is_empty() {
+            held.push("the quiet extension holds open pauses");
+        }
+        if !self.state.apex_dormancy.dormant.is_empty() {
+            held.push("the apex dormancy extension holds dormant bodies");
+        }
+        if !self.state.apex_encounters.gestations.is_empty() {
+            held.push("the apex encounter extension holds paired gestations");
+        }
+        if !self.state.apex_encounters.parentage.is_empty() {
+            held.push("the apex encounter extension holds paired parentage");
+        }
+        if !held.is_empty() {
+            return Err(format!(
+                "cannot remove the population: {}; this operator removes the ordinary roster \
+                 and its descendants and has no accounted policy for extension state keyed to \
+                 the bodies it would take out",
+                held.join(", ")
+            ));
+        }
+        let ids: Vec<crate::ids::OrganismId> =
+            self.state.organisms.iter().map(|(id, _)| id).collect();
+        let mut removed = Vec::with_capacity(ids.len());
+        let mut exported = 0.0;
+        for id in ids {
+            let Some(o) = self.state.organisms.remove(id) else {
+                continue;
+            };
+            exported += o.material();
+            // The private recurrent state goes at the same boundary the body does, exactly as
+            // it does on a death: the entry is keyed by the full id, so a reused slot could
+            // not inherit it even if this were ever missed.
+            self.state.neural.remove(id);
+            removed.push(o);
+        }
+        self.state.external_material_in -= exported;
+        Ok(removed)
+    }
+
     fn assemble(state: WorldState, habitat: Habitat, initial_material: f64) -> World {
         let mut world = World {
             state,

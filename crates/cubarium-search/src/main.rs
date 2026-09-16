@@ -488,8 +488,13 @@ enum Command {
     /// (candidate, seed) plant-only to the last declared age, saves the whole field at every
     /// age and measures how settled it is; `--stage compare` founds the ordinary roster at
     /// each age and runs the ordinary horizon after it, with age 0 as the status quo.
+    ///
+    /// Workstream Z adds `--stage grazed`: the burn-in is the **ordinary coupled world**, so
+    /// the field settles against grazing rather than against nobody; that population is then
+    /// removed and the identical fresh roster founded into the field it grazed.
     Precondition {
-        /// `field` (the operator and its settling measures) or `compare` (the arms).
+        /// `field` (the plant-only operator and its settling measures), `compare` (S's arms)
+        /// or `grazed` (Z's coupled burn-in, removal and re-founding).
         #[arg(long, default_value = "field")]
         stage: String,
         /// Comma-separated candidate names, or `all`.
@@ -768,7 +773,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     wall_seconds,
                     &dir,
                 )?,
-                other => return Err(format!("unknown --stage {other}; use `field` or `compare`").into()),
+                // Workstream Z: the **coupled** grazed opening. The burn-in has the ordinary
+                // roster in it, so the field settles against grazing rather than against
+                // nobody; the population is then removed through
+                // `World::remove_all_animals` and the identical fresh roster founded into
+                // the field it grazed. Age 0 is the status-quo arm and is neither burnt in
+                // nor emptied — it is the reproduction target for workstream S's rows.
+                "grazed" => precondition::run_grazed(
+                    &names,
+                    set,
+                    seeds,
+                    &ages,
+                    ticks,
+                    sample_every,
+                    pursuit_stop,
+                    workers,
+                    wall_seconds,
+                    &dir,
+                )?,
+                other => {
+                    return Err(
+                        format!("unknown --stage {other}; use `field`, `compare` or `grazed`")
+                            .into(),
+                    );
+                }
             };
             precondition::print_report(&report);
             println!("rows and states under {}", dir.display());

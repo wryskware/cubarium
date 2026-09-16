@@ -207,3 +207,200 @@ fn the_founders_material_is_booked_as_arriving_from_outside() {
     );
     w.check_invariants().expect("the material box still closes");
 }
+
+// --- 5. the mirror door: removing the population -------------------------------------------
+//
+// Workstream Z's coupled grazed opening (`design/handoffs/
+// ecology-v1-grazed-opening-opus-2026-09-16.md`, deliverable 1) needs the *other* half of the
+// door: burn a field in with an ordinary roster, take that burn-in population out again, and
+// found the identical fresh roster into the field it grazed. `World::remove_all_animals` is
+// that operator, and it is tested from its definition:
+//
+// 1. it leaves **nothing** alive and hands back exactly what it took;
+// 2. the field, the water, the weather and every pool are **byte-identical** across it;
+// 3. the material it removed is booked out of the world's net external-material counter, so
+//    a burn-in-then-found world's conservation identity still closes;
+// 4. `found_roster` succeeds after it, with `born_tick` at the removal tick;
+// 5. the removed-then-founded world steps on and keeps its invariants over 2,000 ticks;
+// 6. removal on an empty world is a no-op that books zero;
+// 7. it refuses, by name and without touching the world, when an extension holds state keyed
+//    to the bodies it would remove.
+
+/// An ordinary coupled world, burnt in for `ticks` with its own roster present. This is the
+/// burn-in workstream Z's stage runs; a plant-only prefix is a different world entirely.
+fn burnt_in(seed: u64, ticks: u64) -> World {
+    let mut w = World::new(full(seed)).expect("the shipped defaults build a world");
+    for _ in 0..ticks {
+        w.step();
+        w.drain_events();
+    }
+    w
+}
+
+/// Every pool the operator promises not to touch, as plain numbers.
+fn pools(w: &World) -> Vec<Vec<f64>> {
+    vec![
+        w.state.fields.p.to_vec(),
+        w.state.fields.n.to_vec(),
+        w.state.fields.d.to_vec(),
+        w.state.fields.de.to_vec(),
+        w.state.fields.f.to_vec(),
+        w.state.fields.w.to_vec(),
+        w.state.ecology.wood.to_vec(),
+        w.state.ecology.plant_reserve.to_vec(),
+        w.state.ecology.dead_wood.to_vec(),
+        w.state.ecology.carrion.to_vec(),
+        w.state.ecology.carrion_energy.to_vec(),
+    ]
+}
+
+/// The core claim, in two numbers: nobody is left, and what left the world is exactly the
+/// material the bodies held — escrow included, because a gestating body's escrow is part of
+/// the material the conservation identity sums over it.
+#[test]
+fn removal_leaves_nobody_and_books_their_material_to_the_digit() {
+    let mut w = burnt_in(1001, 4_000);
+    let before = w.population();
+    assert!(before > 0, "a coupled burn-in has animals in it");
+    let held: f64 = w.state.organisms.iter().map(|(_, o)| o.material()).sum();
+    let booked_in = w.state.external_material_in;
+
+    let removed = w.remove_all_animals().expect("an ordinary world accepts the removal");
+
+    assert_eq!(w.population(), 0, "nobody is left");
+    assert_eq!(removed.len(), before as usize, "every body is handed back");
+    let exported: f64 = removed.iter().map(|o| o.material()).sum();
+    assert_eq!(exported, held, "what was handed back is what was held");
+    assert_eq!(
+        w.state.external_material_in,
+        booked_in - held,
+        "the removal is the exact mirror of the founding's booking"
+    );
+    assert!(
+        w.mass_residual().abs() < 1e-9,
+        "the material box still closes: residual {}",
+        w.mass_residual()
+    );
+    w.check_invariants().expect("an emptied world obeys the same invariants");
+}
+
+/// The operator is about the animals and nothing else. Every field, every ecology v1 pool and
+/// the weather are the same values afterwards — not close, the same.
+#[test]
+fn the_field_is_byte_identical_across_the_removal() {
+    let mut w = burnt_in(1002, 4_000);
+    let before = pools(&w);
+    let weather = w.state.weather.clone();
+    let tick = w.tick();
+    let (rain_in, evap_out) = (w.state.rain_in_total, w.state.evap_out_total);
+
+    w.remove_all_animals().expect("an ordinary world accepts the removal");
+
+    assert_eq!(pools(&w), before, "every cell of every pool is untouched");
+    assert_eq!(w.state.weather, weather, "the weather is untouched");
+    assert_eq!(w.tick(), tick, "the clock does not move");
+    assert_eq!(w.state.rain_in_total, rain_in, "the water ledgers are untouched");
+    assert_eq!(w.state.evap_out_total, evap_out, "both of them");
+    assert!(w.water_residual().abs() < 1e-9, "and the water budget still closes");
+}
+
+/// The door workstream Z actually walks through: burn in, remove, found again. The fresh
+/// roster is the *identical* roster — the same genomes at the same cells the constructor
+/// would place — and it is born at the removal tick, not at tick 0.
+#[test]
+fn the_identical_roster_can_be_founded_after_a_removal() {
+    const BURN_IN: u64 = 4_000;
+    let mut w = burnt_in(1003, BURN_IN);
+    w.remove_all_animals().expect("an ordinary world accepts the removal");
+    let ids = w.found_roster().expect("an emptied world accepts the roster");
+
+    let cold = World::new(full(1003)).expect("the shipped defaults build a world");
+    let mine: Vec<_> = w.state.organisms.iter().map(|(_, o)| o.clone()).collect();
+    let theirs: Vec<_> = cold.state.organisms.iter().map(|(_, o)| o.clone()).collect();
+    assert_eq!(ids.len(), theirs.len(), "the same roster, body for body");
+    assert_eq!(mine.len(), theirs.len(), "and the world holds exactly it");
+    for (a, b) in mine.iter().zip(&theirs) {
+        assert_eq!(a.genome, b.genome, "the genome is drawn from the seed, not the world");
+        assert_eq!(a.pos, b.pos, "and so is the position");
+        assert_eq!(a.heading, b.heading, "and the heading");
+        assert_eq!(a.structure, b.structure, "adult at founding, as the constructor founds");
+        assert_eq!(a.reserve, b.reserve, "with the configured opening reserve");
+        assert_eq!(a.mode, Mode::Resting, "a founder opens resting");
+        assert_eq!(a.origin, Origin::Founder, "a founder is a founder");
+        assert_eq!(a.born_tick, BURN_IN, "born at the removal tick, not at tick 0");
+    }
+    // The field is the grazed one, not a fresh seeding: that is the entire point.
+    assert_ne!(w.state.fields.p, cold.state.fields.p, "the field is the one the burn-in left");
+    assert!(w.mass_residual().abs() < 1e-9, "and the material box closes across both doors");
+}
+
+/// A world that has been emptied and re-founded is an ordinary world. Two thousand ticks is
+/// the brief's span; the invariants are checked every tick in a debug build, which is what
+/// the test profile runs, and the audits again at the end.
+#[test]
+fn a_removed_then_founded_world_steps_on_and_keeps_its_invariants() {
+    let mut w = burnt_in(1004, 3_000);
+    w.remove_all_animals().expect("an ordinary world accepts the removal");
+    w.found_roster().expect("an emptied world accepts the roster");
+    for _ in 0..2_000 {
+        w.step();
+        w.drain_events();
+    }
+    w.check_invariants().expect("a removed-then-founded world obeys the same invariants");
+    assert!(
+        w.mass_residual().abs() < 1e-9,
+        "and its material residual stays inside the acceptance: {}",
+        w.mass_residual()
+    );
+    assert!(w.water_residual().abs() < 1e-9, "as does the water budget");
+}
+
+/// Nothing to remove is not an error, and it must not invent an export. A world that founded
+/// nobody is the case this actually happens in.
+#[test]
+fn removal_on_an_empty_world_is_a_no_op_that_books_zero() {
+    let mut w = World::new(bare(5)).expect("a world with no founders is an ordinary world");
+    for _ in 0..600 {
+        w.step();
+        w.drain_events();
+    }
+    let before = state_hash(&w.state);
+    let booked = w.state.external_material_in;
+
+    let removed = w.remove_all_animals().expect("an empty world accepts the removal");
+
+    assert!(removed.is_empty(), "nothing was removed");
+    assert_eq!(w.state.external_material_in, booked, "and nothing was booked");
+    assert_eq!(state_hash(&w.state), before, "the world is the same world");
+}
+
+/// The refusal. The operator empties the ordinary roster and its descendants; it has no
+/// accounted policy for a hunter's carried carcass, an open quiet pause, a dormant apex or a
+/// paired gestation, and dropping one silently would corrupt exactly the ledger the extension
+/// exists to keep. A refused call leaves the world untouched.
+#[test]
+fn a_world_whose_extensions_hold_bodies_refuses_by_name() {
+    use cubarium_core::organism::Mode as OMode;
+    use cubarium_core::quiet::{QuietPause, QuietPolicy};
+
+    let mut w = burnt_in(1005, 600);
+    let victim = w.state.organisms.iter().map(|(id, _)| id).next().expect("somebody is alive");
+    w.state.quiet.policy = QuietPolicy::PostBirthPauseV1;
+    w.state.quiet.pauses.push(QuietPause {
+        parent: victim,
+        child: victim,
+        start_tick: w.tick(),
+        end_tick: w.tick() + 10,
+        underlying: OMode::Seeking,
+    });
+    let before = state_hash(&w.state);
+    let population = w.population();
+
+    let refusal = w.remove_all_animals().expect_err("an extension holding bodies must refuse");
+    assert!(
+        refusal.contains("quiet"),
+        "the refusal must name which extension holds them: {refusal}"
+    );
+    assert_eq!(state_hash(&w.state), before, "a refused removal touches nothing");
+    assert_eq!(w.population(), population, "and removes nobody");
+}
