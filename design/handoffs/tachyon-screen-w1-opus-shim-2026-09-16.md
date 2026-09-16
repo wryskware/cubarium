@@ -130,7 +130,7 @@ the config key names above, anything in the cubarium repo.
   (desktop, x86_64) clean; `cargo build --release -p cube-screen-shim` on the
   Tachyon succeeds.
 - `cube-screen-shim layout` output for 1920×1080 in both modes (net must
-  give scale 7, origin `(25, 88)` with gap 1: check that arithmetic against
+  give scale 7, origin `(53, 88)` with gap 1 (net 259×129 source px, 1813×903 panel px): check that arithmetic against
   the spec and report if the spec is wrong rather than fitting it silently).
 - On the device: `outputs`; if the panel is connected, `test-pattern faces`
   and a description (or a photo Wrysk takes) of what is on the screen; the

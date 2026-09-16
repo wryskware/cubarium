@@ -24,7 +24,7 @@ the main checkout. No device access is needed; do not ssh anywhere.
 
 ## What to cover (each a named test, in `crates/cube-screen-shim/tests/`)
 
-1. `net` placement at 1920×1080, gap 1: scale 7, origin (25, 88); every
+1. `net` placement at 1920×1080, gap 1: scale 7, origin (53, 88); every
    populated cell's top-left panel pixel maps to that face's (0, 0); the
    pixel one step left/up of it is background; the last pixel of a cell maps
    to (63, 63); gap columns are background.
