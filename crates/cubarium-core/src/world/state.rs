@@ -19,6 +19,20 @@ use crate::quiet::QuietState;
 
 use super::*;
 
+/// Everything a world is, and **only** what a world is: the state a snapshot round-trips.
+///
+/// The `World` value that owns one also carries transients that are deliberately *not* here —
+/// the diagnostic recorders, and the pursuit stopping rule
+/// ([`crate::hunter::PursuitStop`], `crate::World::set_pursuit_stop`). A transient is a
+/// development control, not a property of the world, so keeping it out of this struct is what
+/// keeps `calibrate::config_hash` and every retained row's `final_state_hash` stable when one
+/// is added.
+///
+/// It has a cost, and [`crate::snapshot::SCHEMA_VERSION`] 17 is where the workspace paid it:
+/// because the rule is not in these bytes, a snapshot cannot say which rule it ran under, and
+/// the only safe way to change the shipped rule was to refuse every older snapshot by number.
+/// A transient whose **default** changes is therefore a schema bump even when nothing here
+/// moves a byte.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WorldState {
     pub config: WorldConfig,

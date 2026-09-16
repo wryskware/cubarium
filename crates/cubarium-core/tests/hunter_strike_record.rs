@@ -230,14 +230,24 @@ fn a_stationary_prey_in_the_grasp_captures_and_all_three_frames_say_it_was_in_re
 }
 
 /// The same attempt with the prey placed a stated distance beyond the grasp, to the claw's
-/// clockwise side so the lunge is never pushed (a burst is only requested for a prey outside
-/// the reach envelope, and a prey abreast of the claws is inside it). Nothing moves, so the
+/// **clockwise side**, so its forward body coordinate is the grasp's own. Nothing moves, so the
 /// separation at every frame is the one the geometry predicts and the outcome is the reach
 /// refusal the audit counted 402 of.
+///
+/// **This fixture runs the rule before 2026-09-16 on purpose.** A motionless body is what makes
+/// the separations statable, and what holds it still here is the forward half-space: the prey
+/// is abreast of the claws, so `body.x < capture_offset_body.x + tolerance` holds and no burst
+/// is pushed. Under the shipped rule — the reach envelope — this same prey is `0.75 px` **out**
+/// of reach, the burst is delivered, and a delivered burst raises the member's speed cap past
+/// the `speed_max = 0` this test freezes it with, so it closes and captures. That is the
+/// adoption working (`crates/cubarium-core/tests/pursuit_predicate_adoption.rs`), and it is
+/// asserted below rather than left as a remark; what this test is *about* is the record's
+/// separation arithmetic, which is the same under either rule.
 #[test]
 fn a_prey_just_beyond_the_grasp_records_out_of_reach_with_the_separation_the_geometry_predicts() {
     let profile = certain(trial(&empty_world()));
     let (mut world, hunter, spot) = staged(&profile);
+    world.set_pursuit_stop(cubarium_core::hunter::PursuitStop::ForwardHalfSpace);
     // Place it once at the origin of the claw so its extent is known, then move it out.
     let grasp = travel(spot, body_offset(Vec2::new(1.0, 0.0), profile.capture_offset_body, 1.0)).end;
     let prey = place_frozen_prey(&mut world, grasp, 0.5, 0.3, 0.4);
@@ -281,9 +291,16 @@ fn a_prey_just_beyond_the_grasp_records_out_of_reach_with_the_separation_the_geo
         assert_eq!(
             frame.pursuit_holds(cubarium_core::hunter::PursuitStop::ForwardHalfSpace),
             Some(true),
-            "{name}: the shipped pursuit stopping rule holds"
+            "{name}: the rule before 2026-09-16 holds, which is what keeps this body still"
+        );
+        assert_eq!(
+            frame.pursuit_holds(cubarium_core::hunter::PursuitStop::ReachEnvelope),
+            Some(false),
+            "{name}: and the shipped rule does not — this prey is out of reach and would be \
+             charged at"
         );
     }
+    assert_eq!(record.stop, cubarium_core::hunter::PursuitStop::ForwardHalfSpace);
     // Neither body moved, so the attempt neither closed nor lost ground.
     close(record.separation_change_over_strike().expect("both frames"), 0.0, 1e-9, "over the burst");
     close(record.separation_change_total().expect("both frames"), 0.0, 1e-9, "over the attempt");

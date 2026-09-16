@@ -212,16 +212,23 @@ fn an_apex_late_override_cannot_spin_a_body_for_free() {
     let strike_pivot = profile.strike_speed_px_s / radius;
     let mut largest_turn_rate = 0.0f64;
     let mut largest_budget = capability;
+    let in_strike = |w: &World| {
+        w.hunters().members.iter().any(|m| m.id == hunter && m.phase == HunterPhase::Strike)
+    };
     for _ in 0..400 {
         let heading = world.state.organisms.get(hunter).expect("alive").heading;
-        let striking = world
-            .hunters()
-            .members
-            .iter()
-            .any(|m| m.id == hunter && m.phase == HunterPhase::Strike);
+        // **The phase at either end of the tick.** The budget a tick spends is the phase the
+        // step resolved under, and the boundary tick — Windup before, Strike after — spends the
+        // strike budget. Reading only the phase before the step was safe while the shipped
+        // pursuit rule held this member at `rest_effort` through its whole burst; since the
+        // reach envelope was adopted the burst is delivered, and the boundary tick is a real
+        // strike tick that the pre-step reading called cruise
+        // (`crates/cubarium-core/tests/pursuit_predicate_adoption.rs`).
+        let was_striking = in_strike(&world);
         world.step();
         world.drain_hunter_events();
         world.drain_events();
+        let striking = was_striking || in_strike(&world);
         let Some(o) = world.state.organisms.get(hunter) else {
             break;
         };
@@ -240,12 +247,12 @@ fn an_apex_late_override_cannot_spin_a_body_for_free() {
         largest_turn_rate = largest_turn_rate.max(rate);
     }
 
-    // What the member's *own* budget buys here. This fixture puts the prey inside the grasp
-    // envelope, so the pursuit override sets `hold` and runs at `rest_effort` rather than 1.0
-    // — and since R0b effort throttles turning as well as travel, so the reachable rate is the
-    // rest-effort share of the ceiling, not the ceiling. Before R0b it was neither: the
-    // capability carried `REFERENCE_RADIUS_PX · turn_rate_max` on top, and a *resting* member
-    // spun at 0.28 rad/s. That is the allowance this milestone removes.
+    // A floor on what the fixture exercised, stated against the smallest budget any tick of it
+    // could have had: the rest-effort share of the cruise ceiling, which is what a member the
+    // pursuit rule *holds* can reach. Since R0b effort throttles turning as well as travel.
+    // Before R0b it was neither: the capability carried `REFERENCE_RADIUS_PX · turn_rate_max`
+    // on top, and a *resting* member spun at 0.28 rad/s. That is the allowance this milestone
+    // removes, and the per-tick assertion above is where it is actually enforced.
     let holding_ceiling = pivot_ceiling * WorldConfig::default().drives.rest_effort;
     assert!(
         largest_turn_rate > 0.5 * holding_ceiling,

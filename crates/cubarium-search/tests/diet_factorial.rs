@@ -36,7 +36,14 @@ use cubarium_surface::{CELL_COUNT, CellId, Face};
 /// and — for the ordinary founders, whose `bud_min_age_seconds` is 120 — breed at least once,
 /// far short of the campaign's horizon.
 fn tiny() -> Design {
-    Design { ticks: 4_000, warm_up_ticks: 600, probe_every: 20, drain_every: 200, wet_min: 0.05 }
+    Design {
+        ticks: 4_000,
+        warm_up_ticks: 600,
+        probe_every: 20,
+        drain_every: 200,
+        wet_min: 0.05,
+        pursuit_stop: cubarium_core::hunter::PursuitStop::default(),
+    }
 }
 
 fn fast_leaf(seed: u64) -> WorldConfig {

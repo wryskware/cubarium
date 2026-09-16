@@ -605,6 +605,7 @@ pub fn run_compare(
     ages: &[u64],
     horizon_ticks: u64,
     sample_every: u64,
+    pursuit_stop: cubarium_core::hunter::PursuitStop,
     workers: usize,
     wall_seconds: u64,
     out: &Path,
@@ -668,6 +669,7 @@ pub fn run_compare(
                         no_animals: false,
                         precondition: Some(job.age),
                         motor: cubarium_core::MotorModel::Sweep,
+                        pursuit_stop,
                     };
                     let evaluation = evaluate_with(&job.values, job.seed, protocol, options);
                     if evaluation.status == crate::evaluate::Status::Completed {

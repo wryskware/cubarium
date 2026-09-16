@@ -307,6 +307,16 @@ pub struct RunOptions {
     /// It is a transient on the world, not a configuration: it does not enter
     /// [`crate::calibrate::config_hash`] and no retained row's hash moves because of it.
     pub motor: cubarium_core::MotorModel,
+    /// **Which pursuit stopping rule the run's world uses**
+    /// (`cubarium_core::hunter::PursuitStop`, `crate::World::set_pursuit_stop`). The default is
+    /// the shipped rule, `ReachEnvelope`, adopted on 2026-09-16
+    /// (`design/7_Research/ecology-v1-predicate-adoption-2026-09-16.md`).
+    ///
+    /// A row produced before that date ran `ForwardHalfSpace`, so **reproducing a retained
+    /// `final_state_hash` means asking for it by name** — which is what `--pursuit-stop
+    /// half-space` is for. Like `motor`, it is a transient on the world: it does not enter
+    /// [`crate::calibrate::config_hash`] and no configuration's hash moves because of it.
+    pub pursuit_stop: cubarium_core::hunter::PursuitStop,
 }
 
 /// Advance a world's plant dynamics with no animals in it, the ordinary §4 tick and nothing
@@ -450,9 +460,12 @@ fn run(
         }
     };
 
-    // The motor contract, before the first tick. A transient on the world, so the config and
-    // its hash are untouched; `MotorModel::Sweep` is the default and changes nothing.
+    // The motor contract and the pursuit stopping rule, before the first tick. Both are
+    // transients on the world, so the config and its hash are untouched; `MotorModel::Sweep`
+    // and `PursuitStop::ReachEnvelope` are the shipped defaults and naming them changes
+    // nothing. Naming `ForwardHalfSpace` is how a row retained before 2026-09-16 is reproduced.
     world.set_motor_model(options.motor);
+    world.set_pursuit_stop(options.pursuit_stop);
     // Workstream S's fixed-age preconditioned opening, before anything is introduced or
     // recorded: the plants run alone to the declared age, then the ordinary roster is founded
     // into the field they grew. At age 0 nothing is stepped and the door reproduces the

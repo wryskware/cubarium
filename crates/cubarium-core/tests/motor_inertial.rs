@@ -384,8 +384,17 @@ fn remembering_policy() -> Gru32 {
 /// dispatched to a recurrent policy that both thrusts and turns: every motor path the switch
 /// touches — the ordinary controller, the apex override, the neural adapter, the observation —
 /// is live in it.
+///
+/// **The pursuit stopping rule is pinned to `ForwardHalfSpace` here, deliberately.** The
+/// hashes below were printed by commit `2eb8a9f`, when that was the shipped rule; the reach
+/// envelope was adopted in its place on 2026-09-16, which moves the apex override and so moves
+/// this world. Naming the rule this fixture was pinned under is what keeps the pin a statement
+/// about the **motor** switch and about nothing else — exactly as naming `Sweep` keeps it a
+/// statement about the motor rather than about whatever ships next. The adoption itself has
+/// its own pins in `crates/cubarium-core/tests/pursuit_predicate_adoption.rs`.
 fn paired_world(model: Option<MotorModel>) -> World {
     let mut world = World::new(WorldConfig::default()).expect("valid");
+    world.set_pursuit_stop(cubarium_core::hunter::PursuitStop::ForwardHalfSpace);
     let profile = FixedHunterProfile::lanternjaw_trial(world.config());
     for _ in 0..1_000 {
         world.step();

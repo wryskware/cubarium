@@ -283,10 +283,23 @@ pub struct StrikeRecord {
     /// **Which pursuit stopping rule the world was running when this attempt was made.**
     /// Carried on the record so a held/delivered reading is never taken under a rule the world
     /// did not run, and so two arms of a paired experiment are distinguishable in one file.
-    /// `#[serde(default)]` is [`super::PursuitStop::ForwardHalfSpace`], which is what every
-    /// artifact recorded before this field existed ran under.
-    #[serde(default)]
+    ///
+    /// The serde default is [`rule_before_the_adoption`] — the forward half-space — and **not**
+    /// [`super::PursuitStop::default`], which became the reach envelope when the envelope was
+    /// adopted as the shipped rule on 2026-09-16. Every record written before this field
+    /// existed ran under the half-space, so that is what a record with no `stop` says; reading
+    /// those artifacts under today's default would relabel them as something they never ran.
+    /// The function is named rather than derived exactly so that the two defaults cannot drift
+    /// together again.
+    #[serde(default = "rule_before_the_adoption")]
     pub stop: super::PursuitStop,
+}
+
+/// The pursuit stopping rule a [`StrikeRecord`] written before the `stop` field existed ran
+/// under: the forward half-space, which was the only rule this workspace had until
+/// 2026-09-16. Deliberately independent of [`super::PursuitStop::default`].
+fn rule_before_the_adoption() -> super::PursuitStop {
+    super::PursuitStop::ForwardHalfSpace
 }
 
 impl StrikeRecord {
@@ -349,16 +362,20 @@ struct OpenAttempt {
 /// The two live together because they are the same instrument: the rule is what the record
 /// exists to measure, an arm that changes one always reads the other, and a record is only
 /// legible beside the rule it was made under — which is why [`StrikeRecord::stop`] is copied
-/// from here at close. The rule is **not** a [`crate::WorldConfig`] field by design: adding one
+/// from here at close.
+///
+/// The rule is **not** a [`crate::WorldConfig`] field, and must not become one: a config field
 /// would change `calibrate::config_hash` for every existing TOML and break the provenance of
-/// every retained row, and this is an experiment, not a contract change.
+/// every retained row. It is carried here instead, which is why a world's saved bytes do not
+/// state it — and why adopting a new default needed a schema bump
+/// ([`crate::snapshot::SCHEMA_VERSION`] 17) rather than a silent change of behaviour on resume.
 #[derive(Clone, Debug, Default)]
 pub struct StrikeRecorder {
     on: bool,
-    /// The rule `crate::world::step`'s hunt-intent pass evaluates. Default
-    /// [`super::PursuitStop::ForwardHalfSpace`] — the shipped rule — and **independent of
-    /// `on`**: turning recording on or off never moves it, and running the variant does not
-    /// require recording.
+    /// The rule `crate::world::step`'s hunt-intent pass evaluates. It follows
+    /// [`super::PursuitStop::default`] **by construction** — the shipped rule, the reach
+    /// envelope, since 2026-09-16 — and is **independent of `on`**: turning recording on or off
+    /// never moves it, and running either rule does not require recording.
     stop: super::PursuitStop,
     open: Vec<OpenAttempt>,
     closed: Vec<StrikeRecord>,
@@ -380,7 +397,8 @@ impl StrikeRecorder {
         self.stop
     }
 
-    /// Run the pursuit's stopping predicate under `stop` from the next tick on. Records already
+    /// Run the pursuit's stopping predicate under `stop` from the next tick on — which an
+    /// ordinary world never needs to do, because the default is the shipped rule. Records already
     /// closed keep the rule they were made under; an attempt still in flight is closed under
     /// the rule in force when it resolves, so a mid-attempt change is visible rather than
     /// silently retconned.

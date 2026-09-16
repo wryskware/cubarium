@@ -88,29 +88,34 @@ impl World {
         self.strikes.enabled()
     }
 
-    /// **Which pursuit stopping rule this world's hunt-intent pass runs.** Off-by-default in
-    /// the only sense that matters: an untouched world is
-    /// [`crate::hunter::PursuitStop::ForwardHalfSpace`], the shipped rule, and is byte-identical
-    /// to a world that never heard of this switch.
+    /// **Which pursuit stopping rule this world's hunt-intent pass runs.** An ordinary world
+    /// runs the shipped rule — [`crate::hunter::PursuitStop::ReachEnvelope`] — without being
+    /// told, and calling this is how a caller asks for the *other* one.
     ///
     /// The rule decides, for a member hunting a target it senses, whether the prey counts as
     /// "inside" — and a member for which it is true drops to its `rest_effort` and is pushed
-    /// **no strike burst**, whatever it has already paid. The shipped rule is a one-sided
-    /// forward half-space; the variant is the reach envelope the predicate's own comment names
-    /// (`crate::hunter::ContactMeasure::in_contact`). It was measured true at the burst's start
-    /// on 408 of 449 paid attempts of the two-apex death arm
-    /// (`design/7_Research/ecology-v1-apex-reach-2026-09-16.md`), and this switch exists so the
-    /// paired arm can be run without changing the rule for anyone
-    /// (`design/7_Research/ecology-v1-apex-predicate-2026-09-16.md`).
+    /// **no strike burst**, whatever it has already paid. The shipped rule is the reach
+    /// envelope the predicate's own comment has always named
+    /// (`crate::hunter::ContactMeasure::in_contact`). The rule before 2026-09-16 was a
+    /// one-sided forward half-space, measured true at the burst's start on 408 of 449 paid
+    /// attempts of the two-apex death arm
+    /// (`design/7_Research/ecology-v1-apex-reach-2026-09-16.md`) and corrected by the paired
+    /// intervention in `design/7_Research/ecology-v1-apex-predicate-2026-09-16.md`; it stays
+    /// selectable here so the rows retained under it remain reproducible
+    /// (`design/7_Research/ecology-v1-predicate-adoption-2026-09-16.md`).
     ///
-    /// **This is not a [`crate::WorldConfig`] field and must not become one** until it is a
-    /// decision: a config field would change `calibrate::config_hash` for every existing TOML.
-    /// It is transient, never persisted, never hashed, and set per `World` value.
+    /// **This is not a [`crate::WorldConfig`] field and must not become one**: a config field
+    /// would change `calibrate::config_hash` for every existing TOML. It is transient, never
+    /// persisted, never hashed, and set per `World` value — which is why adopting a new
+    /// default required [`crate::snapshot::SCHEMA_VERSION`] 17: a world's bytes cannot say
+    /// which rule they were written under, so a schema-16 world is refused rather than resumed
+    /// under a rule it never ran.
     pub fn set_pursuit_stop(&mut self, stop: crate::hunter::PursuitStop) {
         self.strikes.set_pursuit_stop(stop);
     }
 
-    /// The rule [`crate::World::set_pursuit_stop`] installed, or the shipped default.
+    /// The rule [`crate::World::set_pursuit_stop`] installed, or — in every ordinary world —
+    /// the shipped default, [`crate::hunter::PursuitStop::ReachEnvelope`].
     pub fn pursuit_stop(&self) -> crate::hunter::PursuitStop {
         self.strikes.pursuit_stop()
     }

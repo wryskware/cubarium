@@ -1184,18 +1184,25 @@ impl World {
                         // 2.6 px tolerance. The pace calibration makes the lunge 16.67 px, so
                         // a member charged straight through point-blank prey and missed.
                         //
-                        // The shipped rule is nevertheless still a one-sided **forward
-                        // half-space**, `body.x < capture_offset_body.x + tolerance`, and not
-                        // the envelope: a prey *short* of the claws satisfies it as readily as
-                        // one inside them. The strike record measured it true at the burst's
-                        // start on 408 of 449 paid attempts, which drops the member to
+                        // Until 2026-09-16 the rule was nevertheless still a one-sided
+                        // **forward half-space**, `body.x < capture_offset_body.x + tolerance`,
+                        // and not the envelope: a prey *short* of the claws satisfied it as
+                        // readily as one inside them. The strike record measured it true at the
+                        // burst's start on 408 of 449 paid attempts, which drops the member to
                         // `rest_effort` and suppresses the burst it has just paid for
-                        // (`design/7_Research/ecology-v1-apex-reach-2026-09-16.md` §5).
-                        // `PursuitStop` names both readings and
-                        // `ContactMeasure::pursuit_holds` is the one place either is written;
-                        // an ordinary world runs `ForwardHalfSpace` and is byte-identical to
-                        // one that never heard of the switch (`crate::World::set_pursuit_stop`,
-                        // `crates/cubarium-core/tests/hunter_pursuit_predicate.rs`).
+                        // (`design/7_Research/ecology-v1-apex-reach-2026-09-16.md` §5), and the
+                        // paired intervention took held-at-burst from 89.4 % to 5.4 %, contacts
+                        // 88 → 140 and captures 38 → 67
+                        // (`design/7_Research/ecology-v1-apex-predicate-2026-09-16.md`).
+                        //
+                        // **The shipped rule is now the envelope.** `PursuitStop` names both
+                        // readings, `ContactMeasure::pursuit_holds` is the one place either is
+                        // written, and an ordinary world runs `ReachEnvelope` without being
+                        // told; the half-space is the opt-in that reproduces a retained row
+                        // (`crate::World::set_pursuit_stop`,
+                        // `crates/cubarium-core/tests/pursuit_predicate_adoption.rs`). A world's
+                        // bytes do not carry the rule, so the adoption is schema 17 and a
+                        // schema-16 world is refused rather than silently re-ruled.
                         let stop = strikes.pursuit_stop();
                         let inside = organisms
                             .get(t)

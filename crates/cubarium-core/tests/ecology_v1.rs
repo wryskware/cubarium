@@ -1964,16 +1964,20 @@ fn a6_remains_route_to_c_rejects_route_to_d_and_no_stock_leaks_into_another() {
 
 // ------------------------------------------------------------------------------ A7
 
-/// **A7 — snapshot.** Schema 16 round-trips with the documented header, every older schema is
-/// refused with its own version, and a relabelled schema 16 payload is refused too.
+/// **A7 — snapshot.** The current schema round-trips with the documented header, every older
+/// schema is refused with its own version, and a relabelled current payload is refused too.
+///
+/// Since 2026-09-16 that current schema is **17**, and 16 is in the refusal loop: the ecology
+/// v1 payload did not move, but the shipped pursuit stopping rule did, and a world's bytes do
+/// not carry it (`crates/cubarium-core/tests/pursuit_predicate_adoption.rs`).
 ///
 /// The old-schema **fixtures** are covered by their own refusal tests beside the suites that
 /// used to migrate them (`care.rs`, `care_dose_migration.rs`, `hunter_migration.rs`,
 /// `quiet_migration.rs`, `hunter_charging.rs`, `astra_quiet_policy.rs`,
 /// `continuation_fixtures.rs`); this is the rule itself.
 #[test]
-fn a7_schema_sixteen_round_trips_and_every_older_schema_is_refused_by_name() {
-    assert_eq!(SCHEMA_VERSION, 16);
+fn a7_the_current_schema_round_trips_and_every_older_schema_is_refused_by_name() {
+    assert_eq!(SCHEMA_VERSION, 17);
     let mut world = bare_world(BRIGHT);
     paint(&mut world, CellId::new(Face::Top, 8, 8), 0.56, 0.6, 0.30);
     let mut world = restage(world);
@@ -1984,7 +1988,7 @@ fn a7_schema_sixteen_round_trips_and_every_older_schema_is_refused_by_name() {
     let bytes = encode_snapshot(&world.state, "ecology-v1");
     assert_eq!(&bytes[..4], b"CUBW");
     assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), SCHEMA_VERSION);
-    let (meta, back) = decode_snapshot(&bytes).expect("schema 16 round-trips");
+    let (meta, back) = decode_snapshot(&bytes).expect("the current schema round-trips");
     assert_eq!(meta.schema, SCHEMA_VERSION);
     assert_eq!(meta.build_id, "ecology-v1");
     assert_eq!(back, world.state, "the round trip is lossless");
@@ -2003,8 +2007,8 @@ fn a7_schema_sixteen_round_trips_and_every_older_schema_is_refused_by_name() {
         );
     }
 
-    // A relabelled schema 16 payload: a longer body under the current version number is
-    // refused rather than read at the wrong offsets.
+    // A longer body under the current version number is refused rather than read at the
+    // wrong offsets.
     let mut longer = postcard::to_allocvec(&world.state).expect("encodes");
     longer.extend_from_slice(&[0u8; 3]);
     let mut framed = Vec::new();
@@ -2016,7 +2020,7 @@ fn a7_schema_sixteen_round_trips_and_every_older_schema_is_refused_by_name() {
     framed.extend_from_slice(&longer);
     assert!(
         matches!(decode_snapshot(&framed), Err(SnapshotError::Decode(_))),
-        "a relabelled schema 16 payload must be refused"
+        "a relabelled current-schema payload must be refused"
     );
 }
 

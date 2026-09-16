@@ -197,6 +197,14 @@ pub struct Layout {
     /// always existed.
     #[serde(skip)]
     pub motor: MotorModel,
+    // **No pursuit stopping rule.** Every layout clears `founders` and places exactly one
+    // grazer ([`Layout::config`], [`Layout::place`]), so no episode world holds a hunter, the
+    // hunt-intent pass that rule lives in is never reached, and a switch here would be inert —
+    // a control that names a difference it cannot make. It is therefore not carried, not on
+    // the protocol and not on an exported policy: a trained policy is predicate-independent
+    // (`design/7_Research/ecology-v1-predicate-adoption-2026-09-16.md`), and
+    // `crates/cubarium-search/tests/predicate_adoption_provenance.rs` is what keeps that true.
+    // A layout that ever *does* found a hunter owes the field back.
 }
 
 /// The stand that carries `p` of foliage (`design/ecology-v1-contract.md` §14 "search"):
