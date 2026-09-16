@@ -2030,3 +2030,55 @@ fn the_ring_goldens_are_what_this_presenter_draws() {
         );
     }
 }
+
+/// The bend budget is measured against the world's own footprint, and the cube's is the
+/// nine pixels it always was.
+///
+/// The cube's numbers are asserted **bit for bit** against the free functions rather than
+/// against literals: `ArtGeometry::bend_footprint` is `min(9·S, max_local_radius)` and a
+/// cube is `min(9, 32)`, so the geometry-aware path has to short-circuit to exactly
+/// `Sprite::bend_headroom`'s own `f64` — which is what keeps every cube frame identical.
+#[test]
+fn a_cubes_bend_budgets_are_the_nine_pixel_ones_and_a_rings_scale_with_its_stamp_budget() {
+    let pack = pack();
+    let cube = ArtGeometry::CUBE;
+    assert_eq!(cube.bend_footprint(), cubarium_surface::FOOTPRINT_PIXELS);
+    for p in &pack.plants {
+        assert_eq!(cube.plant_bend_budget(p), plant_bend_budget(p), "{}", p.name);
+    }
+    for p in &pack.tall {
+        assert_eq!(cube.tall_bend_budget(p), tall_bend_budget(p), "{}", p.name);
+    }
+
+    // A ring at S = 1 has the same 9-pixel stamp budget as the cube — its 90-pixel
+    // `max_local_radius` is not the binding term — so its budgets are the cube's exactly.
+    let small = ArtGeometry::new(Topology::Ring { w: 320, h: 180 }, Scale::ONE);
+    assert_eq!(small.bend_footprint(), 9.0);
+    for p in &pack.plants {
+        assert_eq!(small.plant_bend_budget(p), plant_bend_budget(p), "{}", p.name);
+    }
+
+    // The panel's rung: `9·S = 18`, still well inside the ring's 180, and every clip of
+    // the shipped pack is then past the tip its species asks for. The two that were
+    // clipped on the cube are `tendrilfan` (0.314 px of budget against a wanted 0.55) and
+    // `glasscane` (0.465 against 0.50); both draw their whole tip here.
+    let panel = ArtGeometry::new(Topology::Ring { w: 640, h: 360 }, Scale::new(2.0));
+    assert_eq!(panel.bend_footprint(), 18.0);
+    for p in &pack.plants {
+        let (budget, want) = (panel.plant_bend_budget(p), wind_response(&p.name).tip_px);
+        assert!(budget > 10.0, "{} has {budget} px of room at S = 2", p.name);
+        assert_eq!(effective_tip(want, budget), want, "{} is no longer clipped", p.name);
+    }
+    for p in &pack.tall {
+        let (budget, want) = (panel.tall_bend_budget(p), wind_response(&p.name).tip_px);
+        assert!(budget > 10.0, "{} has {budget} px of room at S = 2", p.name);
+        assert_eq!(effective_tip(want, budget), want, "{} is no longer clipped", p.name);
+    }
+
+    // And a presenter built for a cube and *fitted* to the panel's ring re-measures them:
+    // the budgets are a property of the pack and of the world, not of the pack alone.
+    let mut presenter = ArtPresenter::new(pack);
+    assert_eq!(presenter.bend_budget("tendrilfan"), 0.3142539178559581);
+    presenter.fit(Topology::Ring { w: 640, h: 360 }, Scale::new(2.0));
+    assert!(presenter.bend_budget("tendrilfan") > 10.0);
+}

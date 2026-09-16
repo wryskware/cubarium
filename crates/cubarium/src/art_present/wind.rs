@@ -1,5 +1,6 @@
 //! Shared wind field and bend budgets.
 
+use cubarium_render::Sprite;
 use cubarium_surface::Topology;
 use super::*;
 
@@ -200,6 +201,49 @@ impl ArtGeometry {
             let tip = effective_tip(response.tip_px, budget) * slot.wind;
             (plant_bend(tip, w, slot.heading), slot.heading)
         }
+    }
+
+    /// The footprint bound this world's bend budgets are measured against, in tile
+    /// pixels: `min(`[`Scale::footprint_radius`]`, `[`Topology::max_local_radius`]`)`.
+    ///
+    /// **Normative, and 9 on the cube by construction** — `min(9·1, 32)` — so a cube's
+    /// budgets, and therefore every amplitude a cube ever draws, are bit for bit what
+    /// they were before this method existed.
+    ///
+    /// The two terms are two different constraints and both are real.
+    ///
+    /// * `9·S` is the **shared stamp budget** every renderer honours: `Sprite::from_rgba`
+    ///   refuses art wider than it, and `stamp_layers_bent`'s pixel walk clips its radius
+    ///   at it (`sprite.rs`, "the *second* budget check site"). A bend admitted past it is
+    ///   a bend whose outer texels the CPU presenter simply does not visit.
+    /// * `max_local_radius` is the **topology's** own limit, the radius `unfold_pixels`
+    ///   accepts: 32 on the cube, and on a ring `min(h, w − 8)/2` — 90 at 320×180, 180 at
+    ///   640×360.
+    ///
+    /// GS-1's report and this package's brief name the second as "the room a ring has",
+    /// and it is much the larger; but it is the *first* that binds a stamp, and honouring
+    /// only the second would admit amplitudes the CPU presenter clips and the GPU does
+    /// not, which is a difference between the two pictures rather than more wind. What a
+    /// ring actually gains is the `S` in `9·S`: the cube is pinned to `S = 1` and a ring
+    /// at the panel's rung is `S = 2`, so the bound there is **18 px**, double the cube's,
+    /// and that is enough to lift every clip of the shipped pack past the tip its species
+    /// asks for (`WIND_RESPONSE`, 0.12–0.9 px). Raising it further would change no
+    /// amplitude at all.
+    pub fn bend_footprint(self) -> f64 {
+        self.scale()
+            .footprint_radius()
+            .min(self.topology().max_local_radius())
+    }
+
+    /// [`plant_bend_budget`] measured against this world's own footprint
+    /// ([`ArtGeometry::bend_footprint`]).
+    pub fn plant_bend_budget(self, plant: &Plant) -> f64 {
+        plant_bend_budget_at(plant, self.bend_footprint())
+    }
+
+    /// [`tall_bend_budget`] measured against this world's own footprint.
+    pub fn tall_bend_budget(self, plant: &TallPlant) -> f64 {
+        tall_bend_budget_at(plant, self.bend_footprint())
     }
 
     /// [`tall_amplitude`] in this world.
@@ -502,13 +546,50 @@ pub fn tall_amplitude(column: &TallColumn, budget: f64, seconds: f64) -> f64 {
 /// bendable texel has an infinite budget, which [`effective_tip`] then leaves to the species'
 /// desired tip.
 pub fn plant_bend_budget(plant: &Plant) -> f64 {
+    plant_bend_budget_at(plant, cubarium_surface::FOOTPRINT_PIXELS)
+}
+
+/// One frame's [`cubarium_render::Sprite::bend_headroom`] against a footprint bound other
+/// than the nine pixels the sprite was loaded with.
+///
+/// The measurement is `bend_headroom`'s own, not a second copy of its criterion: a
+/// sprite's bound is the `Scale` it was built at (`Sprite::from_premultiplied_at`, budget
+/// `9·S`), so the frame is rebuilt at `Scale::new(bound/9)` from its own premultiplied
+/// texels and asked the same question. At the cube's bound this short-circuits and calls
+/// the frame directly, so a cube's budget is the same `f64` it always was and cannot
+/// drift with a rewrite here.
+///
+/// A rebuild that the sprite contract refuses — which can only be an extent past the
+/// *smaller* bound, so only when `bound < 9` — falls back to the frame's own answer.
+fn headroom_at(frame: &Sprite, root: f64, length: f64, base: f64, bound: f64) -> f64 {
+    if bound == cubarium_surface::FOOTPRINT_PIXELS {
+        return frame.bend_headroom(root, length, base);
+    }
+    let (w, h) = (frame.width(), frame.height());
+    let mut texels = Vec::with_capacity(w * h);
+    for y in 0..h {
+        for x in 0..w {
+            texels.push(frame.texel(x as i32, y as i32));
+        }
+    }
+    let scale = Scale::new(bound / cubarium_surface::FOOTPRINT_PIXELS);
+    match Sprite::from_premultiplied_at(scale, w, h, frame.pivot(), texels) {
+        Ok(wide) => wide.bend_headroom(root, length, base),
+        Err(_) => frame.bend_headroom(root, length, base),
+    }
+}
+
+/// [`plant_bend_budget`] against a given footprint bound in tile pixels.
+///
+/// Measured once per pack per world at [`ArtPresenter::for_world`], never per frame.
+pub fn plant_bend_budget_at(plant: &Plant, bound: f64) -> f64 {
     plant
         .stages
         .iter()
         .chain(plant.fruit.iter())
         .chain(plant.transitions.iter().map(|t| &t.clip))
         .flat_map(|clip| clip.frames.iter())
-        .map(|frame| frame.bend_headroom(PLANT_BEND_ROOT, PLANT_BEND_LENGTH, 0.0))
+        .map(|frame| headroom_at(frame, PLANT_BEND_ROOT, PLANT_BEND_LENGTH, 0.0, bound))
         .fold(f64::INFINITY, f64::min)
 }
 
@@ -529,10 +610,17 @@ pub fn plant_bend_budget(plant: &Plant) -> f64 {
 /// retains its original trunk budget. One number per family, measured once: every part
 /// of a column bends by the same amplitude, so they must all be inside the same budget.
 pub fn tall_bend_budget(plant: &TallPlant) -> f64 {
+    tall_bend_budget_at(plant, cubarium_surface::FOOTPRINT_PIXELS)
+}
+
+/// [`tall_bend_budget`] against a given footprint bound in tile pixels.
+pub fn tall_bend_budget_at(plant: &TallPlant, bound: f64) -> f64 {
     let worst = |clip: &Clip, i: f64| {
         clip.frames
             .iter()
-            .map(|f| f.bend_headroom(TALL_BEND_ROOT, TALL_BEND_LENGTH, tall_bend_base(i)))
+            .map(|f| {
+                headroom_at(f, TALL_BEND_ROOT, TALL_BEND_LENGTH, tall_bend_base(i), bound)
+            })
             .fold(f64::INFINITY, f64::min)
     };
     let top = f64::from(TALL_MAX_SEGMENTS);

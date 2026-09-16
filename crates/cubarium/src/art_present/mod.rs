@@ -429,6 +429,20 @@ pub struct ArtPresenter {
     foliage_full: f64,
 }
 
+/// Every plant and tall family of a pack with its measured amplitude budget, in pack
+/// order (plants first, then tall families), against `geom`'s own footprint.
+fn measured_budgets(pack: &ArtPack, geom: ArtGeometry) -> Vec<(String, f64)> {
+    pack.plants
+        .iter()
+        .map(|p| (p.name.clone(), geom.plant_bend_budget(p)))
+        .chain(
+            pack.tall
+                .iter()
+                .map(|p| (p.name.clone(), geom.tall_bend_budget(p))),
+        )
+        .collect()
+}
+
 impl ArtPresenter {
     /// Build the presenter for a **cube** and lay out every cell's slot once.
     ///
@@ -457,17 +471,10 @@ impl ArtPresenter {
             };
             columns.len()
         ];
-        // The amplitude budgets of the shipped pack, measured once from its own pixels.
-        let budgets: Vec<(String, f64)> = pack
-            .plants
-            .iter()
-            .map(|p| (p.name.clone(), plant_bend_budget(p)))
-            .chain(
-                pack.tall
-                    .iter()
-                    .map(|p| (p.name.clone(), tall_bend_budget(p))),
-            )
-            .collect();
+        // The amplitude budgets of the shipped pack, measured once from its own pixels
+        // against **this world's** footprint (`ArtGeometry::bend_footprint`): 9 px on a
+        // cube, by construction, and `9·S` on a ring.
+        let budgets = measured_budgets(&pack, geom);
         let cells_n = geom.cell_count();
         ArtPresenter {
             pack,
@@ -585,6 +592,11 @@ impl ArtPresenter {
         self.bodies.clear();
         self.hunters.clear();
         self.outgoing_prey.clear();
+        // The budgets are a property of the pack *and* of the world's footprint, so a
+        // presenter built for a cube and fitted to a ring re-measures them here. Leaving
+        // them would draw a ring with the cube's nine-pixel room, which is the whole of
+        // what GS-1c item 2 is about.
+        self.budgets = measured_budgets(&self.pack, self.geom);
     }
 
     /// Fit the presenter to the world a view describes.
