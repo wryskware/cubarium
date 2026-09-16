@@ -1444,6 +1444,15 @@ fn the_depth_term_points_up_the_side_faces_and_vanishes_on_top() {
         let higher = SurfacePoint::new(face, 32.0 + up.x * 4.0, 40.0 + up.y * 4.0);
         assert!(Topology::Cube.embed(Scale::ONE, &higher)[1] > Topology::Cube.embed(Scale::ONE, &low)[1]);
     }
+    // The ring's `up` is the constant `−v`, because `height = 1 − 2v/h` falls with `v`
+    // (`design/flat-world-plan-2026-09-16.md` §5). The same two checks, on the same rule.
+    let ring = Topology::Ring { w: 320, h: 180 };
+    let up = up_direction(ring, Face::Front);
+    assert_eq!(up, Vec2::new(0.0, -1.0));
+    let low = SurfacePoint::new(Face::Front, 160.0, 120.0);
+    let higher = SurfacePoint::new(Face::Front, 160.0 + up.x * 4.0, 120.0 + up.y * 4.0);
+    assert!(ring.height(&higher) > ring.height(&low));
+
     // A canopy-bound organism low on a wall heads up; a soil-bound one high up heads down.
     // No food anywhere (no producers, no litter), so nothing stops it to feed on the way.
     let mut cfg = config();

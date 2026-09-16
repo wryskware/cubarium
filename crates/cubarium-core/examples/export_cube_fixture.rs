@@ -24,8 +24,10 @@ fn main() {
     let ticks: u64 = args.next().map_or(FIXTURE_TICKS, |s| s.parse().expect("ticks"));
     let seed: u64 = args.next().map_or(FIXTURE_SEED, |s| s.parse().expect("seed"));
 
-    let mut config = WorldConfig::default();
-    config.seed = seed;
+    let config = WorldConfig {
+        seed,
+        ..WorldConfig::default()
+    };
     let mut world = World::new(config).expect("the default cube world is valid");
     for _ in 0..ticks {
         world.step();

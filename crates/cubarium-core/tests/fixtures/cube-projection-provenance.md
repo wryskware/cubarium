@@ -21,13 +21,13 @@ commit    2a1cedd  ("Ecology v1 next steps, round 2: briefs for the intake diagn
 tree      a temporary `git worktree --detach` under the task's scratch directory, removed
           after the fixture was taken
 generator crates/cubarium-core/examples/export_cube_fixture.rs
-          SHA256 4610bec9789efb416d293d347832c07a2a09b1c9c72d61d7a6873f88be850d3e
+          SHA256 d7a80029488592268506e66d4ef434fd5d5ef0b03f75f11676f0b1139706a0d0
           the *same file* now committed in this tree — it is deliberately self-contained
           (no `Topology`, no `Scale`, nothing the pre-change API lacks) so it can be dropped
           into either checkout unchanged and produce the matching half of the comparison
 build     CARGO_TARGET_DIR=<scratch> cargo build --release -p cubarium-core \
               --example export_cube_fixture
-binary    SHA256 fa46dc88eac068ed4d2bece78dcdf369719db55708b2b4951cdedc1010e0ae70
+binary    SHA256 beab9ace88d52f7a7820a03ae1ceaa093b9c39023206f67fdd8dcbbe11a2b5e4
 run       ./export_cube_fixture <out> 6000 20260916
 ```
 
