@@ -334,3 +334,19 @@ and `/dev/dri/renderD128` is group `render`; the handoff socket becomes group
 `cubarium` in groups `video` and `render`, `cubarium.service` with
 `User=cubarium`, state under `/var/lib/cubarium` owned by that user, and no
 capability beyond that. The daemon keeps root.
+
+### FW-2 result and two ring-world calls (2026-09-16)
+
+FW-2 landed: schema 17, `CubeProjection` against a fixture from an unmodified
+`main` (6,000 ticks, no field differs, hash pinned), weather bit-identical on
+ring and cube from one seed, ring worlds at 320×180 and 640×360 running with
+the same 3,600-cell environment. TOML spelling is `Ring`, not `ring`.
+
+Two effects measured on the ring, for Wrysk to see on the panel before any
+knob moves: the floor row is a moat (18 % of all standing water in 1/45 of the
+cells; a pond along the bottom of a side-view terrarium, which may well be a
+feature), and at the unchanged 24 founders the ring is 2.81× thinner than the
+cube. Decision (Fable): the ring's default founder count scales with cell
+count (24 × 2.81 ≈ 67) so a fresh ring world starts as dense as a fresh cube;
+this is a fresh-world default in W2's config, not a tuning of a running world.
+`evap_floor` stays where the backlog keeps it until the panel is seen.
