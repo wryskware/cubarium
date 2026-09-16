@@ -297,8 +297,12 @@ registered rule's second branch fires. The weights × adapter 2 × 2 of the
 four selected centres, registered before the second seed was read, says
 where the difference lives: swapping only the adapter moves `t_min` by
 −223/+124 (seed 1) and −3,124/+167 (seed 2); swapping which run's weights
-moves it by +132/+479 and **−6,918/−3,627**. **Not expression — the search
-reached a different region, better once and much worse once.** The number
+moves it by +132/+479 and **−6,918/−3,627**. **On the selected centres the
+difference is carried by the weights the search produced, not by acute
+decoding of the same weights** — a different region, better once and much
+worse once. The crossed replay cannot say whether the adapter altered the
+training trajectory that produced those weights, and it says nothing about
+other seeds, band widths, scores, pair counts or optimisers. The number
 behind it: the seed-2 `cub-act-1` centre already turns on 0.9997 of its
 measurable ticks, so the deadband was not clipping that policy and there was
 nothing to release. **No training default proposed**, and none is
@@ -307,10 +311,13 @@ generation-wise p-values are descriptive, and `es-population` refuses
 `cub-act-2` so no whole-world evaluation exists. XY2 also notes, unchased:
 the seed-2 `cub-act-1` control survives two held-out horizons outright, the
 first policy in this line to survive any, and nothing explains why that
-seed. **Fable's reading:** the deadband line is closed. Q's channel finding
+seed. **Fable's reading, scoped as Astra asked:** the 0.05 → 0.0 deadband
+change is closed **as a default and as the next training line under this
+fixed protocol**; not the adapter question in general. Q's channel finding
 was real and its inference to residence was not; the released band neither
-helps frozen weights nor reliably helps the search. The interesting object is
-the surviving seed-2 control, not the adapter.
+helps frozen weights nor reliably helps this search. The interesting object
+is the surviving seed-2 control, which deserves one bounded diagnostic (item
+1 below), not installation or another campaign.
 
 **Part 2 — Y's ladder at arm 2: no rung acceptable, and the predicate is
 load-bearing.** R's 24 arm-2 rows reproduce field for field under
@@ -329,10 +336,12 @@ Named throughout as the apex-arm treatment; predation deaths cross-tabulated
 by prey form from the census's existing cells are under 6 % of prey deaths in
 every cell, so the mechanism is stated as unresolved. Per-rung channel and
 margin sequences reported raw and not called monotone. **No roster change
-proposed.** **Fable's reading:** R's fast-leaf result was a property of the
-old predicate in the arms with predators; under the shipped rule the skimmer
-question is back to Astra's world-level branch, and the depth line is closed
-until someone wants a wet-floor producer.
+proposed.** **Fable's reading, scoped as Astra asked:** R's fast-leaf result
+was a property of the old predicate in the arms with predators. What is
+closed is **the six tested values of the roster skimmer's depth locus at arms
+0 and 2, at this price, horizon, seed set, ecology and shipped predicate**.
+Diet, metabolism, form and their interactions were not varied, arm 1 was not
+run, and a wet-floor producer is one world-level alternative among others.
 
 ## What this does and does not establish
 
@@ -347,11 +356,14 @@ until someone wants a wet-floor producer.
   apex-arm treatment matters for `fast-leaf`.
 - Sixteen pairs' sufficiency remains untested; the split-half spread is
   reported, not concluded on.
-- The released turn band does not replicate as a training advantage; the
-  difference between seeds is in the weights, not the adapter. Closed.
+- The released turn band does not replicate as a training advantage; on the
+  selected centres the difference between seeds is in the weights, not the
+  adapter. Closed as a default and as the next training line under this
+  protocol.
 - Under the shipped predicate no skimmer depth is acceptable in either arm,
   and R's arm-2 effect was largely a property of the old predicate. Closed
-  at the genome; open only as a world question.
+  for this depth-only tuning path at arms 0 and 2; the genome generally and
+  the world-level alternatives are not closed.
 - A coupled-grazed opening at 96,000 ticks gives S's founder gains without
   S's first-hour browning, at near the status quo's starved-cell count, at
   about 15 s per core; it costs the skimmer founders at the shorter ages
@@ -364,7 +376,15 @@ until someone wants a wet-floor producer.
 
 ## Next recommendation (Fable, pending Astra)
 
-1. ~~X, second training seed~~ **Done (XY2): not replicated; closed.** Was: the retained command with `--adapter
+1. ~~X, second training seed~~ **Done (XY2): not replicated; the deadband
+   default is closed under this protocol.** *Next, bounded (Astra):* replay
+   the seed-2 `cub-act-1` control and the prior selected `cub-act-1` centre
+   on h1 and h6 (the two horizons it survived) and two pre-declared failed
+   layouts, with the intake and body-budget trace; compare on-food fraction,
+   dwell, served-to-credited intake, total bill and terminal reserve. A
+   repeatable store-margin difference on the surviving layouts makes it a
+   candidate for the whole-world population test; otherwise the lead ends.
+   Two favourable layouts are not deployment evidence. Was: the retained command with `--adapter
    cub-act-2 --train-seed <second>` and its `cub-act-1` control at the same
    seed (a second control is owed too, 140 s), the seed being the replicate;
    plus the selected centres of both seeds replayed under both adapters as a
@@ -372,7 +392,7 @@ until someone wants a wet-floor producer.
    co-adaptation). No training default from this: a favourable second seed
    still lacks whole-world evaluation while `es-population` refuses
    `cub-act-2`; the host stays on `cub-act-1` regardless.
-2. ~~Y, the ladder at arm 2~~ **Done (XY2): no rung; the predicate halved R's effect; closed at the genome.** Was: same design, two apex adults
+2. ~~Y, the ladder at arm 2~~ **Done (XY2): no rung; the predicate halved R's effect; this depth-only path is closed at arms 0 and 2.** Was: same design, two apex adults
    introduced, under the shipped predicate with R's arm-2 rows reproduced
    under the half-space and the predicate contrast reported at 0.10 and
    0.55; an acceptable rung would be a candidate for held-out confirmation,

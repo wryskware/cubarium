@@ -441,21 +441,55 @@ fn removal_refuses_transient_body_keyed_state_by_name_and_leaves_the_world_as_it
     let err = world.remove_all_animals().err().expect("a scripted intent is refused");
     assert!(err.contains("scripted"), "{err}");
     assert_eq!(state_hash(&world.state), before);
+    assert_eq!(world.scripted_intents().len(), 1, "the intent itself is left in place");
     world.set_scripted_intents(Vec::new());
 
     world.record_body_budgets(true);
     let err = world.remove_all_animals().err().expect("a recording ledger is refused");
     assert!(err.contains("ledger"), "{err}");
     assert_eq!(state_hash(&world.state), before);
+    assert!(world.body_budgets_recording(), "the ledger is left recording");
     world.record_body_budgets(false);
 
     world.trace_intake(Some(id));
     let err = world.remove_all_animals().err().expect("an intake trace is refused");
     assert!(err.contains("intake trace"), "{err}");
     assert_eq!(state_hash(&world.state), before);
+    assert_eq!(world.intake_trace_target(), Some(id), "the trace target is left in place");
     world.trace_intake(None);
 
     let removed = world.remove_all_animals().expect("nothing holds a body now");
     assert!(!removed.is_empty());
     assert!(world.state.organisms.iter().next().is_none());
+}
+
+/// An extension's event queue holds the door too (Astra, round-5 review, finding 11): a world
+/// with hunters introduced has hunter events queued (and members present); the removal names
+/// the queue, and the queue is left exactly as long as it was.
+#[test]
+fn removal_refuses_an_undrained_extension_event_queue_and_leaves_it_queued() {
+    use cubarium_core::hunter::{FixedHunterProfile, HunterTarget};
+    let mut world = World::new(WorldConfig::default()).expect("valid");
+    for _ in 0..1_000 {
+        world.step();
+    }
+    world.drain_events();
+    let profile = FixedHunterProfile::lanternjaw_trial(world.config());
+    world
+        .introduce_hunters(profile, &[HunterTarget { face: 1, u: 23.0, v: 31.0 }])
+        .expect("one adult is placed");
+    // Hunter events are emitted by the hunt itself, not by the introduction: step until the
+    // adult has attempted something, draining only the ordinary life events meanwhile.
+    for _ in 0..30_000 {
+        if world.pending_extension_events()[0] > 0 {
+            break;
+        }
+        world.step();
+        world.drain_events();
+    }
+    let queued = world.pending_extension_events();
+    assert!(queued[0] > 0, "a hunting adult queues hunter events within 30,000 ticks: {queued:?}");
+    let err = world.remove_all_animals().err().expect("refused");
+    assert!(err.contains("hunter events are queued"), "{err}");
+    assert_eq!(world.pending_extension_events(), queued, "the queue is left as it was");
 }

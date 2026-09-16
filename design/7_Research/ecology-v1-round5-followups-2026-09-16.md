@@ -174,7 +174,11 @@ same run:
 holds.** The selected ecology is `fast-leaf`; `baseline` is reported, not weighed.
 
 **Thresholds.** Y's generalisation, unchanged: a seed agrees when a majority of its own runs
-agree, `⌈runs_of_seed / 2⌉`. At 6 runs over 6 seeds a clause needs ≥ 4 runs and ≥ 5 seeds, and
+agree. *(Historical text: this pre-registration wrote the majority as `⌈runs_of_seed / 2⌉`;
+production had already been made a strict majority, `runs_of_seed / 2 + 1`, at repair 2 of
+Astra's round-5 review. With one run per seed the two read identically, so no result here
+depends on the difference — Astra, part 3, finding 15.)* At 6 runs over 6 seeds a clause needs
+≥ 4 runs and ≥ 5 seeds, and
 because arm 2 gives one run per seed those are the same six runs, so **the binding threshold is
 5 of the 6 seeds** — exactly as at arm 0. The 0.10 cell is its own control and no clause is
 evaluated for it.
@@ -538,10 +542,11 @@ exclusions, both named in the pre-registration before the check ran. 24 runs, 88
 **One disclosure about the last two rows.** I's ladder and M's present arm contain **arm-0 rows
 only** (60 and 12 rows, all arm 0), so at arm 2 there is nothing in them to check — "12 not in
 that file", not twelve mismatches. The harness's `clean` gate requires `matched > 0` on every
-retained file it is given and therefore printed its `STOP` banner on the reproduction run. That
-banner is wrong here and is reported rather than suppressed: the run's only job was the check,
-its tables were not needed, and the check it was for passed on every row of both files that
-carry arm-2 rows at all. The ladder run itself was given no retained files, for the reason in
+retained file it is given and therefore printed its `STOP` banner on the reproduction run.
+Read precisely (Astra, part 3): **the primary R reproduction passed (24 of 24, 1,056 fields)
+and A's twelve applicable rows matched; the extra I/M checks were inapplicable, which exposed
+a mis-specified clean gate that did not affect the comparison.** The banner is reported, not
+suppressed, and the gate's first branch is not claimed to "hold". The ladder run itself was given no retained files, for the reason in
 the pre-registration.
 
 So the pre-registered stop rule's **first** branch holds: R's arm-2 numbers are reproduced at
@@ -689,13 +694,17 @@ monotone, because three of them are not:
   (14.90 → 10.70) and again from 0.55 to 0.75 in `fast-leaf` (24.87 → 23.60). Astra's
   observation about Y's arm-0 sequences holds here too, so the direction is reported as a
   direction.
-- **The grazer's founder gives up leaf as the skimmer takes it**, in `fast-leaf`: 10.40 → 3.84
-  m from 0.10 to 0.55 while the skimmer founder goes 0.13 → 3.97, and the horizon *population*
-  does not track it (0.82× at 0.55, 1.31× at 0.30). The plate and the population are different
-  measurements, as Y found.
-- **`baseline` again names the mechanism by exception.** Up to 0.55 the `baseline` skimmer
+- **Skimmer foliage service rises while grazer foliage service generally falls**, in
+  `fast-leaf`: the grazer founder's 10.40 → 3.84 m from 0.10 to 0.55 while the skimmer
+  founder's goes 0.13 → 3.97, and the horizon *population* does not track it (0.82× at 0.55,
+  1.31× at 0.30). These are inverse served-channel sequences: dietary overlap and association,
+  with neither direct displacement nor the mechanism isolated (population, production and
+  feedbacks all changed with depth). The plate and the population are different measurements,
+  as Y found.
+- **`baseline` shows the same association only at 0.75.** Up to 0.55 the `baseline` skimmer
   founder's foliage never exceeds 0.14 m while its litter falls to a third; at 0.75 it reaches
-  4.63 m. `baseline`'s `plant.foliage_rate` is 0.002 against `fast-leaf`'s 0.006.
+  4.63 m. `baseline`'s `plant.foliage_rate` is 0.002 against `fast-leaf`'s 0.006. This is an
+  association by configuration, not a mechanism named.
 
 There is still **no rung at which the skimmer is fed and is not on the leaf**, which is Y's
 central result, and arm 2 does not change it.

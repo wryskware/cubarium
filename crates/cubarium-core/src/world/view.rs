@@ -96,6 +96,22 @@ impl World {
         self.events.len()
     }
 
+    /// How many events each extension queue holds undrained: hunter, quiet, apex dormancy,
+    /// apex encounter, in that order. Read-only, for callers and tests of the removal door.
+    pub fn pending_extension_events(&self) -> [usize; 4] {
+        [
+            self.hunter_events.len(),
+            self.quiet_events.len(),
+            self.apex_dormancy_events.len(),
+            self.apex_encounter_events.len(),
+        ]
+    }
+
+    /// The scripted intents in force (`World::set_scripted_intents`), read-only.
+    pub fn scripted_intents(&self) -> &[(crate::ids::OrganismId, crate::diagnostic::ScriptedIntent)] {
+        &self.scripted
+    }
+
     pub fn drain_events(&mut self) -> Vec<LifeEvent> {
         std::mem::take(&mut self.events)
     }

@@ -508,8 +508,10 @@ each, 408 KiB of `burn-in.jsonl`, and the two exported configs. Build `078594b`,
 The pre-registered reading rule above selected a candidate; it is not an
 adoption gate, because it has no clause for the two costs it found. This gate
 is appended, not substituted, and it is what a held-out confirmation of the
-96,000-tick coupled-grazed opening is read against. Design (Astra's proposal,
-adopted): all eight untouched `HELDOUT_SEEDS` (9001–9008), selected `fast-leaf`
+96,000-tick coupled-grazed opening is read against. This is **Fable's
+registered default if Wrysk requests confirmation** — Astra's proposed design,
+recorded here as research evidence, not a decision; nothing is adopted until he
+asks. Design: all eight untouched `HELDOUT_SEEDS` (9001–9008), selected `fast-leaf`
 only, exactly two matched openings per seed — status quo (age 0) and
 coupled-grazed 96,000 — arm 0, Sweep, reach envelope, 180,000 ticks after
 founding, `sample_every` 600, roster, price, ledger and plant recorder fixed;
@@ -524,10 +526,11 @@ recorded on every row. Sixteen arms and eight burn-ins.
 2. **Skimmer clause:** no held-out seed with zero skimmer founders breeding,
    and a mean of at least 3 of 5. *Fable's default; Wrysk may tighten it if
    the wet-floor lineage matters more to him than the smoother opening.*
-3. **Founder broods:** reported as the paired distribution, **non-gating**
-   — fewer broods beside more surviving founder lineages is lower churn, not
-   ecological harm. *Fable's default, by the standing rule to make routine
-   calls and state their effect; Wrysk may set a maximum loss instead.*
+3. **Founder broods:** reported as the paired distribution, and **proposed
+   as a non-gate** because lineage survival is the valued endpoint. Fewer
+   broods beside more surviving lineages *could* be lower churn or *could* be
+   constrained reproduction masked by better survival; the rows do not say
+   which. *Fable's proposed default; Wrysk may set a maximum loss instead.*
 4. **No held-out herbivore-guild loss** (hard clause); all four forms and
    three guilds at the horizon reported; absolute opening and late foliage,
    opening CV/p10/p90, and the first-hour whole-field trajectory kept; frames

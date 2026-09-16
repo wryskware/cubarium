@@ -274,6 +274,21 @@ impl World {
         if !self.events.is_empty() {
             held.push("life events are queued and undrained");
         }
+        // The four extension event queues too (Astra, round-5 review P2, finding 11): each has
+        // its own drain door, and a caller that drained the persistent extension state but not
+        // its emitted records would otherwise keep stale identities queued.
+        if !self.hunter_events.is_empty() {
+            held.push("hunter events are queued and undrained");
+        }
+        if !self.quiet_events.is_empty() {
+            held.push("quiet events are queued and undrained");
+        }
+        if !self.apex_dormancy_events.is_empty() {
+            held.push("apex dormancy events are queued and undrained");
+        }
+        if !self.apex_encounter_events.is_empty() {
+            held.push("apex encounter events are queued and undrained");
+        }
         if !held.is_empty() {
             return Err(format!(
                 "cannot remove the population: {}; this operator removes the ordinary roster \
