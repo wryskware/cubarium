@@ -39,7 +39,7 @@ inferred.
 | --- | --- | --- | --- | --- | --- |
 | E budget + apex audit | Opus 5 high | `main` | ≈ 63 s / 16 min | 108 KiB / 20 MiB | core 476, search 94 (+9, +8) |
 | F movement arm + census | Opus 5 high | worktree, merged `a4262af` | 5.3 min / 20 min | 1.6 MiB / 30 MiB | search +22 |
-| G presentation follow-up | Opus 5 medium | worktree | none | sheet only | see below |
+| G presentation follow-up | Opus 5 medium | worktree, merged `77c42e8` | none | 25 KB sheet | host 596 (+7), render 101 |
 
 Fable's verification: E's two experiments re-run from the note's commands and
 compared field for field with the retained JSON (identical, timing keys
@@ -158,7 +158,93 @@ when F ran; F reports death cause and last stores instead.
 
 ## G — presentation follow-up
 
-*(pending: G's result lands here)*
+Full note: [ecology-v1-presentation-2-2026-09-16.md](ecology-v1-presentation-2-2026-09-16.md).
+Commits `a2eff47` (the cue, the env hook, the tests), `8fa7c6c` (note, cost
+arm); merged at `77c42e8`. Sheet:
+[ecology-v1-shoulder-2026-09-16.png](assets/ecology-v1-shoulder-2026-09-16.png)
+(rows 1–3: a controlled 30 % foliage loss under shoulders 0.85 / 0.95 / 1.0;
+rows 4–6: B's real strip-then-reflush trajectory under the same three). No
+core change, no new asset, no mapping constant changed.
+
+**The shoulder, measured.** Each frame is drawn twice from the same view, at
+the shoulder under test and at a shoulder of 10⁻⁹, so only the shoulder
+differs between the two encoded 8-bit frames.
+
+| shoulder | first frame the stand's sprite changes | loss at that frame | ramp leaves 1 at | ungrazed average-light stand |
+| --- | --- | --- | --- | --- |
+| 0.85 (ships) | never in 180 frames | — | 30.2 % | whole |
+| 0.95 | 132 | 22.4 % | 22.0 % | mix 0.001, not visible |
+| 1.0 | 108 | 18.3 % | 17.9 % | mix 0.014, bare wood showing |
+
+Astra's finding 7 is exactly right of the plant sprite at 0.85 and false of
+the cell: ground cover, producer wash and flecks read `P` directly and change
+an encoded pixel at frame 3 (0.5 % lost) whatever the shoulder. Of the 30.2
+points the 0.85 sprite ignores, 17.9 are not the shoulder's at all: B0's
+bright stand carries `P/W` = 1.217 and the fullness ratio clamps at 1, so
+that much loss cannot move the sprite at any shoulder. B's stated cost of
+raising the shoulder (the average-light class breathing) does not appear at
+0.95 (wobble excess −0.0004 against the 0.05 bound); at 1.0 an ungrazed
+average stand draws bare wood, reporting depletion that is not happening.
+On the real trajectory the three are hard to tell apart (rows 4–6). **G
+recommends 0.95; the default stays 0.85; the decision is Wrysk's**, and the
+cube now runs 0.95 through `CUBARIUM_FOLIAGE_FULL` (below) so he can judge it.
+
+**The soil-band dead-wood cue.** `soil_snag = clamp(Wd_density − W_density, 0, 1)`
+through the same cube root, rather than a hard `W == 0` gate, because `W`
+reaches zero exactly when `Wd` is largest and a hard gate would stamp the
+whole mark in one frame (§12 forbids cuts); the difference fades it in over
+the dieback. The mark is the cell's own soil plant at stage 0 cut to its
+bottom 2.5 tile rows, in the ash tone, at `SOIL_PLANT_OPACITY · 0.70 ·
+soil_snag`, stamped over the band's scenery so the litter a dying stand
+produces cannot hide the only record that it died. `D + C` still drive the
+band alone. Visible effect: a dead cell below the horizon carries a short
+grey-blue stub among its mushrooms, brightest just after death, fading as
+`Wd` decomposes; every living or never-planted cell is pixel-identical to
+before. Fable's note: this is a cut mushroom, not an authored snag; G says a
+purpose-drawn one would read better.
+
+**Runtime shoulder override** (Fable's mid-task scope addition at Wrysk's
+request): `CUBARIUM_FOLIAGE_FULL=<float>` read once per process at first
+presenter construction, clamped to 0.5..=1.0, unparsable values fall back to
+0.85 with one stderr line; no CLI flag; default unchanged. G recorded that
+this contradicts the brief's own "not a runtime setting" and that Fable
+widened it.
+
+**Tests** `art_ecology` 17 → 24 (soil mark present for dead wood, absent at
+`Wd` = 0, monotone, distinguishable from litter-only and empty; dead column
+distinct, no crown, fading to soil; env reading by injected string). Two of
+G's own tests failed first on their measurement design, not the
+implementation, and were redesigned (differencing two saturating stocks to
+isolate the dead column, since a side face has no pixel row the topmost
+foliage cell's own plant cannot reach). Per-frame cost on B's four arms is
+inside noise (interleaved A/B, min of three); a new fifth arm with every soil
+cell dead (320 marks) costs +2.2 ms, 11.2 ms mean / 12.2 ms worst against the
+16.7 ms budget.
+
+**Not done:** cube and viewer not inspected by G; no world run long enough
+to watch a stand die below the horizon (every dead soil cell seen is
+synthetic); water band still shows nothing for dead wood.
+
+## Deployment (Fable, 2026-09-16)
+
+Wrysk authorised stopping the running cube for a build he can judge. The
+runner someone had restarted on `e17e537` (resumed at tick 249,600, reached
+337,653) was stopped with SIGINT; its `state/` moved to the session
+scratchpad as `state-fastleaf-e17e537-retired-2026-09-16` (not deleted). Then:
+
+```bash
+CUBARIUM_FOLIAGE_FULL=0.95 ./scripts/run-cube.sh --fresh \
+  --config runs/ecology-v1-calibration/selected/fast-leaf.toml
+```
+
+`/status`: build `0.1.0+77c42e8`, fresh (`resumed_from: null`), 24 founders,
+20 Hz, shim sink with the viewer mirrored on port 7393; log
+`runs/cube-eco-v1-fastleaf-2.log`. The opening snapshot decodes to schema 16,
+config v8, seed 1, `fast-leaf` plant values, shipped `move_cost` 0.00036 (the
+display world is not a movement-arm world). To compare shoulders on the
+panels, restart with `CUBARIUM_FOLIAGE_FULL=0.85` (the shipped value) or
+`1.0`; nothing else changes. The physical cube was not inspected by Fable;
+the viewer was.
 
 ## What this does and does not establish
 
@@ -173,9 +259,10 @@ when F ran; F reports death cause and last stores instead.
   current one and five times it clears the brood gate; whether the depleted
   cells are the marginal ones (per-cell `L·μ` not recorded); anything about
   a whole-world neural population.
-- The cube shows none of this. The display world is the legacy controller in
-  `fast-leaf` at the shipped movement price; nothing in E or F changes a
-  number the display produces.
+- The cube shows G's work and none of E's or F's. The display world is the
+  legacy controller in `fast-leaf` at the shipped movement price; nothing in
+  E or F changes a number the display produces. The soil-band cue will only
+  appear once a stand below the horizon actually dies.
 
 ## Next recommendation
 
@@ -194,3 +281,5 @@ when F ran; F reports death cause and last stores instead.
    inferred.
 4. **Diet yield by bin** from the ledger in a whole world, to turn the skimmer
    reading from arithmetic into measurement before any γ experiment.
+5. **Wrysk's calls**: the shoulder (0.85 or 0.95, judged on the panels); the
+   soil snag's look (cut mushroom now, authored snag later or not).

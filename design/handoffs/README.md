@@ -1,6 +1,6 @@
 ---
 design_status: exploration
-last_reviewed: 2026-09-15
+last_reviewed: 2026-09-16
 decision_refs: []
 ---
 
@@ -39,9 +39,20 @@ world, 24 legacy founders, apex controls available, since 15:38 on 2026-09-15.
 work, corrected the interpretation (body misidentified, material≠energy,
 post-hoc selection, movement cost per distance) and found the host's
 `--neural` door did not check the policy's ecology; repaired the same day.
-Next, in the reconciled order in the consolidated result: the per-body store
-budget with a matched feasibility experiment, a movement-cost arm, the apex
-opportunity audit. The [ecology v1 contract](../ecology-v1-contract.md)
+Those next steps ran on 2026-09-16 as E, F and G; the
+[next-steps result](../7_Research/ecology-v1-next-steps-results-2026-09-16.md)
+consolidates them: the trained body is feasible and the controller fails to
+feed ([budget](../7_Research/ecology-v1-budget-2026-09-16.md)); no apex ever
+reaches its minimum reproduction age, so the radius is the wrong knob; the
+movement price buys range and depletion but not recovery and starves the
+grazers before their first brood
+([movement](../7_Research/ecology-v1-movement-2026-09-16.md)); the skimmer
+starves on the generalist diet; the shoulder is measured and 0.95 recommended,
+a soil-band dead-wood cue added
+([presentation 2](../7_Research/ecology-v1-presentation-2-2026-09-16.md)).
+The cube runs `77c42e8` fresh in `fast-leaf` with the 0.95 shoulder for
+Wrysk to judge. Next: generation 9's intake diagnosis, apex eligibility, the
+finer price ladder, diet yield by bin. The [ecology v1 contract](../ecology-v1-contract.md)
 and its [implementation review](../7_Research/ecology-v1-implementation-review-2026-09-15.md)
 stand as the accepted baseline.
 
