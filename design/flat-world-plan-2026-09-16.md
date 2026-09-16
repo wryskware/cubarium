@@ -360,7 +360,7 @@ comparator therefore needs a cross-schema procedure, not just a masked hash:
    `hunger_memory`, `mode`, `escrow`, `births`, `phenotype`, `parent`, `origin`
    and `turn_counter` from every organism (`organism.rs:46-67`), the free-list
    state, the weather, every extension, and all behaviour-bearing config. **Carry
-   everything; subtract two fields.**
+   everything; subtract three fields.**
 2. Precisely what reads what. The new build **never calls `decode_snapshot` on a
    v16 file** — that call refuses schema 16 and keeps refusing it, unchanged. Its
    *test* does read the v16 **payload** (the bytes after the header) through the
@@ -377,8 +377,8 @@ comparator therefore needs a cross-schema procedure, not just a masked hash:
    config field, and assert equality **fails** in every case. A comparator that
    cannot fail is not evidence.
 
-FW-1 authors the projection type and the exporter; the pre-change fixture is a
-snapshot taken from the current `main` build before FW-1 merges.
+FW-2 authors the projection type and the exporter; the pre-change fixture is a
+snapshot taken from the current `main` build before FW-1 starts.
 
 ## 5. Ecology and art: what is not mechanical
 
@@ -437,9 +437,9 @@ read the embedding directly; on a ring the two must be asked for separately.
 `y = 1 − 2v/h` inside `embed()` would have stretched every noise patch and every
 shower `90/32 = 2.81×` vertically at the 16:9 ladder. The stratified design needs
 height only as a **scalar**, and there is no reason for the picture to stretch.
-**The visible effect of the decision: habitat patches and showers are round, and
-a shower crosses the world as a moving cell rather than reading as a horizontal
-band.**
+**The visible effect of the decision: habitat patches are round; weather caps are
+round only at the equator and stretch up to 2.03× vertically at the rims, and a
+shower still crosses the world as a moving cell rather than a horizontal band.**
 
 **Weather is unchanged.** `normalize()` of a cylinder point preserves azimuth and
 maps `y_e` monotonically to latitude, so the existing spherical blob model —
@@ -1036,3 +1036,10 @@ document had asserted rather than derived.
 The reserved FW-6 path `cubarium-core/tests/ring_embedding.rs` is renamed
 `ring_weather.rs` and now carries both the embedding's wrap continuity and the
 measured cap aspect; the count stays at eleven.
+
+## Review status (2026-09-16)
+
+Astra's fifth pass: **accept with corrections**. The three corrections
+(three excluded config fields, FW-2 as the projection's author, the weather
+shape sentence) were applied by the coordinator in this commit. The plan is
+the contract for FW-1..FW-9.
