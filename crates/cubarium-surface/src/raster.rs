@@ -54,10 +54,19 @@ pub fn unfold_pixels(topo: Topology, anchor: SurfacePoint, radius: f64, out: &mu
     if margin >= radius {
         unfold_pixels_direct(topo, anchor, radius, out);
     } else {
-        let mut images = Vec::new();
-        chart_images(topo, anchor.face, MAX_SEAMS, &mut images);
-        unfold_pixels_general(topo, &images, anchor, radius, out);
+        // FW-P's W2b: the image list is at most eleven entries and is rebuilt on every
+        // seam-crossing stamp — about 560 of them per cube frame — so it comes from a
+        // per-thread buffer rather than a fresh allocation. Nothing escapes it.
+        IMAGES.with_borrow_mut(|images| {
+            chart_images(topo, anchor.face, MAX_SEAMS, images);
+            unfold_pixels_general(topo, images, anchor, radius, out);
+        });
     }
+}
+
+thread_local! {
+    /// Scratch for the chart images of one `unfold_pixels` call (see W2b above).
+    static IMAGES: std::cell::RefCell<Vec<ChartImage>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// Pixel indices whose centers can lie within `radius` of chart coordinate `c`, clipped
