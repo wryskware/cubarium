@@ -769,8 +769,42 @@ impl MarginAccumulator {
         dt: f64,
         alive: bool,
     ) {
-        let _ = (key, budget, reserve_energy_density, now_tick, dt, alive);
-        unimplemented!("MarginAccumulator::add")
+        let e_r = reserve_energy_density;
+        let food_in = budget.battery_credit_total()
+            + e_r * budget.reserve_credit_total()
+            + budget.gut_battery_credit
+            + e_r * budget.gut_reserve_credit;
+        let owed = budget.bill_total
+            + budget.other_energy_paid
+            + budget.growth_energy
+            + budget.reproduction_energy;
+        let margin = food_in - owed;
+        let closed = budget.closed_tick.unwrap_or(now_tick);
+        let seconds = closed.saturating_sub(budget.opened_tick) as f64 * dt;
+
+        let bin = self.bins.entry((key.form, key.diet_bin)).or_default();
+        bin.bodies += 1;
+        if alive {
+            bin.alive += 1;
+        } else {
+            bin.deaths += 1;
+        }
+        bin.margin += margin;
+        bin.margin_rate += if seconds > 0.0 { margin / seconds } else { 0.0 };
+        bin.food_in += food_in;
+        bin.owed += owed;
+        bin.bill_total += budget.bill_total;
+        bin.bill_unpaid += budget.bill_total - budget.bill_paid;
+        if budget.bill_total > 0.0 {
+            bin.motor_share +=
+                (budget.motor_translation_billed + budget.motor_turn_billed) / budget.bill_total;
+            bin.motor_share_bodies += 1;
+        }
+        bin.served += budget.served_total();
+        bin.seconds += seconds;
+
+        self.bodies += 1;
+        self.margin_sum += margin;
     }
 
     /// Closed ledger records the world reported dropping.
@@ -779,8 +813,45 @@ impl MarginAccumulator {
     }
 
     pub fn finish(self, ledger_on: bool) -> Margins {
-        let _ = ledger_on;
-        unimplemented!("MarginAccumulator::finish")
+        let bins = self
+            .bins
+            .into_iter()
+            .map(|((form, diet_bin), sum)| {
+                let n = sum.bodies.max(1) as f64;
+                let m = sum.motor_share_bodies.max(1) as f64;
+                MarginBin {
+                    form,
+                    diet_bin,
+                    bodies: sum.bodies,
+                    deaths: sum.deaths,
+                    alive: sum.alive,
+                    margin_mean: sum.margin / n,
+                    margin_rate_mean: sum.margin_rate / n,
+                    food_energy_in_mean: sum.food_in / n,
+                    energy_owed_mean: sum.owed / n,
+                    bill_total_mean: sum.bill_total / n,
+                    bill_unpaid_mean: sum.bill_unpaid / n,
+                    motor_share_mean: if sum.motor_share_bodies == 0 {
+                        0.0
+                    } else {
+                        sum.motor_share / m
+                    },
+                    served_total_mean: sum.served / n,
+                    recorded_seconds_mean: sum.seconds / n,
+                }
+            })
+            .collect();
+        Margins {
+            ledger_on,
+            bodies: self.bodies,
+            records_dropped: self.dropped,
+            margin_mean: if self.bodies == 0 {
+                0.0
+            } else {
+                self.margin_sum / self.bodies as f64
+            },
+            bins,
+        }
     }
 }
 

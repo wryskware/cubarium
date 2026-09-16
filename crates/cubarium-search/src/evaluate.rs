@@ -14,14 +14,16 @@ use cubarium_core::encounter::ApexEncounterEvent;
 use cubarium_core::fields::CellClass;
 use cubarium_core::hunter::{FixedHunterProfile, HunterEvent, HunterTarget};
 use cubarium_core::organism::{DeathCause, Mode};
-use cubarium_core::{ApexDormancyEvent, LifeEvent, OrganismId, World, WorldConfig};
+use cubarium_core::habitat::Habitat;
+use cubarium_core::{ApexDormancyEvent, FOLIAGE, LifeEvent, OrganismId, World, WorldConfig};
 use cubarium_surface::cell_of;
 use serde::{Deserialize, Serialize};
 
+use crate::depletion::{DepletionTracker, PlantConstants, ServedAttributor, monod_reference};
 use crate::metrics::{Components, EcoMeasures, FORMS_POSSIBLE, Sample, guild_of};
 use crate::movement::{
-    BodyTrack, CensusBuilder, CensusKey, CrossingCounter, FormSpatial, Movement, SKIMMER_FORM,
-    SpatialAccumulator, StoreSum, Stores, diet_bin,
+    BodyTrack, CensusBuilder, CensusKey, CrossingCounter, CrossingKind, FormSpatial, FounderBroods,
+    MarginAccumulator, Movement, SKIMMER_FORM, SpatialAccumulator, StoreSum, Stores, diet_bin,
 };
 use crate::params;
 use crate::rng;
@@ -212,11 +214,35 @@ pub(crate) fn stored_energy(world: &World) -> f64 {
     cells + organisms + state.hunters.gut_energy_total()
 }
 
+/// What a run records **beside** its ordinary metrics.
+///
+/// Deliberately not a [`Protocol`] field: `Protocol` is serialised into every retained row and
+/// is constructed by the trainer and the genetic search as well, and neither of those wants
+/// the ledger's throughput cost. A row says what it recorded through `movement.ledger_on`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RunOptions {
+    /// Turn `World::record_body_budgets` on, so the net energy margin per body is measured
+    /// rather than inferred (workstream E's ledger). Off is the shipped path and is what
+    /// every row before workstream I was produced under.
+    pub ledger: bool,
+}
+
 /// Run one candidate on one seed. Never panics: a panic inside the core is caught and
 /// reported as [`Status::Failed`].
 pub fn evaluate(values: &[f64], seed: u64, protocol: Protocol) -> Evaluation {
+    evaluate_with(values, seed, protocol, RunOptions::default())
+}
+
+/// [`evaluate`] with the optional recorders named explicitly.
+pub fn evaluate_with(
+    values: &[f64],
+    seed: u64,
+    protocol: Protocol,
+    options: RunOptions,
+) -> Evaluation {
     let start = Instant::now();
-    match std::panic::catch_unwind(AssertUnwindSafe(|| run(values, seed, protocol, start))) {
+    match std::panic::catch_unwind(AssertUnwindSafe(|| run(values, seed, protocol, options, start)))
+    {
         Ok(evaluation) => evaluation,
         Err(payload) => {
             let what = payload
@@ -235,7 +261,13 @@ pub fn evaluate(values: &[f64], seed: u64, protocol: Protocol) -> Evaluation {
     }
 }
 
-fn run(values: &[f64], seed: u64, protocol: Protocol, start: Instant) -> Evaluation {
+fn run(
+    values: &[f64],
+    seed: u64,
+    protocol: Protocol,
+    options: RunOptions,
+    start: Instant,
+) -> Evaluation {
     let ms = |start: Instant| start.elapsed().as_millis() as u64;
     if let Err(e) = protocol.validate() {
         return Evaluation::refused(Status::Invalid, e, seed, protocol, ms(start));
@@ -294,7 +326,11 @@ fn run(values: &[f64], seed: u64, protocol: Protocol, start: Instant) -> Evaluat
         }
     }
 
-    let mut recorder = Recorder::new(&world, protocol, apex_introduced);
+    // Before the first step, so every body's record opens on its own opening inventory.
+    // The flag is read only at sites that add to a counter; the campaign's row check against
+    // workstream F's ledger-off rows is what tests that claim rather than repeating it.
+    world.record_body_budgets(options.ledger);
+    let mut recorder = Recorder::new(&world, protocol, apex_introduced, options);
     // Founder placement emits nothing, but drain anyway so the run starts from a clean queue.
     world.drain_events();
     world.drain_hunter_events();
@@ -430,6 +466,25 @@ struct Recorder {
     terminal_by_cause: [StoreSum; 4],
     census: CensusBuilder,
 
+    // --- workstream I: the per-depleted-cell record, the brood gate, the margin -------
+    options: RunOptions,
+    /// Why a depleted cell stays depleted: habitat quality, trajectory, pressure.
+    depletion: DepletionTracker,
+    /// E's per-body `served[FOLIAGE]` turned into a per-cell attribution.
+    served: ServedAttributor,
+    /// The cell each prey body was last observed in, so a body that dies between probes can
+    /// still have its last bites credited somewhere.
+    last_cell: BTreeMap<OrganismId, u16>,
+    /// Served material attributed between probes — a dead body's tail — waiting for the next
+    /// probe to hand it to the tracker.
+    pending_served: BTreeMap<u16, f64>,
+    /// Completed broods by tick-0 founders: the ladder's gate.
+    broods: FounderBroods,
+    /// Founders that have already produced a brood, so parents are counted once.
+    founder_parents: BTreeSet<OrganismId>,
+    /// Net energy margin per body, by `(form, diet bin)`.
+    margins: MarginAccumulator,
+
     first_predation_tick: Option<u64>,
     prey_before_first_predation: u32,
     prey_min_after_predation: u32,
@@ -445,18 +500,20 @@ struct Recorder {
 }
 
 impl Recorder {
-    fn new(world: &World, protocol: Protocol, apex_introduced: u32) -> Self {
+    fn new(world: &World, protocol: Protocol, apex_introduced: u32, options: RunOptions) -> Self {
         let founders: BTreeSet<_> = world.state.organisms.iter().map(|(id, _)| id).collect();
         let apex_ids: BTreeSet<_> = world.hunters().members.iter().map(|m| m.id).collect();
         // Every body alive at tick 0 is classified now, so a founder's death is attributed to
         // the guild it was born into rather than to "unknown".
         let mut key_of_id = BTreeMap::new();
         let mut census = CensusBuilder::default();
+        let mut broods = FounderBroods::default();
         for (id, o) in world.state.organisms.iter() {
             if !apex_ids.contains(&id) {
                 let key = census_key(o);
                 key_of_id.insert(id, key);
                 census.found(key);
+                broods.found(key.form);
             }
         }
         let alive_min = world.config().plant.alive_min;
@@ -464,6 +521,32 @@ impl Recorder {
         let crossings =
             CrossingCounter::new(&p_ref, DEPLETION_FRACTION, RECOVERY_FRACTION);
         let watched_cells = crossings.watched();
+
+        // The static habitat, rebuilt from the same `(config.habitat, seed)` pair `World::new`
+        // builds it from, because `World::habitat` is not public. The reconstruction is not
+        // assumed: `fields::initial_wood` from it must reproduce the world's own tick-0 wood in
+        // every cell, and the largest error is carried into the row.
+        let cfg = world.config().clone();
+        let habitat = Habitat::new(&cfg.habitat, cfg.seed);
+        let light: Vec<f64> = habitat.light_base.to_vec();
+        let moisture: Vec<f64> = habitat.moisture_base.to_vec();
+        let wood0: Vec<f64> = world.state.ecology.wood.clone();
+        let habitat_error = light
+            .iter()
+            .zip(&moisture)
+            .zip(&wood0)
+            .map(|((l, m), w)| (cubarium_core::fields::initial_wood(&cfg, *l, *m) - w).abs())
+            .fold(0.0f64, f64::max);
+        let constants = PlantConstants {
+            growth: cfg.producer.growth,
+            mortality: cfg.producer.mortality,
+            maintenance: cfg.plant.maintenance,
+            build: cfg.plant.build,
+            monod_ref: monod_reference(cfg.nutrient.half_saturation),
+            deplete_fraction: DEPLETION_FRACTION,
+        };
+        let mut depletion = DepletionTracker::new(&p_ref, &light, &moisture, &wood0, &constants);
+        depletion.set_habitat_check(habitat_error);
         let opening_alive_cells = world
             .state
             .ecology
@@ -493,6 +576,14 @@ impl Recorder {
             e_r: world.config().organism.reserve_energy_density,
             last_stores: BTreeMap::new(),
             terminal_by_cause: [StoreSum::default(); 4],
+            options,
+            depletion,
+            served: ServedAttributor::default(),
+            last_cell: BTreeMap::new(),
+            pending_served: BTreeMap::new(),
+            broods,
+            founder_parents: BTreeSet::new(),
+            margins: MarginAccumulator::default(),
             protocol,
             samples: Vec::new(),
             apex_introduced,
@@ -565,7 +656,7 @@ impl Recorder {
 
         for event in world.drain_events() {
             match event {
-                LifeEvent::Birth { id, parent, .. } => {
+                LifeEvent::Birth { tick, id, parent, .. } => {
                     self.parent_of.insert(id, parent);
                     self.parents_seen.insert(parent);
                     if self.apex_ids.contains(&id) {
@@ -588,6 +679,17 @@ impl Recorder {
                         self.key_of_id.insert(id, key);
                         self.census.born(key);
                         self.prey_births_guild[usize::from(key.guild)] += 1;
+                        // The ladder's gate. A `Birth` is emitted when gestation completes and
+                        // the child is committed, so this **is** a completed brood; nothing is
+                        // inferred from a reserve or an age. The parent's own form is used,
+                        // not the child's, so a mutated child cannot move a founder's brood
+                        // into another rig's column — `form` is immutable anyway, which makes
+                        // the two agree and is why the choice is stated rather than hidden.
+                        if self.founders.contains(&parent) {
+                            let form = self.key_of_id.get(&parent).map_or(0, |k| k.form);
+                            let first = self.founder_parents.insert(parent);
+                            self.broods.brood(form, tick, first);
+                        }
                     }
                 }
                 LifeEvent::Death { id, cause, tick, age_ticks, .. } => {
@@ -630,6 +732,8 @@ impl Recorder {
             }
         }
 
+        self.drain_budgets(world);
+
         if world.tick() % PROBE_EVERY == 0 {
             self.probe(world);
         }
@@ -646,17 +750,28 @@ impl Recorder {
     /// One second of simulated time: foliage depletion and recovery per cell, and where each
     /// prey body is standing. Reads only; writes nothing the world can see.
     fn probe(&mut self, world: &World) {
-        self.crossings.observe(&world.state.fields.p);
-
+        let tick = world.tick();
         let probe_index = self.probes_this_window;
         self.probes_this_window += 1;
         let mut skimmer_alive = false;
+        // Positions and attributed bites are read **before** the crossings, which is what makes
+        // "the last consumer visit before depletion" well defined: a body standing in a cell as
+        // it crosses is the last visit before, at zero ticks.
+        let mut occupancy: BTreeMap<u16, u32> = BTreeMap::new();
+        let mut served = std::mem::take(&mut self.pending_served);
         for (id, o) in world.state.organisms.iter() {
             if self.apex_ids.contains(&id) {
                 continue;
             }
             let cell = cell_of(&o.pos).index() as u16;
             self.tracks.entry(id).or_default().observe(probe_index, cell);
+            *occupancy.entry(cell).or_insert(0) += 1;
+            self.last_cell.insert(id, cell);
+            if self.options.ledger
+                && let Some(budget) = world.body_budget(id)
+            {
+                self.served.observe(id, cell, budget.served[FOLIAGE], &mut served);
+            }
             self.last_stores.insert(
                 id,
                 Stores {
@@ -672,7 +787,51 @@ impl Recorder {
             }
         }
         if skimmer_alive {
-            self.census.skimmer_seen(world.tick());
+            self.census.skimmer_seen(tick);
+        }
+
+        let p = &world.state.fields.p;
+        self.depletion.note_probe(tick, p, &occupancy, &served);
+        // One rule, one place: the per-cell record is driven by the same counter A's aggregate
+        // numbers come out of, through the closure form, so the two cannot drift.
+        let crossings = &mut self.crossings;
+        let depletion = &mut self.depletion;
+        crossings.observe_reporting(p, |cell, kind| match kind {
+            CrossingKind::Depleted => depletion.depleted(cell, tick),
+            CrossingKind::Recovered => depletion.recovered(cell, tick),
+        });
+        self.depletion.sample(tick, p);
+    }
+
+    /// Take the ledger's closed records: the bodies that died since the last drain. Their
+    /// served tail is credited to the cell they were last observed in and waits for the next
+    /// probe; their margin goes into the bins.
+    fn drain_budgets(&mut self, world: &mut World) {
+        if !self.options.ledger {
+            return;
+        }
+        let now = world.tick();
+        let (closed, dropped) = world.drain_body_budgets();
+        if dropped > 0 {
+            self.margins.note_dropped(dropped);
+        }
+        for budget in closed {
+            let Some(key) = self.key_of_id.get(&budget.id).copied() else {
+                // An apex member: it has a record but no census key, and its bites are not
+                // foliage. Forget it so a reused slot cannot inherit its reading.
+                self.served.forget(budget.id);
+                continue;
+            };
+            match self.last_cell.remove(&budget.id) {
+                Some(cell) => self.served.close(
+                    budget.id,
+                    cell,
+                    budget.served[FOLIAGE],
+                    &mut self.pending_served,
+                ),
+                None => self.served.forget(budget.id),
+            }
+            self.margins.add(key, &budget, self.e_r, now, cubarium_core::DT, false);
         }
     }
 
@@ -869,6 +1028,26 @@ impl Recorder {
         if self.samples.last().map(|s| s.tick) != Some(world.tick()) {
             self.sample(world);
         }
+        // Everything the ledger still holds: the last closed records, then every body still
+        // alive at the horizon, so the margin's denominator is every body and not only the
+        // ones that died.
+        self.drain_budgets(world);
+        if self.options.ledger {
+            let now = world.tick();
+            let live: Vec<(OrganismId, CensusKey)> = world
+                .state
+                .organisms
+                .iter()
+                .filter(|(id, _)| !self.apex_ids.contains(id))
+                .filter_map(|(id, _)| self.key_of_id.get(&id).copied().map(|k| (id, k)))
+                .collect();
+            for (id, key) in live {
+                if let Some(budget) = world.body_budget(id) {
+                    let budget = *budget;
+                    self.margins.add(key, &budget, self.e_r, now, cubarium_core::DT, true);
+                }
+            }
+        }
         let n = self.samples.len().max(1) as f64;
         let mean = |f: fn(&Sample) -> f64| self.samples.iter().map(f).sum::<f64>() / n;
 
@@ -941,6 +1120,8 @@ impl Recorder {
             .filter(|(id, _)| !self.apex_ids.contains(id))
             .map(|(id, o)| self.key_of_id.get(&id).copied().unwrap_or_else(|| census_key(o)))
             .collect();
+        let margins = self.margins.clone().finish(self.options.ledger);
+        let depletion = self.depletion.clone().finish(&world.state.fields.p);
         let movement = Movement {
             move_cost: self.move_cost,
             probe_ticks: PROBE_EVERY,
@@ -951,14 +1132,13 @@ impl Recorder {
             crossings: self.crossings.summary(),
             census: self.census.clone().finish(&alive_keys, dt),
             terminal_by_cause: self.terminal_by_cause,
-            // Workstream E's per-organism budget accumulator had not landed on `main` when
-            // this ran, and nothing on the search side can substitute for it: intake is served
-            // inside `World::step` and only the world-level `intake_diagnostics()` is exposed.
-            net_energy_margin_per_body: None,
-            ledger_on: false,
-            founder_broods: crate::movement::FounderBroods::default(),
-            margins: None,
-            depletion: None,
+            // Workstream E's per-organism budget accumulator is what makes this a number
+            // rather than a `null`: F's rows carry `null` because it had not landed when F ran.
+            net_energy_margin_per_body: self.options.ledger.then_some(margins.margin_mean),
+            ledger_on: self.options.ledger,
+            founder_broods: self.broods,
+            margins: self.options.ledger.then_some(margins),
+            depletion: Some(depletion),
         };
 
         let apex_active_samples = self.samples.iter().filter(|s| s.apex_active > 0).count() as f64;

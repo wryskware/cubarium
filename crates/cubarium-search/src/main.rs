@@ -318,6 +318,11 @@ enum Command {
         /// screen's own matrix. The default is the shipped price.
         #[arg(long, default_value = "0.00036")]
         prices: String,
+        /// Record workstream E's per-body budget ledger, so the net energy margin per body is
+        /// measured rather than inferred. Off by default: it is throughput the screen and the
+        /// trainer do not need.
+        #[arg(long, default_value_t = false)]
+        ledger: bool,
         #[arg(long, default_value_t = 125_000)]
         ticks: u64,
         #[arg(long, default_value_t = 500)]
@@ -413,6 +418,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             seeds,
             arms,
             prices,
+            ledger,
             ticks,
             sample_every,
             introduce_tick,
@@ -444,6 +450,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 seeds,
                 &arms,
                 &prices,
+                ledger,
                 ticks,
                 sample_every,
                 introduce_tick,
