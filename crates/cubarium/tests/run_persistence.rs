@@ -435,24 +435,30 @@ fn two_concurrent_launchers_into_one_empty_directory_leave_exactly_one_owner() {
     assert!(note.contains(&format!("pid {}", std::process::id())), "{note}");
 }
 
-/// **Schema 17: a world saved before the pursuit predicate was adopted is refused, by number.**
+/// **Schema 18: a world saved before the pursuit predicate was adopted, or before the ring
+/// world, is refused on resume — by number, both of them.**
 ///
 /// The rule the hunt-intent pass runs is a `World` transient and is not in the saved bytes
 /// (`cubarium_core::hunter::PursuitStop`,
 /// `design/7_Research/ecology-v1-predicate-adoption-2026-09-16.md`). A schema-16 world resumed
-/// under this build would therefore keep its tick, its bodies and its pools and quietly start
+/// under schema 17 would therefore keep its tick, its bodies and its pools and quietly start
 /// hunting under a different predicate — a migration by another name, which Wrysk's standing
-/// rule of 2026-09-15 forbids. Schema 16 and 17 share a payload shape, so the header is the
-/// only evidence there is, and the version check is what refuses.
+/// rule of 2026-09-15 forbids. Schema 16 and 17 share a payload shape, so between those two
+/// the header is the only evidence there is, and the version check is what refuses.
 ///
-/// The fixture is an honest one: a real snapshot this build wrote, with **only** its version
+/// Schema **18** is the ring world (`design/flat-world-plan-2026-09-16.md` §4): `WorldConfig`
+/// gains `topology` and `world_scale`, so a 16 or 17 payload is now two fields short as well
+/// as differently ruled. Both are still refused by *number*, before the shape is ever looked
+/// at, so the host says which world it was rather than reporting a truncated file.
+///
+/// The fixtures are honest ones: a real snapshot this build wrote, with **only** its version
 /// field rewritten. The CRC covers the payload, so nothing else about the file is wrong.
 #[test]
-fn a_schema_sixteen_world_is_refused_on_resume_and_fresh_starts_seventeen() {
-    let scratch = Scratch::new("schema-17");
+fn an_older_schema_world_is_refused_on_resume_and_fresh_starts_eighteen() {
+    let scratch = Scratch::new("schema-18");
     let state = scratch.join("state");
 
-    // `--fresh` starts schema 17.
+    // `--fresh` starts schema 18.
     let fresh = run(&[
         "--sink", "none", "--speed", "0", "--seconds", "10", "--fresh",
         "--state", state.to_str().unwrap(),
@@ -463,33 +469,43 @@ fn a_schema_sixteen_world_is_refused_on_resume_and_fresh_starts_seventeen() {
     for (_, path) in &snapshots {
         let bytes = std::fs::read(path).expect("reading a snapshot this run wrote");
         let schema = u32::from_le_bytes(bytes[4..8].try_into().expect("4 bytes"));
-        assert_eq!(schema, 17, "{} was written at schema {schema}", path.display());
+        assert_eq!(schema, 18, "{} was written at schema {schema}", path.display());
         assert_eq!(schema, cubarium_core::snapshot::SCHEMA_VERSION);
     }
 
-    // Now relabel every one of them 16 and nothing else, and resume.
-    for (_, path) in &snapshots {
-        let mut bytes = std::fs::read(path).expect("reading");
-        bytes[4..8].copy_from_slice(&16u32.to_le_bytes());
-        std::fs::write(path, &bytes).expect("writing the relabelled world");
+    // Now relabel every one of them — first 16, the predicate break, then 17, the ring break —
+    // and nothing else, and resume. The original bytes are put back between the two arms.
+    let original: Vec<Vec<u8>> = snapshots
+        .iter()
+        .map(|(_, path)| std::fs::read(path).expect("reading"))
+        .collect();
+    for older in [16u32, 17] {
+        for ((_, path), bytes) in snapshots.iter().zip(original.iter()) {
+            let mut bytes = bytes.clone();
+            bytes[4..8].copy_from_slice(&older.to_le_bytes());
+            std::fs::write(path, &bytes).expect("writing the relabelled world");
+        }
+        let err = format!(
+            "{:#}",
+            cubarium::run_world(&parse(&[
+                "--sink", "none", "--speed", "0", "--seconds", "1",
+                "--require-resume",
+                "--state", state.to_str().unwrap(),
+            ]))
+            .expect_err("an older world must not be resumed under rules it never ran")
+        );
+        assert!(
+            err.contains(&format!("UnsupportedSchema({older})")),
+            "the refusal names the schema it read: {err}"
+        );
+        assert!(
+            err.contains("none of them loaded"),
+            "and says the directory is a damaged world rather than an empty one: {err}"
+        );
+        assert_eq!(
+            snapshot_ticks(&state).len(),
+            snapshots.len(),
+            "a refused resume neither converts nor removes the world it would not load"
+        );
     }
-    let err = format!(
-        "{:#}",
-        cubarium::run_world(&parse(&[
-            "--sink", "none", "--speed", "0", "--seconds", "1",
-            "--require-resume",
-            "--state", state.to_str().unwrap(),
-        ]))
-        .expect_err("a schema 16 world must not be resumed under a rule it never ran")
-    );
-    assert!(err.contains("UnsupportedSchema(16)"), "the refusal names the schema it read: {err}");
-    assert!(
-        err.contains("none of them loaded"),
-        "and says the directory is a damaged world rather than an empty one: {err}"
-    );
-    assert_eq!(
-        snapshot_ticks(&state).len(),
-        snapshots.len(),
-        "a refused resume neither converts nor removes the world it would not load"
-    );
 }

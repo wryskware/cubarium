@@ -249,9 +249,13 @@ fn the_adoption_moved_no_protocol_hash() {
         !text.contains("pursuit"),
         "the protocol must not record a rule no episode can observe: {text}"
     );
+    // The value is workstream T's, re-recorded by SYNC-1 when the ring world appended two
+    // fields to `WorldConfig` and every config-derived hash moved with it; the adoption is
+    // still what this test is about, and it moved none of them. The proof that the ring
+    // world is the whole of that move is in `motor_provenance.rs`.
     assert_eq!(
         Protocol::default().hash(),
-        0x65c5_1e05_060f_0d5a,
-        "the shipped protocol keeps the hash it has always had"
+        0x831c_a195_c697_cec8,
+        "the shipped protocol keeps the hash the ring world left it with"
     );
 }

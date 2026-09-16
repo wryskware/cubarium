@@ -6,19 +6,71 @@
 //! score carried across that change compares two tasks.
 //!
 //! The default must cost nothing. `MotorModel::Sweep` is skipped from the protocol's JSON, so
-//! every protocol, checkpoint and policy written before the switch existed keeps the hash it
-//! has always had: the pinned value below was printed by commit 2eb8a9f.
+//! every protocol, checkpoint and policy written before the switch existed keeps the hash the
+//! motor switch found it with.
+//!
+//! **The ring world moved it anyway, and by design** (SYNC-1, 2026-09-16,
+//! `design/7_Research/flat-world-sync-main-2026-09-16.md`). A protocol hash covers
+//! `config_hash` and every `layout_hash`, and both are taken over `serde_json` of the whole
+//! `WorldConfig` — which now carries `topology`, `world_scale` and `version` 9. So **every ES
+//! checkpoint and every exported policy written before the ring world is foreign to this
+//! build**, exactly as every snapshot written before it is refused by schema. That is the
+//! standing always-fresh rule reaching the trainer, and it is the right answer: a policy
+//! trained on a cube has not been trained on a ring, and the protocol hash is what says so.
+//! `the_protocol_hash_moved_only_because_the_config_json_gained_the_ring_world` below proves
+//! that is the whole cause.
 
-use cubarium_core::MotorModel;
+use cubarium_core::{MotorModel, WorldConfig};
+use cubarium_search::calibrate::config_hash;
 use cubarium_search::es::export::PolicyFile;
 use cubarium_search::es::fixture::{self, Ecology};
 use cubarium_search::es::trainer::Protocol;
 
-/// `Protocol::default().hash()` on commit 2eb8a9f, before `MotorModel` existed.
-const PINNED_SWEEP_PROTOCOL_HASH: u64 = 0x65c5_1e05_060f_0d5a;
+/// `Protocol::default().hash()` on this build. Commit 2eb8a9f — before `MotorModel` existed —
+/// and every build up to the ring world printed [`PRE_RING_PROTOCOL_HASH`]; see the module
+/// docs for why that moved and the test below for the proof that nothing else did.
+const PINNED_SWEEP_PROTOCOL_HASH: u64 = 0x831c_a195_c697_cec8;
+
+/// What commit 2eb8a9f, and `main` at `15a2210`, printed for the same protocol.
+const PRE_RING_PROTOCOL_HASH: u64 = 0x65c5_1e05_060f_0d5a;
+
+/// `config_hash(&WorldConfig::default())` on `main` at `15a2210`, before the ring world.
+const PRE_RING_CONFIG_HASH: u64 = 18_166_095_531_363_627_169;
+
+/// **Why the protocol hash moved, proved rather than asserted.** Strike the ring world's two
+/// appended fields from the config's JSON and put `version` back to 8, and the hash the
+/// workspace had before the ring world comes back — so those three fields are the whole of the
+/// difference, and no ecology value in the config moved with them.
+#[test]
+fn the_protocol_hash_moved_only_because_the_config_json_gained_the_ring_world() {
+    let cfg = WorldConfig::default();
+    let json = serde_json::to_string(&cfg).expect("the config serialises");
+    assert!(json.contains(r#""topology":"Cube""#), "{json}");
+    assert!(json.contains(r#""world_scale":1.0"#), "{json}");
+    assert!(json.starts_with(r#"{"version":9,"#), "{json}");
+
+    let pre_ring = json
+        .replace(r#","topology":"Cube","world_scale":1.0"#, "")
+        .replace(r#"{"version":9,"#, r#"{"version":8,"#);
+    // `calibrate::config_hash`'s own loop, over the text it would have been given before the
+    // ring world. Its multiplier is `0x1000_0000_01b3`, not the textbook FNV-1a prime; that is
+    // what the retained rows were hashed with, so it is what this reproduction uses.
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in pre_ring.as_bytes() {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x1000_0000_01b3);
+    }
+    assert_eq!(
+        h, PRE_RING_CONFIG_HASH,
+        "the config moved by more than the ring world's three fields"
+    );
+    assert_ne!(config_hash(&cfg), PRE_RING_CONFIG_HASH);
+    assert_ne!(PINNED_SWEEP_PROTOCOL_HASH, PRE_RING_PROTOCOL_HASH);
+}
 
 /// Adding the motor to the protocol must not move a single existing hash: `sweep` is skipped
-/// from the JSON exactly as the R2a `min` aggregate is.
+/// from the JSON exactly as the R2a `min` aggregate is. (The ring world did move it, for a
+/// reason of its own: see the module docs and the test above.)
 #[test]
 fn the_sweep_protocol_keeps_the_hash_it_has_always_had() {
     let p = Protocol::default();
@@ -26,7 +78,8 @@ fn the_sweep_protocol_keeps_the_hash_it_has_always_had() {
     assert_eq!(
         p.hash(),
         PINNED_SWEEP_PROTOCOL_HASH,
-        "the default protocol's hash moved; every checkpoint and policy on disk is now foreign"
+        "the default protocol's hash moved again; a motor or aggregate default has leaked \
+         into the JSON (the ring world's own move is already in the pinned value)"
     );
     let json = serde_json::to_string(&p).expect("the protocol serializes");
     assert!(!json.contains("motor"), "the shipped contract is absent from the JSON: {json}");

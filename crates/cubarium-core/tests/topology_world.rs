@@ -7,7 +7,7 @@
 use cubarium_core::care::CareTarget;
 use cubarium_core::config::CONFIG_VERSION;
 use cubarium_core::hunter::HunterTarget;
-use cubarium_core::snapshot::{SnapshotError, decode_snapshot, encode_snapshot};
+use cubarium_core::snapshot::{SCHEMA_VERSION, SnapshotError, decode_snapshot, encode_snapshot};
 use cubarium_core::{World, WorldConfig};
 use cubarium_surface::{CellId, Face, FieldGraph, Scale, SurfacePoint, Topology};
 
@@ -99,11 +99,11 @@ fn a_ring_world_round_trips_and_an_older_schema_is_refused_by_name() {
     }
     let bytes = encode_snapshot(&world.state, "ring");
     let (meta, back) = decode_snapshot(&bytes).expect("a ring world round-trips");
-    assert_eq!(meta.schema, 17);
+    assert_eq!(meta.schema, SCHEMA_VERSION);
     assert_eq!(back.config.topology, RING);
     assert_eq!(back, world.state);
 
-    for old in 7u32..=16 {
+    for old in 7..SCHEMA_VERSION {
         let mut relabelled = bytes.clone();
         relabelled[4..8].copy_from_slice(&old.to_le_bytes());
         assert_eq!(

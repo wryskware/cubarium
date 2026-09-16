@@ -24,7 +24,7 @@ use cubarium_core::neural::Policy;
 use cubarium_core::neural::action::{Action7, Envelope};
 use cubarium_core::neural::gru::{Gru32, HIDDEN, INPUT, N, R, Z};
 use cubarium_core::neural::obs::FOOD_NEAR;
-use cubarium_core::snapshot::state_hash;
+use cubarium_core::snapshot::{CubeProjection, projection_hash, state_hash};
 use cubarium_core::{DT, World, WorldConfig};
 use cubarium_surface::Vec2;
 
@@ -428,14 +428,24 @@ fn paired_world(model: Option<MotorModel>) -> World {
 
 /// **The pinned hashes.** Six 1,500-tick boundaries of the paired world, printed by commit
 /// 2eb8a9f — the build before `MotorModel` existed. A world that leaves the default alone and
-/// one that names `Sweep` must both reproduce them exactly.
-const SWEEP_HASHES: [(u64, u64); 6] = [
-    (1_500, 0x1dd0_4659_c55d_2980),
-    (3_000, 0x56a0_f4a8_11c9_964d),
-    (4_500, 0xbc76_70f1_377f_24d9),
-    (6_000, 0x61e6_d61a_4bc3_5fe4),
-    (7_500, 0x15ce_4554_a89f_bae3),
-    (9_000, 0xfa65_65de_e6ae_2dd3),
+/// one that names `Sweep` must both reproduce them exactly.///
+/// **Re-recorded by SYNC-1 (2026-09-16), and the third column is why.** `state_hash` covers
+/// `WorldConfig`, which the ring world appends `topology` and `world_scale` to and takes from
+/// version 8 to 9 (`design/flat-world-plan-2026-09-16.md` §4,
+/// `design/7_Research/flat-world-sync-main-2026-09-16.md`), so **every** pin of a world's state
+/// hash had to move and none of them is evidence about a world any more. The third column is
+/// `projection_hash(CubeProjection::from(state))` — the same state with exactly those three
+/// config fields removed — and it is **unchanged**: every value in it was printed by an
+/// unmodified `main` build at `15a2210`, from this same fixture, before the merge. So the
+/// second column moved because the config's shape moved, the world did not move, and this
+/// array says both at once.
+const SWEEP_HASHES: [(u64, u64, u64); 6] = [
+    (1_500, 0x78bf_522e_3e25_08ca, 15_787_492_136_597_612_314),
+    (3_000, 0x677b_2b7f_c059_b58b, 12_317_936_919_317_601_563),
+    (4_500, 0x1a66_ad82_4401_871b, 7_941_646_029_457_312_395),
+    (6_000, 0x60b2_7006_eab1_3f2a, 14_389_605_590_233_095_962),
+    (7_500, 0x9199_d5c0_18f5_3825, 16_775_633_627_346_188_277),
+    (9_000, 0x10e8_4a77_4cc0_c345, 7_103_647_317_571_660_213),
 ];
 
 #[test]
@@ -453,19 +463,27 @@ fn the_sweep_model_is_byte_identical_to_the_build_that_never_heard_of_the_switch
         named.drain_events();
         untouched.drain_hunter_events();
         named.drain_hunter_events();
-        if let Some((at, hash)) = next
+        if let Some((at, hash, projection)) = next
             && tick == *at
         {
             assert_eq!(
                 state_hash(&untouched.state),
                 *hash,
-                "the default diverged from commit 2eb8a9f at tick {tick}"
+                "the default diverged from the SYNC-1 re-recording at tick {tick}"
             );
             assert_eq!(
                 state_hash(&named.state),
                 *hash,
-                "naming the default diverged from commit 2eb8a9f at tick {tick}"
+                "naming the default diverged from the SYNC-1 re-recording at tick {tick}"
             );
+            for (label, w) in [("the default", &untouched), ("naming Sweep", &named)] {
+                assert_eq!(
+                    projection_hash(&CubeProjection::from(&w.state)),
+                    *projection,
+                    "{label} diverged from commit 2eb8a9f's own world at tick {tick} — this \
+                     one is not a re-recording, it is what `main` printed"
+                );
+            }
             next = pinned.next();
         }
     }

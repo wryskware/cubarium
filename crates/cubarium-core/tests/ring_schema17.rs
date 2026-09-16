@@ -1,9 +1,18 @@
-//! FW-6: schema 17, the extended `WorldState::validate`, and the `CubeProjection` negative
+//! FW-6: the ring world's schema break, the extended `WorldState::validate`, and the
+//! `CubeProjection` negative
 //! tests, written from `design/flat-world-plan-2026-09-16.md` §4 — "**Negative tests are
 //! part of the definition** … perturb one organism field, one allocator free-list entry,
 //! one weather blob, one field vector, one extension state and one non-added config field,
 //! and assert equality **fails** in every case. A comparator that cannot fail is not
 //! evidence."
+//!
+//! **The number moved after this file was written.** The ring break was schema 17 on this
+//! branch; merging `main` found that `main` had spent 17 on a semantics-only bump of its own
+//! (the reach-envelope pursuit rule), so the merged build is **schema 18** and refuses 7
+//! through 17 by name — see `crates/cubarium-core/src/snapshot.rs` and
+//! `design/7_Research/flat-world-sync-main-2026-09-16.md`. The path stays as the plan
+//! reserved it (§9, FW-6's row); every claim below is the same claim with one more predecessor
+//! in the refusal range.
 
 use cubarium_core::config::{CONFIG_VERSION, WorldConfig};
 use cubarium_core::snapshot::projection::{CubeProjection, first_difference, projection_hash};
@@ -46,20 +55,21 @@ fn ring_state(ticks: u32) -> WorldState {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn the_schema_is_seventeen_and_the_config_version_is_nine() {
-    assert_eq!(SCHEMA_VERSION, 17, "§4: a hard bump to schema 17");
+fn the_schema_is_eighteen_and_the_config_version_is_nine() {
+    assert_eq!(SCHEMA_VERSION, 18, "§4: a hard bump — 17 on this branch, 18 after main's own");
     assert_eq!(CONFIG_VERSION, 9, "§4: CONFIG_VERSION 9");
     assert_eq!(SCHEMA_V16, 16);
+    assert_eq!(cubarium_core::snapshot::SCHEMA_V17, 17);
     assert_eq!(CONFIG_VERSION_V16, 8, "what the fixture must report");
 }
 
-/// §4: "refusing 7..=16 by name". Every older schema — and anything newer — comes back as
-/// `UnsupportedSchema` carrying the version that was read, so a caller can say which world
-/// it was instead of migrating it.
+/// §4: "refusing 7..=16 by name", now 7..=17 — `main`'s schema 17 is a predecessor like any
+/// other. Every older schema — and anything newer — comes back as `UnsupportedSchema` carrying
+/// the version that was read, so a caller can say which world it was instead of migrating it.
 #[test]
-fn schemas_seven_through_sixteen_are_refused_by_name() {
+fn schemas_seven_through_seventeen_are_refused_by_name() {
     let bytes = encode_snapshot(&ring_state(0), "fw6");
-    for schema in 7u32..=16 {
+    for schema in 7u32..=17 {
         let mut relabelled = bytes.clone();
         relabelled[4..8].copy_from_slice(&schema.to_le_bytes());
         assert_eq!(
@@ -70,16 +80,16 @@ fn schemas_seven_through_sixteen_are_refused_by_name() {
     }
     // And a future schema is refused the same way, not guessed at.
     let mut newer = bytes.clone();
-    newer[4..8].copy_from_slice(&18u32.to_le_bytes());
-    assert_eq!(decode_snapshot(&newer), Err(SnapshotError::UnsupportedSchema(18)));
+    newer[4..8].copy_from_slice(&19u32.to_le_bytes());
+    assert_eq!(decode_snapshot(&newer), Err(SnapshotError::UnsupportedSchema(19)));
 }
 
 #[test]
-fn a_ring_snapshot_round_trips_at_schema_17() {
+fn a_ring_snapshot_round_trips_at_the_current_schema() {
     for state in [ring_state(5), cube_state(5)] {
         let bytes = encode_snapshot(&state, "fw6-test");
         let (meta, back) = decode_snapshot(&bytes).expect("a fresh snapshot decodes");
-        assert_eq!(meta.schema, 17);
+        assert_eq!(meta.schema, SCHEMA_VERSION);
         assert_eq!(meta.build_id, "fw6-test");
         assert_eq!(back.config.topology, state.config.topology, "the topology is carried");
         assert_eq!(back.config.world_scale, state.config.world_scale);
@@ -370,7 +380,7 @@ fn perturbing_one_non_added_config_field_breaks_the_comparison() {
 // Reading a schema 16 payload without being able to run it
 // ---------------------------------------------------------------------------
 
-/// §4's procedure, exercised on a **synthetic** schema 16 file built from a schema 17 state:
+/// §4's procedure, exercised on a **synthetic** schema 16 file built from a current state:
 /// the product refuses it, the frozen mirror reads it, and the two projections agree.
 ///
 /// This proves the mechanism — that `WorldConfigV16` really is `version` followed by the
