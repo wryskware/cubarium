@@ -83,7 +83,7 @@ fn the_ends_of_the_ladder_are_roster_values_and_the_top_rung_is_nobodys() {
 #[test]
 fn the_ladder_plan_is_seventy_two_arm_zero_cells() {
     let seeds = [1001u64, 1002, 1003, 1004, 1005, 1006];
-    let jobs = census::plan(&seeds);
+    let jobs = census::plan(&seeds, census::LADDER_ARM, &census::DEPTH_LEVELS);
     assert_eq!(jobs.len(), 72, "6 rungs x 2 configurations x 6 seeds x 1 arm");
     assert!(jobs.iter().all(|j| j.arm == LADDER_ARM), "arm 0 only");
     assert_eq!(LADDER_ARM, 0);

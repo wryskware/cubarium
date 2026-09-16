@@ -204,9 +204,11 @@ enum Command {
         workers: usize,
         #[arg(long, default_value_t = 600)]
         wall_seconds: u64,
-        /// Workstream Q's retained pair reduction, for the stability half.
-        #[arg(long, default_value = "runs/ecology-v1-es-antithetic/pairs.json")]
-        pairs: PathBuf,
+        /// Workstream Q's retained pair reduction, for the stability half. It exists for one
+        /// run and one generation; omitted, the replay runs alone, which is what replaying
+        /// another run's centre wants.
+        #[arg(long)]
+        pairs: Option<PathBuf>,
         #[arg(long, default_value_t = 1_000)]
         bootstrap: usize,
         #[arg(long, default_value = "runs/ecology-v1-turn-deadband")]

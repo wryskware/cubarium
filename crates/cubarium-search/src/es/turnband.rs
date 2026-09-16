@@ -360,9 +360,14 @@ pub fn run_replay(
     )?)?;
     file.check_ecology(&eco)?;
     file.check_motor(checkpoint.protocol.motor)?;
-    // The retained run is `cub-act-1`'s; replaying it under `cub-act-2` is exactly the
-    // experiment, so this is the one place the adapter check is deliberately not made.
-    file.check_adapter(ActionAdapter::CubAct1)?;
+    // The centre file must be the run's own — that is what this check has always meant — and
+    // the run's adapter is recorded in its protocol. Replaying those weights under the *other*
+    // adapter is exactly the experiment, so the check is made here, at the file, and
+    // deliberately not made again at the two layout sets below.
+    //
+    // Pinning it to `CubAct1` would have refused a `cub-act-2` run's own centre, which is half
+    // of workstream XY2's 2x2 of weights x adapter.
+    file.check_adapter(checkpoint.protocol.adapter)?;
     if file.generation != generation {
         return Err(Boxed::from(format!("that file is generation {}", file.generation)));
     }
@@ -1051,7 +1056,7 @@ pub fn run(
     horizon: u64,
     workers: usize,
     wall_seconds: u64,
-    pairs_file: PathBuf,
+    pairs_file: Option<PathBuf>,
     bootstrap: usize,
     out: PathBuf,
 ) -> Result<(), Boxed> {
@@ -1064,8 +1069,23 @@ pub fn run(
         wall_seconds,
         &out.join("replay.json"),
     )?;
-    println!();
-    run_stability(&run_dir, &pairs_file, generation, bootstrap, &out.join("stability.json"))?;
+    // The stability half reads one retained pair reduction, which exists for exactly one run
+    // and one generation (workstream Q's). Omitting `--pairs` runs the replay alone, which is
+    // what a replay of some *other* run's centre wants; it is not a way to skip a check that
+    // applies.
+    match pairs_file {
+        Some(pairs_file) => {
+            println!();
+            run_stability(
+                &run_dir,
+                &pairs_file,
+                generation,
+                bootstrap,
+                &out.join("stability.json"),
+            )?;
+        }
+        None => println!("\n(no --pairs: the replay ran alone, the stability half did not)"),
+    }
     Ok(())
 }
 
