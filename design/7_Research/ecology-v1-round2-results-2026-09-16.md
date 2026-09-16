@@ -34,8 +34,14 @@ never grazed cells: 971 of 1,355 depleted cells never held a prey body, the
 depleted set is the dimmest band of the habitat at every price, and the nine
 recoveries are plant-side events in three cells. The depletion/recovery cycle
 §4.4 was written for has not yet been observed, and the display shows a world
-seeded above its own equilibrium in its dim cells. J's factorial (below) closes
-the skimmer question. None of this is "ecosystem healthy"; all of it narrows
+seeded above its own equilibrium in its dim cells. J's controlled factorial reverses the
+sign of F's skimmer association: in matched cells, moving only `diet` from the
+founder's 0.60 to 0.85 takes the skimmer body from establishing 13 times in 16
+to once in 16, because the 0.2 threshold shuts its litter channel and foliage
+does not make it up; the body's cost is real but is a yield cost (it digests
+41 % of what it eats against the burrower's 90 %), and "body" and "habitat" are
+one statement in this roster because `depth` steers it to a wet floor that
+grows litter, not foliage. None of this is "ecosystem healthy"; all of it narrows
 what the next design change must be.
 
 ## Dispatch and budget
@@ -45,9 +51,10 @@ what the next design change must be.
 | H intake diagnostic | Opus 5 high | `main` (`52fe697`…`e9c64fa`) | 5 s / 6 min | 23 MiB / 40 | core 487, search 120 |
 | K apex death + eligibility | Opus 5 high | worktree, merged `9de1bf2` | 84 s / 8 min | 132 KiB / 20 | core 491, search 123 |
 | I grazer-gated ladder | Opus 5 high | worktree, merged `4065012` | 3.3 min / 8 min | 4.3 MiB / 40 | search 152 |
-| J form × diet factorial | Opus 5 high | worktree | *(pending)* | | |
+| J form × diet factorial | Opus 5 high | worktree, merged `c38e8a7` | 100 s / 10 min | 128 KiB / 20 | core 502, search 174, host 596 |
 
-Fable's verification: H's whole experiment re-run from its ignored test and
+Fable's verification: J's whole campaign re-run and compared row for row
+(12 of 12 identical, timing keys excluded); H's whole experiment re-run from its ignored test and
 compared field for field with the retained aggregate (identical, timing keys
 excluded); K's age-eligible probe re-run and compared (identical); two interior
 ladder prices re-run for one seed and matched by `final_state_hash` (4 of 4); I's
@@ -202,7 +209,53 @@ the plant reserve `Q` recorded beside `P`.
 
 ## J — the controlled form × diet factorial
 
-*(pending: J's result lands here)*
+Full note: [ecology-v1-diet-factorial-2026-09-16.md](ecology-v1-diet-factorial-2026-09-16.md).
+Core gained a third founding door, `World::found_animal_with_genome` (both
+public doors now share one private founding; an out-of-bounds genome is
+refused, not clamped); the search side a `factorial` subcommand. Reproduction
+was switched off for the eight clones only through the ES fixtures' scripted
+seam (`bud: Some(false)`), so the 24 legacy founders kept breeding and
+competition was real; 0 clone births in 96 clones. Tests first: 27 red against
+a stub (`d0daef1`). `fast-leaf`, 4 training seeds, horizon 90,000, no apex.
+
+**The brief's habitat stratification could not be built, and the refusal is a
+finding**: the deepest pools hold no food at all — ecology v1 grows foliage only
+in a cell that carries wood, and `water.algae_light` raises a living cell's
+light floor rather than creating a producer — and on one seed only 6 of 1,280
+cells are both wet and foliated. So placement is eight fixed anchors across the
+five faces, resolved to the nearest living cell, and habitat is measured per
+clone rather than assigned.
+
+| arm | comparison | established (≥ 750 s) | median life | what the ledger shows |
+| --- | --- | --- | --- | --- |
+| A, diet within the skimmer body | `diet` 0.60 | **13 / 16** | 885 s | 1.48 m foliage + **4.31 m litter** served |
+| A | `diet` 0.85 | **1 / 16** | 378 s | 1.32 m foliage, **0** litter; 15 of 16 served < 0.3 m in a life |
+| B, body at `diet` 0.85 | burrower / grazer / glider / skimmer | 2 / 2 / 2 / **0** of 8 | 436 / 347 / 369 / 385 s | not resolvable at four seeds (p = 0.47) |
+| C, roster pairing | burrower 0.10 vs skimmer 0.60 | 8 / 8 vs 7 / 8 | 1,076 vs 826 s | digestible / served **0.90 vs 0.41**: same food, half the yield |
+
+**Verdict: both legs, and neither points where the association pointed.** The
+diet effect is large, controlled and sign-definite in the reversed direction:
+per-seed lifetime ratio 0.33–0.45 with no seed overlapping (Fisher p = 4e-5).
+F's "foliage-diet skimmers survive 84 %" was survivorship: with reproduction on
+over 150 minutes, only lineages that win the foliage lottery leave descendants,
+and a surviving skimmer lineage is necessarily a foliage-diet lineage born into
+its parent's patch — exactly the confound F named. The body effect is real and
+is a yield cost measured for the first time (arm C: the skimmer takes 10 % more
+out of the world than the burrower and gets half as much from it), but at a
+foliage diet the body leg is not resolvable and J declined to report it as one.
+"Neither, habitat" is refuted as a separate cause and named as the coupling:
+the skimmer spends 65 % of its probes in water against the glider's 11 %, and
+39 of the 40 deepest cells across the seeds carry no foliage; arm B cannot
+separate `form` from `depth`. A structural finding the arms were not designed
+for: the two food channels fail differently — of 64 pure-foliage clones, 51
+served under 0.5 m and died on the no-intake floor while 11 served over 5 m
+(all-or-nothing); all 32 detrital clones served 1.1–14.3 m and none ever reached
+the horizon or a positive margin. A detrital diet buys a long certain decline; a
+foliage diet is a lottery that mostly ends in six minutes. **Named next:** move
+`depth` and nothing else in arm A's design (0.10 vs 0.55 crossed with `diet`,
+about 25 s); what distinguishes the 8 lottery winners (they visited 271–595
+cells, the 51 that never ate 30–108); and whether the detrital trickle can fund
+a body in `fast-leaf` at all, which is a calibration question.
 
 ## What this does and does not establish
 
@@ -212,15 +265,48 @@ the plant reserve `Q` recorded beside `P`.
   grazing without starving the grazer first; the counted depletions are
   habitat-limited declines in unvisited dim cells, and the counted recoveries
   are plant-side.
+- Established by J: for the skimmer body the founder's generalist diet is the
+  better of the two; the body's cost is a halved yield on the same food;
+  foliage foraging from a cold start is all-or-nothing and detrital foraging
+  is a certain slow decline.
 - Open: why the policy ignores the food-here scalar (a score question); why a
   strike ends out of reach (kinematics, escape or pursuit); whether the
-  contract should name a critical `L·μ` and seed foliage by it; the skimmer
-  (J).
+  contract should name a critical `L·μ` and seed foliage by it; whether
+  `depth`, not the body, is what couples the skimmer to litter; whether any
+  detrital diet can fund a body in `fast-leaf`.
 - The cube is untouched by this round: build `77c42e8`, `fast-leaf`, shipped
   movement price, shoulder 0.95 by override. Nothing here changes a number the
   display produces. What the display's dim cells are showing, on I's reading,
   is a slow decline from an over-seeded start, not grazing.
 
-## Next recommendation
+## Next recommendation (Fable's, before Astra's opinion)
 
-*(to be reconciled with Astra after J lands)*
+Two decisions and three measurements, in this order. The decisions are design
+changes, so each gets a short written proposal and Astra's review before any
+implementation; the measurements are cheap and can run in parallel.
+
+1. **Decision: the forager's training score.** H shows the controller ignores
+   food it stands on because `t_min + 0.25·stores` rewards staying only far
+   downstream of the bite. Proposal to write: a dense term from the ledger
+   (income / bill, or served material per tick) joining `t_min`, evaluated
+   against H's residence measures on the same 12 layouts before any campaign.
+   No training until this is decided.
+2. **Decision: what a depletion is, and how foliage is seeded.** I shows the
+   counted depletions are habitat-limited declines from a uniform `0.4·P_cap`
+   opening in cells that cannot hold it. Proposal to write: seed each cell's
+   opening foliage from its own break-even (the contract would then name a
+   critical `L·μ`), and split the depletion counter by ever-visited so a
+   screen's headline stops mixing two events. This changes what the display
+   shows in its dim cells, so it is Wrysk's call after Astra's review.
+3. **Measure the apex's reach** (K's next): per paid attempt, separation at
+   windup, strike start and settlement against capture reach and the prey's
+   escape speed. About the same cost as K.
+4. **Measure `depth` alone** (J's next): arm A's design with `depth` 0.10 vs
+   0.55 crossed with `diet`, about 25 s; and I's per-cell nutrient and light
+   at the depleted cells with one herbivore-absent arm, about 40 s.
+5. **Ask the calibration question J raised**: can a detrital diet fund a body
+   in `fast-leaf` at all? The detrital clones never had a positive margin,
+   which bears on the burrower guild's long-run persistence, not only the
+   skimmer's.
+
+Nothing in this list touches the cube.

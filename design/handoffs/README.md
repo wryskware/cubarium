@@ -50,9 +50,17 @@ grazers before their first brood
 starves on the generalist diet; the shoulder is measured and 0.95 recommended,
 a soil-band dead-wood cue added
 ([presentation 2](../7_Research/ecology-v1-presentation-2-2026-09-16.md)).
-The cube runs `77c42e8` fresh in `fast-leaf` with the 0.95 shoulder for
-Wrysk to judge. Next: generation 9's intake diagnosis, apex eligibility, the
-finer price ladder, diet yield by bin. The [ecology v1 contract](../ecology-v1-contract.md)
+The cube runs `77c42e8` fresh in `fast-leaf` with the 0.95 shoulder (Wrysk
+deferred that choice; see [the backlog](../backlog.md)). Round 2 ran the same
+day as H, I, J, K, consolidated in
+[the round-2 result](../7_Research/ecology-v1-round2-results-2026-09-16.md):
+the forager fails to *stay* on food, not to eat it (score, not observation);
+the apex starves on a 3 % capture rate and never fills its reserve whatever its
+age; the price ladder is refuted and the counted depletions turn out to be
+unvisited dim cells declining from an over-seeded start; the skimmer's founder
+diet is the better one for its body and F's association was survivorship. Next:
+two written proposals (training score; foliage seeding and what a depletion
+is) for Astra's review, plus the apex-reach and `depth` measurements. The [ecology v1 contract](../ecology-v1-contract.md)
 and its [implementation review](../7_Research/ecology-v1-implementation-review-2026-09-15.md)
 stand as the accepted baseline.
 
