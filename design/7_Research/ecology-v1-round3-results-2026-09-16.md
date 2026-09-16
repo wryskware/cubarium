@@ -27,12 +27,14 @@ the hypothesis standing.
 | O depth × diet factorial | Opus 5 medium | worktree, merged `10d3e2a` | 35 s / 3 min | 180 KiB / 10 MiB | search 199 |
 | L score falsification checks | Opus 5 high | `main` (`14345d9`…`f52d441`) | 22 s / 8 min | 0.8 MiB / 30 | core 502, search 199 |
 | M plant budget | Opus 5 high | worktree | *(pending)* | | |
-| N apex strike reach | Opus 5 high | worktree | *(pending)* | | |
+| N apex strike reach | Opus 5 high | worktree, merged `9c608b5` | 58 s / 6 min | 2.6 MiB / 20 | core 508, search 205 |
 
 Fable's verification so far: O's whole design re-run and matched by
 `final_state_hash` on 16 of 16 rows; its search suite 188 on the branch, 199
 after merge. L's dwell-1000 rung re-run from its ignored test and matched to
-the tick on both layout sets (36,000 and 27,362).
+the tick on both layout sets (36,000 and 27,362). N's death arm re-run and
+compared field for field with its retained rows (identical, timing keys
+excluded); its 12 new tests pass on the branch and the suites after merge.
 
 ## O — the depth × diet factorial
 
@@ -167,9 +169,75 @@ dying at the pinned 7,420).
 
 *(pending)*
 
-## N — why an apex strike ends out of reach
+## N — why an apex strike ends out of reach: the pursuit stopping rule
 
-*(pending)*
+Full note: [ecology-v1-apex-reach-2026-09-16.md](ecology-v1-apex-reach-2026-09-16.md).
+Commits `5ef88d1` (the per-attempt strike record, inert and opt-in, with core
+tests and the audit classification), `b144605` (the body-frame coordinate,
+the hunter's own turn and the hold counters, so the mechanism is measured
+rather than inferred), `6310825` (note); merged `9c608b5`. Three frames per
+paid attempt (intent, strike start, resolution), each gathered through the
+same `ContactEvidence::gather` the settlement uses, 12 and 20 ticks apart by
+construction. Inertness by state hash at every 500-tick boundary of a 9,000-tick
+two-apex world with the recorder on and off, with a non-vacuity assertion.
+Two additive lines outside the brief's list (the recorder's field in
+`world/mod.rs` and its initialiser in `lifecycle.rs`) and no CLI hunk (the
+record follows the existing `--no-ledger` flag) — both accepted as routine.
+N wrote the recorder before its own test file and then verified the tests
+bite by mutation; the classification and search tests were written from
+definitions first. Disclosed.
+
+**Classification of the death arm's 449 paid attempts** (reconciles exactly
+with K: 46 contacts = 15 captured + 31 missed; 30 + 217 + 155 = 402
+out-of-reach):
+
+| class | n | separation at intent → resolution (px) | prey forward coordinate at intent (px; grasp at 13.3) | hunter realised speed (px/s) |
+| --- | --- | --- | --- | --- |
+| resolved in reach | 46 | 3.7 → 2.9 | 13.6 | 1.24 |
+| began in reach, resolved out | 30 | 2.8 → 5.2 | 12.9 | 1.43 |
+| **prey outran** | **217** | 12.3 → 14.6 | 6.2 | **0.12** |
+| **began out of reach** | **155** | 12.4 → 10.3 | 7.9 | 1.12 |
+| target lost | 1 | — | — | — |
+
+**Captures are not lunges that worked; they are prey already in the claws.**
+Captures began at 3.9 px separation with the prey 12.6 px forward, level with
+the grasp; refusals began at 11.6 px with the prey 7.4 px forward, 6 px short.
+Tolerance and advertised reach are identical across outcomes; prey speed
+barely differs. The probe arm (age-eligible introduction, 501 attempts)
+replicates every reading.
+
+**Verdict: the pursuit controller.** The strike speed constant is 16.7 px/s;
+the median realised hunter speed over a paid one-second burst is **0.002
+px/s**, and 80 % of held bursts are at or below the resting effort's cruise
+(0.21 px/s). The gap that needed closing at the burst's start averaged 8.3 px;
+the gap actually closed averaged **−0.9 px** — it grew. A *delivered* burst
+would out-close a prey at its escape cap (10 px/s, exactly the multiple times
+the prey's speed cap) by 6.7 px/s, so the escape multiple is exonerated
+quantitatively. **Named, not changed:** the pursuit stopping predicate
+`inside` in the hunt-intent pass of `world/step.rs` is a one-sided forward
+half-space (17.25 px) although its own comment says it means the reach
+envelope, as `in_contact` does everywhere else in the file. The apex senses at
+12 px and its grasp closes 13.3 px out, so nearly every huntable prey satisfies
+it — 408 of 449 paid attempts, 459 of 501 in the probe. When it is true the
+member drops to the resting effort *and* suppresses the burst it has just paid
+0.08 e for; the 0.21 px/s left is consumed by the turn, priced at the claws'
+own 14.8 px radius. Two constants are named only as downstream
+(`drives.rest_effort` 0.05, the 14.8 px turn radius). A corroborating but
+non-randomised comparison: the 41 attempts where the burst was actually pushed
+delivered 5.7 px/s and resolved in reach 27 % of the time against 9 %.
+
+**What this does not establish:** no intervention was run; nothing says what
+reading `inside` as the envelope would do, nor whether an apex that closes
+would then feed itself (K's arithmetic needs about ten captures per life
+against 0.9 achieved), nor how the 12 px sense radius interacts with the rule;
+the capture roll (15 of 46 contacts) was not examined; the small "began in
+reach, resolved out" class is weakly estimated. **Named next, not launched:** a
+paired arm with `inside` read as the envelope (`in_contact()`), scored on
+exactly these rows — held fraction, gap closed, class histogram, captures per
+life — one 30 s run per variant, with two cautions: the same hold governs the
+stalk, so phase occupancy must be re-read, and an apex that closes spends
+more on motor, so K's ledger decides whether it pays. The predicate decision
+is Fable's; the display's apex is unchanged by this workstream.
 
 ## What this does and does not establish
 
