@@ -10,6 +10,8 @@
 //!   zero/one/two-apex arms, with the ecology v1 component vector and a config export.
 //! - [`evaluate`]: one candidate on one seed, to a hard tick horizon, with component metrics.
 //! - [`metrics`]: the component metrics and the scalar rank derived from them.
+//! - [`movement`]: the spatial-coupling measures — visits, residence, revisit intervals, the
+//!   per-cell depletion/recovery crossing counter, and the variety census.
 //! - [`search`]: the bounded genetic search and every limit it runs under.
 //! - [`rng`]: the search's own keyed randomness, independent of the world's.
 //!
@@ -26,6 +28,7 @@ pub mod calibrate;
 pub mod es;
 pub mod evaluate;
 pub mod metrics;
+pub mod movement;
 pub mod params;
 pub mod population;
 pub mod rng;
