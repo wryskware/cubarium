@@ -12,6 +12,8 @@
 //! - [`depletion`]: the per-depleted-cell record — habitat quality, foliage trajectory,
 //!   post-depletion pressure, and the four-way reading of why a cell stays depleted.
 //! - [`evaluate`]: one candidate on one seed, to a hard tick horizon, with component metrics.
+//! - [`factorial`]: the controlled form × diet factorial — cloned founders at matched cells
+//!   with mutation and reproduction off, measured with the core's per-body ledger.
 //! - [`metrics`]: the component metrics and the scalar rank derived from them.
 //! - [`movement`]: the spatial-coupling measures — visits, residence, revisit intervals, the
 //!   per-cell depletion/recovery crossing counter, and the variety census.
@@ -32,6 +34,7 @@ pub mod calibrate;
 pub mod depletion;
 pub mod es;
 pub mod evaluate;
+pub mod factorial;
 pub mod metrics;
 pub mod movement;
 pub mod params;

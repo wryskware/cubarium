@@ -18,6 +18,7 @@ use clap::{Parser, Subcommand};
 use cubarium_search::calibrate;
 use cubarium_search::es;
 use cubarium_search::evaluate::{BUILD_ID, Protocol, Status, evaluate};
+use cubarium_search::factorial;
 use cubarium_search::metrics::Scoring;
 use cubarium_search::params;
 use cubarium_search::population;
@@ -363,6 +364,44 @@ enum Command {
         #[arg(long, default_value = "runs/ecology-v1-calibration/selected")]
         out: PathBuf,
     },
+    /// Run the controlled form x diet factorial: cloned founders at matched cells in whole
+    /// `fast-leaf` worlds, mutation and reproduction off for the clones, measured with the
+    /// core's per-body ledger (workstream J).
+    Factorial {
+        /// Comma-separated arms: `A` (diet within body), `B` (body within diet), `C` (the
+        /// founder pairing).
+        #[arg(long, default_value = "A,B,C")]
+        arms: String,
+        /// `training` or `holdout`. The held-out set is for the final validation only.
+        #[arg(long, default_value = "training")]
+        seed_set: String,
+        /// How many seeds of that set, from the front.
+        #[arg(long, default_value_t = 4)]
+        seeds: usize,
+        #[arg(long, default_value_t = 90_000)]
+        ticks: u64,
+        /// Ticks of the clone-free warm-up that finds each seed's pools. A world is created
+        /// dry; the basins only exist once rain has arrived.
+        #[arg(long, default_value_t = 24_000)]
+        warm_up_ticks: u64,
+        /// Ticks between probes of where each clone is standing (20 = one simulated second).
+        #[arg(long, default_value_t = 20)]
+        probe_every: u64,
+        /// Ticks between drains of the core's 4,096-record closed-ledger buffer.
+        #[arg(long, default_value_t = 250)]
+        drain_every: u64,
+        /// Mean warm-up water depth at or above which a cell is the wet stratum (d). The
+        /// default is where a non-swimmer starts paying a measurable wading penalty.
+        #[arg(long, default_value_t = 0.05)]
+        wet_min: f64,
+        #[arg(long, default_value_t = 8)]
+        workers: usize,
+        /// Print the eight cells each seed's landscape offers, and run nothing.
+        #[arg(long, default_value_t = false)]
+        cells_only: bool,
+        #[arg(long, default_value = "runs/ecology-v1-diet-factorial")]
+        out: PathBuf,
+    },
     /// Re-run one recorded row and check it reproduces.
     Replay {
         /// The `evals.jsonl` written by a search.
@@ -487,6 +526,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("load with: cubarium run --config {}", path.display());
             Ok(())
         }
+        Command::Factorial {
+            arms,
+            seed_set,
+            seeds,
+            ticks,
+            warm_up_ticks,
+            probe_every,
+            drain_every,
+            wet_min,
+            workers,
+            cells_only,
+            out,
+        } => Ok(factorial::command(
+            &arms,
+            &seed_set,
+            seeds,
+            factorial::Design { ticks, warm_up_ticks, probe_every, drain_every, wet_min },
+            workers,
+            cells_only,
+            &out,
+        )?),
         Command::Replay { record, index } => replay(&record, index),
         Command::EsProtocol { config } => es::commands::protocol(config),
         Command::EsControls { workers, wall_seconds, config, out } => {
