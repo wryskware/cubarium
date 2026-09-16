@@ -51,7 +51,7 @@ fn peak(image: &Canvas) -> f32 {
 }
 
 fn filled(rgb: [f32; 3]) -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     for (f, x, y) in every_pixel() {
         canvas.set(f, x, y, rgb);
     }
@@ -172,9 +172,9 @@ fn a_still_pose_without_a_mask_stamps_bit_identically_to_stamp_sprite() {
     ];
     for (what, anchor, faces) in anchors {
         for heading in [Vec2::new(1.0, 0.0), Vec2::new(0.6, -0.8)] {
-            let mut expected = Canvas::new();
+            let mut expected = Canvas::cube();
             stamp_sprite(&mut expected, anchor, heading, &sprite, 1.0, 0.85, &mut Vec::new());
-            let mut actual = Canvas::new();
+            let mut actual = Canvas::cube();
             stamp_pose(
                 &mut actual,
                 anchor,
@@ -311,7 +311,7 @@ fn a_layer_contributes_its_temporal_blend_and_not_a_held_frame() {
     let swaying = Pose { first: &red, second: &blue, mix: 0.5 };
 
     // One layer at weight 1: the pose's own lerp, (0.5, 0, 0.5).
-    let solo = draw_layers(&Canvas::new(), anchor, &[(swaying, 1.0)], 1.0, Mask::None);
+    let solo = draw_layers(&Canvas::cube(), anchor, &[(swaying, 1.0)], 1.0, Mask::None);
     let pixel = solo.get(Face::Left, 10, 10);
     assert!(
         (pixel[0] - 0.5).abs() < 1e-6 && pixel[1] == 0.0 && (pixel[2] - 0.5).abs() < 1e-6,
@@ -320,7 +320,7 @@ fn a_layer_contributes_its_temporal_blend_and_not_a_held_frame() {
 
     // Half of that blend against half of a still layer: (0.25, 0.5, 0.25).
     let faded = draw_layers(
-        &Canvas::new(),
+        &Canvas::cube(),
         anchor,
         &[(swaying, 0.5), (Pose::still(&green), 0.5)],
         1.0,
@@ -402,7 +402,7 @@ fn a_strip_paints_exactly_the_whole_rows_between_its_floor_and_reveal() {
 fn a_growing_strip_fades_its_first_row_in_and_never_jumps_a_whole_row() {
     let tile = row_tile(|_| [255, 255, 255, 255]);
     let floor = 9.0;
-    let empty = Canvas::new();
+    let empty = Canvas::cube();
 
     // Over black with an opaque white tile the pixel value *is* the mask coverage.
     let mut previous = draw_tile(&tile, Mask::Strip { floor, reveal: floor }, &empty);
@@ -434,7 +434,7 @@ fn a_growing_strip_fades_its_first_row_in_and_never_jumps_a_whole_row() {
 #[test]
 fn axial_and_radial_reveals_are_monotone_from_nothing_to_the_whole_tile() {
     let tile = row_tile(|_| [255, 255, 255, 255]);
-    let empty = Canvas::new();
+    let empty = Canvas::cube();
     let whole = draw_tile(&tile, Mask::None, &empty);
     assert!(peak(&whole) > 0.9);
 

@@ -91,7 +91,7 @@ fn draw_at(
     mask: Mask,
     bend: Bend,
 ) -> Canvas {
-    let mut image = Canvas::new();
+    let mut image = Canvas::cube();
     stamp_layers_bent(
         &mut image,
         anchor,
@@ -232,7 +232,7 @@ fn every_identity_bend_draws_the_unbent_image_bit_for_bit() {
     for (what, anchor, faces) in anchors {
         for heading in [Vec2::new(1.0, 0.0), Vec2::new(0.6, -0.8)] {
             for mask in masks {
-                let mut expected = Canvas::new();
+                let mut expected = Canvas::cube();
                 stamp_layers(
                     &mut expected,
                     anchor,
@@ -258,7 +258,7 @@ fn every_identity_bend_draws_the_unbent_image_bit_for_bit() {
                 }
                 for (name, bend) in identities {
                     assert!(bend.is_identity(), "{name} must be an identity bend");
-                    let mut actual = Canvas::new();
+                    let mut actual = Canvas::cube();
                     stamp_layers_bent(
                         &mut actual,
                         anchor,
@@ -624,7 +624,7 @@ fn at_its_admitted_headroom_a_larger_unfold_radius_draws_the_same_image() {
                     // A stamp the *unbent* renderer already draws as nothing is a fixture the
                     // cube's vertex cone has swallowed, not a wind failure: only the radius
                     // agreement is meaningful there.
-                    let mut still = Canvas::new();
+                    let mut still = Canvas::cube();
                     stamp_layers_bent(
                         &mut still,
                         anchor,
@@ -636,7 +636,7 @@ fn at_its_admitted_headroom_a_larger_unfold_radius_draws_the_same_image() {
                         Bend::NONE,
                         &mut Vec::new(),
                     );
-                    let mut tight = Canvas::new();
+                    let mut tight = Canvas::cube();
                     stamp_layers_bent(
                         &mut tight,
                         anchor,
@@ -648,7 +648,7 @@ fn at_its_admitted_headroom_a_larger_unfold_radius_draws_the_same_image() {
                         bend,
                         &mut Vec::new(),
                     );
-                    let mut wide = Canvas::new();
+                    let mut wide = Canvas::cube();
                     stamp_layers_bent_with_radius(
                         &mut wide,
                         anchor,

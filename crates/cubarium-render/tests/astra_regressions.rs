@@ -7,7 +7,7 @@ use cubarium_surface::{SurfacePoint, Vec2};
 use cube_proto::Face;
 
 fn draw(pose: Pose<'_>, anchor: SurfacePoint, scale: f64, mask: Mask) -> Canvas {
-    let mut image = Canvas::new();
+    let mut image = Canvas::cube();
     stamp_pose(
         &mut image,
         anchor,
@@ -57,7 +57,7 @@ fn opaque_pose_overlap_never_exposes_the_background() {
     let red = Sprite::from_rgba(1, 1, Vec2::new(0.5, 0.5), &[255, 0, 0, 255]).unwrap();
     let green = Sprite::from_rgba(1, 1, Vec2::new(0.5, 0.5), &[0, 255, 0, 255]).unwrap();
     for mix in [0.0, 0.25, 0.5, 0.75, 1.0] {
-        let mut image = Canvas::new();
+        let mut image = Canvas::cube();
         image.set(Face::Front, 32, 32, [0.0, 0.0, 1.0]);
         stamp_pose(
             &mut image,

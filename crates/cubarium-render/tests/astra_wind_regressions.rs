@@ -5,7 +5,7 @@ use cubarium_surface::{SurfacePoint, Vec2};
 use cube_proto::Face;
 
 fn draw(sprite: &Sprite, anchor: SurfacePoint, mask: Mask, bend: Bend) -> Canvas {
-    let mut image = Canvas::new();
+    let mut image = Canvas::cube();
     stamp_layers_bent(
         &mut image,
         anchor,
@@ -71,8 +71,8 @@ fn zero_wind_is_exactly_the_existing_layer_compositor() {
             Mask::Axial { reveal: 1.4 },
             Mask::Radial { reveal: 1.2 },
         ] {
-            let mut old = Canvas::new();
-            let mut bent = Canvas::new();
+            let mut old = Canvas::cube();
+            let mut bent = Canvas::cube();
             stamp_layers(
                 &mut old,
                 anchor,

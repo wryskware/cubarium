@@ -127,7 +127,7 @@ fn recentered_vertex_patches_paint_only_their_physical_nine_pixel_disk() {
         for &((ou, ov), (cu, cv)) in &corners {
             let owner = SurfacePoint::new(face, ou, ov);
             let center = SurfacePoint::new(face, cu, cv);
-            let mut canvas = Canvas::new();
+            let mut canvas = Canvas::cube();
             stamp_pose_in_chart(
                 &mut canvas,
                 owner,
@@ -168,8 +168,8 @@ fn coincident_chart_stamping_keeps_identity_blend_and_source_over_semantics() {
             for mix in [0.0, 0.37, 1.0] {
                 let pose = Pose { first: &first, second: &second, mix };
                 let bend = Bend { amplitude: 0.8, base: 32.0, root: 1.0, length: 40.0 };
-                let mut established = Canvas::new();
-                let mut retained = Canvas::new();
+                let mut established = Canvas::cube();
+                let mut retained = Canvas::cube();
                 established.set(face, anchor.pixel(Topology::Cube).0, anchor.pixel(Topology::Cube).1, [0.1, 0.2, 0.3]);
                 retained.set(face, anchor.pixel(Topology::Cube).0, anchor.pixel(Topology::Cube).1, [0.1, 0.2, 0.3]);
                 stamp_layers_bent(

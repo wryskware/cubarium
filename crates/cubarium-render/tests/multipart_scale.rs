@@ -90,7 +90,7 @@ fn lit_faces(image: &Canvas) -> usize {
 /// A non-black canvas, so a scaled rig that let the background through, or composited twice,
 /// cannot hide behind a black backdrop.
 fn ground() -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     for (f, x, y) in every_pixel() {
         let k = f64::from(x) * 0.011 + f64::from(y) * 0.007 + (f as usize as f64) * 0.03;
         canvas.set(
@@ -195,7 +195,7 @@ fn scaled(
     scale: f64,
     background: bool,
 ) -> Canvas {
-    let mut canvas = if background { ground() } else { Canvas::new() };
+    let mut canvas = if background { ground() } else { Canvas::cube() };
     stamp_rig_scaled(
         &mut canvas,
         root,
@@ -209,7 +209,7 @@ fn scaled(
 }
 
 fn unscaled(root: SurfacePoint, heading: Vec2, parts: &[RigPart<'_>], background: bool) -> Canvas {
-    let mut canvas = if background { ground() } else { Canvas::new() };
+    let mut canvas = if background { ground() } else { Canvas::cube() };
     stamp_rig(
         &mut canvas,
         root,
@@ -860,7 +860,7 @@ fn draw_texel(root: SurfacePoint, heading: Vec2, scale: f64, pad: bool) -> Canva
         });
     }
     let states = [(&parts[..], 1.0f32)];
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     stamp_rig_scaled(
         &mut canvas,
         root,

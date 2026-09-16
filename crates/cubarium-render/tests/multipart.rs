@@ -95,7 +95,7 @@ fn lit_faces(image: &Canvas) -> usize {
 /// A non-black canvas, so a rig that let the background through a joint, or that composited
 /// twice, cannot hide behind a black backdrop.
 fn ground() -> Canvas {
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     for (f, x, y) in every_pixel() {
         let k = f64::from(x) * 0.011 + f64::from(y) * 0.007 + (f as usize as f64) * 0.03;
         canvas.set(f, x, y, [0.08 + 0.04 * k as f32, 0.05, 0.19 - 0.02 * k as f32]);
@@ -718,9 +718,9 @@ fn a_part_hanging_over_the_open_rim_is_cut_and_never_reflected() {
     let parts = [RigPart { sprite: &sprite, offset: Vec2::new(0.0, 6.0), layer: 0 }];
     let heading = Vec2::new(1.0, 0.0);
 
-    let mut rim = Canvas::new();
+    let mut rim = Canvas::cube();
     draw(&mut rim, SurfacePoint::new(Face::Front, 32.0, 60.0), heading, &parts, 1.0);
-    let mut flat = Canvas::new();
+    let mut flat = Canvas::cube();
     draw(&mut flat, SurfacePoint::new(Face::Front, 32.0, 30.0), heading, &parts, 1.0);
 
     // The flat body really does reach past where the rim is, so the cut is not vacuous.
@@ -782,7 +782,7 @@ fn a_rig_straddling_a_seam_is_one_continuous_body_of_the_same_light() {
     let mid = SurfacePoint::new(Face::Front, 32.5, 32.5);
     for (which, heading) in HEADINGS {
         let middle = total_light(&{
-            let mut c = Canvas::new();
+            let mut c = Canvas::cube();
             draw(&mut c, mid, heading, &parts, 1.0);
             c
         });
@@ -799,7 +799,7 @@ fn a_rig_straddling_a_seam_is_one_continuous_body_of_the_same_light() {
             ("a side/top seam, a quarter turn", SurfacePoint::new(Face::Right, 32.5, 0.5)),
             ("a side/top seam, a half turn", SurfacePoint::new(Face::Back, 32.5, 0.5)),
         ] {
-            let mut canvas = Canvas::new();
+            let mut canvas = Canvas::cube();
             draw(&mut canvas, root, heading, &parts, 1.0);
             let light = total_light(&canvas);
             assert!(
@@ -850,7 +850,7 @@ fn at_every_top_vertex_every_pixel_has_one_owner() {
     for (where_, root) in &anchors {
         for (which, heading) in HEADINGS {
             let mut scratch: Vec<PixelImage> = Vec::new();
-            let mut canvas = Canvas::new();
+            let mut canvas = Canvas::cube();
             stamp_rig(&mut canvas, *root, heading, &[(&parts[..], 1.0)], 1.0, &mut scratch);
             assert!(
                 peak(&canvas) <= 1.0 + 1e-6,
@@ -971,7 +971,7 @@ fn a_material_partition_is_never_duplicated_at_a_top_vertex() {
     ] {
         for (which, heading) in HEADINGS {
             for (name, parts) in [("adjacent", &adjacent), ("a gap", &gap)] {
-                let mut canvas = Canvas::new();
+                let mut canvas = Canvas::cube();
                 draw(&mut canvas, root, heading, &parts[..], 1.0);
                 assert!(
                     peak(&canvas) <= 0.5 + 1e-6,
@@ -1001,7 +1001,7 @@ fn a_material_partition_is_never_duplicated_at_a_top_vertex() {
         // Non-vacuity: the marked texels really are carried off the root's own chart, so the
         // vertex is being crossed rather than sidestepped. (They are two lone texels, so the
         // *image* need not span two faces — only the root's face must not own them both.)
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         draw(&mut canvas, root, heading, &adjacent[..], 1.0);
         let painted: Vec<(Face, u16, u16)> = every_pixel()
             .filter(|&(f, x, y)| canvas.get(f, x, y) != [0.0; 3])
@@ -1017,7 +1017,7 @@ fn a_material_partition_is_never_duplicated_at_a_top_vertex() {
     // Astra's exact destination: Top pixel (63, 63) with the root at Front (63, 1). It is
     // owned through the root's Front→Top image, so it reads body (0.5, −1.5) — the first
     // part's painted texel centre at full weight, and the second part's texel not at all.
-    let mut canvas = Canvas::new();
+    let mut canvas = Canvas::cube();
     draw(&mut canvas, SurfacePoint::new(Face::Front, 63.0, 1.0), heading, &adjacent[..], 1.0);
     let px = canvas.get(Face::Top, 63, 63);
     for c in 0..3 {
@@ -1065,9 +1065,9 @@ fn visible_material_over_the_rim_is_drawn_and_off_surface_support_does_not_veto_
     let parts = [RigPart { sprite: &sprite, offset: Vec2::new(6.0, 0.0), layer: 0 }];
     let heading = Vec2::new(0.0, 1.0);
 
-    let mut rim = Canvas::new();
+    let mut rim = Canvas::cube();
     draw(&mut rim, SurfacePoint::new(Face::Front, 32.0, 60.0), heading, &parts, 1.0);
-    let mut flat = Canvas::new();
+    let mut flat = Canvas::cube();
     draw(&mut flat, SurfacePoint::new(Face::Front, 32.0, 30.0), heading, &parts, 1.0);
 
     // The rear texel, on the surface, at the flat placement's own pixel.
@@ -1118,7 +1118,7 @@ fn visible_material_over_the_rim_is_drawn_and_off_surface_support_does_not_veto_
     let mut previous: Option<(f64, f64)> = None;
     let mut v = 49.0f64;
     while v <= 63.5 {
-        let mut canvas = Canvas::new();
+        let mut canvas = Canvas::cube();
         draw(&mut canvas, SurfacePoint::new(Face::Front, 32.0, v), heading, &parts, 1.0);
         let light = total_light(&canvas);
         assert!(
@@ -1142,7 +1142,7 @@ fn visible_material_over_the_rim_is_drawn_and_off_surface_support_does_not_veto_
         v += 0.05;
     }
     // The sweep really did lose the front texel: it starts with both and ends with one.
-    let mut both = Canvas::new();
+    let mut both = Canvas::cube();
     draw(&mut both, SurfacePoint::new(Face::Front, 32.0, 49.0), heading, &parts, 1.0);
     assert!(
         (total_light(&both) - 6.0).abs() < 1e-6,
@@ -1295,7 +1295,7 @@ fn the_generous_reference_query_refuses_an_illegal_radius() {
     let sprite = whole(true);
     let parts = [RigPart { sprite: &sprite, offset: Vec2::ZERO, layer: 0 }];
     stamp_rig_with_radius(
-        &mut Canvas::new(),
+        &mut Canvas::cube(),
         SurfacePoint::new(Face::Front, 32.0, 32.0),
         Vec2::new(1.0, 0.0),
         &[(&parts[..], 1.0)],
