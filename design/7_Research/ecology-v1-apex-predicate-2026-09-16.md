@@ -6,6 +6,23 @@ decision_refs: []
 
 # The pursuit stopping predicate, paired: the burst is delivered, and it still does not close
 
+> **Corrections after Astra's round-4 review.** (1) The "fraction of its own
+> bill earned" rows below are a material ratio (gut material over break-even
+> material), not workstream E's usable-energy ratio (direct gut battery credit
+> + η_ox·e_r × gut reserve credit, over the whole bill of upkeep + motor +
+> strike and handling, with e_r = 2.0 and η_ox = 0.8). Recomputed from the
+> retained life records that ratio is **11.1 %** (half-space) → **18.5 %**
+> (reach envelope); the direction and the "ledger not worse" conclusion
+> survive, stronger. (2) The eight-seed pooled percentages are descriptive:
+> the four-seed registered pair alone does not confirm the contact limb
+> (contacts 46 → 46) and the widening was decided after seeing it; the four
+> added seeds are an independent replication cohort read separately (contacts
+> 42 → 94, captures 23 → 46, gap from growing 1.23 px to closing 0.05 px),
+> and the gap-bin table carries the mechanism. The intervention establishes
+> that the half-space suppresses the paid burst; the capture improvement is
+> replicated exploratorily; the apex is not healthy (32 of 32 starve, none
+> reaches its reproduction age).
+
 Workstream P of the ecology v1 next steps
 ([brief](../handoffs/ecology-v1-apex-predicate-opus-2026-09-16.md)), item 1 of the reconciled
 round-3 next steps and Astra's "single most informative cheap experiment now"

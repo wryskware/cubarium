@@ -6,6 +6,25 @@ decision_refs: []
 
 # Workstream S — a fixed-age preconditioned opening, measured against the status quo
 
+> **Qualifications after Astra's round-4 review.** "No age removes the
+> crossings" is "no *tested* age" (0, 48,000, 96,000, 180,000). The prefix did
+> not "only add foliage": it evolved the whole coupled plant field (wood,
+> reserve, nutrient) and exposed founders to a larger downward transient
+> (baseline opens at ΣP 358 and falls to 192 in 9,700 ticks), so the 48,000
+> founder benefit is "this preconditioned opening gives foliage feeders an
+> immediate brood", not "a stationary opening fixes the founders"; the diet
+> split makes food availability the leading explanation without separating
+> opening stock, nutrient history, plant reserve and the transient. "The
+> animals' recycling keeps the over-seeded cells alive" is measured as "animal
+> presence has a net preserving effect, consistent with recycling"; removing
+> the animals also removed grazing, carcasses, movement and their spatial
+> history. And ΣP 215–230 is a grazed *total*, not an initialiser: a uniform
+> `initial_fraction` reproducing it would recreate the local over- and
+> under-seeding M exposed. The next comparison Astra names: conservation-
+> accounted snapshots of the full coupled field after an ordinary roster has
+> produced the grazed state, that burn-in population removed, an identical
+> fresh roster founded — against status quo and the 48,000 plant-only opening.
+
 Evidence, not a decision. **Nothing here changes §11, `producer.initial_fraction` or any
 equation**, and no `WorldConfig` field was added. §8's options belong to Wrysk; §7 states what
 he would be choosing and does not choose it.

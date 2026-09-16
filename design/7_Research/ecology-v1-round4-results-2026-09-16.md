@@ -75,20 +75,20 @@ Pooled over 255 informative pairs: the preferred member has more intake per
 lived tick in 76 %, more opening residence in 62 %; 29 % of pairs are ranked
 by a layout the estimator's mean would not choose.
 
-**Verdict by Astra's rule: refuted as an optimiser or update problem.**
-Nothing cancels (the summed pair contribution retains 1.00× the orthogonal
-reference in every generation; opposed pairs are not a thing in 10,215
-dimensions with 16 draws) and nothing is erased (the replay is exact; the
-centre sits in the top quartile of its own population for nine consecutive
-generations; the population mean climbs 6,896 → 7,655). But the refutation
-branch's premise also fails: candidates plainly do feed and reside more when
-they score more. The honest statement is neither branch verbatim: **the
-reduction and the update are faithful, and the residence variation they have
-to work with is real and about two orders of magnitude too small** — the
-whole candidate range of opening residence in generation 9 is 0.8–5.5 % of
-life against a route-follower's 97 %, and the search gains about 50 ticks per
-generation against a 29,000-tick gap. Attention moves, as the refutation
-branch directs, to parameterisation and the adapter.
+**Verdict, as corrected after Astra's review:** the recorded update is
+reproduced exactly and correlated-direction cancellation is not the loss
+(the summed pair contribution retains 1.00× the orthogonal reference in every
+generation; the centre sits in the top quartile of its own population for nine
+generations; the population mean climbs 6,896 → 7,655). Candidates do feed and
+reside more when they score more. What this does **not** establish: that the
+estimator's variance, the sixteen-pair count, the centred-rank reduction or
+the optimiser are adequate — none was tested (no split-half or bootstrap
+gradient stability, no repeated seed, no alternative pair count). The
+residence gap is about **18×** (generation 9's candidate range 0.8–5.5 % of
+life against a route-follower's 97 %), not two orders of magnitude; "580
+generations" is an extrapolated rate. The safe statement: **candidate
+variation is real, useful residence is still small, the update is faithful,
+and geometric cancellation is not where it is lost.**
 
 **Deadband occupancy** (generation-9 centre ± σε, 768 samples, 12 layouts):
 thrust is never inside its deadband; the turn head is clipped to exactly zero
@@ -96,15 +96,19 @@ on 100 % of ticks from a reset state (29 of 32 candidates) and on 42 % of the
 carried trajectory (candidates 12–77 %), with the centre's mean |turn head|
 0.060 against an edge of 0.050 — the channel straddles the clip. **Named next
 change, not implemented, the score untouched:** the adapter's turn deadband
-operating point — residence requires stopping and turning, and this is the
-one measured place where weights → behaviour throws away most of what the
-search puts in; it changes what a policy can express, so it is a fresh run
-under a new protocol hash, never a migration. Ranked behind it: the
-four-layout minimum as the aggregation (it inverts the estimator's preference
-on 29 % of pairs; `Aggregate::Mean` exists and hashes as a different task, so
-a paired A/B costs no code; the minimum is what forces generality, and that
-risk is stated), then σ after the adapter so the two are not confounded. The
-rank reduction and the pair count are ruled out by measurement, not deferred.
+operating point — a measured clipping site and the leading adapter
+hypothesis (carried deadband occupancy correlates only r = 0.21 with score;
+no trajectory was run under another band), since residence requires stopping
+and turning. Astra's bounded form: `TURN_DEADBAND` 0.05 → 0.0 only, with
+`Aggregate::Min`, σ, pair count, score, layouts and seed fixed and a new
+protocol hash; first a trajectory replay of the frozen centre and candidates
+under both adapters (falsified as the bottleneck if turn activity rises
+without on-food fraction, dwell or `t_min`); then a fixed-length
+16-generation pair. The four-layout minimum's 29 % disagreement with the
+mean is the price of worst-layout robustness, a design judgement, and is not
+to be changed in the same run. The pair count and the rank reduction are
+untested, not ruled out; a bootstrap or split of the retained pair
+contributions is the cheap missing test.
 Deliverable 3 (reconstructing the 32 candidates for H's exact on-food column)
 was not needed: intake is material that left the stand through the mouth, so
 it already requires on-food residence, and it separates the preferred member
@@ -132,7 +136,7 @@ the attempt (449 paid, the same class histogram, 15 captures).
 | delivered burst: translation / turn sweep / whole motor | 2.7 / 1.7 / 4.4 px/s | 4.6 / **8.0** / 12.5 px/s |
 | contacts | 88 | 140 |
 | **captures per life** | **1.19** | **2.09** |
-| fraction of its own bill earned | 7.7 % | 12.9 % |
+| usable energy earned ÷ whole bill (E's ratio; corrected after review) | 11.1 % | 18.5 % |
 | lifetime mean / max | 12,440 / 16,585 | 13,164 / 23,201 |
 | death cause | starvation 32 / 32 | starvation 32 / 32 |
 | prey population at the end | 864 | 847 |
@@ -142,9 +146,10 @@ capture began inside 8 px and 186 attempts that began at 8–12 px produced no
 contact; corrected, 4–8 px nearly doubles and 8–12 px becomes productive
 (17 contacts, 9 captures); past 12 px nothing changes in either arm.
 
-**Verdict by Astra's rule: confirmed.** The held fraction falls sixteenfold,
-closure improves, contacts rise 59 % and captures 76 %, lifetime rises 6 %
-and the earned fraction of the bill goes from 7.7 to 12.9 %. **Disclosed
+**Verdict by Astra's rule: confirmed as the mechanism; the capture gain is
+an exploratory replication.** The held fraction falls sixteenfold, closure
+improves, contacts rise 59 % and captures 76 %, lifetime rises 6 % and the
+usable earned share of the bill goes from 11.1 to 18.5 %. **Disclosed
 caveat:** the brief's four-seed pair ran first with contacts flat (46 against
 46) and captures 15 → 21; P widened to eight seeds because sixteen lives
 cannot separate a 10 % contact rate from 14 %, and that widening was not
@@ -266,14 +271,15 @@ through and around the door), and `Evaluation` gained two optional fields.
 | `fast-leaf` | 96,000 | 439 | 0.43 | 50 (5 / 45) | 10 of 10 | | 61 | 3.0 | 8.0 |
 | `fast-leaf` | 180,000 | 449 | 0.45 | 287 (93 / 194) | 10 of 10 | | 61 | 3.3 | 34.5 |
 
-**Verdict: no age makes the ungrazed crossings vanish**; they rise
+**Verdict: no tested age makes the ungrazed crossings vanish**; they rise
 monotonically with age on the arm's own reference and on a common §11
 reference (S added the second reading because the counter's reference moves
-with the opening). The mechanism is M's own caveat read from the other side:
-with animals present the over-seeded cells are kept alive by the animals'
-recycling; a long plant-only prefix runs the world in the one regime that
-kills them and hands the founders the corpses (at age 180,000, 63.5 of the
-82.7 starved cells were stripped before founding). The field settles in total
+with the opening). The mechanism, as measured: animal presence has a net
+preserving effect on the over-seeded cells, consistent with recycling
+(removing the animals also removed grazing, carcasses, movement and their
+history); a long plant-only prefix runs the world in the one regime that
+kills those cells and hands the founders the corpses (at age 180,000, 63.5 of
+the 82.7 starved cells were stripped before founding). The field settles in total
 by 96,000 (ΔΣP 0.4 % per window) but 811–883 of 1,110 watched cells still
 move more than 1 % per window at every age: it is an age, not an
 equilibrium, and the note says so.
@@ -281,7 +287,9 @@ equilibrium, and the note says so.
 **But the founders' fate changes completely, and one age gets both.** At
 48,000 the field is 3.3–3.7× greener with essentially nothing starved yet and
 the terminal starved count within noise of the status quo; every one of the
-10 grazer founders breeds instead of 0.3 of 10 (baseline); the first grazer
+10 grazer founders breeds instead of 0.3 of 10 (baseline) — the benefit of a
+much greener, still-transient coupled field (wood, reserve and nutrient
+evolved too), not of a stationary opening; the first grazer
 brood arrives at the 3,001-tick floor instead of 21,000; founder lineages
 alive 4.7 → 11.0; form evenness 0.44 → 0.70; forms 2.3 → 3.0; and the one
 baseline seed whose herbivore guild collapses at the status quo (failing the
@@ -302,9 +310,10 @@ because every arm converges to the same *grazed* standing crop (ΣP 215–230)
 whatever it opened on — the status quo climbs 107 → 233 while the
 preconditioned field falls 358 → 192 in eight minutes and returns to 217 —
 so the opening transient is inverted, not removed, and larger in absolute
-foliage. On this evidence the honest target for a §11 change is the grazed
-standing crop, not the ungrazed one, which is a different measurement. S
-chose none; §11 and `producer.initial_fraction` are untouched.
+foliage. On this evidence the honest object of a §11 change is the grazed
+coupled state, not the ungrazed field — and, per Astra, not a uniform total
+either: ΣP 215–230 is a grazed total whose per-cell field is what produced
+it. S chose none; §11 and `producer.initial_fraction` are untouched.
 
 ## T — the inertial motor model, paired against the shipped sweep (Wrysk's direction)
 
@@ -347,17 +356,19 @@ the `sweep` arm reproduces P's rows row for row):
 | contacts | 140 | **207** |
 | captures per life | 2.09 | **2.91** |
 | attempts beginning past 12 px: contacts / captures | 0 / 0 of 355 | **21 / 12** of 449 |
-| earned fraction of its own bill | 13.6 % | **19.9 %** |
+| usable energy earned ÷ whole bill (E's ratio; corrected after review) | 18.5 % | **27.0 %** |
 | lifetime max | 23,201 | **46,449** |
 | death cause | starvation 32 / 32 | starvation 32 / 32 |
 
 The burst closes the gap for the first time; attempts past 12 px produce
-contacts where they never could; the reproduction age gate opens (members
-reach 46,449 ticks against the 24,000 required) and the first refusing
-readiness term becomes the reserve stock fraction. Still no mating. Caveat T
-could not remove: the switch changes every body from tick 0, so the apex is
-dropped into a thinner prey stock and part of its gain is confounded with the
-world change.
+contacts where they never could; two members pass the reproduction age
+threshold (46,449 ticks against 24,000) and the first refusing readiness term
+becomes the reserve stock fraction — which is not readiness or viability.
+Still no mating. Caveat T could not remove and Astra weighs as material: the
+switch changes every body from tick 0, so the apex is dropped into a 16 %
+thinner prey stock and the attribution among the disc envelope, the omitted
+grasp and the changed prey dynamics is not separated; the direction is
+compelling, the magnitude is not isolated.
 
 **Arm B, the whole world** (A's screen rows, both configurations, six seeds,
 three arms; all 36 `sweep` rows reproduce the retained hashes, with the
@@ -419,41 +430,94 @@ practice, and the world-level change is small and gate-clean.
   shipped price, shipped predicate, shipped motor, shipped roster, shipped
   §11, shoulder 0.95 by override.
 
-## Next recommendation (Fable's, before Astra's opinion)
+## Review and repair (Astra, 2026-09-16)
 
-The round turns three of the pending owner decisions into concrete
-proposals and withdraws one.
+Astra's review is
+[ecology-v1-round4-review-2026-09-16.md](ecology-v1-round4-review-2026-09-16.md).
+Disposition: retain P, R, S and T as evidence; do not deploy predicate and
+motor together from this package. Repair 1, report-level:
 
-1. **Apex and motor together: propose both to Wrysk as one fresh world.**
-   The predicate correction (`inside` → `in_contact()`, one line) meets
-   Astra's condition; the inertial motor model (Wrysk's own direction) is
-   confirmed on the apex, gate-clean on the world, and is the first step of
-   the physics-engine backlog. Fable recommends adopting both as the contract
-   and deploying one fresh `fast-leaf` world with them, because the cube's
-   apex changes once, no trained policy is installed anywhere (so the
-   retraining cost T names is zero in practice today), and the world-level
-   effect is small. What changes visibly: bodies turn more freely and cover
-   more ground, an apex spawned from the viewer charges and catches. What does
-   not: the apex still starves; it is not yet a population. The rows T lists
-   would be re-measured under the new contract as the next calibration
-   baseline, not before deployment.
-2. **Skimmer: no roster change now.** Run R's depth ladder {0.10, 0.20,
-   0.30, 0.40, 0.55, 0.75} at arm 0 (about 3.5 minutes) to ask whether any
-   depth rescues the lineage without the grazer's loss, and split the ledger's
-   margin bins by generation so founder and descendant stop being read as one.
-   The wet floor's missing producer stays a separate design question.
-3. **Seeding: neither option now; change the measurement.** S shows the
-   world converges to a grazed standing crop of ΣP 215–230 regardless of the
-   opening, so the honest target for §11 is that, not the ungrazed field.
-   Next: seed at the grazed standing crop (the equivalent `initial_fraction`,
-   uniform, no operator) and at S's 48,000-tick preconditioned field, and
-   compare founder outcomes, the opening transient's size and sign, and the
-   ungrazed crossings, with frames. Wrysk decides after that; leaving §11 is
-   the default meanwhile.
-4. **Training: widen the adapter's turn deadband operating point** as a
-   fresh, bounded campaign under a new protocol hash (never a migration),
-   with the four-layout aggregation A/B (`Aggregate::Mean` exists) run beside
-   it at the same seed; the score stays. Not visible on the cube.
-5. **Physics, next step:** a cost of acceleration (momentum) on the same disc
-   model, then the apex's reserve stock fraction as the next readiness term
-   to measure, since age no longer binds.
+- **P1, Q.** Exact replay and the orthogonal reference prove faithful
+  execution and no geometric cancellation; the estimator, pair count and
+  rank reduction are untested, not ruled out; the residence gap is about 18×;
+  the deadband is a measured clipping site and the leading hypothesis; the
+  four-layout minimum's masking is a design judgement. Corrected in Q and
+  here.
+- **P1, deployment.** Neither switch has a production contract (no host
+  caller of the pursuit rule; a resumed world returns to `Sweep`; the host's
+  neural seeding does not call `check_motor`), and T's own note requires the
+  fifteen-candidate screen and held-out selection rerun before `fast-leaf`
+  can still be called the selected ecology under `Inertial`. Fable's
+  deploy-together recommendation is withdrawn; the order below is Astra's.
+- **P2, ledger units.** P's and T's "fraction of the bill earned" were a
+  material ratio and a mixed-unit sum; E's usable-energy ratio over the
+  whole bill (upkeep + motor + strike and handling) is 11.1 → 18.5 %
+  (predicate) and 18.5 → 27.0 % (motor), verified by Fable from the retained
+  records. Corrected in both notes and the tables here.
+- **P2, P's widening** read as exploratory replication with the four added
+  seeds as an independent cohort; **P2, S's wording** qualified ("no tested
+  age", "net preserving effect consistent with recycling", not "only
+  foliage", a grazed total is not an initialiser); **P2, T's arm A** not
+  isolated from the world change.
+- **P3, R and integration:** sound; no change.
+
+## Next recommendation (reconciled with Astra)
+
+Astra's order, which Fable accepts. Three items are Wrysk's, and what we
+would tell him is stated at each.
+
+1. **The grasp-only apex pair — the single most informative cheap
+   experiment now.** Under the shipped `Sweep` motor, P's corrected predicate,
+   eight held-out seeds and both configurations: a variant whose apex
+   `turn_radius_px` uses its lobe extent rather than its grasp reach, every
+   ordinary body bit-identical and the prey world unchanged. Record prey at
+   introduction, delivered translation and rotation, signed gap closure,
+   contacts and captures by initial gap, E's usable-energy ratio, lifetime,
+   readiness terms. Confirmation that geometry is the principal apex motor
+   defect: it recovers most of `Inertial`'s −0.57 px closure and 2.9 captures
+   per life in the identical prey world; refutation: it stays near +0.21 px
+   and 2.1. About one minute of simulation; dispatched as workstream U.
+2. **Adopt the reach-envelope predicate separately.** *What we would tell
+   Wrysk: yes.* The half-space contradicts its own reach meaning and
+   suppresses 89 % of paid bursts; the added seeds replicate the direction.
+   Adoption means making reach-envelope the production rule with a
+   production default and a resume regression test, nothing else changed
+   (escape, strike duration, sense and mating radius untouched). Visible: an
+   introduced apex charges and handles prey more often; it still starves and
+   is not a lineage.
+3. **The motor after isolation, contract and recalibration.** *What we would
+   tell Wrysk: the inertial model is a faithful implementation of the
+   approximation you asked for, and it should not go on the cube from this
+   evidence yet.* If the grasp-only pair captures most of the benefit, take
+   that geometry correction and keep `Sweep`. If it does not and the disc
+   model remains the desired physics, then: a host production default, resume
+   and status rule; `check_motor` in the host's neural seeding; an action
+   adapter that can request the quadratic envelope's diagonal; the
+   fifteen-candidate screen and held-out selection rerun; then one fresh
+   world. Never a migration. Acceleration cost waits until the memoryless
+   contract is chosen.
+4. **Training: the turn deadband alone.** *What we would tell Wrysk: no score
+   change.* `TURN_DEADBAND` 0.05 → 0.0 under a new protocol with
+   `Aggregate::Min`, σ, pair count, layouts and score fixed; first trajectory
+   replays of the frozen centre and candidates under both adapters, then a
+   bounded 16-generation pair only if turn release raises on-food residence
+   or `t_min`. Bootstrap or split Q's retained pair contributions for
+   gradient-direction stability before declaring sixteen pairs sufficient.
+   Not visible on the cube.
+5. **The skimmer depth ladder** {0.10, 0.20, 0.30, 0.40, 0.55, 0.75}, arm 0,
+   with founder and descendant ledger bins and served foliage and litter per
+   body, after the apex decision. *What we would tell Wrysk: no roster change
+   at 0.55.* A depth is acceptable only if a lineage persists across seeds
+   without materially reducing the grazer; if none exists, the choice
+   becomes three viable heights and four kinds, or a wet-floor producer,
+   which is a new food web and display layer and not a repair.
+6. **§11: leave it; measure a coupled opening.** *What we would tell Wrysk:
+   no §11 or preconditioning change now.* Compare conservation-accounted
+   snapshots of the full coupled field after an ordinary roster has produced
+   the grazed state (burn-in population removed, identical fresh roster
+   founded) against status quo and the 48,000 plant-only opening, with
+   opening and one-hour frames, exact plant budgets and founder broods. No
+   uniform total written into §11. The current thin-green opening is the
+   honest default meanwhile.
+7. **Record repairs** — done in this repair.
+

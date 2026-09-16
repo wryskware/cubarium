@@ -5,6 +5,33 @@ decision_refs: []
 ---
 
 # The optimiser is doing its job: nothing cancels, nothing is erased, and the variation it has
+
+> **Correction after Astra's round-4 review (P1).** Three claims below are
+> stronger than the measurement. (1) The exact replay and the retained ÷
+> orthogonal-reference ratio establish *faithful execution* and *no excess
+> geometric cancellation*; they do not rule out estimator variance, the pair
+> count, the centred-rank reduction or the optimiser generally — no
+> split-half or bootstrap gradient-direction stability, repeated training
+> seed or alternative pair count was measured. "Refuted as an optimiser/update
+> problem" and "the rank reduction and pair count are ruled out" are
+> withdrawn to "candidate variation is real, useful residence is still small,
+> the recorded update is reproduced exactly, and correlated-direction
+> cancellation is not the loss". (2) The residence gap is about **18×**
+> (96.9 % / 5.5 %), not two orders of magnitude; the "580 generations" figure
+> is an extrapolated rate, not a measured scale. (3) The deadband finding is a
+> **measured clipping site and the leading adapter hypothesis**, not the
+> established place where weights lose their effect: carried deadband
+> occupancy correlates only r = 0.21 with score and no trajectory was run
+> under a different turn band. The four-layout minimum's 29 % disagreement
+> with the mean is a design judgement (worst-layout robustness is what
+> `Min` asks for), not a defect. The bounded next change Astra proposes:
+> `TURN_DEADBAND` 0.05 → 0.0 only, with `Aggregate::Min`, σ, pair count,
+> score, layouts and seed fixed and a new protocol hash; first replay the
+> frozen centre and candidates on their own layouts under both adapters
+> (falsified as the bottleneck if turn activity rises but on-food fraction,
+> dwell and `t_min` do not); and, cheaply, bootstrap or split the retained
+> sixteen pair contributions for gradient-direction stability before calling
+> sixteen pairs sufficient.
 # to work with is two orders of magnitude too small
 
 Workstream Q of the ecology v1 round-4 next steps

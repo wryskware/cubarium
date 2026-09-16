@@ -6,6 +6,26 @@ decision_refs: []
 
 # An inertial motor model, paired against the shipped sweep model
 
+> **Corrections after Astra's round-4 review.** (1) The "earned fraction of
+> its own bill" rows (13.6 % → 19.9 %) divide a mixed-unit sum (reserve
+> material + battery energy) by the energy bill. Workstream E's usable-energy
+> ratio (gut battery credit + η_ox·e_r × gut reserve credit, over upkeep +
+> motor + strike and handling) recomputed from the retained records is
+> **18.5 %** (sweep) → **27.0 %** (inertial); direction unchanged, all 32
+> still starve. (2) Arm A does not isolate the motor's apex effect: the
+> inertial worlds hold 628 prey at introduction against 745, every prey has
+> had the new motor from tick 0, and the attribution among the disc envelope,
+> the omitted grasp and the changed prey dynamics is not separated; the apex
+> catching more absolute prey in a thinner world makes the direction
+> compelling, not the magnitude. "The reproduction age gate opens" means two
+> members pass the age threshold; it is not readiness or viability. (3) The
+> grasp-only intermediate this note recommends is, on Astra's reading too,
+> the honest next experiment, and it comes **before** any adoption of the
+> inertial contract; adoption would additionally need a production default
+> and resume rule on the host, `check_motor` in the host's neural seeding, an
+> action adapter that can request the quadratic envelope's diagonal, and the
+> fifteen-candidate screen and held-out selection rerun.
+
 Workstream T of ecology v1 round 4, to
 [the brief](../handoffs/ecology-v1-motor-inertial-opus-2026-09-16.md), on Wrysk's
 direction of 2026-09-16: *"make movement expense cost like actual physics would
