@@ -4,7 +4,7 @@ last_reviewed: 2026-09-16
 decision_refs: []
 ---
 
-# The optimiser is doing its job: nothing cancels, nothing is erased, and the variation it has to work with is two orders of magnitude too small
+# The optimiser is doing its job: nothing cancels, nothing is erased, and the variation it has to work with is real and still about eighteen times too small (title corrected after review)
 
 > **Correction after Astra's round-4 review (P1).** Three claims below are
 > stronger than the measurement. (1) The exact replay and the retained ÷
