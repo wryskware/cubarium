@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use cubarium_core::MotorModel;
+use cubarium_core::neural::ActionAdapter;
 
 use super::episode::{self, Control, Driver, Episode, EpisodeError, Limits};
 use super::export::PolicyFile;
@@ -525,16 +526,18 @@ pub fn train(
     overwrite: bool,
     config: Option<PathBuf>,
     motor: MotorModel,
+    adapter: ActionAdapter,
     out: PathBuf,
 ) -> Result<(), Boxed> {
     let started = Instant::now();
     let deadline = started + Duration::from_secs(wall_seconds);
     let eco = Ecology::from_option(config.as_deref())?;
-    // The motor contract rides on the layouts, exactly as the ecology does, so the protocol
-    // reads it from the set it was built for and every episode's world is set from it.
+    // The motor contract and the action adapter ride on the layouts, exactly as the ecology
+    // does, so the protocol reads them from the set it was built for and every episode's world
+    // is set from them.
     let layouts: Vec<_> = fixture::training_layouts_on(&eco)
         .into_iter()
-        .map(|l| l.with_motor(motor))
+        .map(|l| l.with_motor(motor).with_adapter(adapter))
         .collect();
     let protocol = Protocol::new(pairs, horizon, train_seed, &layouts).with_aggregate(aggregate);
     let log_path = out.join("generations.jsonl");
@@ -791,7 +794,7 @@ fn record_center(cp: &mut Checkpoint, out: &Path, generation: u64) -> Result<(),
         return Ok(());
     }
     let relative = format!("centers/center-{generation:05}.json");
-    let file = PolicyFile::new(
+    let file = PolicyFile::new_in(
         &cp.theta,
         &cp.build,
         cp.protocol_hash,
@@ -799,6 +802,7 @@ fn record_center(cp: &mut Checkpoint, out: &Path, generation: u64) -> Result<(),
         &cp.protocol.config,
         cp.protocol.config_hash,
         cp.protocol.motor,
+        cp.protocol.adapter,
     )?;
     write_json_atomic(&out.join(&relative), &file)?;
     cp.centers.push(CenterRecord {
@@ -848,6 +852,7 @@ pub fn evaluate(
     probe: EvalProbe,
     config: Option<PathBuf>,
     motor: MotorModel,
+    adapter: ActionAdapter,
     out: PathBuf,
 ) -> Result<(), Boxed> {
     let eco = Ecology::from_option(config.as_deref())?;
@@ -858,6 +863,9 @@ pub fn evaluate(
     // And the motor contract, for the same reason and before the same rebuild: the envelope a
     // body moves in and the price of every radian are not the same under the two models.
     file.check_motor(motor)?;
+    // And the action adapter, for the same reason: the same head decodes to a different turn
+    // under the other band.
+    file.check_adapter(adapter)?;
     let policy = file.policy()?;
     if probe.copies == 0 {
         return Err("--copies must be at least 1".into());
@@ -871,7 +879,7 @@ pub fn evaluate(
         other => return Err(format!("set must be `training` or `holdout`, not `{other}`").into()),
     }
     .into_iter()
-    .map(|l| l.with_motor(motor))
+    .map(|l| l.with_motor(motor).with_adapter(adapter))
     .collect();
     // There is deliberately no `--pursuit-stop` here, and no pursuit rule on the policy file:
     // no layout founds a hunter, so the rule is unreachable in an episode and a switch would
@@ -1052,7 +1060,7 @@ pub fn export(
         }
     };
 
-    let file = PolicyFile::new(
+    let file = PolicyFile::new_in(
         &theta,
         &cp.build,
         cp.protocol_hash,
@@ -1060,12 +1068,13 @@ pub fn export(
         &cp.protocol.config,
         cp.protocol.config_hash,
         cp.protocol.motor,
+        cp.protocol.adapter,
     )?;
     write_json(&out, &file)?;
 
     let back: PolicyFile = serde_json::from_str(&fs::read_to_string(&out)?)?;
     let loaded = back.policy()?;
-    let original = tensor::policy(&theta)?;
+    let original = tensor::policy_in(&theta, cp.protocol.adapter)?;
     let exact = tensor::flatten(&loaded.weights)
         .iter()
         .zip(tensor::flatten(&original.weights))
@@ -1089,7 +1098,10 @@ pub fn export(
         return Err("the exported policy does not round-trip exactly".into());
     }
 
-    let layout = &fixture::training_layouts_on(&eco)[0];
+    let layout = fixture::training_layouts_on(&eco)[0]
+        .clone()
+        .with_motor(cp.protocol.motor)
+        .with_adapter(cp.protocol.adapter);
     let (mut world, id) = layout.build()?;
     world.attach_neural_policy(id, loaded)?;
     for _ in 0..verify_ticks {

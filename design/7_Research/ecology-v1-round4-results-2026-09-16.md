@@ -448,7 +448,7 @@ them the runs `Inertial` crossed in; thirteen paired worlds tie, so this is
 descriptive, and it is about those four lives. T had credited that to the disc
 model; the grasp-only alternative produces it in the identical prey world.
 
-**What this supports:** the geometry correction alone does not reproduce most
+**What this supports:** the grasp-only alternative alone does not reproduce most
 of the *observed, confounded* T arm. It does not say the rest belongs to the
 disc envelope: T's thinner, faster-turning prey world could have helped or hurt
 contact opportunity, so the third recovered is not a bound in either direction
@@ -650,14 +650,15 @@ would tell him is stated at each.
    tell Wrysk: the inertial model is a faithful implementation of the
    approximation you asked for, and it should not go on the cube from this
    evidence yet.* If the grasp-only pair captures most of the benefit, take
-   that geometry correction and keep `Sweep`. It did not (U). The disc model
+   that grasp-only alternative and keep `Sweep`. It did not (U). The disc model
    remains the physics Wrysk asked for, so the next step is the isolation U
    names, as a full 2 × 2 (W): the disc model on the apex only in the shipped
    prey world, its complement, and both controls under one build, read for
    the apex effect, the ordinary-body effect and their interaction; an
    apex-only contrast, not an apportionment, until all four cells exist.
    **Result (W, above):** the apex's envelope does not close the gap (it
-   opens it, +0.37 px); the prey's contract does (−1.06 px, 15/15). The disc
+   opens it, +0.37 px); the ordinary-body motor and the world it produced
+   does (−1.06 px, 15/15, p < 0.001). The disc
    model is a physics decision for every body, not an apex repair. Only
    after Wrysk confirms he wants it on those terms: a host production default, resume
    and status rule; `check_motor` in the host's neural seeding; an action

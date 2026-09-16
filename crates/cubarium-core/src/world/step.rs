@@ -249,6 +249,7 @@ impl World {
                 motor_model,
                 apex_turn_radius,
                 apex_motor_model,
+                action_adapter,
                 initial_material: _,
             } = &mut *self;
             // The motor contract in force this tick, read once. `Sweep` is the shipped
@@ -261,6 +262,10 @@ impl World {
             // (`crate::motor::model_for_body`). `None` is the default and means every body runs
             // `motor_model`; an override reaches nothing without apex contact geometry.
             let apex_motor_model = *apex_motor_model;
+            // And which action adapter decodes a neural body's raw head
+            // (`crate::neural::ActionAdapter`). `CubAct1` is the shipped adapter and the
+            // default; it reaches no legacy body.
+            let action_adapter = *action_adapter;
             let WorldState {
                 config,
                 tick,
@@ -471,6 +476,7 @@ impl World {
                         &mut sensed_bodies,
                         if budgets.traced() == Some(id) { Some(&mut traced_head) } else { None },
                         motor_model,
+                        action_adapter,
                     );
                     decisions.push((id, decision));
                     continue;
@@ -3108,6 +3114,7 @@ fn neural_decision(
     bodies: &mut Vec<crate::neural::SensedBody>,
     head_sink: Option<&mut Option<[f64; crate::neural::action::ACT_LEN]>>,
     motor_model: crate::motor::MotorModel,
+    action_adapter: crate::neural::ActionAdapter,
 ) -> Decision {
     use crate::neural::action::{Action7, Capability, Envelope};
 
@@ -3191,7 +3198,7 @@ fn neural_decision(
             *sink = Some(head);
         }
         let squash_start = std::time::Instant::now();
-        let held = Action7::squash(&head, &capability).0;
+        let held = Action7::squash_in(&head, &capability, action_adapter).0;
         timing.adapter_nanos = timing
             .adapter_nanos
             .saturating_add(squash_start.elapsed().as_nanos() as u64);

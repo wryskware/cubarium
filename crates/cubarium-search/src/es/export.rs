@@ -11,7 +11,7 @@
 //! at attachment. A checkpoint resumes training; an export runs a body.
 
 use cubarium_core::MotorModel;
-use cubarium_core::neural::Policy;
+use cubarium_core::neural::{ActionAdapter, Policy};
 use serde::{Deserialize, Serialize};
 
 use super::fixture::Ecology;
@@ -53,6 +53,15 @@ pub struct PolicyFile {
     /// *does* found a hunter changes that argument and not before.
     #[serde(default)]
     pub motor: Option<String>,
+    /// The **action adapter** the weights were trained under, by name
+    /// (`cubarium_core::neural::ActionAdapter`).
+    ///
+    /// `None` in a file written before the switch existed, and — like `motor`, unlike `config`
+    /// — that is *not* "unknown". There was exactly one action adapter in this workspace until
+    /// workstream X, so a file with no adapter reads as `cub-act-1`, which is what it in fact
+    /// ran. [`PolicyFile::check_adapter`] refuses a mismatch by name.
+    #[serde(default)]
+    pub adapter: Option<String>,
     pub generation: u64,
     pub parameters: usize,
     /// Exact weights in [`super::tensor`]'s flatten order.
@@ -70,16 +79,42 @@ impl PolicyFile {
         config_hash: u64,
         motor: MotorModel,
     ) -> Result<PolicyFile, String> {
+        PolicyFile::new_in(
+            theta,
+            build,
+            protocol_hash,
+            generation,
+            config,
+            config_hash,
+            motor,
+            ActionAdapter::CubAct1,
+        )
+    }
+
+    /// [`PolicyFile::new`], for a named [`ActionAdapter`]. `CubAct1` is [`PolicyFile::new`]
+    /// itself, field for field.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_in(
+        theta: &[f64],
+        build: &str,
+        protocol_hash: u64,
+        generation: u64,
+        config: &str,
+        config_hash: u64,
+        motor: MotorModel,
+        adapter: ActionAdapter,
+    ) -> Result<PolicyFile, String> {
         // Refuse to export something the core would not accept.
-        tensor::policy(theta)?;
+        tensor::policy_in(theta, adapter)?;
         Ok(PolicyFile {
             schema: "cub-es-policy-1".into(),
             build: build.to_string(),
-            policy_digest: cubarium_core::neural::schema_digest(),
+            policy_digest: cubarium_core::neural::schema_digest_in(adapter),
             protocol_hash,
             config: Some(config.to_string()),
             config_hash: Some(config_hash),
             motor: Some(motor.name().to_string()),
+            adapter: Some(adapter.name().to_string()),
             generation,
             parameters: theta.len(),
             theta: theta.to_vec(),
@@ -141,6 +176,39 @@ impl PolicyFile {
         ))
     }
 
+    /// Refuse, **by name**, a policy that was not trained under the action adapter it is about
+    /// to be evaluated under.
+    ///
+    /// The adapter decides what a raw turn head *means*. Under `cub-act-1` a head of 0.03 is
+    /// exactly no turn at all; under `cub-act-2` it is a turn of `tanh(0.03)`. A forager
+    /// trained where the band clips it and one trained where it does not are the same 10,215
+    /// numbers and a different animal, and comparing their scores across that change compares
+    /// two tasks.
+    ///
+    /// A file that records no adapter at all is read as `cub-act-1`: there was one adapter when
+    /// it was written, and that is a fact about the workspace, not an assumption about the
+    /// file.
+    pub fn check_adapter(&self, adapter: ActionAdapter) -> Result<(), String> {
+        let trained = self.adapter.as_deref().unwrap_or(ActionAdapter::CubAct1.name());
+        if trained == adapter.name() {
+            return Ok(());
+        }
+        Err(format!(
+            "policy file was trained under the {trained} action adapter, this evaluation is \
+             {}: the turn deadband differs, so the same head decodes to a different action and \
+             the two scores are not the same task",
+            adapter.name()
+        ))
+    }
+
+    /// The adapter the file names, `cub-act-1` when it names none.
+    pub fn adapter(&self) -> Result<ActionAdapter, String> {
+        match self.adapter.as_deref() {
+            None => Ok(ActionAdapter::CubAct1),
+            Some(name) => ActionAdapter::parse(name),
+        }
+    }
+
     /// The policy, rebuilt exactly.
     ///
     /// The **compatibility digest is checked first**. `tensor::policy` stamps whatever it
@@ -152,19 +220,23 @@ impl PolicyFile {
         if self.schema != "cub-es-policy-1" {
             return Err(format!("unknown policy file schema {:?}", self.schema));
         }
-        let current = cubarium_core::neural::schema_digest();
+        let adapter = self.adapter()?;
+        let current = cubarium_core::neural::schema_digest_in(adapter);
         if self.policy_digest != current {
             return Err(format!(
-                "policy file was written against schema digest {:#018x}, this build is \
-                 {:#018x}: the observation layout, action set, recurrence convention, motor \
-                 contract or controller rate differs and the weights cannot be reinterpreted",
-                self.policy_digest, current
+                "policy file was written against schema digest {:#018x}, this build's {} \
+                 adapter is {:#018x}: the observation layout, action set, recurrence \
+                 convention, motor contract or controller rate differs and the weights cannot \
+                 be reinterpreted",
+                self.policy_digest,
+                adapter.name(),
+                current
             ));
         }
         if self.parameters != self.theta.len() {
             return Err("policy file parameter count disagrees with its weights".into());
         }
-        tensor::policy(&self.theta)
+        tensor::policy_in(&self.theta, adapter)
     }
 }
 

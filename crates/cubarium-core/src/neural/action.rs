@@ -16,6 +16,76 @@ pub const DEADBAND: f64 = 0.05;
 /// Level trigger on attack and reproduce: these are standing requests, not per-tick attempts.
 pub const LEVEL: f64 = 0.5;
 
+/// Which action adapter decodes a raw head into the action in force.
+///
+/// The two differ in **exactly one constant**: the deadband applied to [`TURN`]. Everything
+/// else — the squash functions, the thrust and intake bands, the `LEVEL` triggers, the
+/// capability masks, the shared-mouth normalisation and the order they run in — is one
+/// implementation, shared, so no second adapter can drift from the first by accident.
+///
+/// Why it exists: workstream Q measured the centre's raw turn head at mean `|head|` 0.0600
+/// against a band edge of 0.0500, so the turn channel spends ~42 % of a trajectory and
+/// essentially all of a newborn candidate's ticks clipped to exactly zero
+/// (`design/7_Research/ecology-v1-es-antithetic-2026-09-16.md`). Releasing that band changes
+/// what a policy can *express*, so it is a different interface, not a tuning: the profile text
+/// carries the adapter's name, the schema digest changes with it, and a policy trained under
+/// one is refused **by name** under the other rather than reinterpreted.
+///
+/// [`ActionAdapter::CubAct1`] is the shipped adapter, the [`Default`], and the one the display
+/// host runs. A world that never names an adapter is byte-identical to the build before this
+/// type existed.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum ActionAdapter {
+    /// `DEADBAND` on both motor channels: the shipped contract.
+    #[default]
+    #[serde(rename = "cub-act-1")]
+    CubAct1,
+    /// The same adapter with the [`TURN`] band at 0.0. The [`THRUST`] band stays [`DEADBAND`].
+    #[serde(rename = "cub-act-2")]
+    CubAct2,
+}
+
+impl ActionAdapter {
+    /// The token this adapter occupies in [`super::PROFILE_TEXT`], and its name everywhere
+    /// else: a protocol, a policy file, a command line.
+    pub fn name(self) -> &'static str {
+        match self {
+            ActionAdapter::CubAct1 => "cub-act-1",
+            ActionAdapter::CubAct2 => "cub-act-2",
+        }
+    }
+
+    /// Parse a name. An unknown name is refused rather than defaulted: silently running the
+    /// shipped adapter for a misspelled `--adapter` would compare two tasks.
+    pub fn parse(s: &str) -> Result<ActionAdapter, String> {
+        match s {
+            "cub-act-1" => Ok(ActionAdapter::CubAct1),
+            "cub-act-2" => Ok(ActionAdapter::CubAct2),
+            other => Err(format!("adapter must be `cub-act-1` or `cub-act-2`, not `{other}`")),
+        }
+    }
+
+    /// Whether this is the shipped adapter. Used to keep it out of a serialized protocol, so
+    /// every hash written before the switch existed keeps the value it has always had.
+    pub fn is_default(&self) -> bool {
+        matches!(self, ActionAdapter::CubAct1)
+    }
+
+    /// The deadband this adapter applies to [`TURN`]. **The one constant that differs.**
+    pub fn turn_band(self) -> f64 {
+        match self {
+            ActionAdapter::CubAct1 => DEADBAND,
+            ActionAdapter::CubAct2 => 0.0,
+        }
+    }
+
+    /// Every adapter this build knows, for a caller that has to check a digest against all of
+    /// them.
+    pub const ALL: [ActionAdapter; 2] = [ActionAdapter::CubAct1, ActionAdapter::CubAct2];
+}
+
 /// Channel indices, for readers.
 pub const THRUST: usize = 0;
 pub const TURN: usize = 1;
@@ -86,9 +156,19 @@ impl Action7 {
     /// whatever it held; normalising last means the mouth budget is shared only among the
     /// channels that survived their masks.
     pub fn squash(y: &[f64; ACT_LEN], cap: &Capability) -> Action7 {
+        Action7::squash_in(y, cap, ActionAdapter::CubAct1)
+    }
+
+    /// [`Action7::squash`], under a named [`ActionAdapter`].
+    ///
+    /// [`ActionAdapter::CubAct1`] is [`Action7::squash`] itself, arithmetic for arithmetic.
+    /// The **only** value the adapter reaches is the deadband width on [`TURN`]; there is one
+    /// body of code here, not two, so the claim "they differ in exactly one constant" is a
+    /// property of the implementation rather than of a comment.
+    pub fn squash_in(y: &[f64; ACT_LEN], cap: &Capability, adapter: ActionAdapter) -> Action7 {
         let mut a = [0.0f64; ACT_LEN];
         a[THRUST] = band(sigmoid(y[THRUST]), DEADBAND);
-        a[TURN] = band(tanh(y[TURN]), DEADBAND);
+        a[TURN] = band(tanh(y[TURN]), adapter.turn_band());
         a[GRAZE] = band(sigmoid(y[GRAZE]), DEADBAND);
         a[FRUIT] = band(sigmoid(y[FRUIT]), DEADBAND);
         a[SCAVENGE] = band(sigmoid(y[SCAVENGE]), DEADBAND);

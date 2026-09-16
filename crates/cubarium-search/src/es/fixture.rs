@@ -42,6 +42,7 @@ use std::sync::Arc;
 
 use cubarium_core::config::WorldConfig;
 use cubarium_core::ids::OrganismId;
+use cubarium_core::neural::ActionAdapter;
 use cubarium_core::{DT, MotorModel, World};
 use cubarium_surface::{CellId, Face, Vec2, cell_of};
 use serde::{Deserialize, Serialize};
@@ -206,6 +207,16 @@ pub struct Layout {
     // (`design/7_Research/ecology-v1-predicate-adoption-2026-09-16.md`), and
     // `crates/cubarium-search/tests/predicate_adoption_provenance.rs` is what keeps that true.
     // A layout that ever *does* found a hunter owes the field back.
+    /// The **action adapter** every episode on this layout decodes a raw head with
+    /// (`cubarium_core::neural::ActionAdapter`, `crate::World::set_action_adapter`).
+    ///
+    /// Deliberately **not** serialized, for the same reason `ecology` and `motor` are not: a
+    /// layout's JSON is a description of its geometry, and the adapter it was run under is
+    /// recorded once, by name, in the protocol and in the exported policy. `cub-act-1` is the
+    /// shipped adapter and the default, so every fixture set built without naming one is the
+    /// set that has always existed.
+    #[serde(skip)]
+    pub adapter: ActionAdapter,
 }
 
 /// The stand that carries `p` of foliage (`design/ecology-v1-contract.md` §14 "search"):
@@ -316,6 +327,14 @@ impl Layout {
         self
     }
 
+    /// The same layout under a named action adapter (`cubarium_core::neural::ActionAdapter`).
+    /// A set of layouts carries one adapter, exactly as it carries one ecology and one motor
+    /// contract, and that is what the protocol and the exported policy record.
+    pub fn with_adapter(mut self, adapter: ActionAdapter) -> Layout {
+        self.adapter = adapter;
+        self
+    }
+
     /// Build the world this layout describes, and return it with the grazer's id.
     ///
     /// The world is constructed with `World::new`, staged, and then re-validated through
@@ -376,6 +395,11 @@ impl Layout {
         // The motor contract, on the **final** world and before the first tick. Transient, so
         // it is not in the staged state and `Sweep` changes nothing.
         world.set_motor_model(self.motor);
+        // And the action adapter, on the same world and before the first tick, for the same
+        // reason: transient, so it is not in the staged state and `cub-act-1` changes nothing.
+        world
+            .set_action_adapter(self.adapter)
+            .map_err(|e| format!("layout {}: {e}", self.name))?;
         world
             .check_invariants()
             .map_err(|e| format!("layout {}: staged world inconsistent: {e}", self.name))?;
@@ -447,6 +471,7 @@ pub fn training_layouts_on(ecology: &Ecology) -> Vec<Layout> {
             ],
             ecology: e(),
             motor: MotorModel::default(),
+        adapter: ActionAdapter::default(),
         },
         Layout {
             name: "t2-weak-open".into(),
@@ -460,6 +485,7 @@ pub fn training_layouts_on(ecology: &Ecology) -> Vec<Layout> {
             ],
             ecology: e(),
             motor: MotorModel::default(),
+        adapter: ActionAdapter::default(),
         },
         Layout {
             name: "t3-scatter".into(),
@@ -473,6 +499,7 @@ pub fn training_layouts_on(ecology: &Ecology) -> Vec<Layout> {
             ],
             ecology: e(),
             motor: MotorModel::default(),
+        adapter: ActionAdapter::default(),
         },
         Layout {
             name: "t4-ring".into(),
@@ -488,6 +515,7 @@ pub fn training_layouts_on(ecology: &Ecology) -> Vec<Layout> {
             ],
             ecology: e(),
             motor: MotorModel::default(),
+        adapter: ActionAdapter::default(),
         },
     ]
 }
@@ -552,6 +580,7 @@ fn holdout_layout(index: u64, ecology: &Ecology) -> Layout {
         ],
         ecology: ecology.clone(),
         motor: MotorModel::default(),
+        adapter: ActionAdapter::default(),
     }
 }
 

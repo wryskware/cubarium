@@ -92,6 +92,28 @@ impl World {
     /// Take the births and deaths committed since the last drain, in commit order (a tick's
     /// deaths before its births, each in slot order). The buffer is transient: nothing in the
     /// world reads it back, and a host that never drains it simply lets it grow.
+    /// How many life events are queued and undrained. Read-only: the queue is what
+    /// [`World::drain_events`] takes and what `World::remove_all_animals` refuses over.
+    pub fn pending_events(&self) -> usize {
+        self.events.len()
+    }
+
+    /// How many events each extension queue holds undrained: hunter, quiet, apex dormancy,
+    /// apex encounter, in that order. Read-only, for callers and tests of the removal door.
+    pub fn pending_extension_events(&self) -> [usize; 4] {
+        [
+            self.hunter_events.len(),
+            self.quiet_events.len(),
+            self.apex_dormancy_events.len(),
+            self.apex_encounter_events.len(),
+        ]
+    }
+
+    /// The scripted intents in force (`World::set_scripted_intents`), read-only.
+    pub fn scripted_intents(&self) -> &[(crate::ids::OrganismId, crate::diagnostic::ScriptedIntent)] {
+        &self.scripted
+    }
+
     pub fn drain_events(&mut self) -> Vec<LifeEvent> {
         std::mem::take(&mut self.events)
     }
@@ -404,7 +426,10 @@ impl World {
         id: crate::ids::OrganismId,
         policy: crate::neural::Policy,
     ) -> Result<(), String> {
-        policy.validate()?;
+        // Against the adapter **in force**, not the build's default: the digest says which
+        // action adapter the weights were authored for, and running them under another one
+        // decodes the same seven numbers differently (`crate::neural::ActionAdapter`).
+        policy.validate_in(self.action_adapter)?;
         if self.state.organisms.get(id).is_none() {
             return Err(format!("organism {}:{} is not alive", id.slot, id.generation));
         }

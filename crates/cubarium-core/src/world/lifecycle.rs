@@ -110,6 +110,22 @@ impl World {
             }
         }
         state.validate()?;
+        // The action adapter is a transient the snapshot does not record, so a resumed world
+        // runs the shipped `cub-act-1` (`World::set_action_adapter`). A policy authored under
+        // another adapter would then be decoded wrongly and silently — the class of failure the
+        // always-fresh rule exists to prevent — so it is refused by name here, at the one door
+        // a snapshot comes through. `WorldState::validate` accepts any adapter this build
+        // knows, because the state cannot say which one was in force; this is where it is
+        // known.
+        let shipped = crate::neural::ActionAdapter::default();
+        for policy in &state.neural.policies {
+            policy.validate_in(shipped).map_err(|e| {
+                format!(
+                    "this snapshot's neural policy was authored under an action adapter the \
+                     snapshot cannot name, and a resumed world runs the shipped one: {e}"
+                )
+            })?;
+        }
         let habitat = Habitat::new(
             &state.config.habitat,
             state.config.seed,
@@ -189,6 +205,127 @@ impl World {
         Ok(ids)
     }
 
+    /// Remove **every animal** from this world and hand the bodies back, leaving the field
+    /// exactly as it stands.
+    ///
+    /// This is the mirror of [`World::found_roster`] and the other half of the door
+    /// workstream Z's *coupled grazed opening* needs (`design/handoffs/
+    /// ecology-v1-grazed-opening-opus-2026-09-16.md`, deliverable 1): burn a field in with an
+    /// ordinary roster so the plants settle against **grazing** rather than against nobody,
+    /// take that burn-in population out again, and found the identical fresh roster into the
+    /// field it left. Workstream S measured that a plant-only prefix settles the plants
+    /// against the wrong regime — every arm converges on a grazed standing crop about half
+    /// the ungrazed one, so the founders halve the opening within the first simulated hour.
+    /// Neither existing door reaches that: [`World::found_roster`] refuses a populated world,
+    /// and `evaluate::precondition` is plant-only and refuses one too.
+    ///
+    /// **What it touches.** The organism slots and the private recurrent state keyed to them
+    /// (`neural`), and nothing else. The foliage, wood, plant reserve, nutrient, litter,
+    /// litter energy, fruit, carrion, carrion energy, dead wood and water are untouched cell
+    /// for cell; so are the weather, the clock, the cumulative birth and death counters, the
+    /// water ledgers and the energy ledgers. A removed body is **not** a death: it deposits
+    /// no carrion, emits no [`crate::events::LifeEvent`], and does not move
+    /// `deaths_total`. It leaves the world.
+    ///
+    /// **The books.** Every removed body's [`Organism::material`] — structure, reserve and
+    /// any escrow, which is the same sum [`World::mass_residual`] adds over the population —
+    /// is subtracted from `external_material_in`, which is therefore the world's *net*
+    /// external material and can go negative in a world that fed its population from its own
+    /// field before exporting it. That is the exact mirror of the `+=` the founding does, it
+    /// needs no second counter, and it is what keeps the conservation identity of a
+    /// burn-in-then-found world inside its 1e−9 acceptance — including across a snapshot,
+    /// because [`World::from_state`] re-derives the baseline from the same net term.
+    ///
+    /// The bodies' **stored energy** leaves with them and is deliberately booked nowhere: it
+    /// was not dissipated, so calling it heat would be a fabrication. The world's energy
+    /// audit is measured over an interval against a reading taken when recording opens
+    /// (`evaluate::Recorder`), so a removal that happens *before* the founding it precedes
+    /// does not enter it. The energy that left is on the record instead: it is carried by the
+    /// returned bodies, and the caller reports it.
+    ///
+    /// **The refusal**, by name and without touching the world: an extension holding state
+    /// keyed to the bodies this would remove — hunter members (a carried carcass is material
+    /// inside the identity), open quiet pauses, dormant apexes, paired gestations or
+    /// parentage. This operator empties the ordinary roster and its descendants and has no
+    /// accounted policy for any of those; dropping one silently would corrupt exactly the
+    /// ledger the extension exists to keep. Removing from an empty world is **not** a
+    /// refusal: it is a no-op that books zero, which is what the status-quo arm of a
+    /// comparison does.
+    pub fn remove_all_animals(&mut self) -> Result<Vec<Organism>, String> {
+        let mut held: Vec<&str> = Vec::new();
+        if !self.state.hunters.members.is_empty() {
+            held.push("the hunter extension holds members");
+        }
+        if !self.state.quiet.pauses.is_empty() {
+            held.push("the quiet extension holds open pauses");
+        }
+        if !self.state.apex_dormancy.dormant.is_empty() {
+            held.push("the apex dormancy extension holds dormant bodies");
+        }
+        if !self.state.apex_encounters.gestations.is_empty() {
+            held.push("the apex encounter extension holds paired gestations");
+        }
+        if !self.state.apex_encounters.parentage.is_empty() {
+            held.push("the apex encounter extension holds paired parentage");
+        }
+        // Transient state keyed to bodies, too (Astra, round-5 review P2): a scripted intent,
+        // a live body-budget ledger or intake trace, or an undrained life event would either
+        // go stale against a removed id or publish a record spanning the removed and the fresh
+        // cohorts. Refused by name rather than reset, so the caller decides.
+        if !self.scripted.is_empty() {
+            held.push("scripted intents are set for bodies");
+        }
+        if self.budgets.enabled() {
+            held.push("the body-budget ledger is recording");
+        }
+        if self.budgets.trace_target().is_some() {
+            held.push("an intake trace is targeting a body");
+        }
+        if !self.events.is_empty() {
+            held.push("life events are queued and undrained");
+        }
+        // The four extension event queues too (Astra, round-5 review P2, finding 11): each has
+        // its own drain door, and a caller that drained the persistent extension state but not
+        // its emitted records would otherwise keep stale identities queued.
+        if !self.hunter_events.is_empty() {
+            held.push("hunter events are queued and undrained");
+        }
+        if !self.quiet_events.is_empty() {
+            held.push("quiet events are queued and undrained");
+        }
+        if !self.apex_dormancy_events.is_empty() {
+            held.push("apex dormancy events are queued and undrained");
+        }
+        if !self.apex_encounter_events.is_empty() {
+            held.push("apex encounter events are queued and undrained");
+        }
+        if !held.is_empty() {
+            return Err(format!(
+                "cannot remove the population: {}; this operator removes the ordinary roster \
+                 and its descendants and has no accounted policy for extension state keyed to \
+                 the bodies it would take out",
+                held.join(", ")
+            ));
+        }
+        let ids: Vec<crate::ids::OrganismId> =
+            self.state.organisms.iter().map(|(id, _)| id).collect();
+        let mut removed = Vec::with_capacity(ids.len());
+        let mut exported = 0.0;
+        for id in ids {
+            let Some(o) = self.state.organisms.remove(id) else {
+                continue;
+            };
+            exported += o.material();
+            // The private recurrent state goes at the same boundary the body does, exactly as
+            // it does on a death: the entry is keyed by the full id, so a reused slot could
+            // not inherit it even if this were ever missed.
+            self.state.neural.remove(id);
+            removed.push(o);
+        }
+        self.state.external_material_in -= exported;
+        Ok(removed)
+    }
+
     fn assemble(state: WorldState, habitat: Habitat, initial_material: f64) -> World {
         // Every cache below is sized from the world's own topology and scale, which the
         // config carries and `validate` has already accepted.
@@ -237,6 +374,7 @@ impl World {
             motor_model: crate::motor::MotorModel::default(),
             apex_turn_radius: crate::motor::ApexTurnRadius::default(),
             apex_motor_model: None,
+            action_adapter: crate::neural::ActionAdapter::default(),
             initial_material,
         };
         // Make the derived light/moisture readable before the first tick advances weather.
@@ -506,8 +644,10 @@ impl World {
         policy: crate::neural::Policy,
     ) -> Result<crate::ids::OrganismId, String> {
         // The two refusals that do not depend on the body are made *before* it exists, so
-        // the ordinary case never founds and unwinds.
-        policy.validate()?;
+        // the ordinary case never founds and unwinds. The digest is checked against the
+        // adapter **this world** runs, not against the build's default, so a `cub-act-2`
+        // policy is refused by name by the display host and vice versa.
+        policy.validate_in(self.action_adapter)?;
         if self.state.quiet.policy.enabled() {
             return Err(
                 "the ordinary quiet extension and neural animals cannot be enabled together"

@@ -445,6 +445,11 @@ pub struct BudgetRecorder {
 impl BudgetRecorder {
     /// Whether this world records per-body budgets at all.
     #[inline]
+    /// The body an intake trace is targeting, if one is (`World::trace_intake`).
+    pub fn trace_target(&self) -> Option<OrganismId> {
+        self.target
+    }
+
     pub fn enabled(&self) -> bool {
         self.on
     }
@@ -726,6 +731,16 @@ impl super::World {
     /// at the next tick, with that tick's opening stores as the start; turning it off discards
     /// every record. The flag changes no dynamics: it is read only at sites that add to a
     /// counter, consumes no draw, and moves no value the simulation reads.
+    /// Whether the per-body ledger is recording, read-only.
+    pub fn body_budgets_recording(&self) -> bool {
+        self.budgets.enabled()
+    }
+
+    /// The body an intake trace is targeting, if one is, read-only.
+    pub fn intake_trace_target(&self) -> Option<crate::ids::OrganismId> {
+        self.budgets.trace_target()
+    }
+
     pub fn record_body_budgets(&mut self, on: bool) {
         self.budgets.set_enabled(on);
     }

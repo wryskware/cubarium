@@ -173,7 +173,45 @@ enum Command {
         /// into every exported policy, which is refused by name under the other contract.
         #[arg(long, default_value = "sweep")]
         motor: String,
+        /// The action adapter every fixture world decodes a raw head with: `cub-act-1` is the
+        /// shipped adapter (deadband 0.05 on thrust and turn), `cub-act-2` is workstream X's
+        /// released turn band (0.05 on thrust, 0.0 on turn). It moves the protocol hash and the
+        /// policy digest (a `cub-act-1` protocol keeps the hash it has always had) and is
+        /// written into every exported policy, which is refused by name under the other
+        /// adapter.
+        #[arg(long, default_value = "cub-act-1")]
+        adapter: String,
         #[arg(long, default_value = "runs/es-first")]
+        out: PathBuf,
+    },
+    /// Workstream X: replay one generation's centre and candidates on their own training
+    /// layouts under **both** action adapters, weights untouched, and measure the retained pair
+    /// contributions' gradient-direction stability.
+    EsTurnBand {
+        /// The retained training run: its `checkpoint.json`, `centers/` and nothing else.
+        #[arg(long, default_value = "runs/es-eco-v1-fastleaf")]
+        run: PathBuf,
+        /// The ecology the run was trained in. Required: replaying in another world would
+        /// compare two tasks, and the policy files are checked against this by name.
+        #[arg(long)]
+        config: PathBuf,
+        /// Which recorded centre to replay, with its own `2n` candidates.
+        #[arg(long, default_value_t = 9)]
+        generation: u64,
+        #[arg(long, default_value_t = cubarium_search::es::HORIZON_TICKS)]
+        horizon: u64,
+        #[arg(long, default_value_t = 8)]
+        workers: usize,
+        #[arg(long, default_value_t = 600)]
+        wall_seconds: u64,
+        /// Workstream Q's retained pair reduction, for the stability half. It exists for one
+        /// run and one generation; omitted, the replay runs alone, which is what replaying
+        /// another run's centre wants.
+        #[arg(long)]
+        pairs: Option<PathBuf>,
+        #[arg(long, default_value_t = 1_000)]
+        bootstrap: usize,
+        #[arg(long, default_value = "runs/ecology-v1-turn-deadband")]
         out: PathBuf,
     },
     /// Export a checkpoint's centre as a policy and verify it round-trips and runs.
@@ -226,6 +264,14 @@ enum Command {
         motor: String,
         // No `--pursuit-stop`: an evaluation layout founds no hunter, so the rule is
         // unreachable in an episode (`es::fixture::Layout`).
+        /// The action adapter every fixture world decodes a raw head with: `cub-act-1` is the
+        /// shipped adapter (deadband 0.05 on thrust and turn), `cub-act-2` is workstream X's
+        /// released turn band (0.05 on thrust, 0.0 on turn). It moves the protocol hash and the
+        /// policy digest (a `cub-act-1` protocol keeps the hash it has always had) and is
+        /// written into every exported policy, which is refused by name under the other
+        /// adapter.
+        #[arg(long, default_value = "cub-act-1")]
+        adapter: String,
         #[arg(long)]
         out: PathBuf,
     },
@@ -269,6 +315,13 @@ enum Command {
         /// Hard wall cap. Trials not started by then are recorded as skipped, never extended.
         #[arg(long, default_value_t = 600)]
         wall_seconds: u64,
+        /// The action adapter the whole world runs. Only `cub-act-1` — the shipped adapter and
+        /// the display host's — is accepted here: this command's stage runner
+        /// (`crate::population`) is owned by another workstream this round and was not opened
+        /// to the switch, so naming `cub-act-2` is refused rather than silently ignored. A
+        /// `cub-act-2` policy file is in any case refused by name by `PolicyFile::policy`.
+        #[arg(long, default_value = "cub-act-1")]
+        adapter: String,
         #[arg(long, default_value = "runs/es-eco-v1-fastleaf/population")]
         out: PathBuf,
     },
@@ -437,8 +490,13 @@ enum Command {
     /// (candidate, seed) plant-only to the last declared age, saves the whole field at every
     /// age and measures how settled it is; `--stage compare` founds the ordinary roster at
     /// each age and runs the ordinary horizon after it, with age 0 as the status quo.
+    ///
+    /// Workstream Z adds `--stage grazed`: the burn-in is the **ordinary coupled world**, so
+    /// the field settles against grazing rather than against nobody; that population is then
+    /// removed and the identical fresh roster founded into the field it grazed.
     Precondition {
-        /// `field` (the operator and its settling measures) or `compare` (the arms).
+        /// `field` (the plant-only operator and its settling measures), `compare` (S's arms)
+        /// or `grazed` (Z's coupled burn-in, removal and re-founding).
         #[arg(long, default_value = "field")]
         stage: String,
         /// Comma-separated candidate names, or `all`.
@@ -543,8 +601,9 @@ enum Command {
         #[arg(long, default_value = "runs/ecology-v1-diet-factorial")]
         out: PathBuf,
     },
-    /// Run workstream R's depth census: F's 150-minute variety census with the roster
-    /// skimmer's `depth` overridden search-side at tick 0 and nothing else changed.
+    /// Run the depth census: F's 150-minute variety census with the roster skimmer's `depth`
+    /// overridden search-side at tick 0 and nothing else changed. Workstream Y widened it to
+    /// a six-rung ladder at apex arm 0; R's two levels are still rungs of it.
     Census(census::Args),
     /// Re-run one recorded row and check it reproduces.
     Replay {
@@ -716,7 +775,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     wall_seconds,
                     &dir,
                 )?,
-                other => return Err(format!("unknown --stage {other}; use `field` or `compare`").into()),
+                // Workstream Z: the **coupled** grazed opening. The burn-in has the ordinary
+                // roster in it, so the field settles against grazing rather than against
+                // nobody; the population is then removed through
+                // `World::remove_all_animals` and the identical fresh roster founded into
+                // the field it grazed. Age 0 is the status-quo arm and is neither burnt in
+                // nor emptied — it is the reproduction target for workstream S's rows.
+                "grazed" => precondition::run_grazed(
+                    &names,
+                    set,
+                    seeds,
+                    &ages,
+                    ticks,
+                    sample_every,
+                    pursuit_stop,
+                    workers,
+                    wall_seconds,
+                    &dir,
+                )?,
+                other => {
+                    return Err(
+                        format!("unknown --stage {other}; use `field`, `compare` or `grazed`")
+                            .into(),
+                    );
+                }
             };
             precondition::print_report(&report);
             println!("rows and states under {}", dir.display());
@@ -783,6 +865,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             overwrite,
             config,
             motor,
+            adapter,
             out,
         } => es::commands::train(
             pairs,
@@ -797,6 +880,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             overwrite,
             config,
             cubarium_core::MotorModel::parse(&motor)?,
+            cubarium_core::neural::ActionAdapter::parse(&adapter)?,
             out,
         ),
         Command::EsEvaluate {
@@ -808,11 +892,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             copies,
             config,
             motor,
+            adapter,
             out,
         } => {
             let probe = es::commands::EvalProbe { reset_hidden_every, copies };
             let motor = cubarium_core::MotorModel::parse(&motor)?;
-            es::commands::evaluate(policy, &set, horizon, wall_seconds, probe, config, motor, out)
+            let adapter = cubarium_core::neural::ActionAdapter::parse(&adapter)?;
+            es::commands::evaluate(
+                policy, &set, horizon, wall_seconds, probe, config, motor, adapter, out,
+            )
         }
         Command::EsBudget { policy, config, horizon, initial_seed, workers, wall_seconds, out } => {
             es::budget::run(policy, config, horizon, initial_seed, workers, wall_seconds, out)
@@ -854,6 +942,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 seeds, arm, workers, wall_seconds, out,
             )
         }
+        Command::EsTurnBand {
+            run,
+            config,
+            generation,
+            horizon,
+            workers,
+            wall_seconds,
+            pairs,
+            bootstrap,
+            out,
+        } => es::turnband::run(
+            run, config, generation, horizon, workers, wall_seconds, pairs, bootstrap, out,
+        ),
         Command::EsExport { checkpoint, config, generation, out, verify_ticks } => {
             es::commands::export(checkpoint, config, generation, out, verify_ticks)
         }
@@ -869,8 +970,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             pursuit_stop,
             workers,
             wall_seconds,
+            adapter,
             out,
         } => {
+            // The stage runner is another workstream's file this round, so it was not opened
+            // to the switch. Refuse the other adapter by name rather than run `cub-act-1` under
+            // a `cub-act-2` flag.
+            if cubarium_core::neural::ActionAdapter::parse(&adapter)?
+                != cubarium_core::neural::ActionAdapter::CubAct1
+            {
+                return Err(
+                    "es-population runs the shipped `cub-act-1` adapter only: its stage runner \
+                     (crates/cubarium-search/src/population.rs) was not opened to the action \
+                     adapter switch in workstream X. Evaluate a cub-act-2 policy with \
+                     `es-evaluate --adapter cub-act-2`."
+                        .into(),
+                );
+            }
             let ecology = es::Ecology::load(&config)?;
             let pursuit_stop = cubarium_search::apex_audit::parse_pursuit_stop(&pursuit_stop)?;
             let arms: Vec<u32> =
