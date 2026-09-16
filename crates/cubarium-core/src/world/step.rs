@@ -309,6 +309,13 @@ impl World {
                     budgets.ensure(id, o, now);
                 }
             }
+            // Open this tick's intake row for the one traced body, before anything moves
+            // (`crate::world::budget`). Off by default: one `Option` test and no allocation.
+            budgets.open_row(now);
+            // The raw linear head the traced body's policy produced this tick, if it ran one.
+            // Written by stage 5 and read by stage 7; `None` on a tick that reused the held
+            // action, and for every body that is not neural.
+            let mut traced_head: Option<[f64; crate::neural::action::ACT_LEN]> = None;
 
             // 1. Admit due stimuli. The queue is empty in M2; the hook is the journal.
 
@@ -442,6 +449,7 @@ impl World {
                         neighbors.lists.get(id.slot as usize).map_or(&[][..], |l| &l[..]),
                         &mut sensed_cells,
                         &mut sensed_bodies,
+                        if budgets.traced() == Some(id) { Some(&mut traced_head) } else { None },
                     );
                     decisions.push((id, decision));
                     continue;
@@ -1393,6 +1401,9 @@ impl World {
                     rec.motor_turn_billed +=
                         per_motor * motor::ROTATION_COST_SCALE * motion.sweep.max(0.0);
                 }
+                if let Some(row) = budgets.row_of(*id) {
+                    row.bill_total += cost;
+                }
                 let mut collected = cost.min(o.energy).max(0.0);
                 o.energy -= collected;
                 let shortfall = (cost - collected).max(0.0);
@@ -1432,6 +1443,9 @@ impl World {
                 intake.body_bill_paid += collected;
                 if let Some(rec) = budgets.at(*id) {
                     rec.bill_paid += collected;
+                }
+                if let Some(row) = budgets.row_of(*id) {
+                    row.bill_paid += collected;
                 }
             }
 
@@ -1634,6 +1648,42 @@ impl World {
             let mut litter_density = vec![0.0f64; CELL_COUNT];
             let mut carrion_density = vec![0.0f64; CELL_COUNT];
             let mut requests: Vec<(usize, OrganismId, f64, f64, f64)> = Vec::new();
+            // 7t. The per-tick intake trace (`crate::world::budget`), for the one traced body
+            //     and nobody else: the cell it stands on, that cell's four edible stocks and
+            //     whether each clears `drives.feed_min`, the three decoded efforts (and the raw
+            //     head behind them), the bite each mouth asks for, and what bound it. It reads
+            //     the same pre-settlement stocks every mouth below reads and writes nothing
+            //     any body or field can see. Off in every ordinary world.
+            if let Some(target) = budgets.traced()
+                && let Some(o) = organisms.get(target)
+                && let Some((_, d)) = decisions.iter().find(|(id, _)| *id == target)
+            {
+                let here = cell_of(&o.pos);
+                let cell = here.index();
+                let stock = [
+                    fields.p[cell],
+                    fields.f[cell],
+                    edible_detritus(fields.d[cell], fields.de[cell], e_r),
+                    edible_detritus(ecology.carrion[cell], ecology.carrion_energy[cell], e_r),
+                ];
+                budgets.observe_intake(
+                    target,
+                    here.0,
+                    stock,
+                    cfg.drives.feed_min,
+                    [d.graze_effort, d.fruit_effort, d.scavenge_effort],
+                    o.phenotype.cap_foliage,
+                    o.phenotype.cap_detrital,
+                    o.phenotype.mouth_rate,
+                    k_p,
+                    dt,
+                    o.reserve,
+                    o.phenotype.reserve_max,
+                    o.energy,
+                    o.phenotype.energy_max,
+                    traced_head,
+                );
+            }
             for (id, d) in &decisions {
                 if d.fruit_effort <= 0.0 && d.graze_effort <= 0.0 && d.scavenge_effort <= 0.0 {
                     continue;
@@ -1759,6 +1809,16 @@ impl World {
                             rec.reserve_credit[budget::FRUIT] += to_reserve;
                             rec.battery_credit[budget::FRUIT] += gained;
                         }
+                        if let Some(row) = budgets.row_of(id) {
+                            row.credit(
+                                budget::FRUIT,
+                                q,
+                                q_d,
+                                to_reserve,
+                                gained,
+                                (eta_e * spare).max(0.0) - gained,
+                            );
+                        }
                         ate[1] += q;
                         eaten += q;
                     }
@@ -1786,6 +1846,16 @@ impl World {
                             rec.digestible[budget::FOLIAGE] += q_d;
                             rec.reserve_credit[budget::FOLIAGE] += to_reserve;
                             rec.battery_credit[budget::FOLIAGE] += gained;
+                        }
+                        if let Some(row) = budgets.row_of(id) {
+                            row.credit(
+                                budget::FOLIAGE,
+                                q,
+                                q_d,
+                                to_reserve,
+                                gained,
+                                (eta_e * spare).max(0.0) - gained,
+                            );
                         }
                         ate[0] += q;
                         eaten += q;
@@ -1831,6 +1901,16 @@ impl World {
                                 rec.reserve_credit[budget::LITTER] += to_reserve;
                                 rec.battery_credit[budget::LITTER] += gained;
                             }
+                            if let Some(row) = budgets.row_of(id) {
+                                row.credit(
+                                    budget::LITTER,
+                                    q,
+                                    q_d,
+                                    to_reserve,
+                                    gained,
+                                    (eta_e * spare).max(0.0) - gained,
+                                );
+                            }
                             ate[2] += q;
                             eaten += q;
                         }
@@ -1863,6 +1943,16 @@ impl World {
                                 rec.digestible[budget::CARRION] += q_d;
                                 rec.reserve_credit[budget::CARRION] += to_reserve;
                                 rec.battery_credit[budget::CARRION] += gained;
+                            }
+                            if let Some(row) = budgets.row_of(id) {
+                                row.credit(
+                                    budget::CARRION,
+                                    q,
+                                    q_d,
+                                    to_reserve,
+                                    gained,
+                                    (eta_e * spare).max(0.0) - gained,
+                                );
                             }
                             ate[2] += q;
                             eaten += q;
@@ -2795,6 +2885,8 @@ impl World {
                     budgets.mark(id, o);
                 }
             }
+            // Keep this tick's intake row, once the served bites it needs are known.
+            budgets.close_row();
 
             *tick += 1;
         }
@@ -2868,6 +2960,7 @@ fn neural_decision(
     neighbours: &[crate::pairs::Neighbor],
     cells: &mut Vec<crate::neural::SensedCell>,
     bodies: &mut Vec<crate::neural::SensedBody>,
+    head_sink: Option<&mut Option<[f64; crate::neural::action::ACT_LEN]>>,
 ) -> Decision {
     use crate::neural::action::{Action7, Capability, Envelope};
 
@@ -2940,6 +3033,11 @@ fn neural_decision(
             cfg.mechanisms.grazing,
             cfg.mechanisms.scavenging,
         );
+        // The one read-only diagnostic in this function: the raw head before squashing, for
+        // the traced body only (`crate::world::budget`). Nothing downstream reads it.
+        if let Some(sink) = head_sink {
+            *sink = Some(head);
+        }
         let squash_start = std::time::Instant::now();
         let held = Action7::squash(&head, &capability).0;
         timing.adapter_nanos = timing
