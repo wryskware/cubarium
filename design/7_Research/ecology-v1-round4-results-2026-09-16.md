@@ -25,7 +25,7 @@ which would be visible on the cube; none of this round touches the cube.
 | Q antithetic ES analysis | Opus 5 high | `main` (`da2bdc8`…`a281162`) | 1.4 s / 5 min | 0.24 MiB / 20 | search 230, core 517 |
 | P apex predicate pair | Opus 5 high | worktree, merged | 190 s / 4 min | 8.0 MiB / 20 | core 523, search 224 |
 | R skimmer depth census | Opus 5 high | worktree, merged | 4.2 min / 6 min | 0.6 MiB / 30 | search +20 |
-| S preconditioned opening | Opus 5 high | worktree | *(pending)* | | |
+| S preconditioned opening | Opus 5 high | worktree, merged | 4.5 min / 10 min | 33 MiB / 80 | core 524, search +13 |
 
 Fable's verification so far: Q's two ignored experiments re-run and the
 retained files rewritten with identical generation-9 figures (span
@@ -219,9 +219,79 @@ minutes — is there a depth that rescues the skimmer's lineage without taking
 the grazer's horizon population? — plus splitting the ledger's margin bins by
 generation and recording form-3 served material by channel.
 
-## S — a plant-only preconditioned opening
+## S — a plant-only preconditioned opening: no age removes the crossings; one age changes the founders' fate
 
-*(pending)*
+Full note: [ecology-v1-precondition-2026-09-16.md](ecology-v1-precondition-2026-09-16.md);
+frames [ecology-v1-precondition-2026-09-16.png](assets/ecology-v1-precondition-2026-09-16.png)
+(four ages across, baseline and `fast-leaf` at founding and one hour later,
+seed 1001, Front face, through the real presenter; the physical cube was not
+inspected). Commits `5d3941c` (the door, the operator, the arms), `ea04ab3`
+(note, frames, scripts). `World::found_roster` shares the constructor's
+founder loop (two private helpers), so "the same 24 founders" is a fact;
+because `state_hash` hashes the config, the caller restores the roster to the
+config after the plant-only prefix, and the door refuses a config that
+declares no roster (a cleared-and-not-restored config would otherwise have
+produced a silent zero-founder arm reported as 24). Tests first: 7 core, 8
+integration, 5 unit. **Reproduction:** 12 of 12 age-0 rows founded *through
+the door* carry M's present-arm `final_state_hash` and ecology hash; 48 of 48
+arms' founding hashes match the field stage's independent founding; every
+saved state decodes to its hash; the operator reproduces M's herbivore-absent
+crossings seed for seed and M's opening distributions. Two changes a reviewer
+should look at first, disclosed by S: the recorder's windows, horizon, late
+window and collapse tick are now relative to a recording origin (unchanged at
+origin 0, checked by the 12 of 12 reproduction and an equality of metrics
+through and around the door), and `Evaluation` gained two optional fields.
+
+| config | plant-only age | opening ΣP | CV | crossings (with / without withdrawal) | grazer founders that bred, of 10 | founder lineages alive | population | forms | cells below ¼ of §11 seeding at the horizon |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| baseline | 0 (status quo) | 107 | 0.39 | 68 (0 / 68) | **0.3** | 4.7 | 40 | 2.3 | 11.2 |
+| baseline | 48,000 | 358 | 0.55 | 77 (2 / 75) | **10 of 10** | 11.0 | 46 | 3.0 | 13.0 |
+| baseline | 96,000 | 394 | 0.49 | 169 (3 / 166) | 10 of 10 | | 49 | 3.0 | 29.0 |
+| baseline | 180,000 | 390 | 0.53 | 582 (122 / 460) | 10 of 10 | | 47 | 3.2 | 82.7 |
+| `fast-leaf` | 0 | 107 | 0.39 | 5 (0 / 5) | 4.8 | | 62 | 3.0 | 0.8 |
+| `fast-leaf` | 48,000 | 401 | 0.51 | 17 (2 / 15) | 10 of 10 | | 58 | 3.2 | 2.5 |
+| `fast-leaf` | 96,000 | 439 | 0.43 | 50 (5 / 45) | 10 of 10 | | 61 | 3.0 | 8.0 |
+| `fast-leaf` | 180,000 | 449 | 0.45 | 287 (93 / 194) | 10 of 10 | | 61 | 3.3 | 34.5 |
+
+**Verdict: no age makes the ungrazed crossings vanish**; they rise
+monotonically with age on the arm's own reference and on a common §11
+reference (S added the second reading because the counter's reference moves
+with the opening). The mechanism is M's own caveat read from the other side:
+with animals present the over-seeded cells are kept alive by the animals'
+recycling; a long plant-only prefix runs the world in the one regime that
+kills them and hands the founders the corpses (at age 180,000, 63.5 of the
+82.7 starved cells were stripped before founding). The field settles in total
+by 96,000 (ΔΣP 0.4 % per window) but 811–883 of 1,110 watched cells still
+move more than 1 % per window at every age: it is an age, not an
+equilibrium, and the note says so.
+
+**But the founders' fate changes completely, and one age gets both.** At
+48,000 the field is 3.3–3.7× greener with essentially nothing starved yet and
+the terminal starved count within noise of the status quo; every one of the
+10 grazer founders breeds instead of 0.3 of 10 (baseline); the first grazer
+brood arrives at the 3,001-tick floor instead of 21,000; founder lineages
+alive 4.7 → 11.0; form evenness 0.44 → 0.70; forms 2.3 → 3.0; and the one
+baseline seed whose herbivore guild collapses at the status quo (failing the
+`guilds_intact` gate) does not collapse. Paired per seed: 6 of 6 better on
+lineages, broods and evenness; 0–1 of 6 on crossings. The split falls exactly
+along diet: the foliage feeders (grazer 0.85, glider 0.90) change, the
+burrower (0.10) and the skimmer (0.60, on the floor) do not, in every arm.
+
+**The three options, measured, and what Wrysk would be choosing:** leave §11
+(a thin uniform opening that greens; 11 cells starved; grazers barely breed;
+one seed in six loses its herbivores); adopt preconditioning at 48,000 ticks
+(a green, heterogeneous opening that visibly browns over the first eight
+simulated minutes; every founder breeds; 13 cells starved; 40 simulated
+minutes before a fresh world can be shown; every gate measured against
+opening foliage changes denominator — late ÷ opening 2.31 → 0.62 — and
+`fast-leaf` at 180,000 would fall under the 0.5 foliage floor); or neither,
+because every arm converges to the same *grazed* standing crop (ΣP 215–230)
+whatever it opened on — the status quo climbs 107 → 233 while the
+preconditioned field falls 358 → 192 in eight minutes and returns to 217 —
+so the opening transient is inverted, not removed, and larger in absolute
+foliage. On this evidence the honest target for a §11 change is the grazed
+standing crop, not the ungrazed one, which is a different measurement. S
+chose none; §11 and `producer.initial_fraction` are untouched.
 
 ## What this does and does not establish
 
