@@ -716,7 +716,14 @@ pub fn dead_wood_density(view: &RenderView, index: usize) -> f64 {
 /// ground wash on their own ([`litter_density`]), and a cell's litter neither creates this
 /// mark nor hides it.
 pub fn soil_snag(view: &RenderView, index: usize) -> f64 {
-    (dead_wood_density(view, index) - wood_density(view, index)).clamp(0.0, 1.0)
+    let dead = dead_wood_density(view, index);
+    // A cell with no dead wood cannot be marked whatever its living stand is, and that is
+    // almost every cell of almost every world: taking it before the living read means the
+    // whole pass costs one field compare per soil cell in a world where nothing has died.
+    if dead <= 0.0 {
+        return 0.0;
+    }
+    (dead - wood_density(view, index)).clamp(0.0, 1.0)
 }
 
 /// The opacity the soil band's dead-wood mark is stamped at:
