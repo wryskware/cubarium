@@ -1,5 +1,5 @@
 use super::*;
-use cubarium_surface::face_frame;
+use cubarium_surface::{Scale, Topology, face_frame};
 use cube_proto::{FACE_BYTES, Face};
 
 /// One request over a real socket, returning the status line, the headers and the
@@ -1215,5 +1215,185 @@ fn the_page_declares_the_expected_sizes_and_one_external_script() {
     assert!(
         INDEX_HTML.contains("#0B0525"),
         "the dark background of the room's palette"
+    );
+}
+
+// --- the ring world on the viewer's two read routes and its care route ---------------
+
+const RING: Topology = Topology::Ring { w: 320, h: 180 };
+
+fn ring_shape() -> WorldShape {
+    WorldShape::new(RING, Scale::ONE)
+}
+
+/// A raster whose bytes are a recognizable function of `seed`, so a body that is the
+/// right *length* but the wrong image still fails.
+fn distinct_raster(seed: u8) -> Raster {
+    let mut r = Raster::black(320, 180);
+    let bytes = r.as_bytes_mut();
+    for (i, b) in bytes.iter_mut().enumerate() {
+        *b = (i as u8).wrapping_mul(13).wrapping_add(seed);
+    }
+    r
+}
+
+/// The page has to size its canvas and pick its mode *before* it has polled a frame, so
+/// the shape is on `/status`, not inferred from `/frame`.
+#[test]
+fn the_status_route_names_the_world_s_topology_and_size() {
+    let cube = WebSink::new(0).expect("binding");
+    let (_, _, body) = get(cube.addr(), "/status");
+    let v: serde_json::Value = serde_json::from_str(&body_text(&body)).unwrap();
+    assert_eq!(v["topology"], "cube");
+    assert_eq!(v["w"], 64);
+    assert_eq!(v["h"], 64);
+    assert_eq!(v["scale"], 1.0);
+
+    let ring =
+        WebSink::with_world(0, "", Source::default(), None, ring_shape()).expect("binding");
+    let (_, _, body) = get(ring.addr(), "/status");
+    let v: serde_json::Value = serde_json::from_str(&body_text(&body)).unwrap();
+    assert_eq!(v["topology"], "ring");
+    assert_eq!(v["w"], 320);
+    assert_eq!(v["h"], 180);
+    assert_eq!(v["scale"], 1.0);
+    // Everything the cube's status carried is still there, in the same place.
+    assert_eq!(v["world_tick"], 0);
+    assert!(v["source"].is_object(), "{v}");
+
+    let scaled = WebSink::with_world(
+        0,
+        "",
+        Source::default(),
+        None,
+        WorldShape::new(Topology::Ring { w: 640, h: 360 }, Scale::new(2.0)),
+    )
+    .expect("binding");
+    let (_, _, body) = get(scaled.addr(), "/status");
+    let v: serde_json::Value = serde_json::from_str(&body_text(&body)).unwrap();
+    assert_eq!((v["w"].as_u64(), v["h"].as_u64()), (Some(640), Some(360)));
+    assert_eq!(v["scale"], 2.0);
+}
+
+/// `/frame` is the 8-byte render sequence then the image: `w·h·3` for a ring, not the
+/// cube's fixed 61,440. A black one of the right size answers before the first submit, so
+/// the page always has something valid to draw.
+#[test]
+fn the_frame_route_serves_the_raster_behind_the_same_eight_byte_sequence() {
+    let mut sink =
+        WebSink::with_world(0, "", Source::default(), None, ring_shape()).expect("binding");
+    let expect = 8 + 320 * 180 * 3;
+
+    let (status, _, body) = get(sink.addr(), "/frame");
+    assert_eq!(status, "HTTP/1.1 200 OK");
+    assert_eq!(body.len(), expect, "a black raster before the host submits one");
+    assert!(body[8..].iter().all(|&b| b == 0));
+
+    for seed in 0..3u8 {
+        sink.submit(Output::Ring(&distinct_raster(seed))).unwrap();
+    }
+    let newest = distinct_raster(2);
+    let (_, _, body) = get(sink.addr(), "/frame");
+    assert_eq!(body.len(), expect);
+    assert_eq!(u64::from_le_bytes(body[..8].try_into().unwrap()), 2);
+    assert_eq!(&body[8..], newest.as_bytes(), "byte for byte");
+
+    // The mailbox holds the image in the shape it arrived in, and says so.
+    let (seq, held) = sink.newest_raster().expect("a raster in the mailbox");
+    assert_eq!(seq, 2);
+    assert_eq!(held.as_bytes(), newest.as_bytes());
+    assert!(sink.newest().is_none(), "a ring world has no cube frame to hand out");
+    assert_eq!(sink.shape(), ring_shape());
+}
+
+/// The care route validates against *this* world. `u = 200` is a cell on a 320-pixel ring
+/// and is nowhere on a cube, and neither host guesses at the other's answer.
+#[test]
+fn a_care_target_is_validated_against_the_world_the_viewer_is_showing() {
+    let service = CareService::for_world("epoch-ring", Arc::new(JournalStatus::default()), RING);
+    let sink = WebSink::with_world(
+        0,
+        "",
+        Source::default(),
+        Some(service.shared()),
+        ring_shape(),
+    )
+    .expect("binding");
+    let (_, _, body) = care_post(sink.addr(), "/care/register", "{}");
+    let client = serde_json::from_str::<serde_json::Value>(&body).unwrap()["client"]
+        .as_str()
+        .expect("an issued identity")
+        .to_string();
+
+    let submit = |u: u16, v: u16, request: u64| {
+        care_post(
+            sink.addr(),
+            "/care",
+            &format!(
+                r#"{{"client":"{client}","request":{request},"kind":"feed","target":{{"face":0,"u":{u},"v":{v}}}}}"#
+            ),
+        )
+    };
+    // Accepted: past the cube's pixel 63 in both axes, and the far corner of the ring.
+    for (i, (u, v)) in [(200u16, 120u16), (319, 179)].into_iter().enumerate() {
+        let (status, _, body) = submit(u, v, i as u64 + 1);
+        assert!(
+            !status.starts_with("HTTP/1.1 400"),
+            "({u}, {v}) must be a cell on a 320x180 ring: {status} {body}"
+        );
+    }
+    // Refused: off the ring, and a chart the ring does not have.
+    for (u, v) in [(320u16, 90u16), (160, 180)] {
+        let (status, _, body) = submit(u, v, 9);
+        assert_eq!(status, "HTTP/1.1 400 Bad Request", "({u}, {v}): {body}");
+        assert!(body.contains("pixel extent"), "{body}");
+    }
+    let (status, _, body) = care_post(
+        sink.addr(),
+        "/care",
+        &format!(
+            r#"{{"client":"{client}","request":9,"kind":"feed","target":{{"face":4,"u":10,"v":10}}}}"#
+        ),
+    );
+    assert_eq!(status, "HTTP/1.1 400 Bad Request", "a ring has no Face::Top: {body}");
+
+    // The same coordinates on a cube host: (200, 120) has no cell, and (32, 32) does.
+    let (cube_sink, _cube_service) = care_sink();
+    let (_, _, body) = care_post(cube_sink.addr(), "/care/register", "{}");
+    let cube_client = serde_json::from_str::<serde_json::Value>(&body).unwrap()["client"]
+        .as_str()
+        .expect("an issued identity")
+        .to_string();
+    let (status, _, body) = care_post(
+        cube_sink.addr(),
+        "/care",
+        &format!(
+            r#"{{"client":"{cube_client}","request":1,"kind":"feed","target":{{"face":0,"u":200,"v":120}}}}"#
+        ),
+    );
+    assert_eq!(status, "HTTP/1.1 400 Bad Request", "{body}");
+    let (status, _, body) = care_post(
+        cube_sink.addr(),
+        "/care",
+        &format!(
+            r#"{{"client":"{cube_client}","request":2,"kind":"feed","target":{{"face":0,"u":32,"v":32}}}}"#
+        ),
+    );
+    assert!(!status.starts_with("HTTP/1.1 400"), "the cube is unchanged: {status} {body}");
+}
+
+/// The page picks its mode from `/status` and sizes its buffer from `w` and `h`, so those
+/// three names are part of the contract between the host and the embedded page.
+#[test]
+fn the_embedded_page_reads_the_topology_from_status() {
+    assert!(INDEX_HTML.contains(r#"s.topology === "ring""#), "the page must branch on topology");
+    assert!(INDEX_HTML.contains("enterRingMode(s.w, s.h, s.scale)"), "and size itself from w/h");
+    assert!(
+        INDEX_HTML.contains("frameBodyBytes"),
+        "and expect the world's own /frame length rather than the cube's constant"
+    );
+    assert!(
+        INDEX_HTML.contains("image-rendering: pixelated"),
+        "a ring is drawn at an integer scale with no resampling"
     );
 }

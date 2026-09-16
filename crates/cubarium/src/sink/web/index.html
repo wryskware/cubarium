@@ -85,9 +85,16 @@
   #netWrap { position: relative; }
   #netMark { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
   #net { cursor: crosshair; }
+  /* Ring mode: one image at an integer scale, never resampled by the browser. */
+  #ringPanel { display: none; }
+  #ringWrap { position: relative; line-height: 0; }
+  #ringMark { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
+  #ring, #ringMark { image-rendering: pixelated; image-rendering: crisp-edges; }
+  #ring { cursor: crosshair; max-width: 100%; }
   /* The source line only appears once /status answers; an older host leaves it empty
      and the HUD is exactly one line, as before. */
-  #hudSrc:not(:empty) { display: block; margin-top: 2px; color: var(--ink-dim); }
+  #hudSrc:not(:empty), #ringHudSrc:not(:empty) { display: block; margin-top: 2px; color: var(--ink-dim); }
+  #ringHud { padding: 6px 8px 0; color: var(--ink-dim); }
   @media (max-width: 520px) { body { padding: 8px; } .cap { font-size: 10px; } }
 </style>
 
@@ -103,6 +110,14 @@
       <canvas id="net" width="768" height="384"></canvas>
       <canvas id="netMark" width="768" height="384"></canvas>
     </div>
+  </div>
+  <div class="panel" id="ringPanel">
+    <p class="cap" id="ringCap">ring</p>
+    <div id="ringWrap">
+      <canvas id="ring" width="320" height="180"></canvas>
+      <canvas id="ringMark" width="320" height="180"></canvas>
+    </div>
+    <div id="ringHud"><span id="ringHudMain">seq &mdash; &middot; -- fps</span><span id="ringHudSrc"></span></div>
   </div>
   <details class="panel" id="carePanel">
     <summary>Care (optional)</summary>
@@ -199,6 +214,107 @@ const frameBytes = new Uint8Array(FRAME_BYTES);
 // encoded -- not the world's tick. The tick comes from /status.
 let seq = 0;
 let live = false;          // true once /frame has answered at least once
+
+// ---------------------------------------------------------------------------
+// Ring mode. /status names the world's topology, so the page picks its mode from
+// the host rather than from what happens to arrive on /frame: a cube world keeps
+// the three.js cube and the unfolded net, a ring world replaces both with one
+// image. Nothing below runs until /status has said "ring".
+// ---------------------------------------------------------------------------
+let ringMode = false;
+let ringW = 0, ringH = 0, ringScale = 1;
+let ringBytes = null;                 // w*h*3, the raster as it arrives
+let frameBodyBytes = 8 + FRAME_BYTES; // what /frame is expected to answer with
+let ringCanvas = null, ringCtx = null, ringImage = null, ringMarkCtx = null;
+
+// The largest whole-number scale that fits a comfortable viewport, so a world
+// pixel is always a square block of screen pixels and never a resampled blur.
+function ringIntegerScale(w, h) {
+  const fit = Math.min(1180 / w, 620 / h);
+  return Math.max(1, Math.floor(fit));
+}
+
+function ringSelfTest() {
+  // A corner-marked gradient, the ring analogue of the cube's self-test: red with
+  // +u, green with +v, so the axes and the wrap seam are readable with no host.
+  for (let y = 0; y < ringH; y++) {
+    for (let x = 0; x < ringW; x++) {
+      const i = (y * ringW + x) * 3;
+      ringBytes[i] = Math.floor(30 + 90 * x / ringW);
+      ringBytes[i + 1] = Math.floor(10 + 70 * y / ringH);
+      ringBytes[i + 2] = 40;
+    }
+  }
+  const dot = function (x0, y0, rgb) {
+    for (let dy = 0; dy < 3; dy++) {
+      for (let dx = 0; dx < 3; dx++) {
+        const x = x0 === 0 ? dx : x0 - dx, y = y0 === 0 ? dy : y0 - dy;
+        const i = (y * ringW + x) * 3;
+        ringBytes[i] = rgb[0]; ringBytes[i + 1] = rgb[1]; ringBytes[i + 2] = rgb[2];
+      }
+    }
+  };
+  dot(0, 0, [255, 255, 255]);
+  dot(ringW - 1, 0, [255, 40, 40]);
+  dot(0, ringH - 1, [40, 255, 90]);
+}
+
+function enterRingMode(w, h, scale) {
+  ringMode = true;
+  ringW = w; ringH = h;
+  ringScale = ringIntegerScale(w, h);
+  ringBytes = new Uint8Array(w * h * 3);
+  frameBodyBytes = 8 + ringBytes.length;
+  live = false;
+
+  document.getElementById("cubePanel").style.display = "none";
+  document.getElementById("netPanel").style.display = "none";
+  document.getElementById("ringPanel").style.display = "";
+  document.getElementById("ringCap").textContent =
+    "ring \u2014 " + w + "\u00D7" + h + " at world scale " + scale + ", shown at " + ringScale + "\u00D7";
+  careTargetEl.textContent = "click the image";
+
+  ringCanvas = document.getElementById("ring");
+  ringCanvas.width = w; ringCanvas.height = h;
+  ringCanvas.style.width = (w * ringScale) + "px";
+  ringCanvas.style.height = (h * ringScale) + "px";
+  ringCtx = ringCanvas.getContext("2d");
+  ringCtx.imageSmoothingEnabled = false;
+  ringImage = ringCtx.createImageData(w, h);
+  for (let i = 3; i < ringImage.data.length; i += 4) ringImage.data[i] = 255;
+
+  const markCanvasRing = document.getElementById("ringMark");
+  markCanvasRing.width = w; markCanvasRing.height = h;
+  markCanvasRing.style.width = (w * ringScale) + "px";
+  markCanvasRing.style.height = (h * ringScale) + "px";
+  ringMarkCtx = markCanvasRing.getContext("2d");
+
+  ringSelfTest();
+  dirty = true;
+
+  // Care aims at (face 0, x, y) of the one chart: the canvas is the world at 1:1,
+  // so the pixel under the pointer is the pixel the command names.
+  ringCanvas.addEventListener("click", function (ev) {
+    const r = ringCanvas.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return;
+    const u = Math.floor((ev.clientX - r.left) / r.width * ringW);
+    const v = Math.floor((ev.clientY - r.top) / r.height * ringH);
+    if (u < 0 || v < 0 || u >= ringW || v >= ringH) return;
+    careTarget = { face: 0, u: u, v: v };
+    careTargetEl.textContent = "ring (" + u + ", " + v + ")";
+    drawMark();
+    refreshButtons();
+  });
+}
+
+function drawRing() {
+  const px = ringImage.data;
+  for (let i = 0, d = 0, n = ringW * ringH; i < n; i++, d += 4) {
+    const s = i * 3;
+    px[d] = ringBytes[s]; px[d + 1] = ringBytes[s + 1]; px[d + 2] = ringBytes[s + 2];
+  }
+  ringCtx.putImageData(ringImage, 0, 0);
+}
 
 // Distinct dim base color per face, plus a faint ramp: red grows with +u,
 // green grows with +v, so the chart axes are readable at a glance.
@@ -413,15 +529,25 @@ function poll() {
       return r.arrayBuffer();
     })
     .then(function (buf) {
-      if (buf.byteLength !== 8 + FRAME_BYTES) throw new Error("short frame: " + buf.byteLength);
+      // The length is the world's own: 8 + 61,440 for a cube, 8 + w*h*3 for a ring,
+      // both computed from what /status said rather than assumed.
+      if (buf.byteLength !== frameBodyBytes) throw new Error("short frame: " + buf.byteLength);
       const dv = new DataView(buf);
       seq = Number(dv.getBigUint64(0, true));
-      frameBytes.set(new Uint8Array(buf, 8, FRAME_BYTES));
+      if (ringMode) {
+        ringBytes.set(new Uint8Array(buf, 8, ringBytes.length));
+      } else {
+        frameBytes.set(new Uint8Array(buf, 8, FRAME_BYTES));
+      }
       if (!live) { live = true; showHud(); }
       dirty = true;
     })
     .catch(function () {
-      if (live) { live = false; fillSelfTest(frameBytes); dirty = true; showHud(); }
+      if (!live) return;
+      live = false;
+      if (ringMode) { ringSelfTest(); } else { fillSelfTest(frameBytes); }
+      dirty = true;
+      showHud();
     })
     .finally(function () { inFlight = false; });
 }
@@ -466,6 +592,11 @@ function pollStatus() {
       if (!s) return;
       worldTick = s.world_tick;
       source = s.source || null;
+      // `topology` arrived with FW-4; a host without it is a cube host, which is
+      // exactly what this page did before, so its absence needs no special case.
+      if (!ringMode && s.topology === "ring" && s.w > 0 && s.h > 0) {
+        enterRingMode(s.w, s.h, s.scale);
+      }
       showHud();
     })
     .catch(function () { /* an older host has no /status; the HUD is unchanged */ })
@@ -491,10 +622,16 @@ function showHud() {
   const rate = fps > 0 ? fps.toFixed(0) + " fps" : "-- fps";
   const tail = note ? (" &middot; " + escapeHtml(note)) : "";
   const world = worldTick === null ? "" : ("world tick " + worldTick + " &middot; ");
-  hudMain.innerHTML = live
+  const main = live
     ? (world + "seq " + seq + " &middot; " + rate + tail)
     : ('<span class="warn">self-test</span> &middot; ' + rate);
-  hudSrc.textContent = source ? sourceLine(source) : "";
+  const src = source ? sourceLine(source) : "";
+  hudMain.innerHTML = main;
+  hudSrc.textContent = src;
+  if (ringMode) {
+    document.getElementById("ringHudMain").innerHTML = main;
+    document.getElementById("ringHudSrc").textContent = src;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -576,6 +713,16 @@ function netTarget(ev) {
 }
 
 function drawMark() {
+  if (ringMode) {
+    ringMarkCtx.clearRect(0, 0, ringW, ringH);
+    if (!careTarget) return;
+    // Drawn in world pixels on a canvas the browser scales by a whole number, so
+    // the crosshair lands on the pixel the command names.
+    ringMarkCtx.strokeStyle = "#FFD36E";
+    ringMarkCtx.lineWidth = 1;
+    ringMarkCtx.strokeRect(careTarget.u - 2.5, careTarget.v - 2.5, 6, 6);
+    return;
+  }
   markCtx.clearRect(0, 0, markCanvas.width, markCanvas.height);
   if (!careTarget) return;
   const cell = NET_CELL[careTarget.face];
@@ -870,14 +1017,23 @@ function loop(now) {
   poll();
 
   if (dirty) {
-    for (let i = 0; i < NUM_FACES; i++) textures[i].needsUpdate = true;
-    drawNet();
+    if (ringMode) {
+      drawRing();
+    } else {
+      for (let i = 0; i < NUM_FACES; i++) textures[i].needsUpdate = true;
+      drawNet();
+    }
     dirty = false;
   }
 
-  if (autoRotate) view.yaw += 0.12 * dt;
-  placeCamera();
-  renderer.render(scene, camera);
+  // The cube renderer is not merely hidden in ring mode, it is not run: a WebGL
+  // draw per frame for a panel nobody is looking at is exactly the kind of cost
+  // that shows up as a dropped world frame on the board.
+  if (!ringMode) {
+    if (autoRotate) view.yaw += 0.12 * dt;
+    placeCamera();
+    renderer.render(scene, camera);
+  }
 
   frames++;
   if (now - fpsMark >= 500) {
