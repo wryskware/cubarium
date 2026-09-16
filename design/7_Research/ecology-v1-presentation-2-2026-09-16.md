@@ -146,9 +146,13 @@ soil_snag = clamp(dead_wood_density − wood_density, 0, 1)
 ```
 
 — both terms the same cube-root [`wood_fraction`] the structural bands read. The brief's rule
-is "`Wd > 0` and `W = 0`", and this is exactly that at both ends: full strength where a stand
-is wholly dead, **nothing** where there is no dead wood, and **nothing** where a living stand
-at least as large stands in the same cell.
+is "`Wd > 0` and `W = 0`"; this agrees with it at both ends — full strength where a stand is
+wholly dead, **nothing** where there is no dead wood, and **nothing** where a living stand at
+least as large stands in the same cell — and **differs from it in between**: the mark appears
+as soon as dead density exceeds living density, while `W` is still positive. It is therefore a
+continuous **dead-wood dominance cue** that can show during a dieback, not a strict "the stand
+is dead" mark, and a living cell whose dead wood has come to dominate is *not* pixel-identical
+to before (named after review; the first version called the rule exactly the brief's).
 
 **Why the difference and not a hard gate.** A stand dying below the horizon has `W` falling to
 zero while `Wd` rises, and `W` reaching zero is precisely the instant `Wd` is *largest*. A hard

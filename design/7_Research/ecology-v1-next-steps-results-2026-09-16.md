@@ -17,21 +17,25 @@ workstream E, steps 3 and 4 are workstream F, step 6 is workstream G. Briefs:
 [G](../handoffs/ecology-v1-presentation-2-opus-2026-09-16.md), committed at
 `b70624d`. All three ran in parallel: E on `main`, F and G in worktrees.
 
-**Disposition, in one paragraph.** The single most informative cheap
-experiment was run and it reverses one conclusion: the trained forager's body
-is feasible on the held-out patches (a scripted mobile control survives 11 of
-12 layouts), so the controller, not the energy budget, binds; the trained
-policy travels more and eats fifteen times less. The apex mating radius is the
+**Disposition, in one paragraph** (corrected after
+[Astra's review](ecology-v1-next-steps-review-2026-09-16.md); see "Review and
+repair"). The single most informative cheap experiment was run and it reverses
+one conclusion: the trained forager's body is feasible on eleven of the twelve
+held-out patches (a scripted mobile control survives them), so on those the
+controller, not the energy budget, binds; the trained policy travels more and
+eats fifteen times less. The apex mating radius is the
 wrong knob: no introduced apex ever lives to its own minimum reproduction age,
 so no pair is ever eligible and the radius never becomes the deciding term.
 Raising the movement price does what the spatial-dilution hypothesis predicted
 for range and depletion, and then overshoots: at both raised prices the
-grazing founders starve before their first brood, and recovery still never
-appears because depleted cells stay depleted while the rest of the world
-greens. The skimmer dies of starvation carrying the generalist diet, and the
-skimmer body is the best-surviving body when it carries a foliage diet. None
-of this is "ecosystem healthy"; all of it is now measured rather than
-inferred.
+founder grazers starve before their first brood (the gliders too, except in
+`fast-leaf` at the lower raised price, where they breed), and recovery stays
+rare — 13 crossings in 72 raised-price runs — for reasons the campaign did not
+record. The skimmer dies of starvation carrying the generalist diet, and
+foliage-diet skimmer descendants are the best-surviving bodies in that world,
+an association that does not yet separate diet from body. None of this is
+"ecosystem healthy"; the feasibility, eligibility and range results are
+measured, and the recovery and skimmer mechanisms remain open.
 
 ## Dispatch and budget
 
@@ -77,18 +81,21 @@ drain every tick give one `state_hash` over 9,000 ticks), and two identities
 | initial centre | 0/12 | 7,239 | 0.33 | 0.31 | 148 |
 | generation 9 | 0/12 | 8,421 | 0.53 | 0.83 | 254 |
 
-Branch verdict: "the body's budget binds" is **refuted** (the control pays for
-itself and ends at full reserve); "the controller binds" is **supported and
+Branch verdict: "the body's budget binds" is **refuted on 11 of 12 layouts**
+(the control pays for itself; nine survivors end at full reserve, one ends
+thin, and on `h2` it dies at 26,355); "the controller binds" is **supported and
 sharper** (generation 9 visits five times the cells and travels 1.6 times the
 distance of the control while taking in fifteen times less, so its failure is
 a failure to feed, not to relocate); "relocation is necessary" is also
 **supported** (the stationary grazer pays for itself while its cell lasts,
 then its credit goes to exactly zero). The two supported branches are not in
-tension. Two free corrections to the record: the route foliage decline 34 → 14
-in the training rows is the fixture's painted stands relaxing, not the
-policy's grazing (the initial centre ate 0.31 m in its whole life); and the
-`diet` 0.7 body's measured channel split is 44 / 28 / 28 foliage / fruit /
-litter. For a wandering body the motor is 13.9 % of the whole bill,
+tension. Two corrections to the record: the route foliage decline 34 → 14 in the
+training rows is principally the fixture's painted stands relaxing, not the
+policy's grazing (the initial centre ate 0.31 m in its whole life; grazing is
+the smaller term); and generation 9's measured channel split on these layouts
+is 44 / 28 / 28 foliage / fruit / litter (the initial centre's is about
+50 / 26 / 23, so this is a controller-on-layouts measurement, not a signature
+of every `diet` 0.7 body). For a wandering body the motor is 13.9 % of the whole bill,
 translation 18 : 1 over turning.
 
 **Apex audit, two-apex arm, baseline and `fast-leaf`, four held-out seeds,
@@ -126,33 +133,41 @@ recorder, `organism.move_cost` in the box, the `--prices` axis), `d3e907e`
 Against the pre-registered rules no cell is confirmed and none refuted. Range
 falls below 60 % of the control in every raised-price cell, monotonically;
 depletion rises 4–31×, which is the first direct test of the dilution
-hypothesis and supports it; the recovery clause fails everywhere because
-depleted cells stay depleted to the end of the run (cells still depleted at
-the end ≈ cells ever depleted) while whole-world foliage climbs to 3.4–4.3×
-opening and stands do not die. The missing half is regrowth time on the
-depleted cells, not pressure and not stand death. The dominant effect is an
-overshoot: at both raised prices all 180 grazer and 90 glider founders
-produce zero offspring, starving at 180 s (0.0018) and 79 s (0.006) of life,
-before the brood gate (`bud_min_age` 120 s + gestation 30 s + the reserve
-threshold) can be met, leaving a burrower monoculture. Four whole-world
+hypothesis and supports it; the recovery clause fails everywhere, but
+recovery is rare rather than absent (13 crossings in the 72 raised-price
+runs against 3 in the control), and why depleted cells mostly stay below half
+their opening foliage while whole-world foliage climbs to 3.4–4.3× is **not
+resolved**: slow regrowth, returning consumers and marginal cells are all
+live, and post-depletion visits and per-cell `L·μ` were not recorded. The
+dominant effect is an overshoot: at both raised prices all 180 founder
+grazers produce zero offspring, starving at 180 s (0.0018) and 79 s (0.006)
+of life, before the brood gate (`bud_min_age` 120 s + gestation 30 s + the
+reserve threshold) can be met; the gliders do the same in three of the four
+raised cells, but in `fast-leaf` at 0.0018 they produce 357 births and 101
+are alive at the horizon, so "burrower monoculture" holds only for the other
+three cells (corrected after review). Four whole-world
 extinctions occurred at 0.006, all in apex arms, the first this harness has
 produced (A had none in 306 runs); suggestive at n = 4, not evidence. F
 disclosed a defect in its own pre-registration: the depletion clause was
 already met by the baseline control, so the conjunctive recovery clause
 decided every cell. F proposed no equation; the refutation branch was not
 reached. Named next run: a finer ladder {0.00036, 0.0006, 0.0009, 0.0012,
-0.0018}, arm 0 only, gated on the herbivore bodies' first brood, about 3
-minutes.
+0.0018}, arm 0 only, gated on the founder **grazer's** first completed brood
+with the glider reported separately, about 3 minutes.
 
 **Skimmer attribution.** Lost to starvation (252 of 259 and 233 of 235
 skimmer deaths), median loss at tick 18,510 (baseline) and 65,760
-(`fast-leaf`). Not the controller (held constant). Not the body: within the
-skimmer body, the foliage-diet bin survives 84 % against 20 % for the
-generalist bin, and among foliage-diet bodies the skimmer survives best (84 %
-against glider 23 %, burrower 20 %). Habitat neither marked nor excluded. The
-supported reading is lower realised yield of the generalist diet at γ = 1,
-inferred from the contract's arithmetic and not measured; E's ledger now
-makes it measurable. Confound stated: foliage-bin skimmers are descendants.
+(`fast-leaf`). Within the skimmer body, the foliage-diet bin survives 84 %
+against 20 % for the generalist bin, and among foliage-diet bodies the
+skimmer survives best (84 % against glider 23 %, burrower 20 %). That is a
+strong association and not an isolation (corrected after review): every
+foliage-bin skimmer is a descendant (75 entrants, 12 deaths, 63 alive at the
+horizon), so later birth, censoring, lineage selection and other loci are
+mixed in, and the shared controller algorithm still behaves differently on
+different bodies. Habitat neither marked nor excluded. The leading hypothesis
+is lower realised yield of the generalist diet at γ = 1, from the contract's
+arithmetic; the clean test is a matched form × diet factorial with E's ledger,
+not more bins.
 Net energy margin per body was not measured in F because E had not landed
 when F ran; F reports death cause and last stores instead.
 
@@ -193,14 +208,17 @@ cube now runs 0.95 through `CUBARIUM_FOLIAGE_FULL` (below) so he can judge it.
 through the same cube root, rather than a hard `W == 0` gate, because `W`
 reaches zero exactly when `Wd` is largest and a hard gate would stamp the
 whole mark in one frame (§12 forbids cuts); the difference fades it in over
-the dieback. The mark is the cell's own soil plant at stage 0 cut to its
+the dieback. Named plainly (after review): this is a continuous dead-wood
+*dominance* cue that can show while a stand is still dying, not a strict
+"stand is dead" mark; Astra would not veto the mapping, only its first
+description. The mark is the cell's own soil plant at stage 0 cut to its
 bottom 2.5 tile rows, in the ash tone, at `SOIL_PLANT_OPACITY · 0.70 ·
 soil_snag`, stamped over the band's scenery so the litter a dying stand
 produces cannot hide the only record that it died. `D + C` still drive the
-band alone. Visible effect: a dead cell below the horizon carries a short
-grey-blue stub among its mushrooms, brightest just after death, fading as
-`Wd` decomposes; every living or never-planted cell is pixel-identical to
-before. Fable's note: this is a cut mushroom, not an authored snag; G says a
+band alone. Visible effect: a dead or dying cell below the horizon carries a short
+grey-blue stub among its mushrooms once dead wood dominates, brightest just
+after death, fading as `Wd` decomposes; a never-planted cell, or a living
+stand larger than its dead wood, is pixel-identical to before. Fable's note: this is a cut mushroom, not an authored snag; G says a
 purpose-drawn one would read better.
 
 **Runtime shoulder override** (Fable's mid-task scope addition at Wrysk's
@@ -208,7 +226,10 @@ request): `CUBARIUM_FOLIAGE_FULL=<float>` read once per process at first
 presenter construction, clamped to 0.5..=1.0, unparsable values fall back to
 0.85 with one stderr line; no CLI flag; default unchanged. G recorded that
 this contradicts the brief's own "not a runtime setting" and that Fable
-widened it.
+widened it. After review Fable added one startup log line naming the
+effective shoulder when an override is in force, because the build id alone
+does not identify the live mapping, and fixed the stale "no runtime setting"
+source comment.
 
 **Tests** `art_ecology` 17 → 24 (soil mark present for dead wood, absent at
 `Wd` = 0, monotone, distinguishable from litter-only and empty; dead column
@@ -242,17 +263,50 @@ CUBARIUM_FOLIAGE_FULL=0.95 ./scripts/run-cube.sh --fresh \
 `runs/cube-eco-v1-fastleaf-2.log`. The opening snapshot decodes to schema 16,
 config v8, seed 1, `fast-leaf` plant values, shipped `move_cost` 0.00036 (the
 display world is not a movement-arm world). To compare shoulders on the
-panels, restart with `CUBARIUM_FOLIAGE_FULL=0.85` (the shipped value) or
-`1.0`; nothing else changes. The physical cube was not inspected by Fable;
-the viewer was.
+panels, restart with `CUBARIUM_FOLIAGE_FULL=0.85` (the shipped value); 1.0 is
+vetoed by G and Astra (an ungrazed average stand shows bare wood). The
+shoulder is an environment override, not persisted in the world and not in
+`/status`: a restart without the variable silently returns to 0.85, so
+screenshots and observations should record the effective shoulder (the
+startup log line now states it). The physical cube was not inspected by
+Fable; the viewer was.
+
+## Review and repair (Astra, 2026-09-16)
+
+Astra's review is
+[ecology-v1-next-steps-review-2026-09-16.md](ecology-v1-next-steps-review-2026-09-16.md).
+Disposition: keep the instrumentation, retained rows and presentation work;
+repair F's ecological interpretation before using it to choose another
+movement or diet change. Repair 1, all report-level except one comment and
+one log line:
+
+- **P1, F's glider claim.** "Both herbivore rigs miss their first brood" was
+  contradicted by F's own census: `fast-leaf` at 0.0018 has 357 glider births.
+  Corrected in F and here; the finer ladder now gates on the grazer.
+- **P1, recovery.** "Never / absorbing / regrowth time, not pressure" reduced
+  to "rare (13 crossings in 72 runs), mechanism unresolved"; post-depletion
+  pressure named as the missing measurement.
+- **P1, skimmer.** "Not the body / not the controller / supported reading is
+  diet" reduced to a strong association among descendants; the matched
+  form × diet factorial is the test.
+- **P2, E's scope.** "Feasible, every survivor saturated" corrected to eleven
+  of twelve layouts, with the `h2` death and the thin `h6` ending stated;
+  "not because anything ate it" to "not principally"; the channel split
+  scoped to generation 9 on these layouts.
+- **P2, G's cue.** Named a dead-wood dominance cue that can show during
+  dieback; the pixel-identical claim scoped.
+- **P3, provenance.** Stale "no runtime setting" comment fixed; a startup log
+  line states the effective shoulder when overridden.
 
 ## What this does and does not establish
 
-- Established by measurement: the training body is feasible on the held-out
-  patches; the trained controller fails to feed; the apex never becomes
-  eligible; range and depletion respond to the movement price; recovery does
-  not; the skimmer starves on the generalist diet and thrives on a foliage
-  diet.
+- Established by measurement: the training body is feasible on eleven of
+  twelve held-out patches under a competent scripted controller; the trained
+  controller fails to feed; the apex never becomes eligible; range and
+  depletion respond to the movement price; the skimmer starves on the
+  generalist diet, and its foliage-diet descendants survive far better.
+- Open: why recovery stays rare after depletion; whether diet or body
+  explains the skimmer; whether an eligible apex would ever meet another.
 - Not established: why generation 9 does not eat (intake, not travel, is
   localised; the three separable outcomes are named in E's note); why an
   introduced apex dies near 11,000 ticks; whether any price between the
@@ -266,20 +320,40 @@ the viewer was.
 
 ## Next recommendation
 
-1. **Diagnose generation 9's intake** with the ledger on: per tick, is the
-   body on a cell with `P > feed_min`, what are its three mouth efforts, what
-   did it take. Three outcomes separate cleanly (efforts off, never on food,
-   bite clamped) and decide whether the next move is the score, the
-   observation or the action adapter. No training until then.
-2. **Apex eligibility before radius**: with the ledger, measure why an
-   introduced adult dies near 11,000 ticks; then choose between a lower
-   minimum reproduction age, a longer-lived introduced adult, or
-   already-eligible introductions. The radius stays where it is.
-3. **The finer movement-price ladder**, arm 0, gated on the first brood, with
-   E's ledger giving net margin per body and per-depleted-cell `L·μ`
-   recorded, so regrowth time on depleted cells is measured rather than
-   inferred.
-4. **Diet yield by bin** from the ledger in a whole world, to turn the skimmer
-   reading from arithmetic into measurement before any γ experiment.
-5. **Wrysk's calls**: the shoulder (0.85 or 0.95, judged on the panels); the
-   soil snag's look (cut mushroom now, authored snag later or not).
+Reconciled with Astra's opinion (Fable accepts the reorder: movement before
+apex, a controlled factorial instead of observational bins):
+
+1. **Generation 9's intake diagnostic**, the single most informative cheap
+   experiment now: generation 9 and the mobile script on the same 12 layouts,
+   per tick, with the ledger on: edible stocks in the occupied cell and
+   whether each is above `feed_min`; the three mouth efforts; requested,
+   served, digestible and credited intake; the limiting clamp; the bill.
+   Report fractions of ticks on edible food, effort-on while on food, and
+   served/requested, plus credit/bill. Effort off on food points to
+   action/score; effort on but no food to observation/navigation; effort on,
+   food present, bite clamped to the action adapter or settlement. No
+   training before this separates them.
+2. **The finer price ladder** {0.00036, 0.0006, 0.0009, 0.0012, 0.0018}, arm
+   0, gated on the founder grazer's first completed brood (glider reported
+   separately), and for every depleted cell: `L·μ`, `P/P₀` through time,
+   time and stock at the last consumer visit, post-depletion visits and
+   served material, first recovery and re-depletion times. Recovery after
+   grazing stops with adequate `L·μ` confirms a time-scale problem; continued
+   bites explain pressure; no regrowth after pressure stops at adequate `L·μ`
+   implicates the plant equation; marginal `L·μ` identifies poor cells.
+3. **A controlled form × diet factorial**: matched tick-0 clones and
+   locations, mutation and reproduction off; the founder skimmer genome at
+   `diet` 0.60 and 0.85, then `diet` 0.85 across forms, with the ledger
+   reporting served, digestible, credited, billed and terminal stores by
+   channel. No `γ > 1` until both food channels are demonstrably usable and
+   this is understood.
+4. **Apex death and eligibility, radius untouched**: the ledger on an
+   introduced adult through death (intake, gut credit, oxidation, upkeep,
+   motor and combat bills, terminal stores, cause); then one eligibility
+   intervention at a time, already-age-eligible introduction first. If
+   readiness still never opens, stock or encounter terms bind; if it opens
+   but no candidate pair forms, sensing and meeting are next; only then does
+   the radius become a real choice.
+5. **Wrysk's calls, with provenance visible**: the shoulder (0.85 or 0.95 on
+   the panels; 1.0 vetoed); the soil cue's look (a dead-wood dominance stub
+   cut from a mushroom now; an authored snag later or not).

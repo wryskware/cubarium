@@ -383,36 +383,50 @@ way was my error rather than a result.
    (baseline, 3.8 x) and 0.7 -> 22.3 (`fast-leaf`, 31 x). Astra's finding 4
    asked whether high range *dilutes* grazing pressure; on this evidence it
    does, and charging for range concentrates it.
-3. **It buys no recovery at all, and the reason is in one column.** Recoveries
-   stay at 0.00–0.33 per run against 0.7–55.9 depletions, and **`still depleted
-   at the end` equals `cells ever depleted` to within 0.2 in every cell of the
-   matrix**. At this horizon a depletion is an absorbing state: a cell taken
-   below 25 % of its opening foliage does not climb back above 50 % of it inside
-   150 simulated minutes, even while the world as a whole goes from 2.1 x to
-   4.3 x its opening foliage, the stands stay alive (late alive cells 1,113–1,128
-   against 1,112 at the opening) and plant deaths stay at 0.3–4.8 per run. So the
-   missing half of the cycle is not grazing pressure and it is not stand death;
-   it is the time a stripped cell needs to rebuild, and 150 minutes is not it.
-   **What this campaign cannot say** is whether those particular cells *could*
-   recover: their light and moisture were not recorded per cell, so "these are
-   the marginal cells near `(L*mu)_crit`" is a plausible reading and not a
-   measurement. Naming what would settle it: the depleted cells' own `L*mu` and
-   their foliage trajectory after the last visit.
-4. **At every price tested it also kills the two herbivore rigs before they
-   breed, and that is the dominant ecological effect.** In all 72 raised-price
-   runs the 180 founder grazers and 90 founder gliders of each configuration
-   produce **zero** offspring: grazers die at a mean age of **179.6 s** at 0.0018
-   and **79.4 s** at 0.006, gliders at 184.3 s and 79.5 s, every one of them by
-   starvation with a last-observed usable store of 0.007–0.013 e and hunger
-   1.000. Reproduction needs `bud_min_age_seconds` 120 s plus
-   `gestation_seconds` 30 s **and** a reserve at `bud_reserve` = 0.7 x
-   `reserve_max`; at 0.006 the bodies do not reach the age gate at all, and at
-   0.0018 they pass it on average and never reach the reserve. The world becomes
-   a burrower (detritivore) monoculture — founder kinds alive at the end 2.11 ->
-   1.00 (baseline) and 3.00 -> 1.67 -> 1.00 (`fast-leaf`) — and the foliage then
-   rises to 3.7–4.3 x its opening because almost nothing eats it. Late-window
-   deaths by age fall from 15.2 and 22.4 to about 0: at these prices nothing
-   lives long enough to die of old age.
+3. **It buys very little recovery, and this campaign cannot say why.**
+   (Corrected after review; the first version said "no recovery at all" and
+   called depletion "an absorbing state", which the raw counters contradict.)
+   Recoveries are 0.00–0.33 per run against 0.7–55.9 depletions: **13 recovery
+   crossings in the 72 raised-price runs** (baseline 6 at 0.0018 and 5 at 0.006;
+   `fast-leaf` 2 at 0.0018 and 0 at 0.006), against 3 in the baseline control.
+   Rare, not absent. `still depleted at the end` is within 0.2 of `cells ever
+   depleted` in every cell, but a cell can recover and be depleted again (the
+   `fast-leaf` 0.0018 seed-1006 arms do), so that equality does not show the
+   state is absorbing. Meanwhile the world as a whole goes from 2.1 x to 4.3 x
+   its opening foliage, the stands stay alive (late alive cells 1,113–1,128
+   against 1,112 at the opening) and plant deaths stay at 0.3–4.8 per run — but
+   that greening can happen in other watched cells or in the 168 cells that
+   opened without foliage and are not watched. **Why a depleted cell stays below
+   50 % of its opening foliage is not resolved here**: it may be slow regrowth
+   (`L*mu` marginal), or consumers returning to bite it again, or both. This
+   campaign recorded neither the depleted cells' own `L*mu` and trajectory nor
+   their post-depletion visits and bites. The supported statement is: the
+   price concentrates grazing and multiplies depletion crossings; robust
+   repeated recovery was not produced inside 150 minutes; the mechanism is
+   open. What would settle it: per depleted cell, `L*mu`, `P/P0` through time,
+   time and stock at the last consumer visit, post-depletion visit count and
+   served material, and first recovery / re-depletion times.
+4. **At every price tested it kills the founder grazers before they breed, and
+   in three of the four raised cells the gliders too; that is the dominant
+   ecological effect.** (Corrected after review: the first version said both
+   herbivore rigs produce zero offspring in all 72 raised-price runs and called
+   the outcome a burrower monoculture everywhere. The census table below
+   contradicts that for `fast-leaf` at 0.0018, where the glider enters 447
+   bodies from 90 founders — **357 glider births** — and 101 are alive at the
+   horizon, so the glider lineage crossed conception and completed gestation
+   there.) The grazer statement holds in all four raised cells: 180 founder
+   grazers, **zero** grazer births, mean age at death **179.6 s** at 0.0018 and
+   **79.4 s** at 0.006, every one by starvation with a last-observed usable
+   store of 0.007–0.013 e and hunger 1.000. Gliders produce zero births in the
+   three other raised cells (mean age 184.3 s and 79.5 s). Reproduction needs
+   `bud_min_age_seconds` 120 s plus `gestation_seconds` 30 s **and** a reserve
+   at `bud_reserve` = 0.7 x `reserve_max`; at 0.006 the bodies do not reach the
+   age gate at all. Whether a founder ever reached `bud_reserve` cannot be read
+   from last-observed stores (conception escrows the child once the gates
+   pass), so "never reached the reserve" is inferred, not recorded. Founder
+   kinds alive at the end fall 2.11 -> 1.00 (baseline) and 3.00 -> 1.67 -> 1.00
+   (`fast-leaf`), and the foliage rises to 3.7–4.3 x its opening because much
+   less eats it. Late-window deaths by age fall from 15.2 and 22.4 to about 0.
 5. **The knob is connected, and hard.** The motor and senses take 10.9–12.0 % of
    the complete body bill at the shipped price and **37.6–40.0 %** at 0.006, and
    the feeding fraction rises from 47–49 % to 80–82 % — four bodies in five
@@ -502,13 +516,17 @@ middling diet by 1.46 x and out-survives it by 4.2 x. The across-rig comparison
 *inside one bin* says the same thing from the other direction: in `fast-leaf` at
 0.0018, form 3 in bin 0.65–1.00 survives at 84 % while form 1 (the glider) in
 the same bin survives at 23 % and form 2 (the burrower) in its own bin at 20 %.
-**The skimmer's body is not the handicap; in the one configuration where it
-carries a foliage diet it is the best-surviving rig in the world.**
+**In the one configuration where skimmers carry a foliage diet they are the
+best-surviving bodies in the world.** (Corrected after review: the first
+version concluded from this that the body is not the handicap. It cannot: every
+foliage-bin skimmer is a descendant, not a randomised founder, so the comparison
+mixes later birth, right-censoring, selection into the mutant lineage and
+possible mutation at other loci. It is an association, and a strong one.)
 
-**It is not the controller.** Every body in this campaign is on the legacy
-controller — no neural animal, no quiet policy — so the controller is held
-constant across every comparison above, and it cannot explain a difference
-between two sets of skimmers.
+**The controller algorithm is the same for every body** — no neural animal, no
+quiet policy — but its realised behaviour depends on inherited drives, body
+capabilities and habitat, so holding the algorithm constant does not by itself
+rule the controller's behaviour out as a cause (corrected after review).
 
 **Habitat is not marked by anything measured here, and is not ruled out.** At
 the baseline control, form-3 bodies' late-window range and residence (303 cells
@@ -519,7 +537,8 @@ the algae the wet floor grows (`water.algae_light`), and this campaign recorded
 neither the cell classes a body stood in nor its intake by channel, so "the wet
 floor is thin" is untested rather than excluded.
 
-**The supported reading is the diet, and what it would take to close it.** At
+**The leading hypothesis is the diet's realised yield, and what it would take
+to close it.** (Corrected after review from "the supported reading".) At
 `gamma = 1` a body's caps are `cap_foliage = diet` and `cap_detrital = 1 - diet`,
 so the founder skimmer at `diet = 0.60` takes 0.60 of the leaf it eats where a
 grazer at 0.85 takes 0.85, and 0.40 of the litter where a burrower at 0.10 takes
@@ -531,14 +550,16 @@ yield**: per-body intake by channel is workstream E's accumulator and is not in
 these rows, so the yield step of that chain is inferred from the contract's
 arithmetic rather than measured here.
 
-**One confound, stated.** The bin-0.65–1.00 form-3 bodies are descendants whose
-diet mutated upward, and a body born later has less time to die, which biases
-their *survival* upward. Their mean lifetime does not carry that bias in the same
-direction — it is taken over deaths only, so the 63 still alive at the horizon
-are excluded from it, which biases it **downward** — and it still beats the
-bin-0.35–0.65 cohort by 46 %. The two biases point opposite ways and the
-conclusion survives both. What would remove the confound entirely: a
-birth-tick-matched hazard rate, or E's per-body intake ledger.
+**The confound, stated, and why it is not cancelled.** The bin-0.65–1.00
+form-3 bodies are descendants whose diet mutated upward: of 75 entrants only 12
+die and 63 are alive at the horizon. Later birth biases survival upward; the
+lifetime mean over 12 deaths does not cancel selection into the lineage,
+possible mutation at other loci, or habitat. The clean test is a matched
+factorial, not another observational bin summary: clone the founder skimmer at
+the same birth tick and locations with only `diet` changed (0.60 vs 0.85), then
+cross the same fixed diet over forms, mutation and reproduction off, with E's
+ledger reporting served, digestible, credited and billed energy by channel. A
+birth-tick-matched whole-world hazard is a secondary check only.
 
 ## Accounting, and what was not measured
 
@@ -585,10 +606,13 @@ birth-tick-matched hazard rate, or E's per-body intake ledger.
 ## The next task this implies, named and not launched
 
 **A finer price ladder between the shipped price and 0.0018, gated on the
-herbivore rigs' first brood.** The measured reason every cell is PARTIAL is that
-the cheapest raised price already starves the grazer and the glider at about 180
-seconds, before `bud_min_age_seconds` + `gestation_seconds` and the reserve
-threshold can all be met. The question the campaign was built to answer — does
+founder grazer's first completed brood, with the glider reported separately.**
+(Corrected after review: "first herbivore brood" is already satisfied at
+`fast-leaf` 0.0018 by the glider, so the gate must name the grazer.) The
+measured reason every cell is PARTIAL is that the cheapest raised price already
+starves the grazer at about 180 seconds, before `bud_min_age_seconds` +
+`gestation_seconds` and the reserve threshold can all be met, and recovery
+stays rare for reasons this campaign did not record. The question the campaign was built to answer — does
 concentrated grazing produce depletion *and* recovery — needs a world in which
 concentrated grazers are still alive. The obvious matched arm is
 `organism.move_cost` in {0.00036, 0.0006, 0.0009, 0.0012, 0.0018} on the same two
@@ -597,11 +621,14 @@ measurable difference in A's screen or in this matrix), reporting founder-rig
 first-brood counts beside the same spatial and crossing measures. That is 60
 trials, about 3 wall minutes at this campaign's measured 58,729 ticks/s.
 
-Two smaller measurements would make the result readable either way, and both are
-cheap: **record each depleted cell's own `L*mu` and its foliage trajectory**, so
-"depletion is absorbing" can be separated from "the depleted cells are the ones
-that were always marginal"; and **land workstream E's per-body accumulator**, so
-the skimmer's diet-yield step is measured rather than inferred.
+Three smaller measurements would make the result readable either way, and all
+are cheap: **record each depleted cell's own `L*mu` and its foliage trajectory**;
+**record post-depletion pressure** — time and stock at the last consumer visit,
+visit count and served material after depletion, first recovery and
+re-depletion times — so slow regrowth, returning consumers and intrinsically
+marginal cells can be told apart; and **use workstream E's per-body ledger**
+(landed on `main` at `46ac238`) so the skimmer's diet-yield step is measured
+rather than inferred.
 
 ## Routine decisions made here, and their visible effect
 

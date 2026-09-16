@@ -141,9 +141,13 @@ says so in `window_ticks`.
 **One thing to read carefully.** Over any window in which the stores return to the same
 values, income equals the bill *identically* — that is the energy identity with `ΔE = ΔR = 0`.
 So a trailing ratio of exactly 1.000 means the body was in a stores-saturated steady state,
-not that it was barely scraping by. Every surviving mobile-script body ends at `R = R_max`
-with `E` parked at `0.5·E_max`, the oxidation threshold: its intake is limited by its own
-storage, not by the food. For a **surviving** body the informative number is therefore
+not that it was barely scraping by. Nine of the eleven surviving mobile-script bodies end
+at `R = R_max` with `E` parked at `0.5·E_max`, the oxidation threshold: their intake is
+limited by their own storage, not by the food. Two rows are different and matter
+(corrected after review; the first version said "every"): on `h2-holdout` the control
+**dies** at tick 26,355 with a best window of 1.788, and on `h6-holdout` it reaches the
+horizon with usable stores 0.149 and a trailing ratio of 0.234. A best-window ratio above 1
+proves a profitable interval, not that the patch supports the body indefinitely. For a **surviving** body the informative number is therefore
 `ratio_best_window`; for a **dying** body the trailing window is the informative one, and it
 is what the body was living on at the end.
 
@@ -188,9 +192,12 @@ training note misnamed.
 ### Astra's three branches
 
 **Branch 1 — "the mobile control also dies with its sustained ratio < 1 while reaching food,
-so the body's budget binds." Refuted.** The mobile script survives the full horizon on 11 of
-12 layouts, with a best 2,000-tick ratio of 1.75–2.03 and a trailing ratio of 1.000 at
-`R = R_max`. The body can pay for itself on these patches with room to spare. The training
+so the body's budget binds." Refuted on 11 of 12 layouts.** The mobile script survives
+the full horizon on 11 of 12 layouts with a best 2,000-tick ratio of 1.75–2.03; nine of
+them end saturated (trailing 1.000 at `R = R_max`), one (`h6`) ends on a thin trailing
+ratio of 0.234, and on `h2` it dies at 26,355. The body can pay for itself on these
+patches under a competent controller; that is feasibility on eleven frozen layouts, not
+universal sufficiency (scope corrected after review). The training
 note's "the energy budget, not the search, is what ends the run" does not survive the
 measurement it lacked.
 
@@ -220,7 +227,8 @@ control solves it, and generation 9 solves only the walking half.
 ### One correction to the record, for free
 
 The review noted that "the route stock itself falls from roughly 34 to 14 while the policy is
-present". It does — but not because anything ate it. The initial-centre driver takes a median
+present". It does — but not principally because anything ate it (corrected after review
+from "not because"). The initial-centre driver takes a median
 of **0.31 m** over its whole life and its route still falls from 34.47 to 14.55 by the time it
 dies at ~7,200 ticks. A 0.31 m bite cannot account for a 20 m decline. The fall is the
 fixture's painted stands relaxing toward their own equilibrium under `fast-leaf`, and it

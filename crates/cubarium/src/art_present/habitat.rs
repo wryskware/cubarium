@@ -118,6 +118,13 @@ pub fn foliage_full_default() -> f64 {
             foliage_full_from_env(std::env::var(FOLIAGE_FULL_ENV).ok().as_deref());
         if let Some(complaint) = complaint {
             eprintln!("{complaint}");
+        } else if full != FOLIAGE_FULL {
+            // Provenance for a viewing session: the build id does not say which shoulder the
+            // panels are drawn at, so the log does.
+            eprintln!(
+                "cubarium: drawing the foliage shoulder at {full} from {FOLIAGE_FULL_ENV} \
+                 (shipped {FOLIAGE_FULL})"
+            );
         }
         full
     })
@@ -768,8 +775,9 @@ pub fn foliage_ramp(f: f64) -> f32 {
 ///
 /// This exists because the shoulder is the one mapping constant whose cost — how far a
 /// bright stand can be depleted before the picture moves — can only be judged from a picture.
-/// It is reachable from [`ArtPresenter::with_foliage_full`] at construction; there is no
-/// runtime setting and the shipped display always draws at [`FOLIAGE_FULL`].
+/// It is reachable from [`ArtPresenter::with_foliage_full`] at construction, and the shipped
+/// display draws at [`foliage_full_default`]: [`FOLIAGE_FULL`] unless the process was started
+/// with [`FOLIAGE_FULL_ENV`], the one runtime override, read once.
 pub fn foliage_ramp_at(f: f64, full: f64) -> f32 {
     if f.is_nan() || !(full.is_finite() && full > 0.0) {
         return 0.0;
