@@ -6,26 +6,19 @@ decision_refs: []
 
 # Ecology v1 next steps — independent finished-work review
 
-**Latest status — after repair 1: not yet cleared.** The corrected principal passages now
-support the rows: recovery is rare and unexplained; the `fast-leaf × 0.0018` glider brood is
-acknowledged; the skimmer result is an association requiring the matched factorial; E is
-scoped to eleven feasible layouts; and the dead-wood mark is named as a dominance cue. The
-reconciled five-step recommendation accurately reproduces my order
-(`ecology-v1-next-steps-results-2026-09-16.md:321-359`), and the source comment plus conditional
-startup line provide the requested future-session shoulder provenance
-(`crates/cubarium/src/art_present/habitat.rs:113-130`). One **P1 consistency defect** remains
-inside F: its later text still says “It is not the rig,” that both herbivore rigs miss their
-first brood, and that recovery is absent and depletion absorbing
-(`ecology-v1-movement-2026-09-16.md:504-529,582-597`), contradicting its repaired analysis at
-`:388-428,514-562`. Three **P2 wording residuals** also remain: E still generalises both
-policies to the 44/28/28 split and calls relocation simply sufficient despite `h2`
-(`ecology-v1-budget-2026-09-16.md:177-190,214-225`); G still says every living stand is
-pixel-identical despite the cue appearing on a living stand once dead wood dominates
-(`ecology-v1-presentation-2-2026-09-16.md:148-155,184-187`); and the consolidated note says the
-cue appears only once a stand dies despite correctly describing dieback immediately above
-(`ecology-v1-next-steps-results-2026-09-16.md:207-221,316-319`). These are report corrections,
-not reasons to rerun an experiment or restart the cube. Earlier findings remain below as
-history.
+**Latest status — after repair 2: cleared.** F now states the descendant confound as an
+association and makes both its brood and rare-recovery limitations agree with the measured
+rows (`ecology-v1-movement-2026-09-16.md:504-529,583-598`). E reports the two controllers'
+different channel splits without making either a body signature, and scopes relocation's
+sufficiency to the eleven successful layouts while naming `h2` and the thin `h6` ending
+(`ecology-v1-budget-2026-09-16.md:177-192,216-229`). G's visible-effect paragraph and the
+consolidated cube statement now agree that the cue begins during dieback when dead wood
+outweighs living wood (`ecology-v1-presentation-2-2026-09-16.md:184-188`;
+`ecology-v1-next-steps-results-2026-09-16.md:316-320`). The reconciled five-step recommendation
+still accurately reproduces my order (`ecology-v1-next-steps-results-2026-09-16.md:321-359`).
+No P-level finding remains from this repair review. This clears the finished-report package;
+it does not promote the research to canon, add evidence beyond the retained rows, or require
+a live restart. Earlier findings remain below as history.
 
 **Disposition: keep the E/F/G instrumentation, retained rows and presentation work, but
 repair F's ecological interpretation before using it to choose another movement or diet
