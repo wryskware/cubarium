@@ -164,9 +164,11 @@ rim.
   `lower_corner_crosses_a_vertical_seam_and_reflects` (`travel.rs:478-492`) is the
   precedent the ring's fixture mirrors.
 
-**Unfolding: at most two images.** `chart_images` returns the direct image and
-the two translations by `±w`; the shortest wins, exactly as today. To guarantee no
-third image can ever be nearest, `Topology::validate()` requires
+**Unfolding: at most two images in range.** `chart_images` enumerates three
+candidates — the direct image and the translations by `+w` and `−w` — of which at
+most **two** can lie within `max_local_radius()` of any observer, since the two
+shifts are `2w` apart; the shortest wins, exactly as today. To guarantee that (and
+that no further translation can ever be nearest), `Topology::validate()` requires
 
 > `w >= 2 · max_local_radius() + 2 · CELL_PIXELS`
 
