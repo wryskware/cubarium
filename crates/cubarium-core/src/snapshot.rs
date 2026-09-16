@@ -10,6 +10,7 @@ pub mod v12;
 pub mod v13;
 pub mod v14;
 pub mod v16;
+pub mod v17;
 pub mod v7;
 pub mod v8;
 pub mod v9;
@@ -27,6 +28,7 @@ pub use v12::{SCHEMA_V12, WorldStateV12};
 pub use v13::{SCHEMA_V13, WorldStateV13};
 pub use v14::{SCHEMA_V14, WorldStateV14};
 pub use v16::{CONFIG_VERSION_V16, SCHEMA_V16, WorldStateV16, decode_v16};
+pub use v17::{CONFIG_VERSION_V17, SCHEMA_V17, WorldStateV17, decode_v17};
 pub use projection::{ConfigProjection, CubeProjection, first_difference, projection_hash};
 
 /// Bumped whenever `WorldState` or any nested type changes shape.
@@ -43,23 +45,43 @@ pub use projection::{ConfigProjection, CubeProjection, first_difference, project
 /// the care/no-care comparison. Their `From<WorldStateVn> for WorldState` conversions are
 /// gone: a conversion into the current shape is exactly the migration the rule forbids.
 ///
-/// **Version 17 is the ring world** (`design/flat-world-plan-2026-09-16.md` §4). The cause
+/// **Version 17 is the first bump this module has ever made for a change of *semantics*
+/// rather than of shape, and the shape is byte-for-byte version 16's.** The change is the
+/// adoption of the reach envelope as the shipped pursuit stopping rule
+/// ([`crate::hunter::PursuitStop`], `crate::World::set_pursuit_stop`,
+/// `design/7_Research/ecology-v1-predicate-adoption-2026-09-16.md`). That rule is a `World`
+/// transient and is deliberately not in [`crate::WorldConfig`] or in `WorldState`, so a
+/// world's saved bytes cannot say which rule wrote them: a schema-16 snapshot resumed under
+/// that build would keep its tick, its bodies and its pools and quietly start hunting under a
+/// different predicate. That is a migration by another name, and Wrysk's standing rule of
+/// 2026-09-15 forbids it — so **16 is refused by number exactly like 7–15**. Because the
+/// payload shape did not move, [`decode_exact`] cannot tell 16 from 17 and the header is the
+/// only evidence there is; the version check is what does the refusing.
+///
+/// **Version 18 is the ring world** (`design/flat-world-plan-2026-09-16.md` §4). The cause
 /// is one shape change and nothing else: [`crate::config::WorldConfig`] gains `topology` and
 /// `world_scale`, and `WorldConfig` is inside the payload. The same standing rule applies —
-/// **schema 17 refuses every older snapshot by name**, 7 through 16, and migrates nothing.
+/// **schema 18 refuses every older snapshot by name**, 7 through 17, and migrates nothing.
 /// A world whose cells were counted for a different surface cannot be re-anchored to this
-/// one, and pretending otherwise would be exactly the synthesis the rule forbids.
+/// one, and pretending otherwise would be exactly the synthesis the rule forbids. The ring
+/// work and the predicate adoption were developed in parallel and each bumped 16 → 17 on its
+/// own branch; merging them is a third world — 17's hunt-intent rule *and* a `WorldConfig`
+/// neither 16 nor 17 could hold — so it takes a number of its own rather than overloading
+/// one that two different payload shapes already answer to.
 ///
-/// [`v16`] is frozen beside `v7..v14` for the one reader that is allowed to look inside a
-/// schema 16 payload: the `CubeProjection` comparator, which is how a cube world's behaviour
-/// is shown to be unchanged across a break that makes any hash comparison impossible.
+/// [`v16`] and [`v17`] are frozen beside `v7..v14` for the one reader that is allowed to look
+/// inside an older payload: the `CubeProjection` comparator, which is how a cube world's
+/// behaviour is shown to be unchanged across a break that makes any hash comparison
+/// impossible. They share a shape — 17 moved no bytes — so [`v17`] is [`v16`]'s structs under
+/// its own version number and its own decoder.
 ///
 /// Historical shape notes, kept because the mirrors still encode them: version 8 appends
 /// `care`; 9 appends `energy_correction`; 10 appends `hunters`; 11 reshapes the hunter
 /// extension; 12 reshapes `care` for the persisted shower dose; 13 appends ordinary quiet;
 /// 14 appends apex dormancy and encounters; 15 appends the recurrent extension; 16 appends
-/// [`crate::fields::EcologyV1State`]; 17 appends two fields to `WorldConfig`.
-pub const SCHEMA_VERSION: u32 = 17;
+/// [`crate::fields::EcologyV1State`]; 17 appends nothing and changes the hunt-intent rule;
+/// 18 appends two fields to `WorldConfig`.
+pub const SCHEMA_VERSION: u32 = 18;
 pub const MAGIC: [u8; 4] = *b"CUBW";
 /// Fixed header length: magic 4, schema 4, build-id length 2, then the build id bytes,
 /// then payload length 8 and CRC32 4 (all little-endian).
@@ -140,11 +162,18 @@ where
 /// Validate magic, schema, length, CRC, exact decode, then `state.validate()`; every failure is a
 /// distinct error so the loader can report why a snapshot was refused.
 ///
-/// **Exactly one schema decodes: [`SCHEMA_VERSION`].** Every older version — 7 through 16 —
+/// **Exactly one schema decodes: [`SCHEMA_VERSION`].** Every older version — 7 through 17 —
 /// is [`SnapshotError::UnsupportedSchema`] carrying the version it read, so a caller can say
 /// which world it was and that it has to be restarted rather than converted
 /// (`design/ecology-v1-contract.md` §15.1). `SnapshotMeta.schema` still reports what was read.
-/// A schema 17 payload with trailing bytes — a newer shape relabelled 17 — is refused too.
+/// A schema 18 payload with trailing bytes — a newer shape relabelled 18 — is refused too.
+///
+/// Schemas **16 and 17 are the two refusals this check is the *only* evidence for**: they
+/// share a payload shape with each other, and differ from a schema-18 world only in the
+/// pursuit stopping rule (16) and in the two `WorldConfig` fields a ring world needs (both).
+/// A 16 or 17 file would not decode as 18 in any case — the config is two fields short — but
+/// the version check is what names the world instead of reporting a truncation. See
+/// [`SCHEMA_VERSION`].
 pub fn decode_snapshot(bytes: &[u8]) -> Result<(SnapshotMeta, WorldState), SnapshotError> {
     let take = |at: usize, n: usize| -> Result<&[u8], SnapshotError> {
         bytes.get(at..at + n).ok_or(SnapshotError::Truncated)
@@ -557,7 +586,7 @@ mod tests {
         let bytes = encode_snapshot(&state(), "b");
         for old in [
             SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13,
-            SCHEMA_V14, 15, SCHEMA_V16,
+            SCHEMA_V14, 15, SCHEMA_V16, SCHEMA_V17,
         ] {
             let mut relabelled = bytes.clone();
             relabelled[4..8].copy_from_slice(&old.to_le_bytes());
@@ -567,13 +596,18 @@ mod tests {
                 "schema {old} must be refused by name"
             );
         }
-        assert_eq!(SCHEMA_VERSION, 17);
+        // 16 and 17 are in that list for a reason of their own: they are shape-identical to
+        // each other, so between *those two* the header is the only thing that can refuse a
+        // file, and refusing 16 is what stops a world saved under the forward half-space from
+        // being resumed under the reach envelope (see `SCHEMA_VERSION`).
+        assert_eq!(SCHEMA_VERSION, 18);
     }
 
-    /// A newer payload relabelled 17 is refused too: the length is the only evidence a
-    /// non-self-describing format offers that reader and writer agreed about the shape.
+    /// A newer payload relabelled with the current schema is refused too: the length is the
+    /// only evidence a non-self-describing format offers that reader and writer agreed about
+    /// the shape.
     #[test]
-    fn a_relabelled_schema_sixteen_payload_is_refused() {
+    fn a_relabelled_current_schema_payload_is_refused() {
         let s = state();
         let mut payload = postcard::to_allocvec(&s).unwrap();
         payload.extend_from_slice(&[0u8; 4]);

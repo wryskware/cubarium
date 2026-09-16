@@ -15,14 +15,17 @@ use cubarium_core::encounter::ApexEncounterEvent;
 use cubarium_core::fields::CellClass;
 use cubarium_core::hunter::{FixedHunterProfile, HunterEvent, HunterTarget};
 use cubarium_core::organism::{DeathCause, Mode};
-use cubarium_core::{ApexDormancyEvent, LifeEvent, OrganismId, World, WorldConfig};
+use cubarium_core::habitat::Habitat;
+use cubarium_core::{ApexDormancyEvent, FOLIAGE, LifeEvent, OrganismId, World, WorldConfig};
 use cubarium_surface::cell_of;
 use serde::{Deserialize, Serialize};
 
+use crate::depletion::{DepletionTracker, PlantConstants, ServedAttributor, monod_reference};
+use crate::plant_budget::{CellSample, PlantBudgetTracker};
 use crate::metrics::{Components, EcoMeasures, FORMS_POSSIBLE, Sample, guild_of};
 use crate::movement::{
-    BodyTrack, CensusBuilder, CensusKey, CrossingCounter, FormSpatial, Movement, SKIMMER_FORM,
-    SpatialAccumulator, StoreSum, Stores, diet_bin,
+    BodyTrack, CensusBuilder, CensusKey, CrossingCounter, CrossingKind, FormSpatial, FounderBroods,
+    MarginAccumulator, Movement, SKIMMER_FORM, SpatialAccumulator, StoreSum, Stores, diet_bin,
 };
 use crate::params;
 use crate::rng;
@@ -60,6 +63,38 @@ pub const SPATIAL_COVERAGE: f64 = 0.9;
 
 /// The build that produced a row, stamped by `build.rs`.
 pub const BUILD_ID: &str = env!("CUBARIUM_SEARCH_BUILD");
+
+/// How often the world's own invariants are checked while it is being preconditioned. Ten
+/// simulated minutes: the same order as a run's own `sample_every`, and cheap against 180,000
+/// plant-only ticks.
+pub const PRECONDITION_CHECK_EVERY: u64 = 12_000;
+
+/// How much of a preconditioned comparison arm's opening is recorded point by point: one
+/// simulated hour (`3,600 s / DT`), which is the interval the status-quo world's uniform
+/// green-then-fade happens over and therefore the interval the comparison has to show.
+pub const OPENING_TRAJECTORY_TICKS: u64 = 72_000;
+
+/// One point of that trajectory. Recorded only on a run that founded through
+/// [`World::found_roster`] (`RunOptions::precondition`), so no row produced before workstream
+/// S carries one and none of them change.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct OpeningPoint {
+    /// Ticks since the roster was founded, so age 0 and age 180,000 are on the same axis.
+    pub ticks_since_founding: u64,
+    /// The whole-field stocks: `Σ P`, `Σ W`, `Σ Q`, `Σ N`.
+    pub foliage: f64,
+    pub wood: f64,
+    pub plant_reserve: f64,
+    pub nutrient: f64,
+    pub population: u32,
+    /// Cumulative since founding, summed over every cell of the per-cell plant record: what
+    /// the plants put into foliage, what they took back out, the gross income that funded it,
+    /// and what mouths withdrew. All zero when the record is off.
+    pub foliage_in: f64,
+    pub foliage_out: f64,
+    pub income: f64,
+    pub withdrawal: f64,
+}
 
 /// How an evaluation is run. Fixed across a whole search, so candidates are comparable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -146,6 +181,16 @@ pub struct Evaluation {
     /// a refused or failed run, exactly as `metrics` is.
     #[serde(default)]
     pub movement: Option<Movement>,
+    /// The opening hour's whole-field trajectory, on a preconditioned arm only (workstream S).
+    /// `None` everywhere else, including on every row produced before S.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opening: Option<Vec<OpeningPoint>>,
+    /// `state_hash` of the world the instant after [`World::found_roster`] placed the cohort,
+    /// on a preconditioned arm only. It names the opening this row was run from, so the arm's
+    /// opening can be checked against the state the field stage saved for the same age
+    /// independently of anything the run went on to do.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub founding_state_hash: Option<u64>,
 }
 
 impl Evaluation {
@@ -161,6 +206,8 @@ impl Evaluation {
             apex_energy_in: 0.0,
             metrics: None,
             movement: None,
+            opening: None,
+            founding_state_hash: None,
         }
     }
 }
@@ -213,11 +260,118 @@ pub(crate) fn stored_energy(world: &World) -> f64 {
     cells + organisms + state.hunters.gut_energy_total()
 }
 
+/// What a run records **beside** its ordinary metrics.
+///
+/// Deliberately not a [`Protocol`] field: `Protocol` is serialised into every retained row and
+/// is constructed by the trainer and the genetic search as well, and neither of those wants
+/// the ledger's throughput cost. A row says what it recorded through `movement.ledger_on`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RunOptions {
+    /// Turn `World::record_body_budgets` on, so the net energy margin per body is measured
+    /// rather than inferred (workstream E's ledger). Off is the shipped path and is what
+    /// every row before workstream I was produced under.
+    pub ledger: bool,
+    /// Turn `World::record_plant_budgets` on, so every §4 plant flow and every §6.4 consumer
+    /// withdrawal is booked per cell where it happens (workstream M's record). Off is the
+    /// shipped path and is what every row before workstream M was produced under.
+    pub plant_record: bool,
+    /// Found **no animals at all**: `founders.kinds` empty and `founders.count` zero, so the
+    /// world is plants, water, weather and nothing else (`world/lifecycle.rs:52-63`).
+    ///
+    /// This is workstream M's herbivore-absent arm. It changes the configuration, so it
+    /// changes the world and its hash deliberately — unlike the two recorders above, which
+    /// must not. A run under it is also exempt from the empty-world stop below: a world with
+    /// no population by construction has not collapsed.
+    pub no_animals: bool,
+    /// Found the roster **after** this many plant-only ticks: workstream S's fixed-age
+    /// preconditioned opening (option A with a declared procedure). The world is built with an
+    /// empty roster, [`precondition`] advances the ordinary §4 dynamics with nothing eating,
+    /// the roster is written back into the config, and [`World::found_roster`] places the same
+    /// 24 founders the constructor would have placed — into the field the plants have grown.
+    ///
+    /// `None` is the shipped path: the constructor founds the roster itself and nothing here
+    /// runs, which is what every row before workstream S was produced under. `Some(0)` is the
+    /// **status-quo arm of the comparison**: the door founds at tick 0 into a world that was
+    /// built with an empty roster, which the core's own test proves is the constructor's world
+    /// bit for bit (`crates/cubarium-core/tests/found_roster.rs`) — running the age-0 arm
+    /// through the door rather than around it is what makes the campaign's reproduction of
+    /// workstream M's retained `final_state_hash`es evidence about the door.
+    ///
+    /// Not compatible with `no_animals`, which never founds at all.
+    pub precondition: Option<u64>,
+    /// **Which motor contract the run's world uses**
+    /// (`cubarium_core::MotorModel`, `crate::World::set_motor_model`). The default is
+    /// `Sweep`, the shipped contract, and a run under it is byte-identical to every row
+    /// produced before the switch existed — the two arms of workstream T's pairing differ in
+    /// exactly this field (`design/7_Research/ecology-v1-motor-inertial-2026-09-16.md`).
+    ///
+    /// It is a transient on the world, not a configuration: it does not enter
+    /// [`crate::calibrate::config_hash`] and no retained row's hash moves because of it.
+    pub motor: cubarium_core::MotorModel,
+    /// **Which pursuit stopping rule the run's world uses**
+    /// (`cubarium_core::hunter::PursuitStop`, `crate::World::set_pursuit_stop`). The default is
+    /// the shipped rule, `ReachEnvelope`, adopted on 2026-09-16
+    /// (`design/7_Research/ecology-v1-predicate-adoption-2026-09-16.md`).
+    ///
+    /// A row produced before that date ran `ForwardHalfSpace`, so **reproducing a retained
+    /// `final_state_hash` means asking for it by name** — which is what `--pursuit-stop
+    /// half-space` is for. Like `motor`, it is a transient on the world: it does not enter
+    /// [`crate::calibrate::config_hash`] and no configuration's hash moves because of it.
+    pub pursuit_stop: cubarium_core::hunter::PursuitStop,
+}
+
+/// Advance a world's plant dynamics with no animals in it, the ordinary §4 tick and nothing
+/// else. The world must already have been built with an empty roster; this function does not
+/// remove anybody.
+///
+/// One definition, used by [`run`] inside a comparison arm and by
+/// [`crate::precondition`]'s field stage, so "the world at age T" is the same object in both
+/// and the two can be checked against each other by `state_hash`.
+///
+/// `check_every` ticks, the world's own invariants are checked; a violation stops the
+/// preconditioning by name rather than founding into a world that has already gone wrong.
+pub fn precondition(world: &mut World, ticks: u64, check_every: u64) -> Result<(), String> {
+    if world.population() > 0 {
+        return Err(format!(
+            "preconditioning is plant-only, but this world already holds {} organisms",
+            world.population()
+        ));
+    }
+    let every = check_every.max(1);
+    for _ in 0..ticks {
+        world.step();
+        // Nothing with a mouth is in the world, so these are empty every tick; drained anyway
+        // so the founding starts from the clean queue an ordinary run starts from.
+        world.drain_events();
+        world.drain_hunter_events();
+        world.drain_apex_dormancy_events();
+        world.drain_apex_encounter_events();
+        world.drain_quiet_events();
+        if world.tick() % every == 0 {
+            world
+                .check_invariants()
+                .map_err(|e| format!("invariant violated while preconditioning at tick {}: {e}", world.tick()))?;
+        }
+    }
+    Ok(())
+}
+
 /// Run one candidate on one seed. Never panics: a panic inside the core is caught and
 /// reported as [`Status::Failed`].
 pub fn evaluate(values: &[f64], seed: u64, protocol: Protocol) -> Evaluation {
+    evaluate_with(values, seed, protocol, RunOptions::default())
+}
+
+/// [`evaluate`] with the optional recorders named explicitly.
+pub fn evaluate_with(
+    values: &[f64],
+    seed: u64,
+    protocol: Protocol,
+    options: RunOptions,
+) -> Evaluation {
     let start = Instant::now();
-    match std::panic::catch_unwind(AssertUnwindSafe(|| run(values, seed, protocol, start))) {
+    match std::panic::catch_unwind(AssertUnwindSafe(|| run(values, seed, protocol, options, start)))
+    {
         Ok(evaluation) => evaluation,
         Err(payload) => {
             let what = payload
@@ -236,13 +390,39 @@ pub fn evaluate(values: &[f64], seed: u64, protocol: Protocol) -> Evaluation {
     }
 }
 
-fn run(values: &[f64], seed: u64, protocol: Protocol, start: Instant) -> Evaluation {
+fn run(
+    values: &[f64],
+    seed: u64,
+    protocol: Protocol,
+    options: RunOptions,
+    start: Instant,
+) -> Evaluation {
     let ms = |start: Instant| start.elapsed().as_millis() as u64;
     if let Err(e) = protocol.validate() {
         return Evaluation::refused(Status::Invalid, e, seed, protocol, ms(start));
     }
 
+    if options.no_animals && options.precondition.is_some() {
+        return Evaluation::refused(
+            Status::Invalid,
+            "a run cannot both found no animals and found them after a plant-only prefix"
+                .to_string(),
+            seed,
+            protocol,
+            ms(start),
+        );
+    }
     let mut config = base_config(seed);
+    // The roster this world's founding will use, kept aside before the plant-only prefix
+    // clears it. Writing it back before `found_roster` is what makes a preconditioned world's
+    // *config* — and therefore its hash — the ordinary one.
+    let roster = config.founders.clone();
+    if options.no_animals || options.precondition.is_some() {
+        // Before `params::apply`, so a searched parameter can still refuse an invalid world,
+        // and before `validate`, so an empty roster is validated like any other.
+        config.founders.kinds.clear();
+        config.founders.count = 0;
+    }
     // The profile is derived from the *base* config so that the genome it carries does not
     // shift under the searched drive parameters; only the two searched apex fields move.
     let mut profile = FixedHunterProfile::lanternjaw_trial(&config);
@@ -281,6 +461,39 @@ fn run(values: &[f64], seed: u64, protocol: Protocol, start: Instant) -> Evaluat
         }
     };
 
+    // The motor contract and the pursuit stopping rule, before the first tick. Both are
+    // transients on the world, so the config and its hash are untouched; `MotorModel::Sweep`
+    // and `PursuitStop::ReachEnvelope` are the shipped defaults and naming them changes
+    // nothing. Naming `ForwardHalfSpace` is how a row retained before 2026-09-16 is reproduced.
+    world.set_motor_model(options.motor);
+    world.set_pursuit_stop(options.pursuit_stop);
+    // Workstream S's fixed-age preconditioned opening, before anything is introduced or
+    // recorded: the plants run alone to the declared age, then the ordinary roster is founded
+    // into the field they grew. At age 0 nothing is stepped and the door reproduces the
+    // constructor, so this branch is the status-quo arm too.
+    if let Some(age) = options.precondition {
+        if let Err(e) = precondition(&mut world, age, PRECONDITION_CHECK_EVERY) {
+            return Evaluation::refused(Status::Failed, e, seed, protocol, ms(start));
+        }
+        world.state.config.founders = roster;
+        if let Err(e) = world.found_roster() {
+            return Evaluation::refused(
+                Status::Invalid,
+                format!("founding the roster refused: {e}"),
+                seed,
+                protocol,
+                ms(start),
+            );
+        }
+    }
+    let founding_state_hash = options
+        .precondition
+        .map(|_| cubarium_core::snapshot::state_hash(&world.state));
+    // Every tick the recorder measures is counted from here, not from world creation, so a
+    // preconditioned run's windows, horizon and late window are the same intervals a
+    // status-quo run's are. At age 0 this is 0 and nothing below changes.
+    let origin_tick = world.tick();
+
     let mut apex_material_in = 0.0;
     let mut apex_energy_in = 0.0;
     let mut apex_introduced = 0;
@@ -295,7 +508,14 @@ fn run(values: &[f64], seed: u64, protocol: Protocol, start: Instant) -> Evaluat
         }
     }
 
-    let mut recorder = Recorder::new(&world, protocol, apex_introduced);
+    // Before the first step, so every body's record opens on its own opening inventory.
+    // The flag is read only at sites that add to a counter; the campaign's row check against
+    // workstream F's ledger-off rows is what tests that claim rather than repeating it.
+    world.record_body_budgets(options.ledger);
+    // Opened before the first step, so the record's `P₀` is the world's own tick-0 foliage and
+    // the closing identity spans the whole horizon.
+    world.record_plant_budgets(options.plant_record);
+    let mut recorder = Recorder::new(&world, protocol, apex_introduced, options);
     // Founder placement emits nothing, but drain anyway so the run starts from a clean queue.
     world.drain_events();
     world.drain_hunter_events();
@@ -308,7 +528,7 @@ fn run(values: &[f64], seed: u64, protocol: Protocol, start: Instant) -> Evaluat
         world.step();
         if protocol.apex_founders > 0
             && apex_introduced == 0
-            && world.tick() == protocol.apex_introduce_tick
+            && world.tick() == origin_tick + protocol.apex_introduce_tick
         {
             match introduce(&mut world, &profile, seed, protocol.apex_founders) {
                 Ok((m, e, n)) => {
@@ -321,7 +541,7 @@ fn run(values: &[f64], seed: u64, protocol: Protocol, start: Instant) -> Evaluat
             }
         }
         recorder.absorb(&mut world);
-        if world.tick() % protocol.sample_every == 0 {
+        if (world.tick() - origin_tick) % protocol.sample_every == 0 {
             if let Err(e) = world.check_invariants() {
                 return Evaluation::refused(
                     Status::Failed,
@@ -333,15 +553,17 @@ fn run(values: &[f64], seed: u64, protocol: Protocol, start: Instant) -> Evaluat
             }
             recorder.sample(&world);
         }
-        if world.population() == 0 {
+        if world.population() == 0 && !options.no_animals {
             // Nothing is ever created from nothing: an empty world cannot recover, so the
-            // horizon stops here and the collapse tick is the honest survival time.
-            recorder.collapsed_at = Some(world.tick());
+            // horizon stops here and the collapse tick is the honest survival time. A
+            // deliberately animal-free arm is not that world: it is exempt by the flag, not
+            // by an exception the ordinary path could take.
+            recorder.collapsed_at = Some(world.tick() - origin_tick);
             break;
         }
     }
 
-    let (metrics, movement) = recorder.finish(&mut world);
+    let (metrics, movement, opening) = recorder.finish(&mut world);
     Evaluation {
         status: Status::Completed,
         reason: None,
@@ -353,6 +575,8 @@ fn run(values: &[f64], seed: u64, protocol: Protocol, start: Instant) -> Evaluat
         apex_energy_in,
         metrics: Some(metrics),
         movement: Some(movement),
+        opening,
+        founding_state_hash,
     }
 }
 
@@ -431,11 +655,43 @@ struct Recorder {
     terminal_by_cause: [StoreSum; 4],
     census: CensusBuilder,
 
+    // --- workstream I: the per-depleted-cell record, the brood gate, the margin -------
+    options: RunOptions,
+    /// Why a depleted cell stays depleted: habitat quality, trajectory, pressure.
+    depletion: DepletionTracker,
+    /// E's per-body `served[FOLIAGE]` turned into a per-cell attribution.
+    served: ServedAttributor,
+    /// The cell each prey body was last observed in, so a body that dies between probes can
+    /// still have its last bites credited somewhere.
+    last_cell: BTreeMap<OrganismId, u16>,
+    /// Served material attributed between probes — a dead body's tail — waiting for the next
+    /// probe to hand it to the tracker.
+    pending_served: BTreeMap<u16, f64>,
+    /// Completed broods by tick-0 founders: the ladder's gate.
+    broods: FounderBroods,
+    /// Founders that have already produced a brood, so parents are counted once.
+    founder_parents: BTreeSet<OrganismId>,
+    /// Net energy margin per body, by `(form, diet bin)`.
+    margins: MarginAccumulator,
+
+    // --- workstream M: the counter split by exact withdrawal --------------------------
+    /// Open only when `RunOptions::plant_record` is on, because it reads a record the core
+    /// only keeps when asked.
+    plant: Option<PlantBudgetTracker>,
+    /// Reused per probe so a 180,000-tick run allocates the per-cell view once.
+    plant_scratch: Vec<CellSample>,
+    plant_occupied: Vec<u16>,
+
     first_predation_tick: Option<u64>,
     prey_before_first_predation: u32,
     prey_min_after_predation: u32,
 
     collapsed_at: Option<u64>,
+    /// The tick recording opened at: 0 for a status-quo run, the founding tick for a
+    /// preconditioned one. Every interval the recorder reports is measured from here.
+    origin_tick: u64,
+    /// [`OpeningPoint`]s for the first [`OPENING_TRAJECTORY_TICKS`], on a preconditioned run.
+    opening: Vec<OpeningPoint>,
     opening_energy: f64,
     opening_net_in: f64,
     max_mass: f64,
@@ -446,18 +702,20 @@ struct Recorder {
 }
 
 impl Recorder {
-    fn new(world: &World, protocol: Protocol, apex_introduced: u32) -> Self {
+    fn new(world: &World, protocol: Protocol, apex_introduced: u32, options: RunOptions) -> Self {
         let founders: BTreeSet<_> = world.state.organisms.iter().map(|(id, _)| id).collect();
         let apex_ids: BTreeSet<_> = world.hunters().members.iter().map(|m| m.id).collect();
         // Every body alive at tick 0 is classified now, so a founder's death is attributed to
         // the guild it was born into rather than to "unknown".
         let mut key_of_id = BTreeMap::new();
         let mut census = CensusBuilder::default();
+        let mut broods = FounderBroods::default();
         for (id, o) in world.state.organisms.iter() {
             if !apex_ids.contains(&id) {
                 let key = census_key(o);
                 key_of_id.insert(id, key);
                 census.found(key);
+                broods.found(key.form);
             }
         }
         let alive_min = world.config().plant.alive_min;
@@ -465,6 +723,41 @@ impl Recorder {
         let crossings =
             CrossingCounter::new(&p_ref, DEPLETION_FRACTION, RECOVERY_FRACTION);
         let watched_cells = crossings.watched();
+
+        // The static habitat, rebuilt from the same `(config.habitat, seed)` pair `World::new`
+        // builds it from, because `World::habitat` is not public. The reconstruction is not
+        // assumed: `fields::initial_wood` from it must reproduce the world's own tick-0 wood in
+        // every cell, and the largest error is carried into the row.
+        let cfg = world.config().clone();
+        // The search crate is cube-only (`design/flat-world-plan-2026-09-16.md` §1), and the
+        // world it rebuilds the habitat for is the world it was handed: name the pair the
+        // world's own config carries rather than assuming it.
+        let habitat = Habitat::new(&cfg.habitat, cfg.seed, cfg.topology, cfg.world_scale);
+        let light: Vec<f64> = habitat.light_base.to_vec();
+        let moisture: Vec<f64> = habitat.moisture_base.to_vec();
+        let wood0: Vec<f64> = world.state.ecology.wood.clone();
+        let habitat_error = light
+            .iter()
+            .zip(&moisture)
+            .zip(&wood0)
+            .map(|((l, m), w)| (cubarium_core::fields::initial_wood(&cfg, *l, *m) - w).abs())
+            .fold(0.0f64, f64::max);
+        let constants = PlantConstants {
+            growth: cfg.producer.growth,
+            mortality: cfg.producer.mortality,
+            maintenance: cfg.plant.maintenance,
+            build: cfg.plant.build,
+            monod_ref: monod_reference(cfg.nutrient.half_saturation),
+            deplete_fraction: DEPLETION_FRACTION,
+        };
+        let mut depletion = DepletionTracker::new(&p_ref, &light, &moisture, &wood0, &constants);
+        depletion.set_habitat_check(habitat_error);
+        // The static habitat product I classified on, carried into M's rows for comparison
+        // only: M's own light and nutrient come from the plant step itself.
+        let l_mu: Vec<f64> = light.iter().zip(&moisture).map(|(l, m)| l * m).collect();
+        let plant = options
+            .plant_record
+            .then(|| PlantBudgetTracker::new(&p_ref, &l_mu, world.tick()));
         let opening_alive_cells = world
             .state
             .ecology
@@ -494,6 +787,17 @@ impl Recorder {
             e_r: world.config().organism.reserve_energy_density,
             last_stores: BTreeMap::new(),
             terminal_by_cause: [StoreSum::default(); 4],
+            options,
+            depletion,
+            served: ServedAttributor::default(),
+            last_cell: BTreeMap::new(),
+            pending_served: BTreeMap::new(),
+            broods,
+            founder_parents: BTreeSet::new(),
+            margins: MarginAccumulator::default(),
+            plant,
+            plant_scratch: Vec::new(),
+            plant_occupied: Vec::new(),
             protocol,
             samples: Vec::new(),
             apex_introduced,
@@ -518,6 +822,8 @@ impl Recorder {
             prey_before_first_predation: 0,
             prey_min_after_predation: u32::MAX,
             collapsed_at: None,
+            origin_tick: world.tick(),
+            opening: Vec::new(),
             opening_energy: stored_energy(world),
             opening_net_in: world.state.net_energy_in_corrected(),
             max_mass: 0.0,
@@ -566,7 +872,7 @@ impl Recorder {
 
         for event in world.drain_events() {
             match event {
-                LifeEvent::Birth { id, parent, .. } => {
+                LifeEvent::Birth { tick, id, parent, .. } => {
                     self.parent_of.insert(id, parent);
                     self.parents_seen.insert(parent);
                     if self.apex_ids.contains(&id) {
@@ -589,6 +895,17 @@ impl Recorder {
                         self.key_of_id.insert(id, key);
                         self.census.born(key);
                         self.prey_births_guild[usize::from(key.guild)] += 1;
+                        // The ladder's gate. A `Birth` is emitted when gestation completes and
+                        // the child is committed, so this **is** a completed brood; nothing is
+                        // inferred from a reserve or an age. The parent's own form is used,
+                        // not the child's, so a mutated child cannot move a founder's brood
+                        // into another rig's column — `form` is immutable anyway, which makes
+                        // the two agree and is why the choice is stated rather than hidden.
+                        if self.founders.contains(&parent) {
+                            let form = self.key_of_id.get(&parent).map_or(0, |k| k.form);
+                            let first = self.founder_parents.insert(parent);
+                            self.broods.brood(form, tick, first);
+                        }
                     }
                 }
                 LifeEvent::Death { id, cause, tick, age_ticks, .. } => {
@@ -631,13 +948,15 @@ impl Recorder {
             }
         }
 
+        self.drain_budgets(world);
+
         if world.tick() % PROBE_EVERY == 0 {
             self.probe(world);
         }
         // A window closes the first time the tick crosses its boundary. A partial final
         // window — the world collapsed inside it — is deliberately not closed: a foraging
         // range measured over part of a window is not the same quantity.
-        let index = world.tick() / self.window_ticks;
+        let index = (world.tick() - self.origin_tick) / self.window_ticks;
         if index > self.window_index {
             self.close_window();
             self.window_index = index;
@@ -647,17 +966,28 @@ impl Recorder {
     /// One second of simulated time: foliage depletion and recovery per cell, and where each
     /// prey body is standing. Reads only; writes nothing the world can see.
     fn probe(&mut self, world: &World) {
-        self.crossings.observe(&world.state.fields.p);
-
+        let tick = world.tick();
         let probe_index = self.probes_this_window;
         self.probes_this_window += 1;
         let mut skimmer_alive = false;
+        // Positions and attributed bites are read **before** the crossings, which is what makes
+        // "the last consumer visit before depletion" well defined: a body standing in a cell as
+        // it crosses is the last visit before, at zero ticks.
+        let mut occupancy: BTreeMap<u16, u32> = BTreeMap::new();
+        let mut served = std::mem::take(&mut self.pending_served);
         for (id, o) in world.state.organisms.iter() {
             if self.apex_ids.contains(&id) {
                 continue;
             }
             let cell = cell_of(Topology::Cube, Scale::ONE, &o.pos).index() as u16;
             self.tracks.entry(id).or_default().observe(probe_index, cell);
+            *occupancy.entry(cell).or_insert(0) += 1;
+            self.last_cell.insert(id, cell);
+            if self.options.ledger
+                && let Some(budget) = world.body_budget(id)
+            {
+                self.served.observe(id, cell, budget.served[FOLIAGE], &mut served);
+            }
             self.last_stores.insert(
                 id,
                 Stores {
@@ -673,7 +1003,86 @@ impl Recorder {
             }
         }
         if skimmer_alive {
-            self.census.skimmer_seen(world.tick());
+            self.census.skimmer_seen(tick);
+        }
+
+        let p = &world.state.fields.p;
+        self.depletion.note_probe(tick, p, &occupancy, &served);
+        // Workstream M's cumulative per-cell samples, taken **before** this probe's crossings,
+        // so "since the last recovery" has the detection ticks themselves as its endpoints.
+        if let Some(plant) = self.plant.as_mut()
+            && let Some(rec) = world.plant_budget()
+        {
+            self.plant_scratch.clear();
+            self.plant_scratch.extend(rec.cells.iter().map(|c| CellSample {
+                foliage_in: c.foliage_in(),
+                foliage_out: c.foliage_out(),
+                withdrawal: c.withdrawal_foliage,
+                income: c.income,
+                maintenance_unpaid: c.maintenance_unpaid,
+                death_foliage: c.death_foliage,
+                wood_sum: c.w_sum,
+                light_sum: c.light_effective_sum,
+                nutrient_sum: c.nutrient_sum,
+                ticks_alive: c.ticks_alive,
+            }));
+            self.plant_occupied.clear();
+            self.plant_occupied.extend(occupancy.keys().copied());
+            plant.observe(tick, &self.plant_scratch, &self.plant_occupied);
+        }
+        // One rule, one place: the per-cell record is driven by the same counter A's aggregate
+        // numbers come out of, through the closure form, so the two cannot drift. M's split is
+        // driven from the same closure for the same reason.
+        let crossings = &mut self.crossings;
+        let depletion = &mut self.depletion;
+        let plant = self.plant.as_mut();
+        let mut plant = plant;
+        crossings.observe_reporting(p, |cell, kind| match kind {
+            CrossingKind::Depleted => {
+                depletion.depleted(cell, tick);
+                if let Some(plant) = plant.as_mut() {
+                    plant.depleted(cell, tick, p.get(cell).copied().unwrap_or(0.0));
+                }
+            }
+            CrossingKind::Recovered => {
+                depletion.recovered(cell, tick);
+                if let Some(plant) = plant.as_mut() {
+                    plant.recovered(cell, tick);
+                }
+            }
+        });
+        self.depletion.sample(tick, p);
+    }
+
+    /// Take the ledger's closed records: the bodies that died since the last drain. Their
+    /// served tail is credited to the cell they were last observed in and waits for the next
+    /// probe; their margin goes into the bins.
+    fn drain_budgets(&mut self, world: &mut World) {
+        if !self.options.ledger {
+            return;
+        }
+        let now = world.tick();
+        let (closed, dropped) = world.drain_body_budgets();
+        if dropped > 0 {
+            self.margins.note_dropped(dropped);
+        }
+        for budget in closed {
+            let Some(key) = self.key_of_id.get(&budget.id).copied() else {
+                // An apex member: it has a record but no census key, and its bites are not
+                // foliage. Forget it so a reused slot cannot inherit its reading.
+                self.served.forget(budget.id);
+                continue;
+            };
+            match self.last_cell.remove(&budget.id) {
+                Some(cell) => self.served.close(
+                    budget.id,
+                    cell,
+                    budget.served[FOLIAGE],
+                    &mut self.pending_served,
+                ),
+                None => self.served.forget(budget.id),
+            }
+            self.margins.add(key, &budget, self.e_r, now, cubarium_core::DT, false);
         }
     }
 
@@ -699,7 +1108,45 @@ impl Recorder {
         self.probes_this_window = 0;
     }
 
+    /// One [`OpeningPoint`] per sample over the first [`OPENING_TRAJECTORY_TICKS`] after
+    /// founding, on a preconditioned run only. The whole-field stocks come from the state; the
+    /// four flows are the per-cell plant record summed over every cell, which is cumulative
+    /// since the record opened — and the record opens at founding, so the point's flows and
+    /// its tick share an origin.
+    fn note_opening(&mut self, world: &World) {
+        if self.options.precondition.is_none() {
+            return;
+        }
+        let since = world.tick() - self.origin_tick;
+        if since > OPENING_TRAJECTORY_TICKS {
+            return;
+        }
+        if self.opening.last().map(|o| o.ticks_since_founding) == Some(since) {
+            return;
+        }
+        let state = &world.state;
+        let mut point = OpeningPoint {
+            ticks_since_founding: since,
+            foliage: state.fields.p.iter().sum(),
+            wood: state.ecology.wood.iter().sum(),
+            plant_reserve: state.ecology.plant_reserve.iter().sum(),
+            nutrient: state.fields.n.iter().sum(),
+            population: world.population() as u32,
+            ..OpeningPoint::default()
+        };
+        if let Some(rec) = world.plant_budget() {
+            for c in &rec.cells {
+                point.foliage_in += c.foliage_in();
+                point.foliage_out += c.foliage_out();
+                point.income += c.income;
+                point.withdrawal += c.withdrawal_foliage;
+            }
+        }
+        self.opening.push(point);
+    }
+
     fn sample(&mut self, world: &World) {
+        self.note_opening(world);
         let state = &world.state;
         let dormant: BTreeSet<_> = state.apex_dormancy.dormant.iter().map(|d| d.id).collect();
         let live_apex: BTreeSet<_> = world
@@ -865,15 +1312,35 @@ impl Recorder {
         depth
     }
 
-    fn finish(mut self, world: &mut World) -> (Components, Movement) {
+    fn finish(mut self, world: &mut World) -> (Components, Movement, Option<Vec<OpeningPoint>>) {
         // A final observation, so the terminal state is always in the series.
         if self.samples.last().map(|s| s.tick) != Some(world.tick()) {
             self.sample(world);
         }
+        // Everything the ledger still holds: the last closed records, then every body still
+        // alive at the horizon, so the margin's denominator is every body and not only the
+        // ones that died.
+        self.drain_budgets(world);
+        if self.options.ledger {
+            let now = world.tick();
+            let live: Vec<(OrganismId, CensusKey)> = world
+                .state
+                .organisms
+                .iter()
+                .filter(|(id, _)| !self.apex_ids.contains(id))
+                .filter_map(|(id, _)| self.key_of_id.get(&id).copied().map(|k| (id, k)))
+                .collect();
+            for (id, key) in live {
+                if let Some(budget) = world.body_budget(id) {
+                    let budget = *budget;
+                    self.margins.add(key, &budget, self.e_r, now, cubarium_core::DT, true);
+                }
+            }
+        }
         let n = self.samples.len().max(1) as f64;
         let mean = |f: fn(&Sample) -> f64| self.samples.iter().map(f).sum::<f64>() / n;
 
-        let ticks_run = world.tick();
+        let ticks_run = world.tick() - self.origin_tick;
         let last = *self.samples.last().expect("at least one sample");
         let capacity = world.config().producer.max * world.state.fields.p.len() as f64;
         let e_p = world.config().plant.energy_density;
@@ -897,10 +1364,11 @@ impl Recorder {
         // The ecology v1 windows. The late window is the last `1/WINDOWS` of the **declared**
         // horizon, not of the ticks actually run, so a collapsed world reports `None` rather
         // than a late window measured over its own death throes.
-        let late_start = self
-            .protocol
-            .horizon_ticks
-            .saturating_sub(self.protocol.horizon_ticks / WINDOWS);
+        let late_start = self.origin_tick
+            + self
+                .protocol
+                .horizon_ticks
+                .saturating_sub(self.protocol.horizon_ticks / WINDOWS);
         let eco = EcoMeasures::from_samples(&self.samples).unwrap_or_default();
         let late_slice: Vec<Sample> = self
             .samples
@@ -942,6 +1410,33 @@ impl Recorder {
             .filter(|(id, _)| !self.apex_ids.contains(id))
             .map(|(id, o)| self.key_of_id.get(&id).copied().unwrap_or_else(|| census_key(o)))
             .collect();
+        let margins = self.margins.clone().finish(self.options.ledger);
+        let depletion = self.depletion.clone().finish(&world.state.fields.p);
+        let plant_budget = self.plant.take().map(|plant| {
+            let residual = world.plant_budget_residual();
+            let (samples, ticks) = match world.plant_budget() {
+                Some(rec) => (
+                    rec.cells
+                        .iter()
+                        .map(|c| CellSample {
+                            foliage_in: c.foliage_in(),
+                            foliage_out: c.foliage_out(),
+                            withdrawal: c.withdrawal_foliage,
+                            income: c.income,
+                            maintenance_unpaid: c.maintenance_unpaid,
+                            death_foliage: c.death_foliage,
+                            wood_sum: c.w_sum,
+                            light_sum: c.light_effective_sum,
+                            nutrient_sum: c.nutrient_sum,
+                            ticks_alive: c.ticks_alive,
+                        })
+                        .collect::<Vec<_>>(),
+                    rec.ticks,
+                ),
+                None => (Vec::new(), 0),
+            };
+            plant.finish(&samples, &world.state.fields.p, residual, ticks)
+        });
         let movement = Movement {
             move_cost: self.move_cost,
             probe_ticks: PROBE_EVERY,
@@ -952,10 +1447,14 @@ impl Recorder {
             crossings: self.crossings.summary(),
             census: self.census.clone().finish(&alive_keys, dt),
             terminal_by_cause: self.terminal_by_cause,
-            // Workstream E's per-organism budget accumulator had not landed on `main` when
-            // this ran, and nothing on the search side can substitute for it: intake is served
-            // inside `World::step` and only the world-level `intake_diagnostics()` is exposed.
-            net_energy_margin_per_body: None,
+            // Workstream E's per-organism budget accumulator is what makes this a number
+            // rather than a `null`: F's rows carry `null` because it had not landed when F ran.
+            net_energy_margin_per_body: self.options.ledger.then_some(margins.margin_mean),
+            ledger_on: self.options.ledger,
+            founder_broods: self.broods,
+            margins: self.options.ledger.then_some(margins),
+            depletion: Some(depletion),
+            plant_budget,
         };
 
         let apex_active_samples = self.samples.iter().filter(|s| s.apex_active > 0).count() as f64;
@@ -1059,7 +1558,8 @@ impl Recorder {
             spatial_windows_observed: self.spatial_windows.len() as u64,
             spatial_bodies_observed: self.spatial_bodies,
         };
-        (components, movement)
+        let opening = self.options.precondition.is_some().then_some(self.opening);
+        (components, movement, opening)
     }
 }
 

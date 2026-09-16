@@ -46,16 +46,23 @@ fn stepped_world(ticks: u64) -> World {
 /// migration ladder that ran from version 8 to version 15 is gone; the frozen mirror shapes
 /// stay in the tree only for the refusal tests that name their versions.
 ///
-/// **Version 17 is the ring world** (`design/flat-world-plan-2026-09-16.md` §4), and it is the
-/// same kind of break for the same reason: `WorldConfig` gains `topology` and `world_scale`,
-/// so the payload's shape moves, and 16 joins the list of versions refused by name. A world
-/// whose per-cell vectors were counted for another surface is not re-anchored to this one.
-/// `v16` is frozen beside the others for the one reader allowed inside a schema 16 payload,
-/// the `CubeProjection` comparator.
+/// **Version 17 is the same rule applied to a change of semantics.** The payload did not move,
+/// but the shipped pursuit stopping rule did (2026-09-16), and a world's bytes do not carry it
+/// — so a schema-16 world is refused by number like every predecessor rather than resumed
+/// under a predicate it never ran
+/// (`crates/cubarium-core/tests/pursuit_predicate_adoption.rs`).
+///
+/// **Version 18 is the ring world** (`design/flat-world-plan-2026-09-16.md` §4), and it is a
+/// shape break again for the original reason: `WorldConfig` gains `topology` and
+/// `world_scale`, so the payload's shape moves, and 17 joins the list of versions refused by
+/// name. A world whose per-cell vectors were counted for another surface is not re-anchored
+/// to this one. `v16` and `v17` are frozen beside the others for the one reader allowed
+/// inside those payloads, the `CubeProjection` comparator.
 #[test]
 fn the_schema_version_is_current_and_every_predecessor_is_refused() {
-    assert_eq!(SCHEMA_VERSION, 17);
+    assert_eq!(SCHEMA_VERSION, 18);
     assert_eq!(cubarium_core::snapshot::SCHEMA_V16, 16);
+    assert_eq!(cubarium_core::snapshot::SCHEMA_V17, 17);
     assert_eq!(cubarium_core::SCHEMA_V14, 14);
     assert_eq!(cubarium_core::SCHEMA_V13, 13);
     assert_eq!(cubarium_core::SCHEMA_V12, 12);

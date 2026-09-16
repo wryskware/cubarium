@@ -23,8 +23,9 @@ use crate::pairs::NeighborLists;
 use crate::quiet::QuietEvent;
 
 pub use budget::{
-    BodyBudget, BudgetRecorder, CARRION, CHANNEL_NAMES, CHANNELS, FOLIAGE, FRUIT, LITTER,
-    MAX_CLOSED_RECORDS,
+    BodyBudget, BudgetRecorder, CARRION, CHANNEL_NAMES, CHANNELS, FOLIAGE, FRUIT, IntakeLimit,
+    IntakeTick, LITTER, MAX_CLOSED_RECORDS, MAX_TRACE_ROWS, MOUTH_GRAZE, MOUTH_FRUIT,
+    MOUTH_NAMES, MOUTH_SCAVENGE, MOUTHS,
 };
 pub use crate::fields::{CellClass, EcologyV1State};
 pub use lifecycle::{TRAINING_FOUNDER_HUE, TRAINING_START_ENERGY, TRAINING_START_RESERVE};
@@ -77,6 +78,9 @@ pub struct World {
     /// Per-organism store budgets (`budget`). Off by default; transient, never persisted,
     /// never hashed, never read back by the tick.
     pub(crate) budgets: BudgetRecorder,
+    /// Per-attempt apex strike records (`crate::hunter::StrikeRecorder`). Off by default;
+    /// transient, never persisted, never hashed, never read back by the tick.
+    pub(crate) strikes: crate::hunter::StrikeRecorder,
     /// Why two adult apex members did or did not mate (`crate::encounter::ApexOpportunity`).
     /// Written only inside the apex-encounter pass; transient like every field above.
     pub(crate) apex_opportunity: ApexOpportunity,
@@ -86,6 +90,23 @@ pub struct World {
     /// Transient diagnostic intent overrides (`crate::diagnostic`). Empty in every ordinary
     /// world, never persisted, never set by the world itself.
     pub(crate) scripted: Vec<(crate::ids::OrganismId, ScriptedIntent)>,
+    /// The motor contract this world runs (`crate::motor::MotorModel`). Transient like every
+    /// field above: never persisted, never hashed, never in [`WorldConfig`]. The default is
+    /// [`crate::motor::MotorModel::Sweep`], the shipped contract, so a world that never names a
+    /// model is byte-identical to the build before the switch existed.
+    pub(crate) motor_model: crate::motor::MotorModel,
+    /// Which radius an apex member's grasp puts in the turn budget under
+    /// [`crate::motor::MotorModel::Sweep`] (`crate::motor::ApexTurnRadius`). Transient like
+    /// every field above: never persisted, never hashed, never in [`WorldConfig`]. The default
+    /// is [`crate::motor::ApexTurnRadius::Grasp`], the shipped rule, so a world that never
+    /// names one is byte-identical to the build before the switch existed.
+    pub(crate) apex_turn_radius: crate::motor::ApexTurnRadius,
+    /// The motor contract a **hunter member** runs, when it is not the world's own
+    /// (`crate::motor::model_for_body`). Transient like every field above: never persisted,
+    /// never hashed, never in [`WorldConfig`]. `None` — the default — means every body runs
+    /// [`World::motor_model`], so a world that never names one is byte-identical to the build
+    /// before the override existed.
+    pub(crate) apex_motor_model: Option<crate::motor::MotorModel>,
     pub(crate) initial_material: f64,
 }
 
@@ -109,5 +130,57 @@ impl World {
     #[inline]
     pub fn cell_count(&self) -> usize {
         self.graph.cell_count()
+    }
+
+    /// Run this world under a named motor contract
+    /// (`design/7_Research/ecology-v1-motor-inertial-2026-09-16.md`).
+    ///
+    /// Opt-in and transient: nothing in a snapshot records it, so a resumed world runs
+    /// [`crate::motor::MotorModel::Sweep`] until it is told otherwise. Set it before the first
+    /// tick of an experiment; changing it mid-run is legal but makes one run of two worlds.
+    pub fn set_motor_model(&mut self, model: crate::motor::MotorModel) {
+        self.motor_model = model;
+    }
+
+    /// The motor contract in force, [`crate::motor::MotorModel::Sweep`] unless one was named.
+    pub fn motor_model(&self) -> crate::motor::MotorModel {
+        self.motor_model
+    }
+
+    /// Run this world with the apex's grasp counted, or not counted, as a turn radius
+    /// (`design/7_Research/ecology-v1-apex-grasp-2026-09-16.md`).
+    ///
+    /// Opt-in and transient exactly as [`World::set_motor_model`] is: nothing in a snapshot
+    /// records it, so a resumed world runs [`crate::motor::ApexTurnRadius::Grasp`] until it is
+    /// told otherwise. It reaches no ordinary body: only a hunter member has the contact
+    /// geometry the rule chooses between.
+    pub fn set_apex_turn_radius(&mut self, rule: crate::motor::ApexTurnRadius) {
+        self.apex_turn_radius = rule;
+    }
+
+    /// The rule in force, [`crate::motor::ApexTurnRadius::Grasp`] unless one was named.
+    pub fn apex_turn_radius(&self) -> crate::motor::ApexTurnRadius {
+        self.apex_turn_radius
+    }
+
+    /// Run this world's **apex members** under a motor contract of their own, leaving every
+    /// other body on the world's
+    /// (`design/7_Research/ecology-v1-apex-motor-isolation-2026-09-16.md`).
+    ///
+    /// Opt-in and transient exactly as [`World::set_motor_model`] is: nothing in a snapshot
+    /// records it, so a resumed world runs `None` — the world's own contract for every body —
+    /// until it is told otherwise. It reaches no ordinary body: only a hunter member is handed
+    /// the contact geometry [`crate::motor::model_for_body`] selects on.
+    ///
+    /// This is what makes a paired motor arm a measurement of the apex's envelope alone: the
+    /// prey run the world's own contract in both arms, so the world the founders are introduced
+    /// into is the same world, row for row.
+    pub fn set_apex_motor_model(&mut self, model: Option<crate::motor::MotorModel>) {
+        self.apex_motor_model = model;
+    }
+
+    /// The contract a member runs when it is not the world's own; `None` unless one was named.
+    pub fn apex_motor_model(&self) -> Option<crate::motor::MotorModel> {
+        self.apex_motor_model
     }
 }

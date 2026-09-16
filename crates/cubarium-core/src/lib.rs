@@ -71,7 +71,7 @@ pub use hunter::{
     HunterTarget, HunterView, OxidationPolicy, Reproduction,
 };
 pub use ids::OrganismId;
-pub use motor::{MotorBill, MotorLimits, MotorRequest, ResolvedMotion};
+pub use motor::{MotorBill, MotorLimits, MotorModel, MotorRequest, ResolvedMotion};
 pub use neural::{Action7, AnimalState, NeuralState, Observation70, Policy};
 pub use snapshot::{
     SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13, SCHEMA_V14,
@@ -82,8 +82,9 @@ pub use telemetry::Telemetry;
 pub use view::RenderView;
 pub use world::{
     BodyBudget, BudgetRecorder, CARRION, CHANNEL_NAMES, CHANNELS, ChargingDiagnostics, FOLIAGE,
-    FRUIT, IntakeDiagnostics, LITTER, NeuralTiming, TRAINING_FOUNDER_HUE, TRAINING_START_ENERGY,
-    TRAINING_START_RESERVE, World, WorldState,
+    FRUIT, IntakeDiagnostics, IntakeLimit, IntakeTick, LITTER, MOUTH_GRAZE, MOUTH_FRUIT,
+    MOUTH_NAMES, MOUTH_SCAVENGE, MOUTHS, NeuralTiming, TRAINING_FOUNDER_HUE,
+    TRAINING_START_ENERGY, TRAINING_START_RESERVE, World, WorldState,
 };
 
 /// Simulation ticks per second.

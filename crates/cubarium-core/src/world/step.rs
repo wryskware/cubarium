@@ -242,11 +242,25 @@ impl World {
                 charging,
                 intake,
                 budgets,
+                strikes,
                 apex_opportunity,
                 neural_timing,
                 scripted,
+                motor_model,
+                apex_turn_radius,
+                apex_motor_model,
                 initial_material: _,
             } = &mut *self;
+            // The motor contract in force this tick, read once. `Sweep` is the shipped
+            // contract and the default (`crate::motor::MotorModel`).
+            let motor_model = *motor_model;
+            // And which radius an apex member's grasp puts in that contract's rotation term
+            // (`crate::motor::ApexTurnRadius`). `Grasp` is the shipped rule and the default.
+            let apex_turn_radius = *apex_turn_radius;
+            // And the contract a *hunter member* runs when it is not the world's own
+            // (`crate::motor::model_for_body`). `None` is the default and means every body runs
+            // `motor_model`; an override reaches nothing without apex contact geometry.
+            let apex_motor_model = *apex_motor_model;
             let WorldState {
                 config,
                 tick,
@@ -314,6 +328,13 @@ impl World {
                     budgets.ensure(id, o, now);
                 }
             }
+            // Open this tick's intake row for the one traced body, before anything moves
+            // (`crate::world::budget`). Off by default: one `Option` test and no allocation.
+            budgets.open_row(now);
+            // The raw linear head the traced body's policy produced this tick, if it ran one.
+            // Written by stage 5 and read by stage 7; `None` on a tick that reused the held
+            // action, and for every body that is not neural.
+            let mut traced_head: Option<[f64; crate::neural::action::ACT_LEN]> = None;
 
             // 1. Admit due stimuli. The queue is empty in M2; the hook is the journal.
 
@@ -448,6 +469,8 @@ impl World {
                         neighbors.lists.get(id.slot as usize).map_or(&[][..], |l| &l[..]),
                         &mut sensed_cells,
                         &mut sensed_bodies,
+                        if budgets.traced() == Some(id) { Some(&mut traced_head) } else { None },
+                        motor_model,
                     );
                     decisions.push((id, decision));
                     continue;
@@ -1086,6 +1109,22 @@ impl World {
                             {
                                 m.enter(HunterPhase::Windup, now, now + windup_ticks, 0);
                                 m.target = Some(t);
+                                // The intent frame: where both bodies stood when this member
+                                // committed to the gesture. Inert and opt-in
+                                // (`crate::hunter::StrikeRecorder`); one `bool` test otherwise.
+                                if strikes.enabled() {
+                                    strikes.open_intent(
+                                        m.id,
+                                        hunter::StrikeFrame::gather(
+                                            topo,
+                                            images,
+                                            profile,
+                                            now,
+                                            o,
+                                            organisms.get(t).map(|prey| (t, prey)),
+                                        ),
+                                    );
+                                }
                             }
                         }
                         HunterPhase::Windup if now >= m.phase_ends_tick => {
@@ -1102,6 +1141,23 @@ impl World {
                                 let episode = m.attack_counter;
                                 m.enter(HunterPhase::Strike, now, now + strike_ticks, episode);
                                 m.target = Some(t);
+                                // The strike frame: where both bodies stood when the burst was
+                                // paid for, i.e. after `windup_seconds` of the hunter holding
+                                // and the prey fleeing.
+                                if strikes.enabled() {
+                                    strikes.begin_strike(
+                                        m.id,
+                                        episode,
+                                        hunter::StrikeFrame::gather(
+                                            topo,
+                                            images,
+                                            profile,
+                                            now,
+                                            o,
+                                            organisms.get(t).map(|prey| (t, prey)),
+                                        ),
+                                    );
+                                }
                             } else {
                                 // Refused before payment: no energy, no draw, no attempt.
                                 hunter_events.push(HunterEvent::Attempt {
@@ -1144,12 +1200,32 @@ impl World {
                         // claws and so never held anything. It went unnoticed only because
                         // `closing = strike_speed_px_s · strike_seconds` was 1 px, inside the
                         // 2.6 px tolerance. The pace calibration makes the lunge 16.67 px, so
-                        // a member charged straight through point-blank prey and missed. The
-                        // predicate is now the envelope itself, which is what `in_contact`
-                        // already means everywhere else in this file.
-                        let inside = organisms.get(t).and_then(admission).is_some_and(|c| {
-                            c.body.x < geometry.capture_offset_body.x + c.tolerance
-                        });
+                        // a member charged straight through point-blank prey and missed.
+                        //
+                        // Until 2026-09-16 the rule was nevertheless still a one-sided
+                        // **forward half-space**, `body.x < capture_offset_body.x + tolerance`,
+                        // and not the envelope: a prey *short* of the claws satisfied it as
+                        // readily as one inside them. The strike record measured it true at the
+                        // burst's start on 408 of 449 paid attempts, which drops the member to
+                        // `rest_effort` and suppresses the burst it has just paid for
+                        // (`design/7_Research/ecology-v1-apex-reach-2026-09-16.md` §5), and the
+                        // paired intervention took held-at-burst from 89.4 % to 5.4 %, contacts
+                        // 88 → 140 and captures 38 → 67
+                        // (`design/7_Research/ecology-v1-apex-predicate-2026-09-16.md`).
+                        //
+                        // **The shipped rule is now the envelope.** `PursuitStop` names both
+                        // readings, `ContactMeasure::pursuit_holds` is the one place either is
+                        // written, and an ordinary world runs `ReachEnvelope` without being
+                        // told; the half-space is the opt-in that reproduces a retained row
+                        // (`crate::World::set_pursuit_stop`,
+                        // `crates/cubarium-core/tests/pursuit_predicate_adoption.rs`). A world's
+                        // bytes do not carry the rule, so the adoption is schema 17 and a
+                        // schema-16 world is refused rather than silently re-ruled.
+                        let stop = strikes.pursuit_stop();
+                        let inside = organisms
+                            .get(t)
+                            .and_then(admission)
+                            .is_some_and(|c| geometry.pursuit_holds(stop, &c));
                         let hold = inside || m.phase == HunterPhase::Windup;
                         if let Some(d) = decisions.iter_mut().find(|(id, _)| *id == m.id) {
                             // The intent to face the target, **not** the heading it ends the
@@ -1192,6 +1268,14 @@ impl World {
                             d.1.mode = Mode::Resting;
                             d.1.effort = f64::from(o.phenotype.drives.rest_effort);
                         }
+                    }
+                    // A member that left the gesture without paying for a burst has no
+                    // attempt to record; a member still cocking or still lunging keeps its
+                    // open frames. A no-op when nothing is open, and when recording is off.
+                    if strikes.enabled()
+                        && !matches!(m.phase, HunterPhase::Windup | HunterPhase::Strike)
+                    {
+                        strikes.abandon(m.id);
                     }
                     hunters.members[index] = m;
                 }
@@ -1290,6 +1374,14 @@ impl World {
                             .get(*id)
                             .map(|o| hunter::ContactGeometry::of(profile, o))
                     });
+                // The motor contract **this body** runs: the apex override where one is set and
+                // this body has the contact geometry only a hunter member is handed, the world's
+                // own otherwise. All four of this block's motor reads — the envelope radius, the
+                // resolver, the bill and the rotation price the budget split uses — take it from
+                // here, and for `apex_motor_model == None` it is `motor_model` for every body,
+                // arithmetic for arithmetic.
+                let body_model =
+                    motor::model_for_body(motor_model, apex_motor_model, apex_geometry.as_ref());
                 let Some(o) = organisms.get_mut(*id) else {
                     continue;
                 };
@@ -1316,7 +1408,15 @@ impl World {
                     *flag = true;
                 }
                 let limits = MotorLimits {
-                    radius_px: motor::turn_radius_px(o, apex_geometry.as_ref()),
+                    // The radius the model in force puts in the rotation term: the outermost
+                    // contacting point (an apex member's grasp included) under `Sweep`, the
+                    // disc's own radius of gyration with the grasp dropped under `Inertial`.
+                    radius_px: motor::turn_radius_px_in_with(
+                        o,
+                        apex_geometry.as_ref(),
+                        body_model,
+                        apex_turn_radius,
+                    ),
                     turn_rate_max: d.turn_rate_max,
                     speed_cap,
                     motor_budget: bill.affordable_motor(o.energy, dt),
@@ -1329,7 +1429,7 @@ impl World {
                     // `resolve` clamps this to `speed_cap` either way.
                     speed: d.speed_request.unwrap_or(speed_cap),
                 };
-                let motion = motor::resolve(o.heading, &request, &limits);
+                let motion = motor::resolve_in(o.heading, &request, &limits, body_model);
                 if !neural.animals.is_empty()
                     && let Some(a) = neural.get_mut(*id)
                 {
@@ -1380,7 +1480,7 @@ impl World {
                 // stored energy alone (`affordable_motor`), so a body short of upkeep has
                 // `u = 0` and stands still, and the shortfall is never motion. Movement is paid
                 // from the battery, as it always was.
-                let cost = bill.total_cost(motion.speed, motion.sweep, dt);
+                let cost = bill.total_cost_in(motion.speed, motion.sweep, dt, body_model);
                 // The complete bill, recorded where it is levied: maintenance, sensing and
                 // both halves of the motor charge, for every body billed this tick — including
                 // one that is removed later in the same tick, because removals commit in step
@@ -1398,7 +1498,10 @@ impl World {
                     rec.upkeep_billed += bill.upkeep(dt);
                     rec.motor_translation_billed += per_motor * motion.speed.max(0.0);
                     rec.motor_turn_billed +=
-                        per_motor * motor::ROTATION_COST_SCALE * motion.sweep.max(0.0);
+                        per_motor * body_model.rotation_price() * motion.sweep.max(0.0);
+                }
+                if let Some(row) = budgets.row_of(*id) {
+                    row.bill_total += cost;
                 }
                 let mut collected = cost.min(o.energy).max(0.0);
                 o.energy -= collected;
@@ -1439,6 +1542,9 @@ impl World {
                 intake.body_bill_paid += collected;
                 if let Some(rec) = budgets.at(*id) {
                     rec.bill_paid += collected;
+                }
+                if let Some(row) = budgets.row_of(*id) {
+                    row.bill_paid += collected;
                 }
             }
 
@@ -1554,6 +1660,38 @@ impl World {
                         attack_counter: Some(m.attack_counter),
                         evidence,
                     });
+                    // The resolution frame, read from the same common post-movement state the
+                    // settlement above used, and before anything is removed. Closing the
+                    // record derives the classification from the three frames and nothing
+                    // else; it re-measures nothing and mutates nothing the tick reads.
+                    if strikes.enabled() {
+                        let resolution = hunter::StrikeFrame::gather(
+                            topo,
+                            images,
+                            &profile,
+                            now + 1,
+                            hunter_o,
+                            aimed_at.and_then(|t| organisms.get(t).map(|prey| (t, prey))),
+                        );
+                        strikes.close(
+                            hunter_id,
+                            m.attack_counter,
+                            resolution,
+                            outcome,
+                            profile.strike_energy_cost,
+                            profile.windup_seconds,
+                            profile.strike_seconds,
+                            |from, to| {
+                                hunter::surface_reach(
+                                    topo,
+                                    images,
+                                    from,
+                                    to,
+                                    topo.max_local_radius(),
+                                )
+                            },
+                        );
+                    }
 
                     match caught {
                         Some((prey_id, material, energy)) => {
@@ -1641,6 +1779,42 @@ impl World {
             let mut litter_density = vec![0.0f64; cell_count];
             let mut carrion_density = vec![0.0f64; cell_count];
             let mut requests: Vec<(usize, OrganismId, f64, f64, f64)> = Vec::new();
+            // 7t. The per-tick intake trace (`crate::world::budget`), for the one traced body
+            //     and nobody else: the cell it stands on, that cell's four edible stocks and
+            //     whether each clears `drives.feed_min`, the three decoded efforts (and the raw
+            //     head behind them), the bite each mouth asks for, and what bound it. It reads
+            //     the same pre-settlement stocks every mouth below reads and writes nothing
+            //     any body or field can see. Off in every ordinary world.
+            if let Some(target) = budgets.traced()
+                && let Some(o) = organisms.get(target)
+                && let Some((_, d)) = decisions.iter().find(|(id, _)| *id == target)
+            {
+                let here = cell_of(topo, world_scale, &o.pos);
+                let cell = here.index();
+                let stock = [
+                    fields.p[cell],
+                    fields.f[cell],
+                    edible_detritus(fields.d[cell], fields.de[cell], e_r),
+                    edible_detritus(ecology.carrion[cell], ecology.carrion_energy[cell], e_r),
+                ];
+                budgets.observe_intake(
+                    target,
+                    here.0,
+                    stock,
+                    cfg.drives.feed_min,
+                    [d.graze_effort, d.fruit_effort, d.scavenge_effort],
+                    o.phenotype.cap_foliage,
+                    o.phenotype.cap_detrital,
+                    o.phenotype.mouth_rate,
+                    k_p,
+                    dt,
+                    o.reserve,
+                    o.phenotype.reserve_max,
+                    o.energy,
+                    o.phenotype.energy_max,
+                    traced_head,
+                );
+            }
             for (id, d) in &decisions {
                 if d.fruit_effort <= 0.0 && d.graze_effort <= 0.0 && d.scavenge_effort <= 0.0 {
                     continue;
@@ -1747,6 +1921,9 @@ impl World {
                     if q > 0.0 {
                         let rho = e_f;
                         fields.f[cell] -= q;
+                        if let Some(rec) = eco_scratch.plant_budget_mut() {
+                            rec.cells[cell].withdrawal_fruit += q;
+                        }
                         let q_d = cap_h * q;
                         let to_reserve = eta_m * q_d;
                         o.reserve += to_reserve;
@@ -1766,6 +1943,16 @@ impl World {
                             rec.reserve_credit[budget::FRUIT] += to_reserve;
                             rec.battery_credit[budget::FRUIT] += gained;
                         }
+                        if let Some(row) = budgets.row_of(id) {
+                            row.credit(
+                                budget::FRUIT,
+                                q,
+                                q_d,
+                                to_reserve,
+                                gained,
+                                (eta_e * spare).max(0.0) - gained,
+                            );
+                        }
                         ate[1] += q;
                         eaten += q;
                     }
@@ -1775,6 +1962,11 @@ impl World {
                     if q > 0.0 {
                         let rho = e_v;
                         fields.p[cell] -= q;
+                        // Workstream M's exact per-cell withdrawal: the cell the mouth is
+                        // standing in, at the site the stock actually loses the bite.
+                        if let Some(rec) = eco_scratch.plant_budget_mut() {
+                            rec.cells[cell].withdrawal_foliage += q;
+                        }
                         let q_d = cap_h * q;
                         let to_reserve = eta_m * q_d;
                         o.reserve += to_reserve;
@@ -1793,6 +1985,16 @@ impl World {
                             rec.digestible[budget::FOLIAGE] += q_d;
                             rec.reserve_credit[budget::FOLIAGE] += to_reserve;
                             rec.battery_credit[budget::FOLIAGE] += gained;
+                        }
+                        if let Some(row) = budgets.row_of(id) {
+                            row.credit(
+                                budget::FOLIAGE,
+                                q,
+                                q_d,
+                                to_reserve,
+                                gained,
+                                (eta_e * spare).max(0.0) - gained,
+                            );
                         }
                         ate[0] += q;
                         eaten += q;
@@ -1817,6 +2019,9 @@ impl World {
                             let rho = carried / q;
                             fields.d[cell] -= q;
                             fields.de[cell] -= carried;
+                            if let Some(rec) = eco_scratch.plant_budget_mut() {
+                                rec.cells[cell].withdrawal_litter += q;
+                            }
                             let eta =
                                 if e_r > 0.0 { eta_m * (rho / e_r).min(1.0) } else { eta_m };
                             let q_d = cap_d * q;
@@ -1838,6 +2043,16 @@ impl World {
                                 rec.reserve_credit[budget::LITTER] += to_reserve;
                                 rec.battery_credit[budget::LITTER] += gained;
                             }
+                            if let Some(row) = budgets.row_of(id) {
+                                row.credit(
+                                    budget::LITTER,
+                                    q,
+                                    q_d,
+                                    to_reserve,
+                                    gained,
+                                    (eta_e * spare).max(0.0) - gained,
+                                );
+                            }
                             ate[2] += q;
                             eaten += q;
                         }
@@ -1848,6 +2063,9 @@ impl World {
                             let rho = carried / q;
                             ecology.carrion[cell] -= q;
                             ecology.carrion_energy[cell] -= carried;
+                            if let Some(rec) = eco_scratch.plant_budget_mut() {
+                                rec.cells[cell].withdrawal_carrion += q;
+                            }
                             let eta =
                                 if e_r > 0.0 { eta_m * (rho / e_r).min(1.0) } else { eta_m };
                             let q_d = cap_d * q;
@@ -1870,6 +2088,16 @@ impl World {
                                 rec.digestible[budget::CARRION] += q_d;
                                 rec.reserve_credit[budget::CARRION] += to_reserve;
                                 rec.battery_credit[budget::CARRION] += gained;
+                            }
+                            if let Some(row) = budgets.row_of(id) {
+                                row.credit(
+                                    budget::CARRION,
+                                    q,
+                                    q_d,
+                                    to_reserve,
+                                    gained,
+                                    (eta_e * spare).max(0.0) - gained,
+                                );
                             }
                             ate[2] += q;
                             eaten += q;
@@ -2803,6 +3031,8 @@ impl World {
                     budgets.mark(id, o);
                 }
             }
+            // Keep this tick's intake row, once the served bites it needs are known.
+            budgets.close_row();
 
             *tick += 1;
         }
@@ -2876,13 +3106,19 @@ fn neural_decision(
     neighbours: &[crate::pairs::Neighbor],
     cells: &mut Vec<crate::neural::SensedCell>,
     bodies: &mut Vec<crate::neural::SensedBody>,
+    head_sink: Option<&mut Option<[f64; crate::neural::action::ACT_LEN]>>,
+    motor_model: crate::motor::MotorModel,
 ) -> Decision {
     use crate::neural::action::{Action7, Capability, Envelope};
 
     let (topo, world_scale) = (cfg.topology, cfg.world_scale);
     let here = cell_of(topo, world_scale, &o.pos).index();
     let omega_max = f64::from(o.phenotype.drives.turn_rate_max_deg).to_radians();
-    let radius_px = motor::turn_radius_px(o, None);
+    // The radius the model in force puts in the rotation term, so what the policy is told
+    // about its own turning capability is what the resolver will actually grant it. Under
+    // `Inertial` this is the disc's radius of gyration, and `omega_attain = u_full / r_g` is
+    // exactly the pivot the quadrature envelope allows at zero speed.
+    let radius_px = motor::turn_radius_px_in(o, None, motor_model);
     // `motor_avail` and `ω_attain` share the world's own affordability calculation rather than
     // re-deriving an approximate energy bill: `u_full = min(v_max / wading, affordable_motor)`
     // at the energy the body holds *before* this tick's payment, which is the state stage 6
@@ -2949,6 +3185,11 @@ fn neural_decision(
             cfg.mechanisms.grazing,
             cfg.mechanisms.scavenging,
         );
+        // The one read-only diagnostic in this function: the raw head before squashing, for
+        // the traced body only (`crate::world::budget`). Nothing downstream reads it.
+        if let Some(sink) = head_sink {
+            *sink = Some(head);
+        }
         let squash_start = std::time::Instant::now();
         let held = Action7::squash(&head, &capability).0;
         timing.adapter_nanos = timing

@@ -307,6 +307,15 @@ fn seed_neural_animals(run: &Run, world: &mut World) -> Result<usize> {
         .map_err(|e| anyhow::anyhow!("--neural: {e}"))?;
     file.check_ecology(&ecology)
         .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
+    // And the motor contract, for the same reason: a policy trained under one envelope and
+    // one price per radian is a different animal under another, and the digest says nothing
+    // about that either. The host **never sets a motor model**, so `world.motor_model()` is
+    // always the shipped `Sweep` and this check can only ever refuse an `inertial` policy —
+    // which is the point. It is the contract existing rather than a change of behaviour: no
+    // world the host builds moves because of this line. Refused by name, as `es-evaluate`
+    // and `es-population` refuse it.
+    file.check_motor(world.motor_model())
+        .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
 
     let east = cubarium_surface::Vec2::new(1.0, 0.0);
     for k in 0..run.neural_count {

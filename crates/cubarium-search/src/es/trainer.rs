@@ -34,6 +34,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
+use cubarium_core::MotorModel;
 use cubarium_core::neural::Policy;
 use serde::{Deserialize, Serialize};
 
@@ -115,6 +116,17 @@ pub struct Protocol {
     /// Absent from the JSON (and so from the hash) when it is the R2a `min`.
     #[serde(default, skip_serializing_if = "Aggregate::is_min")]
     pub aggregate: Aggregate,
+    /// The **motor contract** every episode of this protocol runs under
+    /// (`cubarium_core::MotorModel`), by name.
+    ///
+    /// Absent from the JSON — and so from the hash — when it is `sweep`, the shipped contract,
+    /// so every protocol and every checkpoint written before workstream T keeps the hash it
+    /// has always had. An `inertial` protocol is a **different task** with a different hash:
+    /// the envelope a body moves in and the price of every radian it turns are not the same,
+    /// and a policy trained under one is refused by name under the other
+    /// (`super::export::PolicyFile::check_motor`).
+    #[serde(default, skip_serializing_if = "MotorModel::is_sweep")]
+    pub motor: MotorModel,
 }
 
 impl Protocol {
@@ -123,6 +135,19 @@ impl Protocol {
     pub fn with_aggregate(mut self, aggregate: Aggregate) -> Protocol {
         self.aggregate = aggregate;
         self
+    }
+
+    /// The motor contract a layout set shares. One set, one contract — a set that mixes them
+    /// is a programming error, not a task, exactly as a set that mixes ecologies is.
+    fn motor_of(layouts: &[Layout]) -> MotorModel {
+        let Some(first) = layouts.first() else {
+            return MotorModel::default();
+        };
+        assert!(
+            layouts.iter().all(|l| l.motor == first.motor),
+            "a protocol's layouts must all run one motor contract"
+        );
+        first.motor
     }
 
     /// The ecology a layout set shares. Every layout in one set is built on one configuration;
@@ -158,6 +183,7 @@ impl Protocol {
             policy_digest: cubarium_core::neural::schema_digest(),
             init: tensor::init_description(),
             aggregate: Aggregate::Min,
+            motor: Protocol::motor_of(layouts),
         }
     }
 

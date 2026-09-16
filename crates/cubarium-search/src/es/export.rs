@@ -10,6 +10,7 @@
 //! weights, and an animal's lifetime `hidden`/`held`/`feedback` is the world's, created fresh
 //! at attachment. A checkpoint resumes training; an export runs a body.
 
+use cubarium_core::MotorModel;
 use cubarium_core::neural::Policy;
 use serde::{Deserialize, Serialize};
 
@@ -32,6 +33,26 @@ pub struct PolicyFile {
     pub config: Option<String>,
     #[serde(default)]
     pub config_hash: Option<u64>,
+    /// The **motor contract** the weights were trained under, by name
+    /// (`cubarium_core::MotorModel`).
+    ///
+    /// `None` in a file written before the switch existed, and — unlike `config` — that is
+    /// *not* "unknown". There was exactly one motor contract in this workspace until
+    /// workstream T, so a file with no motor reads as `sweep`, which is what it in fact ran.
+    /// [`PolicyFile::check_motor`] refuses a mismatch by name.
+    ///
+    /// **There is deliberately no sibling field for the pursuit stopping rule**
+    /// (`cubarium_core::hunter::PursuitStop`), and none should be added while the fixtures stay
+    /// as they are. Every training and held-out layout clears `founders` and places exactly one
+    /// grazer (`super::fixture::Layout::config`, `Layout::place`), so no episode world holds a
+    /// hunter, the hunt-intent pass the rule lives in is never reached, and **a trained policy
+    /// is predicate-independent**: the same weights score identically under either rule. A
+    /// field here would move every protocol hash and every policy's contract for something no
+    /// episode can observe, so `es-evaluate` does not offer the switch either
+    /// (`design/7_Research/ecology-v1-predicate-adoption-2026-09-16.md`). A layout that ever
+    /// *does* found a hunter changes that argument and not before.
+    #[serde(default)]
+    pub motor: Option<String>,
     pub generation: u64,
     pub parameters: usize,
     /// Exact weights in [`super::tensor`]'s flatten order.
@@ -47,6 +68,7 @@ impl PolicyFile {
         generation: u64,
         config: &str,
         config_hash: u64,
+        motor: MotorModel,
     ) -> Result<PolicyFile, String> {
         // Refuse to export something the core would not accept.
         tensor::policy(theta)?;
@@ -57,6 +79,7 @@ impl PolicyFile {
             protocol_hash,
             config: Some(config.to_string()),
             config_hash: Some(config_hash),
+            motor: Some(motor.name().to_string()),
             generation,
             parameters: theta.len(),
             theta: theta.to_vec(),
@@ -94,6 +117,30 @@ impl PolicyFile {
         }
     }
 
+    /// Refuse, **by name**, a policy that was not trained under the motor contract it is about
+    /// to be evaluated under.
+    ///
+    /// The contract decides the envelope a body moves in and the price of every radian it
+    /// turns. A forager trained where a pivot costs half the outer point's sweep and one
+    /// trained where it costs a disc's `r·ω/√2` out of a quadrature envelope are the same
+    /// 10,215 numbers and a different animal, and comparing their scores across that change
+    /// compares two tasks.
+    ///
+    /// A file that records no motor at all is read as `sweep`: there was one contract when it
+    /// was written, and that is a fact about the workspace, not an assumption about the file.
+    pub fn check_motor(&self, motor: MotorModel) -> Result<(), String> {
+        let trained = self.motor.as_deref().unwrap_or(MotorModel::Sweep.name());
+        if trained == motor.name() {
+            return Ok(());
+        }
+        Err(format!(
+            "policy file was trained under the {trained} motor contract, this evaluation is \
+             {}: the movement envelope and the price of turning differ and the two scores are \
+             not the same task",
+            motor.name()
+        ))
+    }
+
     /// The policy, rebuilt exactly.
     ///
     /// The **compatibility digest is checked first**. `tensor::policy` stamps whatever it
@@ -129,7 +176,7 @@ mod tests {
     #[test]
     fn an_exported_policy_round_trips_weight_for_weight_and_the_core_runs_it() {
         let theta = tensor::initial_center(20_260_915);
-        let file = PolicyFile::new(&theta, "test", 0xdead_beef, 3, "default", 0xc0ffee).expect("exportable");
+        let file = PolicyFile::new(&theta, "test", 0xdead_beef, 3, "default", 0xc0ffee, MotorModel::Sweep).expect("exportable");
         let json = serde_json::to_string(&file).expect("write");
         let back: PolicyFile = serde_json::from_str(&json).expect("read");
         assert_eq!(back, file);
@@ -156,11 +203,11 @@ mod tests {
     #[test]
     fn a_foreign_schema_or_a_mismatched_count_is_refused() {
         let theta = tensor::initial_center(1);
-        let mut file = PolicyFile::new(&theta, "test", 0, 0, "default", 0xc0ffee).expect("exportable");
+        let mut file = PolicyFile::new(&theta, "test", 0, 0, "default", 0xc0ffee, MotorModel::Sweep).expect("exportable");
         file.schema = "something-else".into();
         assert!(file.policy().is_err());
 
-        let mut file = PolicyFile::new(&theta, "test", 0, 0, "default", 0xc0ffee).expect("exportable");
+        let mut file = PolicyFile::new(&theta, "test", 0, 0, "default", 0xc0ffee, MotorModel::Sweep).expect("exportable");
         file.parameters = 7;
         assert!(file.policy().is_err());
     }
@@ -171,7 +218,7 @@ mod tests {
     #[test]
     fn a_foreign_compatibility_digest_is_refused_by_name() {
         let theta = tensor::initial_center(1);
-        let mut file = PolicyFile::new(&theta, "test", 0, 0, "default", 0xc0ffee).expect("exportable");
+        let mut file = PolicyFile::new(&theta, "test", 0, 0, "default", 0xc0ffee, MotorModel::Sweep).expect("exportable");
         assert!(file.policy().is_ok(), "this build's own digest is accepted");
 
         file.policy_digest ^= 1;
@@ -202,7 +249,7 @@ mod tests {
         let elsewhere = Ecology::defaults();
 
         let theta = tensor::initial_center(1);
-        let file = PolicyFile::new(&theta, "test", 0, 0, &here.label, here.hash)
+        let file = PolicyFile::new(&theta, "test", 0, 0, &here.label, here.hash, MotorModel::Sweep)
             .expect("exportable");
         file.check_ecology(&here).expect("its own ecology is accepted");
 

@@ -6,6 +6,18 @@ decision_refs: []
 
 # Ecology v1 — the movement-cost arm and the variety census
 
+> **Erratum (2026-09-16, after workstream M).** The depletion and recovery
+> crossings counted in this note at every price are correct as counts, but the
+> control-price crossings are not grazing: workstream M
+> ([ecology-v1-plant-budget-2026-09-16.md](ecology-v1-plant-budget-2026-09-16.md))
+> found zero exact consumer withdrawal at any of the 73 present-arm crossing
+> cells and a negative plant budget there, and the same cells cross earlier
+> with no animals. Whether the *raised-price* crossings (4–31× more) are
+> grazing was not measured with exact withdrawal and should not be assumed
+> either way. Also corrected after review: the glider bred at `fast-leaf`
+> 0.0018; recovery is rare, not absent; the skimmer result is an association
+> (see the corrections inline and workstreams J and O).
+
 Workstream F, under
 [the movement brief](../handoffs/ecology-v1-movement-opus-2026-09-16.md): steps 3
 and 4 of the reconciled next steps in
