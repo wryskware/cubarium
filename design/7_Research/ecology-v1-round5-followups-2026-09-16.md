@@ -775,7 +775,7 @@ wrote it, so no rerun was added.
 | fast-leaf | 0.55 | 1.5 | 3.5 | 1.8 | **2.0** | 8.8 | 168.8 |
 | fast-leaf | 0.75 | 1.3 | 2.8 | 2.0 | **3.5** | 9.7 | 168.0 |
 
-**Predation is 2–6 % of all prey deaths in every cell** (2.5–9.7 of 152–169), and it is not
+**Predation is under 6 % of all prey deaths in every cell** (2.5–9.7 of 152–169, i.e. 1.6–5.8 %), and it is not
 where the burrower went: the burrower loses 1.7–3.8 bodies to predation across a run in which
 its whole lineage disappears. **So the mechanism by which the apex arm empties the burrower
 remains unresolved**, and this campaign does not add a run to resolve it. What the cross-tab
@@ -833,7 +833,7 @@ with the arm changed, and three are this campaign's own:
   apart. An arm-0 ratio and an arm-2 ratio are compared as two measurements and never
   differenced.
 - **The mechanism behind the predicate's effect on the lineage is not resolved.** Predation is
-  2–6 % of prey deaths in every cell; that the shipped rule halves the 0.55 lineage while
+  under 6 % of prey deaths in every cell; that the shipped rule halves the 0.55 lineage while
   moving a handful of deaths per run is consistent with several stories and this campaign
   tests none of them. No rerun is added for it.
 - **Six rungs, six training seeds, one horizon, one arm.** No held-out seed was touched and
