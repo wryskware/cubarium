@@ -93,7 +93,12 @@ impl CareEffects {
             || command.seq != receipt.seq
             || command.apply_after_tick != receipt.tick
             || receipt.tick < self.latest_boundary
-            || command.target.resolve().is_none()
+            // FW-2 mechanical follow-through: the host is cube-only until FW-4 widens the
+            // care chain, so it names the cube explicitly rather than silently assuming it.
+            || command
+                .target
+                .resolve(Topology::Cube, cubarium_surface::Scale::ONE)
+                .is_none()
         {
             return;
         }

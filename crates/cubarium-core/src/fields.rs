@@ -10,7 +10,7 @@
 use cubarium_surface::{Scale, Topology};
 use serde::{Deserialize, Serialize};
 
-use cubarium_surface::{CUBE_CELL_COUNT, CellId, FieldGraph, ScalarField, diffuse};
+use cubarium_surface::{CellId, FieldGraph, ScalarField, diffuse};
 
 use crate::DT;
 use crate::config::WorldConfig;
@@ -23,19 +23,17 @@ pub struct Fields {
     pub p: Vec<f64>,
     pub d: Vec<f64>,
     pub de: Vec<f64>,
-    /// Fruit `F` (m) per cell (`design/fauna-v2.md` "Fruit"); a serialized state without
-    /// it loads fruitless.
-    #[serde(default = "dry")]
+    /// Fruit `F` (m) per cell (`design/fauna-v2.md` "Fruit").
     pub f: Vec<f64>,
-    /// Surface water depth `w` (d), not material (`design/water.md`). A serialized state
-    /// without it loads dry.
-    #[serde(default = "dry")]
+    /// Surface water depth `w` (d), not material (`design/water.md`).
     pub w: Vec<f64>,
 }
 
-/// A dry surface: the default for `Fields::w` when a serialized state lacks it.
-fn dry() -> Vec<f64> {
-    vec![0.0; CUBE_CELL_COUNT]
+/// A zeroed per-cell vector of this world's length. The cell count is a runtime property of
+/// the topology and scale (`design/flat-world-plan-2026-09-16.md` §2), so nothing here may
+/// reach for a constant; every caller passes the length it was given.
+fn dry(cells: usize) -> Vec<f64> {
+    vec![0.0; cells]
 }
 
 /// `Q_0` as a fraction of `Q_max` in a cell that starts alive
@@ -71,15 +69,16 @@ pub struct EcologyV1State {
     pub recolonisations_total: u64,
 }
 
-impl Default for EcologyV1State {
-    /// Every pool empty and correctly sized: a bare, wood-free surface.
-    fn default() -> Self {
+impl EcologyV1State {
+    /// Every pool empty and sized for `cells` cells: a bare, wood-free surface. Replaces the
+    /// former `Default`, which could only have been right for one topology.
+    pub fn empty(cells: usize) -> EcologyV1State {
         EcologyV1State {
-            wood: dry(),
-            plant_reserve: dry(),
-            dead_wood: dry(),
-            carrion: dry(),
-            carrion_energy: dry(),
+            wood: dry(cells),
+            plant_reserve: dry(cells),
+            dead_wood: dry(cells),
+            carrion: dry(cells),
+            carrion_energy: dry(cells),
             plant_deaths_total: 0,
             recolonisations_total: 0,
         }
@@ -129,12 +128,10 @@ pub fn initial_wood(cfg: &WorldConfig, light0: f64, moisture0: f64) -> f64 {
 impl EcologyV1State {
     /// Initial pools per §11: `W_0` from [`initial_wood`], `Q_0 = 0.5 · q_cap · W_0` in the
     /// cells that start alive, no dead wood and no remains.
-    pub fn new(
-        cfg: &WorldConfig,
-        light0: &[f64; CUBE_CELL_COUNT],
-        moisture0: &[f64; CUBE_CELL_COUNT],
-    ) -> EcologyV1State {
-        let wood: Vec<f64> = (0..CUBE_CELL_COUNT)
+    pub fn new(cfg: &WorldConfig, light0: &[f64], moisture0: &[f64]) -> EcologyV1State {
+        let cells = light0.len();
+        debug_assert_eq!(moisture0.len(), cells);
+        let wood: Vec<f64> = (0..cells)
             .map(|i| initial_wood(cfg, light0[i], moisture0[i]))
             .collect();
         let plant_reserve = wood
@@ -144,11 +141,7 @@ impl EcologyV1State {
         EcologyV1State {
             wood,
             plant_reserve,
-            dead_wood: dry(),
-            carrion: dry(),
-            carrion_energy: dry(),
-            plant_deaths_total: 0,
-            recolonisations_total: 0,
+            ..EcologyV1State::empty(cells)
         }
     }
 
@@ -170,8 +163,12 @@ impl EcologyV1State {
             + self.carrion_energy.iter().sum::<f64>()
     }
 
-    /// Finite, nonnegative, correctly sized, and `Ce ≤ e_c_max · C`.
+    /// Finite, nonnegative, uniformly sized, and `Ce ≤ e_c_max · C`.
+    ///
+    /// "Correctly sized" is [`crate::world::WorldState::validate`]'s job, because only the
+    /// world knows its topology; here every pool must simply agree with `wood`.
     pub fn check(&self, carrion_energy_cap: f64) -> Result<(), String> {
+        let cells = self.wood.len();
         for (name, v) in [
             ("wood", &self.wood),
             ("plant_reserve", &self.plant_reserve),
@@ -179,8 +176,8 @@ impl EcologyV1State {
             ("carrion", &self.carrion),
             ("carrion_energy", &self.carrion_energy),
         ] {
-            if v.len() != CUBE_CELL_COUNT {
-                return Err(format!("{name} has {} cells, expected {CUBE_CELL_COUNT}", v.len()));
+            if v.len() != cells {
+                return Err(format!("{name} has {} cells, expected {cells}", v.len()));
             }
             for (i, &x) in v.iter().enumerate() {
                 if !x.is_finite() {
@@ -191,7 +188,7 @@ impl EcologyV1State {
                 }
             }
         }
-        for i in 0..CUBE_CELL_COUNT {
+        for i in 0..cells {
             let cap = carrion_energy_cap * self.carrion[i] + 1e-9;
             if self.carrion_energy[i] > cap {
                 return Err(format!(
@@ -224,18 +221,19 @@ pub struct EcoScratch {
     incoming: Vec<f64>,
 }
 
-impl Default for EcoScratch {
-    fn default() -> Self {
+impl EcoScratch {
+    /// Working storage for a world of `cells` cells.
+    pub fn new(cells: usize) -> EcoScratch {
         EcoScratch {
-            pre_d: dry(),
-            pre_c: dry(),
-            d5: dry(),
-            de5: dry(),
-            c5: dry(),
-            ce5: dry(),
-            class: vec![CellClass::Bare; CUBE_CELL_COUNT],
-            budget: dry(),
-            incoming: dry(),
+            pre_d: dry(cells),
+            pre_c: dry(cells),
+            d5: dry(cells),
+            de5: dry(cells),
+            c5: dry(cells),
+            ce5: dry(cells),
+            class: vec![CellClass::Bare; cells],
+            budget: dry(cells),
+            incoming: dry(cells),
         }
     }
 }
@@ -273,8 +271,10 @@ impl Fields {
     ///
     /// The wood those cells start with is [`EcologyV1State::new`]'s; both read
     /// [`initial_wood`], so a cell has foliage exactly when it has a stand to carry it.
-    pub fn new(cfg: &WorldConfig, light0: &[f64; CUBE_CELL_COUNT], moisture0: &[f64; CUBE_CELL_COUNT]) -> Fields {
-        let p = (0..CUBE_CELL_COUNT)
+    pub fn new(cfg: &WorldConfig, light0: &[f64], moisture0: &[f64]) -> Fields {
+        let cells = light0.len();
+        debug_assert_eq!(moisture0.len(), cells);
+        let p = (0..cells)
             .map(|i| {
                 let w0 = initial_wood(cfg, light0[i], moisture0[i]);
                 if w0 <= 0.0 {
@@ -284,17 +284,17 @@ impl Fields {
                 cfg.producer.initial_fraction * p_cap
             })
             .collect();
-        let d: Vec<f64> = (0..CUBE_CELL_COUNT)
+        let d: Vec<f64> = (0..cells)
             .map(|i| cfg.detritus.initial_dark * (1.0 - light0[i].clamp(0.0, 1.0)))
             .collect();
         let de = d.iter().map(|d| cfg.detritus.energy_cap * d).collect();
         Fields {
-            n: vec![cfg.nutrient.initial; CUBE_CELL_COUNT],
+            n: vec![cfg.nutrient.initial; cells],
             p,
             d,
             de,
-            f: dry(),
-            w: dry(),
+            f: dry(cells),
+            w: dry(cells),
         }
     }
 
@@ -342,13 +342,16 @@ impl Fields {
         &mut self,
         eco: &mut EcologyV1State,
         cfg: &WorldConfig,
-        light: &[f64; CUBE_CELL_COUNT],
-        moisture: &[f64; CUBE_CELL_COUNT],
+        light: &[f64],
+        moisture: &[f64],
         graph: &FieldGraph,
         scratch: &mut (ScalarField, ScalarField),
         work: &mut EcoScratch,
     ) -> FieldLedger {
-        debug_assert_eq!(self.n.len(), CUBE_CELL_COUNT);
+        let cells = graph.cell_count();
+        debug_assert_eq!(self.n.len(), cells);
+        debug_assert_eq!(light.len(), cells);
+        debug_assert_eq!(moisture.len(), cells);
         let mut ledger = FieldLedger::default();
         let pc = &cfg.producer;
         let pl = &cfg.plant;
@@ -360,7 +363,7 @@ impl Fields {
         let e_d_max = dc.energy_cap;
         let build = 1.0 + pl.build;
 
-        for i in 0..CUBE_CELL_COUNT {
+        for i in 0..cells {
             // Every delta below is a function of this cell's pre-tick values and of what an
             // earlier subphase wrote *in this same cell*, exactly as the §4.0 table allows.
             let n0 = self.n[i];
@@ -683,7 +686,7 @@ impl Fields {
                     pl.propagule_split[1],
                     pl.propagule_split[2],
                 );
-                for i in 0..CUBE_CELL_COUNT {
+                for i in 0..cells {
                     let s = work.incoming[i];
                     if s <= 0.0 {
                         continue;
@@ -708,12 +711,13 @@ impl Fields {
     /// Debug/telemetry check: finite and nonnegative everywhere, `De ≤ e_d_max · D + 1e-9`,
     /// water finite and nonnegative.
     pub fn check(&self, energy_cap: f64) -> Result<(), String> {
-        crate::water::check(&self.w)?;
+        let cells = self.n.len();
+        crate::water::check(&self.w, cells)?;
         for (name, v) in
             [("N", &self.n), ("P", &self.p), ("D", &self.d), ("De", &self.de), ("F", &self.f)]
         {
-            if v.len() != CUBE_CELL_COUNT {
-                return Err(format!("{name} has {} cells, expected {CUBE_CELL_COUNT}", v.len()));
+            if v.len() != cells {
+                return Err(format!("{name} has {} cells, expected {cells}", v.len()));
             }
             for (i, &x) in v.iter().enumerate() {
                 if !x.is_finite() {
@@ -724,7 +728,7 @@ impl Fields {
                 }
             }
         }
-        for i in 0..CUBE_CELL_COUNT {
+        for i in 0..cells {
             let cap = energy_cap * self.d[i] + 1e-9;
             if self.de[i] > cap {
                 return Err(format!(
@@ -768,11 +772,12 @@ pub fn water_factors(w: f64, moisture: f64, cfg: &WorldConfig) -> (f64, f64) {
 mod tests {
     use super::*;
     use crate::habitat::Habitat;
+    use cubarium_surface::CUBE_CELL_COUNT;
 
     struct Harness {
         cfg: WorldConfig,
-        light: Box<[f64; CUBE_CELL_COUNT]>,
-        moisture: Box<[f64; CUBE_CELL_COUNT]>,
+        light: Box<[f64]>,
+        moisture: Box<[f64]>,
         graph: FieldGraph,
         scratch: (ScalarField, ScalarField),
         work: EcoScratch,
@@ -797,7 +802,7 @@ mod tests {
             cfg.plant.reserve_cap = 0.0;
             cfg.plant.propagule_rate = 0.0;
             cfg.plant.foliage_rate = 1e6;
-            let habitat = Habitat::new(&cfg.habitat, cfg.seed);
+            let habitat = Habitat::new(&cfg.habitat, cfg.seed, Topology::Cube, Scale::ONE);
             let mut eco = EcologyV1State::new(&cfg, &habitat.light_base, &habitat.moisture_base);
             eco.wood.iter_mut().for_each(|w| *w = 1.0);
             eco.plant_reserve.iter_mut().for_each(|q| *q = 0.0);
@@ -807,7 +812,7 @@ mod tests {
                 moisture: habitat.moisture_base.clone(),
                 graph: FieldGraph::new(Topology::Cube, Scale::ONE),
                 scratch: (ScalarField::zeros(Topology::Cube, Scale::ONE), ScalarField::zeros(Topology::Cube, Scale::ONE)),
-                work: EcoScratch::default(),
+                work: EcoScratch::new(CUBE_CELL_COUNT),
                 eco,
             }
         }
@@ -894,7 +899,7 @@ mod tests {
     #[test]
     fn initial_fields_follow_the_contract() {
         let cfg = WorldConfig::default();
-        let habitat = Habitat::new(&cfg.habitat, cfg.seed);
+        let habitat = Habitat::new(&cfg.habitat, cfg.seed, Topology::Cube, Scale::ONE);
         let f = Fields::new(&cfg, &habitat.light_base, &habitat.moisture_base);
         let eco = EcologyV1State::new(&cfg, &habitat.light_base, &habitat.moisture_base);
         assert_eq!(f.n.len(), CUBE_CELL_COUNT);
@@ -934,8 +939,8 @@ mod tests {
     fn the_initial_litter_lies_where_it_is_dark() {
         let cfg = WorldConfig::default();
         assert_eq!(cfg.detritus.initial_dark, 1.2);
-        let mut light = Box::new([0.0f64; CUBE_CELL_COUNT]);
-        let moisture = Box::new([1.0f64; CUBE_CELL_COUNT]);
+        let mut light: Box<[f64]> = vec![0.0f64; CUBE_CELL_COUNT].into_boxed_slice();
+        let moisture: Box<[f64]> = vec![1.0f64; CUBE_CELL_COUNT].into_boxed_slice();
         light[0] = 1.0;
         light[1] = 0.0;
         light[2] = 0.25;

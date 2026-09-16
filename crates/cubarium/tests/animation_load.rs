@@ -43,6 +43,8 @@ fn transition_draw_cost_at(
     what: &str,
 ) {
     let mut view = RenderView {
+        topology: cubarium_surface::Topology::Cube,
+        scale: cubarium_surface::Scale::ONE,
         tick: 121, // Six simulated seconds: inside a gust, not its quiet interval.
         producer: vec![
             if growing { 0.0 } else { fullness * WOOD_MAX };

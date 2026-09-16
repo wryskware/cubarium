@@ -1,4 +1,3 @@
-use cubarium_surface::{Scale, Topology};
 use std::f64::consts::TAU;
 
 use cubarium_surface::{Vec2, cell_of};
@@ -109,7 +108,7 @@ impl World {
             return Err("the hunter extension is already initialized".into());
         }
         let founder = self.derive_hunter_founder(&profile)?;
-        let Some(pos) = target.resolve() else {
+        let Some(pos) = target.resolve(self.topology()) else {
             return Err(format!(
                 "hunter founder target {target:?} is not on the surface"
             ));
@@ -217,7 +216,7 @@ impl World {
         let positions = targets
             .iter()
             .map(|target| {
-                target.resolve().ok_or_else(|| {
+                target.resolve(self.topology()).ok_or_else(|| {
                     format!("hunter founder target {target:?} is not on the surface")
                 })
             })
@@ -330,13 +329,13 @@ impl World {
             return Err("this world already holds a budget-matched control deposit".into());
         }
         let founder = self.derive_hunter_founder(&profile)?;
-        let Some(pos) = target.resolve() else {
+        let Some(pos) = target.resolve(self.topology()) else {
             return Err(format!(
                 "hunter control target {target:?} is not on the surface"
             ));
         };
 
-        let cell = cell_of(Topology::Cube, Scale::ONE, &pos);
+        let cell = cell_of(self.topology(), self.scale(), &pos);
         let at = cell.index();
         let cap = self.state.config.detritus.energy_cap;
         let material = founder.material_in;
@@ -425,6 +424,7 @@ impl World {
         let Some(profile) = self.state.hunters.profile() else {
             return Vec::new();
         };
+        let topo = self.topology();
         let gestation_ticks = ticks_from_seconds(profile.gestation_seconds, DT);
         let tick = self.state.tick;
         self.state
@@ -452,12 +452,14 @@ impl World {
                     geometry,
                     body_scale: geometry.scale,
                     capture_center: hunter::body_point(
+                        topo,
                         &self.images,
                         o.pos,
                         o.heading,
                         geometry.capture_offset_body,
                     ),
                     ingestion_center: hunter::body_point(
+                        topo,
                         &self.images,
                         o.pos,
                         o.heading,

@@ -3,7 +3,7 @@
 use cubarium_surface::{Scale, Topology};
 use serde::{Deserialize, Serialize};
 
-use cubarium_surface::{CUBE_CELL_COUNT, CellId};
+use cubarium_surface::CellId;
 
 use crate::config::{HabitatConfig, WeatherConfig};
 use crate::rng::{Stream, unit};
@@ -22,16 +22,21 @@ const MOISTURE_NOISE_SHIFT: [f64; 3] = [0.37, 0.11, 0.23];
 const BASIN_NOISE_SHIFT: [f64; 3] = [0.53, 0.29, 0.71];
 
 /// Per-cell static base light and moisture, computed once from the seed.
+///
+/// Every array is `topology.cell_count(scale)` long — runtime, not a constant, because a ring
+/// has as many cells as its raster and scale decide.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Habitat {
-    pub light_base: Box<[f64; CUBE_CELL_COUNT]>,
-    pub moisture_base: Box<[f64; CUBE_CELL_COUNT]>,
-    /// Cell-center unit-cube positions, cached for weather sampling.
-    pub positions: Box<[[f64; 3]; CUBE_CELL_COUNT]>,
-    /// Terrain height for standing water: `z = h + basin_gain · n_b(p + (0.53, 0.29, 0.71))`
-    /// with `h = p.y` (Top = 1, rim = −1). Hollows a fraction of a cell deep, so the level
-    /// top face and the bottom row of the sides have places for pools (`design/water.md`).
-    pub terrain: Box<[f64; CUBE_CELL_COUNT]>,
+    pub light_base: Box<[f64]>,
+    pub moisture_base: Box<[f64]>,
+    /// Cell-center embedded positions, cached for weather sampling: the unit cube on a cube,
+    /// the isotropic cylinder on a ring (`design/flat-world-plan-2026-09-16.md` §5a).
+    pub positions: Box<[[f64; 3]]>,
+    /// Terrain height for standing water: `z = h + basin_gain · n_b(embed + (0.53, 0.29, 0.71))`
+    /// with `h = Topology::height` (top of the world 1, bottom −1). Hollows a fraction of a
+    /// cell deep, so the level top face and the bottom row have places for pools
+    /// (`design/water.md`).
+    pub terrain: Box<[f64]>,
 }
 
 /// One cosine wave of the patch noise.
@@ -49,7 +54,8 @@ impl Habitat {
     /// basins at `p + (0.53, 0.29, 0.71)`.
     /// `L₀ = clamp(light_base + light_height_gain · y + light_noise_gain · n, 0, 1)`,
     /// `W₀ = clamp(moisture_base + moisture_height_gain · y + moisture_noise_gain · n', moisture_min, 1)`.
-    pub fn new(cfg: &HabitatConfig, seed: u64) -> Habitat {
+    pub fn new(cfg: &HabitatConfig, seed: u64, topo: Topology, scale: Scale) -> Habitat {
+        let count = topo.cell_count(scale);
         let waves: Vec<Wave> = (0..u64::from(cfg.noise_waves))
             .map(|i| {
                 let dir = sphere_direction(seed, Stream::Habitat, i, 0);
@@ -76,12 +82,16 @@ impl Habitat {
             sum / waves.len() as f64
         };
 
-        let mut light_base = Box::new([0.0f64; CUBE_CELL_COUNT]);
-        let mut moisture_base = Box::new([0.0f64; CUBE_CELL_COUNT]);
-        let mut positions = Box::new([[0.0f64; 3]; CUBE_CELL_COUNT]);
-        let mut terrain = Box::new([0.0f64; CUBE_CELL_COUNT]);
-        for cell in CellId::all(Topology::Cube, Scale::ONE) {
-            let p = Topology::Cube.embed(Scale::ONE, &cell.center(Topology::Cube, Scale::ONE));
+        let mut light_base: Box<[f64]> = vec![0.0f64; count].into_boxed_slice();
+        let mut moisture_base: Box<[f64]> = vec![0.0f64; count].into_boxed_slice();
+        let mut positions: Box<[[f64; 3]]> = vec![[0.0f64; 3]; count].into_boxed_slice();
+        let mut terrain: Box<[f64]> = vec![0.0f64; count].into_boxed_slice();
+        for cell in CellId::all(topo, scale) {
+            let center = cell.center(topo, scale);
+            // `embed` is *position* — what the spatially coherent noise is sampled at — and
+            // `height` is the scalar the stratified design reads. They are the same number on
+            // the cube and deliberately different on a ring (plan §5a).
+            let p = topo.embed(scale, &center);
             let shifted = [
                 p[0] + MOISTURE_NOISE_SHIFT[0],
                 p[1] + MOISTURE_NOISE_SHIFT[1],
@@ -92,7 +102,7 @@ impl Habitat {
                 p[1] + BASIN_NOISE_SHIFT[1],
                 p[2] + BASIN_NOISE_SHIFT[2],
             ];
-            let y = p[1];
+            let y = topo.height(&center);
             let l = cfg.light_base + cfg.light_height_gain * y + cfg.light_noise_gain * noise(p);
             let w = cfg.moisture_base
                 + cfg.moisture_height_gain * y
@@ -202,20 +212,29 @@ impl Weather {
     /// `B_c = Σ amp · cap(…)` over the moisture blobs, before the static habitat is added
     /// and before clamping: rain (`design/water.md`) is driven by the moving showers, not
     /// by how wet the ground already is.
+    ///
+    /// **Unchanged by the ring** (`design/flat-world-plan-2026-09-16.md` §5a): the blob model
+    /// lives on the unit sphere after `normalize_or`, and the cylinder embedding preserves
+    /// azimuth and maps height monotonically to latitude, so `Weather::new`, `advance` and
+    /// this function run verbatim on either world and consume exactly the same draws.
     pub fn sample(
         &self,
         cfg: &WeatherConfig,
         habitat: &Habitat,
-        light: &mut [f64; CUBE_CELL_COUNT],
-        moisture: &mut [f64; CUBE_CELL_COUNT],
-        rain_source: &mut [f64; CUBE_CELL_COUNT],
+        light: &mut [f64],
+        moisture: &mut [f64],
+        rain_source: &mut [f64],
         moisture_min: f64,
     ) {
         let radius = cfg.blob_radius_deg.to_radians();
-        // Hoisted out of the 1280-cell loop: `cap` needs `cos(radius)` to reject a cell
+        // Hoisted out of the per-cell loop: `cap` needs `cos(radius)` to reject a cell
         // without an `acos`, and the radius is fixed for the whole sample.
         let cos_radius = radius.cos();
-        for i in 0..CUBE_CELL_COUNT {
+        let count = habitat.positions.len();
+        debug_assert_eq!(light.len(), count);
+        debug_assert_eq!(moisture.len(), count);
+        debug_assert_eq!(rain_source.len(), count);
+        for i in 0..count {
             let dir = normalize_or(habitat.positions[i], [0.0, 1.0, 0.0]);
             let sum = |blobs: &[Blob]| -> f64 {
                 blobs.iter().map(|b| cfg.amplitude * cap(dot(b.center, dir), radius, cos_radius)).sum()
@@ -315,6 +334,7 @@ mod tests {
     use super::*;
     use crate::config::WorldConfig;
     use cubarium_surface::FieldGraph;
+    use cubarium_surface::{CUBE_CELL_COUNT, Scale, Topology};
 
     fn norm(v: [f64; 3]) -> f64 {
         dot(v, v).sqrt()
@@ -324,7 +344,7 @@ mod tests {
     fn habitat_values_stay_inside_their_bounds() {
         let cfg = WorldConfig::default().habitat;
         for seed in [1u64, 2, 7, 12345] {
-            let h = Habitat::new(&cfg, seed);
+            let h = Habitat::new(&cfg, seed, Topology::Cube, Scale::ONE);
             for i in 0..CUBE_CELL_COUNT {
                 assert!((0.0..=1.0).contains(&h.light_base[i]), "light {}", h.light_base[i]);
                 assert!(
@@ -342,8 +362,8 @@ mod tests {
     #[test]
     fn habitat_is_deterministic_and_seed_dependent() {
         let cfg = WorldConfig::default().habitat;
-        assert_eq!(Habitat::new(&cfg, 4), Habitat::new(&cfg, 4));
-        assert_ne!(Habitat::new(&cfg, 4).light_base, Habitat::new(&cfg, 5).light_base);
+        assert_eq!(Habitat::new(&cfg, 4, Topology::Cube, Scale::ONE), Habitat::new(&cfg, 4, Topology::Cube, Scale::ONE));
+        assert_ne!(Habitat::new(&cfg, 4, Topology::Cube, Scale::ONE).light_base, Habitat::new(&cfg, 5, Topology::Cube, Scale::ONE).light_base);
     }
 
     /// Across each of the eight seams a neighboring pair of cells must not be more
@@ -354,7 +374,7 @@ mod tests {
         let cfg = WorldConfig::default().habitat;
         let graph = FieldGraph::new(Topology::Cube, Scale::ONE);
         for seed in [1u64, 2, 3, 99] {
-            let h = Habitat::new(&cfg, seed);
+            let h = Habitat::new(&cfg, seed, Topology::Cube, Scale::ONE);
             let mut worst_seam = 0.0f64;
             let mut worst_inner = 0.0f64;
             let mut seams_seen = std::collections::HashSet::new();
@@ -469,11 +489,11 @@ mod tests {
     #[test]
     fn sample_is_bounded_and_reduces_to_the_base_without_amplitude() {
         let world = WorldConfig::default();
-        let habitat = Habitat::new(&world.habitat, 5);
+        let habitat = Habitat::new(&world.habitat, 5, Topology::Cube, Scale::ONE);
         let weather = Weather::new(&world.weather, 5);
-        let mut light = Box::new([0.0f64; CUBE_CELL_COUNT]);
-        let mut moisture = Box::new([0.0f64; CUBE_CELL_COUNT]);
-        let mut source = Box::new([0.0f64; CUBE_CELL_COUNT]);
+        let mut light = vec![0.0f64; CUBE_CELL_COUNT];
+        let mut moisture = vec![0.0f64; CUBE_CELL_COUNT];
+        let mut source = vec![0.0f64; CUBE_CELL_COUNT];
 
         let flat = WeatherConfig { amplitude: 0.0, ..world.weather.clone() };
         weather.sample(&flat, &habitat, &mut light, &mut moisture, &mut source, world.habitat.moisture_min);
@@ -592,7 +612,7 @@ mod tests {
     fn terrain_is_the_height_with_shallow_basins() {
         use cube_proto::Face;
         let cfg = WorldConfig::default().habitat;
-        let h = Habitat::new(&cfg, 9);
+        let h = Habitat::new(&cfg, 9, Topology::Cube, Scale::ONE);
         assert!(cfg.basin_gain > 0.0, "the default has basins");
         let mut hollows = 0;
         for cell in CellId::all(Topology::Cube, Scale::ONE) {
@@ -619,7 +639,7 @@ mod tests {
             }
         }
         // No basins: the terrain is the embedded height exactly.
-        let flat = Habitat::new(&HabitatConfig { basin_gain: 0.0, ..cfg }, 9);
+        let flat = Habitat::new(&HabitatConfig { basin_gain: 0.0, ..cfg }, 9, Topology::Cube, Scale::ONE);
         for i in 0..CUBE_CELL_COUNT {
             assert_eq!(flat.terrain[i], flat.positions[i][1]);
         }

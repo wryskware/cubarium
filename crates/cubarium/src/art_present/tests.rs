@@ -31,6 +31,8 @@ fn organism(slot: u32, hue: f32, mode: Mode) -> OrganismView {
 
 fn empty_view() -> RenderView {
     RenderView {
+        topology: cubarium_surface::Topology::Cube,
+        scale: cubarium_surface::Scale::ONE,
         tick: 0,
         producer: vec![0.0; CUBE_CELL_COUNT],
         detritus: vec![0.0; CUBE_CELL_COUNT],

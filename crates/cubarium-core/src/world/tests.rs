@@ -1432,9 +1432,9 @@ fn fruit_is_conserved_material_over_a_default_run() {
 
 #[test]
 fn the_depth_term_points_up_the_side_faces_and_vanishes_on_top() {
-    assert_eq!(up_direction(Face::Top), Vec2::ZERO);
+    assert_eq!(up_direction(Topology::Cube, Face::Top), Vec2::ZERO);
     for face in [Face::Front, Face::Right, Face::Back, Face::Left] {
-        let up = up_direction(face);
+        let up = up_direction(Topology::Cube, face);
         assert!(
             (up - Vec2::new(0.0, -1.0)).length() < 1e-12,
             "{face:?}: {up:?}"

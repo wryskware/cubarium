@@ -453,6 +453,7 @@ impl CaptureAudit {
                 ensure!(
                     evidence.measure
                         == measure_contact(
+                            cubarium_surface::Topology::Cube,
                             &self.images,
                             evidence.hunter_pos,
                             evidence.hunter_heading,
@@ -465,6 +466,7 @@ impl CaptureAudit {
                 ensure!(
                     evidence.capture_center
                         == body_point(
+                            cubarium_surface::Topology::Cube,
                             &self.images,
                             evidence.hunter_pos,
                             evidence.hunter_heading,
@@ -472,6 +474,7 @@ impl CaptureAudit {
                         )
                         && evidence.ingestion_center
                             == body_point(
+                                cubarium_surface::Topology::Cube,
                                 &self.images,
                                 evidence.hunter_pos,
                                 evidence.hunter_heading,

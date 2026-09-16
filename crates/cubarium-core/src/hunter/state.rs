@@ -1,7 +1,7 @@
 use cubarium_surface::Topology;
 use serde::{Deserialize, Serialize};
 
-use cubarium_surface::{FACE_EXTENT, Face, SurfacePoint};
+use cubarium_surface::{Face, SurfacePoint};
 
 use crate::config::WorldConfig;
 use crate::ids::{OrganismId, Slots};
@@ -46,7 +46,12 @@ impl HunterRole {
 }
 
 /// Where a hunter founder or its budget-matched control deposit goes: a canonical surface
-/// point, `face` in `0..5` and `u`/`v` in `[0, 64)`.
+/// point, `face` a chart of the world's topology and `u`/`v` inside that chart's extent.
+///
+/// The bounds are the **topology's**, not the cube's 64 (`design/flat-world-plan-2026-09-16.md`
+/// §5, repair 3 finding 2): on a 320×180 ring a target at `u = 200` is on the world and a
+/// target on `Face::Top` is not. This is the core type, with `f64` coordinates; the host's
+/// `CareTarget` in `crates/cubarium/src/care/mod.rs` is a different type with the same name.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HunterTarget {
     pub face: u8,
@@ -55,17 +60,21 @@ pub struct HunterTarget {
 }
 
 impl HunterTarget {
-    /// The surface point named, or `None` when the face or the chart coordinates are out of
-    /// range. Never panics on hostile input.
-    pub fn resolve(&self) -> Option<SurfacePoint> {
+    /// The surface point named, or `None` when the chart is not one this topology has or the
+    /// coordinates are outside its extent. Never panics on hostile input.
+    pub fn resolve(&self, topo: Topology) -> Option<SurfacePoint> {
         let face = Face::from_index(self.face)?;
+        if !topo.has_chart(face) {
+            return None;
+        }
         if !self.u.is_finite() || !self.v.is_finite() {
             return None;
         }
-        if self.u < 0.0 || self.u >= FACE_EXTENT || self.v < 0.0 || self.v >= FACE_EXTENT {
+        let (ext_u, ext_v) = topo.extent(face);
+        if self.u < 0.0 || self.u >= ext_u || self.v < 0.0 || self.v >= ext_v {
             return None;
         }
-        Some(SurfacePoint::new(face, self.u, self.v).canonicalize(Topology::Cube))
+        Some(SurfacePoint::new(face, self.u, self.v).canonicalize(topo))
     }
 }
 

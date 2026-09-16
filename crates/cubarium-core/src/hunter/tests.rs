@@ -370,7 +370,7 @@ fn a_target_resolves_only_inside_the_charts() {
             u: 1.0,
             v: 2.0
         }
-        .resolve()
+        .resolve(cubarium_surface::Topology::Cube)
         .is_some()
     );
     for bad in [
@@ -395,6 +395,6 @@ fn a_target_resolves_only_inside_the_charts() {
             v: 1.0,
         },
     ] {
-        assert!(bad.resolve().is_none(), "{bad:?} resolved");
+        assert!(bad.resolve(cubarium_surface::Topology::Cube).is_none(), "{bad:?} resolved");
     }
 }

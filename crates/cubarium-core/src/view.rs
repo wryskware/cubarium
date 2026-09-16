@@ -3,7 +3,7 @@
 
 use serde::Serialize;
 
-use cubarium_surface::{PathSegment, SurfacePoint, Vec2};
+use cubarium_surface::{PathSegment, Scale, SurfacePoint, Topology, Vec2};
 
 use crate::ids::OrganismId;
 use crate::organism::Mode;
@@ -35,6 +35,13 @@ pub struct OrganismView {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RenderView {
     pub tick: u64,
+    /// The shape of the world these cells and positions belong to
+    /// (`design/flat-world-plan-2026-09-16.md` §3). A presenter reads it instead of assuming
+    /// the cube: it decides the chart count, the cell grid and where a body may be drawn.
+    pub topology: Topology,
+    /// The world scale `S` the topology was measured with. Cells are `4·S` pixels wide, and
+    /// a stamp's budget is `9·S`.
+    pub scale: Scale,
     pub producer: Vec<f64>,
     pub detritus: Vec<f64>,
     /// Fruit `F` per cell (m), `design/fauna-v2.md` "Fruit".

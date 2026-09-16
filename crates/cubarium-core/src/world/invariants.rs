@@ -1,4 +1,3 @@
-use cubarium_surface::Topology;
 use crate::organism::DeathCause;
 
 use super::*;
@@ -50,7 +49,7 @@ impl World {
         // The care ledgers and any shower's progress are runtime invariants too: catching a
         // defect here stops a checkpoint that would not load back. So are the compensated
         // energy ledgers.
-        self.state.care.validate(self.state.tick)?;
+        self.state.care.validate(self.state.tick, self.cell_count())?;
         self.state.energy_ledgers().validate()?;
         self.state
             .hunters
@@ -76,7 +75,7 @@ impl World {
             if !o.hunger_memory.is_finite() {
                 return Err(format!("{who}: hunger memory is not finite"));
             }
-            if !o.pos.is_canonical(Topology::Cube) {
+            if !o.pos.is_canonical(self.topology()) {
                 return Err(format!("{who}: position {:?} is not canonical", o.pos));
             }
             if !o.heading.is_finite() || (o.heading.length() - 1.0).abs() > HEADING_TOLERANCE {

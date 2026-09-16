@@ -1,7 +1,7 @@
 //! Chord-filtered all-pairs neighbor lists with exact local unfolding.
 
 use cubarium_surface::Topology;
-use cubarium_surface::{ChartImage, MAX_LOCAL_RADIUS, SurfacePoint, Vec2, unfold_with};
+use cubarium_surface::{ChartImage, SurfacePoint, Vec2, unfold_with};
 
 use crate::ids::OrganismId;
 
@@ -37,16 +37,24 @@ pub struct Body {
 
 /// Normative: for every unordered pair `(i, j)` with `i < j` by slot, let
 /// `reach = max(sense_i, sense_j) + extent_i + extent_j`; skip if `chord_sq > reach²`;
-/// else `unfold(Topology::Cube, pos_i, pos_j, reach)` once and, when `Some`, add `j` to `i`'s list if
+/// else `unfold(topo, pos_i, pos_j, reach)` once and, when `Some`, add `j` to `i`'s list if
 /// `distance ≤ sense_i + extent_i + extent_j` and `i` to `j`'s list if
 /// `distance ≤ sense_j + extent_i + extent_j` (the reverse `local` is
 /// `pos_j.chart() + map.inverse().apply(pos_i.chart() − local)`; unfolding is symmetric).
 /// Lists are then sorted by `(distance, id)` and truncated to `max_neighbors`, counting
-/// truncations. `images` caches `chart_images` for the five faces (index by face).
+/// truncations. `images` caches `chart_images` per chart of `topo`, indexed by
+/// [`Topology::chart_index`]: five entries on the cube, one on a ring.
 ///
 /// The three statistics accumulate across calls; the world resets them when it emits a
 /// telemetry sample.
-pub fn build(bodies: &[Body], images: &[Vec<ChartImage>; 5], max_neighbors: usize, out: &mut NeighborLists) {
+pub fn build(
+    topo: Topology,
+    bodies: &[Body],
+    images: &[Vec<ChartImage>],
+    max_neighbors: usize,
+    out: &mut NeighborLists,
+) {
+    let max_reach = topo.max_local_radius();
     let NeighborLists { lists, pairs_considered, pairs_unfolded, lists_truncated } = out;
 
     let slots = bodies.iter().map(|b| b.id.slot as usize + 1).max().unwrap_or(0);
@@ -60,13 +68,14 @@ pub fn build(bodies: &[Body], images: &[Vec<ChartImage>; 5], max_neighbors: usiz
     for (k, a) in bodies.iter().enumerate() {
         for b in &bodies[k + 1..] {
             *pairs_considered += 1;
-            // `unfold` never looks past MAX_LOCAL_RADIUS; a larger reach would panic.
-            let reach = (a.sense_radius.max(b.sense_radius) + a.extent + b.extent).min(MAX_LOCAL_RADIUS);
-            if Topology::Cube.chord_sq(&a.pos, &b.pos) > reach * reach {
+            // `unfold` never looks past the topology's local radius; a larger reach would panic.
+            let reach = (a.sense_radius.max(b.sense_radius) + a.extent + b.extent).min(max_reach);
+            if topo.chord_sq(&a.pos, &b.pos) > reach * reach {
                 continue;
             }
             *pairs_unfolded += 1;
-            let Some(u) = unfold_with(Topology::Cube, &images[a.pos.face.index()], a.pos, b.pos, reach) else {
+            let Some(u) = unfold_with(topo, &images[topo.chart_index(a.pos.face)], a.pos, b.pos, reach)
+            else {
                 continue;
             };
             let pad = a.extent + b.extent;
@@ -148,7 +157,7 @@ mod tests {
         let bodies = random_bodies(200, 0xC0FFEE);
         let bodies: Vec<Body> = bodies.into_iter().map(|b| Body { sense_radius: 8.0, ..b }).collect();
         let mut out = NeighborLists::default();
-        build(&bodies, &images(), 64, &mut out);
+        build(Topology::Cube, &bodies, &images(), 64, &mut out);
 
         for (slot, list) in out.lists.iter().enumerate() {
             for n in list {
@@ -168,7 +177,7 @@ mod tests {
     fn chord_rejection_matches_brute_force_unfolding() {
         let bodies = random_bodies(200, 0x5EED_1234);
         let mut out = NeighborLists::default();
-        build(&bodies, &images(), bodies.len(), &mut out);
+        build(Topology::Cube, &bodies, &images(), bodies.len(), &mut out);
 
         let mut expected: Vec<(u32, OrganismId)> = Vec::new();
         for (k, a) in bodies.iter().enumerate() {
@@ -203,7 +212,7 @@ mod tests {
             body(4, Face::Front, 32.0, 29.0, 8.0),
         ];
         let mut out = NeighborLists::default();
-        build(&bodies, &images(), 4, &mut out);
+        build(Topology::Cube, &bodies, &images(), 4, &mut out);
         let full: Vec<OrganismId> = out.lists[0].iter().map(|n| n.id).collect();
         assert_eq!(full, vec![id(1), id(2), id(3), id(4)]);
         for n in &out.lists[0] {
@@ -211,7 +220,7 @@ mod tests {
         }
 
         let mut out = NeighborLists::default();
-        build(&bodies, &images(), 2, &mut out);
+        build(Topology::Cube, &bodies, &images(), 2, &mut out);
         let kept: Vec<OrganismId> = out.lists[0].iter().map(|n| n.id).collect();
         assert_eq!(kept, vec![id(1), id(2)]);
         assert!(out.lists_truncated >= 1);
@@ -222,7 +231,7 @@ mod tests {
         // Two bodies 2 px apart across the Front/Right seam at u = 64.
         let bodies = vec![body(0, Face::Front, 63.0, 20.0, 8.0), body(1, Face::Right, 1.0, 20.0, 8.0)];
         let mut out = NeighborLists::default();
-        build(&bodies, &images(), 16, &mut out);
+        build(Topology::Cube, &bodies, &images(), 16, &mut out);
         assert_eq!(out.lists[0].len(), 1);
         assert_eq!(out.lists[1].len(), 1);
         assert!((out.lists[0][0].distance - 2.0).abs() < 1e-9, "{}", out.lists[0][0].distance);
@@ -236,9 +245,9 @@ mod tests {
     fn statistics_accumulate_across_calls() {
         let bodies = random_bodies(20, 7);
         let mut out = NeighborLists::default();
-        build(&bodies, &images(), 16, &mut out);
+        build(Topology::Cube, &bodies, &images(), 16, &mut out);
         let first = out.pairs_considered;
-        build(&bodies, &images(), 16, &mut out);
+        build(Topology::Cube, &bodies, &images(), 16, &mut out);
         assert_eq!(out.pairs_considered, 2 * first);
     }
 }

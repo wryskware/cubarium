@@ -38,6 +38,8 @@ fn pack() -> ArtPack {
 
 fn bare_view(tick: u64) -> RenderView {
     RenderView {
+        topology: cubarium_surface::Topology::Cube,
+        scale: cubarium_surface::Scale::ONE,
         tick,
         producer: vec![0.0; CUBE_CELL_COUNT],
         detritus: vec![0.0; CUBE_CELL_COUNT],

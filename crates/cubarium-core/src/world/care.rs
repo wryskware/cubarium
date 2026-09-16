@@ -56,7 +56,7 @@ impl World {
         if let Err(reason) = cmd.dose.validate("care dose") {
             return receipt(CareOutcome::Rejected(reason));
         }
-        let Some(center) = cmd.target.resolve() else {
+        let Some(center) = cmd.target.resolve(self.topology(), self.scale()) else {
             return receipt(CareOutcome::Rejected("invalid target".into()));
         };
         let outcome = match cmd.kind {

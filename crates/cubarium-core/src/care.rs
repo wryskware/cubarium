@@ -10,10 +10,9 @@
 //! would change the postcard shape of a nested type and defeat the schema 7 migration.
 //! Every dose below is a **total over the footprint**, never a per-cell amount.
 
-use cubarium_surface::{Scale, Topology};
 use serde::{Deserialize, Serialize};
 
-use cubarium_surface::{CUBE_CELL_COUNT, CellId, FACE_EXTENT, Face, FieldGraph, SurfacePoint, cell_of};
+use cubarium_surface::{CellId, Face, FieldGraph, Scale, SurfacePoint, Topology, cell_of};
 
 use crate::DT;
 use crate::config::WorldConfig;
@@ -146,7 +145,14 @@ impl CareKind {
     }
 }
 
-/// A canonical surface point: `face` in `0..5`, `u` and `v` in `[0, 64)`.
+/// A canonical surface point: `face` a chart of the world's topology, `u` and `v` inside
+/// that chart's extent.
+///
+/// The bounds are the **topology's**, not the cube's 64: on a 320×180 ring a target at
+/// `u = 200` names a real cell and a target on `Face::Top` names none
+/// (`design/flat-world-plan-2026-09-16.md` §5). This is the **core** type; the host's
+/// `CareTarget` (`crates/cubarium/src/care/mod.rs`) is a different type with `u8` fields,
+/// widened by FW-4.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CareTarget {
     pub face: u8,
@@ -155,17 +161,21 @@ pub struct CareTarget {
 }
 
 impl CareTarget {
-    /// The field cell the target names, or `None` when the face or the chart coordinates
-    /// are out of range. Never panics on hostile input.
-    pub fn resolve(&self) -> Option<CellId> {
+    /// The field cell the target names, or `None` when the chart is not one this topology
+    /// has or the coordinates are outside its extent. Never panics on hostile input.
+    pub fn resolve(&self, topo: Topology, scale: Scale) -> Option<CellId> {
         let face = Face::from_index(self.face)?;
+        if !topo.has_chart(face) {
+            return None;
+        }
         if !self.u.is_finite() || !self.v.is_finite() {
             return None;
         }
-        if self.u < 0.0 || self.u >= FACE_EXTENT || self.v < 0.0 || self.v >= FACE_EXTENT {
+        let (ext_u, ext_v) = topo.extent(face);
+        if self.u < 0.0 || self.u >= ext_u || self.v < 0.0 || self.v >= ext_v {
             return None;
         }
-        Some(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::new(face, self.u, self.v)))
+        Some(cell_of(topo, scale, &SurfacePoint::new(face, self.u, self.v)))
     }
 }
 
@@ -303,8 +313,10 @@ pub struct CareState {
 
 impl CareState {
     /// Range checks after decode, called from `WorldState::validate`. `tick` is the state's
-    /// own tick, which no shower may have been admitted after.
-    pub fn validate(&self, tick: u64) -> Result<(), String> {
+    /// own tick, which no shower may have been admitted after, and `cells` is the world's
+    /// runtime cell count — the persisted shower footprints are raw [`CellId`] indices, and
+    /// `1,280` is only the cube's bound (`design/flat-world-plan-2026-09-16.md` §4).
+    pub fn validate(&self, tick: u64, cells: usize) -> Result<(), String> {
         for (name, v) in [
             ("feed_material_in", self.feed_material_in),
             ("feed_energy_in", self.feed_energy_in),
@@ -337,17 +349,17 @@ impl CareState {
                     s.weights.len()
                 ));
             }
-            if s.cells.len() > CUBE_CELL_COUNT {
+            if s.cells.len() > cells {
                 return Err(format!("care shower {} covers more cells than the surface has", s.seq));
             }
             // The persisted dose is range-checked like every other decoded value: a shower
             // whose dose is outside the documented bounds is refused, never clamped.
             s.dose().validate(&format!("care shower {}", s.seq))?;
             // A footprint is a set: a repeated cell would take its share twice.
-            let mut seen = vec![false; CUBE_CELL_COUNT];
+            let mut seen = vec![false; cells];
             for &c in &s.cells {
                 let i = usize::from(c);
-                if i >= CUBE_CELL_COUNT {
+                if i >= cells {
                     return Err(format!("care shower {} names cell {c}, out of range", s.seq));
                 }
                 if seen[i] {
@@ -399,7 +411,7 @@ impl CareState {
 /// `Σ w_c = 1` to within [`WEIGHT_TOLERANCE`]. Returned in `CellId` index order, so the
 /// order the doses are summed in is a property of the surface and not of the search.
 pub fn footprint(graph: &FieldGraph, center: CellId, hops: usize) -> Vec<(CellId, f64)> {
-    let mut seen = vec![false; CUBE_CELL_COUNT];
+    let mut seen = vec![false; graph.cell_count()];
     seen[center.index()] = true;
     let mut raw: Vec<(CellId, f64)> = vec![(center, 1.0)];
     let mut frontier = vec![center];
@@ -501,12 +513,12 @@ mod tests {
 
     #[test]
     fn a_target_resolves_only_inside_the_charts() {
-        assert_eq!(CareTarget { face: 0, u: 0.0, v: 0.0 }.resolve(), Some(CellId::new(Topology::Cube, Scale::ONE, Face::Front, 0, 0)));
-        assert_eq!(CareTarget { face: 4, u: 63.9, v: 63.9 }.resolve(), Some(CellId::new(Topology::Cube, Scale::ONE, Face::Top, 15, 15)));
-        assert_eq!(CareTarget { face: 5, u: 1.0, v: 1.0 }.resolve(), None);
-        assert_eq!(CareTarget { face: 0, u: 64.0, v: 1.0 }.resolve(), None);
-        assert_eq!(CareTarget { face: 0, u: -1e-9, v: 1.0 }.resolve(), None);
-        assert_eq!(CareTarget { face: 0, u: f64::NAN, v: 1.0 }.resolve(), None);
+        assert_eq!(CareTarget { face: 0, u: 0.0, v: 0.0 }.resolve(Topology::Cube, Scale::ONE), Some(CellId::new(Topology::Cube, Scale::ONE, Face::Front, 0, 0)));
+        assert_eq!(CareTarget { face: 4, u: 63.9, v: 63.9 }.resolve(Topology::Cube, Scale::ONE), Some(CellId::new(Topology::Cube, Scale::ONE, Face::Top, 15, 15)));
+        assert_eq!(CareTarget { face: 5, u: 1.0, v: 1.0 }.resolve(Topology::Cube, Scale::ONE), None);
+        assert_eq!(CareTarget { face: 0, u: 64.0, v: 1.0 }.resolve(Topology::Cube, Scale::ONE), None);
+        assert_eq!(CareTarget { face: 0, u: -1e-9, v: 1.0 }.resolve(Topology::Cube, Scale::ONE), None);
+        assert_eq!(CareTarget { face: 0, u: f64::NAN, v: 1.0 }.resolve(Topology::Cube, Scale::ONE), None);
     }
 
     #[test]
@@ -515,6 +527,6 @@ mod tests {
         assert_eq!(care.admitted_seq, 0);
         assert!(care.showers.is_empty());
         assert_eq!(care.allowance_used, 0.0);
-        care.validate(0).expect("the default state is valid");
+        care.validate(0, cubarium_surface::CUBE_CELL_COUNT).expect("the default state is valid");
     }
 }

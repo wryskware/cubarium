@@ -433,6 +433,8 @@ mod tests {
 
     fn empty_view() -> RenderView {
         RenderView {
+            topology: cubarium_surface::Topology::Cube,
+            scale: cubarium_surface::Scale::ONE,
             tick: 0,
             producer: vec![0.0; cubarium_surface::CUBE_CELL_COUNT],
             detritus: vec![0.0; cubarium_surface::CUBE_CELL_COUNT],

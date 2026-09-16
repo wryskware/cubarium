@@ -49,6 +49,8 @@ fn view(producer: Vec<f64>, detritus: Vec<f64>) -> RenderView {
     assert_eq!(producer.len(), CUBE_CELL_COUNT);
     assert_eq!(detritus.len(), CUBE_CELL_COUNT);
     RenderView {
+        topology: cubarium_surface::Topology::Cube,
+        scale: cubarium_surface::Scale::ONE,
         tick: 0,
         producer,
         detritus,

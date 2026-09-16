@@ -109,6 +109,8 @@ fn one_and_two_bodies_cost_per_frame() {
 /// ground and the water are all drawn.
 fn dense_view() -> RenderView {
     RenderView {
+        topology: cubarium_surface::Topology::Cube,
+        scale: cubarium_surface::Scale::ONE,
         // Six simulated seconds: inside a gust, not its quiet interval.
         tick: 121,
         producer: vec![10.0; CUBE_CELL_COUNT],

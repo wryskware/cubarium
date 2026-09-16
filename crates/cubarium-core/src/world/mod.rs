@@ -11,7 +11,7 @@ mod step;
 mod tests;
 mod view;
 
-use cubarium_surface::{CUBE_CELL_COUNT, CellId, ChartImage, FieldGraph, ScalarField, Travel};
+use cubarium_surface::{CellId, ChartImage, FieldGraph, ScalarField, Scale, Topology, Travel};
 
 use crate::diagnostic::ScriptedIntent;
 use crate::dormancy::ApexDormancyEvent;
@@ -45,12 +45,17 @@ pub struct World {
     pub state: WorldState,
     pub(crate) graph: FieldGraph,
     pub(crate) habitat: Habitat,
-    pub(crate) images: [Vec<ChartImage>; 5],
-    pub(crate) light: Box<[f64; CUBE_CELL_COUNT]>,
-    pub(crate) moisture: Box<[f64; CUBE_CELL_COUNT]>,
-    pub(crate) rain_source: Box<[f64; CUBE_CELL_COUNT]>,
-    pub(crate) rain: Box<[f32; CUBE_CELL_COUNT]>,
-    pub(crate) manual_rain: Box<[f64; CUBE_CELL_COUNT]>,
+    /// One entry per chart of the topology, indexed by [`Topology::chart_index`]: five on
+    /// the cube, one on a ring.
+    pub(crate) images: Vec<Vec<ChartImage>>,
+    /// The five per-cell weather and habitat caches. Sized at runtime from
+    /// `topology.cell_count(scale)`: `1,280 = 2^8·5` is the cube's count, not the world's
+    /// (`design/flat-world-plan-2026-09-16.md` §2).
+    pub(crate) light: Box<[f64]>,
+    pub(crate) moisture: Box<[f64]>,
+    pub(crate) rain_source: Box<[f64]>,
+    pub(crate) rain: Box<[f32]>,
+    pub(crate) manual_rain: Box<[f64]>,
     pub(crate) rain_envelope: [f64; crate::care::RAIN_SAMPLES],
     pub(crate) scratch: (ScalarField, ScalarField),
     /// Reusable working storage for the ecology v1 cross-cell subphases 3f and 3h, so a long
@@ -82,4 +87,27 @@ pub struct World {
     /// world, never persisted, never set by the world itself.
     pub(crate) scripted: Vec<(crate::ids::OrganismId, ScriptedIntent)>,
     pub(crate) initial_material: f64,
+}
+
+impl World {
+    /// The shape of this world's surface. Every geometric call in the crate reads it rather
+    /// than assuming the cube (`design/flat-world-plan-2026-09-16.md` §2).
+    #[inline]
+    pub fn topology(&self) -> Topology {
+        self.state.config.topology
+    }
+
+    /// This world's scale `S`. A cube is always [`Scale::ONE`]; a ring may be any validated
+    /// multiplier, and it is what turns pixels into cells and embedded units.
+    #[inline]
+    pub fn scale(&self) -> Scale {
+        self.state.config.world_scale
+    }
+
+    /// Cells over the whole surface: `topology().cell_count(scale())`, and the length of
+    /// every per-cell vector this world holds.
+    #[inline]
+    pub fn cell_count(&self) -> usize {
+        self.graph.cell_count()
+    }
 }

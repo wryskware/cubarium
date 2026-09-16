@@ -58,6 +58,8 @@ fn flat(v: f64) -> Vec<f64> {
 
 fn view(tick: u64, producer: Vec<f64>, detritus: Vec<f64>, water: Vec<f64>) -> RenderView {
     let mut v = RenderView {
+        topology: cubarium_surface::Topology::Cube,
+        scale: cubarium_surface::Scale::ONE,
         tick,
         producer,
         detritus,

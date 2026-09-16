@@ -1,9 +1,9 @@
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use std::f64::consts::TAU;
 
 use cubarium_surface::{
-    CUBE_CELL_COUNT, CellId, FACE_EXTENT, Face, FieldGraph, MAX_SEAMS, ScalarField, SurfacePoint,
-    Travel, Vec2, chart_images, face_frame,
+    CellId, Face, FieldGraph, MAX_SEAMS, ScalarField, SurfacePoint, Travel, Vec2, chart_images,
+    face_frame,
 };
 
 use crate::accounting::EnergyCorrection;
@@ -35,9 +35,14 @@ impl World {
     ///
     /// The five faces have equal area, so a uniform face draw followed by uniform `(u, v)`
     /// is already uniform by area; no rejection is needed.
+    ///
+    /// **On a ring** there is one chart, so the face draw is made and discarded and `(u, v)`
+    /// scale to `w` and `h` instead of `FACE_EXTENT` (`design/flat-world-plan-2026-09-16.md`
+    /// §5). Keeping the draw is what leaves the cube's stream byte-identical.
     pub fn new(config: WorldConfig) -> Result<World, String> {
         config.validate()?;
-        let habitat = Habitat::new(&config.habitat, config.seed);
+        let topo = config.topology;
+        let habitat = Habitat::new(&config.habitat, config.seed, config.topology, config.world_scale);
         let weather = Weather::new(&config.weather, config.seed);
         let fields = Fields::new(&config, &habitat.light_base, &habitat.moisture_base);
         let ecology =
@@ -67,10 +72,17 @@ impl World {
         };
         for (index, kind) in roster.into_iter().take(cap as usize) {
             let seed = config.seed;
+            // The face draw is **kept and discarded** on a one-chart world (plan §5): the
+            // counter block per founder is 0..4 whatever the topology, so a ring and a cube
+            // grown from the same seed differ only where they must.
             let face_index = (unit(seed, Stream::Founders, index, 0) * 5.0).floor();
-            let face = Face::from_index(face_index as u8).unwrap_or(Face::Front);
-            let u = unit(seed, Stream::Founders, index, 1) * FACE_EXTENT;
-            let v = unit(seed, Stream::Founders, index, 2) * FACE_EXTENT;
+            let face = match topo {
+                Topology::Cube => Face::from_index(face_index as u8).unwrap_or(Face::Front),
+                Topology::Ring { .. } => Face::Front,
+            };
+            let (ext_u, ext_v) = topo.extent(face);
+            let u = unit(seed, Stream::Founders, index, 1) * ext_u;
+            let v = unit(seed, Stream::Founders, index, 2) * ext_v;
             let heading = Vec2::from_screen_angle(unit(seed, Stream::Founders, index, 3) * TAU);
             let hue = unit(seed, Stream::Founders, index, 4) as f32;
 
@@ -112,7 +124,7 @@ impl World {
             let energy = config.founders.initial_energy_fraction * phenotype.energy_max;
             external_material_in += structure + reserve;
             organisms.insert(Organism {
-                pos: SurfacePoint::new(face, u, v).canonicalize(Topology::Cube),
+                pos: SurfacePoint::new(face, u, v).canonicalize(topo),
                 heading,
                 ou: Vec2::ZERO,
                 structure,
@@ -186,7 +198,12 @@ impl World {
             }
         }
         state.validate()?;
-        let habitat = Habitat::new(&state.config.habitat, state.config.seed);
+        let habitat = Habitat::new(
+            &state.config.habitat,
+            state.config.seed,
+            state.config.topology,
+            state.config.world_scale,
+        );
         let organism_material: f64 = state.organisms.iter().map(|(_, o)| o.material()).sum();
         // The same terms `mass_residual` subtracts, so a loaded world reads zero: care has
         // imported `feed_material_in` and exported `clean_material_out` since creation, the
@@ -204,28 +221,33 @@ impl World {
     }
 
     fn assemble(state: WorldState, habitat: Habitat, initial_material: f64) -> World {
+        // Every cache below is sized from the world's own topology and scale, which the
+        // config carries and `validate` has already accepted.
+        let topo = state.config.topology;
+        let scale = state.config.world_scale;
+        let cells = topo.cell_count(scale);
         let mut world = World {
             state,
-            graph: FieldGraph::new(Topology::Cube, Scale::ONE),
+            graph: FieldGraph::new(topo, scale),
             habitat,
-            images: std::array::from_fn(|i| {
-                let mut v = Vec::new();
-                chart_images(Topology::Cube, 
-                    Face::from_index(i as u8).expect("five faces"),
-                    MAX_SEAMS,
-                    &mut v,
-                );
-                v
-            }),
-            light: Box::new([0.0; CUBE_CELL_COUNT]),
-            moisture: Box::new([0.0; CUBE_CELL_COUNT]),
-            rain_source: Box::new([0.0; CUBE_CELL_COUNT]),
-            rain: Box::new([0.0; CUBE_CELL_COUNT]),
-            manual_rain: Box::new([0.0; CUBE_CELL_COUNT]),
+            images: topo
+                .charts()
+                .iter()
+                .map(|&face| {
+                    let mut v = Vec::new();
+                    chart_images(topo, face, MAX_SEAMS, &mut v);
+                    v
+                })
+                .collect(),
+            light: vec![0.0; cells].into_boxed_slice(),
+            moisture: vec![0.0; cells].into_boxed_slice(),
+            rain_source: vec![0.0; cells].into_boxed_slice(),
+            rain: vec![0.0; cells].into_boxed_slice(),
+            manual_rain: vec![0.0; cells].into_boxed_slice(),
             rain_envelope: care::rain_envelope(),
-            scratch: (ScalarField::zeros(Topology::Cube, Scale::ONE), ScalarField::zeros(Topology::Cube, Scale::ONE)),
-            eco_scratch: EcoScratch::default(),
-            water_scratch: ScalarField::zeros(Topology::Cube, Scale::ONE),
+            scratch: (ScalarField::zeros(topo, scale), ScalarField::zeros(topo, scale)),
+            eco_scratch: EcoScratch::new(cells),
+            water_scratch: ScalarField::zeros(topo, scale),
             sense_rings: Vec::new(),
             neighbors: NeighborLists::default(),
             travel_buf: Travel::default(),
@@ -371,12 +393,20 @@ impl World {
     }
 }
 
-/// The unit chart direction of increasing embedded height at a point of `face`: the chart
-/// gradient of `y`, `(tangent_u.y, tangent_v.y)` normalized. Zero on the level top face,
-/// `−v` on the four side faces.
-pub(super) fn up_direction(face: Face) -> Vec2 {
-    let frame = face_frame(face);
-    normalize_or_zero(Vec2::new(frame.tangent_u[1], frame.tangent_v[1]))
+/// The unit chart direction of increasing [`Topology::height`] at a point of `face`.
+///
+/// Cube: the chart gradient of `y`, `(tangent_u.y, tangent_v.y)` normalized — zero on the
+/// level top face, `−v` on the four side faces. Ring: the constant `(0, −1)`.
+pub(super) fn up_direction(topo: Topology, face: Face) -> Vec2 {
+    match topo {
+        Topology::Cube => {
+            let frame = face_frame(face);
+            normalize_or_zero(Vec2::new(frame.tangent_u[1], frame.tangent_v[1]))
+        }
+        // `height = 1 − 2v/h` falls with `v`, so uphill is `−v` everywhere on a ring: the
+        // canopy is the top row and the soil the bottom one (plan §5).
+        Topology::Ring { .. } => Vec2::new(0.0, -1.0),
+    }
 }
 
 /// Sensing depth in graph hops for a sensing radius: `ceil(r_sense / 4)`, at least 1 and at
@@ -393,9 +423,10 @@ pub(super) fn sense_depth(sense_radius: f64) -> usize {
 /// For every cell, the cells at graph distance exactly 1, 2 and 3 (breadth-first over the
 /// field graph, seams included, never across the open rim).
 pub(super) fn sense_rings(graph: &FieldGraph) -> Vec<[Vec<CellId>; SENSE_DEPTH_MAX]> {
-    CellId::all(Topology::Cube, Scale::ONE)
+    let cells = graph.cell_count();
+    CellId::all(graph.topology(), graph.scale())
         .map(|origin| {
-            let mut seen = vec![false; CUBE_CELL_COUNT];
+            let mut seen = vec![false; cells];
             seen[origin.index()] = true;
             let mut rings: [Vec<CellId>; SENSE_DEPTH_MAX] = Default::default();
             let mut frontier = vec![origin];

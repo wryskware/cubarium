@@ -138,7 +138,7 @@ fn every_published_grasp_centre_round_trips_through_the_root_chart() {
                         angle as f64 * std::f64::consts::TAU / 8.0,
                     );
                     for offset in offsets {
-                        match body_point(&images, root, heading, offset) {
+                        match body_point(Topology::Cube, &images, root, heading, offset) {
                             Some(point) => {
                                 published += 1;
                                 // The root's own shortest image of that point is the body
@@ -337,6 +337,7 @@ fn capture_metadata_is_the_pre_removal_settlement_and_shares_the_paid_key() {
     assert_eq!(evidence.prey_pos, prey_pos, "the frozen prey never moved, and this is its place");
     let measure = evidence.measure.expect("a capture measured its prey");
     let recomputed = measure_contact(
+        Topology::Cube,
         &images,
         evidence.hunter_pos,
         evidence.hunter_heading,
@@ -349,7 +350,7 @@ fn capture_metadata_is_the_pre_removal_settlement_and_shares_the_paid_key() {
     assert!(measure.in_contact());
     assert_eq!(
         evidence.capture_center,
-        body_point(&images, evidence.hunter_pos, evidence.hunter_heading, evidence.geometry.capture_offset_body),
+        body_point(Topology::Cube, &images, evidence.hunter_pos, evidence.hunter_heading, evidence.geometry.capture_offset_body),
     );
     assert!(evidence.capture_center.is_some(), "a capture always had a drawable grasp");
     assert!(evidence.ingestion_center.is_some());

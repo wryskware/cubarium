@@ -726,7 +726,7 @@ fn a_target_names_the_cell_that_contains_it() {
         CellId::new(Topology::Cube, Scale::ONE, Face::Left, 15, 0),
     ] {
         let t = target_of(cell);
-        assert_eq!(t.resolve(), Some(cell));
+        assert_eq!(t.resolve(Topology::Cube, Scale::ONE), Some(cell));
         assert_eq!(cell_of(Topology::Cube, Scale::ONE, &cell.center(Topology::Cube, Scale::ONE)), cell);
     }
 }

@@ -21,6 +21,8 @@ fn pack() -> ArtPack {
 
 fn view(tick: u64, density: f64) -> RenderView {
     let mut v = RenderView {
+        topology: cubarium_surface::Topology::Cube,
+        scale: cubarium_surface::Scale::ONE,
         tick,
         producer: vec![density * PRODUCER_MAX * PRODUCER_SATURATION; CUBE_CELL_COUNT],
         detritus: vec![0.0; CUBE_CELL_COUNT],

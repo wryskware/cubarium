@@ -5,6 +5,7 @@
 //! consumer by multiplying per-second rates with `DT`; the config never stores per-tick
 //! values so that the tick rate can change without editing worlds.
 
+use cubarium_surface::{Scale, Topology};
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever a field's meaning changes; stored in snapshots.
@@ -12,7 +13,11 @@ use serde::{Deserialize, Serialize};
 /// Version 8 is ecology v1 (`design/ecology-v1-contract.md`): the [`PlantConfig`] block,
 /// the detrital and capability additions, and `producer.energy_density` folded into
 /// `plant.energy_density` — one density for every plant tissue.
-pub const CONFIG_VERSION: u32 = 8;
+///
+/// **Version 9 is the ring world** (`design/flat-world-plan-2026-09-16.md` §4): the two
+/// appended fields [`WorldConfig::topology`] and [`WorldConfig::world_scale`], which decide
+/// the shape and size of the surface every other number here is measured on.
+pub const CONFIG_VERSION: u32 = 9;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -36,6 +41,22 @@ pub struct WorldConfig {
     pub mutation: MutationConfig,
     pub capacity: CapacityConfig,
     pub mechanisms: MechanismToggles,
+    /// The shape of the surface: the five-chart cube, or a ring `w` by `h` pixels
+    /// (`design/flat-world-plan-2026-09-16.md` §2). Chosen once, at `--fresh`, and never
+    /// migrated — schema 17 refuses every older world by name.
+    ///
+    /// **Appended last**, after `mechanisms`, together with [`WorldConfig::world_scale`]:
+    /// that is what makes a schema 16 config the exact postcard prefix that
+    /// [`crate::snapshot::v16::WorldConfigV16`] mirrors.
+    #[serde(default)]
+    pub topology: Topology,
+    /// World scale `S`: the multiplier on every length in a **ring** world. A cube is pinned
+    /// to `S = 1` — its 32-pixel local radius and 9-pixel stamp budget are completeness
+    /// proofs, not tunables — and [`Topology::validate`] refuses anything else.
+    ///
+    /// On the wire and in TOML it *is* its multiplier, so a config writes `world_scale = 2.0`.
+    #[serde(default)]
+    pub world_scale: Scale,
 }
 
 /// The fruit pool `F` of `design/fauna-v2.md` "Fruit": a fifth conserved per-cell material
@@ -385,6 +406,8 @@ impl Default for WorldConfig {
             mutation: MutationConfig::default(),
             capacity: CapacityConfig::default(),
             mechanisms: MechanismToggles::default(),
+            topology: Topology::Cube,
+            world_scale: Scale::ONE,
         }
     }
 }
@@ -646,7 +669,10 @@ impl WorldConfig {
     /// Reject configurations that cannot produce a well-defined world: non-finite or
     /// negative rates, `seek_off >= seek_on`, capacities of zero, assimilation fractions
     /// outside `[0, 1]`, a child material fraction that exceeds what the parent can hold,
-    /// or a body extent above `cubarium_surface::MAX_LOCAL_RADIUS`.
+    /// or a body extent above the topology's own [`Topology::max_local_radius`].
+    ///
+    /// The topology is checked **first**, because every bound below is a length on the
+    /// surface it describes and a world whose shape is refused has no meaningful ones.
     pub fn validate(&self) -> Result<(), String> {
         if self.version != CONFIG_VERSION {
             return Err(format!(
@@ -654,6 +680,10 @@ impl WorldConfig {
                 self.version
             ));
         }
+        self.topology
+            .validate(self.world_scale)
+            .map_err(|e| e.to_string())?;
+        let radius = self.topology.max_local_radius();
 
         let p = &self.producer;
         finite_nonnegative(&[
@@ -860,11 +890,10 @@ impl WorldConfig {
         }
         positive("organism.capability_exponent", o.capability_exponent)?;
         positive("organism.body_extent_max", o.body_extent_max)?;
-        if o.body_extent_max > cubarium_surface::MAX_LOCAL_RADIUS {
+        if o.body_extent_max > radius {
             return Err(format!(
-                "organism.body_extent_max {} exceeds MAX_LOCAL_RADIUS {}",
-                o.body_extent_max,
-                cubarium_surface::MAX_LOCAL_RADIUS
+                "organism.body_extent_max {} exceeds the local radius {} of {:?}",
+                o.body_extent_max, radius, self.topology
             ));
         }
         // Grazing stores `e_r · η_m` per unit of food carrying `e_v`; the audit needs the
@@ -914,11 +943,10 @@ impl WorldConfig {
                 dr.seek_off, dr.seek_on
             ));
         }
-        if dr.birth_offset_px > cubarium_surface::MAX_LOCAL_RADIUS {
+        if dr.birth_offset_px > radius {
             return Err(format!(
-                "drives.birth_offset_px {} exceeds MAX_LOCAL_RADIUS {}",
-                dr.birth_offset_px,
-                cubarium_surface::MAX_LOCAL_RADIUS
+                "drives.birth_offset_px {} exceeds the local radius {} of {:?}",
+                dr.birth_offset_px, radius, self.topology
             ));
         }
 

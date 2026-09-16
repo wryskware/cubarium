@@ -1,7 +1,7 @@
 use cubarium_surface::Topology;
 use serde::Serialize;
 
-use cubarium_surface::{ChartImage, MAX_LOCAL_RADIUS, SurfacePoint, Vec2, travel, unfold_with};
+use cubarium_surface::{ChartImage, SurfacePoint, Vec2, travel, unfold_with};
 
 use crate::ids::OrganismId;
 use crate::organism::Organism;
@@ -64,7 +64,8 @@ impl ContactEvidence {
     /// Gather the evidence for this pairing. Pure, and safe to call before or instead of a
     /// capture: it never mutates anything.
     pub fn gather(
-        images: &[Vec<ChartImage>; 5],
+        topo: Topology,
+        images: &[Vec<ChartImage>],
         profile: &FixedHunterProfile,
         hunter: &Organism,
         prey_id: OrganismId,
@@ -79,18 +80,21 @@ impl ContactEvidence {
             hunter_heading: hunter.heading,
             geometry,
             capture_center: body_point(
+                topo,
                 images,
                 hunter.pos,
                 hunter.heading,
                 geometry.capture_offset_body,
             ),
             ingestion_center: body_point(
+                topo,
                 images,
                 hunter.pos,
                 hunter.heading,
                 geometry.ingestion_offset_body,
             ),
             measure: measure_contact(
+                topo,
                 images,
                 hunter.pos,
                 hunter.heading,
@@ -114,16 +118,17 @@ impl ContactEvidence {
 /// This is the same local unfolding the pair pass and the controller use: it crosses seams,
 /// never a face-local straight line that would miss one, and never the open rim.
 pub fn surface_reach(
-    images: &[Vec<ChartImage>; 5],
+    topo: Topology,
+    images: &[Vec<ChartImage>],
     from: SurfacePoint,
     to: SurfacePoint,
     max_distance: f64,
 ) -> Option<f64> {
-    let max = max_distance.min(MAX_LOCAL_RADIUS);
+    let max = max_distance.min(topo.max_local_radius());
     if max <= 0.0 {
         return None;
     }
-    unfold_with(Topology::Cube, &images[from.face.index()], from, to, max).map(|u| u.distance)
+    unfold_with(topo, &images[topo.chart_index(from.face)], from, to, max).map(|u| u.distance)
 }
 
 /// The body basis `stamp_rig` uses: `+x` along the heading, `+y` its clockwise side.
@@ -168,10 +173,11 @@ impl ContactGeometry {
         }
     }
 
-    /// How far the local unfolding has to reach to decide contact with a body of `extent`.
-    fn window(&self, extent: f64) -> f64 {
+    /// How far the local unfolding has to reach to decide contact with a body of `extent`,
+    /// never past the topology's own query radius.
+    fn window(&self, topo: Topology, extent: f64) -> f64 {
         (self.capture_offset_body.length() + self.capture_reach_px + extent + 1.0)
-            .min(MAX_LOCAL_RADIUS)
+            .min(topo.max_local_radius())
     }
 }
 
@@ -222,7 +228,8 @@ impl ContactMeasure {
 /// of contact with the drawn claw — which is why the old `mouth_point` helper is gone.
 /// `None` means the prey is not reachable inside the local unfolding at all.
 pub fn measure_contact(
-    images: &[Vec<ChartImage>; 5],
+    topo: Topology,
+    images: &[Vec<ChartImage>],
     root: SurfacePoint,
     heading: Vec2,
     geometry: &ContactGeometry,
@@ -230,8 +237,8 @@ pub fn measure_contact(
     prey_extent: f64,
 ) -> Option<ContactMeasure> {
     let (forward, side) = body_basis(heading)?;
-    let window = geometry.window(prey_extent);
-    let u = unfold_with(Topology::Cube, &images[root.face.index()], root, prey, window)?;
+    let window = geometry.window(topo, prey_extent);
+    let u = unfold_with(topo, &images[topo.chart_index(root.face)], root, prey, window)?;
     let delta = u.local - root.chart();
     let body = Vec2::new(forward.dot(delta), side.dot(delta));
     Some(ContactMeasure {
@@ -250,7 +257,8 @@ pub fn measure_contact(
 /// through the root-owned unfolding back to the body coordinate it was built from. A
 /// fabricated reflected point is never published and never captures.
 pub fn body_point(
-    images: &[Vec<ChartImage>; 5],
+    topo: Topology,
+    images: &[Vec<ChartImage>],
     root: SurfacePoint,
     heading: Vec2,
     offset_body: Vec2,
@@ -264,16 +272,16 @@ pub fn body_point(
     if reach <= GRASP_EPS {
         return Some(root);
     }
-    if reach + 1.0 >= MAX_LOCAL_RADIUS {
+    if reach + 1.0 >= topo.max_local_radius() {
         return None;
     }
-    let swept = travel(Topology::Cube, root, chart_offset);
+    let swept = travel(topo, root, chart_offset);
     if swept.reflections > 0 || swept.fallback || swept.ties > 0 {
         return None;
     }
     // The round trip: the root's own shortest image of that point must be the body coordinate
     // it was built from, or the renderer and the world disagree about where the claw is.
-    let u = unfold_with(Topology::Cube, &images[root.face.index()], root, swept.end, reach + 1.0)?;
+    let u = unfold_with(topo, &images[topo.chart_index(root.face)], root, swept.end, reach + 1.0)?;
     let delta = u.local - root.chart();
     let back = Vec2::new(forward.dot(delta), side.dot(delta));
     if (back - offset_body).length() > GRASP_EPS {

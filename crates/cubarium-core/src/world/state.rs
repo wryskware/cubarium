@@ -1,7 +1,4 @@
-use cubarium_surface::Topology;
 use serde::{Deserialize, Serialize};
-
-use cubarium_surface::CUBE_CELL_COUNT;
 
 use crate::accounting::{EnergyCorrection, EnergyLedgers, Ledger};
 use crate::care::CareState;
@@ -104,10 +101,19 @@ impl WorldState {
     /// unit headings (renormalize if within 1e-6, else invalid), population ≤ cap, escrows
     /// nonnegative, genome fields in range, config valid.
     ///
+    /// **The topology first** (`design/flat-world-plan-2026-09-16.md` §4). `config.validate()`
+    /// refuses a `(topology, world_scale)` pair this build cannot run, and everything below is
+    /// then measured against the world that pair describes: every per-cell vector is
+    /// `cell_count()` long, every organism and every persisted care shower names a chart and a
+    /// cell the topology has. `1,280` appears nowhere; it is the cube's count, not the world's.
+    ///
     /// `validate` only reports; [`World::from_state`] renormalizes headings that are within
     /// tolerance before calling it, so a heading that still fails here is genuinely invalid.
     pub fn validate(&self) -> Result<(), String> {
         self.config.validate()?;
+        let topo = self.config.topology;
+        let scale = self.config.world_scale;
+        let cells = topo.cell_count(scale);
         let cap = self.config.capacity.max_organisms as usize;
         if self.organisms.len() > cap {
             return Err(format!(
@@ -124,22 +130,33 @@ impl WorldState {
                 return Err(format!("{name} is not finite"));
             }
         }
+        // Every per-cell serialized vector, against this world's own cell count: the six
+        // `Fields` channels and ecology v1's five pools. A snapshot whose shape disagrees with
+        // its topology is refused, never resized.
         for (name, v) in [
             ("n", &self.fields.n),
             ("p", &self.fields.p),
             ("d", &self.fields.d),
             ("de", &self.fields.de),
+            ("f", &self.fields.f),
+            ("w", &self.fields.w),
+            ("ecology.wood", &self.ecology.wood),
+            ("ecology.plant_reserve", &self.ecology.plant_reserve),
+            ("ecology.dead_wood", &self.ecology.dead_wood),
+            ("ecology.carrion", &self.ecology.carrion),
+            ("ecology.carrion_energy", &self.ecology.carrion_energy),
         ] {
-            if v.len() != CUBE_CELL_COUNT {
+            if v.len() != cells {
                 return Err(format!(
-                    "field {name} has {} cells, expected {CUBE_CELL_COUNT}",
-                    v.len()
+                    "field {name} has {} cells, expected {cells} for {topo:?} at scale {}",
+                    v.len(),
+                    scale.world()
                 ));
             }
         }
         self.fields.check(self.config.detritus.energy_cap)?;
         self.ecology.check(self.config.detritus.carrion_energy_cap)?;
-        self.care.validate(self.tick)?;
+        self.care.validate(self.tick, cells)?;
         self.hunters
             .validate(self.tick, &self.organisms, &self.config)?;
         self.apex_dormancy
@@ -221,7 +238,13 @@ impl WorldState {
             if !o.hunger_memory.is_finite() {
                 return Err(format!("{who}: hunger memory is not finite"));
             }
-            if !o.pos.is_canonical(Topology::Cube) {
+            if !topo.has_chart(o.pos.face) {
+                return Err(format!(
+                    "{who}: chart {:?} is not one of {topo:?}'s",
+                    o.pos.face
+                ));
+            }
+            if !o.pos.is_canonical(topo) {
                 return Err(format!("{who}: position {:?} is not canonical", o.pos));
             }
             if !o.heading.is_finite() || (o.heading.length() - 1.0).abs() > HEADING_TOLERANCE {

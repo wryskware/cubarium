@@ -474,6 +474,8 @@ fn the_flag_does_not_touch_growth_or_what_the_presenter_observes() {
     let mut plain = ArtPresenter::new(legacy_pack());
     for tick in WIND_QUIET_TICK..WIND_QUIET_TICK + 400 {
         let v = RenderView {
+            topology: cubarium_surface::Topology::Cube,
+            scale: cubarium_surface::Scale::ONE,
             tick,
             producer: vec![10.0 * PRODUCER_SATURATION; CUBE_CELL_COUNT],
             detritus: vec![SOIL_SCALE; CUBE_CELL_COUNT],

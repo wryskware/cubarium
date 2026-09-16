@@ -214,11 +214,12 @@ mod tests {
     use crate::fields::Fields;
     use crate::habitat::{Habitat, Weather};
     use crate::ids::Slots;
+    use cubarium_surface::{Scale, Topology};
 
     fn state() -> WorldState {
         let config = WorldConfig::default();
         let habitat_config = config.clone();
-        let habitat = Habitat::new(&config.habitat, config.seed);
+        let habitat = Habitat::new(&config.habitat, config.seed, Topology::Cube, Scale::ONE);
         let fields = Fields::new(&config, &habitat.light_base, &habitat.moisture_base);
         let weather = Weather::new(&config.weather, config.seed);
         WorldState {

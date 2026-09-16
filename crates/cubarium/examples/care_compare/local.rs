@@ -102,7 +102,7 @@ impl LocalObserver {
         let graph = FieldGraph::new(Topology::Cube, Scale::ONE);
         let mut regions = Vec::new();
         for &target in targets {
-            let mut cells = BTreeSet::from([target.resolve().context("invalid local target")?]);
+            let mut cells = BTreeSet::from([target.resolve(cubarium_surface::Topology::Cube, cubarium_surface::Scale::ONE).context("invalid local target")?]);
             for _ in 0..HOPS {
                 let neighbors: Vec<_> = cells
                     .iter()
