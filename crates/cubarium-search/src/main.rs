@@ -313,6 +313,11 @@ enum Command {
         /// Comma-separated apex arms: how many adults are introduced.
         #[arg(long, default_value = "0,1,2")]
         arms: String,
+        /// Comma-separated `organism.move_cost` levels, in e per unit of structure per pixel
+        /// travelled. The matrix is crossed with them, so one level is the calibration
+        /// screen's own matrix. The default is the shipped price.
+        #[arg(long, default_value = "0.00036")]
+        prices: String,
         #[arg(long, default_value_t = 125_000)]
         ticks: u64,
         #[arg(long, default_value_t = 500)]
@@ -407,6 +412,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             seed_set,
             seeds,
             arms,
+            prices,
             ticks,
             sample_every,
             introduce_tick,
@@ -423,6 +429,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .split(',')
                 .map(|s| s.trim().parse::<u32>())
                 .collect::<Result<_, _>>()?;
+            let prices: Vec<f64> = prices
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::parse::<f64>)
+                .collect::<Result<_, _>>()?;
             let set = calibrate::SeedSet::parse(&seed_set)?;
             let dir = out.join(&stage);
             let report = calibrate::run_stage(
@@ -431,6 +443,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 set,
                 seeds,
                 &arms,
+                &prices,
                 ticks,
                 sample_every,
                 introduce_tick,
