@@ -6,7 +6,7 @@
 //! No world reference, RNG, wall clock or transport is used. A single root-owned surface
 //! query keeps each event coherent at seams and clips, rather than reflects, at the rim.
 
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use std::collections::VecDeque;
 
 use cubarium_core::care::{

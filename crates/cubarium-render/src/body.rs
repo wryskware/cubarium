@@ -1,6 +1,6 @@
 //! Seam-aware body stamps.
 
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use crate::Canvas;
 use cubarium_surface::{PixelImage, SurfacePoint, Vec2, unfold_pixels};
 

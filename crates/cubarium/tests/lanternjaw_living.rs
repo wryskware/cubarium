@@ -68,7 +68,7 @@
 //!   amplitude of 0 contributes 0 exactly", "a weight of 0 contributes 0 exactly"), so the
 //!   identity is asserted texel for texel.
 
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use std::panic::AssertUnwindSafe;
 
 use cubarium::lanternjaw::*;

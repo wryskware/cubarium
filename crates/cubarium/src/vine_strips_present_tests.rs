@@ -1,6 +1,6 @@
 //! Production-path regression sweeps ported from the independently reviewed frozen study.
 //! Exact same-amplitude/quiet comparisons deliberately exclude the intended budget gain.
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use super::*;
 use crate::art::ArtPack;
 use cubarium_render::stamp_layers_bent_with_radius;

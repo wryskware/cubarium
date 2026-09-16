@@ -9,7 +9,6 @@
 //! widest pose and its largest query). A desktop capture is not a hardware observation and
 //! none of this measures the browser or shim transport.
 
-use cubarium_surface::{Scale, Topology};
 use std::{hint::black_box, path::Path, time::Instant};
 
 use cubarium::{

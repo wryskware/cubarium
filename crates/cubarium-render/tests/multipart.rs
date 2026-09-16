@@ -24,7 +24,7 @@
 //! `crates/cubarium/tests/lanternjaw.rs`: they need `cubarium::lanternjaw`, and this crate is
 //! below that one in the dependency graph.
 
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use std::collections::HashSet;
 
 use cube_proto::Face;

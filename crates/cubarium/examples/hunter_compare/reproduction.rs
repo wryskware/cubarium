@@ -19,7 +19,6 @@
 //! The bookkeeping is bounded: one open escrow per living parent, a size cache pruned to the
 //! living lineage, and scalar counters. No event history is retained.
 
-use cubarium_surface::{Scale, Topology};
 use anyhow::{Result, bail, ensure};
 use cubarium_core::hunter::{FundingBlocked, Reproduction};
 use cubarium_core::organism::DeathCause;
@@ -934,6 +933,7 @@ impl ReproductionAudit {
 
 #[cfg(test)]
 mod tests {
+    use cubarium_surface::Topology;
     use super::*;
     use cubarium_core::genome::{Genome, decode};
     use cubarium_core::hunter::{EscrowKey, FixedHunterProfile, HunterTarget};

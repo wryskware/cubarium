@@ -30,7 +30,7 @@
 //! correct geometry. `heading_minus_x_is_a_half_turn_about_the_anchor` tests the half turn and
 //! records that the column mirror does *not* hold.
 
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use cube_proto::Face;
 use cubarium::lanternjaw::*;
 use cubarium_render::{Canvas, RigPart, Sprite, rig_radius, stamp_rig};

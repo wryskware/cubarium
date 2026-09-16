@@ -11,7 +11,7 @@
 //!
 //! Nothing here is evidence about ecological balance; the world is a staged fixture.
 
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use cubarium::art::ArtPack;
 use cubarium::art_present::{ArtPresenter, present_seconds};
 use cubarium::clock::DT;

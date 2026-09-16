@@ -1,4 +1,4 @@
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use super::raster::HEAD;
 use super::*;
 use cubarium_render::{Canvas, RigPart, rig_radius};

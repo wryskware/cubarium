@@ -10,7 +10,7 @@
 //! from the previous frame when one was observed, and conservatively from `entered_from`
 //! after a restart. Contract: `design/7_Research/lanternjaw-ecology-animation-contract-2026-09-13.md`.
 
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use cubarium_core::hunter::{FixedHunterProfile, HunterPhase, HunterRole, HunterView};
 use cubarium_core::view::OrganismView;
 use cubarium_surface::{MAX_LOCAL_RADIUS, PathSegment, SurfacePoint, Vec2, travel, unfold};

@@ -5,7 +5,6 @@
 //! rounding. Nothing here touches `N`, `P`, `D` or `De`; the coupling to the ecology runs
 //! the other way, through `Fields::react` (wet growth, drowning) and movement (wading).
 
-use cubarium_surface::{Scale, Topology};
 use cubarium_surface::{CUBE_CELL_COUNT, FieldGraph, ScalarField};
 
 use crate::DT;
@@ -170,6 +169,7 @@ pub fn check(w: &[f64]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use cubarium_surface::{Scale, Topology};
     use super::*;
     use crate::config::WorldConfig;
     use crate::habitat::Habitat;

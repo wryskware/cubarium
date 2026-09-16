@@ -1,6 +1,6 @@
 //! Authored RGBA sprites, composited through the existing surface atlas.
 
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use cubarium_surface::{PixelImage, SurfacePoint, Vec2, unfold_pixels};
 
 use crate::{Canvas, srgb_decode};

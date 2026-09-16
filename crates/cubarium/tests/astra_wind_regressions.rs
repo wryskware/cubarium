@@ -1,6 +1,6 @@
 //! Independent public-contract checks for the ambient wind sampler and asset budgets.
 
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use std::path::Path;
 
 use cubarium::art::{ArtPack, Band, Clip, Plant, Transition};

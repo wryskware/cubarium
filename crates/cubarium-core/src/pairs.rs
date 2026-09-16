@@ -1,6 +1,6 @@
 //! Chord-filtered all-pairs neighbor lists with exact local unfolding.
 
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use cubarium_surface::{ChartImage, MAX_LOCAL_RADIUS, SurfacePoint, Vec2, unfold_with};
 
 use crate::ids::OrganismId;

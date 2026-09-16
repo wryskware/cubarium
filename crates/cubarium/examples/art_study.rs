@@ -1,7 +1,7 @@
 //! Godot-authored sprite/animation study on the real five-face output path.
 //! Explicit development choreography; this is not an evolving population.
 
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use anyhow::{Result, ensure};
 use clap::{Parser, ValueEnum};
 use cubarium::{

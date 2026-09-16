@@ -9,7 +9,7 @@
 //! recycled with a new generation — is stated exactly. Nothing here is evidence about how
 //! often meals happen; that is the paired capture's job.
 
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use std::path::Path;
 
 use cubarium::art::ArtPack;

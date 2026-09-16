@@ -1,4 +1,4 @@
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use serde::{Deserialize, Serialize};
 
 use cubarium_surface::{FACE_EXTENT, Face, SurfacePoint};

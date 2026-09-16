@@ -9,7 +9,7 @@
 //! The staging below is Astra's review fixture (`design/7_Research/assets/`), kept because it
 //! produces a certain capture rather than waiting for a favourable roll.
 
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use cubarium_core::genome::{Genome, decode};
 use cubarium_core::hunter::{FixedHunterProfile, HunterTarget};
 use cubarium_core::ids::OrganismId;

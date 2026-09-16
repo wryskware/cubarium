@@ -6,7 +6,7 @@
 //! Nothing here is evidence about balance. `capture_min = capture_max = 1` in these fixtures
 //! so the settlement path is deterministic; everything else is the trial profile.
 
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use cubarium_core::genome::{Genome, decode};
 use cubarium_core::hunter::{
     AttemptOutcome, ContactGeometry, FixedHunterProfile, HunterEvent, HunterPhase, HunterTarget,

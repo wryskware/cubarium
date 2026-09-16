@@ -1,4 +1,4 @@
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use std::collections::{BTreeMap, BTreeSet};
 
 use cubarium_core::encounter::{ApexEncounterEvent, ApexEncounterState};

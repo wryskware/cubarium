@@ -372,7 +372,7 @@ fn flagged_cap_pixels_lie_within_nine_physical_pixels_of_the_centre_and_the_owne
                                     assert!(
                                         unfold(Topology::Cube, 
                                             centre,
-                                            SurfacePoint::pixel_center(Topology::Cube, f, x as u16, y as u16),
+                                            SurfacePoint::pixel_center(Topology::Cube, f, x, y),
                                             9.0
                                         )
                                         .is_some(),

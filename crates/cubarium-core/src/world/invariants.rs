@@ -1,4 +1,4 @@
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use crate::organism::DeathCause;
 
 use super::*;

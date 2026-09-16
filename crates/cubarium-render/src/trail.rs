@@ -1,6 +1,5 @@
 //! Renderer-only history trails made of actual transported path segments.
 
-use cubarium_surface::{Scale, Topology};
 use std::collections::VecDeque;
 
 use crate::Canvas;
@@ -138,6 +137,7 @@ fn pixel_of(u: f64, v: f64) -> (usize, usize) {
 
 #[cfg(test)]
 mod tests {
+    use cubarium_surface::Topology;
     use super::*;
     use cubarium_surface::{SurfacePoint, Vec2, travel};
 

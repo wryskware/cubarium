@@ -1,4 +1,4 @@
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use cubarium_core::dormancy::{
     ApexDormancyEvent, ApexDormancyState, MAINTENANCE_PER_STRUCTURE_SECOND, PREY_REQUIRED,
     RECHECK_TICKS, SUSTAIN_TICKS,

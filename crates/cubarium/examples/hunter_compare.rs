@@ -13,7 +13,6 @@ mod reproduction;
 #[path = "hunter_compare/spatial.rs"]
 mod spatial;
 
-use cubarium_surface::{Scale, Topology};
 use anyhow::{Context, Result, anyhow, ensure};
 use clap::{Parser, ValueEnum};
 use cubarium_core::organism::DeathCause;
@@ -1013,6 +1012,7 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use cubarium_surface::{Scale, Topology};
     use super::*;
     #[test]
     fn measurement_flag_requires_the_full_horizon_and_uninterrupted_observers() {

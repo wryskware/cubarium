@@ -1,6 +1,6 @@
 //! Adversarial public-contract checks for chart-owned patch stamping.
 
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use cubarium_render::{
     Bend, Canvas, Mask, Pose, Sprite, stamp_layers_bent, stamp_pose_in_chart,
 };

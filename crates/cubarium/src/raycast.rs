@@ -7,7 +7,6 @@
 //! The `-Y` plane is simply absent: the cube's bottom is open, and a ray that would only
 //! hit it shows background.
 
-use cubarium_surface::{Scale, Topology};
 use cube_proto::{FACE_SIZE, Face};
 use cubarium_surface::{FACE_EXTENT, face_frame};
 
@@ -194,6 +193,7 @@ impl Camera {
 
 #[cfg(test)]
 mod tests {
+    use cubarium_surface::{Scale, Topology};
     use super::*;
     use cubarium_surface::SurfacePoint;
 

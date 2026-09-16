@@ -7,7 +7,7 @@
 //! a row popping in whole, a reveal that is not monotone, a zero-weight layer that still
 //! costs footprint.
 
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use cube_proto::Face;
 use cubarium_render::{Canvas, Mask, Pose, Sprite, stamp_layers, stamp_pose, stamp_sprite};
 use cubarium_surface::{SurfacePoint, Vec2};

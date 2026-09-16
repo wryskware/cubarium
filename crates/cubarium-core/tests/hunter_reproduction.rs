@@ -5,7 +5,7 @@
 //! world's public state — never from the implementation's expressions. These are mechanism
 //! tests; nothing here is evidence about balance.
 
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use cubarium_core::hunter::{EscrowKey, FixedHunterProfile, FundingBlocked, HunterEvent, HunterTarget, Reproduction};
 use cubarium_core::ids::OrganismId;
 use cubarium_core::organism::{DeathCause, Mode, Organism, Origin};

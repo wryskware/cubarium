@@ -11,7 +11,6 @@ mod step;
 mod tests;
 mod view;
 
-use cubarium_surface::{Scale, Topology};
 use cubarium_surface::{CUBE_CELL_COUNT, CellId, ChartImage, FieldGraph, ScalarField, Travel};
 
 use crate::diagnostic::ScriptedIntent;

@@ -13,7 +13,7 @@
 //! lattice phase; the rim cuts and never reflects; and the scale gate admits exactly
 //! `SCALE_MIN..=SCALE_MAX`.
 
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use cubarium::lanternjaw::*;
 use cubarium_render::{Canvas, SUPERSAMPLE_REACH, stamp_rig_scaled};
 use cubarium_surface::{SurfacePoint, Vec2};

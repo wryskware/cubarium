@@ -32,7 +32,7 @@
 //! mixes those premultiplied samples, then source-overs once — never two partially opaque
 //! whole-body redraws.
 
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use cubarium_surface::{MAX_LOCAL_RADIUS, PixelImage, SurfacePoint, Vec2, unfold_pixels};
 
 use crate::{Canvas, Sprite};
