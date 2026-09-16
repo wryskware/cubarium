@@ -65,8 +65,16 @@ controller's movement does not respond to food; no score change proposed); the
 apex's pursuit stopping predicate suppresses the burst it pays for; the counted
 depletions are seeding artefacts confirmed by exact per-cell withdrawal (none
 grazed); the skimmer thrives once its depth preference leaves the wet rim.
-Next: paired experiments for the predicate and the skimmer depth, the local
-equilibrium fit for seeding (Wrysk's call), the ES search diagnosis. The [ecology v1 contract](../ecology-v1-contract.md)
+Round 4 ([round-4 result](../7_Research/ecology-v1-round4-results-2026-09-16.md)):
+the predicate correction is confirmed (captures +76 %, apex still starves; the
+turn radius is next); the ES optimiser is faithful and the adapter's turn
+deadband is where residence is lost; the skimmer's depth rescues its lineage
+at the grazer's expense (refuted as a roster change); no plant-only age
+removes the ungrazed crossings but 48,000 ticks makes every grazer founder
+breed, and every arm converges to the same grazed standing crop. Wrysk's
+direction on movement physics (disc bodies, energy-equivalent rotation, no
+claw radius) is workstream T, in flight. A light physics engine is on
+[the backlog](../backlog.md). The [ecology v1 contract](../ecology-v1-contract.md)
 and its [implementation review](../7_Research/ecology-v1-implementation-review-2026-09-15.md)
 stand as the accepted baseline.
 

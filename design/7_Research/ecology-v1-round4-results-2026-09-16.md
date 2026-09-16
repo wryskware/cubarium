@@ -23,16 +23,24 @@ which would be visible on the cube; none of this round touches the cube.
 | stream | model | where | simulation used / cap | storage | tests after |
 | --- | --- | --- | --- | --- | --- |
 | Q antithetic ES analysis | Opus 5 high | `main` (`da2bdc8`…`a281162`) | 1.4 s / 5 min | 0.24 MiB / 20 | search 230, core 517 |
-| P apex predicate pair | Opus 5 high | worktree, merged | 190 s / 4 min | 8.0 MiB / 20 | core 523, search 224 |
-| R skimmer depth census | Opus 5 high | worktree, merged | 4.2 min / 6 min | 0.6 MiB / 30 | search +20 |
-| S preconditioned opening | Opus 5 high | worktree, merged | 4.5 min / 10 min | 33 MiB / 80 | core 524, search +13 |
+| P apex predicate pair | Opus 5 high | worktree, merged `36515fa` | 190 s / 4 min | 8.0 MiB / 20 | core 523, search 224 |
+| R skimmer depth census | Opus 5 high | worktree, merged `c506af9` | 4.2 min / 6 min | 0.6 MiB / 30 | search 257 |
+| S preconditioned opening | Opus 5 high | worktree, merged `0fb9754` | 4.5 min / 10 min | 33 MiB / 80 | core 530, search 270, host 596 |
+| T inertial motor model (Wrysk's direction, added mid-round) | Opus 5 high | worktree | *(pending)* | | |
 
 Fable's verification so far: Q's two ignored experiments re-run and the
 retained files rewritten with identical generation-9 figures (span
 6,459–8,915, sd 643, concordance 15 and 12 of 16, 2 masked); its integration
 tests pass. P's four-seed reach-envelope arm re-run and compared field for
 field with its retained rows (identical, timing keys excluded); its 13 new
-tests pass on the branch and the suites after merge.
+tests pass on the branch and the suites after merge. R's census re-run for
+one seed (both configurations, both depths, three arms) and matched by
+`final_state_hash` on 12 of 12; S's field and compare stages re-run for one
+seed at ages 0 and 48,000 and matched on 4 of 4. One semantic conflict between
+R and S (R's test constructed the run options before S added its
+`precondition` field) was repaired at integration (`1200075`); the shared
+cache's stale-artifact race recurred in every worker and in Fable's own
+re-runs, cleared each time by touching the core crate root.
 
 ## Q — where the ES search loses candidate variation: it does not; there is too little at source
 
@@ -295,8 +303,55 @@ chose none; §11 and `producer.initial_fraction` are untouched.
 
 ## What this does and does not establish
 
-*(after P, R, S)*
+- **Established by measurement:** the apex's pursuit stopping predicate is
+  the cause of its near-zero strike motion (held 89 → 5 %, captures +76 %,
+  ledger not worse), and once it charges the next term is the turn radius
+  its grasp sets; the ES optimiser and update are faithful and the residence
+  variation they see is real and two orders of magnitude too small, with the
+  adapter's turn deadband the measured place weights lose their effect; the
+  skimmer's depth rescues its lineage and pays for it out of the grazer, in
+  both configurations; no plant-only age removes the ungrazed depletion
+  crossings, one age (48,000 ticks) makes every grazer founder breed, and
+  every arm converges to the same grazed standing crop whatever it opened on.
+- **Not established:** whether a delivered lunge can pay for the apex once
+  the turn radius is fixed (T, pending); whether a wider turn deadband lets a
+  policy express residence (a fresh campaign under a new protocol, not run);
+  whether some skimmer depth between 0.10 and 0.55 rescues the lineage without
+  the grazer's loss (a ladder, not run); what a §11 seeded at the grazed
+  standing crop would do (a different measurement from S's).
+- **The cube is untouched by this round**: build `77c42e8`, `fast-leaf`,
+  shipped price, shipped predicate, shipped motor, shipped roster, shipped
+  §11, shoulder 0.95 by override.
 
-## Next recommendation
+## Next recommendation (Fable's, before Astra's opinion)
 
-*(after P, R, S, reconciled with Astra)*
+The round turns three of the pending owner decisions into concrete
+proposals and withdraws one.
+
+1. **Apex: approve the predicate correction** (`inside` → `in_contact()`,
+   one line). Astra's condition for telling Wrysk to approve is met: the
+   burst is delivered, the gap closes, contacts and captures rise, the ledger
+   is not worse. It does not make the apex viable on its own; T's motor
+   result decides whether the corrected apex can then close. Recommend
+   deploying the predicate together with T's motor model if T confirms,
+   as one fresh world, so the cube's apex changes once rather than twice.
+2. **Skimmer: no roster change now.** Run R's depth ladder {0.10, 0.20,
+   0.30, 0.40, 0.55, 0.75} at arm 0 (about 3.5 minutes) to ask whether any
+   depth rescues the lineage without the grazer's loss, and split the ledger's
+   margin bins by generation so founder and descendant stop being read as one.
+   The wet floor's missing producer stays a separate design question.
+3. **Seeding: neither option now; change the measurement.** S shows the
+   world converges to a grazed standing crop of ΣP 215–230 regardless of the
+   opening, so the honest target for §11 is that, not the ungrazed field.
+   Next: seed at the grazed standing crop (the equivalent `initial_fraction`,
+   uniform, no operator) and at S's 48,000-tick preconditioned field, and
+   compare founder outcomes, the opening transient's size and sign, and the
+   ungrazed crossings, with frames. Wrysk decides after that; leaving §11 is
+   the default meanwhile.
+4. **Training: widen the adapter's turn deadband operating point** as a
+   fresh, bounded campaign under a new protocol hash (never a migration),
+   with the four-layout aggregation A/B (`Aggregate::Mean` exists) run beside
+   it at the same seed; the score stays. Not visible on the cube.
+5. **Motor** (T, pending): if the inertial model confirms on both arms and
+   keeps every gate, it becomes the contract proposal to Wrysk, with the
+   acceleration cost as the following step on the physics-engine backlog.
