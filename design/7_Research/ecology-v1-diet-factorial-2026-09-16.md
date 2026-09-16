@@ -402,19 +402,32 @@ seeds, not settled.
 **Of "diet / body / both / neither — habitat", the design supports *both*, and
 neither leg points where the association pointed.**
 
-**The diet leg is large, controlled, sign-definite — and reversed.** Arm A is
-the clean arm: one body, one locus moved, the same cells, the same tick. Moving
-`diet` 0.60 → 0.85 cuts the median life to **0.33–0.45×** on each of the four
-seeds and establishment from **13/16 to 1/16** (Fisher exact, two-sided,
-p = 3.9 × 10⁻⁵). The founder's `diet = 0.60` is
-the better of the two for the skimmer body. F's 84 % cannot be read as "give the
-skimmer a foliage diet and it lives".
+**The diet leg is large, sign-definite — and reversed; it needed the
+counterbalanced arm below to be called controlled.** (Corrected after Astra's
+round-2 review, P1.) Arm A as first run moved one locus on one body at the same
+tick, but its diet assignment was fixed to slots — 0.60 in slots 0, 1, 4, 5 and
+0.85 in slots 2, 3, 6, 7 on every seed — so diet was confounded with founding
+cell, and the low-diet slots happened to be the richer ones (mean opening
+foliage 0.17–0.19 against 0.11–0.16 on every seed). The Fisher p of
+3.9 × 10⁻⁵ treats 32 clone lives sharing four worlds as independent and is
+descriptive only. The **swapped arm** (`--arms As`, the same cells with the
+diets exchanged) resolves this: within the same slot, the low diet outlives the
+high diet in **29 of 32** pairs, establishes **22 of 32** against **2 of 32**,
+and does so in all four worlds (per-seed medians 800–901 s against 375–399 s);
+in the swapped arm alone, where the originally richer slots hold the high diet,
+the high diet establishes 1 of 16 and the low diet 9 of 16. The effect follows
+the diet, not the cell. At the independent level of worlds it is 4 of 4. The
+founder's `diet = 0.60` is the better of the two for the skimmer body. F's 84 %
+cannot be read as "give the skimmer a foliage diet and it lives".
 
-**The body leg is real, small, and measured on yield rather than on lifetime.**
-Arm C, within the detrital guild and with habitat and diet family matched:
-realised yield **0.413 against 0.900**, median life **826 s against 1076 s** —
-a 23 % shorter life for a body that ate more. At a foliage diet (arm B) the body
-leg is **not resolvable**: 0/8 against 2/8 with four seeds is not a measurement.
+**Arm C measures a diet-locus yield difference, not a body cost** (corrected
+after review). Arm C changes form *and* diet together, and the realised yields
+**0.413 against 0.900** follow directly from the two roster diets' capacities
+(φ(1 − 0.60) against φ(1 − 0.10)); the 23 % shorter life for a body that ate more
+is real for those two roster pairings and does not isolate a body-level
+penalty. At a foliage diet (arm B) the body leg is **not resolvable**: 0/8
+against 2/8 with four seeds is not a measurement. The body leg remains
+unmeasured; the depth-only factorial named below is the test.
 
 **Habitat is not excluded, and is what couples the two legs.** The skimmer's
 `depth = 0.10, swim = 1.0` body does go to the water — 65 % of its probes on wet
@@ -423,7 +436,10 @@ ground in arm C, against the glider's 11 % — and the water in ecology v1 grows
 40 carry no foliage at all. The niche the skimmer's body was built for supplies
 exactly the food its diet can only half digest, and moving its diet to the
 foliage end shuts that supply without opening another. Arm B cannot separate
-`form` from `depth`, so "body" and "habitat" are one statement in this roster.
+`form` from `depth`, and roster form also bundles size, speed, swimming and
+metabolism, so body and habitat are **not separable here** (softened after
+review from "one statement"); `depth` is the leading mechanism, not the shown
+one.
 
 ### Reconciling with workstream F, carefully
 
@@ -448,6 +464,40 @@ that mostly ends in six minutes and occasionally pays indefinitely.** Over 150
 minutes with reproduction, only the lottery winners have descendants.
 
 ---
+
+## Addendum after review: the counterbalanced arm
+
+Astra's round-2 review found that arm A's diet assignment was fixed to slots,
+so diet was confounded with founding cell. Fable added `Arm::ASwap` (`--arms
+As`): the same eight placements, the same body, the same tick, with the two
+diets exchanged between the slot pairs (0.85 in slots 0, 1, 4, 5; 0.60 in
+slots 2, 3, 6, 7). Not part of the default three arms. Command and rows:
+
+```bash
+./target/release/cubarium-search factorial --arms A,As --seeds 4 --workers 8 \
+  --out runs/ecology-v1-diet-factorial/swap
+```
+
+The `A` rows reproduce this note's arm A by `final_state_hash` on all four
+seeds. Within-slot pairing across the two arms (32 pairs, one per slot per
+seed):
+
+| | low diet 0.60 | high diet 0.85 |
+| --- | --- | --- |
+| established (≥ 750 s) | **22 / 32** | **2 / 32** |
+| median life | 831 s | 381 s |
+| within-slot pairs won | **29** | 3 |
+| per-seed medians | 901 / 800 / 828 / 835 s | 376 / 375 / 394 / 399 s |
+| established per seed | 7 / 5 / 5 / 5 of 8 | 0 / 0 / 2 / 0 of 8 |
+
+In the swapped arm alone the originally richer slots now hold the high diet and
+it establishes 1 of 16 there; the low diet in the originally poorer slots
+establishes 9 of 16. The advantage follows the diet, not the cell. The two
+high-diet establishments are both seed 1003 slots 3 and 5, alive at the
+horizon under both assignments' high diet (the foliage lottery's winners). The
+independent replicate is the world: 4 of 4 agree in direction and in
+establishment count. The clone-level Fisher test in the original arm A is
+withdrawn as an inferential statistic.
 
 ## Accounting, and what was not measured
 

@@ -153,6 +153,12 @@ pub enum Arm {
     B,
     /// The founder pairing: every roster body at its own roster diet.
     C,
+    /// Arm A with the diet assignment swapped between the slot pairs (slots 0–1 and 4–5 at
+    /// 0.85, slots 2–3 and 6–7 at 0.60), so every cell is observed under both diets across
+    /// the two arms and the diet effect can be read within a slot. Added after Astra's
+    /// round-2 review (P1: diet was confounded with founding cell in arm A alone). Opt-in
+    /// through `--arms`; not part of [`Arm::ALL`], so the three-arm default is unchanged.
+    ASwap,
 }
 
 impl Arm {
@@ -163,6 +169,7 @@ impl Arm {
             Arm::A => "A",
             Arm::B => "B",
             Arm::C => "C",
+            Arm::ASwap => "As",
         }
     }
 
@@ -171,6 +178,9 @@ impl Arm {
             Arm::A => "diet within body: the roster skimmer at 0.60 against the same body at 0.85",
             Arm::B => "body within diet: every roster body held at 0.85, a pure foliage feeder",
             Arm::C => "the founder pairing: every roster body at its own roster diet",
+            Arm::ASwap => {
+                "arm A with the diets swapped between the slot pairs: the counterbalance"
+            }
         }
     }
 
@@ -179,7 +189,8 @@ impl Arm {
             "A" | "a" => Ok(Arm::A),
             "B" | "b" => Ok(Arm::B),
             "C" | "c" => Ok(Arm::C),
-            other => Err(format!("unknown arm {other}: the arms are A, B and C")),
+            "As" | "AS" | "as" | "A-swap" | "a-swap" => Ok(Arm::ASwap),
+            other => Err(format!("unknown arm {other}: the arms are A, B, C and As (A swapped)")),
         }
     }
 }
@@ -479,6 +490,10 @@ pub fn plan(arm: Arm, roster: &Roster, cells: &[Placement; CLONES]) -> Vec<Clone
             let (form, diet) = match arm {
                 Arm::A => {
                     let high = (slot / 2) % 2 == 1;
+                    (SKIMMER, if high { DIET_HIGH } else { DIET_LOW })
+                }
+                Arm::ASwap => {
+                    let high = (slot / 2) % 2 == 0;
                     (SKIMMER, if high { DIET_HIGH } else { DIET_LOW })
                 }
                 Arm::B => (FORMS[slot / 2], DIET_HIGH),
@@ -1140,6 +1155,7 @@ mod tests {
             for slot in 0..CLONES {
                 let key = match arm {
                     Arm::A => format!("diet {}", (slot / 2) % 2),
+                    Arm::ASwap => format!("diet {}", 1 - (slot / 2) % 2),
                     Arm::B | Arm::C => format!("form {}", FORMS[slot / 2]),
                 };
                 count.entry(key).or_default().push(slot);
@@ -1160,6 +1176,19 @@ mod tests {
                 assert_eq!(count["diet 1"], vec![2, 3, 6, 7]);
             }
         }
+    }
+
+    /// The counterbalance is the exact complement of arm A: same body, same cells, and the
+    /// diet in every slot is the other one.
+    #[test]
+    fn the_swapped_arm_is_arm_a_with_every_slots_diet_exchanged() {
+        for slot in 0..CLONES {
+            let a_high = (slot / 2) % 2 == 1;
+            let s_high = (slot / 2) % 2 == 0;
+            assert_ne!(a_high, s_high, "slot {slot}");
+        }
+        assert_eq!(Arm::parse("As").unwrap(), Arm::ASwap);
+        assert!(!Arm::ALL.contains(&Arm::ASwap), "the default three arms are unchanged");
     }
 
     #[test]

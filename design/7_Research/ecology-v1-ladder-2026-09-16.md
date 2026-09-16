@@ -493,8 +493,11 @@ the derived threshold at all:
 
 1. **971 of the 1,355 depleted cells were never observed to hold a prey body at
    any probe of the whole 150-minute run** — not before the crossing, not after.
-   A body cannot be missed for a whole run by a one-second probe unless it never
-   went there.
+   (Corrected after review: a probe every 20 ticks samples where bodies stand
+   once a simulated second; a body can cross or bite a cell between probes, so
+   "never observed at a probe" is not "never visited", and attributed bites are
+   credited to the sampled cell rather than recorded at the withdrawal site.
+   This is screening telemetry, not an exact per-cell consumption ledger.)
 2. **Of the 384 that were ever visited, 73 were last visited within 5 simulated
    minutes of the crossing**, and 5 within one second of it. The median gap
    between a depleted cell's last consumer visit and its crossing is **57,000 to

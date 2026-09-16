@@ -34,15 +34,20 @@ never grazed cells: 971 of 1,355 depleted cells never held a prey body, the
 depleted set is the dimmest band of the habitat at every price, and the nine
 recoveries are plant-side events in three cells. The depletion/recovery cycle
 §4.4 was written for has not yet been observed, and the display shows a world
-seeded above its own equilibrium in its dim cells. J's controlled factorial reverses the
-sign of F's skimmer association: in matched cells, moving only `diet` from the
-founder's 0.60 to 0.85 takes the skimmer body from establishing 13 times in 16
-to once in 16, because the 0.2 threshold shuts its litter channel and foliage
-does not make it up; the body's cost is real but is a yield cost (it digests
-41 % of what it eats against the burrower's 90 %), and "body" and "habitat" are
-one statement in this roster because `depth` steers it to a wet floor that
-grows litter, not foliage. None of this is "ecosystem healthy"; all of it narrows
-what the next design change must be.
+seeded above its own equilibrium in its dim cells — as a leading hypothesis:
+the classification rests on one-second occupancy probes, attributed rather
+than measured bites, and a derived static critical `L·μ` the contract does not
+name, so what is established is that most counted crossings had no *observed*
+grazing at probe resolution. J's factorial, once counterbalanced after review,
+reverses the sign of F's skimmer association: with the diets exchanged on the
+same cells the founder's 0.60 still beats 0.85 in 29 of 32 within-slot pairs
+and in all four worlds, because the 0.2 threshold shuts the litter channel and
+foliage does not make it up. Arm C's yield gap (0.41 against 0.90 digestible
+per served) is a diet-locus difference, not a body cost; body and habitat are
+not separable in this roster, with `depth` the leading mechanism. Astra's review
+([ecology-v1-round2-review-2026-09-16.md](ecology-v1-round2-review-2026-09-16.md))
+and the repair are recorded below. None of this is "ecosystem healthy"; all of
+it narrows what the next design change must be.
 
 ## Dispatch and budget
 
@@ -54,7 +59,8 @@ what the next design change must be.
 | J form × diet factorial | Opus 5 high | worktree, merged `c38e8a7` | 100 s / 10 min | 128 KiB / 20 | core 502, search 174, host 596 |
 
 Fable's verification: J's whole campaign re-run and compared row for row
-(12 of 12 identical, timing keys excluded); H's whole experiment re-run from its ignored test and
+(12 of 12 identical, timing keys excluded), and after review the
+counterbalanced arm run beside it (arm A reproduces by hash on 4 of 4 seeds); H's whole experiment re-run from its ignored test and
 compared field for field with the retained aggregate (identical, timing keys
 excluded); K's age-eligible probe re-run and compared (identical); two interior
 ladder prices re-run for one seed and matched by `final_state_hash` (4 of 4); I's
@@ -190,13 +196,17 @@ ones. The price does not pick out where grazers congregate; it moves a
 brightness threshold down the habitat, through the world's nutrient pool
 (790 → 530 as leaf eaten collapses; a correlate, not a demonstration). The nine
 recoveries are three dim cells recovering at nearly the same tick at four
-prices: plant-side events. **Reading:** a depletion event in ecology v1 is
-almost never a grazed-out cell; it is a cell seeded at `0.4·P_cap` (§11,
-`producer.initial_fraction`) in a habitat that cannot hold that foliage, losing
-it slowly with nothing eating it. A's and F's counters are correct and the name
-on them is not; the depletion/recovery cycle §4.4 was written for has not been
-observed, not because it is rare but because nothing measured so far would be
-one. Stated limits: "plant-limited" is empty by threshold (no depleted cell was
+prices: plant-side events. **Reading, as a leading hypothesis** (softened after review): most counted
+crossings had no grazing observed at one-second probe resolution, and the
+depleted set is the dim band; the proposed mechanism is a cell seeded at
+`0.4·P_cap` (§11, `producer.initial_fraction`) in a habitat that cannot hold
+that foliage, losing it slowly with little or nothing eating it. What would
+confirm it: a herbivore-absent run of the same worlds in which the same cells
+cross at the same times with a measured negative plant budget (actual light and
+`N`, `P` and `Q`, production and loss, exact withdrawal). What would refute it:
+the crossings disappear, or their measured plant budget is positive. A's and F's
+counters are correct as counters; whether "depletion" is the right name for
+what they count is what that run decides. Stated limits: "plant-limited" is empty by threshold (no depleted cell was
 above critical, so the plant equation in an adequate cell is untested); the
 critical value is derived from the contract's §13 break-even and the contract
 names no such constant; `L·μ` is the static habitat; per-cell served is
@@ -233,20 +243,24 @@ clone rather than assigned.
 | B, body at `diet` 0.85 | burrower / grazer / glider / skimmer | 2 / 2 / 2 / **0** of 8 | 436 / 347 / 369 / 385 s | not resolvable at four seeds (p = 0.47) |
 | C, roster pairing | burrower 0.10 vs skimmer 0.60 | 8 / 8 vs 7 / 8 | 1,076 vs 826 s | digestible / served **0.90 vs 0.41**: same food, half the yield |
 
-**Verdict: both legs, and neither points where the association pointed.** The
-diet effect is large, controlled and sign-definite in the reversed direction:
-per-seed lifetime ratio 0.33–0.45 with no seed overlapping (Fisher p = 4e-5).
+**Verdict: the diet leg, reversed; the body leg unmeasured.** (Corrected after
+review.) Arm A as first run had its diets fixed to slots, and the low-diet
+slots were the richer cells on every seed, so Fable added the swapped arm
+(`--arms As`, same cells, diets exchanged). Within-slot across the two arms the
+low diet wins 29 of 32 pairs and establishes 22 of 32 against 2 of 32, in all
+four worlds; the clone-level Fisher test is withdrawn and the world is the
+replicate (4 of 4).
 F's "foliage-diet skimmers survive 84 %" was survivorship: with reproduction on
 over 150 minutes, only lineages that win the foliage lottery leave descendants,
 and a surviving skimmer lineage is necessarily a foliage-diet lineage born into
-its parent's patch — exactly the confound F named. The body effect is real and
-is a yield cost measured for the first time (arm C: the skimmer takes 10 % more
-out of the world than the burrower and gets half as much from it), but at a
-foliage diet the body leg is not resolvable and J declined to report it as one.
-"Neither, habitat" is refuted as a separate cause and named as the coupling:
-the skimmer spends 65 % of its probes in water against the glider's 11 %, and
-39 of the 40 deepest cells across the seeds carry no foliage; arm B cannot
-separate `form` from `depth`. A structural finding the arms were not designed
+its parent's patch — exactly the confound F named. Arm C's yield gap is a diet-locus difference (the two roster diets' capacities),
+not a body cost: arm C moves form and diet together. At a foliage diet the body
+leg is not resolvable and J declined to report it as one; the body leg is
+therefore unmeasured and the depth-only factorial is its test. Habitat is the
+leading coupling, not the shown one: the skimmer spends 65 % of its probes in
+water against the glider's 11 %, and 39 of the 40 deepest cells across the
+seeds carry no foliage; arm B cannot separate `form` from `depth`, and form
+bundles size, speed, swimming and metabolism too. A structural finding the arms were not designed
 for: the two food channels fail differently — of 64 pure-foliage clones, 51
 served under 0.5 m and died on the no-intake floor while 11 served over 5 m
 (all-or-nothing); all 32 detrital clones served 1.1–14.3 m and none ever reached
@@ -259,54 +273,106 @@ a body in `fast-leaf` at all, which is a calibration question.
 
 ## What this does and does not establish
 
-- Established by measurement: the policy's failure is residence on food, not
-  effort, detection or clamping; the apex dies of a 3 % capture rate and never
-  fills its reserve, whatever its age; the movement price cannot concentrate
-  grazing without starving the grazer first; the counted depletions are
-  habitat-limited declines in unvisited dim cells, and the counted recoveries
-  are plant-side.
-- Established by J: for the skimmer body the founder's generalist diet is the
-  better of the two; the body's cost is a halved yield on the same food;
+- Established by measurement: the policy's failure is leaving food, not
+  effort or clamping (the food signal is present in the observation; whether
+  the frozen weights, hidden state or cadence use it was not tested); the apex
+  dies of a 3 % capture rate and never fills its reserve, whatever its age; the
+  movement price cannot concentrate grazing without starving the grazer first;
+  most counted depletion crossings had no grazing observed at probe resolution
+  and fall in the dim band; the counted recoveries are plant-side.
+- Established by J with the counterbalanced arm: for the skimmer body the
+  founder's generalist diet is the better of the two, in every world and
+  within cells; arm C's yield gap is the two roster diets', not the body's;
   foliage foraging from a cold start is all-or-nothing and detrital foraging
   is a certain slow decline.
-- Open: why the policy ignores the food-here scalar (a score question); why a
-  strike ends out of reach (kinematics, escape or pursuit); whether the
-  contract should name a critical `L·μ` and seed foliage by it; whether
-  `depth`, not the body, is what couples the skimmer to litter; whether any
+- Open: why the policy leaves food (a score gradient is the leading
+  hypothesis; cadence and recurrent dynamics are not excluded); why a strike
+  ends out of reach (kinematics, escape or pursuit); whether the counted
+  depletions are over-seeding (the herbivore-absent plant-budget run decides);
+  whether `depth`, not the body, couples the skimmer to litter; whether any
   detrital diet can fund a body in `fast-leaf`.
 - The cube is untouched by this round: build `77c42e8`, `fast-leaf`, shipped
   movement price, shoulder 0.95 by override. Nothing here changes a number the
   display produces. What the display's dim cells are showing, on I's reading,
   is a slow decline from an over-seeded start, not grazing.
 
-## Next recommendation (Fable's, before Astra's opinion)
+## Review and repair (Astra, 2026-09-16)
 
-Two decisions and three measurements, in this order. The decisions are design
-changes, so each gets a short written proposal and Astra's review before any
-implementation; the measurements are cheap and can run in parallel.
+Astra's review is
+[ecology-v1-round2-review-2026-09-16.md](ecology-v1-round2-review-2026-09-16.md).
+Disposition: retain H's trace, I's refutation and K's ledger as evidence; do not
+accept the full causal reading yet. Repair 1, on `main`:
 
-1. **Decision: the forager's training score.** H shows the controller ignores
-   food it stands on because `t_min + 0.25·stores` rewards staying only far
-   downstream of the bite. Proposal to write: a dense term from the ledger
-   (income / bill, or served material per tick) joining `t_min`, evaluated
-   against H's residence measures on the same 12 layouts before any campaign.
-   No training until this is decided.
-2. **Decision: what a depletion is, and how foliage is seeded.** I shows the
-   counted depletions are habitat-limited declines from a uniform `0.4·P_cap`
-   opening in cells that cannot hold it. Proposal to write: seed each cell's
-   opening foliage from its own break-even (the contract would then name a
-   critical `L·μ`), and split the depletion counter by ever-visited so a
-   screen's headline stops mixing two events. This changes what the display
-   shows in its dim cells, so it is Wrysk's call after Astra's review.
-3. **Measure the apex's reach** (K's next): per paid attempt, separation at
-   windup, strike start and settlement against capture reach and the prey's
-   escape speed. About the same cost as K.
-4. **Measure `depth` alone** (J's next): arm A's design with `depth` 0.10 vs
-   0.55 crossed with `diet`, about 25 s; and I's per-cell nutrient and light
-   at the depleted cells with one herbivore-absent arm, about 40 s.
-5. **Ask the calibration question J raised**: can a detrital diet fund a body
-   in `fast-leaf` at all? The detrital clones never had a positive margin,
-   which bears on the burrower guild's long-run persistence, not only the
-   skimmer's.
+- **P1, J's arm A confounded diet with cell.** Fable added the swapped arm and
+  ran it (above): the effect follows the diet within slots in all four worlds.
+  The clone-level Fisher test is withdrawn; the world is the replicate.
+- **P1, J's arm C is a diet-locus yield difference, not a body cost.**
+  Corrected in J and here; "one statement because of depth" softened to "not
+  separable here".
+- **P2, I's mechanism overstated.** "Never visited" is "never observed at a
+  one-second probe"; bites are attributed, not measured; the critical `L·μ` is
+  a static proxy the contract does not name. The over-seeding reading is kept
+  as the leading hypothesis with its confirmation and refutation named.
+- **P2, H's cause not established.** "Not detection" reduced to "the signal is
+  present; whether the weights use it was not tested"; the score change is the
+  leading hypothesis, to be falsified first by Astra's two cheap checks.
+- **P3, K and integration:** no change needed.
+
+## Next recommendation (reconciled with Astra)
+
+Astra's order, which Fable accepts: remove the two causal confounds first (one
+is now done), gate both design decisions on a measurement, and keep the cube
+untouched. The two decisions are Wrysk's; what Fable and Astra would tell him
+is stated at each.
+
+1. **J's counterbalance — done** (the swapped arm above). Diet is causal for
+   the skimmer body's establishment; the body leg is still unmeasured.
+2. **Two cheap falsification checks, then a score experiment, not a campaign.**
+   (a) Sweep the frozen generation-9 controller over otherwise identical
+   observations with the local and ring food scalars varied, with reset and
+   with carried hidden state, to see whether its movement head responds to
+   food at all. (b) Score scripted policies that differ only in dwell on food
+   under the *current* `t_min + 0.25·stores`. If the present score already
+   gives a strong monotone dwell gradient, the missing-gradient diagnosis is
+   wrong; if the movement head already responds to food while residence still
+   fails, cadence or recurrent dynamics come first. Only if both checks pass
+   does the proposal go to Wrysk: Astra's fixed-horizon auxiliary
+   `A = (1/T) Σ clip((E_credited − E_billed) / b_ref, −1, 1)`, with ticks after
+   death scored −1, `S = t_min + λ·A`, `T`, `b_ref` and a small `λ` fixed
+   before any outcome is seen, and a dwell-script ladder demonstrating
+   monotonicity before any ES run. Credited usable energy, not served mass, so
+   low-yield intake and depletion are not rewarded. **What Fable would tell
+   Wrysk:** approve this as a bounded scoring experiment after the two checks;
+   it is not a campaign and it changes nothing on the cube.
+3. **Measure the plant budget before deciding what "depletion" or opening
+   foliage means.** Run the same worlds without herbivores and record per
+   cell: actual effective light and `N`, `P` and `Q` with reserve transfer,
+   gross production and loss, exact consumer withdrawal (zero in that arm), and
+   the crossing and recovery times; then the herbivore arm with exact
+   withdrawal. Split the counter into "crossed with exact withdrawal since the
+   last recovery" and "crossed without". If plant-only cells cross at the same
+   places and times with a negative measured plant budget, the seeding reading
+   is confirmed; if they stay above threshold, look at missed consumption and
+   animal-mediated nutrient and light first. **What Fable would tell Wrysk:**
+   approve the measurement and the counter split now; defer the §11 seeding
+   change and do not put a universal critical `L·μ` in the contract (it is
+   state-dependent; a documented analysis proxy at reference `N` is fine).
+   The seeding change, if it comes, has a visible consequence — dim cells begin
+   less lush and more heterogeneous instead of greening uniformly and fading —
+   so it is an ecological and presentation decision, not a free correction.
+4. **Instrument apex reach before touching eligibility or mating.** For every
+   paid strike: separation at intent and at resolution, predator and prey
+   displacement and heading, target identity continuity, whether the target
+   crossed a cell or movement boundary; compare captures with `OutOfReach`.
+   Failures that begin in range and resolve out implicate cadence or
+   resolution; failures that begin out of range implicate target selection or
+   pursuit. Age, reserve and radius stay unchanged until hunters can fund
+   themselves.
+5. **Then the remaining factorials in causal order:** the depth-only factorial
+   with diet, placement and metabolic parameters fixed; I's nutrient probe
+   folded into the herbivore-absent run rather than treated as its own study;
+   and whether a detrital diet can fund an otherwise fixed body in `fast-leaf`,
+   through the ledger's served → digestible → credited → billed chain, without
+   inheriting arm C's body-effect wording.
 
 Nothing in this list touches the cube.
