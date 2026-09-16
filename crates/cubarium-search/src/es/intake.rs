@@ -267,11 +267,11 @@ impl Fold {
                 its_food[IntakeTick::mouth_of(c)] = true;
             }
         }
-        for m in 0..MOUTHS {
+        for (m, on_its_food) in its_food.into_iter().enumerate() {
             self.effort_sum[m] += row.effort[m];
             self.requested_total[m] += row.requested[m];
             self.limits[m][limit_index(row.limit[m])] += 1;
-            if its_food[m] {
+            if on_its_food {
                 self.its_food_ticks[m] += 1;
                 self.effort_sum_on_its_food[m] += row.effort[m];
                 self.limits_on_its_food[m][limit_index(row.limit[m])] += 1;
@@ -519,9 +519,9 @@ fn csv_line(row: &IntakeTick, out: &mut String) {
     for m in 0..MOUTHS {
         let _ = write!(out, ",{}", LIMIT_NAMES[limit_index(row.limit[m])]);
     }
-    let _ = write!(
+    let _ = writeln!(
         out,
-        ",{:.6},{:.6},{:.3e},{:.3e}\n",
+        ",{:.6},{:.6},{:.3e},{:.3e}",
         row.reserve, row.energy, row.bill_total, row.reserve_headroom
     );
 }
@@ -574,7 +574,7 @@ pub fn run(
                     let next = cursor.fetch_add(1, Ordering::Relaxed);
                     let Some(&(d, l)) = jobs.get(next) else { return };
                     let (named, layout) = (&drivers[d], &layouts[l]);
-                    let keep = per_tick_layouts.iter().any(|n| *n == layout.name);
+                    let keep = per_tick_layouts.contains(&layout.name);
                     match measure(layout, named, horizon, limits, e_r, eta_ox, keep) {
                         Ok((_, row, kept)) => {
                             if let Some(kept) = kept {

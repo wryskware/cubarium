@@ -572,8 +572,8 @@ impl BudgetRecorder {
         row.cell = cell;
         row.stock = stock;
         row.feed_threshold = feed_threshold;
-        for c in 0..CHANNELS {
-            row.above_threshold[c] = stock[c] >= feed_threshold;
+        for (flag, s) in row.above_threshold.iter_mut().zip(stock) {
+            *flag = s >= feed_threshold;
         }
         row.effort = effort;
         row.raw_head = raw_head;
@@ -586,21 +586,17 @@ impl BudgetRecorder {
         // §6.2: a channel whose machinery does not exist is refused in the world, whatever
         // asked for it. This is the settlement's own test, not a second rule.
         let open = [cap_foliage > 0.0, cap_foliage > 0.0, cap_detrital > 0.0];
-        let mut want = [0.0f64; MOUTHS];
-        for m in 0..MOUTHS {
-            want[m] = if open[m] { effort[m].max(0.0) } else { 0.0 };
-        }
+        let want: [f64; MOUTHS] =
+            std::array::from_fn(|m| if open[m] { effort[m].max(0.0) } else { 0.0 });
         let asked: f64 = want.iter().sum();
         // §6.3: one mouth. Normalise only when the efforts overcommit it.
         let norm = if asked > 1.0 { 1.0 / asked } else { 1.0 };
-        for m in 0..MOUTHS {
-            row.effort_normalised[m] = want[m] * norm;
-        }
+        row.effort_normalised = std::array::from_fn(|m| want[m] * norm);
         // The food each mouth bites: foliage, fruit, and the two detrital stocks together.
         let food = [stock[FOLIAGE], stock[FRUIT], stock[LITTER] + stock[CARRION]];
-        for m in 0..MOUTHS {
-            let total = food[m] + k_p;
-            row.saturation[m] = if total > 0.0 { food[m] / total } else { 0.0 };
+        for (m, f) in food.iter().enumerate() {
+            let total = f + k_p;
+            row.saturation[m] = if total > 0.0 { f / total } else { 0.0 };
             row.mouth_bite[m] = if row.effort_normalised[m] > 0.0 {
                 mouth_rate * row.effort_normalised[m] * dt * row.saturation[m]
             } else {
@@ -615,20 +611,21 @@ impl BudgetRecorder {
             row.requested[m] = bite;
             room -= bite;
         }
-        for m in 0..MOUTHS {
-            row.limit[m] = if !open[m] {
+        let (bite, asked_for) = (row.mouth_bite, row.requested);
+        row.limit = std::array::from_fn(|m| {
+            if !open[m] {
                 IntakeLimit::CapabilityZero
             } else if want[m] <= 0.0 {
                 IntakeLimit::EffortZero
             } else if food[m] < feed_threshold {
                 IntakeLimit::StockBelowThreshold
-            } else if row.requested[m] < row.mouth_bite[m] - 1e-15 {
+            } else if asked_for[m] < bite[m] - 1e-15 {
                 IntakeLimit::ReserveHeadroom
             } else {
                 // Refined to `StockShare` on close, when the served bite is known.
                 IntakeLimit::MouthRate
-            };
-        }
+            }
+        });
     }
 
     /// The record for one live body, if recording is on and the id still resolves.

@@ -472,10 +472,10 @@ fn a_neural_bodys_row_carries_the_head_before_the_adapter() {
 #[test]
 #[ignore = "timing study, not a check"]
 fn how_much_tracing_costs() {
-    fn ticks_per_second(mut world: World, on: bool, ticks: u64) -> f64 {
-        if on {
-            let id = world.state.organisms.iter().next().expect("a body").0;
-            world.record_body_budgets(true);
+    fn ticks_per_second(mut world: World, ledger: bool, trace: bool, ticks: u64) -> f64 {
+        let id = world.state.organisms.iter().next().expect("a body").0;
+        world.record_body_budgets(ledger);
+        if trace {
             world.trace_intake(Some(id));
         }
         for _ in 0..ticks / 10 {
@@ -484,25 +484,37 @@ fn how_much_tracing_costs() {
         let start = std::time::Instant::now();
         for _ in 0..ticks {
             world.step();
-            if on {
+            if trace {
                 let _ = world.drain_intake_trace();
+            }
+            if ledger {
                 let _ = world.drain_body_budgets();
             }
         }
         ticks as f64 / start.elapsed().as_secs_f64()
     }
 
-    // Alternating A/B repeats, best-of: this machine runs several workers against one shared
-    // `target/`, so a single pair of timings is dominated by whatever else is compiling.
+    // Alternating A/B/C repeats, best-of: this machine runs several workers against one shared
+    // `target/`, so a single set of timings is dominated by whatever else is compiling.
     let ticks = 10_000;
-    let (mut off, mut on) = (0.0f64, 0.0f64);
+    let mut best = [0.0f64; 3];
     for _ in 0..5 {
-        off = off.max(ticks_per_second(ordinary_world(4_242), false, ticks));
-        on = on.max(ticks_per_second(ordinary_world(4_242), true, ticks));
+        for (i, (ledger, trace)) in
+            [(false, false), (true, false), (true, true)].into_iter().enumerate()
+        {
+            best[i] =
+                best[i].max(ticks_per_second(ordinary_world(4_242), ledger, trace, ticks));
+        }
     }
     println!(
-        "whole default world: {off:.0} ticks/s off, {on:.0} ticks/s with the trace and the \
-         ledger on and drained every tick ({:+.2} %)",
-        100.0 * (on - off) / off
+        "whole default world: {:.0} ticks/s off; {:.0} with the ledger alone ({:+.2} %); \
+         {:.0} with the ledger and the trace, both drained every tick ({:+.2} % against off, \
+         {:+.2} % against the ledger alone)",
+        best[0],
+        best[1],
+        100.0 * (best[1] - best[0]) / best[0],
+        best[2],
+        100.0 * (best[2] - best[0]) / best[0],
+        100.0 * (best[2] - best[1]) / best[1],
     );
 }

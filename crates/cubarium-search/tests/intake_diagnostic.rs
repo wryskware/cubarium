@@ -150,9 +150,9 @@ fn the_counts_are_what_the_columns_say_on_a_disclosed_driver() {
     assert_eq!(open_on_food, row.open_on_food);
     let mut limits = [[0u64; 6]; MOUTHS];
     for r in &kept {
-        for m in 0..MOUTHS {
+        for (m, bin) in limits.iter_mut().enumerate() {
             let i = LIMITS.iter().position(|x| *x == r.limit[m]).expect("a known term");
-            limits[m][i] += 1;
+            bin[i] += 1;
         }
     }
     assert_eq!(limits, row.limits);
