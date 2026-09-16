@@ -41,8 +41,9 @@ Read-only audit: no source file was changed to write it.
    exists but is blocked by a hard 9-pixel stamp budget that must scale with S.
 9. Biome/terrain variation is real but **separable**: one low-frequency region
    field offsetting per-cell habitat parameters, behind a toggle, off by default.
-10. Total: **nine packages — 4 large, 4 medium, 1 small**; six at high effort.
-    Parallel pairs start only after FW-1's contract is frozen.
+10. Total: **ten packages — 5 large, 4 medium, 1 small**; seven at high effort.
+    FW-1..FW-8 are CPU-only; FW-9 is the approved GPU follow-on. Parallel pairs
+    start only after FW-1's contract is frozen.
 
 ## 1. How deep the cube goes
 
@@ -486,9 +487,11 @@ Recommended placement, to be confirmed by FW-0: the host loop on `cpu7` (the
 2.71 GHz core), the parallel presenter across `cpu4-6` plus `cpu7` when it is in
 its render phase, and the screen shim plus the OS on the four A55s — the shim's
 integer block upscale to 1920×1080 XRGB is memory-bound and does not need a big
-core. The board also carries an **Adreno GPU and a Hexagon NPU; both are out of
-scope for the first version** (Wrysk may want the NPU for organism networks or
-voice later, which is a reason not to spend it on rendering now).
+core. The board also carries an Adreno GPU and a Hexagon NPU. **Everything in
+this section is CPU-only, which is the scope of FW-1..FW-8; the Adreno is the
+subject of FW-9, the approved GPU follow-on, and not part of the first version**
+(the Hexagon NPU stays unspent — Wrysk may want it for organism networks or voice
+later).
 
 **The budget is shared, not split.** `Step::Tick` and `Step::Render` alternate on
 one thread in one loop (`crates/cubarium/src/runner/mod.rs:733-801`), so the real
@@ -533,6 +536,19 @@ A78-versus-A55 ratio above is an assumption, not a measurement. FW-0 must produc
 both, pinned, before the value is fixed; 480×270 and 30 fps are the documented
 fallbacks and are config edits, not rewrites. The *contract* carries S from FW-1
 either way (§2), so only the number moves.
+
+**What FW-9 does, and does not do, to this trade.** FW-9 moves the *display
+daemon's* gather to the Adreno: the shim renders surfaceless into a dma-buf
+imported into KMS and does the integer upscale, the rotation and any
+panel-resolution post-effects there. That removes the gather from the CPU budget
+entirely — worth real A55 time, and it is what makes shaded effects affordable at
+1920×1080 at all. It does **not** touch cubarium's side of the wire. The presenter
+still rasterizes the `w×h` world raster on the CPU, so `render ∝ S²` and the
+shared-loop budget above are unchanged, and **S stays gated on FW-0's measured
+numbers exactly as written**. A higher S becomes arguable only if the presenter's
+own background passes — ground, ramps, water, rain, stamps — also move to the GPU,
+which is explicitly outside FW-9's scope and is the "longer-term shaded renderer"
+rather than this plan.
 
 ## 7. The artwork pipeline, and what a rescale costs
 
@@ -658,16 +674,21 @@ excludes `tests/flat_*.rs`:
 | FW-6 | Independent test authoring at the reserved paths: wall reflection incl. exact and near corner, corner-cell flux, capacity refusal, extended `validate`, §5a's weather incl. stream parity, care widening, sink/raster, presenter goldens | — | only the reserved `tests/flat_*.rs` paths above | — | written without reading FW-1..FW-5's own tests | medium | **high** |
 | FW-7 | Pack v6 (`tile` as data), baker at `TILE = 16·S`, `art.rs`/`tall.rs`/`lanternjaw` constants made tile-relative, S-scaled default builder; re-bake at S = 2 | — | `art/**`, `assets/atelier/**`, `crates/cubarium/src/art.rs` | `pack.json` v6 | S = 1 pack still loads and renders bit-identically; 640×360 capture; reproducible Godot bake | large | **high** |
 | FW-8 | Biomes: region field, four parameter sets, `mechanisms.biomes` off by default, presentation by dominant biome | biome parameter sets | `crates/cubarium-core/src/biome.rs` (new), `crates/cubarium/src/art_present/habitat.rs` | `HabitatConfig.biomes` | toggle off ⇒ `CubeProjection` unchanged; toggle on ⇒ short run showing distinct regions | medium | medium |
+| FW-9 | **GPU hybrid (approved follow-on, not the first version).** Sim and sprite stamping stay on the CPU at world resolution; the display daemon renders on the Adreno — EGL surfaceless into a dma-buf imported into KMS — and does the integer upscale, the rotation and panel-resolution post-effects there. The CPU gather remains the fallback, chosen per display | the renderer choice per display | the `led-cube-shim` repo's `cube-screen-shim` and `cube-proto` crates, plus cubarium's `sink/` raster encoder for the auxiliary layers | **auxiliary layers beside RGB in the raster strip format** — candidates: emissive, water mask, height/stratum, rain — with a layer id in the strip header; **FW-4 publishes which layers cubarium emits** | byte-identical output to the CPU gather with no effects enabled; measured ms/frame on the GPU path | large | **high** |
 
 FW-5 and FW-7 both touch `art_present/tall.rs` and `lanternjaw/**`; FW-7 runs
 after FW-5 and the table gives those paths to FW-5, with FW-7 editing them only in
-its own window. FW-8's presenter file is likewise sequenced after FW-5.
+its own window. FW-8's presenter file is likewise sequenced after FW-5. FW-9 touches neither
+repo's presenter files and is independent of FW-7 and FW-8; its only cubarium
+surface is the raster encoder, whose layer set FW-4 declares.
 
 **Ordering.** FW-0 any time. FW-1 first, **and its API is frozen and published
 before anything else starts** — the freeze is the gate, not the merge. Then
 FW-2 ∥ FW-3 (disjoint crates). Then FW-4 ∥ FW-5 (disjoint file sets), only after
 FW-3 publishes `encode_raster`. FW-6 starts at the FW-1 freeze and writes only its
-reserved paths. FW-7 follows FW-5; FW-8 last. W2 (the device) follows FW-7.
+reserved paths. FW-7 follows FW-5; FW-8 last. **FW-9 also follows FW-5 and is
+independent of FW-7 and FW-8**, so it can run beside either. W2 (the device)
+follows FW-7.
 
 **The scale staging.** Scale lives in the FW-1 contract and is exercised at S = 2
 there, so nothing downstream ever changes geometry. What stages is the chosen
@@ -675,11 +696,12 @@ there, so nothing downstream ever changes geometry. What stages is the chosen
 show S = 2 on the same pack, and FW-7 makes S = 2 the shipped default with
 re-baked art. If FW-7 slips the panel still works.
 
-Six packages are high effort: FW-1 (a reflection, tie or bound mistake is silent
+Seven packages are high effort: FW-1 (a reflection, tie or bound mistake is silent
 and corrupts motion), FW-2 (the weather model and the validate extension), FW-3
 (the 9-px stamp budget is a proven-correctness bound shared with `unfold_pixels`),
 FW-5 (new UI construction), FW-6 (test authoring is high by the working rules),
-FW-7 (`tall.rs`'s named row indices).
+FW-7 (`tall.rs`'s named row indices), FW-9 (EGL/dma-buf/KMS interop plus a wire
+format change, with a byte-identical fallback to hold).
 
 **Standing evidence at every package:** `cargo test --workspace` green, a
 fixed-seed `cubarium run --fresh --seed 1 --speed 0 --seconds 120 --sink png`
