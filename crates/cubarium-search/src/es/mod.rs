@@ -15,6 +15,8 @@
 //! - [`fixture`]: the frozen training and held-out layouts, and how one becomes a world.
 //! - [`episode`]: one rollout through `World::step`, plus the three disclosed controls.
 //! - [`budget`]: the matched feasibility experiment over the world's per-organism ledger.
+//! - [`intake`]: the per-tick intake diagnostic — why a trained controller travels and does
+//!   not eat, separated at the sites the tick decides it.
 //! - [`trainer`]: stable job identities, bounded workers, the reduction and the checkpoint.
 //! - [`export`]: a trained centre as a self-contained policy the core can attach.
 //! - [`commands`]: the development commands behind the `es-*` subcommands.
@@ -28,6 +30,7 @@ pub mod commands;
 pub mod episode;
 pub mod export;
 pub mod fixture;
+pub mod intake;
 pub mod optimizer;
 pub mod rng;
 pub mod tensor;
