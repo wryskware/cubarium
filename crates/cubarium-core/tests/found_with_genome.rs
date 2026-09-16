@@ -187,6 +187,9 @@ fn capacity_is_refused_by_name() {
     let mut config = WorldConfig::default();
     let founders: u32 = config.founders.kinds.iter().map(|k| k.count).sum();
     config.capacity.max_organisms = founders;
+    // `count` is ignored when `kinds` is non-empty, but `validate` still reads it against
+    // the cap, so it comes down with the cap.
+    config.founders.count = founders;
     let mut w = World::new(config).expect("a world exactly at its cap");
     assert_eq!(w.population() as u32, founders);
     let (genome, _) = roster_body(&w, SKIMMER_FORM);

@@ -297,6 +297,56 @@ impl World {
         pos: SurfacePoint,
         heading: Vec2,
     ) -> Result<crate::ids::OrganismId, String> {
+        let genome = Genome::founder(TRAINING_FOUNDER_HUE, &self.state.config.drives);
+        self.found_body(pos, heading, genome)
+    }
+
+    /// Found one **adult with a named genome** at `pos` facing `heading`: the same body
+    /// [`World::found_training_animal`] founds, with the genome chosen by the caller instead
+    /// of fixed to the unit adult.
+    ///
+    /// This is the door a matched experiment needs. The roster path inside [`World::new`]
+    /// can only run at creation and only over the configured kinds; `found_training_animal`
+    /// fixes the genome. Neither can put a *stated* genome — the roster's skimmer with only
+    /// `diet` moved, say — into a live world at a chosen cell and tick, which is what
+    /// cloning a founder means (`design/handoffs/ecology-v1-diet-factorial-opus-2026-09-16.md`).
+    ///
+    /// Everything else is identical to the training door and shares its code: adult at
+    /// founding, `R = TRAINING_START_RESERVE · R_max`, `E = TRAINING_START_ENERGY · E_max`,
+    /// `Mode::Seeking`, a full hunger memory, [`Origin::Founder`], `born_tick` = the current
+    /// tick, and `structure + reserve` booked into `external_material_in` because the body
+    /// arrived from outside the material box.
+    ///
+    /// Three refusals, each by name and each leaving the world exactly as it found it:
+    /// capacity, a zero heading, and a genome outside the genome's own bounds. The third is
+    /// a refusal rather than a clamp on purpose: a caller asking for `size = 9` has stated
+    /// something the genome cannot express, and silently founding a `size = 2` animal in a
+    /// *controlled* experiment would corrupt the control without saying so.
+    pub fn found_animal_with_genome(
+        &mut self,
+        pos: SurfacePoint,
+        heading: Vec2,
+        genome: Genome,
+    ) -> Result<crate::ids::OrganismId, String> {
+        let mut checked = genome.clone();
+        if checked.clamp() {
+            return Err(
+                "a founding genome must already lie inside the genome's own bounds; this one \
+                 does not (`Genome::clamp` would move at least one locus)"
+                    .to_string(),
+            );
+        }
+        self.found_body(pos, heading, genome)
+    }
+
+    /// The one definition of a founded adult body, shared by both doors above. Private: the
+    /// public doors own what genome reaches it and what they refuse before it does.
+    fn found_body(
+        &mut self,
+        pos: SurfacePoint,
+        heading: Vec2,
+        genome: Genome,
+    ) -> Result<crate::ids::OrganismId, String> {
         let cap = self.state.config.capacity.max_organisms as usize;
         if self.state.organisms.len() >= cap {
             return Err(format!(
@@ -308,7 +358,6 @@ impl World {
             .normalized()
             .ok_or_else(|| "a founding heading must be nonzero".to_string())?;
         let cfg = self.state.config.clone();
-        let genome = Genome::founder(TRAINING_FOUNDER_HUE, &cfg.drives);
         let phenotype = decode(&genome, &cfg.organism);
         let structure = phenotype.structure_adult;
         let reserve = TRAINING_START_RESERVE * phenotype.reserve_max;
