@@ -80,6 +80,67 @@ pub const DIET_LOW: f32 = 0.60;
 /// descendants had drifted into.
 pub const DIET_HIGH: f32 = 0.85;
 
+/// The founder skimmer's own `depth` (`crates/cubarium-core/src/config.rs:519`), which the
+/// core itself glosses as "the wet floor". `depth` is not a water depth: it decodes to a
+/// preferred **embedded height** `h_pref = −1 + 2 · depth` (`genome.rs:434`), and the only
+/// place it enters the simulation is the steering term `w_depth · (h_pref − h) · up`
+/// (`controller.rs:234`). At 0.10 that is `h_pref = −0.8`: the low rim. This world is wetter
+/// there — `habitat.moisture_height_gain` is negative and standing water sits on
+/// `z = h + basin_gain · n` (`habitat.rs:30`) — so "seeks the wet floor" is what the locus
+/// does, through where it goes and nothing else.
+pub const DEPTH_LOW: f32 = 0.10;
+/// The other level: the roster **grazer's** own `depth` (`config.rs:513`), `h_pref = +0.1`.
+/// Chosen over any invented number for three reasons, all checkable: it is inside the
+/// genome's declared bounds (`depth` is clamped to 0–1, `genome.rs:267`); it is a value the
+/// roster already carries, so the treatment is a body the world is known to be able to hold
+/// rather than a genotype no founder has; and it is the smallest roster step that actually
+/// means "does not seek the wet floor" — it puts `h_pref` just *above* the equator, so the
+/// depth term pushes the body off the rim instead of merely pulling less hard. The glider's
+/// 1.00 would have meant "lives on the Top face", a second change of habitat rather than the
+/// removal of one.
+pub const DEPTH_HIGH: f32 = 0.55;
+
+/// The four treatments of the depth × diet factorial, as `(depth, diet)`. The index is a
+/// two-bit code — **bit 0 is the foliage-end diet, bit 1 is the mid-height depth** — which is
+/// what makes the Latin square below a group action and every pair of rows a clean
+/// one-factor complement. `TREATMENTS[0]` is the roster skimmer exactly.
+pub const TREATMENTS: [(f32, f32); 4] = [
+    (DEPTH_LOW, DIET_LOW),
+    (DEPTH_LOW, DIET_HIGH),
+    (DEPTH_HIGH, DIET_LOW),
+    (DEPTH_HIGH, DIET_HIGH),
+];
+
+/// Short names for the four, in index order.
+pub const TREATMENT_NAMES: [&str; 4] =
+    ["T0 wet/0.60", "T1 wet/0.85", "T2 mid/0.60", "T3 mid/0.85"];
+
+/// Which treatment row `row` puts in `slot`: `(slot mod 4) XOR row`.
+///
+/// Eight slots cannot carry four treatments *and* give every treatment every cell, so the
+/// assignment runs over **four rows** (`Arm::D1..D4`), a 4 × 8 Latin square. Because the
+/// treatment index is a two-bit code and the row is a two-bit mask, XOR makes this a Klein
+/// four-group action, and every property the reading needs falls out of that:
+///
+/// - down a column (one cell, four rows) the mask runs over all four values, so **every cell
+///   holds every treatment exactly once**: neither factor is confounded with founding cell,
+///   which is the confound Astra's round-2 review found in J's arm A;
+/// - along a row the treatment is `(slot mod 4) XOR row`, which takes each value exactly
+///   twice over eight slots, at slots `k` and `k + 4` — different faces under [`ANCHORS`] —
+///   so **every run is a balanced mix of all four treatments** and every comparison is made
+///   inside one world realisation as well as inside one cell;
+/// - rows differing by mask 1 exchange `diet` alone in every slot, by mask 2 exchange `depth`
+///   alone in every slot, by mask 3 exchange both. The counterbalance is therefore exact for
+///   each factor separately, not only for the two together.
+pub fn treatment_of(row: u8, slot: usize) -> usize {
+    usize::from((slot % 4) as u8 ^ (row & 3))
+}
+
+/// A lifetime of at least this many simulated seconds counts as **established**: J's
+/// threshold, about twice the no-intake floor of 308–431 s measured there. A body still alive
+/// at 750 s has found food.
+pub const ESTABLISHED_SECONDS: f64 = 750.0;
+
 /// The pack's creature order (`crates/cubarium-core/src/config.rs:490-519`).
 pub const GRAZER: u8 = 0;
 pub const GLIDER: u8 = 1;
@@ -159,10 +220,35 @@ pub enum Arm {
     /// round-2 review (P1: diet was confounded with founding cell in arm A alone). Opt-in
     /// through `--arms`; not part of [`Arm::ALL`], so the three-arm default is unchanged.
     ASwap,
+    /// Row 0 of the depth × diet Latin square (workstream O): slot `s` carries treatment
+    /// `(s mod 4) XOR 0`, so slot 0 is the roster skimmer exactly. See [`treatment_of`].
+    /// Opt-in through `--arms D1,D2,D3,D4`; not part of [`Arm::ALL`].
+    D1,
+    /// Row 1: D1 with `diet` exchanged in every slot, `depth` held.
+    D2,
+    /// Row 2: D1 with `depth` exchanged in every slot, `diet` held.
+    D3,
+    /// Row 3: D1 with both exchanged in every slot.
+    D4,
 }
 
 impl Arm {
     pub const ALL: [Arm; 3] = [Arm::A, Arm::B, Arm::C];
+
+    /// The four rows of the depth × diet factorial, in row order. Together they are the
+    /// 4 × 8 Latin square; separately none of them is a design.
+    pub const DEPTH_ROWS: [Arm; 4] = [Arm::D1, Arm::D2, Arm::D3, Arm::D4];
+
+    /// The two-bit row mask of a depth row, or `None` for the three diet arms.
+    pub fn depth_row(self) -> Option<u8> {
+        match self {
+            Arm::D1 => Some(0),
+            Arm::D2 => Some(1),
+            Arm::D3 => Some(2),
+            Arm::D4 => Some(3),
+            _ => None,
+        }
+    }
 
     pub fn label(self) -> &'static str {
         match self {
@@ -170,6 +256,10 @@ impl Arm {
             Arm::B => "B",
             Arm::C => "C",
             Arm::ASwap => "As",
+            Arm::D1 => "D1",
+            Arm::D2 => "D2",
+            Arm::D3 => "D3",
+            Arm::D4 => "D4",
         }
     }
 
@@ -181,6 +271,9 @@ impl Arm {
             Arm::ASwap => {
                 "arm A with the diets swapped between the slot pairs: the counterbalance"
             }
+            Arm::D1 | Arm::D2 | Arm::D3 | Arm::D4 => {
+                "depth x diet on the skimmer body: one row of the 4 x 8 Latin square"
+            }
         }
     }
 
@@ -190,7 +283,14 @@ impl Arm {
             "B" | "b" => Ok(Arm::B),
             "C" | "c" => Ok(Arm::C),
             "As" | "AS" | "as" | "A-swap" | "a-swap" => Ok(Arm::ASwap),
-            other => Err(format!("unknown arm {other}: the arms are A, B, C and As (A swapped)")),
+            "D1" | "d1" => Ok(Arm::D1),
+            "D2" | "d2" => Ok(Arm::D2),
+            "D3" | "d3" => Ok(Arm::D3),
+            "D4" | "d4" => Ok(Arm::D4),
+            other => Err(format!(
+                "unknown arm {other}: the arms are A, B, C, As (A swapped) and D1-D4 (the \
+                 depth x diet rows)"
+            )),
         }
     }
 }
@@ -484,26 +584,39 @@ pub fn choose_cells(land: &Landscape, wet_min: f64) -> Result<[Placement; CLONES
 ///   0.60, slots 2–3 and 6–7 at 0.85), which gives each diet two wet starts and two dry.
 /// - **B**: body `FORMS[slot / 2]`, `diet` held at 0.85 — one wet start and one dry each.
 /// - **C**: the same body assignment, each at its own roster diet.
+/// - **D1–D4**: the skimmer body throughout, carrying treatment `(slot mod 4) XOR row` of
+///   [`TREATMENTS`] — `depth` **and** `diet` both set, every other locus the roster
+///   skimmer's. See [`treatment_of`] for what the four rows together guarantee.
 pub fn plan(arm: Arm, roster: &Roster, cells: &[Placement; CLONES]) -> Vec<CloneSpec> {
     (0..CLONES)
         .map(|slot| {
-            let (form, diet) = match arm {
+            // `depth` is moved only by the depth rows; every other arm leaves the roster
+            // body's own value alone, so those arms' rows are unchanged by this workstream.
+            let (form, diet, depth) = match arm {
                 Arm::A => {
                     let high = (slot / 2) % 2 == 1;
-                    (SKIMMER, if high { DIET_HIGH } else { DIET_LOW })
+                    (SKIMMER, if high { DIET_HIGH } else { DIET_LOW }, None)
                 }
                 Arm::ASwap => {
                     let high = (slot / 2) % 2 == 0;
-                    (SKIMMER, if high { DIET_HIGH } else { DIET_LOW })
+                    (SKIMMER, if high { DIET_HIGH } else { DIET_LOW }, None)
                 }
-                Arm::B => (FORMS[slot / 2], DIET_HIGH),
+                Arm::B => (FORMS[slot / 2], DIET_HIGH, None),
                 Arm::C => {
                     let form = FORMS[slot / 2];
-                    (form, roster.genome(form).diet)
+                    (form, roster.genome(form).diet, None)
+                }
+                Arm::D1 | Arm::D2 | Arm::D3 | Arm::D4 => {
+                    let row = arm.depth_row().unwrap_or(0);
+                    let (depth, diet) = TREATMENTS[treatment_of(row, slot)];
+                    (SKIMMER, diet, Some(depth))
                 }
             };
             let mut genome = roster.genome(form).clone();
             genome.diet = diet;
+            if let Some(depth) = depth {
+                genome.depth = depth;
+            }
             CloneSpec {
                 slot,
                 cell: CellId(cells[slot].cell),
@@ -524,6 +637,14 @@ pub struct CloneRow {
     pub form: u8,
     pub kind: String,
     pub diet: f64,
+    /// The genome's `depth`, the locus workstream O moves. `serde(default)` so that rows
+    /// written before this field existed (workstream J's) still read back as 0.
+    #[serde(default)]
+    pub depth: f64,
+    /// Its decoded preferred embedded height, `−1 + 2 · depth` — the only thing `depth`
+    /// changes about the body.
+    #[serde(default)]
+    pub h_pref: f64,
     pub cap_foliage: f64,
     pub cap_detrital: f64,
 
@@ -772,6 +893,8 @@ fn run_inner(arm: Arm, seed: u64, design: Design, ledger: bool) -> Result<ArmRun
             form: spec.form,
             kind: form_name(spec.form).to_string(),
             diet: phenotype.diet,
+            depth: f64::from(spec.genome.depth),
+            h_pref: phenotype.h_pref,
             cap_foliage: phenotype.cap_foliage,
             cap_detrital: phenotype.cap_detrital,
             alive_at_horizon: alive,
@@ -1078,6 +1201,7 @@ pub fn command(
         .map_err(|e| format!("{}: {e}", path.display()))?;
     rows.sort_by_key(|r| (r.arm, r.seed));
     print_report(&rows);
+    print_depth_analysis(&rows);
     println!("\nruns {} in {:.1} s on {workers} workers", report.runs, report.wall_seconds);
     println!("simulated ticks {}", report.simulated_ticks);
     println!(
@@ -1102,27 +1226,36 @@ pub fn print_report(rows: &[ArmRun]) {
     for (arm, runs) in &by_arm {
         println!("\n## Arm {} — {}", arm.label(), arm.hypothesis());
         println!(
-            "\n| kind | diet | start | n | survived | mean life (s) | served f/F/l/c | \
+            "\n| kind | depth | diet | start | n | survived | mean life (s) | served f/F/l/c | \
              credited (m) | billed (e) | net margin (e/s) | cells | wet probes |"
         );
-        println!("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
-        // One line per (kind, diet, start class), pooled over seeds.
-        let mut groups: BTreeMap<(u8, String, bool), Vec<&CloneRow>> = BTreeMap::new();
+        println!(
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+        );
+        // One line per (kind, depth, diet, start class), pooled over seeds. `depth` is in the
+        // key because workstream O moves it; for every other arm each kind has exactly one
+        // value of it, so those tables are unchanged apart from the extra column.
+        let mut groups: BTreeMap<(u8, String, String, bool), Vec<&CloneRow>> = BTreeMap::new();
         for run in runs {
             for c in &run.clones {
                 groups
-                    .entry((c.form, format!("{:.2}", c.diet), c.wet_start))
+                    .entry((
+                        c.form,
+                        format!("{:.2}", c.depth),
+                        format!("{:.2}", c.diet),
+                        c.wet_start,
+                    ))
                     .or_default()
                     .push(c);
             }
         }
-        for ((form, diet, wet), cs) in &groups {
+        for ((form, depth, diet, wet), cs) in &groups {
             let n = cs.len() as f64;
             let mean = |f: &dyn Fn(&CloneRow) -> f64| cs.iter().map(|c| f(c)).sum::<f64>() / n;
             let survived = cs.iter().filter(|c| c.alive_at_horizon).count();
             println!(
-                "| {} | {diet} | {} | {} | {survived} | {:.0} | {:.2}/{:.2}/{:.2}/{:.2} | {:.2} | \
-                 {:.2} | {:+.5} | {:.0} | {:.0}% |",
+                "| {} | {depth} | {diet} | {} | {} | {survived} | {:.0} | \
+                 {:.2}/{:.2}/{:.2}/{:.2} | {:.2} | {:.2} | {:+.5} | {:.0} | {:.0}% |",
                 form_name(*form),
                 if *wet { "wet" } else { "dry" },
                 cs.len(),
@@ -1138,6 +1271,286 @@ pub fn print_report(rows: &[ArmRun]) {
                 100.0 * mean(&|c| c.wet_probe_fraction),
             );
         }
+    }
+}
+
+/// The median of a sample, or 0 for an empty one.
+pub fn median_of(mut v: Vec<f64>) -> f64 {
+    if v.is_empty() {
+        return 0.0;
+    }
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let n = v.len();
+    if n % 2 == 1 { v[n / 2] } else { 0.5 * (v[n / 2 - 1] + v[n / 2]) }
+}
+
+fn established(c: &CloneRow) -> bool {
+    c.lifetime_seconds >= ESTABLISHED_SECONDS
+}
+
+/// The depth × diet factorial's reading, printed from the rows themselves.
+///
+/// Every table here is **within cell**: the four rows put all four treatments in each of the
+/// eight cells of each seed, so a treatment column and its neighbour are the same eight
+/// places in the same eight worlds. The independent replicate is still the **world** — four
+/// of them — and the per-seed tables are what "4 of 4 agree" is read off. No clone-level test
+/// is computed: 32 lives sharing four worlds are not 32 independent observations.
+pub fn print_depth_analysis(rows: &[ArmRun]) {
+    let runs: Vec<&ArmRun> = rows.iter().filter(|r| r.arm.depth_row().is_some()).collect();
+    if runs.is_empty() {
+        return;
+    }
+    // (seed, slot) → the four treatments that stood in that one cell, one per row.
+    let mut by_cell: BTreeMap<(u64, usize), [Option<&CloneRow>; 4]> = BTreeMap::new();
+    for run in &runs {
+        let row = run.arm.depth_row().unwrap_or(0);
+        for c in &run.clones {
+            by_cell.entry((run.seed, c.slot)).or_insert([None; 4])[treatment_of(row, c.slot)] =
+                Some(c);
+        }
+    }
+    let cells: Vec<((u64, usize), [&CloneRow; 4])> = by_cell
+        .iter()
+        .filter_map(|(k, q)| Some((*k, [q[0]?, q[1]?, q[2]?, q[3]?])))
+        .collect();
+    let seeds: Vec<u64> = {
+        let mut s: Vec<u64> = runs.iter().map(|r| r.seed).collect();
+        s.sort_unstable();
+        s.dedup();
+        s
+    };
+    println!(
+        "\n# The depth x diet factorial: {} complete cells ({} seeds x {} slots), \
+         4 treatments each",
+        cells.len(),
+        seeds.len(),
+        CLONES
+    );
+    if cells.len() != seeds.len() * CLONES {
+        println!(
+            "**Incomplete**: {} of {} cells carry all four rows; the tables below use only \
+             the complete ones.",
+            cells.len(),
+            seeds.len() * CLONES
+        );
+    }
+    let of = |t: usize| -> Vec<&CloneRow> { cells.iter().map(|(_, q)| q[t]).collect() };
+
+    // --- the treatment table ---------------------------------------------------------
+    println!("\n## Treatments, pooled over every cell and seed");
+    println!(
+        "\n| treatment | depth | h_pref | diet | n | horizon | established | mean life | \
+         median life | served f/F/l/c (m) | digestible (m) | credited (m) | billed (e) | \
+         net margin (e/s) | cells | wet probes | algae probes |"
+    );
+    println!(
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | \
+         --- | --- | --- | --- |"
+    );
+    for t in 0..4 {
+        let cs = of(t);
+        let n = cs.len() as f64;
+        let mean = |f: &dyn Fn(&CloneRow) -> f64| cs.iter().map(|c| f(c)).sum::<f64>() / n;
+        println!(
+            "| {} | {:.2} | {:+.2} | {:.2} | {} | {} | **{}** | {:.0} s | **{:.0} s** | \
+             {:.2}/{:.2}/{:.2}/{:.2} | {:.2} | {:.2} | {:.2} | {:+.5} | {:.0} | {:.0}% | {:.0}% |",
+            TREATMENT_NAMES[t],
+            cs[0].depth,
+            cs[0].h_pref,
+            cs[0].diet,
+            cs.len(),
+            cs.iter().filter(|c| c.alive_at_horizon).count(),
+            cs.iter().filter(|c| established(c)).count(),
+            mean(&|c| c.lifetime_seconds),
+            median_of(cs.iter().map(|c| c.lifetime_seconds).collect()),
+            mean(&|c| c.served[FOLIAGE]),
+            mean(&|c| c.served[FRUIT]),
+            mean(&|c| c.served[LITTER]),
+            mean(&|c| c.served[CARRION]),
+            mean(&|c| c.digestible.iter().sum::<f64>()),
+            mean(&|c| c.reserve_credit.iter().sum::<f64>()),
+            mean(&|c| c.bill_total),
+            mean(&|c| c.net_margin_per_second),
+            mean(&|c| c.distinct_cells as f64),
+            100.0 * mean(&|c| c.wet_probe_fraction),
+            100.0 * mean(&|c| c.algae_probe_fraction),
+        );
+    }
+
+    // --- per seed, because the world is the replicate --------------------------------
+    println!("\n## Per seed: the world is the replicate");
+    println!("\n| seed | {} |", TREATMENT_NAMES.join(" | "));
+    println!("| --- | --- | --- | --- | --- |");
+    for kind in ["median life", "established of 8", "wet probes"] {
+        for &seed in &seeds {
+            let mut line = format!("| {seed} {kind} |");
+            for t in 0..4 {
+                let cs: Vec<&CloneRow> =
+                    cells.iter().filter(|(k, _)| k.0 == seed).map(|(_, q)| q[t]).collect();
+                let text = match kind {
+                    "median life" => format!(
+                        " {:.0} s |",
+                        median_of(cs.iter().map(|c| c.lifetime_seconds).collect())
+                    ),
+                    "established of 8" => {
+                        format!(" {} |", cs.iter().filter(|c| established(c)).count())
+                    }
+                    _ => format!(
+                        " {:.0}% |",
+                        100.0 * cs.iter().map(|c| c.wet_probe_fraction).sum::<f64>()
+                            / cs.len().max(1) as f64
+                    ),
+                };
+                line.push_str(&text);
+            }
+            println!("{line}");
+        }
+    }
+
+    // --- the four within-cell contrasts ----------------------------------------------
+    println!("\n## Within-cell contrasts: each pair is one cell of one world, both treatments");
+    println!(
+        "\n| contrast | pairs won by the first | ties | established | median life | \
+         seeds agreeing on the median | seeds agreeing on establishment |"
+    );
+    println!("| --- | --- | --- | --- | --- | --- | --- |");
+    let contrasts: [(&str, usize, usize); 5] = [
+        ("diet 0.60 vs 0.85 at depth 0.10 (J's contrast)", 0, 1),
+        ("diet 0.60 vs 0.85 at depth 0.55", 2, 3),
+        ("depth 0.10 vs 0.55 at diet 0.60", 0, 2),
+        ("depth 0.10 vs 0.55 at diet 0.85", 1, 3),
+        ("the roster skimmer vs both loci moved", 0, 3),
+    ];
+    for (label, a, b) in contrasts {
+        let won = cells.iter().filter(|(_, q)| q[a].lifetime_seconds > q[b].lifetime_seconds);
+        let won = won.count();
+        let ties =
+            cells.iter().filter(|(_, q)| q[a].lifetime_seconds == q[b].lifetime_seconds).count();
+        let est = |t: usize| cells.iter().filter(|(_, q)| established(q[t])).count();
+        let med = |t: usize| median_of(cells.iter().map(|(_, q)| q[t].lifetime_seconds).collect());
+        let per_seed = |t: usize, u: usize, on_est: bool| {
+            seeds
+                .iter()
+                .filter(|&&s| {
+                    let pick = |t: usize| -> Vec<&CloneRow> {
+                        cells.iter().filter(|(k, _)| k.0 == s).map(|(_, q)| q[t]).collect()
+                    };
+                    let (x, y) = (pick(t), pick(u));
+                    if on_est {
+                        x.iter().filter(|c| established(c)).count()
+                            > y.iter().filter(|c| established(c)).count()
+                    } else {
+                        median_of(x.iter().map(|c| c.lifetime_seconds).collect())
+                            > median_of(y.iter().map(|c| c.lifetime_seconds).collect())
+                    }
+                })
+                .count()
+        };
+        println!(
+            "| {label} | {won} / {} | {ties} | {} vs {} | {:.0} s vs {:.0} s | {} of {} | {} of {} |",
+            cells.len(),
+            est(a),
+            est(b),
+            med(a),
+            med(b),
+            per_seed(a, b, false),
+            seeds.len(),
+            per_seed(a, b, true),
+            seeds.len(),
+        );
+    }
+
+    // --- the interaction ---------------------------------------------------------------
+    // Is the diet effect the same at both depths? Within one cell, the diet step at depth
+    // 0.10 is `life(T1) − life(T0)` and at depth 0.55 it is `life(T3) − life(T2)`; the
+    // interaction is the difference of those two, cell by cell, so it is free of both the
+    // cell and the world.
+    let d_low: Vec<f64> =
+        cells.iter().map(|(_, q)| q[1].lifetime_seconds - q[0].lifetime_seconds).collect();
+    let d_high: Vec<f64> =
+        cells.iter().map(|(_, q)| q[3].lifetime_seconds - q[2].lifetime_seconds).collect();
+    let inter: Vec<f64> = d_low.iter().zip(&d_high).map(|(a, b)| a - b).collect();
+    let same_sign = d_low
+        .iter()
+        .zip(&d_high)
+        .filter(|(a, b)| (**a >= 0.0) == (**b >= 0.0))
+        .count();
+    println!("\n## The interaction: does the diet effect depend on depth?");
+    println!(
+        "\n| the diet step (0.60 → 0.85), within cell | median | cells where it is negative |"
+    );
+    println!("| --- | --- | --- |");
+    println!(
+        "| at depth 0.10 (the wet floor) | {:+.0} s | {} of {} |",
+        median_of(d_low.clone()),
+        d_low.iter().filter(|x| **x < 0.0).count(),
+        d_low.len()
+    );
+    println!(
+        "| at depth 0.55 (mid height) | {:+.0} s | {} of {} |",
+        median_of(d_high.clone()),
+        d_high.iter().filter(|x| **x < 0.0).count(),
+        d_high.len()
+    );
+    println!(
+        "| difference of the two (the interaction) | {:+.0} s | signs agree in {} of {} cells |",
+        median_of(inter.clone()),
+        same_sign,
+        cells.len()
+    );
+    println!("\n| establishment, of {} cells | diet 0.60 | diet 0.85 |", cells.len());
+    println!("| --- | --- | --- |");
+    for (name, lo, hi) in [("depth 0.10", 0usize, 1usize), ("depth 0.55", 2, 3)] {
+        println!(
+            "| {name} | {} | {} |",
+            cells.iter().filter(|(_, q)| established(q[lo])).count(),
+            cells.iter().filter(|(_, q)| established(q[hi])).count()
+        );
+    }
+
+    // --- the built-in null: the Top face, where the depth term is identically zero -----
+    // `up_direction` is zero on the level top face (`world/lifecycle.rs:422-427`), so a clone
+    // standing there feels no depth term at all. Slot 4's anchor is on Top in every seed, so
+    // it is a control the design did not have to add: if the depth effect is the steering
+    // term, it must be weaker there than in the seven slots that have an `up`.
+    let top: Vec<&((u64, usize), [&CloneRow; 4])> = cells.iter().filter(|(k, _)| k.1 == 4).collect();
+    let rest: Vec<&((u64, usize), [&CloneRow; 4])> =
+        cells.iter().filter(|(k, _)| k.1 != 4).collect();
+    println!(
+        "\n## The Top-face null: slot 4 starts on the one face where `up` is zero, so the \
+         depth term cannot act there"
+    );
+    println!("\n| slots | n | wet probes at depth 0.10 | at 0.55 | median life 0.10 | at 0.55 |");
+    println!("| --- | --- | --- | --- | --- | --- |");
+    for (name, group) in [("slot 4 (Top)", &top), ("slots 0-3, 5-7", &rest)] {
+        if group.is_empty() {
+            continue;
+        }
+        let n = group.len() as f64;
+        let wet = |ts: [usize; 2]| {
+            100.0
+                * group
+                    .iter()
+                    .map(|(_, q)| ts.iter().map(|&t| q[t].wet_probe_fraction).sum::<f64>() / 2.0)
+                    .sum::<f64>()
+                / n
+        };
+        let life = |ts: [usize; 2]| {
+            median_of(
+                group
+                    .iter()
+                    .flat_map(|(_, q)| ts.iter().map(move |&t| q[t].lifetime_seconds))
+                    .collect(),
+            )
+        };
+        println!(
+            "| {name} | {} | {:.0}% | {:.0}% | {:.0} s | {:.0} s |",
+            group.len(),
+            wet([0, 1]),
+            wet([2, 3]),
+            life([0, 1]),
+            life([2, 3])
+        );
     }
 }
 
@@ -1157,6 +1570,9 @@ mod tests {
                     Arm::A => format!("diet {}", (slot / 2) % 2),
                     Arm::ASwap => format!("diet {}", 1 - (slot / 2) % 2),
                     Arm::B | Arm::C => format!("form {}", FORMS[slot / 2]),
+                    Arm::D1 | Arm::D2 | Arm::D3 | Arm::D4 => {
+                        format!("treatment {}", treatment_of(arm.depth_row().unwrap_or(0), slot))
+                    }
                 };
                 count.entry(key).or_default().push(slot);
             }
@@ -1189,6 +1605,57 @@ mod tests {
         }
         assert_eq!(Arm::parse("As").unwrap(), Arm::ASwap);
         assert!(!Arm::ALL.contains(&Arm::ASwap), "the default three arms are unchanged");
+    }
+
+    /// The depth × diet assignment is a Latin square in the arithmetic, before any world is
+    /// built: every cell holds all four treatments across the rows, every row holds each
+    /// twice at slots four apart (so on two faces), and the row masks act as the Klein
+    /// four-group, which is what makes each pair of rows a one-factor exchange.
+    #[test]
+    fn the_slot_arithmetic_is_a_latin_square_of_one_factor_swaps() {
+        for slot in 0..CLONES {
+            let mut down: Vec<usize> =
+                (0..4).map(|row| treatment_of(row as u8, slot)).collect();
+            down.sort_unstable();
+            assert_eq!(down, vec![0, 1, 2, 3], "slot {slot}: every treatment once");
+        }
+        for row in 0..4u8 {
+            let mut along: Vec<usize> = (0..CLONES).map(|s| treatment_of(row, s)).collect();
+            along.sort_unstable();
+            assert_eq!(along, vec![0, 0, 1, 1, 2, 2, 3, 3], "row {row}: each twice");
+            for t in 0..4 {
+                let slots: Vec<usize> =
+                    (0..CLONES).filter(|&s| treatment_of(row, s) == t).collect();
+                assert_eq!(slots[1] - slots[0], 4, "row {row} treatment {t}: four slots apart");
+                assert_ne!(
+                    ANCHORS[slots[0]].0, ANCHORS[slots[1]].0,
+                    "row {row} treatment {t}: two faces"
+                );
+            }
+        }
+        // Bit 0 is diet, bit 1 is depth: mask 1 exchanges diet alone everywhere, mask 2
+        // depth alone, mask 3 both — in every slot, not on average.
+        for slot in 0..CLONES {
+            for row in 0..4u8 {
+                let t = treatment_of(row, slot);
+                assert_eq!(TREATMENTS[t ^ 1].0, TREATMENTS[t].0, "mask 1 holds depth");
+                assert_ne!(TREATMENTS[t ^ 1].1, TREATMENTS[t].1, "mask 1 moves diet");
+                assert_ne!(TREATMENTS[t ^ 2].0, TREATMENTS[t].0, "mask 2 moves depth");
+                assert_eq!(TREATMENTS[t ^ 2].1, TREATMENTS[t].1, "mask 2 holds diet");
+                assert_eq!(treatment_of(row ^ 1, slot), t ^ 1, "the row mask is the XOR");
+            }
+        }
+        assert_eq!(TREATMENTS[0], (DEPTH_LOW, DIET_LOW), "T0 is the roster skimmer");
+    }
+
+    /// The median is the one the note's tables mean: the middle of an odd sample, the mean of
+    /// the two middles of an even one, and 0 for nothing.
+    #[test]
+    fn the_median_is_the_ordinary_one() {
+        assert_eq!(median_of(vec![]), 0.0);
+        assert_eq!(median_of(vec![5.0]), 5.0);
+        assert_eq!(median_of(vec![3.0, 1.0, 2.0]), 2.0);
+        assert_eq!(median_of(vec![4.0, 1.0, 3.0, 2.0]), 2.5);
     }
 
     #[test]

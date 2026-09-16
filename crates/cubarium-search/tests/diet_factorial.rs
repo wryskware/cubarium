@@ -435,3 +435,241 @@ fn recording_the_ledger_moves_nothing() {
     let off = factorial::run_one_without_ledger(Arm::A, 5, tiny()).expect("runs");
     assert_eq!(on.final_state_hash, off.final_state_hash, "the ledger is inert");
 }
+
+// --- 7. the depth x diet factorial (workstream O) ----------------------------------------
+//
+// Four treatments, `depth` in {0.10, 0.55} crossed with `diet` in {0.60, 0.85}, on the one
+// body arm A already showed can be moved a locus at a time. Eight slots cannot hold four
+// treatments and still give every treatment every cell, so the assignment is a **4 x 8 Latin
+// square over four rows**: row `r` gives slot `s` the treatment `(s mod 4) XOR r`, where bit 0
+// of a treatment index is the foliage-end diet and bit 1 is the mid-height depth. The tests
+// below pin every property the reading of the result depends on:
+//
+// - every one of the eight cells holds every one of the four treatments exactly once across
+//   the four rows, so neither factor is confounded with founding cell (Astra's P1 on J);
+// - every row holds every treatment exactly twice, on two different faces, so no treatment is
+//   confined to one side of the world within a run and every run is a balanced mix;
+// - rows are slot-by-slot complements one factor at a time: D1/D2 exchange `diet` with `depth`
+//   held, D1/D3 exchange `depth` with `diet` held, D1/D4 exchange both;
+// - a clone is the roster skimmer with `depth` and `diet` moved and nothing else;
+// - `depth` moves the preferred height and no capacity, so a depth effect is a steering
+//   effect and cannot be a yield difference in disguise.
+
+use cubarium_search::factorial::{DEPTH_HIGH, DEPTH_LOW, TREATMENTS, treatment_of};
+
+/// The whole point of four rows: the 4 x 8 assignment is a Latin square, so treatment is
+/// orthogonal to cell. If this fails, a treatment difference is a habitat difference.
+#[test]
+fn every_cell_holds_every_treatment_exactly_once_across_the_four_rows() {
+    let r = roster(1);
+    let cells = placements();
+    let plans: Vec<Vec<factorial::CloneSpec>> =
+        Arm::DEPTH_ROWS.iter().map(|&a| factorial::plan(a, &r, &cells)).collect();
+    for slot in 0..CLONES {
+        let mut seen: Vec<(u32, u32)> = plans
+            .iter()
+            .map(|p| (p[slot].genome.depth.to_bits(), p[slot].genome.diet.to_bits()))
+            .collect();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), 4, "slot {slot}: all four treatments stand in this one cell");
+        // And they are the four the design declares, not four arbitrary pairs.
+        let mut want: Vec<(u32, u32)> =
+            TREATMENTS.iter().map(|(dp, dt)| (dp.to_bits(), dt.to_bits())).collect();
+        want.sort_unstable();
+        assert_eq!(seen, want, "slot {slot}: exactly the declared treatments");
+        // The same cell, the same class, the same body in every row.
+        for p in &plans {
+            assert_eq!(p[slot].cell, plans[0][slot].cell, "slot {slot}: one cell in every row");
+            assert_eq!(p[slot].wet_start, plans[0][slot].wet_start, "slot {slot}: one class");
+            assert_eq!(p[slot].form, factorial::SKIMMER, "slot {slot}: one body");
+        }
+    }
+}
+
+/// Within a run every treatment stands twice, and on two different faces, so a run is a
+/// balanced mix of the four rather than a treatment competing only against itself.
+#[test]
+fn every_row_holds_every_treatment_twice_on_two_faces() {
+    let r = roster(1);
+    let cells = placements();
+    for arm in Arm::DEPTH_ROWS {
+        let plan = factorial::plan(arm, &r, &cells);
+        assert_eq!(plan.len(), CLONES);
+        for (t, (depth, diet)) in TREATMENTS.iter().enumerate() {
+            let of_t: Vec<_> = plan
+                .iter()
+                .filter(|s| s.genome.depth == *depth && s.genome.diet == *diet)
+                .collect();
+            assert_eq!(of_t.len(), 2, "{} treatment {t}: twice", arm.label());
+            assert_ne!(
+                of_t[0].cell.face(),
+                of_t[1].cell.face(),
+                "{} treatment {t}: on two faces",
+                arm.label()
+            );
+        }
+    }
+}
+
+/// The counterbalance, stated as a property of `plan`'s output rather than of the slot
+/// arithmetic: each pair of rows exchanges exactly one factor (or both) in **every** slot.
+#[test]
+fn the_rows_are_slot_by_slot_complements_one_factor_at_a_time() {
+    let r = roster(1);
+    let cells = placements();
+    let p = |arm| factorial::plan(arm, &r, &cells);
+    let (d1, d2, d3, d4) = (p(Arm::D1), p(Arm::D2), p(Arm::D3), p(Arm::D4));
+    for slot in 0..CLONES {
+        // D1 <-> D2: diet exchanged, depth held.
+        assert_eq!(d1[slot].genome.depth, d2[slot].genome.depth, "slot {slot}: D1/D2 depth held");
+        assert_ne!(d1[slot].genome.diet, d2[slot].genome.diet, "slot {slot}: D1/D2 diet swapped");
+        // D1 <-> D3: depth exchanged, diet held.
+        assert_ne!(d1[slot].genome.depth, d3[slot].genome.depth, "slot {slot}: D1/D3 depth swap");
+        assert_eq!(d1[slot].genome.diet, d3[slot].genome.diet, "slot {slot}: D1/D3 diet held");
+        // D1 <-> D4: both exchanged.
+        assert_ne!(d1[slot].genome.depth, d4[slot].genome.depth, "slot {slot}: D1/D4 depth");
+        assert_ne!(d1[slot].genome.diet, d4[slot].genome.diet, "slot {slot}: D1/D4 diet");
+        // And D2 <-> D4 is the pure depth swap at the other diet, D3 <-> D4 the pure diet
+        // swap at the other depth: both within-cell contrasts exist at both levels.
+        assert_ne!(d2[slot].genome.depth, d4[slot].genome.depth, "slot {slot}: D2/D4 depth");
+        assert_eq!(d2[slot].genome.diet, d4[slot].genome.diet, "slot {slot}: D2/D4 diet held");
+        assert_eq!(d3[slot].genome.depth, d4[slot].genome.depth, "slot {slot}: D3/D4 depth held");
+        assert_ne!(d3[slot].genome.diet, d4[slot].genome.diet, "slot {slot}: D3/D4 diet");
+    }
+}
+
+/// The slot arithmetic the analysis uses to label a row must be the one `plan` used to build
+/// it, or every table in the note is mislabelled.
+#[test]
+fn the_analysis_labels_a_clone_with_the_treatment_plan_gave_it() {
+    let r = roster(1);
+    let cells = placements();
+    for arm in Arm::DEPTH_ROWS {
+        let row = arm.depth_row().expect("a depth arm has a row");
+        for spec in factorial::plan(arm, &r, &cells) {
+            let (depth, diet) = TREATMENTS[treatment_of(row, spec.slot)];
+            assert_eq!(spec.genome.depth, depth, "{} slot {}", arm.label(), spec.slot);
+            assert_eq!(spec.genome.diet, diet, "{} slot {}", arm.label(), spec.slot);
+        }
+    }
+}
+
+/// Only two loci move. Put `depth` and `diet` back and the genome is the roster skimmer,
+/// locus for locus — including `swim`, `speed`, `size`, `metabolism` and every drive, so
+/// `w_depth` (the *gain* on the depth term) is held while `h_pref` (its *target*) moves.
+#[test]
+fn a_depth_arm_is_the_roster_skimmer_with_only_depth_and_diet_changed() {
+    let r = roster(1);
+    let cells = placements();
+    let skimmer = r.genome(factorial::SKIMMER).clone();
+    for arm in Arm::DEPTH_ROWS {
+        for spec in factorial::plan(arm, &r, &cells) {
+            assert_eq!(spec.form, factorial::SKIMMER);
+            let mut as_roster = spec.genome.clone();
+            as_roster.depth = skimmer.depth;
+            as_roster.diet = skimmer.diet;
+            assert_eq!(
+                as_roster,
+                skimmer,
+                "{} slot {}: only `depth` and `diet` moved",
+                arm.label(),
+                spec.slot
+            );
+            assert_eq!(spec.genome.drives.w_depth, skimmer.drives.w_depth, "the gain is held");
+            assert_eq!(spec.genome.swim, skimmer.swim, "swim is held: both levels can wade");
+        }
+    }
+}
+
+/// Both values are roster values, in the genome's declared bounds, and they mean what the
+/// note says: 0.10 is `h_pref = -0.8`, the low rim this world's water runs to, and 0.55 is
+/// `h_pref = +0.1`, a body with no pull toward the rim.
+#[test]
+fn the_two_depth_values_are_roster_values_that_straddle_the_equator() {
+    let r = roster(1);
+    let cfg = fast_leaf(1);
+    assert_eq!(r.genome(factorial::SKIMMER).depth, DEPTH_LOW, "0.10 is the skimmer's own");
+    assert_eq!(r.genome(factorial::GRAZER).depth, DEPTH_HIGH, "0.55 is the grazer's own");
+    assert!((0.0..=1.0).contains(&DEPTH_LOW) && (0.0..=1.0).contains(&DEPTH_HIGH), "in bounds");
+    let mut low = r.genome(factorial::SKIMMER).clone();
+    let mut high = low.clone();
+    low.depth = DEPTH_LOW;
+    high.depth = DEPTH_HIGH;
+    let (pl, ph) = (
+        cubarium_core::genome::decode(&low, &cfg.organism),
+        cubarium_core::genome::decode(&high, &cfg.organism),
+    );
+    // `depth` is an `f32`, so the widened target is exact only to f32 precision.
+    assert!((pl.h_pref + 0.8).abs() < 1e-6, "0.10 prefers the rim: {}", pl.h_pref);
+    assert!((ph.h_pref - 0.1).abs() < 1e-6, "0.55 prefers just above the equator: {}", ph.h_pref);
+    assert!(pl.h_pref < 0.0 && ph.h_pref > 0.0, "the two straddle the equator");
+    // And the world really is wetter low down, or "the wet floor" is a name and not a place.
+    assert!(cfg.habitat.moisture_height_gain < 0.0, "moisture falls with height");
+}
+
+/// `depth` moves the steering target and nothing else a body is paid or billed by: the same
+/// caps, the same maximum speed, the same mouth, the same maintenance. A depth effect is
+/// therefore where the body went, not what it could digest.
+#[test]
+fn depth_changes_only_the_preferred_height_and_no_capacity() {
+    let r = roster(1);
+    let cfg = fast_leaf(1);
+    let mut low = r.genome(factorial::SKIMMER).clone();
+    low.depth = DEPTH_LOW;
+    let mut high = low.clone();
+    high.depth = DEPTH_HIGH;
+    let (a, b) = (
+        cubarium_core::genome::decode(&low, &cfg.organism),
+        cubarium_core::genome::decode(&high, &cfg.organism),
+    );
+    assert_ne!(a.h_pref, b.h_pref, "the preferred height moves");
+    let strip = |p: cubarium_core::genome::Phenotype| {
+        let mut p = p;
+        p.h_pref = 0.0;
+        p
+    };
+    assert_eq!(strip(a), strip(b), "and nothing else in the phenotype does");
+}
+
+/// The rows run, the clones stay sterile, the ledgers close, and a row reproduces.
+#[test]
+fn a_short_depth_run_is_sterile_closed_and_reproducible() {
+    let run = factorial::run_one(Arm::D3, 1, tiny()).expect("a short depth row runs");
+    assert_eq!(run.clones.len(), CLONES);
+    assert_eq!(run.clone_births, 0, "no clone in the row reproduced");
+    assert!(run.world_births > 0, "the ordinary founders still breed around them");
+    let depths: BTreeSet<u64> = run.clones.iter().map(|c| c.depth.to_bits()).collect();
+    assert_eq!(depths.len(), 2, "both depth levels are present in one world");
+    for c in &run.clones {
+        assert!(c.material_residual.abs() < 1e-9, "slot {}: material closes", c.slot);
+        assert!(c.energy_residual.abs() < 1e-9, "slot {}: energy closes", c.slot);
+        assert!(c.billed_ticks > 0 && c.probes > 0, "slot {}: billed and seen", c.slot);
+    }
+    let again = factorial::run_one(Arm::D3, 1, tiny()).expect("runs again");
+    assert_eq!(run.final_state_hash, again.final_state_hash, "the world reproduces");
+    assert_eq!(run.clones, again.clones, "and so does every clone's ledger");
+}
+
+/// The depth rows stand in the same eight cells arm A stood in, so this factorial and J's are
+/// the same experiment with one locus added rather than two different placements.
+#[test]
+fn the_depth_rows_stand_where_arm_a_stood() {
+    let a = factorial::run_one(Arm::A, 3, tiny()).expect("runs");
+    let d = factorial::run_one(Arm::D2, 3, tiny()).expect("runs");
+    assert_eq!(a.placements, d.placements, "one seed, one landscape, one placement");
+}
+
+/// A depth arm parses from its label and is not in the default three.
+#[test]
+fn the_depth_rows_parse_and_are_opt_in() {
+    for arm in Arm::DEPTH_ROWS {
+        assert_eq!(Arm::parse(arm.label()).expect("round trips"), arm);
+        assert!(!Arm::ALL.contains(&arm), "the three-arm default is unchanged");
+        assert!(arm.depth_row().is_some());
+    }
+    for arm in Arm::ALL {
+        assert!(arm.depth_row().is_none(), "{} is not a depth row", arm.label());
+    }
+    assert!(Arm::parse("D5").is_err());
+}

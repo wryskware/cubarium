@@ -369,7 +369,8 @@ enum Command {
     /// core's per-body ledger (workstream J).
     Factorial {
         /// Comma-separated arms: `A` (diet within body), `B` (body within diet), `C` (the
-        /// founder pairing).
+        /// founder pairing), `As` (A counterbalanced), `D1`–`D4` (the four rows of the
+        /// depth x diet Latin square; run all four together or the design is not one).
         #[arg(long, default_value = "A,B,C")]
         arms: String,
         /// `training` or `holdout`. The held-out set is for the final validation only.
