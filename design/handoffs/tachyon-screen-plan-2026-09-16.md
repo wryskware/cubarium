@@ -243,3 +243,13 @@ anti-aliasing, where the pixel-art look is a style rather than a constraint.
 That drops byte-identical frame parity between desktop, cube and panel for
 anything shaded, so it lives behind a renderer choice per display, with the
 CPU rasterizer kept for the LED cube and for tests.
+
+### Ring topology (Wrysk, 2026-09-16)
+
+Wrysk allowed the left and right edges to join. Adopted: the panel world is
+a **ring** (`Topology::Ring { w, h }`): one chart whose left/right edge is a
+seam to itself with identity transport, top and bottom solid with the
+existing rim reflection, embedded as a cylinder so the existing 3D noise and
+the existing spherical weather model work unchanged. This removes the
+horizontal-wall reflection, the corner rule and the planar weather spec
+from the flat-world plan.

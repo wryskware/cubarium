@@ -328,19 +328,36 @@ pre/post equality claim is impossible. Worse, schema 17 *refuses* a schema 16
 snapshot by design, so the new build cannot even read the old run's output. The
 comparator therefore needs a cross-schema procedure, not just a masked hash:
 
-1. Define a **common semantic projection** `CubeProjection` carrying only what
-   schemas 16 and 17 both have and both mean identically: `tick`, every `Fields`
-   and ecology vector, the organism roster (id, `pos`, heading, energy, reserve,
-   genome), the tick counters, the RNG stream states and the care ledgers —
-   **excluding `config`** and excluding anything the bump reshaped.
-2. Each build exports it from its own binary: the pre-change build emits
-   `CubeProjection` from a fixed-seed run, the post-change build emits the same.
-   Neither ever decodes the other's snapshot, so the refusal rule is untouched.
-3. Compare the two projections field-by-field (and hash them for a one-line CI
-   signal). Equality is the cube regression evidence used throughout §9.
+1. Define `CubeProjection` as **`WorldState` verbatim with exactly one
+   substitution**: `config: ConfigProjection`, where `ConfigProjection` is
+   `WorldConfig` minus *only* the two added fields (`topology`, `world_scale`).
+   Every other field is carried whole, at its own type — `tick`, `fields`,
+   `weather`, `organisms: Slots<Organism>` **including the allocator's `entries`,
+   `free` and `live`** (`ids.rs:15-23`), `births_total`, `deaths_total`,
+   `cap_rejections_total`, the material and energy totals, `care`,
+   `energy_correction`, `hunters`, `quiet`, `apex_dormancy`, `apex_encounters`,
+   `neural` and `ecology` (`world/state.rs:23-99`). An enumerated subset was the
+   first draft's mistake: it silently dropped `ou`, `structure`, `born_tick`,
+   `hunger_memory`, `mode`, `escrow`, `births`, `phenotype`, `parent`, `origin`
+   and `turn_counter` from every organism (`organism.rs:46-67`), the free-list
+   state, the weather, every extension, and all behaviour-bearing config. **Carry
+   everything; subtract two fields.**
+2. Each build produces it from its own binary and never decodes the other's
+   snapshot file. The post-change build reads the pre-change *payload* through the
+   frozen `v16.rs` mirror and `decode_exact` — the same mechanism the existing
+   refusal tests already use for schemas 7–14 — so `decode_snapshot`'s refusal of
+   schema 16 stays exactly as it is, and no patch to `main` is needed: the fixture
+   is one snapshot file from an unmodified `main` run.
+3. Compare the two projections field-by-field and hash them for a one-line CI
+   signal. Equality is the cube regression evidence used throughout §9.
+4. **Negative tests are part of the definition**, in FW-6's reserved
+   `flat_schema17.rs`: perturb one organism field, one allocator free-list entry,
+   one weather blob, one field vector, one extension state and one non-added
+   config field, and assert equality **fails** in every case. A comparator that
+   cannot fail is not evidence.
 
-FW-1 authors the projection type and the exporter; the pre-change export is taken
-**before** FW-1 merges, from the current `main` build, and committed as a fixture.
+FW-1 authors the projection type and the exporter; the pre-change fixture is a
+snapshot taken from the current `main` build before FW-1 merges.
 
 ## 5. Ecology and art: what is not mechanical
 
@@ -385,9 +402,12 @@ the *interpretation* of the three fields changes with the topology.
 | `axis` | unit orbit axis, perpendicular to `center` | the unit heading of travel in the plane, `[cos φ, sin φ, 0.0]` |
 | `rate` | angular speed, rad/tick | linear speed in embedded units per tick |
 
-The plane is **10 × 5.625 embedding units at every S** (`w/(32S) = 320S/32S = 10`,
-`h/(32S) = 5.625`), so every quantity below is S-invariant, which is what keeps §6's
-constant-ecology claim true.
+**Everything below is in embedded units, including the walls.** The plane occupies
+`[0, w/(32S)] × [0, h/(32S)]` in the embedding, which for §6's 16:9 ladder
+(`w = 320S`, `h = 180S`) is `10 × 5.625` at every S — so every quantity below is
+S-invariant, which is what keeps §6's constant-ecology claim true. For a general
+`Flat { w, h }` the extents are `W_e = w/(32S)` and `H_e = h/(32S)`; nothing here
+mixes them with pixels.
 
 **Initialization** (`Weather::new`, `habitat.rs:136-156`). The cube draws four
 `unit` values per blob at the reserved block `u64::MAX − 8 + k, k ∈ 0..4` (centre
@@ -398,19 +418,42 @@ consumed and discarded** (the cube's axis `z` has no planar counterpart); draw 3
 `φ = TAU · unit`. `period_min` is cycled from `cfg.periods_min` exactly as today,
 and
 
-> `rate = 10.0 / (period_min · 60 · TICK_HZ)`
+> `rate = W_e / (period_min · 60 · TICK_HZ)`  where `W_e = w/(32S)`
 
-— one traversal of the world width per period. At the default 20-minute period and
-20 Hz that is `1.0/2400` units/tick ≈ 0.43 px/s at S = 1, crossing 320 px in 20
-minutes. A zero or empty period gives `rate = 0`, as today.
+— one traversal of the world **width** per period, in the same embedded units the
+centre is stored in. At the default 20-minute period, 20 Hz and the §6 ladder that
+is `10/24000 ≈ 4.17e-4` units/tick ≈ 0.43 px/s at S = 1, crossing 320 px in 20
+minutes. There is no zero-period case to handle: `WorldConfig::validate` already
+rejects an empty `periods_min` and any non-positive period whenever
+`blobs_per_channel > 0` (`config.rs:772-778`), so `rate > 0` wherever a blob
+exists. Add one new check beside it:
+
+> `rate < min(W_e, H_e) / 2`
+
+so a single tick can cross at most one wall per axis. The margin is enormous —
+`4.17e-4` against `2.81` — but the bound is what lets the reflection below be a
+single fold rather than a loop.
 
 **Per tick** (`Weather::advance`). `cfg.moving == false` freezes centres in both
-topologies, unchanged. Otherwise `center += axis · rate`, then **specular
-reflection at the four walls using exactly §2's algebra**: negate `axis.x` at
-`u = 0` or `u = w`, negate `axis.y` at `v = 0` or `v = h`, both at a corner, and
-mirror the overshoot back inside so the centre always lands in the rectangle. A
-blob therefore bounces around the world the way an organism does, which is the
-consistency argument for reusing the rule.
+topologies, unchanged. Otherwise `center += axis · rate`, then **one fold per
+axis, independently**, in embedded units:
+
+> `fold(x, L)`: if `x < 0` then `(−x, flip)`; if `x > L` then `(2L − x, flip)`;
+> else `(x, keep)` — and `flip` negates that axis's component of `axis`.
+
+Applied to `center[0]` against `W_e` and `center[1]` against `H_e` separately, so
+a corner is simply both folds in the same tick and needs no special case. This is
+§2's wall algebra (`REFLECT_X`, `REFLECT_Y`, both at a corner) expressed on the
+weather's own state, which is the consistency argument for reusing the rule. The
+`rate` bound above guarantees one fold per axis suffices; a violation is a
+validation error, not a loop.
+
+**Persisted geometry is validated, not merely finite.** `WorldState::validate`
+checks only that blob `center`, `axis` and `rate` are finite
+(`world/state.rs:193-208`). Flat worlds add: `center[2] == 0.0`,
+`0 <= center[0] <= W_e`, `0 <= center[1] <= H_e`, `axis[2] == 0.0`, and `axis`
+unit to a stated tolerance. The cube arm keeps today's finiteness-only check, so
+cube refusal behaviour is unchanged.
 
 **Per simulated minute.** The cube draws one `unit(seed, Stream::Weather, key,
 minute)` per blob and tilts by `walk_deg_per_min`. Flat draws **the same single
@@ -542,7 +585,9 @@ daemon's* gather to the Adreno: the shim renders surfaceless into a dma-buf
 imported into KMS and does the integer upscale, the rotation and any
 panel-resolution post-effects there. That removes the gather from the CPU budget
 entirely — worth real A55 time, and it is what makes shaded effects affordable at
-1920×1080 at all. It does **not** touch cubarium's side of the wire. The presenter
+1920×1080 at all. What it does **not** do is offload cubarium's presenter — it
+does extend cubarium's side of the wire, adding the auxiliary layers to the raster
+encoder and a layer id to the strip format (see its row in §9). The presenter
 still rasterizes the `w×h` world raster on the CPU, so `render ∝ S²` and the
 shared-loop budget above are unchanged, and **S stays gated on FW-0's measured
 numbers exactly as written**. A higher S becomes arguable only if the presenter's
@@ -604,14 +649,21 @@ and have the *fresh-world default builder* multiply the length-dimensioned
 defaults: `organism.speed_max 5.0` px/s, `organism.sense_radius 6.0`,
 `organism.body_extent_max 9.0`, `drives.birth_offset_px 2.5`
 (`crates/cubarium-core/src/config.rs:551,554,580,609`), `CELL_PIXELS 4.0`
-(`cubarium-surface/src/field.rs:14`), `MAX_LOCAL_RADIUS 32.0`
-(`unfold.rs:10`, which `config.rs:863,917` validates against), plus the deposit
-and care radii. Pace stays **1 BL/s** by construction: body length and px/s scale
-together, so the calibration recorded on 2026-09-14 is preserved exactly. Two
-cautions: scale the *defaults*, never a value read from a TOML file, or an
-explicit config gets scaled twice; and `MAX_LOCAL_RADIUS` bounds `unfold_pixels`
-cost quadratically, so raising it is a performance decision as well as a
-geometric one.
+(`cubarium-surface/src/field.rs:14`), plus the deposit and care radii. Pace stays
+**1 BL/s** by construction: body length and px/s scale together, so the
+calibration recorded on 2026-09-14 is preserved exactly.
+
+**`MAX_LOCAL_RADIUS` is not on that list.** It is per topology and never scaled
+(§2): the cube's 32 px is a completeness proof tied to `MAX_SEAMS`
+(`unfold.rs:5-13`) and `Topology::Cube` pins `S = 1`, so nothing multiplies it.
+A plane has no seams, so no radius is *meaningless* there; `Flat`'s
+`min(w, h) / 2` is a **chosen performance cap** — `unfold_pixels` cost grows with
+the square of the radius — and the validation `9·S <= max_local_radius()` is what
+ties the stamp budget to it. The two call sites that today validate config radii
+against the constant (`config.rs:863,917`) take the topology's value instead.
+
+One caution remains: scale the *defaults*, never a value read from a TOML file,
+or an explicit config gets scaled twice.
 
 ## 8. Biome and terrain variation (separable)
 
