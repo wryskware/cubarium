@@ -7,7 +7,6 @@
 //! does, from the same neighbour lists and rings, without stepping.
 
 use cubarium_surface::{Scale, Topology};
-use cubarium_core::config::FounderKind;
 use cubarium_core::genome::{Genome, decode};
 use cubarium_core::ids::OrganismId;
 use cubarium_core::neural::Policy;

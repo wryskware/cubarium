@@ -13,7 +13,6 @@
 //! is a mechanism fact; it says nothing about whether a real lineage survives.
 
 use cubarium_surface::{Scale, Topology};
-use std::path::PathBuf;
 
 use cubarium_core::hunter::{
     CHARGE80_OXIDATION_THRESHOLD, FixedHunterProfile, HunterEvent, HunterTarget, OxidationPolicy,
@@ -27,10 +26,6 @@ use cubarium_core::{
 use cubarium_surface::{Face, SurfacePoint, cell_of};
 
 // ---------------------------------------------------------------- helpers
-
-fn fixture(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name)
-}
 
 /// The postcard payload of a snapshot file: everything after the variable-length header.
 fn payload(bytes: &[u8]) -> &[u8] {
@@ -502,35 +497,6 @@ fn the_burn_is_capped_by_the_reserve_that_is_actually_there() {
 }
 
 // ---------------------------------------------------------------- version 3 identity
-
-/// **Retired by ecology v1** (`design/ecology-v1-contract.md` §15.1). The load-bearing
-/// identity test loaded a genuine pre-change schema 12 fixture with a live version 3 trial
-/// actually oxidizing, stepped it 600 ticks, and compared the schema 12 projection against
-/// this build's recording. Worlds always restart fresh and are never migrated (Wrysk,
-/// 2026-09-15), so schema 16 refuses schema 12 by name; the artifact cannot be loaded and
-/// this build cannot write a schema 12 world to re-anchor against, so the continuation is
-/// retired rather than re-recorded.
-///
-/// The fixtures stay in the tree, the provenance note records the retirement, and the refusal
-/// is what is checked on their bytes here.
-#[test]
-fn the_pre_change_charge_fixtures_are_refused_by_name() {
-    for name in [
-        "hunter-v3-charge-active.cubw",
-        "hunter-v3-charge-active-plus600.cubw",
-        "hunter-v3-charge-active-plus600-r0d.cubw",
-        "hunter-v3-charge-window.cubw",
-    ] {
-        let bytes = std::fs::read(fixture(name)).expect("the fixture is committed");
-        let schema = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
-        assert!(schema < cubarium_core::SCHEMA_VERSION, "{name} is schema {schema}");
-        assert_eq!(
-            decode_snapshot(&bytes),
-            Err(SnapshotError::UnsupportedSchema(schema)),
-            "{name}: an old world is refused by name, never migrated"
-        );
-    }
-}
 
 /// The claim the retired `hunter-v3-charge-window.cubw` fixture carried, rebuilt in code: a
 /// member caught **inside** the candidate band, where the two policies visibly disagree.

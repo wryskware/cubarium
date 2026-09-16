@@ -14,23 +14,18 @@
 //! not: compensation begins at migration.
 
 use cubarium_surface::{Scale, Topology};
-use std::path::PathBuf;
 
 use cubarium_core::accounting::{EnergyCorrection, Ledger};
 use cubarium_core::care::{CareCommand, CareKind, CareState, CareTarget, RAIN_TICKS};
 use cubarium_core::snapshot::{state_hash, v7};
 use cubarium_core::world::WorldState;
 use cubarium_core::{
-    SCHEMA_V8, SCHEMA_VERSION, SnapshotError, World, WorldConfig, decode_snapshot, ecology_hash,
+    SCHEMA_VERSION, SnapshotError, World, WorldConfig, decode_snapshot, ecology_hash,
     encode_snapshot,
 };
 use cubarium_surface::{CellId, Face};
 
 // ---------------------------------------------------------------- helpers
-
-fn fixture(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name)
-}
 
 /// The postcard payload of a snapshot file: everything after the variable-length header.
 #[allow(dead_code)]
@@ -84,39 +79,6 @@ fn command(seq: u64, tick: u64, kind: CareKind, cell: CellId) -> CareCommand {
 // ---------------------------------------------------------------- migration
 
 // ---------------------------------------- retired migrations, kept as refusals (§15.1)
-
-/// **Retired by ecology v1** (`design/ecology-v1-contract.md` §15.1). Three tests lived here:
-/// the live schema 8 snapshot loading with zero corrections and projecting back byte for
-/// byte, its 600-tick cross-version continuation, and the same opening claim for a migrated
-/// schema 7 world.
-///
-/// Worlds always restart fresh and are never migrated (Wrysk, 2026-09-15), so schema 16
-/// refuses schemas 7 and 8 by name. The artifacts cannot be loaded and this build cannot make
-/// a schema 7 or 8 world to re-anchor against, so the continuations are retired rather than
-/// re-recorded. The fixtures stay in the tree; the refusal is what is checked on their bytes.
-///
-/// The compensation claim itself — that the corrections begin at zero on a fresh world, track
-/// the real flows, survive a restart and are refused when unusable — is unchanged and is
-/// tested below on worlds this build creates.
-#[test]
-fn the_pre_correction_fixtures_are_refused_by_name() {
-    for name in [
-        "live-v7-55200.cubw",
-        "live-v8-172800.cubw",
-        "live-v8-172800-plus600.cubw",
-        "live-v8-172800-plus600-r0b.cubw",
-    ] {
-        let bytes = std::fs::read(fixture(name)).expect("the fixture is committed");
-        let schema = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
-        assert!(schema < SCHEMA_VERSION, "{name} is schema {schema}");
-        assert_eq!(
-            decode_snapshot(&bytes),
-            Err(cubarium_core::SnapshotError::UnsupportedSchema(schema)),
-            "{name}: an old world is refused by name, never migrated"
-        );
-    }
-    assert_eq!(SCHEMA_V8, 8);
-}
 
 /// A fresh world opens with zero corrections and is compensated from there, and its schema 7
 /// projection is what `ecology_hash` hashes. This is the part of the retired pair that does

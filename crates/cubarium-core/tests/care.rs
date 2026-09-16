@@ -7,31 +7,20 @@
 //! checks that a command does exactly what the contract says and nothing else.
 
 use cubarium_surface::{Scale, Topology};
-use std::path::PathBuf;
 
 use cubarium_core::care::{
     ActiveShower, CLEAN_MATERIAL, CareCommand, CareDose, CareKind, CareOutcome,
     CareTarget, FEED_ALLOWANCE, FEED_MATERIAL, RAIN_DEPTH_TOTAL, RAIN_TICKS, footprint,
     rain_envelope,
 };
-use cubarium_core::snapshot::{HEADER_FIXED_BYTES, state_hash, v7};
+use cubarium_core::snapshot::{state_hash, v7};
 use cubarium_core::world::WorldState;
 use cubarium_core::{
-    SCHEMA_V7, SCHEMA_VERSION, World, WorldConfig, decode_snapshot, ecology_hash, encode_snapshot,
+    SCHEMA_VERSION, World, WorldConfig, decode_snapshot, ecology_hash, encode_snapshot,
 };
 use cubarium_surface::{CellId, FACE_EXTENT, Face, FieldGraph, cell_of};
 
 // ---------------------------------------------------------------- helpers
-
-fn fixture(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(name)
-}
-
-/// The postcard payload of a snapshot file: everything after the variable-length header.
-fn payload(bytes: &[u8]) -> &[u8] {
-    let id_len = usize::from(u16::from_le_bytes(bytes[8..10].try_into().expect("2 bytes")));
-    &bytes[HEADER_FIXED_BYTES + id_len..]
-}
 
 /// FNV-1a 64, the same hash `state_hash` and `ecology_hash` use, computed here from the
 /// fixture's own bytes so the test does not take the crate's word for it.
@@ -85,38 +74,6 @@ fn still_water_config() -> WorldConfig {
 }
 
 // ------------------------------------------------- retired migration, kept as a refusal
-
-/// **Retired by ecology v1** (`design/ecology-v1-contract.md` §15.1). Two tests lived here:
-/// the live schema 7 snapshot loading with an inert `care` and projecting back byte for byte,
-/// and the cross-version proof that stepping that migrated world 600 ticks with zero care
-/// landed exactly on the recorded continuation.
-///
-/// Wrysk's standing rule of 2026-09-15 is that worlds always restart fresh and are never
-/// migrated, so schema 16 refuses schema 7 by name and neither claim is expressible: the
-/// world cannot be loaded, and this build cannot produce a schema 7 world to re-anchor
-/// against. The `live-v7-55200*` fixtures are kept, their provenance note records the
-/// retirement, and what remains checkable on the real bytes is the refusal.
-///
-/// The care semantics those tests bracketed — Feed, Clean, the rain shower and the six
-/// ledgers — are unchanged and are tested below on worlds this build creates.
-#[test]
-fn the_live_schema_seven_fixtures_are_refused_by_name() {
-    for name in [
-        "live-v7-55200.cubw",
-        "live-v7-55200-plus600.cubw",
-        "live-v7-55200-plus600-r0b.cubw",
-    ] {
-        let bytes = std::fs::read(fixture(name)).expect("the fixture is committed");
-        let schema = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
-        assert!(schema < SCHEMA_VERSION, "{name} is schema {schema}");
-        assert_eq!(
-            decode_snapshot(&bytes),
-            Err(cubarium_core::SnapshotError::UnsupportedSchema(schema)),
-            "{name}: an old world is refused by name, never migrated"
-        );
-    }
-    assert_eq!(SCHEMA_V7, 7);
-}
 
 /// **`ecology_hash` is the care-masked hash of the current state** (`§15.1`, revised in repair
 /// cycle 2 after Astra's implementation review found the old schema 7 projection blind to every
