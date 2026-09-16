@@ -7,6 +7,8 @@
 //!
 //! - [`params`]: the joint parameter vector, its bounds, and what is deliberately excluded.
 //! - [`apex_audit`]: why two introduced apex adults never mate, counted at the predicate.
+//! - [`census`]: workstream R's depth census — F's 150-minute variety census with the roster
+//!   skimmer's `depth` overridden search-side at tick 0 and nothing else changed.
 //! - [`calibrate`]: the ecology v1 calibration matrix — declared candidates × seeds × matched
 //!   zero/one/two-apex arms, with the ecology v1 component vector and a config export.
 //! - [`depletion`]: the per-depleted-cell record — habitat quality, foliage trajectory,
@@ -33,6 +35,7 @@
 
 pub mod apex_audit;
 pub mod calibrate;
+pub mod census;
 pub mod depletion;
 pub mod es;
 pub mod evaluate;
