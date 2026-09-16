@@ -23,14 +23,16 @@ which would be visible on the cube; none of this round touches the cube.
 | stream | model | where | simulation used / cap | storage | tests after |
 | --- | --- | --- | --- | --- | --- |
 | Q antithetic ES analysis | Opus 5 high | `main` (`da2bdc8`…`a281162`) | 1.4 s / 5 min | 0.24 MiB / 20 | search 230, core 517 |
-| P apex predicate pair | Opus 5 high | worktree | *(pending)* | | |
+| P apex predicate pair | Opus 5 high | worktree, merged | 190 s / 4 min | 8.0 MiB / 20 | core 523, search 224 |
 | R skimmer depth census | Opus 5 high | worktree | *(pending)* | | |
 | S preconditioned opening | Opus 5 high | worktree | *(pending)* | | |
 
 Fable's verification so far: Q's two ignored experiments re-run and the
 retained files rewritten with identical generation-9 figures (span
 6,459–8,915, sd 643, concordance 15 and 12 of 16, 2 masked); its integration
-tests pass.
+tests pass. P's four-seed reach-envelope arm re-run and compared field for
+field with its retained rows (identical, timing keys excluded); its 13 new
+tests pass on the branch and the suites after merge.
 
 ## Q — where the ES search loses candidate variation: it does not; there is too little at source
 
@@ -95,9 +97,68 @@ was not needed: intake is material that left the stand through the mouth, so
 it already requires on-food residence, and it separates the preferred member
 in 76 % of pairs.
 
-## P — the apex pursuit predicate, paired
+## P — the apex pursuit predicate, paired: confirmed, and the next term is the turn radius
 
-*(pending)*
+Full note: [ecology-v1-apex-predicate-2026-09-16.md](ecology-v1-apex-predicate-2026-09-16.md).
+Commits `d19150e` (the switch, tests, audit aggregations, CLI), `8d1639a`
+(note). The switch is a `World`-level transient on the strike recorder (no
+`WorldConfig` field, no new `World` field, since `lifecycle.rs` belonged to
+another worker); `ContactMeasure::pursuit_holds(stop, …)` is the single place
+either rule is written, so the record cannot transcribe a rule the world did
+not run; `--pursuit-stop` refuses an unknown name rather than defaulting.
+Tests first and red: before `step.rs` was touched, the behavioural tests
+failed with "the burst was requested but not delivered: 0.0019 px/s against a
+held cap of 0.21". The shipped arm reproduces K's and N's retained rows to
+the attempt (449 paid, the same class histogram, 15 captures).
+
+| | half-space (shipped) | reach envelope |
+| --- | --- | --- |
+| paid attempts (8 seeds, 32 lives) | 894 | 969 |
+| **held at the burst's start** | **89.4 %** | **5.4 %** |
+| gap change per burst | −1.07 px | −0.21 px |
+| delivered burst: translation / turn sweep / whole motor | 2.7 / 1.7 / 4.4 px/s | 4.6 / **8.0** / 12.5 px/s |
+| contacts | 88 | 140 |
+| **captures per life** | **1.19** | **2.09** |
+| fraction of its own bill earned | 7.7 % | 12.9 % |
+| lifetime mean / max | 12,440 / 16,585 | 13,164 / 23,201 |
+| death cause | starvation 32 / 32 | starvation 32 / 32 |
+| prey population at the end | 864 | 847 |
+
+Captures by initial gap is the clearest row: under the shipped rule every
+capture began inside 8 px and 186 attempts that began at 8–12 px produced no
+contact; corrected, 4–8 px nearly doubles and 8–12 px becomes productive
+(17 contacts, 9 captures); past 12 px nothing changes in either arm.
+
+**Verdict by Astra's rule: confirmed.** The held fraction falls sixteenfold,
+closure improves, contacts rise 59 % and captures 76 %, lifetime rises 6 %
+and the earned fraction of the bill goes from 7.7 to 12.9 %. **Disclosed
+caveat:** the brief's four-seed pair ran first with contacts flat (46 against
+46) and captures 15 → 21; P widened to eight seeds because sixteen lives
+cannot separate a 10 % contact rate from 14 %, and that widening was not
+pre-registered. What rescues it: the four added seeds are out of sample for
+the decision to widen, and on them alone the effect is larger in every
+direction (contacts 42 → 94, captures 23 → 46, the gap actually closes).
+
+**Strike constants: not adequate once delivered, and raising them is not the
+repair.** The delivered burst translates at 4.6 px/s against a nominal 16.7,
+because 64 % of the boosted budget is turn sweep priced at
+`motor::turn_radius_px` = |capture offset| + capture reach = 14.8 px; relative
+closure is about 2 px/s, so the mean 11.4 px gap needs about 6 s, not 1.25.
+The escape multiple is exonerated a second time on new evidence: the prey the
+corrected hunter chases realises 2.6 px/s, a quarter of its cap. **Named next
+term, untouched:** `motor::turn_radius_px` — the same arithmetic N found
+consuming the resting envelope now consumes the boosted one; it is not
+apex-specific, so an arm on it must be read against the whole world.
+
+**What Wrysk would be approving:** the one-line change of the predicate to
+`in_contact()`. Visible whenever an apex is spawned from the viewer: it
+charges (0.3 → 4.6 px/s during a burst), stalks half as much, handles twice
+as much, eats about twice as often, ends the prey population about 2 % lower,
+one apex reached 97 % of its minimum reproduction age, and a new
+`GraspUnmapped` outcome appears in 5 of 969 attempts where a charging body's
+grasp lands off the surface at the open rim. It does **not** make the apex
+viable: all 32 still starve at 12.9 % of their bill and readiness overlap
+stays zero.
 
 ## R — the skimmer at depth 0.55 in a reproducing world
 
