@@ -297,6 +297,16 @@ That is still a hard bump to **schema 17 / `CONFIG_VERSION` 9, refusing 7..=16 b
 name**, matching `every_older_schema_is_refused_by_name` (`snapshot.rs:539`);
 freeze a `v16.rs` mirror beside `v7..v14`.
 
+> **Shipped as schema 18, not 17** (SYNC-1, 2026-09-16 —
+> `design/7_Research/flat-world-sync-main-2026-09-16.md`). While this branch was
+> being written, `main` spent 17 on a semantics-only bump of its own: the
+> reach-envelope pursuit rule, which moves no bytes but is not carried in them.
+> The merged build is both changes, so it is **schema 18, refusing 7..=17 by
+> name**, and `v17.rs` is frozen beside `v16.rs` — `main`'s 17 is v16's shape
+> under the next number, so it is that mirror's structs with its own decoder.
+> Everything else in this section holds as written; `CONFIG_VERSION` is still 9,
+> and the comparator still reads a pre-ring payload through a frozen mirror.
+
 **Do not widen the fixed header.** `HEADER_FIXED_BYTES` is 22 and the layout
 `[magic][schema u32][id_len u16][id][payload_len u64][crc32 u32][payload]`
 (`snapshot.rs:48-50,78-97`) is parsed with hardcoded offsets outside Rust, by
