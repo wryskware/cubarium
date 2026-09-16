@@ -28,7 +28,7 @@ fn write_policy_in(
 ) -> std::path::PathBuf {
     let theta = cubarium_search::es::tensor::initial_center(seed);
     let hash = cubarium_search::calibrate::config_hash(config);
-    let file = cubarium_search::es::export::PolicyFile::new(&theta, "test", 0, 59, label, hash)
+    let file = cubarium_search::es::export::PolicyFile::new(&theta, "test", 0, 59, label, hash, cubarium_core::MotorModel::Sweep)
         .expect("an exportable centre");
     scratch.write(name, &serde_json::to_string(&file).expect("writing the policy file"))
 }
@@ -227,7 +227,7 @@ fn a_policy_without_a_recorded_ecology_is_refused() {
     let scratch = Scratch::new("neural-unknown-ecology");
     let state = scratch.join("state");
     let theta = cubarium_search::es::tensor::initial_center(5);
-    let mut file = cubarium_search::es::export::PolicyFile::new(&theta, "test", 0, 59, "default", 0)
+    let mut file = cubarium_search::es::export::PolicyFile::new(&theta, "test", 0, 59, "default", 0, cubarium_core::MotorModel::Sweep)
         .expect("an exportable centre");
     file.config = None;
     file.config_hash = None;
@@ -266,4 +266,83 @@ fn a_policy_trained_in_the_configured_ecology_seeds_that_world() {
     assert_eq!(seeded.neural_animals, 2, "the matching policy seeds its cohort");
     assert_eq!(seeded.config.seed, 7, "the seed override still applies");
     assert_eq!(seeded.config.plant.foliage_rate, 0.006, "in the configured ecology");
+}
+
+/// The **motor contract**, checked at the same door as the ecology and for the same reason: a
+/// policy trained under one envelope and one price per radian is a different animal under
+/// another, and the schema digest says nothing about that.
+///
+/// The host never calls `World::set_motor_model`, so the world it builds is always the shipped
+/// `Sweep`. That makes this a *contract existing*, not a behaviour change: no world the host
+/// creates moves because of the check, and the only thing it can ever do is refuse a policy
+/// trained under `inertial` — which is exactly what it is for.
+#[test]
+fn a_policy_trained_under_the_other_motor_contract_is_refused_by_name() {
+    let scratch = Scratch::new("neural-foreign-motor");
+    let state = scratch.join("state");
+
+    let theta = cubarium_search::es::tensor::initial_center(11);
+    let hash = cubarium_search::calibrate::config_hash(&cubarium_core::WorldConfig::default());
+    let file = cubarium_search::es::export::PolicyFile::new(
+        &theta,
+        "test",
+        0,
+        59,
+        "default",
+        hash,
+        cubarium_core::MotorModel::Inertial,
+    )
+    .expect("an exportable centre");
+    let policy = scratch.write("inertial-center.json", &serde_json::to_string(&file).unwrap());
+
+    let err = refusal(&[
+        "--sink", "none", "--speed", "0", "--seconds", "1", "--fresh",
+        "--state", state.to_str().unwrap(),
+        "--neural", policy.to_str().unwrap(),
+    ]);
+    assert!(err.contains("inertial-center.json"), "the refusal names the file: {err}");
+    assert!(
+        err.contains("trained under the inertial motor contract"),
+        "and the contract it claims: {err}"
+    );
+    assert!(err.contains("sweep"), "and the contract this world runs: {err}");
+    assert!(support::snapshot_ticks(&state).is_empty(), "a refused run writes no world");
+}
+
+/// A policy file that records **no** motor at all is `sweep`, not "unknown" — unlike the
+/// ecology, where `None` is genuinely unknown and is refused. There was exactly one motor
+/// contract in this workspace until workstream T, so a file written before the field existed
+/// states its contract by its silence, and the host seeds it.
+#[test]
+fn a_policy_from_before_the_motor_field_existed_still_seeds() {
+    let scratch = Scratch::new("neural-no-motor");
+    let state = scratch.join("state");
+
+    let theta = cubarium_search::es::tensor::initial_center(13);
+    let hash = cubarium_search::calibrate::config_hash(&cubarium_core::WorldConfig::default());
+    let mut file = cubarium_search::es::export::PolicyFile::new(
+        &theta,
+        "test",
+        0,
+        59,
+        "default",
+        hash,
+        cubarium_core::MotorModel::Sweep,
+    )
+    .expect("an exportable centre");
+    // A file from before the field existed does not carry the key at all, so it is removed
+    // rather than written as `null`: `None` must mean `sweep` for both spellings.
+    let mut json = serde_json::to_value(&file).expect("a policy file serialises");
+    assert!(json.as_object_mut().expect("an object").remove("motor").is_some());
+    let text = serde_json::to_string(&json).expect("writing the policy file");
+    assert!(!text.contains("\"motor\""), "the fixture is a file with no motor field");
+    let policy = scratch.write("old-center.json", &text);
+
+    let seeded = run(&[
+        "--sink", "none", "--speed", "0", "--seconds", "1", "--fresh",
+        "--state", state.to_str().unwrap(),
+        "--neural", policy.to_str().unwrap(),
+        "--neural-count", "2",
+    ]);
+    assert_eq!(seeded.neural_animals, 2, "missing means sweep, and sweep is what this world runs");
 }

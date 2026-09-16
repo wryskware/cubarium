@@ -113,6 +113,16 @@ impl From<&WorldStateV16> for CubeProjection {
 /// refused here too. It never calls `validate`: a schema 16 world is not a world this build
 /// can run, only one it can read the numbers out of.
 pub fn decode_v16(bytes: &[u8]) -> Result<(SnapshotMeta, WorldStateV16), SnapshotError> {
+    decode_frozen(bytes, SCHEMA_V16)
+}
+
+/// The body of [`decode_v16`], parameterised by the version it insists on, because schema 17
+/// ([`super::v17`]) is this exact shape under the next number: `main` bumped the version for a
+/// change of the shipped pursuit rule and moved no bytes. One decoder, two headers.
+pub(super) fn decode_frozen(
+    bytes: &[u8],
+    want: u32,
+) -> Result<(SnapshotMeta, WorldStateV16), SnapshotError> {
     let take = |at: usize, n: usize| -> Result<&[u8], SnapshotError> {
         bytes.get(at..at + n).ok_or(SnapshotError::Truncated)
     };
@@ -123,7 +133,7 @@ pub fn decode_v16(bytes: &[u8]) -> Result<(SnapshotMeta, WorldStateV16), Snapsho
         return Err(SnapshotError::BadMagic);
     }
     let schema = u32::from_le_bytes(take(4, 4)?.try_into().expect("4 bytes"));
-    if schema != SCHEMA_V16 {
+    if schema != want {
         return Err(SnapshotError::UnsupportedSchema(schema));
     }
     let id_len = u16::from_le_bytes(take(8, 2)?.try_into().expect("2 bytes")) as usize;

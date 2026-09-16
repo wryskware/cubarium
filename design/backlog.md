@@ -33,6 +33,7 @@ spec. Add to it whenever a new knob lands.
 | `--telemetry`, `--fields`, `--events`, `--out`, `--every`, `--scale` | CLI (diagnostic outputs) | restart | |
 | apex spawn controls (introduce one or two adults, paid lifecycle, never restocked) | viewer page | live | Present since ecology v1. |
 | `organism.move_cost` (ships 0.00036; F measured 0.0018 and 0.006, both overshoot) | `WorldConfig` via TOML; calibration `--prices` axis | restart | Candidate for a slider once the finer ladder (I) reports. |
+| pursuit stopping rule `--pursuit-stop {reach-envelope,half-space}` (ships `reach-envelope` since 2026-09-16) | `cubarium-search` only — `calibrate`, `precondition`, `factorial`, `es-population`, `apex-audit`; a `World` transient (`World::set_pursuit_stop`), never a `WorldConfig` field and never persisted | restart, fresh world only | **Not a knob for the viewer.** `half-space` exists to reproduce rows retained before the adoption and nothing else; the cube has no reason to run it, and a world saved under one rule is refused under the other (schema 17). List it here so the list is complete, not so it gets a slider. |
 
 ## 2. Artwork pass
 
@@ -46,7 +47,29 @@ fade), under `assets/atelier`, replacing the `Mask::Axial` cut in `habitat.rs`; 
 G's notes: the stripped-canopy silhouette is less articulated than the side-face plant; the
 water band shows nothing for dead wood; a tall dead column has no authored crown.
 
-## 3. Deferred decisions
+## 3. A light physics engine for movement
+
+Wrysk, 2026-09-16: "i dont think a light physics engine is the wrong call to
+implement at some point regardless", after directing that movement cost follow
+rough physics (mass, momentum, bodies as balls or cylinders, turning cheaper
+than moving, no modelling of outstretched claws).
+
+**First step, in flight:** workstream T
+([brief](handoffs/ecology-v1-motor-inertial-opus-2026-09-16.md)) — every body a
+uniform disc, rotation as energy-equivalent speed, energy envelope, apex grasp
+excluded from turning; paired against the shipped sweep model on the apex and
+on A's screen rows before it touches the cube.
+
+**Done looks like:** a motor model where a body's motion cost is work against
+inertia and drag: mass from structure, a moment of inertia from a simple shape,
+a cost for accelerating (momentum) and for sustained speed, the same rule for
+every body including the apex. Kept deliberately light: no collisions, no
+contact forces, no rigid-body solver; a per-tick integrator on `(v, ω)` with a
+power budget is the ceiling of ambition. Any step here is a whole-world change:
+it goes through the matched calibration rows, records the model in the training
+protocol, and is put to Wrysk before deployment.
+
+## 4. Deferred decisions
 
 - Shoulder 0.85 vs 0.95: Wrysk does not want to tune now; 0.95 stays on the cube by env
   override, 0.85 stays the shipped default. Revisit when the GUI exists.

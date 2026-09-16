@@ -8,6 +8,8 @@
 //! did. The two live together because a search harness is a search harness, not because a
 //! policy is an ecology parameter.
 //!
+//! - [`antithetic`]: the antithetic-pair reduction over the retained generation reports,
+//!   and the deadband occupancy of a sigma-scale perturbation.
 //! - [`bits`]: exact float persistence, because plain JSON numbers are not exact here.
 //! - [`rng`]: the trainer's own positional randomness, separate from the world's.
 //! - [`tensor`]: the flatten/unflatten order and the seeded centre.
@@ -15,6 +17,10 @@
 //! - [`fixture`]: the frozen training and held-out layouts, and how one becomes a world.
 //! - [`episode`]: one rollout through `World::step`, plus the three disclosed controls.
 //! - [`budget`]: the matched feasibility experiment over the world's per-organism ledger.
+//! - [`intake`]: the per-tick intake diagnostic — why a trained controller travels and does
+//!   not eat, separated at the sites the tick decides it.
+//! - [`scorecheck`]: the two falsification checks the score hypothesis had to survive —
+//!   the frozen controller's response to food, and the current score's dwell gradient.
 //! - [`trainer`]: stable job identities, bounded workers, the reduction and the checkpoint.
 //! - [`export`]: a trained centre as a self-contained policy the core can attach.
 //! - [`commands`]: the development commands behind the `es-*` subcommands.
@@ -22,14 +28,17 @@
 //! Nothing here attaches a policy to the display world, migrates a world, or trains during a
 //! world's ordinary life. The trainer builds its own isolated worlds and throws them away.
 
+pub mod antithetic;
 pub mod bits;
 pub mod budget;
 pub mod commands;
 pub mod episode;
 pub mod export;
 pub mod fixture;
+pub mod intake;
 pub mod optimizer;
 pub mod rng;
+pub mod scorecheck;
 pub mod tensor;
 pub mod trainer;
 

@@ -50,9 +50,41 @@ grazers before their first brood
 starves on the generalist diet; the shoulder is measured and 0.95 recommended,
 a soil-band dead-wood cue added
 ([presentation 2](../7_Research/ecology-v1-presentation-2-2026-09-16.md)).
-The cube runs `77c42e8` fresh in `fast-leaf` with the 0.95 shoulder for
-Wrysk to judge. Next: generation 9's intake diagnosis, apex eligibility, the
-finer price ladder, diet yield by bin. The [ecology v1 contract](../ecology-v1-contract.md)
+The cube runs `77c42e8` fresh in `fast-leaf` with the 0.95 shoulder (Wrysk
+deferred that choice; see [the backlog](../backlog.md)). Round 2 ran the same
+day as H, I, J, K, consolidated in
+[the round-2 result](../7_Research/ecology-v1-round2-results-2026-09-16.md):
+the forager fails to *stay* on food, not to eat it (score, not observation);
+the apex starves on a 3 % capture rate and never fills its reserve whatever its
+age; the price ladder is refuted and the counted depletions turn out to be
+unvisited dim cells declining from an over-seeded start; the skimmer's founder
+diet is the better one for its body and F's association was survivorship. Round 3 followed
+([round-3 result](../7_Research/ecology-v1-round3-results-2026-09-16.md)): the
+score hypothesis is falsified (the current score already pays for staying; the
+controller's movement does not respond to food; no score change proposed); the
+apex's pursuit stopping predicate suppresses the burst it pays for; the counted
+depletions are seeding artefacts confirmed by exact per-cell withdrawal (none
+grazed); the skimmer thrives once its depth preference leaves the wet rim.
+Round 4 ([round-4 result](../7_Research/ecology-v1-round4-results-2026-09-16.md)):
+the predicate correction is confirmed (captures +76 %, apex still starves; the
+turn radius is next); the ES optimiser is faithful and the adapter's turn
+deadband is where residence is lost; the skimmer's depth rescues its lineage
+at the grazer's expense (refuted as a roster change); no plant-only age
+removes the ungrazed crossings but 48,000 ticks makes every grazer founder
+breed, and every arm converges to the same grazed standing crop. Wrysk's
+direction on movement physics (disc bodies, energy-equivalent rotation, no
+claw radius) landed as workstream T: the disc model closes the apex's gap
+and lifts captures 39 % with every gate kept, but is not isolated from the
+world change and has no production contract, so Astra's cleared order is:
+the grasp-only apex pair under the shipped motor first
+([U](ecology-v1-apex-grasp-opus-2026-09-16.md): refuted, a third at most on one run; the age gate is the one robust change), then the disc model on the apex alone in the identical prey world ([W](ecology-v1-apex-motor-isolation-opus-2026-09-16.md): the apex's own envelope opens the gap; the prey's disc contract is what closed it, 15/15; the disc model is a physics decision for every body, not an apex repair), the
+reach-envelope predicate adopted separately as the shipped rule with schema 17,
+a resume regression and the host's motor check
+([V](ecology-v1-predicate-adoption-opus-2026-09-16.md): landed; the selected `fast-leaf` keeps all six gates and moves under half a body, captures 29 → 49 over the eight apex rows, the unselected `baseline` arm 2 loses its guild gate), the motor
+only after isolation, a host contract, the adapter diagonal and a
+recalibration; then the turn deadband alone in training ([X](ecology-v1-turn-deadband-opus-2026-09-16.md), in flight), the skimmer depth
+ladder ([Y](ecology-v1-depth-ladder-opus-2026-09-16.md), in flight), and a coupled grazed-field opening. A light physics engine is on
+[the backlog](../backlog.md). The [ecology v1 contract](../ecology-v1-contract.md)
 and its [implementation review](../7_Research/ecology-v1-implementation-review-2026-09-15.md)
 stand as the accepted baseline.
 

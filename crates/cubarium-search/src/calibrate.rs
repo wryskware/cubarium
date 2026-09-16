@@ -31,12 +31,17 @@ use cubarium_core::hunter::FixedHunterProfile;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::evaluate::{BUILD_ID, Evaluation, Protocol, Status, evaluate};
+use crate::evaluate::{BUILD_ID, Evaluation, Protocol, RunOptions, Status, evaluate_with};
 use crate::params;
 use crate::search::{HELDOUT_SEEDS, TRAINING_SEEDS};
 
 /// The three matched apex arms, in the order the summary reports them.
 pub const ARMS: [u32; 3] = [0, 1, 2];
+
+/// Workstream I's ladder: the shipped price, the three equal 0.0003 steps that fit between it
+/// and workstream F's lowest raised level, and that level. Declared here so the campaign's
+/// command is checkable against the note rather than retyped from it.
+pub const LADDER_PRICES: [f64; 5] = [0.00036, 0.0006, 0.0009, 0.0012, 0.0018];
 
 /// The shipped `organism.move_cost`, in e per unit of structure per pixel travelled. A stage
 /// that names no price runs at this one, which is exactly what the calibration screen ran.
@@ -353,6 +358,33 @@ pub struct StagePlan {
     /// list at the shipped default is the calibration screen's own matrix, unchanged.
     #[serde(default)]
     pub prices: Vec<f64>,
+    /// Whether this stage ran with workstream E's per-body budget ledger on (workstream I).
+    /// Absent on every stage before it, which is what `false` means there.
+    #[serde(default)]
+    pub ledger: bool,
+    /// Whether this stage ran with workstream M's per-cell plant budget on, and whether it
+    /// founded no animals at all. Absent on every stage before M.
+    #[serde(default)]
+    pub plant_record: bool,
+    #[serde(default)]
+    pub no_animals: bool,
+    /// The motor contract every run of this stage used (`cubarium_core::MotorModel`), by name.
+    /// Absent on every stage before workstream T, which is `sweep` — the one contract there
+    /// was. A transient on the world, so it does not enter [`config_hash`] and a `sweep` stage
+    /// reproduces the retained rows bit for bit.
+    #[serde(default = "sweep_name")]
+    pub motor: String,
+    /// The pursuit stopping rule every run of this stage used
+    /// (`cubarium_core::hunter::PursuitStop`), by name. Absent on every stage written before
+    /// this field existed, and what that absence means is **`forward_half_space`** — the rule
+    /// this workspace shipped until 2026-09-16, which is what those runs in fact evaluated.
+    /// It is deliberately not `PursuitStop::default()`, which is the *envelope* now: reading a
+    /// retained plan under today's default would relabel it as a stage it never ran.
+    ///
+    /// A transient on the world, so it does not enter [`config_hash`]; a `forward_half_space`
+    /// stage reproduces the retained rows bit for bit, which is the check this workstream ran.
+    #[serde(default = "half_space_name")]
+    pub pursuit_stop: String,
     pub build_id: String,
     pub horizon_ticks: u64,
     pub sample_every: u64,
@@ -589,6 +621,9 @@ pub fn run_stage(
     arms: &[u32],
     // One or more `organism.move_cost` levels. `&[DEFAULT_MOVE_COST]` is the screen's matrix.
     prices: &[f64],
+    // What this stage records beside its ordinary metrics, and whether it founds animals at
+    // all. `RunOptions::default()` is every stage before workstream I.
+    options: RunOptions,
     horizon_ticks: u64,
     sample_every: u64,
     apex_introduce_tick: u64,
@@ -664,6 +699,11 @@ pub fn run_stage(
     let plan = StagePlan {
         stage: stage.to_string(),
         prices: prices.to_vec(),
+        ledger: options.ledger,
+        plant_record: options.plant_record,
+        no_animals: options.no_animals,
+        motor: options.motor.name().to_string(),
+        pursuit_stop: options.pursuit_stop.as_str().to_string(),
         build_id: BUILD_ID.to_string(),
         horizon_ticks,
         sample_every,
@@ -710,7 +750,8 @@ pub fn run_stage(
                         apex_founders: job.arm,
                         apex_introduce_tick,
                     };
-                    let evaluation = evaluate(&job.values, job.seed, protocol);
+                    let evaluation =
+                        evaluate_with(&job.values, job.seed, protocol, options);
                     let row = CalibrationRow {
                         candidate: job.candidate.name.to_string(),
                         axes: job.candidate.axes.to_string(),
@@ -817,6 +858,18 @@ pub fn run_stage(
 /// Deterministic for a given build because `serde_json` writes a struct's fields in
 /// declaration order, and it covers **every** field, not only the searched ones — so a config
 /// that differs anywhere has a different hash.
+/// The motor contract a stage written before workstream T implies: there was one.
+fn sweep_name() -> String {
+    cubarium_core::MotorModel::Sweep.name().to_string()
+}
+
+/// The pursuit stopping rule a stage written before 2026-09-16 implies: the forward
+/// half-space, which was the only rule the workspace had. Named rather than taken from
+/// `PursuitStop::default()` so that adopting a new shipped rule cannot relabel a retained plan.
+fn half_space_name() -> String {
+    cubarium_core::hunter::PursuitStop::ForwardHalfSpace.as_str().to_string()
+}
+
 pub fn config_hash(config: &WorldConfig) -> u64 {
     let text = serde_json::to_string(config).unwrap_or_default();
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
@@ -894,6 +947,9 @@ pub fn print_report(report: &StageReport) {
         report.plan.seed_set,
     );
     println!("movement prices {:?}", report.plan.prices);
+    println!("per-body ledger  {}", if report.plan.ledger { "on" } else { "off" });
+    println!("plant record     {}", if report.plan.plant_record { "on" } else { "off" });
+    println!("founders         {}", if report.plan.no_animals { "none (plant-only)" } else { "ordinary" });
     println!(
         "\n{:<24} {:>9} {:>3} {:>4} {:>6} {:>9} {:>9} {:>8} {:>8} {:>7} {:>7}  gates",
         "candidate", "move_cost", "arm", "ok", "extinc", "foliage/0", "wood", "pop", "births",
@@ -1079,6 +1135,49 @@ mod tests {
         }
     }
 
+    /// Workstream I's ladder is the brief's five levels, every rung is inside the declared box,
+    /// the three interior rungs are 0.0003 apart, and the two rungs it shares with workstream F
+    /// are bit-for-bit F's — which is what makes the state-hash row check possible.
+    ///
+    /// The end intervals are **not** 0.0003 (0.00024 at the bottom, 0.0006 at the top) because
+    /// the two end rungs are F's, not this campaign's to choose. The note's pre-registration
+    /// calls the ladder "three equal steps of 0.0003"; that sentence is wrong about the end
+    /// intervals and the error is disclosed below its rule rather than edited out of it.
+    #[test]
+    fn the_ladder_is_the_declared_five_levels_inside_the_box_sharing_two_rungs_with_the_matrix() {
+        let k = params::index_of("organism.move_cost").expect("the price is in the box");
+        let spec = params::PARAMS[k];
+        for price in LADDER_PRICES {
+            assert!(
+                spec.lo <= price && price <= spec.hi,
+                "{price} is outside the declared box [{}, {}]",
+                spec.lo,
+                spec.hi
+            );
+        }
+        assert_eq!(
+            LADDER_PRICES[0].to_bits(),
+            DEFAULT_MOVE_COST.to_bits(),
+            "the ladder's control rung is not the shipped price"
+        );
+        assert_eq!(LADDER_PRICES[4].to_bits(), 0.0018f64.to_bits(), "F's lowest raised level");
+        assert_eq!(
+            LADDER_PRICES,
+            [0.00036, 0.0006, 0.0009, 0.0012, 0.0018],
+            "the ladder is not the brief's five levels"
+        );
+        for pair in LADDER_PRICES[1..4].windows(2) {
+            assert!(
+                (pair[1] - pair[0] - 0.0003).abs() < 1e-12,
+                "the interior rungs are not 0.0003 apart: {pair:?}"
+            );
+        }
+        assert!(
+            LADDER_PRICES.windows(2).all(|p| p[1] > p[0]),
+            "the ladder must be strictly increasing"
+        );
+    }
+
     /// Writing the price at its shipped default must change **no bit** of the configuration,
     /// so the movement campaign's control arm is the calibration screen's world exactly.
     #[test]
@@ -1119,6 +1218,7 @@ mod tests {
             1,
             &[0],
             &[0.5],
+            RunOptions::default(),
             100,
             50,
             10,
@@ -1159,6 +1259,8 @@ mod tests {
                     ..crate::metrics::Components::default()
                 }),
                 movement: None,
+                opening: None,
+                founding_state_hash: None,
             },
         };
         let (gates, retention, extinctions, _, _) = gates_for(&[&row]);

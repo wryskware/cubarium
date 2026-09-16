@@ -112,6 +112,122 @@ pub const ROTATION_COST_SCALE: f64 = 0.5;
 /// Free rotation is the defect R0a fixes, so a zero scale is not a tuning option.
 const _: () = assert!(ROTATION_COST_SCALE > 0.0);
 
+/// Which **motor contract** a world is running: the shipped outer-point sweep, or the paired
+/// inertial disc (`design/handoffs/ecology-v1-motor-inertial-opus-2026-09-16.md`).
+///
+/// This is a `World`-level transient — it is never persisted, never in [`WorldConfig`], and
+/// never part of a state hash. [`MotorModel::Sweep`] is the default and is byte-identical to
+/// the build that never heard of the switch; every entry point below without an `_in` suffix
+/// *is* the sweep model, unchanged, so a caller that does not name a model gets today's world.
+///
+/// # The two models
+///
+/// Both express rotation as a **speed in px/s** — a radius times `|ω|` — so that translation
+/// and turning can share one envelope and one `move_cost`. They differ in which radius, how
+/// the two speeds combine in the envelope, and what a px/s of rotation costs.
+///
+/// | | radius in the term | envelope | bill |
+/// |---|---|---|---|
+/// | [`Sweep`](MotorModel::Sweep) | `max(lobes, grasp)` — the outermost *contacting* point | `\|v\| + r·\|ω\| ≤ cap` | `move_cost·S·(\|v\| + k·r·\|ω\|)·dt` |
+/// | [`Inertial`](MotorModel::Inertial) | `lobes/√2` — a uniform disc's radius of gyration | `√(v² + v_rot²) ≤ cap` | `move_cost·S·(\|v\| + v_rot)·dt` |
+///
+/// Under `Inertial` every organism is a uniform disc of mass ∝ `structure` and radius
+/// `phenotype.extent`, and `v_rot = r·|ω|/√2` is the translation speed that carries the same
+/// kinetic energy as spinning that disc at `ω`. Rotation is therefore priced and bounded as an
+/// *energy*, which is why it combines with `v` in quadrature rather than by addition, and why
+/// the separate [`ROTATION_COST_SCALE`] — a stylized price for the rod figure — disappears
+/// into the radius. The apex's grasp (`capture_offset + capture_reach`) is contact geometry and
+/// carries no mass worth turning, so it leaves the radius entirely; this is Wrysk's direction
+/// of 2026-09-16, "we don't need to model 'are claws outstretched' when turning".
+///
+/// **A body that only translates is identical under both models** — the same bill, bit for
+/// bit, and the same delivered speed at every energy. The whole difference is rotation.
+///
+/// Not modelled here: a cost of *acceleration*. Both models are memoryless and price the
+/// motion held during the tick, not the change in it.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum MotorModel {
+    /// The shipped contract: the outermost contacting point's sweep, summed with travel.
+    #[default]
+    Sweep,
+    /// The paired inertial disc: an energy-equivalent rotation speed, combined in quadrature.
+    Inertial,
+}
+
+impl MotorModel {
+    /// The name this model is spelled with on a command line, in a protocol and in a policy
+    /// file. Stable: it is provenance, not a label.
+    pub const fn name(self) -> &'static str {
+        match self {
+            MotorModel::Sweep => "sweep",
+            MotorModel::Inertial => "inertial",
+        }
+    }
+
+    /// Read a model by name. An unknown name is an error, never a silent default: a run that
+    /// misspells its model must not quietly produce the shipped one.
+    pub fn parse(s: &str) -> Result<MotorModel, String> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "sweep" => Ok(MotorModel::Sweep),
+            "inertial" => Ok(MotorModel::Inertial),
+            other => Err(format!(
+                "unknown motor model {other:?}: expected \"sweep\" (the shipped contract) or \
+                 \"inertial\""
+            )),
+        }
+    }
+
+    /// Is this the shipped contract? Used to keep the default out of serialized provenance, so
+    /// a `Sweep` protocol keeps the hash it has always had.
+    pub const fn is_sweep(&self) -> bool {
+        matches!(self, MotorModel::Sweep)
+    }
+
+    /// The radius that enters the rotation term, given the body's physical radius `r`.
+    ///
+    /// `r` under `Sweep` — the outermost point sweeps at `r·ω`. `r/√2` under `Inertial` — a
+    /// uniform disc's radius of gyration, so `r_g·ω` is the translation speed of equal kinetic
+    /// energy.
+    pub fn rotation_radius_px(self, radius_px: f64) -> f64 {
+        let r = finite_non_negative(radius_px);
+        match self {
+            MotorModel::Sweep => r,
+            MotorModel::Inertial => r / std::f64::consts::SQRT_2,
+        }
+    }
+
+    /// The rotation speed this model bounds and bills, px/s, from a **physical** radius and an
+    /// angular rate: `r·|ω|` under `Sweep`, `r·|ω|/√2` under `Inertial`.
+    pub fn rotation_speed(self, radius_px: f64, omega_abs: f64) -> f64 {
+        self.rotation_radius_px(radius_px) * finite_non_negative(omega_abs)
+    }
+
+    /// How translation and rotation combine in the **envelope**: added under `Sweep` (one
+    /// body cannot have two fastest points), in quadrature under `Inertial` (two kinetic
+    /// energies drawn from one budget).
+    pub fn envelope_magnitude(self, speed: f64, rotation: f64) -> f64 {
+        let v = finite_non_negative(speed);
+        let w = finite_non_negative(rotation);
+        match self {
+            MotorModel::Sweep => v + w,
+            MotorModel::Inertial => v.hypot(w),
+        }
+    }
+
+    /// What one px/s of rotation speed costs relative to one px/s of travel:
+    /// [`ROTATION_COST_SCALE`] under `Sweep`, and **one** under `Inertial`, where the
+    /// mean-radius discount is already inside the radius.
+    pub const fn rotation_price(self) -> f64 {
+        match self {
+            MotorModel::Sweep => ROTATION_COST_SCALE,
+            MotorModel::Inertial => 1.0,
+        }
+    }
+}
+
 /// What a body asks the world for this tick, in its own (pre-transport) chart.
 ///
 /// `heading` is a *target orientation*, not a result: the resolver turns toward it by as much
@@ -135,7 +251,12 @@ impl MotorRequest {
 /// The physical envelope one body faces this tick.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MotorLimits {
-    /// `r`: the outer radius of the physical body, px ([`turn_radius_px`]).
+    /// `r`: **the radius the model in force puts in the rotation term**, px
+    /// ([`turn_radius_px_in`]). Under [`MotorModel::Sweep`] that is the outer radius of the
+    /// physical body — the outermost contacting point, the apex's grasp included. Under
+    /// [`MotorModel::Inertial`] it is already the disc's radius of gyration, `lobes/√2`, with
+    /// the grasp excluded, so the resolver's `radius · |ω|` is `v_rot` with no further
+    /// arithmetic and the neural adapter's `Envelope` reads the same number the envelope uses.
     pub radius_px: f64,
     /// `ω_max`: an *additional* ceiling on `|ω|`, rad/s, applied before the shared budget.
     /// It never enlarges the budget; it can only clip a request further.
@@ -162,14 +283,24 @@ impl MotorLimits {
         finite_non_negative(self.speed_cap)
     }
 
-    /// `u`: the capability, capped by what the energy after upkeep actually buys.
-    pub fn available(&self) -> f64 {
-        let budget = if self.motor_budget.is_nan() {
+    /// The purse: [`MotorLimits::motor_budget`] sanitized to a non-negative number (NaN is no
+    /// budget at all), `f64::INFINITY` when motion is free.
+    ///
+    /// Under [`MotorModel::Sweep`] this bounds the same quantity the capability does; under
+    /// [`MotorModel::Inertial`] it bounds the *billed* motion while the capability bounds the
+    /// envelope magnitude, which is why the two are available separately.
+    pub fn budget(&self) -> f64 {
+        if self.motor_budget.is_nan() {
             0.0
         } else {
             self.motor_budget.max(0.0)
-        };
-        self.capability().min(budget)
+        }
+    }
+
+    /// `u`: the capability, capped by what the energy after upkeep actually buys. This is the
+    /// [`MotorModel::Sweep`] envelope's single bound.
+    pub fn available(&self) -> f64 {
+        self.capability().min(self.budget())
     }
 }
 
@@ -183,8 +314,13 @@ pub struct ResolvedMotion {
     /// The signed physical turn actually performed this tick, radians in `(−π, π]`. This —
     /// never the request, never a chart jump — is what the angular cost is charged on.
     pub turn: f64,
-    /// `r · |ω|`, px/s: how fast the outermost point of the body swept. The envelope bounds
-    /// `speed + sweep`; the bill prices `sweep` at [`ROTATION_COST_SCALE`].
+    /// The **rotation speed** the model in force resolved, px/s: `r · |ω|` — the outermost
+    /// point's sweep — under [`MotorModel::Sweep`], and `v_rot = r·|ω|/√2` under
+    /// [`MotorModel::Inertial`]. It is always `MotorLimits::radius_px · |ω|`, because the
+    /// limits already carry the model's radius.
+    ///
+    /// The bill prices it at [`MotorModel::rotation_price`]; the envelope combines it with the
+    /// speed at [`MotorModel::envelope_magnitude`].
     pub sweep: f64,
 }
 
@@ -194,9 +330,22 @@ impl ResolvedMotion {
         if dt > 0.0 { self.turn / dt } else { 0.0 }
     }
 
-    /// `|v| + r · |ω|`: the quantity the envelope bounds. Always `≤ MotorLimits::available()`.
+    /// `|v| + rotation`: the **linear** motor magnitude.
+    ///
+    /// Under [`MotorModel::Sweep`] this is the quantity the envelope bounds, and it is always
+    /// `≤ MotorLimits::available()`. Under [`MotorModel::Inertial`] the envelope bounds
+    /// `√(v² + v_rot²)` instead — see [`ResolvedMotion::envelope_magnitude`] — and this sum is
+    /// the *billed* motion, always within [`MotorLimits::motor_budget`] and at most `√2` times
+    /// the capability. It is kept as the one linear measure so that the recurrent feedback
+    /// channel, whose requested half is the adapter's `v_req + r·|ω_req|`, compares like with
+    /// like under both models.
     pub fn motor_magnitude(&self) -> f64 {
         self.speed + self.sweep
+    }
+
+    /// The quantity the envelope actually bounds under `model`: `≤ MotorLimits::capability()`.
+    pub fn envelope_magnitude(&self, model: MotorModel) -> f64 {
+        model.envelope_magnitude(self.speed, self.sweep)
     }
 
     /// A body that neither moved nor turned.
@@ -220,6 +369,36 @@ pub fn resolve(
     request: &MotorRequest,
     limits: &MotorLimits,
 ) -> ResolvedMotion {
+    resolve_in(current_heading, request, limits, MotorModel::Sweep)
+}
+
+/// [`resolve`], under a named [`MotorModel`]. `MotorModel::Sweep` is [`resolve`] itself, arithmetic
+/// for arithmetic.
+///
+/// The two models share everything up to the scaling factor: the requested turn is clamped to
+/// the angular ceiling, the requested speed to the translation ceiling, the rotation speed is
+/// `limits.radius_px · |ω|` (the limits already carry the model's radius), and both channels
+/// are then multiplied by **one** common factor so the caller's split survives.
+///
+/// What differs is how that factor is found.
+///
+/// - `Sweep` collapses the capability and the purse onto one number,
+///   `u = min(speed_cap, motor_budget)`, and bounds `|v| + r·|ω|` by it. `motor_budget` is
+///   sized by [`MotorBill::affordable_motor`], which prices the whole magnitude at the dearer
+///   of its two halves; a turning body is therefore throttled a little more than its own bill
+///   would require. That conservatism is shipped behaviour and is kept exactly.
+/// - `Inertial` keeps the two constraints apart, because under it they bound *different*
+///   quantities: the capability bounds the envelope magnitude `√(v² + v_rot²)`, and the purse
+///   bounds the billed motion `|v| + v_rot`. Both are positively homogeneous in the request,
+///   so each yields its own ratio and the factor is the smaller. Nothing is approximated: the
+///   charge is exactly what the energy pays for, and a body that only translates sees the two
+///   constraints coincide and moves exactly as it does under `Sweep`.
+pub fn resolve_in(
+    current_heading: Vec2,
+    request: &MotorRequest,
+    limits: &MotorLimits,
+    model: MotorModel,
+) -> ResolvedMotion {
     let Some(current) = current_heading.normalized() else {
         // A body without a usable heading cannot be turned relative to one; adopt the
         // request's own direction if it has one and stand still this tick.
@@ -239,12 +418,24 @@ pub fn resolve(
     let speed_req = finite_non_negative(request.speed).min(finite_non_negative(limits.speed_cap));
 
     let radius = finite_non_negative(limits.radius_px);
-    let demand = speed_req + radius * (turn_req / dt).abs();
-    let available = limits.available();
-    let scale = if demand > available {
-        if demand > 0.0 { available / demand } else { 0.0 }
-    } else {
-        1.0
+    let rotation_req = radius * (turn_req / dt).abs();
+    let scale = match model {
+        MotorModel::Sweep => {
+            let demand = speed_req + rotation_req;
+            let available = limits.available();
+            if demand > available {
+                if demand > 0.0 { available / demand } else { 0.0 }
+            } else {
+                1.0
+            }
+        }
+        MotorModel::Inertial => {
+            let envelope_demand = MotorModel::Inertial.envelope_magnitude(speed_req, rotation_req);
+            let billed_demand = speed_req + rotation_req;
+            let by_capability = bound(envelope_demand, limits.capability());
+            let by_purse = bound(billed_demand, limits.budget());
+            by_capability.min(by_purse)
+        }
     };
 
     let speed = speed_req * scale;
@@ -311,12 +502,134 @@ fn is_unit(v: Vec2) -> bool {
 /// effort of turning, so the budget errs toward slower rotation rather than free rotation.
 /// It is a stylized budget, not a moment of inertia.
 pub fn turn_radius_px(organism: &Organism, apex: Option<&crate::hunter::ContactGeometry>) -> f64 {
+    turn_radius_px_in(organism, apex, MotorModel::Sweep)
+}
+
+/// [`turn_radius_px`] under a named [`MotorModel`]: **the radius that model puts in the
+/// rotation term**, which is what [`MotorLimits::radius_px`] wants and what the neural
+/// adapter's `Envelope` and the observation must be told.
+///
+/// - [`MotorModel::Sweep`] is [`turn_radius_px`] itself: the outermost *contacting* point, so
+///   `max(lobes, |capture_offset| + capture_reach)` for an apex member.
+/// - [`MotorModel::Inertial`] models the body as a uniform disc of radius
+///   [`crate::genome::Phenotype::extent`] and returns its **radius of gyration**, `lobes/√2`,
+///   so that `radius · |ω|` is the translation speed of equal kinetic energy. `apex` is
+///   deliberately ignored: a grasp is contact geometry, it carries no mass worth turning, and
+///   pricing 14.8 px of claw reach as a turn radius is what
+///   `design/7_Research/ecology-v1-apex-predicate-2026-09-16.md` measured taking 64 % of the
+///   apex's boosted budget.
+///
+/// One consequence worth naming: `crate::world::view::neural_observation` and
+/// `crate::world::step::neural_decision` already read this with `apex = None`, so under
+/// `Inertial` the radius a body is *told* and the radius its envelope *uses* are the same
+/// number for every body in the world, apex included, for the first time.
+pub fn turn_radius_px_in(
+    organism: &Organism,
+    apex: Option<&crate::hunter::ContactGeometry>,
+    model: MotorModel,
+) -> f64 {
+    turn_radius_px_in_with(organism, apex, model, ApexTurnRadius::Grasp)
+}
+
+/// **Which radius an apex member's grasp puts in the turn budget** under
+/// [`MotorModel::Sweep`] — the one variable of workstream U
+/// (`design/7_Research/ecology-v1-apex-grasp-2026-09-16.md`).
+///
+/// [`MotorModel::Sweep`] charges the outermost *contacting* point, and for a lanternjaw that
+/// is its 14.8 px grasp rather than its 9 px lobes. Workstream P measured 64 % of the
+/// member's boosted motor budget going into turn sweep at that radius, and T measured the
+/// whole grasp-free disc model recovering the closure. This rule is the **intermediate**: the
+/// grasp stops being a turn radius while everything else about `Sweep` — the additive
+/// envelope, [`ROTATION_COST_SCALE`], the grasp's own *reach* in the strike — is untouched.
+///
+/// [`Grasp`](ApexTurnRadius::Grasp) is the shipped rule and the default, so a world that never
+/// names one is byte-identical to the build before this existed. It is meaningless under
+/// [`MotorModel::Inertial`], which already drops the grasp.
+///
+/// **No ordinary body is reachable by it, by construction:** an organism with no apex contact
+/// geometry is handed `apex = None` and both rules return its lobe extent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ApexTurnRadius {
+    /// `max(lobes, |capture_offset| + capture_reach)` — the shipped rule.
+    #[default]
+    Grasp,
+    /// `lobes` — the member's own body, with the grasp left to the strike that uses it.
+    Lobes,
+}
+
+impl ApexTurnRadius {
+    /// The CLI spelling, and what a record writes.
+    pub fn name(self) -> &'static str {
+        match self {
+            ApexTurnRadius::Grasp => "grasp",
+            ApexTurnRadius::Lobes => "lobes",
+        }
+    }
+
+    /// The spelling back. An unrecognised name is refused rather than silently defaulted: a
+    /// paired arm that quietly ran the shipped half is worse than one that did not run.
+    pub fn parse(s: &str) -> Result<ApexTurnRadius, String> {
+        match s.trim() {
+            "grasp" => Ok(ApexTurnRadius::Grasp),
+            "lobes" => Ok(ApexTurnRadius::Lobes),
+            other => Err(format!(
+                "unknown apex turn radius `{other}`: expected `grasp` (the shipped rule, the \
+                 outermost contacting point) or `lobes` (the member's own extent)"
+            )),
+        }
+    }
+
+    /// Is this the shipped rule?
+    pub fn is_grasp(self) -> bool {
+        matches!(self, ApexTurnRadius::Grasp)
+    }
+}
+
+/// [`turn_radius_px_in`] under a named [`ApexTurnRadius`] as well as a named [`MotorModel`].
+///
+/// The only place the two rules of [`ApexTurnRadius`] are written. Under
+/// [`MotorModel::Inertial`] the argument cannot matter — that model already ignores `apex` —
+/// and under [`MotorModel::Sweep`] it decides whether the grasp joins the lobes in the `max`.
+pub fn turn_radius_px_in_with(
+    organism: &Organism,
+    apex: Option<&crate::hunter::ContactGeometry>,
+    model: MotorModel,
+    apex_radius: ApexTurnRadius,
+) -> f64 {
     let lobes = finite_non_negative(organism.phenotype.extent);
-    match apex {
-        Some(g) => lobes.max(finite_non_negative(
-            g.capture_offset_body.length() + g.capture_reach_px,
-        )),
-        None => lobes,
+    match model {
+        MotorModel::Sweep => match apex.filter(|_| apex_radius.is_grasp()) {
+            Some(g) => lobes.max(finite_non_negative(
+                g.capture_offset_body.length() + g.capture_reach_px,
+            )),
+            None => lobes,
+        },
+        MotorModel::Inertial => MotorModel::Inertial.rotation_radius_px(lobes),
+    }
+}
+
+/// **Which [`MotorModel`] one body runs**: the world's own contract, unless an apex override is
+/// in force and this body has the contact geometry only a hunter member is ever handed
+/// (`crate::World::set_apex_motor_model`, workstream W).
+///
+/// The only place that choice is written. An `apex_override` of `None` — the default of every
+/// ordinary world — returns `world` for every body, arithmetic for arithmetic, and an override
+/// is unreachable by any body without `apex`. The point is a paired arm in which the *prey world
+/// is identical*: workstream T ran `Inertial` on every body at once, so 628 prey stood at
+/// introduction against `Sweep`'s 745 and its apex gain is not apportioned between the
+/// quadrature envelope and that thinner world.
+///
+/// It is a selector, not a one-way flag: `Some(MotorModel::Sweep)` in an `Inertial` world puts
+/// the member back on the shipped envelope while the rest of the world keeps the disc.
+#[inline]
+pub fn model_for_body(
+    world: MotorModel,
+    apex_override: Option<MotorModel>,
+    apex: Option<&crate::hunter::ContactGeometry>,
+) -> MotorModel {
+    match apex_override {
+        Some(model) if apex.is_some() => model,
+        _ => world,
     }
 }
 
@@ -369,6 +682,12 @@ impl MotorBill {
     /// The envelope bounds one magnitude while the bill prices its two halves differently, so
     /// this prices the whole magnitude at whichever half is dearer. The budget is then never
     /// larger than the body can actually pay for, whatever split the resolver lands on.
+    ///
+    /// **The same number under both [`MotorModel`]s, and deliberately so.** Under `Sweep` the
+    /// dearer half is translation (`max(k, 1) = 1`); under `Inertial` this bounds the *billed*
+    /// motion `|v| + v_rot`, whose price is exactly one `move_cost · S · dt` per px/s. The two
+    /// arrive at `(E − upkeep) / (move_cost · S · dt)` by different routes, which is what makes
+    /// a purely translating body identical under both models at every energy.
     pub fn affordable_motor(&self, energy: f64, dt: f64) -> f64 {
         let per_motor = self.per_motor(dt) * ROTATION_COST_SCALE.max(1.0);
         if per_motor <= 0.0 || !per_motor.is_finite() {
@@ -384,13 +703,12 @@ impl MotorBill {
     /// existing `move_cost`. A body that only translates pays exactly what it paid before this
     /// milestone.
     pub fn motor_cost(&self, speed: f64, sweep: f64, dt: f64) -> f64 {
-        self.per_motor(dt) * self.billed_motion(speed, sweep)
+        self.motor_cost_in(speed, sweep, dt, MotorModel::Sweep)
     }
 
-    /// `|v| + k · r|ω|`: the motion the bill actually prices, as opposed to the motion the
-    /// envelope bounds.
-    fn billed_motion(&self, speed: f64, sweep: f64) -> f64 {
-        finite_non_negative(speed) + ROTATION_COST_SCALE * finite_non_negative(sweep)
+    /// [`MotorBill::motor_cost`] under a named [`MotorModel`].
+    pub fn motor_cost_in(&self, speed: f64, sweep: f64, dt: f64, model: MotorModel) -> f64 {
+        self.per_motor(dt) * billed_motion(speed, sweep, model)
     }
 
     /// The whole tick's bill: upkeep plus the resolved motion, in the world's own
@@ -402,10 +720,39 @@ impl MotorBill {
     /// to the energy on hand. Keeping the original association means a body that only
     /// translates pays the pre-R0a bill bit for bit.
     pub fn total_cost(&self, speed: f64, sweep: f64, dt: f64) -> f64 {
+        self.total_cost_in(speed, sweep, dt, MotorModel::Sweep)
+    }
+
+    /// [`MotorBill::total_cost`] under a named [`MotorModel`], in the world's own association.
+    ///
+    /// The only thing the model changes here is the price of the rotation term: `k` under
+    /// `Sweep`, one under `Inertial` — where the mean-radius discount already lives in the
+    /// radius that produced `sweep`. **A body that only translates therefore pays exactly the
+    /// same number under both models, bit for bit**, which is the invariant the paired
+    /// experiment rests on.
+    pub fn total_cost_in(&self, speed: f64, sweep: f64, dt: f64, model: MotorModel) -> f64 {
         (self.maintenance * self.structure
-            + self.move_cost * self.structure * self.billed_motion(speed, sweep)
+            + self.move_cost * self.structure * billed_motion(speed, sweep, model)
             + self.sense_cost * self.sense_radius)
             * dt
+    }
+}
+
+/// `|v| + price · rotation`: the motion the bill actually prices, as opposed to the motion the
+/// envelope bounds. Under [`MotorModel::Sweep`] `price` is [`ROTATION_COST_SCALE`] and the
+/// rotation is the outer point's sweep; under [`MotorModel::Inertial`] it is one and the
+/// rotation is `v_rot`.
+fn billed_motion(speed: f64, rotation: f64, model: MotorModel) -> f64 {
+    finite_non_negative(speed) + model.rotation_price() * finite_non_negative(rotation)
+}
+
+/// The common factor that brings `demand` inside `limit`: 1 when it already fits, `limit /
+/// demand` when it does not, and 0 for a degenerate demand there is no direction to scale.
+fn bound(demand: f64, limit: f64) -> f64 {
+    if demand > limit {
+        if demand > 0.0 { limit / demand } else { 0.0 }
+    } else {
+        1.0
     }
 }
 

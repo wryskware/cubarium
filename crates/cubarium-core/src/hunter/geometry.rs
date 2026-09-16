@@ -1,5 +1,5 @@
 use cubarium_surface::Topology;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use cubarium_surface::{ChartImage, SurfacePoint, Vec2, travel, unfold_with};
 
@@ -217,6 +217,73 @@ pub struct ContactMeasure {
 impl ContactMeasure {
     pub fn in_contact(&self) -> bool {
         self.effector_distance <= self.tolerance
+    }
+}
+
+/// Which rule the pursuit's stopping predicate runs under.
+///
+/// The hunt-intent pass in `crate::world::step` holds a member still — at its `rest_effort`,
+/// with no strike burst pushed — for a prey the predicate calls "inside". The two variants are
+/// the two readings the source has always contained: what the line tested, and what its own
+/// comment said.
+///
+/// **The shipped rule is [`PursuitStop::ReachEnvelope`] from 2026-09-16.** The rule before
+/// that date was the forward half-space, which
+/// `design/7_Research/ecology-v1-apex-reach-2026-09-16.md` measured true at the burst's start
+/// on 408 of 449 paid attempts — dropping the member to `rest_effort` and suppressing the
+/// burst it had just paid for — and which the paired intervention in
+/// `design/7_Research/ecology-v1-apex-predicate-2026-09-16.md` then corrected: held at the
+/// burst's start 89.4 % → 5.4 %, contacts 88 → 140, captures 38 → 67 over 32 lives. It stays
+/// reachable as an opt-in so the rows retained under it remain reproducible.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PursuitStop {
+    /// **The rule before 2026-09-16**: `body.x < capture_offset_body.x · scale + tolerance`, a
+    /// one-sided **forward half-space**. A prey short of the claws satisfies it as readily as
+    /// one inside them, so an apex whose 12 px sense radius is shorter than its own 13.28 px
+    /// grasp held for essentially every prey it could hunt at all. No longer the default: opt
+    /// in per `World` (`crate::World::set_pursuit_stop`) to reproduce a retained row.
+    ForwardHalfSpace,
+    /// **The shipped rule**: [`ContactMeasure::in_contact`], the **reach envelope** the
+    /// predicate's own comment names and the test the rest of the file means by "inside". This
+    /// is the default and what an ordinary world runs without being told.
+    #[default]
+    ReachEnvelope,
+}
+
+impl PursuitStop {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PursuitStop::ForwardHalfSpace => "forward_half_space",
+            PursuitStop::ReachEnvelope => "reach_envelope",
+        }
+    }
+}
+
+impl ContactMeasure {
+    /// Does the pursuit's stopping rule hold a member still against this measure?
+    ///
+    /// **The one place either rule is written.** `crate::world::step`'s hunt-intent pass, the
+    /// per-attempt record's own reading ([`crate::hunter::StrikeFrame::pursuit_holds`]) and the
+    /// tests all evaluate it here, so a record can never transcribe a rule the world did not
+    /// run. `capture_forward` is the scaled `capture_offset_body.x` of the member asking, i.e.
+    /// [`ContactGeometry::capture_offset_body`]`.x`.
+    ///
+    /// The shipped rule is [`PursuitStop::ReachEnvelope`], so this call is
+    /// [`ContactMeasure::in_contact`] in an ordinary world; the half-space arm is the one that
+    /// has to be asked for.
+    pub fn pursuit_holds(&self, stop: PursuitStop, capture_forward: f64) -> bool {
+        match stop {
+            PursuitStop::ForwardHalfSpace => self.body.x < capture_forward + self.tolerance,
+            PursuitStop::ReachEnvelope => self.in_contact(),
+        }
+    }
+}
+
+impl ContactGeometry {
+    /// [`ContactMeasure::pursuit_holds`] at this member's own scaled forward grasp coordinate.
+    pub fn pursuit_holds(&self, stop: PursuitStop, measure: &ContactMeasure) -> bool {
+        measure.pursuit_holds(stop, self.capture_offset_body.x)
     }
 }
 

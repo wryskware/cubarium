@@ -42,7 +42,7 @@ use std::sync::Arc;
 
 use cubarium_core::config::WorldConfig;
 use cubarium_core::ids::OrganismId;
-use cubarium_core::{DT, World};
+use cubarium_core::{DT, MotorModel, World};
 use cubarium_surface::{CellId, Face, Vec2, cell_of};
 use serde::{Deserialize, Serialize};
 
@@ -188,6 +188,24 @@ pub struct Layout {
     /// ever does, it gets the shipped defaults and must set this itself.
     #[serde(skip)]
     pub ecology: Ecology,
+    /// The motor contract every episode on this layout runs under
+    /// (`cubarium_core::MotorModel`, `crate::World::set_motor_model`).
+    ///
+    /// Deliberately **not** serialized, for the same reason `ecology` is not: a layout's JSON
+    /// is a description of its geometry, and the contract it was run under is recorded once,
+    /// by name, in the protocol and in the exported policy. `Sweep` is the shipped contract
+    /// and the default, so every fixture set built without naming one is the set that has
+    /// always existed.
+    #[serde(skip)]
+    pub motor: MotorModel,
+    // **No pursuit stopping rule.** Every layout clears `founders` and places exactly one
+    // grazer ([`Layout::config`], [`Layout::place`]), so no episode world holds a hunter, the
+    // hunt-intent pass that rule lives in is never reached, and a switch here would be inert —
+    // a control that names a difference it cannot make. It is therefore not carried, not on
+    // the protocol and not on an exported policy: a trained policy is predicate-independent
+    // (`design/7_Research/ecology-v1-predicate-adoption-2026-09-16.md`), and
+    // `crates/cubarium-search/tests/predicate_adoption_provenance.rs` is what keeps that true.
+    // A layout that ever *does* found a hunter owes the field back.
 }
 
 /// The stand that carries `p` of foliage (`design/ecology-v1-contract.md` §14 "search"):
@@ -290,6 +308,14 @@ impl Layout {
         fnv1a(self.canonical_text(cfg).as_bytes())
     }
 
+    /// The same layout under a named motor contract (`cubarium_core::MotorModel`). A set of
+    /// layouts carries one contract, exactly as it carries one ecology, and that is what the
+    /// protocol and the exported policy record.
+    pub fn with_motor(mut self, motor: MotorModel) -> Layout {
+        self.motor = motor;
+        self
+    }
+
     /// Build the world this layout describes, and return it with the grazer's id.
     ///
     /// The world is constructed with `World::new`, staged, and then re-validated through
@@ -345,8 +371,11 @@ impl Layout {
 
         // 3. One mature grazer, identical in every episode of every layout.
         let id = self.place(&mut world);
-        let world = World::from_state(world.state)
+        let mut world = World::from_state(world.state)
             .map_err(|e| format!("layout {}: staged state invalid: {e}", self.name))?;
+        // The motor contract, on the **final** world and before the first tick. Transient, so
+        // it is not in the staged state and `Sweep` changes nothing.
+        world.set_motor_model(self.motor);
         world
             .check_invariants()
             .map_err(|e| format!("layout {}: staged world inconsistent: {e}", self.name))?;
@@ -417,6 +446,7 @@ pub fn training_layouts_on(ecology: &Ecology) -> Vec<Layout> {
                 Patch { cx: 13, cy: 8, half: 1, fill: 1.0 },
             ],
             ecology: e(),
+            motor: MotorModel::default(),
         },
         Layout {
             name: "t2-weak-open".into(),
@@ -429,6 +459,7 @@ pub fn training_layouts_on(ecology: &Ecology) -> Vec<Layout> {
                 Patch { cx: 4, cy: 3, half: 1, fill: 1.0 },
             ],
             ecology: e(),
+            motor: MotorModel::default(),
         },
         Layout {
             name: "t3-scatter".into(),
@@ -441,6 +472,7 @@ pub fn training_layouts_on(ecology: &Ecology) -> Vec<Layout> {
                 Patch { cx: 5, cy: 9, half: 2, fill: 1.0 },
             ],
             ecology: e(),
+            motor: MotorModel::default(),
         },
         Layout {
             name: "t4-ring".into(),
@@ -455,6 +487,7 @@ pub fn training_layouts_on(ecology: &Ecology) -> Vec<Layout> {
                 Patch { cx: 4, cy: 12, half: 0, fill: 1.0 },
             ],
             ecology: e(),
+            motor: MotorModel::default(),
         },
     ]
 }
@@ -518,6 +551,7 @@ fn holdout_layout(index: u64, ecology: &Ecology) -> Layout {
             Patch { cx: later_b.0, cy: later_b.1, half: 1, fill: 1.0 },
         ],
         ecology: ecology.clone(),
+        motor: MotorModel::default(),
     }
 }
 

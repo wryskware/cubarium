@@ -24,6 +24,7 @@ mod geometry;
 mod metabolism;
 mod profile;
 mod state;
+mod strike;
 #[cfg(test)]
 mod tests;
 
@@ -32,3 +33,4 @@ pub use geometry::*;
 pub use metabolism::*;
 pub use profile::*;
 pub use state::*;
+pub use strike::*;

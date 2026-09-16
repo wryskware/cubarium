@@ -70,6 +70,64 @@ impl World {
         }
     }
 
+    /// Record one [`crate::hunter::StrikeRecord`] per paid attempt, or stop recording.
+    ///
+    /// **Off by default and inert.** The flag is read only at the three sites in the strike
+    /// path that build a frame; it consumes no draw, moves no value the simulation reads back,
+    /// and is never persisted or hashed. Turning it off drops everything in flight and
+    /// everything undrained, so a half-recorded attempt is never published as a record.
+    ///
+    /// Independent of [`crate::World::record_body_budgets`]: the ledger says what a body
+    /// raised and spent over its life, this says what one of its lunges was aimed at.
+    pub fn record_strike_attempts(&mut self, on: bool) {
+        self.strikes.set_enabled(on);
+    }
+
+    /// Whether this world is recording per-attempt strike records.
+    pub fn records_strike_attempts(&self) -> bool {
+        self.strikes.enabled()
+    }
+
+    /// **Which pursuit stopping rule this world's hunt-intent pass runs.** An ordinary world
+    /// runs the shipped rule — [`crate::hunter::PursuitStop::ReachEnvelope`] — without being
+    /// told, and calling this is how a caller asks for the *other* one.
+    ///
+    /// The rule decides, for a member hunting a target it senses, whether the prey counts as
+    /// "inside" — and a member for which it is true drops to its `rest_effort` and is pushed
+    /// **no strike burst**, whatever it has already paid. The shipped rule is the reach
+    /// envelope the predicate's own comment has always named
+    /// (`crate::hunter::ContactMeasure::in_contact`). The rule before 2026-09-16 was a
+    /// one-sided forward half-space, measured true at the burst's start on 408 of 449 paid
+    /// attempts of the two-apex death arm
+    /// (`design/7_Research/ecology-v1-apex-reach-2026-09-16.md`) and corrected by the paired
+    /// intervention in `design/7_Research/ecology-v1-apex-predicate-2026-09-16.md`; it stays
+    /// selectable here so the rows retained under it remain reproducible
+    /// (`design/7_Research/ecology-v1-predicate-adoption-2026-09-16.md`).
+    ///
+    /// **This is not a [`crate::WorldConfig`] field and must not become one**: a config field
+    /// would change `calibrate::config_hash` for every existing TOML. It is transient, never
+    /// persisted, never hashed, and set per `World` value — which is why adopting a new
+    /// default required [`crate::snapshot::SCHEMA_VERSION`] 17: a world's bytes cannot say
+    /// which rule they were written under, so a schema-16 world is refused rather than resumed
+    /// under a rule it never ran.
+    pub fn set_pursuit_stop(&mut self, stop: crate::hunter::PursuitStop) {
+        self.strikes.set_pursuit_stop(stop);
+    }
+
+    /// The rule [`crate::World::set_pursuit_stop`] installed, or — in every ordinary world —
+    /// the shipped default, [`crate::hunter::PursuitStop::ReachEnvelope`].
+    pub fn pursuit_stop(&self) -> crate::hunter::PursuitStop {
+        self.strikes.pursuit_stop()
+    }
+
+    /// The strike records closed since the last drain, oldest first, with how many were
+    /// dropped because more than [`crate::hunter::MAX_STRIKE_RECORDS`] accumulated undrained,
+    /// and how many resolved with no intent frame (only possible across a mid-attempt
+    /// switch-on).
+    pub fn drain_strike_records(&mut self) -> (Vec<crate::hunter::StrikeRecord>, u64, u64) {
+        self.strikes.drain()
+    }
+
     /// The hunter extension: profile, members, guts, imports and counters (`crate::hunter`).
     pub fn hunters(&self) -> &HunterState {
         &self.state.hunters
@@ -199,6 +257,37 @@ impl World {
         profile: FixedHunterProfile,
         targets: &[HunterTarget],
     ) -> Result<Vec<HunterFounderReceipt>, String> {
+        self.introduce_hunters_with_age(profile, targets, 0.0)
+    }
+
+    /// [`World::introduce_hunters`], with the founders placed as if they had **already lived**
+    /// for `age_seconds`.
+    ///
+    /// The only value this moves is the placed body's `born_tick`, which is the world's single
+    /// source of age (`Organism::age_ticks`). Stores, geometry, headings, draws, member
+    /// records, imports and receipts are what the age-zero door produces, so `age_seconds ==
+    /// 0.0` is that door byte for byte — the one `introduce_hunters` itself now calls.
+    ///
+    /// It exists for one measurement. The apex opportunity audit found that two introduced
+    /// adults were never simultaneously able to reproduce because every one of them died at
+    /// 43–59 % of the `reproduce_min_age_seconds` its own profile demands
+    /// (`design/7_Research/ecology-v1-budget-2026-09-16.md`). Separating "the age gate is what
+    /// binds" from "something after the age gate also binds" needs a founder that is already
+    /// past that gate and nothing else changed. No constant moved to provide it, and the
+    /// display's ordinary spawn control does not use it.
+    ///
+    /// Refused, without changing a single value, for everything
+    /// [`World::introduce_hunters`] refuses, and additionally when `age_seconds` is not a
+    /// finite non-negative number, when it exceeds this world's `organism.max_age_seconds`
+    /// (a founder that is already dead of old age), or when it exceeds the world's own age —
+    /// a body cannot have been born before the world began, and `WorldState::validate` holds
+    /// every organism to `born_tick <= tick`.
+    pub fn introduce_hunters_with_age(
+        &mut self,
+        profile: FixedHunterProfile,
+        targets: &[HunterTarget],
+        age_seconds: f64,
+    ) -> Result<Vec<HunterFounderReceipt>, String> {
         if !(1..=2).contains(&targets.len()) {
             return Err(
                 "an interactive hunter introduction must contain one or two founders".into(),
@@ -211,6 +300,28 @@ impl World {
             && installed != &profile
         {
             return Err("the requested hunter profile does not match the installed lineage".into());
+        }
+        if !age_seconds.is_finite() || age_seconds < 0.0 {
+            return Err(format!(
+                "a founder's age at introduction must be a finite, non-negative number of \
+                 seconds, not {age_seconds}"
+            ));
+        }
+        let lifespan_seconds = self.state.config.organism.max_age_seconds;
+        if age_seconds > lifespan_seconds {
+            return Err(format!(
+                "a founder introduced at {age_seconds} s would already be past this world's \
+                 {lifespan_seconds} s lifespan"
+            ));
+        }
+        let age_ticks = ticks_from_seconds(age_seconds, DT);
+        if age_ticks > self.state.tick {
+            return Err(format!(
+                "a founder introduced at {age_seconds} s ({age_ticks} ticks) into tick {} would \
+                 have been born before this world began; introduce it no earlier than tick \
+                 {age_ticks}",
+                self.state.tick
+            ));
         }
         let founder = self.derive_hunter_founder(&profile)?;
         let positions = targets
@@ -231,6 +342,9 @@ impl World {
         }
 
         let tick = self.state.tick;
+        // The world's only source of age. `age_ticks <= tick` was checked above, so this is a
+        // real tick of this world and never a body born before it existed.
+        let born_tick = tick - age_ticks;
         let first_draw = u64::from(self.state.hunters.founders_placed);
         let mut receipts = Vec::with_capacity(positions.len());
         for (offset, pos) in positions.into_iter().enumerate() {
@@ -251,7 +365,7 @@ impl World {
                 structure: founder.structure,
                 reserve: founder.reserve,
                 energy: founder.energy,
-                born_tick: tick,
+                born_tick,
                 hunger_memory,
                 mode: Mode::Resting,
                 escrow: None,

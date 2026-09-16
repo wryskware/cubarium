@@ -1968,10 +1968,13 @@ fn a6_remains_route_to_c_rejects_route_to_d_and_no_stock_leaks_into_another() {
 /// **A7 — snapshot.** The current schema round-trips with the documented header, every older
 /// schema is refused with its own version, and a relabelled current payload is refused too.
 ///
-/// Written for schema 16 and re-pointed at **17** by the ring world
-/// (`design/flat-world-plan-2026-09-16.md` §4), which appends `topology` and `world_scale` to
-/// `WorldConfig` and therefore changes the payload's shape. The rule the test states is
-/// unchanged, and it now covers one more refusal: 16 is refused by name like every other.
+/// Written for schema 16, re-pointed at **17** when the shipped pursuit stopping rule changed
+/// (the ecology v1 payload did not move, but a world's bytes do not carry that rule —
+/// `crates/cubarium-core/tests/pursuit_predicate_adoption.rs`), and at **18** by the ring
+/// world (`design/flat-world-plan-2026-09-16.md` §4), which appends `topology` and
+/// `world_scale` to `WorldConfig` and therefore does change the payload's shape. The rule the
+/// test states is unchanged, and its `7..SCHEMA_VERSION` loop now covers both 16 and 17 for
+/// free.
 ///
 /// The old-schema **fixtures** are covered by their own refusal tests beside the suites that
 /// used to migrate them (`care.rs`, `care_dose_migration.rs`, `hunter_migration.rs`,
@@ -1979,7 +1982,7 @@ fn a6_remains_route_to_c_rejects_route_to_d_and_no_stock_leaks_into_another() {
 /// `continuation_fixtures.rs`); this is the rule itself.
 #[test]
 fn a7_the_current_schema_round_trips_and_every_older_schema_is_refused_by_name() {
-    assert_eq!(SCHEMA_VERSION, 17);
+    assert_eq!(SCHEMA_VERSION, 18);
     let mut world = bare_world(BRIGHT);
     paint(&mut world, CellId::new(Topology::Cube, Scale::ONE, Face::Top, 8, 8), 0.56, 0.6, 0.30);
     let mut world = restage(world);
@@ -2022,7 +2025,7 @@ fn a7_the_current_schema_round_trips_and_every_older_schema_is_refused_by_name()
     framed.extend_from_slice(&longer);
     assert!(
         matches!(decode_snapshot(&framed), Err(SnapshotError::Decode(_))),
-        "a relabelled current payload must be refused"
+        "a relabelled current-schema payload must be refused"
     );
 }
 
