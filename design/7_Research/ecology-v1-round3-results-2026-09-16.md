@@ -25,13 +25,14 @@ the hypothesis standing.
 | stream | model | where | simulation used / cap | storage | tests after |
 | --- | --- | --- | --- | --- | --- |
 | O depth × diet factorial | Opus 5 medium | worktree, merged `10d3e2a` | 35 s / 3 min | 180 KiB / 10 MiB | search 199 |
-| L score falsification checks | Opus 5 high | `main` | *(pending)* | | |
+| L score falsification checks | Opus 5 high | `main` (`14345d9`…`f52d441`) | 22 s / 8 min | 0.8 MiB / 30 | core 502, search 199 |
 | M plant budget | Opus 5 high | worktree | *(pending)* | | |
 | N apex strike reach | Opus 5 high | worktree | *(pending)* | | |
 
 Fable's verification so far: O's whole design re-run and matched by
 `final_state_hash` on 16 of 16 rows; its search suite 188 on the branch, 199
-after merge.
+after merge. L's dwell-1000 rung re-run from its ignored test and matched to
+the tick on both layout sets (36,000 and 27,362).
 
 ## O — the depth × diet factorial
 
@@ -96,9 +97,71 @@ detrital-funding question is now close to answered in the negative: across
 Until a calibration shows some setting at which litter pays, ecology v1 has
 one working guild, not four.
 
-## L — the score falsification checks
+## L — the score falsification checks: the hypothesis is falsified
 
-*(pending)*
+Full note: [ecology-v1-score-checks-2026-09-16.md](ecology-v1-score-checks-2026-09-16.md);
+proposal, written and marked **not proposed**:
+[forager-score-proposal-2026-09-16.md](../forager-score-proposal-2026-09-16.md).
+Commits `14345d9` (code, tests, and the auxiliary's constants fixed before
+any run — checkable from history), `ce99e87` (note and proposal), `f52d441`
+(one wording correction). No new `neural/` accessors were needed; the forward
+pass, squash and observation were already public. Entry points are ignored
+tests, as H's, because three worktrees held the CLI open.
+
+**Check (a): the frozen controller's movement does not respond to food.** 768
+real generation-9 observations per driver (on- and off-food, all twelve
+layouts), each re-run through the core's own GRU forward pass and action
+squash with only the local food scalar moved (0 → 1) or only the ring food
+sectors moved, from a reset and from the carried hidden state. Every sign is
+right (more food → less thrust, more graze) and every magnitude is about 430
+times too small: a full stand moves thrust by 0.0011 against a held value of
+0.52 and a stopping deadband of 0.05; the effects are 0.06–0.19 of the
+action's own standard deviation. From a reset hidden state both policies
+request exactly zero turn. Nine generations of training barely moved food
+sensitivity (untrained −0.00097 thrust per unit food, generation 9 −0.00109).
+L measured the one-tick observation lag it relied on rather than assuming it:
+max 1.8e-5, 59–160× below the effects. This confirms H's phenotype at the
+level H said it had not measured; it does not weaken the score hypothesis.
+
+**Check (b): the current score already pays enormously for staying.** A
+dwell-parameterised control (the disclosed mobile script with its departure
+rule replaced by a counter; the top rung *is* the script) scored with the
+trainer's own `t_min + 0.25·stores`:
+
+| rung | `t_min`, training four | `t_min`, all twelve | alive of 12 | on-food fraction |
+| --- | --- | --- | --- | --- |
+| dwell 20 ticks | 23,490 | 12,951 | 6 | 0.65 |
+| dwell 100 | 24,269 | 16,658 | 6 | 0.71 |
+| dwell 300 | 27,559 | 21,370 | 6 | 0.79 |
+| dwell 1,000 | **36,000** | **27,362** | 11 | 0.88 |
+| dwell 3,000 | 18,309 | 18,309 | 6 | 0.80 |
+| until below threshold (the script) | 36,000 | 26,355 | 11 | 0.94 |
+| generation 9 | 8,703 | 6,914 | 0 | 0.08 |
+
++53 % on the training four and +111 % on all twelve between a one-second and
+a fifty-second dwell, monotone up to 1,000 and down only at 3,000 for a legible
+reason (150 s on the weak opening crops it bare). The gradient is five orders
+of magnitude larger than the stores tie-break and 70 times larger than the
+auxiliary Astra proposed. **Falsifier 1 fired: the current score already has
+a strong dwell gradient, so no score change is proposed.** The proposal was
+nevertheless written in full with its constants fixed in advance (`T` 36,000,
+clip ±1, ticks after death −1, `b_ref` the body's one-tick upkeep, `λ` 100 so
+the whole term spans 10 s and cannot erase a survival gap above that), and
+the ladder under the proposed `S` is monotone and inverts no ordering of the
+current score: well-behaved and unnecessary.
+
+**What the evidence points at instead**, named not launched: the search is
+not converting a 14,000-tick behavioural gradient into parameter-space
+movement. Cheapest first, no simulation: measure the within-generation score
+spread from the existing `es-eco-v1` checkpoints, which separates "the
+optimiser cannot move" from "the objective does not reward". Then: how much
+of the action sits inside the adapter deadband under a σ-scale perturbation
+(the reset-state zero-turn finding). Then, most expensive: the score's
+gradient in generation 9's *own* behavioural neighbourhood — every ladder rung
+is already a perfect navigator and generation 9 is not, which is the gap
+check (b) leaves open. L's numbers reproduce H's independently (generation 9
+on food 0.116 and 0.085 on H's two per-tick layouts; the no-intake control
+dying at the pinned 7,420).
 
 ## M — the plant budget of a depleted cell
 
