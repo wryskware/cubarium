@@ -616,6 +616,120 @@ own background passes — ground, ramps, water, rain, stamps — also move to th
 which is explicitly outside FW-9's scope and is the "longer-term shaded renderer"
 rather than this plan.
 
+### FW-0 measurements (2026-09-16)
+
+All four numbers, measured. Every figure below is a median over 600 render
+samples or 200 tick samples from
+`crates/cubarium/examples/render_bench.rs`, on a world built from
+`WorldConfig::default()` with `seed = 1` and stepped 3,000 ticks headless
+first (population 24), drawn through the shipped `assets/atelier` pack —
+which is the presentation the flat world inherits (§7), not the plain M2
+discs. Pinning is the bench's own `--pin`, which reports the mask it
+obtained; `taskset` could not be used on the big cores, see the note below.
+
+| quantity | pinning | median | p95 |
+|---|---|---|---|
+| **`R` = `presenter.draw` + `canvas.encode`, one cube frame** | **cpu5, A78 2.40 GHz** | **15.28 ms** | **15.56 ms** |
+| — of which `draw` | cpu5 | 13.90 ms | 14.18 ms |
+| — of which `encode` | cpu5 | 1.37 ms | 1.47 ms |
+| `R`, same world at 12,000 ticks (population 65) | cpu5 | 13.52 ms | 13.80 ms |
+| `R` on the prime core | cpu7, A78 2.71 GHz | 14.12 ms | 14.22 ms |
+| `R` on a little core | cpu0, A55 1.96 GHz | 74.00 ms | 75.00 ms |
+| `R` on the desktop, for scale | Ryzen 9 9950X3D, one core | 8.76 ms | 8.85 ms |
+| `R` with the plain M2 presenter | cpu5 | 3.13 ms | 3.20 ms |
+| **`tick_ms` as the loop pays it** (`step` + `render_view` + `observe`) | **cpu5** | **0.534 ms** | **0.563 ms** |
+| — `World::step` alone | cpu5 | 0.316 ms | 0.348 ms |
+| `tick_ms` at population 65 | cpu5 | 0.599 ms | 0.641 ms |
+| **`R` across four A78 cores** | — | **pending FW-3** | — |
+
+**The four-core entry is deliberately empty.** A row-band split needs FW-3's
+deterministic hook: `Canvas` exposes no band and `ArtPresenter::draw` takes
+`&mut self`, so nothing the bench could time today is work the run loop
+would ever execute. The parallel columns below therefore stay an assumption,
+and every selection here is provisional on the serial numbers.
+
+**Two of the section's own assumptions were wrong.**
+
+- *The A78/A55 ratio is 4.8×, not 2.5–3×* (74.00 / 15.28). The little cores
+  are further behind on this code than the section guessed.
+- *`tick_ms` is 0.53 ms, not the architecture doc's 20 ms target.* The tick
+  term is 10.7 ms per wall second, not 400, so the render budget is **988 ms**,
+  not 600. That is a 1.65× gift, and it is not nearly enough.
+
+**The real runs, on the board, with the display daemon left running.**
+
+| run | result |
+|---|---|
+| `--sink none --seconds 120`, `taskset -c 4-7` | 2,400 ticks in 120.03 s = **19.99 ticks/s**, 1× real time |
+| `--sink none --speed 0 --seconds 600`, `taskset -c 5` | 12,000 ticks in 4.11 s = **2,920 ticks/s**, 146× real time |
+| `--art assets/atelier --sink shim --addr 127.0.0.1:7392 --fps 60 --seconds 120`, `taskset -c 4-7` | 7,196 frames in 120.22 s = **59.86 fps**, 2,400 ticks = 19.96 ticks/s, 0 coalesced, 0 errors, no lag lines |
+| the daemon during that run | presented 60.4 fps, received 60.0 fps, **stale 0, bad 0**, its own gather 8.1 ms avg / 11.3–16.3 ms max |
+| `top` during that run | `cubarium` 85–98 % of one core; whole board 17–19 % user, 3–7 % sys, ~76 % idle |
+| the same at `--fps 120 --seconds 30` | 1,934 frames in 30.22 s = **64.0 fps**, the loop's ceiling |
+
+The last row is the check that matters: asked for 120 fps the loop saturates
+at 64.0, which back-solves to `R = (1000 − 10.7)/64.0 = 15.45 ms`. That is
+the bench's 15.28 ms from a completely independent measurement, so both the
+figure and the shared-loop budget equation are confirmed against a real run
+rather than assumed.
+
+**The gate, recomputed against the measured numbers.** With
+`20 · tick_ms = 10.7 ms` the render budget is 988 ms per wall second, so
+`R_max = 988 / (fps · 2.81 · S²)`:
+
+| S | raster | 60 fps | 30 fps | 20 fps |
+|---|---|---|---|---|
+| 1 | 320×180 | `R ≤ 5.9 ms` | `R ≤ 11.7 ms` | **`R ≤ 17.6 ms`** |
+| 1.5 | 480×270 | `R ≤ 2.6 ms` | `R ≤ 5.2 ms` | `R ≤ 7.8 ms` |
+| **2** | **640×360** | `R ≤ 1.5 ms` | `R ≤ 2.9 ms` | `R ≤ 4.4 ms` |
+| 3 | 960×540 | `R ≤ 0.65 ms` | `R ≤ 1.3 ms` | `R ≤ 2.0 ms` |
+| 6 | 1920×1080 | `R ≤ 0.16 ms` | `R ≤ 0.33 ms` | `R ≤ 0.49 ms` |
+
+**Measured `R` is 15.28 ms.** Exactly one cell in that table admits it.
+
+**Selection (provisional on the serial numbers): S = 1, 320×180, `--fps 20`.**
+The arithmetic: `20 · 0.534 + 20 · 2.81 · 1² · 15.284 = 10.7 + 859.0 =
+869.7 ms ≤ 1000 ms`, 87 % of the wall second. The ceiling at S = 1 is
+`(1000 − 10.7) / 42.95 = 23.0 fps`, so 30 fps at 320×180 misses by 30 %
+(1,299 ms). **S = 2 at 60 fps, the section's recommended candidate, is over
+budget by 10.4×**; the documented 480×270-at-30-fps fallback is over by 3.0×.
+
+**What a perfect four-core split would and would not buy.** At the section's
+assumed ×3.5 the effective `R` is 4.37 ms, which admits S = 1 at 60 fps
+(5.9 ms), S = 1.5 at 30 fps (5.2 ms) — and still **fails S = 2 at 30 fps**
+(2.9 ms) by 1.5×. So FW-3's hook, even at its assumed efficiency, does not
+reach 640×360. The number to rerun this table against is the one FW-3
+measures, not this one.
+
+**And the board is not the problem.** One A78 at 2.40 GHz is 1.74× slower
+than a Zen 5 core on this code (15.28 vs 8.76 ms), so a cube frame costs
+8.8 ms on the fastest desktop core available. `R` is what the presenter
+costs, not what the Tachyon costs, and the plain M2 presenter draws the same
+frame in 3.13 ms — 4.9× cheaper — which places the cost squarely in
+`ArtPresenter::draw` (13.90 of the 15.28 ms) rather than in the sRGB encode
+(1.37 ms). Three consequences worth stating plainly, none of them decided
+here:
+
+1. **FW-9 does not rescue this.** Its own scope paragraph says the presenter
+   keeps rasterizing the `w×h` world raster on the CPU; it moves the
+   *daemon's* gather, which these runs measure separately at 8.1 ms avg and
+   which is not in cubarium's budget at all.
+2. The four-core split is now the difference between 20 fps and 60 fps at
+   S = 1, not a nice-to-have. FW-3's hook should be treated as required.
+3. Reaching S = 2 at all needs the per-frame cost of `ArtPresenter::draw`
+   to fall by roughly an order of magnitude, which is a renderer decision
+   this measurement does not make.
+
+**A device note for every later package.** `taskset -c 7` and `taskset -c 4`
+fail with `EINVAL` on an idle Tachyon and this is not a permissions problem:
+the board's `core_ctl` driver *isolates* idle big cores
+(`/sys/devices/system/cpu/cpu7/isolate` reads `1`), and the scheduler then
+refuses an affinity mask that names only isolated cores. Loading the machine
+brings them back. `render_bench --pin` does exactly that and prints the mask
+it got; `taskset -c 4-7` always succeeds because cpu5 and cpu6 stay
+un-isolated, and the full mask is retained, so the run uses cpu4 and cpu7
+once load brings them back.
+
 ## 7. The artwork pipeline, and what a rescale costs
 
 Today (`art/README.md`, `art/bake.gd`, `art/PLANTS.md`):
