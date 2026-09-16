@@ -292,8 +292,10 @@ enum Command {
         /// a body cannot have been born before the world began.
         #[arg(long, default_value_t = 0.0)]
         founder_age_seconds: f64,
-        /// Turn the per-body store ledger off. It is on by default for this command, which is
-        /// a diagnostic; it changes no dynamics, and a run with it off records no death cause.
+        /// Turn the per-body store ledger **and the per-attempt strike record** off (the two
+        /// diagnostics share this switch in the audit). Both are on by default for this command;
+        /// neither changes dynamics, and a run with them off records no death cause and no
+        /// strike geometry.
         #[arg(long, default_value_t = false)]
         no_ledger: bool,
         #[arg(long, default_value_t = 8)]

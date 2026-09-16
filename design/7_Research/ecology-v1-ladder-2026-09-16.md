@@ -6,6 +6,18 @@ decision_refs: []
 
 # Ecology v1 — the finer movement-price ladder, gated on the grazer
 
+> **Erratum (2026-09-16, after workstream M).** This note's central reading —
+> that the counted depletions are cells seeded above what their habitat holds
+> — is confirmed by workstream M
+> ([ecology-v1-plant-budget-2026-09-16.md](ecology-v1-plant-budget-2026-09-16.md))
+> with exact per-cell withdrawal: 0 of 73 present-arm crossings had any
+> consumer withdrawal, 73 of 73 cross earlier with no animals, all with a
+> negative plant budget. Two things in this note do not survive: the
+> probe-based "never visited" flag (it called 42 of those 73 "visited"; exact
+> withdrawal finds none) and the derived `(L·μ)_crit`, which is an analysis
+> proxy and not a contract constant. The crossings are opening-stock declines,
+> not grazing depletion.
+
 Workstream I, under
 [the ladder brief](../handoffs/ecology-v1-ladder-opus-2026-09-16.md): step 2 of the
 reconciled next steps in

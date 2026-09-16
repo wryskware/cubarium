@@ -6,6 +6,17 @@ decision_refs: []
 
 # Ecology v1 calibration — plausible ranges, matched apex arms, and what the model cannot feel
 
+> **Erratum (2026-09-16, after workstream M).** The "depletion events" and
+> "recovery events" this note counts are correct as counts, but at the shipped
+> movement price they are not grazing. Workstream M
+> ([ecology-v1-plant-budget-2026-09-16.md](ecology-v1-plant-budget-2026-09-16.md))
+> recorded exact per-cell consumer withdrawal and found that not one of the 73
+> depletion crossings in the herbivore-present worlds had lost any foliage to a
+> mouth; the same cells cross earlier with no animals present and carry a
+> negative plant budget. They are opening-stock declines in dim, dry, low-wood
+> cells seeded by §11 above what they sustain. Read every sentence below that
+> treats a depletion count as a grazing signal in that light.
+
 Workstream A of
 [the ecology v1 next-steps dispatch](../handoffs/ecology-v1-next-fable-2026-09-15.md),
 under [the calibration brief](../handoffs/ecology-v1-calibration-opus-2026-09-15.md).

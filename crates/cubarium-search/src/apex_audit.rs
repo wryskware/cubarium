@@ -676,7 +676,9 @@ pub struct Arm {
     pub introduce_tick: u64,
     /// The age the founders are placed at (s). `0.0` is the door the screen used.
     pub founder_age_seconds: f64,
-    /// Whether to record the per-body store ledger for the run.
+    /// Whether to record the per-body store ledger **and** the per-attempt strike record for
+    /// the run. The audit enables both from this one switch (`--no-ledger` disables both);
+    /// calibration's `--ledger` and `--plant-record` are independent instruments.
     pub ledger: bool,
 }
 

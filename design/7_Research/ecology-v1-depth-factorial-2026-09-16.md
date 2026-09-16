@@ -336,11 +336,15 @@ margin per second has no ceiling, and on it the diet effect flips: the founder's
 tells the same story more coarsely: the diet gap is 27 vs 7 at the wet floor and
 30 vs 27 at mid height.
 
-That reversal is worth stating plainly, because it reconciles this campaign with
-workstream F. **F's association — foliage-diet skimmers do better — is real, and
-it is real only for a body that is not parked in a pool.** J found the opposite
-sign because every clone it compared had `depth = 0.10`. Both are correct
-statements about different bodies.
+That reversal is worth stating plainly, because it makes this campaign and
+workstream F consistent. **F's association — foliage-diet skimmers do better —
+is plausibly real for a body that is not parked in a pool**, and J found the
+opposite sign because every clone it compared had `depth = 0.10`. (Scoped after
+Astra's round-3 review: this campaign observes sterile cold-founded clones for
+4,500 s; F observed reproducing descendants for 150 minutes. The interaction
+supplies a plausible mechanism for why the signs differ; it does not identify
+the cause of F's 84 % descendant association. F's census with only the roster
+depth changed is still required.)
 
 ---
 
@@ -500,9 +504,12 @@ Two others worth naming, neither launched:
   question is a calibration one — is there *any* setting of
   `detritus.decomposition`, `energy_cap` and `mouth_rate` at which litter pays
   for a body? — and it belongs with workstream M's plant-budget measurement
-  rather than with another genome factorial. Until it is answered, ecology v1
-  has **one** working guild, not four, and two of the four roster kinds
-  (burrower and skimmer) are slow deaths by construction.
+  rather than with another genome factorial. (Scoped after Astra's round-3
+  review: this answers the question negatively for the *current* skimmer body
+  at the *current* parameters in `fast-leaf`; it does not show that no body or
+  calibrated detrital channel can be funded, so "one working guild" was
+  premature. What stands: in this configuration the two roster kinds that eat
+  litter never had a positive margin here.)
 
 ---
 

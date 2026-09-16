@@ -387,9 +387,21 @@ seeded standing foliage (§7 caveat: measured at the horizon, not proven
 stationary), which is a different founding ecology from the one every result so
 far was measured in.
 
-**Option B — seed each cell below its own measured local equilibrium.** Replace
-the single `initial_fraction · P_cap` with a per-cell opening value derived from
-what that cell can hold.
+**Option B — seed each cell below its own measured terminal state** (renamed
+after Astra's round-3 review: the tick-180,000 plant-only state is not a proven
+fixed point, its predictors — effective light, moisture, `N`, `W` — are
+endogenous and spatially coupled, and changing the opening `P` changes the
+later state being fitted, so a terminal regression is an initialiser, and
+"seeded at it, it stays there" is a new hypothesis, not a consequence of this
+measurement). Replace the single `initial_fraction · P_cap` with a per-cell
+opening value derived from a fit to the plant-only endpoint. Astra's
+alternative, which keeps the coupled equations instead of a fitted proxy: a
+deterministic **whole-field plant-only preconditioning** — initialise the full
+§11 field, advance the ordinary §4 dynamics with animals absent for a declared
+seed- and config-bound duration or until declared moving-window criteria are
+met, then found the animals from that joint state, and call the result a
+fixed-age preconditioned opening, not an equilibrium. That is option A with a
+declared procedure.
 
 *One number*: the opening foliage distribution over the 1,112 watched cells.
 

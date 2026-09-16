@@ -101,8 +101,9 @@ larder does not exist; that is an ecology decision and Fable's. And the
 detrital-funding question is now close to answered in the negative: across
 128 lives litter funded nothing (T0 served 4.66 m, credited 1.15 m against a
 4.67 e bill, starved 32 of 32) and every positive margin came from foliage.
-Until a calibration shows some setting at which litter pays, ecology v1 has
-one working guild, not four.
+That answers the question negatively for the current skimmer body at the
+current parameters in `fast-leaf`; whether any body or calibrated detrital
+channel can be funded is open (scoped after review).
 
 ## L — the score falsification checks: the hypothesis is falsified
 
@@ -157,16 +158,22 @@ the whole term spans 10 s and cannot erase a survival gap above that), and
 the ladder under the proposed `S` is monotone and inverts no ordering of the
 current score: well-behaved and unnecessary.
 
-**What the evidence points at instead**, named not launched: the search is
-not converting a 14,000-tick behavioural gradient into parameter-space
-movement. Cheapest first, no simulation: measure the within-generation score
-spread from the existing `es-eco-v1` checkpoints, which separates "the
-optimiser cannot move" from "the objective does not reward". Then: how much
-of the action sits inside the adapter deadband under a σ-scale perturbation
-(the reset-state zero-turn finding). Then, most expensive: the score's
-gradient in generation 9's *own* behavioural neighbourhood — every ladder rung
-is already a perfect navigator and generation 9 is not, which is the gap
-check (b) leaves open. L's numbers reproduce H's independently (generation 9
+**What the evidence points at instead** (corrected after Astra's review, P1):
+the score rewards the missing behaviour and the frozen controller's one-step
+response to food is far below the deadband; the one-step sweep does *not*
+show that the controller cannot express residence or that the search moves
+nothing in parameter space. Astra checked the retained generation reports:
+candidate scores in generation 9 span 6,459–8,915 ticks (sd 643) and
+correlate r = 0.81 with mean producer intake across the training layouts, so
+perturbations do produce material variation and L's "measure the spread"
+task is already answered. The open question is where useful candidate
+variation is lost — in the four-layout minimum, the centred-rank reduction,
+the update, or the weights-to-residence mapping. Named next, no simulation:
+the antithetic-pair reduction on the retained reports (score difference
+against intake, opening residence and signed update contribution), then
+deadband occupancy under a σ-scale perturbation; only if on-food time is
+needed, reconstruct generation 9's 32 candidates and run H's trace. The score
+stays. L's numbers reproduce H's independently (generation 9
 on food 0.116 and 0.085 on H's two per-tick layouts; the no-intake control
 dying at the pinned 7,420).
 
@@ -233,7 +240,9 @@ clause is exercised by the hand-built tests, not the campaign; no critical
   the whole 150-minute horizon. Visible: the display opens on a world that
   has already sorted itself, no uniform green-then-fade, but founders meet
   3.6–4.2× the seeded standing foliage.
-- **B, seed each cell below its own measured local equilibrium.** Today's
+- **B, seed each cell below its own measured terminal state** (not an
+  equilibrium: the tick-180,000 plant-only state is not a proven fixed point
+  and its predictors are endogenous and coupled; Astra). Today's
   opening foliage over watched cells: total 107, median 0.099, spread (CV)
   0.39; the plant-only world at the horizon: total 389–447, median 0.45–0.46,
   CV 0.46–0.53. Visible: dim dry cells open visibly thinner than bright wet
@@ -242,10 +251,14 @@ clause is exercised by the hand-built tests, not the campaign; no critical
 - Not supported: keeping §11 as is and reading the counter as a grazing
   signal.
 
-**Named next, not launched:** fit the local equilibrium as a per-cell
-function of the habitat from the `--no-animals --plant-record` path, re-seed
-from the fit, and verify the counter goes to zero plant-only and stays small
-with herbivores.
+**Named next, not launched** (revised after review): rather than fitting a
+per-cell "equilibrium", save plant-only whole-field states at several ages
+spanning the first crossing through 180,000 ticks, measure moving-window
+changes in total and per-cell `P`, `W`, `Q`, `N`, exact plant income and
+loss, threshold crossings and spatial variance, found identical rosters into
+status quo and a few of those states, and give Wrysk the opening frames and
+early founder outcomes. That is option A with a declared, deterministic
+procedure; option B's endpoint fit is at most an initialiser.
 
 ## N — why an apex strike ends out of reach: the pursuit stopping rule
 
@@ -290,8 +303,10 @@ px/s**, and 80 % of held bursts are at or below the resting effort's cruise
 (0.21 px/s). The gap that needed closing at the burst's start averaged 8.3 px;
 the gap actually closed averaged **−0.9 px** — it grew. A *delivered* burst
 would out-close a prey at its escape cap (10 px/s, exactly the multiple times
-the prey's speed cap) by 6.7 px/s, so the escape multiple is exonerated
-quantitatively. **Named, not changed:** the pursuit stopping predicate
+the prey's speed cap) by 6.7 px/s, so the escape multiple is exonerated as
+the cause of the *current* near-zero motion — not yet shown adequate for a
+corrected, delivered lunge, which needs 1.25 s for the mean gap against a
+1.0 s strike (Astra). **Named, not changed:** the pursuit stopping predicate
 `inside` in the hunt-intent pass of `world/step.rs` is a one-sided forward
 half-space (17.25 px) although its own comment says it means the reach
 envelope, as `in_contact` does everywhere else in the file. The apex senses at
@@ -322,10 +337,12 @@ is Fable's; the display's apex is unchanged by this workstream.
 - **Established by measurement:** the forager's score already rewards
   staying (a 53–111 % dwell gradient) and its frozen controller's movement
   does not respond to food (effects 0.06–0.19 of the action's own spread),
-  so the binding constraint is between the objective and the search, not in
-  the objective; the apex's paid bursts are suppressed by the pursuit
+  so the score is not the constraint; where candidate variation is lost
+  between the objective and the update is open (the retained generation
+  reports show a wide, intake-correlated score spread); the apex's paid bursts are suppressed by the pursuit
   stopping predicate on 408 of 449 attempts and its realised strike speed is
-  near zero, while the escape multiple is exonerated; the counted depletions
+  near zero, while the escape multiple is exonerated for the current motion
+  only; the counted depletions
   at the shipped price are seeding artefacts in dim, dry, low-wood cells with
   a negative plant budget and zero withdrawal, confirmed in the
   herbivore-present world itself; the skimmer body thrives once its depth
@@ -345,39 +362,84 @@ is Fable's; the display's apex is unchanged by this workstream.
   are starving on the rim by roster design; on N's, any apex spawned from the
   viewer stops short of nearly every prey it pays to strike.
 
-## Next recommendation (Fable's, before Astra's opinion)
+## Review and repair (Astra, 2026-09-16)
 
-Four of the five items are now design changes with a measured cause behind
-them, so each gets a paired experiment or a fit first and then a decision.
-None runs on the cube until Wrysk has seen the result.
+Astra's review is
+[ecology-v1-round3-review-2026-09-16.md](ecology-v1-round3-review-2026-09-16.md).
+Disposition: retain M and N as decisive diagnostics and O as a strong
+founding-time result; L correctly falsifies the score term; the package
+overstated what follows. Repair 1, all report-level plus one doc line:
 
-1. **Apex pursuit predicate** (N): run N's paired arm with `inside` read as
-   the reach envelope, scored on N's rows plus K's ledger (held fraction, gap
-   closed, class histogram, captures per life, phase occupancy, energy
-   margin). If captures per life approach the ~10 that break even and the
-   bill does not explode, propose the one-line predicate change to Wrysk as a
-   correction of a rule to its own comment; it would be visible on the cube
-   whenever an apex is spawned.
-2. **Skimmer depth** (O): re-run F's 150-minute reproduction census with the
-   roster skimmer's `depth` at 0.55 and nothing else changed, six seeds, arms
-   0/1/2. If the lineage persists, propose the roster change to Wrysk (the
-   cube's skimmers would stop dying on the rim); separately, write the
-   question of whether the wet floor should grow a producer at all as a
-   design note, because O shows the skimmer's designed larder does not exist.
-3. **Foliage seeding** (M): fit the local equilibrium per cell from the
-   plant-only path, re-seed from the fit in a branch, verify the counter goes
-   to zero plant-only and stays small with herbivores, and produce one
-   contact-sheet-style opening frame beside today's so Wrysk can see option
-   B's visible consequence before deciding between A, B and leaving §11.
-   This is his call.
-4. **The ES search** (L): no simulation first — measure the within-generation
-   score spread from the retained `es-eco-v1` checkpoints; then how much of
-   the action sits inside the adapter deadband under a σ-scale perturbation.
-   Only then decide whether the optimiser (σ, pairs, generations) or the
+- **P1, L.** "The controller cannot express residence / the search converts
+  nothing" withdrawn; the one-step sweep does not test that, and the retained
+  generation reports already show the candidate-score spread L named as its
+  next task (sd 643 in generation 9, r = 0.81 with intake). The next task is
+  the antithetic-pair reduction, not the spread.
+- **P2, M.** Option B renamed a terminal-state fit; the local-equilibrium
+  wording withdrawn; Astra's whole-field preconditioning operator recorded as
+  the alternative that keeps the coupled equations. No universal critical
+  `L·μ` anywhere.
+- **P2, N.** The escape multiple and strike constants are exonerated for the
+  current motion only; adequacy for a delivered lunge is the paired arm's
+  question (1.25 s needed against a 1.0 s strike at the escape cap).
+- **P2, O.** F's reconciliation stated as plausible, not identified; "one
+  working guild" scoped to the current body and parameters.
+- **P3.** `apex-audit`'s `--no-ledger` also disables the strike record; its
+  help now says so.
+- **Errata** added to A's, F's and I's notes: their depletion counts at the
+  shipped price are opening-stock plant-budget declines with zero measured
+  withdrawal, per M.
+
+## Next recommendation (reconciled with Astra)
+
+Astra's order, which Fable accepts: the apex predicate pair first; the
+antithetic-pair analysis instead of the already-answered spread; the depth
+census before any roster decision; a whole-field preconditioning comparison
+instead of a per-cell fit; detrital calibration later; the errata done now.
+Three items would be visible on the cube and are Wrysk's; what Fable and Astra
+would tell him is stated at each. None runs on the cube until he has seen the
+result.
+
+1. **Apex pursuit predicate** (N) — the single most informative cheap
+   experiment: N's paired arm with `inside` read as `in_contact()`, one
+   variable, identical seeds and introductions, scored on held fraction,
+   initial gap, relative closure during delivered bursts, realised translation
+   and turn consumption, contact and capture class, captures per life by
+   initial-gap bin, phase occupancy, and K's credited, billed and net energy.
+   Confirmed if the corrected arm delivers the burst, closes the gap and
+   raises contacts and captures; refuted if the held fraction falls but
+   closure and contact do not improve. **What Fable and Astra would tell
+   Wrysk:** approve the one-line correction of the predicate to its own
+   comment if it delivers those outcomes without a worse ledger; it need not
+   reach the ten captures per life that break even to show the rule is wrong
+   (that is a later ecological gate); do not touch escape speed, sense radius,
+   strike duration or the mating radius in that arm.
+2. **Skimmer depth** (O): F's six-seed, 150-minute census with the roster
+   skimmer's `depth` 0.10 → 0.55 and every other value fixed; measure founder
+   survival and brood, descendant census by form × diet bin × guild, net
+   margin, water-depth distribution, and the effect on the other kinds.
+   Confirmed if the skimmer establishes a lineage across seeds without
+   replacing the world with a new monoculture. **What Fable and Astra would
+   tell Wrysk:** conditionally approve the roster depth change on that result
+   (the cube's skimmers would stop dying on the rim); do not bundle it with a
+   wet-floor producer, which is a separate ecology design (a new stock, food
+   web and visible layer), not the repair O needs.
+3. **Foliage seeding** (M): a whole-field plant-only preconditioning
+   comparison, not a per-cell equilibrium fit — save plant-only states at a
+   few ages, found identical rosters into them and into status quo, and give
+   Wrysk the opening frames and early founder outcomes before he chooses
+   between preconditioning (A, with a declared procedure), leaving §11, or B
+   as a mere initialiser. This is his call; Astra advises neither as a
+   contract change yet.
+4. **The ES search** (L): the antithetic-pair reduction on the retained
+   generation reports (no simulation), then deadband occupancy under a
+   σ-scale perturbation; then decide whether the reduction, the update or the
    adapter is the next change; no score change.
-5. **Detrital funding** (O, M): using the plant record and the ledger, ask
-   whether any setting of decomposition, energy cap and mouth rate lets litter
-   pay for a body in `fast-leaf`; until it does, ecology v1 has one working
-   guild.
-6. **Re-read A, F and I's depletion sentences** as measurements of the
-   seeding, with a one-paragraph erratum in each note pointing at M.
+5. **Detrital funding** (O, M), after the niche decision: on a fixed body,
+   habitat and control, vary one declared detrital capacity or energy term at
+   a time and measure the ledger chain served litter → digestible → credited
+   → whole bill, plus substrate persistence; the first gate is a non-negative
+   median margin in nearly all worlds without exhausting litter faster than
+   §4 replenishes it. O answered the question negatively only for the current
+   skimmer at current parameters.
+6. **Errata in A, F and I** — done in this repair, not a research campaign.

@@ -263,9 +263,20 @@ still be resurrected, and measuring it needs a different experiment (below), not
 ## What the evidence points at instead
 
 The two checks together say something sharper than either alone: **the score already pays,
-enormously, for the behaviour that is missing, and the controller cannot express that behaviour
-at all.** The binding constraint is between the two — the search is not converting a
-14,411-tick behavioural gradient into any movement in parameter space.
+enormously, for the behaviour that is missing, and the frozen controller's one-step response to
+food is far below the adapter's deadband.** (Corrected after Astra's round-3 review, P1: the
+first version said the controller "cannot express" residence and that the search "is not
+converting" the gradient "into any movement in parameter space". The one-forward-pass sweep at
+sampled states does not test sustained food input, recurrent integration across updates, a
+trajectory under the altered action, or nearby weight perturbations, so neither claim follows.
+And the retained generation reports already hold the spread candidate 1 below asked for:
+`GenerationReport` persists the 32 ordered candidate scores and every candidate-layout episode;
+in generation 9 they span 6,459–8,915 ticks, sd 643, and candidate score correlates r = 0.81
+with mean producer intake across the four training layouts and r = 0.54 with mean ticks in the
+opening. Perturbations do produce material score and feeding variation. The open question is
+therefore **where useful candidate variation is lost** — in the centred-rank reduction across
+the four-layout minimum, in the update, or in the mapping from weights to residence — not
+whether it exists.)
 
 Three candidates, in the order their cost says to try them, none launched:
 
@@ -315,7 +326,13 @@ residence, not before.
 
 ## The next task this implies
 
-Named, not launched: **measure the within-generation score spread from the existing `es-eco-v1`
-checkpoints** (candidate 1 above). It needs no simulation, it uses data already on disk, and it
-is the one measurement that separates the two remaining explanations — an optimiser that cannot
-move from an objective that does not reward. Everything else on this front should wait for it.
+Named, not launched (revised after review; candidate 1's spread is already in the retained
+`generations.jsonl` and is not a new task): **the antithetic-pair reduction on the retained
+generation reports** — for each plus/minus pair, relate the score difference to intake, opening
+residence and the signed contribution to the centred-rank update; then, only if on-food time is
+needed, reconstruct generation 9's 32 candidates and run H's residence trace on the four training
+layouts. Confirmation of an optimiser/update problem: individual perturbations with better
+residence and score that cancel in the centred-rank gradient or are erased by the update.
+Refutation: no candidate-level increase in on-food residence despite the score spread, which
+moves attention to parameterisation, recurrence, cadence or the adapter. Beside it, candidate 2
+(deadband occupancy under a σ-scale perturbation) stands. The score stays as it is.

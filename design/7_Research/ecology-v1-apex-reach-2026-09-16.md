@@ -298,7 +298,13 @@ evidence is the kinematic table in §4, which needs no subset at all: a 16.667 p
 
 ## 6. The verdict
 
-**The pursuit controller, not the strike kinematics and not the escape multiple.**
+**The pursuit controller, not the strike kinematics and not the escape multiple — as the
+cause of the present near-zero motion.** (Scoped after Astra's round-3 review: the escape
+multiple and strike constants are exonerated for the *current* held bursts; whether they are
+adequate for a corrected, actually delivered one-second lunge is not established — a nominal
+16.7 px/s hunter against a 10 px/s prey closes only 6.7 px/s and needs 1.25 s for the mean
+8.3 px gap against `strike_seconds` = 1.0, and the few delivered bursts were clipped to 5.7
+px/s mean by the shared motor envelope. The paired arm decides that.)
 
 - **Strike kinematics are not implicated as constants.** `strike_speed_px_s` = 16.667 and
   `strike_seconds` = 1.0 would close the mean 8.32 px gap in 0.5 s against a motionless prey and
