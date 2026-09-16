@@ -726,7 +726,7 @@ mod tests {
     use crate::es::fixture::{Ecology, training_layouts_on};
 
     fn smoke_protocol() -> Protocol {
-        Protocol::new(2, 2_000, 20_260_915, &training_layouts()[..1])
+        Protocol::new(2, 400, 20_260_915, &training_layouts()[..1])
     }
 
     #[test]

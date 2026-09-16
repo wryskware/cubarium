@@ -1275,7 +1275,6 @@ pub fn print_report(report: &PopulationReport) {
 mod tests {
     use super::*;
     use crate::es::tensor;
-    use cubarium_core::hunter::PursuitStop;
 
     /// The two arms must differ in **exactly one thing**: which controller drives the imported
     /// copies. Same seed, same founders, same bodies, same imported material — so a difference

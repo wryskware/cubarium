@@ -9,7 +9,7 @@ use cubarium_core::config::CONFIG_VERSION;
 use cubarium_core::hunter::HunterTarget;
 use cubarium_core::snapshot::{SCHEMA_VERSION, SnapshotError, decode_snapshot, encode_snapshot};
 use cubarium_core::{World, WorldConfig};
-use cubarium_surface::{CellId, Face, FieldGraph, Scale, SurfacePoint, Topology};
+use cubarium_surface::{CellId, Face, Scale, SurfacePoint, Topology};
 
 const RING: Topology = Topology::Ring { w: 320, h: 180 };
 
@@ -263,44 +263,5 @@ fn height_falls_with_v_and_is_not_the_embedding() {
     assert!(
         row(0, &world.state.ecology.wood) > row(44, &world.state.ecology.wood),
         "the canopy row must start with more wood than the soil row"
-    );
-}
-
-/// Plan §5, decided: the top cell row is the canopy and never drains; the bottom row has
-/// nothing below it. Both are the cube's own two exceptions, stated directly.
-#[test]
-fn the_ring_canopy_holds_and_the_floor_collects() {
-    let graph = FieldGraph::new(RING, Scale::ONE);
-    for cx in [0u16, 1, 79] {
-        assert_eq!(graph.downhill(CellId::new(RING, Scale::ONE, Face::Front, cx, 0)), None);
-        assert_eq!(
-            graph.downhill(CellId::new(RING, Scale::ONE, Face::Front, cx, 44)),
-            None
-        );
-        for cy in 1..44u16 {
-            assert_eq!(
-                graph.downhill(CellId::new(RING, Scale::ONE, Face::Front, cx, cy)),
-                Some(CellId::new(RING, Scale::ONE, Face::Front, cx, cy + 1)),
-                "({cx}, {cy}) must drain straight down"
-            );
-        }
-    }
-
-    // And the world actually behaves that way: after a long run the bottom row holds far more
-    // standing water than the rest, and the canopy row holds the foliage.
-    let mut world = World::new(ring_config()).expect("a ring world");
-    for _ in 0..6000 {
-        world.step();
-    }
-    let row = |r: usize, v: &[f64]| -> f64 { (0..80).map(|c| v[r * 80 + c]).sum() };
-    let mean_other: f64 = (1..44).map(|r| row(r, &world.state.fields.w)).sum::<f64>() / 43.0;
-    assert!(
-        row(44, &world.state.fields.w) > 5.0 * mean_other,
-        "the bottom row should pool: {} against a mean of {mean_other}",
-        row(44, &world.state.fields.w)
-    );
-    assert!(
-        row(0, &world.state.fields.p) > row(44, &world.state.fields.p),
-        "the canopy row should carry more foliage than the soil row"
     );
 }

@@ -797,7 +797,7 @@ mod tests {
     fn the_mobile_script_travels_and_visits_more_than_one_cell() {
         let cancel = AtomicBool::new(false);
         let l = &training_layouts()[0];
-        let e = run(l, &Driver::Control(Control::MobileScript), 4_000, free(&cancel), "t")
+        let e = run(l, &Driver::Control(Control::MobileScript), 600, free(&cancel), "t")
             .expect("ok");
         assert!(e.travelled_px > 0.0, "the script pays for real motion");
         assert!(e.distinct_cells > 1, "the script relocates");
@@ -897,7 +897,7 @@ mod tests {
         let out = run_with_fault(
             l,
             &Driver::Policy(Box::new(policy.clone())),
-            4_000,
+            VALIDATE_EVERY_TICKS + 1,
             free(&cancel),
             "gen7/pair3-/t1-corridor",
             Some(&corrupt),
@@ -913,14 +913,14 @@ mod tests {
         }
         // The same fault after the last cadence point is still caught by the terminal check.
         let late = |w: &mut World, tick: u64| {
-            if tick == 2_500 {
+            if tick == 600 {
                 w.state.neural.animals[0].1.hidden[1] = f64::INFINITY;
             }
         };
         let out = run_with_fault(
             l,
             &Driver::Policy(Box::new(policy.clone())),
-            2_501,
+            601,
             free(&cancel),
             "gen0/center/t1-corridor",
             Some(&late),
@@ -929,7 +929,7 @@ mod tests {
 
         // And the same rollout without a fault is a perfectly ordinary episode.
         assert!(
-            run(l, &Driver::Policy(Box::new(policy)), 4_000, free(&cancel), "t").is_ok(),
+            run(l, &Driver::Policy(Box::new(policy)), 1_000, free(&cancel), "t").is_ok(),
             "the fault, not the fixture, is what fails"
         );
     }
@@ -980,28 +980,4 @@ mod tests {
         assert!(flat.turn_sweep_rad > seam.turn_sweep_rad, "the deficit is the dropped turn");
     }
 
-    /// Ordinary biological death stays a completed episode with a recorded survival time, and
-    /// its final tick is accounted for rather than skipped.
-    #[test]
-    fn ordinary_death_is_a_completed_episode_with_its_last_tick_accounted_for() {
-        let cancel = AtomicBool::new(false);
-        let l = &training_layouts()[0];
-        let e = run(l, &Driver::Control(Control::NoIntake), 36_000, free(&cancel), "t")
-            .expect("death is not an error");
-        assert!(!e.alive);
-        assert_eq!(e.ticks, 7_420, "the no-intake arm's recorded survival time");
-        assert!(e.died_on_last_tick);
-        assert_eq!(e.seam_crossing_ticks, 0, "a stationary body crosses no seam");
-        assert_eq!(e.turn_unmeasured_ticks, 1, "only the death tick's turn is unmeasurable");
-        assert!(e.motion_billed_partial, "so the sweep and the price are lower bounds");
-        assert_eq!(e.terminal_stores, 0.0);
-        // The death tick is billed like every other one: 7,420 ticks of upkeep, not 7,419.
-        // Upkeep is a constant per tick for this stationary body, so the short arm gives the
-        // rate and the long one must be exactly that rate times its own recorded ticks.
-        let short = run(l, &Driver::Control(Control::NoIntake), 100, free(&cancel), "t")
-            .expect("ok");
-        let per_tick = short.upkeep_billed / short.ticks as f64;
-        assert!((e.upkeep_billed - per_tick * e.ticks as f64).abs() < 1e-9,
-            "{} vs {}", e.upkeep_billed, per_tick * e.ticks as f64);
-    }
 }

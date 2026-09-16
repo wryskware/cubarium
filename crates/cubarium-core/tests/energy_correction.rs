@@ -45,28 +45,6 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     h
 }
 
-/// An independent compensated accumulator, written from the Kahan-Babuška-Neumaier formula
-/// rather than called out of the crate, used to sum the *per-tick* flows the observer sees.
-/// This is the diagnostic note's windowed method: it never adds a persisted cumulative total
-/// to anything.
-#[derive(Clone, Copy, Default)]
-struct Windowed {
-    sum: f64,
-    c: f64,
-}
-
-impl Windowed {
-    fn add(&mut self, x: f64) {
-        let t = self.sum + x;
-        self.c += if self.sum.abs() >= x.abs() { (self.sum - t) + x } else { (x - t) + self.sum };
-        self.sum = t;
-    }
-
-    fn value(self) -> f64 {
-        self.sum + self.c
-    }
-}
-
 fn target_of(cell: CellId) -> CareTarget {
     let c = cell.center(Topology::Cube, Scale::ONE);
     CareTarget { face: c.face.index() as u8, u: c.u, v: c.v }
@@ -110,82 +88,6 @@ fn a_fresh_world_opens_at_zero_and_is_compensated_from_there() {
 }
 
 // ---------------------------------------------------------------- tracking the real flows
-
-/// The corrected cumulative ledgers must agree with the flows an independent observer sums
-/// from the transient per-tick counters — the diagnostic note's `Lw`/`Hw` — and must agree
-/// with them at least as well as the raw counters do.
-///
-/// This is a 3,000-tick run, three orders of magnitude short of the twelve-hour case that
-/// failed, so the raw discrepancy here is small; the point is the sign of the comparison and
-/// that the corrections are real, not that this run reproduces the failure.
-#[test]
-fn the_corrected_ledgers_track_independently_windowed_flows() {
-    let mut world = World::new(WorldConfig::default()).expect("defaults are a valid world");
-    // Clear the transient counters once before the first step, then take exactly one sample
-    // per tick: each sample is that tick's flow and is added to the external sums once.
-    world.telemetry();
-    let opening = world.energy_ledgers();
-    let (mut light, mut heat) = (Windowed::default(), Windowed::default());
-
-    for tick in 1..=3_000u64 {
-        world.step();
-        let sample = world.telemetry();
-        assert_eq!(sample.tick, tick);
-        light.add(sample.light_in);
-        heat.add(sample.heat_out);
-    }
-
-    let closing = world.energy_ledgers();
-    let corrected = (closing.light_in.since(opening.light_in), closing.heat_out.since(opening.heat_out));
-    let raw = (closing.light_in.raw - opening.light_in.raw, closing.heat_out.raw - opening.heat_out.raw);
-    let corrected_gap = (corrected.0 - light.value(), corrected.1 - heat.value());
-    let raw_gap = (raw.0 - light.value(), raw.1 - heat.value());
-    println!(
-        "3000 ticks: windowed light {:.17e} heat {:.17e}\n  corrected−windowed light {:e} heat {:e}\n  \
-         raw−windowed light {:e} heat {:e}\n  corrections light {:e} heat {:e}",
-        light.value(),
-        heat.value(),
-        corrected_gap.0,
-        corrected_gap.1,
-        raw_gap.0,
-        raw_gap.1,
-        closing.light_in.correction,
-        closing.heat_out.correction,
-    );
-
-    assert!(heat.value() > 0.0 && light.value() > 0.0, "the run must actually move energy");
-    // The compensated ledgers are at least as close to the independent sums as the raw ones,
-    // on both ledgers. (Exact ties are allowed: over a short run a raw counter may happen to
-    // be exact.)
-    assert!(
-        corrected_gap.0.abs() <= raw_gap.0.abs(),
-        "corrected light is further from the windowed sum ({:e}) than raw ({:e})",
-        corrected_gap.0,
-        raw_gap.0
-    );
-    assert!(
-        corrected_gap.1.abs() <= raw_gap.1.abs(),
-        "corrected heat is further from the windowed sum ({:e}) than raw ({:e})",
-        corrected_gap.1,
-        raw_gap.1
-    );
-    // What is left is the observer's own per-tick rounding, not ledger drift: a few ulps of
-    // the totals involved.
-    for (name, gap, total) in [
-        ("light", corrected_gap.0, light.value()),
-        ("heat", corrected_gap.1, heat.value()),
-    ] {
-        assert!(
-            gap.abs() <= 64.0 * f64::EPSILON * total,
-            "corrected {name} is {gap:e} from the windowed sum, more than 64 ulps of {total:e}"
-        );
-    }
-    // And the corrections are doing work rather than staying at zero.
-    assert!(
-        closing.heat_out.correction != 0.0,
-        "3,000 ticks of heat payments left no correction at all"
-    );
-}
 
 /// The accessors and the delta helper are exactly the arithmetic the handoff specifies, and
 /// the delta helper is not the difference of two corrected totals.

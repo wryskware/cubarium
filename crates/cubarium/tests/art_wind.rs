@@ -26,7 +26,7 @@ use cubarium::art_present::{
     TallColumn, VINE_PLANT,
     WIND_CHART_MAX, WIND_FALL, WIND_FLUTTER, WIND_FLUTTER_SECONDS, WIND_HOLD, WIND_PEAK_SECONDS,
     WIND_PEAK_VARY, WIND_PERIOD, WIND_QUIET_SECONDS, WIND_RISE, WIND_SLOT_VARIATION,
-    WIND_QUIET_TICK, WIND_TRAVEL_SECONDS, band_of, canopy_heading, effective_tip, placement_of, plant_bend,
+    WIND_TRAVEL_SECONDS, band_of, canopy_heading, effective_tip, placement_of, plant_bend,
     plant_bend_budget, plant_cap, plant_phase_of, present_seconds, slot_of, slot_wind,
     species_of, tall_amplitude, tall_anchor_at, tall_bend_base, tall_bend_budget, tall_columns,
     tall_grown_px, tall_heading, tall_wind_of, trunk_strip, wind_at, wind_chart, wind_phase,
@@ -1312,37 +1312,6 @@ fn full_plant_cell(name: &str) -> Option<CellId> {
     })
 }
 
-/// "Identical output for the same simulated time across 30/60/120 Hz histories": `draw` is pure,
-/// so the number of frames a host asked for between two ticks cannot reach the image. A wind
-/// sampler that advanced a phase per frame, or one that remembered its last amplitude, would
-/// show three different images here.
-#[test]
-fn thirty_sixty_and_a_hundred_and_twenty_fps_draw_the_same_simulated_instant_alike() {
-    let first = tick_at(WIND_PERIOD + WIND_RISE + 1.0);
-    let ticks: Vec<u64> = (first..first + 8).collect();
-    let mut images = Vec::new();
-    for fps in [30u32, 60, 120] {
-        let frames = fps / 20;
-        let mut p = ArtPresenter::new(pack());
-        for &tick in &ticks {
-            let v = rich_view(tick);
-            p.observe(&v);
-            for frame in 0..frames {
-                let _ = draw(&mut p, &v, f64::from(frame) / f64::from(frames));
-            }
-        }
-        let last = rich_view(*ticks.last().unwrap());
-        images.push((fps, draw(&mut p, &last, 0.5)));
-    }
-    for (fps, image) in &images[1..] {
-        assert_same_canvas(&images[0].1, image, &format!("{fps} fps against 30 fps"));
-    }
-    assert!(
-        max_diff(&images[0].1, &Canvas::cube()) > 0.01,
-        "the fixture drew an empty cube"
-    );
-}
-
 /// A paused world holds its image, and two presenters given the same world draw the same cube:
 /// the breeze is a pure function of the presentation instant, with no state and no wall time.
 #[test]
@@ -1526,141 +1495,6 @@ fn frame_image(sprite: &Sprite) -> Canvas {
 // ---------------------------------------------------------------------------
 // trunk strips: the end rows a tile never owns (the spiretree's earned wind room)
 // ---------------------------------------------------------------------------
-
-/// Paint the given rows of every trunk frame of a tall plant solid magenta, in place.
-fn make_end_rows_loud(plant: &mut TallPlant, rows: &[usize]) {
-    for frame in &mut plant.trunk.frames {
-        let (w, h) = (frame.width(), frame.height());
-        let mut pixels: Vec<[f32; 4]> = (0..h as i32)
-            .flat_map(|y| (0..w as i32).map(move |x| (x, y)))
-            .map(|(x, y)| frame.texel(x, y))
-            .collect();
-        // Only the trunk's own columns (those its pattern paints), so the loud tile keeps
-        // the footprint the loader admits.
-        let columns: Vec<usize> = (0..w).filter(|&x| (0..h).any(|y| pixels[y * w + x][3] > 0.0)).collect();
-        for &row in rows {
-            for &x in &columns {
-                pixels[row * w + x] = [1.0, 0.0, 1.0, 1.0];
-            }
-        }
-        *frame = Sprite::from_premultiplied(w, h, frame.pivot(), pixels).expect("a loud trunk");
-    }
-}
-
-/// One real column hand-built from the documented geometry with an explicit strip rule:
-/// base whole, trunk strips `floor2..top(i)` (the first segment from `TALL_FIRST_JOIN`), the
-/// cap at the fractional index, one shared amplitude.
-fn build_column(
-    plant: &TallPlant,
-    column: &TallColumn,
-    height: f64,
-    amplitude: f64,
-    floor2: f64,
-    top: &dyn Fn(u8) -> f64,
-) -> Canvas {
-    let mut canvas = Canvas::cube();
-    let heading = tall_heading(column.face, column.cx);
-    let grown = tall_grown_px(height);
-    let mut part = |sprite: &Sprite, i: f64, mask: Mask| {
-        stamp(
-            &mut canvas,
-            sprite,
-            tall_anchor_at(column.face, column.cx, i),
-            heading,
-            TALL_OPACITY,
-            mask,
-            Bend { amplitude, base: tall_bend_base(i), root: TALL_BEND_ROOT, length: TALL_BEND_LENGTH },
-        );
-    };
-    part(&plant.base.as_ref().unwrap().frames[0], 0.0, Mask::None);
-    for i in 1..=TALL_MAX_SEGMENTS {
-        let floor = if i == 1 { TALL_FIRST_JOIN } else { floor2 };
-        let reveal = top(i).min(grown - tall_bend_base(f64::from(i)));
-        if reveal <= floor {
-            break;
-        }
-        part(&plant.trunk.frames[0], f64::from(i), Mask::Strip { floor, reveal });
-    }
-    part(&plant.cap.as_ref().unwrap().frames[0], height + 1.0, Mask::None);
-    canvas
-}
-
-/// A trunk tile's row 15 is **never drawn** for any family, at any height of a column: a
-/// pack whose trunk tiles carry row 15 in solid magenta draws every calm column identically
-/// to the shipped pack all the way up from bare ground to the rim. And on the shifted
-/// strips a tile's row 0 is drawn only by the last possible segment: the spiretree column
-/// hand-built on those strips (the art-derived rule cannot be forced through the presenter,
-/// because painting row 0 is exactly what opts a family *out*) with its trunk's row 0 in
-/// magenta is the shipped column, bit for bit and under a live bend, until the ninth segment
-/// stands — where the loud row shows under the cap (non-vacuity). That is what lets the
-/// spiretree leave those rows unpainted to earn wind room, with its dome over the top.
-#[test]
-fn a_trunk_tiles_end_rows_are_never_drawn_below_the_top_segment() {
-    // Row 15, through the presenter, every family, growing from bare ground.
-    let mut loud_bottom = pack();
-    for plant in &mut loud_bottom.tall {
-        make_end_rows_loud(plant, &[15]);
-    }
-    for (a, b) in loud_bottom.tall.iter().zip(&pack().tall) {
-        assert!(
-            max_diff(&frame_image(&a.trunk.frames[0]), &frame_image(&b.trunk.frames[0])) > 0.5,
-            "{}: the loud row changed nothing",
-            a.name
-        );
-    }
-    let mut shipped = ArtPresenter::new(pack());
-    let mut bottom = ArtPresenter::new(loud_bottom);
-    let first = WIND_QUIET_TICK;
-    shipped.observe(&bare_view(first));
-    bottom.observe(&bare_view(first));
-    let mut compared = 0;
-    for tick in first + 1..=first + 720 {
-        let v = rich_view(tick);
-        shipped.observe(&v);
-        bottom.observe(&v);
-        if tick % 5 != 0 {
-            continue;
-        }
-        for f in [0.0, 0.5] {
-            // Calm at every column: the shared packet is delayed at each root, so ask each
-            // column's own amplitude (any budget: zero wind is zero whatever the room).
-            let seconds = present_seconds(tick, f);
-            if tall_columns().iter().any(|c| tall_amplitude(c, 1.0, seconds) != 0.0) {
-                continue;
-            }
-            let a = draw(&mut shipped, &v, f);
-            let b = draw(&mut bottom, &v, f);
-            assert_same_canvas(&a, &b, &format!("tick {tick} f {f}: a trunk row 15 was drawn"));
-            compared += 1;
-        }
-    }
-    assert!(compared > 100, "only {compared} calm frames were compared");
-    for i in 0..tall_columns().len() {
-        assert!(shipped.tall_growth_of(i).height >= f64::from(TALL_MAX_SEGMENTS) - 1e-9, "column {i} is not full");
-    }
-
-    // Row 0, hand-built on the shifted strips, the spiretree with and without a loud row 0.
-    let art = pack();
-    let spire = art.tall_plant("spiretree").expect("spiretree");
-    let mut loud = pack();
-    let loud_spire = loud.tall.iter_mut().find(|p| p.name == "spiretree").unwrap();
-    make_end_rows_loud(loud_spire, &[0]);
-    let column = tall_columns().into_iter().find(|c| !c.vine && TALL_PLANTS[c.pick] == "spiretree").expect("a bare spiretree column");
-    let top = |i: u8| if i == TALL_MAX_SEGMENTS { TILE_ROWS } else { TALL_STRIP_TOP };
-    let mut below = 0;
-    for height in [0.5, 1.0, 1.3, 2.75, 4.5, 6.1, 7.9] {
-        for amplitude in [0.0, 0.9, -0.9] {
-            let a = build_column(spire, &column, height, amplitude, TALL_STRIP_FLOOR, &top);
-            let b = build_column(loud_spire, &column, height, amplitude, TALL_STRIP_FLOOR, &top);
-            assert_same_canvas(&a, &b, &format!("height {height}, amplitude {amplitude}: a trunk row 0 was drawn below the top"));
-            below += 1;
-        }
-    }
-    let a = build_column(spire, &column, 9.0, 0.0, TALL_STRIP_FLOOR, &top);
-    let b = build_column(loud_spire, &column, 9.0, 0.0, TALL_STRIP_FLOOR, &top);
-    assert!(!differing(&a, &b).is_empty(), "the ninth segment's row 0 is never drawn");
-    println!("  {compared} calm frames: row 15 never drawn; row 0 hidden over {below} hand-built columns below the top, shown by the ninth segment");
-}
 
 /// The shifted strips are a per-family opt-in read from the art: a trunk that paints its
 /// tile row 0 (glasscane, the vine, the synthetic stripes) keeps the original

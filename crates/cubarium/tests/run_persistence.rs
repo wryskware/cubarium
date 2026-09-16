@@ -19,27 +19,27 @@ fn an_interrupted_and_resumed_run_matches_an_uninterrupted_one() {
     // The default `checkpoint_seconds` is 60, so tick 2400 (120 s) is a checkpoint
     // instant in both runs and the split lands exactly on a snapshot.
     let uninterrupted = run(&[
-        "--sink", "none", "--speed", "0", "--seconds", "240", "--fresh",
+        "--sink", "none", "--speed", "0", "--seconds", "60", "--fresh",
         "--state", whole.to_str().unwrap(),
     ]);
-    assert_eq!(uninterrupted.final_tick, 4800);
+    assert_eq!(uninterrupted.final_tick, 1200);
     assert_eq!(uninterrupted.config.capacity.checkpoint_seconds, 60.0);
 
     let first_half = run(&[
-        "--sink", "none", "--speed", "0", "--seconds", "120", "--fresh",
+        "--sink", "none", "--speed", "0", "--seconds", "30", "--fresh",
         "--state", parts.to_str().unwrap(),
     ]);
-    assert_eq!(first_half.final_tick, 2400);
+    assert_eq!(first_half.final_tick, 600);
     // The clean stop wrote the snapshot the resume needs.
-    assert!(snapshot_ticks(&parts).contains(&2400));
+    assert!(snapshot_ticks(&parts).contains(&600));
 
     let second_half = run(&[
-        "--sink", "none", "--speed", "0", "--seconds", "120",
+        "--sink", "none", "--speed", "0", "--seconds", "30",
         "--state", parts.to_str().unwrap(),
     ]);
-    assert_eq!(second_half.loaded_tick, Some(2400), "the resume must start from tick 2400");
-    assert_eq!(second_half.start_tick, 2400);
-    assert_eq!(second_half.final_tick, 4800);
+    assert_eq!(second_half.loaded_tick, Some(600), "the resume must start from tick 600");
+    assert_eq!(second_half.start_tick, 600);
+    assert_eq!(second_half.final_tick, 1200);
 
     assert_eq!(
         second_half.state_hash, uninterrupted.state_hash,

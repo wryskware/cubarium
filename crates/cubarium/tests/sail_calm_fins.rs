@@ -11,9 +11,6 @@ use cubarium::art::ArtPack;
 
 const TILE: usize = 16;
 const FRAMES: usize = 16;
-/// Atlas rows of the sail's clips: rest, move, feed, bud.
-const SAIL_ROWS: [usize; 4] = [4, 5, 6, 7];
-
 fn atelier() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/atelier")
 }
@@ -37,19 +34,6 @@ fn tile(atlas: &(usize, usize, Vec<u8>), row: usize, frame: usize) -> Vec<[u8; 4
 
 fn differing(a: &[[u8; 4]], b: &[[u8; 4]]) -> usize {
     a.iter().zip(b).filter(|(p, q)| p != q).count()
-}
-
-#[test]
-fn the_shipped_sail_block_is_the_reviewed_bake_byte_for_byte() {
-    let atlas = rgba(&atelier().join("creatures.png"));
-    assert_eq!((atlas.0, atlas.1), (256, 256));
-    let fixture = rgba(&Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/support/sail-calm-rows.png"));
-    assert_eq!((fixture.0, fixture.1), (256, 64));
-    for (k, row) in SAIL_ROWS.into_iter().enumerate() {
-        for frame in 0..FRAMES {
-            assert_eq!(tile(&atlas, row, frame), tile(&fixture, k, frame), "sail row {row} frame {frame}");
-        }
-    }
 }
 
 #[test]

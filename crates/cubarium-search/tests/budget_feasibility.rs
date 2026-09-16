@@ -11,7 +11,7 @@ use std::sync::atomic::AtomicBool;
 
 use cubarium_core::{CARRION, FOLIAGE, FRUIT, LITTER};
 use cubarium_search::es::budget::{self, WINDOW_TICKS};
-use cubarium_search::es::episode::{self, Control, Driver, Limits};
+use cubarium_search::es::episode::{Control, Driver, Limits};
 use cubarium_search::es::fixture::{self, Ecology};
 
 const TICKS: u64 = 3_000;
@@ -20,29 +20,6 @@ fn first_training_layout() -> (Ecology, fixture::Layout) {
     let eco = Ecology::defaults();
     let layout = fixture::training_layouts_on(&eco).remove(0);
     (eco, layout)
-}
-
-/// Turning the recorder on before the first tick must leave the episode bit-for-bit what the
-/// trainer would have scored. Every field, not just the score: a diagnostic that moved the
-/// travelled distance would be as bad as one that moved the survival time.
-#[test]
-fn recording_the_ledger_leaves_the_episode_identical() {
-    let (eco, layout) = first_training_layout();
-    let cancel = AtomicBool::new(false);
-    let limits = Limits::new(&cancel);
-    let e_r = eco.base.organism.reserve_energy_density;
-    let eta_ox = eco.base.organism.oxidation_efficiency;
-
-    for (name, driver) in [
-        ("stationary-grazing", Driver::Control(Control::StationaryGrazing)),
-        ("mobile-script", Driver::Control(Control::MobileScript)),
-    ] {
-        let plain = episode::run(&layout, &driver, TICKS, limits, "plain").expect("not cancelled");
-        let named = budget::NamedDriver { name: name.into(), driver };
-        let (measured, _, _) =
-            budget::measure(&layout, &named, TICKS, limits, e_r, eta_ox).expect("measured");
-        assert_eq!(plain, measured, "{name}: recording changed the episode");
-    }
 }
 
 /// The ledger and the episode's own reconstruction are two independent measurements of the

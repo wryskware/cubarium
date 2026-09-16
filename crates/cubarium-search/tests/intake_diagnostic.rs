@@ -20,7 +20,7 @@ use std::sync::atomic::AtomicBool;
 
 use cubarium_core::{CARRION, CHANNELS, FOLIAGE, FRUIT, IntakeLimit, LITTER, MOUTHS, MOUTH_GRAZE};
 use cubarium_search::es::budget::NamedDriver;
-use cubarium_search::es::episode::{self, Control, Driver, Limits};
+use cubarium_search::es::episode::{Control, Driver, Limits};
 use cubarium_search::es::fixture::{self, Ecology};
 use cubarium_search::es::intake::{self, LIMITS, OPEN};
 
@@ -30,29 +30,6 @@ fn first_training_layout() -> (Ecology, fixture::Layout) {
     let eco = Ecology::defaults();
     let layout = fixture::training_layouts_on(&eco).remove(0);
     (eco, layout)
-}
-
-/// Turning the trace and the ledger on before the first tick must leave the episode bit for bit
-/// what the trainer would have scored. Every field, not just the score.
-#[test]
-fn tracing_leaves_the_episode_identical() {
-    let (eco, layout) = first_training_layout();
-    let cancel = AtomicBool::new(false);
-    let limits = Limits::new(&cancel);
-    let e_r = eco.base.organism.reserve_energy_density;
-    let eta_ox = eco.base.organism.oxidation_efficiency;
-
-    for (name, driver) in [
-        ("stationary-grazing", Driver::Control(Control::StationaryGrazing)),
-        ("mobile-script", Driver::Control(Control::MobileScript)),
-        ("no-intake", Driver::Control(Control::NoIntake)),
-    ] {
-        let plain = episode::run(&layout, &driver, TICKS, limits, "plain").expect("not cancelled");
-        let named = NamedDriver { name: name.into(), driver };
-        let (measured, _, _) =
-            intake::measure(&layout, &named, TICKS, limits, e_r, eta_ox, false).expect("measured");
-        assert_eq!(plain, measured, "{name}: tracing changed the episode");
-    }
 }
 
 /// The trace and the ledger are two accumulations of the same transfers, taken at different

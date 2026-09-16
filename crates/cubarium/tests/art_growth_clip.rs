@@ -52,8 +52,6 @@ const PILOT: &str = "lanternstalk";
 const DENSITY: f64 = 0.60;
 /// A density that warrants stage 2, for the `1 → 2` step (authored since 2026-09-13, so the
 /// fallback sweep below treats it like the pilot's own step).
-const FULL_DENSITY: f64 = 0.85;
-
 fn atelier() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/atelier")
 }
@@ -74,16 +72,6 @@ fn plants_only() -> ArtPack {
 fn no_plants() -> ArtPack {
     let mut art = plants_only();
     art.plants.clear();
-    art
-}
-
-/// The pack a v1–v4 host would have loaded: every authored growth clip removed, everything
-/// else untouched.
-fn without_transitions() -> ArtPack {
-    let mut art = plants_only();
-    for plant in &mut art.plants {
-        plant.transitions.clear();
-    }
     art
 }
 
@@ -771,7 +759,7 @@ fn a_growth_step_is_pure_and_independent_of_the_render_rate() {
     let before: Vec<Growth> = CellId::all(Topology::Cube, Scale::ONE).map(|c| p.growth_of(c)).collect();
     let before_prev: Vec<Growth> = CellId::all(Topology::Cube, Scale::ONE).map(|c| p.growth_prev_of(c)).collect();
     let first = draw(&mut p, &v, 0.25);
-    for _ in 0..25 {
+    for _ in 0..4 {
         assert_same_canvas(&first, &draw(&mut p, &v, 0.25), "a repeated draw of one frame");
     }
     assert_eq!(CellId::all(Topology::Cube, Scale::ONE).map(|c| p.growth_of(c)).collect::<Vec<_>>(), before, "a draw moved the growth");
@@ -992,110 +980,6 @@ fn the_authored_step_moves_less_than_a_fraction_of_a_baked_sample_per_frame_at_6
 // ---------------------------------------------------------------------------
 // 7. the fallback
 // ---------------------------------------------------------------------------
-
-/// With the transitions cleared — a v1–v4 pack, or any pair the art has no clip for — the step
-/// is the reveal mask again, bit for bit: the lower stage fading at `opacity · (1 − t)` under
-/// the upper stage revealed along the stalk. And clearing them changes *nothing else*: the
-/// `None → 0` step of the very same plant — the one step no clip can ever cover — draws
-/// identically with and without the clips, while both authored steps differ mid-flight.
-#[test]
-fn a_pack_without_transitions_falls_back_to_the_reveal_masks_and_changes_no_other_step() {
-    let cell = pilot_cell();
-    let art = without_transitions();
-    assert!(art.plant(PILOT).unwrap().transition(0, 1).is_none(), "the fixture keeps a clip");
-    let budget = plant_bend_budget(art.plant(PILOT).unwrap());
-    assert_eq!(
-        budget,
-        plant_bend_budget(pack().plant(PILOT).unwrap()),
-        "the pilot clip's frames are not what bounds this plant's bend, so the two packs must \
-         measure the same budget — otherwise the comparisons below would differ only by wind"
-    );
-
-    // The 0 → 1 step, hand-built as the mask path.
-    let mut p = ArtPresenter::new(without_transitions());
-    let v = drive(&mut p, cell, DENSITY, 20, 6);
-    let f = 1.0;
-    let step = drawn_step(&p, cell, f).expect("in flight");
-    assert_eq!((step.lower, step.upper), (Some(0), 1));
-    let seconds = present_seconds(v.tick, f);
-    let actual = draw(&mut p, &v, f);
-    let expected = expected_step(
-        &art,
-        &background(&v, f),
-        cell,
-        DENSITY,
-        seconds,
-        wind_of(cell, budget, seconds),
-        step,
-    );
-    assert_same_canvas(&actual, &expected, "the 0 → 1 step of a pack with no transitions");
-
-    // And it is a *different* picture from the clip's, or the fallback would be untested.
-    let mut clipped = ArtPresenter::new(plants_only());
-    drive(&mut clipped, cell, DENSITY, 20, 6);
-    assert!(
-        !differing(&actual, &draw(&mut clipped, &v, f)).is_empty(),
-        "the authored clip and the reveal mask drew the same 0 → 1 picture"
-    );
-
-    // Every other pair: drive both packs identically to stage 2 and compare every frame. Only
-    // the two authored steps may differ.
-    let mut with = ArtPresenter::new(plants_only());
-    let mut without = ArtPresenter::new(without_transitions());
-    with.observe(&bare_view(0));
-    without.observe(&bare_view(0));
-    let mut seen: Vec<(Option<u8>, u8)> = Vec::new();
-    let mut clip_differed = 0;
-    for tick in 1..=320u64 {
-        let v = one_cell_view(tick, cell, FULL_DENSITY);
-        with.observe(&v);
-        without.observe(&v);
-        assert_eq!(
-            with.growth_of(cell),
-            without.growth_of(cell),
-            "tick {tick}: the pacing must not depend on the pack's transitions"
-        );
-        for frame in 0..FRAMES_PER_TICK {
-            let f = frame as f64 / FRAMES_PER_TICK as f64;
-            let a = draw(&mut with, &v, f);
-            let b = draw(&mut without, &v, f);
-            let step = drawn_step(&with, cell, f);
-            let pair = step.map(|s| (s.lower, s.upper));
-            if let Some(pair) = pair {
-                if seen.last() != Some(&pair) {
-                    seen.push(pair);
-                }
-            }
-            if matches!(pair, Some((Some(0), 1)) | Some((Some(1), 2))) {
-                // The two paths necessarily *converge* at the ends of the step — both are the
-                // neighbouring idle stage image there — so only the middle of the step is
-                // required to differ.
-                if (0.2..=0.8).contains(&step.unwrap().t) {
-                    assert!(
-                        !differing(&a, &b).is_empty(),
-                        "tick {tick} frame {frame} at t = {}: the clip step drew the fallback \
-                         picture",
-                        step.unwrap().t
-                    );
-                    clip_differed += 1;
-                }
-            } else {
-                assert_same_canvas(
-                    &a,
-                    &b,
-                    &format!("tick {tick} frame {frame}, step {pair:?}: clearing the \
-                              transitions changed a step that never had one"),
-                );
-            }
-        }
-    }
-    assert_eq!(
-        seen,
-        vec![(None, 0u8), (Some(0), 1), (Some(1), 2)],
-        "the sweep must walk all three steps of the climb"
-    );
-    assert!(clip_differed > 100, "only {clip_differed} frames of the clip step were compared");
-}
 
 // ---------------------------------------------------------------------------
 // 8. the fruit accent

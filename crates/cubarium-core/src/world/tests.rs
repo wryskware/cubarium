@@ -3,14 +3,13 @@ use cubarium_surface::{CUBE_CELL_COUNT, CellId, Face, FieldGraph, SurfacePoint, 
 
 use crate::DT;
 use crate::config::WorldConfig;
-use crate::events::LifeEvent;
 use crate::genome::{Genome, decode};
 use crate::ids::OrganismId;
-use crate::organism::{DeathCause, Escrow, Mode, Organism, Origin};
+use crate::organism::{Escrow, Mode, Organism, Origin};
 
 use super::*;
 
-use super::invariants::{edible_detritus, stored_energy};
+use super::invariants::stored_energy;
 use super::lifecycle::{sense_depth, sense_rings, ticks_from_seconds, up_direction};
 
 /// The M2 fixture: v1 founders (one omnivore genotype, `diet` 0.7, drawn hues), so the
