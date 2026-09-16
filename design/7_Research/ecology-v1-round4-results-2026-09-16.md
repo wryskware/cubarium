@@ -24,7 +24,7 @@ which would be visible on the cube; none of this round touches the cube.
 | --- | --- | --- | --- | --- | --- |
 | Q antithetic ES analysis | Opus 5 high | `main` (`da2bdc8`…`a281162`) | 1.4 s / 5 min | 0.24 MiB / 20 | search 230, core 517 |
 | P apex predicate pair | Opus 5 high | worktree, merged | 190 s / 4 min | 8.0 MiB / 20 | core 523, search 224 |
-| R skimmer depth census | Opus 5 high | worktree | *(pending)* | | |
+| R skimmer depth census | Opus 5 high | worktree, merged | 4.2 min / 6 min | 0.6 MiB / 30 | search +20 |
 | S preconditioned opening | Opus 5 high | worktree | *(pending)* | | |
 
 Fable's verification so far: Q's two ignored experiments re-run and the
@@ -160,9 +160,64 @@ grasp lands off the surface at the open rim. It does **not** make the apex
 viable: all 32 still starve at 12.9 % of their bill and readiness overlap
 stays zero.
 
-## R — the skimmer at depth 0.55 in a reproducing world
+## R — the skimmer at depth 0.55 in a reproducing world: refuted, a trade not an addition
 
-*(pending)*
+Full note: [ecology-v1-depth-census-2026-09-16.md](ecology-v1-depth-census-2026-09-16.md).
+Commits `6431156` (pre-registration before any row), `d08884e` (16
+definition tests, 12 red against a stub), `080bee6` (the override, run loop,
+driver, rule), `c38b5a6` (brood counter repair), `6b91316` (note). Search-only
+(`census.rs`); no core file, no `WorldConfig` field. The override rewrites the
+five roster skimmers' `depth` between `World::new` and the first step and
+re-decodes their phenotypes; a control run at 0.10 reproduces the ordinary
+harness world field for field at 2,000 ticks and, at full length, all 60
+retained control rows by `final_state_hash` (A's screen, I's ladder, M's
+present-off) and F's published variety census row for row.
+
+| config | skimmer `depth` | kinds at end | grazer at horizon | glider | burrower | **skimmer** | seeds with any skimmer at the horizon |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| baseline | 0.10 | 2.11 | 8.1 | 14.3 | 16.1 | 0.9 | 1 of 6 |
+| baseline | **0.55** | 2.72 | **2.8** | 12.4 | 10.4 | **18.1** | **6 of 6** |
+| `fast-leaf` | 0.10 | 3.00 | 21.3 | 27.9 | 12.7 | 0.0 | 0 of 6 |
+| `fast-leaf` | **0.55** | 3.50 | **12.4** | 30.3 | 12.6 | **5.6** | **6 of 6** |
+
+(18 runs per cell: 6 seeds × 3 apex arms; no world lost.) The skimmer's
+ledger margin changes sign in both configurations; the grazer's falls in
+both (to 0.35× and 0.58× its horizon population, margin rate to a fifth and a
+forty-fifth); glider and burrower move 1–3 %. Water depth under a skimmer
+falls 0.19 → 0.05 d and 0.25 → 0.08 d; the binary wet flag moves the wrong
+way, as O warned. O's predicted diet drift appears: skimmer entrants in the
+foliage bin 2 → 27 % and 0 → 14 %, and those bodies survive best in the world
+(still an association; every one is a descendant).
+
+**Verdict by Astra's rule: refuted in both configurations, on the variety
+clause.** The lineage persists (baseline 16 of 18 worlds, `fast-leaf` 13 of
+18 against 2 and 0 for the control) and no monoculture forms, but the grazer
+pays: in baseline the loss is decisive on its face (0.35×) and thin
+underneath (the baseline grazer reaches the horizon in only 2 of 6 control
+seeds, so the loss is one world); in `fast-leaf` it is marginal on its face
+(0.58× against a 0.60× line) and solid underneath (the grazer falls in 6 of 6
+seeds and is gone from all three arms of one seed). R disclosed two defects in
+its own pre-registration (a clause measuring a breeding founder's lifetime
+where O's quantity was a sterile clone's; a per-seed agreement clause for a
+lineage-founding rate that is concentrated in a few worlds) and reported both
+as written. **The most consequential finding the brief did not anticipate:**
+0 of 360 founder skimmers reach any horizon at either depth in either
+configuration — the rescue is a lineage effect, not founder survival — and the
+founder's own life moves in opposite directions (`fast-leaf` 609 → 1,352 s,
+baseline 580 → 373 s), read as a 0.55 body paying 4.4× the motor bill for 3.5×
+the range, which `fast-leaf`'s foliage funds and baseline's does not.
+
+**What Wrysk would be approving, corrected:** not "skimmers that stop dying on
+the rim" — they all still die. One genome value buys a fourth lineage that
+persists, paid for out of the grazer: a trade of one kind for another, exactly
+what the refutation clause was written to catch. And 0.55 is the grazer's own
+`depth`, so "off the wet floor" and "onto the grazer's height" are the same
+move here and nothing separates them. **R's recommendation, which Fable
+accepts: do not take the roster change as tested.** Named next: a depth
+ladder {0.10, 0.20, 0.30, 0.40, 0.55, 0.75} at arm 0, 60 runs, about 3.5
+minutes — is there a depth that rescues the skimmer's lineage without taking
+the grazer's horizon population? — plus splitting the ledger's margin bins by
+generation and recording form-3 served material by channel.
 
 ## S — a plant-only preconditioned opening
 
