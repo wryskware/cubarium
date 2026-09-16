@@ -41,15 +41,16 @@ that gate the flat world's scale and frame rate.
    (or extend an existing bench if one fits) that builds a real cube world
    from a fixed seed, runs it to a populated steady state (say 3,000 ticks
    headless), then times, over 600 frames: (a) one full render+encode of a
-   frame on one thread, (b) the same split across four threads by row band
-   if the renderer allows it today, else say so and skip, (c) one world
-   tick. Report medians and p95 in ms. Then a real run: `cubarium run
+   frame on one thread, (b) one world tick. The four-core render number the plan's §6 asks
+   for cannot be measured until FW-3 adds the row-band hook; record it as
+   "pending FW-3 rerun" in the table, and the S selection as provisional on
+   the serial numbers until then. Report medians and p95 in ms. Then a real run: `cubarium run
    --fresh --sink none --seconds 120 --state <scratch>` for ticks/s, and
    `cubarium demo`/`run` with `--sink shim --addr 127.0.0.1:7392 --fps 60
    --seconds 120` on the device for achieved fps and ticks/s from the host
    log while the daemon's log reports presented fps and received/stale.
-   On the device, pin to one A78 (`taskset -c 7`) for (a) and (c), and to
-   `4-7` for (b) and the real run. Record `top` CPU during the real run.
+   On the device, pin to one A78 (`taskset -c 7`) for (a) and (b), and to
+   `4-7` for the real run. Record `top` CPU during the real run.
 3. **The gate.** Put the numbers into the `R_max` table of plan §6 and say
    which S and `--fps` they select under the shared-loop budget
    `20·tick_ms + fps·render_ms ≤ 1000 ms`. Do not change the plan's text

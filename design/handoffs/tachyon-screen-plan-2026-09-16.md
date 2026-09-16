@@ -102,8 +102,8 @@ Decisions, with the reasoning:
    refuses old worlds, per the standing rule). Build natively on the board
    first; set up cross-compilation only if native release builds prove too
    slow to iterate on, and say so with the measured build time.
-10. **Frame rate and speed are measured, not assumed.** The board is six
-   Cortex-A55 cores. W2 measures achieved render fps and sim tick rate and
+10. **Frame rate and speed are measured, not assumed.** The board is four
+   Cortex-A78 and four Cortex-A55 cores. W2 measures achieved render fps and sim tick rate and
    picks `--fps` (60 if it holds, else 30) and leaves `--speed` at 1 unless
    the sim cannot keep real time.
 

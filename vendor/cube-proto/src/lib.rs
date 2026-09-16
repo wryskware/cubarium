@@ -5,13 +5,15 @@
 
 mod client;
 pub mod geometry;
+mod raster;
 mod wire;
 
 pub use client::CubeClient;
 pub use geometry::{cross_seam, CubemapFaces, Edge, Seam};
+pub use raster::{Raster, MAX_RASTER_DIM};
 pub use wire::{
-    decode, encode_face, encode_full, seq_is_newer, Format, Header, ProtoError, HEADER_BYTES,
-    MAGIC, NO_FACE, VERSION,
+    decode, decode_strip, encode_face, encode_full, encode_raster, seq_is_newer, Format, Header,
+    ProtoError, Strip, HEADER_BYTES, MAGIC, MAX_DATAGRAM, NO_FACE, STRIP_HEADER_BYTES, VERSION,
 };
 
 pub const FACE_SIZE: usize = 64;

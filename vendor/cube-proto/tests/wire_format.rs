@@ -186,7 +186,10 @@ fn decode_rejects_wrong_version() {
 
 #[test]
 fn decode_rejects_unknown_format() {
-    for f in [2u8, 3, 0xFF] {
+    // 2 is `Format::RasterStrip` since the raster format was added, so it is no
+    // longer an unknown format byte — it is checked by `raster_strip.rs` instead.
+    // Everything from 3 up is still unknown.
+    for f in [3u8, 4, 0xFF] {
         let mut d = good_full();
         d[5] = f;
         assert_eq!(decode(&d), Err(ProtoError::BadFormat(f)));
