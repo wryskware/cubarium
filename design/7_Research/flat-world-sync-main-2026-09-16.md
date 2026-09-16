@@ -266,11 +266,18 @@ Nothing `main` added is a new *per-cell* vector sized at the cube — the only o
   none was lost.** The one clippy **error**, `neural/gru.rs:233` (`0 * HIDDEN` in a
   `#[cfg(test)]` weight setup), is pre-existing and fires identically on `main`; it stops the
   `cubarium-core` lib-test lint on both sides, so both runs cover the same targets.
-- The merge was performed in a detached worktree of this branch under the task's scratch
-  directory and fast-forwarded into `.claude/worktrees/tachyon-screen`, because GS-1b holds
-  uncommitted edits to `crates/cubarium/src/runner/mod.rs` there and `main` touches that file
-  too. GS-1b's working copy was re-applied over the merged file by three-way merge and is
-  unstaged, untouched, exactly as it was found. The main checkout was never written to.
+- The merge was performed in a detached worktree of `b3a1481` under the task's scratch
+  directory, because GS-1b held **uncommitted** edits to `crates/cubarium/src/runner/mod.rs`
+  in `.claude/worktrees/tachyon-screen` and `main` touches that file too — `git merge` refuses
+  outright when a file it must write has local changes, and taking that file out from under
+  another worker to get past it is not an option. By the time the SYNC-1 line was ready GS-1b
+  had committed (`fca9980`, `54745a0`), so the two lines met in an ordinary merge (`de16e69`)
+  rather than a fast-forward. The only file both touched is `runner/mod.rs`; the two hunks do
+  not overlap — `main`'s motor-contract check in `seed_neural_animals`, GS-1b's `--sink gpu`
+  arm and per-frame `observe_view` — and both are present. `cargo check --workspace --exclude
+  cubarium-gpu --all-targets` is clean on the integrated tree. **The main checkout
+  `/home/wrysk/wryskware/cubarium` was never written to**; `main` was read through a detached
+  worktree under scratch, removed afterwards.
 - **`main` has moved on**: `a4ad52d` at the time of writing, four commits past the merge's
   second parent, all of them design documents and no change under `crates/`.
 
@@ -281,4 +288,8 @@ Nothing `main` added is a new *per-cell* vector sized at the cube — the only o
 | `b02524f` | the merge itself, with the eight resolutions |
 | `99e367d` | the cube proof against the new base: the fixture, its provenance, the comparator |
 | `94cb0d2` | schema 18 through the pins both branches held at 17, and the config-derived hashes re-recorded with their evidence |
-| this one | this report, and the plan's §4 note |
+| `96e66fc` | this report, and the plan's §4 note |
+| `de16e69` | the integration merge into `tachyon-screen`, which had moved two GS-1b commits on while SYNC-1 ran |
+
+(The numbers in §7 and §4 were measured on `96e66fc`, before GS-1b's two commits joined it;
+`de16e69` changes no file either of the tables above names.)
