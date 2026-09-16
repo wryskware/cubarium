@@ -1296,16 +1296,43 @@ fn agreement(facts: &[RunFacts], pred: impl Fn(&RunFacts) -> bool) -> (usize, us
 
 #[cfg(test)]
 mod agreement_tests {
-    /// The strict-majority threshold at every cell size the harness has run or could run:
-    /// 1 of 1, 2 of 3, 4 of 6 — and 2 of 2, where "at least half" would have accepted a tie.
+    use super::{RunFacts, agreement};
+
+    fn fact(seed: u64, arm: u32, ok: bool) -> RunFacts {
+        RunFacts {
+            seed,
+            arm,
+            skimmer_alive_final: u64::from(ok),
+            skimmer_births: u64::from(ok),
+            founder_forms_alive: 0,
+            top_form_share: 0.0,
+            alive_by_form: [0; 5],
+            founder_skimmer_mean_lifetime_seconds: 0.0,
+            skimmer_entered: 0,
+            skimmer_bin2_entered: 0,
+        }
+    }
+
+    /// Through the production function (Astra, round-5 review P3): a seed agrees on a strict
+    /// majority of its own runs — 1 of 1 (Y's arm 0), 2 of 3 (R's cell), 4 of 6 — and **not**
+    /// on 1 of 2, which "at least half" would have accepted as a tie.
     #[test]
     fn a_seed_agrees_on_a_strict_majority_of_its_own_runs() {
-        let needed = |of: usize| of / 2 + 1;
-        assert_eq!(needed(1), 1);
-        assert_eq!(needed(2), 2, "one of two is a tie, not a majority");
-        assert_eq!(needed(3), 2, "R's 2 of 3");
-        assert_eq!(needed(4), 3);
-        assert_eq!(needed(6), 4);
+        let pred = |f: &RunFacts| f.skimmer_alive_final >= 1 && f.skimmer_births > 0;
+        // One run per seed: the run decides (Y's arm-0 cell).
+        let one = [fact(1, 0, true), fact(2, 0, false)];
+        assert_eq!(agreement(&one, pred), (1, 1));
+        // Two runs per seed: one of two is a tie, not a majority.
+        let two = [fact(1, 0, true), fact(1, 1, false), fact(2, 0, true), fact(2, 1, true)];
+        assert_eq!(agreement(&two, pred), (3, 1), "seed 1 tied 1/2 and must not agree");
+        // Three runs per seed: R's "at least 2 of its 3 arms".
+        let three = [fact(1, 0, true), fact(1, 1, true), fact(1, 2, false), fact(2, 0, true), fact(2, 1, false), fact(2, 2, false)];
+        assert_eq!(agreement(&three, pred), (3, 1));
+        // Six runs per seed: four are needed, three are not.
+        let mut six: Vec<RunFacts> = (0..6).map(|a| fact(1, a, a < 3)).collect();
+        assert_eq!(agreement(&six, pred), (3, 0), "3 of 6 is a tie");
+        six[3] = fact(1, 3, true);
+        assert_eq!(agreement(&six, pred), (4, 1));
     }
 }
 

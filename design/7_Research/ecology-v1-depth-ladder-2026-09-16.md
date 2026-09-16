@@ -552,10 +552,12 @@ Skimmer margin **rate** (e/s), pooled over each cell:
 | baseline | 0.55 | 30 | −0.003056 | 194 | +0.001485 |
 | baseline | 0.75 | 30 | −0.002872 | 219 | **+0.001797** |
 
-**The founder's rate falls monotonically with height in both configurations,
-and the descendant's rises in both.** The rescue is a descendant phenomenon
-everywhere, and it is bought with a founder that earns less per second the
-higher it is put. R's finding that the *founder lifetime* effect is
+**The founder's rate is lower off the rim than on it in both configurations,
+and the descendant's is higher — neither monotonically** (the `baseline`
+founder is less negative at 0.75 than at 0.55; the descendant's rate dips at
+one rung in `fast-leaf` and goes negative at 0.30 in `baseline`). The rescue
+is a descendant phenomenon everywhere, and it is bought with a founder that
+earns less per second off the rim than on it. R's finding that the *founder lifetime* effect is
 configuration-dependent and opposite in sign stands — `baseline` 575 → 372 s
 against `fast-leaf` 617 → 1,846 s — but it is not a sign change in the
 founder's margin rate. What differs is the founder's **income**: the
@@ -564,9 +566,11 @@ eats 43× more leaf and lives three times as long on a thinner per-second
 margin, while the `baseline` founder's total margin stays negative
 (−0.24 → −1.10 e) because there is no leaf at its new height to buy.
 
-That is the measurement R said it could not make, and it **corrects R's
-sentence** in one respect: the founder's per-second economics get worse with
-height in both worlds, not better in one of them.
+That is the measurement R said it could not make. R disclosed that its pooled
+ledger could not separate founders from descendants and called its founder
+mechanism a reading, so this **refines** R's record rather than correcting a
+sign claim: the founder's per-second economics are worse off the rim in both
+worlds, and the configuration-dependent lifetime effect is income, not rate.
 
 ## What this campaign found that it was not asked to: the apex-arm treatment matters
 
@@ -708,10 +712,12 @@ where it is weakest. 72 more runs at arm 2 would say whether any rung is
 acceptable in the world the cube actually runs, and would cost the same 4.2
 wall minutes. It is named here and **not** launched.
 
-Beyond that, the ladder's answer points away from the genome: if the question
-is "can a fourth guild be fed without taking the leaf", the measurement above
-says no height does it, and the remaining lever is the world — a wet-floor
-producer — which is a food-web decision and not this workstream's.
+Beyond that, the ladder's answer points away from the genome: at no tested
+height does the skimmer lineage establish on litter, and where it establishes
+its diet overlaps the grazer's foliage. Whether that overlap is the grazer's
+cost was not isolated. The levers that remain are the world's — Astra's
+"three viable heights and four kinds", or a wet-floor producer as one
+candidate — which are food-web decisions and not this workstream's.
 
 ## Stop
 

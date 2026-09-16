@@ -22,7 +22,7 @@ this is the reading across them and the decisions it supports.
 | --- | --- | --- | ---: | ---: | --- |
 | X | [turn deadband](../handoffs/ecology-v1-turn-deadband-opus-2026-09-16.md) | Opus 5, high | 17 s replay + 140 s training | 5.1 MiB | `16f94c2` (+ `997fb24`) |
 | Y | [depth ladder](../handoffs/ecology-v1-depth-ladder-opus-2026-09-16.md) | Opus 5, medium | 254 s | 0.8 MiB | `80a3b20` |
-| Z | [grazed opening](../handoffs/ecology-v1-grazed-opening-opus-2026-09-16.md) | Opus 5, high | — | — | in flight |
+| Z | [grazed opening](../handoffs/ecology-v1-grazed-opening-opus-2026-09-16.md) | Opus 5, high | 304 s | 6.5 MiB | `261240a` |
 
 Fable's verification at each merge: the crate suites on the branch; a re-run
 of the campaign with the branch's binary compared field for field against
@@ -184,17 +184,93 @@ one run per seed, 5 of 6 seeds binds); R's clauses F and D carried unrepaired
 and unread by the acceptance, for comparability; served quantities recorded
 for every form.
 
-## Z — the coupled grazed opening
+## Z — the coupled grazed opening: S's first-hour transient is removed, the founder gains reproduce, and 96,000 reads "better target" in both configurations
 
-In flight. Brief: `World::remove_all_animals` with its material booked out
-exactly; `precondition --stage grazed` (ordinary coupled burn-in to 48,000 /
-96,000 / 180,000, remove the population, found the identical roster, S's
-180,000-tick comparison); three openings compared (status quo, plant-only
-48,000, coupled-grazed) with absolute foliage and the standing crop beside
-S's measures; frames at founding and one hour; a pre-registered reading rule;
-no §11 change proposed.
+[Note](ecology-v1-grazed-opening-2026-09-16.md) ·
+[pre-registration](ecology-v1-grazed-opening-preregistration-2026-09-16.md)
+(committed before the operator, the tests or a row existed) · merged at
+`261240a`. `World::remove_all_animals` removes every organism and neural
+entry, refuses by name when an extension holds bodies (hunter members, quiet
+pauses, dormant apexes, paired gestations or parentage), and books the
+removed bodies' `Organism::material()` (escrow included, so the identity
+holds for a gestating body) as a negative on `external_material_in` — the
+mirror of `found_roster`'s booking, no new field; the bodies' energy is
+reported (55–82 units per removal) and booked nowhere, stated as a limit.
+Six tests in `found_roster.rs`. `precondition --stage grazed` runs the
+ordinary coupled world to the declared ages, empties a clone at each,
+founds the identical roster, saves and re-decodes the opening, and then
+re-runs its own burn-in for the arm so the measured chain stays
+snapshot-free; five tests in `precondition_measures.rs`. Fable's
+verification: 573 core and 295 search on the branch; the whole campaign
+re-run with the branch's binary reproduces all 48 arm rows field for field
+(matched by configuration, seed and age; the workers write rows in
+completion order) and all 12 burn-ins but for the snapshot's byte length,
+whose header carries the build id; 586/321/599/101/93 on the merged tree.
 
-## What this does and does not establish (X and Y; Z pending)
+**The declared deviation.** The brief asked for S's `Evaluation` row shape;
+that is unreachable without editing `evaluate.rs`, which the brief forbade,
+so Z declared it in the pre-registration and wrote its own recorder from the
+shared public definitions, checked measure for measure against S's on the
+twelve status-quo rows (204 of 204 exact). The `Evaluation`-only measures
+(spatial windows, census, margins, the four-way depleted-cell reading) are
+not reported. **Reproductions:** 12 of 12 status-quo rows carry S's retained
+state and ecology hashes across the schema-17 predicate change (arm 0, no
+predator); 36 of 36 founding hashes equal the independently saved openings;
+residuals ≤ 9e−10.
+
+| `fast-leaf` opening | opening ΣP | bred /24 | lineages | evenness | pop | forms | late ΣP (abs) | late ÷ opening |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| status quo | 107 | 14.8 | 7.3 | 0.64 | 62 | 3.0 | 226 | 2.11 |
+| plant-only 48,000 (S) | 401 | 24.0 | 11.7 | 0.70 | 58 | 3.2 | 228 | 0.57 |
+| coupled-grazed 48,000 | 204 | 20.2 | 11.5 | 0.66 | 65 | 3.0 | 228 | 1.12 |
+| coupled-grazed 96,000 | 221 | 22.3 | 13.2 | 0.69 | 64 | 3.2 | 230 | 1.04 |
+| coupled-grazed 180,000 | 229 | 23.3 | 12.7 | 0.70 | 65 | 3.5 | 229 | 1.00 |
+
+**The denominator, settled.** Every arm of every opening ends at 222–248
+absolute foliage — S's grazed standing crop from a third direction — so
+S's 2.31 and 0.63 were the same late field over openings 3.7× apart. **The
+first hour:** the status quo greens by +117 % of its opening, the plant-only
+opening browns by −40 %, the coupled-grazed openings move by −13 % to +9 %.
+S's transient is not inverted; it is removed. Terminal starved cells on the
+common §11 reference stay near the status quo at every coupled age (10.8 →
+19.5 against S's plant-only 180,000 at 82.7), which is S §4.2's recycling
+mechanism seen from the other side. **By kind:** grazer founders breeding
+0.3 → 10 of 10 and first broods at the 3,001-tick floor in 6 of 6 seeds,
+S's gains from a different opening; two costs S's opening did not have —
+the skimmer founders fall to 1.3–3.5 of 5 at 48,000 and 96,000 (the burn-in
+grazes the wet band down; the frames show it) and recover only at 180,000,
+and founder broods fall in nearly every paired seed while lineages, forms
+and population rise (descendants carry the population). Not scored: the
+baseline status quo loses one seed's whole herbivore guild; 0 of 36
+coupled-grazed arms lose one.
+
+**Reading, by the pre-registered rule** (founder gains ∧ opening within 20 %
+of the late field ∧ starved cells within noise): `fast-leaf` reads *better
+target* at 96,000 and *not* at 48,000 and 180,000 (starved-cell excesses of
++1.3 and +2.2 cells against a tight sd of 1.33); `baseline` reads *better
+target* at 96,000 and 180,000 and *not* at 48,000 (one grazer founder in one
+seed against an equality clause). **The one age both agree on is 96,000.**
+Z applied the rule as written and says where it reads badly: clause 3's
+baseline tolerance is manufactured by one seed's guild collapse, and the
+rule has no clause for the two costs found. **No §11 change and no
+`producer.initial_fraction` change is proposed.** Its "Neither" is
+strengthened by the frames: the field's total is stationary while its
+*spatial* pattern is not (the wet band's reeds are eaten off in every
+column), so a §11 rule reproducing the grazed *total* would still not
+reproduce the grazed *field* — Astra's "no uniform total", seen.
+
+**Cost of adoption, measured:** a coupled burn-in runs at ~6,700 ticks/s
+per core, about 1.3× the plant-only prefix, so preconditioning coupled is
+not materially dearer than S's option; at 96,000 ticks that is about 15 s
+per core before a fresh world can be shown.
+
+**Frames:** `assets/ecology-v1-grazed-opening-2026-09-16.png`, three
+openings × two configurations × (founding, +1 h), seed 1001, Front face,
+through the real presenter. At the founding the coupled-grazed reed bed is
+visibly thinner than the plant-only one; an hour later all three are much
+alike.
+
+## What this does and does not establish
 
 - The turn band is not where frozen weights lose residence (replay: on-food
   and `t_min` flat, dwell shorter). Whether a released band lets training
@@ -207,6 +283,15 @@ no §11 change proposed.
   apex-arm treatment matters for `fast-leaf`.
 - Sixteen pairs' sufficiency remains untested; the split-half spread is
   reported, not concluded on.
+- A coupled-grazed opening at 96,000 ticks gives S's founder gains without
+  S's first-hour browning, at near the status quo's starved-cell count, at
+  about 15 s per core; it costs the skimmer founders at the shorter ages
+  and founder broods everywhere, and its reading rule was pre-registered but
+  has no clause for either cost. Whether the opening is worth its
+  computation, and whether a visibly thinner reed bed at founding is what
+  Wrysk wants to see, are his; nothing in §11 changes.
+- Z could not use S's row shape and wrote its own recorder; the
+  `Evaluation`-only measures are absent from its rows.
 
 ## Next recommendation (Fable, pending Astra)
 
@@ -223,5 +308,11 @@ no §11 change proposed.
    under the half-space and the predicate contrast reported at 0.10 and
    0.55; an acceptable rung would be a candidate for held-out confirmation,
    not a roster decision from six training seeds.
-3. **Z** lands and is read by its rule.
+3. **Z has landed.** *What we would tell Wrysk:* a coupled-grazed opening at
+   96,000 ticks is the first §11 alternative that reproduces S's founder
+   gains without its transient, and the frames show what it looks like; it
+   is not proposed as a change, and if he wants it, it is a declared opening
+   age on a fresh world, at about 15 s per core, with the skimmer and
+   founder-brood costs stated. A held-out-seed confirmation at 96,000 would
+   precede any adoption.
 4. The motor decision remains Wrysk's, on the terms in the round-4 result.
