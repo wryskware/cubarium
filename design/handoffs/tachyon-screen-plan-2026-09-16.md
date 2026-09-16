@@ -210,3 +210,18 @@ FW-A now also evaluates the world resolution (480×270, 640×360, 960×540,
 1920×1080) against six A55 cores, the art re-bake path and its scale
 constants, and a bounded first-version biome/terrain package separable from
 the topology work.
+
+### Note: the GPU as the escalation path (2026-09-16)
+
+The board has an Adreno 643 (608 MHz) with Qualcomm's proprietary GLES 2/3,
+EGL, Vulkan and OpenCL userspace on `/dev/kgsl-3d0` (packages `adreno-gles`,
+`adreno-vulkan`), and Mesa 21.2 beside it. So GPU rendering is available
+headless. The first flat world stays on the CPU rasterizer because it is
+deterministic and byte-pinned by tests, and because FW-0 has not yet measured
+the CPU cost on the A78 cluster. If the measured budget does not fit, or when
+the panel-resolution real estate wants effects the sim raster cannot carry,
+the lever is a hybrid: sim and sprite stamping on the CPU at world resolution,
+the daemon (or a presenter stage) doing upscale, rotation and post-effects on
+the GPU at panel resolution (EGL surfaceless, render into a dma-buf imported
+into KMS; a pbuffer + readback is the fallback). Wrysk reserves the Hexagon
+NPU for organism networks or voice.
