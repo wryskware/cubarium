@@ -68,6 +68,11 @@ pub struct Cli {
     pub command: Command,
 }
 
+// One parsed command line exists once per process and is moved once, so the 208-byte
+// difference between the two variants costs nothing worth an indirection — and the
+// indirection clippy suggests is not available here: `#[derive(Subcommand)]` requires each
+// variant's field to implement `clap::Args`, which `Box<Run>` does not.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Run the M1 geometry fixtures.
@@ -390,11 +395,11 @@ impl Run {
         // request. `--neural-count` without `--neural` is harmless and stays accepted.
         anyhow::ensure!(self.neural_count >= 1, "--neural-count must be at least 1");
         check_fps(self.fps)?;
-        check_preview_topology(self.topology(), self.sink == RunSinkArg::Preview)?;
-        check_world_scale(self.topology(), self.world_scale)?;
         // A world's shape belongs to the world, and `--fresh` is the only moment a run
         // chooses one. Refused rather than ignored on a resume: silently dropping it would
-        // leave the operator believing they had asked for a ring and got one.
+        // leave the operator believing they had asked for a ring and got one. Checked
+        // before the two shape checks below, because "you cannot ask for a shape here at
+        // all" is the more useful thing to be told than which shape is wrong.
         if (self.topology.is_some() || self.world_scale.is_some()) && self.require_resume {
             anyhow::bail!(
                 "--topology and --world-scale describe a world to create, and \
@@ -402,6 +407,8 @@ impl Run {
                  its snapshot records."
             );
         }
+        check_preview_topology(self.topology(), self.sink == RunSinkArg::Preview)?;
+        check_world_scale(self.topology(), self.world_scale)?;
         Ok(())
     }
 }
@@ -418,6 +425,25 @@ impl Demo {
         check_fps(self.fps)?;
         check_preview_topology(Some(self.topology.0), self.sink == SinkArg::Preview)?;
         check_world_scale(Some(self.topology.0), Some(self.world_scale))?;
+        // The M1 fixtures are cube geometry, not a world: `Scenes` builds the patch
+        // scene's `ScalarField` at the cube's 1,280 cells and deposits into it through
+        // `Topology::Cube`, while the substrate pass reads the cells of the canvas it is
+        // drawing on. On a ring those disagree and the pass indexes past the field — a
+        // panic, which is never an acceptable answer to a command line. `body` and
+        // `vertex` carry no field and do draw on a ring, so only the two field-bearing
+        // scenes are refused, by name, until the fixtures are built from a topology.
+        if matches!(self.topology.0, Topology::Ring { .. })
+            && matches!(self.scene, SceneArg::Patch | SceneArg::All)
+        {
+            anyhow::bail!(
+                "--scene {:?} is a cube fixture: its patch field is built at the cube's \
+                 1,280 cells, so it cannot be drawn on a ring. Use --scene body or \
+                 --scene vertex for a ring fixture, or `cubarium run --fresh --topology \
+                 {} --sink png` to capture a real ring world.",
+                self.scene,
+                self.topology
+            );
+        }
         self.topology
             .0
             .validate(Scale::new(self.world_scale))
@@ -693,5 +719,196 @@ mod tests {
         assert_eq!(SceneKind::from(SceneArg::Vertex), SceneKind::Vertex);
         assert_eq!(SceneKind::from(SceneArg::Patch), SceneKind::Patch);
         assert_eq!(SceneKind::from(SceneArg::All), SceneKind::All);
+    }
+}
+
+#[cfg(test)]
+mod topology_tests {
+    use super::*;
+    use clap::Parser;
+    use std::str::FromStr;
+
+    fn parse_run<const N: usize>(args: [&str; N]) -> Run {
+        match Cli::parse_from(args).command {
+            Command::Run(r) => r,
+            other => panic!("expected a run command, got {other:?}"),
+        }
+    }
+
+    fn parse_demo<const N: usize>(args: [&str; N]) -> Demo {
+        match Cli::parse_from(args).command {
+            Command::Demo(d) => d,
+            other => panic!("expected a demo command, got {other:?}"),
+        }
+    }
+
+    /// `ring:WxH` on the command line, `{ Ring = { w, h } }` in the config file: two
+    /// spellings of one value, and the flag's own spelling round-trips through `Display`
+    /// so a refusal can quote back what was typed.
+    #[test]
+    fn the_topology_flag_spells_a_ring_as_the_panel_is_spelled() {
+        assert_eq!(TopologyArg::from_str("cube").unwrap().0, Topology::Cube);
+        assert_eq!(TopologyArg::from_str("CUBE").unwrap().0, Topology::Cube);
+        assert_eq!(
+            TopologyArg::from_str("ring:320x180").unwrap().0,
+            Topology::Ring { w: 320, h: 180 }
+        );
+        assert_eq!(
+            TopologyArg::from_str(" ring:1920X1080 ").unwrap().0,
+            Topology::Ring { w: 1920, h: 1080 }
+        );
+        for bad in ["", "ring", "ring:320", "ring:320x", "ring:0x180 extra", "sphere:1x1",
+                    "ring:65536x180", "ring:-1x180", "ring:320x180x2"] {
+            assert!(TopologyArg::from_str(bad).is_err(), "`{bad}` must not parse");
+        }
+        for text in ["cube", "ring:320x180", "ring:640x360"] {
+            assert_eq!(TopologyArg::from_str(text).unwrap().to_string(), text);
+        }
+    }
+
+    /// The flags reach `Run`, and a run that names neither leaves the world's shape to the
+    /// config file exactly as before.
+    #[test]
+    fn a_fresh_run_takes_the_topology_and_the_scale_from_the_command_line() {
+        let r = parse_run(["cubarium", "run"]);
+        assert_eq!(r.topology(), None, "no --topology means the config file decides");
+        assert_eq!(r.scale(), None);
+
+        let r = parse_run([
+            "cubarium", "run", "--fresh", "--sink", "none", "--speed", "0",
+            "--topology", "ring:640x360", "--world-scale", "2",
+        ]);
+        assert_eq!(r.topology(), Some(Topology::Ring { w: 640, h: 360 }));
+        assert_eq!(r.scale(), Some(Scale::new(2.0)));
+        r.validate().expect("a fresh ring at S = 2 is well formed");
+    }
+
+    /// The preview window is two pictures of a cube. Refused at argument validation as
+    /// well as at the sink's own construction, so the operator is told about the spelling
+    /// they typed rather than about a sink they did not name.
+    #[test]
+    fn the_preview_window_is_refused_for_a_ring_on_both_commands() {
+        let err = parse_run([
+            "cubarium", "run", "--fresh", "--sink", "preview", "--topology", "ring:320x180",
+        ])
+        .validate()
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("cannot show a ring world (320x180)"), "{err}");
+        assert!(err.contains("--sink web"), "the refusal must name what to use instead: {err}");
+        assert!(err.contains("--sink png"), "{err}");
+
+        let err = parse_demo(["cubarium", "demo", "--topology", "ring:320x180"])
+            .validate()
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("cannot show a ring world"), "preview is the demo default: {err}");
+
+        // And a cube preview is untouched on both.
+        parse_run(["cubarium", "run", "--sink", "preview"]).validate().unwrap();
+        parse_demo(["cubarium", "demo"]).validate().unwrap();
+    }
+
+    /// The cube is pinned to `S = 1`: its 32-pixel local radius and 9-pixel stamp budget
+    /// are completeness proofs about a 64-pixel chart, not tunables.
+    #[test]
+    fn a_scale_other_than_one_needs_a_ring() {
+        let err = parse_run(["cubarium", "run", "--fresh", "--world-scale", "2"])
+            .validate()
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("needs a ring"), "{err}");
+        assert!(err.contains("pinned to scale 1"), "{err}");
+
+        let err = parse_run([
+            "cubarium", "run", "--fresh", "--topology", "cube", "--world-scale", "1.5",
+        ])
+        .validate()
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("needs a ring"), "{err}");
+
+        // Spelled with `=`, as the contract's other negative values are: bare `-1` reads
+        // as a flag.
+        for bad in ["--world-scale=0", "--world-scale=-1", "--world-scale=nan",
+                    "--world-scale=inf"] {
+            let r = parse_run([
+                "cubarium", "run", "--fresh", "--sink", "none", "--speed", "0",
+                "--topology", "ring:320x180", bad,
+            ]);
+            assert!(r.validate().is_err(), "{bad}");
+        }
+        // The documented pair does parse and validate. `--sink none --speed 0` because
+        // `run`'s default sink is the preview window, which a ring is refused from.
+        parse_run([
+            "cubarium", "run", "--fresh", "--sink", "none", "--speed", "0",
+            "--topology", "ring:320x180", "--world-scale", "1",
+        ])
+        .validate()
+        .unwrap();
+    }
+
+    /// A world's shape is chosen when it is created. Asking for one *and* demanding a
+    /// resume asks for two different things, so it is refused rather than one of them
+    /// being quietly dropped.
+    #[test]
+    fn a_shape_cannot_be_asked_for_alongside_a_required_resume() {
+        let err = parse_run([
+            "cubarium", "run", "--require-resume", "--sink", "none", "--speed", "0",
+            "--topology", "ring:320x180",
+        ])
+        .validate()
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("--require-resume"), "{err}");
+        let err = parse_run(["cubarium", "run", "--require-resume", "--world-scale", "2"])
+            .validate()
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("--require-resume"), "{err}");
+    }
+
+    /// The demo's two field-bearing fixtures are cube geometry and would index past a
+    /// cube-sized field on a ring; the two that carry no field draw there.
+    #[test]
+    fn the_demos_field_bearing_fixtures_are_refused_on_a_ring() {
+        for scene in ["patch", "all"] {
+            let err = parse_demo([
+                "cubarium", "demo", "--sink", "png", "--seconds", "1", "--scene", scene,
+                "--topology", "ring:320x180",
+            ])
+            .validate()
+            .unwrap_err()
+            .to_string();
+            assert!(err.contains("cube fixture"), "{scene}: {err}");
+            assert!(err.contains("--scene body"), "{scene}: {err}");
+        }
+        for scene in ["body", "vertex"] {
+            parse_demo([
+                "cubarium", "demo", "--sink", "png", "--seconds", "1", "--scene", scene,
+                "--topology", "ring:320x180",
+            ])
+            .validate()
+            .unwrap_or_else(|e| panic!("{scene} has no field and draws on a ring: {e}"));
+        }
+        // And every scene is still fine on a cube.
+        for scene in ["body", "vertex", "patch", "all"] {
+            parse_demo(["cubarium", "demo", "--sink", "png", "--seconds", "1", "--scene", scene])
+                .validate()
+                .unwrap();
+        }
+    }
+
+    /// A ring the surface contract cannot accept is refused with the contract's own
+    /// message rather than panicking when the canvas is built.
+    #[test]
+    fn a_ring_the_geometry_refuses_is_refused_on_the_command_line() {
+        // Not a whole number of 4-pixel cells.
+        let err = parse_demo(["cubarium", "demo", "--topology", "ring:321x180", "--sink", "png",
+                              "--seconds", "1", "--scene", "body"])
+            .validate()
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("--topology ring:321x180"), "{err}");
     }
 }

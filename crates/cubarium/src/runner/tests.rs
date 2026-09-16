@@ -2,6 +2,7 @@ use super::care_runtime::*;
 use super::logging::*;
 use super::*;
 use crate::care_effects;
+use crate::cli::TopologyArg;
 use clap::Parser;
 use cubarium_core::Telemetry;
 use cubarium_core::care::{CareCommand, CareKind, CareTarget};
@@ -405,4 +406,124 @@ fn the_headless_digest_names_the_numbers_the_contract_asks_for() {
     ] {
         assert!(line.contains(part), "{line}");
     }
+}
+
+// --- the ring world through the runner ------------------------------------------------
+
+fn ring_scratch(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "cubarium-fw4-{name}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    dir
+}
+
+/// A ring world runs the whole host loop — canvas, encode, sink — and what lands on disk
+/// is the raster at its own size, not the cube's 256×128 net. The end-to-end statement
+/// that `Canvas::new(topo, scale)`, `encode_raster` and `Output::Ring` are wired together.
+#[test]
+fn a_fresh_ring_world_renders_and_captures_at_its_own_size() {
+    for (spec, scale, w, h) in [("ring:320x180", "1", 320u32, 180u32), ("ring:640x360", "2", 640, 360)] {
+        let state = ring_scratch("ring-run-state");
+        let out = ring_scratch("ring-run-out");
+        let run = Run::parse_from([
+            "cubarium", "--fresh", "--seed", "1", "--sink", "png", "--speed", "20",
+            "--seconds", "3", "--every", "10000", "--fps", "30",
+            "--topology", spec, "--world-scale", scale,
+            "--state", state.to_str().unwrap(), "--out", out.to_str().unwrap(),
+        ]);
+        run.validate().expect("a fresh ring capture run is well formed");
+        let outcome = run_world(&run).expect("the ring world runs");
+        assert_eq!(outcome.config.topology, cubarium_surface::Topology::Ring {
+            w: w as u16,
+            h: h as u16
+        });
+        assert!(outcome.frames > 0, "{spec}: the loop must have rendered");
+        assert_eq!(outcome.population, 24, "{spec}: the founders are alive");
+
+        // The PNG's own header is the evidence: a cube capture would say 256x128.
+        let png = std::fs::read(out.join("final.png")).expect("a final capture");
+        assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+        assert_eq!(&png[12..16], b"IHDR");
+        assert_eq!(u32::from_be_bytes(png[16..20].try_into().unwrap()), w, "{spec} width");
+        assert_eq!(u32::from_be_bytes(png[20..24].try_into().unwrap()), h, "{spec} height");
+        assert_eq!(png[24], 8, "8 bits per channel");
+        assert_eq!(png[25], 2, "truecolour RGB, as the cube capture is");
+
+        let _ = std::fs::remove_dir_all(&state);
+        let _ = std::fs::remove_dir_all(&out);
+    }
+}
+
+/// A world's shape is fixed when it is created. `merge_operational` carries `capacity` and
+/// `weather.moving` out of a `--config` and nothing else, so a topology that disagreed with
+/// the snapshot would otherwise be silently ignored — the operator would believe they had
+/// asked for a ring and be watching a cube.
+#[test]
+fn a_resume_refuses_a_topology_the_snapshot_does_not_have() {
+    let state = ring_scratch("resume-topology");
+    let out = ring_scratch("resume-topology-out");
+    let base = ["cubarium", "--seed", "1", "--sink", "none", "--speed", "0", "--seconds", "2"];
+    let mut fresh = Run::parse_from(base);
+    fresh.fresh = true;
+    fresh.state = state.clone();
+    fresh.out = out.clone();
+    fresh.topology = Some(TopologyArg(cubarium_surface::Topology::Ring { w: 320, h: 180 }));
+    let first = run_world(&fresh).expect("a fresh ring world");
+    assert!(first.final_tick > 0);
+
+    // The same directory, resumed as a cube: refused by name, and the snapshot is named too.
+    let mut resume = Run::parse_from(base);
+    resume.state = state.clone();
+    resume.out = out.clone();
+    resume.topology = Some(TopologyArg(cubarium_surface::Topology::Cube));
+    let err = format!("{:#}", run_world(&resume).expect_err("a cube resume of a ring world"));
+    assert!(err.contains("this world is a ring world"), "{err}");
+    assert!(err.contains("asked for a cube world"), "{err}");
+    assert!(err.contains("--fresh"), "the refusal must say what to do instead: {err}");
+
+    // Resumed as what it is, it carries on from where it stopped.
+    let mut again = Run::parse_from(base);
+    again.state = state.clone();
+    again.out = out.clone();
+    again.topology = Some(TopologyArg(cubarium_surface::Topology::Ring { w: 320, h: 180 }));
+    let second = run_world(&again).expect("a ring resume of a ring world");
+    assert_eq!(second.start_tick, first.final_tick, "it resumed where it left off");
+
+    // And a resume that names no topology at all is unchanged: it takes the snapshot's.
+    let mut silent = Run::parse_from(base);
+    silent.state = state.clone();
+    silent.out = out.clone();
+    let third = run_world(&silent).expect("a resume that names no shape");
+    assert_eq!(third.config.topology, cubarium_surface::Topology::Ring { w: 320, h: 180 });
+
+    let _ = std::fs::remove_dir_all(&state);
+    let _ = std::fs::remove_dir_all(&out);
+}
+
+/// `--neural`'s constants are all a cube's — one copy per face, cell (8, 8) of a 16×16
+/// chart — so it is refused on a ring rather than seeding five animals into one corner.
+#[test]
+fn seeding_trained_animals_is_refused_on_a_ring() {
+    let mut run = Run::parse_from(["cubarium"]);
+    run.neural = Some(PathBuf::from("/nonexistent/policy.json"));
+    let config = WorldConfig {
+        topology: cubarium_surface::Topology::Ring { w: 320, h: 180 },
+        ..WorldConfig::default()
+    };
+    let mut ring = World::new(config).expect("a legal ring world");
+    let err = format!("{:#}", seed_neural_animals(&run, &mut ring).unwrap_err());
+    assert!(err.contains("this world is a ring"), "{err}");
+    assert!(err.contains("--neural"), "{err}");
+
+    // On a cube the refusal is not reached: the missing policy file is, which is the
+    // error this run should get.
+    let mut cube = World::new(WorldConfig::default()).expect("a legal cube world");
+    let err = format!("{:#}", seed_neural_animals(&run, &mut cube).unwrap_err());
+    assert!(err.contains("/nonexistent/policy.json"), "{err}");
 }
