@@ -16,7 +16,7 @@ layout(location = 5) in vec4  iWeights;
 layout(location = 6) in vec4  iBend;       // amplitude, base, root, length
 layout(location = 7) in vec4  iMask;       // floor, reveal, flags, opacity
 layout(location = 8) in vec4  iTone;       // colour.rgb, mix
-layout(location = 9) in vec2  iShade;      // floor, reference
+layout(location = 9) in vec4  iShade;      // shade floor, reference, scale, source
 
 layout(location = 0) flat out vec4  vPlace;      // the snapped anchor, then the heading
 layout(location = 1) flat out uvec4 vFrames01;
@@ -26,7 +26,7 @@ layout(location = 4) flat out vec4  vWeights;
 layout(location = 5) flat out vec4  vBend;
 layout(location = 6) flat out vec4  vMask;
 layout(location = 7) flat out vec4  vTone;
-layout(location = 8) flat out vec2  vShade;
+layout(location = 8) flat out vec4  vShade;
 
 void main() {
     vec2 pivot = vec2(iSizePivot.zw);
@@ -36,6 +36,8 @@ void main() {
     float pad = abs(iBend.x) + 1.0;
     vec2 lo = vec2(-pivot.x - pad, -pivot.y - 1.0);
     vec2 hi = vec2(tile.x - pivot.x + pad, tile.y - pivot.y + 1.0);
+    // The stamp's own scale (1, or 0.7 for a juvenile) multiplies the world's S.
+    float stampScale = u.grid.z * max(iShade.z, 1e-3);
     vec2 corner = vec2((gl_VertexIndex & 1) == 0 ? lo.x : hi.x,
                        (gl_VertexIndex & 2) == 0 ? lo.y : hi.y);
 
@@ -43,7 +45,7 @@ void main() {
     // Everything else follows from that, including the S x S blocks in the fragment.
     vec2 anchor = floor(iAnchor) + 0.5;
     vec2 side = vec2(-iHeading.y, iHeading.x);
-    vec2 px = anchor + u.grid.z * (corner.x * iHeading + corner.y * side);
+    vec2 px = anchor + stampScale * (corner.x * iHeading + corner.y * side);
 
     vPlace = vec4(anchor, iHeading);
     vFrames01 = iFrames01;

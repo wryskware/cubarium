@@ -42,7 +42,7 @@ pub mod synthetic;
 pub mod target;
 pub mod vk;
 
-pub use adapter::{PoseRef, Stamp, StampMask, StampTone};
+pub use adapter::{PoseRef, ScratchFrame, Stamp, StampMask, StampTone};
 pub use atlas::{Atlas, Clip, FrameRect, PlantClip};
 pub use render::{FrameTiming, PresentTransform, Renderer, TargetImage};
 pub use scene::{

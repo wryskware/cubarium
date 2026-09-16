@@ -10,6 +10,9 @@
 // smoother breeze at S >= 2.
 
 layout(set = 0, binding = 3) uniform sampler2D atlas;
+// The per-frame page the Lanternjaw's freshly rasterised parts are uploaded into,
+// already premultiplied and already linear (see `SOURCE_SCRATCH`).
+layout(set = 0, binding = 4) uniform sampler2D scratch;
 
 layout(location = 0) flat in vec4  vPlace;
 layout(location = 1) flat in uvec4 vFrames01;
@@ -19,7 +22,7 @@ layout(location = 4) flat in vec4  vWeights;
 layout(location = 5) flat in vec4  vBend;
 layout(location = 6) flat in vec4  vMask;
 layout(location = 7) flat in vec4  vTone;
-layout(location = 8) flat in vec2  vShade;
+layout(location = 8) flat in vec4  vShade;
 
 layout(location = 0) out vec4 outColour;
 
@@ -28,8 +31,12 @@ float unit(float v) { return clamp(v, 0.0, 1.0); }
 // One frame's premultiplied linear sample. The pack is straight sRGB + alpha, so the
 // premultiply happens after the sampler's decode -- exactly `Sprite::from_rgba`'s
 // `srgb_decode(c) * a`.
-vec4 frameAt(uvec2 origin, ivec2 texel, float weight) {
+vec4 frameAt(uvec2 origin, ivec2 texel, float weight, bool fromScratch) {
     if (weight <= 0.0) { return vec4(0.0); }
+    if (fromScratch) {
+        // Already premultiplied linear: the rig's rasteriser produced it that way.
+        return texelFetch(scratch, ivec2(origin) + texel, 0) * weight;
+    }
     vec4 t = texelFetch(atlas, ivec2(origin) + texel, 0);
     return vec4(t.rgb * t.a, t.a) * weight;
 }
@@ -43,7 +50,7 @@ void main() {
     // turns a half-ulp of interpolation error at a texel boundary into a whole wrong
     // texel; computing it here makes the coordinate a function of the pixel centre and
     // the instance alone, which every conformant implementation agrees on.
-    vec2 offset = (gl_FragCoord.xy - vPlace.xy) / u.grid.z;
+    vec2 offset = (gl_FragCoord.xy - vPlace.xy) / (u.grid.z * max(vShade.z, 1e-3));
     vec2 heading = vPlace.zw;
     vec2 vLocal = vec2(dot(offset, heading), dot(offset, vec2(-heading.y, heading.x)));
 
@@ -63,10 +70,11 @@ void main() {
         discard;
     }
 
-    vec4 rgba = frameAt(vFrames01.xy, texel, vWeights.x)
-              + frameAt(vFrames01.zw, texel, vWeights.y)
-              + frameAt(vFrames23.xy, texel, vWeights.z)
-              + frameAt(vFrames23.zw, texel, vWeights.w);
+    bool fromScratch = vShade.w > 0.5;
+    vec4 rgba = frameAt(vFrames01.xy, texel, vWeights.x, fromScratch)
+              + frameAt(vFrames01.zw, texel, vWeights.y, fromScratch)
+              + frameAt(vFrames23.xy, texel, vWeights.z, fromScratch)
+              + frameAt(vFrames23.zw, texel, vWeights.w, fromScratch);
 
     // `Mask`, in the sprite's own material coordinates so a reveal covers the same
     // material however the wind displaces it. Axial and strip read the row; radial reads

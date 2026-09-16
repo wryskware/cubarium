@@ -116,7 +116,7 @@ pub struct Fields {
 ///
 /// Every field is in the units the CPU presenter uses, so the adapter is a
 /// transcription rather than a translation. This is the layout the vertex buffer
-/// takes verbatim — `#[repr(C)]` and `Pod`, 112 bytes, ten vertex attributes.
+/// takes verbatim — `#[repr(C)]` and `Pod`, 120 bytes, ten vertex attributes.
 ///
 /// # Four frame slots, and why exactly four
 ///
@@ -179,6 +179,15 @@ pub struct SpriteInstance {
     pub shade_floor: f32,
     /// `Shade::reference`.
     pub shade_reference: f32,
+    /// A per-stamp multiplier on the world scale `S`, as `stamp_layers`'s own `scale`.
+    ///
+    /// 1 for everything except a juvenile body, which the CPU presenter draws at
+    /// `JUVENILE_SCALE = 0.7` (`present.rs`). That is the one stamp in the image whose
+    /// texels do **not** land on an `S × S` block, on either renderer: 0.7 is not a
+    /// whole number of pixels and no choice of sampler makes it one.
+    pub scale: f32,
+    /// Which texture the frames index: [`SOURCE_ATLAS`] or [`SOURCE_SCRATCH`].
+    pub source: f32,
 }
 
 /// The `mask_floor` of an unmasked or purely axial stamp.
@@ -190,6 +199,16 @@ pub const MASK_AXIAL: f32 = 0.0;
 /// [`SpriteInstance::mask_flags`] for `Mask::Radial`: the reveal is measured from the
 /// pivot outward instead of from the tile's bottom edge.
 pub const MASK_RADIAL: f32 = 1.0;
+/// [`SpriteInstance::source`]: the baked pack's atlas, straight sRGB + alpha.
+pub const SOURCE_ATLAS: f32 = 0.0;
+/// [`SpriteInstance::source`]: the per-frame scratch page, premultiplied linear RGBA16F.
+///
+/// The Lanternjaw is not a baked pack: `lanternjaw::Lanternjaw::parts_living` rasterises
+/// eight fresh `Sprite`s every frame from the rig's channels, so its texels cannot live
+/// in an atlas built at load. They are uploaded into a small page instead, in the
+/// premultiplied linear form the rasteriser already produced — no sRGB round trip, so a
+/// rig part is bit-exact rather than re-encoded.
+pub const SOURCE_SCRATCH: f32 = 1.0;
 
 impl Default for SpriteInstance {
     fn default() -> Self {
@@ -209,6 +228,8 @@ impl Default for SpriteInstance {
             tone_mix: 0.0,
             shade_floor: 1.0,
             shade_reference: 1.0,
+            scale: 1.0,
+            source: SOURCE_ATLAS,
         }
     }
 }
@@ -342,7 +363,8 @@ impl Scene {
         // Half the tile's diagonal plus the bend, in raster pixels: a bound on how
         // far from the anchor the stamp can paint.
         let tile = f32::from(instance.size[0].max(instance.size[1]));
-        let radius = (0.5 * tile + instance.bend[0].abs() + 1.0) * self.layout.scale as f32;
+        let radius = (0.5 * tile * instance.scale.max(1.0) + instance.bend[0].abs() + 1.0)
+            * self.layout.scale as f32;
         let list = &mut self.layers[layer as usize];
         list.push(instance);
         if instance.anchor[0] - radius < 0.0 {
@@ -405,7 +427,7 @@ mod tests {
 
     #[test]
     fn the_instance_is_a_plain_flat_record_the_vertex_buffer_can_take() {
-        assert_eq!(std::mem::size_of::<SpriteInstance>(), 112);
+        assert_eq!(std::mem::size_of::<SpriteInstance>(), 120);
         let _: &[u8] = bytemuck::bytes_of(&SpriteInstance::default());
     }
 }

@@ -34,7 +34,9 @@
 //! | `scale: f64` | the renderer's `S`; a stamp never carries its own |
 
 use crate::atlas::Atlas;
-use crate::scene::{MASK_AXIAL, MASK_RADIAL, NO_MASK_FLOOR, NO_MASK_REVEAL, SpriteInstance};
+use crate::scene::{
+    MASK_RADIAL, NO_MASK_FLOOR, NO_MASK_REVEAL, SOURCE_ATLAS, SOURCE_SCRATCH, SpriteInstance,
+};
 
 /// One pose of one clip at a weight: `cubarium_render`'s `(Pose, f32)`, with the two
 /// bracketing frames named by their index in [`Atlas::frames`].
@@ -73,6 +75,19 @@ pub struct StampTone {
     pub mix: f32,
 }
 
+/// One frame already uploaded into the renderer's per-frame scratch page: where a
+/// procedurally rasterised rig part lives, since it has no place in a baked atlas.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScratchFrame {
+    /// Where `Renderer::scratch_push` put it.
+    pub origin: [u16; 2],
+    /// Its size in texels.
+    pub size: [u16; 2],
+    /// Its pivot in texels, from the sprite's own `pivot()` — **not** assumed central,
+    /// because a rig part's pivot is wherever the rig hangs it from.
+    pub pivot: [u16; 2],
+}
+
 /// One call to `stamp_layers_bent_toned`, as data.
 #[derive(Clone, Debug)]
 pub struct Stamp {
@@ -88,6 +103,11 @@ pub struct Stamp {
     pub mask: StampMask,
     pub tone: Option<StampTone>,
     pub opacity: f32,
+    /// A per-stamp multiplier on the world scale, as `stamp_layers`'s own `scale`
+    /// argument. 1 everywhere but a juvenile body's 0.7 and a hunter rig's own scale.
+    pub scale: f32,
+    /// When set, the stamp draws this one scratch frame and [`Stamp::layers`] is ignored.
+    pub scratch: Option<ScratchFrame>,
 }
 
 impl Default for Stamp {
@@ -100,6 +120,8 @@ impl Default for Stamp {
             mask: StampMask::None,
             tone: None,
             opacity: 1.0,
+            scale: 1.0,
+            scratch: None,
         }
     }
 }
@@ -114,6 +136,23 @@ impl Stamp {
     /// twice inside `BODY_FADE_SECONDS`; the driver counts the occurrences so the
     /// report can say how often rather than guess.
     pub fn instance(&self, atlas: &Atlas) -> (SpriteInstance, usize) {
+        if let Some(frame) = self.scratch {
+            let mut instance = SpriteInstance {
+                anchor: self.anchor,
+                heading: self.heading,
+                frames: [frame.origin, [0, 0], [0, 0], [0, 0]],
+                size: frame.size,
+                pivot: frame.pivot,
+                weights: [1.0, 0.0, 0.0, 0.0],
+                bend: self.bend,
+                opacity: self.opacity,
+                scale: self.scale,
+                source: SOURCE_SCRATCH,
+                ..SpriteInstance::empty()
+            };
+            self.apply(&mut instance);
+            return (instance, 0);
+        }
         // Flatten every pose into (frame, weight), then keep the four heaviest. A pose
         // sitting exactly on a frame contributes one entry, not two, which is why an
         // idle plant and a fruiting one both fit.
@@ -155,6 +194,8 @@ impl Stamp {
             heading: self.heading,
             bend: self.bend,
             opacity: self.opacity,
+            scale: self.scale,
+            source: SOURCE_ATLAS,
             ..SpriteInstance::empty()
         };
         for (slot, (frame, weight)) in flat.iter().enumerate() {
@@ -166,6 +207,12 @@ impl Stamp {
             instance.frames[slot] = [rect.x, rect.y];
             instance.weights[slot] = weight * renormalise;
         }
+        self.apply(&mut instance);
+        (instance, dropped)
+    }
+
+    /// The mask and tone, which do not depend on where the frames came from.
+    fn apply(&self, instance: &mut SpriteInstance) {
         match self.mask {
             StampMask::None => {}
             StampMask::Axial { reveal } => {
@@ -187,16 +234,16 @@ impl Stamp {
             instance.shade_floor = tone.shade_floor;
             instance.shade_reference = tone.shade_reference;
         }
-        (instance, dropped)
     }
 }
 
 /// The unmasked sentinels, for a caller building an instance by hand.
-pub const NO_MASK: (f32, f32, f32) = (NO_MASK_FLOOR, NO_MASK_REVEAL, MASK_AXIAL);
+pub const NO_MASK: (f32, f32, f32) = (NO_MASK_FLOOR, NO_MASK_REVEAL, crate::scene::MASK_AXIAL);
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scene::MASK_AXIAL;
     use std::path::Path;
 
     fn atlas() -> Atlas {
@@ -256,11 +303,28 @@ mod tests {
     }
 
     #[test]
+    fn a_scratch_stamp_names_its_own_page_and_keeps_its_pivot() {
+        let atlas = atlas();
+        let (instance, dropped) = Stamp {
+            scratch: Some(ScratchFrame { origin: [17, 3], size: [11, 9], pivot: [2, 7] }),
+            scale: 0.75,
+            ..Default::default()
+        }
+        .instance(&atlas);
+        assert_eq!(dropped, 0);
+        assert_eq!(instance.source, SOURCE_SCRATCH);
+        assert_eq!((instance.frames[0], instance.size, instance.pivot), ([17, 3], [11, 9], [2, 7]));
+        assert_eq!(instance.weights, [1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(instance.scale, 0.75);
+    }
+
+    #[test]
     fn each_mask_lands_in_the_fields_the_shader_reads() {
         let atlas = atlas();
         let with = |mask| Stamp { mask, ..poses(&[(4, 4, 0.0, 1.0)]) }.instance(&atlas).0;
         let none = with(StampMask::None);
         assert_eq!((none.mask_floor, none.mask_reveal, none.mask_flags), NO_MASK);
+        assert_eq!(none.source, SOURCE_ATLAS);
         let axial = with(StampMask::Axial { reveal: 6.0 });
         assert_eq!((axial.mask_floor, axial.mask_reveal, axial.mask_flags), (NO_MASK_FLOOR, 6.0, MASK_AXIAL));
         let strip = with(StampMask::Strip { floor: 11.0, reveal: 15.0 });

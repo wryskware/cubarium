@@ -39,6 +39,9 @@ const SPRITE_VERT: &[u8] = include_bytes!("../shaders/sprite.vert.spv");
 const SPRITE_FRAG: &[u8] = include_bytes!("../shaders/sprite.frag.spv");
 const PRESENT_FRAG: &[u8] = include_bytes!("../shaders/present.frag.spv");
 
+/// The side of the per-frame scratch page, in texels.
+pub const SCRATCH_SIDE: u32 = 256;
+
 /// The world raster's format. `_SRGB` is the whole of the encode: the attachment
 /// converts on write and blending happens in linear light, which is what the CPU
 /// canvas does by hand and then pays 1.37 ms of `powf` for.
@@ -116,6 +119,15 @@ pub struct Renderer {
     atlas_image: vk::Image,
     atlas_memory: vk::DeviceMemory,
     atlas_view: vk::ImageView,
+    /// The per-frame page a procedurally rasterised rig is uploaded into.
+    scratch_image: vk::Image,
+    scratch_memory: vk::DeviceMemory,
+    scratch_view: vk::ImageView,
+    scratch_staging: HostBuffer,
+    /// `(x, y)` of the next free texel and the current shelf's height, reset each frame.
+    scratch_cursor: (u32, u32, u32),
+    /// Regions written into the staging buffer this frame, to be copied before the pass.
+    scratch_regions: Vec<(u32, u32, u32, u32, u64)>,
     field_images: [vk::Image; 2],
     field_memory: [vk::DeviceMemory; 2],
     field_views: [vk::ImageView; 2],
@@ -216,6 +228,28 @@ impl Renderer {
         staging.destroy(gpu);
         let atlas_view = gpu.view(atlas_image, vk::Format::R8G8B8A8_SRGB)?;
 
+        // --- the scratch page ---
+        // 256 × 256 RGBA16F = 256 KB, which holds the Lanternjaw's eight parts (none of
+        // them larger than the rig's query radius) for a handful of hunters at once. It
+        // is premultiplied *linear*, not sRGB: `lanternjaw::Part`'s sprite is already in
+        // that form and a round trip through 8-bit sRGB would be the only lossy step in
+        // the whole path.
+        let (scratch_image, scratch_memory) = gpu.image(
+            SCRATCH_SIDE,
+            SCRATCH_SIDE,
+            vk::Format::R16G16B16A16_SFLOAT,
+            vk::ImageTiling::OPTIMAL,
+            vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST,
+        )?;
+        gpu.one_shot(command_pool, |cb| unsafe {
+            barrier(d, cb, scratch_image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+        })?;
+        let scratch_view = gpu.view(scratch_image, vk::Format::R16G16B16A16_SFLOAT)?;
+        let scratch_staging = gpu.host_buffer(
+            u64::from(SCRATCH_SIDE) * u64::from(SCRATCH_SIDE) * 8,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+        )?;
+
         // --- the two cell textures ---
         let (cx, cy) = (layout.cells_x(), layout.cells_y());
         let mut field_images = [vk::Image::null(); 2];
@@ -279,6 +313,7 @@ impl Renderer {
             sampler_binding(1),
             sampler_binding(2),
             sampler_binding(3),
+            sampler_binding(4),
         ];
         let scene_set_layout = unsafe {
             d.create_descriptor_set_layout(
@@ -295,7 +330,7 @@ impl Renderer {
         }?;
         let sizes = [
             vk::DescriptorPoolSize::default().ty(vk::DescriptorType::UNIFORM_BUFFER).descriptor_count(1),
-            vk::DescriptorPoolSize::default().ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER).descriptor_count(4),
+            vk::DescriptorPoolSize::default().ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER).descriptor_count(5),
         ];
         let descriptor_pool = unsafe {
             d.create_descriptor_pool(
@@ -322,11 +357,12 @@ impl Renderer {
                 .image_view(view)
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]
         };
-        let (i1, i2, i3, i4) = (
+        let (i1, i2, i3, i4, i5) = (
             image_info(field_views[0]),
             image_info(field_views[1]),
             image_info(atlas_view),
             image_info(raster_view),
+            image_info(scratch_view),
         );
         unsafe {
             d.update_descriptor_sets(
@@ -339,6 +375,7 @@ impl Renderer {
                     sampler_write(scene_set, 1, &i1),
                     sampler_write(scene_set, 2, &i2),
                     sampler_write(scene_set, 3, &i3),
+                    sampler_write(scene_set, 4, &i5),
                     sampler_write(present_set, 0, &i4),
                 ],
                 &[],
@@ -393,6 +430,12 @@ impl Renderer {
             atlas_image,
             atlas_memory,
             atlas_view,
+            scratch_image,
+            scratch_memory,
+            scratch_view,
+            scratch_staging,
+            scratch_cursor: (0, 0, 0),
+            scratch_regions: Vec::new(),
             field_images,
             field_memory,
             field_views,
@@ -421,6 +464,57 @@ impl Renderer {
     /// The raster image, for a readback or for a target that wants to blit it.
     pub fn raster_image(&self) -> vk::Image {
         self.raster_image
+    }
+
+    /// Forget the previous frame's scratch allocations. Called once per frame, before
+    /// any [`Renderer::scratch_push`], and cheap: the page is overwritten, not cleared.
+    pub fn scratch_begin(&mut self) {
+        self.scratch_cursor = (0, 0, 0);
+        self.scratch_regions.clear();
+    }
+
+    /// Copy one procedurally rasterised sprite into this frame's scratch page.
+    ///
+    /// `pixels` is premultiplied linear RGBA in row-major order, `w · h` long — exactly
+    /// what `cubarium_render::Sprite::texel` hands back. Returns where it landed, or
+    /// `None` when the page is full, which the caller should treat as "skip this part"
+    /// rather than as an error: a missing claw is better than a dropped frame.
+    pub fn scratch_push(&mut self, w: u32, h: u32, pixels: &[[f32; 4]]) -> Option<[u16; 2]> {
+        if w == 0 || h == 0 || w > SCRATCH_SIDE || pixels.len() < (w * h) as usize {
+            return None;
+        }
+        let (mut x, mut y, mut shelf) = self.scratch_cursor;
+        if x + w > SCRATCH_SIDE {
+            x = 0;
+            y += shelf;
+            shelf = 0;
+        }
+        if y + h > SCRATCH_SIDE {
+            return None;
+        }
+        // Each region is staged at its own byte offset and copied as its own rect, so
+        // the staging buffer is written densely and the page never needs a full upload.
+        let offset = self.scratch_regions.iter().map(|r| u64::from(r.2) * u64::from(r.3) * 8).sum();
+        let mut halves = vec![0u16; (w * h * 4) as usize];
+        for (i, p) in pixels[..(w * h) as usize].iter().enumerate() {
+            for c in 0..4 {
+                halves[i * 4 + c] = f16(p[c]);
+            }
+        }
+        let bytes: &[u8] = bytemuck::cast_slice(&halves);
+        if offset + bytes.len() as u64 > self.scratch_staging.size {
+            return None;
+        }
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                bytes.as_ptr(),
+                self.scratch_staging.ptr.add(offset as usize),
+                bytes.len(),
+            )
+        };
+        self.scratch_regions.push((x, y, w, h, offset));
+        self.scratch_cursor = (x + w, y, shelf.max(h));
+        Some([x as u16, y as u16])
     }
 
     /// The render pass a target's framebuffers must be built against, creating it for
@@ -540,6 +634,35 @@ impl Renderer {
                     );
                     barrier(d, cb, self.field_images[i], vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
                 }
+            }
+
+            if !self.scratch_regions.is_empty() {
+                let copies: Vec<vk::BufferImageCopy> = self
+                    .scratch_regions
+                    .iter()
+                    .map(|&(x, y, w, h, offset)| {
+                        vk::BufferImageCopy::default()
+                            .buffer_offset(offset)
+                            .buffer_row_length(w)
+                            .buffer_image_height(h)
+                            .image_offset(vk::Offset3D { x: x as i32, y: y as i32, z: 0 })
+                            .image_subresource(
+                                vk::ImageSubresourceLayers::default()
+                                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                                    .layer_count(1),
+                            )
+                            .image_extent(vk::Extent3D { width: w, height: h, depth: 1 })
+                    })
+                    .collect();
+                barrier(d, cb, self.scratch_image, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
+                d.cmd_copy_buffer_to_image(
+                    cb,
+                    self.scratch_staging.buffer,
+                    self.scratch_image,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    &copies,
+                );
+                barrier(d, cb, self.scratch_image, vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
             }
 
             // --- the world raster ---
@@ -691,6 +814,10 @@ impl Renderer {
             d.destroy_image_view(self.atlas_view, None);
             d.destroy_image(self.atlas_image, None);
             d.free_memory(self.atlas_memory, None);
+            self.scratch_staging.destroy(gpu);
+            d.destroy_image_view(self.scratch_view, None);
+            d.destroy_image(self.scratch_image, None);
+            d.free_memory(self.scratch_memory, None);
             d.destroy_framebuffer(self.raster_framebuffer, None);
             d.destroy_image_view(self.raster_view, None);
             d.destroy_image(self.raster_image, None);
@@ -889,7 +1016,7 @@ fn sprite_pipeline(
         attribute(6, F::R32G32B32A32_SFLOAT, 56),       // bend amplitude, base, root, length
         attribute(7, F::R32G32B32A32_SFLOAT, 72),       // mask floor, reveal, flags, opacity
         attribute(8, F::R32G32B32A32_SFLOAT, 88),       // tone colour rgb + tone mix
-        attribute(9, F::R32G32_SFLOAT, 104),            // shade floor, reference
+        attribute(9, F::R32G32B32A32_SFLOAT, 104),      // shade floor, reference, scale, source
     ];
     let vi = vk::PipelineVertexInputStateCreateInfo::default()
         .vertex_binding_descriptions(&bindings)
