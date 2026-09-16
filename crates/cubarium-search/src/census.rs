@@ -1732,7 +1732,7 @@ pub fn command(
     let seeds = calibrate::SeedSet::Training.seeds(seed_count)?;
     let jobs = plan(&seeds);
     println!("build {BUILD_ID}");
-    println!("seeds {seeds:?}   arms {ARMS:?}   configurations {CONFIGURATIONS:?}");
+    println!("seeds {seeds:?}   arm {LADDER_ARM}   configurations {CONFIGURATIONS:?}");
     println!(
         "ladder {DEPTH_LEVELS:?}   control {DEPTH_CONTROL}   arm {LADDER_ARM} only   trials {}",
         jobs.len()
