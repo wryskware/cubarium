@@ -365,3 +365,13 @@ stamps composite as the CPU does; `canopy_top` = 0.67 as the plan's default;
 the bend budget on the ring and the quarter-turn direction are settled by
 Wrysk looking at the panel. Stage B (adapter from `RenderView`, hunters as
 per-part instances, a GPU sink in the runner) follows FW-4.
+
+### Viewing session 1 (Wrysk, 2026-09-16)
+
+Wrysk watched GS-1's synthetic ring scene at 640×360, S = 2, on the panel:
+"looking really good so far". Orientation and look accepted. Wind: the
+higher resolution deserves smoother sway than whole-texel steps; deferred
+("a later problem"). Recorded for Stage B / the art pass: sub-texel bend at
+S ≥ 2 (the bend displacement may move in 1/S steps without breaking the
+S×S block rule for everything else), and the bend budgets on the ring are
+open, not bound by the cube's 9 px footprint.
