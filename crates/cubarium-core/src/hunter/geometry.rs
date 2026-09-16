@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use cubarium_surface::{ChartImage, MAX_LOCAL_RADIUS, SurfacePoint, Vec2, travel, unfold_with};
 
@@ -210,6 +210,65 @@ pub struct ContactMeasure {
 impl ContactMeasure {
     pub fn in_contact(&self) -> bool {
         self.effector_distance <= self.tolerance
+    }
+}
+
+/// Which rule the pursuit's stopping predicate runs under.
+///
+/// The hunt-intent pass in `crate::world::step` holds a member still — at its `rest_effort`,
+/// with no strike burst pushed — for a prey the predicate calls "inside". **What the shipped
+/// rule tests and what its own comment says are not the same thing**, and this enum names both
+/// so a paired experiment can run either without either being implicit.
+///
+/// The workstream that measured it
+/// (`design/7_Research/ecology-v1-apex-reach-2026-09-16.md`) found the shipped rule true at the
+/// burst's start on 408 of 449 paid attempts, which both dropped the member to `rest_effort`
+/// and suppressed the burst it had just paid for.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PursuitStop {
+    /// The shipped rule: `body.x < capture_offset_body.x · scale + tolerance`, a one-sided
+    /// **forward half-space**. A prey short of the claws satisfies it as readily as one inside
+    /// them, so an apex whose 12 px sense radius is shorter than its own 13.28 px grasp holds
+    /// for essentially every prey it can hunt at all. This is the default and the only rule an
+    /// ordinary world runs.
+    #[default]
+    ForwardHalfSpace,
+    /// The paired variant: [`ContactMeasure::in_contact`], the **reach envelope** the
+    /// predicate's own comment names and the test the rest of the file means by "inside". Opt
+    /// in per `World` (`crate::World::set_pursuit_stop`); never on in an ordinary world.
+    ReachEnvelope,
+}
+
+impl PursuitStop {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PursuitStop::ForwardHalfSpace => "forward_half_space",
+            PursuitStop::ReachEnvelope => "reach_envelope",
+        }
+    }
+}
+
+impl ContactMeasure {
+    /// Does the pursuit's stopping rule hold a member still against this measure?
+    ///
+    /// **The one place either rule is written.** `crate::world::step`'s hunt-intent pass, the
+    /// per-attempt record's own reading ([`crate::hunter::StrikeFrame::pursuit_holds`]) and the
+    /// tests all evaluate it here, so a record can never transcribe a rule the world did not
+    /// run. `capture_forward` is the scaled `capture_offset_body.x` of the member asking, i.e.
+    /// [`ContactGeometry::capture_offset_body`]`.x`.
+    pub fn pursuit_holds(&self, stop: PursuitStop, capture_forward: f64) -> bool {
+        match stop {
+            PursuitStop::ForwardHalfSpace => self.body.x < capture_forward + self.tolerance,
+            PursuitStop::ReachEnvelope => self.in_contact(),
+        }
+    }
+}
+
+impl ContactGeometry {
+    /// [`ContactMeasure::pursuit_holds`] at this member's own scaled forward grasp coordinate.
+    pub fn pursuit_holds(&self, stop: PursuitStop, measure: &ContactMeasure) -> bool {
+        measure.pursuit_holds(stop, self.capture_offset_body.x)
     }
 }
 

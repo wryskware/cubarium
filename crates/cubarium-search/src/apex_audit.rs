@@ -45,7 +45,8 @@ use std::collections::VecDeque;
 
 use cubarium_core::encounter::ApexOpportunity;
 use cubarium_core::hunter::{
-    self, AttemptOutcome, FixedHunterProfile, HunterEvent, HunterPhase, StrikeClass, StrikeRecord,
+    self, AttemptOutcome, FixedHunterProfile, HunterEvent, HunterPhase, PursuitStop, StrikeClass,
+    StrikeRecord,
 };
 use cubarium_core::organism::DeathCause;
 use cubarium_core::{BodyBudget, OrganismId, World, WorldConfig};
@@ -448,10 +449,10 @@ impl StrikeStats {
         if r.hunter_crossed_face {
             self.hunter_crossed_face += 1;
         }
-        if r.intent.and_then(|f| f.pursuit_holds()).unwrap_or(false) {
+        if r.held_at_intent().unwrap_or(false) {
             self.held_at_intent += 1;
         }
-        if r.strike.and_then(|f| f.pursuit_holds()).unwrap_or(false) {
+        if r.held_at_strike().unwrap_or(false) {
             self.held_at_strike += 1;
         }
         self.intent_body_forward.push_opt(r.intent.and_then(|f| f.body_forward));
@@ -462,11 +463,7 @@ impl StrikeStats {
                 / STRIKE_SECONDS
         });
         self.hunter_sweep_strike.push_opt(sweep);
-        self.hunter_motor_strike
-            .push_opt(match (r.hunter_speed_strike, sweep) {
-                (Some(v), Some(w)) => Some(v + w),
-                _ => None,
-            });
+        self.hunter_motor_strike.push_opt(motor_strike(r));
         self.advertised_reach.push(r.resolution.advertised_reach);
         self.tolerance.push_opt(r.resolution.tolerance);
         self.intent_separation.push_opt(r.intent.and_then(|f| f.effector_distance));
@@ -512,9 +509,122 @@ impl StrikeStats {
     }
 }
 
+/// The pursuit stopping rule named on the command line.
+///
+/// Two stated names and nothing else: an unrecognised one is refused rather than silently
+/// defaulted to the shipped rule, because a paired arm that quietly ran the wrong half is worse
+/// than one that did not run.
+pub fn parse_pursuit_stop(name: &str) -> Result<PursuitStop, String> {
+    match name.trim() {
+        "half-space" => Ok(PursuitStop::ForwardHalfSpace),
+        "reach-envelope" => Ok(PursuitStop::ReachEnvelope),
+        other => Err(format!(
+            "--pursuit-stop must be `half-space` (the shipped rule) or `reach-envelope` (the \
+             paired variant), not `{other}`"
+        )),
+    }
+}
+
+/// The **initial-gap bin edges**, in px of `effector_distance` at the intent frame.
+///
+/// Stated, not tuned. The first edge is the contact tolerance to the pixel (3.97 px for an
+/// adult against this prey), so bin 0 is "already in the claws when the gesture began" — the
+/// geometry the death arm's captures came from. The rest are 4 px apart up to 16 px, which is
+/// `strike_speed_px_s · strike_seconds` to within a rounding: a gap past the last edge is one a
+/// nominal one-second lunge cannot close even against a motionless prey.
+pub const GAP_BIN_EDGES: [f64; 4] = [4.0, 8.0, 12.0, 16.0];
+
+/// How many bins the edges make: one more than the edges, the last unbounded above.
+pub const GAP_BINS: usize = GAP_BIN_EDGES.len() + 1;
+
+/// Which bin an initial gap falls in. Half-open `[lo, hi)`: an edge belongs to the bin above.
+pub fn gap_bin_of(gap: f64) -> usize {
+    GAP_BIN_EDGES.iter().filter(|e| gap >= **e).count()
+}
+
+/// The bin's label, for a table a reader can line up against another arm's.
+pub fn gap_bin_label(bin: usize) -> String {
+    match bin {
+        0 => format!("0-{:.0}", GAP_BIN_EDGES[0]),
+        b if b < GAP_BINS - 1 => format!("{:.0}-{:.0}", GAP_BIN_EDGES[b - 1], GAP_BIN_EDGES[b]),
+        _ => format!("{:.0}+", GAP_BIN_EDGES[GAP_BIN_EDGES.len() - 1]),
+    }
+}
+
+/// What the attempts that began at one initial gap did: Astra's "capture opportunity by initial
+/// gap bin" (`design/7_Research/ecology-v1-round3-review-2026-09-16.md`, next steps item 1).
+///
+/// `captures` divided by the arm's number of lives is *captures per life in this bin*, which is
+/// the quantity K's arithmetic — about ten captures a life to pay maintenance — is stated in.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct GapBinStats {
+    /// The bin's index, so a serialized table keeps its order without relying on position.
+    pub bin: u8,
+    pub attempts: u64,
+    /// Attempts the pursuit held at the burst's start, under the rule they were made under.
+    pub held_at_strike: u64,
+    /// Attempts whose resolution frame said the strike arrived: **contact**, whatever the
+    /// capture roll then did.
+    pub resolved_in_reach: u64,
+    pub captures: u64,
+    pub energy_paid: f64,
+    /// `strike - resolution` separation: **positive is closing**, which is the sign a reader of
+    /// a pursuit table wants. It is the negation of `separation_change_over_strike`.
+    pub closure_over_strike: Series,
+    pub intent_separation: Series,
+    pub hunter_motor_strike: Series,
+}
+
+impl GapBinStats {
+    fn sample(&mut self, r: &StrikeRecord) {
+        self.attempts += 1;
+        self.energy_paid += r.energy_paid;
+        if r.held_at_strike().unwrap_or(false) {
+            self.held_at_strike += 1;
+        }
+        if r.resolution.in_reach {
+            self.resolved_in_reach += 1;
+        }
+        if r.outcome == AttemptOutcome::Captured {
+            self.captures += 1;
+        }
+        self.closure_over_strike.push_opt(r.separation_change_over_strike().map(|d| -d));
+        self.intent_separation.push_opt(r.intent.and_then(|f| f.effector_distance));
+        self.hunter_motor_strike.push_opt(motor_strike(r));
+    }
+
+    fn add(&mut self, other: &GapBinStats) {
+        self.attempts += other.attempts;
+        self.held_at_strike += other.held_at_strike;
+        self.resolved_in_reach += other.resolved_in_reach;
+        self.captures += other.captures;
+        self.energy_paid += other.energy_paid;
+        self.closure_over_strike.add(&other.closure_over_strike);
+        self.intent_separation.add(&other.intent_separation);
+        self.hunter_motor_strike.add(&other.hunter_motor_strike);
+    }
+}
+
+/// `hunter_speed_strike + advertised_reach * |dheading| / strike_seconds`: the whole motor
+/// magnitude the burst delivered, in the same px/s the envelope `|v| + r*|w| <= u` bounds. The
+/// one place it is derived, so the class table and the gap bins cannot disagree.
+fn motor_strike(r: &StrikeRecord) -> Option<f64> {
+    let sweep = r.hunter_turn_strike.map(|t| {
+        r.strike.map_or(r.resolution.advertised_reach, |f| f.advertised_reach) * t.abs()
+            / STRIKE_SECONDS
+    })?;
+    Some(r.hunter_speed_strike? + sweep)
+}
+
+fn empty_gap_bins() -> Vec<GapBinStats> {
+    (0..GAP_BINS)
+        .map(|b| GapBinStats { bin: b as u8, ..GapBinStats::default() })
+        .collect()
+}
+
 /// Every paid attempt of one run, split the two ways the diagnostic asks for: by the mechanism
 /// its own geometry implicates, and by the outcome the world gave it.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StrikeAudit {
     /// Paid attempts recorded. Equals the sum of `AttemptTally` over the followed members
     /// minus its `unaffordable`, which is refused before payment and is not an attempt.
@@ -527,7 +637,43 @@ pub struct StrikeAudit {
     pub omitted: u64,
     pub by_class: Vec<(StrikeClass, StrikeStats)>,
     pub by_outcome: Vec<(AttemptOutcome, StrikeStats)>,
+    /// The attempts whose **paid burst was actually requested** - the pursuit did not hold them
+    /// at the burst's start, under the rule they were made under - and the attempts it held.
+    /// With `no_strike_frame` these partition `recorded`, so a reading of what a *delivered*
+    /// burst achieved never quietly includes a suppressed one.
+    #[serde(default)]
+    pub delivered: StrikeStats,
+    #[serde(default)]
+    pub held: StrikeStats,
+    /// Attempts with no strike frame, which can be neither held nor delivered.
+    #[serde(default)]
+    pub no_strike_frame: u64,
+    /// The attempts binned by the gap they began at, in the fixed order of [`GAP_BIN_EDGES`].
+    #[serde(default = "empty_gap_bins")]
+    pub by_gap_bin: Vec<GapBinStats>,
+    /// Attempts with no intent frame, which have no initial gap and are binned into nothing.
+    #[serde(default)]
+    pub no_initial_gap: u64,
     pub records: Vec<StrikeRecord>,
+}
+
+impl Default for StrikeAudit {
+    fn default() -> StrikeAudit {
+        StrikeAudit {
+            recorded: 0,
+            dropped: 0,
+            unreadable: 0,
+            omitted: 0,
+            by_class: Vec::new(),
+            by_outcome: Vec::new(),
+            delivered: StrikeStats::default(),
+            held: StrikeStats::default(),
+            no_strike_frame: 0,
+            by_gap_bin: empty_gap_bins(),
+            no_initial_gap: 0,
+            records: Vec::new(),
+        }
+    }
 }
 
 impl StrikeAudit {
@@ -551,6 +697,22 @@ impl StrikeAudit {
                 self.by_outcome.push((r.outcome, s));
             }
         }
+        // The delivered / held partition, under the rule this attempt was made under.
+        match r.held_at_strike() {
+            Some(true) => self.held.sample(&r),
+            Some(false) => self.delivered.sample(&r),
+            None => self.no_strike_frame += 1,
+        }
+        // The initial-gap bin, from the gesture the member committed at.
+        match r.intent.and_then(|f| f.effector_distance) {
+            Some(gap) => {
+                if self.by_gap_bin.len() != GAP_BINS {
+                    self.by_gap_bin = empty_gap_bins();
+                }
+                self.by_gap_bin[gap_bin_of(gap)].sample(&r);
+            }
+            None => self.no_initial_gap += 1,
+        }
         if self.records.len() < MAX_KEPT_RECORDS {
             self.records.push(r);
         } else {
@@ -573,6 +735,18 @@ impl StrikeAudit {
             match self.by_outcome.iter_mut().find(|(k, _)| k == o) {
                 Some((_, into)) => into.add(s),
                 None => self.by_outcome.push((*o, *s)),
+            }
+        }
+        self.delivered.add(&other.delivered);
+        self.held.add(&other.held);
+        self.no_strike_frame += other.no_strike_frame;
+        self.no_initial_gap += other.no_initial_gap;
+        if self.by_gap_bin.len() != GAP_BINS {
+            self.by_gap_bin = empty_gap_bins();
+        }
+        for bin in &other.by_gap_bin {
+            if let Some(into) = self.by_gap_bin.get_mut(bin.bin as usize) {
+                into.add(bin);
             }
         }
     }
@@ -614,6 +788,9 @@ pub struct AuditRow {
     /// Whether the per-body store ledger was recording. When it is off, every `budget` and
     /// `tail` below is `None` and no `death_cause` is known.
     pub ledger: bool,
+    /// The pursuit stopping rule this run's hunt-intent pass evaluated.
+    #[serde(default)]
+    pub pursuit_stop: PursuitStop,
     pub horizon_ticks: u64,
     /// Ticks actually simulated: the horizon, or fewer if the world emptied.
     pub ticks: u64,
@@ -627,6 +804,12 @@ pub struct AuditRow {
     pub strikes: StrikeAudit,
     /// The world's own conservation residuals at the end, so a run that drifted is visible.
     pub mass_residual: f64,
+    /// The prey side. The population the founders were introduced into, the population left at
+    /// the end, and the world's own count of organisms that died of `Predation`.
+    #[serde(default)]
+    pub population_at_introduction: usize,
+    #[serde(default)]
+    pub prey_deaths_predation: u64,
     pub final_population: usize,
     pub elapsed_ms: u64,
     /// The profile terms `hunter::may_reproduce` tests, carried on the row so a reader can see
@@ -658,6 +841,9 @@ pub struct AuditReport {
     pub introduce_tick: u64,
     pub founder_age_seconds: f64,
     pub ledger: bool,
+    /// The pursuit stopping rule every row of this report ran under.
+    #[serde(default)]
+    pub pursuit_stop: PursuitStop,
     pub horizon_ticks: u64,
     pub workers: usize,
     pub wall_seconds: f64,
@@ -680,11 +866,15 @@ pub struct Arm {
     /// the run. The audit enables both from this one switch (`--no-ledger` disables both);
     /// calibration's `--ledger` and `--plant-record` are independent instruments.
     pub ledger: bool,
+    /// **Which pursuit stopping rule the arm runs** (`crate::World::set_pursuit_stop`). This is
+    /// the one variable of the paired predicate experiment; `ForwardHalfSpace` is the shipped
+    /// rule and is byte-identical to an arm that never set it.
+    pub stop: PursuitStop,
 }
 
 /// Run one `(configuration, seed)` arm of the audit.
 fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
-    let Arm { apex, horizon, introduce_tick, founder_age_seconds, ledger } = arm;
+    let Arm { apex, horizon, introduce_tick, founder_age_seconds, ledger, stop } = arm;
     let start = Instant::now();
     let mut config: WorldConfig = (*eco.base).clone();
     config.seed = seed;
@@ -714,6 +904,9 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
     // command is a diagnostic, the record is inert by the same hash test the ledger is, and a
     // second CLI switch would only be a second way to run the audit half-instrumented.
     world.record_strike_attempts(ledger);
+    // The one variable of the paired arm. Independent of the ledger: the rule is what the world
+    // runs, the record is what watches it, and the default is byte-identical to not calling it.
+    world.set_pursuit_stop(stop);
     let dt = cubarium_core::DT;
     let age_ticks = (founder_age_seconds / dt).round().max(0.0) as u64;
 
@@ -726,6 +919,10 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
     let mut introduced = false;
     let mut collapsed_at = None;
     let mut ticks = 0;
+    // The prey side. `population_at_introduction` is the stock the founders were dropped into;
+    // `predation_deaths_total` is the world's own count of prey taken by any member, so the
+    // predator's captures and the prey's losses are read from two independent counters.
+    let mut population_at_introduction = 0;
 
     for _ in 0..horizon {
         world.step();
@@ -780,6 +977,7 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
             let receipts = world
                 .introduce_hunters_with_age(profile.clone(), &targets, founder_age_seconds)
                 .map_err(|e| format!("apex introduction refused: {e}"))?;
+            population_at_introduction = world.population();
             material_in = receipts.iter().map(|r| r.material_in).sum();
             energy_in = receipts.iter().map(|r| r.energy_in).sum();
             lives = receipts
@@ -882,9 +1080,12 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
         introduce_tick,
         founder_age_seconds,
         ledger,
+        pursuit_stop: stop,
         horizon_ticks: horizon,
         ticks,
         collapsed_at,
+        population_at_introduction,
+        prey_deaths_predation: world.hunters().predation_deaths_total,
         apex_material_in: material_in,
         apex_energy_in: energy_in,
         lives,
@@ -987,7 +1188,7 @@ pub fn run(
     wall_seconds: u64,
     out: PathBuf,
 ) -> Result<(), Boxed> {
-    let Arm { apex, horizon, introduce_tick, founder_age_seconds, ledger } = arm;
+    let Arm { apex, horizon, introduce_tick, founder_age_seconds, ledger, stop } = arm;
     if configs.is_empty() {
         return Err("--config must name at least one world configuration TOML".into());
     }
@@ -1009,6 +1210,7 @@ pub fn run(
         "# founders placed at age {founder_age_seconds} s, per-body ledger {}",
         if ledger { "on" } else { "off" }
     );
+    println!("# pursuit stopping rule {}", stop.as_str());
     println!("# horizon {horizon} ticks, held-out seeds {seeds:?}, {workers} workers");
     for e in &ecologies {
         println!("# config {} (hash {})", e.label, e.hex());
@@ -1185,6 +1387,82 @@ pub fn run(
         }
     }
 
+    if strikes.recorded > 0 {
+        // What a *delivered* burst achieved against what a held one did: the reading Astra's
+        // confirmation rule is stated on, and the one the class table cannot give because a
+        // class mixes both.
+        let lives: u64 = rows.iter().map(|r| r.lives.len() as u64).sum();
+        println!();
+        println!(
+            "# the pursuit stopping rule: {} ({} lives); held + delivered + no-strike-frame = {}",
+            stop.as_str(),
+            lives,
+            strikes.held.count + strikes.delivered.count + strikes.no_strike_frame,
+        );
+        let cell = |s: Option<f64>| s.map_or_else(|| "-".to_string(), |v| format!("{v:.2}"));
+        println!(
+            "{:<12} {:>6} {:>7} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9}",
+            "burst", "n", "share", "sep@str", "closed", "hunt v", "hunt |m|", "prey v", "contact",
+        );
+        for (name, st) in [("delivered", &strikes.delivered), ("held", &strikes.held)] {
+            println!(
+                "{:<12} {:>6} {:>6.1}% {:>9} {:>9} {:>9} {:>9} {:>9} {:>9}",
+                name,
+                st.count,
+                100.0 * st.count as f64 / strikes.recorded.max(1) as f64,
+                cell(st.strike_separation.mean()),
+                // Positive is closing: the negation of `separation_change_over_strike`.
+                cell(st.separation_change_over_strike.mean().map(|d| -d)),
+                cell(st.hunter_speed_strike.mean()),
+                cell(st.hunter_motor_strike.mean()),
+                cell(st.prey_speed_strike.mean()),
+                st.resolved_in_reach,
+            );
+        }
+
+        println!();
+        println!(
+            "# attempts by the gap they began at (px from the grasp centre); \
+             no initial gap {}",
+            strikes.no_initial_gap
+        );
+        println!(
+            "{:<10} {:>7} {:>7} {:>9} {:>9} {:>9} {:>9} {:>11}",
+            "gap", "n", "held", "closed", "hunt |m|", "contact", "captures", "per life",
+        );
+        for bin in &strikes.by_gap_bin {
+            println!(
+                "{:<10} {:>7} {:>7} {:>9} {:>9} {:>9} {:>9} {:>11.3}",
+                gap_bin_label(bin.bin as usize),
+                bin.attempts,
+                bin.held_at_strike,
+                cell(bin.closure_over_strike.mean()),
+                cell(bin.hunter_motor_strike.mean()),
+                bin.resolved_in_reach,
+                bin.captures,
+                bin.captures as f64 / lives.max(1) as f64,
+            );
+        }
+
+        println!();
+        println!(
+            "{:<12} {:>7} {:>10} {:>10} {:>10} {:>10} {:>10}",
+            "config", "seed", "pop@intro", "pop@end", "predated", "captures", "lived",
+        );
+        for r in &rows {
+            println!(
+                "{:<12} {:>7} {:>10} {:>10} {:>10} {:>10} {:>10}",
+                r.config,
+                r.seed,
+                r.population_at_introduction,
+                r.final_population,
+                r.prey_deaths_predation,
+                r.lives.iter().map(|l| l.captures).sum::<u64>(),
+                r.lives.iter().map(|l| l.lived_ticks).sum::<u64>(),
+            );
+        }
+    }
+
     let verdict = verdict(&rows);
     println!();
     println!("{verdict}");
@@ -1196,6 +1474,7 @@ pub fn run(
         introduce_tick,
         founder_age_seconds,
         ledger,
+        pursuit_stop: stop,
         horizon_ticks: horizon,
         workers,
         wall_seconds: started.elapsed().as_secs_f64(),
@@ -1228,6 +1507,9 @@ mod tests {
             introduce_tick: 6_000,
             founder_age_seconds: 0.0,
             ledger: true,
+            pursuit_stop: PursuitStop::ForwardHalfSpace,
+            population_at_introduction: 0,
+            prey_deaths_predation: 0,
             horizon_ticks: 180_000,
             ticks: 180_000,
             collapsed_at: None,

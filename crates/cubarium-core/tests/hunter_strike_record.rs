@@ -278,7 +278,11 @@ fn a_prey_just_beyond_the_grasp_records_out_of_reach_with_the_separation_the_geo
         // fixture asserting it.
         close(frame.body_forward.expect(name), profile.capture_offset_body.x, 1e-9, name);
         close(frame.body_side.expect(name), profile.capture_offset_body.y + tolerance + gap, 1e-9, name);
-        assert_eq!(frame.pursuit_holds(), Some(true), "{name}: the pursuit stopping rule holds");
+        assert_eq!(
+            frame.pursuit_holds(cubarium_core::hunter::PursuitStop::ForwardHalfSpace),
+            Some(true),
+            "{name}: the shipped pursuit stopping rule holds"
+        );
     }
     // Neither body moved, so the attempt neither closed nor lost ground.
     close(record.separation_change_over_strike().expect("both frames"), 0.0, 1e-9, "over the burst");

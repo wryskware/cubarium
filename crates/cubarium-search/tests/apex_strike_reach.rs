@@ -9,7 +9,7 @@
 //! (`design/handoffs/ecology-v1-apex-reach-opus-2026-09-16.md`, deliverable 2).
 
 use cubarium_core::OrganismId;
-use cubarium_core::hunter::{AttemptOutcome, StrikeClass, StrikeFrame, StrikeRecord};
+use cubarium_core::hunter::{AttemptOutcome, PursuitStop, StrikeClass, StrikeFrame, StrikeRecord};
 use cubarium_search::apex_audit::{MAX_KEPT_RECORDS, Series, StrikeAudit};
 use cubarium_surface::{Face, SurfacePoint, Vec2};
 
@@ -75,6 +75,7 @@ fn record(
         hunter_turn_windup: Some(0.0),
         hunter_turn_strike: Some(0.0),
         class,
+        stop: PursuitStop::ForwardHalfSpace,
     }
 }
 
@@ -122,8 +123,10 @@ fn the_pursuit_stopping_rule_is_counted_from_the_body_frame_coordinate() {
     let held = record(StrikeClass::ResolvedInReach, AttemptOutcome::Captured, 1.0, 1.0, 1.0, 0.0, 1.0);
     let pushed =
         record(StrikeClass::BeganOutOfReach, AttemptOutcome::OutOfReach, 9.0, 9.0, 9.0, 1.0, 6.0);
-    assert_eq!(held.intent.unwrap().pursuit_holds(), Some(true));
-    assert_eq!(pushed.intent.unwrap().pursuit_holds(), Some(false));
+    assert_eq!(held.held_at_intent(), Some(true));
+    assert_eq!(pushed.held_at_intent(), Some(false));
+    // Both fixtures were built under the shipped rule, which is what `held_at_intent` read.
+    assert_eq!((held.stop, pushed.stop), (PursuitStop::ForwardHalfSpace, PursuitStop::ForwardHalfSpace));
     let a = audit(vec![held, pushed]);
     let total: u64 = a.by_class.iter().map(|(_, s)| s.held_at_intent).sum();
     assert_eq!(total, 1, "exactly one of the two attempts was held by the pursuit rule");
