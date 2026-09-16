@@ -154,21 +154,67 @@ pub struct Policy {
 
 impl Policy {
     pub fn new(weights: Gru32) -> Policy {
+        Policy::new_in(weights, super::ActionAdapter::CubAct1)
+    }
+
+    /// [`Policy::new`], stamped for a named [`super::ActionAdapter`]. `CubAct1` is
+    /// [`Policy::new`] itself.
+    pub fn new_in(weights: Gru32, adapter: super::ActionAdapter) -> Policy {
         Policy {
             weights,
-            schema_digest: super::schema_digest(),
+            schema_digest: super::schema_digest_in(adapter),
         }
     }
 
+    /// The adapter this policy's digest belongs to, if this build knows one.
+    ///
+    /// `None` means the digest is foreign to this build altogether — another observation
+    /// layout, recurrence convention, motor contract or controller rate — which is the case
+    /// [`Policy::validate`] refuses.
+    pub fn adapter(&self) -> Option<super::ActionAdapter> {
+        super::ActionAdapter::ALL
+            .into_iter()
+            .find(|a| super::schema_digest_in(*a) == self.schema_digest)
+    }
+
+    /// Shape, finiteness, and a digest this **build** can interpret under *some* adapter.
+    ///
+    /// This is the decode-time range check: it runs on every `WorldState::validate`, including
+    /// the one inside a world that is deliberately running `cub-act-2`, so it cannot be the
+    /// place that pins one adapter. Which adapter a policy may actually be *run* under is a
+    /// property of the world, and [`Policy::validate_in`] is the check the one explicit door
+    /// into the extension makes (`World::attach_neural_policy`).
     pub fn validate(&self) -> Result<(), String> {
         self.weights.validate()?;
-        if self.schema_digest != super::schema_digest() {
+        if self.adapter().is_none() {
             return Err(format!(
                 "policy schema_digest {:#018x} is not this build's {:#018x}: the observation \
                  layout, action set, recurrence convention, motor contract or controller rate \
                  differs, and the weights cannot be reinterpreted",
                 self.schema_digest,
                 super::schema_digest()
+            ));
+        }
+        Ok(())
+    }
+
+    /// [`Policy::validate`], against the adapter actually in force. A policy authored for the
+    /// other adapter is refused **by name**: the two decode the same seven numbers differently,
+    /// so running one under the other is running a different animal.
+    pub fn validate_in(&self, adapter: super::ActionAdapter) -> Result<(), String> {
+        self.weights.validate()?;
+        let want = super::schema_digest_in(adapter);
+        if self.schema_digest != want {
+            let named = self
+                .adapter()
+                .map_or_else(String::new, |a| format!(" (the {} adapter)", a.name()));
+            return Err(format!(
+                "policy schema_digest {:#018x}{named} is not this world's {:#018x} (the {} \
+                 adapter): the observation layout, action set, recurrence convention, motor \
+                 contract or controller rate differs, and the weights cannot be reinterpreted",
+                self.schema_digest,
+                want,
+                adapter.name()
             ));
         }
         Ok(())

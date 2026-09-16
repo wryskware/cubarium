@@ -400,7 +400,10 @@ impl World {
         id: crate::ids::OrganismId,
         policy: crate::neural::Policy,
     ) -> Result<(), String> {
-        policy.validate()?;
+        // Against the adapter **in force**, not the build's default: the digest says which
+        // action adapter the weights were authored for, and running them under another one
+        // decodes the same seven numbers differently (`crate::neural::ActionAdapter`).
+        policy.validate_in(self.action_adapter)?;
         if self.state.organisms.get(id).is_none() {
             return Err(format!("organism {}:{} is not alive", id.slot, id.generation));
         }

@@ -35,7 +35,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
 use cubarium_core::MotorModel;
-use cubarium_core::neural::Policy;
+use cubarium_core::neural::{ActionAdapter, Policy};
 use serde::{Deserialize, Serialize};
 
 use super::episode::{self, Driver, Episode, EpisodeError, Fault, Limits};
@@ -127,6 +127,17 @@ pub struct Protocol {
     /// (`super::export::PolicyFile::check_motor`).
     #[serde(default, skip_serializing_if = "MotorModel::is_sweep")]
     pub motor: MotorModel,
+    /// The **action adapter** every episode of this protocol decodes a raw head with
+    /// (`cubarium_core::neural::ActionAdapter`), by name.
+    ///
+    /// Absent from the JSON — and so from the hash — when it is `cub-act-1`, the shipped
+    /// adapter, so every protocol and every checkpoint written before workstream X keeps the
+    /// hash it has always had. A `cub-act-2` protocol is a **different task** with a different
+    /// hash and a different `policy_digest`: the turn channel expresses values the other
+    /// adapter clips to exactly zero, and a policy trained under one is refused by name under
+    /// the other (`super::export::PolicyFile::check_adapter`, `Policy::validate_in`).
+    #[serde(default, skip_serializing_if = "ActionAdapter::is_default")]
+    pub adapter: ActionAdapter,
 }
 
 impl Protocol {
@@ -150,6 +161,19 @@ impl Protocol {
         first.motor
     }
 
+    /// The action adapter a layout set shares. One set, one adapter — a set that mixes them is
+    /// a programming error, not a task, exactly as a set that mixes ecologies is.
+    fn adapter_of(layouts: &[Layout]) -> ActionAdapter {
+        let Some(first) = layouts.first() else {
+            return ActionAdapter::default();
+        };
+        assert!(
+            layouts.iter().all(|l| l.adapter == first.adapter),
+            "a protocol's layouts must all run one action adapter"
+        );
+        first.adapter
+    }
+
     /// The ecology a layout set shares. Every layout in one set is built on one configuration;
     /// a set that mixes ecologies is a programming error, not a task.
     fn ecology_of(layouts: &[Layout]) -> Ecology {
@@ -165,6 +189,7 @@ impl Protocol {
 
     pub fn new(pairs: usize, horizon_ticks: u64, train_seed: u64, layouts: &[Layout]) -> Protocol {
         let ecology = Protocol::ecology_of(layouts);
+        let adapter = Protocol::adapter_of(layouts);
         Protocol {
             schema: "cub-es-1".into(),
             horizon_ticks,
@@ -180,10 +205,11 @@ impl Protocol {
             layout_hashes: layouts.iter().map(|l| l.hash(&l.config())).collect(),
             config: ecology.label.clone(),
             config_hash: ecology.hash,
-            policy_digest: cubarium_core::neural::schema_digest(),
+            policy_digest: cubarium_core::neural::schema_digest_in(adapter),
             init: tensor::init_description(),
             aggregate: Aggregate::Min,
             motor: Protocol::motor_of(layouts),
+            adapter,
         }
     }
 
@@ -369,21 +395,23 @@ impl Checkpoint {
         if self.protocol.hash() != self.protocol_hash {
             return Err("checkpoint protocol hash does not match its protocol".into());
         }
-        if self.protocol.policy_digest != cubarium_core::neural::schema_digest() {
+        let want = cubarium_core::neural::schema_digest_in(self.protocol.adapter);
+        if self.protocol.policy_digest != want {
             return Err(format!(
-                "checkpoint was trained against schema digest {:#018x}, this build is {:#018x}: \
-                 the observation layout, action set, recurrence convention, motor contract or \
-                 controller rate differs and the weights cannot be reinterpreted",
+                "checkpoint was trained against schema digest {:#018x}, this build's {} adapter \
+                 is {want:#018x}: the observation layout, action set, recurrence convention, \
+                 motor contract or controller rate differs and the weights cannot be \
+                 reinterpreted",
                 self.protocol.policy_digest,
-                cubarium_core::neural::schema_digest()
+                self.protocol.adapter.name()
             ));
         }
-        tensor::policy(&self.theta).map(|_| ())
+        tensor::policy_in(&self.theta, self.protocol.adapter).map(|_| ())
     }
 
     /// The self-contained policy the core can attach.
     pub fn policy(&self) -> Result<Policy, String> {
-        tensor::policy(&self.theta)
+        tensor::policy_in(&self.theta, self.protocol.adapter)
     }
 }
 
@@ -482,7 +510,8 @@ pub fn evaluate(
     generation: u64,
     cancel: &AtomicBool,
 ) -> Result<(f64, Vec<Episode>), GenerationError> {
-    let policy = tensor::policy(theta).expect("a finite centre is a policy");
+    let policy =
+        tensor::policy_in(theta, protocol.adapter).expect("a finite centre is a policy");
     let names: Vec<String> = plan
         .layouts
         .iter()
@@ -612,7 +641,7 @@ pub fn run_generation(
             }
         };
         policies.push(
-            tensor::policy(&theta_c)
+            tensor::policy_in(&theta_c, protocol.adapter)
                 .expect("a perturbed centre is a finite policy; a non-finite one is an error"),
         );
     }

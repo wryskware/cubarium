@@ -222,6 +222,7 @@ impl World {
             motor_model: crate::motor::MotorModel::default(),
             apex_turn_radius: crate::motor::ApexTurnRadius::default(),
             apex_motor_model: None,
+            action_adapter: crate::neural::ActionAdapter::default(),
             initial_material,
         };
         // Make the derived light/moisture readable before the first tick advances weather.
@@ -483,8 +484,10 @@ impl World {
         policy: crate::neural::Policy,
     ) -> Result<crate::ids::OrganismId, String> {
         // The two refusals that do not depend on the body are made *before* it exists, so
-        // the ordinary case never founds and unwinds.
-        policy.validate()?;
+        // the ordinary case never founds and unwinds. The digest is checked against the
+        // adapter **this world** runs, not against the build's default, so a `cub-act-2`
+        // policy is refused by name by the display host and vice versa.
+        policy.validate_in(self.action_adapter)?;
         if self.state.quiet.policy.enabled() {
             return Err(
                 "the ordinary quiet extension and neural animals cannot be enabled together"
