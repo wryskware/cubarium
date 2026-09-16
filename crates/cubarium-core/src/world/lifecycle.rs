@@ -105,6 +105,22 @@ impl World {
             }
         }
         state.validate()?;
+        // The action adapter is a transient the snapshot does not record, so a resumed world
+        // runs the shipped `cub-act-1` (`World::set_action_adapter`). A policy authored under
+        // another adapter would then be decoded wrongly and silently — the class of failure the
+        // always-fresh rule exists to prevent — so it is refused by name here, at the one door
+        // a snapshot comes through. `WorldState::validate` accepts any adapter this build
+        // knows, because the state cannot say which one was in force; this is where it is
+        // known.
+        let shipped = crate::neural::ActionAdapter::default();
+        for policy in &state.neural.policies {
+            policy.validate_in(shipped).map_err(|e| {
+                format!(
+                    "this snapshot's neural policy was authored under an action adapter the \
+                     snapshot cannot name, and a resumed world runs the shipped one: {e}"
+                )
+            })?;
+        }
         let habitat = Habitat::new(&state.config.habitat, state.config.seed);
         let organism_material: f64 = state.organisms.iter().map(|(_, o)| o.material()).sum();
         // The same terms `mass_residual` subtracts, so a loaded world reads zero: care has

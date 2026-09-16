@@ -300,6 +300,29 @@ fn the_adapter_is_transient_and_never_persisted() {
     );
 }
 
+/// A snapshot holding a `cub-act-2` policy cannot be resumed: the adapter is a transient the
+/// bytes do not carry, a resumed world runs the shipped adapter, and decoding those weights
+/// under it would be silent and wrong. Refused by name at `World::from_state`, which is the
+/// one door a snapshot comes through (Fable, at X's integration). A `cub-act-1` world with a
+/// policy round-trips as before.
+#[test]
+fn a_snapshot_with_a_second_adapter_policy_is_refused_on_resume_by_name() {
+    let world = fixture(&remembering_policy(), ActionAdapter::CubAct2);
+    let bytes = encode_snapshot(&world.state, "test-build");
+    let state = decode_snapshot(&bytes).expect("the bytes decode").1;
+    let err = match World::from_state(state) {
+        Ok(_) => panic!("a cub-act-2 policy must not resume under the shipped adapter"),
+        Err(e) => e,
+    };
+    assert!(err.contains("cub-act-2") && err.contains("cub-act-1"), "{err}");
+
+    let world = fixture(&remembering_policy(), ActionAdapter::CubAct1);
+    let bytes = encode_snapshot(&world.state, "test-build");
+    let state = decode_snapshot(&bytes).expect("the bytes decode").1;
+    let resumed = World::from_state(state).expect("a shipped-adapter policy resumes");
+    assert_eq!(resumed.action_adapter(), ActionAdapter::CubAct1);
+}
+
 /// A policy stamped for one adapter is refused **by name** by a world running the other, at the
 /// one explicit door into the extension, and the world is left as it was found.
 #[test]
