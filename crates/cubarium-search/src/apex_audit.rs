@@ -49,6 +49,7 @@ use cubarium_core::hunter::{
     StrikeRecord,
 };
 use cubarium_core::organism::DeathCause;
+use cubarium_core::motor::ApexTurnRadius;
 use cubarium_core::{BodyBudget, MotorModel, OrganismId, World, WorldConfig};
 use serde::{Deserialize, Serialize};
 
@@ -795,6 +796,11 @@ pub struct AuditRow {
     /// name. Absent on a row written before the switch existed, which is `sweep`.
     #[serde(default = "sweep_name")]
     pub motor: String,
+    /// Which radius this run's envelope and bill gave an apex member's grasp
+    /// (`cubarium_core::motor::ApexTurnRadius`), by name. Absent on a row written before the
+    /// switch existed, which is `grasp`.
+    #[serde(default = "grasp_name")]
+    pub apex_turn_radius: String,
     pub horizon_ticks: u64,
     /// Ticks actually simulated: the horizon, or fewer if the world emptied.
     pub ticks: u64,
@@ -852,6 +858,10 @@ pub struct AuditReport {
     /// by name. Absent from a report written before the switch existed, which is `sweep`.
     #[serde(default = "sweep_name")]
     pub motor: String,
+    /// Which radius every row of this report gave an apex member's grasp, by name. Absent from
+    /// a report written before the switch existed, which is `grasp`.
+    #[serde(default = "grasp_name")]
+    pub apex_turn_radius: String,
     pub horizon_ticks: u64,
     pub workers: usize,
     pub wall_seconds: f64,
@@ -882,11 +892,27 @@ pub struct Arm {
     /// `crate::World::set_motor_model`). The one variable of workstream T's paired arm;
     /// `Sweep` is the shipped contract and is byte-identical to an arm that never set it.
     pub motor: MotorModel,
+    /// **Which radius the arm gives an apex member's grasp in the turn budget**
+    /// (`cubarium_core::motor::ApexTurnRadius`, `crate::World::set_apex_turn_radius`). The one
+    /// variable of workstream U's paired arm, under `MotorModel::Sweep`; `Grasp` is the shipped
+    /// rule and is byte-identical to an arm that never set it.
+    pub apex_turn_radius: ApexTurnRadius,
 }
 
 /// The name a report written before the motor switch existed implies: there was one contract.
 fn sweep_name() -> String {
     MotorModel::Sweep.name().to_string()
+}
+
+/// The rule a report written before the grasp switch existed implies: there was one rule.
+fn grasp_name() -> String {
+    ApexTurnRadius::Grasp.name().to_string()
+}
+
+/// The apex turn radius named on the command line. Like `--motor`, an unrecognised name is
+/// refused rather than silently defaulted.
+pub fn parse_apex_turn_radius(name: &str) -> Result<ApexTurnRadius, String> {
+    ApexTurnRadius::parse(name)
 }
 
 /// The motor contract named on the command line. Like `--pursuit-stop`, an unrecognised name
@@ -898,7 +924,16 @@ pub fn parse_motor(name: &str) -> Result<MotorModel, String> {
 
 /// Run one `(configuration, seed)` arm of the audit.
 fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
-    let Arm { apex, horizon, introduce_tick, founder_age_seconds, ledger, stop, motor } = arm;
+    let Arm {
+        apex,
+        horizon,
+        introduce_tick,
+        founder_age_seconds,
+        ledger,
+        stop,
+        motor,
+        apex_turn_radius,
+    } = arm;
     let start = Instant::now();
     let mut config: WorldConfig = (*eco.base).clone();
     config.seed = seed;
@@ -935,6 +970,10 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
     // contract is what the world runs, it is not in the config, and `Sweep` is byte-identical
     // to not calling this at all.
     world.set_motor_model(motor);
+    // Workstream U's variable, transient in exactly the same way: under `Sweep` it decides
+    // whether an apex member's 14.8 px grasp is a turn radius as well as a reach, and `Grasp`
+    // is byte-identical to not calling this at all. No ordinary body can see it.
+    world.set_apex_turn_radius(apex_turn_radius);
     let dt = cubarium_core::DT;
     let age_ticks = (founder_age_seconds / dt).round().max(0.0) as u64;
 
@@ -1110,6 +1149,7 @@ fn run_one(eco: &Ecology, seed: u64, arm: Arm) -> Result<AuditRow, String> {
         ledger,
         pursuit_stop: stop,
         motor: motor.name().to_string(),
+        apex_turn_radius: apex_turn_radius.name().to_string(),
         horizon_ticks: horizon,
         ticks,
         collapsed_at,
@@ -1217,7 +1257,16 @@ pub fn run(
     wall_seconds: u64,
     out: PathBuf,
 ) -> Result<(), Boxed> {
-    let Arm { apex, horizon, introduce_tick, founder_age_seconds, ledger, stop, motor } = arm;
+    let Arm {
+        apex,
+        horizon,
+        introduce_tick,
+        founder_age_seconds,
+        ledger,
+        stop,
+        motor,
+        apex_turn_radius,
+    } = arm;
     if configs.is_empty() {
         return Err("--config must name at least one world configuration TOML".into());
     }
@@ -1240,6 +1289,7 @@ pub fn run(
         if ledger { "on" } else { "off" }
     );
     println!("# pursuit stopping rule {}", stop.as_str());
+    println!("# motor contract {}, apex turn radius {}", motor.name(), apex_turn_radius.name());
     println!("# horizon {horizon} ticks, held-out seeds {seeds:?}, {workers} workers");
     for e in &ecologies {
         println!("# config {} (hash {})", e.label, e.hex());
@@ -1505,6 +1555,7 @@ pub fn run(
         ledger,
         pursuit_stop: stop,
         motor: motor.name().to_string(),
+        apex_turn_radius: apex_turn_radius.name().to_string(),
         horizon_ticks: horizon,
         workers,
         wall_seconds: started.elapsed().as_secs_f64(),
@@ -1539,6 +1590,7 @@ mod tests {
             ledger: true,
             pursuit_stop: PursuitStop::ForwardHalfSpace,
             motor: MotorModel::Sweep.name().to_string(),
+            apex_turn_radius: ApexTurnRadius::Grasp.name().to_string(),
             population_at_introduction: 0,
             prey_deaths_predation: 0,
             horizon_ticks: 180_000,

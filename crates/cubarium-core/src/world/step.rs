@@ -247,11 +247,15 @@ impl World {
                 neural_timing,
                 scripted,
                 motor_model,
+                apex_turn_radius,
                 initial_material: _,
             } = &mut *self;
             // The motor contract in force this tick, read once. `Sweep` is the shipped
             // contract and the default (`crate::motor::MotorModel`).
             let motor_model = *motor_model;
+            // And which radius an apex member's grasp puts in that contract's rotation term
+            // (`crate::motor::ApexTurnRadius`). `Grasp` is the shipped rule and the default.
+            let apex_turn_radius = *apex_turn_radius;
             let WorldState {
                 config,
                 tick,
@@ -1378,7 +1382,12 @@ impl World {
                     // The radius the model in force puts in the rotation term: the outermost
                     // contacting point (an apex member's grasp included) under `Sweep`, the
                     // disc's own radius of gyration with the grasp dropped under `Inertial`.
-                    radius_px: motor::turn_radius_px_in(o, apex_geometry.as_ref(), motor_model),
+                    radius_px: motor::turn_radius_px_in_with(
+                        o,
+                        apex_geometry.as_ref(),
+                        motor_model,
+                        apex_turn_radius,
+                    ),
                     turn_rate_max: d.turn_rate_max,
                     speed_cap,
                     motor_budget: bill.affordable_motor(o.energy, dt),
