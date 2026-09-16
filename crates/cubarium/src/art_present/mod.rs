@@ -102,9 +102,9 @@ use cubarium_render::{
     stamp_layers_bent, stamp_layers_cached,
 };
 use cubarium_surface::{
-    CUBE_CELL_COUNT, CELLS_PER_FACE_EDGE, CellId, PixelImage, ScalarField, SurfacePoint, Vec2,
+    CUBE_CELL_COUNT, CellId, PixelImage, ScalarField, SurfacePoint, Vec2,
 };
-use cube_proto::{FACE_SIZE, Face};
+use cube_proto::Face;
 
 pub use crate::art::Band;
 use crate::art::{ArtPack, Clip, GroundTile, Plant, TallPlant};
@@ -137,8 +137,8 @@ pub use tall::*;
 pub use wind::*;
 
 use environment::filtered_at;
-use habitat::{FACE_PIXELS, PHASE_SEED, SOIL_RAMP, SOIL_WEIGHT, weight_index};
-use tall::{TallSpecies, draw_column, layers_extent, stage_layers, stage_pose};
+use habitat::{CUBE_TABLES, PHASE_SEED, PixelTables, SOIL_RAMP};
+use tall::{TallSpecies, draw_column_in, layers_extent, stage_layers, stage_pose};
 use wind::{budget_in, hermite};
 
 /// The pack's plants resolved to indices once, per band and pick. A pack without a plant
@@ -327,6 +327,12 @@ const FLAT_TONE: Tone = Tone { colour: [0.0; 3], shade: Shade::FLAT, mix: 0.0 };
 /// toward what the world now says.
 pub struct ArtPresenter {
     pack: ArtPack,
+    /// The raster this presenter is laid out for: the world's topology and scale, and the
+    /// canopy threshold that goes with them. Every cache below is sized and keyed by it,
+    /// and [`ArtPresenter::fit`] rebuilds them all if a view of a different world arrives.
+    geom: ArtGeometry,
+    /// [`w_soil`] and the shimmer phase at every pixel of that raster.
+    tables: std::sync::Arc<PixelTables>,
     species: Species,
     producer: ScalarField,
     detritus: ScalarField,
@@ -424,13 +430,26 @@ pub struct ArtPresenter {
 }
 
 impl ArtPresenter {
-    /// Build the presenter and lay out every cell's slot once.
+    /// Build the presenter for a **cube** and lay out every cell's slot once.
+    ///
+    /// A presenter built this way still draws a ring: [`ArtPresenter::observe`] and
+    /// [`ArtPresenter::draw`] fit the caches to the view's own world before they read
+    /// anything ([`ArtPresenter::fit`]). Naming the world at construction —
+    /// [`ArtPresenter::for_world`] — only saves the one rebuild.
     pub fn new(pack: ArtPack) -> ArtPresenter {
+        ArtPresenter::for_world(pack, Topology::Cube, Scale::ONE)
+    }
+
+    /// Build the presenter for a named world: its caches are sized from
+    /// `topology.cell_count(scale)` and its bands read [`Topology::height`] against the
+    /// canopy threshold that topology's art uses ([`ArtGeometry::new`]).
+    pub fn for_world(pack: ArtPack, topology: Topology, scale: Scale) -> ArtPresenter {
+        let geom = ArtGeometry::new(topology, scale);
         let species = Species::resolve(&pack);
-        let slots: Vec<Slot> = CellId::all(Topology::Cube, Scale::ONE).map(slot_of).collect();
-        let bands = CellId::all(Topology::Cube, Scale::ONE).map(band_of).collect();
+        let slots: Vec<Slot> = geom.all_cells().map(|c| geom.slot_of(c)).collect();
+        let bands = geom.all_cells().map(|c| geom.band_of(c)).collect();
         let tall_species = TallSpecies::resolve(&pack);
-        let columns = tall_columns();
+        let columns = geom.tall_columns();
         let tall = vec![
             TallGrowth {
                 height: 0.0,
@@ -449,30 +468,33 @@ impl ArtPresenter {
                     .map(|p| (p.name.clone(), tall_bend_budget(p))),
             )
             .collect();
+        let cells_n = geom.cell_count();
         ArtPresenter {
             pack,
+            geom,
+            tables: geom.tables(),
             species,
-            water: ScalarField::zeros(Topology::Cube, Scale::ONE),
+            water: ScalarField::zeros(topology, scale),
             tall_species,
             columns,
             tall_prev: tall.clone(),
             tall_dead: tall.clone(),
             tall_dead_prev: tall.clone(),
             tall,
-            producer: ScalarField::zeros(Topology::Cube, Scale::ONE),
-            detritus: ScalarField::zeros(Topology::Cube, Scale::ONE),
-            soil: ScalarField::zeros(Topology::Cube, Scale::ONE),
-            litter: vec![0.0; CUBE_CELL_COUNT],
-            layer: Canvas::cube(),
+            producer: ScalarField::zeros(topology, scale),
+            detritus: ScalarField::zeros(topology, scale),
+            soil: ScalarField::zeros(topology, scale),
+            litter: vec![0.0; cells_n],
+            layer: Canvas::new(topology, scale),
             scratch: Vec::new(),
-            cells: PixelCells::new(Topology::Cube, Scale::ONE),
+            cells: PixelCells::new(topology, scale),
             unfolds: Unfolds::cached(),
             slots,
             bands,
-            growth: vec![Growth::snapped(None, false); CUBE_CELL_COUNT],
-            growth_prev: vec![Growth::snapped(None, false); CUBE_CELL_COUNT],
-            dead: vec![Growth::snapped(None, false); CUBE_CELL_COUNT],
-            dead_prev: vec![Growth::snapped(None, false); CUBE_CELL_COUNT],
+            growth: vec![Growth::snapped(None, false); cells_n],
+            growth_prev: vec![Growth::snapped(None, false); cells_n],
+            dead: vec![Growth::snapped(None, false); cells_n],
+            dead_prev: vec![Growth::snapped(None, false); cells_n],
             bodies: std::collections::HashMap::new(),
             budgets,
             last_tick: None,
@@ -506,6 +528,78 @@ impl ArtPresenter {
     /// The foliage shoulder this presenter draws at: [`FOLIAGE_FULL`] unless a study moved it.
     pub fn foliage_full(&self) -> f64 {
         self.foliage_full
+    }
+
+    /// The raster this presenter is currently laid out for.
+    pub fn geometry(&self) -> ArtGeometry {
+        self.geom
+    }
+
+    /// This presenter with the canopy threshold moved ([`ArtGeometry::with_canopy_top`]),
+    /// for a review session. A value outside `0..=1` is refused and the default kept.
+    ///
+    /// It relays out the slots and bands, so it is a construction-time argument like
+    /// [`ArtPresenter::with_foliage_full`] and not something to move under a running
+    /// presenter: moving the canopy moves which species a cell grows, which is a cut.
+    pub fn with_canopy_top(mut self, canopy_top: f64) -> ArtPresenter {
+        let geom = self.geom.with_canopy_top(canopy_top);
+        if geom != self.geom {
+            self.relayout(geom);
+        }
+        self
+    }
+
+    /// Lay the presenter out for `geom`: every cache sized from its cell count, every slot
+    /// and band and column recomputed, and all growth history dropped.
+    ///
+    /// Called from [`ArtPresenter::fit`] only when the world actually changed, so a cube
+    /// presenter drawing cube views never reaches it.
+    fn relayout(&mut self, geom: ArtGeometry) {
+        let (topology, scale) = (geom.topology(), geom.scale());
+        let cells = geom.cell_count();
+        self.geom = geom;
+        self.tables = geom.tables();
+        self.slots = geom.all_cells().map(|c| geom.slot_of(c)).collect();
+        self.bands = geom.all_cells().map(|c| geom.band_of(c)).collect();
+        self.columns = geom.tall_columns();
+        let tall = vec![TallGrowth { height: 0.0, target: 0 }; self.columns.len()];
+        self.tall_prev = tall.clone();
+        self.tall_dead = tall.clone();
+        self.tall_dead_prev = tall.clone();
+        self.tall = tall;
+        self.water = ScalarField::zeros(topology, scale);
+        self.producer = ScalarField::zeros(topology, scale);
+        self.detritus = ScalarField::zeros(topology, scale);
+        self.soil = ScalarField::zeros(topology, scale);
+        self.litter = vec![0.0; cells];
+        self.layer = Canvas::new(topology, scale);
+        self.cells = PixelCells::new(topology, scale);
+        self.unfolds = Unfolds::cached();
+        let bare = vec![Growth::snapped(None, false); cells];
+        self.growth = bare.clone();
+        self.growth_prev = bare.clone();
+        self.dead = bare.clone();
+        self.dead_prev = bare;
+        // The next view is a first view: a mature world is drawn as it is, not replayed.
+        self.last_tick = None;
+        self.bodies.clear();
+        self.hunters.clear();
+        self.outgoing_prey.clear();
+    }
+
+    /// Fit the presenter to the world a view describes.
+    ///
+    /// **Normative**: a no-op whenever the view's `(topology, scale)` is already the one
+    /// the caches were laid out for — which is every frame of a run, and every frame this
+    /// presenter has ever drawn on a cube. A view of a *different* world is a different
+    /// world, not a migration: the layout is rebuilt and the growth history dropped, and
+    /// the next observe snaps.
+    fn fit(&mut self, topology: Topology, scale: Scale) {
+        if topology != self.geom.topology() || scale != self.geom.scale() {
+            // The new world's own canopy default: a threshold chosen for a cube is not a
+            // threshold for a ring, and carrying it across would be a migration.
+            self.relayout(ArtGeometry::new(topology, scale));
+        }
     }
 
     /// This presenter with the meal onset ([`crate::meal_present`]) switched off, so ordinary
@@ -757,6 +851,7 @@ impl ArtPresenter {
     /// not at draw time, so a test that wants to see a plant in fruit must observe the
     /// fruit. `None` is "the world publishes no fruit yet".
     pub fn observe_with_fruit(&mut self, view: &RenderView, fruit: Option<&[f64]>) {
+        self.fit(view.topology, view.scale);
         let snap = match self.last_tick {
             None => true,
             Some(last) => view.tick < last,
@@ -797,8 +892,9 @@ impl ArtPresenter {
                 }
             }
         }
-        for (index, cell) in CellId::all(Topology::Cube, Scale::ONE).enumerate() {
-            let band = cell_band(cell, view.water.get(index).copied());
+        let geom = self.geom;
+        for (index, cell) in geom.all_cells().enumerate() {
+            let band = geom.cell_band(cell, view.water.get(index).copied());
             if band != self.bands[index] {
                 self.bands[index] = band;
                 // The new band's plant is a different plant: it starts from bare ground.
@@ -811,7 +907,8 @@ impl ArtPresenter {
             } else {
                 self.growth[index].target
             };
-            let target = plant_cap(band, cell)
+            let target = geom
+                .plant_cap(band, cell)
                 .and_then(|cap| next_stage(from_target, t, &stage_thresholds(band), cap));
             let in_fruit = fruit_stage(fruit.and_then(|f| f.get(index).copied()));
             if new_tick {
@@ -830,7 +927,8 @@ impl ArtPresenter {
             if structural(band) {
                 let td = dead_wood_density(view, index);
                 let dead_from = if snap { None } else { self.dead[index].target };
-                let dead_target = plant_cap(band, cell)
+                let dead_target = geom
+                    .plant_cap(band, cell)
                     .and_then(|cap| next_stage(dead_from, td, &stage_thresholds(band), cap));
                 if new_tick {
                     self.dead_prev[index] = self.dead[index];
@@ -849,9 +947,9 @@ impl ArtPresenter {
             }
         }
         for (i, column) in self.columns.iter().enumerate() {
-            let t_col = column_density(view, column.face, column.cx);
+            let t_col = geom.column_density(view, column.face, column.cx);
             let from_target = if snap { 0 } else { self.tall[i].target };
-            let target = next_tall(from_target, t_col);
+            let target = geom.next_tall(column.face, from_target, t_col);
             if new_tick {
                 self.tall_prev[i] = self.tall[i];
             }
@@ -866,9 +964,9 @@ impl ArtPresenter {
             if snap {
                 self.tall_prev[i] = self.tall[i];
             }
-            let t_dead = column_dead_density(view, column.face, column.cx);
+            let t_dead = geom.column_dead_density(view, column.face, column.cx);
             let dead_from = if snap { 0 } else { self.tall_dead[i].target };
-            let dead_target = next_tall(dead_from, t_dead);
+            let dead_target = geom.next_tall(column.face, dead_from, t_dead);
             if new_tick {
                 self.tall_dead_prev[i] = self.tall_dead[i];
             }
@@ -902,8 +1000,9 @@ impl ArtPresenter {
         let now = present_seconds(view.tick, 0.0);
         for o in &view.organisms {
             let state = state_of(o);
-            let start = present::interpolate(&o.moved, o.pos, o.heading, 0.0).1;
-            let end = present::interpolate(&o.moved, o.pos, o.heading, 1.0).1;
+            let topo = self.geom.topology();
+            let start = present::interpolate_on(topo, &o.moved, o.pos, o.heading, 0.0).1;
+            let end = present::interpolate_on(topo, &o.moved, o.pos, o.heading, 1.0).1;
             match self.bodies.get_mut(&o.id) {
                 Some(memory) => {
                     if memory.state != state {
@@ -1028,9 +1127,19 @@ impl ArtPresenter {
         // A presenter that has never seen a tick snaps to this view, exactly as the first
         // `observe` would: a mature world is drawn as it is, not replayed from bare ground.
         // After that `draw` mutates nothing, so a thousand draws advance nothing.
+        self.fit(view.topology, view.scale);
+        assert!(
+            canvas.topology() == self.geom.topology() && canvas.scale() == self.geom.scale(),
+            "the canvas is {:?} at S = {} and the view {:?} at S = {}",
+            canvas.topology(),
+            canvas.scale().world(),
+            self.geom.topology(),
+            self.geom.scale().world(),
+        );
         if self.last_tick.is_none() {
             self.observe_with_fruit(view, fruit);
         }
+        let geom = self.geom;
         let seconds = present_seconds(view.tick, f);
 
         canvas.clear();
@@ -1053,7 +1162,7 @@ impl ArtPresenter {
             PALETTE.producer_high,
             true,
         );
-        add_above_horizon(canvas, &self.layer);
+        add_above_horizon(canvas, &self.tables, &self.layer);
 
         // Detritus flecks, exactly as the M2 presenter draws them — and likewise only
         // above the horizon. In the soil, detritus is the ground itself, not a fleck.
@@ -1062,7 +1171,7 @@ impl ArtPresenter {
         // carcass reads as a denser patch of the fleck and wash treatment litter already has.
         self.litter.clear();
         self.litter
-            .extend((0..CUBE_CELL_COUNT).map(|i| litter_density(view, i) * SOIL_SCALE));
+            .extend((0..geom.cell_count()).map(|i| litter_density(view, i) * SOIL_SCALE));
         present::threshold_field(&mut self.detritus, &self.litter, DETRITUS_THRESHOLD);
         self.layer.clear();
         draw_field_with(
@@ -1073,34 +1182,38 @@ impl ArtPresenter {
             PALETTE.detritus,
             false,
         );
-        add_above_horizon(canvas, &self.layer);
+        add_above_horizon(canvas, &self.tables, &self.layer);
 
         // The soil ground: dark plum to violet-mauve by raw detritus, seam-filtered like
         // every other field layer, faded in through the same horizon.
         present::copy_field(&mut self.soil, &self.litter);
-        draw_soil_ground(canvas, &self.cells, &self.soil);
+        draw_soil_ground(canvas, &self.cells, &self.tables, &self.soil);
 
         // Ground cover: each band's tileable texture on the 8-px lattice, fading in with
         // the density that grows the band's plants and cross-fading through the horizon.
         {
             let pack = &self.pack;
             let cells = &self.cells;
+            let tables = &self.tables;
             let unfolds = &mut self.unfolds;
-            for face in Face::ALL {
-                for (face, x, y) in ground_points(face) {
-                    let point = SurfacePoint::pixel_center(Topology::Cube, face, x, y);
+            for &chart in geom.topology().charts() {
+                for (face, x, y) in geom.ground_points(chart) {
+                    let point = SurfacePoint::pixel_center(geom.topology(), face, x, y);
                     let cell = cells.cell(face, x, y);
-                    let band = band_of(cell);
+                    let band = geom.band_of(cell);
                     let Some(tile) = pack.ground_for(band) else {
                         continue;
                     };
                     let t = ground_density(view, cell.index(), band);
-                    let opacity = ground_opacity(t, band) * ground_weight(face, x, y, band);
+                    let opacity = ground_opacity(t, band)
+                        * band_ground_weight(tables.soil(face, x, y), band);
                     if opacity <= 0.0 {
                         continue;
                     }
-                    let pose =
-                        ground_pose(tile, seconds + ground_phase_of(face, x, y, tile.seconds));
+                    let pose = ground_pose(
+                        tile,
+                        seconds + geom.ground_phase_of(face, x, y, tile.seconds),
+                    );
                     stamp_layers_cached(
                         canvas,
                         point,
@@ -1121,7 +1234,15 @@ impl ArtPresenter {
         if !view.water.is_empty() {
             present::copy_field(&mut self.water, &view.water);
             let saturation = view.producer_max * PRODUCER_SATURATION;
-            draw_water(canvas, &self.cells, &self.water, &self.producer, saturation, seconds);
+            draw_water(
+                canvas,
+                &self.cells,
+                &self.tables,
+                &self.water,
+                &self.producer,
+                saturation,
+                seconds,
+            );
         }
 
         // Plants: scenery that follows the fields. These are not organisms — nothing in
@@ -1132,7 +1253,7 @@ impl ArtPresenter {
         let species = &self.species;
         let budgets = &self.budgets;
         let unfolds = &mut self.unfolds;
-        for (index, cell) in CellId::all(Topology::Cube, Scale::ONE).enumerate() {
+        for (index, cell) in geom.all_cells().enumerate() {
             // The growth this frame shows: between the last two observed states, at `f`.
             let growth = growth_between(self.growth_prev[index], self.growth[index], f);
             let dead = growth_between(self.dead_prev[index], self.dead[index], f);
@@ -1154,7 +1275,7 @@ impl ArtPresenter {
             // and a species with no response takes neither. The silhouettes take the same
             // one, so structure and foliage lean together.
             let (bend, heading) =
-                slot_wind(slot, &plant.name, budget_in(budgets, &plant.name), seconds);
+                geom.slot_wind(slot, &plant.name, budget_in(budgets, &plant.name), seconds);
             // Dead structure, under everything living: the cell's own species as a whole
             // silhouette in the dead tone, at a stage from `dead_wood` through the same
             // mapping the living stand uses, quieter by `DEAD_WOOD_OPACITY` and fading out
@@ -1301,15 +1422,16 @@ impl ArtPresenter {
                 let opacity = opacity_of(stage);
                 if opacity > 0.0 {
                     let layers = stage_layers(plant, stage, cell, seconds, fruit_now);
-                    let mask = match up_of(cell) {
-                        // A stalk stands on the tile's bottom edge and grows upward.
-                        Some(_) => Mask::Axial {
-                            reveal: gu * PLANT_REVEAL_PX,
-                        },
-                        // A radial top-face plant opens from its centre.
-                        None => Mask::Radial {
+                    let mask = if slot.radial {
+                        // A radial plant opens from its centre.
+                        Mask::Radial {
                             reveal: gu * (layers_extent(&layers) + 0.5),
-                        },
+                        }
+                    } else {
+                        // A stalk stands on the tile's bottom edge and grows upward.
+                        Mask::Axial {
+                            reveal: gu * PLANT_REVEAL_PX,
+                        }
                     };
                     stamp_layers_cached(
                         canvas, slot.at, heading, &layers, 1.0, opacity, mask, bend, tone,
@@ -1328,7 +1450,7 @@ impl ArtPresenter {
         // between. It is stamped *over* the band's scenery, not under it, because the litter
         // a stand's own decay produces would otherwise hide the only record that it died.
         // The band's plants, flecks and ground wash still read `D + C` and nothing else.
-        for (index, cell) in CellId::all(Topology::Cube, Scale::ONE).enumerate() {
+        for (index, cell) in geom.all_cells().enumerate() {
             let band = self.bands[index];
             if band != Band::Soil {
                 continue;
@@ -1342,7 +1464,7 @@ impl ArtPresenter {
                 continue;
             };
             let (bend, heading) =
-                slot_wind(slot, &plant.name, budget_in(budgets, &plant.name), seconds);
+                geom.slot_wind(slot, &plant.name, budget_in(budgets, &plant.name), seconds);
             let pose = stage_pose(plant, 0, cell, seconds);
             stamp_layers_cached(
                 canvas,
@@ -1385,12 +1507,13 @@ impl ArtPresenter {
                         own
                     }
                 };
-                let amplitude = tall_amplitude(column, budget, seconds);
+                let amplitude = geom.tall_amplitude(column, budget, seconds);
                 // Dead wood first, under the living column: base and trunk only, in the dead
                 // tone, at its own paced height.
                 let dead = tall_between(self.tall_dead_prev[i], self.tall_dead[i], f).height;
-                draw_column(
+                draw_column_in(
                     canvas,
+                    geom,
                     column,
                     dead,
                     plant,
@@ -1407,17 +1530,20 @@ impl ArtPresenter {
                 );
                 // The crown dims with the stand's own foliage fullness: a stripped column
                 // keeps its trunk and loses its head.
-                let cap =
-                    foliage_ramp_at(column_fullness(view, column.face, column.cx), foliage_full);
-                draw_column(
-                    canvas, column, height, plant, vine, seconds, amplitude, cap, None, scratch,
+                let cap = foliage_ramp_at(
+                    geom.column_fullness(view, column.face, column.cx),
+                    foliage_full,
+                );
+                draw_column_in(
+                    canvas, geom, column, height, plant, vine, seconds, amplitude, cap, None,
+                    scratch,
                 );
             }
         }
 
         // Rain: the streaks at this frame's own instant, so they fall continuously.
         if !view.rain.is_empty() {
-            draw_rain(canvas, &view.rain, seconds);
+            draw_rain(canvas, geom, &view.rain, seconds);
         }
 
         // Bodies: the organism's real state, cross-faded for `BODY_FADE_SECONDS` after a
@@ -1435,6 +1561,7 @@ impl ArtPresenter {
             };
             stamp_creature(
                 &self.pack,
+                geom,
                 &mut self.scratch,
                 o,
                 self.bodies.get(&o.id),
@@ -1480,6 +1607,7 @@ impl ArtPresenter {
                     };
                     stamp_creature(
                         &self.pack,
+                        geom,
                         &mut self.scratch,
                         &held,
                         outgoing.and_then(|p| p.body.as_ref()),
@@ -1499,7 +1627,8 @@ impl ArtPresenter {
             let Some(o) = view.organisms.iter().find(|o| o.id == *id) else {
                 continue;
             };
-            let (anchor, dir) = present::interpolate(&o.moved, o.pos, o.heading, f);
+            let (anchor, dir) =
+                present::interpolate_on(geom.topology(), &o.moved, o.pos, o.heading, f);
             let heading = turn_heading(dir, self.bodies.get(id).map_or(0.0, |m| m.turn), f);
             let (pose, scale) = memory.living_pose(view.tick, f, &o.moved);
             self.lanternjaw.draw_living(
@@ -1525,8 +1654,10 @@ impl ArtPresenter {
 /// between nibbles and hands back to the mode's own clip as `w` falls; the path, heading,
 /// turn and scale are untouched. Gestation immediately fades out any outgoing meal;
 /// no new meal starts while an organism holds an escrow.
+#[allow(clippy::too_many_arguments)]
 fn stamp_creature(
     pack: &ArtPack,
+    geom: ArtGeometry,
     scratch: &mut Vec<PixelImage>,
     o: &OrganismView,
     memory: Option<&BodyMemory>,
@@ -1553,7 +1684,7 @@ fn stamp_creature(
             gestation,
         ))
     };
-    let (anchor, dir) = present::interpolate(&o.moved, o.pos, o.heading, f);
+    let (anchor, dir) = present::interpolate_on(geom.topology(), &o.moved, o.pos, o.heading, f);
     // The turn the tick began with is spent over the tick's frames.
     let heading = turn_heading(dir, memory.map_or(0.0, |m| m.turn), f);
     let scale = if o.juvenile { JUVENILE_SCALE } else { 1.0 };
@@ -1595,12 +1726,12 @@ pub const FEED_STATE: usize = 2;
 /// At a pixel wholly above the horizon the scale is exactly 1, so the multiply and the
 /// add reproduce the decided image bit for bit; at a pixel wholly in the soil the layer
 /// is skipped entirely.
-fn add_above_horizon(canvas: &mut Canvas, layer: &Canvas) {
-    let weight = &*SOIL_WEIGHT;
-    for face in Face::ALL {
-        for y in 0..FACE_SIZE as u16 {
-            for x in 0..FACE_SIZE as u16 {
-                let k = 1.0 - weight[weight_index(face, x, y)];
+fn add_above_horizon(canvas: &mut Canvas, tables: &PixelTables, layer: &Canvas) {
+    let width = canvas.width();
+    for &face in canvas.charts() {
+        for y in canvas.rows_of(face) {
+            for x in 0..width {
+                let k = 1.0 - tables.soil(face, x, y);
                 if k <= 0.0 {
                     continue;
                 }
@@ -1625,13 +1756,18 @@ fn add_above_horizon(canvas: &mut Canvas, layer: &Canvas) {
 /// plum at [`SOIL_MIN_BRIGHTNESS`], which is what makes the band read as a *place* below
 /// the horizon instead of as an unlit strip. The seam-aware one-pixel box filter is
 /// exactly `cubarium_render::draw_field`'s, rim normalization included.
-fn draw_soil_ground(canvas: &mut Canvas, cells: &PixelCells, detritus: &ScalarField) {
+fn draw_soil_ground(
+    canvas: &mut Canvas,
+    cells: &PixelCells,
+    tables: &PixelTables,
+    detritus: &ScalarField,
+) {
     let (low, high) = *SOIL_RAMP;
-    let weight = &*SOIL_WEIGHT;
-    for face in Face::ALL {
-        for y in 0..FACE_SIZE as u16 {
-            for x in 0..FACE_SIZE as u16 {
-                let w = weight[weight_index(face, x, y)];
+    let width = canvas.width();
+    for &face in canvas.charts() {
+        for y in canvas.rows_of(face) {
+            for x in 0..width {
+                let w = tables.soil(face, x, y);
                 if w <= 0.0 {
                     continue;
                 }

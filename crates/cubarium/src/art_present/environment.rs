@@ -1,6 +1,5 @@
 //! Ground cover, water, and rain rendering.
 
-use cubarium_surface::{Scale, Topology};
 use super::*;
 
 // --- Ground cover --------------------------------------------------------------------
@@ -35,18 +34,43 @@ pub fn ground_opacity(t: f64, band: Band) -> f32 {
 /// The pixel centers of the ground lattice on one face: `x ≡ 4 (mod 8)`, `y ≡ 4 (mod 8)`,
 /// 64 points.
 pub fn ground_points(face: Face) -> impl Iterator<Item = (Face, u16, u16)> {
-    let half = GROUND_LATTICE / 2;
-    (0..FACE_SIZE as u16 / GROUND_LATTICE).flat_map(move |j| {
-        (0..FACE_SIZE as u16 / GROUND_LATTICE)
-            .map(move |i| (face, i * GROUND_LATTICE + half, j * GROUND_LATTICE + half))
-    })
+    ArtGeometry::CUBE.ground_points(face)
+}
+
+impl ArtGeometry {
+    /// The pixel centres of the ground lattice on one chart.
+    ///
+    /// **Normative**: `n = extent / `[`GROUND_LATTICE`] points per axis, the run centred on
+    /// the chart so the leftover `extent − n · 8` is split between the two ends —
+    /// `offset = (extent − n·8)/2 + 4`. On the cube 64 divides by 8 and this is `x ≡ y ≡ 4
+    /// (mod 8)`, the 64 points it has always used. A 320×180 ring gets 40 columns that tile
+    /// the wrap exactly (320 = 40·8) and 22 rows centred in 180, leaving two pixels of the
+    /// top rim and two of the bottom rim without a tile rather than one eight-pixel strip
+    /// at the bottom or a double-stamped one.
+    pub fn ground_points(self, face: Face) -> impl Iterator<Item = (Face, u16, u16)> {
+        let (w, h) = self.topology().extent(face);
+        let start = |extent: f64| {
+            let n = (extent as u16) / GROUND_LATTICE;
+            (n, (extent as u16 - n * GROUND_LATTICE) / 2 + GROUND_LATTICE / 2)
+        };
+        let (nx, x0) = start(w);
+        let (ny, y0) = start(h);
+        (0..ny).flat_map(move |j| {
+            (0..nx).map(move |i| (face, i * GROUND_LATTICE + x0, j * GROUND_LATTICE + y0))
+        })
+    }
 }
 
 /// How much of a lattice point belongs to the band whose tile it draws: the soil weight
 /// for the soil tile, its complement for the foliage and canopy tiles, so the texture
 /// cross-fades through the horizon with the ground under it.
 pub fn ground_weight(face: Face, x: u16, y: u16, band: Band) -> f32 {
-    let w = soil_weight(face, x, y);
+    band_ground_weight(soil_weight(face, x, y), band)
+}
+
+/// [`ground_weight`] from a soil weight already read out of the raster's own table.
+#[inline]
+pub(super) fn band_ground_weight(w: f32, band: Band) -> f32 {
     match band {
         Band::Soil => w,
         _ => 1.0 - w,
@@ -56,12 +80,18 @@ pub fn ground_weight(face: Face, x: u16, y: u16, band: Band) -> f32 {
 /// A stable per-lattice-point offset into the tile's breath, in `[0, seconds)`, so a face
 /// of texture does not blink in lockstep.
 pub fn ground_phase_of(face: Face, x: u16, y: u16, seconds: f64) -> f64 {
-    if !(seconds.is_finite() && seconds > 0.0) {
-        return 0.0;
+    ArtGeometry::CUBE.ground_phase_of(face, x, y, seconds)
+}
+
+impl ArtGeometry {
+    /// [`ground_phase_of`] in this world, through [`ArtGeometry::pixel_key`].
+    pub fn ground_phase_of(self, face: Face, x: u16, y: u16, seconds: f64) -> f64 {
+        if !(seconds.is_finite() && seconds > 0.0) {
+            return 0.0;
+        }
+        let mut hash = SplitMix64::new(GROUND_SEED ^ self.pixel_key(face, x, y));
+        hash.next_f64() * seconds
     }
-    let key = (face.index() as u64) << 16 | u64::from(x) << 8 | u64::from(y);
-    let mut hash = SplitMix64::new(GROUND_SEED ^ key);
-    hash.next_f64() * seconds
 }
 
 /// The pose of a ground tile at a presentation time ([`present_seconds`]).
@@ -104,7 +134,7 @@ pub const WATER_SHIMMER: f32 = 0.08;
 /// Shimmer period in simulated seconds. Review-tunable.
 pub const WATER_SHIMMER_SECONDS: f64 = 2.5;
 /// Seeds the per-pixel shimmer phase.
-const WATER_SEED: u64 = 0x7761_7465_7200_0001;
+pub(super) const WATER_SEED: u64 = 0x7761_7465_7200_0001;
 /// Algae in a pool: the water color leans toward this mint where the wet cell holds
 /// producers (`design/water.md` "Algae"). Review-tunable within the flora family.
 pub const ALGAE_SRGB: u32 = 0x007B_EBC9;
@@ -156,22 +186,8 @@ static WATER_RAMP: LazyLock<([f32; 3], [f32; 3])> = LazyLock::new(|| {
 /// The shimmer phase of a pixel, in `[0, 2π)`, from a hash of its position: a fixed
 /// pattern that the time term slides through.
 pub fn water_phase(face: Face, x: u16, y: u16) -> f64 {
-    WATER_PHASE[weight_index(face, x, y)]
+    CUBE_TABLES.shimmer(face, x, y)
 }
-
-static WATER_PHASE: LazyLock<Box<[f64]>> = LazyLock::new(|| {
-    let mut phases = vec![0.0f64; 5 * FACE_PIXELS];
-    for face in Face::ALL {
-        for y in 0..FACE_SIZE as u16 {
-            for x in 0..FACE_SIZE as u16 {
-                let key = (face.index() as u64) << 16 | u64::from(x) << 8 | u64::from(y);
-                phases[weight_index(face, x, y)] =
-                    SplitMix64::new(WATER_SEED ^ key).next_f64() * std::f64::consts::TAU;
-            }
-        }
-    }
-    phases.into_boxed_slice()
-});
 
 /// The water brightness at a presentation time ([`present_seconds`]) for a pixel of
 /// shimmer phase `phase`: `WATER_BRIGHT · (1 + WATER_SHIMMER · sin(2π · seconds /
@@ -207,6 +223,7 @@ pub(super) fn filtered_at(
 pub(super) fn draw_water(
     canvas: &mut Canvas,
     cells: &PixelCells,
+    tables: &PixelTables,
     water: &ScalarField,
     producer: &ScalarField,
     saturation: f64,
@@ -231,7 +248,7 @@ pub(super) fn draw_water(
                     0.0
                 };
                 let c = algae_water_color(w, p_t);
-                let b = water_brightness(seconds, water_phase(face, x, y));
+                let b = water_brightness(seconds, tables.shimmer(face, x, y));
                 let under = canvas.get(face, x, y);
                 canvas.set(
                     face,
@@ -274,8 +291,7 @@ pub fn rain_streaks(rain: f32) -> usize {
 
 /// The stable sub-cell origin `(dx, dy) ∈ [0, 4)²` of streak `k` of a cell.
 pub fn rain_origin(cell: CellId, k: usize) -> (u8, u8) {
-    let mut hash = SplitMix64::new(RAIN_SEED ^ (cell.index() as u64) << 8 ^ k as u64);
-    ((hash.next_u64() % 4) as u8, (hash.next_u64() % 4) as u8)
+    ArtGeometry::CUBE.rain_origin(cell, k)
 }
 
 /// How far a streak has fallen at simulated time `seconds`: `RAIN_SPEED · (seconds mod
@@ -322,51 +338,73 @@ pub fn rain_blink_on(seconds: f64) -> bool {
 /// than as a pixel step. On the top face it is a single pixel at the origin weighted by
 /// [`rain_blink`], omitted when that is 0.
 pub fn rain_marks(cell: CellId, k: usize, seconds: f64) -> Vec<((u16, u16), f32)> {
-    let (dx, dy) = rain_origin(cell, k);
-    let x0 = i32::from(cell.cx(Topology::Cube, Scale::ONE)) * 4;
-    let y0 = i32::from(cell.cy(Topology::Cube, Scale::ONE)) * 4;
-    let Some(up) = up_of(cell) else {
-        let blink = rain_blink(seconds);
-        return if blink > 0.0 {
-            vec![(
-                ((x0 + i32::from(dx)) as u16, (y0 + i32::from(dy)) as u16),
-                blink,
-            )]
-        } else {
-            Vec::new()
-        };
-    };
-    let down = Vec2::new(-up.x, -up.y);
-    let fall = rain_fall(seconds);
-    let phi = (fall - fall.floor()) as f32;
-    let steps = fall.floor() as i32;
-    let in_face = |v: i32| (0..FACE_SIZE as i32).contains(&v);
-    let mut marks = Vec::with_capacity(3);
-    let (vertical, sign) = if down.y.abs() >= down.x.abs() {
-        (true, if down.y >= 0.0 { 1 } else { -1 })
-    } else {
-        (false, if down.x >= 0.0 { 1 } else { -1 })
-    };
-    let along = if vertical {
-        i32::from(dy)
-    } else {
-        i32::from(dx)
-    };
-    let head = (along + sign * steps).rem_euclid(4);
-    for (offset, weight) in [(0, 1.0 - phi), (1, 1.0), (2, phi)] {
-        let step = head + sign * offset;
-        let (x, y) = if vertical {
-            (x0 + i32::from(dx), y0 + step)
-        } else {
-            (x0 + step, y0 + i32::from(dy))
-        };
-        // The head is wrapped within its cell; the two trailing pixels are not, so a
-        // streak that reaches the edge of the face simply loses its tail.
-        if in_face(x) && in_face(y) {
-            marks.push(((x as u16, y as u16), weight));
-        }
+    ArtGeometry::CUBE.rain_marks(cell, k, seconds)
+}
+
+impl ArtGeometry {
+    /// [`rain_origin`] in this world: `(dx, dy)` inside the cell, which is
+    /// [`ArtGeometry::cell_pixels`] wide — 4 on the cube and on a ring at `S = 1`.
+    pub fn rain_origin(self, cell: CellId, k: usize) -> (u8, u8) {
+        let n = self.cell_pixels().max(1.0) as u64;
+        let mut hash = SplitMix64::new(RAIN_SEED ^ (cell.index() as u64) << 8 ^ k as u64);
+        ((hash.next_u64() % n) as u8, (hash.next_u64() % n) as u8)
     }
-    marks
+
+    /// [`rain_marks`] in this world. On a ring `up` is `(0, −1)` in every cell, so every
+    /// streak falls down the chart and the sparkle branch — the cube's level Top face — is
+    /// never taken; the two rims clip a tail exactly as the cube's face edges do.
+    pub fn rain_marks(self, cell: CellId, k: usize, seconds: f64) -> Vec<((u16, u16), f32)> {
+        let (dx, dy) = self.rain_origin(cell, k);
+        let n = self.cell_pixels().max(1.0) as i32;
+        let face = self.face_of(cell);
+        let (w, h) = self.topology().extent(face);
+        let x0 = i32::from(cell.cx(self.topology(), self.scale())) * n;
+        let y0 = i32::from(cell.cy(self.topology(), self.scale())) * n;
+        let Some(up) = self.up_of(cell) else {
+            let blink = rain_blink(seconds);
+            return if blink > 0.0 {
+                vec![(
+                    ((x0 + i32::from(dx)) as u16, (y0 + i32::from(dy)) as u16),
+                    blink,
+                )]
+            } else {
+                Vec::new()
+            };
+        };
+        let down = Vec2::new(-up.x, -up.y);
+        let fall = rain_fall(seconds);
+        let phi = (fall - fall.floor()) as f32;
+        let steps = fall.floor() as i32;
+        let in_chart = |x: i32, y: i32| {
+            (0..w as i32).contains(&x) && (0..h as i32).contains(&y)
+        };
+        let mut marks = Vec::with_capacity(3);
+        let (vertical, sign) = if down.y.abs() >= down.x.abs() {
+            (true, if down.y >= 0.0 { 1 } else { -1 })
+        } else {
+            (false, if down.x >= 0.0 { 1 } else { -1 })
+        };
+        let along = if vertical {
+            i32::from(dy)
+        } else {
+            i32::from(dx)
+        };
+        let head = (along + sign * steps).rem_euclid(n);
+        for (offset, weight) in [(0, 1.0 - phi), (1, 1.0), (2, phi)] {
+            let step = head + sign * offset;
+            let (x, y) = if vertical {
+                (x0 + i32::from(dx), y0 + step)
+            } else {
+                (x0 + step, y0 + i32::from(dy))
+            };
+            // The head is wrapped within its cell; the two trailing pixels are not, so a
+            // streak that reaches a rim simply loses its tail.
+            if in_chart(x, y) {
+                marks.push(((x as u16, y as u16), weight));
+            }
+        }
+        marks
+    }
 }
 
 static RAIN_COLOR: LazyLock<[f32; 3]> = LazyLock::new(|| present::srgb_linear(RAIN_SRGB));
@@ -374,18 +412,18 @@ static RAIN_COLOR: LazyLock<[f32; 3]> = LazyLock::new(|| present::srgb_linear(RA
 /// Rain: for every cell with rain, its streaks source-over the image, each mark at
 /// `min(1, RAIN_OPACITY · min(rain, 1) · weight)` — so a streak sliding between two pixels
 /// shares its light between them instead of jumping.
-pub(super) fn draw_rain(canvas: &mut Canvas, rain: &[f32], seconds: f64) {
+pub(super) fn draw_rain(canvas: &mut Canvas, geom: ArtGeometry, rain: &[f32], seconds: f64) {
     let color = *RAIN_COLOR;
-    for (index, cell) in CellId::all(Topology::Cube, Scale::ONE).enumerate() {
+    for (index, cell) in geom.all_cells().enumerate() {
         let rate = rain.get(index).copied().unwrap_or(0.0);
         let n = rain_streaks(rate);
         if n == 0 {
             continue;
         }
         let scale = RAIN_OPACITY * rate.min(1.0);
-        let face = cell.face(Topology::Cube, Scale::ONE);
+        let face = geom.face_of(cell);
         for k in 0..n {
-            for ((x, y), weight) in rain_marks(cell, k, seconds) {
+            for ((x, y), weight) in geom.rain_marks(cell, k, seconds) {
                 let alpha = (scale * weight).min(1.0);
                 if alpha <= 0.0 {
                     continue;

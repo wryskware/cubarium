@@ -338,6 +338,348 @@ pub const MAX_STEP_SECONDS: f64 = 1.0;
 /// 11–15 — the bottom five of sixteen, just under a third — in the soil.
 pub const SOIL_TOP: f64 = -0.33;
 
+/// Bottom of the canopy band on a **ring**, as the height `h` of a cell center (the top
+/// row = +1, the bottom rim = −1). Review-tunable.
+///
+/// `design/flat-world-plan-2026-09-16.md` §5 proposes 0.67 as an explicit new default,
+/// not a derived number: on a ring `height(p) = 1 − 2v/h`, so 0.67 puts the top **16.5 %**
+/// of the rows in the canopy — 7 of 45 cell rows at 320×180 — and leaves 50 % of the
+/// world for the foliage above [`SOIL_TOP`]'s bottom 33.5 %. It is a *presentation*
+/// constant and lives here, beside [`SOIL_TOP`], for the same reason that one does: the
+/// simulation never asks where the canopy is (`design/stratified-world.md`, "Nothing in
+/// the world reads `soil_top`; only the presenter does").
+pub const CANOPY_TOP: f64 = 0.67;
+
+/// The canopy threshold on a **cube**: only the level Top face reaches `h = 1`, so the
+/// cube's canopy is exactly its Top face and nothing else, which is the rule
+/// `art_present` has always drawn and the one the cube's frames are pinned to.
+pub const CUBE_CANOPY_TOP: f64 = 1.0;
+
+/// The raster a presenter draws on, as the art needs to see it: the world's topology and
+/// scale, plus the one band threshold that differs between them.
+///
+/// Everything in this module that used to name `Topology::Cube` and `Scale::ONE` is a
+/// method here; the free functions below are that method on [`ArtGeometry::CUBE`] and are
+/// therefore unchanged, to the bit, for every cube caller.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ArtGeometry {
+    topology: Topology,
+    scale: Scale,
+    canopy_top: f64,
+}
+
+impl Default for ArtGeometry {
+    fn default() -> ArtGeometry {
+        ArtGeometry::CUBE
+    }
+}
+
+impl ArtGeometry {
+    /// The five-chart cube at `S = 1`, with the canopy exactly its Top face.
+    pub const CUBE: ArtGeometry = ArtGeometry {
+        topology: Topology::Cube,
+        scale: Scale::ONE,
+        canopy_top: CUBE_CANOPY_TOP,
+    };
+
+    /// The geometry of a world: [`CUBE_CANOPY_TOP`] on a cube, [`CANOPY_TOP`] on a ring.
+    pub fn new(topology: Topology, scale: Scale) -> ArtGeometry {
+        let canopy_top = match topology {
+            Topology::Cube => CUBE_CANOPY_TOP,
+            Topology::Ring { .. } => CANOPY_TOP,
+        };
+        ArtGeometry { topology, scale, canopy_top }
+    }
+
+    /// This geometry with the canopy threshold moved, for a review session.
+    ///
+    /// **Normative**: a value outside `0..=1`, or a non-finite one, is refused and the
+    /// geometry keeps the threshold it had — a canopy at `h ≥ 2` would be no canopy at
+    /// all and a canopy at `h ≥ −1` would be the whole world.
+    pub fn with_canopy_top(self, canopy_top: f64) -> ArtGeometry {
+        if canopy_top.is_finite() && (0.0..=1.0).contains(&canopy_top) {
+            ArtGeometry { canopy_top, ..self }
+        } else {
+            self
+        }
+    }
+
+    #[inline]
+    pub fn topology(self) -> Topology {
+        self.topology
+    }
+
+    #[inline]
+    pub fn scale(self) -> Scale {
+        self.scale
+    }
+
+    /// The height at or above which a cell is [`Band::Canopy`].
+    #[inline]
+    pub fn canopy_top(self) -> f64 {
+        self.canopy_top
+    }
+
+    /// Cells over the whole surface.
+    #[inline]
+    pub fn cell_count(self) -> usize {
+        self.topology.cell_count(self.scale)
+    }
+
+    /// Cells across and down one chart.
+    #[inline]
+    pub fn cells(self, face: Face) -> (u16, u16) {
+        self.topology.cells(self.scale, face)
+    }
+
+    /// Pixels along a cell edge: 4 on the cube, `4·S` on a ring.
+    #[inline]
+    pub fn cell_pixels(self) -> f64 {
+        match self.topology {
+            Topology::Cube => cubarium_surface::CELL_PIXELS,
+            Topology::Ring { .. } => self.scale.cell_pixels(),
+        }
+    }
+
+    /// Every cell of this world, in index order.
+    pub fn all_cells(self) -> impl Iterator<Item = CellId> {
+        CellId::all(self.topology, self.scale)
+    }
+
+    /// The cell at `(cx, cy)` of a chart.
+    #[inline]
+    pub fn cell(self, face: Face, cx: u16, cy: u16) -> CellId {
+        CellId::new(self.topology, self.scale, face, cx, cy)
+    }
+
+    /// The chart a cell belongs to.
+    #[inline]
+    pub fn face_of(self, cell: CellId) -> Face {
+        cell.face(self.topology, self.scale)
+    }
+
+    /// A cell's center as a surface point.
+    #[inline]
+    pub fn center_of(self, cell: CellId) -> SurfacePoint {
+        cell.center(self.topology, self.scale)
+    }
+
+    /// The height of a cell's center ([`Topology::height`]): 1 at the top of the world,
+    /// −1 at the bottom. On the cube this *is* `embed(..)[1]` and the Top face is exactly
+    /// 1; on a ring it is `1 − 2v/h`.
+    pub fn height_of(self, cell: CellId) -> f64 {
+        self.topology.height(&self.center_of(cell))
+    }
+
+    /// The band of a height, against this geometry's [`ArtGeometry::canopy_top`].
+    ///
+    /// **Normative**: canopy is `h ≥ canopy_top`, soil is `h < `[`SOIL_TOP`], everything
+    /// between is foliage, and a `NaN` height is foliage. With the cube's `canopy_top = 1`
+    /// this is exactly the `h >= 1.0` rule, so only the Top face is canopy there.
+    pub fn band_of_height(self, h: f64) -> Band {
+        if h >= self.canopy_top {
+            Band::Canopy
+        } else if h < SOIL_TOP {
+            Band::Soil
+        } else {
+            Band::Foliage
+        }
+    }
+
+    /// The band of a cell, by the height of its center. No blending.
+    pub fn band_of(self, cell: CellId) -> Band {
+        self.band_of_height(self.height_of(cell))
+    }
+
+    /// The band a cell is drawn in this tick: [`Band::Water`] over [`REED_DEPTH`],
+    /// otherwise its geometric band.
+    pub fn cell_band(self, cell: CellId, water: Option<f64>) -> Band {
+        match water {
+            Some(w) if w > REED_DEPTH => Band::Water,
+            _ => self.band_of(cell),
+        }
+    }
+
+    /// Whether a cell's plant is drawn radially: its *geometric* band is [`Band::Canopy`].
+    ///
+    /// The band is geometric, so flooding a cell cannot turn a radial plant into a stalk
+    /// halfway through a run. On the cube this is exactly `up_of(cell).is_none()` and
+    /// exactly `face == Face::Top`, so nothing about the cube moves.
+    pub fn is_radial(self, cell: CellId) -> bool {
+        self.band_of(cell) == Band::Canopy
+    }
+
+    /// The chart direction, at a cell's center, in which height increases.
+    ///
+    /// `None` on the cube's level Top face, where there is no uphill and plants are
+    /// drawn radially. A ring has no such chart: `height = 1 − 2v/h` falls with `v`
+    /// everywhere, so this is the constant `(0, −1)` and every ring plant is a stalk.
+    pub fn up_of(self, cell: CellId) -> Option<Vec2> {
+        let center = self.center_of(cell);
+        let du = self.topology.embed_tangent(self.scale, &center, Vec2::new(1.0, 0.0))[1];
+        let dv = self.topology.embed_tangent(self.scale, &center, Vec2::new(0.0, 1.0))[1];
+        Vec2::new(du, dv).normalized()
+    }
+
+    /// The fixed slot of a cell — see [`slot_of`] for the normative draw order.
+    pub fn slot_of(self, cell: CellId) -> Slot {
+        let mut hash = SplitMix64::new(MOTIF_SEED ^ cell.index() as u64);
+        let pick = (hash.next_u64() % 2) as usize;
+        let center = self.center_of(cell);
+        let at = SurfacePoint::new(
+            center.face,
+            center.u + hash.range(-1.0, 1.0),
+            center.v + hash.range(-1.0, 1.0),
+        );
+        let free = Vec2::from_screen_angle(hash.range(0.0, std::f64::consts::TAU));
+        let rank = hash.next_f64();
+        let jitter = hash
+            .range(-HEADING_JITTER_DEG, HEADING_JITTER_DEG)
+            .to_radians();
+        let radial = self.is_radial(cell);
+        let heading = match (radial, self.up_of(cell)) {
+            (false, Some(up)) => {
+                Vec2::from_screen_angle(stalk_heading(up).screen_angle() + jitter)
+            }
+            _ => free,
+        };
+        let wind = hash.range(1.0 - WIND_SLOT_VARIATION, 1.0 + WIND_SLOT_VARIATION);
+        let rank_cap = if rank < RANK_FULL {
+            2
+        } else if rank < RANK_MID {
+            1
+        } else {
+            0
+        };
+        Slot { at, heading, pick, rank_cap, wind, radial }
+    }
+
+    /// Where a cell's plant stands and which way it faces.
+    pub fn placement_of(self, cell: CellId) -> (SurfacePoint, Vec2) {
+        let s = self.slot_of(cell);
+        (s.at, s.heading)
+    }
+
+    /// The highest stage a cell's slot may reach (0, 1 or 2).
+    pub fn rank_cap_of(self, cell: CellId) -> u8 {
+        self.slot_of(cell).rank_cap
+    }
+
+    /// The cap a slot has in a band, `None` for a slot that grows nothing there.
+    pub fn plant_cap(self, _band: Band, cell: CellId) -> Option<u8> {
+        match self.rank_cap_of(cell) {
+            0 => None,
+            cap => Some(cap),
+        }
+    }
+
+    /// The asset name of the plant a cell grows in a band.
+    pub fn species_of(self, band: Band, cell: CellId) -> &'static str {
+        let pick = self.slot_of(cell).pick;
+        match band {
+            Band::Soil => SOIL_PLANTS[pick],
+            Band::Foliage => FOLIAGE_PLANTS[pick],
+            Band::Canopy => CANOPY_PLANTS[pick],
+            Band::Water => WATER_PLANT,
+        }
+    }
+
+    /// A hash key that separates one pixel of this raster from every other.
+    ///
+    /// **Normative**: the cube keeps `face << 16 | x << 8 | y`, which is what every
+    /// per-pixel phase in this presenter was seeded with and is injective there because
+    /// `x` and `y` are both below 64. A ring's pixels run to 65,535 on a side, so that
+    /// packing would collide; it uses `x << 32 | y` instead, which cannot.
+    #[inline]
+    pub fn pixel_key(self, face: Face, x: u16, y: u16) -> u64 {
+        match self.topology {
+            Topology::Cube => (face.index() as u64) << 16 | u64::from(x) << 8 | u64::from(y),
+            Topology::Ring { .. } => u64::from(x) << 32 | u64::from(y),
+        }
+    }
+
+    /// The per-pixel tables of this raster: the soil weight and the shimmer phase.
+    /// Shared, so building two presenters on the cube costs one copy.
+    pub(super) fn tables(self) -> std::sync::Arc<PixelTables> {
+        if self == ArtGeometry::CUBE {
+            return CUBE_TABLES.clone();
+        }
+        std::sync::Arc::new(PixelTables::build(self))
+    }
+}
+
+/// [`w_soil`] and the water shimmer phase at every pixel centre of one raster, built once.
+///
+/// Five faces of 64 × 64 is 20,480 entries; a 320×180 ring is 57,600 and a 640×360 one
+/// 230,400. Recomputing a height and a smoothstep per pixel per frame would be the most
+/// expensive thing in [`ArtPresenter::draw`], which is why this is a table and not a
+/// function.
+pub(super) struct PixelTables {
+    topology: Topology,
+    width: u16,
+    height: u16,
+    soil: Box<[f32]>,
+    shimmer: Box<[f64]>,
+}
+
+impl PixelTables {
+    fn build(geom: ArtGeometry) -> PixelTables {
+        let topology = geom.topology();
+        let (w, h) = topology.extent(Face::Front);
+        let (width, height) = (w as u16, h as u16);
+        let n = topology.charts().len() * usize::from(width) * usize::from(height);
+        let mut soil = vec![0.0f32; n];
+        let mut shimmer = vec![0.0f64; n];
+        let mut table = PixelTables {
+            topology,
+            width,
+            height,
+            soil: Box::new([]),
+            shimmer: Box::new([]),
+        };
+        for &face in topology.charts() {
+            for y in 0..height {
+                for x in 0..width {
+                    let i = table.index(face, x, y);
+                    let p = SurfacePoint::pixel_center(topology, face, x, y);
+                    soil[i] = w_soil(topology.height(&p)) as f32;
+                    shimmer[i] = SplitMix64::new(WATER_SEED ^ geom.pixel_key(face, x, y)).next_f64()
+                        * std::f64::consts::TAU;
+                }
+            }
+        }
+        debug_assert_eq!(soil.len(), n);
+        table.soil = soil.into_boxed_slice();
+        table.shimmer = shimmer.into_boxed_slice();
+        table
+    }
+
+    /// The canvas's own storage order — charts outermost, then `y`, then `x` — so a pass
+    /// walks the table and the image together.
+    #[inline]
+    pub(super) fn index(&self, face: Face, x: u16, y: u16) -> usize {
+        self.topology.chart_index(face) * usize::from(self.width) * usize::from(self.height)
+            + usize::from(y) * usize::from(self.width)
+            + usize::from(x)
+    }
+
+    /// [`w_soil`] of one pixel centre: 1 wholly soil, 0 wholly foliage/canopy.
+    #[inline]
+    pub(super) fn soil(&self, face: Face, x: u16, y: u16) -> f32 {
+        self.soil[self.index(face, x, y)]
+    }
+
+    /// The water shimmer phase of one pixel, in `[0, 2π)`.
+    #[inline]
+    pub(super) fn shimmer(&self, face: Face, x: u16, y: u16) -> f64 {
+        self.shimmer[self.index(face, x, y)]
+    }
+}
+
+/// The cube's tables, shared by every cube presenter and by the free functions below.
+pub(super) static CUBE_TABLES: LazyLock<std::sync::Arc<PixelTables>> =
+    LazyLock::new(|| std::sync::Arc::new(PixelTables::build(ArtGeometry::CUBE)));
+
 /// Half-width, in `h`, of the soft horizon between soil and foliage: the blend runs over
 /// `SOIL_TOP ± HORIZON`. Review-tunable.
 ///
@@ -370,7 +712,7 @@ pub const SOIL_MAX_BRIGHTNESS: f32 = 0.32;
 /// The embedded height of a cell's center: Topology::Cube.embed(Scale::ONE, &`CellId::center())[1]`, Top = 1 exactly
 /// and the open rim = −0.984375 (the center of the bottom cell row).
 pub fn height_of(cell: CellId) -> f64 {
-    Topology::Cube.embed(Scale::ONE, &cell.center(Topology::Cube, Scale::ONE))[1]
+    ArtGeometry::CUBE.height_of(cell)
 }
 
 /// The band of a height.
@@ -379,19 +721,13 @@ pub fn height_of(cell: CellId) -> f64 {
 /// reaches it — a side face's highest cell center is at 0.984375), everything between is
 /// foliage. A `NaN` height is foliage, which is the band that changes nothing.
 pub fn band_of_height(h: f64) -> Band {
-    if h >= 1.0 {
-        Band::Canopy
-    } else if h < SOIL_TOP {
-        Band::Soil
-    } else {
-        Band::Foliage
-    }
+    ArtGeometry::CUBE.band_of_height(h)
 }
 
 /// The band of a cell, by the height of its center. No blending: a cell is wholly in one
 /// band for the purpose of choosing its motif.
 pub fn band_of(cell: CellId) -> Band {
-    band_of_height(height_of(cell))
+    ArtGeometry::CUBE.band_of(cell)
 }
 
 /// How much of a pixel at height `h` is soil.
@@ -417,34 +753,11 @@ fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// Pixels on one face.
-pub(super) const FACE_PIXELS: usize = FACE_SIZE * FACE_SIZE;
-
-/// [`w_soil`] at every pixel center, in `face.index() · 4096 + y · 64 + x` order, built
-/// once. Five faces of 64 × 64 is 20,480 floats; recomputing an `embed` and a smoothstep
-/// per pixel per frame would be the most expensive thing in [`ArtPresenter::draw`].
-pub(super) static SOIL_WEIGHT: LazyLock<Box<[f32]>> = LazyLock::new(|| {
-    let mut w = vec![0.0f32; 5 * FACE_PIXELS];
-    for face in Face::ALL {
-        for y in 0..FACE_SIZE as u16 {
-            for x in 0..FACE_SIZE as u16 {
-                let h = Topology::Cube.embed(Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y))[1];
-                w[weight_index(face, x, y)] = w_soil(h) as f32;
-            }
-        }
-    }
-    w.into_boxed_slice()
-});
-
-#[inline]
-pub(super) fn weight_index(face: Face, x: u16, y: u16) -> usize {
-    face.index() * FACE_PIXELS + usize::from(y) * FACE_SIZE + usize::from(x)
-}
-
-/// The precomputed [`w_soil`] of one pixel center. 1 is wholly soil, 0 wholly
-/// foliage/canopy.
+/// The precomputed [`w_soil`] of one **cube** pixel center. 1 is wholly soil, 0 wholly
+/// foliage/canopy. A ring's weights live in the presenter's own [`PixelTables`], because
+/// they depend on the raster's height.
 pub fn soil_weight(face: Face, x: u16, y: u16) -> f32 {
-    SOIL_WEIGHT[weight_index(face, x, y)]
+    CUBE_TABLES.soil(face, x, y)
 }
 
 /// The soil ground ramp in linear light, decoded once (see [`crate::present::PALETTE`]
@@ -506,6 +819,16 @@ pub struct Slot {
     /// admitted amplitude ([`effective_tip`]) times this. Fixed for the life of the
     /// presenter, and a *scale*, never a phase.
     pub wind: f64,
+    /// Whether this slot's plant is drawn **radially** — seen from above, free to face
+    /// anywhere, turning in place in the wind and opening outward from its own centre —
+    /// rather than as a stalk standing up the wall.
+    ///
+    /// **Normative**: a slot is radial exactly where its cell's *geometric* band is
+    /// [`Band::Canopy`] ([`ArtGeometry::is_radial`]). On the cube that is the Top face and
+    /// nothing else, which is the rule this presenter has always drawn — Top is the one
+    /// chart with no uphill. A ring's canopy is a band of rows rather than a chart, and
+    /// its crowns are the same radial art, so they keep the same treatment.
+    pub radial: bool,
 }
 
 /// The fixed slot of a cell.
@@ -517,41 +840,11 @@ pub struct Slot {
 /// that adding it moved no plant at all. The jitter keeps the anchor within ±1 px of the
 /// cell center, which is 2 px from every cell edge, so a plant never anchors in a
 /// neighbouring cell. Rank: `cap = 2` if `r < `[`RANK_FULL`], `1` if `r < `[`RANK_MID`],
-/// else `0`. Heading: [`stalk_heading`] of [`up_of`] on a side face, plus the jitter; free
-/// on top. Wind: uniform in `[1 − `[`WIND_SLOT_VARIATION`]`, 1 + WIND_SLOT_VARIATION)`.
+/// else `0`. Heading: [`stalk_heading`] of [`up_of`] on a stalk slot, plus the jitter;
+/// free on a radial one ([`ArtGeometry::is_radial`] — the cube's Top face, a ring's canopy
+/// band). Wind: uniform in `[1 − `[`WIND_SLOT_VARIATION`]`, 1 + WIND_SLOT_VARIATION)`.
 pub fn slot_of(cell: CellId) -> Slot {
-    let mut hash = SplitMix64::new(MOTIF_SEED ^ cell.index() as u64);
-    let pick = (hash.next_u64() % 2) as usize;
-    let center = cell.center(Topology::Cube, Scale::ONE);
-    let at = SurfacePoint::new(
-        center.face,
-        center.u + hash.range(-1.0, 1.0),
-        center.v + hash.range(-1.0, 1.0),
-    );
-    let free = Vec2::from_screen_angle(hash.range(0.0, std::f64::consts::TAU));
-    let rank = hash.next_f64();
-    let jitter = hash
-        .range(-HEADING_JITTER_DEG, HEADING_JITTER_DEG)
-        .to_radians();
-    let heading = match up_of(cell) {
-        Some(up) => Vec2::from_screen_angle(stalk_heading(up).screen_angle() + jitter),
-        None => free,
-    };
-    let wind = hash.range(1.0 - WIND_SLOT_VARIATION, 1.0 + WIND_SLOT_VARIATION);
-    let rank_cap = if rank < RANK_FULL {
-        2
-    } else if rank < RANK_MID {
-        1
-    } else {
-        0
-    };
-    Slot {
-        at,
-        heading,
-        pick,
-        rank_cap,
-        wind,
-    }
+    ArtGeometry::CUBE.slot_of(cell)
 }
 
 /// The renderer heading that makes a tile authored standing along its `−y` axis stand
@@ -565,21 +858,17 @@ pub fn stalk_heading(up: Vec2) -> Vec2 {
 /// The chart direction, at a cell's center, in which embedded height increases: "up"
 /// toward the canopy on the four side faces, `None` on the level top face.
 pub fn up_of(cell: CellId) -> Option<Vec2> {
-    let center = cell.center(Topology::Cube, Scale::ONE);
-    let du = Topology::Cube.embed_tangent(Scale::ONE, &center, Vec2::new(1.0, 0.0))[1];
-    let dv = Topology::Cube.embed_tangent(Scale::ONE, &center, Vec2::new(0.0, 1.0))[1];
-    Vec2::new(du, dv).normalized()
+    ArtGeometry::CUBE.up_of(cell)
 }
 
 /// Where a cell's plant stands and which way it faces.
 pub fn placement_of(cell: CellId) -> (SurfacePoint, Vec2) {
-    let s = slot_of(cell);
-    (s.at, s.heading)
+    ArtGeometry::CUBE.placement_of(cell)
 }
 
 /// The highest stage a cell's slot may reach (0, 1 or 2).
 pub fn rank_cap_of(cell: CellId) -> u8 {
-    slot_of(cell).rank_cap
+    ArtGeometry::CUBE.rank_cap_of(cell)
 }
 
 /// The cap a slot has in a band, `None` for a slot that grows nothing there.
@@ -590,20 +879,14 @@ pub fn rank_cap_of(cell: CellId) -> u8 {
 /// flooded floor with a cyan fence of reeds; leaving those slots bare gives the wall
 /// breathing room and lets ground cover carry the fill. Slots with cap 1 or 2 keep their
 /// cap. Review-tunable by changing this rule.
-pub fn plant_cap(_band: Band, cell: CellId) -> Option<u8> {
-    match rank_cap_of(cell) {
-        0 => None,
-        cap => Some(cap),
-    }
+pub fn plant_cap(band: Band, cell: CellId) -> Option<u8> {
+    ArtGeometry::CUBE.plant_cap(band, cell)
 }
 
 /// The band a cell is drawn in this tick: [`Band::Water`] when its water depth exceeds
 /// [`REED_DEPTH`], otherwise its geometric band ([`band_of`]). `None` water is dry.
 pub fn cell_band(cell: CellId, water: Option<f64>) -> Band {
-    match water {
-        Some(w) if w > REED_DEPTH => Band::Water,
-        _ => band_of(cell),
-    }
+    ArtGeometry::CUBE.cell_band(cell, water)
 }
 
 /// The asset name of the plant a cell grows in a band.
@@ -611,13 +894,7 @@ pub fn cell_band(cell: CellId, water: Option<f64>) -> Band {
 /// **Normative**: soil → one of [`SOIL_PLANTS`], foliage → [`FOLIAGE_PLANTS`], canopy →
 /// [`CANOPY_PLANTS`], each by the cell's hashed pick; water → [`WATER_PLANT`] always.
 pub fn species_of(band: Band, cell: CellId) -> &'static str {
-    let pick = slot_of(cell).pick;
-    match band {
-        Band::Soil => SOIL_PLANTS[pick],
-        Band::Foliage => FOLIAGE_PLANTS[pick],
-        Band::Canopy => CANOPY_PLANTS[pick],
-        Band::Water => WATER_PLANT,
-    }
+    ArtGeometry::CUBE.species_of(band, cell)
 }
 
 /// The stage thresholds a band's plants grow by.

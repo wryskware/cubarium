@@ -854,7 +854,7 @@ mod tests {
         assert_eq!(end.face, t.end.face);
         assert!((end.u - t.end.u).abs() < 1e-9 && (end.v - t.end.v).abs() < 1e-9, "{end:?}");
         let last = t.segments.last().unwrap();
-        assert!((end.u - last.to.x).abs() < 1e-9 || (last.to.x - FACE_EXTENT).abs() < 1e-9);
+        assert!((end.u - last.to.x).abs() < 1e-9 || (last.to.x - cubarium_surface::FACE_EXTENT).abs() < 1e-9);
     }
 
     #[test]

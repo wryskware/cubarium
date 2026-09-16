@@ -1,6 +1,6 @@
 //! Shared wind field and bend budgets.
 
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use super::*;
 
 // --- Wind ----------------------------------------------------------------------------
@@ -131,15 +131,88 @@ pub fn wind_strength(seconds: f64) -> f64 {
 ///
 /// It is never normalized and no per-face phase is seeded: both would break the join.
 pub fn wind_chart(face: Face, u: f64, v: f64) -> Vec2 {
-    if !(u.is_finite() && v.is_finite()) {
-        return Vec2::ZERO;
+    ArtGeometry::CUBE.wind_chart(face, u, v)
+}
+
+impl ArtGeometry {
+    /// [`wind_chart`] in this world.
+    ///
+    /// **Normative**: on the cube, exactly [`wind_chart`]'s field, whose calm belts are
+    /// what let a continuous circulation close across the seams. A **ring** has no
+    /// side/side seam and no level chart to join to, only a wrap that is a pure
+    /// translation and two open rims, so the field is the constant `(−1, 0)`: one steady
+    /// direction all the way round, with the gust's shape carried entirely by
+    /// [`ArtGeometry::wind_phase`] as it was on the cube. Nothing has to be calm anywhere,
+    /// because there is nothing for it to disagree with.
+    pub fn wind_chart(self, face: Face, u: f64, v: f64) -> Vec2 {
+        if !(u.is_finite() && v.is_finite()) {
+            return Vec2::ZERO;
+        }
+        match self.topology() {
+            Topology::Ring { .. } => Vec2::new(-1.0, 0.0),
+            Topology::Cube => {
+                let a = u / 32.0 - 1.0;
+                let b = v / 32.0 - 1.0;
+                if face == Face::Top {
+                    Vec2::new(-b * (1.0 - a * a), a * (1.0 - b * b))
+                } else {
+                    Vec2::new(-(1.0 - a * a), 0.0)
+                }
+            }
+        }
     }
-    let a = u / 32.0 - 1.0;
-    let b = v / 32.0 - 1.0;
-    if face == Face::Top {
-        Vec2::new(-b * (1.0 - a * a), a * (1.0 - b * b))
-    } else {
-        Vec2::new(-(1.0 - a * a), 0.0)
+
+    /// [`wind_phase`] in this world: `0.5 · (x + z)` of the point's embedded position.
+    ///
+    /// On a ring that is `0.5 · r · (cos θ + sin θ)` with `r = w/(2π·32·S) = 1.5916` at
+    /// both rungs of the 16:9 ladder, so the gust sweeps round the world as one front and
+    /// is continuous across the wrap by construction — `u = 0` and `u = w` are the same
+    /// point in 3D (plan §5a). There is still no angle in it, so there is no branch cut.
+    pub fn wind_phase(self, point: SurfacePoint) -> f64 {
+        let p = self.topology().embed(self.scale(), &point);
+        let phase = 0.5 * (p[0] + p[2]);
+        if phase.is_finite() { phase } else { 0.0 }
+    }
+
+    /// [`wind_at`] in this world.
+    pub fn wind_at(self, point: SurfacePoint, seconds: f64, lag: f64) -> Vec2 {
+        let lag = if lag.is_finite() { lag } else { 0.0 };
+        let when = seconds - lag - WIND_TRAVEL_SECONDS * self.wind_phase(point);
+        self.wind_chart(point.face, point.u, point.v) * wind_strength(when)
+    }
+
+    /// [`slot_wind`] in this world.
+    pub fn slot_wind(self, slot: &Slot, name: &str, budget: f64, seconds: f64) -> (Bend, Vec2) {
+        let response = wind_response(name);
+        if response == WindResponse::STILL {
+            return (Bend::NONE, slot.heading);
+        }
+        let w = self.wind_at(slot.at, seconds, response.lag_seconds);
+        // Spin-in-place is what a *radial* plant does: it is drawn from above and its
+        // pivot is its own centre. On the cube that is the Top face, which is where this
+        // rule was written; on a ring it is the canopy band, which is the same art.
+        if slot.radial && response.spin_deg > 0.0 {
+            (
+                Bend::NONE,
+                canopy_heading(slot.heading, response.spin_deg * slot.wind, w),
+            )
+        } else {
+            let tip = effective_tip(response.tip_px, budget) * slot.wind;
+            (plant_bend(tip, w, slot.heading), slot.heading)
+        }
+    }
+
+    /// [`tall_amplitude`] in this world.
+    pub fn tall_amplitude(self, column: &TallColumn, budget: f64, seconds: f64) -> f64 {
+        let response = wind_response(TALL_PLANTS[column.pick]);
+        let tip = effective_tip(response.tip_px, budget) * self.tall_wind_of(column.face, column.cx);
+        if tip <= 0.0 {
+            return 0.0;
+        }
+        let at = self.tall_anchor(column.face, column.cx, 0);
+        tip * self
+            .wind_at(at, seconds, response.lag_seconds)
+            .dot(self.tall_heading(column.face, column.cx))
     }
 }
 
@@ -151,9 +224,7 @@ pub fn wind_chart(face: Face, u: f64, v: f64) -> Vec2 {
 /// put a branch cut somewhere on the surface, and the plants either side of that cut would
 /// lean in opposite directions.
 pub fn wind_phase(point: SurfacePoint) -> f64 {
-    let p = Topology::Cube.embed(Scale::ONE, &point);
-    let phase = 0.5 * (p[0] + p[2]);
-    if phase.is_finite() { phase } else { 0.0 }
+    ArtGeometry::CUBE.wind_phase(point)
 }
 
 /// The breeze at a surface point at a presentation instant, for a part whose response lags
@@ -173,9 +244,7 @@ pub fn wind_phase(point: SurfacePoint) -> f64 {
 /// base anchor for base, trunk, cap and vine, and a small plant one at its root. Sampling
 /// per tile or per pixel would split one plant's motion at a tile join or a seam.
 pub fn wind_at(point: SurfacePoint, seconds: f64, lag: f64) -> Vec2 {
-    let lag = if lag.is_finite() { lag } else { 0.0 };
-    let when = seconds - lag - WIND_TRAVEL_SECONDS * wind_phase(point);
-    wind_chart(point.face, point.u, point.v) * wind_strength(when)
+    ArtGeometry::CUBE.wind_at(point, seconds, lag)
 }
 
 /// How one asset answers the shared breeze. Stiffness is expressed as displacement, not as
@@ -394,8 +463,8 @@ pub fn canopy_heading(heading: Vec2, deg: f64, w: Vec2) -> Vec2 {
 ///
 /// * a species with no response ([`WindResponse::STILL`], e.g. `rootveil`) is
 ///   `(Bend::NONE, slot.heading)` without sampling the wind at all;
-/// * a slot on the **top face** whose species is *radial* (`response.spin_deg > 0`) turns in
-///   place: `(Bend::NONE, `[`canopy_heading`]`(slot.heading, response.spin_deg · slot.wind,
+/// * a **radial** slot ([`Slot::radial`]) whose species spins (`response.spin_deg > 0`)
+///   turns in place: `(Bend::NONE, `[`canopy_heading`]`(slot.heading, response.spin_deg · slot.wind,
 ///   w))` — never bent or moved;
 /// * any other slot bends: `(`[`plant_bend`]`(tip, w, slot.heading), slot.heading)`. This
 ///   includes a **reed standing in a flooded top-face cell** (`reedspire` has a tip and no
@@ -407,20 +476,7 @@ pub fn canopy_heading(heading: Vec2, deg: f64, w: Vec2) -> Vec2 {
 /// fruit blend and both the fading lower and the revealing upper stamp of a growth step, so
 /// nothing inside one plant moves differently from the rest of it.
 pub fn slot_wind(slot: &Slot, name: &str, budget: f64, seconds: f64) -> (Bend, Vec2) {
-    let response = wind_response(name);
-    if response == WindResponse::STILL {
-        return (Bend::NONE, slot.heading);
-    }
-    let w = wind_at(slot.at, seconds, response.lag_seconds);
-    if slot.at.face == Face::Top && response.spin_deg > 0.0 {
-        (
-            Bend::NONE,
-            canopy_heading(slot.heading, response.spin_deg * slot.wind, w),
-        )
-    } else {
-        let tip = effective_tip(response.tip_px, budget) * slot.wind;
-        (plant_bend(tip, w, slot.heading), slot.heading)
-    }
+    ArtGeometry::CUBE.slot_wind(slot, name, budget, seconds)
 }
 
 /// The one bend amplitude a whole tall column takes at a presentation instant, in tile pixels.
@@ -432,13 +488,7 @@ pub fn slot_wind(slot: &Slot, name: &str, budget: f64, seconds: f64) -> (Bend, V
 /// ([`ArtPresenter::column_budget`]). Every part of the column is then stamped with this
 /// amplitude and [`tall_bend_base`] of its own tile index.
 pub fn tall_amplitude(column: &TallColumn, budget: f64, seconds: f64) -> f64 {
-    let response = wind_response(TALL_PLANTS[column.pick]);
-    let tip = effective_tip(response.tip_px, budget) * tall_wind_of(column.face, column.cx);
-    if tip <= 0.0 {
-        return 0.0;
-    }
-    let at = tall_anchor(column.face, column.cx, 0);
-    tip * wind_at(at, seconds, response.lag_seconds).dot(tall_heading(column.face, column.cx))
+    ArtGeometry::CUBE.tall_amplitude(column, budget, seconds)
 }
 
 /// The measured bend budget of one plant: the smallest

@@ -1,6 +1,6 @@
 //! Tall-plant placement, growth geometry, and drawing.
 
-use cubarium_surface::{Scale, Topology};
+use cubarium_surface::Topology;
 use super::*;
 
 // --- Tall plants ---------------------------------------------------------------------
@@ -56,10 +56,7 @@ pub struct TallColumn {
 /// are foliage, top to bottom. `None` on the top face (all canopy) — and on any face with
 /// no foliage row.
 pub fn foliage_rows(face: Face) -> Option<(u16, u16)> {
-    let rows: Vec<u16> = (0..CELLS_PER_FACE_EDGE as u16)
-        .filter(|&cy| band_of(CellId::new(Topology::Cube, Scale::ONE, face, 0, cy)) == Band::Foliage)
-        .collect();
-    Some((*rows.first()?, *rows.last()?))
+    ArtGeometry::CUBE.foliage_rows(face)
 }
 
 /// The tall column of a face's cell column, if its hash selects one.
@@ -67,17 +64,192 @@ pub fn foliage_rows(face: Face) -> Option<(u16, u16)> {
 /// **Normative**: one `SplitMix64` stream from the face and column, consumed as select,
 /// pick, vine. Never on the top face.
 pub fn tall_column_of(face: Face, cx: u16) -> Option<TallColumn> {
-    foliage_rows(face)?;
-    let mut hash = SplitMix64::new(TALL_SEED ^ (face.index() as u64) << 8 ^ u64::from(cx));
-    let select = hash.next_f64();
-    let pick = (hash.next_u64() % 2) as usize;
-    let vine = hash.next_f64() < TALL_VINE_P;
-    (select < TALL_COLUMN_P).then_some(TallColumn {
-        face,
-        cx,
-        pick,
-        vine,
-    })
+    ArtGeometry::CUBE.tall_column_of(face, cx)
+}
+
+impl ArtGeometry {
+    /// The foliage rows of a chart as `(top cy, horizon cy)`, top to bottom.
+    ///
+    /// `None` where the chart has no foliage row at all — the cube's level Top face, which
+    /// is wholly canopy. A ring has one chart and every band is a run of its rows, so this
+    /// is the band the columns stand in.
+    pub fn foliage_rows(self, face: Face) -> Option<(u16, u16)> {
+        let (_, ny) = self.cells(face);
+        let rows: Vec<u16> = (0..ny)
+            .filter(|&cy| self.band_of(self.cell(face, 0, cy)) == Band::Foliage)
+            .collect();
+        Some((*rows.first()?, *rows.last()?))
+    }
+
+    /// Most trunk segments a column of this world may carry: `foliage rows − 2`, so a full
+    /// column is base + trunks + crown, one tile per foliage cell row, and its crown lands
+    /// on the **topmost foliage cell's centre**.
+    ///
+    /// **Normative**: on the cube that band is eleven cells and this is
+    /// [`TALL_MAX_SEGMENTS`] = 9, which puts the crown on the rim cell, where the shared
+    /// surface carries it onto the Top face — the tree tops *are* the canopy. A ring's
+    /// foliage band is 23 cells at 320×180, so its columns are 21 segments and their crowns
+    /// reach the bottom of the canopy band instead of crossing a rim.
+    pub fn tall_max_segments(self, face: Face) -> u8 {
+        match self.foliage_rows(face) {
+            Some((top, horizon)) => (horizon - top).saturating_sub(1).min(u16::from(u8::MAX)) as u8,
+            None => 0,
+        }
+    }
+
+    /// The column density one trunk segment is worth in this world.
+    ///
+    /// **Normative**: [`TALL_STEP`] on the cube, exactly — it was measured there, and
+    /// "0.08 reaches the rim at `t_col = 1`" is a statement about the cube's nine segments.
+    /// Elsewhere it is that measurement rescaled to the band's own height,
+    /// `TALL_STEP · 9 / N`, so a column of cells at `W_max` still scores a full column and
+    /// a taller band is not a band a column can never fill.
+    pub fn tall_step(self, face: Face) -> f64 {
+        let n = self.tall_max_segments(face);
+        if n == 0 || n == TALL_MAX_SEGMENTS {
+            return TALL_STEP;
+        }
+        TALL_STEP * f64::from(TALL_MAX_SEGMENTS) / f64::from(n)
+    }
+
+    /// The rising threshold of segment `n >= 1` in this world.
+    pub fn tall_rise(self, face: Face, n: u8) -> f64 {
+        FOLIAGE_STAGES[0] + (f64::from(n) - 0.5) * self.tall_step(face)
+    }
+
+    /// [`next_tall`] in this world: the same rule against this chart's own step and cap.
+    pub fn next_tall(self, face: Face, current: u8, t_col: f64) -> u8 {
+        if t_col.is_nan() {
+            return 0;
+        }
+        let max = self.tall_max_segments(face);
+        let hyst = 0.6 * self.tall_step(face);
+        let mut n = current.min(max);
+        while n > 0 && t_col < self.tall_rise(face, n) - hyst {
+            n -= 1;
+        }
+        while n < max && t_col >= self.tall_rise(face, n + 1) {
+            n += 1;
+        }
+        n
+    }
+
+    /// The `SplitMix64` seed of one cell column.
+    ///
+    /// **Normative**: the cube keeps `TALL_SEED ^ face << 8 ^ cx`, which is what selected
+    /// every column it has ever drawn and is injective there because `cx < 16`. A ring has
+    /// one chart and may have hundreds of columns, so it uses a tag of its own rather than
+    /// a packing that would alias `cx` against a face index.
+    fn column_key(self, face: Face, cx: u16) -> u64 {
+        match self.topology() {
+            Topology::Cube => TALL_SEED ^ (face.index() as u64) << 8 ^ u64::from(cx),
+            Topology::Ring { .. } => TALL_SEED ^ 0x0100_0000_0000_0000 ^ u64::from(cx),
+        }
+    }
+
+    /// The tall column of a chart's cell column, if its hash selects one.
+    pub fn tall_column_of(self, face: Face, cx: u16) -> Option<TallColumn> {
+        if self.tall_max_segments(face) == 0 {
+            return None;
+        }
+        let mut hash = SplitMix64::new(self.column_key(face, cx));
+        let select = hash.next_f64();
+        let pick = (hash.next_u64() % 2) as usize;
+        let vine = hash.next_f64() < TALL_VINE_P;
+        (select < TALL_COLUMN_P).then_some(TallColumn { face, cx, pick, vine })
+    }
+
+    /// A column's own share of the shared breeze.
+    pub fn tall_wind_of(self, face: Face, cx: u16) -> f64 {
+        let mut hash = SplitMix64::new(self.column_key(face, cx));
+        let _select = hash.next_f64();
+        let _pick = hash.next_u64();
+        let _vine = hash.next_f64();
+        hash.range(1.0 - WIND_SLOT_VARIATION, 1.0 + WIND_SLOT_VARIATION)
+    }
+
+    /// A stable per-column offset into a tall clip, in `[0, seconds)`.
+    pub fn tall_phase_of(self, face: Face, cx: u16, seconds: f64) -> f64 {
+        if !(seconds.is_finite() && seconds > 0.0) {
+            return 0.0;
+        }
+        let mut hash = SplitMix64::new(PHASE_SEED ^ self.column_key(face, cx));
+        hash.next_f64() * seconds
+    }
+
+    /// Every tall column of this world, charts in [`Topology::charts`] order then `cx`.
+    ///
+    /// On a ring that is one pass along `u`: the columns are chosen by their position
+    /// round the world, not per side face, and the order does not depend on `Face::ALL`.
+    pub fn tall_columns(self) -> Vec<TallColumn> {
+        self.topology()
+            .charts()
+            .iter()
+            .flat_map(|&face| {
+                let (nx, _) = self.cells(face);
+                (0..nx).filter_map(move |cx| self.tall_column_of(face, cx))
+            })
+            .collect()
+    }
+
+    /// [`tall_anchor_at`] in this world.
+    pub fn tall_anchor_at(self, face: Face, cx: u16, i: f64) -> SurfacePoint {
+        let (_, horizon) = self.foliage_rows(face).unwrap_or((0, 0));
+        let cell = self.cell(face, cx, horizon);
+        let center = self.center_of(cell);
+        let up = self.up_of(cell).unwrap_or(Vec2::new(0.0, -1.0));
+        let step = up * (4.0 * i);
+        SurfacePoint::new(face, center.u + step.x, center.v + step.y)
+    }
+
+    /// [`tall_anchor`] in this world.
+    pub fn tall_anchor(self, face: Face, cx: u16, i: u8) -> SurfacePoint {
+        self.tall_anchor_at(face, cx, f64::from(i))
+    }
+
+    /// [`tall_heading`] in this world.
+    pub fn tall_heading(self, face: Face, cx: u16) -> Vec2 {
+        let (_, horizon) = self.foliage_rows(face).unwrap_or((0, 0));
+        stalk_heading(
+            self.up_of(self.cell(face, cx, horizon))
+                .unwrap_or(Vec2::new(0.0, -1.0)),
+        )
+    }
+
+    /// The mean of a per-cell reading over a column's foliage cells, each clamped.
+    pub fn column_mean(
+        self,
+        view: &RenderView,
+        face: Face,
+        cx: u16,
+        read: &dyn Fn(&RenderView, usize) -> f64,
+    ) -> f64 {
+        let Some((top, horizon)) = self.foliage_rows(face) else {
+            return 0.0;
+        };
+        let mut sum = 0.0;
+        let mut n = 0.0;
+        for cy in top..=horizon {
+            sum += read(view, self.cell(face, cx, cy).index()).clamp(0.0, 1.0);
+            n += 1.0;
+        }
+        if n > 0.0 { sum / n } else { 0.0 }
+    }
+
+    /// The structural density that drives a column's height.
+    pub fn column_density(self, view: &RenderView, face: Face, cx: u16) -> f64 {
+        self.column_mean(view, face, cx, &|v, i| wood_density(v, i))
+    }
+
+    /// How tall the **dead** part of a column stands.
+    pub fn column_dead_density(self, view: &RenderView, face: Face, cx: u16) -> f64 {
+        self.column_mean(view, face, cx, &|v, i| dead_wood_density(v, i))
+    }
+
+    /// How full a column's canopy is.
+    pub fn column_fullness(self, view: &RenderView, face: Face, cx: u16) -> f64 {
+        self.column_mean(view, face, cx, &|v, i| foliage_fullness(v, i))
+    }
 }
 
 /// A column's own share of the shared breeze, in `[1 − `[`WIND_SLOT_VARIATION`]`, 1 +
@@ -87,59 +259,30 @@ pub fn tall_column_of(face: Face, cx: u16) -> Option<TallColumn> {
 /// vine, wind) — *appended*, so adding the wind moved no column, changed no species and
 /// grew no vine that was not there before.
 pub fn tall_wind_of(face: Face, cx: u16) -> f64 {
-    let mut hash = SplitMix64::new(TALL_SEED ^ (face.index() as u64) << 8 ^ u64::from(cx));
-    let _select = hash.next_f64();
-    let _pick = hash.next_u64();
-    let _vine = hash.next_f64();
-    hash.range(1.0 - WIND_SLOT_VARIATION, 1.0 + WIND_SLOT_VARIATION)
+    ArtGeometry::CUBE.tall_wind_of(face, cx)
 }
 
 /// Every tall column on the cube, side faces in `Face::ALL` order.
 pub fn tall_columns() -> Vec<TallColumn> {
-    Face::ALL
-        .into_iter()
-        .flat_map(|face| {
-            (0..CELLS_PER_FACE_EDGE as u16).filter_map(move |cx| tall_column_of(face, cx))
-        })
-        .collect()
+    ArtGeometry::CUBE.tall_columns()
 }
 
 /// The mean producer density (clamped to `[0, 1]`) over a column's foliage cells.
 pub fn column_density(view: &RenderView, face: Face, cx: u16) -> f64 {
-    column_mean(view, face, cx, &|v, i| wood_density(v, i))
+    ArtGeometry::CUBE.column_density(view, face, cx)
 }
 
 /// How tall the **dead** part of a column stands: the same mean over the same cells, of
 /// [`dead_wood_density`], at the same scale. A column whose stand died keeps the height its
 /// wood earned and loses it as `Wd` decomposes.
 pub fn column_dead_density(view: &RenderView, face: Face, cx: u16) -> f64 {
-    column_mean(view, face, cx, &|v, i| dead_wood_density(v, i))
+    ArtGeometry::CUBE.column_dead_density(view, face, cx)
 }
 
 /// How full a column's canopy is: the mean [`foliage_fullness`] of the same cells, which is
 /// what dims its cap ([`foliage_ramp`]) when the stand around it is grazed.
 pub fn column_fullness(view: &RenderView, face: Face, cx: u16) -> f64 {
-    column_mean(view, face, cx, &|v, i| foliage_fullness(v, i))
-}
-
-/// The mean of a per-cell reading over a column's foliage cells, each clamped to `[0, 1]`.
-fn column_mean(
-    view: &RenderView,
-    face: Face,
-    cx: u16,
-    read: &dyn Fn(&RenderView, usize) -> f64,
-) -> f64 {
-    let Some((top, horizon)) = foliage_rows(face) else {
-        return 0.0;
-    };
-    let mut sum = 0.0;
-    let mut n = 0.0;
-    for cy in top..=horizon {
-        let cell = CellId::new(Topology::Cube, Scale::ONE, face, cx, cy);
-        sum += read(view, cell.index()).clamp(0.0, 1.0);
-        n += 1.0;
-    }
-    if n > 0.0 { sum / n } else { 0.0 }
+    ArtGeometry::CUBE.column_fullness(view, face, cx)
 }
 
 /// A column's structural read is [`wood_density`] averaged over its foliage cells, at no
@@ -200,29 +343,18 @@ pub fn tall_anchor(face: Face, cx: u16, i: u8) -> SurfacePoint {
 /// a whole cell when a segment completes; `tall_anchor(face, cx, i)` is
 /// `tall_anchor_at(face, cx, i as f64)`.
 pub fn tall_anchor_at(face: Face, cx: u16, i: f64) -> SurfacePoint {
-    let (_, horizon) = foliage_rows(face).unwrap_or((0, 0));
-    let cell = CellId::new(Topology::Cube, Scale::ONE, face, cx, horizon);
-    let center = cell.center(Topology::Cube, Scale::ONE);
-    let up = up_of(cell).unwrap_or(Vec2::new(0.0, -1.0));
-    let step = up * (4.0 * i);
-    SurfacePoint::new(face, center.u + step.x, center.v + step.y)
+    ArtGeometry::CUBE.tall_anchor_at(face, cx, i)
 }
 
 /// The heading tall tiles are stamped with: [`stalk_heading`] of the column's up, with no
 /// jitter so the segments stack straight.
 pub fn tall_heading(face: Face, cx: u16) -> Vec2 {
-    let (_, horizon) = foliage_rows(face).unwrap_or((0, 0));
-    stalk_heading(up_of(CellId::new(Topology::Cube, Scale::ONE, face, cx, horizon)).unwrap_or(Vec2::new(0.0, -1.0)))
+    ArtGeometry::CUBE.tall_heading(face, cx)
 }
 
 /// A stable per-column offset into a tall clip, in `[0, seconds)`.
 pub fn tall_phase_of(face: Face, cx: u16, seconds: f64) -> f64 {
-    if !(seconds.is_finite() && seconds > 0.0) {
-        return 0.0;
-    }
-    let mut hash =
-        SplitMix64::new(PHASE_SEED ^ TALL_SEED ^ (face.index() as u64) << 8 ^ u64::from(cx));
-    hash.next_f64() * seconds
+    ArtGeometry::CUBE.tall_phase_of(face, cx, seconds)
 }
 
 /// The pack's tall species resolved once.
@@ -310,8 +442,40 @@ pub fn tall_grown_px(height: f64) -> f64 {
 /// pixels are owned by Top, and a vine cannot slide against its trunk. An amplitude of 0 is
 /// [`Bend::NONE`] and the column is drawn exactly as it was before the wind existed.
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 pub(super) fn draw_column(
     canvas: &mut Canvas,
+    column: &TallColumn,
+    height: f64,
+    plant: &TallPlant,
+    vine: Option<&TallPlant>,
+    seconds: f64,
+    amplitude: f64,
+    cap_opacity: f32,
+    tone: Option<Tone>,
+    scratch: &mut Vec<PixelImage>,
+) {
+    draw_column_in(
+        canvas,
+        ArtGeometry::CUBE,
+        column,
+        height,
+        plant,
+        vine,
+        seconds,
+        amplitude,
+        cap_opacity,
+        tone,
+        scratch,
+    )
+}
+
+/// [`draw_column`] on a named raster: the same column, with its segment cap, its anchors,
+/// its heading and its corner handoff read from `geom`.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn draw_column_in(
+    canvas: &mut Canvas,
+    geom: ArtGeometry,
     column: &TallColumn,
     height: f64,
     plant: &TallPlant,
@@ -325,23 +489,29 @@ pub(super) fn draw_column(
     if !(height > 0.0) {
         return;
     }
-    let height = height.min(f64::from(TALL_MAX_SEGMENTS));
+    let max_segments = geom.tall_max_segments(column.face);
+    let height = height.min(f64::from(max_segments));
     let fade = (height / TALL_BASE_FADE).clamp(0.0, 1.0) as f32;
     let grown = tall_grown_px(height);
-    let heading = tall_heading(column.face, column.cx);
+    let heading = geom.tall_heading(column.face, column.cx);
     // `hold_owner` is true only for the cap: with the plant's explicit capability, on a
     // near-corner column, while the cap centre is above tile row 10, its pixels are owned
     // by the unfolding of the cap's final position `(u, 2)`; otherwise, and for every other
     // part, the ordinary stamp about the actual anchor.
-    let near_corner = column.cx < 2 || column.cx > 13;
+    // Only the cube has corners: the handoff exists because a full column's crown crosses
+    // onto the Top face there. A ring's crown lands inside the foliage band and its wrap is
+    // not a corner, so the retained-owner path is off.
+    let near_corner =
+        geom.topology() == Topology::Cube && (column.cx < 2 || column.cx > 13);
     // A toned column is dead wood: base and trunk only, so `hold_owner` is never set on
     // this path and the retained-chart stamp — which has no tone — is never reached.
     let mut stamp = |clip: &Clip, i: f64, mask: Mask, opacity: f32, hold_owner: bool| {
         if opacity <= 0.0 {
             return;
         }
-        let pose = clip.sample(seconds + tall_phase_of(column.face, column.cx, clip.seconds));
-        let at = tall_anchor_at(column.face, column.cx, i);
+        let pose =
+            clip.sample(seconds + geom.tall_phase_of(column.face, column.cx, clip.seconds));
+        let at = geom.tall_anchor_at(column.face, column.cx, i);
         let bend = Bend {
             amplitude,
             base: tall_bend_base(i),
@@ -391,9 +561,9 @@ pub(super) fn draw_column(
         stamp(base, 0.0, Mask::None, TALL_OPACITY * fade, false);
     }
     let (strip_floor, strip_top) = trunk_strip(plant);
-    for i in 1..=TALL_MAX_SEGMENTS {
+    for i in 1..=max_segments {
         let floor = if i == 1 { TALL_FIRST_JOIN } else { strip_floor };
-        let top = if i == TALL_MAX_SEGMENTS {
+        let top = if i == max_segments {
             TILE_ROWS
         } else {
             strip_top
@@ -424,8 +594,8 @@ pub(super) fn draw_column(
     if let (true, Some(vine), None) = (column.vine, vine, tone) {
         let strips = vine.vine_strips.as_ref();
         let trunk = strips.map_or(&vine.trunk, |v| &v.trunk);
-        for i in (1..=TALL_MAX_SEGMENTS).step_by(2) {
-            let top = if i + 2 > TALL_MAX_SEGMENTS && strips.is_none() {
+        for i in (1..=max_segments).step_by(2) {
+            let top = if i + 2 > max_segments && strips.is_none() {
                 TILE_ROWS
             } else {
                 TALL_VINE_TOP
@@ -446,18 +616,18 @@ pub(super) fn draw_column(
             );
         }
         if let Some(strips) = strips {
-            let i = f64::from(TALL_MAX_SEGMENTS) + 1.0;
+            let i = f64::from(max_segments) + 1.0;
             let clip = &strips.endpoint;
             let reveal = grown - tall_bend_base(i);
             // Endpoint pixels own global heights40..44. Skip the empty patch below its
             // first bilinear support without adding a new Strip start envelope at40.
             if reveal > 7.0 {
-                let pose =
-                    clip.sample(seconds + tall_phase_of(column.face, column.cx, clip.seconds));
+                let pose = clip
+                    .sample(seconds + geom.tall_phase_of(column.face, column.cx, clip.seconds));
                 cubarium_render::stamp_pose_in_chart(
                     canvas,
-                    tall_anchor(column.face, column.cx, TALL_MAX_SEGMENTS),
-                    tall_anchor_at(column.face, column.cx, i),
+                    geom.tall_anchor(column.face, column.cx, max_segments),
+                    geom.tall_anchor_at(column.face, column.cx, i),
                     heading,
                     pose,
                     TALL_OPACITY * fade,
