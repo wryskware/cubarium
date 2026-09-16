@@ -174,10 +174,13 @@ fn an_ordinary_bodys_radius_is_untouched_by_the_rule() {
     }
 }
 
-/// **The deliverable's third definition.** Under the switch the number the observation reports,
-/// the number the envelope bounds and the number the bill prices are one number for the apex —
-/// which under the shipped rule they are not, because `neural_observation` already reads the
-/// lobe radius with no geometry while the envelope used the grasp.
+/// **The deliverable's third definition.** Under the switch the number the observation helper
+/// reports, the number the envelope bounds and the number the bill prices are one number for
+/// the apex. This is arithmetic on `turn_radius_px_in_with`, not a correctness claim: the
+/// observation helper (`neural_observation`, `neural_decision`) serves neural animals only and
+/// no apex member consumes it (Astra, round-4 addendum P1), so under the shipped rule the
+/// apex is not "told" one radius and "bounded" by another; `Sweep` charging the outermost
+/// contacting point is internally consistent with that model.
 #[test]
 fn the_observation_the_envelope_and_the_bill_read_the_same_number() {
     let (world, g, lobes, grasp) = apex_member();
