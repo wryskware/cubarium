@@ -132,8 +132,16 @@ of the four seeds, and the *deepest* water carries none on all four.
 | Core commit | `c469569` — the third founding door |
 | Implementation commit | `2368073` — `factorial.rs`, its `lib.rs` line, the `factorial` subcommand |
 | Census commit | `a4dc519` — the ten-deepest-cells print |
-| Build stamp in every row | **`a4dc5190ffd7`** |
+| Result commit | `dc0a844` — this note |
+| Tidying commit | `7e0041f` — the subcommand's body moved out of `main.rs` |
+| Build stamp in every row | **`7e0041f15fcb`** |
 | Host | 8 workers, as the brief caps |
+
+Files touched, and only these: `crates/cubarium-core/src/world/lifecycle.rs`
+(the one door), `crates/cubarium-core/tests/found_with_genome.rs` (new), the new
+`crates/cubarium-search/src/factorial.rs` with its `lib.rs` module line and one
+dispatch line in `main.rs`, `crates/cubarium-search/tests/diet_factorial.rs`
+(new), this note, and `runs/`.
 
 ### The core change: one founding door
 
@@ -209,10 +217,14 @@ Defaults used: `--ticks 90000 --warm-up-ticks 24000 --probe-every 20
 
 ### The reproduction checks, before anything was interpreted
 
-1. **Arm A re-run at a different worker count.** All four seeds reproduce
-   exactly — state hash, placements, stop tick and every field of every clone
-   row: **4 of 4**.
+1. **Arm A re-run at a different worker count** (4 instead of 8). All four seeds
+   reproduce exactly — state hash, placements, stop tick and every field of every
+   clone row: **4 of 4**.
 2. **The whole campaign re-run after a rebuild.** **12 of 12** rows identical.
+3. **The whole campaign re-run after the `main.rs` handler was moved into
+   `factorial.rs`** (commit `7e0041f`, the last change in this workstream).
+   **12 of 12** rows identical again, including both conservation residuals to
+   the last digit. The rows in `runs/` are the ones this final binary produced.
 
 **A build hazard, recorded because it can produce a wrong attribution.** The
 worktree shares `CARGO_TARGET_DIR` with the main checkout and with other
@@ -221,8 +233,8 @@ workers. Twice during this session another tree's build overwrote the
 once a stale `unresolved import`; `touch crates/cubarium-core/src/lib.rs` and a
 rebuild cleared both. Worse, the shared build-script output made the stamp read
 another tree's commit. The rows above were produced by a binary whose stamp was
-pinned with `CUBARIUM_SEARCH_BUILD=a4dc5190ffd7`, this branch's own HEAD, and
-that campaign was verified identical to the unpinned one row for row.
+pinned with `CUBARIUM_SEARCH_BUILD=7e0041f15fcb`, this branch's own HEAD, and
+that campaign was verified identical to the unpinned ones row for row.
 
 ---
 
@@ -534,9 +546,9 @@ Two others worth naming, neither launched:
 
 | | |
 | --- | --- |
-| Campaign | **24.4 s** wall on 8 workers, 717,158 simulated ticks, 12 runs |
+| Campaign | **22.3 s** wall on 8 workers, 717,158 simulated ticks, 12 runs |
 | Landscape census (4 seeds × 24,000 ticks) | ~4 s |
-| Reproduction checks | ~20 s |
-| Budget | ≤ 10 wall minutes of simulation, ≤ 8 workers — **used 24 s and 8** |
+| Reproduction checks (3 of them) | ~70 s |
+| Budget | ≤ 10 wall minutes of simulation, ≤ 8 workers — **used about 100 s and 8** |
 | `runs/ecology-v1-diet-factorial/` | **128 KiB** of the 20 MiB allowed |
 | Left running | nothing |
