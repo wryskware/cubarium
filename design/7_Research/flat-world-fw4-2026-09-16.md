@@ -505,3 +505,64 @@ taskset -c 30 ./target/release/examples/fw4_split ring:640x360 2 3000 300
 cargo test --workspace --exclude cubarium-gpu --no-fail-fast
 cargo clippy -p cubarium --all-targets
 ```
+
+## Addendum, same day: the art presenter's ring numbers, after FW-5's second commit
+
+FW-5 landed `9d8d8ec` ("the art presenter is laid out by the world's own raster")
+while this report was being written, which changes two statements above. Both are
+left standing as what was true at FW-4's own commits, and corrected here.
+
+1. **The art presenter now draws a correct ring image at both scales.** §6's "the
+   art in the top-left 64×64 and repeat bands" and §7's "panics in
+   `cells.rs:105`" are both fixed by that commit. A 320×180 `--art
+   assets/atelier` capture shows the stratified world: canopy along the top,
+   stalks and columns through the middle, litter along the floor.
+2. **The cube regression still holds at `c336e20`**, re-run against the same
+   `c51233f` baseline: all four PNGs byte-identical, all four frame hashes
+   unchanged. That is now joint evidence for FW-4 and *both* FW-5 commits.
+3. `cargo test --workspace --exclude cubarium-gpu --no-fail-fast` at `c336e20`:
+   **1,672 passed, 1 failed, 25 ignored** — the same single `size_of` pin of §8.1
+   and nothing else.
+
+The measured split, art presenter, same conditions as §7 (`taskset -c 30`, seed
+1, warmed 3,000 ticks, `n = 200`, `n = 150` at `S = 2`), milliseconds:
+
+| world | tick | draw | encode | sink | **R** |
+|---|---|---|---|---|---|
+| cube | 0.148 | 6.250 | 0.036 | 0.002 | **6.288** |
+| ring 320×180 `S=1` | 0.313 | 16.481 | 0.166 | 0.004 | **16.652** |
+| ring 640×360 `S=2` | 0.316 | 24.416 | 0.659 | 0.019 | **25.093** |
+
+The `S = 2` row is the surprise and it is good news: 4× the pixels costs **1.51×**
+the draw, not 4×, because the art presenter's cost is dominated by per-slot work
+over the same 3,600 cells and only the composite grows with the raster. That is
+the same "the limit is the presenter, not the pixels" finding FW-3 §5 reached
+from the band split, seen from the other side — and it means the choice between
+320×180 and 640×360 is much cheaper than §6's `∝ S²` law predicts for the art
+image.
+
+### What this says about `--fps`, which is the number the board needs
+
+Desktop, one core, `20·tick + fps·R ≤ 1000`:
+
+| world | 60 fps load | one-core ceiling |
+|---|---|---|
+| cube | 380 ms (38 %) | ~158 fps |
+| ring 320×180 `S=1` | 1,005 ms (**100.5 %**) | ~59.7 fps |
+| ring 640×360 `S=2` | 1,512 ms (151 %) | ~39.6 fps |
+
+Projected to one A78 at FW-0/FW-3's measured 1.73× (arithmetic, not a
+measurement — no device access in this package), and with FW-3's **measured**
+1.94× four-band split applied to `draw` only (`encode` and `sink` stay serial):
+
+| world | one A78, no split | four A78s, FW-3's split | verdict |
+|---|---|---|---|
+| ring 320×180 `S=1` | 1,738 ms, ~34 fps | **911 ms (91 %), clears 60 fps** | 60 fps needs the split, with 9 % to spare |
+| ring 640×360 `S=2` | 2,613 ms, ~23 fps | 1,387 ms, ~43 fps | **30 fps**, or GS-1's Vulkan renderer |
+
+**Recommendation for W2's `--fps`**: `--fps 60` at `ring:320x180`, `S = 1`, with
+FW-3's four-band presenter; `--fps 30` if 640×360 at `S = 2` is chosen on the CPU
+path. 91 % of the wall second is tight enough that the first row must be
+confirmed on the board before it is written into the unit file — the shim
+worker's own thread also wants a core, and these numbers are one pinned desktop
+core scaled by a ratio.
