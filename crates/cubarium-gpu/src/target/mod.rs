@@ -6,8 +6,11 @@
 //! * [`Scanout`] (feature `scanout`) — the board: a ring of `VK_IMAGE_TILING_LINEAR`
 //!   `B8G8R8A8_UNORM` images exported as dma-bufs, imported into KMS with a
 //!   modifier-free `AddFB2` and page-flipped at DP-1. Variant (c) of the spike.
-//! * [`Window`] (feature `window`) — a `winit` window and an `ash` swapchain, for
-//!   development on the desktop.
+//! * A desktop **window** — a `winit` window and an `ash` swapchain — which lives in
+//!   the standalone `crates/cubarium-gpu/window` crate. It drives exactly the passes
+//!   below through [`Renderer::record`](crate::render::Renderer::record); it is out of
+//!   this crate only so that `winit`'s 110-package tail stays out of the workspace's
+//!   shared lockfile and off the board.
 
 use anyhow::Result;
 use ash::vk;
@@ -20,13 +23,8 @@ use crate::vk::Gpu;
 pub mod kms;
 #[cfg(feature = "scanout")]
 mod scanout;
-#[cfg(feature = "window")]
-mod window;
-
 #[cfg(feature = "scanout")]
 pub use scanout::Scanout;
-#[cfg(feature = "window")]
-pub use window::Window;
 
 /// Render into the world raster and nothing else.
 pub struct Headless {

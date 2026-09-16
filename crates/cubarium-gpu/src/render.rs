@@ -776,7 +776,9 @@ fn colour_pass(
     }?)
 }
 
-pub(crate) fn framebuffer(
+/// A single-attachment framebuffer for a render pass. Public because a target lives
+/// outside this crate (the desktop window) and must build its own.
+pub fn framebuffer(
     d: &ash::Device,
     pass: vk::RenderPass,
     view: vk::ImageView,

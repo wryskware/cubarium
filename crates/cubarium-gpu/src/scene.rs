@@ -38,7 +38,15 @@ pub struct RingLayout {
     /// the ring's rims.
     pub h: u32,
     /// The world scale `S` of §6: one authored source texel is `S` raster pixels and
-    /// one field cell is `4·S` of them.
+    /// one field cell is `4·S` of them — `cubarium_surface::Scale::cell_pixels`, which
+    /// FW-1 froze at `4·S` with `CELL_PIXELS = 4.0`.
+    ///
+    /// **Integer only, unlike `Scale`.** FW-1's `Scale` carries an `f64`, so the
+    /// contract admits `S = 1.5`. This renderer does not: the pixel-art rule is that
+    /// one authored source texel covers an exact `S × S` block of raster pixels, and a
+    /// half-integer factor has no such block. §6's ladder rungs 1, 2, 3 and 6 are all
+    /// integers; the 480×270 rung at `S = 1.5` would have to be drawn by the CPU
+    /// presenter or re-baked, and this renderer refuses it rather than blurring it.
     pub scale: u32,
 }
 

@@ -1,0 +1,22 @@
+[package]
+name = "cubarium-gpu-window"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Deliberately its own workspace root. `winit` resolves 110 packages — wayland,
+# x11rb, objc2, android — and this is a *development* window for a renderer whose
+# real target is a panel with no compositor at all. Keeping it out of the
+# cubarium workspace keeps that tail out of the shared `Cargo.lock`, which three
+# other workers are editing, and off the board, which never builds it.
+[workspace]
+
+[dependencies]
+anyhow = "1"
+ash = "0.38"
+cubarium-gpu = { path = "..", default-features = false }
+raw-window-handle = "0.6"
+winit = "0.30"
+
+[profile.release]
+debug = 1

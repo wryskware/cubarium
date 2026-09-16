@@ -14,7 +14,7 @@ layout(location = 6) in vec2  iMask;        // floor, reveal
 layout(location = 7) in vec3  iToneColour;
 layout(location = 8) in vec3  iToneShade;   // shade floor, shade reference, tone mix
 
-layout(location = 0) out vec2      vLocal;    // tile coords, relative to the pivot
+layout(location = 0) flat out vec4  vPlace;   // the snapped anchor, then the heading
 layout(location = 1) flat out uvec4 vFrame0;
 layout(location = 2) flat out uvec4 vFrame1Pivot;
 layout(location = 3) flat out vec2  vBlend;
@@ -40,7 +40,7 @@ void main() {
     vec2 side = vec2(-iHeading.y, iHeading.x);
     vec2 px = anchor + u.grid.z * (corner.x * iHeading + corner.y * side);
 
-    vLocal = corner;
+    vPlace = vec4(anchor, iHeading);
     vFrame0 = iFrame0;
     vFrame1Pivot = iFrame1Pivot;
     vBlend = iBlend;
