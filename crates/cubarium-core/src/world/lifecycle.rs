@@ -242,6 +242,7 @@ impl World {
             apex_opportunity: crate::encounter::ApexOpportunity::default(),
             neural_timing: crate::world::state::NeuralTiming::default(),
             scripted: Vec::new(),
+            motor_model: crate::motor::MotorModel::default(),
             initial_material,
         };
         // Make the derived light/moisture readable before the first tick advances weather.

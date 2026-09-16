@@ -12,6 +12,8 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+use cubarium_core::MotorModel;
+
 use super::episode::{self, Control, Driver, Episode, EpisodeError, Limits};
 use super::export::PolicyFile;
 use super::fixture::{self, Ecology, HORIZON_TICKS};
@@ -521,12 +523,18 @@ pub fn train(
     resume: Option<PathBuf>,
     overwrite: bool,
     config: Option<PathBuf>,
+    motor: MotorModel,
     out: PathBuf,
 ) -> Result<(), Boxed> {
     let started = Instant::now();
     let deadline = started + Duration::from_secs(wall_seconds);
     let eco = Ecology::from_option(config.as_deref())?;
-    let layouts = fixture::training_layouts_on(&eco);
+    // The motor contract rides on the layouts, exactly as the ecology does, so the protocol
+    // reads it from the set it was built for and every episode's world is set from it.
+    let layouts: Vec<_> = fixture::training_layouts_on(&eco)
+        .into_iter()
+        .map(|l| l.with_motor(motor))
+        .collect();
     let protocol = Protocol::new(pairs, horizon, train_seed, &layouts).with_aggregate(aggregate);
     let log_path = out.join("generations.jsonl");
     let checkpoint_path = out.join("checkpoint.json");
@@ -789,6 +797,7 @@ fn record_center(cp: &mut Checkpoint, out: &Path, generation: u64) -> Result<(),
         generation,
         &cp.protocol.config,
         cp.protocol.config_hash,
+        cp.protocol.motor,
     )?;
     write_json_atomic(&out.join(&relative), &file)?;
     cp.centers.push(CenterRecord {
@@ -837,6 +846,7 @@ pub fn evaluate(
     wall_seconds: u64,
     probe: EvalProbe,
     config: Option<PathBuf>,
+    motor: MotorModel,
     out: PathBuf,
 ) -> Result<(), Boxed> {
     let eco = Ecology::from_option(config.as_deref())?;
@@ -844,6 +854,9 @@ pub fn evaluate(
     // The ecology is checked *before* the weights are rebuilt, so a policy from another world
     // is refused by name rather than scored in a world it never saw.
     file.check_ecology(&eco)?;
+    // And the motor contract, for the same reason and before the same rebuild: the envelope a
+    // body moves in and the price of every radian are not the same under the two models.
+    file.check_motor(motor)?;
     let policy = file.policy()?;
     if probe.copies == 0 {
         return Err("--copies must be at least 1".into());
@@ -851,11 +864,14 @@ pub fn evaluate(
     if probe.reset_hidden_every == Some(0) {
         return Err("--reset-hidden-every must be at least 1 tick".into());
     }
-    let layouts = match set {
+    let layouts: Vec<_> = match set {
         "training" => fixture::training_layouts_on(&eco),
         "holdout" => fixture::holdout_layouts_on(&eco),
         other => return Err(format!("set must be `training` or `holdout`, not `{other}`").into()),
-    };
+    }
+    .into_iter()
+    .map(|l| l.with_motor(motor))
+    .collect();
     let cancel = AtomicBool::new(false);
     let started = Instant::now();
     let limits = Limits::until(&cancel, started + Duration::from_secs(wall_seconds));
@@ -1038,6 +1054,7 @@ pub fn export(
         generation,
         &cp.protocol.config,
         cp.protocol.config_hash,
+        cp.protocol.motor,
     )?;
     write_json(&out, &file)?;
 

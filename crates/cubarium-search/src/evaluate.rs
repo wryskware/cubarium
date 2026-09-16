@@ -238,6 +238,15 @@ pub struct RunOptions {
     /// must not. A run under it is also exempt from the empty-world stop below: a world with
     /// no population by construction has not collapsed.
     pub no_animals: bool,
+    /// **Which motor contract the run's world uses**
+    /// (`cubarium_core::MotorModel`, `crate::World::set_motor_model`). The default is
+    /// `Sweep`, the shipped contract, and a run under it is byte-identical to every row
+    /// produced before the switch existed — the two arms of workstream T's pairing differ in
+    /// exactly this field (`design/7_Research/ecology-v1-motor-inertial-2026-09-16.md`).
+    ///
+    /// It is a transient on the world, not a configuration: it does not enter
+    /// [`crate::calibrate::config_hash`] and no retained row's hash moves because of it.
+    pub motor: cubarium_core::MotorModel,
 }
 
 /// Run one candidate on one seed. Never panics: a panic inside the core is caught and
@@ -330,6 +339,10 @@ fn run(
             );
         }
     };
+
+    // The motor contract, before the first tick. A transient on the world, so the config and
+    // its hash are untouched; `MotorModel::Sweep` is the default and changes nothing.
+    world.set_motor_model(options.motor);
 
     let mut apex_material_in = 0.0;
     let mut apex_energy_in = 0.0;

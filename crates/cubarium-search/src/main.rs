@@ -165,6 +165,12 @@ enum Command {
         /// It moves every layout hash and the protocol hash.
         #[arg(long)]
         config: Option<PathBuf>,
+        /// The motor contract every fixture world runs under: `sweep` is the shipped
+        /// outer-point model, `inertial` is workstream T's paired disc model. It moves the
+        /// protocol hash (a `sweep` protocol keeps the hash it has always had) and is written
+        /// into every exported policy, which is refused by name under the other contract.
+        #[arg(long, default_value = "sweep")]
+        motor: String,
         #[arg(long, default_value = "runs/es-first")]
         out: PathBuf,
     },
@@ -210,6 +216,12 @@ enum Command {
         /// It moves every layout hash and the protocol hash.
         #[arg(long)]
         config: Option<PathBuf>,
+        /// The motor contract every fixture world runs under: `sweep` is the shipped
+        /// outer-point model, `inertial` is workstream T's paired disc model. It moves the
+        /// protocol hash (a `sweep` protocol keeps the hash it has always had) and is written
+        /// into every exported policy, which is refused by name under the other contract.
+        #[arg(long, default_value = "sweep")]
+        motor: String,
         #[arg(long)]
         out: PathBuf,
     },
@@ -305,6 +317,13 @@ enum Command {
         /// as it ships. This changes what the world does, deliberately.
         #[arg(long, default_value = "half-space")]
         pursuit_stop: String,
+        /// The motor contract. `sweep` is the shipped outer-point model, where an apex member's
+        /// turn radius is its 14.8 px grasp; `inertial` is workstream T's paired disc model,
+        /// where rotation is `r·ω/√2` over the member's own lobes, the envelope is
+        /// `√(v² + v_rot²) ≤ cap`, and the grasp is contact geometry only. The default runs the
+        /// world exactly as it ships. This changes what the world does, deliberately.
+        #[arg(long, default_value = "sweep")]
+        motor: String,
         #[arg(long, default_value_t = 8)]
         workers: usize,
         #[arg(long, default_value_t = 600)]
@@ -351,6 +370,14 @@ enum Command {
         /// changes the world, and its hash, deliberately.
         #[arg(long, default_value_t = false)]
         no_animals: bool,
+        /// The motor contract the run's world uses: `sweep` is the shipped outer-point model
+        /// and reproduces every retained row bit for bit; `inertial` is workstream T's paired
+        /// disc model, where rotation is an energy-equivalent speed `r·ω/√2`, the envelope is
+        /// `√(v² + v_rot²) ≤ cap`, and an apex's grasp is no longer a turn radius. A transient
+        /// on the world: it does not enter the config hash. This changes what the world does,
+        /// deliberately.
+        #[arg(long, default_value = "sweep")]
+        motor: String,
         #[arg(long, default_value_t = 125_000)]
         ticks: u64,
         #[arg(long, default_value_t = 500)]
@@ -488,6 +515,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ledger,
             plant_record,
             no_animals,
+            motor,
             ticks,
             sample_every,
             introduce_tick,
@@ -495,6 +523,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             wall_seconds,
             out,
         } => {
+            let motor = cubarium_core::MotorModel::parse(&motor)?;
             let names: Vec<String> = if candidates == "all" {
                 calibrate::CANDIDATES.iter().map(|c| c.name.to_string()).collect()
             } else {
@@ -519,7 +548,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 seeds,
                 &arms,
                 &prices,
-                cubarium_search::evaluate::RunOptions { ledger, plant_record, no_animals },
+                cubarium_search::evaluate::RunOptions {
+                    ledger,
+                    plant_record,
+                    no_animals,
+                    motor,
+                },
                 ticks,
                 sample_every,
                 introduce_tick,
@@ -587,6 +621,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             resume,
             overwrite,
             config,
+            motor,
             out,
         } => es::commands::train(
             pairs,
@@ -600,6 +635,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             resume,
             overwrite,
             config,
+            cubarium_core::MotorModel::parse(&motor)?,
             out,
         ),
         Command::EsEvaluate {
@@ -610,10 +646,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             reset_hidden_every,
             copies,
             config,
+            motor,
             out,
         } => {
             let probe = es::commands::EvalProbe { reset_hidden_every, copies };
-            es::commands::evaluate(policy, &set, horizon, wall_seconds, probe, config, out)
+            let motor = cubarium_core::MotorModel::parse(&motor)?;
+            es::commands::evaluate(policy, &set, horizon, wall_seconds, probe, config, motor, out)
         }
         Command::EsBudget { policy, config, horizon, initial_seed, workers, wall_seconds, out } => {
             es::budget::run(policy, config, horizon, initial_seed, workers, wall_seconds, out)
@@ -627,6 +665,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             founder_age_seconds,
             no_ledger,
             pursuit_stop,
+            motor,
             workers,
             wall_seconds,
             out,
@@ -638,6 +677,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 founder_age_seconds,
                 ledger: !no_ledger,
                 stop: cubarium_search::apex_audit::parse_pursuit_stop(&pursuit_stop)?,
+                motor: cubarium_search::apex_audit::parse_motor(&motor)?,
             };
             cubarium_search::apex_audit::run(
                 config.split(',').map(|s| PathBuf::from(s.trim())).filter(|p| !p.as_os_str().is_empty()).collect(),

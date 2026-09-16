@@ -368,6 +368,12 @@ pub struct StagePlan {
     pub plant_record: bool,
     #[serde(default)]
     pub no_animals: bool,
+    /// The motor contract every run of this stage used (`cubarium_core::MotorModel`), by name.
+    /// Absent on every stage before workstream T, which is `sweep` — the one contract there
+    /// was. A transient on the world, so it does not enter [`config_hash`] and a `sweep` stage
+    /// reproduces the retained rows bit for bit.
+    #[serde(default = "sweep_name")]
+    pub motor: String,
     pub build_id: String,
     pub horizon_ticks: u64,
     pub sample_every: u64,
@@ -685,6 +691,7 @@ pub fn run_stage(
         ledger: options.ledger,
         plant_record: options.plant_record,
         no_animals: options.no_animals,
+        motor: options.motor.name().to_string(),
         build_id: BUILD_ID.to_string(),
         horizon_ticks,
         sample_every,
@@ -839,6 +846,11 @@ pub fn run_stage(
 /// Deterministic for a given build because `serde_json` writes a struct's fields in
 /// declaration order, and it covers **every** field, not only the searched ones — so a config
 /// that differs anywhere has a different hash.
+/// The motor contract a stage written before workstream T implies: there was one.
+fn sweep_name() -> String {
+    cubarium_core::MotorModel::Sweep.name().to_string()
+}
+
 pub fn config_hash(config: &WorldConfig) -> u64 {
     let text = serde_json::to_string(config).unwrap_or_default();
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;

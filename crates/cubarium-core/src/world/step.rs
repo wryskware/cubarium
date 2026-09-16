@@ -246,8 +246,12 @@ impl World {
                 apex_opportunity,
                 neural_timing,
                 scripted,
+                motor_model,
                 initial_material: _,
             } = &mut *self;
+            // The motor contract in force this tick, read once. `Sweep` is the shipped
+            // contract and the default (`crate::motor::MotorModel`).
+            let motor_model = *motor_model;
             let WorldState {
                 config,
                 tick,
@@ -451,6 +455,7 @@ impl World {
                         &mut sensed_cells,
                         &mut sensed_bodies,
                         if budgets.traced() == Some(id) { Some(&mut traced_head) } else { None },
+                        motor_model,
                     );
                     decisions.push((id, decision));
                     continue;
@@ -1370,7 +1375,10 @@ impl World {
                     *flag = true;
                 }
                 let limits = MotorLimits {
-                    radius_px: motor::turn_radius_px(o, apex_geometry.as_ref()),
+                    // The radius the model in force puts in the rotation term: the outermost
+                    // contacting point (an apex member's grasp included) under `Sweep`, the
+                    // disc's own radius of gyration with the grasp dropped under `Inertial`.
+                    radius_px: motor::turn_radius_px_in(o, apex_geometry.as_ref(), motor_model),
                     turn_rate_max: d.turn_rate_max,
                     speed_cap,
                     motor_budget: bill.affordable_motor(o.energy, dt),
@@ -1383,7 +1391,7 @@ impl World {
                     // `resolve` clamps this to `speed_cap` either way.
                     speed: d.speed_request.unwrap_or(speed_cap),
                 };
-                let motion = motor::resolve(o.heading, &request, &limits);
+                let motion = motor::resolve_in(o.heading, &request, &limits, motor_model);
                 if !neural.animals.is_empty()
                     && let Some(a) = neural.get_mut(*id)
                 {
@@ -1434,7 +1442,7 @@ impl World {
                 // stored energy alone (`affordable_motor`), so a body short of upkeep has
                 // `u = 0` and stands still, and the shortfall is never motion. Movement is paid
                 // from the battery, as it always was.
-                let cost = bill.total_cost(motion.speed, motion.sweep, dt);
+                let cost = bill.total_cost_in(motion.speed, motion.sweep, dt, motor_model);
                 // The complete bill, recorded where it is levied: maintenance, sensing and
                 // both halves of the motor charge, for every body billed this tick — including
                 // one that is removed later in the same tick, because removals commit in step
@@ -1452,7 +1460,7 @@ impl World {
                     rec.upkeep_billed += bill.upkeep(dt);
                     rec.motor_translation_billed += per_motor * motion.speed.max(0.0);
                     rec.motor_turn_billed +=
-                        per_motor * motor::ROTATION_COST_SCALE * motion.sweep.max(0.0);
+                        per_motor * motor_model.rotation_price() * motion.sweep.max(0.0);
                 }
                 if let Some(row) = budgets.row_of(*id) {
                     row.bill_total += cost;
@@ -3058,12 +3066,17 @@ fn neural_decision(
     cells: &mut Vec<crate::neural::SensedCell>,
     bodies: &mut Vec<crate::neural::SensedBody>,
     head_sink: Option<&mut Option<[f64; crate::neural::action::ACT_LEN]>>,
+    motor_model: crate::motor::MotorModel,
 ) -> Decision {
     use crate::neural::action::{Action7, Capability, Envelope};
 
     let here = cell_of(&o.pos).index();
     let omega_max = f64::from(o.phenotype.drives.turn_rate_max_deg).to_radians();
-    let radius_px = motor::turn_radius_px(o, None);
+    // The radius the model in force puts in the rotation term, so what the policy is told
+    // about its own turning capability is what the resolver will actually grant it. Under
+    // `Inertial` this is the disc's radius of gyration, and `omega_attain = u_full / r_g` is
+    // exactly the pivot the quadrature envelope allows at zero speed.
+    let radius_px = motor::turn_radius_px_in(o, None, motor_model);
     // `motor_avail` and `ω_attain` share the world's own affordability calculation rather than
     // re-deriving an approximate energy bill: `u_full = min(v_max / wading, affordable_motor)`
     // at the energy the body holds *before* this tick's payment, which is the state stage 6

@@ -312,7 +312,9 @@ impl World {
         let bill = crate::motor::MotorBill::of(o, cfg);
         let u_full =
             (o.phenotype.speed_max / wading).min(bill.affordable_motor(o.energy, dt));
-        let radius_px = crate::motor::turn_radius_px(o, None);
+        // The observation must state the radius **the model in force** uses, or a body would
+        // be told about a turning capability its own envelope does not have.
+        let radius_px = crate::motor::turn_radius_px_in(o, None, self.motor_model);
         let feedback = self.state.neural.get(id).map_or([0.0, 0.0, 0.0, 0.0, 0.0, 1.0], |a| {
             a.feedback.channels(o.phenotype.mouth_rate, o.phenotype.speed_max, radius_px, dt)
         });

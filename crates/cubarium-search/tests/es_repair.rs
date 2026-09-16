@@ -97,6 +97,7 @@ fn a_resumed_run_continues_the_same_run_rather_than_repeating_it() {
             resume,
             false,
             None,
+            cubarium_core::MotorModel::Sweep,
             out.to_path_buf(),
         )
         .expect("the run completes")
@@ -181,6 +182,7 @@ fn a_fresh_run_refuses_to_overwrite_an_existing_one_unless_told_to() {
             None,
             overwrite,
             None,
+            cubarium_core::MotorModel::Sweep,
             out.clone(),
         )
     };
