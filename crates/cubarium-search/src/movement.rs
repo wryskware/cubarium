@@ -902,6 +902,11 @@ pub struct Movement {
     /// The per-depleted-cell record and its four-way classification (workstream I).
     #[serde(default)]
     pub depletion: Option<crate::depletion::DepletionSummary>,
+    /// The counter split by **exact** consumer withdrawal, the measured plant budget of every
+    /// crossing, and the coarse all-cell summary (workstream M). `None` on every row produced
+    /// before M, which is why it is `#[serde(default)]` and skipped when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plant_budget: Option<crate::plant_budget::PlantBudgetSummary>,
 }
 
 #[cfg(test)]

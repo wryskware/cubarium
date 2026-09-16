@@ -20,6 +20,7 @@ use cubarium_surface::cell_of;
 use serde::{Deserialize, Serialize};
 
 use crate::depletion::{DepletionTracker, PlantConstants, ServedAttributor, monod_reference};
+use crate::plant_budget::{CellSample, PlantBudgetTracker};
 use crate::metrics::{Components, EcoMeasures, FORMS_POSSIBLE, Sample, guild_of};
 use crate::movement::{
     BodyTrack, CensusBuilder, CensusKey, CrossingCounter, CrossingKind, FormSpatial, FounderBroods,
@@ -225,6 +226,18 @@ pub struct RunOptions {
     /// rather than inferred (workstream E's ledger). Off is the shipped path and is what
     /// every row before workstream I was produced under.
     pub ledger: bool,
+    /// Turn `World::record_plant_budgets` on, so every §4 plant flow and every §6.4 consumer
+    /// withdrawal is booked per cell where it happens (workstream M's record). Off is the
+    /// shipped path and is what every row before workstream M was produced under.
+    pub plant_record: bool,
+    /// Found **no animals at all**: `founders.kinds` empty and `founders.count` zero, so the
+    /// world is plants, water, weather and nothing else (`world/lifecycle.rs:52-63`).
+    ///
+    /// This is workstream M's herbivore-absent arm. It changes the configuration, so it
+    /// changes the world and its hash deliberately — unlike the two recorders above, which
+    /// must not. A run under it is also exempt from the empty-world stop below: a world with
+    /// no population by construction has not collapsed.
+    pub no_animals: bool,
 }
 
 /// Run one candidate on one seed. Never panics: a panic inside the core is caught and
@@ -274,6 +287,12 @@ fn run(
     }
 
     let mut config = base_config(seed);
+    if options.no_animals {
+        // Before `params::apply`, so a searched parameter can still refuse an invalid world,
+        // and before `validate`, so an empty roster is validated like any other.
+        config.founders.kinds.clear();
+        config.founders.count = 0;
+    }
     // The profile is derived from the *base* config so that the genome it carries does not
     // shift under the searched drive parameters; only the two searched apex fields move.
     let mut profile = FixedHunterProfile::lanternjaw_trial(&config);
@@ -330,6 +349,9 @@ fn run(
     // The flag is read only at sites that add to a counter; the campaign's row check against
     // workstream F's ledger-off rows is what tests that claim rather than repeating it.
     world.record_body_budgets(options.ledger);
+    // Opened before the first step, so the record's `P₀` is the world's own tick-0 foliage and
+    // the closing identity spans the whole horizon.
+    world.record_plant_budgets(options.plant_record);
     let mut recorder = Recorder::new(&world, protocol, apex_introduced, options);
     // Founder placement emits nothing, but drain anyway so the run starts from a clean queue.
     world.drain_events();
@@ -368,9 +390,11 @@ fn run(
             }
             recorder.sample(&world);
         }
-        if world.population() == 0 {
+        if world.population() == 0 && !options.no_animals {
             // Nothing is ever created from nothing: an empty world cannot recover, so the
-            // horizon stops here and the collapse tick is the honest survival time.
+            // horizon stops here and the collapse tick is the honest survival time. A
+            // deliberately animal-free arm is not that world: it is exempt by the flag, not
+            // by an exception the ordinary path could take.
             recorder.collapsed_at = Some(world.tick());
             break;
         }
@@ -485,6 +509,14 @@ struct Recorder {
     /// Net energy margin per body, by `(form, diet bin)`.
     margins: MarginAccumulator,
 
+    // --- workstream M: the counter split by exact withdrawal --------------------------
+    /// Open only when `RunOptions::plant_record` is on, because it reads a record the core
+    /// only keeps when asked.
+    plant: Option<PlantBudgetTracker>,
+    /// Reused per probe so a 180,000-tick run allocates the per-cell view once.
+    plant_scratch: Vec<CellSample>,
+    plant_occupied: Vec<u16>,
+
     first_predation_tick: Option<u64>,
     prey_before_first_predation: u32,
     prey_min_after_predation: u32,
@@ -547,6 +579,12 @@ impl Recorder {
         };
         let mut depletion = DepletionTracker::new(&p_ref, &light, &moisture, &wood0, &constants);
         depletion.set_habitat_check(habitat_error);
+        // The static habitat product I classified on, carried into M's rows for comparison
+        // only: M's own light and nutrient come from the plant step itself.
+        let l_mu: Vec<f64> = light.iter().zip(&moisture).map(|(l, m)| l * m).collect();
+        let plant = options
+            .plant_record
+            .then(|| PlantBudgetTracker::new(&p_ref, &l_mu, world.tick()));
         let opening_alive_cells = world
             .state
             .ecology
@@ -584,6 +622,9 @@ impl Recorder {
             broods,
             founder_parents: BTreeSet::new(),
             margins: MarginAccumulator::default(),
+            plant,
+            plant_scratch: Vec::new(),
+            plant_occupied: Vec::new(),
             protocol,
             samples: Vec::new(),
             apex_introduced,
@@ -792,13 +833,48 @@ impl Recorder {
 
         let p = &world.state.fields.p;
         self.depletion.note_probe(tick, p, &occupancy, &served);
+        // Workstream M's cumulative per-cell samples, taken **before** this probe's crossings,
+        // so "since the last recovery" has the detection ticks themselves as its endpoints.
+        if let Some(plant) = self.plant.as_mut()
+            && let Some(rec) = world.plant_budget()
+        {
+            self.plant_scratch.clear();
+            self.plant_scratch.extend(rec.cells.iter().map(|c| CellSample {
+                foliage_in: c.foliage_in(),
+                foliage_out: c.foliage_out(),
+                withdrawal: c.withdrawal_foliage,
+                income: c.income,
+                maintenance_unpaid: c.maintenance_unpaid,
+                death_foliage: c.death_foliage,
+                wood_sum: c.w_sum,
+                light_sum: c.light_effective_sum,
+                nutrient_sum: c.nutrient_sum,
+                ticks_alive: c.ticks_alive,
+            }));
+            self.plant_occupied.clear();
+            self.plant_occupied.extend(occupancy.keys().copied());
+            plant.observe(tick, &self.plant_scratch, &self.plant_occupied);
+        }
         // One rule, one place: the per-cell record is driven by the same counter A's aggregate
-        // numbers come out of, through the closure form, so the two cannot drift.
+        // numbers come out of, through the closure form, so the two cannot drift. M's split is
+        // driven from the same closure for the same reason.
         let crossings = &mut self.crossings;
         let depletion = &mut self.depletion;
+        let plant = self.plant.as_mut();
+        let mut plant = plant;
         crossings.observe_reporting(p, |cell, kind| match kind {
-            CrossingKind::Depleted => depletion.depleted(cell, tick),
-            CrossingKind::Recovered => depletion.recovered(cell, tick),
+            CrossingKind::Depleted => {
+                depletion.depleted(cell, tick);
+                if let Some(plant) = plant.as_mut() {
+                    plant.depleted(cell, tick, p.get(cell).copied().unwrap_or(0.0));
+                }
+            }
+            CrossingKind::Recovered => {
+                depletion.recovered(cell, tick);
+                if let Some(plant) = plant.as_mut() {
+                    plant.recovered(cell, tick);
+                }
+            }
         });
         self.depletion.sample(tick, p);
     }
@@ -1122,6 +1198,31 @@ impl Recorder {
             .collect();
         let margins = self.margins.clone().finish(self.options.ledger);
         let depletion = self.depletion.clone().finish(&world.state.fields.p);
+        let plant_budget = self.plant.take().map(|plant| {
+            let residual = world.plant_budget_residual();
+            let (samples, ticks) = match world.plant_budget() {
+                Some(rec) => (
+                    rec.cells
+                        .iter()
+                        .map(|c| CellSample {
+                            foliage_in: c.foliage_in(),
+                            foliage_out: c.foliage_out(),
+                            withdrawal: c.withdrawal_foliage,
+                            income: c.income,
+                            maintenance_unpaid: c.maintenance_unpaid,
+                            death_foliage: c.death_foliage,
+                            wood_sum: c.w_sum,
+                            light_sum: c.light_effective_sum,
+                            nutrient_sum: c.nutrient_sum,
+                            ticks_alive: c.ticks_alive,
+                        })
+                        .collect::<Vec<_>>(),
+                    rec.ticks,
+                ),
+                None => (Vec::new(), 0),
+            };
+            plant.finish(&samples, &world.state.fields.p, residual, ticks)
+        });
         let movement = Movement {
             move_cost: self.move_cost,
             probe_ticks: PROBE_EVERY,
@@ -1139,6 +1240,7 @@ impl Recorder {
             founder_broods: self.broods,
             margins: self.options.ledger.then_some(margins),
             depletion: Some(depletion),
+            plant_budget,
         };
 
         let apex_active_samples = self.samples.iter().filter(|s| s.apex_active > 0).count() as f64;

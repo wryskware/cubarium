@@ -735,6 +735,51 @@ impl super::World {
         self.budgets.enabled()
     }
 
+    /// Turn workstream M's per-cell **plant** budget on or off for this world.
+    ///
+    /// The per-cell counterpart of [`World::record_body_budgets`], and inert in exactly the
+    /// same sense: it is read only at sites that add to a counter, consumes no draw, moves no
+    /// value the simulation reads, and is never persisted, hashed or snapshotted. Turning it
+    /// on opens the record on the stocks as they stand *now*, so the identity
+    /// `P − P₀ = in − out − withdrawal` is anchored at this tick; turning it off frees it.
+    ///
+    /// It lives in the plant step's own scratch ([`crate::fields::EcoScratch`]) because that
+    /// is where §4.1–4.7 are computed, and the §6.4 withdrawal site in `world::step` books
+    /// each bite into the same record. Nothing else in the world can see it.
+    pub fn record_plant_budgets(&mut self, on: bool) {
+        let tick = self.state.tick;
+        let (p, q, w) = (
+            &self.state.fields.p,
+            &self.state.ecology.plant_reserve,
+            &self.state.ecology.wood,
+        );
+        self.eco_scratch.record_plant_budget(on, p, q, w, tick);
+    }
+
+    /// Whether this world is recording the per-cell plant budget.
+    pub fn records_plant_budgets(&self) -> bool {
+        self.eco_scratch.plant_budget().is_some()
+    }
+
+    /// The per-cell plant budget so far, or `None` when recording is off.
+    pub fn plant_budget(&self) -> Option<&crate::fields::PlantBudgetRecord> {
+        self.eco_scratch.plant_budget()
+    }
+
+    /// The largest absolute residual of the record's three §4 identities against the world's
+    /// own current stocks, over every cell — the record's self-check. `0.0` when off.
+    pub fn plant_budget_residual(&self) -> f64 {
+        match self.eco_scratch.plant_budget() {
+            None => 0.0,
+            Some(rec) => rec.max_residual(
+                &self.state.fields.p,
+                &self.state.ecology.plant_reserve,
+                &self.state.ecology.wood,
+                self.state.config.plant.build,
+            ),
+        }
+    }
+
     /// One living body's budget so far, or `None` when recording is off or the id is stale.
     pub fn body_budget(&self, id: crate::ids::OrganismId) -> Option<&BodyBudget> {
         self.budgets.get(id)
