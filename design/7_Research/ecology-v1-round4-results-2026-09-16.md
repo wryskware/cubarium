@@ -438,15 +438,15 @@ and 42 % of its captures pooled, and that third rests on one run
 (`fast-leaf/9006`: 9 → 27 captures alone); without it pooled captures fall
 below the shipped arm and the gap still grows. Paired sign tests over the 16
 runs do not separate either hunting limb from run-to-run variation (gap 9/16,
-captures 9/14). Two limbs are robust and they are the member's own budget,
-not its luck: it turns more and pays less for turning (translation billed up
-in 13/16, the only limb at the nominal 0.05 line; turn billed down in 11/16),
-and E's ratio rises in 12/16 (p = 0.077). **The one behavioural change
+captures 9/14). One limb crosses the nominal 0.05 line and it is the member's
+own budget, not its luck: translation billed up in 13/16; turn billed down in
+11/16 and E's ratio up in 12/16 (p = 0.077) move the same way without
+separating. **The one behavioural change
 replicated beyond the influential run is the age gate:** no life reached
 24,000 ticks with the grasp counted; four do without it, in three runs, two of
 them the runs `Inertial` crossed in; thirteen paired worlds tie, so this is
 descriptive, and it is about those four lives. T had credited that to the disc
-model; the grasp correction alone produces it in the identical prey world.
+model; the grasp-only alternative produces it in the identical prey world.
 
 **What this supports:** the geometry correction alone does not reproduce most
 of the *observed, confounded* T arm. It does not say the rest belongs to the
@@ -468,7 +468,7 @@ W's 2 × 2 (apex motor × ordinary-body motor, both controls byte-reproduced
 under one build, pre-introduction state hash equal row for row), which is
 cheap and runs before any host contract or recalibration is paid for.
 
-## W — the disc model on the apex alone, as a 2 × 2: the closure gain is the prey's contract, not the apex's envelope
+## W — the disc model on the apex alone, as a 2 × 2: the closure gain is the ordinary-body motor and the world it produced, not the apex's envelope
 
 [Note](ecology-v1-apex-motor-isolation-2026-09-16.md) ·
 [brief](../handoffs/ecology-v1-apex-motor-isolation-opus-2026-09-16.md) ·
@@ -510,23 +510,28 @@ bin from 4 px out, but it starts its bursts further away (mean initial gap
 10.7 → 11.7 px; the 16 px+ bin 134 → 216 attempts), so pooled closure worsens
 while contacts and captures rise.
 
-**The ordinary bodies' contract is what closed T's gap.** With the apex held
-on the shipped envelope and the prey on the disc, the gap change is **−1.056
-px per burst**, more closure than T's whole-world arm, in 15 of 15 runs
-(p = 0.001), the only hunting limb anywhere in the 2 × 2 that separates from
-noise. The apex's own motor is untouched in that cell (whole motor 12.46 →
-12.54), prey realised speed barely moves (2.61 → 2.74 px/s), and the prey
-population is the thinner 628. The 2 × 2 interaction on gap is +0.325, a third
-of the apex main effect, so no clean apportionment of T's gain exists and W
-does not offer one; on captures both contracts push the same way, roughly one
-third apex (+0.28 per life) and two thirds prey (+0.66), neither separating at
-this sample size. `baseline/9006` records no paid attempt in either
+**The ordinary-body motor, and the world it had produced by introduction, is
+what closed T's gap.** With the apex held on the shipped envelope and the
+ordinary bodies on the disc from tick 0, the gap change is **−1.056 px per
+burst**, more closure than T's whole-world arm, in 15 of 15 runs (p < 0.001,
+exactly 2/2¹⁵), the only hunting limb anywhere in the 2 × 2 that separates
+from noise. The apex's own motor is untouched in that cell (whole motor 12.46
+→ 12.54), prey realised speed rises 2.61 → 3.90 px/s, and the population the
+apex meets is the thinner 628 with unequal pre-introduction hashes. That cell
+did not hold the world fixed and change only the pursued body's envelope, so
+prey pivoting is a candidate mechanism, not a measured one (Astra, re-check).
+The 2 × 2 interaction on gap is +0.325, about 2.1× the Sweep-world apex effect
+and what lifts it to +0.482, so no clean apportionment of T's gain exists and
+W does not offer one; on captures the Sweep-baseline main effects are +0.28
+(apex) and +0.66 (ordinary) with an interaction of −0.125, three terms that do
+not add to T's increment and are not shares of it, none separating at this
+sample size. `baseline/9006` records no paid attempt in either
 inertial-prey arm and is dropped from those gap tests, stated.
 
 **Verdict:** mixed on the brief's two branches; decided by the fourth cell.
-T's closure gain was not the apex's quadrature envelope. It was the change in
-the prey world under the disc model, whose direction Astra rightly said was
-unknown before this: it helped the apex. Left unexplained, listed in W §7:
+T's closure gain was not the apex's quadrature envelope. It came with the
+ordinary-body motor and the world it produced, whose direction Astra rightly
+said was unknown before this: it helped the apex. Left unexplained, listed in W §7:
 why the gap interaction is positive; the `I/S` cell's anomalies (held at burst
 start 102 against 52–65, `GraspUnmapped` 27 against 5–8, a crowded 0–4 px bin
 with a 15.9 % capture rate against 43.2 % shipped). Nothing here says the apex

@@ -289,11 +289,11 @@ The paired per-run view says the same thing directly.
 | **motor translation billed** | **13 / 16** | **p = 0.021** |
 | motor turn billed *fell* | 11 / 16 | p = 0.21 |
 
-The two limbs that are not noise are the two that measure the **member's own
-budget**, not its luck against prey: it spends more of its budget on travel, and
-it turns the energy it does catch into a larger fraction of its own bill. The
-hunting limbs — contacts, captures, closure — do not separate from run-to-run
-variation at this sample size.
+The one limb that crosses the nominal 0.05 line measures the **member's own
+budget**, not its luck against prey: it spends more of its budget on travel
+(13/16). E's usable-energy ratio moves the same way in 12/16 but does not
+separate (p = 0.077). The hunting limbs — contacts, captures, closure — do not
+separate from run-to-run variation at this sample size.
 
 ### The one behavioural change replicated beyond the influential run
 
@@ -308,11 +308,12 @@ descriptive change in three worlds, not a statistically separated one, and it
 is a statement about those four lives.
 
 T reported that under `Inertial` "the barrier has moved from *never lived long
-enough* to *never stored enough*". **The grasp correction alone moves it**, in a
-prey world identical to the shipped arm's. The first refusing term is `reserve`
-in both arms and stays so, at 84.7 % and 85.0 % of watched member-ticks, and the
-maximum reserve fraction any member reached is 0.500 in both: the age gate stops
-being the binding term and nothing else opens behind it.
+enough* to *never stored enough*". **The grasp-only alternative alone produces
+those four crossings**, in a prey world identical to the shipped arm's. The
+first refusing term is `reserve` in both arms and stays so, at 84.7 % and 85.0 %
+of watched member-ticks, and the maximum reserve fraction any member reached is
+0.500 in both: for those four lives the age gate stopped binding and reserve
+refused them instead; for the apex generally nothing is established.
 
 ## 5. The verdict, by Astra's rule
 

@@ -1852,5 +1852,31 @@ mod tests {
         json.as_object_mut().expect("an object").remove("pursuit_stop");
         let back: AuditRow = serde_json::from_value(json).expect("a rule-less row still reads");
         assert_eq!(back.pursuit_stop, PursuitStop::ForwardHalfSpace);
+
+        // And the report, at its own serialised boundary.
+        let report = AuditReport {
+            build: "test".into(),
+            configs: vec!["fast-leaf".into()],
+            seeds: vec![1],
+            apex_founders: 2,
+            introduce_tick: 0,
+            founder_age_seconds: 0.0,
+            ledger: false,
+            pursuit_stop: PursuitStop::ReachEnvelope,
+            motor: sweep_name(),
+            apex_turn_radius: grasp_name(),
+            apex_motor: None,
+            horizon_ticks: 1,
+            workers: 1,
+            wall_seconds: 0.0,
+            verdict: String::new(),
+            strikes: StrikeAudit::default(),
+            rows: vec![row(1, 0, 0, 0, 0)],
+        };
+        let mut json = serde_json::to_value(&report).expect("a report serialises");
+        json.as_object_mut().expect("an object").remove("pursuit_stop");
+        let back: AuditReport =
+            serde_json::from_value(json).expect("a rule-less report still reads");
+        assert_eq!(back.pursuit_stop, PursuitStop::ForwardHalfSpace);
     }
 }

@@ -4,7 +4,26 @@ last_reviewed: 2026-09-16
 decision_refs: []
 ---
 
-# The disc model on the apex alone: what T's arm A bought the hunt was bought by the prey
+# The disc model on the apex alone: what T's arm A bought the hunt was bought by the ordinary-body motor and the world it produced
+
+> **Corrections after Astra's re-check (2026-09-16).** (1) The treatment this 2 × 2
+> isolates is *the ordinary-body motor, run from tick 0, and the world it had
+> produced by introduction* (628 prey against 745, pre-introduction hashes unequal
+> in all 16 cross-motor comparisons), not the prey's instantaneous envelope: no
+> cell held the world fixed and changed only the pursued body's contract, and no
+> radial escape, turn allocation or within-attempt counterfactual was measured.
+> "The prey's contract" is replaced below by "the ordinary-body motor and the
+> world it produced"; prey pivoting is a *candidate* mechanism. (2) The apex
+> effect does **not** have the same sign in both worlds on every row: contacts
+> are +29 under Sweep ordinary bodies and −3 under Inertial ones; the statement
+> is scoped to gap, captures, usable share, lifetime and age crossings. (3) The
+> 15/15 sign result is p < 0.001 (exactly 2/2¹⁵ ≈ 0.00006), not p = 0.001.
+> (4) Captures are not apportioned into shares: the two Sweep-baseline main
+> effects (+0.281 apex, +0.656 ordinary) sum past the observed whole-world
+> increment because the interaction is −0.125; the three terms are reported, not
+> normalised. (5) The gap interaction (+0.325) is about 2.1× the Sweep-world
+> apex effect (+0.157), not a third of it. None of these reverses the
+> treatment-level result.
 
 Workstream W of ecology v1 round 5, to
 [the brief](../handoffs/ecology-v1-apex-motor-isolation-opus-2026-09-16.md) as
@@ -34,15 +53,16 @@ build, on P's eight-seed two-apex design:
 | captures per life | 2.094 | 2.375 | 2.750 | 2.906 |
 | contacts | 140 | 169 | 210 | 207 |
 
-- **The apex's envelope is not what closed T's gap. The prey's is.** Put the
+- **The apex's envelope is not what closed T's gap. The ordinary-body motor and the world it produced did.** Put the
   disc model on the apex alone and the burst closes *worse* than shipped
   (`+0.212 → +0.369` px); put it on the ordinary bodies alone and the burst
   closes harder than T's whole-world arm ever did (`+0.212 → −1.056` px), in
-  **15 of 15** runs that recorded an attempt, `p = 0.001` — the only hunting
+  **15 of 15** runs that recorded an attempt, `p < 0.001` — the only hunting
   limb anywhere in this 2×2 that separates from run-to-run variation.
-- **On captures the apex envelope does buy something, and it is about a
-  third.** `2.094 → 2.375` per life against the ordinary-body contract's
-  `2.094 → 2.750`; neither separates from noise per run (`p = 0.75` and
+- **On captures the apex envelope does buy something.** `2.094 → 2.375` per
+  life (+0.281) against the ordinary-body treatment's `2.094 → 2.750` (+0.656),
+  with an interaction of −0.125, so the two do not add to T's +0.812 and are
+  not shares of it; neither separates from noise per run (`p = 0.75` and
   `p = 0.79`).
 - **Both controls reproduce, under this build, not by citation.** The S/S arm is
   field-for-field U's `grasp.json`; the I/I arm is field-for-field T's
@@ -285,9 +305,11 @@ mid-and-long bins:
 | mean lifetime (ticks) | +450 | +352 | −99 | +1,025 | +926 |
 | lives past the age gate | +2 | +2 | 0 | +1 | +1 |
 
-**The apex effect has the same sign in both prey worlds on every row, and so
-does the ordinary-body effect.** The interaction is real and not small on the
-gap (+0.325 px on an apex effect of +0.157), so T's whole-world gain is not the
+**On gap, captures, usable share, lifetime and age crossings the apex effect has
+the same sign in both worlds, and so does the ordinary-body effect; on contacts
+it does not (+29 against −3).** The interaction is real and not small on the
+gap (+0.325 px, about 2.1× the Sweep-world apex effect of +0.157, and what lifts
+it to +0.482), so T's whole-world gain is not the
 sum of its parts and no clean apportionment of it exists — which is why this
 note reports the two main effects and the interaction rather than "X % of T's
 gain". But the ordering is not order-dependent: the apex contract makes the gap
@@ -303,7 +325,7 @@ of those arms and the drop is stated.
 
 | paired limb | apex effect, sweep prey | apex effect, inertial prey | ordinary effect, apex sweep | ordinary effect, apex inertial |
 | --- | ---: | ---: | ---: | ---: |
-| whole-arm gap change | 7/16, p = 0.80 | 4/15, p = 0.12 | **15/15, p = 0.001** | 10/15, p = 0.30 |
+| whole-arm gap change | 7/16, p = 0.80 | 4/15, p = 0.12 | **15/15, p < 0.001** | 10/15, p = 0.30 |
 | captures | 4/10 (6 ties), p = 0.75 | 8/15, p = 1.00 | 8/14 (2 ties), p = 0.79 | 6/12 (4 ties), p = 1.00 |
 | contacts | 8/14 (2 ties), p = 0.79 | 6/15, p = 0.61 | 10/15, p = 0.30 | 7/16, p = 0.80 |
 | apex lifetime | 5/16, p = 0.21 | 4/16, p = 0.077 | 9/16, p = 0.80 | 10/16, p = 0.45 |
@@ -331,15 +353,19 @@ statistic and the composition moved outward. Prey realised speed barely changes
 committing to attempts it could not previously afford to start, most of which
 still lose ground.
 
-Under the *prey* disc model the mechanism is the opposite and much larger: prey
-realised speed rises 2.61 → 3.90, the apex's own motor is untouched (whole motor
-12.46 → 12.54, translation 4.57 → 4.86), and the gap nevertheless closes by
-1.27 px more per burst. What the disc model does to an ordinary body is give it
-√2 the pivot rate at √2 the price per radian under a quadrature envelope; the
-visible consequence in the hunt is that prey spend their budget turning instead
-of fleeing in a straight line, and the member closes on them. That is a
-statement about the **prey's** contract that T's arm A could not separate and
-this one can.
+Under the *ordinary-body* disc model the effect is the opposite and much larger:
+prey realised speed rises 2.61 → 3.90, the apex's own motor is untouched (whole
+motor 12.46 → 12.54, translation 4.57 → 4.86), and the gap nevertheless closes
+by 1.27 px more per burst. What the disc model does to an ordinary body is give
+it √2 the pivot rate at √2 the price per radian under a quadrature envelope, and
+it ran from tick 0, so the world the apex was introduced into is a different one
+(628 prey, unequal pre-introduction hashes). Whether the closure comes from the
+prey's turning at the moment of pursuit or from the population and state that
+motor produced by introduction, this design cannot say: no cell held the world
+fixed and changed only the pursued body's envelope, and no radial escape, turn
+allocation or within-attempt counterfactual was measured. Prey pivoting is the
+candidate mechanism; the isolated treatment is the ordinary-body motor and the
+world it produced.
 
 ## 6. Sensitivity
 

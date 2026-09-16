@@ -73,10 +73,10 @@ the held/delivered readings P's whole note is built on.
 | `hunter::StrikeRecord` | `stop` | `forward_half_space` | a record written before the field existed ran the half-space; reading it under today's default would rewrite what the world did |
 | `calibrate::StagePlan` | `pursuit_stop` | `forward_half_space` | every retained calibration stage evaluated the half-space |
 | `population::PopulationPlan` | `pursuit_stop` | `forward_half_space` | ditto, and this report's *result* depends on the rule (below) |
-| `apex_audit::AuditRow` / `AuditReport` | `pursuit_stop` | **still `#[serde(default)]`** — now reads as envelope | **owed.** See §6. |
+| `apex_audit::AuditRow` / `AuditReport` | `pursuit_stop` | `forward_half_space` | K's and N's retained rows predate the field; repaired at integration (`46b6d18`), see §6 |
 
-Each of the first three is a named function, not `#[serde(default)]`, so the two defaults
-cannot drift back together.
+Each is a named function, not `#[serde(default)]`, so the two defaults cannot drift back
+together (the fourth was given its function at integration, `46b6d18`).
 
 ## 2. Schema 17: the first bump for a change of semantics
 
@@ -250,7 +250,15 @@ both contracts in the message and writes no world, and a policy file with **no**
 seeds normally — missing means `sweep`, because there was exactly one contract when such files
 were written. (Unlike the ecology, where `None` is genuinely unknown and is refused.)
 
-## 6. What this workstream could not do, and what is owed
+## 6. What this workstream could not do, and what was owed
+
+> **Done at integration (Fable, `46b6d18`), after Astra's re-check asked this note to say
+> so:** `AuditRow::pursuit_stop` and `AuditReport::pursuit_stop` now read a missing field
+> as the half-space through the same kind of named function (`rule_before_the_adoption`
+> in `apex_audit.rs`), with a test that strips the field from a serialised row and reads
+> it back; `Arm::stop`'s doc and `parse_pursuit_stop`'s refusal message name the envelope
+> as the shipped rule. The two bullets below are kept as the record of what this
+> workstream handed over.
 
 - **`apex_audit::AuditRow::pursuit_stop` and `AuditReport::pursuit_stop` are still
   `#[serde(default)]`.** With the default flipped they now read a rule-less retained row — K's
