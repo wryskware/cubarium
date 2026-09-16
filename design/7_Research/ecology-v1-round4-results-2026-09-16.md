@@ -468,6 +468,89 @@ W's 2 × 2 (apex motor × ordinary-body motor, both controls byte-reproduced
 under one build, pre-introduction state hash equal row for row), which is
 cheap and runs before any host contract or recalibration is paid for.
 
+## W — the disc model on the apex alone, as a 2 × 2: the closure gain is the prey's contract, not the apex's envelope
+
+[Note](ecology-v1-apex-motor-isolation-2026-09-16.md) ·
+[brief](../handoffs/ecology-v1-apex-motor-isolation-opus-2026-09-16.md) ·
+merged at `2bbccfd`. The isolation U named and Astra's addendum made a full
+2 × 2: `World::set_apex_motor_model(Option<MotorModel>)`, a transient
+selector applied only to a body that has hunter contact geometry
+(`motor::model_for_body`, the one place it is written; all four per-body
+motor reads in `step.rs` take it), `apex-audit --apex-motor`, and a new row
+field `pre_introduction_state_hash` taken at the introduction tick before the
+founders are placed. P's eight-seed two-apex design under reach-envelope and
+`grasp`, four arms: ordinary-body motor × apex motor. Both controls
+byte-reproduced under W's one pinned build (`S/S` = U's `grasp.json`, `I/I` =
+T's `armA-inertial.json`, field for field); Fable's re-run of the decisive
+`I/S` arm reproduces W's file field for field. Pre-introduction state hash
+equal 16/16 within each ordinary-body motor and 0/16 across it. 13 new
+tests; 563 core and 282 search pass.
+
+| | `S/S` shipped | `S/I` apex on disc | `I/S` prey on disc | `I/I` (T) |
+| --- | ---: | ---: | ---: | ---: |
+| prey at introduction | 745 | 745 | 628 | 628 |
+| gap change per burst (+ = grew) | +0.212 | **+0.369** | **−1.056** | −0.574 |
+| contacts | 140 | 169 | 210 | 207 |
+| captures per life | 2.09 | 2.38 | 2.75 | 2.91 |
+| delivered translation / whole motor (px/s) | 4.57 / 12.46 | 8.14 / 24.24 | 4.86 / 12.54 | 8.55 / 24.00 |
+| E's usable-energy ratio | 18.5 % | 23.5 % | 23.9 % | 27.0 % |
+| lives past the 24,000-tick gate | 0/32 | 2/32 | 1/32 | 3/32 |
+| death cause | starvation 32/32 | 32/32 | 32/32 | 32/32 |
+
+**The apex's own envelope does not close the gap.** With the prey world
+identical (745, hash-equal), putting the apex alone on the disc model moves
+the whole-arm gap change from +0.212 to **+0.369 px per burst**: the wrong
+way, and not near `grasp-only`'s −0.031 either. Captures per life rise 2.09 →
+2.38, a third of T's distance and indistinguishable from `grasp-only`. Neither
+hunting limb separates from noise (gap 7/16, captures 4/10). What does
+separate is the member's own motor: translation billed up 14/16 (p = 0.004),
+turn billed up 16/16. The mechanism W can show: the apex on the disc travels
+about twice as fast in a delivered burst and raises the contact rate in every
+bin from 4 px out, but it starts its bursts further away (mean initial gap
+10.7 → 11.7 px; the 16 px+ bin 134 → 216 attempts), so pooled closure worsens
+while contacts and captures rise.
+
+**The ordinary bodies' contract is what closed T's gap.** With the apex held
+on the shipped envelope and the prey on the disc, the gap change is **−1.056
+px per burst**, more closure than T's whole-world arm, in 15 of 15 runs
+(p = 0.001), the only hunting limb anywhere in the 2 × 2 that separates from
+noise. The apex's own motor is untouched in that cell (whole motor 12.46 →
+12.54), prey realised speed barely moves (2.61 → 2.74 px/s), and the prey
+population is the thinner 628. The 2 × 2 interaction on gap is +0.325, a third
+of the apex main effect, so no clean apportionment of T's gain exists and W
+does not offer one; on captures both contracts push the same way, roughly one
+third apex (+0.28 per life) and two thirds prey (+0.66), neither separating at
+this sample size. `baseline/9006` records no paid attempt in either
+inertial-prey arm and is dropped from those gap tests, stated.
+
+**Verdict:** mixed on the brief's two branches; decided by the fourth cell.
+T's closure gain was not the apex's quadrature envelope. It was the change in
+the prey world under the disc model, whose direction Astra rightly said was
+unknown before this: it helped the apex. Left unexplained, listed in W §7:
+why the gap interaction is positive; the `I/S` cell's anomalies (held at burst
+start 102 against 52–65, `GraspUnmapped` 27 against 5–8, a crowded 0–4 px bin
+with a 15.9 % capture rate against 43.2 % shipped). Nothing here says the apex
+is viable: 32/32 starve in all four arms, zero readiness overlap in all 64
+runs, `reserve` the first refusing term on 83–86 % of member-ticks. Eight
+seeds still cannot carry a capture-limb verdict. **No contract recommended
+by W.**
+
+**What this means for the motor decision (Fable, pending Astra):** the disc
+model is not an apex repair and should not be argued as one. Its apex effect
+is a faster, further-starting hunter with more contacts and the same
+starvation; its world effect, which T found gate-clean and small, is where
+the closure came from. The question left for Wrysk is therefore the one he
+already answered in principle — whether movement cost should follow rough
+physics for every body — and its price is unchanged from item 3 below: a host
+contract, the adapter's diagonal, the fifteen-candidate screen and held-out
+rerun, one fresh world. The apex's starvation is a different problem (reserve
+fraction never above 0.52 in any arm) and no motor cell touched it.
+
+**Process note from W, adopted for every future brief:** `cargo fmt` must not
+be run in this repository (no `rustfmt.toml`; the tree is not rustfmt-default
+formatted, and a run reformats 117 files). W caught and reverted its own run
+before committing.
+
 ## What this does and does not establish
 
 - **Established by measurement:** the apex's pursuit stopping predicate
@@ -568,7 +651,10 @@ would tell him is stated at each.
    prey world, its complement, and both controls under one build, read for
    the apex effect, the ordinary-body effect and their interaction; an
    apex-only contrast, not an apportionment, until all four cells exist.
-   Only after that: a host production default, resume
+   **Result (W, above):** the apex's envelope does not close the gap (it
+   opens it, +0.37 px); the prey's contract does (−1.06 px, 15/15). The disc
+   model is a physics decision for every body, not an apex repair. Only
+   after Wrysk confirms he wants it on those terms: a host production default, resume
    and status rule; `check_motor` in the host's neural seeding; an action
    adapter that can request the quadratic envelope's diagonal; the
    fifteen-candidate screen and held-out selection rerun; then one fresh
