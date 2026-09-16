@@ -68,7 +68,7 @@ row).
   translation billed in 13 of 16, while turn billed *falls* in 11 of 16.
 - **Verdict: refuted on the closure and capture limbs, by Astra's rule as
   written.** Geometry is not the principal apex motor defect. What the observed,
-  confounded `Inertial` arm bought the hunt, the grasp correction alone does not
+  confounded `Inertial` arm bought the hunt, the grasp-only alternative does not
   buy; how much of that was the envelope and how much the thinner prey world is
   workstream W's question.
 
@@ -336,7 +336,7 @@ captures; it moves a third of the way pooled, and that third rests on a single
 run. **Geometry — the grasp counted as a turn radius — is not the principal apex
 motor defect.**
 
-**What this supports:** the geometry correction alone does not reproduce most of
+**What this supports:** the grasp-only alternative alone does not reproduce most of
 the **observed, confounded** T arm. Whether the rest belongs to the disc envelope
 or to T's thinner prey world is not decided here. Two qualifications:
 

@@ -404,12 +404,13 @@ recovered on captures, and the second branch does not describe the arm either.**
 Astra's third branch is the one that fits, and the fourth cell says what neither
 of the first two could:
 
-> **The apex's envelope is not the source of T's closure gain. The ordinary
-> bodies' contract is** — `I/S` alone produces −1.056 px, more closure than T's
-> whole-world arm, in 15 of 15 runs at `p = 0.001`. On captures the two
-> contracts contribute in the same direction, roughly one third to the apex
-> (+0.28/life) and two thirds to the prey (+0.66/life), and neither separates
-> from run-to-run noise at this sample size.
+> **The apex's envelope is not the source of T's closure gain. The
+> ordinary-body motor, and the world it had produced by introduction, is** —
+> `I/S` alone produces −1.056 px, more closure than T's whole-world arm, in 15
+> of 15 runs at `p < 0.001`. On captures the Sweep-baseline main effects are
+> +0.281 (apex) and +0.656 (ordinary-body) with an interaction of −0.125: three
+> terms that do not add to T's increment and are not shares of it, none
+> separating from run-to-run noise at this sample size.
 
 What remains unexplained, either way:
 
