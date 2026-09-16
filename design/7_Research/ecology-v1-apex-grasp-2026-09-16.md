@@ -6,6 +6,30 @@ decision_refs: []
 
 # The grasp-only apex turn radius: the geometry is not what the apex is short of
 
+> **Corrections after Astra's round-4 addendum (2026-09-16).** (1) The
+> "correctness fix" reading is withdrawn. The two 9 px readers
+> (`neural_observation`, `neural_decision`) serve neural animals only; an apex
+> member runs the hunter intent path and is never neural, so no apex is "told"
+> one radius and "bounded" by another, and under `Sweep` charging the outermost
+> contacting point is internally consistent with that model. `Lobes` is an
+> **experimental alternative**, not an established defect correction, and its
+> default stays off. (2) "Robust" is too strong. The age-gate change is
+> replicated beyond the influential run (two of the three crossing worlds are
+> not `fast-leaf/9006`), but thirteen of sixteen paired worlds tie, so it is
+> **the only behavioural change replicated beyond the influential run**, not a
+> statistically separated one, and it is scoped to those four lives, not the
+> apex generally; E's ratio at 12/16 is p = 0.077 and only translation billed
+> reaches the nominal 0.05 line amid several inspected outcomes. (3) "Lower
+> bound", "the disc model is needed for the gain" and "not closer to
+> viability" are withdrawn. The direction of T's thinner-prey-world
+> contribution is unknown (fewer, faster prey could help or hurt contact
+> opportunity), so this workstream establishes only that `Lobes` does not
+> reproduce most of the **observed, confounded** T arm; the apex remains
+> nonviable (32/32 starve) while its earned share and age survival both
+> improve. The prose below is repaired in place where it made those claims;
+> the numbers stand.
+
+
 Workstream U of ecology v1 round 4, to
 [the brief](../handoffs/ecology-v1-apex-grasp-opus-2026-09-16.md): item 1 of the
 reconciled round-4 next steps, Astra's "single most informative cheap experiment
@@ -37,14 +61,16 @@ row).
   58 → 51, contacts fall 121 → 117, and the gap still grows (`+0.326 → +0.147`).
   The paired sign tests over 16 runs are 9/16 on the gap, 9/14 on captures and
   11/16 on contacts: all consistent with no effect.
-- **One limb is robust, and it is the one Astra's rule did not name.** Four of 32
+- **One limb is replicated beyond the influential run, and it is the one Astra's rule did not name.** Four of 32
   lives cross the 24,000-tick reproduction age gate under the switch, in **three
   separate runs**, against **zero of 32** with it off — and two of those three are
   the same runs `Inertial` crossed in. Usable energy rises in 12 of 16 runs,
   translation billed in 13 of 16, while turn billed *falls* in 11 of 16.
 - **Verdict: refuted on the closure and capture limbs, by Astra's rule as
-  written.** Geometry is not the principal apex motor defect. What `Inertial`
-  bought the hunt, the grasp correction alone does not buy.
+  written.** Geometry is not the principal apex motor defect. What the observed,
+  confounded `Inertial` arm bought the hunt, the grasp correction alone does not
+  buy; how much of that was the envelope and how much the thinner prey world is
+  workstream W's question.
 
 ## 1. Build and provenance
 
@@ -111,11 +137,12 @@ faster** and its radian gets **cheaper** by the same factor (`Sweep` prices a
 radian at `k·r`, and `r` is what fell). That is a different bargain from
 `Inertial`, which gave the apex 2.33× the pivot at 0.859 of the price.
 
-One inconsistency closes with it. `world::view::neural_observation` and
-`world::step::neural_decision` already read `turn_radius_px_in(o, None, …)` — the
-lobe extent — while the envelope and the bill used the grasp, so an apex was
-*told* one radius and *bounded* by another. Under the switch the observation, the
-envelope and the bill read one number.
+`world::view::neural_observation` and `world::step::neural_decision` read
+`turn_radius_px_in(o, None, …)` — the lobe extent — but both serve neural animals
+only; an apex member runs the hunter intent path and is never neural, so there is
+no apex that is told one radius and bounded by another (Astra, addendum P1). The
+switch is an experimental alternative to `Sweep`'s outermost-contacting-point rule,
+not a correction of it.
 
 ### The tests, written from the definitions
 
@@ -268,7 +295,7 @@ it turns the energy it does catch into a larger fraction of its own bill. The
 hunting limbs — contacts, captures, closure — do not separate from run-to-run
 variation at this sample size.
 
-### The one robust behavioural change
+### The one behavioural change replicated beyond the influential run
 
 **Zero of 32 lives ever crossed the 24,000-tick reproduction age gate with the
 switch off. Four of 32 cross it with the switch on, in three different runs** —
@@ -276,7 +303,9 @@ switch off. Four of 32 cross it with the switch on, in three different runs** �
 and 24,792). Two of those three runs are the same runs T's `Inertial` arm crossed
 in (`baseline/9002` at 26,608, `baseline/9005` at 25,342), so this is not the
 outlier's doing: drop `fast-leaf/9006` and two lives still cross where none did
-before.
+before. Thirteen of sixteen paired worlds tie, so this is a replicated
+descriptive change in three worlds, not a statistically separated one, and it
+is a statement about those four lives.
 
 T reported that under `Inertial` "the barrier has moved from *never lived long
 enough* to *never stored enough*". **The grasp correction alone moves it**, in a
@@ -306,33 +335,32 @@ captures; it moves a third of the way pooled, and that third rests on a single
 run. **Geometry — the grasp counted as a turn radius — is not the principal apex
 motor defect.**
 
-**Which path this supports: the disc model is needed for the apex's gain**, not
-the geometry correction alone. What `Inertial` gave the hunt, the grasp correction
-does not give it. Two qualifications belong on that sentence and neither is small:
+**What this supports:** the geometry correction alone does not reproduce most of
+the **observed, confounded** T arm. Whether the rest belongs to the disc envelope
+or to T's thinner prey world is not decided here. Two qualifications:
 
 1. **T's arm A is still confounded and this does not fix it.** `Inertial` was run
    with a 16 % thinner, faster-turning prey population, and part of its 207
    contacts and 93 captures is that world rather than that motor. The comparison
    above is `grasp-only` measured cleanly against a column that is not clean.
-   What this workstream establishes is a *lower* bound on how much of `Inertial`'s
-   hunting gain the geometry explains — a third at most, plausibly less — and it
-   cannot say how much of the remaining two thirds is the quadrature envelope
-   rather than the thinner world. Separating that needs an `Inertial` arm in which
-   only the apex runs the disc model.
-2. **The geometry correction still stands on its own, for a different reason.**
-   Under `Sweep` an apex is *told* 9 px by its own observation and *bounded* by
-   14.8 px by its envelope; that disagreement is a defect whatever it is worth
-   ecologically. Correcting it is byte-identical for every body that is not an
-   apex member, costs 0.3 pp of the apex's own motor share, buys the one robust
-   behavioural change in this note, and is independent of any decision about the
-   motor contract. It is a correctness fix that happens not to be an ecological
-   lever — which is exactly what r0a found for `ROTATION_COST_SCALE` under the
-   shared budget.
+   The direction of that world's contribution is unknown — fewer, faster-turning
+   prey could help or hurt contact opportunity — so the third recovered here is
+   not a bound in either direction on what the envelope explains. Separating that
+   needs an `Inertial` arm in which only the apex runs the disc model, and its
+   complement, read as a 2 × 2 (workstream W).
+2. **The switch is an experimental alternative, not a correction.** Under
+   `Sweep` the grasp is charged because the model charges the outermost
+   contacting point, which is internally consistent; no apex reads the 9 px
+   figure (see §2). `Lobes` is byte-identical for every body that is not an apex
+   member, costs 0.3 pp of the apex's own motor share and is the setting under
+   which four lives crossed the age gate, but that is a reason to keep it
+   available for experiments, not to ship it. Its default stays off whether or
+   not `Sweep` remains the contract.
 
 ## 6. What this does not establish
 
-- **Not that the apex is viable, or closer to it.** 32 of 32 still starve under
-  the switch. Readiness overlap is zero in all 16 runs, no member ever became
+- **Not that the apex is viable.** 32 of 32 still starve under the switch,
+  though its earned share (18.5 → 25.8 %) and age survival both improve. Readiness overlap is zero in all 16 runs, no member ever became
   ready, and the maximum reserve fraction reached is 0.500 against the stock
   fraction the profile requires. The age gate opening means four members lived
   long enough to be refused for a different reason.
@@ -360,9 +388,9 @@ does not give it. Two qualifications belong on that sentence and neither is smal
 2. **A capture-limb design that can carry a verdict.** 32 lives and 1,000 attempts
    across 16 runs is not enough for a 40 % effect with this dispersion. More
    held-out seeds, or a per-attempt paired reading rather than a per-run one.
-3. **The geometry correction on its own merits**, decided as a correctness
-   question — the observation and the envelope should agree — rather than as an
-   ecological lever, which §5 says it is not.
+3. **The `Lobes` setting stays an experimental transient.** It is not a
+   correctness question (§2) and §5 says it is not an ecological lever; it is
+   decided, if ever, with the motor contract.
 
 ## Files
 

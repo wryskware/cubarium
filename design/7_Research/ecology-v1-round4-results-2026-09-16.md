@@ -440,29 +440,33 @@ below the shipped arm and the gap still grows. Paired sign tests over the 16
 runs do not separate either hunting limb from run-to-run variation (gap 9/16,
 captures 9/14). Two limbs are robust and they are the member's own budget,
 not its luck: it turns more and pays less for turning (translation billed up
-in 13/16, turn billed down in 11/16), and E's ratio rises in 12/16. **The one
-robust behavioural change is the age gate:** no life reached 24,000 ticks
-with the grasp counted; four do without it, in three runs, two of them the
-runs `Inertial` crossed in. T had credited that to the disc model; the grasp
-correction alone produces it in the identical prey world.
+in 13/16, the only limb at the nominal 0.05 line; turn billed down in 11/16),
+and E's ratio rises in 12/16 (p = 0.077). **The one behavioural change
+replicated beyond the influential run is the age gate:** no life reached
+24,000 ticks with the grasp counted; four do without it, in three runs, two of
+them the runs `Inertial` crossed in; thirteen paired worlds tie, so this is
+descriptive, and it is about those four lives. T had credited that to the disc
+model; the grasp correction alone produces it in the identical prey world.
 
-**What this supports:** the disc model, not the geometry correction alone, is
-what gave the apex its hunting gain. Two qualifications: (a) T's arm A is
-still confounded by its thinner prey world, so this is a *lower* bound (a
-third at most) on how much geometry explains, and it cannot apportion the rest
-between the quadrature envelope and the thinner world — an `Inertial` arm in
-which only the apex runs the disc model is the named next experiment; (b) the
-geometry correction stands on its own as a correctness fix (the apex is told
-9 px by its observation and bounded by 14.8 px by its envelope), byte-identical
-for every non-apex body, and it buys the age-gate change. U also found T's
+**What this supports:** the geometry correction alone does not reproduce most
+of the *observed, confounded* T arm. It does not say the rest belongs to the
+disc envelope: T's thinner, faster-turning prey world could have helped or hurt
+contact opportunity, so the third recovered is not a bound in either direction
+(Astra, addendum). An `Inertial` arm in which only the apex runs the disc model,
+with its complement read as a 2 × 2, is the named next experiment (W). The
+"correctness fix" reading is withdrawn: the 9 px readers serve neural animals
+only and no apex consumes them, so `Lobes` is an experimental alternative to
+`Sweep`'s outermost-contacting-point rule, byte-identical for every non-apex
+body, and it is the setting under which the four age-gate crossings happened.
+U also found T's
 gap-bin table printing 221/0/0 for `sweep` at 12–16 px where the rows say
 221/4/0; T's sentence about captures stands.
 
-**Fable's decision, pending Astra's read:** hold the `Lobes` default. It is
-only worth shipping on its own if `Sweep` stays the contract, and under
-`Inertial` it is moot. The motor question now turns on the isolation arm
-above, which is cheap and runs before any host contract or recalibration is
-paid for.
+**Fable's decision, confirmed by Astra's addendum:** hold the `Lobes` default,
+whether or not `Sweep` remains the contract. The motor question now turns on
+W's 2 × 2 (apex motor × ordinary-body motor, both controls byte-reproduced
+under one build, pre-introduction state hash equal row for row), which is
+cheap and runs before any host contract or recalibration is paid for.
 
 ## What this does and does not establish
 
@@ -543,8 +547,9 @@ would tell him is stated at each.
    defect: it recovers most of `Inertial`'s −0.57 px closure and 2.9 captures
    per life in the identical prey world; refutation: it stays near +0.21 px
    and 2.1. About one minute of simulation; dispatched as workstream U.
-   **Result (U, above): refuted.** A third at most, resting on one run; the
-   age gate is the one robust change.
+   **Result (U, above): refuted.** A third of the observed, confounded T
+   arm, resting on one run; the age gate is the one change replicated beyond
+   that run.
 2. **Adopt the reach-envelope predicate separately.** *What we would tell
    Wrysk: yes.* The half-space contradicts its own reach meaning and
    suppresses 89 % of paid bursts; the added seeds replicate the direction.
@@ -559,9 +564,11 @@ would tell him is stated at each.
    evidence yet.* If the grasp-only pair captures most of the benefit, take
    that geometry correction and keep `Sweep`. It did not (U). The disc model
    remains the physics Wrysk asked for, so the next step is the isolation U
-   names: an `Inertial` arm in which only the apex runs the disc model, in the
-   identical prey world, to apportion T's gain between the envelope and the
-   thinner world. Only after that: a host production default, resume
+   names, as a full 2 × 2 (W): the disc model on the apex only in the shipped
+   prey world, its complement, and both controls under one build, read for
+   the apex effect, the ordinary-body effect and their interaction; an
+   apex-only contrast, not an apportionment, until all four cells exist.
+   Only after that: a host production default, resume
    and status rule; `check_motor` in the host's neural seeding; an action
    adapter that can request the quadratic envelope's diagonal; the
    fifteen-candidate screen and held-out selection rerun; then one fresh
