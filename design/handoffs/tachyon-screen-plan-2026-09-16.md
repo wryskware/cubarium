@@ -171,3 +171,30 @@ any change to cubarium's world schema.
 
 - [W1: the screen shim daemon](tachyon-screen-w1-opus-shim-2026-09-16.md)
 - W2 and W3 briefs are written after W1 reports.
+
+## Revision, 2026-09-16 (later): one flat world, no cube on the panel
+
+Wrysk's direction after the panel came up: the display shows **a single
+1920×1080 logical face, one 2D world with edges, no cube**. The panel's
+native mode is 1080×1920 portrait and is not to be changed; the shim rotates.
+
+What stands from above: the device facts, decisions 2, 4, 5, 6, 8, 9, 10,
+the W1 daemon's KMS/ingest/idle/service work (verified at 60 fps on
+`msm_drm`), and W3's tests. What is superseded: decision 1 (the wire format
+gains an additive raster-strip format) and decision 3 (the `net`/`cube`
+layouts remain as the cube-frame test path but the Tachyon config uses a
+new `raster` mode with `rotation = 90`).
+
+New packages:
+
+| id | what | where | model / effort |
+|---|---|---|---|
+| W1b | raster strip format in `cube-proto`, raster ingest + `raster` layout + rotation in the shim, panel verification at 1080×1920 | led-cube-shim worktree | Opus, high (W1 resumed) — [brief](tachyon-screen-w1b-opus-raster-2026-09-16.md) |
+| FW-A | cubarium coupling audit and the flat-world design: a topology switch (cube stays supported for the LED cube; flat `W×H` with solid edges for the panel), phased implementation plan | cubarium worktree, read-only | Opus, high |
+| FW-1..n | the flat world itself, per FW-A's plan | cubarium worktree | decided after FW-A |
+| W2 | cubarium on the device (unchanged in spirit, now with the flat world) | cubarium worktree | after FW-n |
+
+Default world raster for the panel: **320×180** (6× integer blocks on the
+1920×1080 logical canvas), configurable in the world config; a fresh world
+per the standing rule. The edge rule is solid walls (specular reflection,
+as the cube's open bottom rim already does), not wraparound.
