@@ -187,16 +187,17 @@ pub fn water_brightness(seconds: f64, phase: f64) -> f32 {
 /// weighted 4, each existing pixel neighbor's cell weighted 1, normalized over what is
 /// present (so the open rim does not darken). Exactly `cubarium_render::draw_field`'s
 /// filter.
-pub(super) fn filtered_at(field: &ScalarField, face: Face, x: u16, y: u16) -> f64 {
-    let mut sum = field.get(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y))) * 4.0;
-    let mut divisor = 4.0;
-    for edge in Edge::ALL {
-        if let Some((nf, nx, ny)) = pixel_neighbor(Topology::Cube, face, x, y, edge) {
-            sum += field.get(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, nf, nx, ny)));
-            divisor += 1.0;
-        }
-    }
-    sum / divisor
+pub(super) fn filtered_at(
+    cells: &PixelCells,
+    field: &ScalarField,
+    face: Face,
+    x: u16,
+    y: u16,
+) -> f64 {
+    // FW-P's W1: the map is a constant of the raster, so it comes from a table rather than
+    // being rebuilt per pixel per pass. The sum is in the same `Edge::ALL` order, so the
+    // filtered value is bit-identical.
+    cells.filtered(field, face, x, y)
 }
 
 /// The water layer: for every pixel with filtered depth `w > 0`, `px = color(w) · b · a +
@@ -205,21 +206,27 @@ pub(super) fn filtered_at(field: &ScalarField, face: Face, x: u16, y: u16) -> f6
 /// `saturation`, so a pool with a mat reads mint rather than pure blue.
 pub(super) fn draw_water(
     canvas: &mut Canvas,
+    cells: &PixelCells,
     water: &ScalarField,
     producer: &ScalarField,
     saturation: f64,
     seconds: f64,
 ) {
-    for face in Face::ALL {
-        for y in 0..FACE_SIZE as u16 {
-            for x in 0..FACE_SIZE as u16 {
-                let w = filtered_at(water, face, x, y);
+    let width = canvas.width();
+    for &face in canvas.charts() {
+        for y in canvas.rows_of(face) {
+            for x in 0..width {
+                let w = filtered_at(cells, water, face, x, y);
+                // FW-P's W5: a dry pixel leaves here rather than inside `water_coverage`.
+                if !(w > 0.0) {
+                    continue;
+                }
                 let a = water_coverage(w);
                 if a <= 0.0 {
                     continue;
                 }
                 let p_t = if saturation.is_finite() && saturation > 0.0 {
-                    producer.get(cell_of(Topology::Cube, Scale::ONE, &SurfacePoint::pixel_center(Topology::Cube, face, x, y))) / saturation
+                    cells.value(producer, face, x, y) / saturation
                 } else {
                     0.0
                 };

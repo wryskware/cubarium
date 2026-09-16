@@ -21,7 +21,7 @@ use cubarium_core::view::{OrganismView, RenderView};
 use cubarium_core::organism::Mode;
 use cubarium_core::OrganismId;
 use cubarium_render::{
-    BodyShape, Canvas, Lobe, Trail, draw_field, draw_trail, srgb_decode, stamp_body,
+    BodyShape, Canvas, Lobe, PixelCells, Trail, draw_field, draw_trail, srgb_decode, stamp_body,
 };
 use cubarium_surface::{
     Edge, FACE_EXTENT, PathSegment, PixelImage, ScalarField, SurfacePoint, Travel, Vec2, cell_of,
@@ -191,6 +191,44 @@ pub fn draw_ramp_field(
                     let t = t as f32;
                     // Hue follows density linearly; brightness follows its square so the
                     // ordinary standing crop stays a dim floor and only rich patches glow.
+                    let c = mix(low, high, t);
+                    let b = RAMP_MIN_BRIGHTNESS + (RAMP_MAX_BRIGHTNESS - RAMP_MIN_BRIGHTNESS) * t * t;
+                    canvas.add(face, x, y, [c[0] * b, c[1] * b, c[2] * b]);
+                }
+            }
+        }
+    }
+}
+
+/// [`draw_ramp_field`] reading the pixel→cell map from a table built once (FW-P's W1).
+///
+/// **Normative**: bit-identical to it — [`PixelCells`] tabulates exactly the answers
+/// `cell_of` and `pixel_neighbor` give and sums the neighbours in the same `Edge::ALL`
+/// order, so the last bit of every filtered value is the same.
+pub fn draw_ramp_field_with(
+    canvas: &mut Canvas,
+    cells: &PixelCells,
+    field: &ScalarField,
+    scale_to: f64,
+    low: [f32; 3],
+    high: [f32; 3],
+    filter: bool,
+) {
+    if scale_to.is_nan() || scale_to <= 0.0 {
+        return;
+    }
+    let width = canvas.width();
+    for &face in canvas.charts() {
+        for y in canvas.rows_of(face) {
+            for x in 0..width {
+                let value = if filter {
+                    cells.filtered(field, face, x, y)
+                } else {
+                    cells.value(field, face, x, y)
+                };
+                let t = (value / scale_to).min(1.0);
+                if t != 0.0 {
+                    let t = t as f32;
                     let c = mix(low, high, t);
                     let b = RAMP_MIN_BRIGHTNESS + (RAMP_MAX_BRIGHTNESS - RAMP_MIN_BRIGHTNESS) * t * t;
                     canvas.add(face, x, y, [c[0] * b, c[1] * b, c[2] * b]);

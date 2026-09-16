@@ -146,7 +146,7 @@ fn a_body_is_drawn_with_the_rig_its_form_names() {
     let clip = &art.clips[3 * 4];
     let seconds = present_seconds(view.tick, 0.0);
     let pose = clip.sample(clip_time(clip, seconds, phase_of(o.id, clip.seconds), None));
-    stamp_pose(
+    cubarium_render::stamp_pose(
         &mut expected,
         o.pos,
         o.heading,

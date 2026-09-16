@@ -98,12 +98,11 @@ use cubarium_core::hunter::{FixedHunterProfile, HunterEvent, HunterPhase, Hunter
 use cubarium_core::organism::Mode;
 use cubarium_core::view::{OrganismView, RenderView};
 use cubarium_render::{
-    Bend, Canvas, Mask, Pose, Tone, draw_field, stamp_layers, stamp_layers_bent,
-    stamp_layers_bent_toned, stamp_pose,
+    Bend, Canvas, Mask, PixelCells, Pose, Shade, Tone, Unfolds, draw_field_with, stamp_layers,
+    stamp_layers_bent, stamp_layers_cached,
 };
 use cubarium_surface::{
-    CUBE_CELL_COUNT, CELLS_PER_FACE_EDGE, CellId, Edge, PixelImage, ScalarField, SurfacePoint, Vec2,
-    cell_of, pixel_neighbor,
+    CUBE_CELL_COUNT, CELLS_PER_FACE_EDGE, CellId, PixelImage, ScalarField, SurfacePoint, Vec2,
 };
 use cube_proto::{FACE_SIZE, Face};
 
@@ -317,6 +316,11 @@ struct OutgoingPrey {
     meal: Option<MealMemory>,
 }
 
+/// A tone that does not travel: `mix = 0` takes exactly the untinted stamp path, bit for
+/// bit and at the same cost, so a pass with no tint can still go through the one cached
+/// stamp entry point.
+const FLAT_TONE: Tone = Tone { colour: [0.0; 3], shade: Shade::FLAT, mix: 0.0 };
+
 /// The live world drawn with the baked art. Holds the pack, the scratch buffers the
 /// field and sprite paths need, the fixed per-cell slots, and the renderer-side history the
 /// art image keeps: how far each cell's plant, each tall column and each body has got
@@ -336,6 +340,11 @@ pub struct ArtPresenter {
     /// per pixel by the horizon before it reaches the image.
     layer: Canvas,
     scratch: Vec<PixelImage>,
+    /// The pixel→cell map of this world's raster, built once (FW-P's W1).
+    cells: PixelCells,
+    /// The stamp footprints of the anchors that never move — the slots and the ground
+    /// lattice — kept between frames (FW-P's W2).
+    unfolds: Unfolds,
     /// One slot per field cell, in `CellId` index order. Placement never changes.
     slots: Vec<Slot>,
     /// The band each cell was last drawn in; water can move a cell in and out of
@@ -456,6 +465,8 @@ impl ArtPresenter {
             litter: vec![0.0; CUBE_CELL_COUNT],
             layer: Canvas::cube(),
             scratch: Vec::new(),
+            cells: PixelCells::new(Topology::Cube, Scale::ONE),
+            unfolds: Unfolds::cached(),
             slots,
             bands,
             growth: vec![Growth::snapped(None, false); CUBE_CELL_COUNT],
@@ -1033,8 +1044,9 @@ impl ArtPresenter {
         present::copy_field(&mut self.producer, &view.producer);
         let saturation = view.producer_max * PRODUCER_SATURATION;
         self.layer.clear();
-        present::draw_ramp_field(
+        present::draw_ramp_field_with(
             &mut self.layer,
+            &self.cells,
             &self.producer,
             saturation,
             PALETTE.producer_low,
@@ -1053,8 +1065,9 @@ impl ArtPresenter {
             .extend((0..CUBE_CELL_COUNT).map(|i| litter_density(view, i) * SOIL_SCALE));
         present::threshold_field(&mut self.detritus, &self.litter, DETRITUS_THRESHOLD);
         self.layer.clear();
-        draw_field(
+        draw_field_with(
             &mut self.layer,
+            &self.cells,
             &self.detritus,
             DETRITUS_SCALE,
             PALETTE.detritus,
@@ -1065,17 +1078,18 @@ impl ArtPresenter {
         // The soil ground: dark plum to violet-mauve by raw detritus, seam-filtered like
         // every other field layer, faded in through the same horizon.
         present::copy_field(&mut self.soil, &self.litter);
-        draw_soil_ground(canvas, &self.soil);
+        draw_soil_ground(canvas, &self.cells, &self.soil);
 
         // Ground cover: each band's tileable texture on the 8-px lattice, fading in with
         // the density that grows the band's plants and cross-fading through the horizon.
         {
             let pack = &self.pack;
-            let scratch = &mut self.scratch;
+            let cells = &self.cells;
+            let unfolds = &mut self.unfolds;
             for face in Face::ALL {
                 for (face, x, y) in ground_points(face) {
                     let point = SurfacePoint::pixel_center(Topology::Cube, face, x, y);
-                    let cell = cell_of(Topology::Cube, Scale::ONE, &point);
+                    let cell = cells.cell(face, x, y);
                     let band = band_of(cell);
                     let Some(tile) = pack.ground_for(band) else {
                         continue;
@@ -1087,15 +1101,17 @@ impl ArtPresenter {
                     }
                     let pose =
                         ground_pose(tile, seconds + ground_phase_of(face, x, y, tile.seconds));
-                    stamp_pose(
+                    stamp_layers_cached(
                         canvas,
                         point,
                         Vec2::new(1.0, 0.0),
-                        pose,
+                        &[(pose, 1.0)],
                         1.0,
                         opacity,
                         Mask::None,
-                        scratch,
+                        Bend::NONE,
+                        FLAT_TONE,
+                        unfolds,
                     );
                 }
             }
@@ -1105,7 +1121,7 @@ impl ArtPresenter {
         if !view.water.is_empty() {
             present::copy_field(&mut self.water, &view.water);
             let saturation = view.producer_max * PRODUCER_SATURATION;
-            draw_water(canvas, &self.water, &self.producer, saturation, seconds);
+            draw_water(canvas, &self.cells, &self.water, &self.producer, saturation, seconds);
         }
 
         // Plants: scenery that follows the fields. These are not organisms — nothing in
@@ -1115,7 +1131,7 @@ impl ArtPresenter {
         let pack = &self.pack;
         let species = &self.species;
         let budgets = &self.budgets;
-        let scratch = &mut self.scratch;
+        let unfolds = &mut self.unfolds;
         for (index, cell) in CellId::all(Topology::Cube, Scale::ONE).enumerate() {
             // The growth this frame shows: between the last two observed states, at `f`.
             let growth = growth_between(self.growth_prev[index], self.growth[index], f);
@@ -1155,7 +1171,7 @@ impl ArtPresenter {
                     ceiling * DEAD_WOOD_OPACITY,
                 )
             {
-                stamp_layers_bent_toned(
+                stamp_layers_cached(
                     canvas,
                     slot.at,
                     heading,
@@ -1169,7 +1185,7 @@ impl ArtPresenter {
                         shade: wood_shade(),
                         mix: 1.0,
                     },
-                    scratch,
+                    unfolds,
                 );
             }
             if bare {
@@ -1205,7 +1221,7 @@ impl ArtPresenter {
                 let opacity = opacity_of(stage);
                 if opacity > 0.0 {
                     let layers = stage_layers(plant, stage, cell, seconds, fruit_now);
-                    stamp_layers_bent_toned(
+                    stamp_layers_cached(
                         canvas,
                         slot.at,
                         heading,
@@ -1215,7 +1231,7 @@ impl ArtPresenter {
                         Mask::None,
                         bend,
                         tone,
-                        scratch,
+                        unfolds,
                     );
                 }
                 continue;
@@ -1247,7 +1263,7 @@ impl ArtPresenter {
                         (clip.sample(gu * clip.seconds), w_grow),
                         (stage_pose(plant, upper, cell, seconds), w_to),
                     ];
-                    stamp_layers_bent_toned(
+                    stamp_layers_cached(
                         canvas,
                         slot.at,
                         heading,
@@ -1257,7 +1273,7 @@ impl ArtPresenter {
                         Mask::None,
                         bend,
                         tone,
-                        scratch,
+                        unfolds,
                     );
                 }
                 continue;
@@ -1266,7 +1282,7 @@ impl ArtPresenter {
                 let opacity = opacity_of(stage) * (1.0 - gu) as f32;
                 if opacity > 0.0 {
                     let layers = stage_layers(plant, stage, cell, seconds, fruit_now);
-                    stamp_layers_bent_toned(
+                    stamp_layers_cached(
                         canvas,
                         slot.at,
                         heading,
@@ -1276,7 +1292,7 @@ impl ArtPresenter {
                         Mask::None,
                         bend,
                         tone,
-                        scratch,
+                        unfolds,
                     );
                 }
             }
@@ -1295,9 +1311,9 @@ impl ArtPresenter {
                             reveal: gu * (layers_extent(&layers) + 0.5),
                         },
                     };
-                    stamp_layers_bent_toned(
+                    stamp_layers_cached(
                         canvas, slot.at, heading, &layers, 1.0, opacity, mask, bend, tone,
-                        scratch,
+                        unfolds,
                     );
                 }
             }
@@ -1328,7 +1344,7 @@ impl ArtPresenter {
             let (bend, heading) =
                 slot_wind(slot, &plant.name, budget_in(budgets, &plant.name), seconds);
             let pose = stage_pose(plant, 0, cell, seconds);
-            stamp_layers_bent_toned(
+            stamp_layers_cached(
                 canvas,
                 slot.at,
                 heading,
@@ -1344,13 +1360,14 @@ impl ArtPresenter {
                     shade: wood_shade(),
                     mix: 1.0,
                 },
-                scratch,
+                unfolds,
             );
         }
 
         // Tall plants: columns of base, trunks and crown up the side faces, the crown of a
         // full column carried onto the top face by the shared surface.
         {
+            let scratch = &mut self.scratch;
             let tall = &self.tall_species;
             for (i, column) in self.columns.iter().enumerate() {
                 let Some(plant) = tall.plants[column.pick].map(|p| &pack.tall[p]) else {
@@ -1608,7 +1625,7 @@ fn add_above_horizon(canvas: &mut Canvas, layer: &Canvas) {
 /// plum at [`SOIL_MIN_BRIGHTNESS`], which is what makes the band read as a *place* below
 /// the horizon instead of as an unlit strip. The seam-aware one-pixel box filter is
 /// exactly `cubarium_render::draw_field`'s, rim normalization included.
-fn draw_soil_ground(canvas: &mut Canvas, detritus: &ScalarField) {
+fn draw_soil_ground(canvas: &mut Canvas, cells: &PixelCells, detritus: &ScalarField) {
     let (low, high) = *SOIL_RAMP;
     let weight = &*SOIL_WEIGHT;
     for face in Face::ALL {
@@ -1618,7 +1635,7 @@ fn draw_soil_ground(canvas: &mut Canvas, detritus: &ScalarField) {
                 if w <= 0.0 {
                     continue;
                 }
-                let t = filtered_at(detritus, face, x, y) / SOIL_SCALE;
+                let t = filtered_at(cells, detritus, face, x, y) / SOIL_SCALE;
                 // A `NaN` cell paints bare soil rather than nothing or a panic.
                 let t = if t.is_nan() {
                     0.0
