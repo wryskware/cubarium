@@ -808,4 +808,82 @@ mod tests {
             );
         }
     }
+
+    /// **The glowcap's interim glyph.** One cell at every size — no trunk, one crown cell,
+    /// and that cell is the disc's heart, so what a fungus is in the picture is a single
+    /// pixel cluster on the face above its support. And one placeholder colour that is
+    /// unmistakably not one of the five producers': the nearest of them in linear light is
+    /// umbrellafrond's turquoise at **0.70**, against the five's own closest pair
+    /// (stonecushion and velvetpad) at 0.45.
+    ///
+    /// Named interim in the code and pinned here as interim: the art direction of the voxel
+    /// world is its own thread, the paused study at 68a8215 is not implemented, and a
+    /// follow-up package replaces this glyph with whatever `design/voxel-art-direction.md`
+    /// specifies. What this test protects until then is only that a glowcap is *legible as a
+    /// sixth thing* and occupies exactly one cell.
+    #[test]
+    fn the_interim_glowcap_glyph_is_one_cell_in_its_own_placeholder_colour() {
+        let world = world();
+        let mut flora = Flora::new(FloraConfig::default());
+        let sc = flora.config().species(Species::Glowcap).clone();
+
+        // The geometry, at both ends of its size range.
+        for wood in [sc.alive_min, sc.wood_max] {
+            let stand = Stand {
+                id: 0,
+                site: Site { x: 10, y: 3, z: 2 },
+                species: Species::Glowcap,
+                stage: Stage::Alive,
+                wood,
+                foliage: sc.alpha * wood,
+                reserve: 0.0,
+                light: 0.0,
+                moisture: 1.0,
+                water_m3: 0.0,
+                mineral: 0.0,
+                aeration_stress: 0.0,
+                parcel: 0.0,
+            };
+            let parts = parts_of(flora.view(), &stand, 0);
+            assert_eq!(parts.len(), 1, "a glowcap at wood {wood} is not one cell: {parts:?}");
+            assert_eq!(parts[0].0, Cell { x: 10, y: 4, z: 2 }, "not on its support's own face");
+            assert_eq!(parts[0].1, Part::Crown { style: 0, heart: true }, "{parts:?}");
+            assert_eq!(crown_height_voxels(sc.crown_height(wood)), 1);
+        }
+
+        // And on the grid, through the whole presenter path.
+        assert!(flora.apply(
+            &world,
+            Command::Seed { x: 7, z: 1, species: Species::Glowcap, wood: sc.wood_max }
+        ));
+        let view = world.view();
+        let mut stands = Stands::empty(32, 16, 4);
+        stands.rebuild(&view, flora.view());
+        let part = stands.at(7, 4, 1);
+        assert!(part.is_block(), "the cap stamped nothing: {part:?}");
+        assert_eq!(stands.at(7, 5, 1), Part::None, "a cap is one cell and never a stem");
+        let style = stands.style(part).expect("it paints");
+        let standing = flora.view().stand_at(Site { x: 7, y: 3, z: 1 }).expect("seeded");
+        assert_eq!(style, style_of(flora.view(), standing), "the cell paints its own stand");
+        // A founder is planted with `moisture` 0 until its first tick, so the *drawn*
+        // colour is the interim cap wilted; the palette entry itself is the constant, which
+        // is what `seed_style` reads and what the distance below is measured on.
+        assert_eq!(seed_style(Species::Glowcap).crown, srgb_linear(GLOWCAP_INTERIM_CAP_SRGB));
+
+        // Distinct from all five producers' crowns in linear light, with room to spare.
+        let dist = |a: [f32; 3], b: [f32; 3]| {
+            ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+        };
+        let cap = seed_style(Species::Glowcap).crown;
+        let mut nearest = f32::MAX;
+        for species in Species::ALL {
+            if species == Species::Glowcap {
+                continue;
+            }
+            let d = dist(cap, seed_style(species).crown);
+            assert!(d > 0.4, "the interim cap is {d} from {}", species.name());
+            nearest = nearest.min(d);
+        }
+        assert!(nearest > 0.6, "the nearest producer crown is {nearest} away");
+    }
 }
