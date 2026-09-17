@@ -2,13 +2,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Config, Ledger, Material};
 
-/// A frontend or a test changes the world only through these.
+/// A frontend or a test changes the world only through these. Every one of them takes
+/// effect at the moment [`World::apply`] is called, paused or not, and `apply` returns
+/// the volume in cubic metres it accepted — see there for the receipt contract.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Command {
-    /// One rain event: `volume_m3` spread over exposed top surfaces this tick.
+    /// One rain event: `volume_m3` spread now over the sky-exposed cells, sharing it
+    /// evenly and handing what a full cell refuses to the others. A non-finite or
+    /// non-positive volume is refused whole and nothing is booked.
     RainPulse { volume_m3: f64 },
-    /// Add free water into one voxel (clipped to its void space; the rest is refused
-    /// and reported in the return value of `apply`).
+    /// Add free water into one voxel, clipped to its remaining void space. `apply`
+    /// returns the volume accepted; the rest is refused, and a non-finite or negative
+    /// volume is refused whole with nothing booked.
     AddWater { x: i64, y: u32, z: u32, volume_m3: f64 },
     /// Replace a voxel's material, preserving the water volume the voxel held.
     ///
@@ -20,7 +25,8 @@ pub enum Command {
     /// recipients before any farther one — and only volume with no reachable room at all
     /// is booked as `Ledger::displaced_out`.
     SetMaterial { x: i64, y: u32, z: u32, material: Material },
-    /// Add to (or, negative, remove from) the aquifer store.
+    /// Add to (or, negative, remove from) the aquifer store. A withdrawal is capped by
+    /// the stock actually there, and `apply` returns it as a negative volume.
     ChargeAquifer { volume_m3: f64 },
     /// Open or close the named outlet.
     SetOutlet { open: bool },
@@ -202,7 +208,10 @@ impl World {
         self.tick += 1;
     }
 
-    /// Apply a command now. Returns the volume actually accepted for water commands.
+    /// Apply a command now — immediately, including while a frontend has the world
+    /// paused; nothing is queued. Returns the signed volume in cubic metres actually
+    /// accepted, zero for a non-water command or a refused amount. See
+    /// [`crate::water::apply`] for the whole receipt contract.
     pub fn apply(&mut self, command: Command) -> f64 {
         crate::water::apply(self, command)
     }

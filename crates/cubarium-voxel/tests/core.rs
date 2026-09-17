@@ -281,6 +281,40 @@ fn the_residual_stays_below_1e_9_with_every_flux_firing() {
     assert!(residual(&w).abs() < 1e-9, "residual {}", residual(&w));
 }
 
+// ------------------------------------------------------------------ receipts
+
+#[test]
+fn a_clipped_addition_and_an_overlarge_withdrawal_report_what_they_moved() {
+    let mut w = World::empty(cfg(4, 6));
+
+    // One cell holds one cubic metre at 1 m voxels, so 1.5 asked gets 1.0 accepted.
+    let got = w.apply(Command::AddWater { x: 1, y: 1, z: 0, volume_m3: 1.5 });
+    assert!((got - 1.0).abs() < 1e-12, "receipt {got}");
+    assert!((w.view().stored_m3() - 1.0).abs() < 1e-12, "stored {}", w.view().stored_m3());
+    assert!((w.view().ledger.user_in - 1.0).abs() < 1e-12, "user_in {}", w.view().ledger.user_in);
+
+    // Charge the aquifer with 0.5 and then ask for 2.0 back: the receipt is -0.5, the
+    // stock is empty, the store is where it was and `user_in` netted out.
+    assert!((w.apply(Command::ChargeAquifer { volume_m3: 0.5 }) - 0.5).abs() < 1e-12);
+    let back = w.apply(Command::ChargeAquifer { volume_m3: -2.0 });
+    assert!((back + 0.5).abs() < 1e-12, "receipt {back}");
+    assert_eq!(w.view().aquifer_m3, 0.0);
+    assert!((w.view().stored_m3() - 1.0).abs() < 1e-12, "stored {}", w.view().stored_m3());
+    assert!((w.view().ledger.user_in - 1.0).abs() < 1e-12, "user_in {}", w.view().ledger.user_in);
+
+    // Refusals accept nothing and book nothing; non-water commands report zero.
+    assert_eq!(w.apply(Command::AddWater { x: 1, y: 2, z: 0, volume_m3: -1.0 }), 0.0);
+    assert_eq!(w.apply(Command::AddWater { x: 1, y: 2, z: 0, volume_m3: f64::NAN }), 0.0);
+    assert_eq!(w.apply(Command::RainPulse { volume_m3: f64::INFINITY }), 0.0);
+    assert_eq!(w.apply(Command::ChargeAquifer { volume_m3: f64::NAN }), 0.0);
+    assert_eq!(w.apply(Command::SetOutlet { open: true }), 0.0);
+    assert_eq!(w.apply(Command::SetMaterial { x: 3, y: 1, z: 0, material: Material::Rock }), 0.0);
+    assert_eq!(w.view().ledger.rain_in, 0.0, "a refused pulse was booked as rain");
+    assert!((w.view().ledger.user_in - 1.0).abs() < 1e-12, "user_in {}", w.view().ledger.user_in);
+    assert_eq!(w.view().free_at(1, 2, 0), 0.0);
+    assert!(residual(&w).abs() < 1e-9);
+}
+
 // ------------------------------------------------------------- material edits
 
 /// Saturated soil at `(1, 1)` on a four-column ring, made by turning a brim-full air

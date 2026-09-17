@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Ledger {
     pub rain_in: f64,
+    /// Water the user's commands put in, **signed**: an `AddWater` or a positive
+    /// `ChargeAquifer` adds, a `ChargeAquifer` withdrawal subtracts. Refused amounts are
+    /// never booked here.
     pub user_in: f64,
     pub evaporation_out: f64,
     pub outlet_out: f64,

@@ -586,15 +586,38 @@ fn outlet(w: &mut World) {
 
 // ---------------------------------------------------------------- commands
 
+/// Apply one command, and return the receipt.
+///
+/// Commands take effect **now**, at the point of the call, whether or not a frontend
+/// has the world paused: nothing is queued for the next tick. The receipt is the volume
+/// in cubic metres the world actually accepted, signed: positive for water that went in,
+/// negative for a `ChargeAquifer` withdrawal, and capped by what was really there — the
+/// room in the cell, the reachable sky-exposed cells, the aquifer's own stock. What was
+/// asked for and not accepted is the difference between the two, and it is simply
+/// refused, never stored elsewhere.
+///
+/// Non-water commands (`SetMaterial`, `SetOutlet`) always return zero.
+///
+/// A malformed amount — non-finite, or negative for anything but `ChargeAquifer` — is
+/// refused whole: the receipt is zero and nothing at all is booked, so a refused rain
+/// pulse or addition never reaches `Ledger::rain_in` or `Ledger::user_in`.
 pub fn apply(world: &mut World, command: Command) -> f64 {
     match command {
-        Command::RainPulse { volume_m3 } => rain_pulse(world, volume_m3),
+        Command::RainPulse { volume_m3 } => {
+            if !volume_m3.is_finite() || volume_m3 <= 0.0 {
+                return 0.0;
+            }
+            rain_pulse(world, volume_m3)
+        }
         Command::AddWater { x, y, z, volume_m3 } => {
+            if !volume_m3.is_finite() || volume_m3 < 0.0 {
+                return 0.0;
+            }
             if y >= world.config.height || z >= world.config.depth {
                 return 0.0;
             }
             let i = world.config.index(x, y, z);
-            let got = add_free(world, i, volume_m3.max(0.0));
+            let got = add_free(world, i, volume_m3);
             world.ledger.user_in += got;
             got
         }
@@ -602,9 +625,14 @@ pub fn apply(world: &mut World, command: Command) -> f64 {
             if y >= world.config.height || z >= world.config.depth {
                 return 0.0;
             }
-            set_material(world, world.config.index(x, y, z), material)
+            set_material(world, world.config.index(x, y, z), material);
+            0.0
         }
         Command::ChargeAquifer { volume_m3 } => {
+            if !volume_m3.is_finite() {
+                return 0.0;
+            }
+            // A withdrawal can only take what is there.
             let take = volume_m3.max(-world.aquifer_m3);
             world.aquifer_m3 += take;
             world.ledger.user_in += take;
