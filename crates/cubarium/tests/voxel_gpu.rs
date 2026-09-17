@@ -22,6 +22,7 @@ use cubarium_gpu::voxel::slab_hit;
 use cubarium_render::Canvas;
 use cubarium_surface::{Scale, Topology};
 use cubarium_voxel::{Command, Config, Material, World};
+use cubarium_voxel_fauna::{Command as FaunaCommand, Fauna, FaunaConfig, Species as Beast};
 use cubarium_voxel_flora::{Command as FloraCommand, Flora, FloraConfig, Species};
 
 fn config() -> Config {
@@ -105,12 +106,25 @@ fn the_gpu_draws_the_same_small_world_as_the_cpu_presenter() {
     };
 
     let (world, flora) = fixture(&c);
+    // One interim grazer on the strip too (round 5c), so the animal part class is
+    // compared on both renderers and not only the plants'.
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let body = fauna.config().species(Beast::Frondgrazer).body_max;
+    assert!(
+        fauna.apply(&world, FaunaCommand::Introduce { x: 3, z: 1, species: Beast::Frondgrazer, body }),
+        "the fixture has a support face at (3, 1) for the grazer"
+    );
     let mut canvas = Canvas::new(Topology::Ring { w: proj.raster_w, h: proj.raster_h }, Scale::ONE);
     let mut raster = cube_proto::Raster::black(proj.raster_w, proj.raster_h);
-    VoxelPresenter::new(cfg, proj).draw(&world.view(), flora.view(), &mut canvas);
+    VoxelPresenter::new(cfg, proj).draw_with_fauna(
+        &world.view(),
+        flora.view(),
+        Some(fauna.view()),
+        &mut canvas,
+    );
     canvas.encode_raster(&mut raster);
 
-    gpu.stage_world(&world, &flora);
+    gpu.stage_world(&world, &flora, &fauna);
     gpu.render().expect("one GPU frame");
     let rgba = gpu.read_raster().expect("the raster reads back");
 

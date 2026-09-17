@@ -34,7 +34,8 @@ use anyhow::{Context, Result, bail};
 
 use cubarium_gpu::vk::Gpu;
 use cubarium_gpu::voxel::{
-    MAX_STYLES, PART_CROWN, PART_CROWN_HEART, PART_NONE, PART_SPROUT, PART_TRUNK, VoxelParams,
+    MAX_STYLES, PART_ANIMAL_INTERIM, PART_CROWN, PART_CROWN_HEART, PART_NONE, PART_SPROUT,
+    PART_TRUNK, VoxelParams,
     VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel,
 };
 use cubarium_voxel::{World, VoxelView};
@@ -44,7 +45,9 @@ use crate::sink::{FrameSink, Output, WebSink};
 use crate::voxel::VoxelConfig;
 use crate::voxel::present as cpu;
 use crate::voxel::project::Projection;
+use crate::voxel::animal::{AnimalPart, Animals};
 use crate::voxel::stand::{Part, Stands, Style};
+use cubarium_voxel_fauna::Fauna;
 
 use super::target::{GpuTarget, GpuTargetKind};
 
@@ -78,6 +81,8 @@ pub struct VoxelGpuSink {
     target: GpuTarget,
     /// The CPU presenter's own stand decomposition, rebuilt once per staged tick.
     stands: Stands,
+    /// The frame's animals on the same grid, rebuilt per staged tick (round 5c).
+    animals: Animals,
     /// GPU style slots, in the order they were first needed this tick.
     styles: Vec<Style>,
     /// `Stands` style index → GPU slot for this tick, so the dedup costs one linear scan
@@ -129,6 +134,7 @@ impl VoxelGpuSink {
             renderer,
             target,
             stands: Stands::empty(params.width, params.height, params.depth),
+            animals: Animals::empty(params.width, params.height, params.depth),
             styles: Vec::new(),
             slot_of: Vec::new(),
             style_overflow: 0,
@@ -169,10 +175,11 @@ impl VoxelGpuSink {
     /// Pack one tick's world into the renderer's staging buffer. Call it whenever the
     /// world or the plant layer has moved — a tick, or a stdin command that changed a
     /// cell — and not per frame: a frame is one draw over whatever was last staged.
-    pub fn stage_world(&mut self, world: &World, flora: &Flora) {
+    pub fn stage_world(&mut self, world: &World, flora: &Flora, fauna: &Fauna) {
         let started = Instant::now();
         let view = world.view();
         self.stands.rebuild(&view, flora.view());
+        self.animals.rebuild(&view, Some(fauna.view()));
         self.styles.clear();
         self.slot_of.clear();
 
@@ -181,6 +188,8 @@ impl VoxelGpuSink {
         // `Stands` and the style dedup are borrowed inside the closure, so take what it
         // needs out of `self` first; the renderer owns the staging buffer.
         let stands = &self.stands;
+        let animals = &self.animals;
+        let beasts = !animals.is_empty();
         let styles = &mut self.styles;
         let slot_of = &mut self.slot_of;
         let overflow = &mut self.style_overflow;
@@ -191,8 +200,17 @@ impl VoxelGpuSink {
                     for x in 0..w {
                         let xi = i64::from(x);
                         let m = view.material_at(xi, y, z);
+                        // The animal after the plant in its own cell, as the CPU presenter
+                        // stamps it: a body standing in a turf covers the turf.
+                        let beast = if beasts && !m.is_solid() {
+                            animals.at(xi, i64::from(y), z)
+                        } else {
+                            AnimalPart::None
+                        };
                         let (part, slot) = if m.is_solid() {
                             (PART_NONE, 0)
+                        } else if let Some(style) = animals.style(beast) {
+                            (PART_ANIMAL_INTERIM, slot_for_style(style, styles, overflow))
                         } else {
                             let p = stands.at(xi, i64::from(y), z);
                             match part_class(p) {
@@ -336,6 +354,22 @@ impl Drop for VoxelGpuSink {
     fn drop(&mut self) {
         self.target.destroy(&self.gpu);
         self.renderer.destroy(&self.gpu);
+    }
+}
+
+/// The GPU slot for a style that has no plant part index to cache under (an animal's),
+/// deduplicated by value against the same table the plants fill.
+fn slot_for_style(style: Style, styles: &mut Vec<Style>, overflow: &mut u64) -> u8 {
+    match styles.iter().position(|s| *s == style) {
+        Some(at) => at as u8,
+        None if styles.len() < MAX_STYLES => {
+            styles.push(style);
+            (styles.len() - 1) as u8
+        }
+        None => {
+            *overflow += 1;
+            0
+        }
     }
 }
 

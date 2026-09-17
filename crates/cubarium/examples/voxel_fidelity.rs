@@ -198,7 +198,7 @@ fn bench(
     let mut presenter = VoxelPresenter::new(cfg.clone(), proj);
     // One of each first, so neither number is paying for a cold cache or a first pass.
     presenter.draw(&world.view(), flora.view(), &mut canvas);
-    gpu.stage_world(&world, &flora);
+    gpu.stage_world(&world, &flora, &no_fauna());
     gpu.render()?;
 
     let at = std::time::Instant::now();
@@ -216,7 +216,7 @@ fn bench(
 
     let at = std::time::Instant::now();
     for _ in 0..n {
-        gpu.stage_world(&world, &flora);
+        gpu.stage_world(&world, &flora, &no_fauna());
     }
     let pack_ms = at.elapsed().as_secs_f64() * 1e3 / n as f64;
 
@@ -297,7 +297,7 @@ fn compare(
     canvas.encode_raster(&mut raster);
     let cpu = raster.as_bytes();
 
-    gpu.stage_world(world, flora);
+    gpu.stage_world(world, flora, &no_fauna());
     gpu.render()?;
     let gpu_rgba = gpu.read_raster()?;
 
@@ -387,6 +387,11 @@ fn compare(
 
 /// How many voxels of each plant part a scene actually contains, so the report can say
 /// which plant rules the picture tested: `(blocks, a description by class)`.
+/// No animals: the fidelity scenes are the plant world's, and an empty layer stages nothing.
+fn no_fauna() -> cubarium_voxel_fauna::Fauna {
+    cubarium_voxel_fauna::Fauna::new(cubarium_voxel_fauna::FaunaConfig::default())
+}
+
 fn plant_census(world: &World, flora: &Flora) -> (usize, String) {
     use cubarium::voxel::stand::{Part, Stands};
     let c = world.config();

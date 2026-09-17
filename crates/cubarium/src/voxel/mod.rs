@@ -399,7 +399,7 @@ impl Out {
             }
             Out::Gpu(gpu) => {
                 if moved {
-                    gpu.stage_world(world, flora);
+                    gpu.stage_world(world, flora, fauna);
                 }
                 gpu.render()
             }
