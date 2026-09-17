@@ -1963,6 +1963,27 @@ fn stocks_of(flora: &Flora) -> [Stocks; Species::COUNT] {
     out
 }
 
+/// The cohort's mean **canopy fill** `P / (α · W)` over its living stands, and how many
+/// those were.
+///
+/// This is what "recovered" has to be read against, and the reason the strict
+/// [`FULL_FOLIAGE`] bar cannot be read on its own: an **ungrazed** stand at equilibrium does
+/// not sit at 1.0 either, because senescence takes `senescence · P · dt` every tick and the
+/// cap is only what growth aims at. So the measure of a producer response is the grazed
+/// cohort's fill against the **control's own** fill, and the bar is a stricter question
+/// asked beside it.
+fn cohort_fill(flora: &Flora, ids: &[u64]) -> (f64, usize) {
+    let (mut sum, mut n) = (0.0, 0);
+    for s in flora.view().stands.iter().filter(|s| ids.contains(&s.id)) {
+        let cap = flora.config().species(s.species).alpha * s.wood;
+        if cap > 0.0 {
+            sum += s.foliage / cap;
+            n += 1;
+        }
+    }
+    (if n > 0 { sum / n as f64 } else { 0.0 }, n)
+}
+
 /// The foliage, the reserve and the living count of one **cohort by identity**.
 fn cohort_sums(flora: &Flora, ids: &[u64]) -> (f64, f64, usize) {
     let mut out = (0.0, 0.0, 0);
@@ -1989,6 +2010,8 @@ struct Arm {
     /// That cohort's foliage, reserve and living count at the start, at the halfway point
     /// where the harvest stops, and at the end.
     cohort_at: [(f64, f64, usize); 3],
+    /// The same three moments, as mean canopy fill `P / (α · W)` and the count it averages.
+    fill_at: [(f64, usize); 3],
     /// Every identity this arm actually bit, and those of them seen back at full foliage
     /// after the harvest stopped.
     bitten: Vec<u64>,
@@ -2002,7 +2025,10 @@ struct Arm {
     consumed: (f64, f64, f64),
     establishments: u64,
     deaths: u64,
+    /// The three residuals at the end, **and the stocks they are residuals of**: an absolute
+    /// residual says nothing on its own, and this mode used to print only the absolute.
     residuals: (f64, f64, f64),
+    stocks: (f64, f64, f64),
 }
 
 /// One arm: the same conditioned world, the same founders, the same predeclared faces, and a
@@ -2068,6 +2094,7 @@ fn harvest_arm(
         sites,
         cohort: cohort.clone(),
         cohort_at: [cohort_sums(&flora, &cohort), (0.0, 0.0, 0), (0.0, 0.0, 0)],
+        fill_at: [cohort_fill(&flora, &cohort), (0.0, 0), (0.0, 0)],
         bitten: Vec::new(),
         recovered: Vec::new(),
         bites: 0,
@@ -2077,6 +2104,7 @@ fn harvest_arm(
         establishments: 0,
         deaths: 0,
         residuals: (0.0, 0.0, 0.0),
+        stocks: (0.0, 0.0, 0.0),
     };
 
     for tick in 0..ticks {
@@ -2124,14 +2152,16 @@ fn harvest_arm(
         }
         if tick + 1 == half {
             arm.cohort_at[1] = cohort_sums(&flora, &cohort);
+            arm.fill_at[1] = cohort_fill(&flora, &cohort);
         }
         if (tick + 1) % every == 0 {
             arm.samples.push(((tick + 1) as f64 * cubarium_voxel::DT, stocks_of(&flora)));
         }
     }
 
-    let v = flora.view();
     arm.cohort_at[2] = cohort_sums(&flora, &cohort);
+    arm.fill_at[2] = cohort_fill(&flora, &cohort);
+    let v = flora.view();
     arm.consumed = (
         v.ledger.consumed_organic_out,
         v.ledger.consumed_mineral_out,
@@ -2144,6 +2174,7 @@ fn harvest_arm(
         v.mineral() - v.ledger.expected_mineral(),
         v.energy() - v.ledger.expected_energy(),
     );
+    arm.stocks = (v.organic(), v.mineral(), v.energy());
     if arm.samples.last().map(|&(s, _)| s) != Some(ticks as f64 * cubarium_voxel::DT) {
         arm.samples.push((ticks as f64 * cubarium_voxel::DT, stocks_of(&flora)));
     }
@@ -2278,24 +2309,43 @@ fn report_harvest(patch: Species, control: &Arm, grazed: &Arm, rate: f64) {
         bitten - recovered
     );
     println!(
+        "  that bar is strict, and the plant-only arm is what says how strict: its own cohort's \
+         mean canopy fill P/(α·W) ends at {:.3}, so a count against a {:.2} bar is not by itself \
+         evidence that nothing regrew. The fill comparison below is the measure.",
+        control.fill_at[2].0,
+        FULL_FOLIAGE
+    );
+    println!(
         "  the declared cohort ({} stands reachable at the start), foliage / reserve / alive at \
          0 s, at the harvest stop and at the end:",
         grazed.cohort.len()
     );
     for arm in [control, grazed] {
         let [a, b, c] = arm.cohort_at;
+        let [fa, fb, fc] = arm.fill_at;
         println!(
             "    {:>10}: foliage {:.5} -> {:.5} -> {:.5}; reserve {:.5} -> {:.5} -> {:.5}; alive \
-             {} -> {} -> {}",
-            arm.label, a.0, b.0, c.0, a.1, b.1, c.1, a.2, b.2, c.2
+             {} -> {} -> {}; mean fill P/(α·W) {:.3} -> {:.3} -> {:.3}",
+            arm.label, a.0, b.0, c.0, a.1, b.1, c.1, a.2, b.2, c.2, fa.0, fb.0, fc.0
         );
     }
     for arm in [control, grazed] {
         println!(
             "    {:>10}: establishments {}, deaths {}, residuals organic {:.3e} mineral {:.3e} \
-             energy {:.3e}",
-            arm.label, arm.establishments, arm.deaths, arm.residuals.0, arm.residuals.1,
-            arm.residuals.2
+             energy {:.3e} against stocks {:.4} / {:.4} / {:.4} (relative {:.2e} / {:.2e} / \
+             {:.2e})",
+            arm.label,
+            arm.establishments,
+            arm.deaths,
+            arm.residuals.0,
+            arm.residuals.1,
+            arm.residuals.2,
+            arm.stocks.0,
+            arm.stocks.1,
+            arm.stocks.2,
+            arm.residuals.0 / arm.stocks.0.abs().max(1.0),
+            arm.residuals.1 / arm.stocks.1.abs().max(1.0),
+            arm.residuals.2 / arm.stocks.2.abs().max(1.0)
         );
     }
 }

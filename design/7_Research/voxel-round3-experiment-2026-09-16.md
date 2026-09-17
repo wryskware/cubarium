@@ -942,3 +942,259 @@ replacement-control study Astra designed in R5.4 is still the separate later pac
 nothing about coexistence (no invasion, no rare-species arm), and nothing about whether any
 of the fifteen thresholds these three presets introduced is a good number. They are
 placeholders encoding roles, and `design/backlog.md` §1 lists all of them.
+
+## Round 5a — 2026-09-17
+
+Bounded food transfers landed (package M): three withdrawals, a deposit with a carrion
+pool, a reach query, and two new named boundary flows carrying six ledger terms between them
+(`consumed_organic_out` / `consumed_mineral_out` / `consumed_energy_out` and the three
+`deposited_*_in`; the brief said "four", and three currencies in each direction is six) — and
+with them the probe the biosphere asks for before any voxel animal exists (`design/theoretical-biosphere-2026-09-16.md` §5: before
+voxel animals exist "a bounded experimental harvest of reachable foliage can test only the
+producer response"). One command, four arms:
+
+```text
+cargo run --release -p cubarium-voxel-flora --example two_producers -- harvest 400
+```
+
+**A probe, not a study, and it says nothing about an animal.** No body, no movement, no
+population, no birth of anything that eats, no carrying capacity, no viability claim. What
+it measures is what the plant model's existing `foliage_rate` and reflush-from-reserve rules
+do to a stand whose canopy is being taken, and what the ledger does with the material that
+left. There is no replication (one seed, one landform), no dose series (one rate) and no
+measured recovery time to have chosen 200 s of recovery against.
+
+Conditions, all four arms: 128 × 48 × 24 voxels of 0.25 m, `seed` 1, `noise_seed` 0, rain
+2e-4 m/s with the outlet open, 1,000 warm-up ticks (50 s) and then 8,000 coupled ticks
+(400 s), so the world ends at 450 s. Eight founders per species at half its own `wood_max`,
+placed by the harness's `Habitat` table — an experiment condition and not a model rule
+(`design/backlog.md` §1). Two patches, springturf and bloomcrown; each patch is a
+**plant-only arm and a harvested arm of the same conditioned world**, built from the same
+deterministic generation and the same founder selection, which the harness asserts rather
+than assumes (the two arms' founder lists and declared cohorts are compared, and the
+plant-only arm's `consumed_*` are asserted to be zero).
+
+The treatment: every tick, from each of **three predeclared support faces** — the first
+three founder faces of the patch species in site order — a harvester takes up to
+`0.002 · dt` of organic matter off the foliage of the stands inside
+`Reach { horizontal: 2, up: 1 }`, spending that budget on them in site order, and deposits
+nothing. It **stops at 200 s**, leaving 200 s of recovery. The rate and the box are declared
+conditions, not model knobs, and both are now backlog rows: 0.002 /s per face is *faster*
+than one springturf founder's own `foliage_rate · W` (6e-4 /s at founder wood 0.03), on
+purpose, so what the probe reads is a stripped stand and not a grazing equilibrium.
+
+**Wall time: 273.2 s for four arms of 400 coupled seconds** (8,000 ticks each, plus each
+arm's own generation and 1,000 warm-up ticks), on this machine. An earlier run of the same
+four arms took 279.9 s and produced **bit-identical** numbers — the only difference between
+the two outputs is the two lines this note's residual table needed and the wall time itself,
+which is what "deterministic in the seed" is supposed to mean.
+
+### The reach box excludes a grown bloomcrown, and that is the first result
+
+`SpeciesConfig::crown_voxels` is 2 for a bloomcrown at the harness's founder wood (0.3 of
+`wood_max` 0.6 gives `crown_height` 2.0), against `up: 1`. So **no bloomcrown was ever
+eaten in either patch**: a harvester standing on a bloomcrown founder's own face cannot
+reach that founder's crown, and what it ate instead was the springturf and velvetpad within
+two voxels of it. The species that *were* bitten are in the report by species, because the
+ledger's `consumed_*` have no species in them and a reach box does not choose one.
+
+That is the rule behaving as `design/theoretical-biosphere-2026-09-16.md` §6 asks — food
+above reach does not feed a ground browser — and it is worth stating before the tables,
+because it makes the "bloomcrown patch" arm a statement about *where the harvester stood*
+and not about what it ate. A bloomcrown **newborn** is a different matter: at `alive_min`
+0.02 of wood its `crown_height` is 1.07, which rounds to one voxel and is in reach. Six
+bloomcrown newborns appeared between 300 s and 400 s in every arm — after the harvest had
+stopped — so none of them was ever bitten either. A dose series that wanted to graze
+bloomcrown seedlings would have to run the harvest window over the recruitment window.
+
+### Springturf patch: what was taken and what came back
+
+Foliage / reserve / wood, summed per species over the stands standing at that moment
+(`stands` in the first column of each cell):
+
+| t (s) | arm | springturf | velvetpad | bloomcrown |
+| --- | --- | --- | --- | --- |
+| 0 | plant-only | 8 / 0.4800 / 0.1200 / 0.2400 | 8 / 1.6000 / 0.4000 / 0.8000 | 8 / 4.8000 / 1.2000 / 2.4000 |
+| 0 | harvested | 8 / 0.4800 / 0.1200 / 0.2400 | 8 / 1.6000 / 0.4000 / 0.8000 | 8 / 4.8000 / 1.2000 / 2.4000 |
+| 100 | plant-only | 8 / 0.5337 / 0.0667 / 0.2669 | 8 / 1.6996 / 0.2125 / 0.8498 | 8 / 4.6955 / 1.1555 / 2.4158 |
+| 100 | harvested | 8 / 0.3346 / 0.0418 / 0.2461 | 8 / 1.4334 / 0.2098 / 0.8392 | 8 / 4.6955 / 1.1555 / 2.4158 |
+| 200 | plant-only | 8 / 0.5909 / 0.0739 / 0.2957 | 8 / 1.8221 / 0.2278 / 0.9111 | 8 / 4.6996 / 1.1674 / 2.5139 |
+| 200 | harvested | 8 / 0.3714 / 0.0465 / 0.2503 | 8 / 1.2646 / 0.1685 / 0.8778 | 8 / 4.6996 / 1.1676 / 2.5142 |
+| 300 | plant-only | 8 / 0.5692 / 0.0489 / 0.3004 | 9 / 1.8974 / 0.2425 / 0.9590 | 8 / 4.7468 / 1.2155 / 2.6881 |
+| 300 | harvested | 8 / 0.3503 / 0.0276 / 0.2395 | 9 / 1.3360 / 0.1822 / 0.9138 | 8 / 4.7469 / 1.2157 / 2.6884 |
+| 400 | plant-only | 8 / 0.5195 / 0.0200 / 0.2829 | 9 / 1.9132 / 0.2436 / 0.9797 | 14 / 4.9151 / 1.3054 / 2.9146 |
+| 400 | harvested | 8 / 0.3186 / 0.0085 / 0.2173 | 10 / 1.3860 / 0.1933 / 0.9445 | 14 / 4.9134 / 1.3043 / 2.9127 |
+
+Umbrellafrond and stonecushion had no stand within reach of a face and were never bitten.
+They are identical in the two arms to four decimals through 300 s and differ in the **fourth
+decimal at 400 s** (umbrellafrond 5.2664 against 5.2665 of foliage; bloomcrown 4.9151
+against 4.9134). That is not noise and it is not a leak: the arms are coupled through the
+shared water table and the shade field, so a grazed stand transpires and shades less and
+every other stand in the world eventually reads a slightly different world. "Untouched"
+here means **not bitten**, never unaffected, and any future arm-to-arm difference smaller
+than this coupling is not attributable to the treatment.
+
+The declared cohort — the six stands reachable from the three faces **at the start**, fixed
+by identity before anything was eaten, three springturf and three velvetpad:
+
+| arm | foliage at 0 s / 200 s / 400 s | reserve at 0 s / 200 s / 400 s | mean fill `P/(α·W)` | alive |
+| --- | --- | --- | --- | --- |
+| plant-only | 0.78000 / 0.91778 / 0.88709 | 0.19500 / 0.11475 / 0.09664 | 1.000 / 0.999 / 0.941 | 6 / 6 / 6 |
+| harvested | 0.78000 / 0.14054 / 0.14199 | 0.19500 / 0.02794 / 0.02720 | 1.000 / 0.105 / 0.106 | 6 / 6 / 6 |
+
+**The fill column is the measure, and the strict recovery bar is not.** The harness counts a
+stand "recovered" at 99 % of its own `α · W`, and the control says how strict that is: an
+**ungrazed** cohort here sits at 0.941 of its own cap at 400 s, because senescence takes a
+little every tick and the cap is only what growth aims at. So "0 of 6 recovered" cannot be
+read as "nothing regrew" — the comparison that can is the grazed cohort's 0.106 against the
+control's 0.941, and its flatness (0.105 at the stop, 0.106 at the end).
+
+Taken: **8,520 withdrawals that returned something, on 6 distinct stands, 0.772133 of
+organic matter, 0.0157000 of mineral and 1.544266 of energy** — 0.200734 off three
+springturf and 0.571399 off three velvetpad. The three faces' nominal budget over the window
+was `3 · 0.002 · 200` = 1.2, so the harvester actually got **64 %** of what it asked for: for
+much of the window there was less foliage in reach than the budget, which is the reach box
+and the stripped stands and not any rule refusing it. (A face can draw on more than one
+stand in a tick when the first cannot fill its budget, so the withdrawal count is not a
+count of ticks.)
+
+### Bloomcrown patch: the same treatment from three higher faces
+
+| t (s) | arm | springturf | velvetpad |
+| --- | --- | --- | --- |
+| 0 | plant-only | 8 / 0.4800 / 0.1200 / 0.2400 | 8 / 1.6000 / 0.4000 / 0.8000 |
+| 0 | harvested | 8 / 0.4800 / 0.1200 / 0.2400 | 8 / 1.6000 / 0.4000 / 0.8000 |
+| 100 | plant-only | 8 / 0.5337 / 0.0667 / 0.2669 | 8 / 1.6996 / 0.2125 / 0.8498 |
+| 100 | harvested | 8 / 0.4679 / 0.0585 / 0.2602 | 8 / 1.3738 / 0.1995 / 0.8434 |
+| 200 | plant-only | 8 / 0.5909 / 0.0739 / 0.2957 | 8 / 1.8221 / 0.2278 / 0.9111 |
+| 200 | harvested | 8 / 0.4460 / 0.0558 / 0.2746 | 8 / 1.2740 / 0.1710 / 0.8845 |
+| 300 | plant-only | 8 / 0.5692 / 0.0489 / 0.3004 | 9 / 1.8974 / 0.2425 / 0.9590 |
+| 300 | harvested | 8 / 0.4178 / 0.0297 / 0.2662 | 8 / 1.3118 / 0.1749 / 0.9005 |
+| 400 | plant-only | 8 / 0.5195 / 0.0200 / 0.2829 | 9 / 1.9132 / 0.2436 / 0.9797 |
+| 400 | harvested | 8 / 0.3797 / 0.0084 / 0.2409 | 9 / 1.3328 / 0.1817 / 0.9226 |
+
+| arm | foliage at 0 s / 200 s / 400 s | reserve at 0 s / 200 s / 400 s | mean fill `P/(α·W)` | alive |
+| --- | --- | --- | --- | --- |
+| plant-only | 0.92000 / 1.03653 / 1.08822 | 0.23000 / 0.12957 / 0.12930 | 1.000 / 1.000 / 0.955 | 6 / 6 / 6 |
+| harvested | 0.92000 / 0.34358 / 0.37102 | 0.23000 / 0.05470 / 0.05588 | 1.000 / 0.264 / 0.257 | 6 / 6 / 6 |
+
+This cohort's absolute foliage **rose** 8 % over the recovery window while its mean fill
+**fell**, from 0.264 to 0.257: the same stands' own `α · W` caps grew faster than their
+canopies did, because grazing foliage does not stop wood growth. A stand can therefore come
+back in absolute terms and fall further behind itself at the same time, which is the reason
+this note reports both columns and not one.
+
+Taken: **7,829 bites on 5 distinct stands, 0.704971 organic, 0.0143281 mineral, 1.409943
+energy** — 0.141104 off two springturf and 0.563867 off three velvetpad, and nothing off a
+bloomcrown. That is **59 %** of the same nominal 1.2, and one of the three faces, `(12, 8)`
+at `y13`, had **nothing in reach at all** for the whole run, which the report says at the top
+rather than hiding inside a total.
+
+### The producer response, in plain words
+
+1. **Grazing at this rate strips a stand and the stand does not die of it.** Deaths were
+   **zero in all four arms**, as they were in the round-4 smoke. Foliage is not wood: the
+   withdrawal takes `P` and never touches `W`, and death is `W < alive_min`, so a harvester
+   cannot kill a stand directly — it can only take its income away.
+2. **The income falls with the foliage, and the reserve pays the difference.** The grazed
+   cohorts ended the harvest window at 15 % (springturf patch) and 33 % (bloomcrown patch)
+   of their own control's foliage, and at 24 % and 42 % of its reserve. Both arms' reserves
+   fall over the run — the controls' cohort reserve fell to 50 % and 56 % of its starting
+   value on its own, because these founders are spending on wood, foliage and propagule
+   parcels — so what grazing did was **deepen an existing draw-down**, not create one.
+3. **Nothing measurably recovered in 200 s.** The cohorts did not close their gap: the
+   springturf patch's grazed cohort went from 15.3 % of its control's foliage at the stop to
+   16.0 % at the end, and the bloomcrown patch's from 33.1 % to 34.1 %. In canopy fill, which
+   is the measure that reads each stand against its own cap, the grazed cohorts sat at
+   **0.105 → 0.106** and **0.264 → 0.257** against controls at **0.999 → 0.941** and
+   **1.000 → 0.955**. The strict recovery count (0 of 6 and 0 of 5 stands back within 1 % of
+   their own `α · W`) is consistent with that but cannot carry it on its own, because an
+   ungrazed cohort here ends below that bar too. Both controls were themselves drifting over
+   the same window — the springturf patch's control cohort *lost* 3 % of its foliage while
+   the grazed one gained 1 % — which is why every comparison here is against the control and
+   never an absolute slope.
+4. **Why so little, in the model's own terms.** Income is
+   `assimilation · L_eff · μ · (1 − stress) · P · monod · dt`, proportional to the very stock
+   that was taken, and the other way back to full foliage is reflush — spent out of a reserve
+   the harvest had already drawn down. A stripped stand is therefore slow to come back
+   *because* it is stripped, and it is slowest exactly when its reserve is lowest. That is
+   the two existing rules composing, and this run shows their joint outcome; it does **not**
+   separate them, and nothing here measures a recovery time constant. A dose series and a
+   window long enough to see a reserve refill are what would.
+5. **One arm differed in recruitment, and this run cannot attribute it.** The springturf
+   patch's grazed arm ended with 15 establishments against the control's 14, and one more
+   living velvetpad (10 against 9); the bloomcrown patch's arms both ended at 14. A grazed
+   world has less income and should, if anything, recruit less, so this single-count
+   difference is reported and not explained: one lottery draw in one arm is not a mechanism.
+
+### The three residuals, with a consumer taking material out
+
+`consumed_organic_out`, `consumed_mineral_out` and `consumed_energy_out` are named boundary
+flows, subtracted in `expected_organic`, `expected_mineral` and `expected_energy`, so the
+three residuals mean what they meant in round 3 and round 4 — with material now leaving the
+layer into a consumer's hands. At 400 s, each residual against the stock it is a residual of:
+
+| patch | arm | organic | mineral | energy |
+| --- | --- | --- | --- | --- |
+| springturf | plant-only | −9.692e-12 of 29.5635 (−3.28e-13) | 7.105e-15 of 62.4368 (1.14e-16) | −1.938e-11 of 59.1271 (−3.28e-13) |
+| springturf | harvested | −8.026e-12 of 28.4927 (−2.82e-13) | 7.105e-15 of 61.4211 (1.16e-16) | −1.605e-11 of 56.9853 (−2.82e-13) |
+| bloomcrown | plant-only | −9.692e-12 of 29.5635 (−3.28e-13) | 7.105e-15 of 62.4368 (1.14e-16) | −1.938e-11 of 59.1271 (−3.28e-13) |
+| bloomcrown | harvested | −8.818e-12 of 28.5376 (−3.09e-13) | 1.421e-14 of 60.4225 (2.35e-16) | −1.764e-11 of 57.0753 (−3.09e-13) |
+
+The same 1e-13 relative float noise round 4 reported, with 0.772133 and 0.704971 of organic
+matter, 0.0157000 and 0.0143281 of mineral and 1.544266 and 1.409943 of energy taken out
+through `take_foliage` in the two harvested arms. The harness books nothing of its own: it
+reports the `Taken`s it was handed, and the ledger's `consumed_*` are the sum of exactly
+those by construction. The two plant-only arms are the same arm run twice — one per patch,
+so that each patch's control can report that patch's own cohort — and their ledgers agree to
+the bit, which is a second reading of the determinism.
+
+**Nothing deposited anything in this run.** `deposited_*`, `Ground::carrion` and
+`carrion_decomposition` are zero throughout, and the only place they are exercised is
+`tests/round5a.rs`. The cross-layer check — flora `consumed_*` against a fauna layer's
+`eaten_*`, and flora `deposited_*` against its own — belongs to the round that has a fauna
+ledger to check against.
+
+### Open items this round leaves
+
+1. **The deposit side has no coupled measurement.** Nothing in a running world deposits
+   carrion or dung yet, so the carrion pool, its rate and the litter-deposit cap are pinned
+   by short function tests and by nothing else. The first run with a corpse in it is
+   rounds 5b/5c's.
+2. **Remains are invisible, and the host does not print them.** The voxel presenter draws no
+   glyph for `Ground::carrion` and the host's `i X Y Z` inspect line does not print the pool
+   (`crates/cubarium/src/voxel/mod.rs`). Both were left alone deliberately: **`crates/cubarium`
+   needed no change at all for this round** — the new `Ground` fields arrive through
+   `Ground::new` — and a glyph for a stock nothing fills would be drawing an empty pool. The
+   glyph is a backlog row (§2) and its look belongs to Wrysk's art-direction thread.
+3. **`Deposit::DeadWood` does not exist.** Rounds 5b/5c's brief wants a dead-wood deposit
+   kind to lay down declared logs and says to add it there if this round did not. It did not:
+   this round's brief named `Carrion` and `Litter`, and adding a third kind was out of its
+   scope.
+4. **One rate, one seed, one landform, one window.** No dose series, no replication, no
+   second landform, and a 200 s recovery window chosen because the run is 400 s rather than
+   measured against anything. A recovery **time constant** is what a dose series and a window
+   long enough to see a reserve refill would produce; this probe does not have one.
+5. **The harvester is not an animal and must not be read as one.** It has no body, pays
+   nothing, never moves, never dies and eats from three fixed faces at a declared rate. Its
+   totals are a *treatment*, not a diet, and no consumer's bite rate, reach or population can
+   be inferred from them.
+
+### What this does and does not establish
+
+Established: three bounded withdrawals and one deposit with its own new pool, all booked as
+named boundary flows, with the three residuals holding at 1e-13 relative float noise across
+four 400-second coupled arms **with material leaving the layer**; a reach rule that admits a
+turf and excludes a grown bloomcrown crown, measured rather than asserted; zero deaths under
+a harvest that took 0.77 and 0.70 of organic matter off six and five stands; and a producer
+response that is the existing rules composing — income falls with the stock that was taken,
+reflush is paid out of a reserve the harvest had drawn down, and neither grazed cohort closed
+its gap to its own control within 200 s in either foliage or canopy fill.
+
+Not established: anything about an animal, and this round deliberately leaves the biosphere's
+two candidate first consumers unchosen; any recovery time constant, or how much of the
+non-recovery is the income term and how much the emptied reserve (the run shows their joint
+outcome and does not separate them); whether `carrion_decomposition` 0.005 /s or the harvest
+rate is a reasonable number (nothing has measured either, and no result here depends on the
+first); and any arm-to-arm difference smaller than the water-and-shade coupling that already
+moves untouched species in the fourth decimal by 400 s.
