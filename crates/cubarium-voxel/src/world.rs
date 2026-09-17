@@ -160,8 +160,14 @@ impl<'a> VoxelView<'a> {
     }
 
     /// How many contiguous [`Material::Soil`] voxels sit at `(x, y, z)` and below it,
-    /// `y` included. Zero when `(x, y, z)` is not soil, so a plant rooted on rock has no
-    /// root box at all.
+    /// `y` included: one column's contiguous soil, and nothing else. Zero when
+    /// `(x, y, z)` is itself not soil.
+    ///
+    /// It is **not** a plant's root box and says nothing about one (Astra R7.6). The
+    /// flora layer collects the `Material::Soil` voxels of the whole box itself, per
+    /// voxel and not contiguously (`crates/cubarium-voxel-flora/src/step.rs`'s
+    /// `root_box`), so a stand on a rock face can have soil in reach beside or under it
+    /// while this returns zero for its own column.
     pub fn soil_below(&self, x: i64, y: u32, z: u32) -> u32 {
         if z >= self.config.depth || y >= self.config.height {
             return 0;

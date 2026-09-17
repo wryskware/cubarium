@@ -675,9 +675,14 @@ impl SpeciesConfig {
     ///   half of 0.6; `wood_rate` 0.01 and `foliage_rate` 0.02 are ten times the base, and
     ///   `propagule_rate` 0.002 ten times, so a funded donor fills a package in about nine
     ///   seconds against bloomcrown's three hundred. `assimilation` 0.008 is twice the
-    ///   base: a pioneer that pays ten times the maintenance has to fix faster than the
-    ///   others or it cannot be alive at all, and doubling it leaves a 2.4× margin over
-    ///   its own upkeep at full light and moisture.
+    ///   base, and the honest reason is **faster growth, not survival** (Astra R7.6): at
+    ///   full foliage, full light and moisture, mineral 1 and no stress the *base* 0.004
+    ///   already supplies `0.004 · α · monod = 0.0053333 · W` per second against
+    ///   maintenance plus foliage replacement `0.002 · W + 1.2 · 0.001 · 2 · W =
+    ///   0.0044 · W`, a 1.21× margin — so ten times the base maintenance is solvent on the
+    ///   base assimilation. Doubling it takes that margin to 2.42×, which is what funds the
+    ///   ten-times growth and propagule rates above rather than what keeps the species
+    ///   alive.
     /// - **Short-lived.** `maintenance` 0.002 is ten times the base, so a springturf whose
     ///   income stops burns its whole reserve in 250 s and diebacks, where bloomcrown
     ///   waits 2,500 s.
@@ -744,9 +749,12 @@ impl SpeciesConfig {
     /// - **Slow.** `wood_rate` 0.0002 and `foliage_rate` 0.0005 are a fifth and a quarter of
     ///   the base, so a newborn needs about 11,500 s to fill its `wood_max` 0.1;
     ///   `maintenance` 0.00005 is a quarter of the base, which is what lets something that
-    ///   slow stay solvent; `propagule_rate` 0.00005 is a quarter, so a package takes four
-    ///   times as long as bloomcrown's already long 300 s. `alive_min` 0.01 against
-    ///   `wood_max` 0.1 and `donor_min` 0.05.
+    ///   slow stay solvent; `propagule_rate` 0.00005 is a quarter of the base, and its
+    ///   package is half bloomcrown's — `alive_min` 0.01 over `propagule_split[0]` 0.4 is
+    ///   0.025 against 0.05 — so one package takes **600 s** of a fully funded donor's
+    ///   saving, `0.025 / (0.00005 / 1.2)`: *twice* bloomcrown's already long 300 s and
+    ///   not four times, because the smaller package cancels half of the slower rate
+    ///   (Astra R7.6). `alive_min` 0.01 against `wood_max` 0.1 and `donor_min` 0.05.
     /// - **Shape.** `hop` 1; the crown is `[0.5, 0.5]` tall — a cushion has no stem at any
     ///   size — and `[0.5, 1.0]` wide, so it is one cell young and a five-cell plus grown.
     pub fn stonecushion() -> SpeciesConfig {
@@ -787,22 +795,30 @@ impl SpeciesConfig {
     /// - **Water, the three thresholds together.** `establish_pore_min` 0.3, `wilt_pore`
     ///   0.2, `sat_pore` 0.6: damp, and consistently so — it germinates a little above
     ///   drained soil's own 0.25, wilts just below it, and is at full moisture at 0.6,
-    ///   which is where umbrellafrond is too. The difference from the wetland role is
+    ///   which is *below* umbrellafrond's own 0.8 (Astra R7.6). The difference from the
+    ///   wetland role is
     ///   entirely the ceiling: `establish_saturated_max` 0.6 against umbrellafrond's 1.0,
     ///   so a wholly saturated box refuses a velvetpad cohort and targets an adult's
     ///   `aeration_stress` at 1 — waterlogging costs this species something, which is the
     ///   whole of what "aerated" means here. `stress_rate_per_s` 0.1 and
     ///   `relax_rate_per_s` 0.05: it closes on that stress twice as fast as it lets go.
-    ///   `drown_depth_m` 0.1 is twice springturf's — a forest floor takes a puddle — and a
-    ///   fifth of umbrellafrond's 0.5.
-    /// - **Light.** `light_half` 0.1 is the smallest of the five, so velvetpad earns 83 %
-    ///   of its full income at a fifth of open sky where bloomcrown earns 49 %;
+    ///   `drown_depth_m` 0.1 is more than three times springturf's 0.03 — a forest floor
+    ///   takes a puddle — and a fifth of umbrellafrond's 0.5.
+    /// - **Light.** `light_half` 0.1 is the smallest of the five, so at a fifth of open
+    ///   sky velvetpad's light response `L (1 + h) / (L + h)` is **0.7333** where
+    ///   bloomcrown's is **0.36** (Astra R7.6 — the earlier 83 %/49 % was wrong);
     ///   `establish_light_min` 0.05 lets a cohort start almost anywhere the terrain does
     ///   not roof over. `senescence` 0.0005, half the base, is the other half of being a
-    ///   shade plant: long-lived leaves. At the base 0.001 the construction cost of
-    ///   replacing foliage, `(1 + c_g) · senescence · α`, needs `L_eff · μ` above 0.45 to
-    ///   break even, which is not shade at all; at 0.0005 it needs 0.26, and with
-    ///   `light_half` 0.1 that is satisfied at 4 % of open sky.
+    ///   shade plant: long-lived leaves. The break-even it buys, **under stated
+    ///   conditions** — full foliage (`P = α · W`), site mineral 1 so the Monod factor is
+    ///   2/3, no aeration stress and no growth — is where income equals maintenance plus
+    ///   the construction cost of replacing senesced foliage:
+    ///   `L_eff · μ = (maintenance + (1 + c_g) · senescence · α) / (assimilation · α ·
+    ///   monod)`. At the base senescence 0.001 that is
+    ///   `(0.0002 + 1.2·0.001·2) / (0.004·2·(2/3)) = 0.0026 / 0.0053333` = **0.4875**,
+    ///   which is not shade at all; at 0.0005 it is `0.0014 / 0.0053333` = **0.2625**.
+    ///   At 4 % of open sky `L_eff` is 0.3143, so 4 % clears 0.2625 only with `μ` at or
+    ///   above 0.835 — sufficient moisture, not any moisture.
     /// - **Size and rates.** `wood_max` 0.2, `alive_min` 0.015, `donor_min` 0.1 — a third
     ///   of bloomcrown's body; `wood_rate` 0.002 and `foliage_rate` 0.004 are twice the
     ///   base and `propagule_rate` 0.0005 is two and a half times, a pad that fills in

@@ -574,10 +574,12 @@ fn a_newborn_stonecushion_earns_its_upkeep_on_a_rock_ledge() {
         paid_birth(&mut world, fast_donor(Species::Stonecushion), Species::Stonecushion, 0, at(1));
     let income = income_over(&mut birth.flora, &mut world, birth.site, 200);
     assert_survives_on_income(&birth.flora, &world, birth.site, Species::Stonecushion, &income);
-    // Drought tolerance, as a reading rather than a claim: the same pocket drawn down to a
-    // tenth of capacity is still full moisture for this species and wilting for the wet one.
-    // Drought tolerance as a reading rather than a claim: a pocket at a tenth of capacity
-    // is already full moisture for this species, and wilting for the wet one.
+    // Drought tolerance, as a reading rather than a claim, and stated as the assertion
+    // below actually measures it (Astra R7.6): a pocket drawn down to a tenth of capacity
+    // is not *full* moisture for this species — it is about **0.2424** of its ramp,
+    // `(0.1 - 0.02) / (0.35 - 0.02)` — while the wet species is at exactly zero there.
+    // What the reading pins is the ordering and that this species is still drinking at a
+    // tenth of capacity, not that a tenth is plenty.
     let sc = birth.flora.config().species(Species::Stonecushion);
     let frond = birth.flora.config().species(Species::Umbrellafrond);
     let ramp = |v: f64, lo: f64, hi: f64| ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
