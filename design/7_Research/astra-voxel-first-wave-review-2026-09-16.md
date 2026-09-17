@@ -599,3 +599,198 @@ and settle funded reproductive packages and gap arbitration before multiplying
 the presets (R4.4/R4.5). R4.3's accounting qualifications, R4.6's explicit wetland
 trait and R4.8's small boundary fixtures can accompany that work; none calls for
 knob tuning, another long run as a gate, or a general ecological rewrite.
+
+## Round 5
+
+Reviewed package K at `e1e1921` against the round-3b brief and R4.1–R4.8.
+This is a source/test review with isolated binary64 arithmetic checks; I ran no
+cargo command or world experiment. The earlier rounds remain history.
+
+The requested repairs, finding by finding:
+
+- **R4.1: resolved.** `crates/cubarium-voxel-flora/src/step.rs:1007` rounds bin
+  width upward; `:1037` joins only the arrival's own bin, without changing its
+  start. The continuous/pulsed fixtures at
+  `crates/cubarium-voxel-flora/tests/round3.rs:1142,1226` test the former
+  rejuvenation failure. The count bound is cap+1, not cap. K7 gives an expiring
+  bin its last opportunity before removal; pin the exact boundary as R5.5 below.
+- **R4.2: forcing and budget repair resolved.**
+  `crates/cubarium-voxel-flora/examples/two_producers.rs:44,88` states the
+  experimental tap and prints actual flows/storage. The reported near-2.50 m
+  head supports bounded head in those runs; it does not make the warm-up habitat
+  a stationary-habitat measurement or prove that every store has equilibrated.
+- **R4.4: structural repair resolved.** At
+  `crates/cubarium-voxel-flora/src/step.rs:1098`, a donor requests one gross
+  rate, funds it above its reserve floor, respiring construction immediately
+  and retaining the net parcel. At `:1125`, delivery takes the package's
+  fraction of the donor's **current material including parcel** and its mineral.
+  Mineral stays through respiration; no extra construction factor multiplies
+  the recipient's density. Senescence/dieback use that same denominator
+  (`:631,638`); death includes the parcel (`:680`). Clear and pruning book it
+  out. The tests at `crates/cubarium-voxel-flora/tests/round3.rs:321,544,590`
+  cover delivery density, unfunded requests and death with a saved parcel.
+  Keep this rule; bloomcrown's remaining funding/habitat limitation is not the
+  former split-over-24 defect. `funded − landed` includes lost donors' parcels,
+  not just parcels still standing, when deaths or removals occur.
+- **R4.5: lottery and package rule resolved, numeric birth invariant incomplete.**
+  `crates/cubarium-voxel-flora/src/step.rs:828,906,912` uses whole-package
+  weights, sorts candidates, and keys the draw by domain/world/site/tick.
+  Dispersal has a separate domain (`:1180`); neither draw consumes a shared
+  iteration-dependent stream. The swapped-candidate test at `:1307` exercises
+  that contract. Oldest-first consumption preserves each bin's mineral
+  fraction and losing banks; R5.1 is a remaining edge in the newborn it builds.
+- **R4.7: identity repair resolved; observation wording still incomplete.**
+  `crates/cubarium-voxel-flora/examples/two_producers.rs:330` counts surviving
+  descendants by ID, including same-site replacements. The fixture at
+  `crates/cubarium-voxel-flora/tests/round3.rs:1314` covers the blind spot.
+  Withdrawing the invasion verdict was right. The probe still confuses no
+  surviving descendants with no observed recruitment; see R5.4.
+
+1. **R5.1 — P2: a funded birth can round below the death threshold. Timing: now, before carrying germination into the presets.**
+   `crates/cubarium-voxel-flora/src/step.rs:943,952` accumulates the organic
+   debit independently of the diminishing remainder. With three oldest-first
+   bins holding `0.001, 0.009, 0.04`, the bank holds `0.05`, enough for the
+   default package `0.02 / 0.4 = 0.049999999999999996`. These operations return
+   `0.04999999999999999`; `:861` builds wood `0.019999999999999997`, below
+   `alive_min`. With assimilation, maintenance and senescence frozen at zero,
+   the next growth pass kills that paid newborn at `:646` without any loss of
+   wood. I reproduced the ordered arithmetic separately; I did not run a Rust
+   integration fixture. The direct division/multiplication test at `:1280`
+   misses spending across bins, and the `1e-15` comparison in
+   `crates/cubarium-voxel-flora/tests/round3.rs:1011` admits this failure.
+   **Change:** construct funded newborn wood at `alive_min` exactly and take
+   the rounding difference from another newborn compartment, preserving the
+   actual paid organic total and transferred mineral. Pin this three-bin case
+   through birth and one frozen growth tick, with the existing residual checks;
+   also exercise each preset's split. This needs a floating-point allocation
+   correction, not a larger biological package or a relaxed death threshold.
+
+2. **R5.2 — P2: 96 columns is a warm-up observation, not the settled world's niche size. Timing: correct the interpretation now; settle the niche contract before presets.**
+   `crates/cubarium-voxel-flora/examples/two_producers.rs:208,224,376` computes
+   `eligible` after 1,000 world ticks (50 s), before planting, and carries that
+   unchanged into the final result. The head settles only around 900 s in
+   `design/7_Research/voxel-round3-experiment-2026-09-16.md:463`. Thus the
+   comparison at `:554,566` measures different initial wetting under the two
+   taps; it cannot identify a 96-column steady habitat, much less which gate
+   causes its size. At `:515` the note even dismisses the predicate while
+   reporting that none of the three remaining bloomcrown banks passes it.
+   **Change:** label habitat counts with their measurement time; on the next
+   authorised experiment, sample eligibility at introduction and observation,
+   alongside the water budget. Diagnose independent failure combinations for
+   empty soil root box, mean pore, saturated fraction, water depth and geometric
+   light, plus the eligible recipients in each donor's hop. Use the model's
+   gates at `crates/cubarium-voxel-flora/src/step.rs:1198,1221`, not a second
+   approximate predicate. This is a short diagnostic over an available state,
+   not a request for another long comparison now.
+   Bloomcrown on open, aerated soil at pore fraction 0.25 already passes its
+   0.1 moisture/0.6 light thresholds; the rule is not intrinsically incapable
+   of a sunny-soil niche. Whether this generated world supplies that condition
+   persistently is unmeasured here. Keep the values. Before adding springturf,
+   stonecushion and velvetpad, specify whether the intended roles require sunny
+   moist soil, soil pockets near rock, or damp soil under canopy. If the intent
+   is instead bare-rock water uptake or dry-ridge recruitment, that needs an
+   explicit substrate/trait decision. A count of 96 does not choose it.
+
+3. **R5.3 — P2: the pre-K7 results are neither lower bounds nor unchanged coupled budgets. Timing: now, documentation only.**
+   `design/7_Research/voxel-round3-experiment-2026-09-16.md:618` correctly dates
+   the experiment, but `:626` calls establishments, fractions and occupancy
+   sets lower bounds, and `:627` says funding, water and residual numbers are
+   unaffected. Earlier births change gap occupation, water withdrawal, shading,
+   litter and subsequent funding. There is no monotonicity guarantee for those
+   counts or fractions, and unchanged accounting rules do not imply unchanged
+   numerical budgets or residuals. **Change:** retain all numbers as pre-K7
+   observations; state that K7 repairs immediate one-package germination and
+   that its coupled outcomes have not been measured. At the defaults the lost
+   first-tick fraction was `0.001 × 0.05 = 0.00005`, or **0.005%**, not 0.1%.
+   Also correct `:576`: identical initial state, seed, founders and ticks are
+   reproducible. A noise reseed can change the donor's voxel-index key and the
+   subsequent delivery times, so those arms mix terrain effects with changed
+   deterministic draws (`crates/cubarium-voxel-flora/src/step.rs:1180`). Do not
+   use their occupancy difference as independent replicated dispersal evidence.
+
+4. **R5.4 — P2: count recruitment events, and design the control around replacement rather than first birth. Timing: later, before rerunning the probe; not a preset gate.**
+   `crates/cubarium-voxel-flora/examples/two_producers.rs:1024,1035,1059`
+   observes only the final living newcomers. A descendant born and dead during
+   the window yields “recruitment NOT OBSERVED” despite a real birth.
+   **Change:** count newly seen newcomer birth IDs after each tick (or expose
+   per-species birth counters); print cumulative births, deaths and final
+   surviving descendants separately. A tiny birth-then-death fixture is enough.
+   The current global establishment delta includes the resident's births.
+
+   For the future positive control and matched arms, use this concrete design:
+
+   - One founder of the tested species at wood **0.3**, ordinary `Seed` foliage
+     and reserve, zero parcel and no bank of that species. Keep this treatment
+     identical with and without the competitor. Do not rescue a failed
+     single-founder control with four founders and still call it the same test.
+   - Condition the hydrology and resident first, checking interval storage and
+     habitat as well as head. Predeclare three suitable, unoccupied introduction
+     sites across the eligible band, each with eligible dispersal recipients;
+     report their actual recipient counts. For each site and direction, branch
+     the same conditioned state into resident-only, resident-plus-newcomer and
+     newcomer-with-resident-excluded arms. In the exclusion arm remove resident
+     stands **and seed banks**, book removals, and retain matched water, litter
+     and soil mineral. Hold geometry, forcing, phase, species values and draw
+     keys fixed within each pair. Provision the same per-site mineral inventory
+     before this resource-competition study; lazy colonisation imports are not
+     matched fertility (`design/backlog.md:42`).
+   - Start the control with a declared **6,000 s simulated observation cap**,
+     as a future study, not a run requested here. Measure first birth separately
+     from descendants reaching donor size, funding packages and sustaining
+     recruitment themselves. The growth cap at
+     `crates/cubarium-voxel-flora/src/step.rs:558,602`, with `wood_rate = 0.001`
+     (`crates/cubarium-voxel-flora/src/lib.rs:473`), means wood 0.02 needs at
+     least **2,708.15 s** to reach 0.3, then about 300 s to fund a package even
+     under ideal income. Neither 300 s nor the pre-K7 1,300 s first birth is a
+     generation time. If replacement is not observed within the cap, report an
+     inconclusive control; do not infer exclusion or automatically extend it.
+   - Once controls establish full replacement time `G` in both directions,
+     predeclare a matched probe window of at least **3 × the larger G**.
+     Record newborn IDs and donor funding/delivery events so repeated founder
+     donations cannot masquerade as descendant reproduction. Positive increase
+     while rare through replacement, beyond the founder reserve subsidy, in
+     both directions while the resident persists would be coexistence evidence
+     for these conditions. One birth, survival of the imported founder, or a
+     resident that is itself declining does not establish it. A single successful
+     site is a possible refuge, not evidence that every introduction can invade.
+
+5. **R5.5 — P3: pin the expiry tick's last chance explicitly. Timing: with the small germination repair.**
+   `crates/cubarium-voxel-flora/src/step.rs:876,976` implements removal on the
+   first tick with age **greater than** the lifetime, after that tick's lottery.
+   That is a coherent K7 rule: the bin can recruit once on its removal tick,
+   and otherwise goes to litter; it cannot remain indefinitely. Current tests
+   pin immediate recruitment and expiry under a permanently failing predicate,
+   but not their intersection. **Change:** a two-tick lifetime, zero attrition,
+   a paid package in a bin starting at tick 0, and a gate that first opens at
+   tick 3 should recruit then. Its still-blocked twin should fall wholly to
+   litter on tick 3 and never recruit on tick 4. Check organic/mineral transfers
+   and document this boundary rather than changing `>` without a rule decision.
+
+6. **R5.6 — P3: give preset authors the implemented contract. Timing: before presets land.**
+   `crates/cubarium-voxel-flora/src/lib.rs:329` still calls `propagule_rate`
+   per neighbour and says every face receives. **Change:** describe the donor's
+   gross saving rate, construction cost and one drawn recipient per funded
+   package; keep the corrected account in `design/backlog.md:41`. Apply the
+   paid-recruitment/survival and failing-neighbour fixtures already required by
+   `design/handoffs/voxel-round3b-briefs-2026-09-17.md:114` to each new preset,
+   including its actual split and `alive_min <= wood_max`. Soil-only roots,
+   highest-face dispersal and geometric-only germination light remain explicit
+   boundaries, not evidence of bare-rock feeding or canopy-sensitive germination.
+   R4.3/R4.6's mineral-inventory and wetland-proxy qualifications are now stated
+   correctly in `design/backlog.md:42,44`; keep them, with fuller nutrient/light
+   physiology deferred until an experiment actually needs it.
+
+### What this does and does not establish
+
+K resolves rejuvenation, fragmented delivery, enum-order arbitration and founder
+misidentification. Its parcel accounting follows the organic/mineral fraction
+rule, and K7 makes a fresh whole package available before decay. The supplied
+long-run evidence belongs to the earlier phase order; this review establishes
+neither post-K7 outcomes nor bloomcrown self-replacement or coexistence.
+
+**Verdict: changes requested before clearing round 3 for presets:** fix the
+funded-newborn threshold failure (R5.1), correct the habitat phase and post-K7
+claims (R5.2/R5.3), and carry the small boundary/contract checks into that repair
+and the presets (R5.5/R5.6). The structural package-K choices can stand. The
+positive-control study and its observation fix (R5.4) are later work, not a
+condition for adding presets; no tuning or long rerun is required for clearance.
