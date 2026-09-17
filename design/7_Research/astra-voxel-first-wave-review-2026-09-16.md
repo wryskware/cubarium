@@ -794,3 +794,134 @@ claims (R5.2/R5.3), and carry the small boundary/contract checks into that repai
 and the presets (R5.5/R5.6). The structural package-K choices can stand. The
 positive-control study and its observation fix (R5.4) are later work, not a
 condition for adding presets; no tuning or long rerun is required for clearance.
+
+## Round 6
+
+Clearance read at `6cbe4af`, covering the five K8 commits after `7259ae9`, their
+implementation and fixtures, and the updated experiment note. Source review and
+isolated arithmetic only; no cargo command, world run or capture. Prior rounds
+are preserved.
+
+The Round 5 repairs now stand as follows:
+
+- **R5.1: resolved for the landed presets and the reported three-bin failure.**
+  `crates/cubarium-voxel-flora/src/step.rs:917` allocates wood first at
+  `alive_min`, capped by the actual material available. The three-bin spend is
+  still `0.04999999999999999`; the new stocks are wood `0.02`, foliage
+  `0.019999999999999997`, reserve `0.009999999999999992`. They sum back to the
+  actual spend exactly in this case, with mineral unchanged. I reproduced that
+  arithmetic. For finite nonnegative material and valid preset values,
+  `left = max(organic − wood, 0)` and `0 <= foliage <= left`, so
+  `reserve = left − foliage` cannot be negative, including a zero-reserve split.
+  The fixture at `:1524` now checks birth and one frozen growth tick, unchanged
+  identity, remaining bank material and residuals. The allocation cases at
+  `:1612` cover both existing presets and zero reserve. This is not a claim
+  that arbitrary invalid configs are validated, or that an underfunded input
+  is promoted to `alive_min`; the helper correctly declines to invent material.
+- **R5.2: the measurement/API repair is resolved.**
+  `crates/cubarium-voxel-flora/src/step.rs:1242,1258,1298,1312` routes cached
+  germination and public queries through the same `gates` calculation and
+  `Gates::passes`. The old predicate helper is gone; the harness wrapper at
+  `crates/cubarium-voxel-flora/examples/two_producers.rs:582` delegates to
+  `can_establish`. Eligibility is read at introduction (`:229`) and again at
+  observation (`:340`), and diagnosis reads the public gates (`:432`). A few
+  causal claims still exceed these measurements; those are R6.1/R6.3 below.
+- **R5.3: the substantive correction is resolved.**
+  `design/7_Research/voxel-round3-experiment-2026-09-16.md:583,693` withdraws
+  independent-draw, lower-bound and unchanged-budget claims. It distinguishes
+  deterministic replay from changed keys under a noise reseed. Remaining
+  provenance/wording inconsistencies are documentation follow-ups, not a reason
+  to repeat the experiment.
+- **R5.5: resolved.** `crates/cubarium-voxel-flora/src/step.rs:805,1019`
+  documents and implements the last lottery on the first tick past expiry.
+  `crates/cubarium-voxel-flora/tests/round3.rs:1380` opens one twin's gate on
+  tick 3 of a two-tick lifetime: it recruits, the blocked twin falls wholly to
+  litter with mineral/energy, and opening that twin on tick 4 creates nothing.
+- **R5.6: the rate contract is resolved in substance.**
+  `crates/cubarium-voxel-flora/src/lib.rs:332` now describes one donor's gross
+  saving rate, reserve floor, construction, whole package and one unscreened
+  recipient. The per-preset boundary fixtures remain work for the presets
+  themselves; they are not missing implementations in this two-species slice.
+- **R5.4 observation fix: resolved.**
+  `crates/cubarium-voxel-flora/examples/two_producers.rs:1178,1197,1223`
+  counts newly seen newcomer IDs each tick and prints births, losses and
+  survivors separately. Newborns remain observable at the end of their birth
+  tick because death precedes germination. The birth-then-death fixture at
+  `crates/cubarium-voxel-flora/tests/round3.rs:1304` exercises the missing case.
+  The replacement-control study remains later work, not a clearance condition.
+
+1. **R6.1 — P2: define umbrellafrond's wet-soil role; the diagnostic does not establish a transient-only species. Timing: in the presets brief.**
+   `design/7_Research/voxel-round3-experiment-2026-09-16.md:619,633` gives
+   2,404 mean-pore refusals and a skyline mean of 0.401. That mean averages
+   different root boxes at one unsettled moment
+   (`crates/cubarium-voxel-flora/examples/two_producers.rs:439,466`); it is not
+   the equilibrium of drained soil. Soil's actual retained fraction is 0.25
+   (`crates/cubarium-voxel/src/material.rs:44`), and ongoing supply can sustain
+   wetter locations. A 0.45 recruitment floor can exclude ordinary drained
+   ground while admitting persistently wet hollows. Neither the 668 qualifying
+   columns nor the falling head tells us those hollows must disappear.
+   **Change:** retain the stated wetland-producer role unless the brief explicitly
+   chooses another: soil roots with sustained wetness, saturation tolerance 1,
+   and the existing free-water depth limit. Give it a passing wet-root fixture
+   (e.g. mean pore 0.6) and a failing drained-soil neighbour (0.25), and check
+   adult moisture/income alongside recruitment. If the intended role is instead
+   ordinary moist, aerated understory, state that change and choose the
+   `establish_pore_min`, `wilt_pore` and `sat_pore` placeholders together
+   (`crates/cubarium-voxel-flora/src/lib.rs:575`). Lowering 0.45 below 0.40
+   alone is not justified by this spatial mean. The **role is a contract choice**;
+   the numeric thresholds encoding it are preset choices the next round may
+   set and label as placeholders. No hydrology or stress-equation rewrite is
+   required merely to choose those thresholds.
+
+2. **R6.2 — P2: define bloomcrown by resources, and give each new preset its own small boundary case. Timing: before the presets land.**
+   `crates/cubarium-voxel-flora/src/lib.rs:540` describes a light-demanding
+   producer needing moist, aerated soil. The observation at
+   `design/7_Research/voxel-round3-experiment-2026-09-16.md:613` is compatible
+   with that: 2,688 columns pass; the other 384 fail saturation, with 55 also
+   failing water depth. It does not require bloomcrown to occupy only peaks,
+   or only a small fraction of the map. **Change:** make sunny, aerated soil
+   the brief's explicit baseline for bloomcrown, with no occupancy target or
+   threshold adjustment to recover the former 96-column count. State
+   springturf's soil/light role, stonecushion's access to soil pockets, and
+   velvetpad's damp-soil role before assigning their values. Each needs one
+   paid birth plus short survival/income check and a failing neighbouring
+   condition, using its actual split and size limits. Carry finite nonnegative
+   splits summing to one, a positive wood fraction and `alive_min <= wood_max`
+   into those checks. Soil-only roots, highest-face dispersal and geometric
+   germination light remain the boundaries at
+   `crates/cubarium-voxel-flora/src/step.rs:396,1188,1305`; bare-rock water
+   uptake, lower-ledge landing or canopy-sensitive germination would be explicit
+   rule additions if a role needs them. Nothing here requires those additions.
+
+3. **R6.3 — P3: finish the reporting corrections without another repair cycle. Timing: with the presets brief or before the next experiment.**
+   **Change:** in `design/7_Research/voxel-round3-experiment-2026-09-16.md:627`,
+   call this 400 **coupled** seconds after introduction: the harness first warms
+   up for 50 s, then runs the requested duration
+   (`crates/cubarium-voxel-flora/examples/two_producers.rs:212,271`), so the
+   final world age is 450 s, not “350 s later.” At `:630`, zero pore/light
+   refusals at observation does not identify which gate caused the initial 96;
+   at `:640`, a later eligible-neighbour count cannot dismiss the predicate in
+   the earlier 2,000 s arms, which reported refused bloomcrown banks. Limit both
+   claims to their measured states. At `:687`, scope “pre-K7” to the three-arm
+   comparison, excluding the newly added K8 diagnostic, and change the surviving
+   0.1% at `:689` to 0.005%. Remove “settled water” from the unconditional
+   observation label at `crates/cubarium-voxel-flora/examples/two_producers.rs:973`;
+   call the size difference at `:982` a net count change, not a count of columns
+   that moved. Finally, at `crates/cubarium-voxel-flora/src/lib.rs:342`, write
+   construction as `gross − gross / (1 + build)` rather than “c_g of” the gross.
+   The adjacent 0.06-cost/0.05-package example and implementation are correct.
+
+### What this does and does not establish
+
+The K8 source and focused fixtures answer the implementation failures from Round
+5. The supplied diagnostic demonstrates changing eligibility and identifies the
+gates at observation. It establishes neither settled habitat nor self-replacement
+or coexistence. I checked the source and allocation arithmetic; the reported
+world measurements and test executions remain the workers' observations.
+
+**Verdict: clears round 3 for the presets round at `6cbe4af`.** No further model
+repair or long experiment is required before springturf, stonecushion and
+velvetpad. Put the niche contracts and each preset's small boundary fixture in
+that round, carry the reporting corrections with it, and keep the later
+replacement-control study separate. This clears the substrate for more presets;
+it does not certify ecological balance.
