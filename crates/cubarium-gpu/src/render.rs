@@ -29,6 +29,7 @@ use std::collections::HashMap;
 
 use crate::atlas::Atlas;
 use crate::palette::SceneUniforms;
+use crate::present::{FrameSource, PresentPass, TargetSlot};
 use crate::scene::{LAYERS, Layer, RingLayout, Scene, SpriteInstance};
 use crate::vk::{Gpu, HostBuffer, barrier};
 
@@ -37,7 +38,6 @@ const BACKGROUND_FRAG: &[u8] = include_bytes!("../shaders/background.frag.spv");
 const WATER_FRAG: &[u8] = include_bytes!("../shaders/water.frag.spv");
 const SPRITE_VERT: &[u8] = include_bytes!("../shaders/sprite.vert.spv");
 const SPRITE_FRAG: &[u8] = include_bytes!("../shaders/sprite.frag.spv");
-const PRESENT_FRAG: &[u8] = include_bytes!("../shaders/present.frag.spv");
 
 /// The side of the per-frame scratch page, in texels.
 pub const SCRATCH_SIDE: u32 = 256;
@@ -75,7 +75,7 @@ impl PresentTransform {
     }
 
     /// The push constants: two columns of the panel→raster matrix, then its offset.
-    fn push(&self, target: (u32, u32)) -> [f32; 8] {
+    pub(crate) fn push(&self, target: (u32, u32)) -> [f32; 8] {
         let k = 1.0 / self.factor as f32;
         let (pw, ph) = (target.0 as f32, target.1 as f32);
         // col0 = (m00, m10), col1 = (m01, m11): `M · p = col0·p.x + col1·p.y`.
@@ -204,11 +204,8 @@ pub struct Renderer {
     background_pipeline: vk::Pipeline,
     water_pipeline: vk::Pipeline,
     sprite_pipeline: vk::Pipeline,
-    // --- the present pass, one per target format ---
-    present_set_layout: vk::DescriptorSetLayout,
-    present_set: vk::DescriptorSet,
-    present_pipeline_layout: vk::PipelineLayout,
-    present: HashMap<(i32, i32), (vk::RenderPass, vk::Pipeline)>,
+    /// The last pass, shared with the voxel renderer: see [`PresentPass`].
+    present: PresentPass,
     descriptor_pool: vk::DescriptorPool,
     // --- submission ---
     pub command_pool: vk::CommandPool,
@@ -381,32 +378,24 @@ impl Renderer {
                 None,
             )
         }?;
-        let present_bindings = [sampler_binding(0)];
-        let present_set_layout = unsafe {
-            d.create_descriptor_set_layout(
-                &vk::DescriptorSetLayoutCreateInfo::default().bindings(&present_bindings),
-                None,
-            )
-        }?;
         let sizes = [
             vk::DescriptorPoolSize::default().ty(vk::DescriptorType::UNIFORM_BUFFER).descriptor_count(1),
-            vk::DescriptorPoolSize::default().ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER).descriptor_count(5),
+            vk::DescriptorPoolSize::default().ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER).descriptor_count(4),
         ];
         let descriptor_pool = unsafe {
             d.create_descriptor_pool(
-                &vk::DescriptorPoolCreateInfo::default().max_sets(2).pool_sizes(&sizes),
+                &vk::DescriptorPoolCreateInfo::default().max_sets(1).pool_sizes(&sizes),
                 None,
             )
         }?;
-        let layouts = [scene_set_layout, present_set_layout];
-        let sets = unsafe {
+        let layouts = [scene_set_layout];
+        let scene_set = unsafe {
             d.allocate_descriptor_sets(
                 &vk::DescriptorSetAllocateInfo::default()
                     .descriptor_pool(descriptor_pool)
                     .set_layouts(&layouts),
             )
-        }?;
-        let (scene_set, present_set) = (sets[0], sets[1]);
+        }?[0];
 
         let buffer_info = [vk::DescriptorBufferInfo::default()
             .buffer(uniforms.buffer)
@@ -417,11 +406,10 @@ impl Renderer {
                 .image_view(view)
                 .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)]
         };
-        let (i1, i2, i3, i4, i5) = (
+        let (i1, i2, i3, i5) = (
             image_info(field_views[0]),
             image_info(field_views[1]),
             image_info(atlas_view),
-            image_info(raster_view),
             image_info(scratch_view),
         );
         unsafe {
@@ -436,7 +424,6 @@ impl Renderer {
                     sampler_write(scene_set, 2, &i2),
                     sampler_write(scene_set, 3, &i3),
                     sampler_write(scene_set, 4, &i5),
-                    sampler_write(present_set, 0, &i4),
                 ],
                 &[],
             )
@@ -450,19 +437,6 @@ impl Renderer {
                 None,
             )
         }?;
-        let present_layouts = [present_set_layout];
-        let ranges = [vk::PushConstantRange::default()
-            .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-            .size(32)];
-        let present_pipeline_layout = unsafe {
-            d.create_pipeline_layout(
-                &vk::PipelineLayoutCreateInfo::default()
-                    .set_layouts(&present_layouts)
-                    .push_constant_ranges(&ranges),
-                None,
-            )
-        }?;
-
         let fullscreen = gpu.shader(FULLSCREEN_VERT)?;
         let background_fs = gpu.shader(BACKGROUND_FRAG)?;
         let water_fs = gpu.shader(WATER_FRAG)?;
@@ -520,10 +494,7 @@ impl Renderer {
             background_pipeline,
             water_pipeline,
             sprite_pipeline,
-            present_set_layout,
-            present_set,
-            present_pipeline_layout,
-            present: HashMap::new(),
+            present: PresentPass::new(gpu, raster_view, nearest)?,
             descriptor_pool,
             command_pool,
             queries,
@@ -594,30 +565,7 @@ impl Renderer {
         format: vk::Format,
         final_layout: vk::ImageLayout,
     ) -> Result<vk::RenderPass> {
-        Ok(self.present_entry(gpu, format, final_layout)?.0)
-    }
-
-    fn present_entry(
-        &mut self,
-        gpu: &Gpu,
-        format: vk::Format,
-        final_layout: vk::ImageLayout,
-    ) -> Result<(vk::RenderPass, vk::Pipeline)> {
-        let key = (format.as_raw(), final_layout.as_raw());
-        if let Some(entry) = self.present.get(&key) {
-            return Ok(*entry);
-        }
-        let d = &gpu.device;
-        let pass = colour_pass(d, format, vk::AttachmentLoadOp::DONT_CARE, final_layout)?;
-        let vs = gpu.shader(FULLSCREEN_VERT)?;
-        let fs = gpu.shader(PRESENT_FRAG)?;
-        let pipeline = fullscreen_pipeline(d, pass, self.present_pipeline_layout, vs, fs, false)?;
-        unsafe {
-            d.destroy_shader_module(vs, None);
-            d.destroy_shader_module(fs, None);
-        }
-        self.present.insert(key, (pass, pipeline));
-        Ok((pass, pipeline))
+        self.present.pass(gpu, format, final_layout)
     }
 
     /// Upload what changed and record the whole frame: the four scene passes into the
@@ -629,7 +577,7 @@ impl Renderer {
         gpu: &Gpu,
         cb: vk::CommandBuffer,
         scene: &Scene,
-        target: Option<(&TargetImage, (u32, u32), vk::Format, vk::ImageLayout, PresentTransform)>,
+        target: Option<TargetSlot<'_>>,
     ) -> Result<usize> {
         if scene.layout != self.layout {
             bail!("scene layout {:?} is not the renderer's {:?}", scene.layout, self.layout);
@@ -672,7 +620,8 @@ impl Renderer {
 
         let target = target
             .map(|(image, extent, format, layout, xform)| {
-                self.present_entry(gpu, format, layout)
+                self.present
+                    .entry(gpu, format, layout)
                     .map(|(pass, pipeline)| (image, extent, xform, pass, pipeline))
             })
             .transpose()?;
@@ -778,25 +727,7 @@ impl Renderer {
 
             // --- the panel ---
             if let Some((image, extent, xform, pass, pipeline)) = target {
-                begin(d, cb, pass, image.framebuffer, extent.0, extent.1);
-                d.cmd_bind_descriptor_sets(
-                    cb,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    self.present_pipeline_layout,
-                    0,
-                    &[self.present_set],
-                    &[],
-                );
-                d.cmd_push_constants(
-                    cb,
-                    self.present_pipeline_layout,
-                    vk::ShaderStageFlags::FRAGMENT,
-                    0,
-                    bytemuck::cast_slice(&xform.push(extent)),
-                );
-                d.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline);
-                d.cmd_draw(cb, 3, 1, 0, 0);
-                d.cmd_end_render_pass(cb);
+                self.present.record(d, cb, image, extent, xform, pass, pipeline);
             }
 
             d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, 3);
@@ -928,20 +859,15 @@ impl Renderer {
 
     /// Release everything. The device must be idle.
     pub fn destroy(&mut self, gpu: &Gpu) {
+        self.present.destroy(gpu);
         let d = &gpu.device;
         unsafe {
-            for (pass, pipeline) in self.present.values() {
-                d.destroy_pipeline(*pipeline, None);
-                d.destroy_render_pass(*pass, None);
-            }
             d.destroy_pipeline(self.background_pipeline, None);
             d.destroy_pipeline(self.water_pipeline, None);
             d.destroy_pipeline(self.sprite_pipeline, None);
             d.destroy_pipeline_layout(self.scene_pipeline_layout, None);
-            d.destroy_pipeline_layout(self.present_pipeline_layout, None);
             d.destroy_descriptor_pool(self.descriptor_pool, None);
             d.destroy_descriptor_set_layout(self.scene_set_layout, None);
-            d.destroy_descriptor_set_layout(self.present_set_layout, None);
             self.uniforms.destroy(gpu);
             self.instances.destroy(gpu);
             self.field_staging.destroy(gpu);
@@ -1020,7 +946,7 @@ fn sampler_write<'a>(
         .image_info(info)
 }
 
-fn colour_pass(
+pub(crate) fn colour_pass(
     d: &ash::Device,
     format: vk::Format,
     load: vk::AttachmentLoadOp,
@@ -1073,7 +999,7 @@ pub fn framebuffer(
 }
 
 /// `cmd_begin_render_pass` with the viewport and scissor set.
-unsafe fn begin(
+pub(crate) unsafe fn begin(
     d: &ash::Device,
     cb: vk::CommandBuffer,
     pass: vk::RenderPass,
@@ -1114,7 +1040,7 @@ fn premultiplied_blend() -> vk::PipelineColorBlendAttachmentState {
         .alpha_blend_op(vk::BlendOp::ADD)
 }
 
-fn fullscreen_pipeline(
+pub(crate) fn fullscreen_pipeline(
     d: &ash::Device,
     pass: vk::RenderPass,
     layout: vk::PipelineLayout,
@@ -1275,5 +1201,45 @@ mod tests {
         let x = PresentTransform::fit((640, 360), (1080, 1920), 1, false).unwrap();
         assert_eq!(x.factor, 3);
         assert!(PresentTransform::fit((2000, 2000), (1080, 1920), 0, false).is_none());
+    }
+}
+
+/// The ring renderer as a target's frame source: one frame is one [`Scene`].
+impl FrameSource for Renderer {
+    type Frame<'a> = &'a Scene;
+
+    fn raster_size(&self) -> (u32, u32) {
+        (self.layout.w, self.layout.h)
+    }
+
+    fn command_pool(&self) -> vk::CommandPool {
+        self.command_pool
+    }
+
+    fn present_pass(
+        &mut self,
+        gpu: &Gpu,
+        format: vk::Format,
+        final_layout: vk::ImageLayout,
+    ) -> Result<vk::RenderPass> {
+        Renderer::present_pass(self, gpu, format, final_layout)
+    }
+
+    fn record_frame(
+        &mut self,
+        gpu: &Gpu,
+        cb: vk::CommandBuffer,
+        frame: &Scene,
+        target: Option<TargetSlot<'_>>,
+    ) -> Result<()> {
+        Renderer::record(self, gpu, cb, frame, target).map(|_| ())
+    }
+
+    fn gpu_ms(&self, gpu: &Gpu) -> f64 {
+        Renderer::gpu_ms(self, gpu)
+    }
+
+    fn read_raster(&self, gpu: &Gpu) -> Result<Vec<u8>> {
+        Renderer::read_raster(self, gpu)
     }
 }

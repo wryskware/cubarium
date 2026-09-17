@@ -42,7 +42,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::clock::{Clock, Step};
 use crate::cli::{Voxel, VoxelSceneArg, VoxelSinkArg};
-use crate::sink::{FrameSink, Output, PngSink, WebSink, WorldShape};
+use crate::sink::gpu::voxel::{VoxelGpuSink, VoxelGpuSinkOptions};
+use crate::sink::{FrameSink, GpuTargetKind, Output, PngSink, WebSink, WorldShape};
 
 use present::VoxelPresenter;
 use project::Projection;
@@ -134,6 +135,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         Some(path) => load_config(path)?,
         None => VoxelConfig::default(),
     };
+    args.validate()?;
     if args.sink == VoxelSinkArg::Png && args.seconds <= 0.0 {
         bail!("`--sink png` needs `--seconds N`, or it would capture until interrupted");
     }
@@ -171,15 +173,36 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     let shape = WorldShape::new(topology, Scale::ONE);
 
     let speed = args.speed.clamp(MIN_SPEED, MAX_SPEED);
-    let mut sink: Box<dyn FrameSink> = match args.sink {
-        VoxelSinkArg::Png => Box::new(PngSink::new(&args.out, args.every)?),
-        VoxelSinkArg::Web => Box::new(WebSink::with_world(
-            args.web_port,
+    let web = |port| {
+        WebSink::with_world(
+            port,
             "voxel strip",
             crate::sink::web::Source { speed, ..Default::default() },
             None,
             shape,
-        )?),
+        )
+    };
+    let mut out: Out = match args.sink {
+        VoxelSinkArg::Png => {
+            Out::cpu(Box::new(PngSink::new(&args.out, args.every)?), cfg.clone(), proj)
+        }
+        VoxelSinkArg::Web => Out::cpu(Box::new(web(args.web_port)?), cfg.clone(), proj),
+        VoxelSinkArg::Gpu => {
+            crate::sink::gpu::voxel::check(proj)?;
+            let mut gpu = VoxelGpuSink::new(
+                &cfg,
+                proj,
+                VoxelGpuSinkOptions {
+                    target: args.gpu_target.unwrap_or_else(GpuTargetKind::detect),
+                    capture: args.gpu_capture.clone(),
+                    roof_from_texture: !args.gpu_roof_walk,
+                },
+            )?;
+            if args.gpu_web_rate > 0.0 {
+                gpu = gpu.with_web(web(args.web_port)?, args.gpu_web_rate);
+            }
+            Out::Gpu(Box::new(gpu))
+        }
     };
 
     let c = world.config();
@@ -203,9 +226,6 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     );
     eprintln!("cubarium voxel: stdin commands — {COMMANDS}");
 
-    let mut presenter = VoxelPresenter::new(cfg, proj);
-    let mut canvas = Canvas::new(topology, Scale::ONE);
-    let mut raster = shape.raster().expect("a ring topology has a raster");
     let commands = spawn_stdin_reader();
 
     let limit = (args.seconds > 0.0).then(|| Duration::from_secs_f64(args.seconds));
@@ -214,6 +234,10 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     let (mut ticks, mut frames) = (0u64, 0u64);
     let mut ctl = Control::new(speed, proj);
     let mut debt = 0.0f64;
+    // Whether the world or the plant layer has moved since the last frame drawn. The CPU
+    // presenter re-reads the world every frame and does not care; the GPU packs one
+    // texture per *tick*, so it needs to be told.
+    let mut moved = true;
 
     while !ctl.quit {
         let now = Instant::now();
@@ -222,12 +246,16 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         {
             break;
         }
-        if sink.should_quit() || stop.load(Ordering::Relaxed) {
+        if out.should_quit() || stop.load(Ordering::Relaxed) {
             break;
         }
 
         while let Ok(line) = commands.try_recv() {
             ctl.handle(&mut world, &mut flora, &line);
+            // A command may have moved a cell, seeded a stand or loaded a world; which
+            // ones did is the command's business, and one extra pack is cheaper than a
+            // rule here that has to be kept in step with `Control::handle`.
+            moved = true;
         }
         if ctl.quit {
             break;
@@ -242,6 +270,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                         world.step();
                         flora.step(&mut world);
                         ticks += 1;
+                        moved = true;
                     }
                 } else {
                     debt += ctl.speed;
@@ -250,14 +279,13 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                         world.step();
                         flora.step(&mut world);
                         ticks += 1;
+                        moved = true;
                     }
                 }
-                sink.observe_tick(world.tick());
+                out.observe_tick(world.tick());
             }
             Step::Render { .. } => {
-                presenter.draw(&world.view(), flora.view(), &mut canvas);
-                canvas.encode_raster(&mut raster);
-                sink.submit(Output::Ring(&raster))?;
+                out.render(&world, &flora, std::mem::take(&mut moved))?;
                 frames += 1;
             }
             Step::Sleep(d) => std::thread::sleep(d),
@@ -275,7 +303,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         }
     }
 
-    sink.finish()?;
+    out.finish()?;
     let elapsed = clock.elapsed(Instant::now()).as_secs_f64();
     let view = world.view();
     let fv = flora.view();
@@ -292,6 +320,75 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         fv.energy() - fv.ledger.expected_energy(),
     );
     Ok(())
+}
+
+/// Where the run's frames come from: the CPU presenter into a [`FrameSink`], or the
+/// GPU's slab-walk shader straight onto a target.
+///
+/// The two cannot be one `dyn FrameSink`, and the reason is the whole point of the GPU
+/// path: a `FrameSink` consumes *pixels*, and `--sink gpu` exists so that nobody
+/// rasterises the strip on the CPU. `FrameSink`'s `observe_world` hook is no help here
+/// either — it carries the ring's `RenderView`, and this world is a voxel strip. So the
+/// loop names the two, and everything they share is these four methods.
+enum Out {
+    Cpu {
+        sink: Box<dyn FrameSink>,
+        presenter: VoxelPresenter,
+        canvas: Canvas,
+        raster: cube_proto::Raster,
+    },
+    Gpu(Box<VoxelGpuSink>),
+}
+
+impl Out {
+    fn cpu(sink: Box<dyn FrameSink>, cfg: VoxelConfig, proj: Projection) -> Out {
+        let topology = Topology::Ring { w: proj.raster_w, h: proj.raster_h };
+        Out::Cpu {
+            sink,
+            presenter: VoxelPresenter::new(cfg, proj),
+            canvas: Canvas::new(topology, Scale::ONE),
+            raster: cube_proto::Raster::black(proj.raster_w, proj.raster_h),
+        }
+    }
+
+    /// Draw one frame. `moved` says the world has changed since the last one, which is
+    /// what the GPU path packs a new voxel texture on; the CPU path reads the world
+    /// afresh every frame and ignores it.
+    fn render(&mut self, world: &World, flora: &Flora, moved: bool) -> Result<()> {
+        match self {
+            Out::Cpu { sink, presenter, canvas, raster } => {
+                presenter.draw(&world.view(), flora.view(), canvas);
+                canvas.encode_raster(raster);
+                sink.submit(Output::Ring(raster))
+            }
+            Out::Gpu(gpu) => {
+                if moved {
+                    gpu.stage_world(world, flora);
+                }
+                gpu.render()
+            }
+        }
+    }
+
+    fn observe_tick(&mut self, tick: u64) {
+        if let Out::Cpu { sink, .. } = self {
+            sink.observe_tick(tick);
+        }
+    }
+
+    fn should_quit(&mut self) -> bool {
+        match self {
+            Out::Cpu { sink, .. } => sink.should_quit(),
+            Out::Gpu(gpu) => gpu.should_quit(),
+        }
+    }
+
+    fn finish(&mut self) -> Result<()> {
+        match self {
+            Out::Cpu { sink, .. } => sink.finish(),
+            Out::Gpu(gpu) => gpu.finish(),
+        }
+    }
 }
 
 /// The run state a stdin command may change, and the one function that changes it.

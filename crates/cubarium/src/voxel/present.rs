@@ -193,7 +193,12 @@ pub const SKIN_ALPHA_GAIN: f32 = 1.7;
 /// How hard a water *top* face blends relative to the surface row it caps.
 pub const WATER_TOP_ALPHA: f32 = 0.8;
 /// Below this fraction a voxel is dry and draws nothing.
-const WATER_EPSILON: f32 = 1e-4;
+///
+/// `pub(crate)` for the GPU packer, which must call a cell dry at exactly the same
+/// fraction this presenter does (`crate::sink::gpu::voxel`): the voxel texture carries a
+/// quantised fraction and a zero there *means* dry, so the threshold has to be this one
+/// and not a second copy of it.
+pub(crate) const WATER_EPSILON: f32 = 1e-4;
 
 struct Strata {
     sky: [f32; 3],

@@ -19,8 +19,8 @@ use drm::buffer::DrmFourcc;
 
 use super::dmabuf::{self, LinearImage};
 use super::kms::Output;
-use crate::render::{PresentTransform, Renderer, TargetImage, framebuffer};
-use crate::scene::Scene;
+use crate::present::FrameSource;
+use crate::render::{PresentTransform, TargetImage, framebuffer};
 use crate::vk::Gpu;
 
 const RING: usize = 2;
@@ -43,9 +43,9 @@ pub struct Scanout {
 
 impl Scanout {
     /// Take DRM master, allocate the scanout ring and set the mode.
-    pub fn open(
+    pub fn open<S: FrameSource>(
         gpu: &Gpu,
-        renderer: &mut Renderer,
+        src: &mut S,
         connector: &str,
         quarter_turns: u32,
     ) -> Result<Scanout> {
@@ -56,23 +56,23 @@ impl Scanout {
         let shader_encode = !dmabuf::srgb_view_supported(gpu);
         let mut output = Output::open(Path::new("/dev/dri/card0"), connector)?;
         let (w, h) = (output.width, output.height);
-        let transform =
-            PresentTransform::fit((renderer.layout.w, renderer.layout.h), (w, h), quarter_turns, shader_encode)
-                .ok_or_else(|| {
-                    anyhow!(
-                        "a {}x{} raster does not fit {w}x{h} at {quarter_turns} quarter turn(s)",
-                        renderer.layout.w,
-                        renderer.layout.h
-                    )
-                })?;
+        let raster = src.raster_size();
+        let transform = PresentTransform::fit(raster, (w, h), quarter_turns, shader_encode)
+            .ok_or_else(|| {
+                anyhow!(
+                    "a {}x{} raster does not fit {w}x{h} at {quarter_turns} quarter turn(s)",
+                    raster.0,
+                    raster.1
+                )
+            })?;
         let view_format = if shader_encode { dmabuf::FORMAT } else { vk::Format::B8G8R8A8_SRGB };
-        let pass = renderer.present_pass(gpu, view_format, vk::ImageLayout::GENERAL)?;
+        let pass = src.present_pass(gpu, view_format, vk::ImageLayout::GENERAL)?;
 
         let d = &gpu.device;
         let command_buffers = unsafe {
             d.allocate_command_buffers(
                 &vk::CommandBufferAllocateInfo::default()
-                    .command_pool(renderer.command_pool)
+                    .command_pool(src.command_pool())
                     .command_buffer_count(RING as u32),
             )
         }?;
@@ -121,47 +121,56 @@ impl Scanout {
     /// Render into the next image of the ring and flip it.
     ///
     /// Returns `(GPU ms, submit..fence ms, flip queue..complete ms)`.
-    pub fn draw(&mut self, gpu: &Gpu, renderer: &mut Renderer, scene: &Scene) -> Result<(f64, f64, f64)> {
+    pub fn draw<S: FrameSource>(
+        &mut self,
+        gpu: &Gpu,
+        src: &mut S,
+        frame: S::Frame<'_>,
+    ) -> Result<(f64, f64, f64)> {
         let d = &gpu.device;
         let i = self.index;
         self.index = (self.index + 1) % RING;
-        let frame = &self.frames[i];
+        let slot = &self.frames[i];
         let start = Instant::now();
-        unsafe { d.reset_command_buffer(frame.command_buffer, vk::CommandBufferResetFlags::empty()) }?;
-        renderer.record(
+        unsafe { d.reset_command_buffer(slot.command_buffer, vk::CommandBufferResetFlags::empty()) }?;
+        src.record_frame(
             gpu,
-            frame.command_buffer,
-            scene,
+            slot.command_buffer,
+            frame,
             Some((
-                &frame.target,
+                &slot.target,
                 (self.output.width, self.output.height),
                 self.view_format,
                 vk::ImageLayout::GENERAL,
                 self.transform,
             )),
         )?;
-        let one = [frame.command_buffer];
+        let one = [slot.command_buffer];
         unsafe {
-            d.reset_fences(&[frame.fence])?;
-            d.queue_submit(gpu.queue, &[vk::SubmitInfo::default().command_buffers(&one)], frame.fence)?;
-            d.wait_for_fences(&[frame.fence], true, u64::MAX)?;
+            d.reset_fences(&[slot.fence])?;
+            d.queue_submit(gpu.queue, &[vk::SubmitInfo::default().command_buffers(&one)], slot.fence)?;
+            d.wait_for_fences(&[slot.fence], true, u64::MAX)?;
         }
         let submitted = Instant::now();
-        self.output.flip(frame.fb)?;
+        self.output.flip(slot.fb)?;
         let flipped = Instant::now();
         Ok((
-            renderer.gpu_ms(gpu),
+            src.gpu_ms(gpu),
             (submitted - start).as_secs_f64() * 1e3,
             (flipped - submitted).as_secs_f64() * 1e3,
         ))
     }
 
     /// The last scanned-out image, read back through the GPU as RGBA8.
-    pub fn read_scanout(&self, gpu: &Gpu, renderer: &Renderer) -> Result<(u32, u32, Vec<u8>)> {
+    pub fn read_scanout<S: FrameSource>(
+        &self,
+        gpu: &Gpu,
+        src: &S,
+    ) -> Result<(u32, u32, Vec<u8>)> {
         let i = (self.index + RING - 1) % RING;
         let rgba = dmabuf::read_back(
             gpu,
-            renderer.command_pool,
+            src.command_pool(),
             &self.frames[i].image,
             self.output.width,
             self.output.height,
