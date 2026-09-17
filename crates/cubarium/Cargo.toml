@@ -22,6 +22,7 @@ cubarium-core = { workspace = true }
 # Only for `es::export::PolicyFile`: the reader for an exported trained policy, so
 # `--neural` loads the same file the trainer wrote rather than a second parser.
 cubarium-search = { workspace = true }
+cubarium-voxel = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 minifb = { workspace = true }
