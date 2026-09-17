@@ -28,14 +28,10 @@
 //! Dropped from v1 by the brief: fruit (3c), downhill transport of litter (3f) and
 //! nutrient diffusion (3g).
 //!
-//! # Where this crate's accounting differs from the contract
-//!
-//! `FloraView::energy` counts the energy of living tissue and of litter, and there is no
-//! term in it for dead wood — `Ground` has no species, so it has no `e_v` to count with.
-//! So dead wood carries **no** energy here: the energy of wood that diebacks or dies is
-//! respired to `heat_out` at the moment it becomes dead wood, and the decomposition of
-//! dead wood moves material to nutrient and books no further heat. Booking it twice, or
-//! not at all, would show up as a residual.
+//! Dead wood keeps its energy, per §5: `e_v` per unit of it goes into
+//! `Ground::dead_wood_energy` when the wood diebacks or the stand dies, and leaves as
+//! heat only as the wood decomposes, at the stock's current density. A standing dead
+//! trunk is energy-dense and unavailable, which is the point of it being its own stock.
 //!
 //! Every clamp is a `min` against the stock it reads, so nothing here can go negative.
 
@@ -57,15 +53,16 @@ struct Crown {
 }
 
 pub(crate) fn step(flora: &mut Flora, world: &mut World) {
+    // The stocks decomposition is allowed to draw on: what each site held when the tick
+    // started, taken before anything at all moves. Litter and dead wood deposited by
+    // this tick's drownings, senescence and deaths are eligible from the next tick, per
+    // §5. Sites this tick removes are simply never looked up again.
+    let pre: Vec<(Site, f64, f64)> =
+        flora.ground.iter().map(|g| (g.site, g.litter, g.dead_wood)).collect();
+
     prune_unsupported(flora, world);
     refresh_sky_cache(flora, world);
     drown(flora, world);
-
-    // The stocks decomposition is allowed to draw on: what the site held when the tick
-    // started. Litter and dead wood deposited by this tick's senescence and deaths are
-    // eligible from the next tick, per §5.
-    let pre: Vec<(Site, f64, f64)> =
-        flora.ground.iter().map(|g| (g.site, g.litter, g.dead_wood)).collect();
 
     let light = light_per_stand(flora, world);
     let moisture = drink(flora, world);
@@ -104,7 +101,7 @@ fn prune_unsupported(flora: &mut Flora, world: &World) {
             kept.push(*g);
         } else {
             ledger.removed_material_out += g.nutrient + g.litter + g.dead_wood;
-            ledger.removed_energy_out += g.litter_energy;
+            ledger.removed_energy_out += g.litter_energy + g.dead_wood_energy;
         }
     }
     if kept.len() != ground.len() {
@@ -474,7 +471,7 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink]) {
         let die_back = stands[si].wood.min(sc.dieback * unpaid);
         stands[si].wood -= die_back;
         ground[gi].dead_wood += die_back;
-        ledger.heat_out += e_v * die_back;
+        ground[gi].dead_wood_energy += e_v * die_back;
 
         // ---- 4.7 death
         if stands[si].wood < sc.alive_min {
@@ -494,8 +491,7 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink]) {
 fn die(config: &FloraConfig, stand: &Stand, g: &mut Ground, ledger: &mut FloraLedger) {
     let e_v = config.species(stand.species).energy_density;
     g.dead_wood += stand.wood;
-    // Dead wood carries no energy in this crate's accounting: see the module doc.
-    ledger.heat_out += e_v * stand.wood;
+    g.dead_wood_energy += e_v * stand.wood;
     let shed = stand.foliage + stand.reserve;
     add_litter_cap(config.litter_energy_cap, g, shed, e_v * shed, ledger);
     ledger.deaths += 1;
@@ -539,7 +535,14 @@ fn ground_slot(ground: &mut Vec<Ground>, site: Site) -> usize {
         Err(i) => {
             ground.insert(
                 i,
-                Ground { site, nutrient: 0.0, litter: 0.0, litter_energy: 0.0, dead_wood: 0.0 },
+                Ground {
+                    site,
+                    nutrient: 0.0,
+                    litter: 0.0,
+                    litter_energy: 0.0,
+                    dead_wood: 0.0,
+                    dead_wood_energy: 0.0,
+                },
             );
             i
         }
@@ -571,8 +574,11 @@ fn decompose(flora: &mut Flora, pre: &[(Site, f64, f64)]) {
             g.nutrient += dec;
         }
         let dec_w = (config.wood_decomposition * DT * wood0).min(g.dead_wood).max(0.0);
-        if dec_w > 0.0 {
-            // No energy term: dead wood's energy was respired when it died.
+        if dec_w > 0.0 && g.dead_wood > 0.0 {
+            // Energy at the stock's current density, as litter's is. Never 0/0.
+            let out = g.dead_wood_energy * (dec_w / g.dead_wood);
+            g.dead_wood_energy -= out;
+            ledger.heat_out += out;
             g.dead_wood -= dec_w;
             g.nutrient += dec_w;
         }
@@ -719,6 +725,7 @@ fn commit_propagules(flora: &mut Flora, site: Site, species: Species, offers: &[
                     litter: 0.0,
                     litter_energy: 0.0,
                     dead_wood: 0.0,
+                    dead_wood_energy: 0.0,
                 },
             );
             i

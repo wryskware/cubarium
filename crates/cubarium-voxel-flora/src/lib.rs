@@ -104,6 +104,12 @@ pub struct Ground {
     pub litter_energy: f64,
     /// `Wd`: dead wood, material. Keeps its identity; nothing eats it this round.
     pub dead_wood: f64,
+    /// Energy in the dead wood, `e_v` per unit at the moment it died. Held, not
+    /// respired: a standing dead trunk is energy-dense and unavailable, and it releases
+    /// its energy as heat only as the wood decomposes. Kept as its own stock rather than
+    /// as `e_v · dead_wood` because two species with different `energy_density` can
+    /// leave dead wood on one site and `Ground` has no species.
+    pub dead_wood_energy: f64,
 }
 
 /// The plant model of one species: `design/ecology-v1-contract.md` §4 parameters, plus
@@ -388,7 +394,7 @@ impl<'a> FloraView<'a> {
             .iter()
             .map(|s| self.config.species(s.species).energy_density * (s.wood + s.foliage + s.reserve))
             .sum::<f64>()
-            + self.ground.iter().map(|g| g.litter_energy).sum::<f64>()
+            + self.ground.iter().map(|g| g.litter_energy + g.dead_wood_energy).sum::<f64>()
     }
 }
 
@@ -489,7 +495,14 @@ impl Flora {
                     self.ledger.seeded_material_in += self.config.initial_nutrient;
                     self.ground.insert(
                         g,
-                        Ground { site, nutrient: self.config.initial_nutrient, litter: 0.0, litter_energy: 0.0, dead_wood: 0.0 },
+                        Ground {
+                            site,
+                            nutrient: self.config.initial_nutrient,
+                            litter: 0.0,
+                            litter_energy: 0.0,
+                            dead_wood: 0.0,
+                            dead_wood_energy: 0.0,
+                        },
                     );
                 }
                 true

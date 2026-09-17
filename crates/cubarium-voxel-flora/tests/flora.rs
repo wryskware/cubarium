@@ -326,6 +326,51 @@ fn standing_water_drowns_bloomcrown_at_once_and_umbrellafrond_only_past_its_limi
     assert_residuals(&flora, "after two drownings");
 }
 
+/// Dead wood is a stock with its own energy, not respired remains: §5's `Wd` row. Its
+/// density never moves, because decomposition withdraws energy at the stock's current
+/// density, and what leaves the stock arrives in `heat_out`.
+#[test]
+fn dead_wood_keeps_its_energy_until_it_decomposes() {
+    let mut world = plain(8, 8, 0.5);
+    let mut flora = Flora::new(FloraConfig::default());
+    assert!(flora.apply(&world, Command::Seed { x: 2, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
+    let e_v = flora.config().species(Species::Bloomcrown).energy_density;
+
+    // Drown it: a §4.7 death, wood to dead wood.
+    world.apply(WorldCommand::AddWater { x: 2, y: 3, z: 0, volume_m3: 0.2 });
+    flora.step(&mut world);
+    let g = *flora.view().ground_at(site(2)).expect("its remains");
+    assert!((g.dead_wood - 0.1).abs() < 1e-12, "the wood it had: {}", g.dead_wood);
+    assert!(
+        (g.dead_wood_energy - e_v * g.dead_wood).abs() < 1e-12,
+        "dead wood holds e_v per unit, not zero: {} for {}",
+        g.dead_wood_energy,
+        g.dead_wood
+    );
+
+    // Clear the water so nothing else dies, and let it rot for a hundred ticks.
+    world.apply(WorldCommand::SetMaterial { x: 2, y: 3, z: 0, material: Material::Rock });
+    world.apply(WorldCommand::SetMaterial { x: 2, y: 3, z: 0, material: Material::Air });
+    let heat0 = flora.view().ledger.heat_out;
+    run(&mut flora, &mut world, 100);
+
+    let after = *flora.view().ground_at(site(2)).expect("still rotting");
+    assert!(after.dead_wood < g.dead_wood, "it did not decompose: {}", after.dead_wood);
+    assert!(after.dead_wood_energy < g.dead_wood_energy);
+    assert!(
+        (after.dead_wood_energy - e_v * after.dead_wood).abs() < 1e-12,
+        "the density moved: {} for {}",
+        after.dead_wood_energy,
+        after.dead_wood
+    );
+    let released = g.dead_wood_energy - after.dead_wood_energy;
+    let heat = flora.view().ledger.heat_out - heat0;
+    assert!(heat >= released - 1e-12, "the released energy did not reach heat: {heat} vs {released}");
+    // And the material it lost is nutrient on the same site, not a loss.
+    assert!(after.nutrient > flora.config().initial_nutrient, "{}", after.nutrient);
+    assert_residuals(&flora, "after a hundred ticks of rot");
+}
+
 // ----------------------------------------------------------------------- burial
 
 #[test]
