@@ -406,7 +406,11 @@ fn nothing_outside_hop_ever_receives_and_the_patch_does_not_creep() {
         let g = flora.view().ground_at(site(x)).unwrap();
         assert_eq!(g.seeds.len(), 1, "the merge should keep one cohort: {:?}", g.seeds);
         let c = g.seeds[0];
-        assert_eq!(c.age_ticks, 0, "a bank a donor keeps feeding stays young");
+        // One bin, not one cohort per tick: the placeholders' bin is 3,000 ticks wide, so
+        // all forty landings joined the bin that opened at tick 0 — and that bin's age is
+        // the run's own forty ticks, which is the half of the rule R4.1 corrected.
+        assert_eq!(c.bin_start_tick, 0, "not the bin tick 0 opened: {c:?}");
+        assert_eq!(c.age_ticks(flora.tick()), 40, "a fed bank stopped ageing: {c:?}");
         assert!(
             sc.propagule_split[0] * c.organic < sc.alive_min,
             "forty ticks is not a germinating bank: {c:?}"

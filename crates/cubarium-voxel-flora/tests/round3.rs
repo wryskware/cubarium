@@ -42,6 +42,29 @@ fn strip(width: u32, depth: u32, pore: f64) -> World {
     w
 }
 
+/// A four-column strip whose last column is **void**: bedrock-free, soilless air, so it
+/// has no support face at all. A `hop`-1 donor at `x0` therefore has exactly **one**
+/// recipient, `x1` — `x3` offers nothing to land on and `x2` is out of reach — which pins
+/// the landing site under any dispersal rule, including round 3b's one-package-at-a-time
+/// draw. Every other column's support face is `y = 2`, in open sky.
+fn strip_gap(pore: f64) -> World {
+    let config =
+        VoxelConfig { width: 4, height: 8, depth: 1, voxel_m: 1.0, seed: 5, ..VoxelConfig::default() };
+    let mut w = World::empty(config);
+    for x in 0..3i64 {
+        for y in 1..=2 {
+            fill(&mut w, x, y, 0, Material::Soil, pore);
+        }
+    }
+    // `World::empty` lays a bedrock foundation across the whole footprint, and a bare
+    // foundation cell is a support face like any other. Take x3's away, and the column has
+    // nothing to land on at all. The world is never stepped in these fixtures, so the hole
+    // in the foundation drains nothing.
+    w.apply(cubarium_voxel::Command::SetMaterial { x: 3, y: 0, z: 0, material: Material::Air });
+    assert!(cubarium_voxel_flora::highest_support(&w.view(), 3, 0).is_none(), "x3 must be void");
+    w
+}
+
 /// Turn one air voxel into `material` holding exactly `pore` of that material's own pore
 /// capacity, by adding the water first and converting after.
 fn fill(w: &mut World, x: i64, y: u32, z: u32, material: Material, pore: f64) {
@@ -317,7 +340,7 @@ fn a_package_keeps_all_its_mineral_through_construction_respiration() {
         assert_eq!(g.seeds.len(), 1, "one cohort: {:?}", g.seeds);
         let c = g.seeds[0];
         assert_eq!(c.species, Species::Bloomcrown);
-        assert_eq!(c.age_ticks, 0, "a cohort that just landed is age 0");
+        assert_eq!(c.bin_start_tick, 0, "the arrival bin the first tick opened");
         assert!(
             (c.organic - each_net).abs() <= 1e-15 * each_net,
             "{c:?} for a {each_net} package"
@@ -634,7 +657,9 @@ fn a_drowned_stand_s_gap_is_filled_by_its_bank_in_the_same_tick() {
     // and germination is step 8. So a site never has an empty bank for even one tick while
     // a donor is in reach of it.
     assert_eq!(g.seeds.len(), 1, "{:?}", g.seeds);
-    assert_eq!(g.seeds[0].age_ticks, 0, "not a fresh package: {:?}", g.seeds);
+    // One bin: the placeholders' bin is 150 s wide, so twenty-one ticks of this fixture
+    // are all inside the bin that opened at tick 0.
+    assert_eq!(g.seeds[0].bin_start_tick, 0, "not this run's own bin: {:?}", g.seeds);
     assert!(
         g.seeds[0].organic < 0.01 * bank,
         "the bank that germinated was not consumed: {} of a {bank} bank is still there",
@@ -723,73 +748,201 @@ fn the_earlier_species_in_the_fixed_order_wins_a_contested_gap_whatever_the_bank
     assert_residuals(&flora, "after a contested gap was decided by the fixed order");
 }
 
-/// The merge rule, both halves of it: a site a donor feeds every tick holds exactly one
-/// cohort per species and that cohort's age stays 0, because the merge keeps the younger
-/// age; a site that stops being fed keeps its single cohort and ages it one tick per tick
-/// from the moment of its last arrival.
+/// The bin rule, both halves of it, and the **rejuvenation** the old merge allowed is the
+/// thing it now refuses (Astra R4.1). A site a donor feeds every tick holds one cohort per
+/// bin, not one per tick — so the bank is still bounded — and that bin's age rises by one
+/// every tick from the tick its window opened, whether or not anything else lands in it.
+/// The old rule merged age 1 with age 0 and kept 0, so this same fixture read age 0 for
+/// ever.
+///
+/// The bin width is `seed_max_age_s / seed_cohorts_max`; this fixture sets
+/// `seed_max_age_s` to 2 s over the placeholder cap of 4, which is a 0.5 s bin, ten ticks,
+/// so a 30-tick run crosses three bin boundaries and the test can name each one. Two more
+/// rates are the test's own so that a package lands on **every** tick whatever the
+/// dispersal rule is: `propagule_rate` 2.0 /s (placeholder 2e-4) is over one whole
+/// package per tick, and `reserve_cap` 40 (placeholder 0.5) gives the donor the reserve to
+/// pay for a hundred of them. The fixture's void column leaves exactly one recipient.
 #[test]
-fn a_fed_bank_stays_one_cohort_at_age_zero_and_ages_from_its_last_arrival() {
+fn a_fed_bank_holds_one_cohort_per_arrival_bin_and_its_age_never_stops_rising() {
     let mut config = FloraConfig::default();
     config.bloomcrown.hop = 1;
-    let mut world = strip(3, 1, 0.6);
+    config.bloomcrown.seed_max_age_s = 2.0;
+    config.bloomcrown.propagule_rate = 2.0;
+    config.bloomcrown.reserve_cap = 40.0;
+    assert_eq!(config.bloomcrown.seed_cohorts_max, 4, "the placeholder this test divides by");
+    let bin = 10u64; // 2.0 s / 4 bins = 0.5 s = ten ticks at DT = 1/20 s.
+    let mut world = strip_gap(0.6);
     let mut flora = Flora::new(config);
     assert!(flora.apply(&world, Command::Seed { x: 0, z: 0, species: Species::Bloomcrown, wood: 0.6 }));
 
     let fed = site(1);
-    for tick in 1..=30 {
+    for tick in 1..=30u64 {
         flora.step(&mut world);
         let g = flora.view().ground_at(fed).expect("ground");
-        assert_eq!(g.seeds.len(), 1, "tick {tick}: {} cohorts, not one: {:?}", g.seeds.len(), g.seeds);
-        assert_eq!(g.seeds[0].age_ticks, 0, "tick {tick}: a fed bank aged: {:?}", g.seeds);
+        // One bin per window crossed: ticks 0..9 are the first, 10..19 the second, and so
+        // on, and the newest bin is the last of the run because they are sorted oldest
+        // first.
+        let want_bins = (tick / bin + 1) as usize;
+        assert_eq!(
+            g.seeds.len(),
+            want_bins,
+            "tick {tick}: {} cohorts, not {want_bins}: {:?}",
+            g.seeds.len(),
+            g.seeds
+        );
+        for (i, c) in g.seeds.iter().enumerate() {
+            assert_eq!(c.bin_start_tick, i as u64 * bin, "bin {i} at tick {tick}: {c:?}");
+        }
+        // The oldest bin is as old as the run, never rejuvenated by the fresh landings
+        // that keep arriving on top of it.
+        assert_eq!(g.seeds[0].age_ticks(flora.tick()), tick, "the oldest bin was rejuvenated");
     }
-    let organic_fed = flora.view().ground_at(fed).unwrap().seeds[0].organic;
+    let organic_fed: f64 = flora.view().ground_at(fed).unwrap().seed_organic(Species::Bloomcrown);
+    let oldest = flora.view().ground_at(fed).unwrap().seeds[0];
 
-    // Take the donor away. The bank is one cohort and it now ages.
+    // Take the donor away. Nothing new lands, every bin keeps ageing, and the oldest one
+    // reaches `seed_max_age_s` = 40 ticks first — on its own schedule, which is what the
+    // old rule could postpone for ever.
     assert!(flora.apply(&world, Command::Clear { x: 0, z: 0 }));
-    for tick in 1..=25u64 {
-        flora.step(&mut world);
-        let g = flora.view().ground_at(fed).expect("ground");
-        assert_eq!(g.seeds.len(), 1, "an unfed bank split: {:?}", g.seeds);
-        assert_eq!(g.seeds[0].age_ticks, tick, "an unfed bank did not age: {:?}", g.seeds);
-    }
-    let c = flora.view().ground_at(fed).unwrap().seeds[0];
-    assert!(c.organic < organic_fed, "attrition took nothing: {} -> {}", organic_fed, c.organic);
-    assert!(flora.view().ground_at(fed).unwrap().litter > 0.0, "attrition is deletion, not decay");
-    assert_residuals(&flora, "after a bank was fed and then abandoned");
+    run(&mut flora, &mut world, 10);
+    let g = flora.view().ground_at(fed).unwrap().clone();
+    assert_eq!(g.seeds.len(), 4, "a bin arrived or left early: {:?}", g.seeds);
+    assert_eq!(g.seeds[0].bin_start_tick, 0, "the oldest bin is still the first one");
+    assert_eq!(g.seeds[0].age_ticks(flora.tick()), 40, "it did not age: {:?}", g.seeds);
+
+    // One more tick and the first bin is 41 ticks old, past 2 s, and it goes to litter
+    // whole with its mineral.
+    let litter0 = g.litter;
+    flora.step(&mut world);
+    let g = flora.view().ground_at(fed).unwrap().clone();
+    assert_eq!(g.seeds.len(), 3, "the over-age bin is still banked: {:?}", g.seeds);
+    assert_eq!(g.seeds[0].bin_start_tick, bin, "the wrong bin left: {:?}", g.seeds);
+    assert!(
+        g.litter > litter0 + 0.9 * oldest.organic,
+        "the bin that left did not reach the litter: {} against {}",
+        g.litter - litter0,
+        oldest.organic
+    );
+    assert!(
+        g.seed_organic(Species::Bloomcrown) < organic_fed,
+        "attrition and expiry took nothing: {} -> {}",
+        organic_fed,
+        g.seed_organic(Species::Bloomcrown)
+    );
+    assert_residuals(&flora, "after a bank was fed, abandoned and aged out");
 }
 
-/// The adversarial fixture the merge rule's own comment invited, and package J's answer
-/// to it: a donor that comes and goes on a period of more than two ticks. Ages two apart
-/// never merge, and once two cohorts are two ticks apart they stay two ticks apart
-/// forever, so the age merge bounds nothing at all — package I measured fifty cohorts
-/// after fifty pulses, and about 6,000 per site as the only ceiling `seed_max_age_s`
-/// gives. `seed_cohorts_max` bounds it by construction instead.
+/// **Astra's R4.1 fixture.** A two-tick lifetime, germination that cannot happen, and tiny
+/// arrivals that never stop: the old material has to reach the litter on schedule anyway,
+/// with its organic matter, its mineral and its energy all booked.
 ///
-/// The two arms are the same fifty pulses under a cap of 4 (the placeholder) and under a
-/// cap of 1,000 (I's behaviour, since it is never reached). What the cap does and all it
-/// does is regroup:
-///   - the capped bank holds exactly 4 cohorts, the uncapped one 50;
-///   - their total organic matter and mineral agree to 1e-15 — what landed minus
-///     attrition, in both — because merging sums both stocks and attrition is linear in
-///     the organic matter, whatever it is grouped into;
-///   - the oldest age is 99 ticks in both, the first pulse's own age, because the merge of
-///     two cohorts keeps the **older** age and so can only bring `seed_max_age_s` forward.
-///
-/// `bloomcrown.establish_light_min` is 2.0 here (placeholder 0.6), a predicate that can
-/// never pass, so the bank can only accumulate and germination cannot end the experiment
-/// early. The pulsing itself is `Seed` and `Clear`, which is what "a donor that flickers
-/// across its reserve floor" looks like from the recipient site.
+/// `seed_max_age_s` is 0.1 s — two ticks — against the placeholder 600, so the bin width
+/// is 0.025 s, under one tick, and every tick is its own bin: the sharpest possible test of
+/// whether a fresh landing can hold old material back. `establish_light_min` is 2.0
+/// (placeholder 0.6), a predicate nothing can pass, so nothing germinates and the bank can
+/// only accumulate or leave. Both decomposition rates are 0 (placeholders 0.001 and
+/// 0.0001) so what reaches the litter stays there and can be read off. `propagule_rate`
+/// 2.0 /s and `reserve_cap` 40 (placeholders 2e-4 and 0.5) make the arrivals continuous —
+/// one package a tick, for far longer than the run — and the fixture's void column leaves
+/// exactly one recipient.
 #[test]
-fn a_pulsing_donor_stacks_one_cohort_per_pulse_and_the_cap_bounds_it() {
-    let pulses = 50;
-    let mut totals: Vec<(f64, f64)> = Vec::new();
-    for cap in [4usize, 1000] {
+fn tiny_continuing_arrivals_cannot_keep_old_seed_material_alive() {
+    let mut config = FloraConfig::default();
+    config.bloomcrown.hop = 1;
+    config.bloomcrown.seed_max_age_s = 0.1;
+    config.bloomcrown.establish_light_min = 2.0;
+    config.bloomcrown.propagule_rate = 2.0;
+    config.bloomcrown.reserve_cap = 40.0;
+    config.decomposition = 0.0;
+    config.wood_decomposition = 0.0;
+    let e_v = config.bloomcrown.energy_density;
+    let attrition = config.bloomcrown.seed_attrition_per_s;
+    let mut world = strip_gap(0.6);
+    let mut flora = Flora::new(config);
+    assert!(flora.apply(&world, Command::Seed { x: 0, z: 0, species: Species::Bloomcrown, wood: 0.6 }));
+
+    let fed = site(1);
+    // Long enough that the first arrivals are many lifetimes old.
+    run(&mut flora, &mut world, 60);
+
+    let g = flora.view().ground_at(fed).expect("ground").clone();
+    let now = flora.tick();
+    assert!(!g.seeds.is_empty(), "nothing is landing at all: the fixture is broken");
+    // Nothing older than the lifetime is still banked, however much keeps arriving.
+    for c in &g.seeds {
+        assert!(
+            c.age_s(now) <= 0.1,
+            "a {}-tick-old bin survived a two-tick lifetime under continuing arrivals: {c:?}",
+            c.age_ticks(now)
+        );
+    }
+    assert!(g.seeds.len() <= 4, "more bins than the lifetime allows: {:?}", g.seeds);
+    // And the old material is in the litter, in all three currencies: organic matter, the
+    // mineral that came with it, and its energy at the species' own density. With both
+    // decomposition rates at zero this is everything that has ever aged out plus the
+    // attrition on the way.
+    assert!(g.litter > 0.0, "the expired bins were deleted rather than booked");
+    assert!(g.litter_mineral > 0.0, "the expired bins' mineral vanished");
+    assert!(
+        (g.litter_energy - e_v * g.litter).abs() <= 1e-12 * g.litter_energy,
+        "litter energy {} against e_v * litter {}",
+        g.litter_energy,
+        e_v * g.litter
+    );
+    // What left the bank is mostly whole bins and not attrition: two ticks of attrition
+    // is 1e-4 of a bin, so the litter is ~50 bins' worth and not 1 %.
+    let banked = g.seed_organic(Species::Bloomcrown);
+    assert!(
+        g.litter > 4.0 * banked,
+        "the litter {} is not the aged-out bins: {banked} is still banked, attrition is \
+         {attrition}/s",
+        g.litter
+    );
+    assert_eq!(flora.view().ledger.establishments, 0, "the predicate cannot pass here");
+    assert_residuals(&flora, "after sixty ticks of tiny arrivals onto a two-tick bank");
+}
+
+/// The adversarial fixture the old merge rule's own comment invited, under round 3b's
+/// rule: a donor that comes and goes on a period of more than two ticks. Package I
+/// measured what the age merge bounded — nothing, one cohort per pulse, about 6,000 per
+/// site — and package J bounded the *count* by merging the two oldest, which Astra's R4.1
+/// then showed bounds the `Vec` while sweeping almost every old deposit into one bucket
+/// that can kill much younger material at the next expiry. Arrival bins bound the count
+/// **and** the age: a landing joins the bin covering its own tick and moves no other bin's
+/// age, so a species' live bins are at most `seed_cohorts_max + 1` and the first pulse's
+/// material leaves on the first pulse's schedule.
+///
+/// Three arms of the same fifty pulses, at `seed_cohorts_max` 1, 4 (the placeholder) and 8
+/// — which is a bin width of 40, 10 and 5 ticks against the same 2 s lifetime — so the
+/// claim is read at three age resolutions:
+///   - the bank holds at most `cap + 1` bins, sorted oldest first;
+///   - no bin older than the lifetime is in it;
+///   - **the first pulse's bin is gone in every arm**, which is the whole of R4.1: under
+///     the old rule fifty pulses of fresh material kept it at age 0 for ever;
+///   - nothing was deleted on the way (the three residuals, and the litter holds what
+///     left).
+///
+/// `bloomcrown.establish_light_min` is 2.0 (placeholder 0.6), a predicate that can never
+/// pass, so the bank can only accumulate or age out and germination cannot end the
+/// experiment early. `seed_max_age_s` is 2 s (placeholder 600) so the lifetime fits in a
+/// hundred-tick test. `propagule_rate` 2.0 /s and `reserve_cap` 40 (placeholders 2e-4 and
+/// 0.5) make one pulse fund a whole package under any dispersal rule. The pulsing itself
+/// is `Seed` and `Clear`, which is what "a donor that flickers across its reserve floor"
+/// looks like from the recipient site.
+#[test]
+fn a_pulsing_donor_cannot_rejuvenate_a_bank_and_the_bins_bound_it() {
+    let pulses = 50u64;
+    for cap in [1usize, 4, 8] {
         let mut config = FloraConfig::default();
         config.bloomcrown.hop = 1;
         config.bloomcrown.establish_light_min = 2.0;
-        assert_eq!(config.bloomcrown.seed_cohorts_max, 4, "the placeholder this test reads");
+        config.bloomcrown.seed_max_age_s = 2.0;
+        config.bloomcrown.propagule_rate = 2.0;
+        config.bloomcrown.reserve_cap = 40.0;
+        assert_eq!(config.bloomcrown.seed_cohorts_max, 4, "the placeholder one arm reads");
         config.bloomcrown.seed_cohorts_max = cap;
-        let mut world = strip(3, 1, 0.6);
+        let bin = (2.0 / cap as f64 / DT) as u64;
+        let mut world = strip_gap(0.6);
         let mut flora = Flora::new(config);
 
         let target = site(1);
@@ -799,54 +952,46 @@ fn a_pulsing_donor_stacks_one_cohort_per_pulse_and_the_cap_bounds_it() {
             assert!(flora.apply(&world, Command::Clear { x: 0, z: 0 }));
             flora.step(&mut world);
         }
+        let now = flora.tick();
+        assert_eq!(now, 2 * pulses, "the pulse loop is two ticks a pulse");
 
-        let g = flora.view().ground_at(target).expect("ground");
-        assert_eq!(
+        let g = flora.view().ground_at(target).expect("ground").clone();
+        assert!(!g.seeds.is_empty(), "cap {cap}: nothing landed at all");
+        assert!(
+            g.seeds.len() <= cap + 1,
+            "cap {cap}: {} bins, more than cap + 1: {:?}",
             g.seeds.len(),
-            cap.min(pulses),
-            "cap {cap}: {} cohorts after {pulses} pulses two ticks apart",
-            g.seeds.len()
-        );
-        // Sorted by species then age, youngest first, and nothing is older than the first
-        // pulse: 2 ticks a pulse, less the two the last Clear-and-step pair costs it.
-        for w in g.seeds.windows(2) {
-            assert!(w[0].age_ticks < w[1].age_ticks, "not sorted by age: {:?}", g.seeds);
-        }
-        assert!(g.seeds.iter().all(|c| c.species == Species::Bloomcrown));
-        assert_eq!(
-            g.seeds.last().unwrap().age_ticks,
-            2 * pulses as u64 - 1,
-            "cap {cap}: the oldest cohort is not the first pulse's: {:?}",
             g.seeds
         );
-        if cap > pulses {
-            // I's finding, kept as the contrast: every gap is exactly the pulse period.
-            for (i, c) in g.seeds.iter().enumerate() {
-                assert_eq!(c.age_ticks, 1 + 2 * i as u64, "cohort {i}: {c:?}");
-            }
+        assert!(g.seeds.iter().all(|c| c.species == Species::Bloomcrown));
+        for w in g.seeds.windows(2) {
+            assert!(
+                w[0].bin_start_tick < w[1].bin_start_tick,
+                "cap {cap}: not sorted oldest first: {:?}",
+                g.seeds
+            );
         }
+        for c in &g.seeds {
+            assert!(
+                c.age_s(now) <= 2.0,
+                "cap {cap}: a {}-tick-old bin outlived a 2 s lifetime: {c:?}",
+                c.age_ticks(now)
+            );
+            assert_eq!(c.bin_start_tick % bin, 0, "cap {cap}: {c:?} is not on a bin boundary");
+        }
+        // R4.1 itself: the first pulse's material is not in the bank at any resolution.
+        assert!(
+            g.seeds[0].bin_start_tick > 0,
+            "cap {cap}: the first pulse's bin is still banked after {pulses} pulses of fresh \
+             arrivals: {:?}",
+            g.seeds
+        );
+        // It is in the litter instead, with its mineral, and nothing was deleted.
+        assert!(g.litter > 0.0 && g.litter_mineral > 0.0, "cap {cap}: {g:?}");
         assert!(flora.view().stand_at(target).is_none(), "the predicate cannot pass here");
         assert_eq!(flora.view().ledger.establishments, 0);
-        assert_residuals(&flora, "after fifty pulses");
-        totals.push((
-            g.seed_organic(Species::Bloomcrown),
-            g.seed_mineral(Species::Bloomcrown),
-        ));
+        assert_residuals(&flora, "after fifty pulses onto a binned bank");
     }
-    let (capped, uncapped) = (totals[0], totals[1]);
-    assert!(capped.0 > 0.0 && capped.1 > 0.0, "nothing landed at all: {capped:?}");
-    assert!(
-        (capped.0 - uncapped.0).abs() <= 1e-15 * uncapped.0,
-        "the cap lost organic matter: {} against {}",
-        capped.0,
-        uncapped.0
-    );
-    assert!(
-        (capped.1 - uncapped.1).abs() <= 1e-15 * uncapped.1,
-        "the cap lost mineral: {} against {}",
-        capped.1,
-        uncapped.1
-    );
 }
 
 // ============================================================ root-zone aeration

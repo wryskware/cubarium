@@ -490,7 +490,7 @@ fn a_donor_s_package_lands_as_a_seed_cohort_it_paid_for() {
         assert_eq!(g.seeds.len(), 1, "one cohort, not {:?}", g.seeds);
         let c = g.seeds[0];
         assert_eq!(c.species, Species::Bloomcrown);
-        assert_eq!(c.age_ticks, 0, "it landed this tick");
+        assert_eq!(c.bin_start_tick, 0, "it landed in the bin tick 0 opened");
         assert!((c.organic - net).abs() < 1e-12 * net, "{c:?} for a {net} package");
         assert!(c.mineral > 0.0, "a cohort carries the donor's mineral: {c:?}");
         arrived += c.organic;
@@ -555,7 +555,9 @@ fn a_cohort_on_a_site_that_fails_the_predicate_decays_to_litter_and_never_stands
     run(&mut flora, &mut world, 10);
     let g = flora.view().ground_at(banked).unwrap().clone();
     let c = g.seeds[0];
-    assert_eq!(c.age_ticks, 10, "the cohort did not age");
+    // Eleven, not ten: a bin's age is measured from the tick its window opened, and this
+    // one opened on the tick the package landed on — the landing tick counts too.
+    assert_eq!(c.age_ticks(flora.tick()), 11, "the bin did not age");
     assert!(c.organic < landed.organic, "it did not decay: {c:?}");
     assert!(
         (g.litter - (landed.organic - c.organic)).abs() < 1e-15,

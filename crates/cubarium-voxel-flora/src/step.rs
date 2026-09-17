@@ -25,17 +25,16 @@
 //!    dead wood respire their organic matter out of the system and release their mineral
 //!    to the site's pool at the same fraction; litter's energy leaves as heat at its
 //!    current density.
-//! 8. **The seed bank.** Every cohort ages one tick, pays its attrition into litter, and
-//!    falls to litter whole once it is past its species' `seed_max_age_s`. Then any site
+//! 8. **The seed bank.** Every arrival bin pays its attrition into litter and falls to
+//!    litter whole once its **start** is past its species' `seed_max_age_s`. Then any site
 //!    with no stand whose pooled cohorts of one species can build a living stand, and
 //!    which passes that species' establishment predicate, germinates one. This runs
 //!    *after* the deaths of step 6, so a gap opened this tick can be filled this tick.
 //! 9. **Propagules** (§4.8), from one snapshot of donors and recipients. A package lands
-//!    as a seed cohort, on every support face within the donor's `hop` whether it is
-//!    occupied or not: the bank waits for the gap. Cohorts that arrive here are one tick
-//!    younger than the ones step 8 just aged, and the merge folds them together; a bank
-//!    already holding its species' `seed_cohorts_max` folds its two oldest instead of
-//!    growing, so the bank is bounded by construction.
+//!    as a seed cohort, on a support face within the donor's `hop` whether it is occupied
+//!    or not: the bank waits for the gap. A landing joins the arrival bin whose window
+//!    covers this tick — creating it if it is not there — so the age of what is already
+//!    banked does not move, and the bank is bounded by construction.
 //!
 //! Dropped from v1 by the brief: fruit (3c), downhill transport of litter (3f) and
 //! nutrient diffusion (3g).
@@ -83,6 +82,12 @@ struct Crown {
 }
 
 pub(crate) fn step(flora: &mut Flora, world: &mut World) {
+    // The tick counter moves **first**, so that `flora.tick` is the tick this step
+    // produces: the one whose state the caller will read when the step returns. Everything
+    // dated inside a tick — an arrival bin's start, a bin's age, the germination lottery's
+    // seed — then uses one clock reading, and a bin's age at the end of the tick it landed
+    // in is zero rather than minus one.
+    flora.tick += 1;
     // The stocks decomposition is allowed to draw on: what each site held when the tick
     // started, taken before anything at all moves. Litter and dead wood deposited by
     // this tick's drownings, senescence and deaths are eligible from the next tick, per
@@ -100,8 +105,6 @@ pub(crate) fn step(flora: &mut Flora, world: &mut World) {
     decompose(flora, &pre);
     seed_bank(flora, world);
     propagate(flora, world);
-
-    flora.tick += 1;
 }
 
 // ------------------------------------------------------------------ 1. terrain
@@ -726,14 +729,14 @@ fn decompose(flora: &mut Flora, pre: &[(Site, f64, f64)]) {
 
 // ----------------------------------------------------------------- 8. seed bank
 
-/// The seed bank: age every cohort, take its attrition, cull the over-age ones, then
+/// The seed bank: take every bin's attrition, cull the bins whose start is over-age, then
 /// germinate where a bank can build a living stand.
 fn seed_bank(flora: &mut Flora, world: &World) {
-    let Flora { config, stands, ground, ledger, sky, .. } = flora;
+    let Flora { config, tick, stands, ground, ledger, sky, .. } = flora;
+    let tick = *tick;
     let view = world.view();
     for g in ground.iter_mut() {
-        age_cohorts(config, g, ledger);
-        merge_cohorts(g);
+        age_cohorts(config, g, ledger, tick);
     }
     // In site order, then in `Species::ALL` order: two species whose banks could both
     // germinate here this tick are decided by that fixed order, and the loser's cohorts
@@ -785,10 +788,14 @@ fn seed_bank(flora: &mut Flora, world: &World) {
     }
 }
 
-/// One tick of decay for one site's bank. A cohort past `seed_max_age_s` falls to litter
-/// whole; every other cohort pays `seed_attrition_per_s · dt` of itself into litter, with
-/// the matching fraction of its mineral and its energy. Paid decay, never deletion.
-fn age_cohorts(config: &FloraConfig, g: &mut Ground, ledger: &mut FloraLedger) {
+/// One tick of decay for one site's bank. A bin whose **start** is past `seed_max_age_s`
+/// falls to litter whole; every other bin pays `seed_attrition_per_s · dt` of itself into
+/// litter, with the matching fraction of its mineral and its energy. Paid decay, never
+/// deletion.
+///
+/// Nothing here writes an age: a bin's age is `tick - bin_start_tick`, so it rises by one
+/// every tick on its own and a landing cannot lower it.
+fn age_cohorts(config: &FloraConfig, g: &mut Ground, ledger: &mut FloraLedger, tick: u64) {
     if g.seeds.is_empty() {
         return;
     }
@@ -798,8 +805,7 @@ fn age_cohorts(config: &FloraConfig, g: &mut Ground, ledger: &mut FloraLedger) {
     for mut c in taken {
         let sc = config.species(c.species);
         let e_v = sc.energy_density;
-        c.age_ticks = c.age_ticks.saturating_add(1);
-        if c.age_ticks as f64 * DT > sc.seed_max_age_s {
+        if c.age_s(tick) > sc.seed_max_age_s {
             add_litter_cap(cap, g, c.organic, c.mineral, e_v * c.organic, ledger);
             continue;
         }
@@ -821,77 +827,49 @@ fn age_cohorts(config: &FloraConfig, g: &mut Ground, ledger: &mut FloraLedger) {
     g.seeds = kept;
 }
 
-/// Fold same-species cohorts whose ages are within one tick into one. The merged cohort
-/// keeps the **younger** age: material that keeps arriving keeps the bank fresh, and a
-/// bank that stops being fed ages out on the schedule of its last arrival. Without this
-/// a site a donor feeds every tick would collect one cohort per tick forever.
-///
-/// `seeds` is sorted by species then age, so the pairs to fold are adjacent and the
-/// result is still sorted.
-fn merge_cohorts(g: &mut Ground) {
-    let mut i = 0;
-    while i + 1 < g.seeds.len() {
-        let (a, b) = (g.seeds[i], g.seeds[i + 1]);
-        if a.species == b.species && b.age_ticks.abs_diff(a.age_ticks) <= 1 {
-            g.seeds[i] = SeedCohort {
-                species: a.species,
-                organic: a.organic + b.organic,
-                mineral: a.mineral + b.mineral,
-                age_ticks: a.age_ticks.min(b.age_ticks),
-            };
-            g.seeds.remove(i + 1);
-        } else {
-            i += 1;
-        }
-    }
+/// The width of one arrival bin in ticks: `seed_max_age_s / seed_cohorts_max`, floored at
+/// one tick. Derived, not a knob of its own — the placeholders' 600 s over 4 bins is 150 s,
+/// which is 3,000 ticks.
+fn bin_ticks(sc: &SpeciesConfig) -> u64 {
+    let ticks = sc.seed_max_age_s / sc.seed_cohorts_max.max(1) as f64 / DT;
+    if ticks.is_finite() && ticks >= 1.0 { ticks as u64 } else { 1 }
 }
 
-/// Bound one species' cohorts on a site to `max`, merging its two **oldest** into one
-/// until the bank fits: organic matter and mineral summed, and the older of the two ages
-/// kept.
-///
-/// The older age, which is the opposite of [`merge_cohorts`] and on purpose: folding two
-/// cohorts together must not give either of them a longer life than it had, so
-/// `seed_max_age_s` still fires on the older one's schedule and the cap can only bring a
-/// cull forward.
-///
-/// [`merge_cohorts`] alone bounds nothing — package I's pulsing donor put one cohort per
-/// pulse on a site for as long as the pulses lasted — because it folds only ages within
-/// one tick of each other, and two cohorts two ticks apart stay two ticks apart forever.
-///
-/// `seeds` is sorted by species then age, youngest first, so this species' cohorts are one
-/// contiguous run and the two to fold are its last two.
-fn cap_cohorts(g: &mut Ground, species: Species, max: usize) {
-    let max = max.max(1);
-    let mut n = g.seeds.iter().filter(|c| c.species == species).count();
-    if n <= max {
-        return;
-    }
-    let start = g.seeds.iter().position(|c| c.species == species).expect("counted one above");
-    while n > max {
-        let oldest = g.seeds.remove(start + n - 1);
-        let next = &mut g.seeds[start + n - 2];
-        next.organic += oldest.organic;
-        next.mineral += oldest.mineral;
-        next.age_ticks = next.age_ticks.max(oldest.age_ticks);
-        n -= 1;
-    }
+/// The first tick of the bin that `tick` falls in.
+fn bin_start(tick: u64, sc: &SpeciesConfig) -> u64 {
+    let w = bin_ticks(sc);
+    tick - tick % w
 }
 
-/// Land a fresh package on a site's bank, keeping `seeds` sorted, merged and capped.
-fn add_cohort(g: &mut Ground, species: Species, organic: f64, mineral: f64, max_cohorts: usize) {
+/// Land a fresh package on a site's bank, in the bin whose window covers `tick`: a bin
+/// that is already there sums the organic matter and the mineral and keeps its start, and
+/// one that is not is inserted. `seeds` stays sorted by species then `bin_start_tick`,
+/// oldest first, so one species' bins are a contiguous run and germination can spend the
+/// oldest of them first.
+///
+/// No cap and no merge: a bin's age never decreases, so `seed_max_age_s` bounds how many
+/// bins of one species can be alive at `seed_cohorts_max + 1` by construction.
+fn add_cohort(
+    g: &mut Ground,
+    species: Species,
+    organic: f64,
+    mineral: f64,
+    tick: u64,
+    sc: &SpeciesConfig,
+) {
     if organic <= 0.0 && mineral <= 0.0 {
         return;
     }
-    match g.seeds.binary_search_by(|c| (c.species, c.age_ticks).cmp(&(species, 0))) {
+    let start = bin_start(tick, sc);
+    match g.seeds.binary_search_by(|c| (c.species, c.bin_start_tick).cmp(&(species, start))) {
         Ok(i) => {
             g.seeds[i].organic += organic;
             g.seeds[i].mineral += mineral;
         }
-        Err(i) => g.seeds.insert(i, SeedCohort { species, organic, mineral, age_ticks: 0 }),
+        Err(i) => {
+            g.seeds.insert(i, SeedCohort { species, organic, mineral, bin_start_tick: start })
+        }
     }
-    merge_cohorts(g);
-    cap_cohorts(g, species, max_cohorts);
 }
 
 // ---------------------------------------------------------------- 9. propagules
@@ -986,7 +964,8 @@ fn propagate(flora: &mut Flora, world: &World) {
 /// Every offer of one species for one site: debit its donors, respire the build, and land
 /// the rest as one cohort.
 fn commit_propagules(flora: &mut Flora, site: Site, species: Species, offers: &[Offer]) {
-    let Flora { config, stands, ground, ledger, .. } = flora;
+    let Flora { config, tick, stands, ground, ledger, .. } = flora;
+    let tick = *tick;
     let sc = config.species(species);
     let e_v = sc.energy_density;
 
@@ -1020,7 +999,7 @@ fn commit_propagules(flora: &mut Flora, site: Site, species: Species, offers: &[
             i
         }
     };
-    add_cohort(&mut ground[gi], species, net, sent_mineral, sc.seed_cohorts_max);
+    add_cohort(&mut ground[gi], species, net, sent_mineral, tick, sc);
 }
 
 /// The species' establishment predicate: wet enough for its roots, **aerated** enough for

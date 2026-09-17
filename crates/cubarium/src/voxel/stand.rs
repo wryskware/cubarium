@@ -485,13 +485,13 @@ mod tests {
             species: Species::Bloomcrown,
             organic: 0.01,
             mineral: 0.0002,
-            age_ticks: 0,
+            bin_start_tick: 0,
         });
         g.seeds.push(SeedCohort {
             species: Species::Umbrellafrond,
             organic: 0.03,
             mineral: 0.0006,
-            age_ticks: 0,
+            bin_start_tick: 0,
         });
         assert_eq!(g.seed_species(), Some(Species::Umbrellafrond), "the larger bank");
         g.seeds[0].organic = 0.05;

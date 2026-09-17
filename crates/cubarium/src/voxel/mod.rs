@@ -436,11 +436,15 @@ impl Control {
                         g.mineral, g.litter, g.litter_energy, g.litter_mineral, g.dead_wood,
                         g.dead_wood_mineral,
                     );
-                    // The seed bank, in the order the ground holds it: species, then age.
+                    // The seed bank, in the order the ground holds it: species, then
+                    // arrival bin, oldest first. The age is the bin's, measured from the
+                    // tick its window opened.
                     for c in &g.seeds {
                         eprintln!(
-                            "cubarium voxel:   seed {} organic {:.6} mineral {:.7} age {} ticks",
-                            c.species.name(), c.organic, c.mineral, c.age_ticks,
+                            "cubarium voxel:   seed {} organic {:.6} mineral {:.7} age {} ticks \
+                             (bin from tick {})",
+                            c.species.name(), c.organic, c.mineral, c.age_ticks(fv.tick),
+                            c.bin_start_tick,
                         );
                     }
                     if g.seeds.is_empty() {

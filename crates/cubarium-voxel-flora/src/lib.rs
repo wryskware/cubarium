@@ -65,11 +65,19 @@ pub enum Stage {
     Alive,
 }
 
-/// One dormant seed cohort on a site: paid propagule material of one species, of one age.
+/// One dormant seed cohort on a site: paid propagule material of one species that landed
+/// in one **arrival-time bin**.
 ///
 /// Not a stand. It has no income, no maintenance and no growth — only attrition, an age
 /// limit, and the chance to germinate when the site passes its species' establishment
 /// predicate and the bank is big enough to build a living stand out of.
+///
+/// A cohort is a bin and not a delivery: its age is measured from
+/// [`SeedCohort::bin_start_tick`], the first tick of the window it landed in, so a later
+/// landing that joins the same bin adds material without moving the age. Round 3b's
+/// correction (Astra R4.1): the old rule merged a cohort of age 1 with one of age 0 and
+/// kept age 0, so `seed_max_age_s` measured the time since the bank's **last delivery**
+/// and an arbitrarily small fresh arrival could retain old material for ever.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SeedCohort {
     pub species: Species,
@@ -77,8 +85,23 @@ pub struct SeedCohort {
     pub organic: f64,
     /// The mineral that came with it, from the donor's own tissue.
     pub mineral: f64,
-    /// Ticks since it landed.
-    pub age_ticks: u64,
+    /// The first tick of the arrival bin this material landed in: a multiple of the
+    /// species' bin width, `seed_max_age_s / seed_cohorts_max`. Never moves once the bin
+    /// exists, so the bin's age never decreases.
+    pub bin_start_tick: u64,
+}
+
+impl SeedCohort {
+    /// Ticks since this bin opened, at tick `now`. Monotone in `now` by construction:
+    /// nothing a later landing does can make it smaller.
+    pub fn age_ticks(&self, now: u64) -> u64 {
+        now.saturating_sub(self.bin_start_tick)
+    }
+
+    /// The same age in seconds, which is what `seed_max_age_s` is compared against.
+    pub fn age_s(&self, now: u64) -> f64 {
+        self.age_ticks(now) as f64 * DT
+    }
 }
 
 /// A support voxel: solid, with its top face exposed to void. `x` is stored wrapped
@@ -157,12 +180,13 @@ pub struct Ground {
     pub litter_energy: f64,
     /// The mineral held in the litter, released to `mineral` as the litter decomposes.
     pub litter_mineral: f64,
-    /// The site's seed bank, **sorted by species then age**, youngest first. Same-species
-    /// cohorts within one tick of age are merged, so a site a donor feeds every tick
-    /// holds one cohort per species and not one per tick; and a site holds at most
-    /// `SpeciesConfig::seed_cohorts_max` cohorts of any one species, the two oldest being
-    /// merged when a landing would take it past that, so a donor that comes and goes on a
-    /// longer period cannot stack them without bound either.
+    /// The site's seed bank, **sorted by species then `bin_start_tick`**, oldest first.
+    /// One entry per species per arrival bin: a landing joins the bin whose window covers
+    /// the current tick, creating it if it is not there, so a site a donor feeds every
+    /// tick holds one cohort per species per bin and not one per tick. The bank is bounded
+    /// by construction — a bin's age never decreases and a bin older than
+    /// `seed_max_age_s` leaves whole, so at most `seed_cohorts_max + 1` bins of one
+    /// species can be alive at once.
     pub seeds: Vec<SeedCohort>,
     /// `Wd`: dead wood, organic matter. Keeps its identity; nothing eats it this round.
     pub dead_wood: f64,
@@ -259,19 +283,25 @@ pub struct SpeciesConfig {
     /// Fraction of a seed cohort that falls to litter each second, with its mineral:
     /// paid decay, not deletion. **Placeholder**.
     pub seed_attrition_per_s: f64,
-    /// A cohort older than this many seconds falls to litter whole. **Placeholder**.
+    /// A bin whose start is older than this many seconds falls to litter whole, with its
+    /// mineral and its energy. **Placeholder**.
     pub seed_max_age_s: f64,
-    /// The most cohorts of this species one site's bank may hold. A landing that would
-    /// take it past this merges the site's two **oldest** cohorts into one — organic
-    /// matter and mineral summed, the older of the two ages kept — until the bank fits,
-    /// so the bank is bounded by construction and the merge can only bring
-    /// `seed_max_age_s` forward, never postpone it.
+    /// How many arrival bins one species' bank is divided into: the bin width is
+    /// `seed_max_age_s / seed_cohorts_max`, at least one tick, and a landing joins the bin
+    /// whose window covers the current tick. So this is the **age resolution** of a bank,
+    /// and the bound on its size follows from it: a bin's age never decreases and a bin
+    /// past `seed_max_age_s` leaves whole, so a site holds at most `seed_cohorts_max + 1`
+    /// bins of one species however a donor comes and goes. **Placeholder** — 4 is "a few",
+    /// which is what [`Ground::seeds`] always claimed.
     ///
-    /// Package I measured what the age-based merge alone bounds: nothing. Same-species
-    /// cohorts merge only when their ages are within one tick, so a donor that flickers
-    /// on and off every two ticks left one cohort per pulse — fifty pulses, fifty
-    /// cohorts, and about 6,000 of them per site before `seed_max_age_s` culls the
-    /// oldest, on a `Vec` the germination check sums over every tick. **Placeholder**.
+    /// Round 3b replaced two rules with this one (Astra R4.1). The first merged cohorts
+    /// whose ages were within one tick and kept the **younger** age, which made
+    /// `seed_max_age_s` the time since the bank's last delivery rather than a seed's
+    /// lifetime: continuous arrivals, however small, retained old material for ever, and
+    /// `tests/round3.rs` blessed it. The second capped the count by merging the two
+    /// **oldest** cohorts at the older age, which bounded the `Vec` but swept nearly every
+    /// old deposit into one bucket that could then kill much younger material at the next
+    /// expiry. Fixed bins do the bounding without either effect.
     pub seed_cohorts_max: usize,
     /// `n_tissue`: mineral nutrient per unit of organic matter this species builds. Wood,
     /// foliage and reserve share it this round. Growing `ΔO` draws `n_tissue · ΔO` from
