@@ -425,11 +425,16 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink]) {
         ledger.heat_out += e_v * (paid_a + paid_q);
 
         // ---- 4.4 growth: reserve share, foliage, wood, then the rest to reserve
-        let dq_s = (sc.reserve_share * rem).min(d_q);
+        //
+        // Every increment is floored at zero as well as capped by its demand. The caps
+        // above already keep `rem` non-negative in exact arithmetic; in f64 a
+        // `rem - build * (rem / build)` can land a few ulps below it, and a negative
+        // "growth" would take a stock down instead of up.
+        let dq_s = (sc.reserve_share * rem).min(d_q).max(0.0);
         rem -= dq_s;
         stands[si].reserve += dq_s;
 
-        let dp_a = (rem / build).min(d_p);
+        let dp_a = (rem / build).min(d_p).max(0.0);
         rem -= build * dp_a;
         let dp_q = if p0 < sc.reflush_below * p_cap {
             (stands[si].reserve / build)
@@ -444,15 +449,17 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink]) {
         ground[gi].nutrient += sc.build * (dp_a + dp_q);
         ledger.heat_out += e_v * sc.build * (dp_a + dp_q);
 
-        let dw = (rem / build).min(d_w);
+        let dw = (rem / build).min(d_w).max(0.0);
         rem -= build * dw;
         stands[si].wood += dw;
         ground[gi].nutrient += sc.build * dw;
         ledger.heat_out += e_v * sc.build * dw;
 
-        let dq_r = rem.min((d_q - dq_s).max(0.0));
+        let dq_r = rem.min((d_q - dq_s).max(0.0)).max(0.0);
         stands[si].reserve += dq_r;
         rem -= dq_r;
+        // The leftover itself: never hand a negative residue back to the nutrient.
+        let rem = rem.max(0.0);
         // Whatever the caps left over goes straight back: material to nutrient, its
         // energy to heat. With the §4.2 cap on `A` this is float residue only.
         ground[gi].nutrient += rem;
