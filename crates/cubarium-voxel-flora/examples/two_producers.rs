@@ -187,10 +187,10 @@ fn run(
     // a germination, so a stand there at the end is a descendant.
     let mut founder_sites: Vec<(Site, Species)> = Vec::new();
     for f in &planted {
-        if let Some(site) = cubarium_voxel_flora::highest_support(&world.view(), f.x as i64, f.z) {
-            if flora.view().stand_at(site).is_some() {
-                founder_sites.push((site, f.species));
-            }
+        let seated = cubarium_voxel_flora::highest_support(&world.view(), f.x as i64, f.z)
+            .filter(|&site| flora.view().stand_at(site).is_some());
+        if let Some(site) = seated {
+            founder_sites.push((site, f.species));
         }
     }
     let mut vacated = vec![false; founder_sites.len()];

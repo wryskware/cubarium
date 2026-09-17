@@ -278,12 +278,11 @@ fn respiration_is_the_only_organic_leak_and_it_takes_its_energy_with_it() {
 #[test]
 fn a_package_keeps_all_its_mineral_through_construction_respiration() {
     let mut config = FloraConfig::default();
-    for sc in [&mut config.bloomcrown] {
-        sc.assimilation = 0.0;
-        sc.maintenance = 0.0;
-        sc.senescence = 0.0;
-        sc.hop = 1;
-    }
+    let sc = &mut config.bloomcrown;
+    sc.assimilation = 0.0;
+    sc.maintenance = 0.0;
+    sc.senescence = 0.0;
+    sc.hop = 1;
     let build = config.bloomcrown.build;
     let n_tissue = config.bloomcrown.n_tissue;
     let rate = config.bloomcrown.propagule_rate;
