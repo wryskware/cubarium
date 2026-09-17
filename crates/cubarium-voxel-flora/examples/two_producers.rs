@@ -6,6 +6,7 @@
 //! cargo run --release -p cubarium-voxel-flora --example two_producers -- community [seconds] [seed] [noise_seed]
 //! cargo run --release -p cubarium-voxel-flora --example two_producers -- compare [seconds] [seed] [noise_a] [noise_b] [control_seed] [species_a] [species_b]
 //! cargo run --release -p cubarium-voxel-flora --example two_producers -- chesson [fill] [probe] [seed] [noise_seed] [resident] [newcomer]
+//! cargo run --release -p cubarium-voxel-flora --example two_producers -- harvest [seconds] [rate] [seed] [noise_seed]
 //! ```
 //!
 //! Every mode names its species **by name** and none of them is wired in: the bare run and
@@ -39,6 +40,15 @@
 //! replication and no stationary resident — and it exists to say whether five presets can
 //! be in one world at once and which gate is shutting for each of them.
 //!
+//! `harvest` is round 5a's **producer-response probe** and nothing more: two arms of one
+//! conditioned world, one plant-only and one with a scripted harvester that takes reachable
+//! foliage from three predeclared support faces for the first half of the run, and then
+//! stops. It says what a stripped producer does about it — foliage, reserve and wood, and
+//! how much of what was grazed is back at full foliage by the end — and it says **nothing**
+//! about an animal: there is no body, no movement, no population, no carrying capacity and
+//! no viability claim anywhere in it. `design/theoretical-biosphere-2026-09-16.md` §5 asks
+//! for exactly this before voxel animals exist.
+//!
 //! `compare` is the decisive experiment of `design/voxel-ecology-sketch-2026-09-16.md`
 //! §4: re-draw **only** the generator's final weak correlated noise with a new seed,
 //! keep the landform, seed the same founder columns, and see whether each species
@@ -48,7 +58,7 @@
 //! decorative and the patches are reading the noise.
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, World};
-use cubarium_voxel_flora::{Command, Flora, FloraConfig, Site, Species, SpeciesConfig};
+use cubarium_voxel_flora::{Command, Flora, FloraConfig, Reach, Site, Species, SpeciesConfig};
 
 const WARMUP_TICKS: u32 = 1000;
 const FOUNDERS_PER_SPECIES: usize = 8;
@@ -242,6 +252,7 @@ fn main() {
         Some("compare") => return compare(&args[1..]),
         Some("chesson") => return chesson(&args[1..]),
         Some("community") => return community(&args[1..]),
+        Some("harvest") => return harvest(&args[1..]),
         _ => {}
     }
     let seconds: f64 = arg(&args, 0).unwrap_or(60.0);
@@ -1894,6 +1905,399 @@ fn community(args: &[String]) {
         l.transpired_m3
     );
     println!("wall time: {:.1} s for {ticks} coupled ticks", started.elapsed().as_secs_f64());
+}
+
+// ------------------------------------------------------------------ 5a: harvest
+
+/// The reach box the harvest probe uses, straight out of the round-5a brief: two voxels
+/// sideways, one up — a ground browser's box.
+///
+/// Not a model default (the model has no consumer) and not tuned: it is a **declared
+/// experiment condition**, printed with every run. One consequence is worth knowing before
+/// reading any result: `SpeciesConfig::crown_voxels` is 2 for a bloomcrown at the harness's
+/// founder wood, so a grown bloomcrown crown is **out of reach** of an `up: 1` eater and
+/// only its seedlings are ever food. What a harvester standing on a bloomcrown face eats is
+/// therefore whatever else is within two voxels of it, and the per-species lines below say
+/// exactly what that was.
+const HARVEST_REACH: Reach = Reach { horizontal: 2, up: 1 };
+
+/// How many support faces the scripted harvester works from. Predeclared before the run,
+/// printed with what each of them can reach at the start.
+const HARVEST_SITES: usize = 3;
+
+/// The default harvest rate: organic matter per second **per support face**, taken from the
+/// stands that face can reach, spent on them in **site order** — so the harvester strips the
+/// first stand it can reach before it touches the next. An experiment condition like
+/// [`HARNESS_RAIN_M_PER_S`], and an argument so a rerun can state a different one.
+///
+/// 0.002 /s against a springturf founder's own foliage regrowth — `foliage_rate · W` is
+/// 6e-4 /s at founder wood 0.03 — is a harvester that takes faster than one stand in reach
+/// can put foliage back. That is deliberate: the probe asks what a **stripped** producer
+/// does, not where a grazing equilibrium sits, and nothing here claims that a consumer of
+/// any size would eat at this rate.
+const HARVEST_RATE_PER_S: f64 = 0.002;
+
+/// "Full foliage" for the recovery count: within 1 % of `α · W`. A stand at equilibrium sits
+/// just under its own cap, because senescence takes `senescence · P · dt` every tick and the
+/// cap is only what growth aims at, so an exact `P = α · W` would count nobody.
+const FULL_FOLIAGE: f64 = 0.99;
+
+/// One species' living stocks at one moment, summed over its stands.
+#[derive(Clone, Copy, Default)]
+struct Stocks {
+    stands: usize,
+    foliage: f64,
+    reserve: f64,
+    wood: f64,
+}
+
+fn stocks_of(flora: &Flora) -> [Stocks; Species::COUNT] {
+    let mut out = [Stocks::default(); Species::COUNT];
+    for s in flora.view().stands {
+        let e = &mut out[s.species.index()];
+        e.stands += 1;
+        e.foliage += s.foliage;
+        e.reserve += s.reserve;
+        e.wood += s.wood;
+    }
+    out
+}
+
+/// The foliage, the reserve and the living count of one **cohort by identity**.
+fn cohort_sums(flora: &Flora, ids: &[u64]) -> (f64, f64, usize) {
+    let mut out = (0.0, 0.0, 0);
+    for s in flora.view().stands.iter().filter(|s| ids.contains(&s.id)) {
+        out.0 += s.foliage;
+        out.1 += s.reserve;
+        out.2 += 1;
+    }
+    out
+}
+
+/// Everything one arm of the harvest probe leaves behind.
+struct Arm {
+    label: &'static str,
+    /// Per-species stocks every 100 s, plus the start and the end.
+    samples: Vec<(f64, [Stocks; Species::COUNT])>,
+    /// The harvester's own faces, and what each reached at the start: stands and foliage.
+    /// Declared in **both** arms, because a face is a property of the patch and not of the
+    /// treatment — the control has to be able to report the same cohort.
+    sites: Vec<(Site, usize, f64)>,
+    /// The stands reachable from those faces **at the start**, by identity: the patch this
+    /// arm is about, fixed before anything was eaten so that both arms mean one set.
+    cohort: Vec<u64>,
+    /// That cohort's foliage, reserve and living count at the start, at the halfway point
+    /// where the harvest stops, and at the end.
+    cohort_at: [(f64, f64, usize); 3],
+    /// Every identity this arm actually bit, and those of them seen back at full foliage
+    /// after the harvest stopped.
+    bitten: Vec<u64>,
+    recovered: Vec<u64>,
+    /// Bites that took something, and the organic matter each species lost to them: the
+    /// ledger's `consumed_*` have no species in them, and a reach box does not care which
+    /// species it is holding.
+    bites: u64,
+    taken_by_species: [f64; Species::COUNT],
+    bitten_by_species: [usize; Species::COUNT],
+    consumed: (f64, f64, f64),
+    establishments: u64,
+    deaths: u64,
+    residuals: (f64, f64, f64),
+}
+
+/// One arm: the same conditioned world, the same founders, the same predeclared faces, and a
+/// scripted harvester only if `harvesting`.
+///
+/// Both arms are built from `prepared_world(seed, noise_seed)` and `pick_founders`, which are
+/// deterministic in the seed, so the two are the **same world with the same founders** and
+/// diverge at the first bite and nowhere else. The founder lists are compared afterwards
+/// rather than trusted.
+fn harvest_arm(
+    seconds: f64,
+    rate: f64,
+    seed: u64,
+    noise_seed: u64,
+    patch: Species,
+    harvesting: bool,
+    verbose: bool,
+) -> (Arm, Vec<Founder>) {
+    let mut world = prepared_world(seed, noise_seed);
+    let skyline = skyline_of(&world);
+    let mut flora = Flora::new(FloraConfig::default());
+    let founders = pick_founders(&world, &flora, &skyline, &Species::ALL, verbose);
+    for f in &founders {
+        let wood = founder_wood(flora.config().species(f.species));
+        flora.apply(&world, Command::Seed { x: f.x as i64, z: f.z, species: f.species, wood });
+    }
+
+    // The harvester's faces, predeclared: the first `HARVEST_SITES` founder faces of the
+    // patch species in site order. A founder's own face is a support face by construction,
+    // and the eater stands on it.
+    let mut faces: Vec<Site> = founders
+        .iter()
+        .filter(|f| f.species == patch)
+        .filter_map(|f| cubarium_voxel_flora::highest_support(&world.view(), f.x as i64, f.z))
+        .collect();
+    faces.sort_unstable();
+    faces.dedup();
+    faces.truncate(HARVEST_SITES);
+
+    let mut sites: Vec<(Site, usize, f64)> = Vec::new();
+    let mut cohort: Vec<u64> = Vec::new();
+    for &face in &faces {
+        let reach = flora.view().reachable_foliage(&world.view(), face, HARVEST_REACH);
+        // `+ 0.0` only so that an empty reach prints as a positive zero.
+        let foliage: f64 = 0.0 + reach.iter().map(|&(_, f)| f).sum::<f64>();
+        sites.push((face, reach.len(), foliage));
+        for (site, _) in reach {
+            if let Some(stand) = flora.view().stand_at(site) {
+                if !cohort.contains(&stand.id) {
+                    cohort.push(stand.id);
+                }
+            }
+        }
+    }
+    cohort.sort_unstable();
+
+    let ticks = (seconds * cubarium_voxel::TICK_HZ as f64).round() as u64;
+    let half = ticks / 2;
+    let every = 100 * cubarium_voxel::TICK_HZ as u64;
+    let mut arm = Arm {
+        label: if harvesting { "harvested" } else { "plant-only" },
+        samples: vec![(0.0, stocks_of(&flora))],
+        sites,
+        cohort: cohort.clone(),
+        cohort_at: [cohort_sums(&flora, &cohort), (0.0, 0.0, 0), (0.0, 0.0, 0)],
+        bitten: Vec::new(),
+        recovered: Vec::new(),
+        bites: 0,
+        taken_by_species: [0.0; Species::COUNT],
+        bitten_by_species: [0; Species::COUNT],
+        consumed: (0.0, 0.0, 0.0),
+        establishments: 0,
+        deaths: 0,
+        residuals: (0.0, 0.0, 0.0),
+    };
+
+    for tick in 0..ticks {
+        world.step();
+        flora.step(&mut world);
+        // The bite is **between** ticks, which is where a transfer belongs: this tick has
+        // run, and the next one reads the smaller `P`.
+        if harvesting && tick < half {
+            let budget = rate * cubarium_voxel::DT;
+            for &face in &faces {
+                let mut left = budget;
+                let reachable = flora.view().reachable_foliage(&world.view(), face, HARVEST_REACH);
+                for (site, _) in reachable {
+                    if left <= 0.0 {
+                        break;
+                    }
+                    let Some((id, species)) =
+                        flora.view().stand_at(site).map(|s| (s.id, s.species))
+                    else {
+                        continue;
+                    };
+                    if let Some(taken) = flora.take_foliage(site, left) {
+                        left -= taken.organic;
+                        arm.bites += 1;
+                        arm.taken_by_species[species.index()] += taken.organic;
+                        if !arm.bitten.contains(&id) {
+                            arm.bitten.push(id);
+                            arm.bitten_by_species[species.index()] += 1;
+                        }
+                    }
+                }
+            }
+        }
+        // Recovery is asked only after the harvest has stopped, and by identity: a stand
+        // that was bitten and is back within 1 % of its own `α · W`.
+        if tick >= half {
+            for stand in flora.view().stands {
+                if arm.bitten.contains(&stand.id) && !arm.recovered.contains(&stand.id) {
+                    let cap = flora.config().species(stand.species).alpha * stand.wood;
+                    if cap > 0.0 && stand.foliage >= FULL_FOLIAGE * cap {
+                        arm.recovered.push(stand.id);
+                    }
+                }
+            }
+        }
+        if tick + 1 == half {
+            arm.cohort_at[1] = cohort_sums(&flora, &cohort);
+        }
+        if (tick + 1) % every == 0 {
+            arm.samples.push(((tick + 1) as f64 * cubarium_voxel::DT, stocks_of(&flora)));
+        }
+    }
+
+    let v = flora.view();
+    arm.cohort_at[2] = cohort_sums(&flora, &cohort);
+    arm.consumed = (
+        v.ledger.consumed_organic_out,
+        v.ledger.consumed_mineral_out,
+        v.ledger.consumed_energy_out,
+    );
+    arm.establishments = v.ledger.establishments;
+    arm.deaths = v.ledger.deaths;
+    arm.residuals = (
+        v.organic() - v.ledger.expected_organic(),
+        v.mineral() - v.ledger.expected_mineral(),
+        v.energy() - v.ledger.expected_energy(),
+    );
+    if arm.samples.last().map(|&(s, _)| s) != Some(ticks as f64 * cubarium_voxel::DT) {
+        arm.samples.push((ticks as f64 * cubarium_voxel::DT, stocks_of(&flora)));
+    }
+    arm.bitten.sort_unstable();
+    arm.recovered.sort_unstable();
+    (arm, founders)
+}
+
+/// The probe: two patches, and for each of them a plant-only arm and a harvested arm of the
+/// same conditioned world.
+fn harvest(args: &[String]) {
+    let seconds: f64 = arg(args, 0).unwrap_or(400.0);
+    let rate: f64 = arg(args, 1).unwrap_or(HARVEST_RATE_PER_S);
+    let seed: u64 = arg(args, 2).unwrap_or(1);
+    let noise_seed: u64 = arg(args, 3).unwrap_or(0);
+    let started = std::time::Instant::now();
+    println!(
+        "harvest: seed {seed} noise_seed {noise_seed}, rain {HARNESS_RAIN_M_PER_S} m/s with the \
+         outlet open, {WARMUP_TICKS} warm-up ticks (50 s), then {seconds:.0} coupled seconds per \
+         arm; the harvester takes up to {rate} organic/s per support face from stands inside \
+         {HARVEST_REACH:?}, spends it in site order, and **stops at {:.0} s**",
+        seconds / 2.0
+    );
+    println!(
+        "a producer-response probe and nothing else: no animal body, no movement, no population, \
+         no carrying capacity and no viability claim. What it measures is what the existing \
+         foliage_rate and reflush-from-reserve rules do to a stripped stand."
+    );
+
+    let mut first = true;
+    for patch in [Species::Springturf, Species::Bloomcrown] {
+        let (control, founders) =
+            harvest_arm(seconds, rate, seed, noise_seed, patch, false, first);
+        first = false;
+        let (grazed, again) = harvest_arm(seconds, rate, seed, noise_seed, patch, true, false);
+        assert_eq!(again, founders, "the two arms must plant the same founders");
+        assert_eq!(control.consumed, (0.0, 0.0, 0.0), "the plant-only arm ate something");
+        assert_eq!(control.cohort, grazed.cohort, "the two arms must mean the same cohort");
+        report_harvest(patch, &control, &grazed, rate);
+    }
+    println!(
+        "\nwall time: {:.1} s for four arms of {seconds:.0} coupled seconds",
+        started.elapsed().as_secs_f64()
+    );
+}
+
+/// One patch's report: the declaration, the two arms' trajectories, what was taken from
+/// whom, and what came back.
+fn report_harvest(patch: Species, control: &Arm, grazed: &Arm, rate: f64) {
+    println!("\n=== {} patch ===", patch.name());
+    if grazed.sites.is_empty() {
+        println!(
+            "  no founder of {} was planted, so there is no predeclared face and no treatment to \
+             report",
+            patch.name()
+        );
+        return;
+    }
+    println!(
+        "  predeclared support faces (the first {HARVEST_SITES} founder faces of {} in site \
+         order), and what each reached at the start under {HARVEST_REACH:?}:",
+        patch.name()
+    );
+    for &(site, stands, foliage) in &grazed.sites {
+        println!(
+            "    ({:>3},{:>3}) y{:<3} {stands} stands in reach holding {foliage:.5} of foliage",
+            site.x, site.z, site.y
+        );
+    }
+    let in_reach: usize = grazed.sites.iter().map(|&(_, n, _)| n).sum();
+    if in_reach == 0 {
+        println!(
+            "  **nothing was in reach at the start**: with {HARVEST_REACH:?} a crown is food only \
+             if its lowest cell is at most one voxel over the eater's own face. Read the totals \
+             below as the empty treatment they are."
+        );
+    }
+
+    println!("  trajectories (stands / foliage / reserve / wood, summed per species):");
+    for arm in [control, grazed] {
+        println!("    -- {} --", arm.label);
+        for &(seconds, stocks) in &arm.samples {
+            let mut line = format!("    t {seconds:>5.0} s:");
+            for species in Species::ALL {
+                let s = stocks[species.index()];
+                if s.stands == 0 {
+                    continue;
+                }
+                line.push_str(&format!(
+                    " {} {}/{:.4}/{:.4}/{:.4};",
+                    species.name(),
+                    s.stands,
+                    s.foliage,
+                    s.reserve,
+                    s.wood
+                ));
+            }
+            println!("{line}");
+        }
+    }
+
+    println!(
+        "  taken at {rate} organic/s per face: {} bites on {} distinct stands; consumed organic \
+         {:.6}, mineral {:.7}, energy {:.6}",
+        grazed.bites,
+        grazed.bitten.len(),
+        grazed.consumed.0,
+        grazed.consumed.1,
+        grazed.consumed.2
+    );
+    println!("  by species, because a reach box does not choose one:");
+    for species in Species::ALL {
+        let i = species.index();
+        if grazed.bitten_by_species[i] == 0 {
+            continue;
+        }
+        println!(
+            "    {:>14}: {:.6} organic off {} stands",
+            species.name(),
+            grazed.taken_by_species[i],
+            grazed.bitten_by_species[i]
+        );
+    }
+    let bitten = grazed.bitten.len();
+    let recovered = grazed.recovered.len();
+    println!(
+        "  recovery, by identity, after the harvest stopped: {recovered} of {bitten} bitten \
+         stands reached {:.0} % of their own α·W before the end — a recovery fraction of {:.2}; \
+         the other {} are still under it or no longer standing",
+        100.0 * FULL_FOLIAGE,
+        if bitten == 0 { 0.0 } else { recovered as f64 / bitten as f64 },
+        bitten - recovered
+    );
+    println!(
+        "  the declared cohort ({} stands reachable at the start), foliage / reserve / alive at \
+         0 s, at the harvest stop and at the end:",
+        grazed.cohort.len()
+    );
+    for arm in [control, grazed] {
+        let [a, b, c] = arm.cohort_at;
+        println!(
+            "    {:>10}: foliage {:.5} -> {:.5} -> {:.5}; reserve {:.5} -> {:.5} -> {:.5}; alive \
+             {} -> {} -> {}",
+            arm.label, a.0, b.0, c.0, a.1, b.1, c.1, a.2, b.2, c.2
+        );
+    }
+    for arm in [control, grazed] {
+        println!(
+            "    {:>10}: establishments {}, deaths {}, residuals organic {:.3e} mineral {:.3e} \
+             energy {:.3e}",
+            arm.label, arm.establishments, arm.deaths, arm.residuals.0, arm.residuals.1,
+            arm.residuals.2
+        );
+    }
 }
 
 #[cfg(test)]
