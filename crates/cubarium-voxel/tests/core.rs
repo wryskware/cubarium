@@ -562,13 +562,28 @@ fn save_load_round_trips() {
     assert_eq!(w.tick(), back.tick());
 }
 
+/// Schema 1 is the pre-plant-boundary format: no `transpiration_out`, no
+/// `terrain_version`. It is refused, not migrated.
 #[test]
 fn a_wrong_schema_tag_is_refused() {
     let w = World::empty(cfg(4, 5));
     let mut bytes = w.save();
-    bytes[0] = 2;
+    bytes[0] = 1;
     let err = World::load(&bytes).expect_err("must refuse another schema");
     assert!(format!("{err}").contains("schema"), "{err}");
+}
+
+#[test]
+fn the_plant_boundary_fields_round_trip() {
+    let mut w = wet_soil();
+    w.apply(Command::SetMaterial { x: 3, y: 4, z: 0, material: Material::Rock });
+    let took = w.apply(Command::WithdrawPore { x: 1, y: 1, z: 0, volume_m3: 0.01 });
+    assert!(took < 0.0, "a withdrawal is negative: {took}");
+    assert!(w.terrain_version() > 0 && w.view().ledger.transpiration_out > 0.0);
+    let back = World::load(&w.save()).expect("round trip");
+    assert_eq!(w, back);
+    assert_eq!(back.terrain_version(), w.terrain_version());
+    assert_eq!(back.view().ledger.transpiration_out, w.view().ledger.transpiration_out);
 }
 
 // ------------------------------------------------------------------ generator
@@ -620,4 +635,263 @@ fn the_generator_has_no_isolated_voids_a_ridge_above_the_basin_and_a_clean_seam(
         assert!(world.outlet_cell().is_some(), "seed {seed}: no outlet");
         assert!(world.spring_cell().is_some(), "seed {seed}: no spring");
     }
+}
+
+// ------------------------------------------------------- the plant boundary
+
+/// A saturated soil voxel holds `pore_capacity` cubic metres at `voxel_m = 1`: 0.35.
+#[test]
+fn withdraw_pore_caps_at_the_stock_and_books_the_ledger() {
+    let mut w = wet_soil();
+    let stock = w.view().pore_water_m3(1, 1, 0);
+    assert!((stock - 0.35).abs() < 1e-12, "saturated soil holds {stock}");
+
+    // A bite out of the middle: exactly what was asked for, booked as a loss.
+    let got = w.apply(Command::WithdrawPore { x: 1, y: 1, z: 0, volume_m3: 0.1 });
+    assert!((got + 0.1).abs() < 1e-12, "a withdrawal is negative and exact: {got}");
+    assert!((w.view().ledger.transpiration_out - 0.1).abs() < 1e-12);
+    assert!((w.view().pore_water_m3(1, 1, 0) - 0.25).abs() < 1e-12);
+
+    // And then more than is left: capped by the stock, and the stock is empty, not
+    // negative.
+    let left = w.view().pore_water_m3(1, 1, 0);
+    let got = w.apply(Command::WithdrawPore { x: 1, y: 1, z: 0, volume_m3: 10.0 });
+    assert!((got + left).abs() < 1e-12, "took {got}, the voxel held {left}");
+    assert_eq!(w.view().pore_at(1, 1, 0), 0.0);
+    assert!((w.view().ledger.transpiration_out - 0.35).abs() < 1e-12);
+    // The loss term is what keeps conservation: stored fell by exactly what was booked.
+    assert!(residual(&w).abs() < 1e-9, "{}", residual(&w));
+}
+
+#[test]
+fn withdraw_pore_refuses_a_bad_volume_and_takes_nothing_from_air() {
+    let mut w = wet_soil();
+    for bad in [-1.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(w.apply(Command::WithdrawPore { x: 1, y: 1, z: 0, volume_m3: bad }), 0.0);
+    }
+    assert_eq!(w.view().ledger.transpiration_out, 0.0, "a refused volume books nothing");
+    assert_eq!(w.view().pore_at(1, 1, 0), 1.0, "and takes nothing");
+
+    // Air has no pore space at all: zero accepted, zero booked.
+    assert_eq!(w.apply(Command::WithdrawPore { x: 1, y: 4, z: 0, volume_m3: 1.0 }), 0.0);
+    // Bedrock has none either.
+    assert_eq!(w.apply(Command::WithdrawPore { x: 1, y: 0, z: 0, volume_m3: 1.0 }), 0.0);
+    assert_eq!(w.view().ledger.transpiration_out, 0.0);
+    // Outside the world: refused, nothing booked.
+    assert_eq!(w.apply(Command::WithdrawPore { x: 1, y: 99, z: 0, volume_m3: 1.0 }), 0.0);
+    assert_eq!(w.apply(Command::WithdrawPore { x: 1, y: 1, z: 9, volume_m3: 1.0 }), 0.0);
+    assert_eq!(w.view().ledger.transpiration_out, 0.0);
+}
+
+/// A support face needs void above it *inside* the world, so the topmost row is never
+/// one however solid it is; a roofed floor is one, because a plant's room is the void
+/// over the face, not the open sky.
+#[test]
+fn is_support_skips_the_top_row_and_accepts_a_roofed_floor() {
+    let c = cfg(4, 5);
+    let mut w = World::empty(c.clone());
+    for x in 0..4 {
+        w.apply(Command::SetMaterial { x, y: 4, z: 0, material: Material::Rock });
+        w.apply(Command::SetMaterial { x, y: 2, z: 0, material: Material::Rock });
+    }
+    let v = w.view();
+    assert!(!v.is_support(0, 4, 0), "the top row has no room above it");
+    assert!(v.is_support(0, 0, 0), "the foundation under a roof is a support");
+    assert!(v.is_support(0, 2, 0), "and so is the roof's own top face");
+    assert!(!v.is_support(0, 1, 0), "air is not a support");
+    assert_eq!(v.supports_in_column(0, 0), vec![0, 2], "ascending, and only the real ones");
+    assert_eq!(v.supports_in_column(0, 9), Vec::<u32>::new(), "no such slab");
+}
+
+#[test]
+fn water_depth_sums_fractional_fills_and_stops_at_a_dry_cell() {
+    let mut w = World::empty(cfg(4, 8));
+    w.apply(Command::AddWater { x: 1, y: 1, z: 0, volume_m3: 0.5 });
+    w.apply(Command::AddWater { x: 1, y: 2, z: 0, volume_m3: 0.3 });
+    // y = 3 stays dry; the water above it is not standing on this face.
+    w.apply(Command::AddWater { x: 1, y: 4, z: 0, volume_m3: 0.4 });
+    let v = w.view();
+    assert!((v.water_depth_m(1, 0, 0) - 0.8).abs() < 1e-12, "{}", v.water_depth_m(1, 0, 0));
+    assert_eq!(v.water_depth_m(2, 0, 0), 0.0, "a dry face reads zero");
+
+    // A solid stops it too, and `voxel_m` scales it.
+    let mut w = World::empty(Config { voxel_m: 0.25, ..cfg(4, 8) });
+    w.apply(Command::AddWater { x: 1, y: 1, z: 0, volume_m3: 0.5 * 0.25 * 0.25 * 0.25 });
+    w.apply(Command::SetMaterial { x: 1, y: 2, z: 0, material: Material::Rock });
+    w.apply(Command::AddWater { x: 1, y: 3, z: 0, volume_m3: 0.25 * 0.25 * 0.25 });
+    let v = w.view();
+    assert!((v.water_depth_m(1, 0, 0) - 0.125).abs() < 1e-12, "{}", v.water_depth_m(1, 0, 0));
+}
+
+#[test]
+fn soil_below_stops_at_rock() {
+    let mut w = World::empty(cfg(4, 8));
+    for y in 1..=2 {
+        w.apply(Command::SetMaterial { x: 1, y, z: 0, material: Material::Rock });
+    }
+    for y in 3..=5 {
+        w.apply(Command::SetMaterial { x: 1, y, z: 0, material: Material::Soil });
+    }
+    let v = w.view();
+    assert_eq!(v.soil_below(1, 5, 0), 3, "three soil voxels down to the rock");
+    assert_eq!(v.soil_below(1, 4, 0), 2);
+    assert_eq!(v.soil_below(1, 2, 0), 0, "rock is not soil");
+    assert_eq!(v.soil_below(1, 6, 0), 0, "air is not soil");
+}
+
+// ------------------------------------------------------------ sky visibility
+
+/// Seven slabs deep, so a 30-degree ray cannot slip out of the front or back wall
+/// before a roof one voxel up has stopped it.
+fn sky_fixture(width: u32, height: u32) -> World {
+    World::empty(Config { width, height, depth: 7, voxel_m: 1.0, ..Config::default() })
+}
+
+fn roof(w: &mut World, y: u32) {
+    for z in 0..w.config().depth {
+        for x in 0..w.config().width as i64 {
+            w.apply(Command::SetMaterial { x, y, z, material: Material::Rock });
+        }
+    }
+}
+
+/// A rock wall across every slab: the fan must go over it, not round it.
+fn sky_wall(w: &mut World, x: i64, ys: std::ops::RangeInclusive<u32>) {
+    for y in ys {
+        for z in 0..w.config().depth {
+            w.apply(Command::SetMaterial { x, y, z, material: Material::Rock });
+        }
+    }
+}
+
+#[test]
+fn sky_visibility_is_one_on_an_open_plain_and_zero_under_a_roof() {
+    let mut w = sky_fixture(8, 6);
+    let v = w.view();
+    for z in 0..7 {
+        for x in 0..8 {
+            assert_eq!(v.sky_visibility(x, 0, z), 1.0, "({x}, 0, {z}) is open sky");
+        }
+    }
+
+    // One voxel of headroom and a complete roof: nothing gets out.
+    roof(&mut w, 2);
+    let v = w.view();
+    assert_eq!(v.sky_visibility(0, 0, 3), 0.0, "a roofed floor sees no sky");
+    assert_eq!(v.sky_visibility(0, 2, 3), 1.0, "the roof's own top face does");
+}
+
+#[test]
+fn sky_visibility_beside_a_wall_is_between_and_mirrors_exactly() {
+    // A two-voxel wall on a sixteen-column ring: the far side of the ring clears it at
+    // 30 degrees of elevation, the column against it does not.
+    let mut w = sky_fixture(16, 8);
+    sky_wall(&mut w, 4, 1..=2);
+    let open = w.view().sky_visibility(10, 0, 3);
+    let beside = w.view().sky_visibility(5, 0, 3);
+    assert_eq!(open, 1.0, "six columns from a two-voxel wall is still open sky");
+    assert!(beside > 0.0 && beside < 1.0, "beside a wall: {beside}");
+    assert!(beside < open, "beside the wall must be darker than away from it");
+
+    // A fixture symmetric under x -> 7 - x (walls at 2 and 5, which map onto each
+    // other) gives its two mirrored sites the same answer, bit for bit: the fan's
+    // azimuths are closed under negating dx.
+    let mut w = sky_fixture(8, 8);
+    sky_wall(&mut w, 2, 1..=5);
+    sky_wall(&mut w, 5, 1..=5);
+    let v = w.view();
+    for z in 0..7 {
+        for x in 0..8 {
+            assert_eq!(
+                v.sky_visibility(x, 0, z),
+                v.sky_visibility(7 - x, 0, z),
+                "({x}, 0, {z}) is not the mirror of ({}, 0, {z})",
+                7 - x
+            );
+        }
+    }
+    assert!(v.sky_visibility(3, 0, 3) < 1.0, "the site between the walls is shaded");
+}
+
+// ---------------------------------------------------------- terrain version
+
+#[test]
+fn terrain_version_bumps_only_on_a_real_change() {
+    let mut w = World::empty(cfg(4, 6));
+    assert_eq!(w.terrain_version(), 0);
+    w.apply(Command::SetMaterial { x: 1, y: 1, z: 0, material: Material::Soil });
+    assert_eq!(w.terrain_version(), 1);
+    w.apply(Command::SetMaterial { x: 1, y: 1, z: 0, material: Material::Soil });
+    assert_eq!(w.terrain_version(), 1, "setting the same material changes no terrain");
+    w.apply(Command::SetMaterial { x: 1, y: 9, z: 0, material: Material::Rock });
+    assert_eq!(w.terrain_version(), 1, "a refused edit changes no terrain");
+    w.apply(Command::AddWater { x: 1, y: 2, z: 0, volume_m3: 0.2 });
+    run(&mut w, 5);
+    assert_eq!(w.terrain_version(), 1, "water is not terrain");
+    w.apply(Command::SetMaterial { x: 1, y: 1, z: 0, material: Material::Rock });
+    assert_eq!(w.terrain_version(), 2);
+}
+
+// ----------------------------------------------------------------- noise seed
+
+/// The decisive experiment's instrument: re-draw the final weak wobble and nothing else
+/// moves. The main stream advances identically, so the rock phase, the strata warp and
+/// the soil pockets are the same numbers; only the surface's last centimetres differ.
+#[test]
+fn noise_seed_moves_the_wobble_and_leaves_the_landform() {
+    let base = Config { width: 64, height: 32, depth: 6, seed: 5, ..Config::default() };
+    let a = World::new(base.clone());
+    let b = World::new(Config { noise_seed: 99, ..base.clone() });
+    let c = World::new(Config { noise_seed: 99, ..base.clone() });
+    assert_eq!(b, c, "a noise seed is a seed: same inputs, same world");
+
+    let (va, vb) = (a.view(), b.view());
+    let mut moved = 0;
+    for z in 0..base.depth {
+        for x in 0..base.width as i64 {
+            let (ya, yb) = (va.surface_y(x, z).unwrap() as i64, vb.surface_y(x, z).unwrap() as i64);
+            if ya != yb {
+                moved += 1;
+            }
+            assert!((ya - yb).abs() <= 2, "({x}, {z}) moved {ya} -> {yb}: not a weak wobble");
+        }
+    }
+    assert!(moved > 0, "the wobble did not move at all");
+    assert!(
+        moved < (base.width * base.depth) as i32 / 2,
+        "{moved} of {} surface cells moved: that is not a weak wobble",
+        base.width * base.depth
+    );
+
+    // The body under a column the wobble left alone is identical, voxel for voxel: the
+    // rock thickness phase, the strata warp and the soil pockets are drawn after the
+    // wobble from the same stream positions, so they cannot have moved. Soil depth
+    // reads the two neighbouring columns, so a column only counts as untouched when its
+    // neighbours are untouched too.
+    let mut checked = 0;
+    for z in 0..base.depth {
+        for x in 0..base.width as i64 {
+            if (-1..=1).any(|d| va.surface_y(x + d, z) != vb.surface_y(x + d, z)) {
+                continue;
+            }
+            checked += 1;
+            for y in 0..base.height {
+                assert_eq!(
+                    va.material_at(x, y, z),
+                    vb.material_at(x, y, z),
+                    "the body moved at ({x}, {y}, {z}) under an unmoved surface"
+                );
+            }
+        }
+    }
+    assert!(checked > (base.width * base.depth) as i32 / 4, "only {checked} columns held still");
+
+    // The basin keeps its slab and its floor to within the wobble. Its *column* does
+    // not, and that is not something the shared stream can give: the outlet is the
+    // argmin over a basin floor the flattening rule makes nearly level, so a one-voxel
+    // wobble hands the title to a different column, and the spring is placed from the
+    // outlet's `x`. Nothing downstream of the wobble is invariant — only the stream is.
+    let (ao, bo) = (a.outlet_cell().unwrap(), b.outlet_cell().unwrap());
+    assert_eq!(ao.2, bo.2, "the outlet left the front slab: {ao:?} -> {bo:?}");
+    assert!(ao.1.abs_diff(bo.1) <= 1, "the basin floor moved more than the wobble: {ao:?} -> {bo:?}");
 }

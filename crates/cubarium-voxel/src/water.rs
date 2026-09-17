@@ -670,10 +670,10 @@ fn outlet(w: &mut World) {
 /// Commands take effect **now**, at the point of the call, whether or not a frontend
 /// has the world paused: nothing is queued for the next tick. The receipt is the volume
 /// in cubic metres the world actually accepted, signed: positive for water that went in,
-/// negative for a `ChargeAquifer` withdrawal, and capped by what was really there — the
-/// room in the cell, the reachable sky-exposed cells, the aquifer's own stock. What was
-/// asked for and not accepted is the difference between the two, and it is simply
-/// refused, never stored elsewhere.
+/// negative for a `ChargeAquifer` or `WithdrawPore` withdrawal, and capped by what was
+/// really there — the room in the cell, the reachable sky-exposed cells, the aquifer's
+/// own stock, the pore water in the one voxel. What was asked for and not accepted is
+/// the difference between the two, and it is simply refused, never stored elsewhere.
 ///
 /// Non-water commands (`SetMaterial`, `SetOutlet`) always return zero.
 ///
@@ -700,11 +700,30 @@ pub fn apply(world: &mut World, command: Command) -> f64 {
             world.ledger.user_in += got;
             got
         }
+        Command::WithdrawPore { x, y, z, volume_m3 } => {
+            if !volume_m3.is_finite() || volume_m3 < 0.0 {
+                return 0.0;
+            }
+            if y >= world.config.height || z >= world.config.depth {
+                return 0.0;
+            }
+            let i = world.config.index(x, y, z);
+            // Capped by the stock in this one voxel: `take_pore` returns what it moved,
+            // which is zero where there is no pore space at all.
+            let got = take_pore(world, i, volume_m3);
+            world.ledger.transpiration_out += got;
+            -got
+        }
         Command::SetMaterial { x, y, z, material } => {
             if y >= world.config.height || z >= world.config.depth {
                 return 0.0;
             }
-            set_material(world, world.config.index(x, y, z), material);
+            let i = world.config.index(x, y, z);
+            let changed = world.material[i] != material;
+            set_material(world, i, material);
+            if changed {
+                world.terrain_version += 1;
+            }
             0.0
         }
         Command::ChargeAquifer { volume_m3 } => {

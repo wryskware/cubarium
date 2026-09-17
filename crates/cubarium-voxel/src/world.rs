@@ -3,6 +3,34 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Config, Ledger, Material};
 
+/// The sky-visibility fan: `(dx, dy, dz, weight)` for each of 17 rays. The zenith
+/// carries weight 1 and each elevated ray the sine of its elevation, which is the
+/// cosine weighting of a hemispherical integral sampled at two rings. Written out
+/// rather than computed so the table is exactly symmetric under negating `dx`: an `x`
+/// reflection of a fixture reflects its sky visibility exactly.
+const RAY_FAN: [(f64, f64, f64, f64); 17] = [
+    // Zenith.
+    (0.0, 1.0, 0.0, 1.0),
+    // Eight azimuths at 60 degrees of elevation, weight sin 60.
+    (0.5, 0.8660254037844386, 0.0, 0.8660254037844386),
+    (0.3535533905932738, 0.8660254037844386, 0.3535533905932738, 0.8660254037844386),
+    (0.0, 0.8660254037844386, 0.5, 0.8660254037844386),
+    (-0.3535533905932738, 0.8660254037844386, 0.3535533905932738, 0.8660254037844386),
+    (-0.5, 0.8660254037844386, 0.0, 0.8660254037844386),
+    (-0.3535533905932738, 0.8660254037844386, -0.3535533905932738, 0.8660254037844386),
+    (0.0, 0.8660254037844386, -0.5, 0.8660254037844386),
+    (0.3535533905932738, 0.8660254037844386, -0.3535533905932738, 0.8660254037844386),
+    // The same eight at 30 degrees, weight sin 30.
+    (0.8660254037844386, 0.5, 0.0, 0.5),
+    (0.6123724356957946, 0.5, 0.6123724356957946, 0.5),
+    (0.0, 0.5, 0.8660254037844386, 0.5),
+    (-0.6123724356957946, 0.5, 0.6123724356957946, 0.5),
+    (-0.8660254037844386, 0.5, 0.0, 0.5),
+    (-0.6123724356957946, 0.5, -0.6123724356957946, 0.5),
+    (0.0, 0.5, -0.8660254037844386, 0.5),
+    (0.6123724356957946, 0.5, -0.6123724356957946, 0.5),
+];
+
 /// A frontend or a test changes the world only through these. Every one of them takes
 /// effect at the moment [`World::apply`] is called, paused or not, and `apply` returns
 /// the volume in cubic metres it accepted — see there for the receipt contract.
@@ -26,6 +54,16 @@ pub enum Command {
     /// recipients before any farther one — and only volume with no reachable room at all
     /// is booked as `Ledger::displaced_out`.
     SetMaterial { x: i64, y: u32, z: u32, material: Material },
+    /// Take pore water out of one voxel: the plant layer's one bounded withdrawal.
+    ///
+    /// Capped by the stock actually in that voxel, so a whole stand of plants asking
+    /// for more than the soil holds gets the soil's water and no more. `apply` returns
+    /// the accepted volume as a **negative** number — the [`Command::ChargeAquifer`]
+    /// withdrawal convention — and books it as [`Ledger::transpiration_out`], a loss:
+    /// transpired water leaves the world. A non-finite or negative volume is refused
+    /// whole with nothing booked, and a voxel with no pore capacity (air, bedrock)
+    /// accepts nothing and books nothing.
+    WithdrawPore { x: i64, y: u32, z: u32, volume_m3: f64 },
     /// Add to (or, negative, remove from) the aquifer store. A withdrawal is capped by
     /// the stock actually there, and `apply` returns it as a negative volume.
     ChargeAquifer { volume_m3: f64 },
@@ -45,6 +83,10 @@ pub struct VoxelView<'a> {
     /// Pore water as a fraction of the voxel's pore capacity, `0..=1`. Zero in air.
     pub pore: &'a [f64],
     pub tick: u64,
+    /// Counts committed material changes. A reader that caches anything derived from
+    /// the terrain alone — sky visibility, support faces — recomputes when this moves
+    /// and never otherwise.
+    pub terrain_version: u64,
     pub ledger: &'a Ledger,
     /// Aquifer store in cubic metres.
     pub aquifer_m3: f64,
@@ -73,6 +115,134 @@ impl<'a> VoxelView<'a> {
     pub fn surface_y(&self, x: i64, z: u32) -> Option<u32> {
         (0..self.config.height).rev().find(|&y| self.material_at(x, y, z).is_solid())
     }
+    /// Whether `(x, y, z)` is a **support face**: a solid voxel whose top face is
+    /// exposed to void inside the world. Plants stand on these, never on a column's
+    /// skyline as such: the skyline solid at `y = height - 1` has no room above it and
+    /// is not a support, while a roofed floor is one.
+    pub fn is_support(&self, x: i64, y: u32, z: u32) -> bool {
+        let c = self.config;
+        y + 1 < c.height
+            && z < c.depth
+            && self.material_at(x, y, z).is_solid()
+            && !self.material_at(x, y + 1, z).is_solid()
+    }
+
+    /// Every support face in column `(x, z)`, ascending in `y`.
+    pub fn supports_in_column(&self, x: i64, z: u32) -> Vec<u32> {
+        if z >= self.config.depth {
+            return Vec::new();
+        }
+        (0..self.config.height).filter(|&y| self.is_support(x, y, z)).collect()
+    }
+
+    /// Depth of the free water standing on the support face `(x, y, z)`, in metres, as
+    /// the stores hold it: the fills of the void cells from `y + 1` up while each one
+    /// holds water, summed and multiplied by `voxel_m`. Unrounded — a 0.3-full cell is
+    /// 0.3 voxels of water — and zero when the cell directly above is dry, so a film
+    /// running down a slope reads as the film it is.
+    pub fn water_depth_m(&self, x: i64, y: u32, z: u32) -> f64 {
+        let c = self.config;
+        if z >= c.depth {
+            return 0.0;
+        }
+        let mut depth = 0.0;
+        for yy in y + 1..c.height {
+            if self.material_at(x, yy, z).is_solid() {
+                break;
+            }
+            let f = self.free_at(x, yy, z);
+            if !(f > 0.0) {
+                break;
+            }
+            depth += f;
+        }
+        depth * c.voxel_m
+    }
+
+    /// How many contiguous [`Material::Soil`] voxels sit at `(x, y, z)` and below it,
+    /// `y` included. Zero when `(x, y, z)` is not soil, so a plant rooted on rock has no
+    /// root box at all.
+    pub fn soil_below(&self, x: i64, y: u32, z: u32) -> u32 {
+        if z >= self.config.depth || y >= self.config.height {
+            return 0;
+        }
+        let mut n = 0;
+        for yy in (0..=y).rev() {
+            if self.material_at(x, yy, z) != Material::Soil {
+                break;
+            }
+            n += 1;
+        }
+        n
+    }
+
+    /// Pore water in one voxel, cubic metres: its fill times its material's pore
+    /// capacity times the voxel volume. Zero in air and bedrock.
+    pub fn pore_water_m3(&self, x: i64, y: u32, z: u32) -> f64 {
+        let i = self.config.index(x, y, z);
+        self.pore[i] * self.material[i].pore_capacity() * self.config.voxel_volume()
+    }
+
+    /// Geometric sky visibility of the top face of `(x, y, z)`: the cosine-weighted
+    /// fraction of a fixed 17-ray fan from the centre of that face that leaves the world
+    /// without entering a solid.
+    ///
+    /// The fan is the zenith (weight 1), eight azimuths at 45-degree steps at 60 degrees
+    /// of elevation (weight `sin 60`) and the same eight at 30 degrees (weight
+    /// `sin 30`). A ray leaves the world at `y >= height` or at `z` outside
+    /// `0..depth`; `x` wraps, so the strip never has a side to escape through. Marching
+    /// is by fixed sub-voxel steps of a quarter voxel, sampling the voxel each step
+    /// lands in: cheap, and exactly symmetric under an `x` reflection because the
+    /// azimuth set is closed under negating the `x` component.
+    ///
+    /// Pure geometry. Canopies are not here — a plant layer multiplies its own
+    /// attenuation onto this.
+    pub fn sky_visibility(&self, x: i64, y: u32, z: u32) -> f64 {
+        let c = self.config;
+        if z >= c.depth || y + 1 >= c.height {
+            // Nothing above the top face of the topmost row to be blocked by, and
+            // nothing to march through either: it is open sky.
+            return if z < c.depth { 1.0 } else { 0.0 };
+        }
+        let origin = (x as f64 + 0.5, (y + 1) as f64, z as f64 + 0.5);
+        let mut total = 0.0;
+        let mut open = 0.0;
+        for &(dx, dy, dz, weight) in RAY_FAN.iter() {
+            total += weight;
+            if self.ray_escapes(origin, (dx, dy, dz)) {
+                open += weight;
+            }
+        }
+        open / total
+    }
+
+    /// March one ray by quarter-voxel steps: `true` if it leaves the world, `false` if
+    /// it enters a solid first. Every ray in the fan climbs, so `y` grows without bound
+    /// and the walk always ends.
+    fn ray_escapes(&self, origin: (f64, f64, f64), dir: (f64, f64, f64)) -> bool {
+        let c = self.config;
+        const STEP: f64 = 0.25;
+        let limit = 8 * c.height as u64 + 8 * c.depth as u64 + 16;
+        for k in 1..=limit {
+            let t = STEP * k as f64;
+            let px = origin.0 + dir.0 * t;
+            let py = origin.1 + dir.1 * t;
+            let pz = origin.2 + dir.2 * t;
+            if py >= c.height as f64 {
+                return true;
+            }
+            if pz < 0.0 || pz >= c.depth as f64 {
+                return true;
+            }
+            let (vy, vz) = (py.floor() as u32, pz.floor() as u32);
+            if self.material_at(px.floor() as i64, vy, vz).is_solid() {
+                return false;
+            }
+        }
+        // Unreachable for a climbing ray; a blocked answer is the safe one.
+        false
+    }
+
     /// Total free plus pore plus aquifer water in cubic metres.
     pub fn stored_m3(&self) -> f64 {
         let v = self.config.voxel_volume();
@@ -95,6 +265,9 @@ pub struct World {
     pub(crate) aquifer_m3: f64,
     pub(crate) outlet_open: bool,
     pub(crate) tick: u64,
+    /// Bumped by every material change a command actually commits. See
+    /// [`VoxelView::terrain_version`].
+    pub(crate) terrain_version: u64,
     pub(crate) ledger: Ledger,
     /// The one named outlet: when open it exports free water out of this cell.
     /// Generation picks the lowest void cell of the receiving basin.
@@ -117,6 +290,7 @@ impl World {
             aquifer_m3: 0.0,
             outlet_open: false,
             tick: 0,
+            terrain_version: 0,
             ledger: Ledger::default(),
             outlet_cell: None,
             spring_cell: None,
@@ -144,6 +318,7 @@ impl World {
             aquifer_m3: 0.0,
             outlet_open: false,
             tick: 0,
+            terrain_version: 0,
             ledger: Ledger::default(),
             outlet_cell: None,
             spring_cell: None,
@@ -158,6 +333,12 @@ impl World {
 
     pub fn tick(&self) -> u64 {
         self.tick
+    }
+
+    /// How many material changes this world has committed. See
+    /// [`VoxelView::terrain_version`].
+    pub fn terrain_version(&self) -> u64 {
+        self.terrain_version
     }
 
     /// The named outlet cell, if the world has one.
@@ -197,6 +378,7 @@ impl World {
             free: &self.free,
             pore: &self.pore,
             tick: self.tick,
+            terrain_version: self.terrain_version,
             ledger: &self.ledger,
             aquifer_m3: self.aquifer_m3,
             outlet_open: self.outlet_open,
@@ -284,6 +466,7 @@ impl World {
             ("user_in", self.ledger.user_in),
             ("evaporation_out", self.ledger.evaporation_out),
             ("outlet_out", self.ledger.outlet_out),
+            ("transpiration_out", self.ledger.transpiration_out),
             ("displaced_out", self.ledger.displaced_out),
         ] {
             ensure!(flux.is_finite(), "the ledger's {name} is {flux}");

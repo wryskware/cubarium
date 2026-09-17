@@ -16,6 +16,12 @@ pub struct Config {
     pub voxel_m: f64,
     /// Seed for every deterministic stream (landform, soil, water events).
     pub seed: u64,
+    /// Seed for the landform's final weak correlated wobble alone. Zero — the default —
+    /// draws it from the one `seed` stream exactly as before; any other value draws the
+    /// wobble from its own stream while the main stream advances identically, so the
+    /// ridge phase, the strata warp and the soil pockets do not move. That is what makes
+    /// the terrain-coupling experiment possible: re-draw the noise, keep the landform.
+    pub noise_seed: u64,
     /// Prescribed rain onto exposed top surfaces, metres of water per second.
     pub rain_m_per_s: f64,
     /// Prescribed evaporation from exposed free-water surfaces, metres per second.
@@ -44,6 +50,7 @@ impl Default for Config {
             depth: 24,
             voxel_m: 0.25,
             seed: 1,
+            noise_seed: 0,
             rain_m_per_s: 0.0,
             evaporation_m_per_s: 0.0,
             water_substeps: 4,

@@ -12,6 +12,10 @@ pub struct Ledger {
     pub user_in: f64,
     pub evaporation_out: f64,
     pub outlet_out: f64,
+    /// Pore water taken out of the soil by plants, cubic metres. The one loss term for
+    /// [`crate::Command::WithdrawPore`]: transpired water leaves the world, it is never
+    /// handed to another store here.
+    pub transpiration_out: f64,
     /// Water removed because a terrain edit left it nowhere to go. Should stay zero;
     /// reported rather than hidden.
     pub displaced_out: f64,
@@ -21,7 +25,11 @@ pub struct Ledger {
 
 impl Ledger {
     pub fn net_in(&self) -> f64 {
-        self.rain_in + self.user_in - self.evaporation_out - self.outlet_out - self.displaced_out
+        self.rain_in + self.user_in
+            - self.evaporation_out
+            - self.outlet_out
+            - self.transpiration_out
+            - self.displaced_out
     }
 
     /// What the stores should hold now given the fluxes alone. `stored - expected` is

@@ -108,13 +108,25 @@ pub fn landform(world: &mut World) {
     // ---- the weak correlated wobble, added last and small ----
     // The depth frequency stays low: the wobble must not undo the climb between two
     // neighbouring depths, or every column would need flattening afterwards.
-    let noise: Vec<(f64, f64, f64, f64)> = (0..4)
-        .map(|k| {
-            let harmonic = (3 + k * 2) as f64;
-            let amp = 0.55 / (1.0 + k as f64 * 0.6);
-            (harmonic, amp, rng.unit() * TAU, rng.range(0.05, 0.22))
-        })
-        .collect();
+    let wobble = |rng: &mut Rng| -> Vec<(f64, f64, f64, f64)> {
+        (0..4)
+            .map(|k| {
+                let harmonic = (3 + k * 2) as f64;
+                let amp = 0.55 / (1.0 + k as f64 * 0.6);
+                (harmonic, amp, rng.unit() * TAU, rng.range(0.05, 0.22))
+            })
+            .collect()
+    };
+    // Drawn from the main stream either way, so everything downstream of it — the rock
+    // phase, the strata warp, the soil pockets — sees the same numbers whatever
+    // `noise_seed` is. With a non-zero `noise_seed` the wobble itself is re-drawn from
+    // its own stream: the landform stays, only the noise moves.
+    let noise = wobble(&mut rng);
+    let noise = if c.noise_seed == 0 {
+        noise
+    } else {
+        wobble(&mut Rng::new(c.noise_seed ^ 0x_4E4F_4953_4531))
+    };
 
     let hi_clamp = (hf - 5.0).max(FLOOR_Y as f64);
     let mut surf = vec![0i32; w * d];
@@ -314,11 +326,18 @@ pub fn isolated_voids(world: &World) -> Vec<usize> {
 }
 
 /// Fill every void the sky cannot reach with rock. Run after every carve.
+///
+/// Bumps `terrain_version` once if it filled anything: this is the other path besides
+/// [`crate::Command::SetMaterial`] that changes a material, and a cached sky visibility
+/// has to notice it.
 pub fn repair_isolated(world: &mut World) -> usize {
     let pockets = isolated_voids(world);
     for &i in &pockets {
         world.material[i] = Material::Rock;
         world.free[i] = 0.0;
+    }
+    if !pockets.is_empty() {
+        world.terrain_version += 1;
     }
     pockets.len()
 }

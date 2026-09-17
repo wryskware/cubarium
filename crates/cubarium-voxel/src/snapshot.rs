@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::World;
 
-pub const SCHEMA: u32 = 1;
+/// Bumped to 2 for the plant boundary: `Ledger::transpiration_out` and
+/// `World::terrain_version`. Schema 1 bytes are refused, never migrated.
+pub const SCHEMA: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
