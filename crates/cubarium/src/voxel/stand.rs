@@ -422,6 +422,7 @@ mod tests {
             reserve: 0.0,
             light: 0.0,
             moisture: 1.0,
+            water_m3: 0.0,
         };
         let parts = parts_of(flora.view(), &stand, 0);
         assert_eq!(parts.len(), 1);
@@ -465,6 +466,7 @@ mod tests {
                     reserve: 0.0,
                     light: 0.0,
                     moisture,
+                    water_m3: 0.0,
                 },
             )
         };
