@@ -11,6 +11,7 @@ members = [
     "crates/cubarium-gpu",
     "crates/cubarium-voxel",
     "crates/cubarium-voxel-flora",
+    "crates/cubarium-voxel-fauna",
 ]
 
 [workspace.package]
@@ -27,6 +28,7 @@ cubarium-core = { path = "crates/cubarium-core" }
 cubarium-search = { path = "crates/cubarium-search" }
 cubarium-voxel = { path = "crates/cubarium-voxel" }
 cubarium-voxel-flora = { path = "crates/cubarium-voxel-flora" }
+cubarium-voxel-fauna = { path = "crates/cubarium-voxel-fauna" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 minifb = "0.28"
