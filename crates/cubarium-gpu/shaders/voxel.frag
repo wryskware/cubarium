@@ -51,6 +51,9 @@ const int TRUNK = 1;
 const int CROWN = 2;
 const int CROWN_HEART = 3;
 const int SPROUT = 4;
+// The fauna range of the same field. The interim glyph is a flat block in the style's
+// `wood`; 6 and 7 are unspoken for until the art direction names them.
+const int ANIMAL_INTERIM = 5;
 
 int S, RISE, BASE, W, H, D;
 
@@ -67,7 +70,7 @@ uvec4 at(int x, int y, int z) { return texelFetch(voxels, ivec3(wrapX(x), y, z),
 
 int matOf(uvec4 v) { return int(v.r & 3u); }
 int partOf(uvec4 v) { return int((v.r >> 2) & 7u); }
-bool isBlockPart(int p) { return p == TRUNK || p == CROWN || p == CROWN_HEART; }
+bool isBlockPart(int p) { return p == TRUNK || p == CROWN || p == CROWN_HEART || p == ANIMAL_INTERIM; }
 bool solidV(uvec4 v) { return matOf(v) != 0; }
 
 // Out-of-range y reads as air, which is what makes the top of the world an open sky and
@@ -217,7 +220,11 @@ void plantColumn(int x, int y, int z, uvec4 v, int dx, float shade, out vec3 fro
     int style = int(v.a);
     vec3 wood = styleAt(style, 0);
     bool crown = p == CROWN || p == CROWN_HEART;
-    if (crown) {
+    if (p == ANIMAL_INTERIM) {
+        // `VoxelPresenter::animal`: one flat colour, no cylinder and no silhouette edge.
+        front = wood;
+        cap = plantLit(wood, shade);
+    } else if (crown) {
         bool heart = p == CROWN_HEART;
         bool mid = heart && dx * 2 >= S - 2 && dx * 2 < S + 2;
         vec3 base = mid ? styleAt(style, 2) : styleAt(style, 1);

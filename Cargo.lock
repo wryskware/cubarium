@@ -282,6 +282,7 @@ dependencies = [
  "cubarium-search",
  "cubarium-surface",
  "cubarium-voxel",
+ "cubarium-voxel-fauna",
  "cubarium-voxel-flora",
  "cube-proto",
  "libc",

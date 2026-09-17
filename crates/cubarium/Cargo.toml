@@ -24,6 +24,7 @@ cubarium-core = { workspace = true }
 cubarium-search = { workspace = true }
 cubarium-voxel = { workspace = true }
 cubarium-voxel-flora = { workspace = true }
+cubarium-voxel-fauna = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 minifb = { workspace = true }
