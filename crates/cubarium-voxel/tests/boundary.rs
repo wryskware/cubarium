@@ -242,10 +242,13 @@ fn sky_visibility_under_a_partial_roof_is_between_open_and_roofed() {
 
 // ============================================================ the noise seed
 //
-// The instrument of the decisive experiment. Two claims are in play and they are not the
-// same claim: the brief's list asks for identical outlet and spring cells and identical
-// bedrock below y = 2, while `tests/core.rs` pins the weaker "the outlet keeps its slab
-// and its floor to within the wobble" and says why. Both are written out here.
+// The instrument of the decisive experiment. The round-2 brief asked for identical
+// outlet and spring cells under a noise reseed; that is false and was measured (seed 1:
+// outlet (28, 9, 0) -> (12, 9, 0), spring (44, 17, 12) -> (28, 17, 12)). The outlet is an
+// argmin over a basin floor the flattening rule makes nearly level, so a one-voxel wobble
+// hands the title to another column, and the spring's x is derived from the outlet's.
+// Nothing downstream of the wobble is invariant, only the RNG stream is. The two claims
+// that are true are below: unmoved columns are identical, and the foundation rows are.
 
 fn wobble_pair(seed: u64, noise_a: u64, noise_b: u64) -> (World, World) {
     let base = Config { seed, ..Config::default() };
@@ -253,42 +256,6 @@ fn wobble_pair(seed: u64, noise_a: u64, noise_b: u64) -> (World, World) {
         World::new(Config { noise_seed: noise_a, ..base.clone() }),
         World::new(Config { noise_seed: noise_b, ..base }),
     )
-}
-
-/// The brief's own form of the claim. It fails: see the commit message and the
-/// `#[ignore]` reason. The outlet is an argmin over a basin floor the flattening rule
-/// makes nearly level, so a one-voxel wobble moves the title to another column, and the
-/// spring's `x` is derived from the outlet's.
-#[test]
-#[ignore = "FINDING: the outlet and spring cells move with the noise seed, and the row \
-at y = 2 moves with it too. Default 128x48x24 world, noise_seed 0 vs 99 -- seed 1: \
-outlet (28, 9, 0) -> (12, 9, 0), spring (44, 17, 12) -> (28, 17, 12); seed 4: outlet \
-(82, 9, 0) -> (111, 9, 0), spring (98, 17, 12) -> (127, 23, 12); seed 9: outlet \
-(24, 9, 0) -> (13, 9, 0), spring (40, 17, 12) -> (29, 16, 12). Columns whose material \
-differs, of 3072: y=0 none, y=1 none, y=2 56 / 2 / 16 for the three seeds. So 'identical \
-bedrock below y = 2' holds and is kept as its own test; 'identical outlet and spring' \
-and 'identical at y = 2' do not. Not bent: the outlet is an argmin over a basin floor \
-the flattening rule makes nearly level, so a one-voxel wobble hands the title to another \
-column and the spring's x is derived from the outlet's. Nothing downstream of the wobble \
-is invariant -- only the RNG stream is."]
-fn noise_seed_keeps_the_outlet_and_spring_cells_and_the_bedrock_below_y_2() {
-    for seed in [1u64, 4, 9] {
-        let (a, b) = wobble_pair(seed, 0, 99);
-        assert_eq!(a.outlet_cell(), b.outlet_cell(), "seed {seed}: the outlet moved");
-        assert_eq!(a.spring_cell(), b.spring_cell(), "seed {seed}: the spring moved");
-        let (va, vb) = (a.view(), b.view());
-        for z in 0..a.config().depth {
-            for x in 0..a.config().width as i64 {
-                for y in 0..=2 {
-                    assert_eq!(
-                        va.material_at(x, y, z),
-                        vb.material_at(x, y, z),
-                        "seed {seed}: the deep body moved at ({x}, {y}, {z})"
-                    );
-                }
-            }
-        }
-    }
 }
 
 /// The form that is true, checked over nine seed pairs on the world the experiment
