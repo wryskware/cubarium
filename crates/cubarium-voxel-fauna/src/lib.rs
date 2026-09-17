@@ -382,6 +382,16 @@ pub struct FaunaLedger {
     pub deaths: u64,
     /// Withdrawals that returned something.
     pub bites: u64,
+    /// Bites and organic matter **by the plant species they came off**, indexed by
+    /// [`cubarium_voxel_flora::Species::index`].
+    ///
+    /// The plant layer's `consumed_*` have no species in them and a reach box does not
+    /// choose one (round 5a's note), and Astra's round 8 asks a consumer's report to say
+    /// which species it actually ate: which stands a browser can reach depends on the
+    /// face it stands on, so "what it ate" is a measurement and never a property of a
+    /// species. This is that measurement, taken where the bite happens.
+    pub bites_by_plant: [u64; cubarium_voxel_flora::Species::COUNT],
+    pub eaten_by_plant: [f64; cubarium_voxel_flora::Species::COUNT],
     /// Steps taken, one voxel each.
     pub steps: u64,
 }

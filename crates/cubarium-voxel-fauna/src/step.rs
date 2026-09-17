@@ -302,8 +302,15 @@ fn crop(
         if !(left > 0.0) {
             break;
         }
+        // Whose foliage this is, read before the withdrawal, so the report can say which
+        // species was eaten rather than which species is in principle edible.
+        let plant = flora.view().stand_at(site).map(|s| s.species);
         let Some(taken) = flora.take_foliage(site, left) else { continue };
         let taken = fauna.book_eaten(taken);
+        if let Some(plant) = plant {
+            fauna.ledger.bites_by_plant[plant.index()] += 1;
+            fauna.ledger.eaten_by_plant[plant.index()] += taken.organic;
+        }
         left -= taken.organic;
         assimilate(fauna, flora, i, sc, taken);
     }
