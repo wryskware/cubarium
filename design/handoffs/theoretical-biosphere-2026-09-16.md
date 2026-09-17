@@ -115,6 +115,11 @@ a few thousand words, tables and one or two diagrams, with these sections.
    what cost) and how it dissipates. The abiotic gradients this terrain actually
    produces (light, pore water, standing water, slope, substrate, cover, depth in
    the habitat) and which of them the biosphere should be organized around.
+   Include **time**: the substrate has no seasons yet, but a seasonal schedule
+   over rain, evaporation and light is cheap to add, and Wrysk wants different
+   meta-climates per seeded biosphere or map type (backlog §4). Say what a
+   climate regime would do to your web, which regimes it should exist in, and
+   whether dormancy, seed banks or migration become necessary under any of them.
 2. **The web.** Functional guilds and a food web with several channels rather
    than one tall chain: producers, reproductive structures, litter and dead wood,
    living prey, carrion, waste, fungi and microbes, mineral nutrient. Every arrow

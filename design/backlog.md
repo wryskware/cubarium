@@ -75,7 +75,34 @@ power budget is the ceiling of ambition. Any step here is a whole-world change:
 it goes through the matched calibration rows, records the model in the training
 protocol, and is put to Wrysk before deployment.
 
-## 4. Deferred decisions
+## 4. Seasons and meta-climates (feature to explore)
+
+Wrysk, 2026-09-16: seasons as a potential feature, with different meta-climates
+depending on the seeded biosphere or the chosen map type. Not scheduled; the
+theoretical-biosphere handoff is asked to say what a climate regime would do to
+its web.
+
+What it would mean on the current substrate: the prescribed-weather mode already
+takes rain and evaporation as rates, so a season is a schedule over those two
+plus, once they exist, day length (sky light) and temperature. A meta-climate is
+the parameter set the schedule runs on (wet-dry monsoon, cold-warm, steady humid,
+drought-prone), chosen with the map type or drawn from the same seed as the
+biosphere so a world's plants are the ones that fit its year. The atmospheric
+recycling mode in the terrain proposal (§4) is the other half: a season can move
+water between the atmosphere store and the ground without inventing any.
+
+Why it earns a place: the ecology's disturbance regime is otherwise flat. A dry
+season that lowers the water table and contracts the pond is the cleanest way to
+get the "dry weather contracts habitat toward the spring" story, dormancy and
+seed banks a reason to exist, and boom-and-bust a rhythm a viewer can read.
+
+Open questions for whoever picks it up: season length against organism lifetimes
+(a season must be long enough for succession to show and short enough that a
+desk viewer sees more than one); whether presentation lighting follows the
+season or stays constant (roadmap §5 keeps it constant); whether the player
+chooses a climate at world creation or unlocks weather control later.
+
+## 5. Deferred decisions
 
 - Shoulder 0.85 vs 0.95: Wrysk does not want to tune now; 0.95 stays on the cube by env
   override, 0.85 stays the shipped default. Revisit when the GUI exists.
