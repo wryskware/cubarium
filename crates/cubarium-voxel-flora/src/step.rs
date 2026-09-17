@@ -17,6 +17,13 @@
 //!    one read taken before any withdrawal: a stand that got less than it asked for does
 //!    not get a second read. The root box's **saturated fraction** comes off the same
 //!    one read, for step 6's aeration stress.
+//! 5b. **Substrate**, for the saprotrophs only, and on the same shape as the water: every
+//!    saprotroph's demand on every dead-wood pool of its **mycelium box** is collected
+//!    first, then each pool is drawn on **once** for the total and what it gave up is split
+//!    among its demanders proportional to demand. So two fungi on one log share it rather
+//!    than the earlier site taking its fill first, exactly as two stands' roots share a
+//!    soil voxel. `μ` from step 5 multiplies the demand, so a drying log starves the
+//!    fungus. See [`feed`].
 //! 6. **Per stand**, in site order: §4.1–4.4 income, maintenance and growth, §4.5
 //!    senescence, §4.6 dieback, §4.7 death. These three subphases are purely local once
 //!    light and water are in hand, so running them per stand in one pass is the same
@@ -59,6 +66,19 @@
 //! heat only as the wood decomposes, at the stock's current density. A standing dead
 //! trunk is energy-dense and unavailable, which is the point of it being its own stock.
 //!
+//! # A saprotroph's income
+//!
+//! A [`crate::Trophic::Saprotroph`] stand runs every rule above except one: its income is
+//! not light. It withdraws organic matter from the dead-wood pools of its mycelium box
+//! (step 5b), keeps `substrate_yield` of it as income and respires the rest at once, and
+//! the mineral that came with the wood is netted against what its new tissue actually
+//! needs. Nothing about that crosses the layer's boundary: the organic matter was already
+//! in the system, in the log, so it is **not** `fixed_in` and the withdrawal is **not**
+//! `consumed_*_out` — those name material a consumer *outside* this layer took, and a
+//! glowcap is a stand inside it. What the ledger gains is a per-species diagnostic flux,
+//! [`FloraLedger::substrate_uptake`], which is a report and not a boundary term, exactly
+//! like the three `propagule_*` arrays.
+//!
 //! # Organic matter and mineral
 //!
 //! Round 3's first correction: the two are separate currencies (`lib.rs`'s `FloraLedger`).
@@ -80,7 +100,7 @@ use cubarium_voxel::{Command as WorldCommand, Material, VoxelView, World, DT};
 
 use crate::{
     Flora, FloraConfig, FloraLedger, Ground, SeedCohort, Site, Species, SpeciesConfig, Stage,
-    Stand,
+    Stand, Taken, Trophic,
 };
 
 /// Stream keys, so two draws in one tick cannot be the same draw. One per rule that
@@ -160,7 +180,8 @@ pub(crate) fn step(flora: &mut Flora, world: &mut World) {
 
     let light = light_per_stand(flora, world);
     let moisture = drink(flora, world);
-    grow(flora, &light, &moisture);
+    let substrate = feed(flora, world, &moisture);
+    grow(flora, &light, &moisture, &substrate);
     decompose(flora, &pre);
     seed_bank(flora, world);
     propagate(flora, world);
@@ -507,9 +528,188 @@ fn ramp(value: f64, lo: f64, hi: f64) -> f64 {
     ((value - lo) / (hi - lo)).clamp(0.0, 1.0)
 }
 
+// --------------------------------------------------------------- 5b. substrate
+
+/// The **mycelium box** of a saprotroph on `site`: [`root_box`]'s geometry read as support
+/// **sites** rather than as soil voxels — `|dx| <= rooting_radius`, `|dz| <=
+/// rooting_radius`, `site.y - rooting_depth < y <= site.y`, `x` wrapped and `z` clipped at
+/// the walls — in a fixed geometric order, deduplicated.
+///
+/// Sites, not voxels, because what a fungus eats is a *stock on the ground* and the ground
+/// stocks live one per support face. A site in the box that has never held anything has no
+/// [`Ground`] and therefore no dead wood, which is the same thing as holding none.
+///
+/// Two consequences of reusing the root box, both stated rather than repaired. The box
+/// reaches **down** and never up, so a log on the face above a fungus is not in its box
+/// while one on the face below is — at `rooting_depth` 1, which is glowcap's placeholder,
+/// the box is one row and the asymmetry does not arise. And the box is a box and not a
+/// path: a log across a one-voxel wall is in reach of a mycelium that could not actually
+/// grow through it, exactly as [`crate::Reach`] is a box with no line of sight in it.
+fn mycelium_sites(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> Vec<Site> {
+    let c = view.config;
+    let span = sc.rooting_depth.min(site.y + 1);
+    if span == 0 {
+        return Vec::new();
+    }
+    let y_lo = site.y + 1 - span;
+    let r = sc.rooting_radius as i64;
+    let width = c.width.max(1) as i64;
+    let mut out: Vec<Site> = Vec::new();
+    for dz in -r..=r {
+        let z = site.z as i64 + dz;
+        if z < 0 || z >= c.depth as i64 {
+            continue;
+        }
+        for y in y_lo..=site.y {
+            for dx in -r..=r {
+                let x = (site.x as i64 + dx).rem_euclid(width) as u32;
+                let s = Site { x, y, z: z as u32 };
+                if !out.contains(&s) {
+                    out.push(s);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The dead wood a saprotroph's mycelium box holds, which is what
+/// `establish_substrate_min` is compared against. **Zero for a [`Trophic::Photo`]
+/// species**, whose substrate gate is open whatever the ground holds — the box walk is
+/// skipped entirely for the five plants.
+pub(crate) fn substrate_in_box(
+    view: &VoxelView<'_>,
+    ground: &[Ground],
+    site: Site,
+    sc: &SpeciesConfig,
+) -> f64 {
+    if sc.trophic != Trophic::Saprotroph {
+        return 0.0;
+    }
+    mycelium_sites(view, site, sc)
+        .into_iter()
+        .filter_map(|s| ground.binary_search_by_key(&s, |g| g.site).ok())
+        .map(|gi| ground[gi].dead_wood)
+        .sum()
+}
+
+/// Step 5b: what every saprotroph took out of the dead wood this tick, in `stands` order,
+/// zero for every [`Trophic::Photo`] stand.
+///
+/// **[`drink`]'s rule, on the dead-wood pools.** Each saprotroph asks for
+/// `substrate_uptake_per_s · W · μ · dt`, split across the pools of its own mycelium box
+/// pro rata by what each holds; then every pool is drawn on **once** for the total asked of
+/// it, through the same [`crate::take_pool`] a consumer's `take_dead_wood` uses, and what it
+/// gave up is shared among its demanders proportional to demand. Collect-then-withdraw is
+/// the model's rule for a shared bounded stock, and it is the reason two fungi on one log
+/// share it instead of the earlier site in the sweep eating its fill first.
+///
+/// The uptake is bounded twice — by the rate and by the pools — so an empty log feeds
+/// nothing and a pool can never go negative. It is **not** multiplied by
+/// `1 − aeration_stress`: a saprotroph's only water term is `μ`, which is the round-5b
+/// brief's rule, and the consequence is stated in the glowcap preset's own doc (a spore
+/// will not start on a waterlogged log, while the mycelium already in one pays nothing).
+///
+/// Nothing is booked at the layer's boundary here. The material moves from a ground stock
+/// to a stand, both inside this layer, so the only ledger term it touches is the
+/// per-species diagnostic [`FloraLedger::substrate_uptake`]; the organic matter the fungus
+/// does **not** keep is respired in [`grow`], where every other respiration is.
+fn feed(flora: &mut Flora, world: &World, drink: &[Drink]) -> Vec<Taken> {
+    let mut out = vec![Taken::default(); flora.stands.len()];
+    let Flora { config, stands, ground, ledger, .. } = flora;
+    let view = world.view();
+    // (ground index, stand index, wanted) — sorted, so the withdrawal order is the
+    // ground's own site order and nothing depends on how the stands were reached.
+    let mut wants: Vec<(usize, usize, f64)> = Vec::new();
+    for (si, stand) in stands.iter().enumerate() {
+        let sc = config.species(stand.species);
+        if sc.trophic != Trophic::Saprotroph {
+            continue;
+        }
+        let want = (sc.substrate_uptake_per_s * stand.wood * drink[si].moisture * DT).max(0.0);
+        if !(want > 0.0) {
+            continue;
+        }
+        let mut pools: Vec<(usize, f64)> = Vec::new();
+        for s in mycelium_sites(&view, stand.site, sc) {
+            if let Ok(gi) = ground.binary_search_by_key(&s, |g| g.site) {
+                if ground[gi].dead_wood > 0.0 {
+                    pools.push((gi, ground[gi].dead_wood));
+                }
+            }
+        }
+        let total: f64 = pools.iter().map(|&(_, w)| w).sum();
+        if !(total > 0.0) {
+            continue;
+        }
+        for (gi, held) in pools {
+            let share = split_proportional(want, held, total);
+            if share > 0.0 {
+                wants.push((gi, si, share));
+            }
+        }
+    }
+    wants.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+    let mut at = 0;
+    while at < wants.len() {
+        let gi = wants[at].0;
+        let mut end = at;
+        let mut total = 0.0;
+        while end < wants.len() && wants[end].0 == gi {
+            total += wants[end].2;
+            end += 1;
+        }
+        let g = &mut ground[gi];
+        // One bounded withdrawal for the whole pool, whatever asked for it.
+        if let Some(taken) = crate::take_pool(
+            &mut g.dead_wood,
+            &mut g.dead_wood_mineral,
+            &mut g.dead_wood_energy,
+            total,
+        ) {
+            share_taken(taken, &wants[at..end], &mut out);
+        }
+        at = end;
+    }
+    for (si, stand) in stands.iter().enumerate() {
+        ledger.substrate_uptake[stand.species.index()] += out[si].organic;
+    }
+    out
+}
+
+/// Split one pool's withdrawal among its demanders, proportional to demand in all three
+/// currencies, with the **last** demander taking each remainder.
+///
+/// The remainder rule is what [`split_proportional`] alone cannot give: water's shares are
+/// not in a ledger, and these are, so what the pool lost and what the stands received have
+/// to agree to the bit rather than to a few ulps. With one demander — which is every case
+/// this round produces — it hands over the whole [`Taken`].
+fn share_taken(taken: Taken, wants: &[(usize, usize, f64)], out: &mut [Taken]) {
+    let total: f64 = wants.iter().map(|&(_, _, w)| w).sum();
+    let (mut o, mut m, mut e) = (taken.organic, taken.mineral, taken.energy);
+    for (k, &(_, si, want)) in wants.iter().enumerate() {
+        let (so, sm, se) = if k + 1 == wants.len() {
+            (o.max(0.0), m.max(0.0), e.max(0.0))
+        } else {
+            (
+                split_proportional(taken.organic, want, total).min(o.max(0.0)),
+                split_proportional(taken.mineral, want, total).min(m.max(0.0)),
+                split_proportional(taken.energy, want, total).min(e.max(0.0)),
+            )
+        };
+        o -= so;
+        m -= sm;
+        e -= se;
+        out[si].organic += so;
+        out[si].mineral += sm;
+        out[si].energy += se;
+    }
+}
+
 // ------------------------------------------- 6. income, growth, senescence, death
 
-fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink]) {
+fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink], substrate: &[Taken]) {
     let Flora { config, stands, ground, ledger, .. } = flora;
     let mut dead: Vec<usize> = Vec::new();
 
@@ -563,10 +763,6 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink]) {
         let n0 = ground[gi].mineral;
         let monod = if n0 + sc.nutrient_half > 0.0 { n0 / (n0 + sc.nutrient_half) } else { 0.0 };
         let mineral_cap = if sc.n_tissue > 0.0 { n0 / sc.n_tissue } else { f64::INFINITY };
-        let a_pot = (sc.assimilation * l_eff * mu * (1.0 - stress) * p0 * monod * DT)
-            .min(sc.nutrient_draw_max * n0 * DT)
-            .min(mineral_cap)
-            .max(0.0);
         let p_cap = sc.alpha * w0;
         let q_max = sc.reserve_cap * w0;
         let m = sc.maintenance * w0 * DT;
@@ -574,10 +770,45 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink]) {
         let d_w = (sc.wood_max - w0).max(0.0).min(sc.wood_rate * w0 * DT);
         let d_q = (q_max - q0).max(0.0);
         let build = 1.0 + sc.build;
-        let a = a_pot.min(m + build * (d_p + d_w) + d_q);
-
-        ledger.fixed_in += a;
-        ledger.light_in += e_v * a;
+        // The income, by trophic mode. Everything below this is one set of rules.
+        let (a, arrived_mineral) = match sc.trophic {
+            Trophic::Photo => {
+                let a_pot = (sc.assimilation * l_eff * mu * (1.0 - stress) * p0 * monod * DT)
+                    .min(sc.nutrient_draw_max * n0 * DT)
+                    .min(mineral_cap)
+                    .max(0.0);
+                // Capped by what the stand can actually spend: light not captured is
+                // simply never fixed, so there is nothing to respire.
+                let a = a_pot.min(m + build * (d_p + d_w) + d_q);
+                ledger.fixed_in += a;
+                ledger.light_in += e_v * a;
+                (a, 0.0)
+            }
+            // A saprotroph's income is the dead wood step 5b already took out of the pools
+            // for it. `substrate_yield` of it is income and the rest is respired **at
+            // once**: it has left the log and it is not tissue, so it cannot be left
+            // unaccounted the way an uncaptured photon is, and there is no demand cap here
+            // for the same reason — anything the stand cannot spend falls through to the
+            // leftover `rem` below and is respired there.
+            //
+            // The `energy / e_v` bound is conservation and not a rule: the tissue this
+            // income becomes holds `e_v` per unit, so building more of it than the
+            // substrate's own energy pays for would create energy inside the system. At
+            // the placeholders it never binds — `e_v · yield` is 0.8 against a log's own
+            // 2.0 per unit — and it binds exactly when a log was laid with less energy in
+            // it than the tissue it would become, which is a log with nothing to eat.
+            Trophic::Saprotroph => {
+                let taken = substrate[si];
+                let gross = (sc.substrate_yield.clamp(0.0, 1.0) * taken.organic)
+                    .min(if e_v > 0.0 { taken.energy / e_v } else { f64::INFINITY })
+                    .max(0.0)
+                    .min(taken.organic);
+                let waste = (taken.organic - gross).max(0.0);
+                ledger.respired_out += waste;
+                ledger.heat_out += (taken.energy - e_v * gross).max(0.0);
+                (gross, taken.mineral)
+            }
+        };
 
         // ---- 4.3 maintenance from income first, then reserve
         let paid_a = a.min(m);
@@ -638,9 +869,22 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink]) {
         // `min` is float insurance: `A_pot`'s `mineral / n_tissue` cap already bounds
         // this by the pool, and only this stand draws on this site.
         let built = dq_s + dp_a + dw + dq_r;
-        let draw = (sc.n_tissue * built).max(0.0).min(ground[gi].mineral.max(0.0));
-        ground[gi].mineral -= draw;
-        stands[si].mineral += draw;
+        let need = (sc.n_tissue * built).max(0.0);
+        // A saprotroph's mineral arrives **with the wood**, at the log's own density, and
+        // is netted against what the tissue it built actually needs: the excess is released
+        // to the site's pool and a shortfall is drawn from it under the same cap the plants
+        // draw under. Mineral only ever moves between stocks, so both directions conserve
+        // it exactly. A `Photo` stand has no arrival and this is the draw it always was.
+        stands[si].mineral += arrived_mineral;
+        if arrived_mineral > need {
+            let release = (arrived_mineral - need).min(stands[si].mineral.max(0.0));
+            stands[si].mineral -= release;
+            ground[gi].mineral += release;
+        } else {
+            let draw = (need - arrived_mineral).min(ground[gi].mineral.max(0.0));
+            ground[gi].mineral -= draw;
+            stands[si].mineral += draw;
+        }
 
         // ---- 4.5 senescence
         let shed = (sc.senescence * stands[si].foliage * DT).min(stands[si].foliage);
@@ -890,7 +1134,13 @@ fn seed_bank(flora: &mut Flora, world: &World) {
     // one package out of its oldest bins; its own remainder and every loser's bank stay
     // where they are and go on ageing.
     let world_seed = view.config.seed;
-    for g in ground.iter_mut() {
+    // The lottery is drawn in a **read-only** pass, and only then are the winners' banks
+    // spent. Round 5b's reason: a saprotroph's substrate gate reads the dead wood of
+    // *other* sites in its mycelium box, which cannot be looked up while this site is
+    // borrowed for mutation. The order, the keys and the draw are unchanged — the sweep is
+    // still `ground`'s own site order — so no `Photo` species' behaviour moves.
+    let mut winners: Vec<(usize, Species)> = Vec::new();
+    for (gi, g) in ground.iter().enumerate() {
         if g.seeds.is_empty() || stands.binary_search_by_key(&g.site, |s| s.site).is_ok() {
             continue;
         }
@@ -907,16 +1157,21 @@ fn seed_bank(flora: &mut Flora, world: &World) {
             if packages < 1.0 {
                 continue;
             }
-            if !establishes(&view, sky, g.site, sc) {
+            if !establishes(&view, sky, ground, g.site, sc) {
                 continue;
             }
             candidates.push((species, packages.min(u32::MAX as f64) as u64));
         }
         let site_index = view.config.index(g.site.x as i64, g.site.y, g.site.z) as u64;
-        let Some(species) = lottery(world_seed, site_index, tick, &candidates) else { continue };
+        if let Some(species) = lottery(world_seed, site_index, tick, &candidates) {
+            winners.push((gi, species));
+        }
+    }
+    for (gi, species) in winners {
+        let g = &mut ground[gi];
         let sc = config.species(species);
         // The slot first and the bank second: a bank must never be spent on a birth that
-        // does not happen. The loop skipped occupied sites above and nothing inserts a
+        // does not happen. The pass above skipped occupied sites and nothing inserts a
         // stand on *this* site in between, so this is unreachable rather than a real
         // branch — and it is in this order so that it stays harmless if that ever changes.
         let at = match stands.binary_search_by_key(&g.site, |s| s.site) {
@@ -1287,7 +1542,8 @@ fn dispersal_target(
 }
 
 /// The species' establishment predicate: wet enough for its roots, **aerated** enough for
-/// them, bright enough for its leaves, and not already under water it cannot stand in.
+/// them, bright enough for its leaves, something to eat if it eats wood, and not already
+/// under water it cannot stand in.
 ///
 /// The aeration bound reads the site's saturated fraction *now*, not a stress that a
 /// cohort has no way to carry. It is the half of correction 2 that makes saturation cost
@@ -1296,11 +1552,12 @@ fn dispersal_target(
 fn establishes(
     view: &VoxelView<'_>,
     sky: &mut Vec<(Site, f64)>,
+    ground: &[Ground],
     site: Site,
     sc: &SpeciesConfig,
 ) -> bool {
     let visibility = sky_at(sky, view, site);
-    gates(view, site, sc, visibility).passes()
+    gates(view, site, sc, visibility, substrate_in_box(view, ground, site, sc)).passes()
 }
 
 /// The same predicate for a caller outside a tick — a harness picking founders, a
@@ -1308,6 +1565,12 @@ fn establishes(
 /// the view instead of off `step`'s cache. The cache is memoized geometry, so the two
 /// agree by construction, and there is exactly **one** germination predicate in the crate
 /// for anything to agree with.
+///
+/// It reads **no substrate**, because a `VoxelView` holds none: for a
+/// [`Trophic::Saprotroph`] species this therefore refuses every site, and the caller that
+/// means to ask about a fungus wants [`crate::FloraView::can_establish`], which supplies
+/// the dead wood out of the flora's own ground. Still one predicate: the substrate is an
+/// input to it, exactly as sky visibility is.
 ///
 /// Package I had to replicate the private one line for line in `examples/two_producers.rs`
 /// to say which germination gate was shut, and the harness's own founder-selection
@@ -1344,33 +1607,65 @@ pub struct Gates {
     /// Sky visibility of the site: **terrain geometry only**, with no canopy in it, which
     /// is the boundary germination light has in this round.
     pub sky_visibility: f64,
+    /// Dead wood in the species' **mycelium box**, as the reading was supplied: zero for a
+    /// [`Trophic::Photo`] species, which never asks, and zero for a caller that read the
+    /// gates off a `VoxelView` alone, which has no ground stocks in it.
+    pub dead_wood: f64,
     /// `mean_pore >= establish_pore_min`, and false for a box with no soil in it.
     pub pore_ok: bool,
     /// `saturated_fraction <= establish_saturated_max`.
     pub aeration_ok: bool,
     /// `water_depth_m <= drown_depth_m`.
     pub depth_ok: bool,
-    /// `sky_visibility >= establish_light_min`.
+    /// `sky_visibility >= establish_light_min` — and **always true for a saprotroph**,
+    /// which has no light gate at all, because it does not eat light.
     pub light_ok: bool,
+    /// `dead_wood >= establish_substrate_min` — and **always true for a `Photo` species**,
+    /// whose substrate gate is open by construction.
+    pub substrate_ok: bool,
 }
 
 impl Gates {
     /// The predicate itself: every gate, and nothing else.
     pub fn passes(&self) -> bool {
-        self.pore_ok && self.aeration_ok && self.depth_ok && self.light_ok
+        self.pore_ok && self.aeration_ok && self.depth_ok && self.light_ok && self.substrate_ok
     }
 }
 
-/// The gates at one site for one species, reading sky visibility straight off the view.
-/// The one predicate, in the form that says which gate shut.
+/// The gates at one site for one species, reading sky visibility straight off the view and
+/// the substrate as **nothing**. The one predicate, in the form that says which gate shut.
+///
+/// A `VoxelView` holds no ground stocks, so this is the form for the five plants; for a
+/// [`Trophic::Saprotroph`] it reports `substrate_ok: false` and refuses, which is what
+/// "there is no log here as far as I can see" means. [`establishment_gates_on_substrate`]
+/// is the same function with the reading supplied, and
+/// [`crate::FloraView::establishment_gates`] takes it off the flora's own ground.
 pub fn establishment_gates(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> Gates {
+    establishment_gates_on_substrate(view, site, sc, 0.0)
+}
+
+/// [`establishment_gates`] with the dead wood of the species' mycelium box handed in: the
+/// substrate is an **input** to the one predicate, the way sky visibility is, and not a
+/// second predicate.
+pub fn establishment_gates_on_substrate(
+    view: &VoxelView<'_>,
+    site: Site,
+    sc: &SpeciesConfig,
+    dead_wood: f64,
+) -> Gates {
     let visibility = view.sky_visibility(site.x as i64, site.y, site.z);
-    gates(view, site, sc, visibility)
+    gates(view, site, sc, visibility, dead_wood)
 }
 
 /// The same, for a caller that already has a sky reading — `step`'s memoized cache, which
 /// is the same geometry by construction.
-fn gates(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig, sky_visibility: f64) -> Gates {
+fn gates(
+    view: &VoxelView<'_>,
+    site: Site,
+    sc: &SpeciesConfig,
+    sky_visibility: f64,
+    dead_wood: f64,
+) -> Gates {
     let box_ = root_box(view, site, sc);
     let mean_pore = mean_pore(view, &box_);
     let saturated_fraction = saturated_fraction(view, &box_, sc);
@@ -1381,10 +1676,21 @@ fn gates(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig, sky_visibility: f
         saturated_fraction,
         water_depth_m,
         sky_visibility,
+        dead_wood,
         pore_ok: mean_pore.is_some_and(|mean| mean >= sc.establish_pore_min),
         aeration_ok: saturated_fraction <= sc.establish_saturated_max,
         depth_ok: water_depth_m <= sc.drown_depth_m,
-        light_ok: sky_visibility >= sc.establish_light_min,
+        light_ok: match sc.trophic {
+            Trophic::Photo => sky_visibility >= sc.establish_light_min,
+            // No light gate for a saprotroph: `design/theoretical-biosphere-2026-09-16.md`
+            // §6's "no light income" applies on the way in as well. A fungus in the dark
+            // under a closed canopy is a fungus in its habitat.
+            Trophic::Saprotroph => true,
+        },
+        substrate_ok: match sc.trophic {
+            Trophic::Photo => true,
+            Trophic::Saprotroph => dead_wood >= sc.establish_substrate_min,
+        },
     }
 }
 

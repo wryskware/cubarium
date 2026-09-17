@@ -57,7 +57,7 @@ pub use cubarium_voxel::{DT, TICK_HZ};
 pub use step::can_establish;
 /// The same predicate, gate by gate, for a caller that needs to know **which** gate shut:
 /// `Gates::passes()` is exactly `can_establish`.
-pub use step::{establishment_gates, Gates};
+pub use step::{establishment_gates, establishment_gates_on_substrate, Gates};
 
 /// The producers of the voxel ecology, each one a **role**: see the preset that carries
 /// its numbers ([`SpeciesConfig::bloomcrown`] and the four after it) for the sentence of
@@ -1318,6 +1318,20 @@ pub struct FloraLedger {
     pub propagule_requested: [f64; Species::COUNT],
     pub propagule_funded: [f64; Species::COUNT],
     pub propagule_landed: [f64; Species::COUNT],
+    /// Organic matter the saprotrophs have withdrawn from dead wood, per species, indexed
+    /// by [`Species::index`]: a **diagnostic flux and not a boundary flow**, exactly like
+    /// the three `propagule_*` arrays, and therefore in none of the three
+    /// `expected_*` totals.
+    ///
+    /// The reason it cannot be a boundary term is what a saprotroph is. `consumed_*_out`
+    /// means "a consumer outside this layer took this, and owes it on its own books"; a
+    /// glowcap is a stand *inside* this layer, so its uptake moves organic matter from a
+    /// ground stock to a stand and crosses nothing. Booking it out and back in again would
+    /// keep the residuals and destroy the meaning of `consumed_organic_out` — a harvest
+    /// study could no longer tell what an animal ate from what the fungi digested. What
+    /// leaves the system out of that uptake is the part the fungus does not keep, and that
+    /// is `respired_out` like every other respiration.
+    pub substrate_uptake: [f64; Species::COUNT],
 }
 
 impl FloraLedger {
@@ -1485,6 +1499,48 @@ impl<'a> FloraView<'a> {
             }
         }
         out
+    }
+
+    /// Dead wood the sites of a species' **mycelium box** around `from` hold, in total:
+    /// what [`SpeciesConfig::establish_substrate_min`] is compared against, and the stock
+    /// a saprotroph's income is drawn from. **Zero for a [`Trophic::Photo`] species**,
+    /// which never asks.
+    ///
+    /// The box is the root box's geometry — `rooting_depth` down and `rooting_radius`
+    /// sideways, `x` wrapped and `z` clipped — read as **support sites** rather than as
+    /// soil voxels, because a ground stock lives one per support face.
+    pub fn dead_wood_in_box(
+        &self,
+        world: &VoxelView<'_>,
+        from: Site,
+        sc: &SpeciesConfig,
+    ) -> f64 {
+        step::substrate_in_box(world, self.ground, from, sc)
+    }
+
+    /// The one establishment predicate for **any** species, gate by gate, with the
+    /// substrate read off this layer's own ground: [`can_establish`] cannot do that,
+    /// because a `VoxelView` holds no dead wood, so this is the form a harness or a
+    /// diagnosis wants once a saprotroph is in the world.
+    pub fn establishment_gates(
+        &self,
+        world: &VoxelView<'_>,
+        site: Site,
+        species: Species,
+    ) -> Gates {
+        let sc = self.config.species(species);
+        step::establishment_gates_on_substrate(
+            world,
+            site,
+            sc,
+            self.dead_wood_in_box(world, site, sc),
+        )
+    }
+
+    /// `passes()` on [`FloraView::establishment_gates`]: the predicate itself, for any
+    /// species, and the one the tick runs.
+    pub fn can_establish(&self, world: &VoxelView<'_>, site: Site, species: Species) -> bool {
+        self.establishment_gates(world, site, species).passes()
     }
 
     /// Energy in every living and dead stock.
