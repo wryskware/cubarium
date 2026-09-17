@@ -72,6 +72,12 @@ fn spill_threshold_just_over_the_sill_spills_and_leaves_the_sides_unequal() {
     // The near column can only hold one unit below the sill top; the rest crosses.
     assert!((column(&w, 0) - 1.0).abs() < 0.02, "near {}", column(&w, 0));
     assert!((column(&w, 2) - 0.4).abs() < 0.02, "far {}", column(&w, 2));
+    // Both sills end dry on top: the spill stopped at the sill top instead of levelling
+    // across it, which is the whole point of the threshold.
+    for x in [1, 3] {
+        let over = w.view().free_at(x, 2, 0);
+        assert!(over < 1e-9, "water left standing on the sill top at {x}: {over}");
+    }
     assert!((w.view().stored_m3() - 1.4).abs() < 1e-6);
     assert!(residual(&w).abs() < 1e-9);
 }
@@ -84,6 +90,60 @@ fn spill_threshold_well_over_the_sill_equalizes_above_it() {
     assert!((column(&w, 0) - 1.3).abs() < 1e-3, "near {}", column(&w, 0));
     assert!((column(&w, 2) - 1.3).abs() < 1e-3, "far {}", column(&w, 2));
     assert!((w.view().free_at(1, 2, 0) - 0.3).abs() < 1e-3);
+    assert!(residual(&w).abs() < 1e-9);
+}
+
+// --------------------------------------------------------- symmetric spill (R2.1)
+
+/// Two bedrock supports side by side with a one-cell hollow either side of them, closed
+/// in by bedrock walls: the whole state — geometry and both sources — is symmetric under
+/// `x -> 5 - x`, so the water perched on the supports has two identical ways down and no
+/// substep may prefer one of them.
+fn symmetric_spill() -> World {
+    let mut w = World::empty(cfg(6, 5));
+    for x in [0, 5] {
+        for y in 1..=4 {
+            w.apply(Command::SetMaterial { x, y, z: 0, material: Material::Bedrock });
+        }
+    }
+    for x in [2, 3] {
+        w.apply(Command::SetMaterial { x, y: 1, z: 0, material: Material::Bedrock });
+        w.apply(Command::AddWater { x, y: 2, z: 0, volume_m3: 0.7 });
+    }
+    w
+}
+
+/// Mirror symmetry is a property of the *state*, so it has to hold after every tick and
+/// not only once the spill has settled.
+fn assert_mirrored(w: &World, width: i64, axis: i64, when: &str) {
+    let v = w.view();
+    for y in 0..w.config().height {
+        for x in 0..width {
+            assert_eq!(v.material_at(x, y, 0), v.material_at(axis - x, y, 0), "material {x},{y}");
+            let (l, r) = (v.free_at(x, y, 0), v.free_at(axis - x, y, 0));
+            assert!((l - r).abs() < 1e-9, "{when}: free {x},{y} is {l}, its mirror is {r}");
+        }
+    }
+}
+
+#[test]
+fn a_symmetric_spill_shares_itself_between_both_hollows() {
+    let mut w = symmetric_spill();
+    assert_mirrored(&w, 6, 5, "tick 0");
+    for tick in 1..=20 {
+        w.step();
+        assert_mirrored(&w, 6, 5, &format!("tick {tick}"));
+    }
+    // 1.4 units over two one-unit hollows: both end at 0.7 and the shelf ends dry.
+    let v = w.view();
+    let (left, right) = (v.free_at(1, 1, 0), v.free_at(4, 1, 0));
+    assert!((left - right).abs() < 1e-9, "hollows {left} vs {right}");
+    assert!((left - 0.7).abs() < 1e-6, "left hollow {left}");
+    assert!((right - 0.7).abs() < 1e-6, "right hollow {right}");
+    for x in 1..=4 {
+        assert!(v.free_at(x, 2, 0) < 1e-6, "the shelf kept water at {x}: {}", v.free_at(x, 2, 0));
+    }
+    assert!((v.stored_m3() - 1.4).abs() < 1e-9, "stored {}", v.stored_m3());
     assert!(residual(&w).abs() < 1e-9);
 }
 
@@ -152,9 +212,15 @@ fn shelf(dir: i64) -> World {
     w
 }
 
-/// Index order is the seed and candidate tie-break in `equalize`, so a fixture mirrored
-/// in `x` is where an order bias would show: the same geometry walked the other way
-/// round, with the wet source on the other side of the sill it has to cross.
+/// Index order is the seed and row tie-break in `equalize`, so running this fixture
+/// against its mirror image is where an order bias would show: the same geometry walked
+/// the other way round, with the wet basin on the other side of the sill it has to cross.
+///
+/// What this pins down is *this* fixture. Growth is order independent within a row,
+/// because a row of candidates is taken whole or not at all (see the `water` module
+/// doc), and this fixture, the seam shift above and the symmetric spill are the three
+/// cases that is checked against. None of them establishes that every geometry is
+/// insensitive to the order its cells are reached in.
 #[test]
 fn the_mirrored_fixture_gives_the_mirrored_answer() {
     let here = shelf(1);
@@ -167,8 +233,8 @@ fn the_mirrored_fixture_gives_the_mirrored_answer() {
     assert!(column(&here, 0) > column(&here, 3), "the basin did not stay deeper");
     // 1e-6 rather than 1e-12: the spill decays toward its stopping point, so the
     // substep it stops on turns on a float comparison and the two runs settle a few
-    // times 1e-8 apart. A seed or candidate *order* bias would move a fill by a
-    // tenth, not by 1e-8. See the tie rule in the `water` module doc.
+    // times 1e-8 apart. An order bias between the two sides would move a fill by a
+    // tenth, not by 1e-8.
     for y in 0..here.config().height {
         for x in 0..8 {
             assert_eq!(a.material_at(x, y, 0), b.material_at(-x, y, 0), "material {x},{y}");

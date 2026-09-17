@@ -63,29 +63,39 @@
 //!
 //! # Connectivity: what a region is
 //!
-//! A region is grown from a seed void cell that holds water, and a void cell joins it
-//! only if it is 6-connected to the region **and** the level the region would settle to
-//! after taking it in still lies strictly above the highest cell in the region,
-//! including the candidate. So the region is always a body of water whose own surface
-//! submerges every cell it reaches through — under roofs as readily as in the open,
-//! since nothing in the rule looks at the sky.
+//! A region is grown from a seed void cell that holds water. Its candidates are the void
+//! cells 6-connected to it, and they are admitted **a whole row of one `y` at a time**:
+//! a row joins only if the level the region would settle to after taking that whole row
+//! in still lies strictly above the highest cell in the region, the row included. So the
+//! region is always a body of water whose own surface submerges every cell it reaches
+//! through — under roofs as readily as in the open, since nothing in the rule looks at
+//! the sky.
 //!
-//! ## The tie rule, and why it decides nothing visible
+//! ## Row order, and why a row is all or nothing
 //!
-//! Seeds are taken lowest-water-surface first, then in index order. Candidates are
-//! taken lowest-`y` first, water-bearing before dry at the same `y`, then in index
-//! order. A candidate rejected while the level was still low is offered again on the
-//! next pass, so growth does not depend on which side of the region it reached first.
+//! Seeds are taken lowest-water-surface first, then in index order. Rows are taken in
+//! this order: the region's own surface row first, then upwards, and only then the rows
+//! *below* it, lowest first. So the body spreads out at its own level before it looks for
+//! a way down, and by the time it does, every way down at a given `y` is in hand and they
+//! are judged together. A row refused while the level was still low is offered again in
+//! the next round, since taking other water in can lift the level within reach of it.
 //!
-//! Both index-order tie-breaks are there only to make the walk deterministic. Neither
-//! can tilt the answer: a region fills bottom-up and every cell at the surface level
-//! gets the *same* share, so the solver never picks a direction. A fixture mirrored in
-//! `x`, source and all, therefore settles to the mirror image of the original — exactly
-//! in the cases that reach a common level, and to within a few times 1e-8 in a spill,
-//! whose stopping substep turns on a float comparison. That is what the seam-shift and
-//! mirrored-fixture tests pin down.
+//! Judging a row whole is what keeps the answer off the order the cells were reached in.
+//! Two identical hollows either side of a perched shelf are one row: admitting both would
+//! drop the level below the shelf, so *neither* is admitted, and the shelf drains into
+//! both by falling, a cell per substep, at the same rate. Admitting one of them — which is
+//! what judging candidates one at a time did — made the shelf pick the side the walk
+//! happened to reach first and left the other hollow short for good.
 //!
-//! That rule is what the U-tube and roofed-passage tests pin down. A shaft on the far
+//! Index order inside a row is a tie-break for determinism only, and the fill picks no
+//! direction either: a region fills bottom-up and every cell at the surface level gets
+//! the *same* share. What is actually checked is three fixtures in `tests/core.rs` — the
+//! seam shift, the mirrored shelf and the symmetric spill — each settling to the
+//! translated or mirrored answer: exactly where they reach a common level, and to within
+//! a few times 1e-8 in a spill, whose stopping substep turns on a float comparison. That
+//! is three fixtures, not a proof that every geometry is order independent.
+//!
+//! The level rule is what the U-tube and roofed-passage tests pin down. A shaft on the far
 //! side of a bottom connection, or of a roofed passage, joins the region only when the
 //! common level would stand above the connection, which is exactly when real water
 //! would push through it — so both sides rise together and end level, and neither the
@@ -389,9 +399,15 @@ fn equalize(w: &mut World) {
     let mut queued = vec![0u32; n];
     let mut counts = vec![0u32; height];
     let mut fracs = vec![0f64; height];
+    // Candidates waiting to be judged, filed under their own `y`, and the round in which
+    // that row was last refused. `rows` is non-empty only at the `y`s listed in `touched`.
+    let mut rows: Vec<Vec<usize>> = vec![Vec::new(); height];
+    let mut refused = vec![0u32; height];
+    let mut touched: Vec<usize> = Vec::new();
     let mut region: Vec<usize> = Vec::new();
     let mut heap: BinaryHeap<Reverse<(usize, u8, usize)>> = BinaryHeap::new();
     let mut epoch = 0u32;
+    let mut round = 0u32;
 
     for (_, seed) in seeds {
         if done[seed] {
@@ -408,43 +424,67 @@ fn equalize(w: &mut World) {
         counts[y_max] = 1;
         push_neighbours(&c, w, seed, epoch, &stamp, &done, &mut queued, &mut heap);
 
-        // Candidates come lowest first, and water-bearing before dry at the same `y`,
-        // since taking water in can only lift the level. A candidate rejected while the
-        // level was low is offered again in the next pass, so the answer does not depend
-        // on which side of the region the growth happened to reach first.
+        // Growth takes a whole row of candidates or none of it, and it takes the region's
+        // own surface row and the rows above it before any row below: the body spreads out
+        // at its own level first and only then looks for a way down, so when there are
+        // several ways down at one `y` they are judged together instead of one at a time.
+        // That is what keeps two equal exits from being decided by which one the walk
+        // reached first. A row refused while the level was low is offered again in the
+        // next round, since taking other water in can lift the level within reach of it.
         for _ in 0..4 {
-            let mut accepted = 0usize;
-            while let Some(Reverse((y, _, i))) = heap.pop() {
-                if stamp[i] == epoch || done[i] {
-                    continue;
+            round += 1;
+            let mut committed = false;
+            loop {
+                // File everything reachable so far under its own `y`. `queued` keeps a
+                // cell out of more than one row, so a row never counts one twice.
+                while let Some(Reverse((y, _, i))) = heap.pop() {
+                    if stamp[i] == epoch || done[i] {
+                        continue;
+                    }
+                    if rows[y].is_empty() {
+                        touched.push(y);
+                    }
+                    rows[y].push(i);
                 }
-                counts[y] += 1;
-                let candidate = w.free[i];
-                let l = level(&counts, fill + candidate);
+                let Some(y) = (y_max..height)
+                    .chain(0..y_max)
+                    .find(|&y| refused[y] != round && !rows[y].is_empty())
+                else {
+                    break;
+                };
+
+                let batch = std::mem::take(&mut rows[y]);
+                let taking = batch.len() as u32;
+                let candidates: f64 = batch.iter().map(|&i| w.free[i]).sum();
+                counts[y] += taking;
+                let l = level(&counts, fill + candidates);
                 let top = y_max.max(y) as f64;
                 if l > top + 1e-12 {
-                    stamp[i] = epoch;
-                    region.push(i);
-                    fill += candidate;
+                    fill += candidates;
                     y_max = y_max.max(y);
-                    accepted += 1;
-                    push_neighbours(&c, w, i, epoch, &stamp, &done, &mut queued, &mut heap);
+                    for &i in &batch {
+                        stamp[i] = epoch;
+                        region.push(i);
+                    }
+                    for &i in &batch {
+                        push_neighbours(&c, w, i, epoch, &stamp, &done, &mut queued, &mut heap);
+                    }
+                    committed = true;
                 } else {
-                    counts[y] -= 1;
-                    // Not reachable at this level. Leave it open to be offered again.
-                    queued[i] = 0;
+                    counts[y] -= taking;
+                    refused[y] = round;
+                    // Not reachable at this level. Keep the row for the next round.
+                    rows[y] = batch;
                 }
             }
-            if accepted == 0 {
-                break;
-            }
-            for &i in &region {
-                push_neighbours(&c, w, i, epoch, &stamp, &done, &mut queued, &mut heap);
-            }
-            if heap.is_empty() {
+            if !committed {
                 break;
             }
         }
+        for &y in &touched {
+            rows[y].clear();
+        }
+        touched.clear();
 
         // Fill the region bottom up, splitting what is left across the cells that sit
         // at the surface level.
