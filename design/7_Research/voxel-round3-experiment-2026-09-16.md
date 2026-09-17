@@ -504,8 +504,10 @@ establishments per arm; recruitment is an order of magnitude rarer here, and bot
 that made it so are intended:
 
 - **A birth needs two packages on one site.** A package is exactly the minimum viable
-  stand's material, and a bin pays attrition before germination is tested, so one package
-  alone is 0.1 % short for ever. The diagnosis shows every arm ending with banks just
+  stand's material, and (in these arms) a bin paid attrition before germination was
+  tested, so one package alone was short for ever — by `seed_attrition_per_s · dt` =
+  `0.001 × 0.05` = **0.005 %** of itself, not the 0.1 % an earlier draft of this section
+  said (Astra R5.3). The diagnosis shows every arm ending with banks just
   under the threshold — biggest 92.5 %, 93.6 % and 81.9 % of it for bloomcrown, 81.9 %,
   81.9 % and 94.5 % for umbrellafrond — which is one package minus its attrition, waiting
   for a second that has to arrive before the first bin ages out.
@@ -551,35 +553,93 @@ landform: lowest skyline quartile  0.977 (re-drawn noise)  0.324 (another landfo
 
 bloomcrown     occupied 11 / 10 / 14 columns:      Jaccard noise 0.750   control 0.389
                living stands only 8 / 8 / 7:              noise 1.000   control 0.875
-               habitat 96 / 99 / 95 of 3072:              noise 0.822   control 0.016
+               eligible AT INTRODUCTION 96 / 99 / 95 of 3072: noise 0.822   control 0.016
                in the lowest skyline quartile: base 1.00, re-draw 1.00, control 0.36
 umbrellafrond  occupied 22 / 22 / 20 columns:      Jaccard noise 0.692   control 0.400
                living stands only 12 / 10 / 11:           noise 0.833   control 0.643
-               habitat 386 / 390 / 383 of 3072:           noise 0.970   control 0.172
+               eligible AT INTRODUCTION 386 / 390 / 383 of 3072: noise 0.970   control 0.172
                in the lowest skyline quartile: base 1.00, re-draw 1.00, control 0.50
 ```
 
+Every eligible count in this section — 96, 99, 95, 386, 390, 383 — was read **at
+introduction**: after the 1,000-tick (50 s) warm-up and before a plant acted. None of them
+is a habitat size. The water budget above shows the head still falling at 50 s and settling
+only around 900 s, so these are readings of one early moment under one initial wetting, and
+the arms' eligible sets differ in initial wetting as well as in terrain (Astra R5.2). The
+harness now samples the same predicate again at observation and prints both; the section
+below is what that shows.
+
 Two things are worth reading here and one is worth not reading.
 
-**The habitat sets replicate and the landform explains them.** Umbrellafrond's habitat is
-the same 97 % of columns under a re-drawn noise and 17 % under another landform, which is
-round 2's finding again. Bloomcrown's habitat is now **96 columns of 3,072** rather than
-2,526: the bounded tap leaves the world far drier than the rising one did, and the sun
-producer's own `establish_pore_min` 0.1 with `establish_saturated_max` 0.25 admits only the
-wet-but-not-waterlogged band. That makes its habitat pair (0.822) a real measurement on a
-small set rather than a statement about 82 % of the world, and its control value of
-**0.016** is the sharpest terrain-coupling number either species has produced.
+**The introduction-time eligible sets replicate, and the landform explains them.**
+Umbrellafrond's is the same 97 % of columns under a re-drawn noise and 17 % under another
+landform, which is round 2's finding again, and its control value of 0.172 against the
+noise pair's 0.970 is terrain and not wetting. Bloomcrown's was **96 columns of 3,072** at
+50 s here against 2,526 under the old rising tap — but that is two different early wettings
+compared with each other, not a niche that shrank: see the next section, where the same
+predicate at observation reads 2,688. Its 0.822 / 0.016 pair is a real measurement of the
+50 s reading and nothing more.
 
-**The occupancy Jaccards are now dispersal noise as well as terrain.** 0.750 and 0.692
-against the re-draw, where package J read 1.000 and 0.977, because the occupied set is a
-handful of drawn landing sites rather than every column in every donor's `hop`. Two arms
-with the same terrain and the same founders no longer produce the same footprint, and that
-is the dispersal draw doing what R4.4 asked for.
+**The occupancy Jaccards are dispersal draws as well as terrain.** 0.750 and 0.692 against
+the re-draw, where package J read 1.000 and 0.977, because the occupied set is a handful of
+drawn landing sites rather than every column in every donor's `hop`. This is **not**
+independent replicated dispersal evidence (Astra R5.3): the model is deterministic, so an
+identical initial state, seed, founder set and tick count reproduces a footprint exactly —
+but a noise reseed moves support faces by a voxel, and a donor's draw key is
+`(domain, world seed, donor voxel index, tick)`, so the re-draw arm changes terrain **and**
+every donor's delivery sequence at once. The two effects are not separated here, and the
+difference between those arms cannot be attributed to either.
 
 **What not to read:** the per-arm establishment counts (4 / 2 / 3) are three samples of a
 stochastic process with no replication, and the control arm's 13 off-predicate founders
 make its arm a different treatment as well as a different landform. Nothing here is
 evidence about coexistence, and the probe that would be was not run.
+
+### The eligible band is a reading of a moment (R5.2's short diagnostic)
+
+Astra's R5.2 asked for a short diagnostic over an available state rather than another long
+comparison, using the model's own gates instead of a second approximate predicate. The
+harness now samples `can_establish` at **observation** as well as at introduction, and
+prints a per-gate breakdown over the final state through
+`cubarium_voxel_flora::establishment_gates`, whose `passes()` **is** `can_establish`. A
+400 s single run at the same forcing (`two_producers 400 1 101`: the same terrain and tap
+as the base arm, stopped early on purpose):
+
+```
+ umbrellafrond: 386 of 3072 skyline sites pass its establishment predicate at introduction
+    bloomcrown:  96 of 3072 skyline sites pass its establishment predicate at introduction
+
+establishment gates at observation (3072 skyline columns):
+      bloomcrown: 2688 eligible; shut gates (a column can fail several): no soil in the
+                  root box 0, mean pore < 0.10 0, saturated fraction > 0.25 384, water
+                  over 0.05 m 55, sky < 0.60 0
+                : sole cause - pore alone 0, saturation alone 329, light alone 0; mean
+                  root-box pore over the 3072 columns with soil 0.386
+                : 8 donors, 182 candidate faces within hop 2, 85 of them eligible (10.6 each)
+   umbrellafrond: 668 eligible; shut gates: no soil 0, mean pore < 0.45 2404, saturated
+                  fraction > 1.00 0, water over 0.50 m 0, sky < 0.10 0
+                : sole cause - pore alone 2404, saturation alone 0, light alone 0; mean
+                  root-box pore over the 3072 columns with soil 0.401
+                : 8 donors, 61 candidate faces within hop 1, 61 of them eligible (7.6 each)
+```
+
+**Bloomcrown's 96 columns was the wetting at 50 s and not a niche size.** On the same
+terrain, 350 s later, the same predicate admits **2,688 of 3,072** columns — the soil comes
+down off saturation as the initial charge drains — and what shuts the remaining 384 is the
+saturation ceiling (329 of them for that reason alone) plus 55 columns under standing water.
+Not one column fails on mean pore and not one on light: `establish_pore_min` 0.1 and
+`establish_light_min` 0.6 are not what held it to 96. Umbrellafrond moves the other way and
+for the opposite reason, 386 → 668, with 2,404 columns refused on **mean pore alone**,
+because its `establish_pore_min` of 0.45 sits above where drained soil settles (the mean
+root-box pore over the whole skyline is 0.40).
+
+Two things this does **not** say. It is not a settled-habitat measurement either — the head
+is still falling at 400 s, −0.24 m over the run with the outlet at its full 0.05 m³/s — and
+a count of eligible columns is not a count of reachable ones: what a donor can recruit on is
+the eligible faces inside its own `hop`, 85 of 182 for the eight bloomcrown donors and 61 of
+61 for the eight umbrellafrond donors. The germination gate that was shut in the 2,000 s
+arms was the **bank**, not the predicate.
+
 
 ### The three residuals, still fine
 
@@ -621,17 +681,24 @@ and nothing is negative anywhere.
    cost **two packages on one site**. K7 made germination read the bank as it stands at the
    start of the tick and charged attrition on what stays — the rule the package size always
    stated: **one package is one recruit**, born on the next step at exactly `alive_min` of
-   wood. A package landing on a passing site is now a stand one tick later instead of a
-   half-funded bank waiting for a partner, so the establishments, descendant fractions and
-   occupancy sets in this section are lower bounds on what the current code does. The
-   funding, water and residual numbers are unaffected: no donor, no budget and no water
-   rule changed. Whoever designs the positive control should measure the generation time
-   again under the new rule rather than halving these.
-2. **Bloomcrown's habitat is now 96 columns of 3,072** under the bounded tap, against 2,526
-   under the rising one. Whether that is the sun producer's intended niche or an artifact of
-   `establish_pore_min` 0.1 meeting a drier world is a placeholder question
-   (`design/backlog.md` row 41), and it decides whether the species has anywhere to live
-   before the presets round adds three more.
+   wood. Everything in this section is therefore a **pre-K7 observation, and the coupled
+   post-K7 outcomes have not been measured** — not a lower bound on them (Astra R5.3).
+   Earlier births change which gaps are occupied, and therefore water withdrawal, shading,
+   litter and the funding that follows; there is no monotonicity to appeal to for the
+   counts or the fractions, and unchanged accounting *rules* do not imply unchanged
+   numerical budgets or residuals. Whoever designs the positive control should measure the
+   generation time again under the new rule rather than scaling these.
+2. **Bloomcrown's niche has not been measured, and no eligible count here measures it.**
+   96 columns of 3,072 is its **introduction-time** reading under this tap, 2,688 is its
+   **observation-time** reading on the same terrain (next section), and 2,526 was an
+   introduction-time reading under the old rising tap. The contract to settle before the
+   presets round is not a number but a statement of intent, per Astra's R5.2: whether the
+   three new roles want sunny moist soil, soil pockets near rock, or damp soil under a
+   canopy — and if any of them is meant to take bare rock or a dry ridge, that is an
+   explicit substrate or trait decision and not a preset value. Bloomcrown already passes
+   its own 0.1 pore and 0.6 light thresholds on open aerated soil at pore fraction 0.25, so
+   the rule is not incapable of a sunny-soil niche; whether this generated world offers
+   that condition persistently is unmeasured.
 3. **Two packages per recruit was a consequence, not a decision — and it is settled.**
    Taken up as `K7` straight after this rerun, as the phase-order change of the two
    candidates: germination happens before that tick's attrition and expiry, so one package

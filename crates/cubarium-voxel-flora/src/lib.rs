@@ -27,6 +27,9 @@ pub use cubarium_voxel::{DT, TICK_HZ};
 /// harness picking founder columns, a diagnosis of which gate is shut. There is one
 /// predicate, and this is it.
 pub use step::can_establish;
+/// The same predicate, gate by gate, for a caller that needs to know **which** gate shut:
+/// `Gates::passes()` is exactly `can_establish`.
+pub use step::{establishment_gates, Gates};
 
 /// The two producers of the first coupled experiment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

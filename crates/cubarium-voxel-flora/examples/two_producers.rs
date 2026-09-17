@@ -123,12 +123,16 @@ struct Outcome {
     /// hollows and the ridges, as pure landform, with no plant and no water in them.
     low_quartile: Vec<(u32, u32)>,
     high_quartile: Vec<(u32, u32)>,
-    /// Per species, the skyline columns whose highest support passed the founder
-    /// establishment predicate after the warm-up and before any plant acted: the
-    /// species' *habitat*, pure terrain and water. The patch itself is bounded by the
-    /// founders, which are held identical across runs on purpose, so this is the set
-    /// that answers "do the hollows stay put" with the founders out of the way.
+    /// Per species, the skyline columns whose highest support passed the establishment
+    /// predicate **at introduction**: after the 1,000-tick (50 s) warm-up and before any
+    /// plant acted. Pure terrain and water, and an instantaneous reading — the water
+    /// budget shows the head still falling at 50 s, so this is the eligible set of that
+    /// moment and not a settled habitat (Astra R5.2).
     eligible: [Vec<(u32, u32)>; 2],
+    /// The same predicate over the same columns **at observation**: the last tick of the
+    /// run, with the plants and the settled water in it. Printed beside the introduction
+    /// set so that a reader can see how far the eligible band moved while the arm ran.
+    eligible_at_end: [Vec<(u32, u32)>; 2],
     /// The founders this run's own selection rule would have planted, whatever it was
     /// actually handed: umbrellafrond from the bottom of its eligible skyline, bloomcrown
     /// from the top. Comparing these across runs asks where the *process* would put a
@@ -222,14 +226,7 @@ fn run(
     skyline.sort_by_key(|s| (s.y, s.x, s.z));
 
     let mut flora = Flora::new(FloraConfig::default());
-    let mut eligible = [Vec::new(), Vec::new()];
-    for species in Species::ALL {
-        let sc = flora.config().species(species);
-        let mut set: Vec<(u32, u32)> =
-            skyline.iter().filter(|s| passes(&world, sc, **s)).map(|s| (s.x, s.z)).collect();
-        set.sort_unstable();
-        eligible[sp(species)] = set;
-    }
+    let eligible = eligible_sets(&world, &flora, &skyline);
     let own_founders = pick_founders(&world, &flora, &skyline, verbose && founders.is_none());
     let (planted, off_predicate) = match founders {
         None => (own_founders.clone(), 0),
@@ -337,6 +334,11 @@ fn run(
         }
     }
 
+    // The same predicate again, now: at observation rather than at introduction. Astra's
+    // R5.2 — an eligible count is a reading of one moment, and carrying the warm-up's
+    // reading into the result made it look like a habitat size.
+    let eligible_at_end = eligible_sets(&world, &flora, &skyline);
+
     // Round 3: `alive` is the stands, and `occupied` is the stands plus the sites where
     // a species' seed bank is waiting — the old "establishing" half of `occupied`, which
     // is a cohort in the ground now and not a frozen stand.
@@ -374,6 +376,7 @@ fn run(
         low_quartile,
         high_quartile,
         eligible,
+        eligible_at_end,
         own_founders,
         founders: planted,
         off_predicate,
@@ -389,6 +392,130 @@ fn run(
         print_columns(&outcome);
     }
     outcome
+}
+
+/// Every skyline column that passes each species' establishment predicate right now, as
+/// sorted column keys. An instantaneous reading: the caller says when it took it.
+fn eligible_sets(world: &World, flora: &Flora, skyline: &[Site]) -> [Vec<(u32, u32)>; 2] {
+    let mut out = [Vec::new(), Vec::new()];
+    for species in Species::ALL {
+        let sc = flora.config().species(species);
+        let mut set: Vec<(u32, u32)> =
+            skyline.iter().filter(|s| passes(world, sc, **s)).map(|s| (s.x, s.z)).collect();
+        set.sort_unstable();
+        out[sp(species)] = set;
+    }
+    out
+}
+
+/// Which gate refuses the columns a species cannot establish on, over the state the run
+/// ended in, and how many eligible recipients each donor actually has inside its `hop`.
+///
+/// Every number here comes from the model's own predicate through
+/// `cubarium_voxel_flora::establishment_gates`, whose `passes()` **is** `can_establish`:
+/// no second approximate predicate, which is what package J deleted and what Astra's R5.2
+/// asks to keep deleted. A column can fail several gates at once, so the counts overlap by
+/// construction; the point is which of them is doing the work.
+fn gate_diagnosis(world: &World, flora: &Flora, skyline: &[Site]) {
+    let view = world.view();
+    println!("establishment gates at observation ({} skyline columns):", skyline.len());
+    for species in Species::ALL {
+        let sc = flora.config().species(species);
+        let mut eligible = 0usize;
+        let (mut no_soil, mut pore, mut aeration, mut depth, mut light) = (0, 0, 0, 0, 0);
+        let mut only_pore = 0usize;
+        let mut only_aeration = 0usize;
+        let mut only_light = 0usize;
+        let mut mean_pore_sum = 0.0;
+        let mut mean_pore_n = 0usize;
+        for site in skyline {
+            let g = cubarium_voxel_flora::establishment_gates(&view, *site, sc);
+            if g.passes() {
+                eligible += 1;
+            }
+            if g.soil_voxels == 0 {
+                no_soil += 1;
+            }
+            if let Some(mean) = g.mean_pore {
+                mean_pore_sum += mean;
+                mean_pore_n += 1;
+            }
+            let shut = [!g.pore_ok, !g.aeration_ok, !g.depth_ok, !g.light_ok];
+            if shut[0] {
+                pore += 1;
+            }
+            if shut[1] {
+                aeration += 1;
+            }
+            if shut[2] {
+                depth += 1;
+            }
+            if shut[3] {
+                light += 1;
+            }
+            if shut.iter().filter(|&&f| f).count() == 1 {
+                if shut[0] {
+                    only_pore += 1;
+                } else if shut[1] {
+                    only_aeration += 1;
+                } else if shut[3] {
+                    only_light += 1;
+                }
+            }
+        }
+        let mean_pore = if mean_pore_n > 0 { mean_pore_sum / mean_pore_n as f64 } else { f64::NAN };
+        println!(
+            "  {:>14}: {eligible} eligible; shut gates (a column can fail several): no soil in the root box {no_soil}, mean pore < {:.2} {pore}, saturated fraction > {:.2} {aeration}, water over {:.2} m {depth}, sky < {:.2} {light}",
+            species.name(),
+            sc.establish_pore_min,
+            sc.establish_saturated_max,
+            sc.drown_depth_m,
+            sc.establish_light_min
+        );
+        println!(
+            "  {:>14}: sole cause — pore alone {only_pore}, saturation alone {only_aeration}, light alone {only_light}; mean root-box pore over the {mean_pore_n} columns with soil {mean_pore:.3}",
+            ""
+        );
+        // The dispersal side of eligibility: a donor's packages can only recruit where they
+        // land, so what matters to it is the eligible faces inside its own hop.
+        let donors: Vec<&cubarium_voxel_flora::Stand> = flora
+            .view()
+            .stands
+            .iter()
+            .filter(|s| s.species == species && s.wood >= sc.donor_min)
+            .collect();
+        let (mut candidates, mut ok) = (0usize, 0usize);
+        for donor in &donors {
+            let hop = sc.hop as i64;
+            let mut seen: Vec<Site> = Vec::new();
+            for dz in -hop..=hop {
+                let z = donor.site.z as i64 + dz;
+                if z < 0 || z >= view.config.depth as i64 {
+                    continue;
+                }
+                for dx in -hop..=hop {
+                    let x = donor.site.x as i64 + dx;
+                    let Some(site) = cubarium_voxel_flora::highest_support(&view, x, z as u32)
+                    else {
+                        continue;
+                    };
+                    if site == donor.site || seen.contains(&site) {
+                        continue;
+                    }
+                    seen.push(site);
+                }
+            }
+            candidates += seen.len();
+            ok += seen.iter().filter(|s| passes(world, sc, **s)).count();
+        }
+        println!(
+            "  {:>14}: {} donors, {candidates} candidate faces within hop {}, {ok} of them eligible ({:.1} per donor)",
+            "",
+            donors.len(),
+            sc.hop,
+            if donors.is_empty() { 0.0 } else { ok as f64 / donors.len() as f64 }
+        );
+    }
 }
 
 /// Founders go where their own species could establish: wet enough at the support face,
@@ -425,7 +552,8 @@ fn pick_founders(
         }
         if verbose {
             println!(
-                "{:>14}: {n} of {} skyline sites pass its establishment predicate; founders at y {lo}..{hi}{}",
+                "{:>14}: {n} of {} skyline sites pass its establishment predicate at introduction \
+                 (50 s warm-up, before planting); founders at y {lo}..{hi}{}",
                 species.name(),
                 skyline.len(),
                 if n == 0 { " (seeded anyway, nowhere qualifies)" } else { "" }
@@ -633,6 +761,7 @@ fn report(
         view.energy()
     );
     germination_diagnosis(world, flora);
+    gate_diagnosis(world, flora, skyline);
     let water = world.view().stored_m3() - world.view().ledger.expected_stored();
     println!(
         "core water: stored {:.4} m3, residual {:.3e}, transpiration_out {:.6} m3 (flora says {:.6})",
@@ -824,12 +953,13 @@ fn compare(args: &[String]) {
             quartile_fraction(a, &alt.low_quartile),
             quartile_fraction(c, &ctl.low_quartile)
         );
-        // The patch is bounded by founders held identical on purpose, so the habitat is
-        // the set that answers the sketch's question without them in the way.
+        // The patch is bounded by founders held identical on purpose, so the eligible set
+        // is what answers the sketch's question without them in the way — read twice,
+        // because it is a reading of a moment and not a habitat size (Astra R5.2).
         let (be, ae, ce) = (&base.eligible[i], &alt.eligible[i], &ctl.eligible[i]);
         println!(
-            "  habitat, the establishment predicate alone ({} / {} / {} of {} columns): \
-             noise {}   control {}",
+            "  eligible at introduction (50 s warm-up, before planting) ({} / {} / {} of {} \
+             columns): noise {}   control {}",
             be.len(),
             ae.len(),
             ce.len(),
@@ -837,8 +967,26 @@ fn compare(args: &[String]) {
             show(jaccard(be, ae)),
             show(jaccard(be, ce))
         );
+        let (bo, ao, co) =
+            (&base.eligible_at_end[i], &alt.eligible_at_end[i], &ctl.eligible_at_end[i]);
         println!(
-            "  habitat in the lowest skyline quartile: base {:.2}, re-drawn noise {:.2}, control {:.2}",
+            "  eligible at observation (end of the run, plants and settled water in it) \
+             ({} / {} / {}): noise {}   control {}",
+            bo.len(),
+            ao.len(),
+            co.len(),
+            show(jaccard(bo, ao)),
+            show(jaccard(bo, co))
+        );
+        println!(
+            "  the eligible band moved by {} / {} / {} columns between the two readings",
+            (bo.len() as i64) - (be.len() as i64),
+            (ao.len() as i64) - (ae.len() as i64),
+            (co.len() as i64) - (ce.len() as i64)
+        );
+        println!(
+            "  eligible at introduction, in the lowest skyline quartile: base {:.2}, \
+             re-drawn noise {:.2}, control {:.2}",
             quartile_fraction(be, &base.low_quartile),
             quartile_fraction(ae, &alt.low_quartile),
             quartile_fraction(ce, &ctl.low_quartile)

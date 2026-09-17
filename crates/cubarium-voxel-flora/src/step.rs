@@ -1238,8 +1238,8 @@ fn establishes(
     site: Site,
     sc: &SpeciesConfig,
 ) -> bool {
-    establishes_but_for_light(view, site, sc)
-        && sky_at(sky, view, site) >= sc.establish_light_min
+    let visibility = sky_at(sky, view, site);
+    gates(view, site, sc, visibility).passes()
 }
 
 /// The same predicate for a caller outside a tick — a harness picking founders, a
@@ -1255,23 +1255,76 @@ fn establishes(
 /// *fraction* over the whole root box, which on a slope reaches sideways into neighbouring
 /// columns.
 pub fn can_establish(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> bool {
-    establishes_but_for_light(view, site, sc)
-        && view.sky_visibility(site.x as i64, site.y, site.z) >= sc.establish_light_min
+    establishment_gates(view, site, sc).passes()
 }
 
-/// Every gate of the predicate but the light one, which needs a sky reading its caller
-/// supplies.
-fn establishes_but_for_light(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> bool {
+/// What each gate of the predicate read at one site, and which of them passed:
+/// [`can_establish`] is `passes()` on this, so a caller that wants to know **why** a site
+/// is refused reads the same numbers the model refused it on (Astra R5.2 — a second
+/// approximate predicate in a harness is what package J deleted, and this is the thing to
+/// use instead).
+///
+/// The reading is instantaneous: it describes the world at the tick it was taken and
+/// nothing else. A count of eligible sites is therefore a statement about *that* moment —
+/// after a warm-up, at introduction, at observation — and never about a settled habitat
+/// unless the water budget says the stores have settled.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Gates {
+    /// Soil voxels in the species' root box. Zero means there is no soil under this site
+    /// at all: rock, or a box that falls outside the world.
+    pub soil_voxels: usize,
+    /// Capacity-weighted mean pore fraction of the root box, `None` for a box with no pore
+    /// space in it at all.
+    pub mean_pore: Option<f64>,
+    /// Fraction of the root box's voxels at or above the species' `saturated_pore`.
+    pub saturated_fraction: f64,
+    /// Free water standing on the support face, metres.
+    pub water_depth_m: f64,
+    /// Sky visibility of the site: **terrain geometry only**, with no canopy in it, which
+    /// is the boundary germination light has in this round.
+    pub sky_visibility: f64,
+    /// `mean_pore >= establish_pore_min`, and false for a box with no soil in it.
+    pub pore_ok: bool,
+    /// `saturated_fraction <= establish_saturated_max`.
+    pub aeration_ok: bool,
+    /// `water_depth_m <= drown_depth_m`.
+    pub depth_ok: bool,
+    /// `sky_visibility >= establish_light_min`.
+    pub light_ok: bool,
+}
+
+impl Gates {
+    /// The predicate itself: every gate, and nothing else.
+    pub fn passes(&self) -> bool {
+        self.pore_ok && self.aeration_ok && self.depth_ok && self.light_ok
+    }
+}
+
+/// The gates at one site for one species, reading sky visibility straight off the view.
+/// The one predicate, in the form that says which gate shut.
+pub fn establishment_gates(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> Gates {
+    let visibility = view.sky_visibility(site.x as i64, site.y, site.z);
+    gates(view, site, sc, visibility)
+}
+
+/// The same, for a caller that already has a sky reading — `step`'s memoized cache, which
+/// is the same geometry by construction.
+fn gates(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig, sky_visibility: f64) -> Gates {
     let box_ = root_box(view, site, sc);
-    match mean_pore(view, &box_) {
-        None => return false,
-        Some(mean) if mean < sc.establish_pore_min => return false,
-        Some(_) => {}
+    let mean_pore = mean_pore(view, &box_);
+    let saturated_fraction = saturated_fraction(view, &box_, sc);
+    let water_depth_m = view.water_depth_m(site.x as i64, site.y, site.z);
+    Gates {
+        soil_voxels: box_.len(),
+        mean_pore,
+        saturated_fraction,
+        water_depth_m,
+        sky_visibility,
+        pore_ok: mean_pore.is_some_and(|mean| mean >= sc.establish_pore_min),
+        aeration_ok: saturated_fraction <= sc.establish_saturated_max,
+        depth_ok: water_depth_m <= sc.drown_depth_m,
+        light_ok: sky_visibility >= sc.establish_light_min,
     }
-    if saturated_fraction(view, &box_, sc) > sc.establish_saturated_max {
-        return false;
-    }
-    view.water_depth_m(site.x as i64, site.y, site.z) <= sc.drown_depth_m
 }
 
 #[cfg(test)]
@@ -1586,6 +1639,62 @@ mod tests {
         // takes all of it and the stand is born dying rather than born rich.
         let (wood, foliage, reserve) = newborn_stocks(&dry, 0.01);
         assert_eq!((wood, foliage, reserve), (0.01, 0.0, 0.0));
+    }
+
+    /// `can_establish` is `Gates::passes()` and nothing else, so there is still exactly one
+    /// predicate in the crate — now in a form that says which gate shut. Read on a slab
+    /// that passes everything, then on the three ways to fail it that a world can produce
+    /// without touching a config: no soil in the root box, a saturated box, and standing
+    /// water over the face.
+    #[test]
+    fn the_gates_are_the_predicate_and_they_say_which_one_shut() {
+        let sc = SpeciesConfig::bloomcrown();
+        let mut world = slab(4, 0.6);
+        let site = Site { x: 1, y: 2, z: 0 };
+        let view = world.view();
+        let g = establishment_gates(&view, site, &sc);
+        assert!(g.passes() && can_establish(&view, site, &sc), "{g:?}");
+        assert_eq!(g.soil_voxels, 6, "three columns of two soil rows: {g:?}");
+        assert_eq!((g.pore_ok, g.aeration_ok, g.depth_ok, g.light_ok), (true, true, true, true));
+        assert_eq!(g.saturated_fraction, 0.0);
+        assert_eq!(g.water_depth_m, 0.0);
+        assert_eq!(g.sky_visibility, 1.0, "open sky");
+        assert!((g.mean_pore.expect("soil") - 0.6).abs() < 1e-12);
+        drop(view);
+
+        // A site with no soil under it at all: the pore gate shuts, and the saturated
+        // fraction of an empty box is zero rather than waterlogged.
+        let mut rock = slab(4, 0.6);
+        for x in 0..3i64 {
+            for y in 1..=2u32 {
+                rock.apply(WorldCommand::SetMaterial { x, y, z: 0, material: Material::Rock });
+            }
+        }
+        let view = rock.view();
+        let g = establishment_gates(&view, site, &sc);
+        assert_eq!(g.soil_voxels, 0, "{g:?}");
+        assert_eq!(g.mean_pore, None);
+        assert!(!g.pore_ok && g.aeration_ok, "{g:?}");
+        assert_eq!(g.passes(), can_establish(&view, site, &sc));
+        assert!(!g.passes());
+        drop(view);
+
+        // A wholly saturated root box: the aeration gate shuts and the pore gate does not.
+        let wet = slab(4, 0.98);
+        let view = wet.view();
+        let g = establishment_gates(&view, site, &sc);
+        assert!(g.pore_ok && !g.aeration_ok, "{g:?}");
+        assert_eq!(g.saturated_fraction, 1.0);
+        assert_eq!(g.passes(), can_establish(&view, site, &sc));
+        drop(view);
+
+        // Standing water deeper than the species tolerates: the depth gate shuts.
+        world.apply(WorldCommand::AddWater { x: 1, y: 3, z: 0, volume_m3: 0.2 });
+        let view = world.view();
+        let g = establishment_gates(&view, site, &sc);
+        assert!(g.water_depth_m > sc.drown_depth_m && !g.depth_ok, "{g:?}");
+        assert!(g.pore_ok && g.aeration_ok && g.light_ok, "{g:?}");
+        assert_eq!(g.passes(), can_establish(&view, site, &sc));
     }
 
     /// The bank's size bound is by construction and not by a cap: a lifetime in bins of
