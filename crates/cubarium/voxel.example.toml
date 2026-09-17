@@ -2,33 +2,40 @@
 #
 # Every value here is the default, so this file is also the documentation: delete a line
 # and nothing changes. Unknown keys are errors, so a typo is reported rather than ignored.
+# One value is deliberately *not* written down — `[world] depth` — because it belongs to
+# `cubarium_voxel::Config::default()`; see the note below it.
 
-# Elevation of the orthographic view. It reaches the picture only as a whole number of
+# Elevation of the orthographic view: the camera chosen by the storyboard study
+# (`art/studies/voxel-storyboard/`). It reaches the picture only as a whole number of
 # pixels of lift per voxel of depth, `round(px_per_voxel * tan(tilt))` — 2 px at these
 # defaults — because a fractional depth step would smear every block edge.
 tilt_degrees = 30.0
 
-# Pixels per voxel edge. A front face is this square; a top face is this wide and
-# `depth step` tall. The raster width is always `world.width * px_per_voxel`, so the
-# strip fills it exactly and the seam in x is a plain wrap.
+# Pixels per voxel edge, the other half of the chosen camera. A front face is this square;
+# a top face is this wide and `depth step` tall. Below 4 the sprite atlas stops reading.
+# The raster width is always `world.width * px_per_voxel`, so the strip fills it exactly
+# and the seam in x is a plain wrap.
 px_per_voxel = 4
 
 # Ring raster height in pixels. 0 derives it from the world so the whole strip fits
 # (`world.height * px_per_voxel + world.depth * depth step`); anything smaller crops
-# from the top and says so once.
+# from the top and says so once. The floor line stays on the bottom row either way.
 raster_height = 0
 
 # How far the back wall fades toward the haze colour. 0 turns the depth tint off.
 haze = 0.55
 
-# Opacity of one voxel of free water. The surface row blends harder than the body.
+# Opacity of one voxel of free water. The surface row blends harder than the body, and a
+# pool many slabs deep still blends one water face per pixel.
 water_alpha = 0.5
 
 [world]
 # `cubarium_voxel::Config`. x wraps; y is up from the foundation; z runs into the habitat.
 width = 128
 height = 48
-depth = 24
+# `depth` is on purpose absent: how deep the habitat is is the core's decision, so it
+# mirrors `cubarium_voxel::Config::default().depth` — 24 slabs at the chosen camera, which
+# is 48 px of ground plane on top of the strip's own height. Write `depth = N` to override.
 voxel_m = 0.25
 seed = 1
 rain_m_per_s = 0.0

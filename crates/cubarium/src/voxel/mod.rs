@@ -48,8 +48,8 @@ const MAX_SPEED: f64 = 64.0;
 /// defaults below and unknown fields are errors, so a typo is not silently ignored.
 ///
 /// ```toml
-/// tilt_degrees = 30.0
-/// px_per_voxel = 4
+/// tilt_degrees = 30.0   # the chosen camera
+/// px_per_voxel = 4      # the chosen camera
 /// raster_height = 0     # 0 derives it from the world
 /// haze = 0.55
 /// water_alpha = 0.5
@@ -57,15 +57,18 @@ const MAX_SPEED: f64 = 64.0;
 /// [world]
 /// width = 128
 /// height = 48
-/// depth = 16
+/// # depth is deliberately absent: it comes from `cubarium_voxel::Config::default()`, so
+/// # the habitat's chosen depth lives in the core and the presenter never pins its own.
 /// ```
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct VoxelConfig {
     /// Elevation of the orthographic view, in degrees. Reaches the picture only as
-    /// `round(px_per_voxel · tan(tilt))` whole pixels of lift per voxel of depth.
+    /// `round(px_per_voxel · tan(tilt))` whole pixels of lift per voxel of depth. The
+    /// chosen camera is 30°.
     pub tilt_degrees: f64,
-    /// Pixels per voxel edge.
+    /// Pixels per voxel edge. The chosen camera is 4: below that the sprite atlas stops
+    /// reading.
     pub px_per_voxel: u32,
     /// Ring raster height in pixels; `0` derives it so the whole strip fits. The width is
     /// always `world.width · px_per_voxel`, so the strip fills it exactly.
@@ -74,17 +77,21 @@ pub struct VoxelConfig {
     pub haze: f32,
     /// Opacity of one voxel of free water, `0..=1`.
     pub water_alpha: f32,
+    /// The world to build. Every field optional, every default the core's own — the
+    /// habitat's extent, `depth` included, is the core's decision and not the presenter's.
     pub world: cubarium_voxel::Config,
 }
 
 impl Default for VoxelConfig {
     fn default() -> VoxelConfig {
         VoxelConfig {
+            // The camera chosen by the storyboard study: 30°, 4 px per voxel.
             tilt_degrees: 30.0,
             px_per_voxel: 4,
             raster_height: 0,
             haze: 0.55,
             water_alpha: 0.5,
+            // Including the depth: `cubarium_voxel` owns how deep the habitat is.
             world: cubarium_voxel::Config::default(),
         }
     }
@@ -111,6 +118,15 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     if args.sink == VoxelSinkArg::Png && args.seconds <= 0.0 {
         bail!("`--sink png` needs `--seconds N`, or it would capture until interrupted");
     }
+    // `World::new` and `World::empty` panic on a config no world can be built from —
+    // building one from nonsense is a programming error. A config *file* is input, so the
+    // boundary is here: a bad file is reported, not a backtrace.
+    cfg.world
+        .validate()
+        .with_context(|| match &args.config {
+            Some(path) => format!("the `[world]` in {}", path.display()),
+            None => "the built-in world defaults".to_string(),
+        })?;
 
     let mut world = match &args.load {
         Some(path) => {
@@ -446,12 +462,37 @@ mod tests {
         assert!(toml::from_str::<VoxelConfig>("[world]\nwidht = 64\n").is_err());
     }
 
-    /// The committed example config parses and is the default picture.
+    /// The committed example config parses, is the default picture, and does not pin the
+    /// world depth: that follows `cubarium_voxel::Config::default()`, so changing the
+    /// habitat's depth in the core changes the example without editing it.
     #[test]
-    fn the_example_config_parses() {
+    fn the_example_config_parses_and_leaves_the_depth_to_the_core() {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("voxel.example.toml");
         let cfg = load_config(&path).unwrap();
         assert_eq!(cfg, VoxelConfig::default());
+        assert_eq!(cfg.world.depth, cubarium_voxel::Config::default().depth);
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !text.lines().any(|l| l.trim_start().starts_with("depth")),
+            "the example must not set `depth`; it mirrors the core default"
+        );
+        // The chosen camera, written down where a reader of the file will find it.
+        assert!(text.contains("tilt_degrees = 30.0") && text.contains("px_per_voxel = 4"));
+    }
+
+    /// A config file whose `[world]` no world can be built from is an error, not a panic:
+    /// `World::new` asserts, so the run validates first.
+    #[test]
+    fn a_world_no_world_can_be_built_from_is_refused_not_panicked_on() {
+        let cfg: VoxelConfig =
+            toml::from_str("[world]\ndepth = 0\n").expect("it parses; it is just impossible");
+        let err = cfg.world.validate().expect_err("a zero dimension must be refused");
+        assert!(format!("{err}").contains("nonzero dimensions"), "{err}");
+
+        let bad: VoxelConfig = toml::from_str("[world]\nvoxel_m = 0.0\n").unwrap();
+        assert!(bad.world.validate().is_err());
+        assert!(VoxelConfig::default().world.validate().is_ok());
     }
 
     /// Stdin commands reach the world: pause toggles, speed halves and doubles, a
