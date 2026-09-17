@@ -191,7 +191,7 @@ impl VoxelPresenter {
             for y in 0..p.height {
                 for x in 0..i64::from(p.width) {
                     let m = view.material_at(x, y, z);
-                    let free = view.free_at(x, y, z);
+                    let free = view.free_at(x, y, z) as f32;
                     if m.is_solid() {
                         if self.hidden(view, x, y, z) {
                             continue;
@@ -234,7 +234,8 @@ impl VoxelPresenter {
         roofed: bool,
     ) {
         let p = self.proj;
-        let wet = if m.pore_capacity() > 0.0 { view.pore_at(x, y, z).clamp(0.0, 1.0) } else { 0.0 };
+        let wet =
+            if m.pore_capacity() > 0.0 { view.pore_at(x, y, z).clamp(0.0, 1.0) as f32 } else { 0.0 };
         let body = mix(strata_of(m), STRATA.water_deep, wet * WET);
         let mut lit = mix(mul(body, TOP_GAIN), STRATA.light, TOP_TINT);
         if roofed {
@@ -360,7 +361,7 @@ fn free_at(view: &VoxelView<'_>, x: i64, y: i64, z: u32) -> f32 {
     if y < 0 || y >= i64::from(view.config.height) {
         return 0.0;
     }
-    view.free_at(x, y as u32, z)
+    view.free_at(x, y as u32, z) as f32
 }
 
 /// The raster's own bounds: wrap in `x`, clip in `y`.
@@ -599,7 +600,7 @@ mod tests {
         let (lo, hi) = (*tops.iter().min().unwrap(), *tops.iter().max().unwrap());
         assert!(hi >= lo + 6, "a ridge needs relief: {lo}..{hi}");
 
-        let water: f64 = view.free.iter().map(|&f| f64::from(f)).sum();
+        let water: f64 = view.free.iter().sum();
         assert!(water > 0.0, "the hollow must hold standing water");
 
         // An overhang: solid with air under it somewhere below the column's surface.

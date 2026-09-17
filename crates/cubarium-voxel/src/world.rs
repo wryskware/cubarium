@@ -27,9 +27,9 @@ pub struct VoxelView<'a> {
     /// One entry per voxel in `Config::index` order.
     pub material: &'a [Material],
     /// Free water as a fraction of the voxel's void volume, `0..=1`. Zero in solids.
-    pub free: &'a [f32],
+    pub free: &'a [f64],
     /// Pore water as a fraction of the voxel's pore capacity, `0..=1`. Zero in air.
-    pub pore: &'a [f32],
+    pub pore: &'a [f64],
     pub tick: u64,
     pub ledger: &'a Ledger,
     /// Aquifer store in cubic metres.
@@ -48,11 +48,11 @@ impl<'a> VoxelView<'a> {
         self.material[self.config.index(x, y, z)]
     }
     #[inline]
-    pub fn free_at(&self, x: i64, y: u32, z: u32) -> f32 {
+    pub fn free_at(&self, x: i64, y: u32, z: u32) -> f64 {
         self.free[self.config.index(x, y, z)]
     }
     #[inline]
-    pub fn pore_at(&self, x: i64, y: u32, z: u32) -> f32 {
+    pub fn pore_at(&self, x: i64, y: u32, z: u32) -> f64 {
         self.pore[self.config.index(x, y, z)]
     }
     /// Highest solid voxel in column `(x, z)`, or `None` if the column is all air.
@@ -64,8 +64,8 @@ impl<'a> VoxelView<'a> {
         let v = self.config.voxel_volume();
         let mut total = self.aquifer_m3;
         for (i, m) in self.material.iter().enumerate() {
-            total += self.free[i] as f64 * v * if m.is_solid() { 0.0 } else { 1.0 };
-            total += self.pore[i] as f64 * v * m.pore_capacity();
+            total += self.free[i] * v * if m.is_solid() { 0.0 } else { 1.0 };
+            total += self.pore[i] * v * m.pore_capacity();
         }
         total
     }
@@ -76,8 +76,8 @@ impl<'a> VoxelView<'a> {
 pub struct World {
     pub(crate) config: Config,
     pub(crate) material: Vec<Material>,
-    pub(crate) free: Vec<f32>,
-    pub(crate) pore: Vec<f32>,
+    pub(crate) free: Vec<f64>,
+    pub(crate) pore: Vec<f64>,
     pub(crate) aquifer_m3: f64,
     pub(crate) outlet_open: bool,
     pub(crate) tick: u64,

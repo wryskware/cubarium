@@ -56,8 +56,10 @@
 //!   instantaneous.
 //! - **Water above the level is not part of the region.** A film running down a slope
 //!   descends a cell per substep rather than arriving at once.
-//! - **`f32` stores.** `free` and `pore` are `f32` fractions, so internal transfers
-//!   round; the residue is booked in `Ledger::rounding_m3` rather than dropped.
+//! - **`f64` stores.** `free` and `pore` are `f64` fractions, so an internal transfer
+//!   debits its source exactly what it credited its destination. There is no
+//!   quantization term: the ledger residual `stored - initial_stored - net_in` is the
+//!   raw conservation error and nothing corrects it.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -75,20 +77,20 @@ fn voxel(w: &World) -> f64 {
 }
 
 fn free_m3(w: &World, i: usize) -> f64 {
-    if w.material[i].is_solid() { 0.0 } else { w.free[i] as f64 * voxel(w) }
+    if w.material[i].is_solid() { 0.0 } else { w.free[i] * voxel(w) }
 }
 
 fn free_room_m3(w: &World, i: usize) -> f64 {
-    if w.material[i].is_solid() { 0.0 } else { (1.0 - w.free[i] as f64).max(0.0) * voxel(w) }
+    if w.material[i].is_solid() { 0.0 } else { (1.0 - w.free[i]).max(0.0) * voxel(w) }
 }
 
 fn pore_m3(w: &World, i: usize) -> f64 {
-    w.pore[i] as f64 * voxel(w) * w.material[i].pore_capacity()
+    w.pore[i] * voxel(w) * w.material[i].pore_capacity()
 }
 
 fn pore_room_m3(w: &World, i: usize) -> f64 {
     let cap = w.material[i].pore_capacity();
-    if cap <= 0.0 { 0.0 } else { (1.0 - w.pore[i] as f64).max(0.0) * voxel(w) * cap }
+    if cap <= 0.0 { 0.0 } else { (1.0 - w.pore[i]).max(0.0) * voxel(w) * cap }
 }
 
 fn add_free(w: &mut World, i: usize, vol: f64) -> f64 {
@@ -96,9 +98,9 @@ fn add_free(w: &mut World, i: usize, vol: f64) -> f64 {
         return 0.0;
     }
     let v = voxel(w);
-    let before = w.free[i] as f64;
-    w.free[i] = (before + vol / v).min(1.0) as f32;
-    ((w.free[i] as f64) - before).max(0.0) * v
+    let before = w.free[i];
+    w.free[i] = (before + vol / v).min(1.0);
+    (w.free[i] - before).max(0.0) * v
 }
 
 fn take_free(w: &mut World, i: usize, vol: f64) -> f64 {
@@ -106,9 +108,9 @@ fn take_free(w: &mut World, i: usize, vol: f64) -> f64 {
         return 0.0;
     }
     let v = voxel(w);
-    let before = w.free[i] as f64;
-    w.free[i] = (before - vol / v).max(0.0) as f32;
-    (before - (w.free[i] as f64)).max(0.0) * v
+    let before = w.free[i];
+    w.free[i] = (before - vol / v).max(0.0);
+    (before - w.free[i]).max(0.0) * v
 }
 
 fn add_pore(w: &mut World, i: usize, vol: f64) -> f64 {
@@ -117,9 +119,9 @@ fn add_pore(w: &mut World, i: usize, vol: f64) -> f64 {
         return 0.0;
     }
     let unit = voxel(w) * cap;
-    let before = w.pore[i] as f64;
-    w.pore[i] = (before + vol / unit).min(1.0) as f32;
-    ((w.pore[i] as f64) - before).max(0.0) * unit
+    let before = w.pore[i];
+    w.pore[i] = (before + vol / unit).min(1.0);
+    (w.pore[i] - before).max(0.0) * unit
 }
 
 fn take_pore(w: &mut World, i: usize, vol: f64) -> f64 {
@@ -128,9 +130,9 @@ fn take_pore(w: &mut World, i: usize, vol: f64) -> f64 {
         return 0.0;
     }
     let unit = voxel(w) * cap;
-    let before = w.pore[i] as f64;
-    w.pore[i] = (before - vol / unit).max(0.0) as f32;
-    (before - (w.pore[i] as f64)).max(0.0) * unit
+    let before = w.pore[i];
+    w.pore[i] = (before - vol / unit).max(0.0);
+    (before - w.pore[i]).max(0.0) * unit
 }
 
 /// Which store a transfer touches at one end.
@@ -141,8 +143,7 @@ enum Store {
 }
 
 /// Move at most `vol` from one cell's store to another's, crediting the destination
-/// with what it gained and debiting the source with that same volume. The `f32`
-/// residue between the two goes to `Ledger::rounding_m3`.
+/// with what it gained and debiting the source with exactly that same volume.
 fn transfer(w: &mut World, from: (usize, Store), to: (usize, Store), vol: f64) -> f64 {
     let have = match from {
         (i, Store::Free) => free_m3(w, i),
@@ -160,11 +161,10 @@ fn transfer(w: &mut World, from: (usize, Store), to: (usize, Store), vol: f64) -
         (i, Store::Free) => add_free(w, i, want),
         (i, Store::Pore) => add_pore(w, i, want),
     };
-    let lost = match from {
+    let _ = match from {
         (i, Store::Free) => take_free(w, i, got),
         (i, Store::Pore) => take_pore(w, i, got),
     };
-    w.ledger.rounding_m3 += got - lost;
     got
 }
 
@@ -321,12 +321,11 @@ fn equalize(w: &mut World) {
     let n = c.cells();
     let plane = c.width as usize * c.depth as usize;
     let height = c.height as usize;
-    let v = c.voxel_volume();
 
     let mut seeds: Vec<(f64, usize)> = Vec::new();
     for i in 0..n {
         if !w.material[i].is_solid() && w.free[i] > 0.0 {
-            seeds.push(((i / plane) as f64 + w.free[i] as f64, i));
+            seeds.push(((i / plane) as f64 + w.free[i], i));
         }
     }
     if seeds.is_empty() {
@@ -342,7 +341,6 @@ fn equalize(w: &mut World) {
     let mut region: Vec<usize> = Vec::new();
     let mut heap: BinaryHeap<Reverse<(usize, u8, usize)>> = BinaryHeap::new();
     let mut epoch = 0u32;
-    let mut residue = 0.0;
 
     for (_, seed) in seeds {
         if done[seed] {
@@ -354,7 +352,7 @@ fn equalize(w: &mut World) {
         stamp[seed] = epoch;
         queued[seed] = epoch;
         region.push(seed);
-        let mut fill = w.free[seed] as f64;
+        let mut fill = w.free[seed];
         let mut y_max = seed / plane;
         counts[y_max] = 1;
         push_neighbours(&c, w, seed, epoch, &stamp, &done, &mut queued, &mut heap);
@@ -370,7 +368,7 @@ fn equalize(w: &mut World) {
                     continue;
                 }
                 counts[y] += 1;
-                let candidate = w.free[i] as f64;
+                let candidate = w.free[i];
                 let l = level(&counts, fill + candidate);
                 let top = y_max.max(y) as f64;
                 if l > top + 1e-12 {
@@ -423,7 +421,7 @@ fn equalize(w: &mut World) {
         if c.free_transfer_cap > 0.0 {
             let mut worst = 0.0f64;
             for &i in &region {
-                let d = (fracs[i / plane] - w.free[i] as f64).abs();
+                let d = (fracs[i / plane] - w.free[i]).abs();
                 worst = worst.max(d);
             }
             if worst > c.free_transfer_cap {
@@ -432,17 +430,15 @@ fn equalize(w: &mut World) {
         }
 
         for &i in &region {
-            let before = w.free[i] as f64;
+            let before = w.free[i];
             let target = before + relax * (fracs[i / plane] - before);
-            w.free[i] = target.clamp(0.0, 1.0) as f32;
-            residue += ((w.free[i] as f64) - before) * v;
+            w.free[i] = target.clamp(0.0, 1.0);
             done[i] = true;
         }
         for &i in &region {
             counts[i / plane] = 0;
         }
     }
-    w.ledger.rounding_m3 += residue;
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -668,11 +664,8 @@ fn set_material(w: &mut World, i: usize, material: Material) -> f64 {
         placed += spill_to_nearest_void(w, i, water - placed);
     }
     let deficit = water - placed;
-    if deficit > 0.0 {
+    if deficit > 1e-12 {
         w.ledger.displaced_out += deficit;
-    } else {
-        // The last cell rounded its fill up: arithmetic, not water.
-        w.ledger.rounding_m3 -= deficit;
     }
     placed
 }

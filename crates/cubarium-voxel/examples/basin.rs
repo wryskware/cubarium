@@ -100,9 +100,9 @@ fn stores(world: &World) -> (f64, f64) {
     let mut pore = 0.0;
     for (i, m) in v.material.iter().enumerate() {
         if !m.is_solid() {
-            free += v.free[i] as f64 * vol;
+            free += v.free[i] * vol;
         }
-        pore += v.pore[i] as f64 * vol * m.pore_capacity();
+        pore += v.pore[i] * vol * m.pore_capacity();
     }
     (free, pore)
 }
@@ -129,10 +129,10 @@ fn write_png(world: &World, path: &str) -> anyhow::Result<()> {
                 let m = v.material_at(x, y, z);
                 let shade = 1.0 - 0.45 * (z as f64 / (c.depth.max(2) - 1) as f64);
                 if m.is_solid() {
-                    rgb = tint(material_rgb(m, v.pore_at(x, y, z)), shade);
+                    rgb = tint(material_rgb(m, v.pore_at(x, y, z) as f32), shade);
                     break;
                 }
-                let fill = v.free_at(x, y, z) as f64;
+                let fill = v.free_at(x, y, z);
                 if fill > 0.02 && sub < fill {
                     let top = fill - sub < 1.0 / SCALE as f64;
                     let water = if top { [120u8, 196, 236] } else { [46, 104, 176] };

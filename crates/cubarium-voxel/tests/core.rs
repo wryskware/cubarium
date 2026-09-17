@@ -32,7 +32,7 @@ fn pour(w: &mut World, x: i64, mut volume: f64) -> f64 {
 
 fn column(w: &World, x: i64) -> f64 {
     let v = w.view();
-    (0..w.config().height).map(|y| v.free_at(x, y, 0) as f64).sum()
+    (0..w.config().height).map(|y| v.free_at(x, y, 0)).sum()
 }
 
 fn residual(w: &World) -> f64 {
@@ -83,7 +83,7 @@ fn spill_threshold_well_over_the_sill_equalizes_above_it() {
     // share the remaining 1.2 evenly.
     assert!((column(&w, 0) - 1.3).abs() < 1e-3, "near {}", column(&w, 0));
     assert!((column(&w, 2) - 1.3).abs() < 1e-3, "far {}", column(&w, 2));
-    assert!((w.view().free_at(1, 2, 0) as f64 - 0.3).abs() < 1e-3);
+    assert!((w.view().free_at(1, 2, 0) - 0.3).abs() < 1e-3);
     assert!(residual(&w).abs() < 1e-9);
 }
 
@@ -106,10 +106,10 @@ fn u_tube_equalizes() {
     let v = w.view();
     // Bottom row (three cells) full, then one unit shared by the two shafts at y = 2.
     for x in 0..3 {
-        assert!((v.free_at(x, 1, 0) as f64 - 1.0).abs() < 1e-3, "floor {x}");
+        assert!((v.free_at(x, 1, 0) - 1.0).abs() < 1e-3, "floor {x}");
     }
-    assert!((v.free_at(0, 2, 0) as f64 - 0.5).abs() < 1e-3, "near {}", v.free_at(0, 2, 0));
-    assert!((v.free_at(2, 2, 0) as f64 - 0.5).abs() < 1e-3, "far {}", v.free_at(2, 2, 0));
+    assert!((v.free_at(0, 2, 0) - 0.5).abs() < 1e-3, "near {}", v.free_at(0, 2, 0));
+    assert!((v.free_at(2, 2, 0) - 0.5).abs() < 1e-3, "far {}", v.free_at(2, 2, 0));
     assert!(residual(&w).abs() < 1e-9);
 }
 
@@ -147,7 +147,7 @@ fn a_roofed_passage_fills_and_the_far_side_rises() {
     let v = w.view();
     // Six units over the eight passage cells: level 1.75 under the roof, everywhere.
     for x in 1..=8 {
-        assert!((v.free_at(x, 1, 0) as f64 - 0.75).abs() < 1e-3, "passage {x}: {}", v.free_at(x, 1, 0));
+        assert!((v.free_at(x, 1, 0) - 0.75).abs() < 1e-3, "passage {x}: {}", v.free_at(x, 1, 0));
     }
     assert!(column(&w, 7) > 0.5, "far side dry: {}", column(&w, 7));
     assert!(residual(&w).abs() < 1e-9);
@@ -160,10 +160,10 @@ fn a_roofed_passage_pushes_the_far_shaft_above_the_roof() {
     // Fourteen units: the passage full (8), both shafts full at y = 2 (4), and the
     // remaining 2 shared by the eight cells of the row above the roof: level 3.25. The
     // far shaft stands above the roof, so the passage carried pressure through it.
-    assert!((v.free_at(8, 3, 0) as f64 - 0.25).abs() < 1e-3, "far {}", v.free_at(8, 3, 0));
-    assert!((v.free_at(1, 3, 0) as f64 - 0.25).abs() < 1e-3, "near {}", v.free_at(1, 3, 0));
-    assert!((v.free_at(4, 3, 0) as f64 - 0.25).abs() < 1e-3, "over the roof {}", v.free_at(4, 3, 0));
-    assert!((v.free_at(8, 2, 0) as f64 - 1.0).abs() < 1e-3, "far shaft {}", v.free_at(8, 2, 0));
+    assert!((v.free_at(8, 3, 0) - 0.25).abs() < 1e-3, "far {}", v.free_at(8, 3, 0));
+    assert!((v.free_at(1, 3, 0) - 0.25).abs() < 1e-3, "near {}", v.free_at(1, 3, 0));
+    assert!((v.free_at(4, 3, 0) - 0.25).abs() < 1e-3, "over the roof {}", v.free_at(4, 3, 0));
+    assert!((v.free_at(8, 2, 0) - 1.0).abs() < 1e-3, "far shaft {}", v.free_at(8, 2, 0));
     assert!(residual(&w).abs() < 1e-9);
 }
 
@@ -221,11 +221,11 @@ fn the_residual_stays_below_1e_9_with_every_flux_firing() {
     assert!(v.ledger.outlet_out > 0.0, "no outlet export");
     assert!(v.ledger.displaced_out == 0.0, "displaced {}", v.ledger.displaced_out);
     assert!(v.aquifer_m3 < 2.0, "spring never discharged");
-    let infiltrated: f32 = (0..6).map(|x| v.pore_at(x, 1, 0)).sum();
+    let infiltrated: f64 = (0..6).map(|x| v.pore_at(x, 1, 0)).sum();
     assert!(infiltrated > 0.0, "no infiltration");
+    // Raw conservation error: `free` and `pore` are `f64` and the ledger has no
+    // correction term, so this is the whole story.
     assert!(residual(&w).abs() < 1e-9, "residual {}", residual(&w));
-    // The quantization term must stay arithmetic-sized, not water-sized.
-    assert!(v.ledger.rounding_m3.abs() < 1e-6, "rounding {}", v.ledger.rounding_m3);
 }
 
 #[test]
@@ -235,10 +235,9 @@ fn set_material_moves_displaced_water_instead_of_booking_it_out() {
     let before = w.view().stored_m3();
     w.apply(Command::SetMaterial { x: 1, y: 1, z: 0, material: Material::Rock });
     let after = w.view().stored_m3();
-    // The rock keeps its pore share; the rest lands in the nearest void cell. The store
-    // only moves by the f32 quantization of that fill, which the ledger accounts for.
-    assert!((before - after).abs() < 1e-6, "{before} -> {after}");
-    assert!((w.view().free_at(0, 1, 0) as f64 - 0.98).abs() < 1e-6, "{}", w.view().free_at(0, 1, 0));
+    // The rock keeps its pore share; the rest lands in the nearest void cell.
+    assert!((before - after).abs() < 1e-9, "{before} -> {after}");
+    assert!((w.view().free_at(0, 1, 0) - 0.98).abs() < 1e-9, "{}", w.view().free_at(0, 1, 0));
     assert_eq!(w.view().ledger.displaced_out, 0.0);
     assert!(residual(&w).abs() < 1e-9);
 }
