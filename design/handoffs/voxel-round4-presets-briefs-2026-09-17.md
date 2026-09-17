@@ -99,7 +99,11 @@ Per new species, in a new `tests/round4.rs`:
    not die.
 3. **Failing neighbour**: the same package on the neighbouring condition the role
    excludes never germinates and falls to litter with its mineral (springturf
-   under a dense crown; stonecushion on rock with **no** soil pocket in reach;
+   under a **shut sky** — corrected from "under a dense crown", which the model
+   cannot express at germination: germination light is *geometric* sky visibility
+   with no canopy in it, so only terrain shade can shut that gate and the
+   geometric boundary is the one a fixture can ask about (Astra R7.3);
+   stonecushion on rock with **no** soil pocket in reach;
    velvetpad on a wholly saturated box, where germination is refused, plus an
    adult velvetpad placed there reaching stress above zero).
 4. **Validity**: `validate()` passes all five presets and rejects one deliberately

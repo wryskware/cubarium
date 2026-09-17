@@ -644,19 +644,33 @@ impl SpeciesConfig {
         }
     }
 
-    /// **Springturf — the pioneer turf of open, moist soil.** It wins the first years on
-    /// bare moist ground and loses under a canopy and on dry ground: shallow roots that
-    /// only see the support row, a light need above bloomcrown's, a moisture floor at the
-    /// fraction drained soil actually settles to, a fast cheap body that turns income into
-    /// packages quickly, and a maintenance bill that kills it as soon as the light or the
-    /// water goes.
+    /// **Springturf — the pioneer turf of open, moist soil.** "It wins the first years on
+    /// bare moist ground and loses under a canopy" is **intended succession and untested**
+    /// (Astra R7.3): round 4 measured neither half of it, and the numbers below encode the
+    /// sentence rather than evidencing it. What is measured is the boundaries — a paid
+    /// birth, one income window, one failing neighbour (`tests/round4.rs`). The role as the
+    /// numbers state it: shallow roots that only see the support row, a light need above
+    /// bloomcrown's, a moisture floor at the fraction drained soil actually settles to, a
+    /// fast cheap body that turns income into packages quickly, and a maintenance bill that
+    /// kills it as soon as the light or the water goes.
     ///
     /// Every number is a **placeholder** (`design/backlog.md` §1), chosen to encode that
     /// sentence and nothing else:
     ///
     /// - **Water, the three thresholds together.** `establish_pore_min` 0.25 is soil's own
     ///   retained fraction, so springturf germinates on ordinary drained soil and no
-    ///   drier; `wilt_pore` 0.15 is twice bloomcrown's 0.08, so it is the species that
+    ///   drier. That is **germination permission and not a positive newborn budget**, and
+    ///   the two are separate claims (Astra R7.3): a newborn on passing soil at pore 0.26,
+    ///   with ordinary preset stocks, fixes `0.008 · 1 · 0.36667 · 0.006 · (2/3) =
+    ///   1.17333e-5` organic per second against maintenance `0.002 · 0.006 = 1.2e-5` and
+    ///   pays the difference out of reserve — 1.06667e-5 at the 0.25 floor itself
+    ///   (`tests/round4.rs`,
+    ///   `springturf_germinates_on_retained_water_soil_and_is_maintenance_deficient_there`).
+    ///   The species' own income fixture runs at pore **0.6**, so what it establishes is
+    ///   solvency on *ample* water, not a viable pioneer on retained-water soil. Whether
+    ///   recruitment has to be solvent on drained soil is a deliberate contract question
+    ///   for a later round and explicitly **not** a reason to raise `assimilation`.
+    ///   `wilt_pore` 0.15 is twice bloomcrown's 0.08, so it is the species that
     ///   gives up first on a dry ridge; `sat_pore` 0.45 is where it reaches full moisture,
     ///   just above the germination floor, because a turf's shallow roots either have
     ///   water in the top row or do not. `establish_saturated_max` 0.3 keeps it out of a

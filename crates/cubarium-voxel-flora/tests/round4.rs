@@ -382,8 +382,11 @@ fn assert_survives_on_income(flora: &Flora, world: &World, site: Site, species: 
 // ========================================================================= springturf
 //
 // The pioneer turf of open, moist soil: shallow, sun-demanding, fast, short-lived, a wide
-// hop and a crown one cell tall. It wins the first years on bare moist ground and loses
-// under a canopy and on dry ground.
+// hop and a crown one cell tall. "It wins the first years on bare moist ground and loses
+// under a canopy" is **intended succession and untested** (Astra R7.3): what the fixtures
+// below pin is the boundaries — a paid birth, an income window on ample water, a newborn's
+// deficit on retained-water soil, a shut-sky refusal, and the sign of the adult shade
+// reading — and not the succession itself.
 
 /// **Paid birth.** A springturf donor on open soil at 0.6 of pore capacity funds one whole
 /// 0.015 package in a tick, it lands on the fixture's single candidate column, and the next
@@ -414,6 +417,82 @@ fn a_newborn_springturf_earns_its_upkeep_on_open_moist_soil() {
     // shade, and the next test is where it does.
     let stand = birth.flora.view().stand_at(birth.site).expect("alive");
     assert!((stand.light - 1.0).abs() < 1e-12, "open sky read as {}", stand.light);
+}
+
+/// **Germination permission is not a positive newborn income** (Astra R7.3). The two are
+/// separate claims about the same soil and this fixture holds them apart: springturf's
+/// `establish_pore_min` 0.25 is soil's own retained fraction, so a package germinates on
+/// ordinary drained soil — and the stand that germination buys, on exactly that soil and
+/// with **ordinary preset stocks**, fixes less per second than its own maintenance and pays
+/// the difference out of reserve.
+///
+/// The fixture sits one point above the floor, pore **0.26**, so the gate is passing and not
+/// on its knife edge. With `rooting_depth` 1 the root box is the support row alone, so the
+/// mean pore fraction the model reads is 0.26 and `μ = (0.26 − 0.15) / (0.45 − 0.15) =
+/// 0.36667`. The newborn is one 0.015 package split `[0.4, 0.4, 0.2]`, so `W = P = 0.006`.
+/// At open sky `L_eff = 1`, site mineral 1 gives a Monod factor of 2/3 and there is no
+/// aeration stress, so the income expression gives
+/// `0.008 · 1 · 0.36667 · 0.006 · (2/3) = 1.17333e-5` organic per second against maintenance
+/// `0.002 · 0.006 = 1.2e-5`. At the 0.25 floor itself `μ` is exactly 1/3 and the income is
+/// `1.06667e-5` against the same 1.2e-5. Reserve pays the difference, and no income is left
+/// to build the foliage the newborn does not yet have.
+///
+/// This is **not** an argument for raising `assimilation`, and R7.3 says so: a species may
+/// germinate into a site it cannot yet run a surplus on, and nothing here is tuned. What it
+/// does mean is that `a_newborn_springturf_earns_its_upkeep_on_open_moist_soil` — pore
+/// **0.6**, ample water — establishes solvency on *ample* water and not on retained-water
+/// soil. Whether recruitment has to be solvent on ordinary drained soil is a contract
+/// question for a later round, not a number to move here.
+#[test]
+fn springturf_germinates_on_retained_water_soil_and_is_maintenance_deficient_there() {
+    let mut world = pillars(8, &[0, 1], 0.26);
+    let sc = FloraConfig::default().springturf.clone();
+
+    // Permission: every gate open at 0.26, and the shallow box is the support row alone.
+    let g = establishment_gates(&world.view(), at(1), &sc);
+    assert!(g.passes(), "0.26 is meant to be a passing site: {g:?}");
+    assert!((g.mean_pore.expect("soil") - 0.26).abs() < 1e-12, "{g:?}");
+    assert_eq!(g.soil_voxels, 2, "the root box is the two soil faces: {g:?}");
+
+    // The newborn that permission buys. Only the donor's saving rate is the fixture's own
+    // (see the module doc); the newborn's own stocks and every rate it lives by are the
+    // preset's.
+    let mut birth =
+        paid_birth(&mut world, fast_donor(Species::Springturf), Species::Springturf, 0, at(1));
+    let born = *birth.flora.view().stand_at(at(1)).expect("the package germinated");
+    assert!((born.wood - 0.006).abs() <= 1e-18 && (born.foliage - 0.006).abs() <= 1e-18, "{born:?}");
+    let mineral = birth.flora.view().ground_at(at(1)).expect("ground").mineral;
+
+    // The per-second budget in the model's own factors, at the fixture's own pore fraction.
+    let mu = (0.26 - sc.wilt_pore) / (sc.sat_pore - sc.wilt_pore);
+    let monod = mineral / (mineral + sc.nutrient_half);
+    let rate = sc.assimilation * 1.0 * mu * born.foliage * monod;
+    let upkeep = sc.maintenance * born.wood;
+    assert!((mu - 11.0 / 30.0).abs() < 1e-12, "mu {mu}");
+    assert!((monod - 2.0 / 3.0).abs() < 1e-12, "the site's pool is not 1: {mineral}");
+    assert!((rate - 1.173333e-5).abs() < 1e-10, "income rate {rate}");
+    assert!((upkeep - 1.2e-5).abs() < 1e-18, "upkeep {upkeep}");
+    assert!(rate < upkeep, "income {rate} is not below upkeep {upkeep}");
+    // Astra's own figure at the floor: mu exactly 1/3, income 1.06667e-5.
+    let floor_mu = (sc.establish_pore_min - sc.wilt_pore) / (sc.sat_pore - sc.wilt_pore);
+    assert!((floor_mu - 1.0 / 3.0).abs() < 1e-12, "floor mu {floor_mu}");
+    let floor_rate = sc.assimilation * floor_mu * born.foliage * monod;
+    assert!((floor_rate - 1.066667e-5).abs() < 1e-10, "income at the floor {floor_rate}");
+
+    // And measured: over five seconds the stand fixes less than its own maintenance bill,
+    // the reserve pays the difference, and nothing is built.
+    let fixed0 = birth.flora.view().ledger.fixed_in;
+    run(&mut birth.flora, &mut world, 100);
+    let v = birth.flora.view();
+    let now = *v.stand_at(at(1)).expect("it is short of income, not dead");
+    let fixed = v.ledger.fixed_in - fixed0;
+    let bill = upkeep * 100.0 * cubarium_voxel::DT;
+    assert!(fixed < bill, "fixed {fixed} against a {bill} maintenance bill");
+    assert!(fixed > 0.0, "it fixed nothing at all, which is a different fixture");
+    assert!(now.reserve < born.reserve, "the deficit was not paid out of reserve");
+    assert!(now.wood <= born.wood + 1e-18, "it grew on a deficit: {} to {}", born.wood, now.wood);
+    assert!(now.foliage <= born.foliage + 1e-18, "it built foliage on a deficit");
+    assert_residuals(&birth.flora, "after a maintenance-deficient newborn window");
 }
 
 /// **Failing neighbour.** The same package, on the same column, with the sky shut: it never
