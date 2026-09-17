@@ -533,6 +533,15 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink]) {
         // the pool limits is the *tissue* it can pay `n_tissue` per unit for, so the
         // pool's own units bound `A` through `mineral / n_tissue`. The
         // Michaelis-Menten and the `f_max` rate cap are unchanged.
+        //
+        // All three read the **site's** pool, and they gate the whole of `A` — including
+        // the part that pays maintenance. So a stand whose own tissue is rich in mineral
+        // still fixes nothing on a bare pool, which is stronger than "mineral caps new
+        // tissue" and is a stated limitation of this round rather than a physiological
+        // claim: `Stand::mineral` is an inventory, not a usable reserve (Astra R4.3, and
+        // the doc on that field). At the placeholders the `f_max` rate cap is the binding
+        // one by five orders of magnitude — `0.0005 · N` against the stock cap's
+        // `50 · N` — so moving `n_tissue` would not change which limit bites.
         let n0 = ground[gi].mineral;
         let monod = if n0 + sc.nutrient_half > 0.0 { n0 / (n0 + sc.nutrient_half) } else { 0.0 };
         let mineral_cap = if sc.n_tissue > 0.0 { n0 / sc.n_tissue } else { f64::INFINITY };

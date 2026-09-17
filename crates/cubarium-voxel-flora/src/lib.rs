@@ -158,7 +158,21 @@ pub struct Stand {
     /// organic matter away and leaves the mineral where it is, so a starving stand ends
     /// up mineral-rich per unit of what is left. Every transfer out of a stand — litter,
     /// dead wood, a propagule package — takes the same fraction of this as it takes of
-    /// the stand's organic matter.
+    /// the stand's material.
+    ///
+    /// It is an **inventory, not a reusable internal nutrient reserve**, and that is a
+    /// stated limitation of this round rather than a physiological claim (Astra R4.3).
+    /// Income reads the *site's* pool: `assimilation`'s Michaelis–Menten term, the
+    /// `nutrient_draw_max` rate cap and the `mineral / n_tissue` stock cap all read
+    /// `Ground::mineral`, so a stand rich in mineral fixes **zero** on a bare pool at full
+    /// light and full moisture and has to burn reserve to stand still
+    /// (`tests/round3.rs`, `a_bare_mineral_pool_stops_the_income_and_not_just_the_growth`
+    /// pins it). Moving `mineral / n_tissue` alone would not change that: the other two
+    /// terms zero the income independently. When nutrient physiology matters, carbon
+    /// fixation and maintenance have to be separated from mineral-funded tissue
+    /// construction, and the nutrient response pointed at whatever stock is then the
+    /// usable one. Until then this number is what the stand is *made of*, not what it can
+    /// spend.
     pub mineral: f64,
     /// Waterlogging of the root zone, `0..=1`. It relaxes toward the level its root box's
     /// saturated fraction asks for — nothing at or below the species'
@@ -345,8 +359,16 @@ pub struct SpeciesConfig {
     pub seed_cohorts_max: usize,
     /// `n_tissue`: mineral nutrient per unit of organic matter this species builds. Wood,
     /// foliage and reserve share it this round. Growing `ΔO` draws `n_tissue · ΔO` from
-    /// the site's mineral pool, and the pool caps growth through `mineral / n_tissue`.
+    /// the site's mineral pool, and the pool caps income through `mineral / n_tissue`.
     /// **Placeholder**; nothing here is tuned.
+    ///
+    /// Which of the three nutrient limits actually binds, at the placeholders (Astra
+    /// R4.3): the stock cap `N / n_tissue` is `50 · N` of income per tick, the
+    /// `nutrient_draw_max` rate cap is `f_max · N · dt` = `0.0005 · N`, and the
+    /// Michaelis–Menten factor is `N / (N + 0.5)`. The **rate cap is five orders of
+    /// magnitude tighter**, so the stock cap cannot be the binding one for any positive
+    /// `N`: `n_tissue` sets the stoichiometry of the draw and the density of the tissue,
+    /// and not the ceiling on income.
     pub n_tissue: f64,
     /// `q_share`: share of every tick's surplus that goes to the reserve first.
     pub reserve_share: f64,
@@ -398,6 +420,15 @@ pub struct SpeciesConfig {
     /// a site a species may germinate on is a site it does not stress on. The tolerant
     /// species has a high ceiling, and at 1.0 it has no saturation stress at all; the
     /// intolerant one has a low ceiling and a fast `stress_rate`. **Placeholder**.
+    ///
+    /// That double duty is an **assumption**, stated as one (Astra R4.6): "can germinate
+    /// here" does not logically imply "pays no stress here as an adult", and a role whose
+    /// seedlings are fussier than its adults, or whose adults pay something even where
+    /// their seeds establish, needs the two traits separated. They are one number in this
+    /// slice because nothing has measured them apart, not because they are the same
+    /// quantity. Two different hypotheses come out of splitting them: a germination
+    /// ceiling below the adult tolerance, and an adult response with an explicit subunit
+    /// maximum or a funded cost of tolerance. Neither needs an oxygen solver.
     pub establish_saturated_max: f64,
     /// Standing water over the support face deeper than this (metres) kills the stand.
     ///
@@ -524,6 +555,16 @@ impl SpeciesConfig {
             // are therefore inert at the placeholders and kept only because a lower
             // ceiling would need them. Placeholders, in the direction the sketch asks
             // for, and the asymmetry Chesson's test needs somewhere to bite.
+            //
+            // 1.0 makes this species explicitly **saturation-immune**, and that is the
+            // role it is standing in for: a wetland producer, not the biosphere's
+            // moist-but-aerated understory role, which is a different niche and will need
+            // its own preset (Astra R4.6). Do **not** lower it slightly as a repair: for
+            // *every* tolerance below 1, a wholly saturated root box targets stress 1 and
+            // eventually takes all of the species' assimilation again, which is the
+            // failure package I measured. A partial cost at full saturation is a different
+            // rule — an explicit subunit maximum on the response, or a funded cost of
+            // tolerance — and not a smaller number here.
             stress_rate_per_s: 0.01,
             relax_rate_per_s: 0.05,
             establish_saturated_max: 1.0,
@@ -562,6 +603,16 @@ pub struct FloraConfig {
     /// Mineral a site starts with the first time anything lands on it. Booked as
     /// `seeded_mineral_in`: it comes from outside the closed system, so it is a named
     /// inflow and not a residual.
+    ///
+    /// It is applied **lazily**, when a site first gets a `Ground` — a founder, a landed
+    /// package, litter — so what it represents is *provisioning previously unrepresented
+    /// ground*, not fertilizing it (Astra R4.3). Colonization therefore imports mineral
+    /// into the world, explicitly booked, and the mineral inventory is not closed while
+    /// first landings are still happening: `expected_mineral` grows with the number of
+    /// sites the plants have reached. A fertility comparison wants a **fixed per-site
+    /// inventory laid down at world creation** instead, so that the total is the same in
+    /// every arm however far the plants spread; that is a change to make when fertility is
+    /// the thing being measured, and it is not this round.
     pub initial_mineral: f64,
 }
 
