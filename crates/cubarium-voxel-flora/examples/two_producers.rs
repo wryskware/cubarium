@@ -37,7 +37,15 @@ fn main() {
     let seed: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(1);
     let noise_seed: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(0);
 
-    let config = VoxelConfig { seed, noise_seed, rain_m_per_s: 0.0005, ..VoxelConfig::default() };
+    // Generate once to find where the generator put the basin, then generate the world
+    // the run uses with the water table charged to a metre above that floor. Generation
+    // is deterministic in the seed, so the second world is the first one with water in
+    // it. The outlet cell is the lowest void cell of the receiving basin, so its `y` is
+    // the basin floor.
+    let dry = VoxelConfig { seed, noise_seed, rain_m_per_s: 0.0005, ..VoxelConfig::default() };
+    let basin_floor_m = World::new(dry.clone()).outlet_cell().map_or(0.0, |(_, y, _)| y as f64)
+        * dry.voxel_m;
+    let config = VoxelConfig { initial_aquifer_head_m: basin_floor_m + 1.0, ..dry };
     let (width, depth) = (config.width, config.depth);
     let mut world = World::new(config.clone());
     world.apply(WorldCommand::SetOutlet { open: true });
@@ -123,6 +131,12 @@ fn main() {
     println!(
         "two_producers: {}x{}x{} seed {seed} noise_seed {noise_seed}, rain {} m/s, outlet open",
         config.width, config.height, config.depth, config.rain_m_per_s
+    );
+    println!(
+        "water table charged to {:.2} m (basin floor {:.2} m + 1 m), now at {:.2} m",
+        config.initial_aquifer_head_m,
+        basin_floor_m,
+        world.aquifer_head_m()
     );
     println!(
         "{WARMUP_TICKS} warm-up ticks, then {ticks} coupled ticks ({seconds:.0} s); {founders} founders at wood {FOUNDER_WOOD}"

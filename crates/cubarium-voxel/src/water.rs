@@ -26,14 +26,19 @@
 //!    region settles to one surface level).
 //! 4. **Drainage**: pore water above the cell's own `field_capacity` moves down — into
 //!    the pore space below, into the aquifer where a porous cell sits on bedrock or on
-//!    the foundation, or as a drip into free water where a porous cell roofs a void. The
+//!    the foundation, or as a drip into free water where a porous cell roofs a void. A
+//!    voxel inside the saturated zone is skipped: it has nowhere lower to go. The
 //!    **donor** cell's material sets both the threshold and the rate
 //!    (`permeability_per_s * DT` of its own pore capacity). This is field-capacity
 //!    drainage, not "saturated soil only": rock above its field capacity drips too, just
 //!    very slowly, and soil stops draining at `field_capacity` rather than at zero —
 //!    that fraction is the retained water ecology gets to read.
-//! 5. **Spring**: out of the aquifer into the spring cell. See below.
-//! 6. **Outlet**: while open, the one named outlet cell exports up to
+//! 5. **Water table**: the aquifer saturates the pores of every permeable voxel whose
+//!    centre lies at or below its head, and seeps free water into the void cells the
+//!    head reaches over saturated ground. `drain` leaves the saturated zone alone. See
+//!    [`water_table`] — this is what makes low ground wetter than high ground.
+//! 6. **Spring**: out of the aquifer into the spring cell. See below.
+//! 7. **Outlet**: while open, the one named outlet cell exports up to
 //!    `outlet_m3_per_s * DT` of its free water into `Ledger::outlet_out`. This is the
 //!    separate named export and has nothing to do with the spring.
 //!
@@ -328,6 +333,7 @@ pub fn step(world: &mut World) {
         equalize(world);
     }
     drain(world);
+    water_table(world);
     spring(world);
     outlet(world);
 }
@@ -404,6 +410,108 @@ fn level(counts: &[u32], mut rem: f64) -> f64 {
         }
     }
     top
+}
+
+/// Whether the centre of row `y` lies at or below the water table `table`, in metres
+/// above `y = 0`. The centre, not the floor: a voxel counts as part of the saturated
+/// zone once the table has reached the middle of it.
+#[inline]
+fn submerged(c: &Config, y: u32, table: f64) -> bool {
+    (y as f64 + 0.5) * c.voxel_m <= table
+}
+
+/// The water table: the aquifer and the world exchanging water according to head.
+///
+/// `Config::aquifer_head_m` turns the aquifer store into a level above `y = 0`, and that
+/// level is a real boundary rather than just the spring's drive:
+///
+/// 1. **Saturation.** Every permeable voxel whose centre lies at or below the table has
+///    its pores filled toward `pore = 1` from the aquifer, at that material's
+///    `permeability_per_s * DT` of its own pore capacity, capped by the aquifer's stock.
+///    `drain` leaves those voxels alone, so soil under the table sits saturated instead
+///    of settling back to its field capacity.
+/// 2. **Seepage.** A void voxel the table reaches, standing on a permeable voxel that is
+///    itself saturated, takes free water from the aquifer up to the table's own level
+///    inside that cell — `clamp((table - y * voxel_m) / voxel_m, 0, 1)` of the cell — at
+///    the *support's* permeability rate, because the water has to come up through it.
+///    Seepage never lifts a free surface above the table, and a cell already at or above
+///    it takes nothing: from there the path back down is the ordinary
+///    infiltrate-then-drain.
+///
+/// Both directions are internal transfers between the aquifer and a voxel, so the ledger
+/// has nothing to say about them and the conservation residual must not move. The table
+/// is read once per step and held fixed for the whole of it, so the order voxels are
+/// filled in cannot change the answer; within a step the fill runs bottom-up in index
+/// order, which is also the order a scarce stock is shared in.
+///
+/// The named spring is untouched and still one cell with its own conductance: it is the
+/// world's one *feature*, while this is the ambient boundary the whole world sits on.
+fn water_table(w: &mut World) {
+    let c = w.config.clone();
+    let table = c.aquifer_head_m(w.aquifer_m3);
+    if !(table > 0.0) {
+        return;
+    }
+    // What the aquifer gives up this step, accumulated and debited once. Subtracting a
+    // microlitre from a store of tens of cubic metres forty thousand times a tick is
+    // forty thousand roundings against the store's own ulp; one subtraction is one.
+    let mut taken = 0.0;
+    let charged = w.aquifer_m3;
+
+    for y in 0..c.height {
+        if !submerged(&c, y, table) {
+            continue;
+        }
+        for z in 0..c.depth {
+            for x in 0..c.width as i64 {
+                let i = c.index(x, y, z);
+                let m = w.material[i];
+                if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
+                    continue;
+                }
+                let rate = m.permeability_per_s() * DT * m.pore_capacity() * c.voxel_volume();
+                let want = rate.min(pore_room_m3(w, i)).min((charged - taken).max(0.0));
+                if want <= 0.0 {
+                    continue;
+                }
+                taken += add_pore(w, i, want);
+            }
+        }
+    }
+
+    for y in 1..c.height {
+        // Above the table there is nothing to seep into.
+        if (y as f64) * c.voxel_m >= table {
+            break;
+        }
+        let level = ((table - y as f64 * c.voxel_m) / c.voxel_m).clamp(0.0, 1.0);
+        for z in 0..c.depth {
+            for x in 0..c.width as i64 {
+                let i = c.index(x, y, z);
+                if w.material[i].is_solid() || w.free[i] >= level {
+                    continue;
+                }
+                let below = c.index(x, y - 1, z);
+                let m = w.material[below];
+                if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
+                    continue;
+                }
+                // Only saturated ground seeps: unsaturated soil takes the water itself.
+                if w.pore[below] < 1.0 - 1e-9 {
+                    continue;
+                }
+                let rate = m.permeability_per_s() * DT * m.pore_capacity() * c.voxel_volume();
+                let room = (level - w.free[i]) * c.voxel_volume();
+                let want = rate.min(room).min((charged - taken).max(0.0));
+                if want <= 0.0 {
+                    continue;
+                }
+                taken += add_free(w, i, want);
+            }
+        }
+    }
+
+    w.aquifer_m3 = (charged - taken).max(0.0);
 }
 
 /// Settle every connected water region to one surface level. See the module doc for
@@ -608,9 +716,15 @@ fn infiltrate(w: &mut World, dt: f64) {
 
 fn drain(w: &mut World) {
     let c = w.config.clone();
+    // The table as it stands at the start of the step: a voxel inside the saturated
+    // zone has nowhere lower to drain to, because the aquifer is what is holding it up.
+    let table = c.aquifer_head_m(w.aquifer_m3);
     for z in 0..c.depth {
         for x in 0..c.width as i64 {
             for y in 0..c.height {
+                if submerged(&c, y, table) {
+                    continue;
+                }
                 let i = c.index(x, y, z);
                 let m = w.material[i];
                 let cap = m.pore_capacity();

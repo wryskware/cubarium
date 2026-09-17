@@ -34,6 +34,15 @@ pub struct Config {
     /// Fraction of the world footprint the aquifer store occupies, used to turn its
     /// volume into a head in metres above `y = 0`.
     pub aquifer_porosity: f64,
+    /// Level of the water table at creation, in metres above `y = 0`. The aquifer is
+    /// charged to the volume whose head is this, and that water is counted in
+    /// `Ledger::initial_stored` like any other water the world starts with.
+    ///
+    /// Zero, the default, is a dry aquifer and the behaviour every world had before the
+    /// water table existed. Set it to a little above the basin floor and the basin's
+    /// soil is saturated from below and seeps a pond, while ground above the level
+    /// drains to its field capacity as usual.
+    pub initial_aquifer_head_m: f64,
     /// Free water an open outlet exports, cubic metres per second.
     pub outlet_m3_per_s: f64,
     /// Largest change in one cell's `free` fraction that a single equalization substep
@@ -56,6 +65,7 @@ impl Default for Config {
             water_substeps: 4,
             spring_k_m2_per_s: 0.02,
             aquifer_porosity: 0.1,
+            initial_aquifer_head_m: 0.0,
             outlet_m3_per_s: 0.05,
             free_transfer_cap: 0.0,
         }
@@ -94,6 +104,7 @@ impl Config {
             ("spring_k_m2_per_s", self.spring_k_m2_per_s),
             ("outlet_m3_per_s", self.outlet_m3_per_s),
             ("free_transfer_cap", self.free_transfer_cap),
+            ("initial_aquifer_head_m", self.initial_aquifer_head_m),
         ] {
             ensure!(rate.is_finite() && rate >= 0.0, "{name} must be finite and not negative, not {rate}");
         }
@@ -139,8 +150,18 @@ impl Config {
     /// Aquifer head in metres above `y = 0` for a given store, from the world footprint
     /// and [`Config::aquifer_porosity`].
     pub fn aquifer_head_m(&self, aquifer_m3: f64) -> f64 {
+        aquifer_m3 / self.aquifer_pore_m3()
+    }
+
+    /// The aquifer store whose head is `head_m`: the inverse of
+    /// [`Config::aquifer_head_m`].
+    pub fn aquifer_volume_for_head(&self, head_m: f64) -> f64 {
+        self.aquifer_pore_m3() * head_m.max(0.0)
+    }
+
+    /// Cubic metres of aquifer pore space per metre of head.
+    fn aquifer_pore_m3(&self) -> f64 {
         let area = self.width as f64 * self.depth as f64 * self.cell_area();
-        let pore = (area * self.aquifer_porosity).max(1e-12);
-        aquifer_m3 / pore
+        (area * self.aquifer_porosity).max(1e-12)
     }
 }

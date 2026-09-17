@@ -297,12 +297,14 @@ impl World {
             config,
         };
         crate::generate::landform(&mut world);
+        world.aquifer_m3 = world.config.aquifer_volume_for_head(world.config.initial_aquifer_head_m);
         world.ledger.initial_stored = world.view().stored_m3();
         world
     }
 
     /// An all-air world over one bedrock floor row: the fixture builder for tests and
-    /// hand-authored scenes. Panics on a config [`Config::validate`] refuses.
+    /// hand-authored scenes. Charged to [`Config::initial_aquifer_head_m`] like any
+    /// other world. Panics on a config [`Config::validate`] refuses.
     pub fn empty(config: Config) -> World {
         config.validate().expect("World::empty needs a valid Config");
         let n = config.cells();
@@ -312,7 +314,7 @@ impl World {
                 material[config.index(x, 0, z)] = Material::Bedrock;
             }
         }
-        World {
+        let mut world = World {
             free: vec![0.0; n],
             pore: vec![0.0; n],
             aquifer_m3: 0.0,
@@ -324,7 +326,10 @@ impl World {
             spring_cell: None,
             material,
             config,
-        }
+        };
+        world.aquifer_m3 = world.config.aquifer_volume_for_head(world.config.initial_aquifer_head_m);
+        world.ledger.initial_stored = world.view().stored_m3();
+        world
     }
 
     pub fn config(&self) -> &Config {

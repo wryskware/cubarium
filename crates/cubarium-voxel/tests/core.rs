@@ -947,3 +947,99 @@ fn rain_wets_a_slope_as_well_as_it_wets_a_flat() {
     }
     assert!(residual(&w).abs() < 1e-9, "{}", residual(&w));
 }
+
+// ------------------------------------------------------------- the water table
+
+/// A basin between two ridges: soil at y = 1 and y = 2 across the middle four columns,
+/// a soil cap at y = 6 on the two columns at each end, bedrock body, no rain.
+///
+/// `aquifer_porosity` is 0.5 here against the default 0.1, and that is not decoration.
+/// A metre of head is `width * depth * cell_area * aquifer_porosity` cubic metres — 0.8
+/// at the default against the 1.4 that one row of this basin's soil pores holds — so at
+/// the default the aquifer cannot fill the ground it is supposed to be holding up and
+/// the table collapses as it tries. At 0.5 a metre of head is 4 cubic metres and the
+/// table settles instead.
+fn water_table_basin(head_m: f64) -> World {
+    let config = Config {
+        width: 8,
+        height: 10,
+        depth: 1,
+        voxel_m: 1.0,
+        seed: 13,
+        aquifer_porosity: 0.5,
+        initial_aquifer_head_m: head_m,
+        ..Config::default()
+    };
+    let mut w = World::empty(config.clone());
+    for x in 0..8i64 {
+        if x < 2 || x >= 6 {
+            for y in 1..6 {
+                w.apply(Command::SetMaterial { x, y, z: 0, material: Material::Bedrock });
+            }
+            // The ridge cap starts saturated, so "it drains to field capacity" is a
+            // measurement and not a tautology.
+            w.apply(Command::AddWater { x, y: 6, z: 0, volume_m3: 0.35 });
+            w.apply(Command::SetMaterial { x, y: 6, z: 0, material: Material::Soil });
+        } else {
+            for y in 1..=2 {
+                w.apply(Command::SetMaterial { x, y, z: 0, material: Material::Soil });
+            }
+        }
+    }
+    w
+}
+
+/// The table saturates what is under it and seeps a pond, while ground above it drains
+/// to field capacity as it always did. Nothing here is a flux: every transfer is between
+/// the aquifer and a voxel, so the ledger is untouched and the residual must not move.
+#[test]
+fn the_water_table_saturates_the_basin_and_leaves_the_ridge_to_drain() {
+    let mut w = water_table_basin(3.5);
+    let charged = w.view().stored_m3();
+    assert!((w.aquifer_head_m() - 3.5).abs() < 1e-12, "head {}", w.aquifer_head_m());
+    run(&mut w, 500);
+
+    let head = w.aquifer_head_m();
+    let v = w.view();
+    for x in 2..6 {
+        for y in 1..=2 {
+            let pore = v.pore_at(x, y, 0);
+            assert!(pore > 0.99, "basin soil at ({x}, {y}) is only at {pore}");
+        }
+        // The pond: free water in the void over the basin, and its surface is the table
+        // rather than some level of its own.
+        let free = v.free_at(x, 3, 0);
+        assert!(free > 0.0, "no pond over the basin at x {x}");
+        let surface = 3.0 + free;
+        assert!(
+            (surface - head).abs() <= 1.0,
+            "the pond's surface {surface} is not within a voxel of the table at {head}"
+        );
+    }
+    for x in [0, 1, 6, 7] {
+        let pore = v.pore_at(x, 6, 0);
+        assert!(pore <= 0.25 + 1e-9, "the ridge cap at x {x} held {pore}, above field capacity");
+    }
+    // The water only moved about: the world holds what it was charged with.
+    assert!((v.stored_m3() - charged).abs() < 1e-9, "{} against {charged}", v.stored_m3());
+    assert!(residual(&w).abs() < 1e-9, "{}", residual(&w));
+}
+
+/// A table at zero is no table at all: the staircase steps to exactly the state it
+/// reached before the water table existed, down to the last bit of every pore fraction.
+#[test]
+fn a_table_at_zero_changes_nothing() {
+    let mut w = staircase();
+    assert_eq!(w.config().initial_aquifer_head_m, 0.0, "the default is a dry aquifer");
+    run(&mut w, 400);
+    let v = w.view();
+    for x in 0..8i64 {
+        let top = if x < 2 { 1 } else { x as u32 };
+        assert_eq!(v.pore_at(x, top, 0), 0.25, "x {x} moved");
+        assert_eq!(v.free_at(x, top + 1, 0), 0.0, "x {x} is standing in water");
+    }
+    // The aquifer took the rest, and its head stayed under the soil it would saturate.
+    assert!((v.aquifer_m3 - 0.9).abs() < 1e-9, "{}", v.aquifer_m3);
+    assert!(w.aquifer_head_m() < 1.5, "the table reached the soil: {}", w.aquifer_head_m());
+    assert!(residual(&w).abs() < 1e-9, "{}", residual(&w));
+}

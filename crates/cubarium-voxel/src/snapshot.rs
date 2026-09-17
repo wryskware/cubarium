@@ -6,9 +6,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::World;
 
-/// Bumped to 2 for the plant boundary: `Ledger::transpiration_out` and
-/// `World::terrain_version`. Schema 1 bytes are refused, never migrated.
-pub const SCHEMA: u32 = 2;
+/// Bumped to 2 for the plant boundary (`Ledger::transpiration_out`,
+/// `World::terrain_version`) and to 3 for the water table
+/// (`Config::initial_aquifer_head_m`, which sits inside the serialized world). Postcard
+/// is not self-describing, so a new field is a new format: earlier tags are refused,
+/// never migrated.
+pub const SCHEMA: u32 = 3;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
