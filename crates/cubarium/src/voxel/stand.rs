@@ -535,6 +535,7 @@ mod tests {
                     moisture,
                     water_m3: 0.0,
                     mineral: 0.0,
+                    aeration_stress: 0.0,
                 },
             )
         };

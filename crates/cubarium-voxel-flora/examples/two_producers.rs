@@ -266,11 +266,14 @@ fn pick_founders(
 }
 
 /// The species' establishment predicate at one site, in the terms the plant layer uses.
+/// The aeration bound is read on the support voxel alone rather than over the whole root
+/// box, which is the same approximation the pore term here already makes.
 fn passes(world: &World, sc: &cubarium_voxel_flora::SpeciesConfig, s: Site) -> bool {
     let view = world.view();
     let (x, y, z) = (s.x as i64, s.y, s.z);
     view.soil_below(x, y, z) >= 1
         && view.pore_at(x, y, z) >= sc.establish_pore_min
+        && (view.pore_at(x, y, z) < sc.saturated_pore || sc.establish_saturated_max >= 1.0)
         && view.water_depth_m(x, y, z) <= sc.drown_depth_m
         && view.sky_visibility(x, y, z) >= sc.establish_light_min
 }

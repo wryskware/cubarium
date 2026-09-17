@@ -15,7 +15,7 @@
 //! moves.
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
-use cubarium_voxel_flora::{Command, Flora, FloraConfig, Site, Species, Stage};
+use cubarium_voxel_flora::{Command, Flora, FloraConfig, Site, Species};
 
 // Round 3 replaced the frozen `Stage::Establishing` stand with a per-site seed bank, so
 // the three propagule tests below now read `Ground::seeds` where they read a sub-`W_min`

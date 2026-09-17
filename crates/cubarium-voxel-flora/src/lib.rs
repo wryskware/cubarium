@@ -116,6 +116,12 @@ pub struct Stand {
     /// dead wood, a propagule package — takes the same fraction of this as it takes of
     /// the stand's organic matter.
     pub mineral: f64,
+    /// Waterlogging of the root zone, `0..=1`. It rises while the root box is saturated
+    /// and relaxes while it is not, and it multiplies income by `1 − aeration_stress`, so
+    /// a drowned stand earns nothing and diebacks on unpaid maintenance. That is the
+    /// "roots drowned" death the sketch wanted, with no new kill switch: standing-water
+    /// drowning (`drown_depth_m`) is a separate and much cruder thing.
+    pub aeration_stress: f64,
 }
 
 impl Stand {
@@ -278,10 +284,22 @@ pub struct SpeciesConfig {
     /// Water transpired per second per unit foliage at `μ = 1`, cubic metres. Withdrawn
     /// from the root box through `Command::WithdrawPore`, never by reading `pore` twice.
     pub transpiration_m3_per_s: f64,
-    /// A propagule may land only on a site whose root-box mean pore fraction is at least
-    /// this and whose sky visibility is at least `establish_light_min`.
+    /// A seed cohort may germinate only on a site whose root-box mean pore fraction is at
+    /// least this and whose sky visibility is at least `establish_light_min`.
     pub establish_pore_min: f64,
     pub establish_light_min: f64,
+    /// Pore fraction (0..1 of capacity) at and above which a root voxel counts as
+    /// **saturated** — no air in it for a root. **Placeholder**.
+    pub saturated_pore: f64,
+    /// How fast `Stand::aeration_stress` rises per second with the whole root box
+    /// saturated, and how fast it relaxes per second with none of it saturated. Both
+    /// scale linearly with the saturated fraction. **Placeholders**.
+    pub stress_rate_per_s: f64,
+    pub relax_rate_per_s: f64,
+    /// A cohort may germinate only where the site's *current* saturated root fraction is
+    /// at most this. The tolerant species has a high ceiling and a slow `stress_rate`;
+    /// the intolerant one the reverse. **Placeholder**.
+    pub establish_saturated_max: f64,
     /// Standing water over the support face deeper than this (metres) kills the stand.
     ///
     /// The threshold means a **pool**, not a rain film. What the core reports as water
@@ -347,6 +365,10 @@ impl SpeciesConfig {
             transpiration_m3_per_s: 2e-5,
             establish_pore_min: 0.2,
             establish_light_min: 0.3,
+            saturated_pore: 0.95,
+            stress_rate_per_s: 0.05,
+            relax_rate_per_s: 0.05,
+            establish_saturated_max: 0.5,
             drown_depth_m: 0.0,
             hop: 1,
             crown_height_voxels: [1.0, 3.0],
@@ -365,6 +387,12 @@ impl SpeciesConfig {
             sat_pore: 0.5,
             establish_pore_min: 0.1,
             establish_light_min: 0.6,
+            // The sun producer of ridges and terraces: it stresses fast in a saturated
+            // root box, relaxes slowly, and will not germinate on a site that is even a
+            // quarter waterlogged. Placeholders, in the direction the sketch asks for.
+            stress_rate_per_s: 0.2,
+            relax_rate_per_s: 0.02,
+            establish_saturated_max: 0.25,
             // A fifth of a voxel: bloomcrown dies in a pool and shrugs off a shower.
             // This was 0.0, which is not "dies in standing water" but "dies in any
             // water at all": measured on the default generated world under rain, every
@@ -388,6 +416,14 @@ impl SpeciesConfig {
             sat_pore: 0.8,
             establish_pore_min: 0.45,
             establish_light_min: 0.1,
+            // The wet producer of hollows: twenty times slower to stress, faster to
+            // recover, and with no aeration bound on establishment at all — a wholly
+            // waterlogged hollow is its habitat, and bloomcrown's `0.25` is what shuts
+            // the sun producer out of it. Placeholders, in the direction the sketch asks
+            // for, and the asymmetry Chesson's test needs somewhere to bite.
+            stress_rate_per_s: 0.01,
+            relax_rate_per_s: 0.05,
+            establish_saturated_max: 1.0,
             drown_depth_m: 0.5,
             hop: 1,
             crown_height_voxels: [2.0, 5.0],
@@ -663,6 +699,7 @@ impl Flora {
                     moisture: 0.0,
                     water_m3: 0.0,
                     mineral: 0.0,
+                    aeration_stress: 0.0,
                 };
                 let organic = stand.organic();
                 // A founder arrives at the species' own tissue mineral content: it is

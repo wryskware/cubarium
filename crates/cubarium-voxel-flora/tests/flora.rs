@@ -871,6 +871,158 @@ fn growth_stops_when_the_site_s_mineral_is_spent_though_light_and_water_are_ampl
     assert_residuals(&ample, "after 200 ticks on an ample pool");
 }
 
+// ------------------------------------------------- root-zone aeration (round 3)
+
+/// A strip whose soil rows are saturated and held there by the water table: pore 0.98 to
+/// begin with, which is already past both species' `saturated_pore` of 0.95, and an
+/// aquifer charged to 3 m — above the support face at `y = 2` — so the core tops the
+/// rows to capacity and `drain` leaves them alone while the table is up. Dropping the
+/// table with a negative `ChargeAquifer` is then the one thing that unsaturates them.
+///
+/// Nothing stands in free water here: the table fills pore space up to capacity and no
+/// further, so `water_depth_m` at the support face stays 0 and `drown_depth_m` never
+/// fires. This is waterlogged *soil*, which is the thing correction 2 is about.
+fn saturated_basin() -> World {
+    let config = VoxelConfig {
+        width: 6,
+        height: 8,
+        depth: 1,
+        voxel_m: 1.0,
+        seed: 11,
+        initial_aquifer_head_m: 3.0,
+        ..VoxelConfig::default()
+    };
+    let mut w = World::empty(config);
+    for x in 0..6i64 {
+        for y in 1..=2 {
+            wet_soil(&mut w, x, y, 0.98);
+        }
+    }
+    w
+}
+
+fn coupled(flora: &mut Flora, world: &mut World, ticks: u32) {
+    for _ in 0..ticks {
+        world.step();
+        flora.step(world);
+    }
+}
+
+/// The three claims of correction 2's income half, on one fixture: a bloomcrown over a
+/// saturated root box reaches stress 1 and earns nothing; an umbrellafrond over the same
+/// box stays far below it and keeps earning; and the bloomcrown relaxes once the water
+/// table is dropped out from under it.
+///
+/// No rate is the test's own. The placeholders are what make this readable: bloomcrown
+/// stresses at 0.2 /s, so 5 s of a wholly saturated box is stress 1, and umbrellafrond at
+/// 0.01 /s against a 0.05 /s relaxation cannot accumulate stress at all while any part of
+/// its box is aerated.
+#[test]
+fn a_saturated_root_box_stresses_bloomcrown_to_nothing_and_leaves_umbrellafrond_earning() {
+    let mut bloom_world = saturated_basin();
+    let mut bloom = Flora::new(FloraConfig::default());
+    assert!(bloom.apply(&bloom_world, Command::Seed { x: 2, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
+    let mut frond_world = saturated_basin();
+    let mut frond = Flora::new(FloraConfig::default());
+    assert!(frond.apply(&frond_world, Command::Seed { x: 2, z: 0, species: Species::Umbrellafrond, wood: 0.1 }));
+
+    coupled(&mut bloom, &mut bloom_world, 150);
+    coupled(&mut frond, &mut frond_world, 150);
+
+    let b = *bloom.view().stand_at(site(2)).expect("alive, not drowned");
+    let u = *frond.view().stand_at(site(2)).expect("alive, not drowned");
+    assert_eq!(bloom_world.view().water_depth_m(2, 2, 0), 0.0, "this is wet soil, not a pool");
+    assert_eq!(bloom.view().ledger.deaths, 0, "drowning is not what is being tested");
+    assert_eq!(b.light, 1.0, "open sky: light is not what stopped it");
+    assert_eq!(b.moisture, 1.0, "pore 1.0 is past sat_pore: nor is water");
+    assert_eq!(b.aeration_stress, 1.0, "bloomcrown should be fully stressed: {b:?}");
+    assert!(u.aeration_stress < 0.1, "umbrellafrond stressed to {}", u.aeration_stress);
+
+    // Earning nothing: over the next thirty ticks the bloomcrown fixes not one unit, its
+    // wood does not move by one bit, and its foliage and reserve only fall — with any
+    // income at all the shed foliage would be reflushed.
+    let fixed = bloom.view().ledger.fixed_in;
+    coupled(&mut bloom, &mut bloom_world, 30);
+    let after = *bloom.view().stand_at(site(2)).expect("still alive");
+    assert_eq!(bloom.view().ledger.fixed_in, fixed, "a fully stressed stand fixed light");
+    assert_eq!(after.wood, b.wood, "and it grew");
+    assert!(after.foliage < b.foliage && after.reserve < b.reserve, "{after:?}");
+    // The umbrellafrond on the same box is still earning over the same span.
+    let frond_fixed = frond.view().ledger.fixed_in;
+    coupled(&mut frond, &mut frond_world, 30);
+    assert!(frond.view().ledger.fixed_in > frond_fixed, "umbrellafrond stopped earning");
+
+    // Drop the table out from under it: `drain` takes the root box down to the soil's
+    // field capacity, well under `saturated_pore`, and the stress relaxes and the income
+    // comes back. `ChargeAquifer` with a negative volume is clamped by what is there.
+    let drained = bloom_world.apply(WorldCommand::ChargeAquifer { volume_m3: -1e9 });
+    assert!(drained < 0.0, "nothing was drained: {drained}");
+    assert_eq!(bloom_world.aquifer_head_m(), 0.0);
+    let fixed = bloom.view().ledger.fixed_in;
+    coupled(&mut bloom, &mut bloom_world, 600);
+
+    let dry = *bloom.view().stand_at(site(2)).expect("still alive");
+    assert!(bloom_world.view().pore_at(2, 1, 0) < 0.95, "the box is still saturated");
+    assert!(dry.aeration_stress < 1.0, "the stress did not relax: {}", dry.aeration_stress);
+    assert!(bloom.view().ledger.fixed_in > fixed, "the income did not come back");
+    assert_residuals(&bloom, "after a bloomcrown stressed and relaxed");
+    assert_residuals(&frond, "after an umbrellafrond shrugged off a saturated box");
+}
+
+/// The establishment half: on a wholly saturated site bloomcrown's bank never germinates
+/// and umbrellafrond's does. Both banks are paid for by a donor of their own species and
+/// both are over the germination threshold, so the aeration bound is the only difference.
+///
+/// `propagule_rate` is 3.0 /s for both species here against the placeholder 2e-4, and
+/// `hop` 1 for bloomcrown against the placeholder 2: together they put one donor's whole
+/// spendable reserve into two banks in one tick, so the banks are over threshold
+/// immediately and the test is short. The saturation is the fixture's, not a rate.
+#[test]
+fn bloomcrown_cannot_germinate_on_a_saturated_site_and_umbrellafrond_can() {
+    let mut config = FloraConfig::default();
+    config.bloomcrown.propagule_rate = 3.0;
+    config.bloomcrown.hop = 1;
+    config.umbrellafrond.propagule_rate = 3.0;
+    // The fixture is saturated to the bit, so the two ceilings are the whole difference.
+    assert_eq!(config.bloomcrown.establish_saturated_max, 0.25);
+    assert_eq!(config.umbrellafrond.establish_saturated_max, 1.0);
+
+    // No `world.step`: pore 0.98 is already past both species' `saturated_pore`, so the
+    // saturated fraction of every root box is 1 and nothing has to move to keep it there.
+    let mut world = saturated_basin();
+    let mut flora = Flora::new(config);
+    assert!(flora.apply(&world, Command::Seed { x: 0, z: 0, species: Species::Bloomcrown, wood: 0.6 }));
+    assert!(flora.apply(&world, Command::Seed { x: 3, z: 0, species: Species::Umbrellafrond, wood: 0.6 }));
+
+    // One tick to bank, then twenty for germination to happen if it is going to.
+    run(&mut flora, &mut world, 21);
+
+    let w_frac = flora.config().species(Species::Bloomcrown).propagule_split[0];
+    let alive_min = flora.config().species(Species::Bloomcrown).alive_min;
+    // Bloomcrown's own hop neighbours hold banks well over the threshold, and no stand.
+    for x in [1u32, 5] {
+        let g = flora.view().ground_at(site(x)).unwrap();
+        let bank = g.seed_organic(Species::Bloomcrown);
+        assert!(w_frac * bank >= alive_min, "site {x} is not over the threshold: {bank}");
+        assert!(
+            flora.view().stand_at(site(x)).is_none(),
+            "bloomcrown germinated on a saturated site: {:?}",
+            flora.view().stand_at(site(x))
+        );
+    }
+    // Umbrellafrond's germinated on exactly the same saturation.
+    for x in [2u32, 4] {
+        let s = flora
+            .view()
+            .stand_at(site(x))
+            .unwrap_or_else(|| panic!("umbrellafrond did not germinate at {x}"));
+        assert_eq!(s.species, Species::Umbrellafrond);
+        assert!(s.wood >= flora.config().species(Species::Umbrellafrond).alive_min);
+    }
+    assert_eq!(flora.view().ledger.establishments, 2, "one per umbrellafrond bank");
+    assert_residuals(&flora, "after a saturated site turned one species away");
+}
+
 // ---------------------------------------------------------------- conservation
 
 /// All three residuals over 200 ticks of a rained-on world with stands of both species

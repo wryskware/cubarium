@@ -15,7 +15,8 @@
 //!    issues exactly **one** `Command::WithdrawPore` for the total and the accepted
 //!    volume is split among its demanders proportional to demand. `μ` for income is the
 //!    one read taken before any withdrawal: a stand that got less than it asked for does
-//!    not get a second read.
+//!    not get a second read. The root box's **saturated fraction** comes off the same
+//!    one read, for step 6's aeration stress.
 //! 6. **Per stand**, in site order: §4.1–4.4 income, maintenance and growth, §4.5
 //!    senescence, §4.6 dieback, §4.7 death. These three subphases are purely local once
 //!    light and water are in hand, so running them per stand in one pass is the same
@@ -261,11 +262,14 @@ fn wrapped_delta(a: f64, b: f64, period: f64) -> f64 {
 
 // -------------------------------------------------------------------- 5. water
 
-/// What one stand got, and the moisture factor its income reads.
+/// What one stand got, the moisture factor its income reads, and how waterlogged its
+/// root box was — all three off the one pre-withdrawal read.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Drink {
     pub(crate) moisture: f64,
     pub(crate) taken_m3: f64,
+    /// The fraction of the root box's voxels at or above the species' `saturated_pore`.
+    pub(crate) saturated: f64,
 }
 
 /// Collect every stand's demand per voxel, then withdraw once per voxel and split what
@@ -281,6 +285,7 @@ fn drink(flora: &mut Flora, world: &mut World) -> Vec<Drink> {
             let sc = flora.config.species(stand.species);
             let box_ = root_box(&view, stand.site, sc);
             out[i].moisture = moisture_of(&view, &box_, sc);
+            out[i].saturated = saturated_fraction(&view, &box_, sc);
             let demand =
                 (sc.transpiration_m3_per_s * stand.foliage * out[i].moisture * DT).max(0.0);
             if demand <= 0.0 || box_.is_empty() {
@@ -382,6 +387,20 @@ fn mean_pore(view: &VoxelView<'_>, box_: &[usize]) -> Option<f64> {
     if capacity <= 0.0 { None } else { Some(water / capacity) }
 }
 
+/// The fraction of a root box's voxels at or above the species' `saturated_pore`: how
+/// much of the root zone has no air left in it. Counted per voxel, not weighted by
+/// capacity, because what a root needs is somewhere to breathe and not a volume of it.
+///
+/// A box with no voxels at all is **not** waterlogged: there is no soil there to hold
+/// water, and that stand's problem is `μ`, which already reads an empty box as wilting.
+fn saturated_fraction(view: &VoxelView<'_>, box_: &[usize], sc: &SpeciesConfig) -> f64 {
+    if box_.is_empty() {
+        return 0.0;
+    }
+    let n = box_.iter().filter(|&&i| view.pore[i] >= sc.saturated_pore).count();
+    n as f64 / box_.len() as f64
+}
+
 /// `μ`: a linear ramp of the root box's mean pore fraction between `wilt_pore` and
 /// `sat_pore`. An empty box is a wilting one.
 fn moisture_of(view: &VoxelView<'_>, box_: &[usize], sc: &SpeciesConfig) -> f64 {
@@ -420,6 +439,17 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink]) {
         stands[si].moisture = mu;
         stands[si].water_m3 = drink[si].taken_m3;
 
+        // ---- aeration stress, from the same pre-withdrawal read `μ` came from. It
+        // rises with the saturated fraction of the root box and relaxes with the rest of
+        // it, and it is applied to *this* tick's income: the water was read before
+        // anything was withdrawn, so the stress and the moisture describe one moment.
+        let saturated = drink[si].saturated;
+        let stress = (stands[si].aeration_stress
+            + sc.stress_rate_per_s * DT * saturated
+            - sc.relax_rate_per_s * DT * (1.0 - saturated))
+            .clamp(0.0, 1.0);
+        stands[si].aeration_stress = stress;
+
         // ---- 4.1 potential income, 4.2 demands
         //
         // The mineral cap replaces v1's `.min(n0)`: income is organic matter, and what
@@ -429,7 +459,7 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink]) {
         let n0 = ground[gi].mineral;
         let monod = if n0 + sc.nutrient_half > 0.0 { n0 / (n0 + sc.nutrient_half) } else { 0.0 };
         let mineral_cap = if sc.n_tissue > 0.0 { n0 / sc.n_tissue } else { f64::INFINITY };
-        let a_pot = (sc.assimilation * l_eff * mu * p0 * monod * DT)
+        let a_pot = (sc.assimilation * l_eff * mu * (1.0 - stress) * p0 * monod * DT)
             .min(sc.nutrient_draw_max * n0 * DT)
             .min(mineral_cap)
             .max(0.0);
@@ -715,6 +745,7 @@ fn seed_bank(flora: &mut Flora, world: &World) {
                     moisture: 0.0,
                     water_m3: 0.0,
                     mineral,
+                    aeration_stress: 0.0,
                 },
             );
             ledger.establishments += 1;
@@ -928,8 +959,13 @@ fn commit_propagules(flora: &mut Flora, site: Site, species: Species, offers: &[
     add_cohort(&mut ground[gi], species, net, sent_mineral);
 }
 
-/// The species' establishment predicate: wet enough for its roots, bright enough for
-/// its leaves, and not already under water it cannot stand in.
+/// The species' establishment predicate: wet enough for its roots, **aerated** enough for
+/// them, bright enough for its leaves, and not already under water it cannot stand in.
+///
+/// The aeration bound reads the site's saturated fraction *now*, not a stress that a
+/// cohort has no way to carry. It is the half of correction 2 that makes saturation cost
+/// something on the way in: the intolerant species is shut out of the basin instead of
+/// merely doing badly there, which is what Chesson's test needs to have anywhere to bite.
 fn establishes(
     view: &VoxelView<'_>,
     sky: &mut Vec<(Site, f64)>,
@@ -941,6 +977,9 @@ fn establishes(
         None => return false,
         Some(mean) if mean < sc.establish_pore_min => return false,
         Some(_) => {}
+    }
+    if saturated_fraction(view, &box_, sc) > sc.establish_saturated_max {
+        return false;
     }
     if view.water_depth_m(site.x as i64, site.y, site.z) > sc.drown_depth_m {
         return false;

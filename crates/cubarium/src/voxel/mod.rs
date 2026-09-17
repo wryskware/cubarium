@@ -423,9 +423,9 @@ impl Control {
                 match fv.stand_at(site) {
                     Some(s) => eprintln!(
                         "cubarium voxel:   {} {:?} W {:.4} P {:.4} Q {:.4} mineral {:.5} \
-                         light {:.3} moisture {:.3}",
+                         light {:.3} moisture {:.3} aeration stress {:.3}",
                         s.species.name(), s.stage, s.wood, s.foliage, s.reserve, s.mineral,
-                        s.light, s.moisture,
+                        s.light, s.moisture, s.aeration_stress,
                     ),
                     None => eprintln!("cubarium voxel:   no stand"),
                 }
