@@ -29,7 +29,7 @@
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 use cubarium_voxel_flora::{
-    Command, Flora, FloraConfig, Site, Species, SpeciesConfig, Taken,
+    Command, Deposit, DepositKind, Flora, FloraConfig, Site, Species, SpeciesConfig, Taken,
 };
 
 // ------------------------------------------------------------------- fixtures
@@ -272,6 +272,167 @@ fn dead_wood_and_litter_withdrawals_carry_their_pro_rata_mineral_and_energy() {
     assert!((n - (half.mineral + all.mineral)).abs() <= 1e-18, "consumed mineral {n}");
     assert!((e - (half.energy + all.energy)).abs() <= 1e-18, "consumed energy {e}");
     assert_residuals(&flora, "after two dead-pool withdrawals");
+}
+
+// ---------------------------------------------------------------- 2. deposits
+
+/// A **carrion** deposit conserves its mineral exactly on the way to the site's pool and
+/// respires its organic matter out of the system, which is litter's rule on a pool of its
+/// own and at a rate of its own.
+///
+/// The site has no stand, so nothing draws on the pool while the corpse decomposes and the
+/// mineral can be read straight off the ground: what leaves `carrion_mineral` arrives in
+/// `mineral`, to the last bit, however many ticks it takes.
+#[test]
+fn a_carrion_deposit_conserves_its_mineral_into_the_site_pool_and_respires_its_organic_matter() {
+    let mut world = pillars(8, &[0], 0.6);
+    // Fast enough to read in twenty ticks, and litter decomposition off so that only the
+    // carrion can move anything.
+    let mut config = FloraConfig::default();
+    config.decomposition = 0.0;
+    config.wood_decomposition = 0.0;
+    config.carrion_decomposition = 5.0;
+    let mut flora = Flora::new(config);
+    let site = at(0);
+
+    // The site is bare: the deposit is what provisions its ground, and the lazy
+    // `initial_mineral` is booked as `seeded_mineral_in` exactly as it is for a founder.
+    assert!(flora.view().ground_at(site).is_none());
+    let body = Deposit { kind: DepositKind::Carrion, organic: 0.4, mineral: 0.012, energy: 0.9 };
+    assert!(flora.deposit(site, body), "the deposit was refused");
+    let g0 = flora.view().ground_at(site).expect("the deposit provisions a ground").clone();
+    assert_eq!((g0.carrion, g0.carrion_mineral, g0.carrion_energy), (0.4, 0.012, 0.9));
+    assert_eq!(g0.mineral, flora.config().initial_mineral, "a new site's own pool");
+    let l0 = flora.view().ledger.clone();
+    assert_eq!(
+        (l0.deposited_organic_in, l0.deposited_mineral_in, l0.deposited_energy_in),
+        (0.4, 0.012, 0.9)
+    );
+    assert_eq!(l0.seeded_mineral_in, flora.config().initial_mineral, "provisioning is seeded");
+    assert_residuals(&flora, "after a carrion deposit");
+
+    // The mineral in the ground is conserved to the bit: the pool is the only place the
+    // carrion's mineral can go, and nothing on this site draws on it.
+    let total_mineral = g0.mineral + g0.carrion_mineral;
+    run(&mut flora, &mut world, 20);
+    let g1 = flora.view().ground_at(site).expect("its own ground").clone();
+    let l1 = flora.view().ledger.clone();
+    assert!(g1.carrion < g0.carrion, "the corpse did not decompose at all");
+    assert!(g1.mineral > g0.mineral, "no mineral reached the pool");
+    assert!(
+        (g1.mineral + g1.carrion_mineral - total_mineral).abs() <= 1e-18,
+        "mineral {} + {} is not the {total_mineral} that was there",
+        g1.mineral,
+        g1.carrion_mineral
+    );
+    // Organic matter respired, energy to heat, and the densities of what is left unmoved.
+    assert!(
+        (l1.respired_out - l0.respired_out - (g0.carrion - g1.carrion)).abs() <= 1e-15,
+        "respired {} for {} of carrion gone",
+        l1.respired_out - l0.respired_out,
+        g0.carrion - g1.carrion
+    );
+    assert!(l1.heat_out > l0.heat_out, "no energy left as heat");
+    assert!(
+        (g1.carrion_mineral / g1.carrion - g0.carrion_mineral / g0.carrion).abs() <= 1e-15,
+        "the mineral density of the remains moved"
+    );
+    assert!(
+        (g1.carrion_energy / g1.carrion - g0.carrion_energy / g0.carrion).abs() <= 1e-15,
+        "the energy density of the remains moved"
+    );
+    assert_eq!(l1.deposited_mineral_in, l0.deposited_mineral_in, "decomposition is not a deposit");
+    assert_residuals(&flora, "after a corpse decomposed");
+}
+
+/// A **litter** deposit joins `Ground::litter` through the existing `e_d_max` cap: the
+/// organic matter and the mineral go in whole, the energy only as far as the cap allows,
+/// and the refused energy leaves as heat at once — which is what keeps the energy residual
+/// closed over a deposit the pool cannot hold.
+#[test]
+fn a_litter_deposit_obeys_the_energy_cap_and_the_rest_leaves_as_heat() {
+    let mut config = FloraConfig::default();
+    config.decomposition = 0.0;
+    let cap = config.litter_energy_cap;
+    let mut flora = Flora::new(config);
+    let site = at(0);
+
+    // Twice as much energy as `e_d_max · D` can hold.
+    let dung =
+        Deposit { kind: DepositKind::Litter, organic: 0.2, mineral: 0.004, energy: 2.0 * cap * 0.2 };
+    assert!(flora.deposit(site, dung));
+    let g = flora.view().ground_at(site).expect("provisioned").clone();
+    let l = flora.view().ledger.clone();
+    assert_eq!(g.litter, 0.2);
+    assert_eq!(g.litter_mineral, 0.004, "mineral is never capped: it has nowhere else to be");
+    assert!((g.litter_energy - cap * 0.2).abs() <= 1e-18, "litter kept {}", g.litter_energy);
+    assert!(
+        (l.heat_out - cap * 0.2).abs() <= 1e-18,
+        "the refused half did not leave as heat: {}",
+        l.heat_out
+    );
+    assert_eq!(l.deposited_energy_in, 2.0 * cap * 0.2, "all of it was booked in");
+    assert_eq!(g.carrion, 0.0, "a litter deposit is not carrion");
+    assert_residuals(&flora, "after a capped litter deposit");
+}
+
+/// A deposit of nothing, and a deposit of nonsense, are refused and book nothing — in
+/// particular they do not provision a ground and import its `initial_mineral`.
+#[test]
+fn a_deposit_of_nothing_or_of_nonsense_is_refused_and_books_nothing() {
+    // No world at all: `deposit` reads none, which is the other half of its contract —
+    // the site is a place in the layer's own ground, and an unsupported one is booked out
+    // by step 1 of the next tick like any other.
+    let mut flora = Flora::new(FloraConfig::default());
+    let site = at(0);
+
+    for bad in [
+        Deposit { kind: DepositKind::Carrion, organic: 0.0, mineral: 0.0, energy: 0.0 },
+        Deposit { kind: DepositKind::Litter, organic: 0.0, mineral: 0.0, energy: 0.0 },
+        Deposit { kind: DepositKind::Carrion, organic: -1.0, mineral: 0.0, energy: 0.0 },
+        Deposit { kind: DepositKind::Carrion, organic: f64::NAN, mineral: 0.0, energy: 0.0 },
+        Deposit { kind: DepositKind::Litter, organic: 1.0, mineral: f64::INFINITY, energy: 0.0 },
+    ] {
+        assert!(!flora.deposit(site, bad), "{bad:?} was accepted");
+    }
+    assert!(flora.view().ground_at(site).is_none(), "a refused deposit provisioned a ground");
+    let l = flora.view().ledger.clone();
+    assert_eq!(
+        (l.deposited_organic_in, l.deposited_mineral_in, l.deposited_energy_in, l.seeded_mineral_in),
+        (0.0, 0.0, 0.0, 0.0)
+    );
+    assert_residuals(&flora, "after five refused deposits");
+}
+
+/// The phase order, as one fixture: a deposit made between ticks is in the **next** tick's
+/// decomposition snapshot, and one made during the inter-tick after that is in the one
+/// after. Nothing decomposes on the tick it was deposited, because the snapshot is taken
+/// before anything moves.
+#[test]
+fn a_deposit_decomposes_from_the_tick_after_the_inter_tick_it_arrived_in() {
+    let mut world = pillars(8, &[0], 0.6);
+    let mut config = FloraConfig::default();
+    config.decomposition = 0.0;
+    config.wood_decomposition = 0.0;
+    // Half the pool per tick, so one tick of eligibility is unmistakable.
+    config.carrion_decomposition = 10.0;
+    let mut flora = Flora::new(config);
+    let site = at(0);
+
+    assert!(flora.deposit(
+        site,
+        Deposit { kind: DepositKind::Carrion, organic: 1.0, mineral: 0.02, energy: 2.0 }
+    ));
+    let before = flora.view().ground_at(site).expect("provisioned").carrion;
+    assert_eq!(before, 1.0, "the deposit is whole before any tick runs");
+
+    flora.step(&mut world);
+    let after_one = flora.view().ground_at(site).expect("its own ground").carrion;
+    assert!(
+        (after_one - 0.5).abs() <= 1e-15,
+        "one tick of a 10 /s rate on a 1.0 snapshot should leave 0.5, not {after_one}"
+    );
+    assert_residuals(&flora, "one tick after a deposit");
 }
 
 // ----------------------------------------------------- 4. the producer response

@@ -315,6 +315,24 @@ pub struct Ground {
     /// as `e_v · dead_wood` because two species with different `energy_density` can
     /// leave dead wood on one site and `Ground` has no species.
     pub dead_wood_energy: f64,
+    /// `C`: **carrion** — organic matter a consumer deposited here, a corpse or a part of
+    /// one ([`Flora::deposit`] with [`DepositKind::Carrion`]). Its own pool and not litter,
+    /// because it decomposes at its own rate ([`FloraConfig::carrion_decomposition`]) and
+    /// because a picture will want to draw remains as remains.
+    ///
+    /// No plant ever creates it: dead plant tissue is litter and dead wood, as it was. This
+    /// pool exists so that a consumer layer has somewhere to put a body, and it is emptied
+    /// by the same `decompose` phase on the same two flows — organic matter respired out of
+    /// the system, mineral released to `mineral` at the stock's own fraction.
+    pub carrion: f64,
+    /// The mineral held in the carrion, released to `mineral` as it decomposes.
+    pub carrion_mineral: f64,
+    /// Energy in the carrion, as the depositing consumer handed it over. Held and released
+    /// as heat at the stock's current density as the carrion decomposes — dead wood's rule,
+    /// and **not** litter's: there is no `e_d_max` cap on this pool, because a deposit's
+    /// energy comes from a consumer's own books rather than from a species'
+    /// `energy_density`, and a cap here would be a second knob with nothing measuring it.
+    pub carrion_energy: f64,
 }
 
 impl Ground {
@@ -330,6 +348,9 @@ impl Ground {
             dead_wood: 0.0,
             dead_wood_mineral: 0.0,
             dead_wood_energy: 0.0,
+            carrion: 0.0,
+            carrion_mineral: 0.0,
+            carrion_energy: 0.0,
         }
     }
 
@@ -1030,6 +1051,13 @@ pub struct FloraConfig {
     pub decomposition: f64,
     /// `k_w`: dead-wood decomposition per second, the same two flows, slow.
     pub wood_decomposition: f64,
+    /// `k_c`: **carrion** decomposition per second ([`Ground::carrion`]), the same two
+    /// flows. **A placeholder, and nothing has measured it**
+    /// (`design/backlog.md` §1): 0.005 /s is five times `decomposition`, which is the only
+    /// thing it claims — a corpse goes faster than a leaf, an e-folding in 200 s against
+    /// litter's 1,000 s and dead wood's 10,000 s. It is not tuned and no result in this
+    /// round depends on its value.
+    pub carrion_decomposition: f64,
     /// `e_d_max`: retained energy cap per unit of litter.
     pub litter_energy_cap: f64,
     /// Mineral a site starts with the first time anything lands on it. Booked as
@@ -1059,6 +1087,7 @@ impl Default for FloraConfig {
             shade_k: 1.5,
             decomposition: 0.001,
             wood_decomposition: 0.0001,
+            carrion_decomposition: 0.005,
             litter_energy_cap: 2.0,
             initial_mineral: 1.0,
         }
@@ -1088,6 +1117,7 @@ impl FloraConfig {
             ("shade_k", self.shade_k),
             ("decomposition", self.decomposition),
             ("wood_decomposition", self.wood_decomposition),
+            ("carrion_decomposition", self.carrion_decomposition),
             ("litter_energy_cap", self.litter_energy_cap),
             ("initial_mineral", self.initial_mineral),
         ] {
@@ -1144,6 +1174,19 @@ pub struct FloraLedger {
     pub consumed_organic_out: f64,
     pub consumed_mineral_out: f64,
     pub consumed_energy_out: f64,
+    /// The same boundary, **entering**: what [`Flora::deposit`] put back as carrion or as
+    /// litter — a consumer's corpse, or its droppings. Not `seeded_*`, which is material
+    /// this layer created out of nothing for a founder or for a new site's pool: a deposit
+    /// is material a consumer is handing over, and the consumer's own books are where it
+    /// came from. A consumer layer's outflow and this inflow are the same transfer seen
+    /// from the two sides, so the two ledgers close together.
+    ///
+    /// A site's lazy `initial_mineral` is **not** in here even when a deposit is what first
+    /// provisioned the site: that is `seeded_mineral_in`, as it is for a founder and a
+    /// landed package.
+    pub deposited_organic_in: f64,
+    pub deposited_mineral_in: f64,
+    pub deposited_energy_in: f64,
     /// Water withdrawn through `Command::WithdrawPore`, cubic metres, for cross-checking
     /// against the core ledger's `transpiration_out`.
     pub transpired_m3: f64,
@@ -1174,18 +1217,20 @@ pub struct FloraLedger {
 
 impl FloraLedger {
     pub fn expected_organic(&self) -> f64 {
-        self.seeded_organic_in + self.fixed_in
+        self.seeded_organic_in + self.fixed_in + self.deposited_organic_in
             - self.respired_out
             - self.removed_organic_out
             - self.consumed_organic_out
     }
 
     pub fn expected_mineral(&self) -> f64 {
-        self.seeded_mineral_in - self.removed_mineral_out - self.consumed_mineral_out
+        self.seeded_mineral_in + self.deposited_mineral_in
+            - self.removed_mineral_out
+            - self.consumed_mineral_out
     }
 
     pub fn expected_energy(&self) -> f64 {
-        self.seeded_energy_in + self.light_in
+        self.seeded_energy_in + self.light_in + self.deposited_energy_in
             - self.heat_out
             - self.removed_energy_out
             - self.consumed_energy_out
@@ -1242,7 +1287,10 @@ impl<'a> FloraView<'a> {
                 .ground
                 .iter()
                 .map(|g| {
-                    g.litter + g.dead_wood + g.seeds.iter().map(|c| c.organic).sum::<f64>()
+                    g.litter
+                        + g.dead_wood
+                        + g.carrion
+                        + g.seeds.iter().map(|c| c.organic).sum::<f64>()
                 })
                 .sum::<f64>()
     }
@@ -1258,6 +1306,7 @@ impl<'a> FloraView<'a> {
                     g.mineral
                         + g.litter_mineral
                         + g.dead_wood_mineral
+                        + g.carrion_mineral
                         + g.seeds.iter().map(|c| c.mineral).sum::<f64>()
                 })
                 .sum::<f64>()
@@ -1275,6 +1324,7 @@ impl<'a> FloraView<'a> {
                 .map(|g| {
                     g.litter_energy
                         + g.dead_wood_energy
+                        + g.carrion_energy
                         + g.seeds
                             .iter()
                             .map(|c| self.config.species(c.species).energy_density * c.organic)
@@ -1295,6 +1345,35 @@ pub enum Command {
     /// Remove the stand on the highest support face of column `(x, z)`, booking its
     /// material and energy as removed. Refused if there is none.
     Clear { x: i64, z: u32 },
+}
+
+/// Which of a site's dead pools a [`Deposit`] joins. Two, because a consumer has two
+/// things to leave behind: a body, and what passed through it.
+///
+/// Dung is **litter** this round and not a pool of its own, which is a simplification
+/// stated as one: droppings and shed leaves decompose at one rate here, and a separate
+/// dung pool with its own rate is a later contract question, not a missing line of code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DepositKind {
+    /// [`Ground::carrion`]: a corpse, on its own pool at its own rate.
+    Carrion,
+    /// [`Ground::litter`], through the same `e_d_max` cap plant litter goes through.
+    Litter,
+}
+
+/// Material a consumer hands back to the plant layer at one site: a corpse, or droppings.
+///
+/// The three currencies are given explicitly and none of them is derived from the other
+/// two — there is no species here and no `energy_density` to read, because the consumer
+/// that is depositing knows what its own body held. A deposit is the mirror of a
+/// [`Taken`], and a consumer that deposits exactly what it took moves material without
+/// creating any.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Deposit {
+    pub kind: DepositKind,
+    pub organic: f64,
+    pub mineral: f64,
+    pub energy: f64,
 }
 
 /// The plant layer. Owns its stands and ground stocks; borrows the world per call.
@@ -1483,6 +1562,74 @@ impl Flora {
         let g = &mut self.ground[i];
         let taken = take_pool(&mut g.litter, &mut g.litter_mineral, &mut g.litter_energy, want)?;
         Some(self.book_consumed(taken))
+    }
+
+    /// A consumer puts material **back** on `site`: a corpse into the carrion pool, or
+    /// droppings into the litter pool. Returns whether it was accepted.
+    ///
+    /// Refused — booking nothing — when any of the three numbers is not finite or is
+    /// negative, and when all three are zero: a deposit of nothing is not a deposit, and
+    /// accepting one would provision a `Ground` (and import its `initial_mineral`) for no
+    /// material at all.
+    ///
+    /// A deposit on a site with no [`Ground`] provisions one, and the lazy
+    /// `initial_mineral` rule applies and is booked as `seeded_mineral_in` exactly as it
+    /// is for a founder or a landed package. Nothing here reads the world, so a deposit on
+    /// a site that is no longer a support face is accepted and then **booked out** as
+    /// `removed_*` by step 1 of the next tick, like any other stock on a site the terrain
+    /// took away.
+    ///
+    /// # Where this sits in the tick
+    ///
+    /// Applied **between** ticks, like a [`Command`] and like the withdrawals. `step`
+    /// takes its decomposition snapshot as the very first thing it does, so material
+    /// deposited between tick `t` and tick `t + 1` is in the snapshot of tick `t + 1` and
+    /// decomposes in it — "a tick's decomposition sees the previous inter-tick's deposits",
+    /// which is the tick-start snapshot rule (`step`'s module doc, step 7) and not a new
+    /// one. A carrion deposit therefore starts respiring on the next tick, and a litter
+    /// deposit does too, exactly as this tick's own senescence would.
+    pub fn deposit(&mut self, site: Site, deposit: Deposit) -> bool {
+        let Deposit { kind, organic, mineral, energy } = deposit;
+        for v in [organic, mineral, energy] {
+            if !v.is_finite() || v < 0.0 {
+                return false;
+            }
+        }
+        if organic <= 0.0 && mineral <= 0.0 && energy <= 0.0 {
+            return false;
+        }
+        let gi = match self.ground.binary_search_by_key(&site, |g| g.site) {
+            Ok(i) => i,
+            Err(i) => {
+                self.ledger.seeded_mineral_in += self.config.initial_mineral;
+                self.ground.insert(i, Ground::new(site, self.config.initial_mineral));
+                i
+            }
+        };
+        self.ledger.deposited_organic_in += organic;
+        self.ledger.deposited_mineral_in += mineral;
+        self.ledger.deposited_energy_in += energy;
+        match kind {
+            DepositKind::Carrion => {
+                let g = &mut self.ground[gi];
+                g.carrion += organic;
+                g.carrion_mineral += mineral;
+                g.carrion_energy += energy;
+            }
+            // The existing cap rule, with the existing consequence: energy over
+            // `e_d_max · D` cannot be held by litter and leaves as heat at once, which the
+            // `deposited_energy_in` above has already booked in, so the energy residual
+            // holds whatever the cap refuses.
+            DepositKind::Litter => step::add_litter_cap(
+                self.config.litter_energy_cap,
+                &mut self.ground[gi],
+                organic,
+                mineral,
+                energy,
+                &mut self.ledger,
+            ),
+        }
+        true
     }
 
     /// One withdrawal on the boundary: the three named `consumed_*` flows, and the same

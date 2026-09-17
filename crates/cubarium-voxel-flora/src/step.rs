@@ -21,10 +21,10 @@
 //!    senescence, §4.6 dieback, §4.7 death. These three subphases are purely local once
 //!    light and water are in hand, so running them per stand in one pass is the same
 //!    arithmetic as three passes over every stand.
-//! 7. **Decomposition** (§5), on the stocks the site held *before* this tick: litter and
-//!    dead wood respire their organic matter out of the system and release their mineral
-//!    to the site's pool at the same fraction; litter's energy leaves as heat at its
-//!    current density.
+//! 7. **Decomposition** (§5), on the stocks the site held *before* this tick: litter,
+//!    dead wood and carrion respire their organic matter out of the system and release
+//!    their mineral to the site's pool at the same fraction; each pool's energy leaves as
+//!    heat at its own current density.
 //! 8. **The seed bank.** Every site with no stand holds a local lottery among the species
 //!    whose bank there holds at least one whole package and which pass that species'
 //!    establishment predicate, weighted by the packages each holds; the winner spends
@@ -42,6 +42,17 @@
 //!
 //! Dropped from v1 by the brief: fruit (3c), downhill transport of litter (3f) and
 //! nutrient diffusion (3g).
+//!
+//! # Transfers, which happen between ticks
+//!
+//! A consumer's withdrawals and deposits ([`crate::Flora::take_foliage`] and friends,
+//! [`crate::Flora::deposit`]) are **not** phases of this tick: they are applied between
+//! ticks, like [`crate::Command`]s. The snapshot in step 7 is taken as the first thing
+//! `step` does, so material deposited during the inter-tick before this one is in the
+//! snapshot and decomposes in this tick, while anything this tick's own senescence,
+//! dieback or death deposits waits for the next — one rule, and the same one for a plant
+//! and for a corpse. A withdrawal has no phase at all: it lowers the stock it reads, and
+//! the next tick's income and decomposition simply see less of it.
 //!
 //! Dead wood keeps its energy, per §5: `e_v` per unit of it goes into
 //! `Ground::dead_wood_energy` when the wood diebacks or the stand dies, and leaves as
@@ -132,11 +143,16 @@ pub(crate) fn step(flora: &mut Flora, world: &mut World) {
     // in is zero rather than minus one.
     flora.tick += 1;
     // The stocks decomposition is allowed to draw on: what each site held when the tick
-    // started, taken before anything at all moves. Litter and dead wood deposited by
-    // this tick's drownings, senescence and deaths are eligible from the next tick, per
-    // §5. Sites this tick removes are simply never looked up again.
-    let pre: Vec<(Site, f64, f64)> =
-        flora.ground.iter().map(|g| (g.site, g.litter, g.dead_wood)).collect();
+    // started, taken before anything at all moves. Litter, dead wood and carrion deposited
+    // by this tick's drownings, senescence and deaths are eligible from the next tick, per
+    // §5; a consumer's deposit from the previous inter-tick is in here, because the
+    // snapshot is taken before the tick and the deposit happened before that. Sites this
+    // tick removes are simply never looked up again.
+    let pre: Vec<Pre> = flora
+        .ground
+        .iter()
+        .map(|g| Pre { site: g.site, litter: g.litter, dead_wood: g.dead_wood, carrion: g.carrion })
+        .collect();
 
     prune_unsupported(flora, world);
     refresh_sky_cache(flora, world);
@@ -710,7 +726,10 @@ fn add_litter(
 /// Litter takes the organic matter, the mineral that was in it, and as much of its energy
 /// as `e_d_max · D` leaves room for; the rest of the energy is respired. The mineral is
 /// never capped: it has nowhere else to be.
-fn add_litter_cap(
+///
+/// `pub(crate)` because a **litter deposit** ([`crate::Flora::deposit`]) is the same
+/// transfer into the same pool under the same cap: one rule, one function.
+pub(crate) fn add_litter_cap(
     cap: f64,
     g: &mut Ground,
     organic: f64,
@@ -751,42 +770,79 @@ fn ground_slot(ground: &mut Vec<Ground>, site: Site) -> usize {
 /// is conserved exactly and a decomposing stock's mineral density never moves. Energy
 /// leaves at the stock's current density for the same reason, which is what lets the
 /// `e_d_max` cap survive without a re-clamp.
-fn decompose(flora: &mut Flora, pre: &[(Site, f64, f64)]) {
+fn decompose(flora: &mut Flora, pre: &[Pre]) {
     let Flora { config, ground, ledger, .. } = flora;
     for g in ground.iter_mut() {
         // A site the tick created has nothing eligible yet.
-        let (litter0, wood0) = match pre.binary_search_by_key(&g.site, |e| e.0) {
-            Ok(i) => (pre[i].1, pre[i].2),
-            Err(_) => continue,
-        };
-        let dec = (config.decomposition * DT * litter0).min(g.litter).max(0.0);
-        if dec > 0.0 && g.litter > 0.0 {
-            // Energy and mineral both leave at the stock's current density, so neither
-            // density moves and the `e_d_max` cap needs no re-clamp. Never 0/0: guarded
-            // above.
-            let f = dec / g.litter;
-            let out = g.litter_energy * f;
-            g.litter_energy -= out;
-            ledger.heat_out += out;
-            let mineral = (g.litter_mineral * f).min(g.litter_mineral);
-            g.litter_mineral -= mineral;
-            g.mineral += mineral;
-            g.litter -= dec;
-            ledger.respired_out += dec;
-        }
-        let dec_w = (config.wood_decomposition * DT * wood0).min(g.dead_wood).max(0.0);
-        if dec_w > 0.0 && g.dead_wood > 0.0 {
-            let f = dec_w / g.dead_wood;
-            let out = g.dead_wood_energy * f;
-            g.dead_wood_energy -= out;
-            ledger.heat_out += out;
-            let mineral = (g.dead_wood_mineral * f).min(g.dead_wood_mineral);
-            g.dead_wood_mineral -= mineral;
-            g.mineral += mineral;
-            g.dead_wood -= dec_w;
-            ledger.respired_out += dec_w;
-        }
+        let Ok(i) = pre.binary_search_by_key(&g.site, |e| e.site) else { continue };
+        let (litter0, wood0, carrion0) = (pre[i].litter, pre[i].dead_wood, pre[i].carrion);
+        decompose_pool(
+            &mut g.litter,
+            &mut g.litter_mineral,
+            &mut g.litter_energy,
+            &mut g.mineral,
+            config.decomposition,
+            litter0,
+            ledger,
+        );
+        decompose_pool(
+            &mut g.dead_wood,
+            &mut g.dead_wood_mineral,
+            &mut g.dead_wood_energy,
+            &mut g.mineral,
+            config.wood_decomposition,
+            wood0,
+            ledger,
+        );
+        // Carrion, at its own rate, on exactly the two flows the other two pools use: a
+        // corpse is not a special case of the ledger, only of the clock.
+        decompose_pool(
+            &mut g.carrion,
+            &mut g.carrion_mineral,
+            &mut g.carrion_energy,
+            &mut g.mineral,
+            config.carrion_decomposition,
+            carrion0,
+            ledger,
+        );
     }
+}
+
+/// What one site held when this tick started: the stocks [`decompose`] may draw on.
+struct Pre {
+    site: Site,
+    litter: f64,
+    dead_wood: f64,
+    carrion: f64,
+}
+
+/// One dead pool's tick of decomposition: `rate · dt` of the **tick-start** stock `stock0`,
+/// capped by what the pool holds now, respired out of the system, with the mineral released
+/// into `pool` and the energy leaving as heat **both at the stock's current density** — so
+/// neither density moves, mineral is conserved exactly, and litter's `e_d_max` cap needs no
+/// re-clamp. Never `0/0`: the guard is the `min` above the division.
+fn decompose_pool(
+    organic: &mut f64,
+    mineral: &mut f64,
+    energy: &mut f64,
+    pool: &mut f64,
+    rate: f64,
+    stock0: f64,
+    ledger: &mut FloraLedger,
+) {
+    let dec = (rate * DT * stock0).min(*organic).max(0.0);
+    if !(dec > 0.0) || !(*organic > 0.0) {
+        return;
+    }
+    let f = dec / *organic;
+    let out = *energy * f;
+    *energy -= out;
+    ledger.heat_out += out;
+    let released = (*mineral * f).min(*mineral);
+    *mineral -= released;
+    *pool += released;
+    *organic -= dec;
+    ledger.respired_out += dec;
 }
 
 // ----------------------------------------------------------------- 8. seed bank
