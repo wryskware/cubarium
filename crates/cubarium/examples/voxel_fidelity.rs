@@ -60,6 +60,10 @@ struct Args {
     /// Print this many of the worst-differing pixels per scene, with their coordinates
     /// and the voxel column they fall in. How a difference gets diagnosed.
     worst: usize,
+    /// Time both renderers over this many frames of the authored scene instead of
+    /// comparing anything. The run loop caps at `clock::MAX_FPS`, so a run's reported
+    /// fps cannot separate two renderers that both clear it; this can.
+    bench: usize,
 }
 
 fn parse() -> Result<Args> {
@@ -69,6 +73,7 @@ fn parse() -> Result<Args> {
         seconds: 60.0,
         roof_walk: false,
         worst: 0,
+        bench: 0,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -78,6 +83,7 @@ fn parse() -> Result<Args> {
             "--seconds" => a.seconds = it.next().context("--seconds N")?.parse()?,
             "--roof-walk" => a.roof_walk = true,
             "--worst" => a.worst = it.next().context("--worst N")?.parse()?,
+            "--bench" => a.bench = it.next().context("--bench N")?.parse()?,
             other => bail!("unknown flag {other}"),
         }
     }
@@ -117,6 +123,9 @@ fn main() -> Result<()> {
         }
     };
 
+    if args.bench > 0 {
+        return bench(&args, &cfg, proj, &world_cfg, &mut gpu);
+    }
     let ticks = (args.seconds * f64::from(TICK_HZ)).round() as u64;
     let mut worst = 0u8;
     for (name, rained) in [("authored", false), ("authored-rained", true)] {
@@ -166,6 +175,63 @@ fn build(cfg: &Config, authored: bool, ticks: Option<u64>) -> (World, Flora) {
         }
     }
     (world, flora)
+}
+
+/// Time both renderers on the authored scene, one frame at a time, with no readback.
+///
+/// The CPU number is `VoxelPresenter::draw` plus `Canvas::encode_raster` — what a frame
+/// of `--sink web` or `--sink png` pays before the sink sees a pixel. The GPU number is
+/// `stage_world` once and then `render` per frame through the headless target, which is
+/// record, submit and wait on the fence: the whole cost of a frame, not just the shader.
+fn bench(
+    args: &Args,
+    cfg: &VoxelConfig,
+    proj: Projection,
+    world_cfg: &Config,
+    gpu: &mut VoxelGpuSink,
+) -> Result<()> {
+    let (world, flora) = build(world_cfg, true, None);
+    let n = args.bench;
+    let topology = Topology::Ring { w: proj.raster_w, h: proj.raster_h };
+    let mut canvas = Canvas::new(topology, Scale::ONE);
+    let mut raster = cube_proto::Raster::black(proj.raster_w, proj.raster_h);
+    let mut presenter = VoxelPresenter::new(cfg.clone(), proj);
+    // One of each first, so neither number is paying for a cold cache or a first pass.
+    presenter.draw(&world.view(), flora.view(), &mut canvas);
+    gpu.stage_world(&world, &flora);
+    gpu.render()?;
+
+    let at = std::time::Instant::now();
+    for _ in 0..n {
+        presenter.draw(&world.view(), flora.view(), &mut canvas);
+        canvas.encode_raster(&mut raster);
+    }
+    let cpu_ms = at.elapsed().as_secs_f64() * 1e3 / n as f64;
+
+    let at = std::time::Instant::now();
+    for _ in 0..n {
+        gpu.render()?;
+    }
+    let gpu_ms = at.elapsed().as_secs_f64() * 1e3 / n as f64;
+
+    let at = std::time::Instant::now();
+    for _ in 0..n {
+        gpu.stage_world(&world, &flora);
+    }
+    let pack_ms = at.elapsed().as_secs_f64() * 1e3 / n as f64;
+
+    let p = gpu.params();
+    println!(
+        "bench over {n} frames at {}x{} ({} px/voxel, depth step {}):",
+        p.raster_w, p.raster_h, p.s, p.rise
+    );
+    println!("  CPU presenter draw + encode {cpu_ms:.3} ms/frame ({:.0} fps)", 1e3 / cpu_ms);
+    println!("  GPU record + submit + fence {gpu_ms:.3} ms/frame ({:.0} fps)", 1e3 / gpu_ms);
+    println!(
+        "  CPU pack of one tick        {pack_ms:.3} ms, {:.0} KiB uploaded",
+        p.upload_bytes() as f64 / 1024.0
+    );
+    Ok(())
 }
 
 /// A hand-built strip for the two rules neither the fixture nor the generator draws.
