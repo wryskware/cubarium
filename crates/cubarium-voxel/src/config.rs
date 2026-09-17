@@ -1,3 +1,4 @@
+use anyhow::{Context, ensure};
 use serde::{Deserialize, Serialize};
 
 /// Everything a world is generated and stepped from. Physical units: metres and
@@ -55,7 +56,45 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Number of voxels.
+    /// Refuse a config no world can be built from: zero dimensions, a cell count that
+    /// does not fit a `usize`, a voxel size or aquifer porosity that is not positive and
+    /// finite, a rate that is negative or not finite, or fewer than one water substep.
+    ///
+    /// [`crate::World::new`] and [`crate::World::empty`] panic on a failure — building a
+    /// world from nonsense is a programming error — and [`crate::World::load`] returns
+    /// it, because a snapshot is input. Everything past this point may divide by a
+    /// dimension and index with [`Config::index`] without checking again.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        ensure!(
+            self.width > 0 && self.height > 0 && self.depth > 0,
+            "a voxel world needs nonzero dimensions, not {}x{}x{}",
+            self.width,
+            self.height,
+            self.depth
+        );
+        (self.width as usize)
+            .checked_mul(self.height as usize)
+            .and_then(|n| n.checked_mul(self.depth as usize))
+            .with_context(|| {
+                format!("{}x{}x{} voxels overflows a cell count", self.width, self.height, self.depth)
+            })?;
+        for (name, value) in [("voxel_m", self.voxel_m), ("aquifer_porosity", self.aquifer_porosity)] {
+            ensure!(value.is_finite() && value > 0.0, "{name} must be positive and finite, not {value}");
+        }
+        for (name, rate) in [
+            ("rain_m_per_s", self.rain_m_per_s),
+            ("evaporation_m_per_s", self.evaporation_m_per_s),
+            ("spring_k_m2_per_s", self.spring_k_m2_per_s),
+            ("outlet_m3_per_s", self.outlet_m3_per_s),
+            ("free_transfer_cap", self.free_transfer_cap),
+        ] {
+            ensure!(rate.is_finite() && rate >= 0.0, "{name} must be finite and not negative, not {rate}");
+        }
+        ensure!(self.water_substeps >= 1, "water_substeps must be at least 1, not 0");
+        Ok(())
+    }
+
+    /// Number of voxels. Valid configs cannot overflow it; see [`Config::validate`].
     pub fn cells(&self) -> usize {
         self.width as usize * self.height as usize * self.depth as usize
     }

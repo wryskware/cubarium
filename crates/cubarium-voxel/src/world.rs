@@ -1,3 +1,4 @@
+use anyhow::{bail, ensure};
 use serde::{Deserialize, Serialize};
 
 use crate::{Config, Ledger, Material};
@@ -104,8 +105,10 @@ pub struct World {
 }
 
 impl World {
-    /// Generate a world from its config. Deterministic in `config.seed`.
+    /// Generate a world from its config. Deterministic in `config.seed`. Panics on a
+    /// config [`Config::validate`] refuses.
     pub fn new(config: Config) -> World {
+        config.validate().expect("World::new needs a valid Config");
         let n = config.cells();
         let mut world = World {
             material: vec![Material::Air; n],
@@ -125,8 +128,9 @@ impl World {
     }
 
     /// An all-air world over one bedrock floor row: the fixture builder for tests and
-    /// hand-authored scenes.
+    /// hand-authored scenes. Panics on a config [`Config::validate`] refuses.
     pub fn empty(config: Config) -> World {
+        config.validate().expect("World::empty needs a valid Config");
         let n = config.cells();
         let mut material = vec![Material::Air; n];
         for x in 0..config.width as i64 {
@@ -221,7 +225,61 @@ impl World {
         crate::snapshot::encode(self)
     }
 
+    /// Read a world back. Refuses another schema tag, corrupt bytes, and anything
+    /// [`World::validate_loaded`] finds wrong with the world itself.
     pub fn load(bytes: &[u8]) -> anyhow::Result<World> {
         crate::snapshot::decode(bytes)
+    }
+
+    /// What a loaded world has to satisfy before it may replace a running one: a valid
+    /// config, one entry per cell in each array, every fraction a real number in
+    /// `0..=1`, a finite non-negative aquifer and finite ledger terms, and outlet and
+    /// spring cells inside the world.
+    pub(crate) fn validate_loaded(&self) -> anyhow::Result<()> {
+        self.config.validate()?;
+        let n = self.config.cells();
+        for (name, len) in
+            [("material", self.material.len()), ("free", self.free.len()), ("pore", self.pore.len())]
+        {
+            ensure!(len == n, "{name} has {len} entries, not one per cell ({n})");
+        }
+        for (name, store) in [("free", &self.free), ("pore", &self.pore)] {
+            if let Some((i, bad)) =
+                store.iter().copied().enumerate().find(|&(_, f)| !(0.0..=1.0).contains(&f))
+            {
+                bail!("{name}[{i}] is {bad}, not a fraction in 0..=1");
+            }
+        }
+        ensure!(
+            self.aquifer_m3.is_finite() && self.aquifer_m3 >= 0.0,
+            "the aquifer store is {}, not a volume",
+            self.aquifer_m3
+        );
+        ensure!(
+            self.ledger.initial_stored.is_finite() && self.ledger.initial_stored >= 0.0,
+            "initial_stored is {}, not a volume",
+            self.ledger.initial_stored
+        );
+        for (name, flux) in [
+            ("rain_in", self.ledger.rain_in),
+            ("user_in", self.ledger.user_in),
+            ("evaporation_out", self.ledger.evaporation_out),
+            ("outlet_out", self.ledger.outlet_out),
+            ("displaced_out", self.ledger.displaced_out),
+        ] {
+            ensure!(flux.is_finite(), "the ledger's {name} is {flux}");
+        }
+        for (name, cell) in [("outlet", self.outlet_cell), ("spring", self.spring_cell)] {
+            if let Some((x, y, z)) = cell {
+                ensure!(
+                    x < self.config.width && y < self.config.height && z < self.config.depth,
+                    "the {name} cell ({x}, {y}, {z}) is outside a {}x{}x{} world",
+                    self.config.width,
+                    self.config.height,
+                    self.config.depth
+                );
+            }
+        }
+        Ok(())
     }
 }

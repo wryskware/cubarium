@@ -25,5 +25,31 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<World> {
         bail!("voxel snapshot schema {tag} is not {SCHEMA}; start a fresh world");
     }
     let env: Envelope = postcard::from_bytes(bytes).context("corrupt voxel world snapshot")?;
+    env.world.validate_loaded().context("invalid voxel world snapshot")?;
     Ok(env.world)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Config, World};
+
+    fn fixture() -> World {
+        World::empty(Config { width: 4, height: 4, depth: 1, ..Config::default() })
+    }
+
+    #[test]
+    fn a_zero_width_config_is_refused() {
+        let mut world = fixture();
+        world.config.width = 0;
+        let err = World::load(&world.save()).expect_err("a zero-width world is not a world");
+        assert!(format!("{err:#}").contains("dimensions"), "{err:#}");
+    }
+
+    #[test]
+    fn a_truncated_array_is_refused() {
+        let mut world = fixture();
+        world.free.truncate(3);
+        let err = World::load(&world.save()).expect_err("a short store is not a world");
+        assert!(format!("{err:#}").contains("free has 3 entries"), "{err:#}");
+    }
 }
