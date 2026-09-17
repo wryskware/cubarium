@@ -661,7 +661,12 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink]) {
 /// `n_tissue · O`, because respiration leaves mineral behind, so a transfer of a
 /// fraction of the organic matter has to take the same fraction of the mineral.
 /// `before` is the stand's organic matter *including* `moved`.
-fn pull_mineral(stand: &mut Stand, before: f64, moved: f64) -> f64 {
+///
+/// `pub(crate)` because a **withdrawal** out of a stand's foliage is the same transfer
+/// ([`crate::Flora::take_foliage`]): a consumer taking a fifth of a stand's material takes
+/// a fifth of its mineral, exactly as senescence and a leaving propagule package do. One
+/// rule, one function.
+pub(crate) fn pull_mineral(stand: &mut Stand, before: f64, moved: f64) -> f64 {
     if moved <= 0.0 || before <= 0.0 || stand.mineral <= 0.0 {
         return 0.0;
     }

@@ -20,6 +20,28 @@
 //! paid maintenance and growth, dieback, death, paid propagules) with light from
 //! geometry and water from the simulation instead of noise fields. See
 //! `design/voxel-ecology-sketch-2026-09-16.md` §2 and §4.
+//!
+//! # Transfers to a consumer layer, and the producer response (round 5a)
+//!
+//! A consumer eats through three **bounded withdrawals** and puts material back through one
+//! **deposit**, all applied between ticks the way [`Command`]s are:
+//! [`Flora::take_foliage`], [`Flora::take_dead_wood`], [`Flora::take_litter`] and
+//! [`Flora::deposit`], with [`FloraView::reachable_foliage`] as the geometry of what a
+//! ground browser can actually get at. Each of them is a named boundary flow of the ledger
+//! ([`FloraLedger::consumed_organic_out`] and [`FloraLedger::deposited_organic_in`] and
+//! their mineral and energy siblings), so the three residuals hold to the bit with a
+//! consumer present. There is no animal body here, no movement, no population and no
+//! carrying capacity: this layer says only what may be taken and what a deposit becomes.
+//!
+//! **The producer response needs no new rule, and none was added.** A grazed stand's
+//! foliage drops; its income drops with it, because income is
+//! `assimilation · L_eff · μ · (1 − stress) · P · monod` and `P` is exactly what was taken;
+//! and the foliage comes back through the `foliage_rate` growth and the
+//! reflush-from-reserve rules that were already there. A stand grazed faster than it can
+//! reflush pays the difference out of its reserve, and one held at zero foliage fixes
+//! nothing at all and lives on reserve until dieback. "Recovery" is therefore a
+//! **measurement** of those rules (`design/7_Research/voxel-round3-experiment-2026-09-16.md`,
+//! "Round 5a") and not a mechanic of its own.
 
 #![forbid(unsafe_code)]
 
@@ -1110,6 +1132,18 @@ pub struct FloraLedger {
     pub removed_organic_out: f64,
     pub removed_mineral_out: f64,
     pub removed_energy_out: f64,
+    /// Organic matter, mineral and energy a consumer **took** — [`Flora::take_foliage`],
+    /// [`Flora::take_dead_wood`], [`Flora::take_litter`] — cumulative over every
+    /// withdrawal. A named boundary flow exactly like `removed_*_out`: this layer holds no
+    /// animal, so material a consumer eats leaves the plant layer's accounting the moment
+    /// it is handed over, and the consumer layer that received the [`Taken`] owes the same
+    /// three numbers on its own books.
+    ///
+    /// The three are the sum of the [`Taken`]s the withdrawals returned, to the bit: a
+    /// caller that books what it was given cannot disagree with this.
+    pub consumed_organic_out: f64,
+    pub consumed_mineral_out: f64,
+    pub consumed_energy_out: f64,
     /// Water withdrawn through `Command::WithdrawPore`, cubic metres, for cross-checking
     /// against the core ledger's `transpiration_out`.
     pub transpired_m3: f64,
@@ -1140,16 +1174,43 @@ pub struct FloraLedger {
 
 impl FloraLedger {
     pub fn expected_organic(&self) -> f64 {
-        self.seeded_organic_in + self.fixed_in - self.respired_out - self.removed_organic_out
+        self.seeded_organic_in + self.fixed_in
+            - self.respired_out
+            - self.removed_organic_out
+            - self.consumed_organic_out
     }
 
     pub fn expected_mineral(&self) -> f64 {
-        self.seeded_mineral_in - self.removed_mineral_out
+        self.seeded_mineral_in - self.removed_mineral_out - self.consumed_mineral_out
     }
 
     pub fn expected_energy(&self) -> f64 {
-        self.seeded_energy_in + self.light_in - self.heat_out - self.removed_energy_out
+        self.seeded_energy_in + self.light_in
+            - self.heat_out
+            - self.removed_energy_out
+            - self.consumed_energy_out
     }
+}
+
+/// What one withdrawal actually took out of the plant layer: the three currencies of the
+/// ledger, in the same units [`FloraView::organic`], [`FloraView::mineral`] and
+/// [`FloraView::energy`] report.
+///
+/// A withdrawal is **bounded by the stock it reads** — never more than the stand's foliage,
+/// never the wood or the reserve, never more than a dead pool holds — so this is what a
+/// consumer got and not what it asked for. Booking exactly these three numbers is what
+/// keeps a consumer layer's own accounting and this one's `consumed_*` agreeing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Taken {
+    /// Organic matter, material units.
+    pub organic: f64,
+    /// The mineral that was in it: the same **fraction** of the source's mineral stock as
+    /// the organic matter was of its organic stock ([`Stand::mineral`]'s fraction rule for
+    /// a stand, the stock's own current density for a dead pool).
+    pub mineral: f64,
+    /// The energy that was in it: the tissue's `energy_density` for foliage, and the dead
+    /// pool's own retained energy pro rata for litter and dead wood.
+    pub energy: f64,
 }
 
 /// Read-only access for drawing and inspection.
@@ -1364,6 +1425,100 @@ impl Flora {
             }
         }
     }
+
+    /// A consumer eats the **foliage** of the stand on `site`, up to `want`: at most what
+    /// the stand's `P` holds, never its wood and never its reserve.
+    ///
+    /// The mineral leaves by the same fraction rule every other outflow uses
+    /// ([`Stand::mineral`]): a transfer of a fraction of the stand's material takes that
+    /// fraction of its mineral stock. The energy is the tissue's own `energy_density` times
+    /// the organic matter taken.
+    ///
+    /// `None`, booking nothing at all, when there is nothing to take: no stand on the site,
+    /// a stand with no foliage left, or a `want` that is not a positive finite number.
+    /// `Some` therefore always carries a strictly positive `organic`.
+    ///
+    /// Applied **between** ticks, like a [`Command`]: nothing here reads or moves the
+    /// world, and the tick that follows sees the smaller `P` in its own income
+    /// (`step`'s step 6). Taking a stand's whole canopy does not kill it — death is
+    /// `wood < alive_min` and wood is untouched — it starves it, which is the producer
+    /// response the crate doc describes.
+    pub fn take_foliage(&mut self, site: Site, want: f64) -> Option<Taken> {
+        if !(want > 0.0) || !want.is_finite() {
+            return None;
+        }
+        let i = self.stands.binary_search_by_key(&site, |s| s.site).ok()?;
+        let e_v = self.config.species(self.stands[i].species).energy_density;
+        let organic = want.min(self.stands[i].foliage);
+        if !(organic > 0.0) {
+            return None;
+        }
+        // The fraction rule reads the stand's whole material, parcel included, exactly as
+        // senescence, dieback, death and a leaving package do.
+        let before = self.stands[i].material();
+        self.stands[i].foliage -= organic;
+        let mineral = step::pull_mineral(&mut self.stands[i], before, organic);
+        Some(self.book_consumed(Taken { organic, mineral, energy: e_v * organic }))
+    }
+
+    /// A consumer eats **dead wood** off the site's ground, up to `want`, with its mineral
+    /// and its retained energy pro rata. `None` when the site has no ground entry, its
+    /// dead-wood pool is empty, or `want` is not a positive finite number.
+    ///
+    /// Pro rata means at the stock's own **current density**, which is what `decompose`
+    /// does: neither the mineral nor the energy density of what is left moves, so a pool
+    /// half eaten is the same stuff it was.
+    pub fn take_dead_wood(&mut self, site: Site, want: f64) -> Option<Taken> {
+        let i = self.ground.binary_search_by_key(&site, |g| g.site).ok()?;
+        let g = &mut self.ground[i];
+        let taken =
+            take_pool(&mut g.dead_wood, &mut g.dead_wood_mineral, &mut g.dead_wood_energy, want)?;
+        Some(self.book_consumed(taken))
+    }
+
+    /// A consumer eats **litter** off the site's ground, up to `want`, with its mineral and
+    /// its retained energy pro rata — [`Flora::take_dead_wood`]'s rule on the other pool.
+    pub fn take_litter(&mut self, site: Site, want: f64) -> Option<Taken> {
+        let i = self.ground.binary_search_by_key(&site, |g| g.site).ok()?;
+        let g = &mut self.ground[i];
+        let taken = take_pool(&mut g.litter, &mut g.litter_mineral, &mut g.litter_energy, want)?;
+        Some(self.book_consumed(taken))
+    }
+
+    /// One withdrawal on the boundary: the three named `consumed_*` flows, and the same
+    /// [`Taken`] back to the caller, so what the ledger books and what the consumer
+    /// receives are one value and cannot drift.
+    fn book_consumed(&mut self, taken: Taken) -> Taken {
+        self.ledger.consumed_organic_out += taken.organic;
+        self.ledger.consumed_mineral_out += taken.mineral;
+        self.ledger.consumed_energy_out += taken.energy;
+        taken
+    }
+}
+
+/// A bounded pro-rata draw on one of a site's dead pools: `want` of its organic matter at
+/// most, with the mineral and the energy that were in it at the stock's **current
+/// density**, which is `decompose`'s own rule. `None` when nothing can be taken, so the
+/// caller books nothing.
+fn take_pool(
+    organic: &mut f64,
+    mineral: &mut f64,
+    energy: &mut f64,
+    want: f64,
+) -> Option<Taken> {
+    if !(want > 0.0) || !want.is_finite() || !(*organic > 0.0) {
+        return None;
+    }
+    let out = want.min(*organic);
+    // `f` is 1.0 exactly when the pool is emptied, so an emptied pool hands over every
+    // unit of its mineral and its energy and keeps no float dust claiming to be a stock.
+    let f = out / *organic;
+    let m = if f >= 1.0 { *mineral } else { (*mineral * f).min(*mineral) };
+    let e = if f >= 1.0 { *energy } else { (*energy * f).min(*energy) };
+    *organic -= out;
+    *mineral -= m;
+    *energy -= e;
+    Some(Taken { organic: out, mineral: m, energy: e })
 }
 
 /// The highest support face in a column: the skyline solid, if the void above it is
