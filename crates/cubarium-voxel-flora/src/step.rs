@@ -973,12 +973,18 @@ fn age_cohorts(config: &FloraConfig, g: &mut Ground, ledger: &mut FloraLedger, t
     g.seeds = kept;
 }
 
-/// The width of one arrival bin in ticks: `seed_max_age_s / seed_cohorts_max`, floored at
-/// one tick. Derived, not a knob of its own — the placeholders' 600 s over 4 bins is 150 s,
-/// which is 3,000 ticks.
+/// The width of one arrival bin in ticks: `seed_max_age_s / seed_cohorts_max`, **rounded
+/// up**, at least one tick. Derived, not a knob of its own — the placeholders' 600 s over 4
+/// bins is 150 s, which is 3,000 ticks exactly.
+///
+/// Rounded up rather than truncated so that the bound on the bank is exact: a lifetime of
+/// `life` ticks in bins of `ceil(life / n)` can hold at most `n + 1` live bins, where
+/// truncating could fit one more (a 2 s lifetime over 7 bins truncates to 5 ticks, and
+/// 40 ticks of lifetime is nine such bins). Rounding up can only make a bin coarser than
+/// asked for, never let a bank hold more of them.
 fn bin_ticks(sc: &SpeciesConfig) -> u64 {
     let ticks = sc.seed_max_age_s / sc.seed_cohorts_max.max(1) as f64 / DT;
-    if ticks.is_finite() && ticks >= 1.0 { ticks as u64 } else { 1 }
+    if ticks.is_finite() && ticks >= 1.0 { ticks.ceil() as u64 } else { 1 }
 }
 
 /// The first tick of the bin that `tick` falls in.
@@ -1346,6 +1352,36 @@ mod tests {
             "{:?}",
             g.seeds
         );
+    }
+
+    /// The bank's size bound is by construction and not by a cap: a lifetime in bins of
+    /// `ceil(lifetime / seed_cohorts_max)` holds at most `seed_cohorts_max + 1` of them,
+    /// whatever the two numbers are and whether or not they divide.
+    #[test]
+    fn the_bin_width_bounds_a_bank_at_the_cohort_cap_plus_one() {
+        for cap in 1..=12usize {
+            for &life_s in &[0.05, 0.1, 1.0, 2.0, 7.0, 600.0] {
+                let mut sc = SpeciesConfig::bloomcrown();
+                sc.seed_max_age_s = life_s;
+                sc.seed_cohorts_max = cap;
+                let w = bin_ticks(&sc);
+                assert!(w >= 1, "a zero-width bin at cap {cap}, life {life_s}");
+                // Every bin start a landing can produce, over one lifetime of ticks: the
+                // bins alive at once are the distinct starts inside the lifetime, plus the
+                // one the oldest is expiring out of.
+                let life_ticks = (life_s / DT) as u64;
+                let live = life_ticks / w + 1;
+                assert!(
+                    live <= cap as u64 + 1,
+                    "cap {cap}, life {life_s}: {live} live bins of {w} ticks"
+                );
+            }
+        }
+        // The placeholders themselves: 600 s over 4 bins is 3,000 ticks, exactly.
+        assert_eq!(bin_ticks(&SpeciesConfig::bloomcrown()), 3000);
+        assert_eq!(bin_start(0, &SpeciesConfig::bloomcrown()), 0);
+        assert_eq!(bin_start(2999, &SpeciesConfig::bloomcrown()), 0);
+        assert_eq!(bin_start(3000, &SpeciesConfig::bloomcrown()), 3000);
     }
 
     /// One draw is one draw: the same world, site and tick give the same index, a
