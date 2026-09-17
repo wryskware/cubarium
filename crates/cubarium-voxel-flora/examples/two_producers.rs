@@ -25,7 +25,7 @@
 //! noise-pair overlap is no better than the control's, the terrain coupling is
 //! decorative and the patches are reading the noise.
 
-use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, VoxelView, World};
+use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, World};
 use cubarium_voxel_flora::{Command, Flora, FloraConfig, Site, Species, SpeciesConfig};
 
 const WARMUP_TICKS: u32 = 1000;
@@ -360,96 +360,29 @@ fn pick_founders(
                 skyline.len(),
                 if n == 0 { " (seeded anyway, nowhere qualifies)" } else { "" }
             );
+            let picked: Vec<(u32, u32)> = out
+                .iter()
+                .filter(|f| f.species == species)
+                .map(|f| (f.x, f.z))
+                .collect();
+            println!("{:>14}: founder columns {picked:?}", species.name());
         }
     }
     out
 }
 
-/// The species' establishment predicate at one site, in the terms the plant layer uses.
-/// The aeration bound is read on the support voxel alone rather than over the whole root
-/// box, which is the same approximation the pore term here already makes.
-fn passes(world: &World, sc: &cubarium_voxel_flora::SpeciesConfig, s: Site) -> bool {
-    let view = world.view();
-    let (x, y, z) = (s.x as i64, s.y, s.z);
-    view.soil_below(x, y, z) >= 1
-        && view.pore_at(x, y, z) >= sc.establish_pore_min
-        && (view.pore_at(x, y, z) < sc.saturated_pore || sc.establish_saturated_max >= 1.0)
-        && view.water_depth_m(x, y, z) <= sc.drown_depth_m
-        && view.sky_visibility(x, y, z) >= sc.establish_light_min
-}
-
-// ------------------------------------------------- the model's own predicate
-//
-// `passes` above is the *founder-selection* predicate, and it is not the one germination
-// uses: it reads the support voxel's own pore and a binary saturation test, where
-// `step.rs::establishes` reads the capacity-weighted mean and the saturated *fraction*
-// over the whole root box. On a slope the root box reaches sideways into neighbouring
-// columns and the two disagree. The functions below are a line-for-line replica of
-// `step.rs`'s private `establishes`, so a run can say how many of the sites holding a
-// germinable bank the model would actually let germinate. Nothing in the crate is
-// changed to expose it.
-
-fn model_root_box(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> Vec<usize> {
-    let c = view.config;
-    let span = sc.rooting_depth.min(site.y + 1);
-    if span == 0 {
-        return Vec::new();
-    }
-    let y_lo = site.y + 1 - span;
-    let r = sc.rooting_radius as i64;
-    let mut out = Vec::new();
-    for dz in -r..=r {
-        let z = site.z as i64 + dz;
-        if z < 0 || z >= c.depth as i64 {
-            continue;
-        }
-        for y in y_lo..=site.y {
-            for dx in -r..=r {
-                let i = c.index(site.x as i64 + dx, y, z as u32);
-                if view.material[i] == Material::Soil {
-                    out.push(i);
-                }
-            }
-        }
-    }
-    out
-}
-
-fn model_mean_pore(view: &VoxelView<'_>, box_: &[usize]) -> Option<f64> {
-    let mut water = 0.0;
-    let mut capacity = 0.0;
-    for &i in box_ {
-        let cap = view.material[i].pore_capacity();
-        water += view.pore[i] * cap;
-        capacity += cap;
-    }
-    if capacity <= 0.0 { None } else { Some(water / capacity) }
-}
-
-fn model_saturated_fraction(view: &VoxelView<'_>, box_: &[usize], sc: &SpeciesConfig) -> f64 {
-    if box_.is_empty() {
-        return 0.0;
-    }
-    let n = box_.iter().filter(|&&i| view.pore[i] >= sc.saturated_pore).count();
-    n as f64 / box_.len() as f64
-}
-
-/// `step.rs::establishes`, replicated.
-fn model_establishes(world: &World, sc: &SpeciesConfig, site: Site) -> bool {
-    let view = world.view();
-    let box_ = model_root_box(&view, site, sc);
-    match model_mean_pore(&view, &box_) {
-        None => return false,
-        Some(mean) if mean < sc.establish_pore_min => return false,
-        Some(_) => {}
-    }
-    if model_saturated_fraction(&view, &box_, sc) > sc.establish_saturated_max {
-        return false;
-    }
-    if view.water_depth_m(site.x as i64, site.y, site.z) > sc.drown_depth_m {
-        return false;
-    }
-    view.sky_visibility(site.x as i64, site.y, site.z) >= sc.establish_light_min
+/// The species' establishment predicate at one site: the model's own, through
+/// `cubarium_voxel_flora::can_establish`.
+///
+/// This used to be the harness's own approximation of it — the support voxel's pore
+/// fraction and a binary saturation test, where the model reads the capacity-weighted mean
+/// and the saturated *fraction* over the whole root box — with a line-for-line replica of
+/// the model's private predicate further down the file for the germination diagnosis to
+/// use. Package I's report had to carry a caveat saying which number came from which.
+/// Package J exposed the model's, so there is one predicate: founder selection, the
+/// habitat sets, the off-predicate count and the diagnosis all read it.
+fn passes(world: &World, sc: &SpeciesConfig, s: Site) -> bool {
+    cubarium_voxel_flora::can_establish(&world.view(), s, sc)
 }
 
 /// Why a run had no second generation, if it had none: per species, how many sites hold a
@@ -476,10 +409,8 @@ fn germination_diagnosis(world: &World, flora: &Flora) {
         };
         let over: Vec<Site> =
             banks.iter().filter(|&&(_, o)| o >= threshold).map(|&(s, _)| s).collect();
-        let over_and_ok =
-            over.iter().filter(|&&s| model_establishes(world, sc, s)).count();
-        let predicate_ok =
-            banks.iter().filter(|&&(s, _)| model_establishes(world, sc, s)).count();
+        let over_and_ok = over.iter().filter(|&&s| passes(world, sc, s)).count();
+        let predicate_ok = banks.iter().filter(|&&(s, _)| passes(world, sc, s)).count();
         println!(
             "  {:>14}: threshold {threshold:.4}; {} banked sites, mean {mean:.5}, biggest \
              {biggest:.5} ({:.1}% of threshold); {} over threshold, {over_and_ok} of those \

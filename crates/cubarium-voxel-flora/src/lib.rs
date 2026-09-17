@@ -23,6 +23,10 @@ use cubarium_voxel::{VoxelView, World};
 use serde::{Deserialize, Serialize};
 
 pub use cubarium_voxel::{DT, TICK_HZ};
+/// The germination predicate the model itself uses, for a caller outside a tick: a
+/// harness picking founder columns, a diagnosis of which gate is shut. There is one
+/// predicate, and this is it.
+pub use step::can_establish;
 
 /// The two producers of the first coupled experiment.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

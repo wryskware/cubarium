@@ -1036,6 +1036,30 @@ fn establishes(
     site: Site,
     sc: &SpeciesConfig,
 ) -> bool {
+    establishes_but_for_light(view, site, sc)
+        && sky_at(sky, view, site) >= sc.establish_light_min
+}
+
+/// The same predicate for a caller outside a tick — a harness picking founders, a
+/// presenter shading the sites a species could take — reading sky visibility straight off
+/// the view instead of off `step`'s cache. The cache is memoized geometry, so the two
+/// agree by construction, and there is exactly **one** germination predicate in the crate
+/// for anything to agree with.
+///
+/// Package I had to replicate the private one line for line in `examples/two_producers.rs`
+/// to say which germination gate was shut, and the harness's own founder-selection
+/// predicate had drifted from it: it read the support voxel's own pore fraction and a
+/// binary saturation test where this reads the capacity-weighted mean and the saturated
+/// *fraction* over the whole root box, which on a slope reaches sideways into neighbouring
+/// columns.
+pub fn can_establish(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> bool {
+    establishes_but_for_light(view, site, sc)
+        && view.sky_visibility(site.x as i64, site.y, site.z) >= sc.establish_light_min
+}
+
+/// Every gate of the predicate but the light one, which needs a sky reading its caller
+/// supplies.
+fn establishes_but_for_light(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> bool {
     let box_ = root_box(view, site, sc);
     match mean_pore(view, &box_) {
         None => return false,
@@ -1045,10 +1069,7 @@ fn establishes(
     if saturated_fraction(view, &box_, sc) > sc.establish_saturated_max {
         return false;
     }
-    if view.water_depth_m(site.x as i64, site.y, site.z) > sc.drown_depth_m {
-        return false;
-    }
-    sky_at(sky, view, site) >= sc.establish_light_min
+    view.water_depth_m(site.x as i64, site.y, site.z) <= sc.drown_depth_m
 }
 
 #[cfg(test)]
