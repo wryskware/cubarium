@@ -837,7 +837,6 @@ fn seed_bank(flora: &mut Flora, world: &World) {
         let site_index = view.config.index(g.site.x as i64, g.site.y, g.site.z) as u64;
         let Some(species) = lottery(world_seed, site_index, tick, &candidates) else { continue };
         let sc = config.species(species);
-        let [w_frac, p_frac, q_frac] = sc.propagule_split;
         // The slot first and the bank second: a bank must never be spent on a birth that
         // does not happen. The loop skipped occupied sites above and nothing inserts a
         // stand on *this* site in between, so this is unreachable rather than a real
@@ -849,6 +848,7 @@ fn seed_bank(flora: &mut Flora, world: &World) {
         // Exactly one package, oldest bins first, with each bin's own mineral in
         // proportion to what it gave up.
         let (organic, mineral) = spend_bank(g, species, package_of(sc));
+        let (wood, foliage, reserve) = newborn_stocks(sc, organic);
         let id = ledger.births;
         ledger.births += 1;
         stands.insert(
@@ -858,9 +858,9 @@ fn seed_bank(flora: &mut Flora, world: &World) {
                 site: g.site,
                 species,
                 stage: Stage::Alive,
-                wood: w_frac * organic,
-                foliage: p_frac * organic,
-                reserve: q_frac * organic,
+                wood,
+                foliage,
+                reserve,
                 light: 0.0,
                 moisture: 0.0,
                 water_m3: 0.0,
@@ -876,6 +876,32 @@ fn seed_bank(flora: &mut Flora, world: &World) {
     for g in ground.iter_mut() {
         age_cohorts(config, g, ledger, tick);
     }
+}
+
+/// The three stocks a funded newborn is built out of `organic` units of banked material:
+/// wood at **exactly** `alive_min`, foliage at the preset's `p_frac` of the material, and
+/// the remainder — including every unit of floating-point difference — in the reserve.
+///
+/// Astra's R5.1. `spend_bank` accumulates the material it takes bin by bin, so across
+/// several bins the sum is the intended package to within an ulp or two rather than to the
+/// bit: Astra's case is bins of `0.001, 0.009, 0.04` against the default package
+/// `0.02 / 0.4 = 0.049999999999999996`, which spends `0.04999999999999999` — short by
+/// 6.9e-18. `w_frac · that` is `0.019999999999999997`, which is **below** `alive_min` by
+/// 3.5e-18, so the next growth pass killed a newborn that had just been paid for in full,
+/// with no loss of wood anywhere. A funded package buys a stand that is alive: the wood is
+/// the threshold itself, and the rounding difference goes where it can do no harm.
+///
+/// The reserve is the compartment that absorbs it because it is the buffer — it feeds no
+/// income and no death test. The paid organic total and the transferred mineral are
+/// preserved: `wood + foliage + reserve` re-sums to `organic` (exactly, in Astra's case),
+/// and `mineral` is untouched by this. Every stock is non-negative by construction, even
+/// for a preset whose `q_frac` is zero, because `foliage` is capped at what is left after
+/// the wood and the reserve is that remainder.
+fn newborn_stocks(sc: &SpeciesConfig, organic: f64) -> (f64, f64, f64) {
+    let wood = sc.alive_min.min(organic.max(0.0));
+    let left = (organic - wood).max(0.0);
+    let foliage = (sc.propagule_split[1] * organic).clamp(0.0, left);
+    (wood, foliage, left - foliage)
 }
 
 /// Which species takes a gap, among the banks that can build a stand on it: a draw
@@ -1374,6 +1400,175 @@ mod tests {
             "{:?}",
             g.seeds
         );
+    }
+
+    /// A world of one soil slab holding `pore` of soil's own pore capacity: bedrock at
+    /// `y = 0`, soil at `y = 1..=2`, air above, so every column's support face is `y = 2`
+    /// in open sky. Built the way the integration fixtures build one — water into the void
+    /// first, then the conversion — because `AddWater` will not push pore water into a
+    /// voxel that is already solid.
+    fn slab(width: u32, pore: f64) -> World {
+        let config = cubarium_voxel::Config {
+            width,
+            height: 8,
+            depth: 1,
+            voxel_m: 1.0,
+            seed: 5,
+            ..cubarium_voxel::Config::default()
+        };
+        let mut w = World::empty(config);
+        for x in 0..width as i64 {
+            for y in 1..=2u32 {
+                let want = pore * Material::Soil.pore_capacity() * w.config().voxel_volume();
+                let got = w.apply(WorldCommand::AddWater { x, y, z: 0, volume_m3: want });
+                assert!((got - want).abs() < 1e-12, "the void took {got} of {want}");
+                w.apply(WorldCommand::SetMaterial { x, y, z: 0, material: Material::Soil });
+            }
+        }
+        w
+    }
+
+    /// The three residuals, as the integration fixtures compute them.
+    fn residuals(flora: &Flora) -> (f64, f64, f64) {
+        let v = flora.view();
+        (
+            v.organic() - v.ledger.expected_organic(),
+            v.mineral() - v.ledger.expected_mineral(),
+            v.energy() - v.ledger.expected_energy(),
+        )
+    }
+
+    /// **Astra's R5.1 case, end to end.** A bank of three oldest-first bins holding
+    /// `0.001, 0.009, 0.04` is one whole default package — and spending it across the three
+    /// of them returns `0.04999999999999999`, 6.9e-18 short of the package itself, so the
+    /// old `w_frac · organic` built wood of `0.019999999999999997`: **below** `alive_min`
+    /// by 3.5e-18. Frozen (`assimilation`, `maintenance` and `senescence` all zero, so
+    /// nothing can take a unit of wood off it), the next growth pass killed that newborn on
+    /// the §4.7 death test. Now the wood is `alive_min` exactly and the difference is in
+    /// the reserve.
+    ///
+    /// The bank is injected rather than donated because no donor can produce these three
+    /// amounts: a landing is always exactly one package. It is booked in as seeded material
+    /// the way `Command::Seed` books a founder, so the three residuals still mean something.
+    #[test]
+    fn a_funded_birth_across_three_bins_is_born_alive_and_stays_alive() {
+        let mut config = FloraConfig::default();
+        config.bloomcrown.assimilation = 0.0;
+        config.bloomcrown.maintenance = 0.0;
+        config.bloomcrown.senescence = 0.0;
+        let sc = config.bloomcrown.clone();
+        let e_v = sc.energy_density;
+        let n_tissue = sc.n_tissue;
+        let package = package_of(&sc);
+        assert_eq!(package, 0.049999999999999996, "the default package this case is about");
+
+        let mut world = slab(4, 0.6);
+        let mut flora = Flora::new(config);
+        let site = Site { x: 1, y: 2, z: 0 };
+
+        // The bank: three bins, oldest first, summing to exactly 0.05 of organic matter.
+        // Their start ticks are hand-set one tick apart to force the three-bin spend; the
+        // placeholders' bin is 3,000 ticks wide, so a donor would have put all of this in
+        // one bin.
+        let mut g = Ground::new(site, 1.0);
+        let mut banked_organic = 0.0;
+        let mut banked_mineral = 0.0;
+        for (start, organic) in [(0u64, 0.001), (1, 0.009), (2, 0.04)] {
+            let mineral = n_tissue * organic;
+            g.seeds.push(SeedCohort {
+                species: Species::Bloomcrown,
+                organic,
+                mineral,
+                bin_start_tick: start,
+            });
+            banked_organic += organic;
+            banked_mineral += mineral;
+        }
+        assert_eq!(banked_organic, 0.05, "the bank is one package, and a hair over it");
+        assert!(banked_organic > package, "it has to be able to buy the package");
+        flora.ground.push(g);
+        flora.ledger.seeded_organic_in += banked_organic;
+        flora.ledger.seeded_mineral_in += banked_mineral + 1.0; // the site's own pool
+        flora.ledger.seeded_energy_in += e_v * banked_organic;
+        let (o, n, e) = residuals(&flora);
+        assert!(o.abs() < 1e-18 && n.abs() < 1e-18 && e.abs() < 1e-18, "{o} {n} {e}");
+
+        // The birth.
+        flora.step(&mut world);
+        assert_eq!(flora.view().ledger.establishments, 1, "the bank did not germinate");
+        let born = *flora.view().stand_at(site).expect("nothing stands here");
+        assert_eq!(born.wood, sc.alive_min, "born with {} of wood", born.wood);
+        assert!(born.wood >= sc.alive_min, "born under the death threshold: {}", born.wood);
+        // What it holds is what was spent, to the bit in this case.
+        let spent = 0.04999999999999999;
+        assert_eq!(born.organic(), spent, "born holding {}", born.organic());
+        assert!(born.organic() < package, "the fixture's premise: the spend is short");
+        // The intended split is recovered to a hair, and the difference is in the reserve.
+        assert!((born.foliage - sc.propagule_split[1] * spent).abs() < 1e-17, "{born:?}");
+        assert!((born.reserve - sc.propagule_split[2] * spent).abs() < 1e-17, "{born:?}");
+        assert!(born.reserve > 0.0 && born.foliage > 0.0, "{born:?}");
+        // Its mineral is the consumed bins' own, at the bank's density.
+        assert!(
+            (born.mineral / born.organic() - n_tissue).abs() < 1e-15,
+            "mineral density {} against the bank's {n_tissue}",
+            born.mineral / born.organic()
+        );
+        // What is left of the third bin is the 6.9e-18 the spend could not take, with its
+        // mineral: real material, not deleted, and it ages out on its own bin's schedule.
+        let left = flora.view().ground_at(site).expect("ground").seed_organic(Species::Bloomcrown);
+        assert!(left > 0.0 && left < 1e-17, "the third bin left {left}");
+
+        // One frozen growth tick: nothing can take wood off it, so the only thing that
+        // could kill it is the death test reading a rounded-down wood.
+        flora.step(&mut world);
+        assert_eq!(flora.view().ledger.deaths, 0, "the paid newborn was killed");
+        let still = *flora.view().stand_at(site).expect("it died on its first growth tick");
+        assert_eq!(still.wood, sc.alive_min, "its wood moved: {}", still.wood);
+        assert_eq!(still.id, born.id, "a different stand is standing here");
+        let (o, n, e) = residuals(&flora);
+        let v = flora.view();
+        assert!(o.abs() <= 1e-9 * v.organic().max(1.0), "organic residual {o}");
+        assert!(n.abs() <= 1e-9 * v.mineral().max(1.0), "mineral residual {n}");
+        assert!(e.abs() <= 1e-9 * v.energy().max(1.0), "energy residual {e}");
+    }
+
+    /// The same allocation against **every preset's own split**, on the value Astra's three
+    /// bins produce and on an exact package: the wood is `alive_min` on the nose, no stock
+    /// is negative, the total is preserved, and the foliage and reserve are the intended
+    /// fractions to within the rounding that is being corrected. The last two cases are the
+    /// degenerate splits a future preset could bring — no reserve at all, and a bank that
+    /// somehow holds less than `alive_min`.
+    #[test]
+    fn a_newborn_s_wood_is_exactly_alive_min_for_every_split() {
+        for sc in [SpeciesConfig::bloomcrown(), SpeciesConfig::umbrellafrond()] {
+            let [w_frac, p_frac, q_frac] = sc.propagule_split;
+            assert!((w_frac + p_frac + q_frac - 1.0).abs() < 1e-15, "the split sums to one");
+            assert!(sc.alive_min <= sc.wood_max, "alive_min over wood_max");
+            for organic in [0.04999999999999999, package_of(&sc), 0.2] {
+                let (wood, foliage, reserve) = newborn_stocks(&sc, organic);
+                assert_eq!(wood, sc.alive_min, "wood {wood} for {organic} of material");
+                assert!(foliage >= 0.0 && reserve >= 0.0, "{wood} {foliage} {reserve}");
+                assert!(
+                    ((wood + foliage + reserve) - organic).abs() <= 4e-18,
+                    "{wood} + {foliage} + {reserve} against {organic} paid"
+                );
+                assert!((foliage - p_frac * organic).abs() <= 1e-17, "foliage {foliage}");
+                if organic <= package_of(&sc) {
+                    assert!((reserve - q_frac * organic).abs() <= 1e-17, "reserve {reserve}");
+                }
+            }
+        }
+        // A split with nothing in the reserve: the remainder is zero and never negative.
+        let mut dry = SpeciesConfig::bloomcrown();
+        dry.propagule_split = [0.5, 0.5, 0.0];
+        let (wood, foliage, reserve) = newborn_stocks(&dry, package_of(&dry));
+        assert_eq!(wood, dry.alive_min);
+        assert!(reserve >= 0.0 && reserve < 1e-17, "reserve {reserve}");
+        assert!((wood + foliage + reserve - package_of(&dry)).abs() <= 4e-18);
+        // And a bank under `alive_min`, which the candidate filter cannot produce: the wood
+        // takes all of it and the stand is born dying rather than born rich.
+        let (wood, foliage, reserve) = newborn_stocks(&dry, 0.01);
+        assert_eq!((wood, foliage, reserve), (0.01, 0.0, 0.0));
     }
 
     /// The bank's size bound is by construction and not by a cap: a lifetime in bins of
