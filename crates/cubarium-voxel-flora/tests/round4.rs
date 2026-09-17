@@ -630,6 +630,141 @@ fn a_stonecushion_package_on_rock_with_no_soil_pocket_never_germinates_and_goes_
     assert!(g.litter_mineral > 0.0, "the package's mineral did not reach the litter");
     assert_residuals(&flora, "after a soilless rock face refused every package");
 }
+// ========================================================================== velvetpad
+//
+// The moist, aerated understory pad — the niche Astra's R4.6 separated from
+// umbrellafrond's wetland. Damp soil that still has air in it, under somebody else's crown.
+
+/// **Paid birth.** A velvetpad donor on damp aerated soil at 0.45 of capacity funds one
+/// 0.0375 package and the next tick builds a stand at exactly `alive_min` 0.015 of wood.
+#[test]
+fn a_paid_velvetpad_birth_on_damp_aerated_soil() {
+    let mut world = pillars(8, &[0, 1, 2], 0.45);
+    let birth = paid_birth(&mut world, fast_donor(Species::Velvetpad), Species::Velvetpad, 0, at(1));
+    assert!((birth.package - 0.0375).abs() < 1e-15, "a {} package", birth.package);
+    assert_paid_birth(&birth, Species::Velvetpad);
+    // Damp and aerated, both read off the gates after the run: over its 0.3 floor, under
+    // `saturated_pore` 0.95 everywhere, and a hair under the fixture's 0.45 because two
+    // ticks of a donor's transpiration came out of these same voxels.
+    let g = establishment_gates(&world.view(), at(1), birth.flora.config().species(Species::Velvetpad));
+    let mean = g.mean_pore.expect("soil");
+    assert!((0.3..0.45).contains(&mean) && (0.45 - mean) < 1e-6, "{g:?}");
+    assert_eq!(g.saturated_fraction, 0.0, "{g:?}");
+}
+
+/// **Survival and income.** The newborn under a founder's crown — which is the role's own
+/// habitat — fixes more than the system respires over 200 ticks and grows; and under that
+/// same crown it reads **more** light than a bloomcrown does, which is the whole of what
+/// `light_half` 0.1 against 0.8 buys.
+#[test]
+fn a_newborn_velvetpad_earns_its_upkeep_under_a_founder_s_crown() {
+    let mut world = pillars(8, &[0, 1, 2], 0.45);
+    let mut birth =
+        paid_birth(&mut world, fast_donor(Species::Velvetpad), Species::Velvetpad, 0, at(1));
+    // The crown goes up where the donor stood: umbrellafrond at full size reaches two
+    // columns and stands five voxels over the pad's one, so both x1 and x2 are under it.
+    assert!(birth.flora.apply(
+        &world,
+        Command::Seed { x: 0, z: 0, species: Species::Umbrellafrond, wood: 0.6 }
+    ));
+    // A small bloomcrown beside it, under the same crown and shorter than it, as the
+    // comparison: same sky, same attenuation, a different light response.
+    assert!(birth.flora.apply(
+        &world,
+        Command::Seed { x: 2, z: 0, species: Species::Bloomcrown, wood: 0.02 }
+    ));
+
+    let income = income_over(&mut birth.flora, &mut world, birth.site, 200);
+    assert_survives_on_income(&birth.flora, &world, birth.site, Species::Velvetpad, &income);
+
+    let v = birth.flora.view();
+    let pad = v.stand_at(at(1)).expect("the pad").light;
+    let bloom = v.stand_at(at(2)).expect("the comparison").light;
+    assert!(pad < 1.0, "the pad is not actually shaded: {pad}");
+    assert!(
+        pad > bloom,
+        "the shade specialist read {pad} where the sun producer read {bloom}"
+    );
+    // The size of that gap is limited by `shade_k` 1.5, a known-wrong placeholder that lets
+    // one full crown attenuate by about 9 % (`design/backlog.md` §1); the *trait* is larger
+    // than the fixture can show, and it is arithmetic: at a fifth of open sky velvetpad's
+    // response is 0.2 · 1.1 / 0.3 = 0.73 where bloomcrown's is 0.2 · 1.8 / 1.0 = 0.36.
+    assert!(pad > 0.9 && bloom > 0.9, "a deeper shade than shade_k can make: {pad}, {bloom}");
+}
+
+/// **Failing neighbour.** A **wholly saturated** root box: germination is refused on the
+/// aeration gate and nothing else, the package reaches the litter with its mineral, and an
+/// adult velvetpad standing there closes on a positive `aeration_stress` — while
+/// umbrellafrond, whose ceiling is 1.0, stays at exactly zero in the same soil.
+///
+/// That contrast is the point of the preset existing (Astra R4.6): umbrellafrond is
+/// saturation-immune and stands for the wetland, and velvetpad is the role that pays for
+/// waterlogging.
+#[test]
+fn a_velvetpad_package_on_a_wholly_saturated_box_is_refused_and_an_adult_there_stresses() {
+    let mut config = fast_donor(Species::Velvetpad);
+    config.velvetpad.seed_max_age_s = 0.1;
+    config.decomposition = 0.0;
+    let package = config.velvetpad.alive_min / config.velvetpad.propagule_split[0];
+
+    // 0.98 of capacity is over `saturated_pore` 0.95, so every voxel of the box counts as
+    // having no air left in it and the saturated fraction is 1.
+    let mut world = pillars(5, &[0, 1], 0.98);
+    let site = at(1);
+    let g = establishment_gates(&world.view(), site, &config.velvetpad);
+    assert_eq!(g.saturated_fraction, 1.0, "{g:?}");
+    assert!(!g.aeration_ok, "the aeration gate did not shut: {g:?}");
+    assert!(g.pore_ok && g.depth_ok && g.light_ok, "another gate shut too: {g:?}");
+
+    let mut flora = Flora::new(config.clone());
+    assert!(flora.apply(
+        &world,
+        Command::Seed { x: 0, z: 0, species: Species::Velvetpad, wood: 0.2 }
+    ));
+    // One tick to land one package, then the donor goes, so the site stops being fed and
+    // the one package can be followed to the litter.
+    flora.step(&mut world);
+    let banked = flora.view().ground_at(site).expect("ground").seed_organic(Species::Velvetpad);
+    assert!((banked - package).abs() <= 1e-15, "{banked} landed, not one {package} package");
+    assert!(flora.apply(&world, Command::Clear { x: 0, z: 0 }), "the donor would not clear");
+    run(&mut flora, &mut world, 8);
+    {
+        let v = flora.view();
+        assert_eq!(v.ledger.establishments, 0, "a saturated box germinated a velvetpad");
+        let ground = v.ground_at(site).expect("the package never landed");
+        assert_eq!(ground.seed_organic(Species::Velvetpad), 0.0, "{:?}", ground.seeds);
+        assert!(ground.litter >= package - 1e-12, "the litter holds {}", ground.litter);
+        assert!(ground.litter_mineral > 0.0, "no mineral reached the litter");
+    }
+    assert_residuals(&flora, "after a saturated box refused every package");
+
+    // The adult side. The pad is placed on the site the cohort was refused, and the wetland
+    // species on the donor's, which has the same soil at the same fraction.
+    assert!(flora.apply(&world, Command::Seed { x: 1, z: 0, species: Species::Velvetpad, wood: 0.2 }));
+    assert!(flora.apply(
+        &world,
+        Command::Seed { x: 0, z: 0, species: Species::Umbrellafrond, wood: 0.6 }
+    ));
+    run(&mut flora, &mut world, 40);
+
+    let v = flora.view();
+    let pad = *v.stand_at(site).expect("the adult pad died before it could stress");
+    let frond = *v.stand_at(at(0)).expect("the wetland species");
+    assert!(pad.aeration_stress > 0.0, "a drowned pad read {} of stress", pad.aeration_stress);
+    assert_eq!(
+        frond.aeration_stress, 0.0,
+        "umbrellafrond stressed in its own habitat: {}",
+        frond.aeration_stress
+    );
+    // The stress is the level the box asks for being closed on, not a switch: 40 ticks at
+    // `stress_rate_per_s` 0.1 closes about a fifth of the gap to 1.
+    assert!(pad.aeration_stress < 1.0, "it reached the ceiling in 2 s: {}", pad.aeration_stress);
+    assert!(
+        pad.light * pad.moisture > 0.0 && pad.aeration_stress > 0.05,
+        "the pad has light and water and is still losing income to the water: {pad:?}"
+    );
+    assert_residuals(&flora, "after an adult pad stressed on a saturated box");
+}
 // =========================================================================== validity
 
 /// **Validity.** Every one of the five presets passes [`SpeciesConfig::validate`], and the
