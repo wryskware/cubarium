@@ -388,7 +388,9 @@ One cosmetic oddity, harmless and worth one look later: direction 1 of the probe
 `seed bank on 0 sites holding -0.00000` for the newcomer. The site count uses `> 0.0` and
 the sum does not, so the sum is over cohorts that are all at or below zero — a cohort kept
 for its mineral after its organic matter went to zero. It is a print, not a stock: the
-ledger residuals above are the check that matters.
+ledger residuals above are the check that matters. (**Corrected after package K:** it is
+not a cohort at all. Rust's `Sum` for `f64` folds from `-0.0`, so an **empty** sum prints
+as `-0.00000`. Nothing was negative.)
 
 ### What changed and what did not
 
@@ -412,3 +414,211 @@ refill the reserve. Chesson's probe still fails in both directions, because a si
 cannot lift one recipient bank over the threshold inside 1,500 s. Neither is a rule that is
 wrong; both are `propagule_rate`, `hop`, `alive_min` and probe-length calls, which are the
 owner's, and nothing here was tuned.
+
+## Rerun after package K — 2026-09-17
+
+Package K answered Astra's round-4 findings on `main`: `6accd14` K1 (arrival bins),
+`8497068` K2 (the harness water budget and its tap), `ea6f15e` K3 (funded reproductive
+parcels), `8e3931a` K4 (the gap lottery and one-package germination), `619f9a5` K5
+(lineage by identity), `1c0c6c9` K6 (documentation), plus `687c54e` and `398af32`. The
+binary that produced the numbers below was built at K5; the two later commits change no
+number at the placeholders (`687c54e` rounds the bin width up, and 600 s over 4 bins is
+3,000 ticks either way; `398af32` reorders two lines on an unreachable branch).
+
+**Chesson's probe was deliberately not rerun.** R4.7 asks for a positive control to be
+designed first; the open items at the end of this section say what it needs.
+
+| run | command | simulated | wall |
+| --- | --- | --- | --- |
+| comparison | `compare 2000 1 101 202 7` | 3 x 2,000 s | 1,465 s (24.4 min) |
+
+Four rules changed, so nothing here is comparable to package J's numbers except as a
+before-and-after of the rules themselves:
+
+1. A seed cohort is an **arrival bin** whose age never decreases, so a fed bank ages out
+   on its own schedule instead of being held young by every fresh landing (R4.1).
+2. A donor **saves** one recipient's worth per tick into `Stand::parcel` and sends one
+   whole package — `alive_min / w_frac` = 0.05 net, 0.06 of reserve — to **one** drawn
+   recipient, instead of paying `rate · dt` to every recipient in `hop` at once (R4.4).
+3. A bare site draws its occupant by a **lottery weighted by whole packages**, and the
+   winner spends exactly one package out of its oldest bins (R4.5).
+4. The harness rain is **2e-4 m/s**, a nominal 0.0384 m³/s against the outlet's 0.05,
+   where the old tap was 0.096 m³/s against the same outlet (R4.2).
+
+### The water budget, which is what R4.2 asked for
+
+The harness now prints in, out and storage every 100 s and again over the whole run. The
+whole-run lines:
+
+```
+base      water m3/s over 2000 s: rain in 0.038400, outlet 0.036435, evaporation 0.000000,
+          transpiration 0.00019437, storage change +0.001771 (residual -6.97e-11);
+          head 2.502 m (-0.4846 m), stored 221.6132 m3
+re-draw   rain in 0.038400, outlet 0.036230, transpiration 0.00019073, storage +0.001980;
+          head 2.507 m (-0.4778 m), stored 222.0313 m3
+control   rain in 0.038400, outlet 0.035970, transpiration 0.00009535, storage +0.002335;
+          head 2.502 m (-0.4844 m), stored 222.7415 m3
+```
+
+**The head is bounded and stationary**, at 2.50 m in all three arms, and the run gets
+there by *draining*: the metre of initial charge above the basin floor comes off in the
+first 900 s at about 0.05 m per 100 s, and after that the head moves by +0.0001 m per
+interval. The interval lines show the mechanism (base arm):
+
+```
+  t   100 s: rain in 0.038400, outlet 0.050000, storage change -0.011741; head 2.922 m (-0.0647 m)
+  t   800 s: rain in 0.038400, outlet 0.050000, storage change -0.011804; head 2.532 m (-0.0526 m)
+  t  1000 s: rain in 0.038400, outlet 0.017494, storage change +0.020706; head 2.501 m (+0.0001 m)
+  t  1500 s: rain in 0.038400, outlet 0.023364, storage change +0.014838; head 2.501 m (+0.0001 m)
+  t  2000 s: rain in 0.038400, outlet 0.036435, storage change +0.001771 (whole-run mean)
+```
+
+While there is standing water to export the outlet runs at its full 0.05 m³/s and storage
+falls; once the head reaches 2.50 m the outlet cell is undersupplied and export drops to
+0.017 m³/s, whereupon storage rises again and the export climbs back toward the input. By
+2,000 s the arms are within 0.002 m³/s of balance and the whole-run storage change is
++0.0018 to +0.0023 m³/s, against **+0.046 m³/s or more** under the old tap. So bounding
+nominal rain below the outlet's capacity bounds the head, and — exactly as R4.2 warned —
+it does not by itself guarantee balance, because the outlet exports less than its capacity
+when its own cell is dry. The arms are held on terrain, initial water (`basin floor + 1 m`
+of charge), initial mineral, forcing and observation phase, and the budget is printed per
+arm so a reader can check that rather than take it.
+
+The core's own conservation residual over each interval is 1e-11 or smaller, and its
+whole-run residual is 1.3–1.4e-7 m³ on 222 m³ stored (6e-10 relative), with the flora's
+`transpired_m3` equal to the core's `transpiration_out` to the bit in every arm.
+
+### Establishments, deaths and descendants by identity
+
+```
+life cycle per arm: base establishments 4 deaths 0; re-drawn noise 2 / 0; control 3 / 1
+
+bloomcrown      descendant stands / living stands: base 0/8 (0.00), re-draw 0/8 (0.00), control 0/7 (0.00)
+umbrellafrond   descendant stands / living stands: base 4/12 (0.33), re-draw 2/10 (0.20), control 3/11 (0.27)
+```
+
+These fractions are counted by `Stand::id` — the ledger's birth counter — and not by the
+site watch, so they are exact lineage counts rather than the "not certified" ones R4.7
+objected to. Package J's fractions were 0.86, 0.89 and 0.25 for umbrellafrond, from 24
+establishments per arm; recruitment is an order of magnitude rarer here, and both changes
+that made it so are intended:
+
+- **A birth needs two packages on one site.** A package is exactly the minimum viable
+  stand's material, and a bin pays attrition before germination is tested, so one package
+  alone is 0.1 % short for ever. The diagnosis shows every arm ending with banks just
+  under the threshold — biggest 92.5 %, 93.6 % and 81.9 % of it for bloomcrown, 81.9 %,
+  81.9 % and 94.5 % for umbrellafrond — which is one package minus its attrition, waiting
+  for a second that has to arrive before the first bin ages out.
+- **Packages scatter.** A donor sends one package to one drawn site per 300 s of funded
+  output, so with umbrellafrond's `hop` 1 (8 candidate columns) two packages coincide on
+  one site fairly often, and with bloomcrown's `hop` 2 (24 candidates) they rarely do.
+  That, and not the predicate, is why bloomcrown still has no descendants: the diagnosis
+  reports `0 of all 3 banked sites pass it` in the base arm — its banks are on sites its
+  own predicate refuses — while umbrellafrond's read `12 of all 13 banked sites pass it`.
+
+### Requested, funded and landed, which is what R4.4 asked for
+
+Cumulative organic matter, net of construction, per species per arm:
+
+```
+base      bloomcrown:    requested 2.66667, funded 1.55823 (58.4 %), landed 1.45000 (29.0 packages); 0.10823 in parcels on 8 stands
+          umbrellafrond: requested 2.66667, funded 2.66667 (100.0 %), landed 2.40000 (48.0 packages); 0.26667 in parcels on 12 stands
+re-draw   bloomcrown:    requested 2.66667, funded 1.45171 (54.4 %), landed 1.35000 (27.0 packages); 0.10171 in parcels on 8 stands
+          umbrellafrond: requested 2.66667, funded 2.66667 (100.0 %), landed 2.40000 (48.0 packages); 0.26667 in parcels on 10 stands
+control   bloomcrown:    requested 2.23948, funded 1.53257 (68.4 %), landed 1.35000 (27.0 packages); 0.18257 in parcels on 7 stands
+          umbrellafrond: requested 2.66667, funded 1.46663 (55.0 %), landed 1.20000 (24.0 packages); 0.26663 in parcels on 11 stands
+```
+
+This is the distinction the old rule could not make. **Bloomcrown is funding-limited and
+umbrellafrond is not**: on the base landform the sun producer can pay for 58 % of what its
+rate asks for, because its interior aeration stress (0.85 at 1,000 s) takes most of the
+income that would refill the reserve above the donor floor, and its donor count falls from
+8 to 1 over the run while umbrellafrond's stays at 8. On the control landform the two
+swap — bloomcrown 68 % and umbrellafrond 55 % — which is the terrain, not the species.
+Raising `propagule_rate` would move `requested` and nothing else in the columns that
+matter, which is precisely R4.4's point; nothing was tuned.
+
+`funded − landed` is the material standing in parcels, and it matches the per-stand parcels
+exactly: 8 bloomcrown stands hold 0.10823 after 29 packages, which is 8 x 0.0135 of a
+0.05 package each.
+
+### The comparison itself
+
+```
+founder columns identical in all three: 16, off-predicate 1 in the re-draw and 13 in the control
+landform: lowest skyline quartile  0.977 (re-drawn noise)  0.324 (another landform)
+          highest skyline quartile 0.957                   0.515
+
+bloomcrown     occupied 11 / 10 / 14 columns:      Jaccard noise 0.750   control 0.389
+               living stands only 8 / 8 / 7:              noise 1.000   control 0.875
+               habitat 96 / 99 / 95 of 3072:              noise 0.822   control 0.016
+               in the lowest skyline quartile: base 1.00, re-draw 1.00, control 0.36
+umbrellafrond  occupied 22 / 22 / 20 columns:      Jaccard noise 0.692   control 0.400
+               living stands only 12 / 10 / 11:           noise 0.833   control 0.643
+               habitat 386 / 390 / 383 of 3072:           noise 0.970   control 0.172
+               in the lowest skyline quartile: base 1.00, re-draw 1.00, control 0.50
+```
+
+Two things are worth reading here and one is worth not reading.
+
+**The habitat sets replicate and the landform explains them.** Umbrellafrond's habitat is
+the same 97 % of columns under a re-drawn noise and 17 % under another landform, which is
+round 2's finding again. Bloomcrown's habitat is now **96 columns of 3,072** rather than
+2,526: the bounded tap leaves the world far drier than the rising one did, and the sun
+producer's own `establish_pore_min` 0.1 with `establish_saturated_max` 0.25 admits only the
+wet-but-not-waterlogged band. That makes its habitat pair (0.822) a real measurement on a
+small set rather than a statement about 82 % of the world, and its control value of
+**0.016** is the sharpest terrain-coupling number either species has produced.
+
+**The occupancy Jaccards are now dispersal noise as well as terrain.** 0.750 and 0.692
+against the re-draw, where package J read 1.000 and 0.977, because the occupied set is a
+handful of drawn landing sites rather than every column in every donor's `hop`. Two arms
+with the same terrain and the same founders no longer produce the same footprint, and that
+is the dispersal draw doing what R4.4 asked for.
+
+**What not to read:** the per-arm establishment counts (4 / 2 / 3) are three samples of a
+stochastic process with no replication, and the control arm's 13 off-predicate founders
+make its arm a different treatment as well as a different landform. Nothing here is
+evidence about coexistence, and the probe that would be was not run.
+
+### The three residuals, still fine
+
+```
+base     ledger: fixed_in 36.019642 respired_out 21.126060 light_in 72.039284 heat_out 42.252121 transpired 0.388746 m3 deaths 0 establishments 4
+         residuals: organic -8.962e-11 mineral -4.462e-12 energy -1.792e-10 (stocks: organic 31.6936 mineral 76.3360 energy 63.3872)
+re-draw  residuals: organic -8.573e-11 mineral -4.576e-12 energy -1.715e-10 (stocks: organic 31.1964 mineral 77.3360 energy 62.3928)
+control  residuals: organic -3.011e-11 mineral -1.258e-12 energy -6.021e-11 (stocks: organic 21.8891 mineral 59.3360 energy 43.7782)
+```
+
+Relative: 2.8e-12, 5.8e-14 and 2.8e-12 in the base arm, with the parcel counted in the
+organic and energy stocks through `Stand::material` and its mineral counted in the stand.
+The mineral stock differs by arm now — 76.336, 77.336 and 59.336 against a flat 249.336 in
+package J — because `initial_mineral` is provisioned lazily per site and the arms colonize
+far fewer sites when a donor sends one package at a time. That is the accounting R4.3 asked
+to have stated: colonization imports booked mineral, so the total is a function of how far
+the plants spread, and a fertility comparison wants a fixed per-site inventory instead.
+
+One correction to the record: the `seed bank on 0 sites holding -0.00000` print noted after
+package J is not a cohort at or below zero. Rust's `Sum` for `f64` folds from **-0.0**, so
+an empty sum prints as `-0.00000`; the same `-0.0` reaches the progress line's
+`best bank -0.0% of threshold` through `f64::max`. It is a print artifact of an empty bank
+and nothing is negative anywhere.
+
+### Open items
+
+1. **The probe's positive control (R4.7), owner's call on the design.** What it needs, as
+   far as this rerun can say: the same founder treatment — one founder, or a declared small
+   cohort — planted alone under this same bounded forcing, run until it has replaced itself
+   *beyond the initial reserve subsidy*, with the generation time measured rather than
+   assumed. This rerun says a recruit costs **two packages on one site**, that one package
+   is 300 s of a fully funded donor's output, and that a single funded umbrellafrond donor
+   with 8 candidate sites took 1,300 s to produce its first birth in the base arm. A
+   probe shorter than several times that cannot read an invasion, whatever it prints.
+2. **Bloomcrown's habitat is now 96 columns of 3,072** under the bounded tap, against 2,526
+   under the rising one. Whether that is the sun producer's intended niche or an artifact of
+   `establish_pore_min` 0.1 meeting a drier world is a placeholder question
+   (`design/backlog.md` row 41), and it decides whether the species has anywhere to live
+   before the presets round adds three more.
+3. **Two packages per recruit is a consequence, not a decision.** If it should be one, the
+   rule to change is where attrition is charged relative to germination, or the package
+   size — both explicit rule changes, neither a knob.
