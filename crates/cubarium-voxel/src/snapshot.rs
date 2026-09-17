@@ -52,4 +52,26 @@ mod tests {
         let err = World::load(&world.save()).expect_err("a short store is not a world");
         assert!(format!("{err:#}").contains("free has 3 entries"), "{err:#}");
     }
+
+    /// `0..=1` is not enough: the fraction has to be one the cell's own material can
+    /// hold, or the view reports water the store accounting does not count.
+    #[test]
+    fn free_water_in_a_solid_is_refused() {
+        let mut world = fixture();
+        // `y = 0` is the bedrock foundation `World::empty` lays down.
+        let i = world.config.index(1, 0, 0);
+        world.free[i] = 1.0;
+        let err = World::load(&world.save()).expect_err("bedrock holds no free water");
+        assert!(format!("{err:#}").contains("holds no free water"), "{err:#}");
+    }
+
+    #[test]
+    fn pore_water_without_pore_space_is_refused() {
+        let mut world = fixture();
+        let i = world.config.index(1, 2, 0);
+        assert!(!world.material[i].is_solid(), "the fixture's (1, 2, 0) must be air");
+        world.pore[i] = 1.0;
+        let err = World::load(&world.save()).expect_err("air has no pore space");
+        assert!(format!("{err:#}").contains("has no pore space"), "{err:#}");
+    }
 }

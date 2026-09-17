@@ -233,8 +233,15 @@ impl World {
 
     /// What a loaded world has to satisfy before it may replace a running one: a valid
     /// config, one entry per cell in each array, every fraction a real number in
-    /// `0..=1`, a finite non-negative aquifer and finite ledger terms, and outlet and
-    /// spring cells inside the world.
+    /// `0..=1` **and one its own material can actually hold** — no free water in a
+    /// solid, no pore water where [`Material::pore_capacity`] is zero — a finite
+    /// non-negative aquifer and finite ledger terms, and outlet and spring cells inside
+    /// the world.
+    ///
+    /// The material check is not decoration: `VoxelView` hands both fractions straight
+    /// out, while the store accounting reads free water only in voids and pore water
+    /// only against the material's own capacity. A snapshot with free water in bedrock
+    /// would draw and be queried as wet and weigh nothing at all.
     pub(crate) fn validate_loaded(&self) -> anyhow::Result<()> {
         self.config.validate()?;
         let n = self.config.cells();
@@ -249,6 +256,18 @@ impl World {
             {
                 bail!("{name}[{i}] is {bad}, not a fraction in 0..=1");
             }
+        }
+        for (i, &m) in self.material.iter().enumerate() {
+            ensure!(
+                !m.is_solid() || self.free[i] == 0.0,
+                "free[{i}] is {}, but {m:?} holds no free water",
+                self.free[i]
+            );
+            ensure!(
+                m.pore_capacity() > 0.0 || self.pore[i] == 0.0,
+                "pore[{i}] is {}, but {m:?} has no pore space",
+                self.pore[i]
+            );
         }
         ensure!(
             self.aquifer_m3.is_finite() && self.aquifer_m3 >= 0.0,
