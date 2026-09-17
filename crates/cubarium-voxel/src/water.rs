@@ -29,10 +29,22 @@
 //! after taking it in still lies strictly above the highest cell in the region,
 //! including the candidate. So the region is always a body of water whose own surface
 //! submerges every cell it reaches through — under roofs as readily as in the open,
-//! since nothing in the rule looks at the sky. Candidates are taken lowest-`y` first,
-//! so a region fills its floor before it climbs, and the result is symmetric: every
-//! cell at the surface level gets the same share, so the solver never picks a
-//! direction. Seeds are taken lowest-water-surface first, then in index order.
+//! since nothing in the rule looks at the sky.
+//!
+//! ## The tie rule, and why it decides nothing visible
+//!
+//! Seeds are taken lowest-water-surface first, then in index order. Candidates are
+//! taken lowest-`y` first, water-bearing before dry at the same `y`, then in index
+//! order. A candidate rejected while the level was still low is offered again on the
+//! next pass, so growth does not depend on which side of the region it reached first.
+//!
+//! Both index-order tie-breaks are there only to make the walk deterministic. Neither
+//! can tilt the answer: a region fills bottom-up and every cell at the surface level
+//! gets the *same* share, so the solver never picks a direction. A fixture mirrored in
+//! `x`, source and all, therefore settles to the mirror image of the original — exactly
+//! in the cases that reach a common level, and to within a few times 1e-8 in a spill,
+//! whose stopping substep turns on a float comparison. That is what the seam-shift and
+//! mirrored-fixture tests pin down.
 //!
 //! That rule is what the U-tube and roofed-passage tests pin down. A shaft on the far
 //! side of a bottom connection, or of a roofed passage, joins the region only when the

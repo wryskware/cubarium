@@ -90,14 +90,21 @@ fn spill_threshold_well_over_the_sill_equalizes_above_it() {
 // ------------------------------------------------------------------ U-tube
 
 /// Two shafts joined only along the bottom row, on a closed five-column ring.
-fn u_tube(offset: i64) -> World {
+/// `offset` slides the whole fixture — walls and input column together — around the
+/// ring. `dir = -1` mirrors it in `x` about the input column, which moves the wet shaft
+/// to the other side of the passage without changing anything else.
+fn u_tube_at(offset: i64, dir: i64) -> World {
     let mut w = World::empty(cfg(5, 8));
-    wall(&mut w, offset + 1, 2..=7);
-    wall(&mut w, offset + 3, 1..=7);
-    wall(&mut w, offset + 4, 1..=7);
+    wall(&mut w, offset + dir, 2..=7);
+    wall(&mut w, offset + 3 * dir, 1..=7);
+    wall(&mut w, offset + 4 * dir, 1..=7);
     pour(&mut w, offset, 4.0);
     run(&mut w, 16);
     w
+}
+
+fn u_tube(offset: i64) -> World {
+    u_tube_at(offset, 1)
 }
 
 #[test]
@@ -118,10 +125,56 @@ fn the_same_fixture_shifted_across_the_seam_gives_identical_stores() {
     let here = u_tube(0);
     let seam = u_tube(-2);
     assert!((here.view().stored_m3() - seam.view().stored_m3()).abs() < 1e-12);
-    for x in 0..5 {
-        let a = column(&here, x);
-        let b = column(&seam, x - 2);
-        assert!((a - b).abs() < 1e-9, "column {x}: {a} vs {b}");
+    // Per cell, not per column: the shifted run must be the inverse shift of this one
+    // everywhere, in both stores.
+    let (a, b) = (here.view(), seam.view());
+    for y in 0..here.config().height {
+        for x in 0..5 {
+            assert_eq!(a.material_at(x, y, 0), b.material_at(x - 2, y, 0), "material {x},{y}");
+            let (f, g) = (a.free_at(x, y, 0), b.free_at(x - 2, y, 0));
+            assert!((f - g).abs() < 1e-12, "free {x},{y}: {f} vs {g}");
+            let (p, q) = (a.pore_at(x, y, 0), b.pore_at(x - 2, y, 0));
+            assert!((p - q).abs() < 1e-12, "pore {x},{y}: {p} vs {q}");
+        }
+    }
+}
+
+/// A four-column basin behind a one-cell sill, a shallow two-column shelf beyond it and
+/// a tall ridge closing the shelf off: no symmetry anywhere, and the source is off to
+/// one side. `dir = -1` mirrors every wall and the input column about `x = 0`, which
+/// puts the wet basin on the other side of the sill.
+fn shelf(dir: i64) -> World {
+    let mut w = World::empty(cfg(8, 6));
+    wall(&mut w, 2 * dir, 1..=1);
+    wall(&mut w, 5 * dir, 1..=4);
+    pour(&mut w, dir, 5.0);
+    run(&mut w, 20);
+    w
+}
+
+/// Index order is the seed and candidate tie-break in `equalize`, so a fixture mirrored
+/// in `x` is where an order bias would show: the same geometry walked the other way
+/// round, with the wet source on the other side of the sill it has to cross.
+#[test]
+fn the_mirrored_fixture_gives_the_mirrored_answer() {
+    let here = shelf(1);
+    let flipped = shelf(-1);
+    assert!((here.view().stored_m3() - flipped.view().stored_m3()).abs() < 1e-12);
+    let (a, b) = (here.view(), flipped.view());
+    // The water crossed the sill, so the two sides really are unequal and a bias
+    // between them would have somewhere to hide.
+    assert!(column(&here, 3) > 1e-6, "nothing crossed the sill");
+    assert!(column(&here, 0) > column(&here, 3), "the basin did not stay deeper");
+    // 1e-6 rather than 1e-12: the spill decays toward its stopping point, so the
+    // substep it stops on turns on a float comparison and the two runs settle a few
+    // times 1e-8 apart. A seed or candidate *order* bias would move a fill by a
+    // tenth, not by 1e-8. See the tie rule in the `water` module doc.
+    for y in 0..here.config().height {
+        for x in 0..8 {
+            assert_eq!(a.material_at(x, y, 0), b.material_at(-x, y, 0), "material {x},{y}");
+            let (f, g) = (a.free_at(x, y, 0), b.free_at(-x, y, 0));
+            assert!((f - g).abs() < 1e-6, "free {x},{y}: {f} vs {g}");
+        }
     }
 }
 
