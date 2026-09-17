@@ -1,11 +1,17 @@
-//! Two producers on the generated strip: founder stands of bloomcrown on the highest
-//! support faces and of umbrellafrond in the lowest, then N seconds of coupled world
-//! and plants.
+//! Producers on the generated strip: founder stands on the support faces each species'
+//! **contract habitat** asks for, then N seconds of coupled world and plants.
 //!
 //! ```text
 //! cargo run --release -p cubarium-voxel-flora --example two_producers -- [seconds] [seed] [noise_seed]
-//! cargo run --release -p cubarium-voxel-flora --example two_producers -- compare [seconds] [seed] [noise_a] [noise_b] [control_seed]
+//! cargo run --release -p cubarium-voxel-flora --example two_producers -- community [seconds] [seed] [noise_seed]
+//! cargo run --release -p cubarium-voxel-flora --example two_producers -- compare [seconds] [seed] [noise_a] [noise_b] [control_seed] [species_a] [species_b]
+//! cargo run --release -p cubarium-voxel-flora --example two_producers -- chesson [fill] [probe] [seed] [noise_seed] [resident] [newcomer]
 //! ```
+//!
+//! Every mode names its species **by name** and none of them is wired in: the bare run and
+//! `community` take whatever [`Species::ALL`] holds, and `compare` and `chesson` take any
+//! pair as arguments, defaulting to the original bloomcrown/umbrellafrond pair so that the
+//! round-3 invocations still mean what they meant.
 //!
 //! The generated world starts bone dry and the plant model reads pore water, so the
 //! example rains on it. That rain is not weather and it is not a model default: it is an
@@ -28,6 +34,11 @@
 //! quarter of the surface, not of the stands), the set of occupied skyline columns, the
 //! water budget and the two flora residuals.
 //!
+//! `community` is round 4's smoke run: one founder cohort of **every** species on its own
+//! contract habitat, one duration, no arms. It is not a study — it has no control, no
+//! replication and no stationary resident — and it exists to say whether five presets can
+//! be in one world at once and which gate is shutting for each of them.
+//!
 //! `compare` is the decisive experiment of `design/voxel-ecology-sketch-2026-09-16.md`
 //! §4: re-draw **only** the generator's final weak correlated noise with a new seed,
 //! keep the landform, seed the same founder columns, and see whether each species
@@ -41,7 +52,63 @@ use cubarium_voxel_flora::{Command, Flora, FloraConfig, Site, Species, SpeciesCo
 
 const WARMUP_TICKS: u32 = 1000;
 const FOUNDERS_PER_SPECIES: usize = 8;
-const FOUNDER_WOOD: f64 = 0.3;
+/// A founder starts at this fraction of its own species' `wood_max`.
+///
+/// It was a flat 0.3 while both species had `wood_max` 0.6, and 0.3 is what half of 0.6
+/// still is, so the two original arms are unchanged to the bit. It has to be a fraction now
+/// because the round-4 presets are smaller bodies — springturf's whole `wood_max` is 0.06 —
+/// and `Command::Seed` does not bound its `wood` by `wood_max`: a flat 0.3 would have
+/// planted a springturf five times its own maximum size, which can never grow and is not a
+/// founder of anything. At half of `wood_max` a founder also starts at exactly `donor_min`
+/// for all five presets, which is where a stand becomes able to reproduce.
+const FOUNDER_FRACTION: f64 = 0.5;
+
+fn founder_wood(sc: &SpeciesConfig) -> f64 {
+    FOUNDER_FRACTION * sc.wood_max
+}
+
+/// Where on its own eligible skyline a species' founders go, and why.
+///
+/// This is the harness's statement of the **contract habitat** of
+/// `design/handoffs/voxel-round4-presets-briefs-2026-09-17.md`, and it is an **experiment
+/// condition and not a model rule**: the model has no opinion about where a founder is
+/// planted, because `Command::Seed` is accepted on any support face whatever the gates say.
+/// Every run prints the rule it used beside the count it planted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Habitat {
+    /// The **highest** eligible faces: an open ridge. Bloomcrown.
+    Ridge,
+    /// The **lowest** eligible faces: a wet hollow. Umbrellafrond.
+    Hollow,
+    /// The eligible faces with the **wettest** root box, wettest first: bare moist soil.
+    /// Springturf.
+    MoistSoil,
+    /// Eligible faces whose own support voxel is **not** soil. Since the pore gate has
+    /// already passed on them, a soil pocket is by definition in reach: that is what
+    /// `pore_ok` on a rock face means. Stonecushion.
+    RockWithAPocket,
+    /// Eligible faces inside a **taller founder's crown**, which means this species is
+    /// planted after the others. Velvetpad.
+    UnderACrown,
+}
+
+/// The table itself. One line per species, and the only place the harness says where a
+/// species belongs.
+fn habitat_of(species: Species) -> Habitat {
+    match species {
+        Species::Bloomcrown => Habitat::Ridge,
+        Species::Umbrellafrond => Habitat::Hollow,
+        Species::Springturf => Habitat::MoistSoil,
+        Species::Stonecushion => Habitat::RockWithAPocket,
+        Species::Velvetpad => Habitat::UnderACrown,
+    }
+}
+
+/// The species this species has to be planted after: `UnderACrown` needs crowns to be
+/// under, so it goes last.
+fn planted_last(species: Species) -> bool {
+    habitat_of(species) == Habitat::UnderACrown
+}
 
 /// The harness's rain, metres per second onto exposed top surfaces: an experiment
 /// condition, not a model knob and not a tuned plant parameter.
@@ -159,33 +226,45 @@ struct Outcome {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.first().map(String::as_str) == Some("compare") {
-        compare(&args[1..]);
-        return;
-    }
-    if args.first().map(String::as_str) == Some("chesson") {
-        chesson(&args[1..]);
-        return;
+    match args.first().map(String::as_str) {
+        Some("compare") => return compare(&args[1..]),
+        Some("chesson") => return chesson(&args[1..]),
+        Some("community") => return community(&args[1..]),
+        _ => {}
     }
     let seconds: f64 = arg(&args, 0).unwrap_or(60.0);
     let seed: u64 = arg(&args, 1).unwrap_or(1);
     let noise_seed: u64 = arg(&args, 2).unwrap_or(0);
-    run(seconds, seed, noise_seed, None, true);
+    run(seconds, seed, noise_seed, &Species::ALL, None, true);
 }
 
 fn arg<T: std::str::FromStr>(args: &[String], i: usize) -> Option<T> {
     args.get(i).and_then(|s| s.parse().ok())
 }
 
+/// A species named on the command line, through the model's own [`Species::parse`]. An
+/// unparseable name is a hard stop with the list printed: a silent fallback to a default
+/// species would make a run mean something other than what it was asked for.
+fn species_arg(args: &[String], i: usize, fallback: Species) -> Species {
+    match args.get(i) {
+        None => fallback,
+        Some(name) => Species::parse(name).unwrap_or_else(|| {
+            let names: Vec<&str> = Species::ALL.iter().map(|s| s.name()).collect();
+            panic!("unknown species {name:?}; the five are {}", names.join(", "))
+        }),
+    }
+}
+
 /// One run: generate, warm up, seed founders, step the coupled world and plants.
 ///
-/// `founders` is `None` for a run that picks its own — the base of a comparison, or a
-/// single run — and `Some` for one that must plant the same columns as another, whether
-/// or not its own terrain still likes them.
+/// `species` is which species get founders; `founders` is `None` for a run that picks its
+/// own — the base of a comparison, or a single run — and `Some` for one that must plant the
+/// same columns as another, whether or not its own terrain still likes them.
 fn run(
     seconds: f64,
     seed: u64,
     noise_seed: u64,
+    species: &[Species],
     founders: Option<&[Founder]>,
     verbose: bool,
 ) -> Outcome {
@@ -220,7 +299,8 @@ fn run(
 
     let mut flora = Flora::new(FloraConfig::default());
     let eligible = eligible_sets(&world, &flora, &skyline);
-    let own_founders = pick_founders(&world, &flora, &skyline, verbose && founders.is_none());
+    let own_founders =
+        pick_founders(&world, &flora, &skyline, species, verbose && founders.is_none());
     let (planted, off_predicate) = match founders {
         None => (own_founders.clone(), 0),
         Some(given) => (given.to_vec(), off_count(&world, &flora, given)),
@@ -229,7 +309,12 @@ fn run(
     for f in &planted {
         if flora.apply(
             &world,
-            Command::Seed { x: f.x as i64, z: f.z, species: f.species, wood: FOUNDER_WOOD },
+            Command::Seed {
+                x: f.x as i64,
+                z: f.z,
+                species: f.species,
+                wood: founder_wood(flora.config().species(f.species)),
+            },
         ) {
             seeded += 1;
         }
@@ -409,9 +494,9 @@ fn eligible_sets(world: &World, flora: &Flora, skyline: &[Site]) -> [Vec<(u32, u
 /// no second approximate predicate, which is what package J deleted and what Astra's R5.2
 /// asks to keep deleted. A column can fail several gates at once, so the counts overlap by
 /// construction; the point is which of them is doing the work.
-fn gate_diagnosis(world: &World, flora: &Flora, skyline: &[Site]) {
+fn gate_diagnosis(world: &World, flora: &Flora, skyline: &[Site], when: &str) {
     let view = world.view();
-    println!("establishment gates at observation ({} skyline columns):", skyline.len());
+    println!("establishment gates {when} ({} skyline columns):", skyline.len());
     for species in Species::ALL {
         let sc = flora.config().species(species);
         let mut eligible = 0usize;
@@ -511,55 +596,164 @@ fn gate_diagnosis(world: &World, flora: &Flora, skyline: &[Site]) {
     }
 }
 
-/// Founders go where their own species could establish: wet enough at the support face,
-/// bright enough, and not already under water it cannot stand in. Without that filter
-/// every founder of the high species lands on bare sloping rock and dies in the first
-/// tick — see the commit message on why a slope never wets.
+/// Founders go where their own species could establish — wet enough for its roots,
+/// aerated enough, bright enough, not under water it cannot stand in — and, among those
+/// sites, where its own [`Habitat`] says. Without the establishment filter every founder of
+/// a light-demanding species lands on bare sloping rock and dies in the first tick; without
+/// the habitat rule the five species would all be planted in the same place and the run
+/// would say nothing about any of them.
+///
+/// `species` is the list to plant and its order is only the order of the printed lines: the
+/// species whose habitat is `UnderACrown` are planted **after** every other species,
+/// because their rule reads the crowns the others make.
 fn pick_founders(
     world: &World,
     flora: &Flora,
     skyline: &[Site],
+    species: &[Species],
     verbose: bool,
 ) -> Vec<Founder> {
-    let mut out = Vec::new();
-    for (species, from_the_top) in [(Species::Umbrellafrond, false), (Species::Bloomcrown, true)] {
-        let sc = flora.config().species(species);
-        let mut ok: Vec<Site> = skyline.iter().copied().filter(|s| passes(world, sc, *s)).collect();
-        let n = ok.len();
-        // A species with nowhere to establish is still seeded, on the sites its own
-        // ordering prefers, so the run has two producers in it and the summary shows what
-        // happens to it. The printed count is the honest one.
-        if ok.is_empty() {
-            ok = skyline.to_vec();
-        }
-        if from_the_top {
-            ok.reverse();
-        }
-        let stride = (ok.len() / FOUNDERS_PER_SPECIES).max(1);
-        let mut lo = u32::MAX;
-        let mut hi = 0;
-        for site in ok.iter().step_by(stride).take(FOUNDERS_PER_SPECIES) {
-            out.push(Founder { species, x: site.x, z: site.z });
-            lo = lo.min(site.y);
-            hi = hi.max(site.y);
-        }
-        if verbose {
-            println!(
-                "{:>14}: {n} of {} skyline sites pass its establishment predicate at introduction \
-                 (50 s warm-up, before planting); founders at y {lo}..{hi}{}",
-                species.name(),
-                skyline.len(),
-                if n == 0 { " (seeded anyway, nowhere qualifies)" } else { "" }
-            );
-            let picked: Vec<(u32, u32)> = out
-                .iter()
-                .filter(|f| f.species == species)
-                .map(|f| (f.x, f.z))
-                .collect();
-            println!("{:>14}: founder columns {picked:?}", species.name());
+    let mut out: Vec<Founder> = Vec::new();
+    let mut rounds: Vec<Vec<Species>> = vec![Vec::new(), Vec::new()];
+    for &s in species {
+        rounds[usize::from(planted_last(s))].push(s);
+    }
+    for round in rounds {
+        for species in round {
+            let sc = flora.config().species(species);
+            let habitat = habitat_of(species);
+            let eligible: Vec<Site> =
+                skyline.iter().copied().filter(|s| passes(world, sc, *s)).collect();
+            let n = eligible.len();
+            // A species with nowhere to establish is still seeded, on the sites its own
+            // ordering prefers, so the run has every producer in it and the summary shows
+            // what happens to it. The printed count is the honest one.
+            let pool = if eligible.is_empty() { skyline.to_vec() } else { eligible };
+            let ok = order_for(world, flora, species, habitat, pool, &out);
+            let stride = (ok.len() / FOUNDERS_PER_SPECIES).max(1);
+            let mut lo = u32::MAX;
+            let mut hi = 0;
+            for site in ok.iter().step_by(stride).take(FOUNDERS_PER_SPECIES) {
+                out.push(Founder { species, x: site.x, z: site.z });
+                lo = lo.min(site.y);
+                hi = hi.max(site.y);
+            }
+            if verbose {
+                println!(
+                    "{:>14}: {n} of {} skyline sites pass its establishment predicate at \
+                     introduction (50 s warm-up, before planting); habitat rule {habitat:?} over \
+                     {} candidates; founders at y {lo}..{hi}{}",
+                    species.name(),
+                    skyline.len(),
+                    ok.len(),
+                    if n == 0 { " (seeded anyway, nowhere qualifies)" } else { "" }
+                );
+                let picked: Vec<(u32, u32)> = out
+                    .iter()
+                    .filter(|f| f.species == species)
+                    .map(|f| (f.x, f.z))
+                    .collect();
+                println!("{:>14}: founder columns {picked:?}", species.name());
+            }
         }
     }
     out
+}
+
+/// One [`Habitat`] rule applied to a pool of eligible sites: the candidates, best first.
+/// The strided sample the caller then takes is over this order, so the rule is the whole of
+/// what makes one species' founders differ from another's.
+///
+/// `skyline` reaches here already sorted by `(y, x, z)`, so `Hollow` is the pool as it
+/// stands and `Ridge` is it reversed.
+fn order_for(
+    world: &World,
+    flora: &Flora,
+    species: Species,
+    habitat: Habitat,
+    mut pool: Vec<Site>,
+    planted: &[Founder],
+) -> Vec<Site> {
+    let view = world.view();
+    match habitat {
+        Habitat::Hollow => pool,
+        Habitat::Ridge => {
+            pool.reverse();
+            pool
+        }
+        Habitat::MoistSoil => {
+            // The wettest root boxes first, read through the model's own gates so the
+            // number is the one the predicate used. A stable sort on the height order, so
+            // ties keep it.
+            let mut keyed: Vec<(Site, f64)> = pool
+                .into_iter()
+                .map(|s| {
+                    let sc = flora.config().species(species);
+                    let mean = cubarium_voxel_flora::establishment_gates(&view, s, sc)
+                        .mean_pore
+                        .unwrap_or(0.0);
+                    (s, mean)
+                })
+                .collect();
+            keyed.sort_by(|a, b| b.1.total_cmp(&a.1));
+            keyed.into_iter().map(|(s, _)| s).collect()
+        }
+        Habitat::RockWithAPocket => {
+            // A support face that is not soil. The pore gate has already passed on every
+            // site in the pool, and the root box only ever holds soil voxels, so a
+            // non-soil face in this pool *is* a face with a soil pocket in reach.
+            pool.retain(|s| view.material_at(s.x as i64, s.y, s.z) != cubarium_voxel::Material::Soil);
+            pool.reverse();
+            pool
+        }
+        Habitat::UnderACrown => {
+            let width = view.config.width;
+            pool.retain(|s| under_a_crown(flora, width, species, *s, planted));
+            pool
+        }
+    }
+}
+
+/// Whether a site falls inside the crown of an already-planted founder whose crown is
+/// **taller over its own face** than this species' would be over this one — the shade
+/// model's own two conditions (cover in `x` and `z`, and a strictly higher crown top), read
+/// off the same `crown_radius` and `crown_height` the model shades with, at the wood a
+/// founder is planted at.
+///
+/// It is the level-face version of the height test, because `Founder` deliberately does not
+/// carry a `y`: under another noise seed the same column's face sits a voxel higher or
+/// lower and it is the same place on the map. A founder on a *higher* face shades further
+/// than this says, so the rule is conservative rather than wrong — and the light the run
+/// actually reports comes from the model, not from here.
+fn under_a_crown(
+    flora: &Flora,
+    width: u32,
+    species: Species,
+    site: Site,
+    planted: &[Founder],
+) -> bool {
+    let own_top = {
+        let sc = flora.config().species(species);
+        sc.crown_height(founder_wood(sc))
+    };
+    let width = f64::from(width.max(1));
+    planted.iter().any(|f| {
+        let sc = flora.config().species(f.species);
+        let wood = founder_wood(sc);
+        let radius = sc.crown_radius(wood);
+        let mut dx = f64::from(f.x) - f64::from(site.x);
+        while dx > width * 0.5 {
+            dx -= width;
+        }
+        while dx < -width * 0.5 {
+            dx += width;
+        }
+        let dz = f64::from(f.z) - f64::from(site.z);
+        if dx * dx + dz * dz > radius * radius {
+            return false;
+        }
+        sc.crown_height(wood) > own_top
+    })
 }
 
 /// The species' establishment predicate at one site: the model's own, through
@@ -692,7 +886,8 @@ fn report(
         config.outlet_m3_per_s / footprint_m2
     );
     println!(
-        "{WARMUP_TICKS} warm-up ticks, then {ticks} coupled ticks ({seconds:.0} s); {founders} founders at wood {FOUNDER_WOOD}"
+        "{WARMUP_TICKS} warm-up ticks, then {ticks} coupled ticks ({seconds:.0} s); {founders} \
+         founders at {FOUNDER_FRACTION} of each species' own wood_max"
     );
 
     for species in Species::ALL {
@@ -754,7 +949,7 @@ fn report(
         view.energy()
     );
     germination_diagnosis(world, flora);
-    gate_diagnosis(world, flora, skyline);
+    gate_diagnosis(world, flora, skyline, "at observation");
     let water = world.view().stored_m3() - world.view().ledger.expected_stored();
     println!(
         "core water: stored {:.4} m3, residual {:.3e}, transpiration_out {:.6} m3 (flora says {:.6})",
@@ -868,13 +1063,21 @@ fn compare(args: &[String]) {
     let noise_a: u64 = arg(args, 2).unwrap_or(101);
     let noise_b: u64 = arg(args, 3).unwrap_or(202);
     let control_seed: u64 = arg(args, 4).unwrap_or(7);
+    // Any pair, by name. The default is the round-3 pair, so an invocation written before
+    // round 4 still runs the experiment it ran then.
+    let pair =
+        [species_arg(args, 5, Species::Bloomcrown), species_arg(args, 6, Species::Umbrellafrond)];
 
-    println!("=== base: seed {seed}, noise_seed {noise_a} ===");
-    let base = run(seconds, seed, noise_a, None, true);
+    println!(
+        "=== base: seed {seed}, noise_seed {noise_a}, pair {} and {} ===",
+        pair[0].name(),
+        pair[1].name()
+    );
+    let base = run(seconds, seed, noise_a, &pair, None, true);
     println!("\n=== re-drawn noise: seed {seed}, noise_seed {noise_b} (same landform) ===");
-    let alt = run(seconds, seed, noise_b, Some(&base.founders), true);
+    let alt = run(seconds, seed, noise_b, &pair, Some(&base.founders), true);
     println!("\n=== control: seed {control_seed}, noise_seed {noise_a} (another landform) ===");
-    let ctl = run(seconds, control_seed, noise_a, Some(&base.founders), true);
+    let ctl = run(seconds, control_seed, noise_a, &pair, Some(&base.founders), true);
 
     println!("\n=== the comparison ===");
     println!(
@@ -900,7 +1103,7 @@ fn compare(args: &[String]) {
         base.establishments, base.deaths, alt.establishments, alt.deaths, ctl.establishments,
         ctl.deaths
     );
-    for species in Species::ALL {
+    for species in pair {
         let i = species.index();
         let (b, a, c) = (&base.occupied[i], &alt.occupied[i], &ctl.occupied[i]);
         println!("{}:", species.name());
@@ -1055,15 +1258,22 @@ fn skyline_of(world: &World) -> Vec<Site> {
     skyline
 }
 
-/// A species' own habitat on this skyline, ordered best first: the sun producer from the
-/// ridges down, the wet producer from the hollows up.
+/// A species' own habitat on this skyline, ordered best first by its own [`Habitat`] rule —
+/// the same table `pick_founders` uses, so the probe cannot disagree with the experiment
+/// about where a species belongs.
+///
+/// `UnderACrown` is passed the founders already standing, so a probe's newcomer goes under
+/// the resident it is invading rather than into the open.
 fn habitat(world: &World, flora: &Flora, skyline: &[Site], species: Species) -> Vec<Site> {
     let sc = flora.config().species(species);
-    let mut ok: Vec<Site> = skyline.iter().copied().filter(|s| passes(world, sc, *s)).collect();
-    if species == Species::Bloomcrown {
-        ok.reverse();
-    }
-    ok
+    let ok: Vec<Site> = skyline.iter().copied().filter(|s| passes(world, sc, *s)).collect();
+    let standing: Vec<Founder> = flora
+        .view()
+        .stands
+        .iter()
+        .map(|s| Founder { species: s.species, x: s.site.x, z: s.site.z })
+        .collect();
+    order_for(world, flora, species, habitat_of(species), ok, &standing)
 }
 
 fn step_coupled(flora: &mut Flora, world: &mut World, seconds: f64) {
@@ -1083,14 +1293,17 @@ fn chesson(args: &[String]) {
     let probe: f64 = arg(args, 1).unwrap_or(1000.0);
     let seed: u64 = arg(args, 2).unwrap_or(1);
     let noise_seed: u64 = arg(args, 3).unwrap_or(101);
+    // Any pair, by name, in both directions. The default is the round-3 pair.
+    let a = species_arg(args, 4, Species::Bloomcrown);
+    let b = species_arg(args, 5, Species::Umbrellafrond);
+    assert_ne!(a, b, "an invasion needs two different species");
     println!(
-        "chesson: seed {seed} noise_seed {noise_seed}; {fill:.0} s of the resident alone, then \
-         one founder of the newcomer and {probe:.0} s"
+        "chesson: seed {seed} noise_seed {noise_seed}; {} and {}; {fill:.0} s of the resident \
+         alone, then one founder of the newcomer and {probe:.0} s",
+        a.name(),
+        b.name()
     );
-    for (resident, newcomer) in [
-        (Species::Bloomcrown, Species::Umbrellafrond),
-        (Species::Umbrellafrond, Species::Bloomcrown),
-    ] {
+    for (resident, newcomer) in [(a, b), (b, a)] {
         invasion(fill, probe, seed, noise_seed, resident, newcomer);
     }
 }
@@ -1117,7 +1330,12 @@ fn invasion(
     for site in ok.iter().step_by(stride).take(FOUNDERS_PER_SPECIES) {
         if flora.apply(
             &world,
-            Command::Seed { x: site.x as i64, z: site.z, species: resident, wood: FOUNDER_WOOD },
+            Command::Seed {
+                x: site.x as i64,
+                z: site.z,
+                species: resident,
+                wood: founder_wood(flora.config().species(resident)),
+            },
         ) {
             planted += 1;
         }
@@ -1148,7 +1366,12 @@ fn invasion(
     };
     assert!(flora.apply(
         &world,
-        Command::Seed { x: target.x as i64, z: target.z, species: newcomer, wood: FOUNDER_WOOD }
+        Command::Seed {
+            x: target.x as i64,
+            z: target.z,
+            species: newcomer,
+            wood: founder_wood(flora.config().species(newcomer)),
+        }
     ));
     // The founder's identity, from the ledger's birth counter: the one stand this probe is
     // allowed to call a founder.
@@ -1217,4 +1440,216 @@ fn invasion(
          {lost} of them dead before the end, {descendants} surviving descendant(s)",
         if births > 0 { "OBSERVED" } else { "NOT OBSERVED" }
     );
+}
+
+// =================================================================== the community run
+//
+// Round 4's smoke run: one founder cohort of every species on its own contract habitat,
+// one duration, no arms. **Not a study.** There is no control, no replication, no
+// stationary resident and no measured generation time, so what it can report is what five
+// presets did in one world for one duration and which gate was shutting for each of them.
+// Astra's R5.2 applies to every eligible count in it: a count is a reading of the moment it
+// was taken, and never a settled habitat.
+
+/// Every stand identity this run has seen alive at the end of a tick, per species, sorted
+/// so a lookup is a binary search and no hash iteration can reach the model.
+///
+/// A birth that dies inside the run is still the birth it was, which is Astra's R5.4:
+/// reading only the final living stands reported "no recruitment" over a real one. Death
+/// precedes germination inside a tick, so a newborn is always alive at the end of its own
+/// birth tick and no birth can slip past this.
+struct Seen([Vec<u64>; Species::COUNT]);
+
+impl Seen {
+    fn new() -> Seen {
+        Seen(std::array::from_fn(|_| Vec::new()))
+    }
+
+    fn note(&mut self, species: Species, id: u64) {
+        let v = &mut self.0[species.index()];
+        if let Err(i) = v.binary_search(&id) {
+            v.insert(i, id);
+        }
+    }
+
+    fn len(&self, species: Species) -> usize {
+        self.0[species.index()].len()
+    }
+}
+
+fn community(args: &[String]) {
+    let seconds: f64 = arg(args, 0).unwrap_or(400.0);
+    let seed: u64 = arg(args, 1).unwrap_or(1);
+    let noise_seed: u64 = arg(args, 2).unwrap_or(0);
+    let started = std::time::Instant::now();
+
+    let mut world = prepared_world(seed, noise_seed);
+    let skyline = skyline_of(&world);
+    let mut flora = Flora::new(FloraConfig::default());
+    let config = world.config().clone();
+    println!(
+        "community: {}x{}x{} seed {} noise_seed {}, rain {} m/s, outlet open; {WARMUP_TICKS} \
+         warm-up ticks (50 s) then {seconds:.0} coupled seconds, so the world ends at {} s",
+        config.width, config.height, config.depth, config.seed, config.noise_seed,
+        config.rain_m_per_s,
+        50.0 + seconds
+    );
+    println!(
+        "the five contract habitats, as founder-placement rules of this harness and not \
+         model rules:"
+    );
+    for species in Species::ALL {
+        let sc = flora.config().species(species);
+        println!(
+            "  {:>14}: {:?}, {FOUNDERS_PER_SPECIES} founders at wood {:.3} (half its own \
+             wood_max), hop {}, package {:.4}",
+            species.name(),
+            habitat_of(species),
+            founder_wood(sc),
+            sc.hop,
+            sc.alive_min / sc.propagule_split[0]
+        );
+    }
+
+    let eligible = eligible_sets(&world, &flora, &skyline);
+    println!("\n--- at introduction (after the warm-up, before any plant acted) ---");
+    gate_diagnosis(&world, &flora, &skyline, "at introduction");
+    let founders = pick_founders(&world, &flora, &skyline, &Species::ALL, true);
+    let mut planted = [0usize; Species::COUNT];
+    let mut seen = Seen::new();
+    for f in &founders {
+        let wood = founder_wood(flora.config().species(f.species));
+        if flora.apply(&world, Command::Seed { x: f.x as i64, z: f.z, species: f.species, wood }) {
+            planted[f.species.index()] += 1;
+        }
+    }
+    let founder_ids: Vec<u64> = flora.view().stands.iter().map(|s| s.id).collect();
+    assert_eq!(
+        founder_ids.len() as u64,
+        flora.view().ledger.births,
+        "every stand alive before the first tick is a founder"
+    );
+    for stand in flora.view().stands {
+        seen.note(stand.species, stand.id);
+    }
+
+    let ticks = (seconds * cubarium_voxel::TICK_HZ as f64).round() as u64;
+    let every = 100 * cubarium_voxel::TICK_HZ as u64;
+    let start_mark = water_mark(&world, 0.0);
+    let mut last_mark = start_mark;
+    println!();
+    for tick in 0..ticks {
+        world.step();
+        flora.step(&mut world);
+        for stand in flora.view().stands {
+            seen.note(stand.species, stand.id);
+        }
+        if (tick + 1) % every == 0 {
+            let v = flora.view();
+            let mut line = format!(
+                "  t {:>5.0} s: establishments {}, deaths {}",
+                (tick + 1) as f64 * cubarium_voxel::DT,
+                v.ledger.establishments,
+                v.ledger.deaths
+            );
+            for species in Species::ALL {
+                let n = v.stands.iter().filter(|s| s.species == species).count();
+                let sc = flora.config().species(species);
+                let threshold = sc.alive_min / sc.propagule_split[0];
+                let bank =
+                    v.ground.iter().map(|g| g.seed_organic(species)).fold(0.0f64, f64::max);
+                line.push_str(&format!(
+                    "; {} {n} ({:.0}% bank)",
+                    species.name(),
+                    100.0 * bank / threshold
+                ));
+            }
+            println!("{line}");
+            let mark = water_mark(&world, (tick + 1) as f64 * cubarium_voxel::DT);
+            println!("    {}", water_budget_line(&last_mark, &mark));
+            last_mark = mark;
+        }
+    }
+
+    // Per species, by identity: what was planted, what is standing, how much of it is a
+    // descendant, how many births this run ever saw, and how many of those are gone. The
+    // ledger's own `establishments` and `deaths` have no species in them, so these are the
+    // per-species figures and they are counted from `Stand::id` alone.
+    println!("\n--- at observation (the last tick of the run) ---");
+    let v = flora.view();
+    println!(
+        "{:>14}  {:>8} {:>7} {:>7} {:>7} {:>7} {:>7} {:>8} {:>7} {:>7} {:>7} {:>6}",
+        "species", "founders", "alive", "found.", "desc.", "births", "deaths", "wood", "light",
+        "moist", "stress", "banks"
+    );
+    for species in Species::ALL {
+        let all: Vec<_> = v.stands.iter().filter(|s| s.species == species).collect();
+        let n = all.len().max(1) as f64;
+        let still = all.iter().filter(|s| founder_ids.contains(&s.id)).count();
+        let desc = all.len() - still;
+        let born = seen.len(species) - planted[species.index()];
+        let gone = seen.len(species) - all.len();
+        let banks = v.ground.iter().filter(|g| g.seed_organic(species) > 0.0).count();
+        println!(
+            "{:>14}  {:>8} {:>7} {:>7} {:>7} {:>7} {:>7} {:>8.4} {:>7.3} {:>7.3} {:>7.3} {:>6}",
+            species.name(),
+            planted[species.index()],
+            all.len(),
+            still,
+            desc,
+            born,
+            gone,
+            all.iter().map(|s| s.wood).sum::<f64>(),
+            all.iter().map(|s| s.light).sum::<f64>() / n,
+            all.iter().map(|s| s.moisture).sum::<f64>() / n,
+            all.iter().map(|s| s.aeration_stress).sum::<f64>() / n,
+            banks
+        );
+    }
+    println!(
+        "eligible skyline columns per species, introduction -> observation (a reading of a \
+         moment each, never a settled habitat):"
+    );
+    let eligible_at_end = eligible_sets(&world, &flora, &skyline);
+    for species in Species::ALL {
+        let i = species.index();
+        println!(
+            "  {:>14}: {} -> {} of {}",
+            species.name(),
+            eligible[i].len(),
+            eligible_at_end[i].len(),
+            skyline.len()
+        );
+    }
+    let l = v.ledger;
+    println!(
+        "ledger: fixed_in {:.6} respired_out {:.6} light_in {:.6} heat_out {:.6} transpired \
+         {:.6} m3 births {} establishments {} deaths {}",
+        l.fixed_in, l.respired_out, l.light_in, l.heat_out, l.transpired_m3, l.births,
+        l.establishments, l.deaths
+    );
+    println!(
+        "residuals: organic {:.3e} mineral {:.3e} energy {:.3e} (stocks: organic {:.4} mineral \
+         {:.4} energy {:.4})",
+        v.organic() - l.expected_organic(),
+        v.mineral() - l.expected_mineral(),
+        v.energy() - l.expected_energy(),
+        v.organic(),
+        v.mineral(),
+        v.energy()
+    );
+    germination_diagnosis(&world, &flora);
+    gate_diagnosis(&world, &flora, &skyline, "at observation");
+    let end_mark = water_mark(&world, ticks as f64 * cubarium_voxel::DT);
+    println!("whole run: {}", water_budget_line(&start_mark, &end_mark));
+    let water = world.view().stored_m3() - world.view().ledger.expected_stored();
+    println!(
+        "core water: stored {:.4} m3, residual {:.3e}, transpiration_out {:.6} m3 (flora says \
+         {:.6})",
+        world.view().stored_m3(),
+        water,
+        world.view().ledger.transpiration_out,
+        l.transpired_m3
+    );
+    println!("wall time: {:.1} s for {ticks} coupled ticks", started.elapsed().as_secs_f64());
 }
