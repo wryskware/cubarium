@@ -1102,3 +1102,172 @@ the study. A consumer round should start with explicit bounded food transfers
 and the organic/mineral/energy ledger, leaving population targets and carrying
 capacity unclaimed. No new hydrology, species tuning or long rerun is required
 to answer this review.
+
+## Round 8
+
+Source review at `e7f4020`: package L (`e7d850c` through `c36e8d7`) and
+package M's five commits. The eleven `round5a` tests, both example placement
+tests and L's retained-water springturf test pass. I checked the transfer and
+recovery arithmetic separately; no harvest rerun or long world run. The
+reported 400-second outcomes remain the worker's observations.
+
+Package L answers the Round 7 repair requests in substance:
+
+- **R7.1 resolved.** `crates/cubarium-voxel-flora/examples/two_producers.rs:829,870,993`
+  resolves planned support heights, reads existing stands' actual wood and
+  foliage, compares absolute tops and wraps horizontal distance. The two
+  fixtures at `:2397,2437` cover the reported failures. Reserved/occupied
+  columns are removed before sampling at `:682`. Worker point **(g)** holds;
+  OpenSoil asks about cover above the ground face, UnderACrown about cover
+  above the candidate founder's crown, an explicit and reasonable distinction.
+- **R7.3 resolved.** The fixture at
+  `crates/cubarium-voxel-flora/tests/round4.rs:447` demonstrates a passing
+  pore-0.26 site with income below newborn maintenance and falling reserve.
+  The preset and brief distinguish permission, solvency and intended succession.
+  Its fast-donor config still changes `reserve_cap` as well as saving rate;
+  the comment at `:459` should acknowledge that, but neither changes this
+  maintenance-deficient newborn's result: it earns no allocation surplus.
+- **R7.4/R7.5 resolved.** OpenSoil's support/occupancy/canopy filter and keyed
+  ordering are at `examples/two_producers.rs:765`; there is no off-predicate
+  fallback at `:656`. Planting gates and identity-based observation are printed
+  at `:728,933`. The experiment note at
+  `design/7_Research/voxel-round3-experiment-2026-09-16.md:849,890,924`
+  separates bank, vacancy and predicate, withdraws the stress attribution and
+  distinguishes a skyline mean from retained-water equilibrium.
+- **R7.6 resolved:** the numerical corrections are present in the preset docs
+  and backlog; `crates/cubarium-voxel/src/world.rs:162` now describes only
+  contiguous column soil. **R7.2 remains deferred, not implemented by L.**
+  The old probe still selects velvetpad residents from an empty canopy at
+  `examples/two_producers.rs:1571,1575`. Its separate study brief records the
+  required treatment/refusal and timing repairs. This does not block transfers.
+
+1. **R8.1 — P1: pruning a carrion site silently destroys all three currencies. Timing: now, before a consumer's deposits land.**
+   `crates/cubarium-voxel-flora/src/step.rs:200,201,202` books litter,
+   dead wood and soluble mineral when dropping an unsupported Ground, but
+   omits `carrion`, `carrion_mineral` and `carrion_energy`. The new stock
+   totals include them, so this is an actual residual, not a missing label.
+   Concrete one-tick case: deposit `(organic, mineral, energy) =
+   (0.4, 0.012, 0.9)` on a support face, remove that support, then step.
+   The Ground disappears before decomposition; residuals become approximately
+   **−0.4, −0.012, −0.9**. The same failure follows a deposit directly on an
+   unsupported site, which `src/lib.rs:1683` explicitly promises to book out.
+   **Change:** include all three carrion stocks in the corresponding
+   `removed_*` additions. Add one deposit/remove-support/step fixture, checking
+   the removal terms and residuals, plus the directly unsupported deposit case.
+   `tests/round5a.rs:382` mentions this promise but never exercises pruning.
+   No relocation, terrain rule or consumer behaviour change is needed.
+
+2. **R8.2 — P2: accepted zero-organic deposits can strand mineral and energy indefinitely. Timing: settle before frondgrazer death/excretion uses the API.**
+   `crates/cubarium-voxel-flora/src/lib.rs:1699,1704` accepts any finite
+   nonnegative triplet with at least one positive component. Thus a carrion
+   deposit `(0, 0.02, 0.4)` succeeds, but
+   `src/step.rs:833,834` always returns with zero decomposition: its mineral
+   never reaches the soluble pool and its energy never becomes heat. Litter
+   with `(0, 0.02, 0)` strands the mineral too. Conservation totals still close;
+   the defect is a public terminal-state contract that creates an inert sink
+   until unrelated organic material happens to arrive. This matters for an
+   exhausted consumer whose respiration left mineral behind.
+   **Proposed change:** for an accepted deposit with organic exactly zero,
+   credit mineral directly to the site's soluble pool and energy to heat,
+   retaining the full `deposited_*` booking and existing provisioning rule.
+   Document that terminal case and test it for both kinds. If the intended API
+   instead requires positive organic for either kind, reject these triplets
+   before provisioning and explicitly give the consumer another destination
+   for its remaining mineral; do not accept them into an undecomposable pool.
+
+3. **R8.3 — P2: the harvest note mistakes mediated treatment effects for coupling between arms and overstates non-recovery. Timing: now, reporting only.**
+   `crates/cubarium-voxel-flora/examples/two_producers.rs:2050,2052,2209,2212`
+   constructs separate World/Flora instances. At
+   `design/7_Research/voxel-round3-experiment-2026-09-16.md:1031,1035,1199`,
+   the arms therefore do **not** share a water table or shade field. Stands
+   within each arm do. With identical starts and deterministic rules, a
+   difference in an unbitten species can be a downstream effect of harvesting;
+   its fourth-decimal magnitude is not a threshold below which attribution to
+   the treatment becomes impossible. The direct bite effect and its ecological
+   mediators have not been separated, nor has generality across seeds been tested.
+   **Change:** replace the cross-arm coupling claim with within-arm feedback
+   and distinguish total treatment response from a particular causal pathway.
+   Keep the 15-versus-14 establishments as a measured contrast with mechanism
+   unmeasured; delete “less income ... should ... recruit less” at `:1127`.
+   Competition, water, shade, timing and keyed lotteries supply no monotonicity
+   guarantee. This is the correction to worker points **(c)** and **(d)**.
+   Also replace “nothing measurably recovered” at `:1105` with **limited partial
+   regrowth, no stand reaching the declared full-foliage threshold**. The given
+   cohorts gain **1.03%** and **7.99%** absolute foliage after harvest stops;
+   the springturf-location deficit against control narrows from **0.77724 to
+   0.74510**, while the bloomcrown-location deficit grows from **0.69295 to
+   0.71720**. Neither closes its deficit, but these are measured changes.
+   Do not attribute the control's 0.941 fill solely to per-tick senescence at
+   `:1047`: base senescence removes 0.005% per tick, and the growth, resource
+   and stress budgets jointly determine whether it is replaced. No rerun is
+   needed to make these statements match the recorded observations.
+
+4. **R8.4 — P3: an adult bloomcrown is beyond reach from its own face, not from every face. Timing: before adopting the reach explanation in the browser contract.**
+   The implementation at `crates/cubarium-voxel-flora/src/lib.rs:1389`
+   correctly compares **absolute** crown-cell height against the eater's
+   ceiling. The unconditional “only its seedlings are ever food” at
+   `examples/two_producers.rs:1918` and the general exclusion in
+   `design/backlog.md:51` are stronger than that rule. A founder bloomcrown
+   on support `y=2` has crown cells at 4: an adjacent eater on support `y=3`
+   reaches it with `up=1`, although an eater on `y=2` cannot.
+   **Change:** qualify the prose by relative elevation and add that two-face
+   case beside `tests/round5a.rs:478`. Worker point **(b)** is valid as the
+   measured result of these declared harvest faces, not a species-wide food
+   exclusion. Keep the actual species of every bite in the report. Point
+   **(f)** is fine: `FloraView` plus `VoxelView` supplies wrapping without
+   tying flora to the presenter. The upper-only vertical bound, no line of
+   sight and whole-stand foliage availability once one crown cell qualifies
+   are explicit approximations, not a measured animal's reach or bite capacity.
+
+5. **R8.5 — P3: state precisely what waits for the next tick. Timing: with the transfer documentation repair.**
+   `crates/cubarium-voxel-flora/src/step.rs:151,164` correctly snapshots
+   inter-tick deposits before growth and decomposes them on the next flora
+   step; `tests/round5a.rs:412` pins that for carrion. But the last sentence
+   of `src/lib.rs:1696` equates this with the current tick's senescence,
+   which is too late for that snapshot. L's reporting repair also says a
+   newly landed package enters the “same tick's lottery” at
+   `design/7_Research/voxel-round3-experiment-2026-09-16.md:868`; propagation
+   follows the lottery, so its first opportunity is the next tick.
+   **Change:** correct both descriptions without changing phase order.
+   Also qualify the blanket waiting claim in `src/step.rs:49`: the snapshot
+   at `:812` stores **organic amounts**, while `:837,841` uses the mixed
+   pool's **current** energy/mineral density. For example, one old unit with
+   no mineral plus one newly shed unit with one mineral, at a half-old-stock
+   decomposition step, releases 0.25 mineral immediately. Organic throughput
+   is delayed; individual material parcels are not age-isolated. That is the
+   inherited well-mixed-pool rule, and it conserves the currencies. Document
+   it and pin a small mixed-density fixture before a consumer relies on a
+   stronger all-currencies delay; M's inter-tick API needs no new phase.
+
+### What this does and does not establish
+
+`take_foliage` uses pre-withdrawal `Stand::material`, parcel included, for the
+existing fraction rule (`src/lib.rs:1643`); it leaves wood and reserve alone
+and returns the same triplet booked as consumed. `take_pool` at `:1756`
+preserves dead-pool mineral/energy density and empties all three stocks on a
+full withdrawal. The six ledger terms have the correct signs; carrion appears
+in stock totals; litter deposits book the full incoming energy and send excess
+to heat. These ordinary positive-organic transfer paths are sound on this read.
+The omission in R8.1 is on removal, not on decomposition or withdrawal.
+
+Worker point **(a)** holds only with “directly” and the observation window:
+foliage removal does not itself kill a stand, but unpaid maintenance later
+removes wood (`src/step.rs:653,662`) and can kill it. Zero deaths in these
+400 seconds is not grazing immunity. The short regrowth fixture checks a
+positive direction with reserve available, not complete recovery after the
+reported prolonged harvest. **(e)** is an appropriate scope boundary:
+`DepositKind` has the two kinds the brief requested; package N may add dead
+wood with the same booking/removal checks. No coupled deposit measurement was
+made, and unit tests are sufficient for this substrate once the missing cases
+above are covered. `carrion_decomposition` remains **0.005/s**, unmeasured;
+the report at `:1153` should say its *flux* was zero, not its configured rate.
+
+**Verdict: changes requested — R8.1 and R8.2 before clearing the shared deposit
+boundary for glowcap/frondgrazer integration; R8.3–R8.5 are reporting and
+contract follow-ups at the stated timings.** The bounded foliage/dead-wood
+withdrawals are suitable for the packages already in progress. They can
+continue against actual `Taken` receipts; fix carrion removal and define the
+zero-organic terminal case before calling the combined consumer ledger closed.
+Then check one small consume/deposit/decompose exchange across both ledgers,
+including litter-cap heat and separately booked lazy mineral provisioning.
+No tuning, recovery mechanic or long harvest rerun is a clearance requirement.
