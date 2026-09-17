@@ -4,7 +4,8 @@
 //! The loop is [`crate::run::drive`]'s shape — one [`Clock`], one `encode_raster` per
 //! rendered frame, one sink — with two differences: the world is a voxel strip rather
 //! than the fixture scenes, and a stdin reader thread lets the run be poked while it is
-//! running (pause, single-step, speed, rain, save, load, inspect, outlet, quit).
+//! running (pause, single-step, speed, rain, set a cell's material, save, load, inspect,
+//! outlet, quit).
 //!
 //! `--speed` scales world ticks per clock tick through an accumulator, so a fractional
 //! speed slows the world down without touching the clock: the picture is still drawn at
@@ -26,7 +27,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use cubarium_render::Canvas;
 use cubarium_surface::{Scale, Topology};
-use cubarium_voxel::{Command as VoxelCommand, World};
+use cubarium_voxel::{Command as VoxelCommand, Material, World};
 use serde::{Deserialize, Serialize};
 
 use crate::clock::{Clock, Step};
@@ -35,6 +36,12 @@ use crate::sink::{FrameSink, Output, PngSink, WebSink, WorldShape};
 
 use present::VoxelPresenter;
 use project::Projection;
+
+/// The stdin commands, in the one place both the banner and the usage line read them
+/// from, so a new command cannot be added to only one of the two.
+const COMMANDS: &str = "p pause/resume, s step, +/- speed, r [m3] rain, \
+                        m X Y Z air|rock|soil|bedrock set material, w PATH save, \
+                        l PATH load, i X Y Z inspect, o outlet, q quit";
 
 /// Default rain volume for the `r` command, in cubic metres.
 const DEFAULT_RAIN_M3: f64 = 1.0;
@@ -178,10 +185,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         cfg.tilt_degrees,
         proj.rise,
     );
-    eprintln!(
-        "cubarium voxel: stdin commands — p pause/resume, s step, +/- speed, \
-         r [m3] rain, w PATH save, l PATH load, i X Y Z inspect, o outlet, q quit"
-    );
+    eprintln!("cubarium voxel: stdin commands — {COMMANDS}");
 
     let mut presenter = VoxelPresenter::new(cfg, proj);
     let mut canvas = Canvas::new(topology, Scale::ONE);
@@ -368,40 +372,74 @@ impl Control {
                 None => eprintln!("cubarium voxel: `l PATH` needs a path"),
             },
             "i" | "inspect" => {
-                let parsed = (
-                    rest.first().and_then(|t| t.parse::<i64>().ok()),
-                    rest.get(1).and_then(|t| t.parse::<u32>().ok()),
-                    rest.get(2).and_then(|t| t.parse::<u32>().ok()),
-                );
-                let Some((x, y, z)) = (match parsed {
-                    (Some(x), Some(y), Some(z)) => Some((x, y, z)),
-                    _ => None,
-                }) else {
-                    eprintln!("cubarium voxel: `i X Y Z` wants three integers");
-                    return;
+                let Some((x, y, z)) = coords(world, "i X Y Z", &rest) else { return };
+                eprintln!("cubarium voxel: {}", cell_state(world, x, y, z));
+            }
+            "m" | "material" => {
+                let usage = "m X Y Z air|rock|soil|bedrock";
+                let Some((x, y, z)) = coords(world, usage, &rest) else { return };
+                let material = match rest.get(3).map(|w| w.to_ascii_lowercase()).as_deref() {
+                    Some("air") => Material::Air,
+                    Some("rock") => Material::Rock,
+                    Some("soil") => Material::Soil,
+                    Some("bedrock") => Material::Bedrock,
+                    other => {
+                        eprintln!(
+                            "cubarium voxel: `{usage}` — `{}` is not a material",
+                            other.unwrap_or("")
+                        );
+                        return;
+                    }
                 };
-                let view = world.view();
-                if y >= view.config.height || z >= view.config.depth {
-                    eprintln!(
-                        "cubarium voxel: ({x}, {y}, {z}) is outside a {}x{}x{} world",
-                        view.config.width, view.config.height, view.config.depth
-                    );
-                    return;
-                }
+                // The core moves the water the old material held; the new state is the
+                // receipt, so a displaced cell says so itself.
+                world.apply(VoxelCommand::SetMaterial { x, y, z, material });
                 eprintln!(
-                    "cubarium voxel: ({}, {y}, {z}) {:?} free {:.4} pore {:.4}",
-                    x.rem_euclid(i64::from(view.config.width)),
-                    view.material_at(x, y, z),
-                    view.free_at(x, y, z),
-                    view.pore_at(x, y, z),
+                    "cubarium voxel: set {material:?}, now {}",
+                    cell_state(world, x, y, z)
                 );
             }
-            other => eprintln!(
-                "cubarium voxel: `{other}`? — p pause/resume, s step, +/- speed, \
-                 r [m3] rain, w PATH save, l PATH load, i X Y Z inspect, o outlet, q quit"
-            ),
+            other => eprintln!("cubarium voxel: `{other}`? — {COMMANDS}"),
         }
     }
+}
+
+/// `X Y Z` from a command's arguments, or `None` with the reason printed.
+///
+/// `x` wraps — the strip is a ring and has no end to fall off — so any integer is a
+/// column. `y` and `z` have real ends, so one outside the world is refused and named
+/// rather than folded into a cell the caller did not mean.
+fn coords(world: &World, usage: &str, rest: &[&str]) -> Option<(i64, u32, u32)> {
+    let triple = (
+        rest.first().and_then(|t| t.parse::<i64>().ok()),
+        rest.get(1).and_then(|t| t.parse::<u32>().ok()),
+        rest.get(2).and_then(|t| t.parse::<u32>().ok()),
+    );
+    let (Some(x), Some(y), Some(z)) = triple else {
+        eprintln!("cubarium voxel: `{usage}` wants three integers for X Y Z");
+        return None;
+    };
+    let c = world.config();
+    if y >= c.height || z >= c.depth {
+        eprintln!(
+            "cubarium voxel: ({x}, {y}, {z}) is outside a {}x{}x{} world",
+            c.width, c.height, c.depth
+        );
+        return None;
+    }
+    Some((x, y, z))
+}
+
+/// One cell's state as `i` reports it, and as `m` echoes back after an edit.
+fn cell_state(world: &World, x: i64, y: u32, z: u32) -> String {
+    let view = world.view();
+    format!(
+        "({}, {y}, {z}) {:?} free {:.4} pore {:.4}",
+        x.rem_euclid(i64::from(view.config.width)),
+        view.material_at(x, y, z),
+        view.free_at(x, y, z),
+        view.pore_at(x, y, z),
+    )
 }
 
 /// Read stdin lines on a thread and hand them to the loop.
@@ -527,6 +565,43 @@ mod tests {
         ctl.handle(&mut world, "i 0 0 0");
         ctl.handle(&mut world, "q");
         assert!(ctl.quit);
+    }
+
+    /// Terrain editing from stdin: paused, `m` changes one cell, and the `i` that follows
+    /// reads the new material off the same view it prints from. The interaction the local
+    /// tool was missing — you can now dig a channel and watch the pool find it.
+    #[test]
+    fn a_paused_terrain_edit_changes_the_cell_the_next_inspect_reports() {
+        let c = cubarium_voxel::Config { width: 16, height: 8, depth: 2, ..Default::default() };
+        let mut world = World::empty(c.clone());
+        let mut ctl = Control::new(1.0, Projection::new(30.0, 4, 0, &c).unwrap());
+
+        ctl.handle(&mut world, "p");
+        assert!(ctl.paused);
+        assert_eq!(world.view().material_at(3, 2, 1), Material::Air);
+
+        ctl.handle(&mut world, "m 3 2 1 soil");
+        assert_eq!(world.view().material_at(3, 2, 1), Material::Soil);
+        // What the following `i` prints is this, off the edited world.
+        let seen = cell_state(&world, 3, 2, 1);
+        assert!(seen.contains("(3, 2, 1) Soil"), "{seen}");
+        ctl.handle(&mut world, "i 3 2 1");
+
+        // `x` wraps, as everything in the ring does.
+        ctl.handle(&mut world, "m -13 2 1 rock");
+        assert_eq!(world.view().material_at(3, 2, 1), Material::Rock);
+
+        // A `y` or `z` outside the world, an unknown material and a short line are all
+        // refused, and leave the cell alone.
+        for bad in ["m 3 99 1 air", "m 3 2 9 air", "m 3 2 1 lava", "m 3 2 1", "m", "material"] {
+            ctl.handle(&mut world, bad);
+            assert_eq!(world.view().material_at(3, 2, 1), Material::Rock, "`{bad}` edited a cell");
+        }
+
+        ctl.handle(&mut world, "m 3 2 1 air");
+        assert_eq!(world.view().material_at(3, 2, 1), Material::Air);
+        // Both help texts really do offer the command that was just used.
+        assert!(COMMANDS.contains("m X Y Z air|rock|soil|bedrock"));
     }
 
     /// `w` then `l` round-trips the world through the snapshot the core writes, and a
