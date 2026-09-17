@@ -96,8 +96,9 @@ enum Habitat {
     /// already passed on them, a soil pocket is by definition in reach: that is what
     /// `pore_ok` on a rock face means. Stonecushion.
     RockWithAPocket,
-    /// Eligible faces inside a **taller founder's crown**, which means this species is
-    /// planted after the others. Velvetpad.
+    /// Eligible faces under a crown whose **absolute** top — support height plus crown
+    /// height — is above the one this species' own founder would have there, which means
+    /// this species is planted after the others. Velvetpad.
     UnderACrown,
 }
 
@@ -662,6 +663,27 @@ fn pick_founders(
                 );
                 continue;
             }
+            // Columns another founder has already reserved, or that something is already
+            // standing on, are dropped **before** the sample (Astra R7.1). `Command::Seed`
+            // refuses an occupied site, so a sample that keeps them silently plants fewer
+            // founders than it printed: that is what cost the round-4 velvetpad cohort two
+            // of its eight, and it was read as a failed habitat trial.
+            let free: Vec<Site> = ok
+                .into_iter()
+                .filter(|s| !out.iter().any(|f| f.x == s.x && f.z == s.z))
+                .filter(|s| flora.view().stand_at(*s).is_none())
+                .collect();
+            if free.is_empty() {
+                println!(
+                    "{:>14}: {n} of {} skyline sites pass its establishment predicate, and its \
+                     habitat rule {habitat:?} leaves no **unreserved** candidate, so none were \
+                     planted (Astra R7.1)",
+                    species.name(),
+                    skyline.len()
+                );
+                continue;
+            }
+            let ok = free;
             let stride = (ok.len() / FOUNDERS_PER_SPECIES).max(1);
             let mut lo = u32::MAX;
             let mut hi = 0;
@@ -756,8 +778,12 @@ fn order_for(
             pool
         }
         Habitat::UnderACrown => {
+            // One canopy for the whole pool: living stands at their actual site, wood and
+            // foliage, and planned founders at their own column's support face (Astra
+            // R7.1).
+            let canopy = canopy_over(world, flora, planted);
             let width = view.config.width;
-            pool.retain(|s| under_a_crown(flora, width, species, *s, planted));
+            pool.retain(|s| under_a_crown(&canopy, width, flora, species, *s));
             pool
         }
     }
@@ -774,6 +800,12 @@ struct Canopy {
     /// harness's level-face test used to leave out (Astra R7.1).
     top: f64,
     radius: f64,
+    /// The crown's own foliage. The shade *condition* does not read it — `step.rs` shades
+    /// on cover and a higher top alone — but its *strength* is
+    /// `exp(-shade_k · foliage / area)`, so a crown with no leaves on it attenuates by
+    /// nothing and this helper does not call such a site shaded (Astra R7.1: actual
+    /// foliage, not a founder's).
+    foliage: f64,
 }
 
 /// Every crown over this world: one per living stand at its **actual** site and wood, plus
@@ -793,6 +825,7 @@ fn canopy_over(world: &World, flora: &Flora, planned: &[Founder]) -> Vec<Canopy>
             z: f64::from(stand.site.z),
             top: f64::from(stand.site.y) + sc.crown_height(stand.wood),
             radius: sc.crown_radius(stand.wood),
+            foliage: stand.foliage,
         });
     }
     for f in planned {
@@ -810,6 +843,8 @@ fn canopy_over(world: &World, flora: &Flora, planned: &[Founder]) -> Vec<Canopy>
             z: f64::from(f.z),
             top: f64::from(site.y) + sc.crown_height(wood),
             radius: sc.crown_radius(wood),
+            // What `Command::Seed` will give it: `alpha · wood`, full foliage.
+            foliage: sc.alpha * wood,
         });
     }
     out
@@ -824,7 +859,7 @@ fn canopy_over(world: &World, flora: &Flora, planned: &[Founder]) -> Vec<Canopy>
 fn covered_by(canopy: &[Canopy], width: u32, site: Site, top: f64) -> bool {
     let width = f64::from(width.max(1));
     canopy.iter().any(|c| {
-        if c.top <= top {
+        if c.top <= top || c.foliage <= 0.0 {
             return false;
         }
         let dx = wrapped_delta(c.x, f64::from(site.x), width);
@@ -921,46 +956,31 @@ fn founder_identity_report(world: &World, flora: &Flora, founders: &[(u64, Speci
     }
 }
 
-/// Whether a site falls inside the crown of an already-planted founder whose crown is
-/// **taller over its own face** than this species' would be over this one — the shade
-/// model's own two conditions (cover in `x` and `z`, and a strictly higher crown top), read
-/// off the same `crown_radius` and `crown_height` the model shades with, at the wood a
-/// founder is planted at.
+/// Whether a founder planted at this site would stand under a crown that the **model**
+/// would let shade it: some crown covers the column — wrapped in `x`, plain in `z`, inside
+/// its own radius — and its **absolute** top is strictly above this founder's own absolute
+/// top. Those are `step.rs`'s two conditions in `light_per_stand`, read off the same
+/// `crown_height`/`crown_radius` the model shades with.
 ///
-/// It is the level-face version of the height test, because `Founder` deliberately does not
-/// carry a `y`: under another noise seed the same column's face sits a voxel higher or
-/// lower and it is the same place on the map. A founder on a *higher* face shades further
-/// than this says, so the rule is conservative rather than wrong — and the light the run
-/// actually reports comes from the model, not from here.
+/// Before Astra's R7.1 this compared the two crown heights **over their own support faces**
+/// and left both support heights out, which is not conservative — it is wrong in both
+/// directions. Astra's case: a half-grown bloomcrown on a face at `y = 2` tops out at 4.0
+/// with radius 1, a half-grown velvetpad on a face at `y = 4` tops out at 4.75, and the old
+/// test admitted the pad because `2.0 > 0.75` — while the model correctly applies no shade
+/// at all. The other direction is a short plant on high ground, which does shade a pad below
+/// it and which the old test refused. It also read every existing stand as a half-grown
+/// founder, so an old or a newborn resident carried the wrong crown entirely; `canopy_over`
+/// now reads a standing stand's own site, wood and foliage.
 fn under_a_crown(
-    flora: &Flora,
+    canopy: &[Canopy],
     width: u32,
+    flora: &Flora,
     species: Species,
     site: Site,
-    planted: &[Founder],
 ) -> bool {
-    let own_top = {
-        let sc = flora.config().species(species);
-        sc.crown_height(founder_wood(sc))
-    };
-    let width = f64::from(width.max(1));
-    planted.iter().any(|f| {
-        let sc = flora.config().species(f.species);
-        let wood = founder_wood(sc);
-        let radius = sc.crown_radius(wood);
-        let mut dx = f64::from(f.x) - f64::from(site.x);
-        while dx > width * 0.5 {
-            dx -= width;
-        }
-        while dx < -width * 0.5 {
-            dx += width;
-        }
-        let dz = f64::from(f.z) - f64::from(site.z);
-        if dx * dx + dz * dz > radius * radius {
-            return false;
-        }
-        sc.crown_height(wood) > own_top
-    })
+    let sc = flora.config().species(species);
+    let own_top = f64::from(site.y) + sc.crown_height(founder_wood(sc));
+    covered_by(canopy, width, site, own_top)
 }
 
 /// The species' establishment predicate at one site: the model's own, through
@@ -1481,18 +1501,16 @@ fn skyline_of(world: &World) -> Vec<Site> {
 /// the same table `pick_founders` uses, so the probe cannot disagree with the experiment
 /// about where a species belongs.
 ///
-/// `UnderACrown` is passed the founders already standing, so a probe's newcomer goes under
-/// the resident it is invading rather than into the open.
+/// `UnderACrown` reads the crowns of whatever is **standing**, so a probe's newcomer goes
+/// under the resident it is invading rather than into the open. It is passed no planned
+/// founders: `canopy_over` takes living stands straight off the flora view, at their own
+/// site, wood and foliage. This function used to hand them over as `Founder` records, which
+/// threw their wood away and read an old or a newborn resident as a half-grown founder
+/// (Astra R7.1).
 fn habitat(world: &World, flora: &Flora, skyline: &[Site], species: Species) -> Vec<Site> {
     let sc = flora.config().species(species);
     let ok: Vec<Site> = skyline.iter().copied().filter(|s| passes(world, sc, *s)).collect();
-    let standing: Vec<Founder> = flora
-        .view()
-        .stands
-        .iter()
-        .map(|s| Founder { species: s.species, x: s.site.x, z: s.site.z })
-        .collect();
-    order_for(world, flora, species, habitat_of(species), ok, &standing)
+    order_for(world, flora, species, habitat_of(species), ok, &[])
 }
 
 fn step_coupled(flora: &mut Flora, world: &mut World, seconds: f64) {
@@ -1876,4 +1894,138 @@ fn community(args: &[String]) {
         l.transpired_m3
     );
     println!("wall time: {:.1} s for {ticks} coupled ticks", started.elapsed().as_secs_f64());
+}
+
+#[cfg(test)]
+mod tests {
+    //! The placement geometry Astra's R7.1 asked for, as two short cases. They are unit
+    //! tests of this harness's own helpers — the model is not stepped here — and the crate
+    //! is configured to run them (`[[example]] test = true`).
+
+    use super::*;
+    use cubarium_voxel::Material;
+
+    /// Two ledges and a wrap: column 0's support face is at `y = 2`, column 1's at `y = 4`,
+    /// and column 7's at `y = 2`, which is one step from column 0 across the world's `x`
+    /// wrap. Nothing is ever stepped, so no water moves and the faces stay where they are.
+    fn two_ledges() -> World {
+        let mut w = World::empty(VoxelConfig {
+            width: 8,
+            height: 12,
+            depth: 1,
+            voxel_m: 1.0,
+            ..VoxelConfig::default()
+        });
+        for (x, top) in [(0i64, 2u32), (1, 4), (7, 2)] {
+            for y in 1..=top {
+                w.apply(WorldCommand::SetMaterial { x, y, z: 0, material: Material::Soil });
+            }
+        }
+        for (x, top) in [(0i64, 2u32), (1, 4), (7, 2)] {
+            assert_eq!(
+                cubarium_voxel_flora::highest_support(&w.view(), x, 0),
+                Some(Site { x: x as u32, y: top, z: 0 }),
+                "column {x} must have its face at {top}"
+            );
+        }
+        w
+    }
+
+    /// **The two-height case.** A half-grown bloomcrown planned on the low ledge tops out
+    /// at an absolute 4.0 with radius 1, so it covers both neighbouring columns. The
+    /// velvetpad candidate on the **high** ledge would top out at 4.75 and the model applies
+    /// no shade to it, so the rule must refuse that site; the one on the level ledge tops
+    /// out at 2.75 and is genuinely under the crown.
+    ///
+    /// The old level-face test admitted both, because it compared 2.0 against 0.75 and never
+    /// looked at either support height.
+    #[test]
+    fn a_crown_lower_than_the_site_it_covers_does_not_shade_it() {
+        let world = two_ledges();
+        let flora = Flora::new(FloraConfig::default());
+        let planned = [Founder { species: Species::Bloomcrown, x: 0, z: 0 }];
+        let canopy = canopy_over(&world, &flora, &planned);
+        assert_eq!(canopy.len(), 1, "one planned crown: {canopy:?}");
+        assert!((canopy[0].top - 4.0).abs() < 1e-12, "absolute top {}", canopy[0].top);
+        assert!((canopy[0].radius - 1.0).abs() < 1e-12, "radius {}", canopy[0].radius);
+        assert!(canopy[0].foliage > 0.0, "a planned founder arrives with alpha * wood");
+
+        let bloom = flora.config().species(Species::Bloomcrown);
+        let velvet = flora.config().species(Species::Velvetpad);
+        let high = Site { x: 1, y: 4, z: 0 };
+        let level = Site { x: 7, y: 2, z: 0 };
+        // The premise of the old test, so the case cannot rot: over their own faces the
+        // bloomcrown crown is the taller of the two.
+        assert!(
+            bloom.crown_height(founder_wood(bloom)) > velvet.crown_height(founder_wood(velvet)),
+            "the level-face comparison the old helper made"
+        );
+        // Both columns are inside the crown's footprint, so it is the height that decides.
+        assert!(covered_by(&canopy, 8, high, 0.0), "the high ledge is under the footprint");
+        assert!(covered_by(&canopy, 8, level, 0.0), "the level ledge is under the footprint");
+
+        assert!(
+            !under_a_crown(&canopy, 8, &flora, Species::Velvetpad, high),
+            "a crown topping out at 4.0 cannot shade a velvetpad whose own top is 4.75"
+        );
+        assert!(
+            under_a_crown(&canopy, 8, &flora, Species::Velvetpad, level),
+            "on the level ledge the same crown does top it, at 4.0 against 2.75"
+        );
+    }
+
+    /// **The undersized-resident case.** A standing bloomcrown at `alive_min` is a much
+    /// smaller crown than a half-grown founder: radius 0.533 against 1.0, absolute top
+    /// 3.067 against 4.0. So the neighbouring column across the wrap is **outside** its
+    /// footprint, where treating the resident as a founder would have called that column
+    /// shaded and — for `UnderACrown` — planted a velvetpad there in full sky.
+    #[test]
+    fn an_existing_stand_is_measured_at_its_own_wood_and_not_as_a_founder() {
+        let world = two_ledges();
+        let sc = FloraConfig::default().bloomcrown.clone();
+        let mut flora = Flora::new(FloraConfig::default());
+        assert!(flora.apply(
+            &world,
+            Command::Seed { x: 0, z: 0, species: Species::Bloomcrown, wood: sc.alive_min }
+        ));
+
+        let canopy = canopy_over(&world, &flora, &[]);
+        assert_eq!(canopy.len(), 1, "one standing crown: {canopy:?}");
+        assert!(
+            (canopy[0].radius - sc.crown_radius(sc.alive_min)).abs() < 1e-12,
+            "radius {} is not the stand's own",
+            canopy[0].radius
+        );
+        assert!(
+            canopy[0].radius < sc.crown_radius(founder_wood(&sc)),
+            "a newborn is not a half-grown founder: {} against {}",
+            canopy[0].radius,
+            sc.crown_radius(founder_wood(&sc))
+        );
+        assert!(
+            (canopy[0].top - (2.0 + sc.crown_height(sc.alive_min))).abs() < 1e-12,
+            "absolute top {}",
+            canopy[0].top
+        );
+
+        let level = Site { x: 7, y: 2, z: 0 };
+        assert!(
+            !under_a_crown(&canopy, 8, &flora, Species::Velvetpad, level),
+            "a newborn's 0.533 radius does not reach the next column"
+        );
+        // The same column, read as the founder-sized crown the old helper assumed: it is
+        // covered, and its top does clear a velvetpad's 2.75, so the two readings disagree
+        // and the resident's actual wood is what decides.
+        let as_founder = [Canopy {
+            x: 0.0,
+            z: 0.0,
+            top: 2.0 + sc.crown_height(founder_wood(&sc)),
+            radius: sc.crown_radius(founder_wood(&sc)),
+            foliage: sc.alpha * founder_wood(&sc),
+        }];
+        assert!(
+            under_a_crown(&as_founder, 8, &flora, Species::Velvetpad, level),
+            "the founder-sized reading is the one that admitted this site"
+        );
+    }
 }

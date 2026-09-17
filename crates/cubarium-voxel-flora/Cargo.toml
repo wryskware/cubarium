@@ -11,3 +11,9 @@ cubarium-voxel = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
+
+# The `two_producers` harness carries the placement-geometry unit tests Astra's R7.1 asked
+# for (its own `#[cfg(test)] mod tests`), so it is compiled and run as a test target too.
+[[example]]
+name = "two_producers"
+test = true

@@ -779,9 +779,15 @@ the end of a tick, so a birth that died inside the run would still be counted (n
 | | stonecushion | 8 | 8 | 8 | 0 | 0 | 0 | 0.4324 | 0.949 | 0.924 | 0.000 | 0 |
 | | velvetpad | 8 | 14 | 8 | 6 | 6 | 0 | 1.0713 | 0.964 | 0.997 | 0.358 | 2 |
 
-Two of the eight velvetpad founders were refused in the default arm: the `UnderACrown` rule
-picked columns an earlier founder already stood on, and `Command::Seed` refuses an occupied
-site. The printed count is the six that were planted.
+Two of the eight velvetpad founders were refused in the default arm, and it is a **placement
+collision and not a failed habitat trial** (Astra R7.1): the `UnderACrown` rule picked two
+columns an earlier founder had already been given, and `Command::Seed` refuses an occupied
+site. Nothing about velvetpad's habitat, gates or crowns produced that six — the sample
+simply kept columns it had already spent. The printed count is the six that were planted.
+The harness now drops already-reserved and already-occupied columns **before** it samples,
+so a rerun plants eight; the same repair changed `UnderACrown` itself, which compared crown
+heights over their own support faces and left both support heights out, so this arm's
+velvetpad columns will not reproduce either.
 
 Ledgers and residuals, which is the part that has to hold before anything else means
 anything:
