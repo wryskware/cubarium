@@ -57,11 +57,16 @@ pub use cubarium_voxel::{DT, TICK_HZ};
 pub use step::can_establish;
 /// The same predicate, gate by gate, for a caller that needs to know **which** gate shut:
 /// `Gates::passes()` is exactly `can_establish`.
-pub use step::{establishment_gates, Gates};
+pub use step::{establishment_gates, establishment_gates_on_substrate, Gates};
 
-/// The producers of the voxel ecology, each one a **role**: see the preset that carries
-/// its numbers ([`SpeciesConfig::bloomcrown`] and the four after it) for the sentence of
+/// The **stands** of the voxel ecology, each one a role: see the preset that carries its
+/// numbers ([`SpeciesConfig::bloomcrown`] and the five after it) for the sentence of
 /// ecology the numbers encode.
+///
+/// Five of the six are producers. The sixth, [`Species::Glowcap`], is a
+/// [`Trophic::Saprotroph`]: the same stand, the same lifecycle, and dead wood where the
+/// light was. "Species" is therefore the crate's word for a kind of stand and not a claim
+/// that they are all plants.
 ///
 /// The first two are the pair of the first coupled experiment and keep slots 0 and 1, so
 /// that a [`FloraLedger`] array read by index still means what it meant in round 3.
@@ -82,6 +87,9 @@ pub enum Species {
     /// The moist, aerated understory pad: shade-tolerant, damp but not waterlogged soil,
     /// low and broad.
     Velvetpad,
+    /// The wood fungus of the decomposer grove: **not a plant**. It earns nothing from
+    /// light, eats the dead wood under and around it, and fruits one cap.
+    Glowcap,
 }
 
 impl Species {
@@ -89,12 +97,13 @@ impl Species {
     /// [`FloraLedger`]. Derived from [`Species::ALL`] so the two can never disagree.
     pub const COUNT: usize = Species::ALL.len();
 
-    pub const ALL: [Species; 5] = [
+    pub const ALL: [Species; 6] = [
         Species::Bloomcrown,
         Species::Umbrellafrond,
         Species::Springturf,
         Species::Stonecushion,
         Species::Velvetpad,
+        Species::Glowcap,
     ];
 
     /// This species' slot in the per-species arrays of [`FloraLedger`], and the same index
@@ -106,6 +115,7 @@ impl Species {
             Species::Springturf => 2,
             Species::Stonecushion => 3,
             Species::Velvetpad => 4,
+            Species::Glowcap => 5,
         }
     }
 
@@ -116,6 +126,7 @@ impl Species {
             Species::Springturf => "springturf",
             Species::Stonecushion => "stonecushion",
             Species::Velvetpad => "velvetpad",
+            Species::Glowcap => "glowcap",
         }
     }
 
@@ -380,11 +391,54 @@ impl Ground {
     }
 }
 
+/// **How a species earns.** One number's worth of ecology, and the only thing in this crate
+/// that changes which income rule a stand runs.
+///
+/// Everything else about a stand — where it may establish, how it grows, how it diebacks,
+/// how it dies, how it reproduces — is one set of rules for both modes. A saprotroph is not
+/// a second model: it is the same stand with its income line replaced, which is what
+/// `design/theoretical-biosphere-2026-09-16.md` §6 asks for ("reuse stand
+/// location/lifecycle structure, replace income and substrate rules; no light income").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Trophic {
+    /// **A plant.** Income is light: `assimilation · L_eff · μ · (1 − stress) · P · monod`,
+    /// capped by the mineral pool, and the organic matter is created at the boundary
+    /// ([`FloraLedger::fixed_in`]).
+    #[default]
+    Photo,
+    /// **A saprotroph.** Income is dead wood: at most
+    /// [`SpeciesConfig::substrate_uptake_per_s`]` · W · μ · dt` taken pro rata from the
+    /// dead-wood pools of the sites in its **mycelium box**, of which
+    /// [`SpeciesConfig::substrate_yield`] becomes tissue and the rest is respired at once.
+    /// No light gate, no light income, and nothing is created at the boundary: the organic
+    /// matter was already in the system, in the log.
+    Saprotroph,
+}
+
 /// The plant model of one species: `design/ecology-v1-contract.md` §4 parameters, plus
 /// the terrain couplings that replace the old noise fields.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SpeciesConfig {
+    /// Which income rule this species runs: [`Trophic::Photo`] for the five plants,
+    /// [`Trophic::Saprotroph`] for a wood fungus. Nothing else in the config changes
+    /// meaning with it — the three `substrate_*` fields below are simply inert on a
+    /// `Photo` species, and the light fields are inert on a `Saprotroph`.
+    pub trophic: Trophic,
+    /// **Saprotroph only.** Organic matter a mycelium withdraws from the dead wood in its
+    /// box per second per unit of `W`, at full moisture. The uptake is
+    /// `substrate_uptake_per_s · W · μ · dt`, bounded again by what the pools actually
+    /// hold, so a drying log and an empty log both starve the fungus. **Placeholder**
+    /// (`design/backlog.md` §1); inert on a [`Trophic::Photo`] species.
+    pub substrate_uptake_per_s: f64,
+    /// **Saprotroph only.** The fraction of the organic matter taken that becomes tissue;
+    /// the rest is respired at once (`respired_out`, heat). The brief's `yield`, spelled out
+    /// because `yield` is a reserved word. **Placeholder**; inert on a `Photo` species.
+    pub substrate_yield: f64,
+    /// **Saprotroph only.** Dead wood the sites of the mycelium box must hold, in total,
+    /// before a spore cohort may germinate there. **Placeholder**; inert on a `Photo`
+    /// species, whose substrate gate is open by construction.
+    pub establish_substrate_min: f64,
     /// `α`: foliage the structure can carry, `P_cap = α · W`.
     pub alpha: f64,
     /// `W_max`: the most living wood one stand can hold.
@@ -611,6 +665,14 @@ pub struct Reach {
 impl SpeciesConfig {
     fn v1_base() -> SpeciesConfig {
         SpeciesConfig {
+            // A plant, with the three saprotroph numbers inert. A `Photo` species never
+            // reads them, and they are zero rather than absent so that a preset which
+            // switches `trophic` and forgets them earns nothing and says so, instead of
+            // inheriting a rate from the base.
+            trophic: Trophic::Photo,
+            substrate_uptake_per_s: 0.0,
+            substrate_yield: 0.0,
+            establish_substrate_min: 0.0,
             alpha: 2.0,
             wood_max: 0.6,
             reserve_cap: 0.5,
@@ -946,6 +1008,105 @@ impl SpeciesConfig {
         }
     }
 
+    /// **Glowcap — the wood fungus of the decomposer grove.** The biosphere's §5 branch 2
+    /// and its §6 substrate request: "non-photosynthetic stand metabolism: reuse stand
+    /// location/lifecycle structure, replace income and substrate rules; no light income".
+    /// A mycelium in a log, a cap on top of it, and no leaves anywhere: `wood` is mycelium,
+    /// `foliage` is fruiting caps, and the reserve is the reserve.
+    ///
+    /// The role as the numbers state it: it lives on the dead wood in its own box and
+    /// nothing else, it earns nothing from light and needs none to start, it wants a log
+    /// that is damp but not drowned, it is small and cheap, and it spreads one hop — along
+    /// the log, not across the world.
+    ///
+    /// **Every number is an untuned placeholder** (`design/backlog.md` §1), chosen to
+    /// encode that sentence and nothing else:
+    ///
+    /// - **Income.** `substrate_uptake_per_s` 0.02 per unit of mycelium per second and
+    ///   `substrate_yield` 0.4: a fungus at full moisture earns `0.4 · 0.02 · W = 0.008 · W`
+    ///   of tissue per second against maintenance plus cap replacement
+    ///   `0.0002 · W + 1.2 · 0.001 · 2 · W = 0.0026 · W`, a **3.08× margin** — solvent on a
+    ///   log with wood in it, and starving the moment the log or the moisture runs out,
+    ///   which is the whole of what the role claims. The yield is the one number with a
+    ///   literature shape to it (a microbial growth yield is a fraction, not a fifth and not
+    ///   nine tenths) and it is still a placeholder: nothing here measured it.
+    ///   `assimilation` is **0.0**, so the species earns nothing from light even if some
+    ///   future caller reaches the `Photo` branch with it.
+    /// - **The substrate gate.** `establish_substrate_min` 0.02 is about one spore package's
+    ///   worth of wood (`alive_min / w_frac` = 0.025): a log has to hold roughly what the
+    ///   stand it would feed is made of. Below it the box is not a log any more and the gate
+    ///   shuts, which is how a decomposer grove *ends*.
+    /// - **Water, the three thresholds together.** `establish_pore_min` 0.1 and
+    ///   `establish_saturated_max` 0.5 are the brief's "pore between the species' floor and
+    ///   its saturation ceiling", read in the model's own terms — the existing pore gate is
+    ///   the floor and the existing aeration gate is the ceiling, and **no new rule was
+    ///   added**. `wilt_pore` 0.1 and `sat_pore` 0.4: full uptake on ordinary drained soil,
+    ///   nothing at all on a dry one, because `μ` multiplies uptake exactly as it multiplies
+    ///   assimilation. `drown_depth_m` 0.05 — a cap under a pool is finished.
+    ///
+    ///   **A stated limitation, and the one this preset is most likely to be wrong about.**
+    ///   The ceiling is a *germination* ceiling: a spore will not take a waterlogged log,
+    ///   while the mycelium already in one pays nothing, because a saprotroph's uptake reads
+    ///   `μ` and not `1 − aeration_stress` (the brief names only `μ`, and `step`'s `feed`
+    ///   says so). That is exactly the germination-versus-adult-tolerance assumption
+    ///   `establish_saturated_max`'s own doc records for the plants (Astra R4.6), pointing
+    ///   the other way for this species. Its `stress_rate_per_s` 0.1 and `relax_rate_per_s`
+    ///   0.05 are therefore **inert on the income** and kept only because the stress is
+    ///   still tracked and drawn.
+    /// - **The box.** `rooting_depth` 1 and `rooting_radius` 1: the mycelium box is the nine
+    ///   support faces of its own level, its own included, and it reaches no deeper — so the
+    ///   root box's downward-only asymmetry cannot arise for this species. Water is read off
+    ///   the *soil voxels* of the same box, as every stand's is, which is why a glowcap on
+    ///   bare rock has `μ = 0` and starves however much wood is on the rock: one water read
+    ///   for every stand is the model's rule and a fungus is not exempted from it here.
+    ///   `transpiration_m3_per_s` **0.0** — it reads the moisture and withdraws nothing, so
+    ///   a fungus takes no water away from the plants it lives among.
+    /// - **Small and cheap.** `wood_max` 0.1, `alive_min` 0.01, `donor_min` 0.05 —
+    ///   stonecushion's body; `foliage_rate` 0.004 and `wood_rate` 0.002 are twice the base,
+    ///   a mycelium that fills a log fairly quickly; `propagule_rate` 0.0005 is two and a
+    ///   half times the base, so one 0.025 package is **60 s** of a fully funded donor's
+    ///   saving — the fastest of the six, because a fruiting body's whole job is spores.
+    /// - **Spread.** `hop` 1: the eight faces around it. A grove follows its log.
+    /// - **Shape.** `crown_height_voxels` `[0.5, 0.5]` and `crown_radius_voxels`
+    ///   `[0.5, 0.5]`: **one cell, at every size**, on the face above its support. That is
+    ///   the interim glyph and not a design — the art direction of the voxel world is its
+    ///   own thread, and `crates/cubarium/src/voxel/stand.rs` names the palette interim too.
+    ///   One consequence in the model: a crown top of `y + 0.5` is the lowest of the six, so
+    ///   a glowcap shades nothing at all, and everything shades it — which costs it nothing,
+    ///   because it does not eat light.
+    pub fn glowcap() -> SpeciesConfig {
+        SpeciesConfig {
+            trophic: Trophic::Saprotroph,
+            substrate_uptake_per_s: 0.02,
+            substrate_yield: 0.4,
+            establish_substrate_min: 0.02,
+            // No light income at all, and no light gate (`step`'s `gates` opens `light_ok`
+            // for a saprotroph whatever this says; 0.0 keeps the reported number honest).
+            assimilation: 0.0,
+            establish_light_min: 0.0,
+            rooting_depth: 1,
+            rooting_radius: 1,
+            wilt_pore: 0.1,
+            sat_pore: 0.4,
+            establish_pore_min: 0.1,
+            establish_saturated_max: 0.5,
+            stress_rate_per_s: 0.1,
+            relax_rate_per_s: 0.05,
+            drown_depth_m: 0.05,
+            transpiration_m3_per_s: 0.0,
+            hop: 1,
+            wood_max: 0.1,
+            alive_min: 0.01,
+            donor_min: 0.05,
+            foliage_rate: 0.004,
+            wood_rate: 0.002,
+            propagule_rate: 0.0005,
+            crown_height_voxels: [0.5, 0.5],
+            crown_radius_voxels: [0.5, 0.5],
+            ..SpeciesConfig::v1_base()
+        }
+    }
+
     /// Whether this preset can produce a living stand at all, checked where the numbers
     /// enter the system rather than where they first go wrong (Astra R6.2 asks for exactly
     /// this list: a finite nonnegative split summing to one, a positive wood fraction,
@@ -1000,10 +1161,28 @@ impl SpeciesConfig {
             ));
         }
 
+        // A yield over one would build more tissue than the substrate it came out of held,
+        // which creates organic matter inside the system with no boundary flow to name it.
+        // Checked as a bound and not as a rate because it is a fraction, and checked for
+        // every species — the field is inert on a `Photo` preset, and a wrong value there
+        // is still a wrong value waiting for a `trophic` switch.
+        if !(self.substrate_yield.is_finite()
+            && self.substrate_yield >= 0.0
+            && self.substrate_yield <= 1.0)
+        {
+            return fail(&format!(
+                "substrate_yield is {}, not a fraction in 0..=1 — a yield over one would \
+                 build tissue out of nothing",
+                self.substrate_yield
+            ));
+        }
+
         // Every scalar the tick multiplies a stock by. A `NaN` or an infinity in any of
         // them reaches the ledger within one step, and none of them has a meaning below
         // zero — a negative rate would run a flow backwards past its own `min` guard.
-        let rates: [(&str, f64); 25] = [
+        let rates: [(&str, f64); 27] = [
+            ("substrate_uptake_per_s", self.substrate_uptake_per_s),
+            ("establish_substrate_min", self.establish_substrate_min),
             ("alpha", self.alpha),
             ("reserve_cap", self.reserve_cap),
             ("maintenance", self.maintenance),
@@ -1078,6 +1257,7 @@ pub struct FloraConfig {
     pub springturf: SpeciesConfig,
     pub stonecushion: SpeciesConfig,
     pub velvetpad: SpeciesConfig,
+    pub glowcap: SpeciesConfig,
     /// Canopy attenuation: a taller stand whose crown covers a site multiplies the light
     /// reaching that site by `exp(-shade_k · P / crown_area)`.
     pub shade_k: f64,
@@ -1120,6 +1300,7 @@ impl Default for FloraConfig {
             springturf: SpeciesConfig::springturf(),
             stonecushion: SpeciesConfig::stonecushion(),
             velvetpad: SpeciesConfig::velvetpad(),
+            glowcap: SpeciesConfig::glowcap(),
             shade_k: 1.5,
             decomposition: 0.001,
             wood_decomposition: 0.0001,
@@ -1138,6 +1319,20 @@ impl FloraConfig {
             Species::Springturf => &self.springturf,
             Species::Stonecushion => &self.stonecushion,
             Species::Velvetpad => &self.velvetpad,
+            Species::Glowcap => &self.glowcap,
+        }
+    }
+
+    /// The same table, mutably: a harness or a fixture that has a [`Species`] in hand and
+    /// wants to change that species' preset, without a sixth copy of the match.
+    pub fn species_mut(&mut self, s: Species) -> &mut SpeciesConfig {
+        match s {
+            Species::Bloomcrown => &mut self.bloomcrown,
+            Species::Umbrellafrond => &mut self.umbrellafrond,
+            Species::Springturf => &mut self.springturf,
+            Species::Stonecushion => &mut self.stonecushion,
+            Species::Velvetpad => &mut self.velvetpad,
+            Species::Glowcap => &mut self.glowcap,
         }
     }
 
@@ -1249,6 +1444,20 @@ pub struct FloraLedger {
     pub propagule_requested: [f64; Species::COUNT],
     pub propagule_funded: [f64; Species::COUNT],
     pub propagule_landed: [f64; Species::COUNT],
+    /// Organic matter the saprotrophs have withdrawn from dead wood, per species, indexed
+    /// by [`Species::index`]: a **diagnostic flux and not a boundary flow**, exactly like
+    /// the three `propagule_*` arrays, and therefore in none of the three
+    /// `expected_*` totals.
+    ///
+    /// The reason it cannot be a boundary term is what a saprotroph is. `consumed_*_out`
+    /// means "a consumer outside this layer took this, and owes it on its own books"; a
+    /// glowcap is a stand *inside* this layer, so its uptake moves organic matter from a
+    /// ground stock to a stand and crosses nothing. Booking it out and back in again would
+    /// keep the residuals and destroy the meaning of `consumed_organic_out` — a harvest
+    /// study could no longer tell what an animal ate from what the fungi digested. What
+    /// leaves the system out of that uptake is the part the fungus does not keep, and that
+    /// is `respired_out` like every other respiration.
+    pub substrate_uptake: [f64; Species::COUNT],
 }
 
 impl FloraLedger {
@@ -1418,6 +1627,48 @@ impl<'a> FloraView<'a> {
         out
     }
 
+    /// Dead wood the sites of a species' **mycelium box** around `from` hold, in total:
+    /// what [`SpeciesConfig::establish_substrate_min`] is compared against, and the stock
+    /// a saprotroph's income is drawn from. **Zero for a [`Trophic::Photo`] species**,
+    /// which never asks.
+    ///
+    /// The box is the root box's geometry — `rooting_depth` down and `rooting_radius`
+    /// sideways, `x` wrapped and `z` clipped — read as **support sites** rather than as
+    /// soil voxels, because a ground stock lives one per support face.
+    pub fn dead_wood_in_box(
+        &self,
+        world: &VoxelView<'_>,
+        from: Site,
+        sc: &SpeciesConfig,
+    ) -> f64 {
+        step::substrate_in_box(world, self.ground, from, sc)
+    }
+
+    /// The one establishment predicate for **any** species, gate by gate, with the
+    /// substrate read off this layer's own ground: [`can_establish`] cannot do that,
+    /// because a `VoxelView` holds no dead wood, so this is the form a harness or a
+    /// diagnosis wants once a saprotroph is in the world.
+    pub fn establishment_gates(
+        &self,
+        world: &VoxelView<'_>,
+        site: Site,
+        species: Species,
+    ) -> Gates {
+        let sc = self.config.species(species);
+        step::establishment_gates_on_substrate(
+            world,
+            site,
+            sc,
+            self.dead_wood_in_box(world, site, sc),
+        )
+    }
+
+    /// `passes()` on [`FloraView::establishment_gates`]: the predicate itself, for any
+    /// species, and the one the tick runs.
+    pub fn can_establish(&self, world: &VoxelView<'_>, site: Site, species: Species) -> bool {
+        self.establishment_gates(world, site, species).passes()
+    }
+
     /// Energy in every living and dead stock.
     pub fn energy(&self) -> f64 {
         self.stands
@@ -1453,8 +1704,9 @@ pub enum Command {
     Clear { x: i64, z: u32 },
 }
 
-/// Which of a site's dead pools a [`Deposit`] joins. Two, because a consumer has two
-/// things to leave behind: a body, and what passed through it.
+/// Which of a site's dead pools a [`Deposit`] joins. Three, because a consumer has two
+/// things to leave behind — a body, and what passed through it — and because something
+/// outside the plant layer can put **wood** on the ground.
 ///
 /// Dung is **litter** this round and not a pool of its own, which is a simplification
 /// stated as one: droppings and shed leaves decompose at one rate here, and a separate
@@ -1465,9 +1717,27 @@ pub enum DepositKind {
     Carrion,
     /// [`Ground::litter`], through the same `e_d_max` cap plant litter goes through.
     Litter,
+    /// [`Ground::dead_wood`]: a **log**. Round 5a did not have this kind, because nothing
+    /// in that round could put wood on the ground that a plant had not grown there
+    /// (Astra's round 8 closes on the same point: "package N may add dead wood with the
+    /// same booking/removal checks").
+    ///
+    /// Round 5b needs it twice over. A saprotroph eats dead wood, and a **fresh world has
+    /// none**: the harness has to lay declared logs before a fungus can be introduced at
+    /// all. And a consumer that kills a stand and leaves its trunk standing is putting wood
+    /// back, not litter and not a corpse.
+    ///
+    /// No energy cap, for carrion's reason: a deposit's energy comes from the depositor's
+    /// own books and not from a species' `energy_density`, and dead wood has never had an
+    /// `e_d_max`. A log laid without energy — `energy` 0 against a positive `organic` — is
+    /// therefore a log with nothing in it to eat, and a saprotroph on it earns nothing and
+    /// respires everything it takes (`step`'s `feed`). A harness laying a log should hand
+    /// over `e_v · organic`, which is what a dead trunk holds.
+    DeadWood,
 }
 
-/// Material a consumer hands back to the plant layer at one site: a corpse, or droppings.
+/// Material a consumer hands back to the plant layer at one site: a corpse, droppings, or a
+/// log.
 ///
 /// The three currencies are given explicitly and none of them is derived from the other
 /// two — there is no species here and no `energy_density` to read, because the consumer
@@ -1670,13 +1940,20 @@ impl Flora {
         Some(self.book_consumed(taken))
     }
 
-    /// A consumer puts material **back** on `site`: a corpse into the carrion pool, or
-    /// droppings into the litter pool. Returns whether it was accepted.
+    /// A consumer puts material **back** on `site`: a corpse into the carrion pool,
+    /// droppings into the litter pool, or a log into the dead-wood pool. Returns whether it
+    /// was accepted.
     ///
     /// Refused — booking nothing — when any of the three numbers is not finite or is
     /// negative, and when all three are zero: a deposit of nothing is not a deposit, and
     /// accepting one would provision a `Ground` (and import its `initial_mineral`) for no
     /// material at all.
+    ///
+    /// **A deposit whose `organic` is zero is accepted and settles at once**, whatever its
+    /// kind: its mineral goes straight to the site's soluble pool and its energy leaves as
+    /// heat, because a dead pool decomposes `rate · dt · organic` and a pool with no
+    /// organic matter in it would hold that mineral for ever (Astra R8.2). It is still
+    /// booked as `deposited_*_in` in full, and it still provisions a `Ground`.
     ///
     /// A deposit on a site with no [`Ground`] provisions one, and the lazy
     /// `initial_mineral` rule applies and is booked as `seeded_mineral_in` exactly as it
@@ -1692,8 +1969,10 @@ impl Flora {
     /// deposited between tick `t` and tick `t + 1` is in the snapshot of tick `t + 1` and
     /// decomposes in it — "a tick's decomposition sees the previous inter-tick's deposits",
     /// which is the tick-start snapshot rule (`step`'s module doc, step 7) and not a new
-    /// one. A carrion deposit therefore starts respiring on the next tick, and a litter
-    /// deposit does too, exactly as this tick's own senescence would.
+    /// one. A carrion deposit therefore starts respiring on the **next** step, which is
+    /// **sooner** than what this tick's own senescence sheds: that waits for the step after
+    /// it, because it is not in this one's snapshot (Astra R8.5 — the two were equated here,
+    /// and they are one tick apart).
     pub fn deposit(&mut self, site: Site, deposit: Deposit) -> bool {
         let Deposit { kind, organic, mineral, energy } = deposit;
         for v in [organic, mineral, energy] {
@@ -1715,12 +1994,37 @@ impl Flora {
         self.ledger.deposited_organic_in += organic;
         self.ledger.deposited_mineral_in += mineral;
         self.ledger.deposited_energy_in += energy;
+        // **A deposit with no organic matter in it is terminal at once** (Astra R8.2). A
+        // dead pool's decomposition is `rate · dt · organic`, so a pool holding mineral and
+        // energy against zero organic matter releases nothing for ever: an exhausted
+        // consumer whose respiration left only mineral behind would have created an inert
+        // sink that waits for unrelated material to arrive and dilute itself into. The
+        // conservation totals closed either way; the defect was the terminal state of a
+        // public API. So the mineral goes straight to the site's soluble pool, where
+        // decomposition would have put it, and the energy leaves as heat, where
+        // decomposition would have sent it — with the full `deposited_*` booking above and
+        // the same provisioning rule, whichever kind was asked for. The alternative,
+        // refusing the triplet, was rejected because it leaves a consumer with nowhere to
+        // put the mineral it is holding.
+        if organic <= 0.0 {
+            self.ground[gi].mineral += mineral;
+            self.ledger.heat_out += energy;
+            return true;
+        }
         match kind {
             DepositKind::Carrion => {
                 let g = &mut self.ground[gi];
                 g.carrion += organic;
                 g.carrion_mineral += mineral;
                 g.carrion_energy += energy;
+            }
+            // Dead wood, on the pool a dieback and a death already fill, with no energy
+            // cap — dead wood has never had one.
+            DepositKind::DeadWood => {
+                let g = &mut self.ground[gi];
+                g.dead_wood += organic;
+                g.dead_wood_mineral += mineral;
+                g.dead_wood_energy += energy;
             }
             // The existing cap rule, with the existing consequence: energy over
             // `e_d_max · D` cannot be held by litter and leaves as heat at once, which the

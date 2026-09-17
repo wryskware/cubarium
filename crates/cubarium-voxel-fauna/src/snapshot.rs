@@ -22,9 +22,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::Fauna;
 
-/// Schema 1: the first animal layer there has ever been. Postcard is not
+/// Schema 2: schema 1 was the first animal layer; the per-plant arrays in the ledger are
+/// sized by the flora's species count, which the glowcap merge raised to six, so the
+/// postcard layout changed with it (round 5b/5c merge). Postcard is not
 /// self-describing, so any new field is a new format and earlier tags are refused.
-pub const SCHEMA: u32 = 1;
+pub const SCHEMA: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

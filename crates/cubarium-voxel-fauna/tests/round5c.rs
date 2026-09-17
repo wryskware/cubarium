@@ -429,7 +429,12 @@ fn excess_mineral_is_excreted_as_litter() {
     assert_eq!(v.ledger.deposited_mineral_out, v.ledger.eaten_mineral_in, "all of it excreted");
     assert_eq!(v.animal(id).unwrap().mineral, mineral_before, "the animal kept none of it");
     let g = flora.view().ground_at(at(2, 2)).expect("the dung provisioned the site");
-    assert!((g.litter_mineral - v.ledger.deposited_mineral_out).abs() < 1e-18);
+    // A zero-organic deposit settles at once (Astra R8.2, round 5b): the mineral goes
+    // straight to the site's soluble pool on top of the lazy provisioning, and nothing
+    // waits in litter for organic matter that never comes.
+    let provisioned = flora.config().initial_mineral;
+    assert!((g.mineral - provisioned - v.ledger.deposited_mineral_out).abs() < 1e-15);
+    assert_eq!(g.litter_mineral, 0.0, "nothing is stranded in litter");
     assert_eq!(g.litter, 0.0, "dung is mineral only this round: the rest was respired");
     assert_residual_pair(&flora, &fauna, "after excretion");
 

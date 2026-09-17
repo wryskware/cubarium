@@ -120,6 +120,9 @@ fn species_mut(config: &mut FloraConfig, species: Species) -> &mut SpeciesConfig
         Species::Springturf => &mut config.springturf,
         Species::Stonecushion => &mut config.stonecushion,
         Species::Velvetpad => &mut config.velvetpad,
+        // Round 5b's sixth species. The one line a new `Species` variant forces on an
+        // exhaustive match; nothing this file asserts changed.
+        Species::Glowcap => &mut config.glowcap,
     }
 }
 
@@ -516,6 +519,38 @@ fn a_crown_two_voxels_up_is_out_of_reach_and_one_across_the_seam_is_not() {
         wider.iter().map(|&(s, _)| s).collect::<Vec<_>>(),
         vec![near, far, seam],
         "two more voxels sideways reach the far crown"
+    );
+}
+
+/// **The same crown, out of reach from its own face and in reach from the one above**
+/// (Astra R8.4). Reach compares the crown's **absolute** cell height against the eater's
+/// ceiling, so "an adult bloomcrown is beyond reach" is a statement about *where the eater
+/// is standing* and not about the species: a founder bloomcrown on a face at `y = 2` has
+/// its crown cells at `y = 4`, which an `up: 1` eater at `y = 2` cannot reach and one at
+/// `y = 3` can. The harvest probe's own result — that no bloomcrown was ever eaten — is
+/// therefore the measured consequence of its three declared faces and not a species-wide
+/// food exclusion.
+#[test]
+fn the_same_crown_is_out_of_reach_from_its_own_face_and_in_reach_from_the_one_above() {
+    // Three columns: the low eater's face, the bloomcrown's own face beside it, and a
+    // raised face on the other side for the high eater to stand on.
+    let world = ledges(8, &[(0, 2), (1, 2), (2, 3)]);
+    let mut flora = Flora::new(FloraConfig::default());
+    let wood = 0.5 * flora.config().bloomcrown.wood_max;
+    let bloom = plant_wood(&mut flora, &world, 1, Species::Bloomcrown, wood);
+    assert_eq!(bloom, at(1), "the founder stands on the low face");
+    // An adult's crown cells are two voxels above its own support: this is the geometry the
+    // whole claim rests on.
+    assert_eq!(flora.config().bloomcrown.crown_voxels(wood), 2);
+
+    let reach = Reach { horizontal: 2, up: 1 };
+    let low = flora.view().reachable_foliage(&world.view(), Site { x: 0, y: 2, z: 0 }, reach);
+    assert!(low.is_empty(), "an eater on the crown's own level reached it: {low:?}");
+    let high = flora.view().reachable_foliage(&world.view(), Site { x: 2, y: 3, z: 0 }, reach);
+    assert_eq!(
+        high.iter().map(|&(s, _)| s).collect::<Vec<_>>(),
+        vec![bloom],
+        "one voxel of elevation is the whole difference: {high:?}"
     );
 }
 

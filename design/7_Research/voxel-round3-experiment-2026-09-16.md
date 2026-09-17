@@ -865,8 +865,11 @@ Four things this says, all of them about these two arms at 450 s and nothing mor
      so the next authorised run can.
 
    What none of the three can say is *why* an earlier germination did not happen. Under K7
-   a whole newly landed package at a vacant, passing site germinates in the same tick's
-   lottery, before that tick's attrition; so a fractional bank at 450 s is equally
+   a whole newly landed package at a vacant, passing site germinates out of the bank **as
+   it stands at the start of a tick**, before that tick's attrition — and a package lands
+   in phase 9, *after* the lottery of phase 8, so its first opportunity is the **next**
+   tick and not the one it landed in (Astra R8.5: this note said "the same tick's
+   lottery", which the phase order does not allow). So a fractional bank at 450 s is equally
    consistent with a package that landed on an occupied site, with one the predicate
    refused and attrition then wore down, and with one that has simply not been topped up
    yet. An earlier refusal is attributable only to an **observed event**, and this run
@@ -1028,11 +1031,16 @@ Foliage / reserve / wood, summed per species over the stands standing at that mo
 Umbrellafrond and stonecushion had no stand within reach of a face and were never bitten.
 They are identical in the two arms to four decimals through 300 s and differ in the **fourth
 decimal at 400 s** (umbrellafrond 5.2664 against 5.2665 of foliage; bloomcrown 4.9151
-against 4.9134). That is not noise and it is not a leak: the arms are coupled through the
-shared water table and the shade field, so a grazed stand transpires and shades less and
-every other stand in the world eventually reads a slightly different world. "Untouched"
-here means **not bitten**, never unaffected, and any future arm-to-arm difference smaller
-than this coupling is not attributable to the treatment.
+against 4.9134). That is not noise and it is not a leak — but it is not *coupling between
+the arms* either, which is what this note said before (Astra R8.3). Each arm is its own
+`World` and its own `Flora`; nothing crosses between them. What is shared is **within** an
+arm: the stands of one arm share that arm's water table and shade field, so a grazed stand
+transpires and shades less and every other stand in *that* world reads a slightly different
+world from then on. "Untouched" therefore means **not bitten**, never unaffected, and a
+fourth-decimal difference in an unbitten species is a **downstream effect of the treatment**
+— its magnitude is not a threshold below which attribution becomes impossible. What this run
+has not done is separate the direct bite from those mediators, or test whether the sign of
+such a difference holds across seeds.
 
 The declared cohort — the six stands reachable from the three faces **at the start**, fixed
 by identity before anything was eaten, three springturf and three velvetpad:
@@ -1044,8 +1052,11 @@ by identity before anything was eaten, three springturf and three velvetpad:
 
 **The fill column is the measure, and the strict recovery bar is not.** The harness counts a
 stand "recovered" at 99 % of its own `α · W`, and the control says how strict that is: an
-**ungrazed** cohort here sits at 0.941 of its own cap at 400 s, because senescence takes a
-little every tick and the cap is only what growth aims at. So "0 of 6 recovered" cannot be
+**ungrazed** cohort here sits at 0.941 of its own cap at 400 s. Senescence is one term in
+that and not the explanation (Astra R8.3): base senescence removes 0.005 % of `P` per tick,
+and whether it is replaced is decided jointly by the growth, resource and stress budgets —
+`foliage_rate · W` against the gap, the income funding it, the reflush rule, and whatever
+the mineral pool and the aeration stress allow. So "0 of 6 recovered" cannot be
 read as "nothing regrew" — the comparison that can is the grazed cohort's 0.106 against the
 control's 0.941, and its flatness (0.105 at the stop, 0.106 at the end).
 
@@ -1102,9 +1113,14 @@ rather than hiding inside a total.
    fall over the run — the controls' cohort reserve fell to 50 % and 56 % of its starting
    value on its own, because these founders are spending on wood, foliage and propagule
    parcels — so what grazing did was **deepen an existing draw-down**, not create one.
-3. **Nothing measurably recovered in 200 s.** The cohorts did not close their gap: the
-   springturf patch's grazed cohort went from 15.3 % of its control's foliage at the stop to
-   16.0 % at the end, and the bloomcrown patch's from 33.1 % to 34.1 %. In canopy fill, which
+3. **Limited partial regrowth in 200 s, and no stand reaching the declared full-foliage
+   threshold.** The grazed cohorts gained absolute foliage after the harvest stopped —
+   **+1.03 %** in the springturf patch and **+7.99 %** in the bloomcrown patch — and their
+   deficits against their own controls moved in *opposite* directions: the
+   springturf-location deficit narrowed from **0.77724 to 0.74510** while the
+   bloomcrown-location deficit **grew** from **0.69295 to 0.71720**, because the control was
+   moving too. Neither closed, and "nothing measurably recovered" — what this note said
+   before — was too strong (Astra R8.3). In canopy fill, which
    is the measure that reads each stand against its own cap, the grazed cohorts sat at
    **0.105 → 0.106** and **0.264 → 0.257** against controls at **0.999 → 0.941** and
    **1.000 → 0.955**. The strict recovery count (0 of 6 and 0 of 5 stands back within 1 % of
@@ -1123,9 +1139,12 @@ rather than hiding inside a total.
    window long enough to see a reserve refill are what would.
 5. **One arm differed in recruitment, and this run cannot attribute it.** The springturf
    patch's grazed arm ended with 15 establishments against the control's 14, and one more
-   living velvetpad (10 against 9); the bloomcrown patch's arms both ended at 14. A grazed
-   world has less income and should, if anything, recruit less, so this single-count
-   difference is reported and not explained: one lottery draw in one arm is not a mechanism.
+   living velvetpad (10 against 9); the bloomcrown patch's arms both ended at 14. That is a
+   **measured contrast with its mechanism unmeasured**, and it is reported and not explained.
+   No direction was expected of it either (Astra R8.3): competition, water, shade, the timing
+   of a vacancy and the keyed lotteries supply no monotonicity between "less income" and
+   "fewer recruits", so the earlier gloss — that a grazed world should if anything recruit
+   less — was not a prediction this model licenses.
 
 ### The three residuals, with a consumer taking material out
 
@@ -1149,9 +1168,10 @@ those by construction. The two plant-only arms are the same arm run twice — on
 so that each patch's control can report that patch's own cohort — and their ledgers agree to
 the bit, which is a second reading of the determinism.
 
-**Nothing deposited anything in this run.** `deposited_*`, `Ground::carrion` and
-`carrion_decomposition` are zero throughout, and the only place they are exercised is
-`tests/round5a.rs`. The cross-layer check — flora `consumed_*` against a fauna layer's
+**Nothing deposited anything in this run.** `deposited_*` and `Ground::carrion` are zero
+throughout, so `carrion_decomposition`'s **flux** was zero — its configured rate is 0.005 /s
+and unmeasured, which is a different statement (Astra R8.3) — and the only place any of them
+is exercised is `tests/round5a.rs` and, from round 5b, `tests/round5b.rs`. The cross-layer check — flora `consumed_*` against a fauna layer's
 `eaten_*`, and flora `deposited_*` against its own — belongs to the round that has a fauna
 ledger to check against.
 
@@ -1196,6 +1216,194 @@ two candidate first consumers unchosen; any recovery time constant, or how much 
 non-recovery is the income term and how much the emptied reserve (the run shows their joint
 outcome and does not separate them); whether `carrion_decomposition` 0.005 /s or the harvest
 rate is a reasonable number (nothing has measured either, and no result here depends on the
+first); and the mechanism of the fourth-decimal differences in unbitten species, which are
+downstream effects of the treatment through each arm's **own** water and shade rather than
+coupling between the arms, with the direct bite and its mediators not separated and no test
+of generality across seeds.
+
+## Round 5b — 2026-09-17
+
+Package N landed `Species::Glowcap`, a **saprotroph** stand: the same stand the five
+producers are — the same establishment, growth, senescence, dieback, death, seed bank and
+paid parcel — with its income line replaced. `SpeciesConfig::trophic` is the only thing that
+selects between them. It eats the dead wood of its **mycelium box** (the root box's geometry
+read as support sites), keeps `substrate_yield` of what it takes and respires the rest at
+once, has no light income and **no light gate**, and needs
+`establish_substrate_min` of wood in that box before a spore may germinate. The biosphere's
+§5 branch 2 and its §6 request, and nothing more than that.
+
+One command, one arm, six species:
+
+```text
+cargo run --release -p cubarium-voxel-flora --example two_producers -- community 400
+```
+
+**A smoke run, not a study.** No control, no replication, no dose series, one seed, one
+landform. It exists to say whether six presets can be in one world at once, whether every
+quantity a fungus moves is paid and observable, and which gate is shutting for each species.
+**Nothing here is a population claim, a viability claim or a carrying capacity**, and the
+first thing to say about it is that the fungus's *own* second generation did not happen —
+see "the grove did not spread" below.
+
+Conditions: 128 × 48 × 24 voxels of 0.25 m, `seed` 1, `noise_seed` 0, rain 2e-4 m/s with the
+outlet open, 1,000 warm-up ticks (50 s) and then 8,000 coupled ticks (400 s), so the world
+ends at 450 s. Eight founders per species at half its own `wood_max`, placed by the harness's
+`Habitat` table — an experiment condition and not a model rule (`design/backlog.md` §1).
+
+**New condition, and the one a reader has to know about: eight declared logs.** A fresh world
+holds **no dead wood at all**, so a saprotroph's substrate gate is shut everywhere and a
+glowcap cannot be introduced. The harness therefore lays 8 logs of 1.0 organic matter each,
+with the mineral and the energy a dead trunk holds (`n_tissue · organic` = 0.02 and
+`e_v · organic` = 2.0), through round 5a's `deposit` with round 5b's new
+`DepositKind::DeadWood`, on faces that pass every glowcap gate but the substrate one, drawn
+in the keyed spread `Habitat::OpenSoil` uses, before anything is planted. They are printed
+with the run. **That wood is imported into the world** — booked as `deposited_organic_in`,
+an inflow like `seeded_*`, and not a stock the plants grew — so the organic inventory is not
+closed across this run, exactly as it is not closed while first landings are still
+provisioning `initial_mineral`.
+
+**Wall time: 70.4 s for 8,000 coupled ticks** (plus the generation and 1,000 warm-up ticks),
+on this machine. A first run of the same arm took 69.2 s and produced **bit-identical**
+numbers; the only difference between the two outputs is the per-banked-site gate lines the
+second build added and the wall time itself.
+
+### The community, at observation (450 s)
+
+Counts are by `Stand::id`, so "desc." is a germination and not a site that changed hands;
+`wood`, `light`, `moist` and `stress` are the species' living totals and means.
+
+| species | founders | alive | founders still | desc. | births | deaths | wood | light | moist | stress | banks |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| bloomcrown | 8 | 14 | 8 | 6 | 6 | 0 | 2.9160 | 0.883 | 0.851 | 0.133 | 2 |
+| umbrellafrond | 8 | 15 | 8 | 7 | 7 | 0 | 3.4041 | 0.964 | 1.000 | 0.000 | 1 |
+| springturf | 8 | 8 | 8 | 0 | 0 | 0 | 0.2828 | 0.916 | 1.000 | 1.000 | 3 |
+| stonecushion | 8 | 8 | 8 | 0 | 0 | 0 | 0.4312 | 0.943 | 0.962 | 0.000 | 0 |
+| velvetpad | 8 | 8 | 8 | 0 | 0 | 0 | 0.9767 | 0.965 | 1.000 | 0.597 | 8 |
+| **glowcap** | **8** | **8** | **8** | **0** | **0** | **0** | **0.4716** | 0.948 | **0.688** | **0.292** | **3** |
+
+61 births in all (48 founders and 13 establishments), **zero deaths**, and the five
+producers' numbers are the round-4 smoke's shape: bloomcrown and umbrellafrond recruit, the
+other three hold their founders. The glowcap's `light` 0.948 is reported and **inert** — it
+is the sky its cells see, and its income never reads it.
+
+### What the fungus did, in its own currency
+
+| quantity | value |
+| --- | --- |
+| dead wood laid (8 logs × 1.0) | 8.0000 |
+| dead wood left on those logs at 450 s | 5.7924 |
+| dead wood elsewhere in the world at 450 s | 0.0176 |
+| `substrate_uptake[glowcap]`, cumulative | **1.93599** |
+| of that, tissue at `substrate_yield` 0.4 | 0.77440 |
+| of that, respired at once | 1.16159 |
+| mycelium (`W`) at 0 s → 450 s | 0.4000 → **0.4716** |
+| parcels funded (net) / landed / standing | 0.19245 / 0.07500 (3 packages of 0.025) / 0.11745 |
+| requested against funded | 1.33333 / 0.19245 (**14.4 %**) |
+
+Three readings worth keeping. **The logs are being eaten and not only rotting**: 2.2076 of
+organic matter left them, 1.9360 of it into the fungi and 0.2716 to `wood_decomposition` on
+its own, so the saprotroph took **88 %** of the log turnover and the fungi ate **24 %** of
+the wood laid in 400 s. **The world made a little dead wood of its own** — 0.0176 away from
+the declared logs, from the dieback of stressed stands with nothing dying — which is the
+first dead wood in this world that a plant produced, and the only supply a grove would have
+after the declared logs are gone. And **the income was nearly all spent**: against 0.77440 of
+tissue income the budget is maintenance `0.0002 · W · t` ≈ 0.035, senesced caps replaced at
+`(1 + c_g) · senescence · P · t` ≈ 0.43, parcels 0.231 gross and a body up by 0.072, which
+closes to about 0.77 — so the surplus the uptake rule *can* produce (it is bounded by the
+rate and the pools and **not** by what the stand can spend) was a small term here, at a mean
+moisture of 0.688. That is a measurement of this arm and not a property of the rule.
+
+**A drying log starves it, and a drowned one does not.** Mean moisture 0.688 across the eight
+fungi, and the two on the driest logs sat at 0.500 — `μ` multiplies the uptake, so those two
+earned half. Mean `aeration_stress` 0.292, and it **cost them nothing**: a saprotroph's
+uptake reads `μ` and not `1 − aeration_stress`, so three fungi whose root boxes are now over
+half saturated pay for it on the way in (the gate refuses a spore there) and nothing as
+adults. That is the preset's stated limitation, now measured rather than asserted, and it is
+the first thing to revisit if waterlogging is meant to cost a mycelium anything.
+
+### The grove did not spread, and the gate diagnosis says why
+
+Zero glowcap establishments. Not for want of reproduction: three whole packages left donors
+and landed, and the biggest bank stood at 85.2 % of the 0.025 threshold at observation.
+**All three banked sites are refused by the substrate gate**, and the per-site gate line says
+so in the same numbers the model refused them on:
+
+```text
+glowcap: 3 banked sites, biggest 0.02130 (85.2% of threshold); 0 of all 3 banked sites pass it
+  banked site (47,3) y12 — mean pore 0.719 (>= 0.10), saturated fraction 0.625 (<= 0.50), dead wood in the box 0.000 (>= 0.020)
+  banked site (48,1) y12 — mean pore 1.000 (>= 0.10), saturated fraction 1.000 (<= 0.50), dead wood in the box 0.000 (>= 0.020)
+  banked site (49,1) y13 — mean pore 0.372 (>= 0.10), saturated fraction 0.000 (<= 0.50), dead wood in the box 0.000 (>= 0.020)
+```
+
+The mechanism is a **geometric mismatch between dispersal and the box**, and it is worth
+stating precisely because it is a model finding and not a tuning question. A package lands on
+the **highest support face** of a column inside the donor's `hop` (`dispersal_target`, one
+candidate per column so that a stand cannot seed the terraces below itself). The glowcap's
+mycelium box is `rooting_depth` **1**, so it is the nine support sites of the recipient's
+**own** `y` row. When the neighbouring column's highest face sits at a different height from
+the donor's — which on this terrain is usual, and `(49,1) y13` against a donor at `y12` is
+exactly it — the recipient's box does not contain the log the donor is standing on, and the
+substrate gate shuts on a face one voxel from a full log. Two of the three were also refused
+on aeration. Across the whole strip the shape is the same: at observation 33 of 3,072 skyline
+columns pass the glowcap predicate, the substrate gate shuts **3,039** of them, and the
+donors' own dispersal neighbourhood is 12 eligible faces of 52 candidates (**1.5 per
+donor**). So a grove's spread at these placeholders is bounded by the log and by the box's
+geometry, not by the hop and not by reproduction.
+
+Three ways out, none of them taken here and all of them rule decisions rather than numbers: a
+mycelium box that reaches **up** as well as down (the root box reaches only down, which is
+inherited and stated in `mycelium_sites`); a dispersal rule for a saprotroph that lands on
+the substrate rather than on the skyline; or a deeper `rooting_depth`, which is the one that
+is only a number and the least honest of the three. The other half of the same finding is
+that the run's own supply of dead wood — 0.0176 from dieback — is three orders of magnitude
+under a declared log, so a self-sustaining decomposer grove needs plants that actually die,
+which is the round-4/5a observation (zero deaths in 400 s) reappearing from the other side.
+
+### The three residuals, with a fungus digesting
+
+| currency | residual | stock | relative |
+| --- | --- | --- | --- |
+| organic | −1.031e-11 | 37.3409 | −2.76e-13 |
+| mineral | −3.268e-13 | 74.6248 | −4.38e-15 |
+| energy | −2.062e-11 | 74.6819 | −2.76e-13 |
+
+The same 1e-13 relative float noise rounds 3, 4 and 5a report, with a saprotroph moving
+1.936 of organic matter out of ground stocks and into living tissue over 8,000 ticks. It
+closes because that transfer **crosses no boundary**: `substrate_uptake` is a per-species
+diagnostic flux and not a ledger term, like the three `propagule_*` arrays, and the only
+boundary flows the fungus touches are the `respired_out`/`heat_out` it pays and the
+`deposited_*_in` of the declared logs. Booking the uptake out through `consumed_*_out` and
+back in again would have kept these residuals and destroyed the meaning of
+`consumed_organic_out`, which is "what a consumer outside this layer took" and is what a
+harvest or a grazing study reads.
+
+The core's water ledger over the same run: rain in 0.038400 m³/s, outlet 0.050000,
+evaporation 0, transpiration 0.00023086, storage change −0.011831 (residual −1.60e-11), head
+2.741 m (−0.2434 m over the run), stored 213.3395 m³. The head is still falling at 450 s, so
+every eligible-column count here is a reading of a moment and not a settled habitat.
+
+### What this does and does not establish
+
+**Established.** Six presets, one of them not a plant, run together for 400 coupled seconds
+with zero deaths and the three residuals at 1e-13 relative. A saprotroph's whole metabolism
+is paid and observable: it withdraws from a bounded pool through the same pro-rata rule a
+consumer's `take_dead_wood` uses, respires what it does not keep, moves its mineral between
+stocks without creating any, and funds its spores out of its reserve like every other stand.
+The gates behave as the brief asks — no light gate, a substrate gate that bites, and the
+existing pore and aeration gates doing the "damp but aerated attachment" work with no new
+rule. And the harness can put a fungus in a fresh world at all, which needed
+`DepositKind::DeadWood`.
+
+**Not established.** Anything about a fungal population: this arm's glowcaps are eight
+founders that fed, grew 18 % of mycelium and failed to recruit, and *why* they failed is
+attributed to the substrate gate by a per-site reading at one moment, not by a controlled
+comparison. Nothing about whether 0.02 /s of uptake, a 0.4 yield, a 0.02 substrate threshold
+or a 1.0 log is a reasonable number — **nothing measured any of them**, and the preset's own
+doc says which sentence each of them was chosen to encode. Nothing about competition between
+the fungus and the plants (they share a mineral pool and a water box, and no arm varied it),
+nothing about two fungi on one log (the collect-then-withdraw rule for a shared pool is
+implemented and unit-tested, and this arm's boxes did not overlap enough to exercise it),
+and nothing about what a waterlogged log should cost a mycelium.
 first); and any arm-to-arm difference smaller than the water-and-shade coupling that already
 moves untouched species in the fourth decimal by 400 s.
 

@@ -58,7 +58,10 @@
 //! decorative and the patches are reading the noise.
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, World};
-use cubarium_voxel_flora::{Command, Flora, FloraConfig, Reach, Site, Species, SpeciesConfig};
+use cubarium_voxel_flora::{
+    Command, Deposit, DepositKind, Flora, FloraConfig, Reach, Site, Species, SpeciesConfig,
+    Trophic,
+};
 
 const WARMUP_TICKS: u32 = 1000;
 const FOUNDERS_PER_SPECIES: usize = 8;
@@ -110,6 +113,15 @@ enum Habitat {
     /// height — is above the one this species' own founder would have there, which means
     /// this species is planted after the others. Velvetpad.
     UnderACrown,
+    /// Faces whose **mycelium box holds a declared log**. Glowcap.
+    ///
+    /// The gate does the whole of the filtering here, and it is the only habitat rule of
+    /// the six for which that is true: a saprotroph's establishment predicate reads the
+    /// dead wood of its own box, so the eligible pool this rule is handed already *is* the
+    /// set of faces with something to eat, and all the rule adds is the keyed spread
+    /// `OpenSoil` uses. A fresh world holds no dead wood at all, so `community` lays the
+    /// logs down first with `DepositKind::DeadWood` and prints what it declared.
+    OnALog,
 }
 
 /// The table itself. One line per species, and the only place the harness says where a
@@ -121,6 +133,7 @@ fn habitat_of(species: Species) -> Habitat {
         Species::Springturf => Habitat::OpenSoil,
         Species::Stonecushion => Habitat::RockWithAPocket,
         Species::Velvetpad => Habitat::UnderACrown,
+        Species::Glowcap => Habitat::OnALog,
     }
 }
 
@@ -140,6 +153,76 @@ fn planted_last(species: Species) -> bool {
 /// settles to the printed budget. The previous 5e-4 was 0.096 m³/s, nearly twice what the
 /// world can remove (Astra R4.2).
 const HARNESS_RAIN_M_PER_S: f64 = 0.0002;
+
+/// How many **declared logs** the `community` run lays down, and how much dead wood each
+/// one holds.
+///
+/// A fresh world holds **no dead wood at all** — nothing has died in it — so a saprotroph
+/// has nothing to eat and its substrate gate shuts everywhere. The harness therefore lays
+/// logs before anything is planted, through round 5a's `deposit` with round 5b's
+/// `DepositKind::DeadWood`, and each of them carries the mineral and the energy a dead
+/// trunk of that size holds: `n_tissue · organic` and `e_v · organic`, because a log laid
+/// without its energy is a log with nothing in it to eat.
+///
+/// **Declared experiment conditions, not model rules**, printed with every run and listed
+/// in `design/backlog.md` §1. `LOG_ORGANIC` 1.0 is between one and three times a producer's
+/// whole body (bloomcrown's `wood_max` is 0.6, springturf's 0.06), which is what a fallen
+/// trunk is, and it is **material imported into the world** — booked as
+/// `deposited_organic_in`, an inflow like `seeded_*`, and not a stock the plants grew.
+/// Eight of them is [`FOUNDERS_PER_SPECIES`], so the fungus gets as many starting places as
+/// every other species.
+const DECLARED_LOGS: usize = FOUNDERS_PER_SPECIES;
+const LOG_ORGANIC: f64 = 1.0;
+
+/// Lay the declared logs: [`DECLARED_LOGS`] faces that pass every glowcap gate **but** the
+/// substrate one, drawn in the same keyed order `Habitat::OpenSoil` uses so that the choice
+/// says nothing about how wet or how high a face is. Returns the sites, sorted.
+///
+/// The faces are chosen with the substrate gate **satisfied by assumption** — the model's
+/// own predicate, read through `establishment_gates_on_substrate` with the threshold handed
+/// in — which is the honest way to ask "would a fungus be able to start here once there is
+/// a log". Everything else is the real gate.
+fn lay_declared_logs(world: &World, flora: &mut Flora, skyline: &[Site]) -> Vec<Site> {
+    let sc = flora.config().species(Species::Glowcap).clone();
+    let view = world.view();
+    let mut pool: Vec<Site> = skyline
+        .iter()
+        .copied()
+        .filter(|s| {
+            cubarium_voxel_flora::establishment_gates_on_substrate(
+                &view,
+                *s,
+                &sc,
+                sc.establish_substrate_min,
+            )
+            .passes()
+        })
+        .collect();
+    pool.sort_by_key(|s| (site_key(Species::Glowcap, *s), s.x, s.z));
+    let candidates = pool.len();
+    let stride = (pool.len() / DECLARED_LOGS).max(1);
+    let chosen: Vec<Site> = pool.iter().copied().step_by(stride).take(DECLARED_LOGS).collect();
+    let (mineral, energy) = (sc.n_tissue * LOG_ORGANIC, sc.energy_density * LOG_ORGANIC);
+    let mut laid: Vec<Site> = Vec::new();
+    for site in chosen {
+        let deposit =
+            Deposit { kind: DepositKind::DeadWood, organic: LOG_ORGANIC, mineral, energy };
+        if flora.deposit(site, deposit) {
+            laid.push(site);
+        }
+    }
+    laid.sort_unstable();
+    println!(
+        "declared logs: {} of {LOG_ORGANIC} organic matter each (with {mineral} of mineral \
+         and {energy} of energy, a dead trunk's own), laid on {candidates} candidate faces \
+         by the keyed spread — an experiment condition and not a model rule, and material \
+         **imported** into the world as `deposited_organic_in`",
+        laid.len()
+    );
+    let cells: Vec<String> = laid.iter().map(|s| format!("({},{}) y{}", s.x, s.z, s.y)).collect();
+    println!("declared logs at: {}", cells.join(", "));
+    laid
+}
 
 /// The core's water ledger and stores at one instant, so an interval's budget is a
 /// difference of two of these and nothing has to be accumulated by hand.
@@ -500,9 +583,11 @@ fn run(
 fn eligible_sets(world: &World, flora: &Flora, skyline: &[Site]) -> [Vec<(u32, u32)>; Species::COUNT] {
     let mut out: [Vec<(u32, u32)>; Species::COUNT] = std::array::from_fn(|_| Vec::new());
     for species in Species::ALL {
-        let sc = flora.config().species(species);
-        let mut set: Vec<(u32, u32)> =
-            skyline.iter().filter(|s| passes(world, sc, **s)).map(|s| (s.x, s.z)).collect();
+        let mut set: Vec<(u32, u32)> = skyline
+            .iter()
+            .filter(|s| passes(world, flora, species, **s))
+            .map(|s| (s.x, s.z))
+            .collect();
         set.sort_unstable();
         out[species.index()] = set;
     }
@@ -524,15 +609,21 @@ fn gate_diagnosis(world: &World, flora: &Flora, skyline: &[Site], when: &str) {
         let sc = flora.config().species(species);
         let mut eligible = 0usize;
         let (mut no_soil, mut pore, mut aeration, mut depth, mut light) = (0, 0, 0, 0, 0);
+        // Round 5b's sixth gate: dead wood in the mycelium box, and open by construction
+        // for the five plants.
+        let mut substrate = 0usize;
         let mut only_pore = 0usize;
         let mut only_aeration = 0usize;
         let mut only_light = 0usize;
         let mut mean_pore_sum = 0.0;
         let mut mean_pore_n = 0usize;
         for site in skyline {
-            let g = cubarium_voxel_flora::establishment_gates(&view, *site, sc);
+            let g = flora.view().establishment_gates(&view, *site, species);
             if g.passes() {
                 eligible += 1;
+            }
+            if !g.substrate_ok {
+                substrate += 1;
             }
             if g.soil_voxels == 0 {
                 no_soil += 1;
@@ -566,12 +657,20 @@ fn gate_diagnosis(world: &World, flora: &Flora, skyline: &[Site], when: &str) {
         }
         let mean_pore = if mean_pore_n > 0 { mean_pore_sum / mean_pore_n as f64 } else { f64::NAN };
         println!(
-            "  {:>14}: {eligible} eligible; shut gates (a column can fail several): no soil in the root box {no_soil}, mean pore < {:.2} {pore}, saturated fraction > {:.2} {aeration}, water over {:.2} m {depth}, sky < {:.2} {light}",
+            "  {:>14}: {eligible} eligible; shut gates (a column can fail several): no soil in the root box {no_soil}, mean pore < {:.2} {pore}, saturated fraction > {:.2} {aeration}, water over {:.2} m {depth}, sky < {:.2} {light}{}",
             species.name(),
             sc.establish_pore_min,
             sc.establish_saturated_max,
             sc.drown_depth_m,
-            sc.establish_light_min
+            sc.establish_light_min,
+            match sc.trophic {
+                Trophic::Photo => String::new(),
+                Trophic::Saprotroph => format!(
+                    ", dead wood in the mycelium box < {:.3} {substrate} (and **no light \
+                     gate**: the sky column above is inert for this species)",
+                    sc.establish_substrate_min
+                ),
+            }
         );
         println!(
             "  {:>14}: sole cause — pore alone {only_pore}, saturation alone {only_aeration}, light alone {only_light}; mean root-box pore over the {mean_pore_n} columns with soil {mean_pore:.3}",
@@ -607,7 +706,7 @@ fn gate_diagnosis(world: &World, flora: &Flora, skyline: &[Site], when: &str) {
                 }
             }
             candidates += seen.len();
-            ok += seen.iter().filter(|s| passes(world, sc, **s)).count();
+            ok += seen.iter().filter(|s| passes(world, flora, species, **s)).count();
         }
         println!(
             "  {:>14}: {} donors, {candidates} candidate faces within hop {}, {ok} of them eligible ({:.1} per donor)",
@@ -643,10 +742,9 @@ fn pick_founders(
     }
     for round in rounds {
         for species in round {
-            let sc = flora.config().species(species);
             let habitat = habitat_of(species);
             let eligible: Vec<Site> =
-                skyline.iter().copied().filter(|s| passes(world, sc, *s)).collect();
+                skyline.iter().copied().filter(|s| passes(world, flora, species, *s)).collect();
             let n = eligible.len();
             // No fallback (Astra R7.4). A species with nowhere to establish used to be
             // seeded anyway, on whatever its own ordering preferred among *every* skyline
@@ -732,7 +830,7 @@ fn pick_founders(
                         site.x,
                         site.z,
                         site.y,
-                        gate_line(world, sc, *site)
+                        gate_line(world, flora, species, *site)
                     );
                 }
             }
@@ -786,6 +884,19 @@ fn order_for(
             // non-soil face in this pool *is* a face with a soil pocket in reach.
             pool.retain(|s| view.material_at(s.x as i64, s.y, s.z) != cubarium_voxel::Material::Soil);
             pool.reverse();
+            pool
+        }
+        Habitat::OnALog => {
+            // Everything that makes a face a glowcap's face is already in `pool`: the
+            // substrate gate passed on it, which is what "there is a log here" means. Drop
+            // what is occupied or reserved, then take the same keyed spread `OpenSoil`
+            // takes, so the founders are a sample of the declared logs and not the first
+            // few in site order.
+            pool.retain(|s| {
+                flora.view().stand_at(*s).is_none()
+                    && !planted.iter().any(|f| f.x == s.x && f.z == s.z)
+            });
+            pool.sort_by_key(|s| (site_key(species, *s), s.x, s.z));
             pool
         }
         Habitat::UnderACrown => {
@@ -905,11 +1016,13 @@ fn site_key(species: Species, site: Site) -> u64 {
 
 /// One site's gate values, as the numbers the predicate itself read, each beside the
 /// threshold it is compared with.
-fn gate_line(world: &World, sc: &SpeciesConfig, site: Site) -> String {
-    let g = cubarium_voxel_flora::establishment_gates(&world.view(), site, sc);
+fn gate_line(world: &World, flora: &Flora, species: Species, site: Site) -> String {
+    let sc = flora.config().species(species);
+    let g = flora.view().establishment_gates(&world.view(), site, species);
     format!(
         "mean pore {} (>= {:.2}), saturated fraction {:.3} (<= {:.2}), water {:.3} m \
-         (<= {:.2}), sky {:.3} (>= {:.2}), {} soil voxels",
+         (<= {:.2}), sky {:.3} (>= {:.2}), {} soil voxels, dead wood in the box {:.3} \
+         (>= {:.3})",
         g.mean_pore.map_or_else(|| "none".to_string(), |m| format!("{m:.3}")),
         sc.establish_pore_min,
         g.saturated_fraction,
@@ -918,7 +1031,9 @@ fn gate_line(world: &World, sc: &SpeciesConfig, site: Site) -> String {
         sc.drown_depth_m,
         g.sky_visibility,
         sc.establish_light_min,
-        g.soil_voxels
+        g.soil_voxels,
+        g.dead_wood,
+        sc.establish_substrate_min
     )
 }
 
@@ -941,8 +1056,7 @@ fn founder_identity_report(world: &World, flora: &Flora, founders: &[(u64, Speci
     );
     let v = flora.view();
     for &(id, species, site) in founders {
-        let sc = flora.config().species(species);
-        let g = cubarium_voxel_flora::establishment_gates(&world.view(), site, sc);
+        let g = flora.view().establishment_gates(&world.view(), site, species);
         let at = format!("({},{}) y{}", site.x, site.z, site.y);
         match v.stands.iter().find(|s| s.id == id) {
             Some(s) => println!(
@@ -995,7 +1109,7 @@ fn under_a_crown(
 }
 
 /// The species' establishment predicate at one site: the model's own, through
-/// `cubarium_voxel_flora::can_establish`.
+/// `FloraView::can_establish`.
 ///
 /// This used to be the harness's own approximation of it — the support voxel's pore
 /// fraction and a binary saturation test, where the model reads the capacity-weighted mean
@@ -1004,8 +1118,12 @@ fn under_a_crown(
 /// use. Package I's report had to carry a caveat saying which number came from which.
 /// Package J exposed the model's, so there is one predicate: founder selection, the
 /// habitat sets, the off-predicate count and the diagnosis all read it.
-fn passes(world: &World, sc: &SpeciesConfig, s: Site) -> bool {
-    cubarium_voxel_flora::can_establish(&world.view(), s, sc)
+/// Round 5b: it reads `FloraView::can_establish` and not the free `can_establish`, because
+/// a saprotroph's substrate gate reads the dead wood of its own mycelium box and a
+/// `VoxelView` holds none. Still exactly one predicate — the flora-view form *is* the free
+/// one with the substrate supplied — and it is now the same one for all six species.
+fn passes(world: &World, flora: &Flora, species: Species, s: Site) -> bool {
+    flora.view().can_establish(&world.view(), s, species)
 }
 
 /// Why a run had no second generation, if it had none: per species, how many sites hold a
@@ -1056,16 +1174,27 @@ fn germination_diagnosis(world: &World, flora: &Flora) {
         };
         let over: Vec<Site> =
             banks.iter().filter(|&&(_, o)| o >= threshold).map(|&(s, _)| s).collect();
-        let over_and_ok = over.iter().filter(|&&s| passes(world, sc, s)).count();
-        let predicate_ok = banks.iter().filter(|&&(s, _)| passes(world, sc, s)).count();
+        let over_and_ok = over.iter().filter(|&&s| passes(world, flora, species, s)).count();
+        let predicate_ok =
+            banks.iter().filter(|&&(s, _)| passes(world, flora, species, s)).count();
         // Vacancy is the third constraint and it used not to be printed at all, so a
         // fractional bank at observation could be read as a refused predicate when an
         // occupied site is just as consistent with it (Astra R7.5). The germinable count is
         // the conjunction: a whole package, a vacant site, and the predicate open.
         let vacant = banks.iter().filter(|&&(s, _)| view.stand_at(s).is_none()).count();
+        // And **which** gate is shutting a waiting bank, per site, through the same
+        // `Gates`: "0 of 3 banked sites pass the predicate" says that one of them did
+        // without saying which, and for a saprotroph the answer is usually its substrate —
+        // a package lands on the *highest support* of a column inside the donor's hop, and
+        // that face's own mycelium box need not hold the log the donor is standing on.
+        let refused: Vec<Site> = banks
+            .iter()
+            .map(|&(s, _)| s)
+            .filter(|&s| !passes(world, flora, species, s))
+            .collect();
         let germinable = over
             .iter()
-            .filter(|&&s| view.stand_at(s).is_none() && passes(world, sc, s))
+            .filter(|&&s| view.stand_at(s).is_none() && passes(world, flora, species, s))
             .count();
         println!(
             "  {:>14}: threshold {threshold:.4}; {} banked sites, mean {mean:.5}, biggest \
@@ -1079,6 +1208,16 @@ fn germination_diagnosis(world: &World, flora: &Flora) {
             over.len(),
             banks.len()
         );
+        for site in refused.iter().take(3) {
+            println!(
+                "  {:>14}: banked site ({},{}) y{} is refused — {}",
+                "",
+                site.x,
+                site.z,
+                site.y,
+                gate_line(world, flora, species, *site)
+            );
+        }
     }
 }
 
@@ -1087,10 +1226,9 @@ fn off_count(world: &World, flora: &Flora, founders: &[Founder]) -> usize {
     founders
         .iter()
         .filter(|f| {
-            let sc = flora.config().species(f.species);
             match cubarium_voxel_flora::highest_support(&world.view(), f.x as i64, f.z) {
                 None => true,
-                Some(site) => !passes(world, sc, site),
+                Some(site) => !passes(world, flora, f.species, site),
             }
         })
         .count()
@@ -1519,8 +1657,8 @@ fn skyline_of(world: &World) -> Vec<Site> {
 /// threw their wood away and read an old or a newborn resident as a half-grown founder
 /// (Astra R7.1).
 fn habitat(world: &World, flora: &Flora, skyline: &[Site], species: Species) -> Vec<Site> {
-    let sc = flora.config().species(species);
-    let ok: Vec<Site> = skyline.iter().copied().filter(|s| passes(world, sc, *s)).collect();
+    let ok: Vec<Site> =
+        skyline.iter().copied().filter(|s| passes(world, flora, species, *s)).collect();
     order_for(world, flora, species, habitat_of(species), ok, &[])
 }
 
@@ -1742,8 +1880,11 @@ fn community(args: &[String]) {
         config.rain_m_per_s,
         50.0 + seconds
     );
+    // The logs first: a fresh world holds no dead wood, so the glowcap's substrate gate is
+    // shut everywhere until they are down, and `pick_founders` reads the real gate.
+    let logs = lay_declared_logs(&world, &mut flora, &skyline);
     println!(
-        "the five contract habitats, as founder-placement rules of this harness and not \
+        "the six contract habitats, as founder-placement rules of this harness and not \
          model rules:"
     );
     for species in Species::ALL {
@@ -1874,6 +2015,24 @@ fn community(args: &[String]) {
             skyline.len()
         );
     }
+    // The saprotroph's own flux, and what is left of the logs. `substrate_uptake` is a
+    // diagnostic and not a boundary flow: the organic matter moved from a ground stock to a
+    // stand, both inside this layer, so it is in none of the three `expected_*` totals.
+    let dead_wood: f64 = v.ground.iter().map(|g| g.dead_wood).sum();
+    let on_logs: f64 = logs
+        .iter()
+        .filter_map(|s| v.ground_at(*s))
+        .map(|g| g.dead_wood)
+        .sum();
+    println!(
+        "dead wood: {:.4} in the world, {:.4} of it on the {} declared logs (laid: {:.4}); \
+         substrate uptake by the fungus {:.5} organic matter, cumulative",
+        dead_wood,
+        on_logs,
+        logs.len(),
+        logs.len() as f64 * LOG_ORGANIC,
+        v.ledger.substrate_uptake[Species::Glowcap.index()]
+    );
     let l = v.ledger;
     println!(
         "ledger: fixed_in {:.6} respired_out {:.6} light_in {:.6} heat_out {:.6} transpired \
@@ -1914,11 +2073,16 @@ fn community(args: &[String]) {
 ///
 /// Not a model default (the model has no consumer) and not tuned: it is a **declared
 /// experiment condition**, printed with every run. One consequence is worth knowing before
-/// reading any result: `SpeciesConfig::crown_voxels` is 2 for a bloomcrown at the harness's
-/// founder wood, so a grown bloomcrown crown is **out of reach** of an `up: 1` eater and
-/// only its seedlings are ever food. What a harvester standing on a bloomcrown face eats is
-/// therefore whatever else is within two voxels of it, and the per-species lines below say
-/// exactly what that was.
+/// reading any result, and it is a statement about **relative elevation** and not about the
+/// species (Astra R8.4): `SpeciesConfig::crown_voxels` is 2 for a bloomcrown at the
+/// harness's founder wood, so its crown cells sit two voxels above its own support face and
+/// an `up: 1` eater standing on **that same face** cannot reach them — while one standing
+/// on a face a voxel higher can, because the rule compares the crown's *absolute* cell
+/// height against the eater's own ceiling
+/// (`tests/round5a.rs::the_same_crown_is_out_of_reach_from_its_own_face_and_in_reach_from_the_one_above`).
+/// The declared faces of this probe are the patch species' own founder faces, so what a
+/// harvester eats here is whatever else is within two voxels of it, and the per-species
+/// lines below say exactly what that was.
 const HARVEST_REACH: Reach = Reach { horizontal: 2, up: 1 };
 
 /// How many support faces the scripted harvester works from. Predeclared before the run,

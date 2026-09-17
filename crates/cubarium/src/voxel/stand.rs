@@ -1,5 +1,6 @@
-//! Turning a [`FloraView`]'s stands into voxels the presenter can draw, and the five
-//! species' palettes.
+//! Turning a [`FloraView`]'s stands into voxels the presenter can draw, and the six
+//! species' palettes — five of which are decided and one of which, the glowcap's, is
+//! explicitly **interim** (see `GLOWCAP_INTERIM_CAP_SRGB`).
 //!
 //! # Why an occupancy grid and not a sprite list
 //!
@@ -105,6 +106,33 @@ pub const PAD_WOOD_SRGB: u32 = 0x002B_1B6B;
 pub const PAD_CROWN_SRGB: u32 = 0x007B_5CF0;
 /// Velvetpad's centre: periwinkle.
 pub const PAD_HEART_SRGB: u32 = 0x00C3_B4FF;
+
+// --- The glowcap's interim glyph -----------------------------------------------------
+//
+// **A placeholder, and named one.** The art direction of the voxel world is Wrysk's own
+// thread (`design/handoffs/voxel-art-direction-handoff-2026-09-17.md`), which will produce
+// `design/voxel-art-direction.md`; the agent-made consumer study at 68a8215 is **paused and
+// not canon** and is deliberately not implemented here. Until that doc lands, a glowcap is
+// one cell in one placeholder colour on the face above its support, and a small follow-up
+// package replaces this with whatever the art direction specifies.
+//
+// The colour is chosen for one reason only — to be unmistakably *not* one of the five, so
+// that a fungus in a screenshot is legible as a sixth thing. Acid yellow-green is the one
+// direction of the Outrun family none of the five producers uses, and it is the farthest of
+// the candidates measured from all five crowns in linear light (0.70 to umbrellafrond's
+// turquoise, the nearest of them, against the five's own closest pair at 0.45):
+// `the_interim_glowcap_glyph_is_one_cell_in_its_own_placeholder_colour` in this module's
+// tests pins the distance and the single cell.
+
+/// Glowcap mycelium: a dim olive. A one-cell stand has no trunk, so this shows only as the
+/// colour a spent cap falls back toward. **Interim.**
+pub const GLOWCAP_INTERIM_WOOD_SRGB: u32 = 0x004A_5A2E;
+/// The glowcap's cap: acid yellow-green, the one hue none of the five producers holds.
+/// **Interim** — a placeholder glyph colour, not an art-direction decision.
+pub const GLOWCAP_INTERIM_CAP_SRGB: u32 = 0x00C8_F03C;
+/// The cap's centre, which for a one-cell stand is the whole of it: pale bioluminescent
+/// green. **Interim.**
+pub const GLOWCAP_INTERIM_HEART_SRGB: u32 = 0x00EF_FFC0;
 
 /// How far a crown with no foliage left falls back toward its own wood colour. Crown
 /// fill is `P / (α·W)`, so a stand that has shed its canopy reads as bare structure
@@ -365,6 +393,10 @@ fn palette(species: Species) -> (u32, u32, u32) {
         Species::Springturf => (TURF_WOOD_SRGB, TURF_CROWN_SRGB, TURF_HEART_SRGB),
         Species::Stonecushion => (CUSHION_WOOD_SRGB, CUSHION_CROWN_SRGB, CUSHION_HEART_SRGB),
         Species::Velvetpad => (PAD_WOOD_SRGB, PAD_CROWN_SRGB, PAD_HEART_SRGB),
+        // Interim, and named so: see the block above the constants.
+        Species::Glowcap => {
+            (GLOWCAP_INTERIM_WOOD_SRGB, GLOWCAP_INTERIM_CAP_SRGB, GLOWCAP_INTERIM_HEART_SRGB)
+        }
     }
 }
 
@@ -775,5 +807,83 @@ mod tests {
                 chroma(other)
             );
         }
+    }
+
+    /// **The glowcap's interim glyph.** One cell at every size — no trunk, one crown cell,
+    /// and that cell is the disc's heart, so what a fungus is in the picture is a single
+    /// pixel cluster on the face above its support. And one placeholder colour that is
+    /// unmistakably not one of the five producers': the nearest of them in linear light is
+    /// umbrellafrond's turquoise at **0.70**, against the five's own closest pair
+    /// (stonecushion and velvetpad) at 0.45.
+    ///
+    /// Named interim in the code and pinned here as interim: the art direction of the voxel
+    /// world is its own thread, the paused study at 68a8215 is not implemented, and a
+    /// follow-up package replaces this glyph with whatever `design/voxel-art-direction.md`
+    /// specifies. What this test protects until then is only that a glowcap is *legible as a
+    /// sixth thing* and occupies exactly one cell.
+    #[test]
+    fn the_interim_glowcap_glyph_is_one_cell_in_its_own_placeholder_colour() {
+        let world = world();
+        let mut flora = Flora::new(FloraConfig::default());
+        let sc = flora.config().species(Species::Glowcap).clone();
+
+        // The geometry, at both ends of its size range.
+        for wood in [sc.alive_min, sc.wood_max] {
+            let stand = Stand {
+                id: 0,
+                site: Site { x: 10, y: 3, z: 2 },
+                species: Species::Glowcap,
+                stage: Stage::Alive,
+                wood,
+                foliage: sc.alpha * wood,
+                reserve: 0.0,
+                light: 0.0,
+                moisture: 1.0,
+                water_m3: 0.0,
+                mineral: 0.0,
+                aeration_stress: 0.0,
+                parcel: 0.0,
+            };
+            let parts = parts_of(flora.view(), &stand, 0);
+            assert_eq!(parts.len(), 1, "a glowcap at wood {wood} is not one cell: {parts:?}");
+            assert_eq!(parts[0].0, Cell { x: 10, y: 4, z: 2 }, "not on its support's own face");
+            assert_eq!(parts[0].1, Part::Crown { style: 0, heart: true }, "{parts:?}");
+            assert_eq!(crown_height_voxels(sc.crown_height(wood)), 1);
+        }
+
+        // And on the grid, through the whole presenter path.
+        assert!(flora.apply(
+            &world,
+            Command::Seed { x: 7, z: 1, species: Species::Glowcap, wood: sc.wood_max }
+        ));
+        let view = world.view();
+        let mut stands = Stands::empty(32, 16, 4);
+        stands.rebuild(&view, flora.view());
+        let part = stands.at(7, 4, 1);
+        assert!(part.is_block(), "the cap stamped nothing: {part:?}");
+        assert_eq!(stands.at(7, 5, 1), Part::None, "a cap is one cell and never a stem");
+        let style = stands.style(part).expect("it paints");
+        let standing = flora.view().stand_at(Site { x: 7, y: 3, z: 1 }).expect("seeded");
+        assert_eq!(style, style_of(flora.view(), standing), "the cell paints its own stand");
+        // A founder is planted with `moisture` 0 until its first tick, so the *drawn*
+        // colour is the interim cap wilted; the palette entry itself is the constant, which
+        // is what `seed_style` reads and what the distance below is measured on.
+        assert_eq!(seed_style(Species::Glowcap).crown, srgb_linear(GLOWCAP_INTERIM_CAP_SRGB));
+
+        // Distinct from all five producers' crowns in linear light, with room to spare.
+        let dist = |a: [f32; 3], b: [f32; 3]| {
+            ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+        };
+        let cap = seed_style(Species::Glowcap).crown;
+        let mut nearest = f32::MAX;
+        for species in Species::ALL {
+            if species == Species::Glowcap {
+                continue;
+            }
+            let d = dist(cap, seed_style(species).crown);
+            assert!(d > 0.4, "the interim cap is {d} from {}", species.name());
+            nearest = nearest.min(d);
+        }
+        assert!(nearest > 0.6, "the nearest producer crown is {nearest} away");
     }
 }
