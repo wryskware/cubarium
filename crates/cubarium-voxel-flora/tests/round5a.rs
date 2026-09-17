@@ -29,7 +29,7 @@
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 use cubarium_voxel_flora::{
-    Command, Deposit, DepositKind, Flora, FloraConfig, Site, Species, SpeciesConfig, Taken,
+    Command, Deposit, DepositKind, Flora, FloraConfig, Reach, Site, Species, SpeciesConfig, Taken,
 };
 
 // ------------------------------------------------------------------- fixtures
@@ -433,6 +433,130 @@ fn a_deposit_decomposes_from_the_tick_after_the_inter_tick_it_arrived_in() {
         "one tick of a 10 /s rate on a 1.0 snapshot should leave 0.5, not {after_one}"
     );
     assert_residuals(&flora, "one tick after a deposit");
+}
+
+// ------------------------------------------------------------------- 3. reach
+
+/// Columns of chosen heights and nothing else: for each `(x, top)`, bedrock at `y = 0` and
+/// soil at `y = 1..=top`, so that column's support face is `y = top`; every other column is
+/// void. These fixtures are about geometry — nothing is stepped, so no stand drinks, grows
+/// or dies inside them.
+fn ledges(width: u32, columns: &[(i64, u32)]) -> World {
+    let mut w = empty_world(width, 1);
+    for x in 0..width as i64 {
+        match columns.iter().find(|(cx, _)| *cx == x) {
+            Some(&(_, top)) => {
+                for y in 1..=top {
+                    fill(&mut w, x, y, 0, Material::Soil, 0.6);
+                }
+                assert_eq!(
+                    cubarium_voxel_flora::highest_support(&w.view(), x, 0),
+                    Some(Site { x: x as u32, y: top, z: 0 }),
+                    "column {x} must stand at {top}"
+                );
+            }
+            None => void_column(&mut w, x, 0),
+        }
+    }
+    w
+}
+
+/// Plant `species` at exactly `wood` on a column, and return the face it stands on.
+fn plant_wood(flora: &mut Flora, world: &World, x: i64, species: Species, wood: f64) -> Site {
+    assert!(
+        flora.apply(world, Command::Seed { x, z: 0, species, wood }),
+        "{} could not be planted on column {x}",
+        species.name()
+    );
+    cubarium_voxel_flora::highest_support(&world.view(), x, 0).expect("a support face")
+}
+
+/// The reach box, as three cases on one fixture: a crown one voxel up is in reach of an
+/// `up: 1` eater, the same crown **two** voxels up is not, and one across the world's `x`
+/// seam is one step away. The results come back sorted by site.
+#[test]
+fn a_crown_two_voxels_up_is_out_of_reach_and_one_across_the_seam_is_not() {
+    // Eight columns: the eater's own face at `y = 2`, a neighbour at `y = 2`, one raised to
+    // `y = 3`, one four columns away, and the column on the other side of the seam.
+    let world = ledges(8, &[(0, 2), (1, 2), (2, 3), (4, 2), (7, 2)]);
+    let mut flora = Flora::new(FloraConfig::default());
+    let turf = 0.5 * flora.config().springturf.wood_max;
+    // A springturf crown at this wood is one cell, one voxel above its own face.
+    assert_eq!(flora.config().springturf.crown_voxels(turf), 1);
+    assert!(flora.config().springturf.crown_radius(turf) < 1.0, "one cell wide");
+
+    let near = plant_wood(&mut flora, &world, 1, Species::Springturf, turf);
+    let high = plant_wood(&mut flora, &world, 2, Species::Springturf, turf);
+    let far = plant_wood(&mut flora, &world, 4, Species::Springturf, turf);
+    let seam = plant_wood(&mut flora, &world, 7, Species::Springturf, turf);
+    assert_eq!((near.y, high.y, far.y, seam.y), (2, 3, 2, 2), "the fixture's own heights");
+
+    let from = Site { x: 0, y: 2, z: 0 };
+    let reach = Reach { horizontal: 2, up: 1 };
+    let got = flora.view().reachable_foliage(&world.view(), from, reach);
+    let sites: Vec<Site> = got.iter().map(|&(s, _)| s).collect();
+    assert_eq!(sites, vec![near, seam], "reached {sites:?}");
+    let mut sorted = sites.clone();
+    sorted.sort_unstable();
+    assert_eq!(sites, sorted, "the list must be sorted by site");
+    // Each entry is the foliage that stand actually holds.
+    for &(site, foliage) in &got {
+        assert_eq!(foliage, flora.view().stand_at(site).expect("a listed stand").foliage);
+    }
+    // The raised one is out by exactly one voxel of `up`, and the one four columns away is
+    // out by two of `horizontal`: both come back in when the box grows.
+    let taller = flora.view().reachable_foliage(&world.view(), from, Reach { horizontal: 2, up: 2 });
+    assert_eq!(
+        taller.iter().map(|&(s, _)| s).collect::<Vec<_>>(),
+        vec![near, high, seam],
+        "one more voxel of `up` reaches the raised crown"
+    );
+    let wider = flora.view().reachable_foliage(&world.view(), from, Reach { horizontal: 4, up: 1 });
+    assert_eq!(
+        wider.iter().map(|&(s, _)| s).collect::<Vec<_>>(),
+        vec![near, far, seam],
+        "two more voxels sideways reach the far crown"
+    );
+}
+
+/// What has to be in reach is a **crown cell**, not the stand's own column: a broad crown
+/// whose trunk is four columns away still hangs two columns away, and that is what a
+/// browser gets at. And a stand with no foliage left is not listed at all — there is
+/// nothing there to eat.
+#[test]
+fn a_broad_crown_is_reached_by_its_cells_and_a_stripped_stand_is_not_listed() {
+    let world = ledges(12, &[(0, 2), (4, 2)]);
+    let mut flora = Flora::new(FloraConfig::default());
+    // Velvetpad at its own `wood_max` is the widest crown of the five: radius 2 voxels, and
+    // one voxel tall, so its cells run from column 2 to column 6.
+    let pad_wood = flora.config().velvetpad.wood_max;
+    assert_eq!(flora.config().velvetpad.crown_radius(pad_wood), 2.0);
+    assert_eq!(flora.config().velvetpad.crown_voxels(pad_wood), 1);
+    let pad = plant_wood(&mut flora, &world, 4, Species::Velvetpad, pad_wood);
+
+    let from = Site { x: 0, y: 2, z: 0 };
+    let reach = Reach { horizontal: 2, up: 1 };
+    assert_eq!(
+        flora.view().reachable_foliage(&world.view(), from, reach),
+        vec![(pad, flora.view().stand_at(pad).expect("planted").foliage)],
+        "the crown's nearest cell is two columns away, and the box is two"
+    );
+    // Its trunk alone would be out of reach: the centre is four columns away.
+    assert!(
+        flora
+            .view()
+            .reachable_foliage(&world.view(), from, Reach { horizontal: 1, up: 1 })
+            .is_empty(),
+        "a one-voxel box cannot reach a crown whose nearest cell is two away"
+    );
+
+    // Eat all of it, and it is no longer food.
+    assert!(flora.take_foliage(pad, 1.0).is_some());
+    assert!(
+        flora.view().reachable_foliage(&world.view(), from, reach).is_empty(),
+        "a stand with no foliage is not reachable foliage"
+    );
+    assert_residuals(&flora, "after stripping the only crown in reach");
 }
 
 // ----------------------------------------------------- 4. the producer response

@@ -570,6 +570,42 @@ impl SpeciesConfig {
         let t = (wood / self.wood_max).clamp(0.0, 1.0);
         self.crown_radius_voxels[0] + t * (self.crown_radius_voxels[1] - self.crown_radius_voxels[0])
     }
+
+    /// How many voxels above its support face the crown's **cells** sit:
+    /// `round(crown_height)`, never zero. The crown is one disc of cells at that level, so
+    /// a species whose crown height rounds to one is a crown sitting straight on the
+    /// ground with no stem — which is what a one-voxel plant is — and the wood of a taller
+    /// one is the cells below it.
+    ///
+    /// [`SpeciesConfig::crown_height`] is the float the **shade** model uses, and this is
+    /// the same number quantised to whole voxels, which is what a query about *cells* — is
+    /// this crown in reach, which cell does the picture paint — has to ask. The presenter's
+    /// `cubarium::voxel::stand::crown_height_voxels` is the same rounding, and this is the
+    /// model-side statement of it.
+    pub fn crown_voxels(&self, wood: f64) -> u32 {
+        let h = self.crown_height(wood);
+        if !h.is_finite() {
+            return 1;
+        }
+        (h.round().max(1.0) as u32).min(u32::from(u16::MAX))
+    }
+}
+
+/// How far a ground consumer can get at food from the face it is standing on: sideways in
+/// whole voxels, and up in whole voxels.
+///
+/// Pure geometry, and deliberately crude — there is **no line of sight**, no body, no
+/// posture and no cost. `design/theoretical-biosphere-2026-09-16.md` §6's point is only
+/// that food above reach does not feed a ground browser, and a box is enough to say that.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Reach {
+    /// Voxels sideways, in wrapped `x` and in `z`, each measured on its own: a box, not a
+    /// disc.
+    pub horizontal: u32,
+    /// Voxels **above** the eater's own support face that it can still reach. The only
+    /// vertical bound there is: a crown level with the face, or below it, is in reach
+    /// whatever this says.
+    pub up: u32,
 }
 
 impl SpeciesConfig {
@@ -1310,6 +1346,76 @@ impl<'a> FloraView<'a> {
                         + g.seeds.iter().map(|c| c.mineral).sum::<f64>()
                 })
                 .sum::<f64>()
+    }
+
+    /// Every stand whose **crown** a consumer standing on `from` can get at, with the
+    /// foliage each of them holds, sorted by site. Stands with no foliage left are not
+    /// listed: there is nothing there to eat.
+    ///
+    /// A stand qualifies when
+    ///
+    /// 1. **at least one of its crown cells** is within `reach.horizontal` voxels of
+    ///    `from` in wrapped `x` **and** within the same in `z` — the crown's cells are the
+    ///    integer disc of [`SpeciesConfig::crown_radius`] around its own column, which is
+    ///    the set the shade model covers and the presenter paints; and
+    /// 2. its crown's **lowest cell** — the one level at
+    ///    `site.y + `[`SpeciesConfig::crown_voxels`] — is at most `reach.up` voxels above
+    ///    `from.y`.
+    ///
+    /// `world` is read for one thing only, the world's width, because `x` wraps: a crown
+    /// one step across the seam is one step away. Nothing else about the world enters, so
+    /// this is geometry and not a path — **no line of sight**, no terrain between the eater
+    /// and the food, no check that `from` is even a support face. The caller stands where
+    /// it says it stands.
+    ///
+    /// Sorted by site because [`FloraView::stands`] is, and this walks it in order: a
+    /// consumer's choice among what it can reach is therefore its own rule and never a
+    /// storage order.
+    pub fn reachable_foliage(
+        &self,
+        world: &VoxelView<'_>,
+        from: Site,
+        reach: Reach,
+    ) -> Vec<(Site, f64)> {
+        let width = world.config.width.max(1) as i64;
+        let horizontal = i64::from(reach.horizontal);
+        let ceiling = i64::from(from.y) + i64::from(reach.up);
+        let mut out = Vec::new();
+        for stand in self.stands {
+            if !(stand.foliage > 0.0) {
+                continue;
+            }
+            let sc = self.config.species(stand.species);
+            if i64::from(stand.site.y) + i64::from(sc.crown_voxels(stand.wood)) > ceiling {
+                continue;
+            }
+            let r = sc.crown_radius(stand.wood).max(0.0);
+            let span = r.floor() as i64;
+            let r2 = r * r;
+            let mut within = false;
+            for dz in -span..=span {
+                for dx in -span..=span {
+                    if (dx * dx + dz * dz) as f64 > r2 {
+                        continue;
+                    }
+                    let cell_x = i64::from(stand.site.x) + dx;
+                    let d = (cell_x - i64::from(from.x)).rem_euclid(width);
+                    let wrapped = d.min(width - d);
+                    let dz_abs = (i64::from(stand.site.z) + dz - i64::from(from.z)).abs();
+                    if wrapped <= horizontal && dz_abs <= horizontal {
+                        within = true;
+                        break;
+                    }
+                }
+                if within {
+                    break;
+                }
+            }
+            if within {
+                out.push((stand.site, stand.foliage));
+            }
+        }
+        out
     }
 
     /// Energy in every living and dead stock.
