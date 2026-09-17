@@ -621,4 +621,159 @@ mod tests {
         let sc = flora.config().species(Species::Umbrellafrond);
         sc.alpha * sc.wood_max
     }
+
+    /// Round 4's three producers: each one stamps **at least one cell** at both ends of its
+    /// own size range, its sprout mark is its own, and every one of the five crowns is
+    /// distinct from the other four in linear light.
+    ///
+    /// The three new crowns are one cell tall by design — `crown_height_voxels` starts at
+    /// 0.5 for all three, which `crown_height_voxels()` rounds to 1 — so they have **no
+    /// trunk at all**: the crown disc sits straight on the ground, which is what a turf, a
+    /// cushion and a pad are. That is the case the geometry has to get right, because the
+    /// trunk loop is `1..h` and an `h` of 1 runs it zero times.
+    #[test]
+    fn the_five_palettes_are_distinct_and_the_three_new_crowns_stamp_a_cell() {
+        let world = world();
+        let flora = Flora::new(FloraConfig::default());
+
+        // Geometry, at `alive_min` and at `wood_max`: one cell or more, always a heart, and
+        // never a trunk cell for the three ground-level species.
+        for species in [Species::Springturf, Species::Stonecushion, Species::Velvetpad] {
+            let sc = flora.config().species(species);
+            for wood in [sc.alive_min, sc.wood_max] {
+                let stand = Stand {
+                    id: 0,
+                    site: Site { x: 10, y: 3, z: 2 },
+                    species,
+                    stage: Stage::Alive,
+                    wood,
+                    foliage: sc.alpha * wood,
+                    reserve: 0.0,
+                    light: 1.0,
+                    moisture: 1.0,
+                    water_m3: 0.0,
+                    mineral: 0.0,
+                    aeration_stress: 0.0,
+                    parcel: 0.0,
+                };
+                let parts = parts_of(flora.view(), &stand, 0);
+                assert_eq!(
+                    crown_height_voxels(sc.crown_height(wood)),
+                    1,
+                    "{} at wood {wood} is not one cell tall",
+                    species.name()
+                );
+                let trunks = parts.iter().filter(|(_, p)| matches!(p, Part::Trunk(_))).count();
+                let crowns: Vec<&Cell> = parts
+                    .iter()
+                    .filter(|(_, p)| matches!(p, Part::Crown { .. }))
+                    .map(|(c, _)| c)
+                    .collect();
+                assert_eq!(trunks, 0, "{}: a stemless plant grew a stem", species.name());
+                assert!(
+                    !crowns.is_empty(),
+                    "{} at wood {wood} stamped no cell at all",
+                    species.name()
+                );
+                assert!(
+                    crowns.iter().all(|c| c.y == 4),
+                    "{}: the crown left the ground: {crowns:?}",
+                    species.name()
+                );
+                assert_eq!(
+                    parts.iter().filter(|(_, p)| matches!(p, Part::Crown { heart: true, .. })).count(),
+                    1,
+                    "{}: one heart and no more",
+                    species.name()
+                );
+            }
+        }
+        // And the shapes at full size. The brief gives springturf and stonecushion the
+        // **same** radius range, `[0.5, 1.0]`, so at `wood_max` they draw the same
+        // five-cell plus and what separates them in the picture is the palette — which is
+        // why stonecushion is the one low-chroma crown of the five, checked below. The pad
+        // is the broad one, `[1.0, 2.0]`, and that is the role's own "low and broad".
+        let cells = |species: Species| -> usize {
+            let sc = flora.config().species(species);
+            let stand = Stand {
+                id: 0,
+                site: Site { x: 10, y: 3, z: 2 },
+                species,
+                stage: Stage::Alive,
+                wood: sc.wood_max,
+                foliage: sc.alpha * sc.wood_max,
+                reserve: 0.0,
+                light: 1.0,
+                moisture: 1.0,
+                water_m3: 0.0,
+                mineral: 0.0,
+                aeration_stress: 0.0,
+                parcel: 0.0,
+            };
+            parts_of(flora.view(), &stand, 0).len()
+        };
+        let (turf, cushion, pad) =
+            (cells(Species::Springturf), cells(Species::Stonecushion), cells(Species::Velvetpad));
+        assert!(turf >= 1 && cushion >= 1 && pad >= 1, "turf {turf}, cushion {cushion}, pad {pad}");
+        assert_eq!(turf, cushion, "the two share a radius range: {turf}, {cushion}");
+        assert!(pad > turf, "the pad must be the broad one: {pad} against {turf}");
+
+        // A stand of each of the five actually reaches the grid, on its own support face.
+        let mut flora = Flora::new(FloraConfig::default());
+        for (x, species) in Species::ALL.into_iter().enumerate() {
+            let sc = flora.config().species(species);
+            let wood = sc.wood_max;
+            assert!(flora.apply(&world, Command::Seed { x: x as i64 * 4, z: 1, species, wood }));
+        }
+        let view = world.view();
+        let mut stands = Stands::empty(32, 16, 4);
+        stands.rebuild(&view, flora.view());
+        for (x, species) in Species::ALL.into_iter().enumerate() {
+            let part = stands.at(x as i64 * 4, 4, 1);
+            assert!(part.is_block(), "{} stamped nothing at all: {part:?}", species.name());
+            let style = stands.style(part).expect("it paints");
+            assert_eq!(style, style_of(flora.view(), flora.view().stand_at(Site { x: x as u32 * 4, y: 3, z: 1 }).expect("seeded")));
+        }
+
+        // The palettes: every pair of the five crowns apart in linear light, and the same
+        // for the sprout marks, which are the unmoved palette.
+        let crowns: Vec<(Species, [f32; 3])> =
+            Species::ALL.into_iter().map(|s| (s, seed_style(s).crown)).collect();
+        let dist = |a: [f32; 3], b: [f32; 3]| {
+            ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+        };
+        let mut closest = f32::MAX;
+        for (i, (sa, a)) in crowns.iter().enumerate() {
+            for (sb, b) in crowns.iter().skip(i + 1) {
+                let d = dist(*a, *b);
+                assert!(d > 0.25, "{} and {} are {d} apart in linear light", sa.name(), sb.name());
+                closest = closest.min(d);
+            }
+        }
+        // Measured: the closest pair of the five is stonecushion's stone-lilac against
+        // velvetpad's violet, at 0.44. Pinned as a floor, not as a value, so a repaint has
+        // room to move but not to collapse two species into one colour.
+        assert!(closest > 0.4, "the closest pair of the five is {closest} apart");
+
+        // And the three new ones land where the module doc says: springturf blue-dominant,
+        // velvetpad blue-dominant but far darker in green, stonecushion the low-chroma one.
+        let chroma = |c: [f32; 3]| {
+            let (lo, hi) = c.iter().fold((f32::MAX, 0.0f32), |(l, h), &v| (l.min(v), h.max(v)));
+            hi - lo
+        };
+        let turf = seed_style(Species::Springturf).crown;
+        let cushion = seed_style(Species::Stonecushion).crown;
+        let pad = seed_style(Species::Velvetpad).crown;
+        assert!(turf[2] > turf[0] && turf[2] > turf[1], "springturf is blue: {turf:?}");
+        assert!(pad[2] > pad[0] && pad[2] > pad[1], "velvetpad is violet-blue: {pad:?}");
+        assert!(turf[1] > pad[1] * 2.0, "the cyan and the violet must part in green");
+        for other in [turf, pad, seed_style(Species::Bloomcrown).crown, seed_style(Species::Umbrellafrond).crown] {
+            assert!(
+                chroma(cushion) < chroma(other),
+                "stonecushion must be the low-chroma one: {} against {}",
+                chroma(cushion),
+                chroma(other)
+            );
+        }
+    }
 }
