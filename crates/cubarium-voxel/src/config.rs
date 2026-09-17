@@ -33,6 +33,11 @@ pub struct Config {
     pub spring_k_m2_per_s: f64,
     /// Fraction of the world footprint the aquifer store occupies, used to turn its
     /// volume into a head in metres above `y = 0`.
+    ///
+    /// It must be at least soil's own pore capacity (0.35) for the water table to hold:
+    /// a metre of head is `footprint * aquifer_porosity` cubic metres, and if that is
+    /// less than one row of saturated soil holds, the aquifer collapses while trying to
+    /// fill the ground it is supposed to be holding up. Not tuned; a consistency floor.
     pub aquifer_porosity: f64,
     /// Level of the water table at creation, in metres above `y = 0`. The aquifer is
     /// charged to the volume whose head is this, and that water is counted in
@@ -64,7 +69,7 @@ impl Default for Config {
             evaporation_m_per_s: 0.0,
             water_substeps: 4,
             spring_k_m2_per_s: 0.02,
-            aquifer_porosity: 0.1,
+            aquifer_porosity: 0.35,
             initial_aquifer_head_m: 0.0,
             outlet_m3_per_s: 0.05,
             free_transfer_cap: 0.0,

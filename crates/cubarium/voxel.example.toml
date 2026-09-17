@@ -41,3 +41,8 @@ seed = 1
 rain_m_per_s = 0.0
 evaporation_m_per_s = 0.0
 water_substeps = 4
+# Level of the water table at creation, metres above the foundation. 0 is a dry aquifer.
+# Set it a little above the basin floor and the basin's soil is saturated from below and
+# seeps a pond, while higher ground drains to field capacity. The `a M3` stdin command
+# charges it by hand at run time.
+initial_aquifer_head_m = 0.0

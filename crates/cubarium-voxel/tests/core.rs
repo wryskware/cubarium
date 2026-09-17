@@ -355,6 +355,10 @@ fn the_residual_stays_below_1e_9_with_every_flux_firing() {
 fn spring_world(aquifer_m3: f64, sealed: bool) -> World {
     let mut c = cfg(4, 6);
     c.spring_k_m2_per_s = 0.5;
+    // The heads these tests hand-work (10 m from 4 m3, 2.5 m from 1 m3) assume a tenth
+    // of the footprint; the default rose to soil's pore capacity when the water table
+    // arrived, so the fixture pins the value the arithmetic was done with.
+    c.aquifer_porosity = 0.1;
     let mut w = World::empty(c);
     if sealed {
         for (x, y) in [(1, 2), (1, 4), (0, 3), (2, 3)] {
