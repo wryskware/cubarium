@@ -26,7 +26,7 @@
 //! decorative and the patches are reading the noise.
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, World};
-use cubarium_voxel_flora::{Command, Flora, FloraConfig, Site, Species, Stage};
+use cubarium_voxel_flora::{Command, Flora, FloraConfig, Site, Species};
 
 const WARMUP_TICKS: u32 = 1000;
 const FOUNDERS_PER_SPECIES: usize = 8;
@@ -173,13 +173,21 @@ fn run(
         flora.step(&mut world);
     }
 
+    // Round 3: `alive` is the stands, and `occupied` is the stands plus the sites where
+    // a species' seed bank is waiting — the old "establishing" half of `occupied`, which
+    // is a cohort in the ground now and not a frozen stand.
     let mut occupied = [Vec::new(), Vec::new()];
     let mut alive = [Vec::new(), Vec::new()];
     for stand in flora.view().stands {
         let key = (stand.site.x, stand.site.z);
         occupied[sp(stand.species)].push(key);
-        if stand.stage == Stage::Alive {
-            alive[sp(stand.species)].push(key);
+        alive[sp(stand.species)].push(key);
+    }
+    for g in flora.view().ground {
+        for species in Species::ALL {
+            if g.seed_organic(species) > 0.0 {
+                occupied[sp(species)].push((g.site.x, g.site.z));
+            }
         }
     }
     for set in occupied.iter_mut().chain(alive.iter_mut()) {
@@ -310,18 +318,17 @@ fn report(
 
     for species in Species::ALL {
         let all: Vec<_> = view.stands.iter().filter(|s| s.species == species).collect();
-        let alive = all.iter().filter(|s| s.stage == Stage::Alive).count();
+        let n = all.len();
         let wood: f64 = all.iter().map(|s| s.wood).sum();
-        // Only the alive ones have read light and water: an establishing stand is frozen
-        // and its two factors stay at zero.
-        let live = all.iter().filter(|s| s.stage == Stage::Alive);
-        let light: f64 = live.clone().map(|s| s.light).sum::<f64>() / alive.max(1) as f64;
-        let moisture: f64 = live.map(|s| s.moisture).sum::<f64>() / alive.max(1) as f64;
+        let light: f64 = all.iter().map(|s| s.light).sum::<f64>() / n.max(1) as f64;
+        let moisture: f64 = all.iter().map(|s| s.moisture).sum::<f64>() / n.max(1) as f64;
+        // The seed bank: how many sites are waiting, and how much organic matter waits.
+        let banks = view.ground.iter().filter(|g| g.seed_organic(species) > 0.0).count();
+        let banked: f64 = view.ground.iter().map(|g| g.seed_organic(species)).sum();
         println!(
-            "{:>14}: {} stands ({alive} alive, {} establishing), wood {wood:.4}, alive mean light {light:.3}, moisture {moisture:.3}",
+            "{:>14}: {n} stands, wood {wood:.4}, mean light {light:.3}, moisture {moisture:.3}; \
+             seed bank on {banks} sites holding {banked:.5}",
             species.name(),
-            all.len(),
-            all.len() - alive
         );
     }
 

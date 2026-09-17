@@ -31,8 +31,11 @@
 //! solid terrain is dropped, so a stand whose support has been buried does not paint
 //! inside rock.
 //!
-//! An [`Stage::Establishing`] stand is a single **sprout** cell just above its support:
-//! propagule material, not yet a plant.
+//! A site whose [`cubarium_voxel_flora::Ground`] holds a **seed cohort** is a single
+//! **sprout** cell just above its support: dormant propagule material, not yet a plant.
+//! Round 3 moved the glyph there from the deleted `Stage::Establishing`, so the picture
+//! still shows waiting propagules. A site can hold a bank *and* a living stand, and the
+//! stand's own cells outrank the sprout, so the mark shows only where the gap is open.
 //!
 //! Whole voxels are the picture's own quantisation. The model's crown top is a float and
 //! its disc a float radius; the drawing rounds both, so a stand's drawn top can sit half
@@ -40,7 +43,7 @@
 //! per voxel.
 
 use cubarium_voxel::VoxelView;
-use cubarium_voxel_flora::{FloraView, Species, Stage, Stand};
+use cubarium_voxel_flora::{FloraView, Species, Stand};
 
 use crate::present::{mix, srgb_linear};
 
@@ -93,7 +96,7 @@ pub enum Part {
     Trunk(u16),
     /// A crown cell. `heart` is the disc's centre column, over the trunk's top.
     Crown { style: u16, heart: bool },
-    /// An establishing stand: a mark, not a block.
+    /// A site holding a seed cohort: a mark, not a block.
     Sprout(u16),
 }
 
@@ -182,6 +185,21 @@ impl Stands {
                 self.place(view, cell, part);
             }
         }
+        // Then the seed banks, also in site order: one sprout mark per site that holds a
+        // cohort, in the colours of whichever species' cohorts hold the most there.
+        for g in flora.ground {
+            let Some(species) = g.seed_species() else { continue };
+            let style = self.styles.len().min(u16::MAX as usize) as u16;
+            if usize::from(style) != self.styles.len() {
+                break;
+            }
+            self.styles.push(seed_style(species));
+            self.place(
+                view,
+                Cell { x: i64::from(g.site.x), y: g.site.y + 1, z: g.site.z },
+                Part::Sprout(style),
+            );
+        }
     }
 
     /// Write one part, letting the stronger claim keep the cell. Wood beats canopy —
@@ -260,10 +278,6 @@ pub fn parts_of(flora: FloraView<'_>, stand: &Stand, style: u16) -> Vec<(Cell, P
     let site = stand.site;
     let sx = i64::from(site.x);
     let mut out = Vec::new();
-    if stand.stage == Stage::Establishing {
-        out.push((Cell { x: sx, y: site.y + 1, z: site.z }, Part::Sprout(style)));
-        return out;
-    }
 
     // The trunk: the stand stands `H` cells above its support's top face, and the top
     // one of those is the crown's own centre, so the wood runs to `H − 1`. A stand whose
@@ -306,13 +320,26 @@ pub fn crown_height_voxels(height: f64) -> u32 {
     (height.round().max(1.0) as u32).min(u32::from(u16::MAX))
 }
 
+/// The three sRGB hex colours of a species, before fill or wilt move them.
+fn palette(species: Species) -> (u32, u32, u32) {
+    match species {
+        Species::Bloomcrown => (BLOOM_WOOD_SRGB, BLOOM_CROWN_SRGB, BLOOM_HEART_SRGB),
+        Species::Umbrellafrond => (FROND_WOOD_SRGB, FROND_CROWN_SRGB, FROND_HEART_SRGB),
+    }
+}
+
+/// A seed cohort's colours: its species' palette, unmoved. A dormant cohort has no
+/// foliage to fill a crown with and no `μ` to wilt by — the sprout mark is drawn in
+/// `crown`, so what it says is only which species is waiting there.
+pub fn seed_style(species: Species) -> Style {
+    let (wood, crown, heart) = palette(species);
+    Style { wood: srgb_linear(wood), crown: srgb_linear(crown), heart: srgb_linear(heart) }
+}
+
 /// One stand's colours: species palette, then crown fill, then wilt.
 pub fn style_of(flora: FloraView<'_>, stand: &Stand) -> Style {
     let sc = flora.config.species(stand.species);
-    let (wood, crown, heart) = match stand.species {
-        Species::Bloomcrown => (BLOOM_WOOD_SRGB, BLOOM_CROWN_SRGB, BLOOM_HEART_SRGB),
-        Species::Umbrellafrond => (FROND_WOOD_SRGB, FROND_CROWN_SRGB, FROND_HEART_SRGB),
-    };
+    let (wood, crown, heart) = palette(stand.species);
     let (wood, crown, heart) = (srgb_linear(wood), srgb_linear(crown), srgb_linear(heart));
 
     // Crown fill: `P / P_cap`. A stand that has shed its foliage keeps its structure,
@@ -347,7 +374,7 @@ fn wilted(c: [f32; 3], wilt: f32) -> [f32; 3] {
 mod tests {
     use super::*;
     use cubarium_voxel::{Command as VoxelCommand, Config, Material, World};
-    use cubarium_voxel_flora::{Command, Flora, FloraConfig, Site};
+    use cubarium_voxel_flora::{Command, Flora, FloraConfig, Site, Stage};
 
     fn world() -> World {
         let mut world = World::empty(Config { width: 32, height: 16, depth: 4, ..Config::default() });
@@ -408,28 +435,67 @@ mod tests {
         assert_eq!(stands.at(10, 99, 2), Part::None);
     }
 
-    /// An establishing stand is a sprout: one cell, and not a block, so the sky above it
-    /// stays open and what is behind it still shows.
+    /// A site holding a seed cohort draws a sprout: one cell just above its support, and
+    /// not a block, so the sky above it stays open and what is behind it still shows.
+    /// Round 3 moved this glyph off the deleted `Stage::Establishing` and onto the bank.
+    ///
+    /// The cohort is made the way the model makes them — a donor's paid package — so the
+    /// test reads the presenter against the layer's own state and not a hand-built one.
     #[test]
-    fn an_establishing_stand_is_a_single_sprout_cell() {
-        let flora = Flora::new(FloraConfig::default());
-        let stand = Stand {
-            site: Site { x: 4, y: 3, z: 1 },
+    fn a_site_holding_a_seed_cohort_is_a_single_sprout_cell() {
+        let mut world = world();
+        let mut flora = Flora::new(FloraConfig::default());
+        let sp = Species::Bloomcrown;
+        let wood = flora.config().species(sp).wood_max;
+        assert!(flora.apply(&world, Command::Seed { x: 6, z: 1, species: sp, wood }));
+        flora.step(&mut world);
+
+        let banks: Vec<Site> = flora
+            .view()
+            .ground
+            .iter()
+            .filter(|g| g.seed_species().is_some())
+            .map(|g| g.site)
+            .collect();
+        assert!(!banks.is_empty(), "one tick of a full-grown donor should have seeded a bank");
+        assert!(!banks.contains(&Site { x: 6, y: 3, z: 1 }), "a donor does not seed itself");
+
+        let view = world.view();
+        let mut stands = Stands::empty(32, 16, 4);
+        stands.rebuild(&view, flora.view());
+        for site in banks {
+            let part = stands.at(i64::from(site.x), i64::from(site.y) + 1, site.z);
+            assert!(matches!(part, Part::Sprout(_)), "no sprout at {site:?}: {part:?}");
+            assert!(!part.is_block(), "a sprout is a mark, not a block");
+            // Two cells up is empty: a bank is one cell and never a stem.
+            assert_eq!(stands.at(i64::from(site.x), i64::from(site.y) + 2, site.z), Part::None);
+            let style = stands.style(part).expect("a sprout paints");
+            assert_eq!(style, seed_style(Species::Bloomcrown), "the bank's own species");
+        }
+    }
+
+    /// Two species' cohorts can share one site now, and the picture has one glyph per
+    /// site: the species holding the most organic matter there is the one drawn.
+    #[test]
+    fn a_shared_bank_draws_the_species_that_holds_the_most() {
+        use cubarium_voxel_flora::{Ground, SeedCohort};
+        let mut g = Ground::new(Site { x: 1, y: 2, z: 0 }, 0.0);
+        assert_eq!(g.seed_species(), None, "an empty bank draws nothing");
+        g.seeds.push(SeedCohort {
             species: Species::Bloomcrown,
-            stage: Stage::Establishing,
-            wood: 0.01,
-            foliage: 0.0,
-            reserve: 0.0,
-            light: 0.0,
-            moisture: 1.0,
-            water_m3: 0.0,
-            mineral: 0.0,
-        };
-        let parts = parts_of(flora.view(), &stand, 0);
-        assert_eq!(parts.len(), 1);
-        assert_eq!(parts[0].0, Cell { x: 4, y: 4, z: 1 });
-        assert_eq!(parts[0].1, Part::Sprout(0));
-        assert!(!parts[0].1.is_block());
+            organic: 0.01,
+            mineral: 0.0002,
+            age_ticks: 0,
+        });
+        g.seeds.push(SeedCohort {
+            species: Species::Umbrellafrond,
+            organic: 0.03,
+            mineral: 0.0006,
+            age_ticks: 0,
+        });
+        assert_eq!(g.seed_species(), Some(Species::Umbrellafrond), "the larger bank");
+        g.seeds[0].organic = 0.05;
+        assert_eq!(g.seed_species(), Some(Species::Bloomcrown), "and now the other one");
     }
 
     /// A cell that terrain has taken is not painted: a stand whose support was buried

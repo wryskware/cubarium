@@ -48,13 +48,33 @@ impl Species {
     }
 }
 
-/// Life stage of a stand. A site with no stand is **bare**.
+/// Life stage of a stand. A site with no stand is **bare**; propagule material waiting on
+/// a site is a [`SeedCohort`] in that site's [`Ground`], never a stand.
+///
+/// Round 3 deleted `Establishing`. A frozen sub-`W_min` stand was not a seed bank: it
+/// could not die, it never aged, and it needed one donor's whole attention for 300 s to
+/// cross `alive_min`. One variant is left on purpose — a stand is alive or it is not
+/// there — so that code which matches on a stage keeps saying which it means.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Stage {
-    /// `0 < W < W_min`: propagule material, frozen. No income, no maintenance, no growth.
-    Establishing,
-    /// `W >= W_min`: runs the full plant model every tick.
+    /// Runs the full plant model every tick.
     Alive,
+}
+
+/// One dormant seed cohort on a site: paid propagule material of one species, of one age.
+///
+/// Not a stand. It has no income, no maintenance and no growth — only attrition, an age
+/// limit, and the chance to germinate when the site passes its species' establishment
+/// predicate and the bank is big enough to build a living stand out of.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SeedCohort {
+    pub species: Species,
+    /// Organic matter in the cohort.
+    pub organic: f64,
+    /// The mineral that came with it, from the donor's own tissue.
+    pub mineral: f64,
+    /// Ticks since it landed.
+    pub age_ticks: u64,
 }
 
 /// A support voxel: solid, with its top face exposed to void. `x` is stored wrapped
@@ -112,7 +132,7 @@ impl Stand {
 /// were in ecology v1: respiring a kilogram of wood does not produce a kilogram of
 /// fertilizer. Litter and dead wood carry organic matter and the mineral that was in the
 /// tissue; the site's `mineral` is what a stand can actually draw on to build with.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Ground {
     pub site: Site,
     /// `N`: the mineral pool a stand on this site draws on to build tissue. Never
@@ -124,6 +144,10 @@ pub struct Ground {
     pub litter_energy: f64,
     /// The mineral held in the litter, released to `mineral` as the litter decomposes.
     pub litter_mineral: f64,
+    /// The site's seed bank, **sorted by species then age**, youngest first. Same-species
+    /// cohorts within one tick of age are merged, so a site a donor feeds every tick
+    /// holds one cohort per species and not one per tick.
+    pub seeds: Vec<SeedCohort>,
     /// `Wd`: dead wood, organic matter. Keeps its identity; nothing eats it this round.
     pub dead_wood: f64,
     /// The mineral held in the dead wood, released to `mineral` as it decomposes.
@@ -145,10 +169,36 @@ impl Ground {
             litter: 0.0,
             litter_energy: 0.0,
             litter_mineral: 0.0,
+            seeds: Vec::new(),
             dead_wood: 0.0,
             dead_wood_mineral: 0.0,
             dead_wood_energy: 0.0,
         }
+    }
+
+    /// The organic matter this site's seed bank holds of one species: what germination
+    /// pools and measures against `alive_min / w_frac`.
+    pub fn seed_organic(&self, species: Species) -> f64 {
+        self.seeds.iter().filter(|c| c.species == species).map(|c| c.organic).sum()
+    }
+
+    /// The mineral the same cohorts hold.
+    pub fn seed_mineral(&self, species: Species) -> f64 {
+        self.seeds.iter().filter(|c| c.species == species).map(|c| c.mineral).sum()
+    }
+
+    /// Which species' cohorts hold the most organic matter here, for a picture with one
+    /// glyph per site. Ties go to the earlier species in [`Species::ALL`], which is a
+    /// fixed order and not an iteration order.
+    pub fn seed_species(&self) -> Option<Species> {
+        let mut best: Option<(Species, f64)> = None;
+        for species in Species::ALL {
+            let o = self.seed_organic(species);
+            if o > 0.0 && best.is_none_or(|(_, b)| o > b) {
+                best = Some((species, o));
+            }
+        }
+        best.map(|(s, _)| s)
     }
 }
 
@@ -175,19 +225,26 @@ pub struct SpeciesConfig {
     pub build: f64,
     /// `κ`: wood lost per unit of unpaid maintenance.
     pub dieback: f64,
-    /// `W_min`: alive at or above this much wood; establishing below it.
+    /// `W_min`: a stand with less wood than this dies. Germination needs a seed bank
+    /// holding at least `alive_min / w_frac`, so that the stand it builds is born alive.
     pub alive_min: f64,
     /// `W_est`: wood a stand needs before it can send propagules.
     pub donor_min: f64,
     /// `q_prop`: the fraction of `Q_max` a donor keeps for itself.
     pub donor_reserve_floor: f64,
-    /// `k_est`: propagule material per second per establishing-or-bare neighbour site.
+    /// `k_est`: propagule organic matter per second per neighbour site within `hop`. Every
+    /// support face in reach is a recipient, occupied or not: a seed bank waits for a gap.
     pub propagule_rate: f64,
     /// `w_frac, p_frac, q_frac`: how a landed propagule splits into wood, starter foliage
     /// and starter reserve. Sums to one.
     pub propagule_split: [f64; 3],
     /// `e_v`: energy per unit of organic matter in every plant tissue. Light is the source.
     pub energy_density: f64,
+    /// Fraction of a seed cohort that falls to litter each second, with its mineral:
+    /// paid decay, not deletion. **Placeholder**.
+    pub seed_attrition_per_s: f64,
+    /// A cohort older than this many seconds falls to litter whole. **Placeholder**.
+    pub seed_max_age_s: f64,
     /// `n_tissue`: mineral nutrient per unit of organic matter this species builds. Wood,
     /// foliage and reserve share it this round. Growing `ΔO` draws `n_tissue · ΔO` from
     /// the site's mineral pool, and the pool caps growth through `mineral / n_tissue`.
@@ -274,6 +331,8 @@ impl SpeciesConfig {
             propagule_rate: 0.0002,
             propagule_split: [0.4, 0.4, 0.2],
             energy_density: 2.0,
+            seed_attrition_per_s: 0.001,
+            seed_max_age_s: 600.0,
             n_tissue: 0.02,
             reserve_share: 0.2,
             reflush_below: 0.25,
@@ -465,21 +524,32 @@ impl<'a> FloraView<'a> {
         self.ground.binary_search_by_key(&site, |g| g.site).ok().map(|i| &self.ground[i])
     }
 
-    /// Organic matter in every living and dead stock. The site's mineral pool is not
-    /// organic matter and is not in here.
+    /// Organic matter in every living and dead stock, the seed banks included. The site's
+    /// mineral pool is not organic matter and is not in here.
     pub fn organic(&self) -> f64 {
         self.stands.iter().map(|s| s.organic()).sum::<f64>()
-            + self.ground.iter().map(|g| g.litter + g.dead_wood).sum::<f64>()
+            + self
+                .ground
+                .iter()
+                .map(|g| {
+                    g.litter + g.dead_wood + g.seeds.iter().map(|c| c.organic).sum::<f64>()
+                })
+                .sum::<f64>()
     }
 
-    /// Mineral in every stock: the sites' pools, the mineral held in litter and dead
-    /// wood, and the mineral standing in living tissue.
+    /// Mineral in every stock: the sites' pools, the mineral held in litter, dead wood
+    /// and the seed banks, and the mineral standing in living tissue.
     pub fn mineral(&self) -> f64 {
         self.stands.iter().map(|s| s.mineral).sum::<f64>()
             + self
                 .ground
                 .iter()
-                .map(|g| g.mineral + g.litter_mineral + g.dead_wood_mineral)
+                .map(|g| {
+                    g.mineral
+                        + g.litter_mineral
+                        + g.dead_wood_mineral
+                        + g.seeds.iter().map(|c| c.mineral).sum::<f64>()
+                })
                 .sum::<f64>()
     }
 
@@ -489,7 +559,18 @@ impl<'a> FloraView<'a> {
             .iter()
             .map(|s| self.config.species(s.species).energy_density * s.organic())
             .sum::<f64>()
-            + self.ground.iter().map(|g| g.litter_energy + g.dead_wood_energy).sum::<f64>()
+            + self
+                .ground
+                .iter()
+                .map(|g| {
+                    g.litter_energy
+                        + g.dead_wood_energy
+                        + g.seeds
+                            .iter()
+                            .map(|c| self.config.species(c.species).energy_density * c.organic)
+                            .sum::<f64>()
+                })
+                .sum::<f64>()
     }
 }
 

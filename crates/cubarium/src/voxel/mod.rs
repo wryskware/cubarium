@@ -436,6 +436,16 @@ impl Control {
                         g.mineral, g.litter, g.litter_energy, g.litter_mineral, g.dead_wood,
                         g.dead_wood_mineral,
                     );
+                    // The seed bank, in the order the ground holds it: species, then age.
+                    for c in &g.seeds {
+                        eprintln!(
+                            "cubarium voxel:   seed {} organic {:.6} mineral {:.7} age {} ticks",
+                            c.species.name(), c.organic, c.mineral, c.age_ticks,
+                        );
+                    }
+                    if g.seeds.is_empty() {
+                        eprintln!("cubarium voxel:   no seed cohort");
+                    }
                 }
             }
             "f" | "flora" => {

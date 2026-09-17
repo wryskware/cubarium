@@ -7,8 +7,8 @@
 //!    turned to air — loses its stand and its ground, booked as `removed_*_out`.
 //! 2. **Sky cache.** Dropped whole when `VoxelView::terrain_version` moved, refilled
 //!    lazily per site.
-//! 3. **Drowning.** An alive stand standing in water deeper than its species tolerates
-//!    dies the §4.7 death. Establishing stands are frozen (§3.1) and do not drown.
+//! 3. **Drowning.** A stand standing in water deeper than its species tolerates dies the
+//!    §4.7 death.
 //! 4. **Light**, from one snapshot of every stand's pre-tick crown: nothing a stand
 //!    grows this tick shades anything this tick.
 //! 5. **Water.** Every stand's demand per voxel is collected first; then each voxel
@@ -24,7 +24,15 @@
 //!    dead wood respire their organic matter out of the system and release their mineral
 //!    to the site's pool at the same fraction; litter's energy leaves as heat at its
 //!    current density.
-//! 8. **Propagules** (§4.8), from one snapshot of donors and recipients.
+//! 8. **The seed bank.** Every cohort ages one tick, pays its attrition into litter, and
+//!    falls to litter whole once it is past its species' `seed_max_age_s`. Then any site
+//!    with no stand whose pooled cohorts of one species can build a living stand, and
+//!    which passes that species' establishment predicate, germinates one. This runs
+//!    *after* the deaths of step 6, so a gap opened this tick can be filled this tick.
+//! 9. **Propagules** (§4.8), from one snapshot of donors and recipients. A package lands
+//!    as a seed cohort, on every support face within the donor's `hop` whether it is
+//!    occupied or not: the bank waits for the gap. Cohorts that arrive here are one tick
+//!    younger than the ones step 8 just aged, and the merge folds them together.
 //!
 //! Dropped from v1 by the brief: fruit (3c), downhill transport of litter (3f) and
 //! nutrient diffusion (3g).
@@ -53,7 +61,10 @@
 
 use cubarium_voxel::{Command as WorldCommand, Material, VoxelView, World, DT};
 
-use crate::{Flora, FloraConfig, FloraLedger, Ground, Site, Species, SpeciesConfig, Stage, Stand};
+use crate::{
+    Flora, FloraConfig, FloraLedger, Ground, SeedCohort, Site, Species, SpeciesConfig, Stage,
+    Stand,
+};
 
 /// One stand's crown as the shade model sees it, taken before anything moves.
 #[derive(Clone, Copy, Debug)]
@@ -84,6 +95,7 @@ pub(crate) fn step(flora: &mut Flora, world: &mut World) {
     let moisture = drink(flora, world);
     grow(flora, &light, &moisture);
     decompose(flora, &pre);
+    seed_bank(flora, world);
     propagate(flora, world);
 
     flora.tick += 1;
@@ -112,19 +124,26 @@ fn prune_unsupported(flora: &mut Flora, world: &World) {
         *stands = kept;
     }
 
-    let mut kept = Vec::with_capacity(ground.len());
-    for g in ground.iter() {
+    let taken = std::mem::take(ground);
+    let mut kept = Vec::with_capacity(taken.len());
+    for g in taken {
         if supported(&g.site) {
-            kept.push(*g);
+            kept.push(g);
         } else {
             ledger.removed_organic_out += g.litter + g.dead_wood;
             ledger.removed_mineral_out += g.mineral + g.litter_mineral + g.dead_wood_mineral;
             ledger.removed_energy_out += g.litter_energy + g.dead_wood_energy;
+            // The seed bank goes out with the ground it sat on: a cohort whose support
+            // face is gone has nowhere to germinate, and it is booked as removed rather
+            // than dropped.
+            for c in &g.seeds {
+                ledger.removed_organic_out += c.organic;
+                ledger.removed_mineral_out += c.mineral;
+                ledger.removed_energy_out += config.species(c.species).energy_density * c.organic;
+            }
         }
     }
-    if kept.len() != ground.len() {
-        *ground = kept;
-    }
+    *ground = kept;
 }
 
 // ---------------------------------------------------------------- 2. sky cache
@@ -159,9 +178,6 @@ fn drown(flora: &mut Flora, world: &World) {
     let view = world.view();
     let mut doomed: Vec<usize> = Vec::new();
     for (i, stand) in stands.iter().enumerate() {
-        if stand.stage != Stage::Alive {
-            continue;
-        }
         let limit = config.species(stand.species).drown_depth_m;
         if view.water_depth_m(stand.site.x as i64, stand.site.y, stand.site.z) > limit {
             doomed.push(i);
@@ -262,9 +278,6 @@ fn drink(flora: &mut Flora, world: &mut World) -> Vec<Drink> {
     {
         let view = world.view();
         for (i, stand) in flora.stands.iter().enumerate() {
-            if stand.stage != Stage::Alive {
-                continue;
-            }
             let sc = flora.config.species(stand.species);
             let box_ = root_box(&view, stand.site, sc);
             out[i].moisture = moisture_of(&view, &box_, sc);
@@ -394,9 +407,6 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink]) {
     let mut dead: Vec<usize> = Vec::new();
 
     for si in 0..stands.len() {
-        if stands[si].stage != Stage::Alive {
-            continue;
-        }
         let site = stands[si].site;
         let species = stands[si].species;
         let sc = config.species(species);
@@ -653,7 +663,143 @@ fn decompose(flora: &mut Flora, pre: &[(Site, f64, f64)]) {
     }
 }
 
-// ---------------------------------------------------------------- 8. propagules
+// ----------------------------------------------------------------- 8. seed bank
+
+/// The seed bank: age every cohort, take its attrition, cull the over-age ones, then
+/// germinate where a bank can build a living stand.
+fn seed_bank(flora: &mut Flora, world: &World) {
+    let Flora { config, stands, ground, ledger, sky, .. } = flora;
+    let view = world.view();
+    for g in ground.iter_mut() {
+        age_cohorts(config, g, ledger);
+        merge_cohorts(g);
+    }
+    // In site order, then in `Species::ALL` order: two species whose banks could both
+    // germinate here this tick are decided by that fixed order, and the loser's cohorts
+    // stay in the bank rather than being spent.
+    for g in ground.iter_mut() {
+        if g.seeds.is_empty() || stands.binary_search_by_key(&g.site, |s| s.site).is_ok() {
+            continue;
+        }
+        for species in Species::ALL {
+            let sc = config.species(species);
+            let [w_frac, p_frac, q_frac] = sc.propagule_split;
+            if w_frac <= 0.0 {
+                continue;
+            }
+            // The threshold is `alive_min / w_frac`, stated as a product so no division
+            // by a zero-ish fraction can invent one.
+            let pooled = g.seed_organic(species);
+            if w_frac * pooled < sc.alive_min {
+                continue;
+            }
+            if !establishes(&view, sky, g.site, sc) {
+                continue;
+            }
+            let mineral = g.seed_mineral(species);
+            g.seeds.retain(|c| c.species != species);
+            let at = match stands.binary_search_by_key(&g.site, |s| s.site) {
+                Ok(_) => continue,
+                Err(at) => at,
+            };
+            stands.insert(
+                at,
+                Stand {
+                    site: g.site,
+                    species,
+                    stage: Stage::Alive,
+                    wood: w_frac * pooled,
+                    foliage: p_frac * pooled,
+                    reserve: q_frac * pooled,
+                    light: 0.0,
+                    moisture: 0.0,
+                    water_m3: 0.0,
+                    mineral,
+                },
+            );
+            ledger.establishments += 1;
+            break;
+        }
+    }
+}
+
+/// One tick of decay for one site's bank. A cohort past `seed_max_age_s` falls to litter
+/// whole; every other cohort pays `seed_attrition_per_s · dt` of itself into litter, with
+/// the matching fraction of its mineral and its energy. Paid decay, never deletion.
+fn age_cohorts(config: &FloraConfig, g: &mut Ground, ledger: &mut FloraLedger) {
+    if g.seeds.is_empty() {
+        return;
+    }
+    let cap = config.litter_energy_cap;
+    let taken = std::mem::take(&mut g.seeds);
+    let mut kept: Vec<SeedCohort> = Vec::with_capacity(taken.len());
+    for mut c in taken {
+        let sc = config.species(c.species);
+        let e_v = sc.energy_density;
+        c.age_ticks = c.age_ticks.saturating_add(1);
+        if c.age_ticks as f64 * DT > sc.seed_max_age_s {
+            add_litter_cap(cap, g, c.organic, c.mineral, e_v * c.organic, ledger);
+            continue;
+        }
+        let loss = (sc.seed_attrition_per_s * DT * c.organic).min(c.organic).max(0.0);
+        if loss > 0.0 {
+            let mineral = if c.organic > 0.0 {
+                (c.mineral * (loss / c.organic)).min(c.mineral)
+            } else {
+                0.0
+            };
+            c.organic -= loss;
+            c.mineral -= mineral;
+            add_litter_cap(cap, g, loss, mineral, e_v * loss, ledger);
+        }
+        if c.organic > 0.0 || c.mineral > 0.0 {
+            kept.push(c);
+        }
+    }
+    g.seeds = kept;
+}
+
+/// Fold same-species cohorts whose ages are within one tick into one. The merged cohort
+/// keeps the **younger** age: material that keeps arriving keeps the bank fresh, and a
+/// bank that stops being fed ages out on the schedule of its last arrival. Without this
+/// a site a donor feeds every tick would collect one cohort per tick forever.
+///
+/// `seeds` is sorted by species then age, so the pairs to fold are adjacent and the
+/// result is still sorted.
+fn merge_cohorts(g: &mut Ground) {
+    let mut i = 0;
+    while i + 1 < g.seeds.len() {
+        let (a, b) = (g.seeds[i], g.seeds[i + 1]);
+        if a.species == b.species && b.age_ticks.abs_diff(a.age_ticks) <= 1 {
+            g.seeds[i] = SeedCohort {
+                species: a.species,
+                organic: a.organic + b.organic,
+                mineral: a.mineral + b.mineral,
+                age_ticks: a.age_ticks.min(b.age_ticks),
+            };
+            g.seeds.remove(i + 1);
+        } else {
+            i += 1;
+        }
+    }
+}
+
+/// Land a fresh package on a site's bank, keeping `seeds` sorted and merged.
+fn add_cohort(g: &mut Ground, species: Species, organic: f64, mineral: f64) {
+    if organic <= 0.0 && mineral <= 0.0 {
+        return;
+    }
+    match g.seeds.binary_search_by(|c| (c.species, c.age_ticks).cmp(&(species, 0))) {
+        Ok(i) => {
+            g.seeds[i].organic += organic;
+            g.seeds[i].mineral += mineral;
+        }
+        Err(i) => g.seeds.insert(i, SeedCohort { species, organic, mineral, age_ticks: 0 }),
+    }
+    merge_cohorts(g);
+}
+
+// ---------------------------------------------------------------- 9. propagules
 
 /// What one donor offers one recipient site this tick.
 #[derive(Clone, Copy, Debug)]
@@ -669,22 +815,24 @@ struct Offer {
 ///
 /// Recipients are the **highest** support face of each column within `hop` of the donor
 /// in `x` and `z` — one candidate per column for now, so a stand cannot seed the
-/// terraces below its own. A candidate qualifies if it is bare, or holds an establishing
-/// stand of the donor's own species, and passes the species' establishment predicate.
-/// Where two species offer for the same bare site in one tick the larger total takes it
-/// and the other donors keep their reserve, so nothing is created or lost by the tie.
+/// terraces below its own — and every one of them qualifies, occupied or not. Round 3
+/// dropped both of the old filters: a package is a dormant cohort now, so a site holding
+/// a living stand can hold a bank that waits for the gap, and a site that fails the
+/// establishment predicate can hold one that never germinates and decays instead. The
+/// predicate is germination's test, not landing's. A donor never seeds its own site.
+///
+/// Two species' cohorts can therefore share one site, and there is no contest to settle.
 fn propagate(flora: &mut Flora, world: &World) {
     let mut offers: Vec<Offer> = Vec::new();
     {
-        let Flora { config, stands, sky, .. } = flora;
+        let Flora { config, stands, .. } = flora;
         let view = world.view();
         let donors: Vec<Stand> = stands
             .iter()
             .copied()
             .filter(|s| {
                 let sc = config.species(s.species);
-                s.stage == Stage::Alive
-                    && s.wood >= sc.donor_min
+                s.wood >= sc.donor_min
                     && s.reserve > sc.donor_reserve_floor * sc.reserve_cap * s.wood
             })
             .collect();
@@ -700,13 +848,7 @@ fn propagate(flora: &mut Flora, world: &World) {
                 for dx in -hop..=hop {
                     let x = donor.site.x as i64 + dx;
                     let Some(site) = crate::highest_support(&view, x, z as u32) else { continue };
-                    if targets.contains(&site) {
-                        continue;
-                    }
-                    if !receptive(stands, site, donor.species) {
-                        continue;
-                    }
-                    if !establishes(&view, sky, site, sc) {
+                    if site == donor.site || targets.contains(&site) {
                         continue;
                     }
                     targets.push(site);
@@ -736,33 +878,18 @@ fn propagate(flora: &mut Flora, world: &World) {
 
     let mut at = 0;
     while at < offers.len() {
-        let site = offers[at].site;
+        let (site, species) = (offers[at].site, offers[at].species);
         let mut end = at;
-        while end < offers.len() && offers[end].site == site {
+        while end < offers.len() && offers[end].site == site && offers[end].species == species {
             end += 1;
         }
-        let winner = winning_species(&offers[at..end]);
-        commit_propagules(flora, site, winner, &offers[at..end]);
+        commit_propagules(flora, site, species, &offers[at..end]);
         at = end;
     }
 }
 
-/// The species that offered this site the most material; ties go to the earlier species
-/// in `Species::ALL`, which is a fixed order, not an iteration order.
-fn winning_species(offers: &[Offer]) -> Species {
-    let mut best = offers[0].species;
-    let mut best_total = 0.0;
-    for species in Species::ALL {
-        let total: f64 =
-            offers.iter().filter(|o| o.species == species).map(|o| o.material).sum();
-        if total > best_total {
-            best_total = total;
-            best = species;
-        }
-    }
-    best
-}
-
+/// Every offer of one species for one site: debit its donors, respire the build, and land
+/// the rest as one cohort.
 fn commit_propagules(flora: &mut Flora, site: Site, species: Species, offers: &[Offer]) {
     let Flora { config, stands, ground, ledger, .. } = flora;
     let sc = config.species(species);
@@ -772,7 +899,7 @@ fn commit_propagules(flora: &mut Flora, site: Site, species: Species, offers: &[
     // a donor's reserve leaves with it.
     let mut sent = 0.0;
     let mut sent_mineral = 0.0;
-    for offer in offers.iter().filter(|o| o.species == species) {
+    for offer in offers {
         let Ok(di) = stands.binary_search_by_key(&offer.donor, |s| s.site) else { continue };
         let take = stands[di].reserve.min(offer.material);
         let organic_before = stands[di].organic();
@@ -790,7 +917,7 @@ fn commit_propagules(flora: &mut Flora, site: Site, species: Species, offers: &[
     ledger.respired_out += sent - net;
     ledger.heat_out += e_v * (sent - net);
 
-    let _gi = match ground.binary_search_by_key(&site, |g| g.site) {
+    let gi = match ground.binary_search_by_key(&site, |g| g.site) {
         Ok(i) => i,
         Err(i) => {
             ledger.seeded_mineral_in += config.initial_mineral;
@@ -798,46 +925,7 @@ fn commit_propagules(flora: &mut Flora, site: Site, species: Species, offers: &[
             i
         }
     };
-
-    let [w_frac, p_frac, q_frac] = sc.propagule_split;
-    let si = match stands.binary_search_by_key(&site, |s| s.site) {
-        Ok(i) => i,
-        Err(i) => {
-            stands.insert(
-                i,
-                Stand {
-                    site,
-                    species,
-                    stage: Stage::Establishing,
-                    wood: 0.0,
-                    foliage: 0.0,
-                    reserve: 0.0,
-                    light: 0.0,
-                    moisture: 0.0,
-                    water_m3: 0.0,
-                    mineral: 0.0,
-                },
-            );
-            i
-        }
-    };
-    stands[si].wood += w_frac * net;
-    stands[si].foliage += p_frac * net;
-    stands[si].reserve += q_frac * net;
-    stands[si].mineral += sent_mineral;
-    if stands[si].stage == Stage::Establishing && stands[si].wood >= sc.alive_min {
-        stands[si].stage = Stage::Alive;
-        ledger.establishments += 1;
-    }
-}
-
-/// Bare, or establishing in the donor's own species: a propagule of one species never
-/// feeds another's stand.
-fn receptive(stands: &[Stand], site: Site, species: Species) -> bool {
-    match stands.binary_search_by_key(&site, |s| s.site) {
-        Err(_) => true,
-        Ok(i) => stands[i].stage == Stage::Establishing && stands[i].species == species,
-    }
+    add_cohort(&mut ground[gi], species, net, sent_mineral);
 }
 
 /// The species' establishment predicate: wet enough for its roots, bright enough for

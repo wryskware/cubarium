@@ -17,6 +17,11 @@
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 use cubarium_voxel_flora::{Command, Flora, FloraConfig, Site, Species, Stage};
 
+// Round 3 replaced the frozen `Stage::Establishing` stand with a per-site seed bank, so
+// the three propagule tests below now read `Ground::seeds` where they read a sub-`W_min`
+// stand. The claims they make are the same ones: a package is paid for, it arrives only
+// where a donor spent its own reserve, and it never reaches past the donor's `hop`.
+
 // ------------------------------------------------------------------- fixtures
 
 /// One slab deep: bedrock floor, soil at `y = 1` and `y = 2` at a chosen pore fraction,
@@ -317,19 +322,22 @@ fn frozen(sc: &mut cubarium_voxel_flora::SpeciesConfig) {
     sc.senescence = 0.0;
 }
 
-/// Two species contesting the same two bare sites. The larger total takes each site, the
-/// loser keeps every unit of its reserve, and on the next tick the loser will not feed
-/// the establishing stand of the other species that now sits there.
+/// Two species reaching the same two bare sites. Round 3 has no contest to settle — a
+/// site holds a bank per species — so the claim is the one that survives that change:
+/// each donor is debited exactly for its **own** cohort, and one species' package never
+/// lands in the other species' cohort.
 ///
-/// `bloomcrown.propagule_rate` is 4e-4 here against the placeholder 2e-4, which is what
-/// makes one side the winner; `bloomcrown.hop` is 1 against the placeholder 2, so that
-/// both donors reach exactly the same two sites on a four-column ring; umbrellafrond is
-/// frozen (see `frozen`). Nothing else is changed.
+/// `bloomcrown.propagule_rate` is 4e-4 here against the placeholder 2e-4, so the two
+/// banks are visibly different sizes rather than the same number twice; `bloomcrown.hop`
+/// is 1 against the placeholder 2, so both donors reach exactly the same two sites on a
+/// four-column ring; both species are frozen (see `frozen`) so a reserve moves only where
+/// a propagule debits it. Nothing else is changed.
 #[test]
-fn a_losing_donor_is_not_debited_and_never_feeds_the_other_species() {
+fn two_species_banks_share_one_site_and_each_donor_pays_only_its_own() {
     let mut config = FloraConfig::default();
     config.bloomcrown.propagule_rate = 4e-4;
     config.bloomcrown.hop = 1;
+    frozen(&mut config.bloomcrown);
     frozen(&mut config.umbrellafrond);
 
     let mut world = plain(4, 8, 0.6);
@@ -342,55 +350,43 @@ fn a_losing_donor_is_not_debited_and_never_feeds_the_other_species() {
     let seeded_reserve = us.reserve_cap * 0.4;
     let each_b = bs.propagule_rate * cubarium_voxel::DT;
     let each_u = us.propagule_rate * cubarium_voxel::DT;
-    assert!(each_b > each_u, "the fixture's premise: {each_b} beats {each_u}");
+    assert!(each_b > each_u, "the fixture's premise: {each_b} against {each_u}");
 
     flora.step(&mut world);
 
-    // Both bare sites went to the bigger offer.
+    // Both bare sites hold two cohorts, one per species, each the size its own donor
+    // paid for. Sorted by species: bloomcrown first, as `Species::ALL` orders them.
     for x in [1u32, 3] {
-        let s = flora.view().stand_at(site(x)).unwrap_or_else(|| panic!("nothing at {x}"));
-        assert_eq!(s.species, Species::Bloomcrown, "the larger offer takes the site");
-        assert_eq!(s.stage, Stage::Establishing);
-        let net = each_b / (1.0 + bs.build);
-        assert!(
-            (s.wood + s.foliage + s.reserve - net).abs() < 1e-12 * net,
-            "the site holds {} for a {net} package",
-            s.wood + s.foliage + s.reserve
-        );
+        let g = flora.view().ground_at(site(x)).unwrap_or_else(|| panic!("nothing at {x}"));
+        assert_eq!(g.seeds.len(), 2, "one cohort per species: {:?}", g.seeds);
+        assert_eq!(g.seeds[0].species, Species::Bloomcrown, "sorted by species");
+        assert_eq!(g.seeds[1].species, Species::Umbrellafrond);
+        for (c, (each, sc)) in g.seeds.iter().zip([(each_b, &bs), (each_u, &us)]) {
+            let net = each / (1.0 + sc.build);
+            assert!(
+                (c.organic - net).abs() < 1e-12 * net,
+                "{c:?} for a {net} package"
+            );
+        }
+        assert!(flora.view().stand_at(site(x)).is_none(), "a cohort is not a stand");
     }
-    // And the loser paid nothing at all: its reserve is the seeded number, to the bit.
-    let u = *flora.view().stand_at(site(0)).expect("the loser");
-    assert_eq!(u.reserve, seeded_reserve, "a losing donor was debited");
-    assert_eq!(u.wood, 0.4, "the frozen donor's wood moved");
-    assert_eq!(u.foliage, us.alpha * 0.4, "the frozen donor's foliage moved");
-
-    // A second tick: both sites now hold establishing *bloomcrown*, so the umbrellafrond
-    // has no receptive site within its hop and offers nothing. A propagule of one species
-    // never feeds another's stand.
-    let before: Vec<f64> =
-        [1u32, 3].iter().map(|&x| flora.view().stand_at(site(x)).unwrap().wood).collect();
-    flora.step(&mut world);
-    assert_eq!(
-        flora.view().stand_at(site(0)).unwrap().reserve,
-        seeded_reserve,
-        "the umbrellafrond fed a bloomcrown propagule"
-    );
-    for (i, &x) in [1u32, 3].iter().enumerate() {
-        let s = flora.view().stand_at(site(x)).unwrap();
-        assert_eq!(s.species, Species::Bloomcrown, "the site changed species");
-        let step = s.wood - before[i];
-        let want = bs.propagule_split[0] * each_b / (1.0 + bs.build);
+    // Each donor paid exactly its two packages and not the other's.
+    for (x, each) in [(0u32, each_u), (2, each_b)] {
+        let s = *flora.view().stand_at(site(x)).unwrap();
         assert!(
-            (step - want).abs() < 1e-12 * want,
-            "site {x} grew by {step}, not by the one donor's {want}"
+            (seeded_reserve - s.reserve - 2.0 * each).abs() < 1e-15,
+            "the donor at {x} spent {} for two {each} packages",
+            seeded_reserve - s.reserve
         );
+        assert_eq!(s.wood, 0.4, "the frozen donor's wood moved");
     }
-    assert_residuals(&flora, "after two contested ticks");
+    assert_residuals(&flora, "after two species banked on one site");
 }
 
-/// A recipient outside the donor's `hop` never receives, and the patch does not creep:
-/// the establishing stands the first tick creates are frozen, far below `donor_min`, so
-/// forty ticks later the occupied set is still the donor's own hop neighbourhood.
+/// A site outside the donor's `hop` never receives, and the patch does not creep: forty
+/// ticks of one donor at the placeholder rate is nowhere near a bank that can germinate,
+/// so the banked set is still the donor's own hop neighbourhood and the donor is still
+/// the only stand.
 #[test]
 fn nothing_outside_hop_ever_receives_and_the_patch_does_not_creep() {
     let mut world = plain(16, 8, 0.6);
@@ -401,20 +397,28 @@ fn nothing_outside_hop_ever_receives_and_the_patch_does_not_creep() {
 
     run(&mut flora, &mut world, 40);
 
-    let occupied: Vec<u32> = flora.view().stands.iter().map(|s| s.site.x).collect();
-    assert_eq!(occupied, vec![5, 6, 7, 8, 9], "the patch is the donor's hop and nothing else");
+    let banked: Vec<u32> =
+        flora.view().ground.iter().filter(|g| !g.seeds.is_empty()).map(|g| g.site.x).collect();
+    assert_eq!(banked, vec![5, 6, 8, 9], "the banks are the donor's hop, and never its own site");
+    let stands: Vec<u32> = flora.view().stands.iter().map(|s| s.site.x).collect();
+    assert_eq!(stands, vec![7], "something germinated: {stands:?}");
     for x in [5u32, 6, 8, 9] {
-        let s = flora.view().stand_at(site(x)).unwrap();
-        assert_eq!(s.stage, Stage::Establishing, "forty ticks is not enough to cross alive_min");
-        assert!(s.wood < sc.alive_min, "wood {} against alive_min {}", s.wood, sc.alive_min);
-        assert!(s.wood < sc.donor_min, "an establishing stand cannot be a donor either");
+        let g = flora.view().ground_at(site(x)).unwrap();
+        assert_eq!(g.seeds.len(), 1, "the merge should keep one cohort: {:?}", g.seeds);
+        let c = g.seeds[0];
+        assert_eq!(c.age_ticks, 0, "a bank a donor keeps feeding stays young");
+        assert!(
+            sc.propagule_split[0] * c.organic < sc.alive_min,
+            "forty ticks is not a germinating bank: {c:?}"
+        );
     }
+    assert_eq!(flora.view().ledger.establishments, 0);
     assert_residuals(&flora, "after forty ticks of one donor");
 }
 
 /// The donor's side of §4.8: what left the donor's reserve is exactly what arrived, as
-/// stand stocks plus the construction respiration deposited in the recipients' ground.
-/// Nothing is created by a propagule and nothing is lost in one.
+/// seed cohorts plus the construction respiration. Nothing is created by a propagule and
+/// nothing is lost in one.
 ///
 /// Bloomcrown is frozen here (see `frozen`) so that the reserve's whole change over the
 /// tick is the debit; with income on, growth moves the same stock and the debit cannot be
@@ -442,15 +446,15 @@ fn a_donor_is_debited_exactly_what_arrives_plus_its_construction() {
 
     let mut arrived = 0.0;
     for x in targets {
-        let s = flora.view().stand_at(site(x)).unwrap_or_else(|| panic!("nothing at {x}"));
-        let g = flora.view().ground_at(site(x)).unwrap();
-        arrived += s.organic();
+        let g = flora.view().ground_at(site(x)).unwrap_or_else(|| panic!("nothing at {x}"));
+        assert_eq!(g.seeds.len(), 1, "{:?}", g.seeds);
+        assert_eq!(g.seeds[0].species, Species::Bloomcrown);
+        arrived += g.seeds[0].organic;
         // Round 3: the construction respiration is *not* deposited on the recipient. It
         // leaves the system as organic matter, so the site's pool is its starting
         // mineral to the bit.
         assert_eq!(g.mineral, flora.config().initial_mineral, "construction fertilized the site");
-        assert_eq!(s.species, Species::Bloomcrown);
-        assert_eq!(s.stage, Stage::Establishing);
+        assert!(flora.view().stand_at(site(x)).is_none(), "a package is a cohort, not a stand");
     }
     // What left the donor is what arrived plus what the build respired, and the respired
     // half is a named boundary flow rather than a stock somewhere.
