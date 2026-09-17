@@ -79,6 +79,68 @@ pub enum Command {
     Demo(Demo),
     /// Run the persistent M2 world.
     Run(Run),
+    /// Run a voxel ringworld strip and draw it as pixel art.
+    Voxel(Voxel),
+}
+
+/// `cubarium voxel`: a `cubarium-voxel` world at 20 Hz, drawn through the ring sinks.
+///
+/// Everything about the *picture* — tilt, pixel scale, haze, and the world to build — is
+/// in the `--config` TOML ([`crate::voxel::VoxelConfig`]), because those are the numbers
+/// worth writing down and re-reading. The flags here are the ones worth typing: which
+/// scene, which sink, how long, how fast.
+#[derive(Parser, Debug, Clone)]
+pub struct Voxel {
+    /// TOML presentation and world config; missing fields take defaults, unknown fields
+    /// are errors. See `crates/cubarium/voxel.example.toml`.
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+    /// Where frames go. The minifb preview is absent on purpose: it refuses ring rasters.
+    #[arg(long, value_enum, default_value_t = VoxelSinkArg::Web)]
+    pub sink: VoxelSinkArg,
+    /// Which world to start from; ignored when `--load` names a snapshot.
+    #[arg(long, value_enum, default_value_t = VoxelSceneArg::Authored)]
+    pub scene: VoxelSceneArg,
+    /// Stop after this much wall time; 0 runs until `q` or Ctrl-C. Required for `png`.
+    #[arg(long, default_value_t = 0.0)]
+    pub seconds: f64,
+    /// World ticks per clock tick: 1.0 is real time, 0.25 is quarter speed.
+    #[arg(long, default_value_t = 1.0)]
+    pub speed: f64,
+    /// Resume from a saved world instead of building one.
+    #[arg(long)]
+    pub load: Option<PathBuf>,
+    /// Directory for PNG captures.
+    #[arg(long, default_value = "captures")]
+    pub out: PathBuf,
+    /// With `png`, save one capture every N rendered frames.
+    #[arg(long, default_value_t = 30)]
+    pub every: u64,
+    /// Render rate in frames per second; the simulation stays at 20 Hz.
+    #[arg(long, default_value_t = crate::clock::RENDER_HZ)]
+    pub fps: u32,
+    /// Port for the `web` sink (a viewer page at http://127.0.0.1:<port>/).
+    #[arg(long, default_value_t = 7393)]
+    pub web_port: u16,
+}
+
+/// Which world `cubarium voxel` starts from.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VoxelSceneArg {
+    /// The hand-authored fixture: ridge across the seam, hollow with standing water,
+    /// covered passage, jutting shelf, terrace.
+    Authored,
+    /// `cubarium_voxel::World::new`: the core's own generator.
+    Generated,
+}
+
+/// Where `cubarium voxel` frames go. A ring raster, so no preview window.
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VoxelSinkArg {
+    /// Local HTTP viewer.
+    Web,
+    /// PNG captures into `--out`.
+    Png,
 }
 
 #[derive(Parser, Debug, Clone)]

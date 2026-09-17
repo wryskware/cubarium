@@ -30,6 +30,7 @@ pub mod runner;
 pub mod scene;
 pub mod sink;
 pub mod state;
+pub mod voxel;
 
 mod run;
 
