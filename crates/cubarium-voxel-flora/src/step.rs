@@ -800,8 +800,25 @@ fn decompose(flora: &mut Flora, pre: &[(Site, f64, f64)]) {
 /// is born at tick `t + 1` with the whole package. And a bin on the tick its own
 /// `seed_max_age_s` runs out gets one last chance to germinate before it falls to litter:
 /// it is paid material on a site that passes the predicate, and throwing it away in the
-/// same tick that could have used it would be the same 0.1 % arbitrariness one step
-/// further out.
+/// same tick that could have used it would be the same arbitrariness one step further out.
+///
+/// # The expiry boundary, exactly (Astra R5.5)
+///
+/// [`age_cohorts`] removes a bin on the first tick whose age is **greater than**
+/// `seed_max_age_s`, and it runs after the lottery. So for a lifetime of `L` ticks and a
+/// bin that opened at tick `b`:
+///
+/// - ticks `b..=b + L` — the bin is in the bank and can be drawn on.
+/// - tick `b + L + 1` — the lottery still sees it: **this is its last chance**, and a site
+///   whose gate opens on exactly this tick recruits out of it. Whatever is left of it
+///   afterwards goes to litter whole, with its mineral and its energy.
+/// - tick `b + L + 2` and after — there is nothing there. A gate that opens one tick too
+///   late finds an empty bank, and the material is in the litter.
+///
+/// A bin therefore cannot linger: it recruits once on its removal tick or it is gone. The
+/// rule is the `>` in [`age_cohorts`] plus this phase order, and changing either is a rule
+/// decision and not a tidy-up. Pinned by
+/// `tests/round3.rs::an_expiring_bin_gets_one_last_germination_and_then_goes_to_litter`.
 fn seed_bank(flora: &mut Flora, world: &World) {
     let Flora { config, tick, stands, ground, ledger, sky, .. } = flora;
     let tick = *tick;

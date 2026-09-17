@@ -1287,6 +1287,155 @@ fn a_pulsing_donor_cannot_rejuvenate_a_bank_and_the_bins_bound_it() {
     }
 }
 
+/// **Astra's R5.5: the expiry boundary, both sides of it.** K7 germinates before charging
+/// attrition and expiry, so a bin on the first tick past its `seed_max_age_s` gets one last
+/// chance to recruit before it goes to litter. This pins that tick and the one after it:
+/// a gate that opens exactly on the removal tick recruits out of the bin, and an identical
+/// twin whose gate is still shut loses the whole bin to litter on that same tick and can
+/// never recruit afterwards, however wide its gate opens.
+///
+/// The gate is the **saturation ceiling**, driven by the world and not by a config change
+/// mid-run: both target sites start with wholly saturated root boxes, which is a saturated
+/// fraction of 1 against bloomcrown's `establish_saturated_max` of 0.25, so the predicate
+/// refuses them; draining one root box through the core's own bounded withdrawal opens its
+/// gate on the tick of the operator's choosing.
+///
+/// Four values are the test's own. `seed_max_age_s` is 0.1 s — **two ticks** — against the
+/// placeholder 600, and `seed_cohorts_max` is 1 against 4, which makes the bin two ticks
+/// wide so that the package landing on tick 1 joins the bin that opened at tick **0** and
+/// is therefore removed on tick 3 (age 3 ticks = 0.15 s > 0.1 s). `seed_attrition_per_s`
+/// and `decomposition` are 0 (placeholders 0.001 and 0.001) so that what reaches the
+/// litter is exactly the bin and stays readable. `propagule_rate` is 2.0 /s (placeholder
+/// 2e-4) so one tick of each donor's own reserve funds one whole package, and the donors
+/// are cleared straight afterwards so that each target holds exactly one package in
+/// exactly one bin.
+#[test]
+fn an_expiring_bin_gets_one_last_germination_and_then_goes_to_litter() {
+    let mut config = FloraConfig::default();
+    config.bloomcrown.seed_max_age_s = 0.1;
+    config.bloomcrown.seed_cohorts_max = 1;
+    config.bloomcrown.seed_attrition_per_s = 0.0;
+    config.bloomcrown.propagule_rate = 2.0;
+    config.bloomcrown.hop = 1;
+    config.decomposition = 0.0;
+    config.wood_decomposition = 0.0;
+    let sc = config.bloomcrown.clone();
+    let package = sc.alive_min / sc.propagule_split[0];
+    let e_v = sc.energy_density;
+
+    // Eight columns: two donors at x0 and x4, their only recipients at x1 and x5, and void
+    // columns at x3 and x7 so that each donor has exactly one support face in reach. The
+    // root boxes of x1 (x0..x2) and x5 (x4..x6) are three columns apart, so draining one
+    // leaves the other saturated.
+    let vconfig =
+        VoxelConfig { width: 8, height: 8, depth: 1, voxel_m: 1.0, seed: 5, ..VoxelConfig::default() };
+    let mut world = World::empty(vconfig);
+    for x in [0i64, 1, 2, 4, 5, 6] {
+        for y in 1..=2u32 {
+            fill(&mut world, x, y, 0, Material::Soil, 0.98);
+        }
+    }
+    for x in [3i64, 7] {
+        world.apply(WorldCommand::SetMaterial { x, y: 0, z: 0, material: Material::Air });
+        assert!(cubarium_voxel_flora::highest_support(&world.view(), x, 0).is_none(), "x{x} void");
+    }
+    let (opens, blocked) = (site(1), site(5));
+    let mut flora = Flora::new(config);
+    for x in [0i64, 4] {
+        assert!(flora.apply(&world, Command::Seed { x, z: 0, species: Species::Bloomcrown, wood: 0.6 }));
+    }
+
+    // Tick 1: one package to each target, in the bin that opened at tick 0.
+    flora.step(&mut world);
+    for at in [opens, blocked] {
+        let g = flora.view().ground_at(at).unwrap_or_else(|| panic!("nothing landed at {at:?}"));
+        assert_eq!(g.seeds.len(), 1, "{at:?}: {:?}", g.seeds);
+        assert_eq!(g.seeds[0].bin_start_tick, 0, "{at:?}: not the bin tick 0 opened");
+        assert_eq!(g.seeds[0].organic, package, "{at:?}: {:?}", g.seeds);
+        assert!(g.seeds[0].mineral > 0.0, "{at:?} carries no mineral");
+    }
+    let banked_mineral = flora.view().ground_at(blocked).unwrap().seeds[0].mineral;
+    for x in [0i64, 4] {
+        assert!(flora.apply(&world, Command::Clear { x, z: 0 }), "clearing the donor at x{x}");
+    }
+
+    // Tick 2: the saturation ceiling refuses both, and the bin is exactly at its lifetime
+    // (age 2 ticks = 0.1 s, which is not *past* 0.1 s), so nothing is removed either.
+    flora.step(&mut world);
+    assert_eq!(flora.view().ledger.establishments, 0, "something germinated on saturated soil");
+    for at in [opens, blocked] {
+        assert_eq!(
+            flora.view().ground_at(at).unwrap().seeds.len(),
+            1,
+            "{at:?}: the bin left at its lifetime rather than past it"
+        );
+        assert_eq!(flora.view().ground_at(at).unwrap().seeds[0].age_ticks(flora.tick()), 2);
+    }
+
+    // Open one gate, between the ticks: drain x1's whole root box under the species'
+    // `saturated_pore` of 0.95. The twin at x5 stays saturated.
+    for x in 0..3i64 {
+        for y in 1..=2u32 {
+            drain_to(&mut world, x, y, 0, 0.5);
+        }
+    }
+
+    // Tick 3: the bin is one tick past its lifetime, and the lottery runs first. The drained
+    // site recruits out of it; the blocked twin loses the whole bin to litter.
+    flora.step(&mut world);
+    assert_eq!(flora.view().ledger.establishments, 1, "the expiring bin's last chance was not taken");
+    let born = *flora.view().stand_at(opens).expect("the drained site did not recruit");
+    assert_eq!(born.species, Species::Bloomcrown);
+    assert_eq!(born.wood, sc.alive_min, "born with {} of wood", born.wood);
+    assert!(
+        (born.organic() - package).abs() <= 1e-16,
+        "born with {} for a whole {package} package",
+        born.organic()
+    );
+    assert!(
+        flora.view().ground_at(opens).unwrap().seeds.is_empty(),
+        "the spent bin is still there: {:?}",
+        flora.view().ground_at(opens).unwrap().seeds
+    );
+    // The twin: nothing born, the bin gone, and every unit of it in the litter with its
+    // mineral and its energy.
+    assert!(flora.view().stand_at(blocked).is_none(), "the blocked twin recruited");
+    let g = flora.view().ground_at(blocked).expect("ground").clone();
+    assert!(g.seeds.is_empty(), "the expired bin is still banked: {:?}", g.seeds);
+    assert!((g.litter - package).abs() <= 1e-16, "{} of a {package} bin reached the litter", g.litter);
+    assert!(
+        (g.litter_mineral - banked_mineral).abs() <= 1e-18,
+        "{} of the bin's {banked_mineral} of mineral reached the litter",
+        g.litter_mineral
+    );
+    assert!(
+        (g.litter_energy - e_v * g.litter).abs() <= 1e-15,
+        "litter energy {} against e_v times litter {}",
+        g.litter_energy,
+        e_v * g.litter
+    );
+
+    // Open the twin's gate too, one tick too late, and step again: there is nothing left to
+    // recruit out of. The material is in the litter, not in a bank.
+    for x in 4..7i64 {
+        for y in 1..=2u32 {
+            drain_to(&mut world, x, y, 0, 0.5);
+        }
+    }
+    flora.step(&mut world);
+    assert_eq!(
+        flora.view().ledger.establishments,
+        1,
+        "the twin recruited a tick after its bin had gone to litter"
+    );
+    assert!(flora.view().stand_at(blocked).is_none(), "the twin recruited out of nothing");
+    assert!(
+        (flora.view().ground_at(blocked).unwrap().litter - package).abs() <= 1e-16,
+        "the litter moved after the expiry"
+    );
+    assert_residuals(&flora, "after an expiring bin's last chance");
+}
+
 // ================================================================ lineage by id
 
 /// A founder dies and **its own species** germinates on its site in the same tick, and the
