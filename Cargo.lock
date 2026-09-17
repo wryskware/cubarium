@@ -281,6 +281,7 @@ dependencies = [
  "cubarium-render",
  "cubarium-search",
  "cubarium-surface",
+ "cubarium-voxel",
  "cube-proto",
  "libc",
  "minifb",
@@ -351,6 +352,16 @@ name = "cubarium-surface-oracle"
 version = "0.1.0"
 dependencies = [
  "cube-proto",
+]
+
+[[package]]
+name = "cubarium-voxel"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "png",
+ "postcard",
+ "serde",
 ]
 
 [[package]]
