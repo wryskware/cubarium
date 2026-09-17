@@ -8,14 +8,25 @@
 //! ```
 //!
 //! The generated world starts bone dry and the plant model reads pore water, so the
-//! example rains on it: `rain_m_per_s = 0.0005` is not weather, it is a tap, chosen to
-//! bring flat ground to field capacity inside a 50-second warm-up without filling the
-//! basin faster than the outlet can export. The outlet is opened for the same reason.
+//! example rains on it. That rain is not weather and it is not a model default: it is an
+//! **experiment condition** of this harness, printed in the header of every run and
+//! recorded in the results note with the numbers it produced.
+//!
+//! Round 3b set it from the world's own arithmetic (Astra's R4.2). The default footprint
+//! is 128 x 24 voxels of 0.25 m, which is 192 m², and the core's outlet exports at most
+//! `outlet_m3_per_s = 0.05` with evaporation left at zero, so nominal rain above
+//! `0.05 / 192 = 2.604e-4` m/s cannot leave however long the run is. The old 5e-4 m/s was
+//! 0.096 m³/s in against 0.05 m³/s out: the table climbed for the whole run and every arm
+//! was a rising-water disturbance rather than a habitat baseline. [`HARNESS_RAIN_M_PER_S`]
+//! is now under that ceiling, and the run prints its own water budget — accepted rain,
+//! outlet export, evaporation, transpiration, storage change and the head — over every
+//! progress interval and at the end, so whether the head is actually bounded is a measured
+//! thing and not a claim in a comment.
 //!
 //! What a single run prints: per-species stand counts, occupancy by support-height
 //! quartile (the quartiles are of the *terrain's* own skyline, so "q4" is the top
-//! quarter of the surface, not of the stands), the set of occupied skyline columns, and
-//! the two flora residuals.
+//! quarter of the surface, not of the stands), the set of occupied skyline columns, the
+//! water budget and the two flora residuals.
 //!
 //! `compare` is the decisive experiment of `design/voxel-ecology-sketch-2026-09-16.md`
 //! §4: re-draw **only** the generator's final weak correlated noise with a new seed,
@@ -31,6 +42,64 @@ use cubarium_voxel_flora::{Command, Flora, FloraConfig, Site, Species, SpeciesCo
 const WARMUP_TICKS: u32 = 1000;
 const FOUNDERS_PER_SPECIES: usize = 8;
 const FOUNDER_WOOD: f64 = 0.3;
+
+/// The harness's rain, metres per second onto exposed top surfaces: an experiment
+/// condition, not a model knob and not a tuned plant parameter.
+///
+/// 2e-4 m/s over the default 192 m² footprint is a nominal 0.0384 m³/s, which is 77 % of
+/// the outlet's 0.05 m³/s. Actual accepted rain is at most that, because only exposed top
+/// faces take it, and the outlet can export less than its capacity when its own cell is
+/// undersupplied — so this bounds the *input* below the exit and leaves whether the head
+/// settles to the printed budget. The previous 5e-4 was 0.096 m³/s, nearly twice what the
+/// world can remove (Astra R4.2).
+const HARNESS_RAIN_M_PER_S: f64 = 0.0002;
+
+/// The core's water ledger and stores at one instant, so an interval's budget is a
+/// difference of two of these and nothing has to be accumulated by hand.
+#[derive(Clone, Copy, Debug)]
+struct WaterMark {
+    seconds: f64,
+    rain_in: f64,
+    outlet_out: f64,
+    evaporation_out: f64,
+    transpiration_out: f64,
+    stored: f64,
+    head_m: f64,
+}
+
+fn water_mark(world: &World, seconds: f64) -> WaterMark {
+    let v = world.view();
+    WaterMark {
+        seconds,
+        rain_in: v.ledger.rain_in,
+        outlet_out: v.ledger.outlet_out,
+        evaporation_out: v.ledger.evaporation_out,
+        transpiration_out: v.ledger.transpiration_out,
+        stored: v.stored_m3(),
+        head_m: world.aquifer_head_m(),
+    }
+}
+
+/// One interval of the water budget, as rates, plus the head at its end: in, out, and the
+/// storage change they explain. `in - out - storage` is the core's own conservation
+/// residual over the interval and should be float noise.
+fn water_budget_line(a: &WaterMark, b: &WaterMark) -> String {
+    let dt = (b.seconds - a.seconds).max(1e-12);
+    let rain = (b.rain_in - a.rain_in) / dt;
+    let outlet = (b.outlet_out - a.outlet_out) / dt;
+    let evap = (b.evaporation_out - a.evaporation_out) / dt;
+    let transp = (b.transpiration_out - a.transpiration_out) / dt;
+    let storage = (b.stored - a.stored) / dt;
+    format!(
+        "water m3/s over {dt:.0} s: rain in {rain:.6}, outlet {outlet:.6}, evaporation \
+         {evap:.6}, transpiration {transp:.8}, storage change {storage:+.6} (residual \
+         {:+.2e}); head {:.3} m ({:+.4} m), stored {:.4} m3",
+        rain - outlet - evap - transp - storage,
+        b.head_m,
+        b.head_m - a.head_m,
+        b.stored
+    )
+}
 
 /// A column a founder was planted in. The `y` is not part of it: under another noise
 /// seed the same column's support face may sit a voxel higher or lower, and it is the
@@ -128,7 +197,8 @@ fn run(
     // is deterministic in the seed, so the second world is the first one with water in
     // it. The outlet cell is the lowest void cell of the receiving basin, so its `y` is
     // the basin floor.
-    let dry = VoxelConfig { seed, noise_seed, rain_m_per_s: 0.0005, ..VoxelConfig::default() };
+    let dry =
+        VoxelConfig { seed, noise_seed, rain_m_per_s: HARNESS_RAIN_M_PER_S, ..VoxelConfig::default() };
     let basin_floor_m =
         World::new(dry.clone()).outlet_cell().map_or(0.0, |(_, y, _)| y as f64) * dry.voxel_m;
     let config = VoxelConfig { initial_aquifer_head_m: basin_floor_m + 1.0, ..dry };
@@ -197,6 +267,11 @@ fn run(
 
     let ticks = (seconds * cubarium_voxel::TICK_HZ as f64).round() as u64;
     let every = 100 * cubarium_voxel::TICK_HZ as u64;
+    // The water budget is read against the state the founders were planted into, and then
+    // against the previous progress interval, so both the whole run and each interval have
+    // an in/out/storage line of their own.
+    let start_mark = water_mark(&world, 0.0);
+    let mut last_mark = start_mark;
     for tick in 0..ticks {
         world.step();
         flora.step(&mut world);
@@ -244,6 +319,9 @@ fn run(
                 ));
             }
             println!("{line}");
+            let mark = water_mark(&world, (tick + 1) as f64 * cubarium_voxel::DT);
+            println!("    {}", water_budget_line(&last_mark, &mark));
+            last_mark = mark;
         }
         let view = flora.view();
         for (i, (site, species)) in founder_sites.iter().enumerate() {
@@ -315,7 +393,9 @@ fn run(
         deaths: flora.view().ledger.deaths,
     };
     if verbose {
+        let end_mark = water_mark(&world, ticks as f64 * cubarium_voxel::DT);
         report(&world, &flora, &config, &skyline, seeded, ticks, seconds, basin_floor_m);
+        println!("whole run: {}", water_budget_line(&start_mark, &end_mark));
         print_columns(&outcome);
     }
     outcome
@@ -460,6 +540,21 @@ fn report(
         config.initial_aquifer_head_m,
         basin_floor_m,
         world.aquifer_head_m()
+    );
+    // The experiment condition, as an arithmetic statement rather than a claim: nominal
+    // rain against the only exit the world has at these settings.
+    let footprint_m2 =
+        config.width as f64 * config.voxel_m * config.depth as f64 * config.voxel_m;
+    println!(
+        "forcing: rain {:.5} m/s over {footprint_m2:.0} m2 is a nominal {:.4} m3/s in, against \
+         an outlet of {:.4} m3/s and evaporation {:.5} m/s — {:.0} % of the outlet-only \
+         ceiling {:.6} m/s",
+        config.rain_m_per_s,
+        config.rain_m_per_s * footprint_m2,
+        config.outlet_m3_per_s,
+        config.evaporation_m_per_s,
+        100.0 * config.rain_m_per_s * footprint_m2 / config.outlet_m3_per_s,
+        config.outlet_m3_per_s / footprint_m2
     );
     println!(
         "{WARMUP_TICKS} warm-up ticks, then {ticks} coupled ticks ({seconds:.0} s); {founders} founders at wood {FOUNDER_WOOD}"
@@ -766,7 +861,8 @@ fn compare(args: &[String]) {
 /// Generate, open the outlet, warm up. The same preparation `run` does, factored out so
 /// the probe cannot drift from it.
 fn prepared_world(seed: u64, noise_seed: u64) -> World {
-    let dry = VoxelConfig { seed, noise_seed, rain_m_per_s: 0.0005, ..VoxelConfig::default() };
+    let dry =
+        VoxelConfig { seed, noise_seed, rain_m_per_s: HARNESS_RAIN_M_PER_S, ..VoxelConfig::default() };
     let basin_floor_m =
         World::new(dry.clone()).outlet_cell().map_or(0.0, |(_, y, _)| y as f64) * dry.voxel_m;
     let config = VoxelConfig { initial_aquifer_head_m: basin_floor_m + 1.0, ..dry };
