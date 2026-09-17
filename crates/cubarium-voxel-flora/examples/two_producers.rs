@@ -822,10 +822,21 @@ fn germination_diagnosis(world: &World, flora: &Flora) {
             banks.iter().filter(|&&(_, o)| o >= threshold).map(|&(s, _)| s).collect();
         let over_and_ok = over.iter().filter(|&&s| passes(world, sc, s)).count();
         let predicate_ok = banks.iter().filter(|&&(s, _)| passes(world, sc, s)).count();
+        // Vacancy is the third constraint and it used not to be printed at all, so a
+        // fractional bank at observation could be read as a refused predicate when an
+        // occupied site is just as consistent with it (Astra R7.5). The germinable count is
+        // the conjunction: a whole package, a vacant site, and the predicate open.
+        let vacant = banks.iter().filter(|&&(s, _)| view.stand_at(s).is_none()).count();
+        let germinable = over
+            .iter()
+            .filter(|&&s| view.stand_at(s).is_none() && passes(world, sc, s))
+            .count();
         println!(
             "  {:>14}: threshold {threshold:.4}; {} banked sites, mean {mean:.5}, biggest \
              {biggest:.5} ({:.1}% of threshold); {} over threshold, {over_and_ok} of those \
-             pass the model predicate; {predicate_ok} of all {} banked sites pass it",
+             pass the model predicate; {predicate_ok} of all {} banked sites pass it; \
+             {vacant} of them are vacant; {germinable} are over threshold, vacant and \
+             passing at once",
             species.name(),
             banks.len(),
             100.0 * biggest / threshold,

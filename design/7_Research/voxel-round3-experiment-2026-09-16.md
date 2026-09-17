@@ -634,8 +634,9 @@ one on light. That is a statement about **those two gates at 450 s** and nothing
 96-column reading at introduction was not broken down by gate, so this does not identify
 what held bloomcrown to 96 (Astra R6.3). Umbrellafrond moves the other way and for the
 opposite reason, 386 → 668, with 2,404 columns refused on **mean pore alone**, because its
-`establish_pore_min` of 0.45 sits above where drained soil settles (the mean root-box pore
-over the whole skyline is 0.40).
+`establish_pore_min` of 0.45 sits above the mean root-box pore fraction over its own boxes
+on this skyline, 0.40 — which is this draining arm's reading and not drained soil's
+equilibrium, which is `field_capacity` 0.25 (Astra R7.5).
 
 Two things this does **not** say. It is not a settled-habitat measurement either — the head
 is still falling at 400 s, −0.24 m over the run with the outlet at its full 0.05 m³/s — and
@@ -835,14 +836,33 @@ several gates at once, so the totals overlap):
 
 Four things this says, all of them about these two arms at 450 s and nothing more.
 
-1. **The shut gate for further recruitment is the bank, in every species, in both arms.**
-   The germination diagnosis has every non-empty bank at **90.5 % to 93.3 %** of its own
-   threshold and **zero** banks over it: bloomcrown 90.5 %, springturf 91.2 %, velvetpad
-   92.1 % in the default arm, and 90.5 %, — and 93.3 % in the reseed. A package minus its
-   own attrition is what a bank holds between deliveries, and a second package has to arrive
-   before the first bin ages out. The predicate is not what is refusing these sites: of
-   velvetpad's three banked sites in the default arm, zero pass, but in the reseed one of
-   two does, and either way none of them has a whole package in it.
+1. **No bank held a whole package at observation — and that is a reading of the banks at
+   450 s, not a diagnosis of which gate refused a recruitment.** A germination needs three
+   things at once: a bank over its threshold, a vacant site, and the predicate open. This
+   run measured them separately, so they are reported separately (Astra R7.5).
+   - **Bank sufficiency at observation.** Every non-empty bank sits at **90.5 % to 93.3 %**
+     of its own threshold and **zero** banks are over it: bloomcrown 90.5 %, springturf
+     91.2 %, velvetpad 92.1 % in the default arm, and bloomcrown 90.5 % and velvetpad
+     93.3 % in the reseed. A package minus its own attrition is what a bank holds between
+     deliveries, and a second package has to arrive before the first bin ages out.
+   - **Predicate at observation.** Of velvetpad's three banked sites in the default arm,
+     **zero** pass; in the reseed **one of two** does. So the predicate is not uniformly
+     open at the banked sites either, and "the predicate is not what is refusing these
+     sites" — what this note said before — was not a reading this run took.
+   - **Vacancy at observation.** **Not recorded.** The diagnosis printed bank and predicate
+     only, so this run cannot say whether a banked site was occupied.
+     `germination_diagnosis` now prints the vacant count and the conjunction of all three,
+     so the next authorised run can.
+
+   What none of the three can say is *why* an earlier germination did not happen. Under K7
+   a whole newly landed package at a vacant, passing site germinates in the same tick's
+   lottery, before that tick's attrition; so a fractional bank at 450 s is equally
+   consistent with a package that landed on an occupied site, with one the predicate
+   refused and attrition then wore down, and with one that has simply not been topped up
+   yet. An earlier refusal is attributable only to an **observed event**, and this run
+   logged none: it counted establishments, not refusals. Stonecushion is not in this
+   finding at all — it has no landed bank (finding 2), so none of the three constraints
+   ever applied to it.
 2. **Stonecushion did not reproduce at all, and the reason is saving time, not habitat.**
    It is the most permissive of the five at the gate — 2,737 of 3,072 columns eligible, with
    `establish_pore_min` 0.05 refusing not one column — and 61 of 61 of its donors' candidate
@@ -871,9 +891,12 @@ Four things this says, all of them about these two arms at 450 s and nothing mor
    canopy in it.
 
 Umbrellafrond is unchanged from round 3 on purpose: 2,377 columns refused on **mean pore
-alone**, its `establish_pore_min` 0.45 sitting above where drained soil settles (skyline mean
-0.402). Astra's R6.1 said to keep the wetland role rather than lower that floor as a repair,
-and it was kept.
+alone**, its `establish_pore_min` 0.45 sitting above the mean root-box pore fraction over
+umbrellafrond's own boxes on this skyline, **0.402**. That mean is a reading of these two
+draining arms at 450 s and **not** drained soil's equilibrium (Astra R7.5): soil's retained
+fraction is `field_capacity` **0.25**, and the head was still falling, −0.24 m over the run.
+Astra's R6.1 said to keep the wetland role rather than lower that floor as a repair, and it
+was kept.
 
 ### What this does and does not establish
 
