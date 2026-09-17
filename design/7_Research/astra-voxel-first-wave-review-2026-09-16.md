@@ -925,3 +925,180 @@ velvetpad. Put the niche contracts and each preset's small boundary fixture in
 that round, carry the reporting corrections with it, and keep the later
 replacement-control study separate. This clears the substrate for more presets;
 it does not certify ecological balance.
+
+## Round 7
+
+Source review at `8dd0a57`, covering the presets commits from `2f1d680` and the
+brief at `4b2fcf3`. I ran the eleven `round4` flora tests, the newborn-allocation
+unit test across all five presets, and the focused five-palette/ground-crown
+test: all passed. Arithmetic below is isolated arithmetic, not another world
+experiment. The two 400-second community runs remain the worker's observations.
+
+1. **R7.1 — P2: the harness's “under a crown” test can put the understory above its canopy. Timing: now, before reusing the placement helper.**
+   `crates/cubarium-voxel-flora/examples/two_producers.rs:737,744,757`
+   compares crown heights relative to their respective support faces, omitting
+   both support heights. This is not conservative as claimed at `:725`.
+   Concrete case: a half-grown bloomcrown at `(x,y,z)=(0,2,0)` has top 4 and
+   radius 1; a half-grown velvetpad at `(1,4,0)` has top 4.75. The helper admits
+   it (`2 > 0.75`, distance 1), but the model correctly applies no canopy shade
+   (`crates/cubarium-voxel-flora/src/step.rs:261,282`). Conversely a short plant
+   on sufficiently higher terrain can shade a pad despite failing this helper.
+   `habitat` also discards living stands' actual wood at
+   `crates/cubarium-voxel-flora/examples/two_producers.rs:1273`: an old or
+   newborn resident is subsequently treated as a half-grown founder.
+   **Change:** resolve planned founders' support heights in the current world;
+   use actual site, wood and foliage for existing stands; compare absolute tops
+   and wrapped horizontal coverage using the model's conditions. Add the
+   two-height case and an undersized resident case. Exclude already-reserved
+   columns before sampling founders at `:638`; the six-of-eight velvetpad result
+   at `design/7_Research/voxel-round3-experiment-2026-09-16.md:777` is a
+   placement collision, not a failed habitat trial. No change to canopy physics
+   is needed for this repair.
+
+2. **R7.2 — P2: accepting any species pair does not yet make the probe a valid pairwise treatment. Timing: before the replacement-control study.**
+   `crates/cubarium-voxel-flora/examples/two_producers.rs:1326,1330` starts
+   with no stands and asks `habitat` for the resident. For a velvetpad resident,
+   `UnderACrown` tests an empty crown list and returns no sites. The probe then
+   runs with zero residents and can report newcomer recruitment in that empty
+   treatment. An isolated velvetpad positive control has the same placement
+   problem, although its model predicate does not require a canopy.
+   **Change:** separate the community's illustrative placement from the study's
+   predeclared, gate-passing introduction sites; refuse to label an arm an
+   invasion if its resident population was never planted or has disappeared.
+   Velvetpad's control may use declared damp terrain shade, or a separately
+   declared background canopy held constant across arms. It must not secretly
+   require the competitor being excluded. Add an empty-layer velvetpad-resident
+   selection check. Keep matched water, mineral, founder treatment and bank
+   removal from R5.4; the existing `chesson` command is still a recruitment
+   diagnostic, not that completed study.
+   Also revise R5.4's **two-species** observation cap before including
+   stonecushion: `crates/cubarium-voxel-flora/src/lib.rs:766,768,772,773`
+   implies at least `ln(0.05/0.01) / ln(1 + 0.0002*0.05) * 0.05 ≈ 8,047 s`
+   from newborn to donor, then **600 s** to save one 0.025 package when fully
+   funded. Even the optimistic replacement path exceeds 8,647 s, so 6,000 s
+   cannot demonstrate its completion. Predeclare a species-appropriate cap or
+   report this control as unresolved; measure `G` before setting `3 × G` arms.
+   This is a study-design correction, not authorization for a long run now.
+
+3. **R7.3 — P2: springturf's recruitment floor is not a newborn maintenance boundary, and reduced light is not demonstrated canopy exclusion. Timing: document now; pin the boundary before using this role in a consumer comparison.**
+   `crates/cubarium-voxel-flora/src/lib.rs:657,692,694,704,708` admits soil
+   at pore 0.25. With the actual newborn split, `W=P=0.006`, initial site
+   mineral 1, open sky and zero stress, `μ=1/3`. The income expression at
+   `crates/cubarium-voxel-flora/src/step.rs:548,550` gives
+   `0.008*(1/3)*0.006*(2/3) = 1.0667e-5` organic/s against maintenance
+   `0.002*0.006 = 1.2e-5`. Reserve pays the deficit; no income remains to
+   build the missing foliage. The ample-water fixture at
+   `crates/cubarium-voxel-flora/tests/round4.rs:408` uses pore **0.6** and
+   cannot establish solvency on ordinary retained-water soil. This does not
+   invalidate germination into a temporarily unfavourable site, but it is a
+   different claim from a viable drained-soil pioneer.
+   **Change:** explicitly distinguish germination permission from positive
+   newborn income, and add a short post-birth budget check at pore **0.26**
+   (still passing, still maintenance-deficient) with ordinary preset stocks.
+   If retained-water soil must sustain recruitment, make that a deliberate
+   contract repair rather than raising assimilation until a community count
+   looks right. The added 0.008 and velvetpad's 0.0005 senescence are legitimate
+   named placeholders; their necessity has not been established by these tests.
+   Similarly, `tests/round4.rs:511,515` proves only a small reduction in adult
+   light, not that springturf loses under canopy. Accept worker point **(a)** as
+   the existing geometric-germination boundary; correct the literal dense-crown
+   refusal requirement in
+   `design/handoffs/voxel-round4-presets-briefs-2026-09-17.md:101`. Label
+   “wins the first years”/“loses under canopy” as intended succession, still
+   untested. A canopy-sensitive germination rule is not required for clearance.
+
+4. **R7.4 — P2: the proposed open-soil placement is sensible, but the stress diagnosis does not show that wettest-first caused the observed stress. Timing: correct the claim now; repair sampling before the next habitat comparison.**
+   `crates/cubarium-voxel-flora/examples/two_producers.rs:627,635,686`
+   filters on all gates, sorts by mean pore, then takes a **strided sample of
+   the whole sorted pool**, not the eight wettest sites. Every qualifying
+   springturf site initially has saturated fraction at most 0.3, hence target
+   stress zero (`crates/cubarium-voxel-flora/src/step.rs:468`). Positive later
+   stress requires subsequent root-zone conditions or retained stress from an
+   intervening wet period; mean pore and saturated fraction are different
+   measurements. The final mean 0.862 also cannot establish “a seventh of its
+   potential income for the whole run” at
+   `design/7_Research/voxel-round3-experiment-2026-09-16.md:859,863`.
+   **Change:** accept Fable's proposed deterministic draw among unoccupied,
+   gate-passing **soil support** sites, excluding actual overhead crowns for
+   the open-soil treatment. The current `MoistSoil` branch never tests support
+   material. Record selected founders' gate values and actual later saturated
+   fraction/stress by identity on the next authorised diagnostic; do not tune
+   the ceiling or promise the new draw removes stress. If no contract sites
+   exist, report that rather than falling back to off-predicate founders at
+   `examples/two_producers.rs:633`. This is my judgement on **(b)**.
+
+5. **R7.5 — P2: a depleted bank at observation does not exonerate its germination gates. Timing: now, reporting only.**
+   `design/7_Research/voxel-round3-experiment-2026-09-16.md:838,843`
+   calls the bank the shut gate in every species and says the predicate is not
+   refusing sites, while reporting that all three default-arm velvetpad banks
+   fail it. Under K7 a whole newly landed package at a vacant passing site
+   germinates before attrition. A later fractional package can instead reflect
+   earlier occupancy or a refused predicate, followed by attrition. These are
+   concurrent constraints; stonecushion has no landed bank at all.
+   **Change:** report observation-time bank sufficiency, vacancy and predicate
+   separately. Attribute an earlier refusal only to an observed event, not the
+   remaining fraction. Keep the funded/requested diagnosis for stonecushion:
+   **(c) is sound** — `400*0.00005/1.2 = 0.016667 < 0.025` per donor. Its
+   lack of births is expected rate limitation, not a reason to accelerate it.
+   Retain the R6.3 time/provenance corrections already applied, but remove the
+   surviving identification of skyline mean 0.402 with drained-soil equilibrium
+   at `:874`; the retained fraction remains 0.25.
+
+6. **R7.6 — P3: correct the small numerical and API claims before they become future contracts. Timing: next documentation repair, before a consumer uses these quantities.**
+   **Change:** at `crates/cubarium-voxel/src/world.rs:163`, describe
+   `soil_below` only as contiguous soil in that column; delete “a plant rooted
+   on rock has no root box.” `crates/cubarium-voxel-flora/src/step.rs:396,413`
+   independently collects soil throughout the root box. Worker point **(e)**
+   is correct; no core behaviour change or rock-support flag is warranted.
+   At `crates/cubarium-voxel-flora/src/lib.rs:747`, stonecushion's package
+   takes **600 s**, twice bloomcrown's saving time, not four times. At `:790`,
+   umbrellafrond reaches full moisture at **0.8**, not 0.6; at `:796`, 0.1 is
+   not twice springturf's 0.03. At `:798`, 20% incident light gives velvetpad
+   **0.7333** effective light and bloomcrown **0.36**, not 0.83/0.49
+   (`step.rs:291`; the test comment at `tests/round4.rs:690` is correct).
+   State the conditions behind the break-even claim at `lib.rs:803` and
+   `design/backlog.md:48`: full foliage, mineral 1, no stress and no growth
+   require `L_eff*μ ≈ 0.2625` for velvetpad, or **0.4875** at base senescence,
+   not 0.45; 4% sky works there only with sufficient moisture. Likewise the
+   claim that springturf must double assimilation to survive at all (`:678`)
+   is too strong: at full foliage/light/moisture and mineral 1 the base
+   assimilation supplies `0.005333 W/s`, above maintenance plus foliage
+   replacement `0.0044 W/s`. Extra income can fund faster growth; that is the
+   honest placeholder rationale. Correct the duplicated “full moisture at
+   0.1” prose at `tests/round4.rs:577`: its own assertion correctly checks
+   about **0.2424**, not 1.
+
+### What this does and does not establish
+
+The three paid births and exclusion fixtures agree with the implemented
+boundaries: springturf on ample open moist soil versus terrain shade/drier soil;
+stonecushion on rock with reachable soil versus rock without it; velvetpad on
+damp aerated soil versus saturation. Stonecushion is **rock-capable**, not
+rock-exclusive; velvetpad is shade-tolerant, not canopy-obligate. Keep those
+distinctions explicit rather than adding substrate or canopy requirements to
+manufacture spatial segregation. The velvetpad income fixture also checks its
+own positive material change (`tests/round4.rs:357,376`), so the presence of
+other producers does not reduce it to an aggregate-ledger claim. It establishes
+income in the fixture's mild shade, not a closed-canopy specialist advantage.
+
+Worker point **(d)** is correct: newborn light/moisture have not been sampled
+on the birth tick; zero there is not evidence of drought, and the next growth
+window checks drinking. Five-way species indexing and validation cover the
+brief's requested invariants (`src/lib.rs:65,857,1031,1241`); the presenter
+test at `crates/cubarium/src/voxel/stand.rs:635` covers nonempty stemless
+geometry and distinct palettes. I found no new transfer or conservation error
+in the presets change. I did not assess a rendered community frame, settled
+habitat, replacement or consumer carrying capacity. The weak canopy/light
+budget and lazy mineral provisioning already recorded in `design/backlog.md:41,42`
+remain limitations, not quantities this smoke run has calibrated.
+
+**Verdict: changes requested for the harness and claims (R7.1, R7.3–R7.6), with
+R7.2 required before the replacement-control study.** The five presets clear
+the conserved producer substrate for a first consumer transfer prototype;
+they do not yet clear the existing harness as the replacement study or establish
+the claimed succession. Make the small placement, boundary-fixture and reporting
+repairs; carry the matched-arm and species-specific timing requirements into
+the study. A consumer round should start with explicit bounded food transfers
+and the organic/mineral/energy ledger, leaving population targets and carrying
+capacity unclaimed. No new hydrology, species tuning or long rerun is required
+to answer this review.
