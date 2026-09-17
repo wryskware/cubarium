@@ -749,9 +749,13 @@ Conditions, both arms: 128 × 48 × 24 voxels of 0.25 m, `seed` 1, rain 2e-4 m/s
 outlet open, 1,000 warm-up ticks (50 s) and then 8,000 coupled ticks (400 s), so the world
 ends at 450 s. Eight founders per species at half of each species' own `wood_max`, which is
 exactly its `donor_min`, placed by the harness's `Habitat` table — bloomcrown on the
-highest eligible faces, umbrellafrond on the lowest, springturf on the wettest eligible
-root boxes, stonecushion on eligible faces that are **not** soil, velvetpad inside a taller
-founder's crown. That table is an experiment condition and not a model rule.
+highest eligible faces, umbrellafrond on the lowest, springturf on a **strided sample of
+its eligible faces sorted by mean root-box pore** (not the eight wettest, which is what this
+note used to say — Astra R7.4), stonecushion on eligible faces that are **not** soil,
+velvetpad inside a taller founder's crown. That table is an experiment condition and not a
+model rule, and springturf's rule has since been replaced: `Habitat::OpenSoil` now draws
+deterministically among unoccupied, gate-passing sites whose support is soil and which have
+no crown over them, so a rerun will not reproduce these founder columns.
 
 **Wall time: 69.6 s for the default arm and 86.6 s for the reseed**, 8,000 coupled ticks
 each, on this machine.
@@ -875,14 +879,35 @@ Four things this says, all of them about these two arms at 450 s and nothing mor
    5.333 — the largest ask of the five by an order of magnitude — and was funded **2.2 %** of
    it, because `reserve_cap` 0.5 on a `wood_max` of 0.06 leaves a donor a surplus of at most
    0.0075 above its own floor while `maintenance` ten times the base draws on the same
-   reserve. Raising `propagule_rate` further would create no income at all. And its mean
-   aeration stress is **0.862**, the highest of the five by a wide margin: the harness plants
-   it on the *wettest* eligible root boxes, which is exactly where its own
-   `establish_saturated_max` 0.3 bites hardest. That is a disagreement between the placement
-   rule and the preset, not a model fault — but it means the springturf cohort in these two
-   arms was earning about a seventh of its potential income for the whole run, and the
-   "pioneer of open **moist** soil" role has to decide whether "moist" means the wettest
-   ground available or merely not dry.
+   reserve. Raising `propagule_rate` further would create no income at all.
+
+   Separately, its mean aeration stress at observation is **0.862**, the highest of the
+   five by a wide margin — and this run does **not** show that the placement rule caused
+   it (Astra R7.4). Three corrections to what this note claimed:
+   - The placement was never "the eight wettest sites". `pick_founders` filtered on all
+     four gates, `order_for` sorted that pool by mean root-box pore, and the caller then
+     took a **strided sample of the whole sorted pool**, so the founders were spread across
+     it rather than taken off its wet end.
+   - Whatever the ordering, **every** site that passes springturf's gates has saturated
+     fraction at most its own `establish_saturated_max` 0.3, so `aeration_target` is
+     **zero** at planting for every founder it could have chosen (`step.rs`'s
+     `aeration_target`). A mean stress of 0.862 at 450 s therefore needs later root-zone
+     conditions, or stress retained from an intervening wet period — mean pore and
+     saturated fraction are different measurements of the same box. Which of the two
+     happened was not recorded, so it stays unattributed.
+   - 0.862 is a cohort mean at the final tick and cannot become "about a seventh of its
+     potential income for the whole run": that claim is **withdrawn**. `1 - stress`
+     multiplies income at the instant it is read and this run kept no stress history.
+
+   The placement rule changed anyway, for the reason Astra gives: ordering a gate-passing
+   pool by mean pore is a habitat claim the role does not make. `Habitat::OpenSoil` draws
+   deterministically among unoccupied, gate-passing sites whose support face is soil and
+   which have no crown over them, and there is no longer any fallback to off-predicate
+   founders — a species with no contract site is reported and not planted. The harness now
+   also records each founder's gate values at planting and prints saturated fraction and
+   stress **by identity** at observation, so the next authorised run can say what this one
+   could not. Nothing promises that the new draw removes the stress, and no ceiling was
+   tuned.
 4. **Springturf's light gate is the only large sole-cause count of the five.** 293 columns
    refuse it on `establish_light_min` 0.75 alone (286 in the reseed), where bloomcrown's 0.6
    refuses 2. If this species turns out to be too rare, that is the first number to look at —

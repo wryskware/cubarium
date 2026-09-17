@@ -80,9 +80,18 @@ enum Habitat {
     Ridge,
     /// The **lowest** eligible faces: a wet hollow. Umbrellafrond.
     Hollow,
-    /// The eligible faces with the **wettest** root box, wettest first: bare moist soil.
-    /// Springturf.
-    MoistSoil,
+    /// **Bare open soil**: gate-passing faces whose own support voxel is soil, that
+    /// nothing is standing on and that have no crown over them, drawn in a deterministic
+    /// keyed order. Springturf.
+    ///
+    /// It was "the wettest root box, wettest first" until Astra's R7.4. Two things were
+    /// wrong with that. It never tested the support material at all, so "bare soil" was
+    /// not a condition of it; and ordering a gate-passing pool by mean pore is a habitat
+    /// claim the role does not make — "pioneer of open **moist** soil" means not dry, which
+    /// is what the pore gate already says, and the wettest ground available is a different
+    /// and stronger statement. The keyed draw takes a spread of the qualifying pool instead
+    /// and orders it by nothing the role claims.
+    OpenSoil,
     /// Eligible faces whose own support voxel is **not** soil. Since the pore gate has
     /// already passed on them, a soil pocket is by definition in reach: that is what
     /// `pore_ok` on a rock face means. Stonecushion.
@@ -98,7 +107,7 @@ fn habitat_of(species: Species) -> Habitat {
     match species {
         Species::Bloomcrown => Habitat::Ridge,
         Species::Umbrellafrond => Habitat::Hollow,
-        Species::Springturf => Habitat::MoistSoil,
+        Species::Springturf => Habitat::OpenSoil,
         Species::Stonecushion => Habitat::RockWithAPocket,
         Species::Velvetpad => Habitat::UnderACrown,
     }
@@ -627,16 +636,39 @@ fn pick_founders(
             let eligible: Vec<Site> =
                 skyline.iter().copied().filter(|s| passes(world, sc, *s)).collect();
             let n = eligible.len();
-            // A species with nowhere to establish is still seeded, on the sites its own
-            // ordering prefers, so the run has every producer in it and the summary shows
-            // what happens to it. The printed count is the honest one.
-            let pool = if eligible.is_empty() { skyline.to_vec() } else { eligible };
-            let ok = order_for(world, flora, species, habitat, pool, &out);
+            // No fallback (Astra R7.4). A species with nowhere to establish used to be
+            // seeded anyway, on whatever its own ordering preferred among *every* skyline
+            // site — which put founders on sites their own predicate refuses and made the
+            // arm unreadable. If no contract site exists, that is the result: it is
+            // printed, and nothing of that species is planted.
+            if eligible.is_empty() {
+                println!(
+                    "{:>14}: 0 of {} skyline sites pass its establishment predicate at \
+                     introduction, so it has no contract site and **none were planted** — a \
+                     founder off its own predicate is not a founder of anything (Astra R7.4)",
+                    species.name(),
+                    skyline.len()
+                );
+                continue;
+            }
+            let ok = order_for(world, flora, species, habitat, eligible, &out);
+            if ok.is_empty() {
+                println!(
+                    "{:>14}: {n} of {} skyline sites pass its establishment predicate, but its \
+                     habitat rule {habitat:?} leaves **no candidate at all**, so none were \
+                     planted (Astra R7.4)",
+                    species.name(),
+                    skyline.len()
+                );
+                continue;
+            }
             let stride = (ok.len() / FOUNDERS_PER_SPECIES).max(1);
             let mut lo = u32::MAX;
             let mut hi = 0;
+            let mut chosen: Vec<Site> = Vec::new();
             for site in ok.iter().step_by(stride).take(FOUNDERS_PER_SPECIES) {
                 out.push(Founder { species, x: site.x, z: site.z });
+                chosen.push(*site);
                 lo = lo.min(site.y);
                 hi = hi.max(site.y);
             }
@@ -644,11 +676,10 @@ fn pick_founders(
                 println!(
                     "{:>14}: {n} of {} skyline sites pass its establishment predicate at \
                      introduction (50 s warm-up, before planting); habitat rule {habitat:?} over \
-                     {} candidates; founders at y {lo}..{hi}{}",
+                     {} candidates; founders at y {lo}..{hi}",
                     species.name(),
                     skyline.len(),
-                    ok.len(),
-                    if n == 0 { " (seeded anyway, nowhere qualifies)" } else { "" }
+                    ok.len()
                 );
                 let picked: Vec<(u32, u32)> = out
                     .iter()
@@ -656,6 +687,21 @@ fn pick_founders(
                     .map(|f| (f.x, f.z))
                     .collect();
                 println!("{:>14}: founder columns {picked:?}", species.name());
+                // What each selected founder's own root zone and sky read at planting
+                // (Astra R7.4). Springturf's saturated fraction here is the point: a site
+                // that passes its gate cannot be over `establish_saturated_max`, so every
+                // founder starts at zero aeration stress by construction and any later
+                // stress is a later condition and not this placement.
+                for site in &chosen {
+                    println!(
+                        "{:>14}: founder ({:>3},{:>3}) y {:>2} — {}",
+                        species.name(),
+                        site.x,
+                        site.z,
+                        site.y,
+                        gate_line(world, sc, *site)
+                    );
+                }
             }
         }
     }
@@ -683,22 +729,23 @@ fn order_for(
             pool.reverse();
             pool
         }
-        Habitat::MoistSoil => {
-            // The wettest root boxes first, read through the model's own gates so the
-            // number is the one the predicate used. A stable sort on the height order, so
-            // ties keep it.
-            let mut keyed: Vec<(Site, f64)> = pool
-                .into_iter()
-                .map(|s| {
-                    let sc = flora.config().species(species);
-                    let mean = cubarium_voxel_flora::establishment_gates(&view, s, sc)
-                        .mean_pore
-                        .unwrap_or(0.0);
-                    (s, mean)
-                })
-                .collect();
-            keyed.sort_by(|a, b| b.1.total_cmp(&a.1));
-            keyed.into_iter().map(|(s, _)| s).collect()
+        Habitat::OpenSoil => {
+            // Astra R7.4. Four conditions, and a draw that adds no fifth one: the support
+            // face is soil, nothing already stands there, no column of `planted` has
+            // reserved it, and no crown reaches over it. Gate-passing is the caller's:
+            // `pool` is the eligible set and there is no longer any fallback to sites that
+            // fail the predicate.
+            let canopy = canopy_over(world, flora, planted);
+            pool.retain(|s| {
+                view.material_at(s.x as i64, s.y, s.z) == cubarium_voxel::Material::Soil
+                    && flora.view().stand_at(*s).is_none()
+                    && !planted.iter().any(|f| f.x == s.x && f.z == s.z)
+                    && !covered_by(&canopy, view.config.width, *s, s.y as f64)
+            });
+            // A deterministic keyed order: the same pool always yields the same founders,
+            // and the order says nothing about how wet a site is.
+            pool.sort_by_key(|s| (site_key(species, *s), s.x, s.z));
+            pool
         }
         Habitat::RockWithAPocket => {
             // A support face that is not soil. The pore gate has already passed on every
@@ -712,6 +759,164 @@ fn order_for(
             let width = view.config.width;
             pool.retain(|s| under_a_crown(flora, width, species, *s, planted));
             pool
+        }
+    }
+}
+
+/// One crown, as the model shades with it: an **absolute** top over the world floor, a
+/// radius, and the column it stands over. `step.rs`'s `crown_of` builds the same thing from
+/// a stand.
+#[derive(Clone, Copy, Debug)]
+struct Canopy {
+    x: f64,
+    z: f64,
+    /// `site.y + crown_height(wood)`. The support height is part of it, which is what the
+    /// harness's level-face test used to leave out (Astra R7.1).
+    top: f64,
+    radius: f64,
+}
+
+/// Every crown over this world: one per living stand at its **actual** site and wood, plus
+/// one per planned-but-unplanted founder resolved at its own column's support face in this
+/// world and at the wood a founder is planted with.
+///
+/// Resolving the plan's support face is the R7.1/R7.4 repair: a `Founder` record
+/// deliberately carries no `y`, but the height of the ground it will stand on is in the
+/// world already, and without it a crown's top cannot be compared with anything.
+fn canopy_over(world: &World, flora: &Flora, planned: &[Founder]) -> Vec<Canopy> {
+    let view = flora.view();
+    let mut out: Vec<Canopy> = Vec::with_capacity(view.stands.len() + planned.len());
+    for stand in view.stands {
+        let sc = flora.config().species(stand.species);
+        out.push(Canopy {
+            x: f64::from(stand.site.x),
+            z: f64::from(stand.site.z),
+            top: f64::from(stand.site.y) + sc.crown_height(stand.wood),
+            radius: sc.crown_radius(stand.wood),
+        });
+    }
+    for f in planned {
+        if view.stands.iter().any(|s| s.site.x == f.x && s.site.z == f.z) {
+            continue; // already standing, and counted above with its real wood
+        }
+        let Some(site) = cubarium_voxel_flora::highest_support(&world.view(), f.x as i64, f.z)
+        else {
+            continue;
+        };
+        let sc = flora.config().species(f.species);
+        let wood = founder_wood(sc);
+        out.push(Canopy {
+            x: f64::from(f.x),
+            z: f64::from(f.z),
+            top: f64::from(site.y) + sc.crown_height(wood),
+            radius: sc.crown_radius(wood),
+        });
+    }
+    out
+}
+
+/// Whether any crown covers this column and has its top **strictly above** `top` — the
+/// model's own two shade conditions (`step.rs`'s `light_per_stand`): wrapped cover in `x`,
+/// plain cover in `z`, inside the crown's radius, and a strictly higher top.
+///
+/// `top` is an absolute height, so a caller asks "is there anything over this ground" with
+/// the site's own face and "would this stand be shaded" with the stand's own crown top.
+fn covered_by(canopy: &[Canopy], width: u32, site: Site, top: f64) -> bool {
+    let width = f64::from(width.max(1));
+    canopy.iter().any(|c| {
+        if c.top <= top {
+            return false;
+        }
+        let dx = wrapped_delta(c.x, f64::from(site.x), width);
+        let dz = c.z - f64::from(site.z);
+        dx * dx + dz * dz <= c.radius * c.radius
+    })
+}
+
+/// `a - b` on a world that wraps in `x`, the same way `step.rs`'s own `wrapped_delta` does.
+fn wrapped_delta(a: f64, b: f64, period: f64) -> f64 {
+    let mut d = a - b;
+    while d > period * 0.5 {
+        d -= period;
+    }
+    while d < -period * 0.5 {
+        d += period;
+    }
+    d
+}
+
+/// A deterministic key for one column and species: splitmix64 over `(x, z)` salted by the
+/// species index. It lets a habitat rule draw a repeatable spread of a qualifying pool
+/// **without** ordering that pool by any quantity, which is what Astra's R7.4 asked for in
+/// place of wettest-first. Two species draw different orders from the same pool.
+fn site_key(species: Species, site: Site) -> u64 {
+    let salt = (species.index() as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    let mut z = ((u64::from(site.x) << 32) ^ u64::from(site.z)).wrapping_add(salt);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+/// One site's gate values, as the numbers the predicate itself read, each beside the
+/// threshold it is compared with.
+fn gate_line(world: &World, sc: &SpeciesConfig, site: Site) -> String {
+    let g = cubarium_voxel_flora::establishment_gates(&world.view(), site, sc);
+    format!(
+        "mean pore {} (>= {:.2}), saturated fraction {:.3} (<= {:.2}), water {:.3} m \
+         (<= {:.2}), sky {:.3} (>= {:.2}), {} soil voxels",
+        g.mean_pore.map_or_else(|| "none".to_string(), |m| format!("{m:.3}")),
+        sc.establish_pore_min,
+        g.saturated_fraction,
+        sc.establish_saturated_max,
+        g.water_depth_m,
+        sc.drown_depth_m,
+        g.sky_visibility,
+        sc.establish_light_min,
+        g.soil_voxels
+    )
+}
+
+/// Every founder by identity at observation: where it stands, what its root box reads now,
+/// and the stress it is actually carrying.
+///
+/// Astra's R7.4 asked for this record so that a cohort's stress is reported **per stand**
+/// instead of inferred from the placement rule. For springturf the inference cannot work at
+/// all: a site that passes its gate has saturated fraction at most
+/// `establish_saturated_max`, so `aeration_target` is zero at planting for every founder and
+/// any later stress is a later root-zone condition.
+fn founder_identity_report(world: &World, flora: &Flora, founders: &[(u64, Species, Site)]) {
+    println!(
+        "founders by identity at observation — saturated fraction is the root box now, stress \
+         is the stand's own `aeration_stress`:"
+    );
+    println!(
+        "{:>14} {:>5} {:>14} {:>9} {:>8} {:>8} {:>8} {:>8}",
+        "species", "id", "column", "sat.frac", "stress", "moist", "light", "wood"
+    );
+    let v = flora.view();
+    for &(id, species, site) in founders {
+        let sc = flora.config().species(species);
+        let g = cubarium_voxel_flora::establishment_gates(&world.view(), site, sc);
+        let at = format!("({},{}) y{}", site.x, site.z, site.y);
+        match v.stands.iter().find(|s| s.id == id) {
+            Some(s) => println!(
+                "{:>14} {id:>5} {at:>14} {:>9.3} {:>8.3} {:>8.3} {:>8.3} {:>8.4}",
+                species.name(),
+                g.saturated_fraction,
+                s.aeration_stress,
+                s.moisture,
+                s.light,
+                s.wood
+            ),
+            None => println!(
+                "{:>14} {id:>5} {at:>14} {:>9.3} {:>8} {:>8} {:>8} {:>8}",
+                species.name(),
+                g.saturated_fraction,
+                "gone",
+                "-",
+                "-",
+                "-"
+            ),
         }
     }
 }
@@ -1538,6 +1743,10 @@ fn community(args: &[String]) {
         }
     }
     let founder_ids: Vec<u64> = flora.view().stands.iter().map(|s| s.id).collect();
+    // Identity, species and site of every founder, for the per-stand record at observation
+    // (Astra R7.4).
+    let founder_rows: Vec<(u64, Species, Site)> =
+        flora.view().stands.iter().map(|s| (s.id, s.species, s.site)).collect();
     assert_eq!(
         founder_ids.len() as u64,
         flora.view().ledger.births,
@@ -1620,6 +1829,7 @@ fn community(args: &[String]) {
             banks
         );
     }
+    founder_identity_report(&world, &flora, &founder_rows);
     println!(
         "eligible skyline columns per species, introduction -> observation (a reading of a \
          moment each, never a settled habitat):"
