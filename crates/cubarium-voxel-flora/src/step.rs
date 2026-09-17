@@ -33,7 +33,9 @@
 //! 9. **Propagules** (§4.8), from one snapshot of donors and recipients. A package lands
 //!    as a seed cohort, on every support face within the donor's `hop` whether it is
 //!    occupied or not: the bank waits for the gap. Cohorts that arrive here are one tick
-//!    younger than the ones step 8 just aged, and the merge folds them together.
+//!    younger than the ones step 8 just aged, and the merge folds them together; a bank
+//!    already holding its species' `seed_cohorts_max` folds its two oldest instead of
+//!    growing, so the bank is bounded by construction.
 //!
 //! Dropped from v1 by the brief: fruit (3c), downhill transport of litter (3f) and
 //! nutrient diffusion (3g).
@@ -844,8 +846,40 @@ fn merge_cohorts(g: &mut Ground) {
     }
 }
 
-/// Land a fresh package on a site's bank, keeping `seeds` sorted and merged.
-fn add_cohort(g: &mut Ground, species: Species, organic: f64, mineral: f64) {
+/// Bound one species' cohorts on a site to `max`, merging its two **oldest** into one
+/// until the bank fits: organic matter and mineral summed, and the older of the two ages
+/// kept.
+///
+/// The older age, which is the opposite of [`merge_cohorts`] and on purpose: folding two
+/// cohorts together must not give either of them a longer life than it had, so
+/// `seed_max_age_s` still fires on the older one's schedule and the cap can only bring a
+/// cull forward.
+///
+/// [`merge_cohorts`] alone bounds nothing — package I's pulsing donor put one cohort per
+/// pulse on a site for as long as the pulses lasted — because it folds only ages within
+/// one tick of each other, and two cohorts two ticks apart stay two ticks apart forever.
+///
+/// `seeds` is sorted by species then age, youngest first, so this species' cohorts are one
+/// contiguous run and the two to fold are its last two.
+fn cap_cohorts(g: &mut Ground, species: Species, max: usize) {
+    let max = max.max(1);
+    let mut n = g.seeds.iter().filter(|c| c.species == species).count();
+    if n <= max {
+        return;
+    }
+    let start = g.seeds.iter().position(|c| c.species == species).expect("counted one above");
+    while n > max {
+        let oldest = g.seeds.remove(start + n - 1);
+        let next = &mut g.seeds[start + n - 2];
+        next.organic += oldest.organic;
+        next.mineral += oldest.mineral;
+        next.age_ticks = next.age_ticks.max(oldest.age_ticks);
+        n -= 1;
+    }
+}
+
+/// Land a fresh package on a site's bank, keeping `seeds` sorted, merged and capped.
+fn add_cohort(g: &mut Ground, species: Species, organic: f64, mineral: f64, max_cohorts: usize) {
     if organic <= 0.0 && mineral <= 0.0 {
         return;
     }
@@ -857,6 +891,7 @@ fn add_cohort(g: &mut Ground, species: Species, organic: f64, mineral: f64) {
         Err(i) => g.seeds.insert(i, SeedCohort { species, organic, mineral, age_ticks: 0 }),
     }
     merge_cohorts(g);
+    cap_cohorts(g, species, max_cohorts);
 }
 
 // ---------------------------------------------------------------- 9. propagules
@@ -985,7 +1020,7 @@ fn commit_propagules(flora: &mut Flora, site: Site, species: Species, offers: &[
             i
         }
     };
-    add_cohort(&mut ground[gi], species, net, sent_mineral);
+    add_cohort(&mut ground[gi], species, net, sent_mineral, sc.seed_cohorts_max);
 }
 
 /// The species' establishment predicate: wet enough for its roots, **aerated** enough for

@@ -155,7 +155,10 @@ pub struct Ground {
     pub litter_mineral: f64,
     /// The site's seed bank, **sorted by species then age**, youngest first. Same-species
     /// cohorts within one tick of age are merged, so a site a donor feeds every tick
-    /// holds one cohort per species and not one per tick.
+    /// holds one cohort per species and not one per tick; and a site holds at most
+    /// `SpeciesConfig::seed_cohorts_max` cohorts of any one species, the two oldest being
+    /// merged when a landing would take it past that, so a donor that comes and goes on a
+    /// longer period cannot stack them without bound either.
     pub seeds: Vec<SeedCohort>,
     /// `Wd`: dead wood, organic matter. Keeps its identity; nothing eats it this round.
     pub dead_wood: f64,
@@ -254,6 +257,18 @@ pub struct SpeciesConfig {
     pub seed_attrition_per_s: f64,
     /// A cohort older than this many seconds falls to litter whole. **Placeholder**.
     pub seed_max_age_s: f64,
+    /// The most cohorts of this species one site's bank may hold. A landing that would
+    /// take it past this merges the site's two **oldest** cohorts into one — organic
+    /// matter and mineral summed, the older of the two ages kept — until the bank fits,
+    /// so the bank is bounded by construction and the merge can only bring
+    /// `seed_max_age_s` forward, never postpone it.
+    ///
+    /// Package I measured what the age-based merge alone bounds: nothing. Same-species
+    /// cohorts merge only when their ages are within one tick, so a donor that flickers
+    /// on and off every two ticks left one cohort per pulse — fifty pulses, fifty
+    /// cohorts, and about 6,000 of them per site before `seed_max_age_s` culls the
+    /// oldest, on a `Vec` the germination check sums over every tick. **Placeholder**.
+    pub seed_cohorts_max: usize,
     /// `n_tissue`: mineral nutrient per unit of organic matter this species builds. Wood,
     /// foliage and reserve share it this round. Growing `ΔO` draws `n_tissue · ΔO` from
     /// the site's mineral pool, and the pool caps growth through `mineral / n_tissue`.
@@ -361,6 +376,7 @@ impl SpeciesConfig {
             energy_density: 2.0,
             seed_attrition_per_s: 0.001,
             seed_max_age_s: 600.0,
+            seed_cohorts_max: 4,
             n_tissue: 0.02,
             reserve_share: 0.2,
             reflush_below: 0.25,

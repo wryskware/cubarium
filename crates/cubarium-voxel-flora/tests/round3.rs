@@ -758,52 +758,95 @@ fn a_fed_bank_stays_one_cohort_at_age_zero_and_ages_from_its_last_arrival() {
     assert_residuals(&flora, "after a bank was fed and then abandoned");
 }
 
-/// The adversarial fixture the merge rule's own comment invites: a donor that comes and
-/// goes on a period of more than two ticks. Ages two apart never merge, and once two
-/// cohorts are two ticks apart they stay two ticks apart forever, so the bank grows by
-/// one cohort per pulse and the merge bounds nothing.
+/// The adversarial fixture the merge rule's own comment invited, and package J's answer
+/// to it: a donor that comes and goes on a period of more than two ticks. Ages two apart
+/// never merge, and once two cohorts are two ticks apart they stay two ticks apart
+/// forever, so the age merge bounds nothing at all — package I measured fifty cohorts
+/// after fifty pulses, and about 6,000 per site as the only ceiling `seed_max_age_s`
+/// gives. `seed_cohorts_max` bounds it by construction instead.
 ///
-/// Fifty pulses two ticks apart give fifty cohorts on one site. The only ceiling is
-/// `seed_max_age_s`: at 600 s and `DT` = 0.05 a cohort lives 12,000 ticks, so one site can
-/// hold about **6,000** cohorts of one species — a `Vec` the germination check sums over
-/// every tick. `Ground::seeds`' own doc says "at most a few cohorts per site".
+/// The two arms are the same fifty pulses under a cap of 4 (the placeholder) and under a
+/// cap of 1,000 (I's behaviour, since it is never reached). What the cap does and all it
+/// does is regroup:
+///   - the capped bank holds exactly 4 cohorts, the uncapped one 50;
+///   - their total organic matter and mineral agree to 1e-15 — what landed minus
+///     attrition, in both — because merging sums both stocks and attrition is linear in
+///     the organic matter, whatever it is grouped into;
+///   - the oldest age is 99 ticks in both, the first pulse's own age, because the merge of
+///     two cohorts keeps the **older** age and so can only bring `seed_max_age_s` forward.
 ///
 /// `bloomcrown.establish_light_min` is 2.0 here (placeholder 0.6), a predicate that can
 /// never pass, so the bank can only accumulate and germination cannot end the experiment
 /// early. The pulsing itself is `Seed` and `Clear`, which is what "a donor that flickers
 /// across its reserve floor" looks like from the recipient site.
 #[test]
-fn a_pulsing_donor_stacks_one_cohort_per_pulse_and_the_merge_bounds_nothing() {
-    let mut config = FloraConfig::default();
-    config.bloomcrown.hop = 1;
-    config.bloomcrown.establish_light_min = 2.0;
-    let mut world = strip(3, 1, 0.6);
-    let mut flora = Flora::new(config);
-
-    let target = site(1);
+fn a_pulsing_donor_stacks_one_cohort_per_pulse_and_the_cap_bounds_it() {
     let pulses = 50;
-    for _ in 0..pulses {
-        assert!(flora.apply(&world, Command::Seed { x: 0, z: 0, species: Species::Bloomcrown, wood: 0.6 }));
-        flora.step(&mut world);
-        assert!(flora.apply(&world, Command::Clear { x: 0, z: 0 }));
-        flora.step(&mut world);
-    }
+    let mut totals: Vec<(f64, f64)> = Vec::new();
+    for cap in [4usize, 1000] {
+        let mut config = FloraConfig::default();
+        config.bloomcrown.hop = 1;
+        config.bloomcrown.establish_light_min = 2.0;
+        assert_eq!(config.bloomcrown.seed_cohorts_max, 4, "the placeholder this test reads");
+        config.bloomcrown.seed_cohorts_max = cap;
+        let mut world = strip(3, 1, 0.6);
+        let mut flora = Flora::new(config);
 
-    let g = flora.view().ground_at(target).expect("ground");
-    assert_eq!(
-        g.seeds.len(),
-        pulses,
-        "{} cohorts after {pulses} pulses two ticks apart",
-        g.seeds.len()
-    );
-    // Sorted by age, youngest first, and every gap is exactly the pulse period.
-    for (i, c) in g.seeds.iter().enumerate() {
-        assert_eq!(c.species, Species::Bloomcrown);
-        assert_eq!(c.age_ticks, 1 + 2 * i as u64, "cohort {i}: {c:?}");
+        let target = site(1);
+        for _ in 0..pulses {
+            assert!(flora.apply(&world, Command::Seed { x: 0, z: 0, species: Species::Bloomcrown, wood: 0.6 }));
+            flora.step(&mut world);
+            assert!(flora.apply(&world, Command::Clear { x: 0, z: 0 }));
+            flora.step(&mut world);
+        }
+
+        let g = flora.view().ground_at(target).expect("ground");
+        assert_eq!(
+            g.seeds.len(),
+            cap.min(pulses),
+            "cap {cap}: {} cohorts after {pulses} pulses two ticks apart",
+            g.seeds.len()
+        );
+        // Sorted by species then age, youngest first, and nothing is older than the first
+        // pulse: 2 ticks a pulse, less the two the last Clear-and-step pair costs it.
+        for w in g.seeds.windows(2) {
+            assert!(w[0].age_ticks < w[1].age_ticks, "not sorted by age: {:?}", g.seeds);
+        }
+        assert!(g.seeds.iter().all(|c| c.species == Species::Bloomcrown));
+        assert_eq!(
+            g.seeds.last().unwrap().age_ticks,
+            2 * pulses as u64 - 1,
+            "cap {cap}: the oldest cohort is not the first pulse's: {:?}",
+            g.seeds
+        );
+        if cap > pulses {
+            // I's finding, kept as the contrast: every gap is exactly the pulse period.
+            for (i, c) in g.seeds.iter().enumerate() {
+                assert_eq!(c.age_ticks, 1 + 2 * i as u64, "cohort {i}: {c:?}");
+            }
+        }
+        assert!(flora.view().stand_at(target).is_none(), "the predicate cannot pass here");
+        assert_eq!(flora.view().ledger.establishments, 0);
+        assert_residuals(&flora, "after fifty pulses");
+        totals.push((
+            g.seed_organic(Species::Bloomcrown),
+            g.seed_mineral(Species::Bloomcrown),
+        ));
     }
-    assert!(flora.view().stand_at(target).is_none(), "the predicate cannot pass here");
-    assert_eq!(flora.view().ledger.establishments, 0);
-    assert_residuals(&flora, "after fifty pulses");
+    let (capped, uncapped) = (totals[0], totals[1]);
+    assert!(capped.0 > 0.0 && capped.1 > 0.0, "nothing landed at all: {capped:?}");
+    assert!(
+        (capped.0 - uncapped.0).abs() <= 1e-15 * uncapped.0,
+        "the cap lost organic matter: {} against {}",
+        capped.0,
+        uncapped.0
+    );
+    assert!(
+        (capped.1 - uncapped.1).abs() <= 1e-15 * uncapped.1,
+        "the cap lost mineral: {} against {}",
+        capped.1,
+        uncapped.1
+    );
 }
 
 // ============================================================ root-zone aeration
