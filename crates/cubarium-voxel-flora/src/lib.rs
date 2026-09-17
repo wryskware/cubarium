@@ -40,6 +40,15 @@ pub enum Species {
 impl Species {
     pub const ALL: [Species; 2] = [Species::Bloomcrown, Species::Umbrellafrond];
 
+    /// This species' slot in the per-species arrays of [`FloraLedger`], and the same index
+    /// [`Species::ALL`] holds it at. A fixed order, never an iteration order.
+    pub fn index(self) -> usize {
+        match self {
+            Species::Bloomcrown => 0,
+            Species::Umbrellafrond => 1,
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Species::Bloomcrown => "bloomcrown",
@@ -152,12 +161,35 @@ pub struct Stand {
     /// wanted, with no new kill switch: standing-water drowning (`drown_depth_m`) is a
     /// separate and much cruder thing.
     pub aeration_stress: f64,
+    /// Organic matter this stand has paid out of its reserve for reproduction and is
+    /// **saving**: a propagule package under construction. It is no longer the stand's
+    /// tissue — it earns nothing, it is not `W`, `P` or `Q`, and it cannot be spent on
+    /// maintenance — but it is still inside the system, so it counts in
+    /// [`FloraView::organic`] through [`Stand::material`] and it goes to litter when the
+    /// stand dies.
+    ///
+    /// Round 3b (Astra R4.4): the old rule gave the donor a budget of
+    /// `propagule_rate · dt · recipient_count` and split it across every recipient, so
+    /// each recipient's share was a rate *per recipient* paid out of one scarce reserve,
+    /// and no bank ever came near the germination threshold while its donor was stressed —
+    /// bloomcrown's best bank sat at a seventh of it for 2,000 s. A donor now saves one
+    /// recipient's worth per tick until it holds one whole minimum package and sends
+    /// **that**, to one recipient. The mineral of the parcel stays in the stand until the
+    /// package leaves, and travels with it by the fraction rule.
+    pub parcel: f64,
 }
 
 impl Stand {
-    /// `W + P + Q`: the organic matter this stand holds.
+    /// `W + P + Q`: the organic matter this stand's **tissue** holds. Not the parcel: that
+    /// is paid-out material in transit, and a stand cannot live on it.
     pub fn organic(&self) -> f64 {
         self.wood + self.foliage + self.reserve
+    }
+
+    /// `W + P + Q + parcel`: every unit of organic matter this stand holds, which is what
+    /// the ledger has to account for and what the stand's mineral is a stock against.
+    pub fn material(&self) -> f64 {
+        self.organic() + self.parcel
     }
 }
 
@@ -586,6 +618,23 @@ pub struct FloraLedger {
     pub transpired_m3: f64,
     pub establishments: u64,
     pub deaths: u64,
+    /// Reproductive flux per species, indexed by [`Species::index`], cumulative organic
+    /// matter **net of construction** so that the three are one currency and comparable:
+    ///
+    /// - `propagule_requested`: what the rate asks for — `propagule_rate · dt / (1 + c_g)`
+    ///   for every stand over `donor_min`, whether or not it can pay.
+    /// - `propagule_funded`: what the reserves actually paid into parcels, above each
+    ///   donor's own reserve floor. `funded / requested` is how much of the advertised
+    ///   reproductive effort the world can afford.
+    /// - `propagule_landed`: what left donors as whole packages and arrived in seed banks.
+    ///
+    /// Astra's R4.4 asked for exactly this split: "distinguish requested, funded and
+    /// landed reproductive flux in the diagnosis", because raising a rate that is already
+    /// not the binding constraint creates no income. `funded − landed` is the material
+    /// standing in parcels, plus whatever parcels have gone to litter with their donors.
+    pub propagule_requested: [f64; 2],
+    pub propagule_funded: [f64; 2],
+    pub propagule_landed: [f64; 2],
 }
 
 impl FloraLedger {
@@ -626,7 +675,7 @@ impl<'a> FloraView<'a> {
     /// Organic matter in every living and dead stock, the seed banks included. The site's
     /// mineral pool is not organic matter and is not in here.
     pub fn organic(&self) -> f64 {
-        self.stands.iter().map(|s| s.organic()).sum::<f64>()
+        self.stands.iter().map(|s| s.material()).sum::<f64>()
             + self
                 .ground
                 .iter()
@@ -656,7 +705,7 @@ impl<'a> FloraView<'a> {
     pub fn energy(&self) -> f64 {
         self.stands
             .iter()
-            .map(|s| self.config.species(s.species).energy_density * s.organic())
+            .map(|s| self.config.species(s.species).energy_density * s.material())
             .sum::<f64>()
             + self
                 .ground
@@ -763,6 +812,7 @@ impl Flora {
                     water_m3: 0.0,
                     mineral: 0.0,
                     aeration_stress: 0.0,
+                    parcel: 0.0,
                 };
                 let organic = stand.organic();
                 // A founder arrives at the species' own tissue mineral content: it is
@@ -782,7 +832,9 @@ impl Flora {
                 let Some(site) = highest_support(&view, x, z) else { return false };
                 let Ok(at) = self.stands.binary_search_by_key(&site, |s| s.site) else { return false };
                 let s = self.stands.remove(at);
-                let organic = s.organic();
+                // The parcel goes out with the stand: it is organic matter this layer
+                // holds, and a `Clear` removes everything the site held.
+                let organic = s.material();
                 self.ledger.removed_organic_out += organic;
                 self.ledger.removed_mineral_out += s.mineral;
                 self.ledger.removed_energy_out += self.config.species(s.species).energy_density * organic;

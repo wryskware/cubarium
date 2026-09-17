@@ -322,21 +322,33 @@ fn frozen(sc: &mut cubarium_voxel_flora::SpeciesConfig) {
     sc.senescence = 0.0;
 }
 
-/// Two species reaching the same two bare sites. Round 3 has no contest to settle — a
-/// site holds a bank per species — so the claim is the one that survives that change:
-/// each donor is debited exactly for its **own** cohort, and one species' package never
-/// lands in the other species' cohort.
+/// Two species reaching the same two bare sites. Round 3b's donors save for one recipient
+/// at a time, so the claim that survives is the one about **cadence and books**: a package
+/// is the same size for both species (`alive_min / w_frac`, 0.05 at the placeholders), so
+/// a donor funded at twice the rate sends twice as many of them, each donor is debited
+/// only for its own parcels, and one species' package never lands in the other species'
+/// cohort.
 ///
-/// `bloomcrown.propagule_rate` is 4e-4 here against the placeholder 2e-4, so the two
-/// banks are visibly different sizes rather than the same number twice; `bloomcrown.hop`
-/// is 1 against the placeholder 2, so both donors reach exactly the same two sites on a
-/// four-column ring; both species are frozen (see `frozen`) so a reserve moves only where
-/// a propagule debits it. Nothing else is changed.
+/// `bloomcrown.propagule_rate` is 0.36 /s and `umbrellafrond.propagule_rate` 0.18 /s here
+/// (placeholder 2e-4 for both), which is 0.015 and 0.0075 of net parcel a tick — so in 21
+/// ticks the first funds 0.315 of parcel and sends **six** packages and the second funds
+/// 0.1575 and sends **three**. `reserve_cap` is 4.0 for both (placeholder 0.5) so the
+/// reserve is never the binding constraint and the rate is; `bloomcrown.hop` is 1 against
+/// the placeholder 2, so both donors reach exactly the same two sites on a four-column
+/// ring; both species are frozen (see `frozen`) so a reserve moves only where a propagule
+/// debits it. Both `establish_light_min` are 2.0 (placeholders 0.6 and 0.1), a predicate
+/// nothing can pass, so the banks accumulate instead of germinating and the books can be
+/// read against what landed — nine packages on two sites would otherwise recruit.
 #[test]
 fn two_species_banks_share_one_site_and_each_donor_pays_only_its_own() {
     let mut config = FloraConfig::default();
-    config.bloomcrown.propagule_rate = 4e-4;
+    config.bloomcrown.propagule_rate = 0.36;
     config.bloomcrown.hop = 1;
+    config.bloomcrown.reserve_cap = 4.0;
+    config.bloomcrown.establish_light_min = 2.0;
+    config.umbrellafrond.propagule_rate = 0.18;
+    config.umbrellafrond.reserve_cap = 4.0;
+    config.umbrellafrond.establish_light_min = 2.0;
     frozen(&mut config.bloomcrown);
     frozen(&mut config.umbrellafrond);
 
@@ -347,46 +359,116 @@ fn two_species_banks_share_one_site_and_each_donor_pays_only_its_own() {
 
     let bs = flora.config().species(Species::Bloomcrown).clone();
     let us = flora.config().species(Species::Umbrellafrond).clone();
-    let seeded_reserve = us.reserve_cap * 0.4;
-    let each_b = bs.propagule_rate * cubarium_voxel::DT;
-    let each_u = us.propagule_rate * cubarium_voxel::DT;
-    assert!(each_b > each_u, "the fixture's premise: {each_b} against {each_u}");
+    let package = bs.alive_min / bs.propagule_split[0];
+    assert!(
+        (package - us.alive_min / us.propagule_split[0]).abs() < 1e-15,
+        "the fixture's premise: one package is the same size for both species"
+    );
+    let net_b = bs.propagule_rate * cubarium_voxel::DT / (1.0 + bs.build);
+    let net_u = us.propagule_rate * cubarium_voxel::DT / (1.0 + us.build);
+    let seeded_reserve_b = bs.reserve_cap * 0.4;
+    let seeded_reserve_u = us.reserve_cap * 0.4;
 
-    flora.step(&mut world);
+    let ticks = 21u32;
+    run(&mut flora, &mut world, ticks);
 
-    // Both bare sites hold two cohorts, one per species, each the size its own donor
-    // paid for. Sorted by species: bloomcrown first, as `Species::ALL` orders them.
-    for x in [1u32, 3] {
-        let g = flora.view().ground_at(site(x)).unwrap_or_else(|| panic!("nothing at {x}"));
-        assert_eq!(g.seeds.len(), 2, "one cohort per species: {:?}", g.seeds);
-        assert_eq!(g.seeds[0].species, Species::Bloomcrown, "sorted by species");
-        assert_eq!(g.seeds[1].species, Species::Umbrellafrond);
-        for (c, (each, sc)) in g.seeds.iter().zip([(each_b, &bs), (each_u, &us)]) {
-            let net = each / (1.0 + sc.build);
-            assert!(
-                (c.organic - net).abs() < 1e-12 * net,
-                "{c:?} for a {net} package"
-            );
-        }
-        assert!(flora.view().stand_at(site(x)).is_none(), "a cohort is not a stand");
-    }
-    // Each donor paid exactly its two packages and not the other's.
-    for (x, each) in [(0u32, each_u), (2, each_b)] {
-        let s = *flora.view().stand_at(site(x)).unwrap();
+    // Six packages against three: the cadence is the rate, and the ledger says so without
+    // anyone having to guess which site a draw picked.
+    let l = flora.view().ledger;
+    let (ib, iu) = (Species::Bloomcrown.index(), Species::Umbrellafrond.index());
+    assert!(
+        (l.propagule_landed[ib] - 6.0 * package).abs() <= 1e-15,
+        "bloomcrown landed {} of six {package} packages",
+        l.propagule_landed[ib]
+    );
+    assert!(
+        (l.propagule_landed[iu] - 3.0 * package).abs() <= 1e-15,
+        "umbrellafrond landed {} of three {package} packages",
+        l.propagule_landed[iu]
+    );
+    // Each donor asked for, was funded, and is holding exactly its own arithmetic.
+    for (species, net, landed, seeded) in [
+        (Species::Bloomcrown, net_b, 6.0 * package, seeded_reserve_b),
+        (Species::Umbrellafrond, net_u, 3.0 * package, seeded_reserve_u),
+    ] {
+        let i = species.index();
+        let accrued = ticks as f64 * net;
         assert!(
-            (seeded_reserve - s.reserve - 2.0 * each).abs() < 1e-15,
-            "the donor at {x} spent {} for two {each} packages",
-            seeded_reserve - s.reserve
+            (l.propagule_requested[i] - accrued).abs() <= 1e-15,
+            "{} requested {}",
+            species.name(),
+            l.propagule_requested[i]
         );
-        assert_eq!(s.wood, 0.4, "the frozen donor's wood moved");
+        assert!(
+            (l.propagule_funded[i] - accrued).abs() <= 1e-15,
+            "{} was funded {} of {accrued} it asked for",
+            species.name(),
+            l.propagule_funded[i]
+        );
+        let x = if species == Species::Bloomcrown { 2 } else { 0 };
+        let donor = *flora.view().stand_at(site(x)).expect("the donor");
+        assert_eq!(donor.wood, 0.4, "the frozen donor's wood moved");
+        assert!(
+            (donor.parcel - (accrued - landed)).abs() <= 1e-15,
+            "{}'s parcel holds {} of {accrued} funded less {landed} landed",
+            species.name(),
+            donor.parcel
+        );
+        // The debit is the gross of everything it saved, sent or not: `(1 + c_g)` times.
+        let build = 1.0 + flora.config().species(species).build;
+        let spent = seeded - donor.reserve;
+        assert!(
+            (spent - build * accrued).abs() <= 1e-12 * spent,
+            "{} spent {spent} of reserve for {accrued} of parcel",
+            species.name()
+        );
+    }
+
+    // Nine packages over the two sites both donors reach, and nowhere else. Where a site
+    // holds both species they are two cohorts, bloomcrown first, and neither donor's
+    // material is in the other's.
+    let mut shared = 0;
+    for g in flora.view().ground.iter().filter(|g| !g.seeds.is_empty()) {
+        assert!(
+            [site(1), site(3)].contains(&g.site),
+            "a package landed outside both donors' hop: {:?}",
+            g.site
+        );
+        let species: Vec<Species> = g.seeds.iter().map(|c| c.species).collect();
+        let mut sorted = species.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(species, sorted, "not one cohort per species, sorted: {:?}", g.seeds);
+        if species.len() == 2 {
+            shared += 1;
+        }
+    }
+    assert!(shared >= 1, "the two species never shared a site in {ticks} ticks");
+    // And what is banked is what landed, less the attrition each bin has paid since.
+    for (species, landed) in
+        [(Species::Bloomcrown, 6.0 * package), (Species::Umbrellafrond, 3.0 * package)]
+    {
+        let banked: f64 = flora.view().ground.iter().map(|g| g.seed_organic(species)).sum();
+        assert!(
+            banked > 0.99 * landed && banked <= landed,
+            "{} banked {banked} of {landed} landed",
+            species.name()
+        );
     }
     assert_residuals(&flora, "after two species banked on one site");
 }
 
-/// A site outside the donor's `hop` never receives, and the patch does not creep: forty
-/// ticks of one donor at the placeholder rate is nowhere near a bank that can germinate,
-/// so the banked set is still the donor's own hop neighbourhood and the donor is still
-/// the only stand.
+/// A site outside the donor's `hop` never receives, and the patch does not creep. Two arms,
+/// because round 3b's rule changed what "forty ticks at the placeholder rate" means:
+///
+///   - at the **placeholder** `propagule_rate` of 2e-4 /s, forty ticks fund 3.33e-4 of
+///     parcel, which is 0.67 % of one 0.05 package, so **nothing lands at all**. That is
+///     Astra's R4.4 arithmetic from the other end: one package is 300 s of a donor's whole
+///     funded reproductive output, and the old rule's forty-tick cohorts were the same
+///     material spread over four sites at once and counted four times.
+///   - at 3.0 /s with `reserve_cap` 4.0 (placeholder 0.5), the donor sends a package every
+///     tick, and every one of them lands on one of the four columns within `hop` 2 —
+///     never outside, never its own site, and never a stand.
 #[test]
 fn nothing_outside_hop_ever_receives_and_the_patch_does_not_creep() {
     let mut world = plain(16, 8, 0.6);
@@ -394,42 +476,83 @@ fn nothing_outside_hop_ever_receives_and_the_patch_does_not_creep() {
     assert!(flora.apply(&world, Command::Seed { x: 7, z: 0, species: Species::Bloomcrown, wood: 0.4 }));
     let sc = flora.config().species(Species::Bloomcrown).clone();
     assert_eq!(sc.hop, 2, "the placeholder hop this test reads");
+    let package = sc.alive_min / sc.propagule_split[0];
+    let net = sc.propagule_rate * cubarium_voxel::DT / (1.0 + sc.build);
+
+    run(&mut flora, &mut world, 40);
+
+    let donor = *flora.view().stand_at(site(7)).expect("the donor");
+    assert!(
+        (donor.parcel - 40.0 * net).abs() <= 1e-15,
+        "the parcel holds {} after forty ticks of {net}",
+        donor.parcel
+    );
+    assert!(
+        donor.parcel < 0.01 * package,
+        "forty placeholder ticks is {} of a {package} package",
+        donor.parcel / package
+    );
+    assert!(
+        flora.view().ground.iter().all(|g| g.seeds.is_empty()),
+        "something landed on a parcel that is not a package: {:?}",
+        flora.view().ground
+    );
+    assert_eq!(flora.view().ledger.propagule_landed[Species::Bloomcrown.index()], 0.0);
+    assert_eq!(flora.view().ledger.establishments, 0);
+    assert_residuals(&flora, "after forty ticks of one placeholder donor");
+
+    // The second arm: a funded donor, whose packages stay inside its hop.
+    let mut config = FloraConfig::default();
+    config.bloomcrown.propagule_rate = 3.0;
+    config.bloomcrown.reserve_cap = 4.0;
+    let mut world = plain(16, 8, 0.6);
+    let mut flora = Flora::new(config);
+    assert!(flora.apply(&world, Command::Seed { x: 7, z: 0, species: Species::Bloomcrown, wood: 0.4 }));
 
     run(&mut flora, &mut world, 40);
 
     let banked: Vec<u32> =
         flora.view().ground.iter().filter(|g| !g.seeds.is_empty()).map(|g| g.site.x).collect();
-    assert_eq!(banked, vec![5, 6, 8, 9], "the banks are the donor's hop, and never its own site");
+    assert!(!banked.is_empty(), "a funded donor landed nothing");
+    assert!(
+        banked.iter().all(|x| [5u32, 6, 8, 9].contains(x)),
+        "a package landed outside the donor's hop, or on its own site: {banked:?}"
+    );
+    // Forty packages over four sites is about ten each, so this arm does germinate — and
+    // the patch still does not creep: every stand is the donor or one of its own hop
+    // neighbours, and the newborns are far under `donor_min` so none of them can spread
+    // further.
     let stands: Vec<u32> = flora.view().stands.iter().map(|s| s.site.x).collect();
-    assert_eq!(stands, vec![7], "something germinated: {stands:?}");
-    for x in [5u32, 6, 8, 9] {
-        let g = flora.view().ground_at(site(x)).unwrap();
-        assert_eq!(g.seeds.len(), 1, "the merge should keep one cohort: {:?}", g.seeds);
-        let c = g.seeds[0];
-        // One bin, not one cohort per tick: the placeholders' bin is 3,000 ticks wide, so
-        // all forty landings joined the bin that opened at tick 0 — and that bin's age is
-        // the run's own forty ticks, which is the half of the rule R4.1 corrected.
-        assert_eq!(c.bin_start_tick, 0, "not the bin tick 0 opened: {c:?}");
-        assert_eq!(c.age_ticks(flora.tick()), 40, "a fed bank stopped ageing: {c:?}");
-        assert!(
-            sc.propagule_split[0] * c.organic < sc.alive_min,
-            "forty ticks is not a germinating bank: {c:?}"
-        );
+    assert!(
+        stands.iter().all(|x| [5u32, 6, 7, 8, 9].contains(x)),
+        "a stand appeared outside the donor's hop: {stands:?}"
+    );
+    assert!(stands.contains(&7), "the donor died: {stands:?}");
+    let donor_min = flora.config().species(Species::Bloomcrown).donor_min;
+    for s in flora.view().stands.iter().filter(|s| s.site.x != 7) {
+        assert!(s.wood < donor_min, "a newborn can already donate: {s:?}");
     }
-    assert_eq!(flora.view().ledger.establishments, 0);
-    assert_residuals(&flora, "after forty ticks of one donor");
+    assert!(
+        flora.view().ledger.propagule_landed[Species::Bloomcrown.index()] > 0.0,
+        "the funded arm landed nothing either"
+    );
+    assert_residuals(&flora, "after forty ticks of one funded donor");
 }
 
-/// The donor's side of §4.8: what left the donor's reserve is exactly what arrived, as
-/// seed cohorts plus the construction respiration. Nothing is created by a propagule and
-/// nothing is lost in one.
+/// The donor's side of §4.8 under round 3b: what left the donor's reserve is exactly what
+/// it saved, `1 + c_g` times over; what it saved is either standing in its parcel or has
+/// landed as a package; and the three reproductive fluxes in the ledger say which.
+/// Nothing is created by a propagule and nothing is lost in one.
 ///
 /// Bloomcrown is frozen here (see `frozen`) so that the reserve's whole change over the
-/// tick is the debit; with income on, growth moves the same stock and the debit cannot be
-/// read off it.
+/// run is the debit; with income on, growth moves the same stock and the debit cannot be
+/// read off it. `propagule_rate` is 0.18 /s (placeholder 2e-4), which is 0.0075 of parcel
+/// a tick, so the first package is full on the seventh tick and this ten-tick run has one
+/// package away and 0.025 still saving.
 #[test]
 fn a_donor_is_debited_exactly_what_arrives_plus_its_construction() {
     let mut config = FloraConfig::default();
+    config.bloomcrown.propagule_rate = 0.18;
     frozen(&mut config.bloomcrown);
     let mut world = plain(8, 8, 0.6);
     let mut flora = Flora::new(config);
@@ -440,45 +563,95 @@ fn a_donor_is_debited_exactly_what_arrives_plus_its_construction() {
     assert_eq!(flora.view().stand_at(site(3)).unwrap().reserve, reserve0);
     let heat0 = flora.view().ledger.heat_out;
     let respired0 = flora.view().ledger.respired_out;
+    let build = 1.0 + sc.build;
+    let net = sc.propagule_rate * cubarium_voxel::DT / build;
+    let package = sc.alive_min / sc.propagule_split[0];
 
-    flora.step(&mut world);
+    let ticks = 10u32;
+    run(&mut flora, &mut world, ticks);
 
-    let spent = reserve0 - flora.view().stand_at(site(3)).unwrap().reserve;
-    let targets = [1u32, 2, 4, 5];
-    let budget = sc.propagule_rate * cubarium_voxel::DT * targets.len() as f64;
-    assert!((spent - budget).abs() < 1e-15, "the donor spent {spent} of a {budget} budget");
+    let accrued = ticks as f64 * net;
+    let donor = *flora.view().stand_at(site(3)).expect("the donor");
+    let spent = reserve0 - donor.reserve;
+    assert!(
+        (spent - build * accrued).abs() <= 1e-15,
+        "the donor spent {spent} of reserve for {accrued} of parcel"
+    );
 
+    // One package away, on one site, and the rest of what it saved is in the parcel.
     let mut arrived = 0.0;
-    for x in targets {
-        let g = flora.view().ground_at(site(x)).unwrap_or_else(|| panic!("nothing at {x}"));
+    let mut landed_on = 0;
+    for g in flora.view().ground {
+        if g.seeds.is_empty() {
+            continue;
+        }
+        assert!(
+            [site(1), site(2), site(4), site(5)].contains(&g.site),
+            "a package landed outside the donor's hop 2: {:?}",
+            g.site
+        );
+        landed_on += 1;
         assert_eq!(g.seeds.len(), 1, "{:?}", g.seeds);
         assert_eq!(g.seeds[0].species, Species::Bloomcrown);
         arrived += g.seeds[0].organic;
         // Round 3: the construction respiration is *not* deposited on the recipient. It
-        // leaves the system as organic matter, so the site's pool is its starting
-        // mineral to the bit.
-        assert_eq!(g.mineral, flora.config().initial_mineral, "construction fertilized the site");
-        assert!(flora.view().stand_at(site(x)).is_none(), "a package is a cohort, not a stand");
+        // leaves the system as organic matter, so the site's pool is still its starting
+        // mineral — to 1e-11, which is the cohort's own attrition decomposing in the three
+        // ticks since it landed, and not the 0.01 of construction that was respired.
+        let pool = g.mineral - flora.config().initial_mineral;
+        assert!(pool >= 0.0 && pool < 1e-10, "construction fertilized the site by {pool}");
+        assert!(flora.view().stand_at(g.site).is_none(), "a package is a cohort, not a stand");
     }
-    // What left the donor is what arrived plus what the build respired, and the respired
-    // half is a named boundary flow rather than a stock somewhere.
-    let net = spent / (1.0 + sc.build);
-    let respired = flora.view().ledger.respired_out - respired0;
+    assert_eq!(landed_on, 1, "one package, one recipient");
+    // What is there is the package less the attrition of the three ticks since it landed:
+    // 0.001/s of it a second, so 0.015 % over three ticks.
+    let kept = 1.0 - 3.0 * sc.seed_attrition_per_s * cubarium_voxel::DT;
     assert!(
-        (arrived + respired - spent).abs() < 1e-15,
-        "{arrived} arrived and {respired} respired for {spent} spent"
+        arrived <= package && arrived > kept * package,
+        "{arrived} arrived for a {package} package, {} expected after three ticks of attrition",
+        kept * package
     );
     assert!(
-        (respired - sc.build * net).abs() < 1e-15,
-        "construction respired {respired} for a net {net} package"
+        (donor.parcel - (accrued - package)).abs() <= 1e-15,
+        "the parcel holds {} of {accrued} saved less one {package} package",
+        donor.parcel
+    );
+
+    // What left the donor is what it saved plus what the build respired, and the respired
+    // half is a named boundary flow rather than a stock somewhere.
+    // To 1e-7 and not to the bit: the landed package's attrition is litter on its site,
+    // and the site's litter decomposes, which is the other thing in `respired_out` here.
+    let respired = flora.view().ledger.respired_out - respired0;
+    assert!(
+        (respired - sc.build * accrued).abs() <= 1e-7 * respired,
+        "construction respired {respired} for {accrued} saved"
+    );
+    assert!(
+        (arrived + donor.parcel + respired - spent).abs() <= 1e-4 * spent,
+        "{arrived} arrived, {} is saving and {respired} respired for {spent} spent (the \
+         difference is the landed package's own attrition, which is litter on its site)",
+        donor.parcel
     );
     // The construction respiration is booked as heat too, at the species' own density.
     let heat = flora.view().ledger.heat_out - heat0;
     assert!(
-        (heat - sc.energy_density * sc.build * net).abs() < 1e-15,
-        "construction heat {heat} for a net {net} package"
+        (heat - sc.energy_density * sc.build * accrued).abs() <= 1e-7 * heat,
+        "construction heat {heat} for {accrued} saved"
     );
-    assert_residuals(&flora, "after one paid round of propagules");
+    // The three fluxes: an unlimited donor is funded everything it asks for, and what it
+    // has not landed is exactly what it is holding.
+    let l = flora.view().ledger;
+    let i = Species::Bloomcrown.index();
+    assert!((l.propagule_requested[i] - accrued).abs() <= 1e-15, "{:?}", l.propagule_requested);
+    assert!((l.propagule_funded[i] - accrued).abs() <= 1e-15, "{:?}", l.propagule_funded);
+    assert!((l.propagule_landed[i] - package).abs() <= 1e-15, "{:?}", l.propagule_landed);
+    assert!(
+        (l.propagule_funded[i] - l.propagule_landed[i] - donor.parcel).abs() <= 1e-15,
+        "funded minus landed is the parcel: {:?} against {}",
+        l,
+        donor.parcel
+    );
+    assert_residuals(&flora, "after ten ticks of one saving donor");
 }
 
 // ====================================================== the light split, plant side

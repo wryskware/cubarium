@@ -471,6 +471,30 @@ fn passes(world: &World, sc: &SpeciesConfig, s: Site) -> bool {
 /// germinate. Two independent gates, and this says which one is shut.
 fn germination_diagnosis(world: &World, flora: &Flora) {
     let view = flora.view();
+    // Reproduction first: what the rate asked for, what the reserves could pay, and what
+    // actually left as packages. Astra's R4.4 — a rate that is not the binding constraint
+    // cannot be raised into income, and this line says which of the three it is.
+    println!("reproductive flux (organic matter, net of construction, cumulative):");
+    for species in Species::ALL {
+        let i = species.index();
+        let (req, fund, land) = (
+            view.ledger.propagule_requested[i],
+            view.ledger.propagule_funded[i],
+            view.ledger.propagule_landed[i],
+        );
+        let parcels: f64 =
+            view.stands.iter().filter(|s| s.species == species).map(|s| s.parcel).sum();
+        let sc = flora.config().species(species);
+        let package = sc.alive_min / sc.propagule_split[0];
+        println!(
+            "  {:>14}: requested {req:.5}, funded {fund:.5} ({:.1} %), landed {land:.5} \
+             ({:.1} packages of {package:.4}); {parcels:.5} standing in parcels on {} stands",
+            species.name(),
+            if req > 0.0 { 100.0 * fund / req } else { 0.0 },
+            land / package,
+            view.stands.iter().filter(|s| s.species == species).count()
+        );
+    }
     println!("germination gates:");
     for species in Species::ALL {
         let sc = flora.config().species(species);

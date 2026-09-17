@@ -441,10 +441,16 @@ mod tests {
     ///
     /// The cohort is made the way the model makes them — a donor's paid package — so the
     /// test reads the presenter against the layer's own state and not a hand-built one.
+    /// Voxel round 3b: a donor **saves** for one recipient and sends it a whole package,
+    /// so at the placeholder `propagule_rate` the first one leaves after 300 s and not on
+    /// the first tick. This fixture raises that rate to 3.0 /s so the package is away in
+    /// one tick, which is what the presenter is being asked about.
     #[test]
     fn a_site_holding_a_seed_cohort_is_a_single_sprout_cell() {
         let mut world = world();
-        let mut flora = Flora::new(FloraConfig::default());
+        let mut config = FloraConfig::default();
+        config.bloomcrown.propagule_rate = 3.0;
+        let mut flora = Flora::new(config);
         let sp = Species::Bloomcrown;
         let wood = flora.config().species(sp).wood_max;
         assert!(flora.apply(&world, Command::Seed { x: 6, z: 1, species: sp, wood }));
@@ -536,6 +542,7 @@ mod tests {
                     water_m3: 0.0,
                     mineral: 0.0,
                     aeration_stress: 0.0,
+                    parcel: 0.0,
                 },
             )
         };

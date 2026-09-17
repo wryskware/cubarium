@@ -68,6 +68,44 @@ use crate::{
     Stand,
 };
 
+/// Stream keys, so two draws in one tick cannot be the same draw. One per rule that
+/// draws.
+const DOMAIN_DISPERSAL: u64 = 1;
+
+/// A deterministic scalar stream (splitmix64), keyed by the values that **identify** a
+/// draw rather than seeded from stored state: the same world, the same place and the same
+/// tick always produce the same numbers, and nothing about iteration or storage order can
+/// reach them. No clock and no thread state, like the core generator's own stream.
+struct Rng(u64);
+
+impl Rng {
+    fn keyed(domain: u64, a: u64, b: u64, c: u64) -> Rng {
+        let mut state = 0u64;
+        for part in [domain, a, b, c] {
+            state = mix(state ^ part);
+        }
+        Rng(state)
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        mix(self.0)
+    }
+
+    /// A uniform index below `n`, which must be positive. Modulo, whose bias against
+    /// `2^64` is 1e-18 for the handful of candidates anything here draws among.
+    fn below(&mut self, n: usize) -> usize {
+        (self.next_u64() % n as u64) as usize
+    }
+}
+
+/// splitmix64's finalizer: the avalanche that makes neighbouring keys independent.
+fn mix(mut z: u64) -> u64 {
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
 /// One stand's crown as the shade model sees it, taken before anything moves.
 #[derive(Clone, Copy, Debug)]
 struct Crown {
@@ -120,7 +158,9 @@ fn prune_unsupported(flora: &mut Flora, world: &World) {
         if supported(&stand.site) {
             kept.push(*stand);
         } else {
-            let organic = stand.organic();
+            // The parcel is organic matter this layer holds, so it is booked out with the
+            // stand that was saving it.
+            let organic = stand.material();
             ledger.removed_organic_out += organic;
             ledger.removed_mineral_out += stand.mineral;
             ledger.removed_energy_out += config.species(stand.species).energy_density * organic;
@@ -574,14 +614,14 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink]) {
 
         // ---- 4.5 senescence
         let shed = (sc.senescence * stands[si].foliage * DT).min(stands[si].foliage);
-        let organic_before = stands[si].organic();
+        let organic_before = stands[si].material();
         stands[si].foliage -= shed;
         let shed_mineral = pull_mineral(&mut stands[si], organic_before, shed);
         add_litter(config, &mut ground[gi], shed, shed_mineral, e_v * shed, ledger);
 
         // ---- 4.6 dieback
         let die_back = stands[si].wood.min(sc.dieback * unpaid);
-        let organic_before = stands[si].organic();
+        let organic_before = stands[si].material();
         stands[si].wood -= die_back;
         let die_back_mineral = pull_mineral(&mut stands[si], organic_before, die_back);
         ground[gi].dead_wood += die_back;
@@ -617,18 +657,21 @@ fn pull_mineral(stand: &mut Stand, before: f64, moved: f64) -> f64 {
     out
 }
 
-/// §4.7 death: wood to dead wood, foliage and reserve to litter under the energy cap,
+/// §4.7 death: wood to dead wood, foliage, reserve and any saved parcel to litter under the
+/// energy cap,
 /// and the stand's mineral split between the two in proportion to the organic matter
 /// each takes.
 fn die(config: &FloraConfig, stand: &Stand, g: &mut Ground, ledger: &mut FloraLedger) {
     let e_v = config.species(stand.species).energy_density;
-    let organic = stand.organic();
+    let organic = stand.material();
     let wood_mineral =
         if organic > 0.0 { (stand.mineral * (stand.wood / organic)).min(stand.mineral) } else { 0.0 };
     g.dead_wood += stand.wood;
     g.dead_wood_mineral += wood_mineral;
     g.dead_wood_energy += e_v * stand.wood;
-    let shed = stand.foliage + stand.reserve;
+    // A parcel dies with its donor: material saved for a package that will never be sent
+    // falls where the foliage and the reserve fall, and its mineral goes with it.
+    let shed = stand.foliage + stand.reserve + stand.parcel;
     let shed_mineral = (stand.mineral - wood_mineral).max(0.0);
     add_litter_cap(config.litter_energy_cap, g, shed, shed_mineral, e_v * shed, ledger);
     ledger.deaths += 1;
@@ -780,6 +823,7 @@ fn seed_bank(flora: &mut Flora, world: &World) {
                     water_m3: 0.0,
                     mineral,
                     aeration_stress: 0.0,
+                    parcel: 0.0,
                 },
             );
             ledger.establishments += 1;
@@ -874,132 +918,138 @@ fn add_cohort(
 
 // ---------------------------------------------------------------- 9. propagules
 
-/// What one donor offers one recipient site this tick.
-#[derive(Clone, Copy, Debug)]
-struct Offer {
-    site: Site,
-    species: Species,
-    donor: Site,
-    material: f64,
+/// The smallest package worth sending: the seed-bank organic matter a germination needs to
+/// build a stand at exactly `alive_min` of wood, `alive_min / w_frac` — 0.05 at the
+/// placeholders. Stated as a division guarded by the caller, never a tuned constant.
+///
+/// Zero for a species whose `w_frac` is zero, which can never germinate anything.
+fn package_of(sc: &SpeciesConfig) -> f64 {
+    let w_frac = sc.propagule_split[0];
+    if w_frac > 0.0 { sc.alive_min / w_frac } else { 0.0 }
 }
 
-/// §4.8: a stand doing well spends reserve on its neighbours, and nothing arrives from
-/// outside.
+/// §4.8, round 3b: a stand doing well **saves** for one neighbour at a time, and nothing
+/// arrives from outside.
 ///
-/// Recipients are the **highest** support face of each column within `hop` of the donor
-/// in `x` and `z` — one candidate per column for now, so a stand cannot seed the
-/// terraces below its own — and every one of them qualifies, occupied or not. Round 3
-/// dropped both of the old filters: a package is a dormant cohort now, so a site holding
-/// a living stand can hold a bank that waits for the gap, and a site that fails the
-/// establishment predicate can hold one that never germinates and decays instead. The
-/// predicate is germination's test, not landing's. A donor never seeds its own site.
+/// Every tick, a stand over `donor_min` asks for one recipient's worth of material —
+/// `propagule_rate · dt`, gross — and is funded out of whatever its reserve holds above
+/// its own `donor_reserve_floor`. What it can pay is respired for construction (`c_g`) and
+/// the rest is saved in [`Stand::parcel`]. When the parcel holds one whole minimum package
+/// ([`package_of`], `alive_min / w_frac`), that package lands on **one** support face
+/// within the donor's `hop`, and the remainder keeps saving.
 ///
-/// Two species' cohorts can therefore share one site, and there is no contest to settle.
+/// Astra's R4.4 is the reason: the old rule multiplied the budget by the recipient count
+/// and then split it, so `propagule_rate` was a rate *per recipient* paid out of one
+/// reserve. A bloomcrown with 24 recipients in `hop` 2 gave each of them a
+/// twenty-fourth of what it could afford, and no bank came within a seventh of the
+/// germination threshold in 2,000 s. The rate is unchanged; what changed is that the donor
+/// pays for one package instead of pretending to pay for two dozen.
+///
+/// The recipient is drawn from the donor's own deterministic stream, keyed by the world's
+/// seed, the donor's site and the tick — never its own site, and with **no habitat
+/// screening**: the predicate is germination's test, not landing's, so a package can land
+/// on an occupied site and wait for the gap, or on a site that will never germinate it and
+/// decay there. Two species' cohorts can share one site, and there is no contest to
+/// settle until germination.
 fn propagate(flora: &mut Flora, world: &World) {
-    let mut offers: Vec<Offer> = Vec::new();
-    {
-        let Flora { config, stands, .. } = flora;
-        let view = world.view();
-        let donors: Vec<Stand> = stands
-            .iter()
-            .copied()
-            .filter(|s| {
-                let sc = config.species(s.species);
-                s.wood >= sc.donor_min
-                    && s.reserve > sc.donor_reserve_floor * sc.reserve_cap * s.wood
-            })
-            .collect();
-        for donor in donors {
-            let sc = config.species(donor.species);
-            let mut targets: Vec<Site> = Vec::new();
-            let hop = sc.hop as i64;
-            for dz in -hop..=hop {
-                let z = donor.site.z as i64 + dz;
-                if z < 0 || z >= view.config.depth as i64 {
-                    continue;
-                }
-                for dx in -hop..=hop {
-                    let x = donor.site.x as i64 + dx;
-                    let Some(site) = crate::highest_support(&view, x, z as u32) else { continue };
-                    if site == donor.site || targets.contains(&site) {
-                        continue;
-                    }
-                    targets.push(site);
-                }
-            }
-            if targets.is_empty() {
-                continue;
-            }
-            let floor = sc.donor_reserve_floor * sc.reserve_cap * donor.wood;
-            let budget =
-                (donor.reserve - floor).max(0.0).min(sc.propagule_rate * DT * targets.len() as f64);
-            if budget <= 0.0 {
-                continue;
-            }
-            let each = budget / targets.len() as f64;
-            for site in targets {
-                offers.push(Offer { site, species: donor.species, donor: donor.site, material: each });
-            }
-        }
-    }
-    if offers.is_empty() {
-        return;
-    }
-    offers.sort_unstable_by(|a, b| {
-        a.site.cmp(&b.site).then(a.species.cmp(&b.species)).then(a.donor.cmp(&b.donor))
-    });
-
-    let mut at = 0;
-    while at < offers.len() {
-        let (site, species) = (offers[at].site, offers[at].species);
-        let mut end = at;
-        while end < offers.len() && offers[end].site == site && offers[end].species == species {
-            end += 1;
-        }
-        commit_propagules(flora, site, species, &offers[at..end]);
-        at = end;
-    }
-}
-
-/// Every offer of one species for one site: debit its donors, respire the build, and land
-/// the rest as one cohort.
-fn commit_propagules(flora: &mut Flora, site: Site, species: Species, offers: &[Offer]) {
     let Flora { config, tick, stands, ground, ledger, .. } = flora;
     let tick = *tick;
-    let sc = config.species(species);
-    let e_v = sc.energy_density;
+    let view = world.view();
+    let world_seed = view.config.seed;
 
-    // Debit the donors that actually sent, and nothing else. The mineral of what leaves
-    // a donor's reserve leaves with it.
-    let mut sent = 0.0;
-    let mut sent_mineral = 0.0;
-    for offer in offers {
-        let Ok(di) = stands.binary_search_by_key(&offer.donor, |s| s.site) else { continue };
-        let take = stands[di].reserve.min(offer.material);
-        let organic_before = stands[di].organic();
-        stands[di].reserve -= take;
-        sent_mineral += pull_mineral(&mut stands[di], organic_before, take);
-        sent += take;
-    }
-    if sent <= 0.0 {
-        return;
-    }
-    let net = sent / (1.0 + sc.build);
-    // Construction respiration of the package: organic matter out of the system, energy
-    // to heat. It releases no mineral, so the whole package's mineral travels with the
-    // organic matter that survives the build.
-    ledger.respired_out += sent - net;
-    ledger.heat_out += e_v * (sent - net);
+    for si in 0..stands.len() {
+        let donor = stands[si];
+        let sc = config.species(donor.species);
+        let e_v = sc.energy_density;
+        let slot = donor.species.index();
+        let build = 1.0 + sc.build;
 
-    let gi = match ground.binary_search_by_key(&site, |g| g.site) {
-        Ok(i) => i,
-        Err(i) => {
-            ledger.seeded_mineral_in += config.initial_mineral;
-            ground.insert(i, Ground::new(site, config.initial_mineral));
-            i
+        // ---- what the rate asks for, and what the reserve can fund.
+        if donor.wood >= sc.donor_min {
+            let ask = (sc.propagule_rate * DT).max(0.0);
+            ledger.propagule_requested[slot] += ask / build;
+            let floor = sc.donor_reserve_floor * sc.reserve_cap * donor.wood;
+            let take = (donor.reserve - floor).max(0.0).min(ask).min(donor.reserve.max(0.0));
+            if take > 0.0 {
+                let net = take / build;
+                stands[si].reserve -= take;
+                stands[si].parcel += net;
+                ledger.propagule_funded[slot] += net;
+                // Construction respiration, paid when the material is set aside: organic
+                // matter out of the system, energy to heat, and no mineral moves — the
+                // parcel's mineral is still in the stand and travels only when the package
+                // does.
+                ledger.respired_out += take - net;
+                ledger.heat_out += e_v * (take - net);
+            }
         }
-    };
-    add_cohort(&mut ground[gi], species, net, sent_mineral, tick, sc);
+
+        // ---- one whole package or nothing. A stand that has fallen below `donor_min`
+        // still delivers material it has already paid for; nothing that is paid for is
+        // stranded.
+        let package = package_of(sc);
+        if package <= 0.0 || stands[si].parcel < package {
+            continue;
+        }
+        let Some(site) = dispersal_target(&view, sc, &donor, world_seed, tick) else { continue };
+        let before = stands[si].material();
+        stands[si].parcel -= package;
+        // The package takes the same fraction of the donor's mineral as it is of the
+        // donor's whole material, parcel included: the fraction rule, with the parcel
+        // counted because its mineral never left the stand.
+        let mineral = pull_mineral(&mut stands[si], before, package);
+        ledger.propagule_landed[slot] += package;
+
+        let gi = match ground.binary_search_by_key(&site, |g| g.site) {
+            Ok(i) => i,
+            Err(i) => {
+                ledger.seeded_mineral_in += config.initial_mineral;
+                ground.insert(i, Ground::new(site, config.initial_mineral));
+                i
+            }
+        };
+        add_cohort(&mut ground[gi], donor.species, package, mineral, tick, sc);
+    }
+}
+
+/// The one site this tick's package lands on: the **highest** support face of each column
+/// within `hop` of the donor in `x` and `z` is a candidate — one per column, so a stand
+/// cannot seed the terraces below its own — and one of them is drawn uniformly from a
+/// stream keyed by the world's seed, the donor's own site and the tick. Never the donor's
+/// own site, and no habitat screening.
+///
+/// The candidate list is built in a fixed geometric order and the draw is an index into
+/// it, so nothing about how the stands were reached or how the ground is stored can move
+/// the choice; the same world, donor and tick always choose the same site.
+fn dispersal_target(
+    view: &VoxelView<'_>,
+    sc: &SpeciesConfig,
+    donor: &Stand,
+    world_seed: u64,
+    tick: u64,
+) -> Option<Site> {
+    let mut targets: Vec<Site> = Vec::new();
+    let hop = sc.hop as i64;
+    for dz in -hop..=hop {
+        let z = donor.site.z as i64 + dz;
+        if z < 0 || z >= view.config.depth as i64 {
+            continue;
+        }
+        for dx in -hop..=hop {
+            let x = donor.site.x as i64 + dx;
+            let Some(site) = crate::highest_support(view, x, z as u32) else { continue };
+            if site == donor.site || targets.contains(&site) {
+                continue;
+            }
+            targets.push(site);
+        }
+    }
+    if targets.is_empty() {
+        return None;
+    }
+    let home = view.config.index(donor.site.x as i64, donor.site.y, donor.site.z) as u64;
+    let mut rng = Rng::keyed(DOMAIN_DISPERSAL, world_seed, home, tick);
+    Some(targets[rng.below(targets.len())])
 }
 
 /// The species' establishment predicate: wet enough for its roots, **aerated** enough for
@@ -1089,6 +1139,46 @@ mod tests {
         for f in [0.0, 0.5, 0.999, 1.0] {
             assert_eq!(aeration_target(f, &frond), 0.0, "umbrellafrond at f = {f}");
         }
+    }
+
+    /// The package a donor saves for is the material a germination needs to build a stand
+    /// at exactly `alive_min` of wood, so `w_frac · package` must not land **under**
+    /// `alive_min` in f64 — a newborn a hair under it would be born and die on its first
+    /// tick. It is exact at both species' placeholders, and this is the test a new preset
+    /// has to keep passing.
+    #[test]
+    fn one_package_builds_a_stand_at_exactly_alive_min() {
+        for sc in [SpeciesConfig::bloomcrown(), SpeciesConfig::umbrellafrond()] {
+            let package = package_of(&sc);
+            assert!((package - 0.05).abs() < 1e-15, "a {package} package at the placeholders");
+            let wood = sc.propagule_split[0] * package;
+            assert!(wood >= sc.alive_min, "a package builds {wood} of wood, under {}", sc.alive_min);
+            assert!(
+                wood - sc.alive_min <= 1e-15,
+                "a package builds {wood}, which is not alive_min {}",
+                sc.alive_min
+            );
+        }
+        // A species that cannot put anything into wood has no package at all, and
+        // `propagate` and germination both skip it rather than dividing by zero.
+        let mut odd = SpeciesConfig::bloomcrown();
+        odd.propagule_split = [0.0, 0.5, 0.5];
+        assert_eq!(package_of(&odd), 0.0);
+    }
+
+    /// One draw is one draw: the same world, site and tick give the same index, a
+    /// different tick gives a different sequence, and every candidate is reachable.
+    #[test]
+    fn a_keyed_draw_is_reproducible_and_covers_its_candidates() {
+        let once = Rng::keyed(DOMAIN_DISPERSAL, 7, 1234, 99).below(4);
+        let again = Rng::keyed(DOMAIN_DISPERSAL, 7, 1234, 99).below(4);
+        assert_eq!(once, again, "the same key drew twice");
+        let mut seen = [0usize; 4];
+        for tick in 0..400u64 {
+            seen[Rng::keyed(DOMAIN_DISPERSAL, 7, 1234, tick).below(4)] += 1;
+        }
+        assert!(seen.iter().all(|&n| n > 60), "four candidates over 400 ticks: {seen:?}");
+        assert_eq!(seen.iter().sum::<usize>(), 400);
     }
 
     #[test]
