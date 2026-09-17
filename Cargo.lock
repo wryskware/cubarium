@@ -282,6 +282,7 @@ dependencies = [
  "cubarium-search",
  "cubarium-surface",
  "cubarium-voxel",
+ "cubarium-voxel-flora",
  "cube-proto",
  "libc",
  "minifb",
@@ -361,6 +362,15 @@ dependencies = [
  "anyhow",
  "png",
  "postcard",
+ "serde",
+]
+
+[[package]]
+name = "cubarium-voxel-flora"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cubarium-voxel",
  "serde",
 ]
 
