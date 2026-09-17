@@ -673,7 +673,16 @@ and nothing is negative anywhere.
    assumed. One package is 300 s of a fully funded donor's output, and a single funded
    umbrellafrond donor with 8 candidate sites took 1,300 s to produce its first birth in
    the base arm. A probe shorter than several times that cannot read an invasion, whatever
-   it prints.
+   it prints — and neither of those two figures is a generation time: from a newborn's
+   `alive_min` of 0.02, the `wood_rate` 0.001 growth cap needs at least **2,708 s** to
+   reach `donor_min` 0.3 even on unlimited income, and only then can it start saving the
+   300 s for a package (Astra R5.4). The study design Astra wrote in R5.4 — the matched
+   arms, the resident-and-bank exclusion arm, the provisioned per-site mineral, the
+   declared 6,000 s observation cap and the `3 × G` probe window — is the design to
+   follow; it is not restated here, and this note's numbers are not inputs to it beyond
+   the funding scale above. The probe's own observation bug is fixed (K8/R5.4: it counts
+   newcomer birth identities per tick, so a descendant born and dead inside the window is
+   reported as a birth, with survivors printed separately).
 
    **The recruitment cost has since changed, and every number above this line predates
    it.** All three arms ran before `K7`, when a bin paid its attrition *before* germination

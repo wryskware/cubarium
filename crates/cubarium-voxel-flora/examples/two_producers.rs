@@ -1130,7 +1130,7 @@ fn invasion(
         }
     }
     println!(
-        "  {} founders of the resident on {} habitat sites of {} skyline columns",
+        "  {} founders of the resident on {} of {} skyline columns eligible at introduction",
         planted,
         ok.len(),
         skyline.len()
@@ -1161,7 +1161,8 @@ fn invasion(
     // allowed to call a founder.
     let founder_id = flora.view().stand_at(target).expect("just planted").id;
     println!(
-        "  one {} founder at x{} z{} y{} ({} habitat sites free of the resident)",
+        "  one {} founder at x{} z{} y{} ({} sites eligible for it now and free of the \
+         resident)",
         newcomer.name(),
         target.x,
         target.z,
@@ -1169,10 +1170,21 @@ fn invasion(
         ok.iter().filter(|s| flora.view().stand_at(**s).is_none()).count()
     );
 
+    // Every newcomer identity seen alive at the end of any tick, so a descendant that is
+    // born and dies inside the window is still counted as the birth it was. Astra's R5.4:
+    // reading only the final living stands reported "recruitment NOT OBSERVED" over a real
+    // birth, and the ledger's own establishment delta cannot be used instead because it
+    // includes the resident's births too.
+    let mut seen: Vec<u64> = Vec::new();
     let ticks = (probe * cubarium_voxel::TICK_HZ as f64).round() as u64;
     for _ in 0..ticks {
         world.step();
         flora.step(&mut world);
+        for stand in flora.view().stands.iter().filter(|s| s.species == newcomer) {
+            if stand.id != founder_id && !seen.contains(&stand.id) {
+                seen.push(stand.id);
+            }
+        }
     }
 
     let view = flora.view();
@@ -1182,6 +1194,8 @@ fn invasion(
     // the tick the founder died.
     let descendants =
         view.stands.iter().filter(|s| s.species == newcomer && s.id != founder_id).count();
+    let births = seen.len();
+    let lost = births - descendants;
     let founder_gone = !view.stands.iter().any(|s| s.id == founder_id);
     let banks = view.ground.iter().filter(|g| g.seed_organic(newcomer) > 0.0).count();
     let banked: f64 = view.ground.iter().map(|g| g.seed_organic(newcomer)).sum();
@@ -1202,10 +1216,12 @@ fn invasion(
     // Not a verdict on coexistence (Astra R4.7). One birth, or a founder surviving, is not
     // an invasion: the criterion needs the rare species to increase through complete
     // generations while the resident persists, and this probe has neither a stationary
-    // resident nor a measured single-founder generation time. It reports what it saw.
+    // resident nor a measured single-founder generation time. It reports what it saw —
+    // and reports the three numbers separately, because a window that ends with no living
+    // descendant is not a window with no recruitment in it (R5.4).
     println!(
-        "  recruitment {} within {probe:.0} s: {descendants} descendant stand(s) of the \
-         newcomer, by identity",
-        if descendants > 0 { "OBSERVED" } else { "NOT OBSERVED" }
+        "  recruitment {} within {probe:.0} s: {births} newcomer birth(s) by identity, \
+         {lost} of them dead before the end, {descendants} surviving descendant(s)",
+        if births > 0 { "OBSERVED" } else { "NOT OBSERVED" }
     );
 }

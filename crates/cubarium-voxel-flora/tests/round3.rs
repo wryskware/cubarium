@@ -1287,6 +1287,73 @@ fn a_pulsing_donor_cannot_rejuvenate_a_bank_and_the_bins_bound_it() {
     }
 }
 
+/// **Astra's R5.4, at model level.** A descendant that is born and dies inside an
+/// observation window leaves no trace in the final state: the site is empty, the species
+/// has no living stand, and a harness that counts only survivors reports no recruitment
+/// over a real birth. The counters see it — one establishment, one death, one identity that
+/// was alive and is not — and that is what the probe now reads per tick.
+///
+/// The fixture is one donor and one recipient behind a void column, so the only landing,
+/// the only birth and the only death in the run belong to this one lineage.
+/// `propagule_rate` 3.0 /s (placeholder 2e-4) funds the package from the donor's own
+/// starting reserve in one tick; `assimilation` 0 and `maintenance` 0.4 /s (placeholders
+/// 0.004 and 0.0002) mean the newborn — born at exactly `alive_min` with `q_frac` of a
+/// package in reserve — cannot pay its own bill and diebacks under the threshold within a
+/// few ticks. The donor, twenty times its wood, outlives the window.
+#[test]
+fn a_descendant_born_and_dead_inside_the_window_is_still_a_birth() {
+    let mut config = FloraConfig::default();
+    config.bloomcrown.propagule_rate = 3.0;
+    config.bloomcrown.hop = 1;
+    config.bloomcrown.assimilation = 0.0;
+    config.bloomcrown.maintenance = 0.4;
+    let sc = config.bloomcrown.clone();
+    let mut world = strip_gap(0.6);
+    let mut flora = Flora::new(config);
+    let recipient = site(1);
+    assert!(flora.apply(&world, Command::Seed { x: 0, z: 0, species: Species::Bloomcrown, wood: 0.6 }));
+    let founder_id = flora.view().stand_at(site(0)).expect("planted").id;
+
+    // Watch the way the probe watches: every identity of this species seen alive at the end
+    // of any tick, and the survivors at the end.
+    let mut seen: Vec<u64> = Vec::new();
+    for _ in 0..60 {
+        flora.step(&mut world);
+        for s in flora.view().stands.iter().filter(|s| s.species == Species::Bloomcrown) {
+            if s.id != founder_id && !seen.contains(&s.id) {
+                seen.push(s.id);
+            }
+        }
+    }
+
+    // One birth happened, and nothing of it is standing at the end.
+    assert_eq!(seen.len(), 1, "identities seen alive besides the founder: {seen:?}");
+    assert_eq!(flora.view().ledger.establishments, 1, "one germination");
+    assert_eq!(flora.view().ledger.deaths, 1, "the newborn did not die");
+    assert_eq!(flora.view().ledger.births, 2, "the founder and the one descendant");
+    assert!(flora.view().stand_at(recipient).is_none(), "the descendant is still standing");
+    let survivors = flora
+        .view()
+        .stands
+        .iter()
+        .filter(|s| s.species == Species::Bloomcrown && s.id != founder_id)
+        .count();
+    assert_eq!(survivors, 0, "a survivor makes this the wrong fixture");
+    // The founder is still there, so the death was the descendant's.
+    assert!(
+        flora.view().stands.iter().any(|s| s.id == founder_id),
+        "the founder died: the death may not be the descendant's"
+    );
+    // So the final state alone says "no recruitment" and the per-tick identity watch says
+    // one birth and no survivor. Both readings are printed by the probe.
+    assert!(seen.len() > survivors, "the birth is invisible in the final state, and counted");
+    // Its remains are on the site it was born on, and nothing was lost on the way.
+    let g = flora.view().ground_at(recipient).expect("the grave").clone();
+    assert!(g.dead_wood > 0.0 && g.litter > 0.0, "the descendant left no remains: {g:?}");
+    assert!(g.dead_wood >= sc.alive_min * 0.5, "it was born at alive_min: {g:?}");
+    assert_residuals(&flora, "after a descendant was born and died inside the window");
+}
+
 /// **Astra's R5.5: the expiry boundary, both sides of it.** K7 germinates before charging
 /// attrition and expiry, so a bin on the first tick past its `seed_max_age_s` gets one last
 /// chance to recruit before it goes to litter. This pins that tick and the one after it:
