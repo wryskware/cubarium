@@ -737,9 +737,9 @@ fn a_pruned_site_books_its_stand_its_bank_and_its_pool_in_three_currencies() {
 
 /// The gap a *drowning* opens is filled in the same tick it opens. Drowning is step 3 of
 /// the tick and germination is step 8, so a bank that was waiting under a stand becomes a
-/// stand in the single step that killed its predecessor — and it pays that tick's
-/// attrition on the way through, which is why its stocks are the bank's minus one tick of
-/// decay rather than the bank's exactly.
+/// stand in the single step that killed its predecessor — and since K7 it does that
+/// **before** the tick's attrition is charged, so the newborn is a whole package exactly
+/// and not a package minus a tick of decay.
 ///
 /// `umbrellafrond.propagule_rate` is 3.0 /s (placeholder 2e-4) so the bank is over the
 /// germination threshold in one tick. The water is the fixture's: 0.1 m over the support
@@ -791,11 +791,17 @@ fn a_drowned_stand_s_gap_is_filled_by_its_bank_in_the_same_tick() {
     // one `alive_min / w_frac` and leaves the rest ageing (Astra R4.5). The bank here held
     // two packages, so the newborn is half of it.
     let package = sc.alive_min / sc.propagule_split[0];
+    // A whole package, to one ulp — the three split products re-sum to 0.05 where the
+    // package itself is 0.049999999999999996 — and not the package minus a tick of decay,
+    // because since K7 germination reads the bank before the attrition of its own tick.
     assert!(
-        (born.organic() - package).abs() <= 1e-12 * package,
+        (born.organic() - package).abs() <= 1e-16,
         "born with {} out of a {bank} bank, for a {package} package",
         born.organic()
     );
+    // And the wood is `alive_min` exactly: a newborn is a minimum viable stand, on the
+    // nose, at any bank size.
+    assert_eq!(born.wood, sc.alive_min, "born with {} of wood, not alive_min", born.wood);
     // Its mineral is the consumed bins' own, at the bank's density.
     let density = bank_mineral / bank;
     assert!(

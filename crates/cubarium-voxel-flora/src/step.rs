@@ -25,13 +25,15 @@
 //!    dead wood respire their organic matter out of the system and release their mineral
 //!    to the site's pool at the same fraction; litter's energy leaves as heat at its
 //!    current density.
-//! 8. **The seed bank.** Every arrival bin pays its attrition into litter and falls to
-//!    litter whole once its **start** is past its species' `seed_max_age_s`. Then every
-//!    site with no stand holds a local lottery among the species whose bank there holds at
-//!    least one whole package and which pass that species' establishment predicate,
-//!    weighted by the packages each holds; the winner spends exactly **one** package out
-//!    of its oldest bins and every other bank stays. This runs *after* the deaths of step
-//!    6, so a gap opened this tick can be filled this tick.
+//! 8. **The seed bank.** Every site with no stand holds a local lottery among the species
+//!    whose bank there holds at least one whole package and which pass that species'
+//!    establishment predicate, weighted by the packages each holds; the winner spends
+//!    exactly **one** package out of its oldest bins and every other bank stays. This runs
+//!    *after* the deaths of step 6, so a gap opened this tick can be filled this tick.
+//!    **Then** every arrival bin still banked pays its attrition into litter and falls to
+//!    litter whole once its **start** is past its species' `seed_max_age_s`. Germination
+//!    before decay, so that one package — exactly one minimum viable stand's material —
+//!    is one recruit and not 0.1 % short of one.
 //! 9. **Propagules** (§4.8), from one snapshot of donors and recipients. A package lands
 //!    as a seed cohort, on a support face within the donor's `hop` whether it is occupied
 //!    or not: the bank waits for the gap. A landing joins the arrival bin whose window
@@ -784,15 +786,26 @@ fn decompose(flora: &mut Flora, pre: &[(Site, f64, f64)]) {
 
 // ----------------------------------------------------------------- 8. seed bank
 
-/// The seed bank: take every bin's attrition, cull the bins whose start is over-age, then
-/// germinate where a bank can build a living stand.
+/// The seed bank: **germinate first**, out of the bank as it stands at the start of the
+/// tick, and then charge attrition and expiry on whatever is still banked.
+///
+/// The order matters because a package is exactly one minimum viable stand's material
+/// (`alive_min / w_frac`). Charging attrition first left a single package 0.1 % short of
+/// the germination threshold for ever, so every recruit cost **two** packages and one
+/// package's worth of paid material could never become a stand at all — which is not the
+/// rule the package size states. Germination therefore reads the bank before anything
+/// decays out of it, and attrition applies to what stays.
+///
+/// Two consequences, both deliberate. A package that lands on tick `t` on a passing site
+/// is born at tick `t + 1` with the whole package. And a bin on the tick its own
+/// `seed_max_age_s` runs out gets one last chance to germinate before it falls to litter:
+/// it is paid material on a site that passes the predicate, and throwing it away in the
+/// same tick that could have used it would be the same 0.1 % arbitrariness one step
+/// further out.
 fn seed_bank(flora: &mut Flora, world: &World) {
     let Flora { config, tick, stands, ground, ledger, sky, .. } = flora;
     let tick = *tick;
     let view = world.view();
-    for g in ground.iter_mut() {
-        age_cohorts(config, g, ledger, tick);
-    }
     // In site order. Which species takes a bare site is a **local lottery** among the
     // banks that can build a stand here, weighted by the whole packages each holds, drawn
     // from a stream keyed by the world, the site and the tick. The winner spends exactly
@@ -857,6 +870,11 @@ fn seed_bank(flora: &mut Flora, world: &World) {
             },
         );
         ledger.establishments += 1;
+    }
+    // Then the decay, on what is left: a bin the germination above emptied pays nothing,
+    // because there is nothing left of it to pay with.
+    for g in ground.iter_mut() {
+        age_cohorts(config, g, ledger, tick);
     }
 }
 

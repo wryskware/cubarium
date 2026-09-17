@@ -610,15 +610,31 @@ and nothing is negative anywhere.
    far as this rerun can say: the same founder treatment — one founder, or a declared small
    cohort — planted alone under this same bounded forcing, run until it has replaced itself
    *beyond the initial reserve subsidy*, with the generation time measured rather than
-   assumed. This rerun says a recruit costs **two packages on one site**, that one package
-   is 300 s of a fully funded donor's output, and that a single funded umbrellafrond donor
-   with 8 candidate sites took 1,300 s to produce its first birth in the base arm. A
-   probe shorter than several times that cannot read an invasion, whatever it prints.
+   assumed. One package is 300 s of a fully funded donor's output, and a single funded
+   umbrellafrond donor with 8 candidate sites took 1,300 s to produce its first birth in
+   the base arm. A probe shorter than several times that cannot read an invasion, whatever
+   it prints.
+
+   **The recruitment cost has since changed, and every number above this line predates
+   it.** All three arms ran before `K7`, when a bin paid its attrition *before* germination
+   was tested, so a single package sat 0.1 % under its own threshold for ever and a recruit
+   cost **two packages on one site**. K7 made germination read the bank as it stands at the
+   start of the tick and charged attrition on what stays — the rule the package size always
+   stated: **one package is one recruit**, born on the next step at exactly `alive_min` of
+   wood. A package landing on a passing site is now a stand one tick later instead of a
+   half-funded bank waiting for a partner, so the establishments, descendant fractions and
+   occupancy sets in this section are lower bounds on what the current code does. The
+   funding, water and residual numbers are unaffected: no donor, no budget and no water
+   rule changed. Whoever designs the positive control should measure the generation time
+   again under the new rule rather than halving these.
 2. **Bloomcrown's habitat is now 96 columns of 3,072** under the bounded tap, against 2,526
    under the rising one. Whether that is the sun producer's intended niche or an artifact of
    `establish_pore_min` 0.1 meeting a drier world is a placeholder question
    (`design/backlog.md` row 41), and it decides whether the species has anywhere to live
    before the presets round adds three more.
-3. **Two packages per recruit is a consequence, not a decision.** If it should be one, the
-   rule to change is where attrition is charged relative to germination, or the package
-   size — both explicit rule changes, neither a knob.
+3. **Two packages per recruit was a consequence, not a decision — and it is settled.**
+   Taken up as `K7` straight after this rerun, as the phase-order change of the two
+   candidates: germination happens before that tick's attrition and expiry, so one package
+   germinates whole and attrition applies to what stays banked. The other candidate — a
+   margin added to the package size — was refused, because it would have turned a derived
+   number into a tuned one.

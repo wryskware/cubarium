@@ -649,6 +649,17 @@ fn a_cohort_on_a_site_that_fails_the_predicate_decays_to_litter_and_never_stands
     // five-tick window opened at tick 5, and the run is at tick 17.
     assert_eq!(c.bin_start_tick, 5, "not the bin the landing tick belonged to: {c:?}");
     assert_eq!(c.age_ticks(flora.tick()), 12, "the bin did not age");
+    // Attrition from its **first banked tick**, not from the tick it landed on: the
+    // package arrives in step 9, after that tick's decay has been charged, so ten ticks in
+    // the bank is ten factors of `1 − seed_attrition_per_s · dt` and no more. K7 moved
+    // germination in front of the decay; it did not move the decay itself.
+    let attrition = flora.config().species(Species::Bloomcrown).seed_attrition_per_s;
+    let want = landed.organic * (1.0 - attrition * cubarium_voxel::DT).powi(10);
+    assert!(
+        (c.organic - want).abs() <= 1e-15,
+        "{} banked after ten ticks of attrition, not {want}",
+        c.organic
+    );
     assert!(c.organic < landed.organic, "it did not decay: {c:?}");
     assert!(
         (g.litter - (landed.organic - c.organic)).abs() < 1e-15,
@@ -689,12 +700,12 @@ fn a_cohort_on_a_site_that_fails_the_predicate_decays_to_litter_and_never_stands
 /// builds is its own banked material: alive, over `alive_min`, and carrying the bank's own
 /// mineral density rather than `n_tissue`.
 ///
-/// It also pins the consequence of round 3b's package arithmetic that nothing else states.
-/// A landed package is **exactly** the minimum viable stand's material,
-/// `alive_min / w_frac`, and a dormant cohort pays attrition every tick before germination
-/// is tested — so one package on its own is 0.1 % short for ever and a recruit needs a
-/// **second** delivery. The second tick below is that claim: one whole package is banked
-/// and nothing is born.
+/// It also pins the arithmetic of round 3b's package, which K7 made whole: a landed
+/// package is **exactly** the minimum viable stand's material, `alive_min / w_frac`, so one
+/// package on a passing site is **one recruit**, born on the next step out of the whole
+/// package at exactly `alive_min` of wood. Germination reads the bank before that tick's
+/// attrition is charged for precisely this reason; when attrition went first, one package
+/// was 0.1 % short of the threshold for ever and every recruit cost two deliveries.
 ///
 /// `propagule_rate` is 3.0 /s against the placeholder 2e-4 and `reserve_cap` 4.0 against
 /// 0.5, so the donor can fund a package every tick for eight ticks and the test is short;
@@ -727,31 +738,23 @@ fn a_bank_over_the_threshold_germinates_into_a_stand_of_its_own_pooled_cohorts()
     assert!((first - package).abs() <= 1e-15 * package, "a {first} package, not {package}");
     assert_eq!(flora.view().ledger.establishments, 0, "born on its landing tick");
 
-    // Tick two: that bank held exactly one package and has now paid a tick of attrition,
-    // so it is **under** the threshold and nothing germinates out of it.
+    // Tick two: that one package is a recruit. It germinates out of the whole package,
+    // before any attrition is charged against it, on the site it landed on.
     flora.step(&mut world);
     assert_eq!(
         flora.view().ledger.establishments,
-        0,
-        "a single package germinated, though attrition put it under alive_min / w_frac"
+        1,
+        "one package on a passing site is one recruit"
     );
-
-    // Give it the second delivery it needs, and the first birth follows.
-    let mut born_at = None;
-    for _ in 0..20 {
-        flora.step(&mut world);
-        if flora.view().ledger.establishments > 0 {
-            born_at = flora
-                .view()
-                .stands
-                .iter()
-                .find(|st| st.site != site(2))
-                .map(|st| st.site);
-            break;
-        }
-    }
-    let at = born_at.expect("twenty more ticks of packages produced no birth at all");
+    let at = banked[0];
     let s = *flora.view().stand_at(at).expect("the newborn");
+    // The bin it came out of was emptied whole, so the bank on that site is whatever the
+    // donor has landed since and nothing older.
+    assert!(
+        flora.view().ground_at(at).unwrap().seed_organic(Species::Bloomcrown) <= package,
+        "the bin was not spent whole: {:?}",
+        flora.view().ground_at(at).unwrap().seeds
+    );
     assert_eq!(s.stage, Stage::Alive, "a germinated stand is alive, not establishing");
     assert_eq!(s.species, Species::Bloomcrown);
     assert!(s.wood >= sc.alive_min, "born below alive_min: {}", s.wood);

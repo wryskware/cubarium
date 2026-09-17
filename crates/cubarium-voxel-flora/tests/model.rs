@@ -548,11 +548,15 @@ fn nothing_outside_hop_ever_receives_and_the_patch_does_not_creep() {
 /// run is the debit; with income on, growth moves the same stock and the debit cannot be
 /// read off it. `propagule_rate` is 0.18 /s (placeholder 2e-4), which is 0.0075 of parcel
 /// a tick, so the first package is full on the seventh tick and this ten-tick run has one
-/// package away and 0.025 still saving.
+/// package away and 0.025 still saving. `establish_light_min` is 2.0 (placeholder 0.6), a
+/// predicate nothing can pass: since K7 a single package on a *passing* site is a recruit
+/// on the next step, and this test is about the donor's books, so the package has to stay
+/// in the bank to be read.
 #[test]
 fn a_donor_is_debited_exactly_what_arrives_plus_its_construction() {
     let mut config = FloraConfig::default();
     config.bloomcrown.propagule_rate = 0.18;
+    config.bloomcrown.establish_light_min = 2.0;
     frozen(&mut config.bloomcrown);
     let mut world = plain(8, 8, 0.6);
     let mut flora = Flora::new(config);
