@@ -457,9 +457,11 @@ fn springturf_germinates_on_retained_water_soil_and_is_maintenance_deficient_the
     assert!((g.mean_pore.expect("soil") - 0.26).abs() < 1e-12, "{g:?}");
     assert_eq!(g.soil_voxels, 2, "the root box is the two soil faces: {g:?}");
 
-    // The newborn that permission buys. Only the donor's saving rate is the fixture's own
-    // (see the module doc); the newborn's own stocks and every rate it lives by are the
-    // preset's.
+    // The newborn that permission buys. What the fixture changes is the donor's saving
+    // rule alone — `fast_donor` raises `propagule_rate` **and** `reserve_cap`, so that one
+    // tick's reserve above the floor can fund a whole package (Astra R7.3 asked for the
+    // second of those to be named here) — and neither reaches this newborn: its own stocks
+    // and every rate it lives by are the preset's, and it earns no allocation surplus.
     let mut birth =
         paid_birth(&mut world, fast_donor(Species::Springturf), Species::Springturf, 0, at(1));
     let born = *birth.flora.view().stand_at(at(1)).expect("the package germinated");

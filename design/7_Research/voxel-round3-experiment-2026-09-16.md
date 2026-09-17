@@ -865,8 +865,11 @@ Four things this says, all of them about these two arms at 450 s and nothing mor
      so the next authorised run can.
 
    What none of the three can say is *why* an earlier germination did not happen. Under K7
-   a whole newly landed package at a vacant, passing site germinates in the same tick's
-   lottery, before that tick's attrition; so a fractional bank at 450 s is equally
+   a whole newly landed package at a vacant, passing site germinates out of the bank **as
+   it stands at the start of a tick**, before that tick's attrition — and a package lands
+   in phase 9, *after* the lottery of phase 8, so its first opportunity is the **next**
+   tick and not the one it landed in (Astra R8.5: this note said "the same tick's
+   lottery", which the phase order does not allow). So a fractional bank at 450 s is equally
    consistent with a package that landed on an occupied site, with one the predicate
    refused and attrition then wore down, and with one that has simply not been topped up
    yet. An earlier refusal is attributable only to an **observed event**, and this run

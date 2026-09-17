@@ -1937,11 +1937,16 @@ fn community(args: &[String]) {
 ///
 /// Not a model default (the model has no consumer) and not tuned: it is a **declared
 /// experiment condition**, printed with every run. One consequence is worth knowing before
-/// reading any result: `SpeciesConfig::crown_voxels` is 2 for a bloomcrown at the harness's
-/// founder wood, so a grown bloomcrown crown is **out of reach** of an `up: 1` eater and
-/// only its seedlings are ever food. What a harvester standing on a bloomcrown face eats is
-/// therefore whatever else is within two voxels of it, and the per-species lines below say
-/// exactly what that was.
+/// reading any result, and it is a statement about **relative elevation** and not about the
+/// species (Astra R8.4): `SpeciesConfig::crown_voxels` is 2 for a bloomcrown at the
+/// harness's founder wood, so its crown cells sit two voxels above its own support face and
+/// an `up: 1` eater standing on **that same face** cannot reach them — while one standing
+/// on a face a voxel higher can, because the rule compares the crown's *absolute* cell
+/// height against the eater's own ceiling
+/// (`tests/round5a.rs::the_same_crown_is_out_of_reach_from_its_own_face_and_in_reach_from_the_one_above`).
+/// The declared faces of this probe are the patch species' own founder faces, so what a
+/// harvester eats here is whatever else is within two voxels of it, and the per-species
+/// lines below say exactly what that was.
 const HARVEST_REACH: Reach = Reach { horizontal: 2, up: 1 };
 
 /// How many support faces the scripted harvester works from. Predeclared before the run,

@@ -61,6 +61,16 @@
 //! and for a corpse. A withdrawal has no phase at all: it lowers the stock it reads, and
 //! the next tick's income and decomposition simply see less of it.
 //!
+//! **What waits is the organic throughput, and not every currency** (Astra R8.5). The
+//! snapshot stores organic *amounts*, and [`decompose_pool`] then takes the mineral and the
+//! energy at the pool's **current** density, so material parcels are not age-isolated:
+//! one old unit holding no mineral plus one unit shed inside the tick holding one, at a
+//! decomposition step of half the old stock, releases `1.0 · 0.5/2.0` = **0.25 of mineral
+//! immediately**. That is the inherited well-mixed-pool rule, it conserves every currency
+//! exactly, and it is pinned by
+//! `tests/round5b.rs::decomposition_delays_organic_matter_and_not_the_mineral_of_a_mixed_pool`
+//! rather than changed.
+//!
 //! Dead wood keeps its energy, per §5: `e_v` per unit of it goes into
 //! `Ground::dead_wood_energy` when the wood diebacks or the stand dies, and leaves as
 //! heat only as the wood decomposes, at the stock's current density. A standing dead

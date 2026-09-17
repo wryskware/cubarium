@@ -1969,8 +1969,10 @@ impl Flora {
     /// deposited between tick `t` and tick `t + 1` is in the snapshot of tick `t + 1` and
     /// decomposes in it — "a tick's decomposition sees the previous inter-tick's deposits",
     /// which is the tick-start snapshot rule (`step`'s module doc, step 7) and not a new
-    /// one. A carrion deposit therefore starts respiring on the next tick, and a litter
-    /// deposit does too, exactly as this tick's own senescence would.
+    /// one. A carrion deposit therefore starts respiring on the **next** step, which is
+    /// **sooner** than what this tick's own senescence sheds: that waits for the step after
+    /// it, because it is not in this one's snapshot (Astra R8.5 — the two were equated here,
+    /// and they are one tick apart).
     pub fn deposit(&mut self, site: Site, deposit: Deposit) -> bool {
         let Deposit { kind, organic, mineral, energy } = deposit;
         for v in [organic, mineral, energy] {
