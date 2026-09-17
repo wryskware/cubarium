@@ -1,0 +1,13 @@
+[package]
+name = "cubarium-voxel-flora"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Producers on the voxel strip: stands rooted in support faces, fed by geometric light and pore water through the core's bounded commands. No drawing."
+
+[dependencies]
+anyhow = { workspace = true }
+cubarium-voxel = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]

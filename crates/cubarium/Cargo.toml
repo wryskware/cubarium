@@ -23,6 +23,7 @@ cubarium-core = { workspace = true }
 # `--neural` loads the same file the trainer wrote rather than a second parser.
 cubarium-search = { workspace = true }
 cubarium-voxel = { workspace = true }
+cubarium-voxel-flora = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 minifb = { workspace = true }
