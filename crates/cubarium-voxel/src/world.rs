@@ -76,6 +76,12 @@ pub struct World {
     pub(crate) outlet_open: bool,
     pub(crate) tick: u64,
     pub(crate) ledger: Ledger,
+    /// The one named outlet: when open it exports free water out of this cell.
+    /// Generation picks the lowest void cell of the receiving basin.
+    pub(crate) outlet_cell: Option<(u32, u32, u32)>,
+    /// Where the aquifer discharges when its head rises above the cell. Generation
+    /// picks a low void cell part way up the basin flank.
+    pub(crate) spring_cell: Option<(u32, u32, u32)>,
 }
 
 impl World {
@@ -90,6 +96,8 @@ impl World {
             outlet_open: false,
             tick: 0,
             ledger: Ledger::default(),
+            outlet_cell: None,
+            spring_cell: None,
             config,
         };
         crate::generate::landform(&mut world);
@@ -114,6 +122,8 @@ impl World {
             outlet_open: false,
             tick: 0,
             ledger: Ledger::default(),
+            outlet_cell: None,
+            spring_cell: None,
             material,
             config,
         }
@@ -125,6 +135,36 @@ impl World {
 
     pub fn tick(&self) -> u64 {
         self.tick
+    }
+
+    /// The named outlet cell, if the world has one.
+    pub fn outlet_cell(&self) -> Option<(u32, u32, u32)> {
+        self.outlet_cell
+    }
+
+    /// Name a different outlet cell, or `None` for no outlet.
+    pub fn set_outlet_cell(&mut self, cell: Option<(u32, u32, u32)>) {
+        self.outlet_cell = cell;
+    }
+
+    /// Whether the outlet is currently exporting.
+    pub fn outlet_open(&self) -> bool {
+        self.outlet_open
+    }
+
+    /// The cell the aquifer discharges into, if the world has one.
+    pub fn spring_cell(&self) -> Option<(u32, u32, u32)> {
+        self.spring_cell
+    }
+
+    /// Name a different spring cell, or `None` for no spring.
+    pub fn set_spring_cell(&mut self, cell: Option<(u32, u32, u32)>) {
+        self.spring_cell = cell;
+    }
+
+    /// Aquifer head in metres above `y = 0`.
+    pub fn aquifer_head_m(&self) -> f64 {
+        self.config.aquifer_head_m(self.aquifer_m3)
     }
 
     pub fn view(&self) -> VoxelView<'_> {

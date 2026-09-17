@@ -37,4 +37,15 @@ impl Material {
             Material::Soil => 0.2,
         }
     }
+
+    /// Fraction of the pore capacity the material holds against gravity. Only pore
+    /// water above this drains downward; the rest stays put until it evaporates or a
+    /// plant takes it.
+    pub fn field_capacity(self) -> f64 {
+        match self {
+            Material::Air | Material::Bedrock => 0.0,
+            Material::Rock => 0.5,
+            Material::Soil => 0.25,
+        }
+    }
 }

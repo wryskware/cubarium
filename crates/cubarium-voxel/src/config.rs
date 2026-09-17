@@ -20,6 +20,18 @@ pub struct Config {
     pub evaporation_m_per_s: f64,
     /// Water substeps per tick for the free-water solver.
     pub water_substeps: u32,
+    /// Spring conductance from the aquifer into the spring cell, square metres per
+    /// second: `Q = spring_k_m2_per_s * max(head - h_spring, 0)`.
+    pub spring_k_m2_per_s: f64,
+    /// Fraction of the world footprint the aquifer store occupies, used to turn its
+    /// volume into a head in metres above `y = 0`.
+    pub aquifer_porosity: f64,
+    /// Free water an open outlet exports, cubic metres per second.
+    pub outlet_m3_per_s: f64,
+    /// Largest change in one cell's `free` fraction that a single equalization substep
+    /// may apply, so a filling region can be watched travelling. Zero (the default)
+    /// disables the cap and a region settles to its level in one substep.
+    pub free_transfer_cap: f64,
 }
 
 impl Default for Config {
@@ -33,6 +45,10 @@ impl Default for Config {
             rain_m_per_s: 0.0,
             evaporation_m_per_s: 0.0,
             water_substeps: 4,
+            spring_k_m2_per_s: 0.02,
+            aquifer_porosity: 0.1,
+            outlet_m3_per_s: 0.05,
+            free_transfer_cap: 0.0,
         }
     }
 }
@@ -66,5 +82,18 @@ impl Config {
     /// Volume of one voxel in cubic metres.
     pub fn voxel_volume(&self) -> f64 {
         self.voxel_m * self.voxel_m * self.voxel_m
+    }
+
+    /// Footprint of one voxel column in square metres.
+    pub fn cell_area(&self) -> f64 {
+        self.voxel_m * self.voxel_m
+    }
+
+    /// Aquifer head in metres above `y = 0` for a given store, from the world footprint
+    /// and [`Config::aquifer_porosity`].
+    pub fn aquifer_head_m(&self, aquifer_m3: f64) -> f64 {
+        let area = self.width as f64 * self.depth as f64 * self.cell_area();
+        let pore = (area * self.aquifer_porosity).max(1e-12);
+        aquifer_m3 / pore
     }
 }

@@ -14,6 +14,13 @@ pub struct Ledger {
     pub displaced_out: f64,
     /// Total stored water at creation, so `residual` can be computed from a snapshot.
     pub initial_stored: f64,
+    /// The `f32` quantization residue of internal transfers. `free` and `pore` are
+    /// `f32` fractions, so a transfer's credit and debit can differ by an ulp of the
+    /// cells involved; every transfer books its destination's actual gain and its
+    /// source's actual loss and the difference lands here. A few ulps per transfer is
+    /// arithmetic, not water: a real leak shows up as a term far larger than that.
+    /// Reported rather than hidden, like `displaced_out`.
+    pub rounding_m3: f64,
 }
 
 impl Ledger {
@@ -21,9 +28,9 @@ impl Ledger {
         self.rain_in + self.user_in - self.evaporation_out - self.outlet_out - self.displaced_out
     }
 
-    /// What the stores should hold now given the fluxes. `stored - expected` is the
-    /// conservation residual.
+    /// What the stores should hold now given the fluxes and the `f32` quantization
+    /// residue. `stored - expected` is the conservation residual.
     pub fn expected_stored(&self) -> f64 {
-        self.initial_stored + self.net_in()
+        self.initial_stored + self.net_in() + self.rounding_m3
     }
 }
