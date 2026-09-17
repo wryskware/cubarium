@@ -656,8 +656,14 @@ fn rain_pulse(w: &mut World, volume_m3: f64) -> f64 {
     credited
 }
 
-/// Replace a material, moving the water it held to the nearest void space it can reach
-/// before booking any of it as displaced.
+/// Replace a material, preserving the water volume the cell held.
+///
+/// The cell's free and pore water are converted to cubic metres *before* the edit, so
+/// nothing carries over as a fraction of the wrong capacity. The new material then keeps
+/// what fits it: air keeps free water up to its void, soil and rock keep pore water up
+/// to their pore capacity, and a solid turned to air hands its pore water over as free
+/// water. What does not fit is displaced to the nearest void with room, and only volume
+/// with no reachable room at all is booked as [`crate::Ledger::displaced_out`].
 fn set_material(w: &mut World, i: usize, material: Material) -> f64 {
     let water = free_m3(w, i) + pore_m3(w, i);
     w.material[i] = material;
@@ -667,51 +673,56 @@ fn set_material(w: &mut World, i: usize, material: Material) -> f64 {
         return 0.0;
     }
 
-    let mut placed = if material.is_solid() {
-        add_pore(w, i, water)
-    } else {
-        add_free(w, i, water)
-    };
-    if water - placed > 1e-15 {
-        placed += spill_to_nearest_void(w, i, water - placed);
+    let kept = if material.is_solid() { add_pore(w, i, water) } else { add_free(w, i, water) };
+    let mut left = water - kept;
+    if left > 1e-15 {
+        left -= spill_to_nearest_void(w, i, left);
     }
-    let deficit = water - placed;
-    if deficit > 1e-12 {
-        w.ledger.displaced_out += deficit;
+    if left > 1e-12 {
+        w.ledger.displaced_out += left;
     }
-    placed
+    water - left.max(0.0)
 }
 
-/// Breadth-first through void cells from `from`, pouring into each cell's room in
-/// order of distance and then index. Returns what it managed to place.
+/// Pour `volume_m3` into the void cells nearest `from`, and return what it placed.
+///
+/// "Nearest" is the wrapped face-adjacent **void** path distance: the search steps only
+/// through void cells, so it never tunnels through a solid to reach space behind it, and
+/// it wraps in `x` like everything else. Every cell at the same distance gets an equal
+/// share; a cell with no room takes nothing and its share goes back to the others at
+/// that same distance; only once a whole shell is full does the next shell get anything.
+/// Equal shares are the tie rule — nothing here depends on index order.
 fn spill_to_nearest_void(w: &mut World, from: usize, volume_m3: f64) -> f64 {
     let c = w.config.clone();
     let mut seen = vec![false; c.cells()];
     seen[from] = true;
-    let mut frontier: Vec<usize> = neighbours(&c, from)
-        .into_iter()
-        .flatten()
-        .filter(|&nb| {
-            let take = !seen[nb] && !w.material[nb].is_solid();
+    let mut shell: Vec<usize> = Vec::new();
+    for nb in neighbours(&c, from).into_iter().flatten() {
+        if !seen[nb] && !w.material[nb].is_solid() {
             seen[nb] = true;
-            take
-        })
-        .collect();
-    frontier.sort_unstable();
+            shell.push(nb);
+        }
+    }
 
     let mut left = volume_m3;
     let mut placed = 0.0;
-    let mut visited = 0usize;
-    while !frontier.is_empty() && left > 1e-15 && visited < 8192 {
-        let mut next: Vec<usize> = Vec::new();
-        for &i in &frontier {
-            visited += 1;
-            let got = add_free(w, i, left);
-            placed += got;
-            left -= got;
-            if left <= 1e-15 {
+    while !shell.is_empty() && left > 1e-15 {
+        let mut open = shell.clone();
+        while !open.is_empty() && left > 1e-15 {
+            let share = left / open.len() as f64;
+            let mut taken = 0.0;
+            for &i in &open {
+                taken += add_free(w, i, share);
+            }
+            placed += taken;
+            left -= taken;
+            if taken <= 1e-15 {
                 break;
             }
+            open.retain(|&i| free_room_m3(w, i) > 1e-15);
+        }
+        let mut next: Vec<usize> = Vec::new();
+        for &i in &shell {
             for nb in neighbours(&c, i).into_iter().flatten() {
                 if !seen[nb] && !w.material[nb].is_solid() {
                     seen[nb] = true;
@@ -719,8 +730,7 @@ fn spill_to_nearest_void(w: &mut World, from: usize, volume_m3: f64) -> f64 {
                 }
             }
         }
-        next.sort_unstable();
-        frontier = next;
+        shell = next;
     }
     placed
 }

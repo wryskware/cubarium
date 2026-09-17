@@ -10,8 +10,15 @@ pub enum Command {
     /// Add free water into one voxel (clipped to its void space; the rest is refused
     /// and reported in the return value of `apply`).
     AddWater { x: i64, y: u32, z: u32, volume_m3: f64 },
-    /// Replace a voxel's material. Water it displaces moves to available space or is
-    /// booked as `displaced_out`; pore water above the new capacity likewise.
+    /// Replace a voxel's material, preserving the water volume the voxel held.
+    ///
+    /// Its free and pore water are converted to cubic metres first, then the new
+    /// material keeps what fits: air keeps free water up to its void, soil and rock keep
+    /// pore water up to their own pore capacity, and a solid turned to air releases its
+    /// pore water as free water. The rest is displaced to the nearest void with room —
+    /// wrapped face-adjacent void path distance, sharing equally among equal-distance
+    /// recipients before any farther one — and only volume with no reachable room at all
+    /// is booked as `Ledger::displaced_out`.
     SetMaterial { x: i64, y: u32, z: u32, material: Material },
     /// Add to (or, negative, remove from) the aquifer store.
     ChargeAquifer { volume_m3: f64 },

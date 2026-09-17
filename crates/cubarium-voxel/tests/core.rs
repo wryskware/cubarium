@@ -281,6 +281,20 @@ fn the_residual_stays_below_1e_9_with_every_flux_firing() {
     assert!(residual(&w).abs() < 1e-9, "residual {}", residual(&w));
 }
 
+// ------------------------------------------------------------- material edits
+
+/// Saturated soil at `(1, 1)` on a four-column ring, made by turning a brim-full air
+/// cell into soil: the soil takes its whole 0.35 m3 pore capacity and the other 0.65 m3
+/// is already sitting in its three void face neighbours, `(0, 1)`, `(2, 1)` and
+/// `(1, 2)` — `(1, 0)` is the bedrock foundation. Never stepped, so nothing has drained.
+fn wet_soil() -> World {
+    let mut w = World::empty(cfg(4, 6));
+    w.apply(Command::AddWater { x: 1, y: 1, z: 0, volume_m3: 1.0 });
+    w.apply(Command::SetMaterial { x: 1, y: 1, z: 0, material: Material::Soil });
+    assert!((w.view().pore_at(1, 1, 0) - 1.0).abs() < 1e-9, "the soil must start saturated");
+    w
+}
+
 #[test]
 fn set_material_moves_displaced_water_instead_of_booking_it_out() {
     let mut w = World::empty(cfg(4, 6));
@@ -288,9 +302,67 @@ fn set_material_moves_displaced_water_instead_of_booking_it_out() {
     let before = w.view().stored_m3();
     w.apply(Command::SetMaterial { x: 1, y: 1, z: 0, material: Material::Rock });
     let after = w.view().stored_m3();
-    // The rock keeps its pore share; the rest lands in the nearest void cell.
+    // The rock keeps its pore share (0.02); the remaining 0.98 is shared equally by the
+    // three void cells one step away.
     assert!((before - after).abs() < 1e-9, "{before} -> {after}");
-    assert!((w.view().free_at(0, 1, 0) - 0.98).abs() < 1e-9, "{}", w.view().free_at(0, 1, 0));
+    assert!((w.view().pore_at(1, 1, 0) - 1.0).abs() < 1e-9, "{}", w.view().pore_at(1, 1, 0));
+    for (x, y) in [(0, 1), (2, 1), (1, 2)] {
+        let f = w.view().free_at(x, y, 0);
+        assert!((f - 0.98 / 3.0).abs() < 1e-9, "({x}, {y}) got {f}");
+    }
+    assert_eq!(w.view().ledger.displaced_out, 0.0);
+    assert!(residual(&w).abs() < 1e-9);
+}
+
+#[test]
+fn wet_soil_turned_to_rock_keeps_only_rock_capacity_and_displaces_the_rest() {
+    let mut w = wet_soil();
+    let before = w.view().stored_m3();
+    w.apply(Command::SetMaterial { x: 1, y: 1, z: 0, material: Material::Rock });
+    // Rock holds 0.02 of the voxel against soil's 0.35, so a full rock pore keeps
+    // 0.02 m3 and the other 0.33 m3 is shared by the three neighbouring voids. Keeping
+    // the *fraction* would have silently dropped that 0.33.
+    assert!((w.view().pore_at(1, 1, 0) - 1.0).abs() < 1e-9, "{}", w.view().pore_at(1, 1, 0));
+    for (x, y) in [(0, 1), (2, 1), (1, 2)] {
+        let f = w.view().free_at(x, y, 0);
+        assert!((f - 0.98 / 3.0).abs() < 1e-9, "({x}, {y}) got {f}");
+    }
+    assert!((w.view().stored_m3() - before).abs() < 1e-9, "{}", w.view().stored_m3());
+    assert_eq!(w.view().ledger.displaced_out, 0.0);
+    assert!(residual(&w).abs() < 1e-9);
+}
+
+#[test]
+fn wet_soil_turned_to_air_releases_its_pore_water_as_free_water() {
+    let mut w = wet_soil();
+    let before = w.view().stored_m3();
+    w.apply(Command::SetMaterial { x: 1, y: 1, z: 0, material: Material::Air });
+    // Air has no pores: the soil's 0.35 m3 becomes free water, and it fits in the cell.
+    assert!((w.view().free_at(1, 1, 0) - 0.35).abs() < 1e-9, "{}", w.view().free_at(1, 1, 0));
+    assert_eq!(w.view().pore_at(1, 1, 0), 0.0);
+    assert!((w.view().stored_m3() - before).abs() < 1e-9, "{}", w.view().stored_m3());
+    assert_eq!(w.view().ledger.displaced_out, 0.0);
+    assert!(residual(&w).abs() < 1e-9);
+}
+
+#[test]
+fn a_full_recipient_is_skipped_and_the_next_shell_takes_the_water() {
+    let mut w = wet_soil();
+    for (x, y) in [(0, 1), (2, 1), (1, 2)] {
+        w.apply(Command::AddWater { x, y, z: 0, volume_m3: 1.0 });
+    }
+    let before = w.view().stored_m3();
+    w.apply(Command::SetMaterial { x: 1, y: 1, z: 0, material: Material::Rock });
+    // Every cell one step away is brim full, so the 0.33 goes to the four cells two
+    // void steps away: (3, 1) round the seam, (0, 2), (2, 2) and (1, 3).
+    for (x, y) in [(0, 1), (2, 1), (1, 2)] {
+        assert!((w.view().free_at(x, y, 0) - 1.0).abs() < 1e-9, "({x}, {y}) overfilled");
+    }
+    for (x, y) in [(3, 1), (0, 2), (2, 2), (1, 3)] {
+        let f = w.view().free_at(x, y, 0);
+        assert!((f - 0.33 / 4.0).abs() < 1e-9, "({x}, {y}) got {f}");
+    }
+    assert!((w.view().stored_m3() - before).abs() < 1e-9);
     assert_eq!(w.view().ledger.displaced_out, 0.0);
     assert!(residual(&w).abs() < 1e-9);
 }
