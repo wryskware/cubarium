@@ -197,12 +197,14 @@ struct Outcome {
     /// moment and not a settled habitat (Astra R5.2).
     eligible: [Vec<(u32, u32)>; Species::COUNT],
     /// The same predicate over the same columns **at observation**: the last tick of the
-    /// run, with the plants and the settled water in it. Printed beside the introduction
-    /// set so that a reader can see how far the eligible band moved while the arm ran.
+    /// run, with the plants in it. Not "settled water" — the water budget shows the head
+    /// still falling at the end of these runs, so this is a reading of the last tick and
+    /// nothing more (Astra R6.3). Printed beside the introduction set so that a reader can
+    /// see how far the eligible set moved while the arm ran.
     eligible_at_end: [Vec<(u32, u32)>; Species::COUNT],
     /// The founders this run's own selection rule would have planted, whatever it was
-    /// actually handed: umbrellafrond from the bottom of its eligible skyline, bloomcrown
-    /// from the top. Comparing these across runs asks where the *process* would put a
+    /// actually handed: each species from the end of its own eligible skyline its
+    /// [`Habitat`] names. Comparing these across runs asks where the *process* would put a
     /// species when it is free to choose, which the fixed-founder arms deliberately do
     /// not.
     own_founders: Vec<Founder>,
@@ -1166,7 +1168,7 @@ fn compare(args: &[String]) {
         let (bo, ao, co) =
             (&base.eligible_at_end[i], &alt.eligible_at_end[i], &ctl.eligible_at_end[i]);
         println!(
-            "  eligible at observation (end of the run, plants and settled water in it) \
+            "  eligible at observation (the last tick of the run, with the plants in it) \
              ({} / {} / {}): noise {}   control {}",
             bo.len(),
             ao.len(),
@@ -1175,7 +1177,8 @@ fn compare(args: &[String]) {
             show(jaccard(bo, co))
         );
         println!(
-            "  the eligible band moved by {} / {} / {} columns between the two readings",
+            "  the eligible count changed by {} / {} / {} columns between the two readings — a \
+             net change in the size of each set, not a count of columns that moved",
             (bo.len() as i64) - (be.len() as i64),
             (ao.len() as i64) - (ae.len() as i64),
             (co.len() as i64) - (ce.len() as i64)

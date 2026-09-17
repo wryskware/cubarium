@@ -624,21 +624,28 @@ establishment gates at observation (3072 skyline columns):
 ```
 
 **Bloomcrown's 96 columns was the wetting at 50 s and not a niche size.** On the same
-terrain, 350 s later, the same predicate admits **2,688 of 3,072** columns — the soil comes
-down off saturation as the initial charge drains — and what shuts the remaining 384 is the
-saturation ceiling (329 of them for that reason alone) plus 55 columns under standing water.
-Not one column fails on mean pore and not one on light: `establish_pore_min` 0.1 and
-`establish_light_min` 0.6 are not what held it to 96. Umbrellafrond moves the other way and
-for the opposite reason, 386 → 668, with 2,404 columns refused on **mean pore alone**,
-because its `establish_pore_min` of 0.45 sits above where drained soil settles (the mean
-root-box pore over the whole skyline is 0.40).
+terrain, after **400 coupled seconds** — the harness warms the world up for 50 s and then
+runs the duration it was asked for, so this reading is of a 450-second-old world and not of
+one 350 s on from the first reading (Astra R6.3) — the same predicate admits **2,688 of
+3,072** columns. The soil comes down off saturation as the initial charge drains, and what
+shuts the remaining 384 is the saturation ceiling (329 of them for that reason alone) plus
+55 columns under standing water. At observation not one column fails on mean pore and not
+one on light. That is a statement about **those two gates at 450 s** and nothing else: the
+96-column reading at introduction was not broken down by gate, so this does not identify
+what held bloomcrown to 96 (Astra R6.3). Umbrellafrond moves the other way and for the
+opposite reason, 386 → 668, with 2,404 columns refused on **mean pore alone**, because its
+`establish_pore_min` of 0.45 sits above where drained soil settles (the mean root-box pore
+over the whole skyline is 0.40).
 
 Two things this does **not** say. It is not a settled-habitat measurement either — the head
 is still falling at 400 s, −0.24 m over the run with the outlet at its full 0.05 m³/s — and
 a count of eligible columns is not a count of reachable ones: what a donor can recruit on is
 the eligible faces inside its own `hop`, 85 of 182 for the eight bloomcrown donors and 61 of
-61 for the eight umbrellafrond donors. The germination gate that was shut in the 2,000 s
-arms was the **bank**, not the predicate.
+61 for the eight umbrellafrond donors. And it says nothing about which germination gate was
+shut in the earlier 2,000 s arms, which reported refused bloomcrown banks: an
+eligible-neighbour count taken here, on a world of a different age under a different
+recruitment rule, cannot dismiss the predicate there. Those arms' own diagnosis is the only
+evidence about them (Astra R6.3).
 
 
 ### The three residuals, still fine
@@ -684,14 +691,18 @@ and nothing is negative anywhere.
    newcomer birth identities per tick, so a descendant born and dead inside the window is
    reported as a birth, with survivors printed separately).
 
-   **The recruitment cost has since changed, and every number above this line predates
-   it.** All three arms ran before `K7`, when a bin paid its attrition *before* germination
-   was tested, so a single package sat 0.1 % under its own threshold for ever and a recruit
-   cost **two packages on one site**. K7 made germination read the bank as it stands at the
+   **The recruitment cost has since changed, and the three-arm comparison predates it.**
+   All three arms of that comparison ran before `K7`, when a bin paid its attrition
+   *before* germination was tested, so a single package sat 0.005 % under its own threshold
+   for ever — one tick of `seed_attrition_per_s` 0.001 at `DT` 0.05 is 5e-5 of the bank —
+   and a recruit cost **two packages on one site**. The 400-second gate diagnostic added in
+   `K8` (the section above) is **not** pre-K7: it ran under the new rule, and the scoping
+   here is to the comparison alone (Astra R6.3). K7 made germination read the bank as it stands at the
    start of the tick and charged attrition on what stays — the rule the package size always
    stated: **one package is one recruit**, born on the next step at exactly `alive_min` of
-   wood. Everything in this section is therefore a **pre-K7 observation, and the coupled
-   post-K7 outcomes have not been measured** — not a lower bound on them (Astra R5.3).
+   wood. The three-arm comparison is therefore a **pre-K7 observation, and the coupled
+   post-K7 outcomes of those arms have not been measured** — not a lower bound on them
+   (Astra R5.3).
    Earlier births change which gaps are occupied, and therefore water withdrawal, shading,
    litter and the funding that follows; there is no monotonicity to appeal to for the
    counts or the fractions, and unchanged accounting *rules* do not imply unchanged
