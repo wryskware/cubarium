@@ -43,8 +43,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use ash::vk;
 
 use super::dmabuf::{self, LinearImage};
-use crate::render::{PresentTransform, Renderer, TargetImage};
-use crate::scene::Scene;
+use crate::present::FrameSource;
+use crate::render::{PresentTransform, TargetImage};
 use crate::vk::Gpu;
 
 /// The daemon's socket.
@@ -95,14 +95,19 @@ pub struct ShimScanout {
 
 impl ShimScanout {
     /// Connect, export `SLOTS` scanout images and attach them all.
-    pub fn open(gpu: &Gpu, renderer: &mut Renderer, quarter_turns: u32) -> Result<ShimScanout> {
+    pub fn open<S: FrameSource>(
+        gpu: &Gpu,
+        src: &mut S,
+        quarter_turns: u32,
+    ) -> Result<ShimScanout> {
         if !gpu.has_dma_buf {
             bail!("this device has no VK_EXT_external_memory_dma_buf; the shim cannot be fed");
         }
         dmabuf::linear_export_supported(gpu)?;
         let shader_encode = !dmabuf::srgb_view_supported(gpu);
+        let raster = src.raster_size();
         let transform = PresentTransform::fit(
-            (renderer.layout.w, renderer.layout.h),
+            raster,
             PANEL,
             quarter_turns,
             shader_encode,
@@ -110,8 +115,8 @@ impl ShimScanout {
         .ok_or_else(|| {
             anyhow!(
                 "a {}x{} raster does not fit {}x{} at {quarter_turns} quarter turn(s)",
-                renderer.layout.w,
-                renderer.layout.h,
+                raster.0,
+                raster.1,
                 PANEL.0,
                 PANEL.1
             )
@@ -122,12 +127,12 @@ impl ShimScanout {
         } else {
             vk::Format::B8G8R8A8_SRGB
         };
-        let pass = renderer.present_pass(gpu, view_format, vk::ImageLayout::GENERAL)?;
+        let pass = src.present_pass(gpu, view_format, vk::ImageLayout::GENERAL)?;
         let d = &gpu.device;
         let command_buffers = unsafe {
             d.allocate_command_buffers(
                 &vk::CommandBufferAllocateInfo::default()
-                    .command_pool(renderer.command_pool)
+                    .command_pool(src.command_pool())
                     .command_buffer_count(SLOTS as u32),
             )
         }?;
@@ -194,7 +199,12 @@ impl ShimScanout {
     /// Returns `(GPU ms, submit..fence ms, pacing ms)`. The third is what this frame
     /// spent waiting for the daemon to give a slot back — the panel's own pacing, which
     /// with three slots shows up only once the renderer is a frame ahead of it.
-    pub fn draw(&mut self, gpu: &Gpu, renderer: &mut Renderer, scene: &Scene) -> Result<(f64, f64, f64)> {
+    pub fn draw<S: FrameSource>(
+        &mut self,
+        gpu: &Gpu,
+        src: &mut S,
+        frame: S::Frame<'_>,
+    ) -> Result<(f64, f64, f64)> {
         let waited = Instant::now();
         let index = self.take_free_slot()?;
         let d = &gpu.device;
@@ -202,10 +212,10 @@ impl ShimScanout {
         {
             let slot = &self.slots[index];
             unsafe { d.reset_command_buffer(slot.command_buffer, vk::CommandBufferResetFlags::empty()) }?;
-            renderer.record(
+            src.record_frame(
                 gpu,
                 slot.command_buffer,
-                scene,
+                frame,
                 Some((
                     &slot.target,
                     PANEL,
@@ -224,7 +234,7 @@ impl ShimScanout {
         let submitted = Instant::now();
         self.present(self.slots[index].id)?;
         Ok((
-            renderer.gpu_ms(gpu),
+            src.gpu_ms(gpu),
             (submitted - start).as_secs_f64() * 1e3,
             (start - waited).as_secs_f64() * 1e3,
         ))
@@ -232,11 +242,15 @@ impl ShimScanout {
 
     /// The last presented slot's contents, read back through the GPU as RGBA8: proof
     /// that what the daemon is scanning out is the frame that was drawn.
-    pub fn read_presented(&self, gpu: &Gpu, renderer: &Renderer) -> Result<(u32, u32, Vec<u8>)> {
+    pub fn read_presented<S: FrameSource>(
+        &self,
+        gpu: &Gpu,
+        src: &S,
+    ) -> Result<(u32, u32, Vec<u8>)> {
         let index = (self.next + SLOTS - 1) % SLOTS;
         let rgba = dmabuf::read_back(
             gpu,
-            renderer.command_pool,
+            src.command_pool(),
             &self.slots[index].image,
             PANEL.0,
             PANEL.1,

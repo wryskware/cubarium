@@ -19,8 +19,7 @@
 use anyhow::Result;
 use ash::vk;
 
-use crate::render::Renderer;
-use crate::scene::Scene;
+use crate::present::FrameSource;
 use crate::vk::Gpu;
 
 #[cfg(feature = "scanout")]
@@ -43,12 +42,12 @@ pub struct Headless {
 }
 
 impl Headless {
-    pub fn new(gpu: &Gpu, renderer: &Renderer) -> Result<Headless> {
+    pub fn new<S: FrameSource>(gpu: &Gpu, src: &S) -> Result<Headless> {
         let d = &gpu.device;
         let command_buffer = unsafe {
             d.allocate_command_buffers(
                 &vk::CommandBufferAllocateInfo::default()
-                    .command_pool(renderer.command_pool)
+                    .command_pool(src.command_pool())
                     .command_buffer_count(1),
             )
         }?[0];
@@ -57,23 +56,28 @@ impl Headless {
     }
 
     /// Draw one frame and wait for it. Returns the GPU milliseconds the timestamps saw.
-    pub fn draw(&mut self, gpu: &Gpu, renderer: &mut Renderer, scene: &Scene) -> Result<f64> {
+    pub fn draw<S: FrameSource>(
+        &mut self,
+        gpu: &Gpu,
+        src: &mut S,
+        frame: S::Frame<'_>,
+    ) -> Result<f64> {
         let d = &gpu.device;
         unsafe { d.reset_command_buffer(self.command_buffer, vk::CommandBufferResetFlags::empty()) }?;
-        renderer.record(gpu, self.command_buffer, scene, None)?;
+        src.record_frame(gpu, self.command_buffer, frame, None)?;
         let one = [self.command_buffer];
         unsafe {
             d.reset_fences(&[self.fence])?;
             d.queue_submit(gpu.queue, &[vk::SubmitInfo::default().command_buffers(&one)], self.fence)?;
             d.wait_for_fences(&[self.fence], true, u64::MAX)?;
         }
-        Ok(renderer.gpu_ms(gpu))
+        Ok(src.gpu_ms(gpu))
     }
 
     /// The world raster as `w × h` RGBA8, already sRGB-encoded by the attachment — the
     /// bytes a PNG wants.
-    pub fn read(&self, gpu: &Gpu, renderer: &Renderer) -> Result<Vec<u8>> {
-        renderer.read_raster(gpu)
+    pub fn read<S: FrameSource>(&self, gpu: &Gpu, src: &S) -> Result<Vec<u8>> {
+        src.read_raster(gpu)
     }
 
     pub fn destroy(&self, gpu: &Gpu) {
