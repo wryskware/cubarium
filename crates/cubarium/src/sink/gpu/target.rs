@@ -3,8 +3,7 @@
 use anyhow::{Context, Result};
 use clap::ValueEnum;
 
-use cubarium_gpu::render::Renderer;
-use cubarium_gpu::scene::Scene;
+use cubarium_gpu::present::FrameSource;
 use cubarium_gpu::target::Headless;
 use cubarium_gpu::vk::Gpu;
 
@@ -32,7 +31,12 @@ impl GpuTargetKind {
     }
 }
 
-/// One open target.
+/// One open target, for either renderer.
+///
+/// Nothing here names `Renderer` or `VoxelRenderer`: a target asks its frame source
+/// (`cubarium_gpu::present::FrameSource`) for the raster's size, a command pool, the
+/// present render pass and one `record_frame`, which is all a window or a panel needs.
+/// That is why `--sink gpu` on the ring and on the voxel strip share this file.
 pub enum GpuTarget {
     Shim(Box<cubarium_gpu::target::ShimScanout>),
     Window(Box<WindowTarget>),
@@ -40,28 +44,40 @@ pub enum GpuTarget {
 }
 
 impl GpuTarget {
-    pub fn open(kind: GpuTargetKind, gpu: &Gpu, renderer: &mut Renderer) -> Result<GpuTarget> {
+    /// Open a target for `src`. `title` names the development window and is ignored by
+    /// every other target.
+    pub fn open<S: FrameSource>(
+        kind: GpuTargetKind,
+        gpu: &Gpu,
+        src: &mut S,
+        title: &str,
+    ) -> Result<GpuTarget> {
         match kind {
             GpuTargetKind::Shim => {
-                let shim = cubarium_gpu::target::ShimScanout::open(gpu, renderer, 1)
+                let shim = cubarium_gpu::target::ShimScanout::open(gpu, src, 1)
                     .context("attaching to cube-screen-shim's frame socket")?;
                 Ok(GpuTarget::Shim(Box::new(shim)))
             }
-            GpuTargetKind::Window => Ok(GpuTarget::Window(Box::new(WindowTarget::open(
-                gpu, renderer,
-            )?))),
+            GpuTargetKind::Window => {
+                Ok(GpuTarget::Window(Box::new(WindowTarget::open(gpu, src, title)?)))
+            }
             GpuTargetKind::Headless => {
-                Ok(GpuTarget::Headless(Box::new(Headless::new(gpu, renderer)?)))
+                Ok(GpuTarget::Headless(Box::new(Headless::new(gpu, src)?)))
             }
         }
     }
 
-    /// Draw one scene. Returns the GPU milliseconds the timestamps saw.
-    pub fn draw(&mut self, gpu: &Gpu, renderer: &mut Renderer, scene: &Scene) -> Result<f64> {
+    /// Draw one frame. Returns the GPU milliseconds the timestamps saw.
+    pub fn draw<S: FrameSource>(
+        &mut self,
+        gpu: &Gpu,
+        src: &mut S,
+        frame: S::Frame<'_>,
+    ) -> Result<f64> {
         match self {
-            GpuTarget::Shim(t) => Ok(t.draw(gpu, renderer, scene)?.0),
-            GpuTarget::Window(t) => t.draw(gpu, renderer, scene),
-            GpuTarget::Headless(t) => t.draw(gpu, renderer, scene),
+            GpuTarget::Shim(t) => Ok(t.draw(gpu, src, frame)?.0),
+            GpuTarget::Window(t) => t.draw(gpu, src, frame),
+            GpuTarget::Headless(t) => t.draw(gpu, src, frame),
         }
     }
 
@@ -72,7 +88,7 @@ impl GpuTarget {
         }
     }
 
-    pub fn finish(&mut self, _gpu: &Gpu, _renderer: &mut Renderer) -> Result<()> {
+    pub fn finish(&mut self, _gpu: &Gpu) -> Result<()> {
         Ok(())
     }
 
@@ -103,22 +119,19 @@ pub struct WindowTarget {
 }
 
 impl WindowTarget {
-    fn open(gpu: &Gpu, renderer: &mut Renderer) -> Result<WindowTarget> {
-        let (w, h) = (renderer.layout.w as usize, renderer.layout.h as usize);
+    fn open<S: FrameSource>(gpu: &Gpu, src: &mut S, title: &str) -> Result<WindowTarget> {
+        let (rw, rh) = src.raster_size();
+        let (w, h) = (rw as usize, rh as usize);
         // The largest whole upscale that fits a 1,600 x 900 desktop area: nearest and
         // integer, exactly as the panel gets it.
         let zoom = ((1600 / w).min(900 / h)).max(1);
         let size = (w * zoom, h * zoom);
-        let window = minifb::Window::new(
-            "cubarium — ring (GPU)",
-            size.0,
-            size.1,
-            minifb::WindowOptions::default(),
-        )
-        .context("opening the --gpu-target window")?;
+        let window =
+            minifb::Window::new(title, size.0, size.1, minifb::WindowOptions::default())
+                .context("opening the --gpu-target window")?;
         Ok(WindowTarget {
             window,
-            headless: Headless::new(gpu, renderer)?,
+            headless: Headless::new(gpu, src)?,
             buffer: vec![0; size.0 * size.1],
             zoom,
             size,
@@ -126,10 +139,15 @@ impl WindowTarget {
         })
     }
 
-    fn draw(&mut self, gpu: &Gpu, renderer: &mut Renderer, scene: &Scene) -> Result<f64> {
-        let ms = self.headless.draw(gpu, renderer, scene)?;
-        let rgba = renderer.read_raster(gpu)?;
-        let (w, h) = (renderer.layout.w as usize, renderer.layout.h as usize);
+    fn draw<S: FrameSource>(
+        &mut self,
+        gpu: &Gpu,
+        src: &mut S,
+        frame: S::Frame<'_>,
+    ) -> Result<f64> {
+        let ms = self.headless.draw(gpu, src, frame)?;
+        let rgba = src.read_raster(gpu)?;
+        let w = src.raster_size().0 as usize;
         for y in 0..self.size.1 {
             let sy = y / self.zoom;
             for x in 0..self.size.0 {
@@ -139,7 +157,6 @@ impl WindowTarget {
                     | u32::from(rgba[i + 2]);
             }
         }
-        let _ = h;
         if !self.window.is_open() || self.window.is_key_down(minifb::Key::Escape) {
             self.open = false;
             return Ok(ms);

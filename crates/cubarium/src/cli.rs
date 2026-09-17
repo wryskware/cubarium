@@ -122,6 +122,49 @@ pub struct Voxel {
     /// Port for the `web` sink (a viewer page at http://127.0.0.1:<port>/).
     #[arg(long, default_value_t = 7393)]
     pub web_port: u16,
+    /// Where `--sink gpu` puts its frames. Omitted, it is `shim` where the display
+    /// daemon's socket exists and a development window where it does not.
+    #[arg(long, value_enum)]
+    pub gpu_target: Option<crate::sink::GpuTargetKind>,
+    /// Write a PNG of every `--sink gpu` frame into this directory.
+    #[arg(long)]
+    pub gpu_capture: Option<PathBuf>,
+    /// Serve the operator's viewer from `--sink gpu`'s own raster, at this many frames a
+    /// second. 0 (the default) attaches no viewer and reads nothing back.
+    #[arg(long, default_value_t = 0.0)]
+    pub gpu_web_rate: f64,
+    /// Make `--sink gpu` walk each column in the shader for the roof gap instead of
+    /// reading the table the CPU uploads. Same picture; this is the knob the two costs
+    /// were measured with.
+    #[arg(long, default_value_t = false)]
+    pub gpu_roof_walk: bool,
+}
+
+impl Voxel {
+    /// Reject flag combinations clap cannot express.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.gpu_web_rate.is_finite()
+                && self.gpu_web_rate >= 0.0
+                && self.gpu_web_rate <= 60.0,
+            "--gpu-web-rate is frames per second for the viewer, 0 (none) to 60"
+        );
+        if self.sink != VoxelSinkArg::Gpu {
+            anyhow::ensure!(
+                self.gpu_target.is_none()
+                    && self.gpu_capture.is_none()
+                    && self.gpu_web_rate == 0.0
+                    && !self.gpu_roof_walk,
+                "--gpu-* belongs to `--sink gpu`; this run's sink is {}",
+                match self.sink {
+                    VoxelSinkArg::Web => "web",
+                    VoxelSinkArg::Png => "png",
+                    VoxelSinkArg::Gpu => "gpu",
+                }
+            );
+        }
+        Ok(())
+    }
 }
 
 /// Which world `cubarium voxel` starts from.
@@ -141,6 +184,9 @@ pub enum VoxelSinkArg {
     Web,
     /// PNG captures into `--out`.
     Png,
+    /// The GPU renderer: the strip drawn by `cubarium-gpu`'s slab-walk shader instead of
+    /// by the CPU presenter, onto `--gpu-target`.
+    Gpu,
 }
 
 #[derive(Parser, Debug, Clone)]

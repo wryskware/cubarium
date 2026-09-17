@@ -62,6 +62,10 @@ use cube_proto::Raster;
 mod target;
 pub use target::{GpuTarget, GpuTargetKind};
 
+#[path = "gpu/voxel.rs"]
+pub mod voxel;
+pub use voxel::{VoxelGpuSink, VoxelGpuSinkOptions};
+
 /// `--sink gpu`.
 pub struct GpuSink {
     /// The presenter that decides everything; it never draws.
@@ -230,7 +234,7 @@ impl GpuSink {
         // Default 1: what `art_present` does, whatever the world's S. `--gpu-art-scale`
         // is how the plan's "the sprite tile scales with S" gets looked at on the panel.
         renderer.art_scale = art_scale.unwrap_or(1.0);
-        let target = GpuTarget::open(kind, &gpu, &mut renderer)?;
+        let target = GpuTarget::open(kind, &gpu, &mut renderer, "cubarium — ring (GPU)")?;
         // The canopy line comes from `ArtGeometry::new`, which is `CANOPY_TOP = 0.67` on
         // a ring — FW-5's constant, so the GPU and the CPU cannot disagree about where
         // the canopy starts.
@@ -1312,7 +1316,7 @@ impl FrameSink for GpuSink {
         if let Some((web, _)) = self.web.as_mut() {
             web.finish()?;
         }
-        self.target.finish(&self.gpu, &mut self.renderer)
+        self.target.finish(&self.gpu)
     }
 }
 

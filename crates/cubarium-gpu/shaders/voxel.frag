@@ -395,13 +395,18 @@ void main() {
                 trans = 0.0;
                 break;
             }
+            // The cell's own water before its own plant, here as at the level above: the
+            // CPU stamps a plant and then blends the water of its cell over it, and a
+            // full-to-the-brim cell with air over it has its water *top* in the band
+            // above — which is this band, exactly where the plant's cap is. A submerged
+            // crown is seen through that surface, not instead of it.
+            if (v.g != 0u) { waterAt(x, below, z, v, px.y, acc, trans); }
             int p = partOf(v);
             if (isBlockPart(p)) {
                 acc += trans * plantCap(x, below, z, v, r, dx);
                 trans = 0.0;
                 break;
             }
-            if (v.g != 0u) { waterAt(x, below, z, v, px.y, acc, trans); }
         }
 
         if (trans <= 0.0) { break; }
