@@ -17,6 +17,8 @@
 
 #![forbid(unsafe_code)]
 
+mod step;
+
 use cubarium_voxel::{VoxelView, World};
 use serde::{Deserialize, Serialize};
 
@@ -81,6 +83,12 @@ pub struct Stand {
     pub light: f64,
     /// Moisture factor `μ` this stand saw last tick, `0..=1`. Zero means wilting.
     pub moisture: f64,
+    /// Pore water this stand actually got last tick, cubic metres: its share of what the
+    /// core accepted, which is less than it asked for when the soil ran out or when
+    /// another stand's roots reached the same voxels. Income reads `moisture`, not this —
+    /// the one water read happens before any withdrawal — so this is for inspection,
+    /// drawing and tests.
+    pub water_m3: f64,
 }
 
 /// Non-living stocks that sit on a site: mineral nutrient and the stand's own detritus.
@@ -111,6 +119,8 @@ pub struct SpeciesConfig {
     pub reserve_cap: f64,
     /// `m_w`: wood maintenance per second.
     pub maintenance: f64,
+    /// `m_p`: foliage senescence per second. Shed foliage becomes litter.
+    pub senescence: f64,
     /// `r_p`: foliage regrowth per second per unit of `W`.
     pub foliage_rate: f64,
     /// `r_w`: wood growth per second per unit of `W`.
@@ -196,6 +206,7 @@ impl SpeciesConfig {
             wood_max: 0.6,
             reserve_cap: 0.5,
             maintenance: 0.0002,
+            senescence: 0.001,
             foliage_rate: 0.002,
             wood_rate: 0.001,
             build: 0.2,
@@ -402,11 +413,25 @@ pub struct Flora {
     stands: Vec<Stand>,
     ground: Vec<Ground>,
     ledger: FloraLedger,
+    /// Sky visibility per site, sorted by site: pure terrain geometry, so it is dropped
+    /// whole when the world's `terrain_version` moves and refilled lazily. A `Vec` with
+    /// a binary search, never a `HashMap`: this layer iterates nothing unordered.
+    sky: Vec<(Site, f64)>,
+    /// The `terrain_version` `sky` was filled against, `None` before the first tick.
+    sky_version: Option<u64>,
 }
 
 impl Flora {
     pub fn new(config: FloraConfig) -> Flora {
-        Flora { config, tick: 0, stands: Vec::new(), ground: Vec::new(), ledger: FloraLedger::default() }
+        Flora {
+            config,
+            tick: 0,
+            stands: Vec::new(),
+            ground: Vec::new(),
+            ledger: FloraLedger::default(),
+            sky: Vec::new(),
+            sky_version: None,
+        }
     }
 
     pub fn config(&self) -> &FloraConfig {
@@ -429,10 +454,9 @@ impl Flora {
 
     /// Advance one tick against the world's current state. Call after `World::step`.
     /// Withdraws root water through `Command::WithdrawPore`; that is the only way this
-    /// layer changes the world.
+    /// layer changes the world. The order within the tick is `step`'s module doc.
     pub fn step(&mut self, world: &mut World) {
-        let _ = world;
-        self.tick += 1;
+        step::step(self, world);
     }
 
     /// Apply a command now. Returns whether it was accepted.
@@ -455,6 +479,7 @@ impl Flora {
                     reserve: sc.reserve_cap * wood,
                     light: 0.0,
                     moisture: 0.0,
+                    water_m3: 0.0,
                 };
                 let material = stand.wood + stand.foliage + stand.reserve;
                 self.ledger.seeded_material_in += material;
