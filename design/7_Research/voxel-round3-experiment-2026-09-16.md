@@ -187,3 +187,228 @@ predicate. Two numbers are:
 Both are placeholders with backlog rows (`design/backlog.md` §1, rows 43 and 44). Nothing
 here was tuned; the point of the rerun was to find out what the placeholders do, and this
 is what they do.
+
+## Rerun after package J — 2026-09-17
+
+Package J fixed the two specification defects above and reran the same two commands on
+`main` at `318bddc`: fix 1 `387dab4` (aeration stress relaxes first-order toward
+`target = clamp((f − establish_saturated_max) / (1 − establish_saturated_max), 0, 1)`
+instead of ramping on a `stress`-independent increment), fix 2 `1e31136`
+(`SpeciesConfig::seed_cohorts_max`, placeholder 4, merging a site's two oldest cohorts of
+one species), fix 3 `318bddc` (`cubarium_voxel_flora::can_establish` — one germination
+predicate, which the harness now calls for founder selection, the habitat sets and the
+diagnosis instead of its own two).
+
+| run | command | simulated | wall |
+| --- | --- | --- | --- |
+| comparison | `compare 2000 1 101 202 7` | 3 x 2,000 s | 1,687 s (28.1 min) |
+| Chesson's probe | `chesson 1500 1500 1 101` | 2 x 3,000 s | 1,721 s (28.7 min) |
+
+Both ran in parallel on separate cores; nothing else was running.
+
+### The headline: there is a second generation, in every arm
+
+```
+life cycle per arm: base establishments 24 deaths 18; re-drawn noise 24 / 5; control 2 / 4
+```
+
+Against **0 establishments in every arm of every run** before. All of them are
+umbrellafrond's, and they all happen in the same 100 s window, when the best seed bank in
+the world finally crosses the germination threshold `alive_min / w_frac` = 0.05:
+
+```
+base (seed 1, noise 101)
+  t   100 s: est 0, deaths  0; 8 bloomcrown (4 donors), stress 0.000, best bank  9.5%; 8 umbrellafrond (6 donors), stress 0.000, best bank 51.7%
+  t   400 s: est 0, deaths  0; 8 bloomcrown (2 donors), stress 0.226, best bank 12.9%; 8 umbrellafrond (5 donors), stress 0.000, best bank 71.7%
+  t   700 s: est 0, deaths  0; 8 bloomcrown (1 donors), stress 0.713, best bank 15.6%; 8 umbrellafrond (2 donors), stress 0.000, best bank 91.7%
+  t  1000 s: est 0, deaths  2; 8 bloomcrown (2 donors), stress 0.724, best bank 11.6%; 6 umbrellafrond (5 donors), stress 0.000, best bank 87.5%
+  t  1500 s: est 0, deaths  5; 8 bloomcrown (1 donors), stress 0.724, best bank 13.0%; 3 umbrellafrond (2 donors), stress 0.000, best bank 89.0%
+  t  1700 s: est 0, deaths  5; 8 bloomcrown (0 donors), stress 0.724, best bank 13.7%; 3 umbrellafrond (0 donors), stress 0.000, best bank 99.7%
+  t  1800 s: est 24, deaths 5; 8 bloomcrown (1 donors), stress 0.724, best bank 14.1%; 27 umbrellafrond (0 donors), stress 0.000, best bank 65.9%
+  t  2000 s: est 24, deaths 18; 8 bloomcrown (2 donors), stress 0.724, best bank 14.7%; 14 umbrellafrond (0 donors), stress 0.000, best bank 58.2%
+
+re-drawn noise (seed 1, noise 202)
+  t  1700 s: est  0, deaths 5; 8 bloomcrown (0 donors), stress 0.615, best bank 15.3%; 3 umbrellafrond (2 donors), stress 0.000, best bank 95.9%
+  t  1800 s: est 16, deaths 5; 8 bloomcrown (0 donors), stress 0.615, best bank 15.5%; 19 umbrellafrond (1 donors), stress 0.000, best bank 96.2%
+  t  2000 s: est 24, deaths 5; 8 bloomcrown (2 donors), stress 0.615, best bank 16.1%; 27 umbrellafrond (1 donors), stress 0.000, best bank 62.0%
+
+control (seed 7, noise 101)
+  t  1700 s: est 0, deaths 4; 6 bloomcrown (1 donors), stress 0.798, best bank 18.8%; 6 umbrellafrond (4 donors), stress 0.000, best bank 97.9%
+  t  1800 s: est 2, deaths 4; 6 bloomcrown (1 donors), stress 0.798, best bank 18.9%; 8 umbrellafrond (1 donors), stress 0.000, best bank 63.2%
+  t  2000 s: est 2, deaths 4; 6 bloomcrown (1 donors), stress 0.798, best bank 19.1%; 8 umbrellafrond (3 donors), stress 0.000, best bank 70.8%
+```
+
+Read left to right, the chain of finding 1 is broken in three places:
+
+1. **Umbrellafrond's aeration stress is 0.000 in every arm, at every reading.** It was
+   0.876 at 100 s and 1.000 from 200 s on. Its `establish_saturated_max` is 1.0 and the
+   stress target measures from the same number, so the wet producer has no saturation
+   stress anywhere: a waterlogged hollow is its habitat and it earns in it.
+2. **Bloomcrown's stress settles at an interior level and stays there** — 0.724 in the
+   base arm from 800 s, 0.615 under the re-drawn noise, 0.798 in the control. It earns
+   27.6 %, 38.5 % and 20.2 % of its income respectively instead of nothing, which is what
+   "the basin costs the sun producer something" was supposed to mean. The levels differ by
+   arm because the saturated fraction of the root boxes differs by arm — the thing they are
+   supposed to measure.
+3. **The banks are fed continuously, so they grow instead of ageing out.** Umbrellafrond's
+   best bank climbs 51.7 % → 99.7 % of the threshold over 1,700 s and crosses it; it peaked
+   at 27.8 % and fell to 0 before. Its donor count never goes to zero for long, because its
+   income never does.
+
+What the germination spends the bank on: 24 new stands in the base arm and the re-draw, 2
+in the control. Then the base arm kills 13 of them inside 200 s (deaths 5 → 18): a cohort
+of same-age saplings born into a hollow, of which the ones in the deepest water drown at
+`drown_depth_m`. The re-draw's 27 all survived to 2,000 s.
+
+### Descendant fractions, which are no longer zero
+
+```
+bloomcrown:     descendant stands / living stands: base 0/8 (0.00), re-drawn noise 0/8 (0.00), control 0/6 (0.00)
+umbrellafrond:  descendant stands / living stands: base 12/14 (0.86), re-drawn noise 24/27 (0.89), control 2/8 (0.25)
+```
+
+Most living umbrellafronds at the end of a 2,000 s arm were born in it. Bloomcrown's
+fraction is still 0.00, and the diagnosis says which gate is shut for it — the bank, not
+the predicate, and not by a little:
+
+```
+base        bloomcrown: threshold 0.0500; 67 banked sites, mean 0.00567, biggest 0.00735 (14.7% of threshold); 0 over threshold; 26 of all 67 banked sites pass the predicate
+re-draw     bloomcrown: threshold 0.0500; 67 banked sites, mean 0.00693, biggest 0.00805 (16.1% of threshold); 0 over threshold; 30 of all 67 banked sites pass the predicate
+control     bloomcrown: threshold 0.0500; 38 banked sites, mean 0.00611, biggest 0.00954 (19.1% of threshold); 0 over threshold;  2 of all 38 banked sites pass the predicate
+base     umbrellafrond: threshold 0.0500; 40 banked sites, mean 0.02267, biggest 0.02908 (58.2% of threshold); 12 of 40 banked sites pass the predicate
+re-draw  umbrellafrond: threshold 0.0500; 40 banked sites, mean 0.02148, biggest 0.03098 (62.0% of threshold); 28 of 40 banked sites pass the predicate
+control  umbrellafrond: threshold 0.0500; 43 banked sites, mean 0.02167, biggest 0.03538 (70.8% of threshold); 43 of 43 banked sites pass the predicate
+```
+
+(The umbrellafrond banks read low at 2,000 s because the germination at 1,700–1,800 s spent
+the sites that were over the threshold; the timeline above is where the crossing shows.)
+
+Bloomcrown's bank sits at a seventh of the threshold and does not climb: `hop` 2 splits one
+donor's spendable reserve across 24 recipient columns against umbrellafrond's 8, and its
+income is down by the interior stress on top. Whether that is right is a knob call —
+`propagule_rate`, `hop`, `alive_min` — and nothing here was tuned.
+
+### The comparison, on the one predicate
+
+Founder columns and habitat sets moved when fix 3 deleted the harness's own predicate, so
+none of the habitat numbers below is comparable to the pre-J section; they are the model's
+own predicate now, in all three arms and in the diagnosis.
+
+```
+founder columns identical in all three: 16, off-predicate 0 in the re-draw and 6 in the control
+landform: lowest skyline quartile  0.977 (re-drawn noise)  0.324 (another landform)
+          highest skyline quartile 0.957                   0.515
+
+bloomcrown     occupied 75 / 75 / 44 columns:      Jaccard noise 1.000   control 0.053
+               founders excluded 67 / 67 / 38:             noise 1.000   control 0.000
+               living stands only 8 / 8 / 6:               noise 1.000   control 0.750
+               habitat 2526 / 2546 / 2540 of 3072:         noise 0.881   control 0.747
+umbrellafrond  occupied 42 / 43 / 49 columns:      Jaccard noise 0.977   control 0.569
+               founders excluded 40 / 40 / 43:             noise 1.000   control 0.627
+               living stands only 14 / 27 / 8:             noise 0.519   control 0.048
+               habitat 415 / 418 / 411 of 3072:            noise 0.983   control 0.168
+               in the lowest skyline quartile: base 1.00, re-drawn noise 1.00, control 0.20
+```
+
+Umbrellafrond replicates round 2's finding on every line it has: re-draw the generator's
+final weak noise and the habitat is the same 98 % of columns and the occupied set the same
+98 %; change the landform and 17 % of the habitat and 57 % of the occupancy survive, with
+the lowest-quartile fraction falling from 1.00 to 0.20. Its living-stand Jaccard of 0.519
+against the re-draw is the one number that is genuinely about the plants rather than the
+terrain, and it is low for a reason the run states: the two arms germinated 24 stands each
+but not on the same columns, and the base arm then drowned 13 of them.
+
+Bloomcrown's `occupied` is 75 columns of which 8 hold a stand — the rest are seed-bank
+sites — so its 1.000 against the re-draw is the footprint of eight founders' `hop`-2
+neighbourhoods, which is identical by construction. Its 0.053 against the control is the
+founders' neighbourhoods landing elsewhere on another landform. Neither is evidence about
+the terrain coupling. The habitat pair, 0.881 against 0.747, is weak evidence at best: the
+set is 82 % of the world.
+
+### Chesson's probe: both directions still fail, for a new reason
+
+```
+=== resident bloomcrown, newcomer umbrellafrond ===
+  after 1500 s alone: 8 resident stands, seed bank on 91 sites, establishments 0, deaths 0
+  one umbrellafrond founder at x3 z0 y12 (2526 habitat sites free of the resident)
+  after 1500 s of invasion: newcomer 0 stands (0 descendants); resident 8 -> 8
+  establishments 0 -> 0, deaths 0 -> 1; the founder's own site was vacated at some point
+  INVASION FAILS
+
+=== resident umbrellafrond, newcomer bloomcrown ===
+  after 1500 s alone: 3 resident stands, seed bank on 48 sites, establishments 0, deaths 5
+  one bloomcrown founder at x75 z15 y31 (289 habitat sites free of the resident)
+  after 1500 s of invasion: newcomer 1 stands (0 descendants), seed bank on 24 sites holding 0.17026; resident 3 -> 1
+  establishments 0 -> 24, deaths 5 -> 31; the founder's own site held its founder throughout
+  INVASION FAILS
+```
+
+The residents are standing now — 8 bloomcrown through 3,000 s with no deaths at all, where
+the pre-J probe's "resident" umbrellafrond had lost 6 of 8 founders before the newcomer
+arrived. And the 24 establishments in direction 2 are real: they are the **resident**
+umbrellafrond's, its bank crossing the threshold at the same ~1,700 s as in the comparison,
+which is why its deaths jump to 31 as well.
+
+One thing to remember when reading those counts: the resident's habitat is taken at the
+warm-up (bloomcrown 2,526 columns, umbrellafrond 415, the same numbers the comparison
+prints) but the newcomer's is recomputed on the post-fill world, and 1,500 s of the
+harness's rain tap moves it a long way — umbrellafrond's free habitat is 2,526 sites there
+against 415 at the warm-up, and bloomcrown's is 289 against 2,526. The two species' habitats
+very nearly swap places as the world wets up, which is a fact about the harness's tap and
+the rising table, not about the probe.
+
+What still fails is the newcomer, in both directions, and the reason is now a measured
+quantity rather than a broken rule: **one** founder needs about 1,700 s of uninterrupted
+donation to push one recipient bank over the threshold, and the probe gives it 1,500 s. In
+direction 1 it does not even get that — the single umbrellafrond founder placed in the
+deepest free hollow drowns at `drown_depth_m` (deaths 0 → 1, its site vacated), and its bank
+ages out behind it. In direction 2 the bloomcrown founder survives the whole probe and banks
+0.170 of organic matter over 24 sites, a mean of 0.0071 against the threshold 0.05 — the
+same seventh-of-a-threshold ceiling the comparison measured. The invasion criterion still
+cannot be read: it needs the rare species to increase, and a single founder cannot in
+1,500 s. A longer probe, or a founder cohort rather than one stand, is the next thing to
+try, and both are the owner's call.
+
+### The three residuals, still fine
+
+```
+base     ledger: fixed_in 30.844525 respired_out 21.870407 light_in 61.689050 heat_out 43.740814 transpired 0.302307 m3 deaths 18 establishments 24
+         residuals: organic 2.567e-11 mineral -1.307e-12 energy 5.134e-11 (stocks: organic 25.7741 mineral 249.3360 energy 51.5482)
+         core water: stored 312.6464 m3, residual 1.460e-7, transpiration_out 0.302307 m3 (flora says 0.302307)
+re-draw  residuals: organic 2.778e-11 mineral -7.390e-13 energy 5.555e-11 (stocks: organic 26.4927 mineral 249.3360 energy 52.9854)
+control  residuals: organic 5.329e-13 mineral  2.416e-12 energy 1.066e-12 (stocks: organic 22.9886 mineral 249.3360 energy 45.9772)
+```
+
+Relative: 1.0e-12, 5.2e-15, 1.0e-12 in the base arm, and the flora's `transpired_m3` still
+agrees with the core's `transpiration_out` to the bit. The mineral stock is 249.3360 in all
+three arms, as a closed stock should be. The runs are eleven times more productive than
+package I's (fixed_in 30.8 against 2.7) and the residuals did not grow with them.
+
+One cosmetic oddity, harmless and worth one look later: direction 1 of the probe printed
+`seed bank on 0 sites holding -0.00000` for the newcomer. The site count uses `> 0.0` and
+the sum does not, so the sum is over cohorts that are all at or below zero — a cohort kept
+for its mineral after its organic matter went to zero. It is a print, not a stock: the
+ledger residuals above are the check that matters.
+
+### What changed and what did not
+
+What changed is the *shape* of two rules, not any number. Aeration stress became a level
+the root box sets rather than a ramp to a boundary, and that alone is what put a second
+generation in the world: umbrellafrond stopped drowning in its own habitat, bloomcrown
+settled at 0.62–0.80 instead of 1.00, both kept earning, their reserves kept crossing the
+donor floor, and the seed banks they feed grew for 1,700 s instead of ageing out at 600 s
+and reaching a quarter of the threshold. Establishments went from 0 in every arm to 24, 24
+and 2; descendant fractions from 0.00 everywhere to 0.86, 0.89 and 0.25 for umbrellafrond;
+and the occupancy Jaccards stopped being 1.000-or-0.000 artifacts of a frozen founder set,
+so the comparison measures something again. The seed-cohort cap and the single predicate
+changed no outcome in these runs — no site ever held five cohorts of one species here, and
+the predicate change moved the founder columns and habitat sets but not the mechanism.
+
+What did not change is bloomcrown's side of the experiment. Its bank still peaks at a
+seventh of the germination threshold and it still has 0.00 descendants in every arm, for
+reasons this rerun measures precisely: `hop` 2 splits one donor's propagule budget across
+24 columns, and an interior stress of 0.6–0.8 takes two thirds of the income that would
+refill the reserve. Chesson's probe still fails in both directions, because a single founder
+cannot lift one recipient bank over the threshold inside 1,500 s. Neither is a rule that is
+wrong; both are `propagule_rate`, `hop`, `alive_min` and probe-length calls, which are the
+owner's, and nothing here was tuned.
