@@ -49,7 +49,7 @@ use project::Projection;
 
 /// The stdin commands, in the one place both the banner and the usage line read them
 /// from, so a new command cannot be added to only one of the two.
-const COMMANDS: &str = "p pause/resume, s step, +/- speed, r [m3] rain, \
+const COMMANDS: &str = "p pause/resume, s step, +/- speed, r [m3] rain, a M3 charge the aquifer (negative withdraws), \
                         m X Y Z air|rock|soil|bedrock set material, \
                         f X Z bloomcrown|umbrellafrond [wood] seed a stand, \
                         c X Z clear a stand, w PATH save, \
@@ -357,6 +357,20 @@ impl Control {
                 };
                 let took = world.apply(VoxelCommand::RainPulse { volume_m3: volume });
                 eprintln!("cubarium voxel: rain {volume} m3, accepted {took} m3");
+            }
+            "a" | "aquifer" => {
+                let volume = match rest.first().map(|t| t.parse::<f64>()) {
+                    Some(Ok(v)) if v.is_finite() && v != 0.0 => v,
+                    _ => {
+                        eprintln!("cubarium voxel: `a M3` wants a nonzero volume (negative withdraws)");
+                        return;
+                    }
+                };
+                let took = world.apply(VoxelCommand::ChargeAquifer { volume_m3: volume });
+                eprintln!(
+                    "cubarium voxel: aquifer {volume:+} m3, accepted {took:+} m3, head now {:.3} m",
+                    world.aquifer_head_m()
+                );
             }
             "o" | "outlet" => {
                 self.outlet = !world.outlet_open();
@@ -680,9 +694,19 @@ mod tests {
         assert!(ctl.paused && ctl.pending_steps == 1);
         ctl.handle(&mut world, &mut flora, "o");
         assert!(ctl.outlet);
+        // The aquifer takes a charge, gives back only what it holds, and is booked.
+        ctl.handle(&mut world, &mut flora, "a 2.5");
+        assert_eq!(world.view().aquifer_m3, 2.5);
+        ctl.handle(&mut world, &mut flora, "a -10");
+        assert_eq!(world.view().aquifer_m3, 0.0);
+        assert_eq!(world.view().ledger.user_in, 0.0);
         // Nonsense, and a bad argument, change nothing.
         ctl.handle(&mut world, &mut flora, "nonsense 1 2 3");
         ctl.handle(&mut world, &mut flora, "r not-a-volume");
+        ctl.handle(&mut world, &mut flora, "a");
+        ctl.handle(&mut world, &mut flora, "a 0");
+        ctl.handle(&mut world, &mut flora, "a nan");
+        assert_eq!(world.view().aquifer_m3, 0.0);
         ctl.handle(&mut world, &mut flora, "i 0 999 0");
         ctl.handle(&mut world, &mut flora, "i only-one");
         ctl.handle(&mut world, &mut flora, "w");
