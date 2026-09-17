@@ -26,16 +26,17 @@ Astra's round 7 frames both: explicit bounded transfers and the
 organic/mineral/energy ledger; **population targets and carrying capacity stay
 unclaimed**. Direction: ambient piece, no game hooks.
 
-**The look is not the workers' call.** The artwork pass is owned by a Fable
-thread (Wrysk, 2026-09-17). That thread delivers, before or alongside these
-packages, a spec for how a glowcap cluster and a frondgrazer body read at 4 px
-per voxel in the Outrun palette (`design/appearance.md`), and the workers
-implement that spec in the presenter. Until it arrives, each package draws an
-**interim** glyph the spec will replace: the fungus a one-cell cap in a
-placeholder colour on its support face, the grazer a 2×1×2 voxel block. The
-GPU renderer draws plant parts from a part/style id in the voxel texture
-(`crates/cubarium-gpu/src/voxel/**`), so both presenters stamp through that
-same path and need no new render pass.
+**The look is not the workers' call, and it is not decided yet.** The art
+direction of the voxel world is Wrysk's own thread
+(`voxel-art-direction-handoff-2026-09-17.md`), which will produce
+`design/voxel-art-direction.md`. Until that doc exists and says otherwise,
+each package draws an **interim** glyph named as interim in code and commit:
+the fungus a one-cell cap in a placeholder colour on its support face, the
+grazer a 2×1×2 voxel block in a placeholder colour. The study at 68a8215
+(`design/7_Research/voxel-consumer-art-2026-09-17.md`) is paused and not
+canon; do not implement it. The GPU renderer draws plant parts from a
+part/style id in the voxel texture (`crates/cubarium-gpu/src/voxel/**`), so
+both presenters stamp through that same path and need no new render pass.
 
 ## 5b — glowcap (package N, flora crate)
 
@@ -162,11 +163,9 @@ identical and a different world seed different.
   `crates/cubarium/src/voxel/animal.rs`, the minimal wiring in
   `crates/cubarium/src/voxel/mod.rs` and `crates/cubarium-gpu/src/voxel/**`
   (a part id range only), backlog, experiment note section "Round 5c".
-- **Art** — a Fable thread, in parallel: the glowcap and frondgrazer look at 4
-  px per voxel, delivered as `design/7_Research/voxel-consumer-art-2026-09-17.md`
-  plus a study under `art/studies/voxel-consumers/` with captures. The workers
-  read it when it lands and replace the interim glyphs in a final commit; if it
-  lands after them, a small follow-up package applies it.
+- **Art** — Wrysk's own art-direction thread (see the handoff above); when
+  `design/voxel-art-direction.md` lands, a small follow-up package replaces
+  the interim glyphs with what it specifies.
 - Astra rounds on 5a+L, then on 5b and 5c together.
 
 ## Rules

@@ -1,8 +1,14 @@
 ---
-design_status: leaning
+design_status: paused
 last_reviewed: 2026-09-17
 decision_refs: []
 ---
+
+> **PAUSED, NOT APPROVED (Wrysk, 2026-09-17).** This look was produced by an
+> agent thread and is not the art direction. The art direction is Wrysk's own
+> thread: `design/handoffs/voxel-art-direction-handoff-2026-09-17.md`. Nothing
+> below is canon; packages N and O ship interim glyphs and cite the art doc that
+> thread produces.
 
 # The two consumers' look: glowcap cluster and frondgrazer at 4 and 8 px per voxel
 
