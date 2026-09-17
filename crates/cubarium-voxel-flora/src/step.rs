@@ -218,9 +218,16 @@ fn prune_unsupported(flora: &mut Flora, world: &World) {
         if supported(&g.site) {
             kept.push(g);
         } else {
-            ledger.removed_organic_out += g.litter + g.dead_wood;
-            ledger.removed_mineral_out += g.mineral + g.litter_mineral + g.dead_wood_mineral;
-            ledger.removed_energy_out += g.litter_energy + g.dead_wood_energy;
+            // **Every** stock the site held, carrion included. Astra's R8.1: the three
+            // carrion stocks were missing here, and since they are in `FloraView`'s own
+            // totals that was an actual residual and not a missing label — a deposit of
+            // `(0.4, 0.012, 0.9)` on a face the terrain then took away left residuals of
+            // −0.4, −0.012 and −0.9, and so did a deposit made directly on an unsupported
+            // site, which `Flora::deposit` promises to book out here.
+            ledger.removed_organic_out += g.litter + g.dead_wood + g.carrion;
+            ledger.removed_mineral_out +=
+                g.mineral + g.litter_mineral + g.dead_wood_mineral + g.carrion_mineral;
+            ledger.removed_energy_out += g.litter_energy + g.dead_wood_energy + g.carrion_energy;
             // The seed bank goes out with the ground it sat on: a cohort whose support
             // face is gone has nowhere to germinate, and it is booked as removed rather
             // than dropped.

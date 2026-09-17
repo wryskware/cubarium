@@ -552,3 +552,182 @@ fn a_glowcap_crown_is_one_cell_high_at_every_size() {
         );
     }
 }
+
+// -------------------------------------------- Astra's round 8: the deposit boundary
+
+/// **R8.1: pruning a site books out its carrion too.** A carrion deposit of
+/// `(0.4, 0.012, 0.9)` on a support face, the support taken away, one step: the three
+/// stocks leave through `removed_*_out` and the residuals stay at noise. Before the repair
+/// they were −0.4, −0.012 and −0.9 — an actual residual, because `FloraView`'s totals count
+/// the carrion pool.
+#[test]
+fn pruning_an_unsupported_site_books_out_its_carrion() {
+    let mut world = pillars(4, &[1], 0.5);
+    let mut flora = Flora::new(config());
+    let site = at(1);
+    let (organic, mineral, energy) = (0.4, 0.012, 0.9);
+    assert!(flora.deposit(site, Deposit { kind: DepositKind::Carrion, organic, mineral, energy }));
+    let pool = flora.view().ground_at(site).expect("provisioned").mineral;
+    assert_residuals(&flora, "after a carrion deposit");
+
+    // Take the support away: the face at `y = 2` is no longer a support, so the site is
+    // gone with it. (The column's bedrock is still there, so the *column* has a support
+    // face lower down; what the site lost is its own.)
+    for y in 1..=2 {
+        world.apply(WorldCommand::SetMaterial { x: 1, y, z: 0, material: Material::Air });
+    }
+    assert!(!world.view().is_support(1, 2, 0), "the face is still a support");
+    flora.step(&mut world);
+
+    let v = flora.view();
+    assert!(v.ground_at(site).is_none(), "the site survived losing its support");
+    assert_eq!(v.ledger.removed_organic_out, organic, "the carrion was not booked out");
+    assert_eq!(v.ledger.removed_mineral_out, mineral + pool, "with the soluble pool");
+    assert_eq!(v.ledger.removed_energy_out, energy);
+    assert_eq!(v.organic(), 0.0, "something is still standing: {:?}", v.stands);
+    assert_residuals(&flora, "after the support was taken away");
+}
+
+/// **R8.1, the other half**: a deposit made **directly** on a site that is not a support
+/// face is accepted — `deposit` reads no world — and booked out by the next tick's step 1,
+/// which is what its own doc promises. All three kinds, and all three residuals.
+#[test]
+fn a_deposit_on_a_site_with_no_support_is_booked_out_by_the_next_tick() {
+    for kind in [DepositKind::Carrion, DepositKind::Litter, DepositKind::DeadWood] {
+        let mut world = pillars(4, &[1], 0.5);
+        let mut flora = Flora::new(config());
+        // A site in the void: `pillars` left column 2 with nothing solid at all.
+        let nowhere = Site { x: 2, y: 2, z: 0 };
+        assert!(cubarium_voxel_flora::highest_support(&world.view(), 2, 0).is_none());
+        let (organic, mineral, energy) = (0.4, 0.012, 0.9);
+        assert!(flora.deposit(nowhere, Deposit { kind, organic, mineral, energy }), "{kind:?}");
+        assert_residuals(&flora, "after a deposit into the void");
+
+        flora.step(&mut world);
+        let v = flora.view();
+        assert!(v.ground_at(nowhere).is_none(), "{kind:?}: the void site survived");
+        assert_eq!(v.ledger.removed_organic_out, organic, "{kind:?}");
+        assert_eq!(
+            v.ledger.removed_mineral_out,
+            mineral + flora.config().initial_mineral,
+            "{kind:?}"
+        );
+        // Litter is the one kind with an energy cap: `e_d_max · D` is 0.8 of the 0.9
+        // offered, and the 0.1 it cannot hold left as heat when the deposit landed, which
+        // is the rule round 5a already had.
+        let held = if kind == DepositKind::Litter {
+            flora.config().litter_energy_cap * organic
+        } else {
+            energy
+        };
+        assert_eq!(v.ledger.removed_energy_out, held, "{kind:?}");
+        assert_eq!(v.ledger.heat_out, energy - held, "{kind:?}");
+        assert_residuals(&flora, "after an unsupported deposit was pruned");
+    }
+}
+
+/// **R8.2: a deposit with no organic matter in it settles at once.** A dead pool
+/// decomposes `rate · dt · organic`, so `(0, 0.02, 0.4)` in a pool would have held its
+/// mineral for ever and never released its energy. It is still accepted and still booked
+/// `deposited_*_in` in full — an exhausted consumer has to have somewhere to put the
+/// mineral its respiration left behind — but the mineral goes straight to the site's
+/// soluble pool and the energy leaves as heat, which is where decomposition would have sent
+/// them. Both for all three kinds, with the pools left empty.
+#[test]
+fn a_zero_organic_deposit_credits_the_pool_and_the_heat_at_once() {
+    for kind in [DepositKind::Carrion, DepositKind::Litter, DepositKind::DeadWood] {
+        let mut world = pillars(4, &[1], 0.5);
+        let mut flora = Flora::new(config());
+        let site = at(1);
+        let (mineral, energy) = (0.02, 0.4);
+        assert!(
+            flora.deposit(site, Deposit { kind, organic: 0.0, mineral, energy }),
+            "{kind:?}: a consumer with only mineral left was refused"
+        );
+        let v = flora.view();
+        let g = v.ground_at(site).expect("provisioned").clone();
+        assert_eq!((g.litter, g.dead_wood, g.carrion), (0.0, 0.0, 0.0), "{kind:?}: a pool");
+        assert_eq!(
+            (g.litter_mineral, g.dead_wood_mineral, g.carrion_mineral),
+            (0.0, 0.0, 0.0),
+            "{kind:?}: mineral stranded in a pool that can never release it"
+        );
+        assert_eq!(g.mineral, flora.config().initial_mineral + mineral, "{kind:?}");
+        assert_eq!(v.ledger.heat_out, energy, "{kind:?}");
+        assert_eq!(v.ledger.deposited_mineral_in, mineral, "{kind:?}");
+        assert_eq!(v.ledger.deposited_energy_in, energy, "{kind:?}");
+        assert_eq!(v.ledger.deposited_organic_in, 0.0, "{kind:?}");
+        assert_residuals(&flora, "after a zero-organic deposit");
+
+        // And it stays settled: nothing about it moves again.
+        run(&mut flora, &mut world, 5);
+        let v = flora.view();
+        assert_eq!(v.ground_at(site).expect("ground").mineral, flora.config().initial_mineral + mineral);
+        assert_eq!(v.ledger.heat_out, energy, "{kind:?}");
+        assert_residuals(&flora, "five ticks after a zero-organic deposit");
+    }
+}
+
+/// **R8.5: what waits for the next tick is the organic throughput, and not every
+/// currency.** `decompose` sizes its draw on the **tick-start** organic stock but takes the
+/// mineral and the energy at the pool's **current** density, so material parcels are not
+/// age-isolated: mineral that arrived inside this tick can leave inside this tick.
+///
+/// Astra's own case, built out of the model: one old unit of litter holding **no** mineral
+/// in the tick-start snapshot, one fresh unit shed inside the tick carrying **one** mineral,
+/// and a decomposition step of half the old stock — `dec = 0.5`, pool now 2.0, so
+/// `f = 0.25` and **0.25 of mineral reaches the soluble pool immediately**. That is the
+/// inherited well-mixed-pool rule and it conserves every currency; it is documented rather
+/// than changed, and this pins it before a consumer relies on a stronger claim.
+#[test]
+fn decomposition_delays_organic_matter_and_not_the_mineral_of_a_mixed_pool() {
+    let mut config = config();
+    // A stand that sheds its whole canopy in one tick and does nothing else: no income, no
+    // maintenance, so no growth, no dieback and no mineral draw.
+    let sc = &mut config.bloomcrown;
+    sc.assimilation = 0.0;
+    sc.maintenance = 0.0;
+    sc.senescence = 1e9;
+    sc.alpha = 2.0;
+    sc.n_tissue = 1.0;
+    sc.wood_max = 1.0;
+    // Half of the tick-start stock per tick: `rate · DT` = 0.5.
+    config.decomposition = 0.5 / DT;
+    config.wood_decomposition = 0.0;
+    let initial_mineral = config.initial_mineral;
+    let mut world = pillars(4, &[1], 0.5);
+    let mut flora = Flora::new(config);
+    let site = at(1);
+
+    // The old unit: one of organic matter with no mineral and no energy in it, laid in the
+    // inter-tick so that it is in the next tick's snapshot.
+    assert!(flora.deposit(
+        site,
+        Deposit { kind: DepositKind::Litter, organic: 1.0, mineral: 0.0, energy: 0.0 }
+    ));
+    // The fresh unit: a founder at wood 0.5 sheds `alpha · W` = 1.0 of foliage this tick,
+    // and the fraction rule sends `n_tissue · 1.0` = 1.0 of mineral with it.
+    assert!(flora.apply(
+        &world,
+        Command::Seed { x: 1, z: 0, species: Species::Bloomcrown, wood: 0.5 }
+    ));
+    let pool0 = flora.view().ground_at(site).expect("ground").mineral;
+    assert_eq!(pool0, initial_mineral, "the fixture's premise");
+    assert_residuals(&flora, "before the mixed tick");
+
+    flora.step(&mut world);
+
+    let v = flora.view();
+    let g = v.ground_at(site).expect("ground").clone();
+    // 1.0 old + 1.0 shed = 2.0, less `dec` = 0.5 of it.
+    assert!((g.litter - 1.5).abs() < 1e-12, "litter {}", g.litter);
+    // And the mineral: 1.0 arrived this tick, 0.25 of it is already in the soluble pool.
+    assert!(
+        (g.mineral - (pool0 + 0.25)).abs() < 1e-12,
+        "the soluble pool is {} and not {}: the mixed-density release",
+        g.mineral,
+        pool0 + 0.25
+    );
+    assert!((g.litter_mineral - 0.75).abs() < 1e-12, "litter mineral {}", g.litter_mineral);
+    assert_residuals(&flora, "after one mixed-density decomposition step");
+}

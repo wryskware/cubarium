@@ -1949,6 +1949,12 @@ impl Flora {
     /// accepting one would provision a `Ground` (and import its `initial_mineral`) for no
     /// material at all.
     ///
+    /// **A deposit whose `organic` is zero is accepted and settles at once**, whatever its
+    /// kind: its mineral goes straight to the site's soluble pool and its energy leaves as
+    /// heat, because a dead pool decomposes `rate · dt · organic` and a pool with no
+    /// organic matter in it would hold that mineral for ever (Astra R8.2). It is still
+    /// booked as `deposited_*_in` in full, and it still provisions a `Ground`.
+    ///
     /// A deposit on a site with no [`Ground`] provisions one, and the lazy
     /// `initial_mineral` rule applies and is booked as `seeded_mineral_in` exactly as it
     /// is for a founder or a landed package. Nothing here reads the world, so a deposit on
@@ -1986,6 +1992,23 @@ impl Flora {
         self.ledger.deposited_organic_in += organic;
         self.ledger.deposited_mineral_in += mineral;
         self.ledger.deposited_energy_in += energy;
+        // **A deposit with no organic matter in it is terminal at once** (Astra R8.2). A
+        // dead pool's decomposition is `rate · dt · organic`, so a pool holding mineral and
+        // energy against zero organic matter releases nothing for ever: an exhausted
+        // consumer whose respiration left only mineral behind would have created an inert
+        // sink that waits for unrelated material to arrive and dilute itself into. The
+        // conservation totals closed either way; the defect was the terminal state of a
+        // public API. So the mineral goes straight to the site's soluble pool, where
+        // decomposition would have put it, and the energy leaves as heat, where
+        // decomposition would have sent it — with the full `deposited_*` booking above and
+        // the same provisioning rule, whichever kind was asked for. The alternative,
+        // refusing the triplet, was rejected because it leaves a consumer with nowhere to
+        // put the mineral it is holding.
+        if organic <= 0.0 {
+            self.ground[gi].mineral += mineral;
+            self.ledger.heat_out += energy;
+            return true;
+        }
         match kind {
             DepositKind::Carrion => {
                 let g = &mut self.ground[gi];
