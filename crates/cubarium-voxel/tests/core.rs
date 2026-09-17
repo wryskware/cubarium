@@ -233,8 +233,7 @@ fn the_mirrored_fixture_gives_the_mirrored_answer() {
     assert!(column(&here, 0) > column(&here, 3), "the basin did not stay deeper");
     // 1e-6 rather than 1e-12: the spill decays toward its stopping point, so the
     // substep it stops on turns on a float comparison and the two runs settle a few
-    // times 1e-8 apart. An order bias between the two sides would move a fill by a
-    // tenth, not by 1e-8.
+    // times 1e-8 apart.
     for y in 0..here.config().height {
         for x in 0..8 {
             assert_eq!(a.material_at(x, y, 0), b.material_at(-x, y, 0), "material {x},{y}");
