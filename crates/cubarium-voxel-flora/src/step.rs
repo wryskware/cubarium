@@ -401,6 +401,28 @@ fn saturated_fraction(view: &VoxelView<'_>, box_: &[usize], sc: &SpeciesConfig) 
     n as f64 / box_.len() as f64
 }
 
+/// The aeration stress a root box at saturated fraction `f` asks for: zero at and below
+/// the species' `establish_saturated_max`, one at a wholly saturated box, linear between.
+///
+/// The tolerance is `establish_saturated_max` and not a knob of its own, because a site a
+/// species may germinate on is a site it does not stress on. A species whose ceiling is at
+/// or above 1 — umbrellafrond's placeholder is exactly 1.0 — asks for no saturation stress
+/// anywhere, and its drowning path is `drown_depth_m` alone.
+///
+/// This is a **target**, not an increment: the stress relaxes toward it first-order, so a
+/// box held half saturated settles at a stress strictly inside `0..1` and the two rates
+/// say how fast it gets there rather than which boundary it ramps to. Package I measured
+/// what the increment rule did instead (`design/7_Research/voxel-round3-experiment-2026-09-16.md`,
+/// findings 1 and 2): `f* = relax / (rate + relax)` was a threshold, and two saturated
+/// voxels of an eighteen-voxel box pinned a bloomcrown at stress 1 forever.
+fn aeration_target(saturated: f64, sc: &SpeciesConfig) -> f64 {
+    let tol = sc.establish_saturated_max;
+    if tol >= 1.0 {
+        return 0.0;
+    }
+    ((saturated - tol) / (1.0 - tol)).clamp(0.0, 1.0)
+}
+
 /// `μ`: a linear ramp of the root box's mean pore fraction between `wilt_pore` and
 /// `sat_pore`. An empty box is a wilting one.
 fn moisture_of(view: &VoxelView<'_>, box_: &[usize], sc: &SpeciesConfig) -> f64 {
@@ -440,14 +462,21 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink]) {
         stands[si].water_m3 = drink[si].taken_m3;
 
         // ---- aeration stress, from the same pre-withdrawal read `μ` came from. It
-        // rises with the saturated fraction of the root box and relaxes with the rest of
-        // it, and it is applied to *this* tick's income: the water was read before
-        // anything was withdrawn, so the stress and the moisture describe one moment.
+        // closes on the level the root box's saturated fraction asks for — up at
+        // `stress_rate_per_s`, down at `relax_rate_per_s`, both as a fraction of the
+        // gap per second — and it is applied to *this* tick's income: the water was read
+        // before anything was withdrawn, so the stress and the moisture describe one
+        // moment.
         let saturated = drink[si].saturated;
-        let stress = (stands[si].aeration_stress
-            + sc.stress_rate_per_s * DT * saturated
-            - sc.relax_rate_per_s * DT * (1.0 - saturated))
-            .clamp(0.0, 1.0);
+        let target = aeration_target(saturated, sc);
+        let was = stands[si].aeration_stress;
+        let stress = if target > was {
+            (was + sc.stress_rate_per_s * DT * (target - was)).clamp(0.0, 1.0)
+        } else if target < was {
+            (was - sc.relax_rate_per_s * DT * (was - target)).clamp(0.0, 1.0)
+        } else {
+            was
+        };
         stands[si].aeration_stress = stress;
 
         // ---- 4.1 potential income, 4.2 demands
@@ -1004,6 +1033,27 @@ mod tests {
         assert_eq!(split_proportional(0.0, 1.0, 1.0), 0.0);
         // One demander asking for the whole total takes all of it, exactly.
         assert_eq!(split_proportional(0.4, 1.0, 1.0), 0.4);
+    }
+
+    /// The aeration target's two ends and its middle, straight off the two species'
+    /// placeholders: zero anywhere a species would germinate, one where there is no air
+    /// left at all, and in proportion between. Umbrellafrond's ceiling of 1.0 is the
+    /// degenerate case, and it means no saturation stress anywhere.
+    #[test]
+    fn the_aeration_target_is_zero_up_to_the_tolerance_and_one_at_full_saturation() {
+        let bloom = SpeciesConfig::bloomcrown();
+        assert_eq!(bloom.establish_saturated_max, 0.25);
+        assert_eq!(aeration_target(0.0, &bloom), 0.0);
+        assert_eq!(aeration_target(2.0 / 18.0, &bloom), 0.0, "two saturated voxels of eighteen");
+        assert_eq!(aeration_target(0.25, &bloom), 0.0, "at the tolerance, not past it");
+        assert!((aeration_target(0.5, &bloom) - 1.0 / 3.0).abs() < 1e-15);
+        assert_eq!(aeration_target(1.0, &bloom), 1.0);
+
+        let frond = SpeciesConfig::umbrellafrond();
+        assert_eq!(frond.establish_saturated_max, 1.0);
+        for f in [0.0, 0.5, 0.999, 1.0] {
+            assert_eq!(aeration_target(f, &frond), 0.0, "umbrellafrond at f = {f}");
+        }
     }
 
     #[test]

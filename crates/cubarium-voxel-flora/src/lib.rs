@@ -116,11 +116,14 @@ pub struct Stand {
     /// dead wood, a propagule package — takes the same fraction of this as it takes of
     /// the stand's organic matter.
     pub mineral: f64,
-    /// Waterlogging of the root zone, `0..=1`. It rises while the root box is saturated
-    /// and relaxes while it is not, and it multiplies income by `1 − aeration_stress`, so
-    /// a drowned stand earns nothing and diebacks on unpaid maintenance. That is the
-    /// "roots drowned" death the sketch wanted, with no new kill switch: standing-water
-    /// drowning (`drown_depth_m`) is a separate and much cruder thing.
+    /// Waterlogging of the root zone, `0..=1`. It relaxes toward the level its root box's
+    /// saturated fraction asks for — nothing at or below the species'
+    /// `establish_saturated_max`, everything at a wholly saturated box, in proportion
+    /// between — and it multiplies income by `1 − aeration_stress`, so a stand in a root
+    /// zone wetter than it tolerates earns that much less and a drowned one earns nothing
+    /// and diebacks on unpaid maintenance. That is the "roots drowned" death the sketch
+    /// wanted, with no new kill switch: standing-water drowning (`drown_depth_m`) is a
+    /// separate and much cruder thing.
     pub aeration_stress: f64,
 }
 
@@ -291,14 +294,21 @@ pub struct SpeciesConfig {
     /// Pore fraction (0..1 of capacity) at and above which a root voxel counts as
     /// **saturated** — no air in it for a root. **Placeholder**.
     pub saturated_pore: f64,
-    /// How fast `Stand::aeration_stress` rises per second with the whole root box
-    /// saturated, and how fast it relaxes per second with none of it saturated. Both
-    /// scale linearly with the saturated fraction. **Placeholders**.
+    /// How fast `Stand::aeration_stress` closes the gap to the level its root box asks
+    /// for — a fraction of the remaining gap per second, rising with `stress_rate_per_s`
+    /// and falling with `relax_rate_per_s`. The level itself is
+    /// `(f − establish_saturated_max) / (1 − establish_saturated_max)`, clamped to
+    /// `0..=1`, where `f` is the saturated fraction of the root box: a box no wetter than
+    /// the species would germinate on asks for no stress, a wholly saturated one asks for
+    /// all of it, and anything between settles between. These two rates therefore set how
+    /// fast a stand reaches its level and not which level it reaches. **Placeholders**.
     pub stress_rate_per_s: f64,
     pub relax_rate_per_s: f64,
     /// A cohort may germinate only where the site's *current* saturated root fraction is
-    /// at most this. The tolerant species has a high ceiling and a slow `stress_rate`;
-    /// the intolerant one the reverse. **Placeholder**.
+    /// at most this — and the same number is where `aeration_stress` starts to bite, since
+    /// a site a species may germinate on is a site it does not stress on. The tolerant
+    /// species has a high ceiling, and at 1.0 it has no saturation stress at all; the
+    /// intolerant one has a low ceiling and a fast `stress_rate`. **Placeholder**.
     pub establish_saturated_max: f64,
     /// Standing water over the support face deeper than this (metres) kills the stand.
     ///
@@ -387,9 +397,10 @@ impl SpeciesConfig {
             sat_pore: 0.5,
             establish_pore_min: 0.1,
             establish_light_min: 0.6,
-            // The sun producer of ridges and terraces: it stresses fast in a saturated
-            // root box, relaxes slowly, and will not germinate on a site that is even a
-            // quarter waterlogged. Placeholders, in the direction the sketch asks for.
+            // The sun producer of ridges and terraces: it will not germinate on a site
+            // that is even a quarter waterlogged, and past that quarter it stresses
+            // quickly toward what the root box asks for and lets go of the stress ten
+            // times more slowly. Placeholders, in the direction the sketch asks for.
             stress_rate_per_s: 0.2,
             relax_rate_per_s: 0.02,
             establish_saturated_max: 0.25,
@@ -416,10 +427,12 @@ impl SpeciesConfig {
             sat_pore: 0.8,
             establish_pore_min: 0.45,
             establish_light_min: 0.1,
-            // The wet producer of hollows: twenty times slower to stress, faster to
-            // recover, and with no aeration bound on establishment at all — a wholly
-            // waterlogged hollow is its habitat, and bloomcrown's `0.25` is what shuts
-            // the sun producer out of it. Placeholders, in the direction the sketch asks
+            // The wet producer of hollows: no aeration bound on establishment at all,
+            // which — since the same number is the stress target's tolerance — is also no
+            // waterlogging stress at all. A wholly waterlogged hollow is its habitat, and
+            // bloomcrown's `0.25` is what shuts the sun producer out of it. Its two rates
+            // are therefore inert at the placeholders and kept only because a lower
+            // ceiling would need them. Placeholders, in the direction the sketch asks
             // for, and the asymmetry Chesson's test needs somewhere to bite.
             stress_rate_per_s: 0.01,
             relax_rate_per_s: 0.05,

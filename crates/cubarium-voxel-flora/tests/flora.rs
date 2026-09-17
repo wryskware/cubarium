@@ -909,14 +909,17 @@ fn coupled(flora: &mut Flora, world: &mut World, ticks: u32) {
 }
 
 /// The three claims of correction 2's income half, on one fixture: a bloomcrown over a
-/// saturated root box reaches stress 1 and earns nothing; an umbrellafrond over the same
-/// box stays far below it and keeps earning; and the bloomcrown relaxes once the water
-/// table is dropped out from under it.
+/// saturated root box reaches stress 1 and earns nothing measurable; an umbrellafrond over
+/// the same box does not stress at all and keeps earning; and the bloomcrown relaxes once
+/// the water table is dropped out from under it.
 ///
-/// No rate is the test's own. The placeholders are what make this readable: bloomcrown
-/// stresses at 0.2 /s, so 5 s of a wholly saturated box is stress 1, and umbrellafrond at
-/// 0.01 /s against a 0.05 /s relaxation cannot accumulate stress at all while any part of
-/// its box is aerated.
+/// No rate is the test's own. Package J's target rule is what sets the two levels: a
+/// wholly saturated box is `f` = 1, so bloomcrown's target is 1 (its tolerance is 0.25)
+/// and umbrellafrond's is 0 (its tolerance is 1.0, which is no saturation stress at all).
+/// The rates only say how fast. Bloomcrown closes `stress_rate_per_s` = 0.2 of the
+/// remaining gap per second, so 100 s is 20 time constants and the stress is 1 to within
+/// 2e-9 — asymptotically, never exactly, which is why the income below is read against a
+/// tolerance and not against zero.
 #[test]
 fn a_saturated_root_box_stresses_bloomcrown_to_nothing_and_leaves_umbrellafrond_earning() {
     let mut bloom_world = saturated_basin();
@@ -926,8 +929,8 @@ fn a_saturated_root_box_stresses_bloomcrown_to_nothing_and_leaves_umbrellafrond_
     let mut frond = Flora::new(FloraConfig::default());
     assert!(frond.apply(&frond_world, Command::Seed { x: 2, z: 0, species: Species::Umbrellafrond, wood: 0.1 }));
 
-    coupled(&mut bloom, &mut bloom_world, 150);
-    coupled(&mut frond, &mut frond_world, 150);
+    coupled(&mut bloom, &mut bloom_world, 2000);
+    coupled(&mut frond, &mut frond_world, 2000);
 
     let b = *bloom.view().stand_at(site(2)).expect("alive, not drowned");
     let u = *frond.view().stand_at(site(2)).expect("alive, not drowned");
@@ -935,16 +938,18 @@ fn a_saturated_root_box_stresses_bloomcrown_to_nothing_and_leaves_umbrellafrond_
     assert_eq!(bloom.view().ledger.deaths, 0, "drowning is not what is being tested");
     assert_eq!(b.light, 1.0, "open sky: light is not what stopped it");
     assert_eq!(b.moisture, 1.0, "pore 1.0 is past sat_pore: nor is water");
-    assert_eq!(b.aeration_stress, 1.0, "bloomcrown should be fully stressed: {b:?}");
-    assert!(u.aeration_stress < 0.1, "umbrellafrond stressed to {}", u.aeration_stress);
+    assert!(1.0 - b.aeration_stress < 1e-6, "bloomcrown should be fully stressed: {b:?}");
+    assert_eq!(u.aeration_stress, 0.0, "umbrellafrond stressed to {}", u.aeration_stress);
 
-    // Earning nothing: over the next thirty ticks the bloomcrown fixes not one unit, its
-    // wood does not move by one bit, and its foliage and reserve only fall — with any
-    // income at all the shed foliage would be reflushed.
+    // Earning nothing measurable: over the next thirty ticks the bloomcrown fixes about
+    // 1.5e-12 of a unit — `1 − stress` is 2e-9 there and its maintenance alone is 1e-6 a
+    // tick — its wood does not move by one bit, and its foliage and reserve only fall,
+    // where with any income to speak of the shed foliage would be reflushed.
     let fixed = bloom.view().ledger.fixed_in;
     coupled(&mut bloom, &mut bloom_world, 30);
     let after = *bloom.view().stand_at(site(2)).expect("still alive");
-    assert_eq!(bloom.view().ledger.fixed_in, fixed, "a fully stressed stand fixed light");
+    let earned = bloom.view().ledger.fixed_in - fixed;
+    assert!(earned < 1e-10, "a fully stressed stand fixed {earned}");
     assert_eq!(after.wood, b.wood, "and it grew");
     assert!(after.foliage < b.foliage && after.reserve < b.reserve, "{after:?}");
     // The umbrellafrond on the same box is still earning over the same span.

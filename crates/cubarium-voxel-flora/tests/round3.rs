@@ -846,108 +846,119 @@ fn box_world(saturated: usize) -> World {
     w
 }
 
-/// The shape of the aeration response, which the brief and the commit message both state
-/// only at its two endpoints. The update is `stress += rate·dt·f − relax·dt·(1−f)`: an
-/// increment that does not depend on `stress` at all. So it is a **ramp to a boundary**,
-/// with no interior fixed point except at the single saturated fraction
-/// `f* = relax / (rate + relax)`, and the species' response to its root zone is a step
-/// function of `f` and not a gradient.
+/// The shape of the aeration response. Package J made it first-order relaxation toward a
+/// **target** the root box sets: `target = (f − tol) / (1 − tol)` clamped to `0..=1`, with
+/// `f` the saturated fraction and `tol` the species' own `establish_saturated_max`, and
+/// `stress` closes a fraction of the remaining gap every second — `stress_rate_per_s` of
+/// it upward, `relax_rate_per_s` downward. So `f` picks the level and the rates pick only
+/// how fast the stand gets there.
 ///
-/// For bloomcrown `f* = 0.02 / 0.22 = 0.0909`. On an 18-voxel root box that sits between
-/// one saturated voxel (1/18 = 0.0556) and two (2/18 = 0.1111), so **two wet voxels out of
-/// eighteen** are the difference between a stand that relaxes to exactly 0 and a stand
-/// that is pinned at exactly 1. No rate here is the test's own.
+/// What it replaced, which package I measured: an increment `rate·dt·f − relax·dt·(1−f)`
+/// that did not depend on `stress`, so the pair of rates was not a strength but a
+/// threshold `f* = relax / (rate + relax)` = 0.0909 for bloomcrown — **two** saturated
+/// voxels of an eighteen-voxel box pinned it at stress 1 forever. Those same two voxels
+/// are `f` = 0.1111, under the tolerance 0.25, and now cost it exactly nothing.
+///
+/// Three readings of bloomcrown's own box, and both rates, with no rate the test's own:
+///   - 2 of 18 (`f` = 0.1111 < tol): stress exactly 0, for 2,000 ticks.
+///   - 18 of 18 (`f` = 1, target 1): `1 − (1 − rate·DT)^n`, which is 0.634 at 100 ticks —
+///     one time constant of the 0.2 /s placeholder — and within 1e-6 of 1 by 2,000.
+///   - back to 2 of 18: `(1 − relax·DT)^n` of where it was, ten times slower, which is
+///     0.135 of it after 2,000 ticks.
 #[test]
-fn aeration_stress_is_a_step_in_the_saturated_fraction_not_a_gradient() {
+fn aeration_stress_relaxes_toward_the_level_its_saturated_fraction_asks_for() {
     let sc = SpeciesConfig::bloomcrown();
-    let f_star = sc.relax_rate_per_s / (sc.stress_rate_per_s + sc.relax_rate_per_s);
-    assert!(
-        (f_star - 0.02 / 0.22).abs() < 1e-12,
-        "the placeholders this test reads: f* = {f_star}"
-    );
-    assert!(1.0 / 18.0 < f_star && f_star < 2.0 / 18.0, "f* {f_star} is not between 1/18 and 2/18");
+    assert_eq!(sc.establish_saturated_max, 0.25, "the tolerance the target measures from");
+    assert!(2.0 / 18.0 < sc.establish_saturated_max, "two of eighteen is under the tolerance");
+    let here = at(2, 1);
 
-    // Start wholly saturated: the stress ramps to the ceiling.
+    // Two saturated voxels of eighteen: under the tolerance, so no stress ever, and the
+    // stand earns the whole time.
+    let mut world = box_world(2);
+    let mut flora = Flora::new(FloraConfig::default());
+    assert!(flora.apply(&world, Command::Seed { x: 2, z: 1, species: Species::Bloomcrown, wood: 0.1 }));
+    run(&mut flora, &mut world, 2000);
+    assert_eq!(
+        flora.view().stand_at(here).unwrap().aeration_stress,
+        0.0,
+        "2 of 18 saturated voxels (f = {:.4}) stressed a stand whose tolerance is 0.25",
+        2.0 / 18.0
+    );
+    assert!(flora.view().ledger.fixed_in > 0.0, "it earned nothing under no stress at all");
+
+    // A wholly saturated box: the target is 1, approached at `stress_rate_per_s` per
+    // second of the gap that is left.
     let mut world = box_world(18);
     let mut flora = Flora::new(FloraConfig::default());
     assert!(flora.apply(&world, Command::Seed { x: 2, z: 1, species: Species::Bloomcrown, wood: 0.1 }));
-    let here = at(2, 1);
-    run(&mut flora, &mut world, 400);
-    assert_eq!(
-        flora.view().stand_at(here).unwrap().aeration_stress,
-        1.0,
-        "a wholly saturated box did not pin the stress at the ceiling"
-    );
-    assert_eq!(flora.view().stand_at(here).unwrap().moisture, 1.0, "μ is not what stopped it");
+    run(&mut flora, &mut world, 100);
+    let rise = 1.0 - (1.0 - sc.stress_rate_per_s * DT).powi(100);
+    let s = flora.view().stand_at(here).unwrap().aeration_stress;
+    assert!((s - rise).abs() < 1e-9, "after 100 ticks the stress is {s}, not {rise}");
+    assert!((rise - 0.634).abs() < 1e-3, "one time constant of the placeholder rate is {rise}");
+    run(&mut flora, &mut world, 1900);
+    let s = flora.view().stand_at(here).unwrap().aeration_stress;
+    assert!(1.0 - s < 1e-6, "a wholly saturated box left the stress at {s}, not at its target 1");
+    assert_eq!(flora.view().stand_at(here).unwrap().moisture, 1.0, "μ is not what is happening");
 
-    // Dry sixteen of the eighteen: 2/18 = 0.1111 is still over f*, so the ceiling holds.
+    // Dry sixteen of the eighteen: `f` = 2/18 is under the tolerance again, the target is
+    // 0, and the stress falls first-order at `relax_rate_per_s` — ten times slower than it
+    // rose, which is the asymmetry the placeholders ask for.
     let order = root_box_order();
     for &(x, y, z) in order.iter().take(16) {
         drain_to(&mut world, x, y, z, 0.5);
     }
-    run(&mut flora, &mut world, 400);
-    let s = flora.view().stand_at(here).unwrap();
-    assert_eq!(
-        s.aeration_stress, 1.0,
-        "2 of 18 saturated voxels (f = {}) did not hold the ceiling",
-        2.0 / 18.0
-    );
-    assert_eq!(s.moisture, 1.0, "the box is still wet enough for μ = 1");
-
-    // Dry one more: 1/18 = 0.0556 is under f*, and the stress falls all the way to the
-    // floor. `(f* − 1/18) · (rate + relax) · dt` per tick is 3.9e-4, so 2,572 ticks.
-    let (x, y, z) = order[16];
-    drain_to(&mut world, x, y, z, 0.5);
-    run(&mut flora, &mut world, 2600);
-    let s = flora.view().stand_at(here).unwrap();
-    assert_eq!(
-        s.aeration_stress, 0.0,
-        "1 of 18 saturated voxels (f = {}) did not relax to the floor",
-        1.0 / 18.0
-    );
-    assert_residuals(&flora, "after a root box crossed f* twice");
+    let before = flora.view().stand_at(here).unwrap().aeration_stress;
+    run(&mut flora, &mut world, 2000);
+    let want = before * (1.0 - sc.relax_rate_per_s * DT).powi(2000);
+    let s = flora.view().stand_at(here).unwrap().aeration_stress;
+    assert!((s - want).abs() < 1e-9, "after 2,000 ticks of relaxation the stress is {s}, not {want}");
+    assert!((want - 0.135).abs() < 1e-3, "two time constants of the relax placeholder is {want}");
+    assert_residuals(&flora, "after a root box was wetted and dried");
 }
 
-/// **FINDING.** The brief and package H's report both describe aeration stress as a level
-/// a root box settles at — "it relaxes after the water table drops", "stays under its
-/// stress ceiling". A box held at a fixed intermediate saturation has no such level: the
-/// per-tick increment `rate·dt·f − relax·dt·(1−f)` is independent of `stress`, so every
-/// fraction other than the single knife-edge `f* = relax / (rate + relax)` ramps to 0 or
-/// to 1 and stays there. Half a saturated root box is not half a stress.
+/// **Package I's finding, fixed.** I measured that a box held at a fixed intermediate
+/// saturation had no equilibrium stress at all: the old increment did not depend on
+/// `stress`, so every fraction but the knife-edge `f*` ramped to 0 or to 1 and half a
+/// saturated root box was never half a stress. The target rule gives it one, and this is
+/// the same nine-of-eighteen fixture (`f` = 0.5) that measured the finding:
 ///
-/// Measured on a nine-of-eighteen box (f = 0.5) held there for 20,000 ticks
-/// (1,000 s), with `μ = 1` and light 1 throughout:
-///   bloomcrown (rate 0.2 /s, relax 0.02 /s, f* = 0.0909): stress 1.0, income 0.
-///   umbrellafrond (rate 0.01 /s, relax 0.05 /s, f* = 0.8333): stress 0.0, income full.
-/// Neither is strictly inside `0..1` at any fraction but its own `f*`, where the
-/// increment is zero and the stress simply never moves from wherever it started.
+///   - bloomcrown, tol 0.25: target `(0.5 − 0.25) / 0.75` = **1/3**, and it settles there.
+///     Its income is multiplied by 2/3 rather than by nothing, which is what "a cost" was
+///     supposed to mean.
+///   - umbrellafrond, tol 1.0: no saturation stress at any fraction whatever, so exactly
+///     **0**. Under the old rule it read 0.0 here too — but by ramping *away* from the
+///     boundary its own `f*` of 0.8333 put it above, not because saturation costs it
+///     nothing.
 ///
-/// This is the specified update rule, not a mistake in implementing it, so nothing here is
-/// changed to make the test pass. What it costs the model: the two species do not grade
-/// into one another across the moisture gradient the terrain provides — each one either
-/// earns everything or nothing, and the crossover sits at a fraction fixed by a rate ratio
-/// nobody has measured. The backlog row calls the 20x ratio "the number most likely to be
-/// wrong"; this is why it matters more than a factor of twenty usually would.
+/// 2,000 ticks is 20 time constants of bloomcrown's 0.2 /s rise, so 1e-6 is a slack
+/// tolerance on a value converged to about 2e-9.
 #[test]
-#[ignore = "FINDING: aeration stress has no interior equilibrium. On a 9/18 saturated box \
-            held for 20,000 ticks, bloomcrown reaches exactly 1.0 and umbrellafrond \
-            exactly 0.0; the increment rate*dt*f - relax*dt*(1-f) does not depend on \
-            stress, so every f except f* = relax/(rate+relax) (0.0909 bloomcrown, 0.8333 \
-            umbrellafrond) ramps to a boundary. Specified rule, not an implementation \
-            slip; left failing on purpose."]
 fn a_half_saturated_root_box_settles_at_an_interior_stress() {
-    for (species, x) in [(Species::Bloomcrown, 2i64), (Species::Umbrellafrond, 2)] {
+    assert_eq!(SpeciesConfig::bloomcrown().establish_saturated_max, 0.25);
+    assert_eq!(SpeciesConfig::umbrellafrond().establish_saturated_max, 1.0);
+    for (species, want) in [(Species::Bloomcrown, 1.0 / 3.0), (Species::Umbrellafrond, 0.0)] {
         let mut world = box_world(9);
         let mut flora = Flora::new(FloraConfig::default());
-        assert!(flora.apply(&world, Command::Seed { x, z: 1, species, wood: 0.1 }));
-        run(&mut flora, &mut world, 20_000);
+        assert!(flora.apply(&world, Command::Seed { x: 2, z: 1, species, wood: 0.1 }));
+        run(&mut flora, &mut world, 2000);
         let s = *flora.view().stand_at(at(2, 1)).expect("alive");
         assert!(
-            s.aeration_stress > 0.0 && s.aeration_stress < 1.0,
-            "{} on a half-saturated box sits at stress {}, not strictly inside 0..1",
+            (s.aeration_stress - want).abs() < 1e-6,
+            "{} on a half-saturated box sits at stress {}, not {want}",
             species.name(),
             s.aeration_stress
         );
+        assert!(s.moisture > 0.0, "μ is not what is being measured: {}", s.moisture);
+        if want > 0.0 {
+            assert!(
+                s.aeration_stress > 0.0 && s.aeration_stress < 1.0,
+                "{} is at a boundary, not strictly inside 0..1: {}",
+                species.name(),
+                s.aeration_stress
+            );
+        }
+        assert_residuals(&flora, "after a half-saturated box settled");
     }
 }
 
@@ -1139,107 +1150,106 @@ fn the_root_box_sees_soil_only_so_saturated_rock_is_neither_wet_nor_waterlogged(
     assert_residuals(&flora, "after 200 ticks over saturated rock");
 }
 
-/// **FINDING.** Umbrellafrond's tolerance of a saturated root zone is a *delay*, not a
-/// tolerance. Its `f*` is 0.8333, so a root box saturated to the last voxel — which is
-/// exactly what the basin the species is for looks like — is over its threshold too, and
-/// it ramps to stress 1 and earns nothing, 20 times more slowly than bloomcrown but just
-/// as completely. `establish_saturated_max` of 1.0 lets it germinate there first.
+/// Umbrellafrond's `establish_saturated_max` is 1.0, and package J made that same number
+/// the tolerance the stress target measures from, so the wet producer has **no**
+/// saturation stress anywhere: a root box saturated to the last voxel is its habitat and
+/// it earns in it. Package I measured the opposite under the increment rule — `f*` 0.8333,
+/// stress 0.5 at tick 1,000 and exactly 1.0 by tick 2,000, with not one further unit of
+/// organic matter fixed, "20 times more slowly than bloomcrown but just as completely".
 ///
-/// Measured on a wholly saturated 18-voxel box with `μ = 1` and light 1 throughout:
-/// stress 0.5 at tick 1,000 (50 s), exactly 1.0 by tick 2,000 (100 s), and from there not
-/// one further unit of organic matter fixed. Bloomcrown reaches the same place at tick
-/// 100 (5 s). Correction 2 was meant to make the basin cost bloomcrown something and cost
-/// umbrellafrond nothing; at full saturation it costs them both everything, on two
-/// different clocks.
-///
-/// H's own aeration test reads umbrellafrond's stress after 150 ticks and finds it under
-/// 0.1, which is true — and is 1/13th of the way along this ramp.
+/// Its drowning path is `drown_depth_m` alone, and that is the second half of this test:
+/// 0.6 m of free water standing over the support face against its 0.5 m limit kills it in
+/// one tick. Wet soil is not a pool, and only the pool is fatal.
 #[test]
-fn umbrellafrond_also_drowns_in_a_wholly_saturated_root_box_only_twenty_times_slower() {
+fn umbrellafrond_never_stresses_from_saturation_and_drowns_only_by_depth() {
     let sc = SpeciesConfig::umbrellafrond();
-    let f_star = sc.relax_rate_per_s / (sc.stress_rate_per_s + sc.relax_rate_per_s);
-    assert!((f_star - 0.05 / 0.06).abs() < 1e-12, "the placeholders this test reads: f* = {f_star}");
-    assert!(f_star < 1.0, "a wholly saturated box is over even umbrellafrond's threshold");
+    assert_eq!(sc.establish_saturated_max, 1.0, "no aeration bound, so no aeration stress");
+    assert_eq!(sc.drown_depth_m, 0.5, "the one water that does kill it");
 
     let mut world = box_world(18);
     let mut flora = Flora::new(FloraConfig::default());
     let here = at(2, 1);
     assert!(flora.apply(&world, Command::Seed { x: 2, z: 1, species: Species::Umbrellafrond, wood: 0.1 }));
 
-    // H's own reading point: after 150 ticks it looks tolerant.
-    run(&mut flora, &mut world, 150);
-    let early = *flora.view().stand_at(here).expect("alive");
-    assert!(early.aeration_stress < 0.1, "at 150 ticks it is only {}", early.aeration_stress);
-    assert_eq!(early.moisture, 1.0, "μ is not what is happening here");
-
-    // Half way, at 1,000 ticks.
-    run(&mut flora, &mut world, 850);
-    let half = flora.view().stand_at(here).expect("alive").aeration_stress;
-    assert!((half - 0.5).abs() < 0.01, "at 1,000 ticks the stress is {half}, not about 0.5");
-
-    // And pinned at the ceiling by 2,000.
-    run(&mut flora, &mut world, 1050);
-    let s = *flora.view().stand_at(here).expect("still alive, just earning nothing");
-    assert_eq!(s.aeration_stress, 1.0, "at 2,000 ticks the stress is {}", s.aeration_stress);
+    // Twice as long as package I's ramp took to reach the ceiling.
+    run(&mut flora, &mut world, 4000);
+    let s = *flora.view().stand_at(here).expect("alive and earning");
+    assert_eq!(s.aeration_stress, 0.0, "a wholly saturated box stressed it at all");
     assert_eq!(s.light, 1.0, "open sky");
-    assert_eq!(s.moisture, 1.0, "wetter than sat_pore: water is not the limit");
-
+    assert_eq!(s.moisture, 1.0, "wetter than sat_pore: water is not a limit either");
+    assert!(s.wood > 0.1, "it did not grow: wood {}", s.wood);
     let fixed = flora.view().ledger.fixed_in;
     run(&mut flora, &mut world, 200);
-    assert_eq!(
-        flora.view().ledger.fixed_in, fixed,
-        "a fully stressed umbrellafrond went on fixing light"
-    );
-    assert_eq!(
-        flora.view().stand_at(here).unwrap().wood,
-        s.wood,
-        "and it went on growing"
-    );
-    assert_residuals(&flora, "after an umbrellafrond drowned in its own habitat");
+    assert!(flora.view().ledger.fixed_in > fixed, "it stopped fixing light");
+    assert_eq!(flora.view().ledger.deaths, 0, "waterlogged soil is not a pool");
+
+    // The one water that does kill it: 0.6 m standing on the face, over the 0.5 m limit.
+    let took = world.apply(WorldCommand::AddWater { x: 2, y: 3, z: 1, volume_m3: 0.6 });
+    assert!((took - 0.6).abs() < 1e-12, "the void took {took} of 0.6");
+    let depth = world.view().water_depth_m(2, 2, 1);
+    assert!(depth > sc.drown_depth_m, "{depth} m over the face is not over the limit");
+    run(&mut flora, &mut world, 1);
+    assert_eq!(flora.view().ledger.deaths, 1, "{depth} m of standing water did not drown it");
+    assert!(flora.view().stand_at(here).is_none(), "it drowned and is still standing");
+    assert_residuals(&flora, "after an umbrellafrond earned in a saturated box and drowned in a pool");
 }
 
-/// The same finding on the fixture H's own aeration test uses, so it cannot be an artifact
-/// of hand-set pore fractions: a water table charged above the support face, the world
-/// stepped every tick, and no rain. At 150 coupled ticks umbrellafrond's stress is under
-/// 0.1; at 2,100 it is exactly 1.0 and it has stopped earning.
+/// The same two levels on a coupled fixture rather than on hand-set pore fractions, so
+/// neither can be an artifact of the way the fixture was built: a water table charged
+/// above the support face, the world stepped every tick, and no rain. The core tops both
+/// soil rows to capacity, so the saturated fraction of either species' root box is 1 —
+/// bloomcrown's target is 1 and umbrellafrond's is 0, and that is what they reach.
+///
+/// Nothing stands in free water here (`water_depth_m` at the face is 0 throughout), so
+/// this is waterlogged *soil*, which is the thing the aeration rule is about.
 #[test]
 fn the_same_holds_on_a_water_table_basin_with_the_world_stepping() {
-    let config = VoxelConfig {
-        width: 6,
-        height: 8,
-        depth: 1,
-        voxel_m: 1.0,
-        seed: 11,
-        initial_aquifer_head_m: 3.0,
-        ..VoxelConfig::default()
-    };
-    let mut world = World::empty(config);
-    for x in 0..6i64 {
-        for y in 1..=2u32 {
-            fill(&mut world, x, y, 0, Material::Soil, 0.98);
+    let basin = || {
+        let config = VoxelConfig {
+            width: 6,
+            height: 8,
+            depth: 1,
+            voxel_m: 1.0,
+            seed: 11,
+            initial_aquifer_head_m: 3.0,
+            ..VoxelConfig::default()
+        };
+        let mut world = World::empty(config);
+        for x in 0..6i64 {
+            for y in 1..=2u32 {
+                fill(&mut world, x, y, 0, Material::Soil, 0.98);
+            }
         }
-    }
-    let mut flora = Flora::new(FloraConfig::default());
-    assert!(flora.apply(&world, Command::Seed { x: 2, z: 0, species: Species::Umbrellafrond, wood: 0.1 }));
-
+        world
+    };
     let coupled = |flora: &mut Flora, world: &mut World, ticks: u32| {
         for _ in 0..ticks {
             world.step();
             flora.step(world);
         }
     };
-    coupled(&mut flora, &mut world, 150);
-    let early = flora.view().stand_at(site(2)).expect("alive").aeration_stress;
-    assert!(early < 0.1, "at 150 coupled ticks it is {early}, which is where H reads it");
 
-    coupled(&mut flora, &mut world, 1950);
-    let s = *flora.view().stand_at(site(2)).expect("alive, earning nothing");
+    // Bloomcrown: the target is 1 and it converges on it, within 1e-6 by 2,000 ticks.
+    let mut world = basin();
+    let mut flora = Flora::new(FloraConfig::default());
+    assert!(flora.apply(&world, Command::Seed { x: 2, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
+    coupled(&mut flora, &mut world, 2000);
+    let s = *flora.view().stand_at(site(2)).expect("alive, earning almost nothing");
     assert_eq!(world.view().water_depth_m(2, 2, 0), 0.0, "this is wet soil, not a pool");
     assert_eq!(flora.view().ledger.deaths, 0, "drowning by depth is not what this is");
     assert_eq!(s.moisture, 1.0, "water is not the limit");
-    assert_eq!(s.aeration_stress, 1.0, "at 2,100 coupled ticks the stress is {}", s.aeration_stress);
+    assert!(1.0 - s.aeration_stress < 1e-6, "bloomcrown's stress is {}, not its target 1", s.aeration_stress);
+
+    // Umbrellafrond on the same basin: no stress at all, and still earning.
+    let mut world = basin();
+    let mut flora = Flora::new(FloraConfig::default());
+    assert!(flora.apply(&world, Command::Seed { x: 2, z: 0, species: Species::Umbrellafrond, wood: 0.1 }));
+    coupled(&mut flora, &mut world, 2000);
+    let s = *flora.view().stand_at(site(2)).expect("alive");
+    assert_eq!(s.aeration_stress, 0.0, "umbrellafrond stressed to {}", s.aeration_stress);
+    assert_eq!(s.moisture, 1.0, "water is not the limit");
     let fixed = flora.view().ledger.fixed_in;
     coupled(&mut flora, &mut world, 100);
-    assert_eq!(flora.view().ledger.fixed_in, fixed, "it went on fixing light");
-    assert_residuals(&flora, "after an umbrellafrond drowned on a water-table basin");
+    assert!(flora.view().ledger.fixed_in > fixed, "it stopped fixing light");
+    assert_residuals(&flora, "after two species sat on a water-table basin");
 }
