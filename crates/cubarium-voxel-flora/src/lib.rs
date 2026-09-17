@@ -329,8 +329,33 @@ pub struct SpeciesConfig {
     pub donor_min: f64,
     /// `q_prop`: the fraction of `Q_max` a donor keeps for itself.
     pub donor_reserve_floor: f64,
-    /// `k_est`: propagule organic matter per second per neighbour site within `hop`. Every
-    /// support face in reach is a recipient, occupied or not: a seed bank waits for a gap.
+    /// `k_est`: the **gross** organic matter a donor sets aside for reproduction per
+    /// second — one recipient's worth, not one per neighbour (round 3b, Astra R4.4/R5.6).
+    ///
+    /// The implemented contract, for a preset author:
+    ///
+    /// 1. Every tick, a stand whose wood is at least `donor_min` asks for
+    ///    `propagule_rate · dt` of its reserve and is funded out of whatever that reserve
+    ///    holds **above** `donor_reserve_floor · reserve_cap · wood`. A stand that cannot
+    ///    pay asks anyway, and the gap between the two is
+    ///    [`FloraLedger::propagule_requested`] against [`FloraLedger::propagule_funded`].
+    /// 2. What it can pay is charged construction respiration at once — `c_g` of it leaves
+    ///    as `respired_out` and heat — and the remaining `1 / (1 + build)` of it is saved
+    ///    in [`Stand::parcel`]. So a whole package costs `(1 + build)` times its own size:
+    ///    0.06 of reserve for 0.05 of package at the placeholders.
+    /// 3. When the parcel holds one whole **package** — `alive_min / propagule_split[0]`,
+    ///    the material a germination needs to build a stand at exactly `alive_min` of wood
+    ///    — that package lands on **one** support face inside `hop`, drawn from the donor's
+    ///    own keyed stream, and the remainder keeps saving. Nothing lands before the parcel
+    ///    is full; there is no trickle to every neighbour.
+    /// 4. The recipient is drawn without habitat screening and may be occupied: the
+    ///    predicate is germination's test, not landing's, and a bank waits for a gap. It is
+    ///    never the donor's own site.
+    ///
+    /// At the placeholders one package is therefore 300 s of a fully funded donor's entire
+    /// reproductive output, wherever `hop` reaches. Raising this rate raises what a donor
+    /// *asks* for; it creates no income, and on a stand that is already reserve-limited it
+    /// changes nothing at all.
     pub propagule_rate: f64,
     /// `w_frac, p_frac, q_frac`: how a landed propagule splits into wood, starter foliage
     /// and starter reserve. Sums to one.
