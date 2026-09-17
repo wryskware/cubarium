@@ -5,22 +5,61 @@
 //!
 //! # One tick
 //!
+//! Every rate below is per second and is applied over one [`crate::DT`]. Only step 3 is
+//! subdivided, and it is the one step with no rate in it: a substep re-levels water that
+//! is already there, so nothing is divided by `water_substeps`. Every interface is
+//! limited at both ends as well — by the donor's water and the receiver's room — and the
+//! material named with it is the one whose constants set the rate.
+//!
 //! 1. **Rain**: `rain_m_per_s * DT` metres of water onto each column's sky-exposed
-//!    void cell. A roof shadows what is under it: the rain lands on the roof.
+//!    void cell, limited by that cell's room. A roof shadows what is under it: the rain
+//!    lands on the roof.
 //! 2. **Evaporation**: `evaporation_m_per_s * DT` metres off each column's sky-exposed
-//!    free-water surface. Water under a roof does not evaporate.
+//!    free-water surface, limited by the water there. Water under a roof does not
+//!    evaporate.
 //! 3. **`water_substeps` free-water substeps**, each: *fall* (every void cell hands its
 //!    water to the void cell below while that has room, one cell per substep), then
 //!    *equalize* (every connected water region settles to one surface level).
-//! 4. **Infiltration**: free water into the porous cell directly below it, at
-//!    `permeability_per_s` of that cell's pore capacity, limited by its remaining room.
-//! 5. **Drainage**: pore water above `field_capacity` moves down — into the pore space
-//!    below, into the aquifer where porous rock meets bedrock, or as a drip into free
-//!    water where a porous cell roofs a void.
-//! 6. **Spring**: `Q = spring_k_m2_per_s * max(head - h_spring, 0)` out of the aquifer
-//!    into the spring cell, where `head` comes from [`crate::Config::aquifer_head_m`].
-//! 7. **Outlet**: while open, the named outlet cell exports up to `outlet_m3_per_s`
-//!    into `Ledger::outlet_out`.
+//! 4. **Infiltration**: free water into the porous cell directly below it. The
+//!    **receiving** cell's material sets the rate: `permeability_per_s * DT` of its own
+//!    `pore_capacity`, per voxel volume.
+//! 5. **Drainage**: pore water above the cell's own `field_capacity` moves down — into
+//!    the pore space below, into the aquifer where a porous cell sits on bedrock or on
+//!    the foundation, or as a drip into free water where a porous cell roofs a void. The
+//!    **donor** cell's material sets both the threshold and the rate
+//!    (`permeability_per_s * DT` of its own pore capacity). This is field-capacity
+//!    drainage, not "saturated soil only": rock above its field capacity drips too, just
+//!    very slowly, and soil stops draining at `field_capacity` rather than at zero —
+//!    that fraction is the retained water ecology gets to read.
+//! 6. **Spring**: out of the aquifer into the spring cell. See below.
+//! 7. **Outlet**: while open, the one named outlet cell exports up to
+//!    `outlet_m3_per_s * DT` of its free water into `Ledger::outlet_out`. This is the
+//!    separate named export and has nothing to do with the spring.
+//!
+//! # The spring, and what it is not
+//!
+//! `h_spring = y * voxel_m`: the elevation of the spring cell's own floor, in metres
+//! above `y = 0`, from that cell's `y`. `head` is [`crate::Config::aquifer_head_m`] of
+//! the current store — the aquifer is a single number, not a field. The drive is
+//! `max(head - h_spring, 0)`, so a spring cell at or above the head discharges nothing
+//! at all, and
+//!
+//! ```text
+//! Q = spring_k_m2_per_s * max(head - h_spring, 0)
+//! ```
+//!
+//! The volume that actually leaves the aquifer in one tick is the smallest of `Q * DT`,
+//! the aquifer's whole stock, and the room at the destination. The seep emerges at the
+//! named cell and, if that is brim full, in the void cells above it, so a spring under
+//! standing water still reaches the surface; a solid stops it there. Whatever it could
+//! not push out **stays in the aquifer**: a full or roofed spring cell means zero
+//! discharge and an unchanged store, never water lost.
+//!
+//! **Limitation, plainly: discharge is one-way this wave.** There is no submerged
+//! backpressure. A pool standing over the spring does not push back on it — only the
+//! destination's *room* limits the flow — and water never runs from the cell back into
+//! the aquifer. So this is a room-limited source, not a groundwater equilibrium, and the
+//! only path back into the aquifer is drainage (step 5).
 //!
 //! # Connectivity: what a region is
 //!

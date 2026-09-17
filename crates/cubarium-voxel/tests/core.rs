@@ -281,6 +281,56 @@ fn the_residual_stays_below_1e_9_with_every_flux_firing() {
     assert!(residual(&w).abs() < 1e-9, "residual {}", residual(&w));
 }
 
+// ------------------------------------------------------------------ spring
+
+/// A spring at `(1, 3)` on a four-column ring, 1 m voxels: `h_spring` is 3 m and the
+/// aquifer's head is `aquifer_m3 / 0.4`, so 4 m3 drives it and 1 m3 does not.
+/// `sealed` walls `(1, 3)` in with bedrock — no pores, so nothing infiltrates out of it
+/// before the spring runs — and roofs it, which is the blocked case.
+fn spring_world(aquifer_m3: f64, sealed: bool) -> World {
+    let mut c = cfg(4, 6);
+    c.spring_k_m2_per_s = 0.5;
+    let mut w = World::empty(c);
+    if sealed {
+        for (x, y) in [(1, 2), (1, 4), (0, 3), (2, 3)] {
+            w.apply(Command::SetMaterial { x, y, z: 0, material: Material::Bedrock });
+        }
+    }
+    w.set_spring_cell(Some((1, 3, 0)));
+    w.apply(Command::ChargeAquifer { volume_m3: aquifer_m3 });
+    w
+}
+
+#[test]
+fn a_full_or_roofed_spring_cell_discharges_nothing_and_the_aquifer_keeps_it() {
+    // The control: the same sealed cell, empty. Head 10 m over a 3 m spring drives
+    // 0.5 * 7 * DT = 0.175 m3 into it, which is well inside the cell's room.
+    let mut open = spring_world(4.0, true);
+    open.step();
+    assert!((open.view().free_at(1, 3, 0) - 0.175).abs() < 1e-9, "{}", open.view().free_at(1, 3, 0));
+    assert!((open.view().aquifer_m3 - 3.825).abs() < 1e-9, "{}", open.view().aquifer_m3);
+
+    // Now fill it: no room, no discharge, and the aquifer is exactly where it was.
+    let mut full = spring_world(4.0, true);
+    full.apply(Command::AddWater { x: 1, y: 3, z: 0, volume_m3: 1.0 });
+    let before = full.view().aquifer_m3;
+    full.step();
+    assert_eq!(full.view().aquifer_m3, before, "the aquifer paid for a blocked spring");
+    assert!((full.view().free_at(1, 3, 0) - 1.0).abs() < 1e-12);
+    assert!(residual(&full).abs() < 1e-9);
+}
+
+#[test]
+fn a_spring_above_the_aquifer_head_discharges_nothing() {
+    // Head 2.5 m, spring floor at 3 m: no excess, so no flow at all.
+    let mut w = spring_world(1.0, false);
+    w.step();
+    assert_eq!(w.view().aquifer_m3, 1.0, "the aquifer leaked without head");
+    let wet: f64 = (0..4).map(|x| column(&w, x)).sum();
+    assert_eq!(wet, 0.0, "water appeared without head: {wet}");
+    assert!(residual(&w).abs() < 1e-9);
+}
+
 // ------------------------------------------------------------------ receipts
 
 #[test]
