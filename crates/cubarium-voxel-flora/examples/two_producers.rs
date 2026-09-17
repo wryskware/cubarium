@@ -116,9 +116,9 @@ struct Outcome {
     seed: u64,
     noise_seed: u64,
     /// Occupied skyline columns per species, sorted, deduplicated: every stand.
-    occupied: [Vec<(u32, u32)>; 2],
+    occupied: [Vec<(u32, u32)>; Species::COUNT],
     /// The same, alive stands only.
-    alive: [Vec<(u32, u32)>; 2],
+    alive: [Vec<(u32, u32)>; Species::COUNT],
     /// The columns of the lowest and the highest quarter of this run's own skyline: the
     /// hollows and the ridges, as pure landform, with no plant and no water in them.
     low_quartile: Vec<(u32, u32)>,
@@ -128,11 +128,11 @@ struct Outcome {
     /// plant acted. Pure terrain and water, and an instantaneous reading — the water
     /// budget shows the head still falling at 50 s, so this is the eligible set of that
     /// moment and not a settled habitat (Astra R5.2).
-    eligible: [Vec<(u32, u32)>; 2],
+    eligible: [Vec<(u32, u32)>; Species::COUNT],
     /// The same predicate over the same columns **at observation**: the last tick of the
     /// run, with the plants and the settled water in it. Printed beside the introduction
     /// set so that a reader can see how far the eligible band moved while the arm ran.
-    eligible_at_end: [Vec<(u32, u32)>; 2],
+    eligible_at_end: [Vec<(u32, u32)>; Species::COUNT],
     /// The founders this run's own selection rule would have planted, whatever it was
     /// actually handed: umbrellafrond from the bottom of its eligible skyline, bloomcrown
     /// from the top. Comparing these across runs asks where the *process* would put a
@@ -149,19 +149,12 @@ struct Outcome {
     /// ledger's own birth identity, so it is exact: a founder that died and was replaced
     /// on its own site by its own species in the same tick counts as one death and one
     /// descendant, which the site watch this replaced could not see.
-    descendants: [usize; 2],
+    descendants: [usize; Species::COUNT],
     /// Per species: living stands that are still the original founder, by identity.
-    founder_stands: [usize; 2],
+    founder_stands: [usize; Species::COUNT],
     /// The flora ledger's two life-cycle counters at the end of the run.
     establishments: u64,
     deaths: u64,
-}
-
-fn sp(species: Species) -> usize {
-    match species {
-        Species::Bloomcrown => 0,
-        Species::Umbrellafrond => 1,
-    }
 }
 
 fn main() {
@@ -324,13 +317,13 @@ fn run(
     // Descendants: a living stand whose identity is not one of the founders'. Exact, and
     // not a site watch: it counts a founder replaced on its own site by its own species in
     // the tick it died.
-    let mut descendants = [0usize; 2];
-    let mut founder_stands = [0usize; 2];
+    let mut descendants = [0usize; Species::COUNT];
+    let mut founder_stands = [0usize; Species::COUNT];
     for stand in flora.view().stands {
         if founder_ids.contains(&stand.id) {
-            founder_stands[sp(stand.species)] += 1;
+            founder_stands[stand.species.index()] += 1;
         } else {
-            descendants[sp(stand.species)] += 1;
+            descendants[stand.species.index()] += 1;
         }
     }
 
@@ -342,17 +335,17 @@ fn run(
     // Round 3: `alive` is the stands, and `occupied` is the stands plus the sites where
     // a species' seed bank is waiting — the old "establishing" half of `occupied`, which
     // is a cohort in the ground now and not a frozen stand.
-    let mut occupied = [Vec::new(), Vec::new()];
-    let mut alive = [Vec::new(), Vec::new()];
+    let mut occupied = std::array::from_fn(|_| Vec::new());
+    let mut alive: [Vec<(u32, u32)>; Species::COUNT] = std::array::from_fn(|_| Vec::new());
     for stand in flora.view().stands {
         let key = (stand.site.x, stand.site.z);
-        occupied[sp(stand.species)].push(key);
-        alive[sp(stand.species)].push(key);
+        occupied[stand.species.index()].push(key);
+        alive[stand.species.index()].push(key);
     }
     for g in flora.view().ground {
         for species in Species::ALL {
             if g.seed_organic(species) > 0.0 {
-                occupied[sp(species)].push((g.site.x, g.site.z));
+                occupied[species.index()].push((g.site.x, g.site.z));
             }
         }
     }
@@ -396,14 +389,14 @@ fn run(
 
 /// Every skyline column that passes each species' establishment predicate right now, as
 /// sorted column keys. An instantaneous reading: the caller says when it took it.
-fn eligible_sets(world: &World, flora: &Flora, skyline: &[Site]) -> [Vec<(u32, u32)>; 2] {
-    let mut out = [Vec::new(), Vec::new()];
+fn eligible_sets(world: &World, flora: &Flora, skyline: &[Site]) -> [Vec<(u32, u32)>; Species::COUNT] {
+    let mut out: [Vec<(u32, u32)>; Species::COUNT] = std::array::from_fn(|_| Vec::new());
     for species in Species::ALL {
         let sc = flora.config().species(species);
         let mut set: Vec<(u32, u32)> =
             skyline.iter().filter(|s| passes(world, sc, **s)).map(|s| (s.x, s.z)).collect();
         set.sort_unstable();
-        out[sp(species)] = set;
+        out[species.index()] = set;
     }
     out
 }
@@ -776,9 +769,9 @@ fn report(
 /// eye as well as by a number.
 fn print_columns(outcome: &Outcome) {
     for species in Species::ALL {
-        let all = &outcome.occupied[sp(species)];
-        let alive = &outcome.alive[sp(species)];
-        let (d, f) = (outcome.descendants[sp(species)], outcome.founder_stands[sp(species)]);
+        let all = &outcome.occupied[species.index()];
+        let alive = &outcome.alive[species.index()];
+        let (d, f) = (outcome.descendants[species.index()], outcome.founder_stands[species.index()]);
         println!(
             "{:>14}: {} occupied columns ({} with a living stand), lowest skyline quartile {:.2}; \
              {d} of {} living stands are descendants ({}), {f} still the founder",
@@ -908,7 +901,7 @@ fn compare(args: &[String]) {
         ctl.deaths
     );
     for species in Species::ALL {
-        let i = sp(species);
+        let i = species.index();
         let (b, a, c) = (&base.occupied[i], &alt.occupied[i], &ctl.occupied[i]);
         println!("{}:", species.name());
         println!(

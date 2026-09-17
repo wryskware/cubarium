@@ -1370,13 +1370,21 @@ mod tests {
     /// The package a donor saves for is the material a germination needs to build a stand
     /// at exactly `alive_min` of wood, so `w_frac · package` must not land **under**
     /// `alive_min` in f64 — a newborn a hair under it would be born and die on its first
-    /// tick. It is exact at both species' placeholders, and this is the test a new preset
-    /// has to keep passing.
+    /// tick. It is exact at every preset's placeholders, and this is the test a new preset
+    /// has to keep passing: round 4 added three, whose packages are 0.015, 0.025 and 0.0375
+    /// against the original pair's 0.05.
     #[test]
     fn one_package_builds_a_stand_at_exactly_alive_min() {
-        for sc in [SpeciesConfig::bloomcrown(), SpeciesConfig::umbrellafrond()] {
+        let config = FloraConfig::default();
+        for species in Species::ALL {
+            let sc = config.species(species).clone();
             let package = package_of(&sc);
-            assert!((package - 0.05).abs() < 1e-15, "a {package} package at the placeholders");
+            let want = sc.alive_min / 0.4;
+            assert!(
+                (package - want).abs() < 1e-15,
+                "{}: a {package} package for a {want} split",
+                species.name()
+            );
             let wood = sc.propagule_split[0] * package;
             assert!(wood >= sc.alive_min, "a package builds {wood} of wood, under {}", sc.alive_min);
             assert!(
@@ -1602,7 +1610,7 @@ mod tests {
         assert!(e.abs() <= 1e-9 * v.energy().max(1.0), "energy residual {e}");
     }
 
-    /// The same allocation against **every preset's own split**, on the value Astra's three
+    /// The same allocation against **every one of the five presets' own splits**, on the value Astra's three
     /// bins produce and on an exact package: the wood is `alive_min` on the nose, no stock
     /// is negative, the total is preserved, and the foliage and reserve are the intended
     /// fractions to within the rounding that is being corrected. The last two cases are the
@@ -1610,7 +1618,9 @@ mod tests {
     /// somehow holds less than `alive_min`.
     #[test]
     fn a_newborn_s_wood_is_exactly_alive_min_for_every_split() {
-        for sc in [SpeciesConfig::bloomcrown(), SpeciesConfig::umbrellafrond()] {
+        let config = FloraConfig::default();
+        for species in Species::ALL {
+            let sc = config.species(species).clone();
             let [w_frac, p_frac, q_frac] = sc.propagule_split;
             assert!((w_frac + p_frac + q_frac - 1.0).abs() < 1e-15, "the split sums to one");
             assert!(sc.alive_min <= sc.wood_max, "alive_min over wood_max");

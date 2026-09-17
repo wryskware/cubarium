@@ -1,4 +1,4 @@
-//! Turning a [`FloraView`]'s stands into voxels the presenter can draw, and the two
+//! Turning a [`FloraView`]'s stands into voxels the presenter can draw, and the five
 //! species' palettes.
 //!
 //! # Why an occupancy grid and not a sprite list
@@ -47,13 +47,28 @@ use cubarium_voxel_flora::{FloraView, Species, Stand};
 
 use crate::present::{mix, srgb_linear};
 
-// --- The two palettes ----------------------------------------------------------------
+// --- The five palettes ---------------------------------------------------------------
 //
-// Both live in the Outrun family of `design/appearance.md`, as the strata do, and are
-// separated the way `art/PLANTS.md` separates the same two names: bloomcrown warm —
+// All five live in the Outrun family of `design/appearance.md`, as the strata do — deep
+// indigo and violet, electric blue-cyan, magenta, one warm accent — and the two originals
+// are separated the way `art/PLANTS.md` separates the same two names: bloomcrown warm —
 // violet wood under a magenta canopy with a warm bloom heart — and umbrellafrond cool —
 // deep teal wood under a turquoise frond with a mint heart. Warm against cool is the
 // one distinction that survives a 4-pixel-wide trunk.
+//
+// The three round-4 producers take the three remaining directions of that family, so that
+// every crown is its own hue and no two of the five sit next to each other:
+//
+// - **springturf** electric blue — the producer cyan of the appearance doc, on an indigo
+//   wood. A one-cell turf, so what has to read at a glance is the single bright pixel.
+// - **stonecushion** pale stone-lilac — the only *low-chroma* palette of the five, which
+//   is how a mineral crust reads beside four saturated plants. Its distinction is chroma
+//   and value rather than hue, and that survives being one cell wide.
+// - **velvetpad** deep violet — saturated indigo-violet with a periwinkle heart, the
+//   understory floor under somebody else's canopy.
+//
+// `the_five_palettes_are_distinct_and_the_three_new_crowns_stamp_a_cell` in this module's
+// tests keeps every pair apart in linear light.
 
 /// Bloomcrown wood: a warm plum, clear of the soil violet it stands on.
 pub const BLOOM_WOOD_SRGB: u32 = 0x0075_2A58;
@@ -68,6 +83,28 @@ pub const FROND_WOOD_SRGB: u32 = 0x0021_5A70;
 pub const FROND_CROWN_SRGB: u32 = 0x0033_D2AE;
 /// The frond's centre: mint.
 pub const FROND_HEART_SRGB: u32 = 0x00A6_F5DC;
+
+/// Springturf wood: indigo, barely seen — a turf's crown sits straight on the ground, so
+/// this shows only as the colour a shed crown falls back toward.
+pub const TURF_WOOD_SRGB: u32 = 0x002E_4FB5;
+/// Springturf canopy: the appearance doc's producer cyan, `#42C5F8`.
+pub const TURF_CROWN_SRGB: u32 = 0x0042_C5F8;
+/// Springturf's centre: pale ice.
+pub const TURF_HEART_SRGB: u32 = 0x00BF_EBFF;
+
+/// Stonecushion wood: grey-violet, the mineral end of the family.
+pub const CUSHION_WOOD_SRGB: u32 = 0x0057_506E;
+/// Stonecushion canopy: pale stone-lilac — the one low-chroma crown of the five.
+pub const CUSHION_CROWN_SRGB: u32 = 0x00B9_A8D6;
+/// Stonecushion's centre: near-white lilac.
+pub const CUSHION_HEART_SRGB: u32 = 0x00EF_E6FF;
+
+/// Velvetpad wood: deep indigo-violet.
+pub const PAD_WOOD_SRGB: u32 = 0x002B_1B6B;
+/// Velvetpad canopy: electric violet.
+pub const PAD_CROWN_SRGB: u32 = 0x007B_5CF0;
+/// Velvetpad's centre: periwinkle.
+pub const PAD_HEART_SRGB: u32 = 0x00C3_B4FF;
 
 /// How far a crown with no foliage left falls back toward its own wood colour. Crown
 /// fill is `P / (α·W)`, so a stand that has shed its canopy reads as bare structure
@@ -325,6 +362,9 @@ fn palette(species: Species) -> (u32, u32, u32) {
     match species {
         Species::Bloomcrown => (BLOOM_WOOD_SRGB, BLOOM_CROWN_SRGB, BLOOM_HEART_SRGB),
         Species::Umbrellafrond => (FROND_WOOD_SRGB, FROND_CROWN_SRGB, FROND_HEART_SRGB),
+        Species::Springturf => (TURF_WOOD_SRGB, TURF_CROWN_SRGB, TURF_HEART_SRGB),
+        Species::Stonecushion => (CUSHION_WOOD_SRGB, CUSHION_CROWN_SRGB, CUSHION_HEART_SRGB),
+        Species::Velvetpad => (PAD_WOOD_SRGB, PAD_CROWN_SRGB, PAD_HEART_SRGB),
     }
 }
 

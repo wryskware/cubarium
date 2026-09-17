@@ -1,8 +1,14 @@
-//! Producers on the voxel strip. Two species — bloomcrown, a sun producer of ridges
-//! and terraces, and umbrellafrond, a shade-and-wet producer of hollows — live as
-//! **stands** on support faces of a [`cubarium_voxel::World`], compete for light
-//! through their own canopies and for pore water through the core's bounded
-//! withdrawal, and spread by paid propagules.
+//! Producers on the voxel strip. Five species — bloomcrown, the light-demanding producer
+//! of sunny aerated soil; umbrellafrond, the wetland producer of hollows; springturf, the
+//! pioneer turf of open moist soil; stonecushion, the cushion of bare rock with a soil
+//! pocket in reach; and velvetpad, the moist aerated understory pad — live as **stands**
+//! on support faces of a [`cubarium_voxel::World`], compete for light through their own
+//! canopies and for pore water through the core's bounded withdrawal, and spread by paid
+//! propagules.
+//!
+//! Each species is a **role first** and a set of numbers second: the role is one sentence
+//! of ecology in the preset's own doc comment, and every number encoding it is a
+//! placeholder listed in `design/backlog.md` §1. Nothing here is tuned.
 //!
 //! This crate never draws and never reads the clock. It reads the world through
 //! [`cubarium_voxel::VoxelView`] and changes it only through
@@ -31,17 +37,43 @@ pub use step::can_establish;
 /// `Gates::passes()` is exactly `can_establish`.
 pub use step::{establishment_gates, Gates};
 
-/// The two producers of the first coupled experiment.
+/// The producers of the voxel ecology, each one a **role**: see the preset that carries
+/// its numbers ([`SpeciesConfig::bloomcrown`] and the four after it) for the sentence of
+/// ecology the numbers encode.
+///
+/// The first two are the pair of the first coupled experiment and keep slots 0 and 1, so
+/// that a [`FloraLedger`] array read by index still means what it meant in round 3.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Species {
-    /// Sun producer: high light, shallow roots, tolerates dry, dies in standing water.
+    /// The light-demanding producer of sunny, aerated soil: high light, shallow roots,
+    /// tolerates dry, dies in standing water.
     Bloomcrown,
-    /// Shade/wet producer: tolerates low light, deep roots, wants wet soil, taller crown.
+    /// The wetland producer: tolerates low light, deep roots, wants sustained wetness,
+    /// saturation-immune, taller crown.
     Umbrellafrond,
+    /// The pioneer turf of open, moist soil: shallow, sun-demanding, fast, short-lived,
+    /// wide hop, a crown one cell tall.
+    Springturf,
+    /// The cushion of bare rock whose roots reach a soil pocket: drought-tolerant, slow,
+    /// tiny.
+    Stonecushion,
+    /// The moist, aerated understory pad: shade-tolerant, damp but not waterlogged soil,
+    /// low and broad.
+    Velvetpad,
 }
 
 impl Species {
-    pub const ALL: [Species; 2] = [Species::Bloomcrown, Species::Umbrellafrond];
+    /// How many species there are, and the length of every per-species array in
+    /// [`FloraLedger`]. Derived from [`Species::ALL`] so the two can never disagree.
+    pub const COUNT: usize = Species::ALL.len();
+
+    pub const ALL: [Species; 5] = [
+        Species::Bloomcrown,
+        Species::Umbrellafrond,
+        Species::Springturf,
+        Species::Stonecushion,
+        Species::Velvetpad,
+    ];
 
     /// This species' slot in the per-species arrays of [`FloraLedger`], and the same index
     /// [`Species::ALL`] holds it at. A fixed order, never an iteration order.
@@ -49,6 +81,9 @@ impl Species {
         match self {
             Species::Bloomcrown => 0,
             Species::Umbrellafrond => 1,
+            Species::Springturf => 2,
+            Species::Stonecushion => 3,
+            Species::Velvetpad => 4,
         }
     }
 
@@ -56,6 +91,9 @@ impl Species {
         match self {
             Species::Bloomcrown => "bloomcrown",
             Species::Umbrellafrond => "umbrellafrond",
+            Species::Springturf => "springturf",
+            Species::Stonecushion => "stonecushion",
+            Species::Velvetpad => "velvetpad",
         }
     }
 
@@ -339,8 +377,10 @@ pub struct SpeciesConfig {
     ///    holds **above** `donor_reserve_floor · reserve_cap · wood`. A stand that cannot
     ///    pay asks anyway, and the gap between the two is
     ///    [`FloraLedger::propagule_requested`] against [`FloraLedger::propagule_funded`].
-    /// 2. What it can pay is charged construction respiration at once — `c_g` of it leaves
-    ///    as `respired_out` and heat — and the remaining `1 / (1 + build)` of it is saved
+    /// 2. What it can pay is charged construction respiration at once — of a gross `gross`
+    ///    taken out of the reserve, `gross − gross / (1 + build)` leaves as `respired_out`
+    ///    and heat (Astra R6.3: not "`c_g` of the gross", which is the larger
+    ///    `c_g · gross`) — and the remaining `1 / (1 + build)` of it is saved
     ///    in [`Stand::parcel`]. So a whole package costs `(1 + build)` times its own size:
     ///    0.06 of reserve for 0.05 of package at the placeholders.
     /// 3. When the parcel holds one whole **package** — `alive_min / propagule_split[0]`,
@@ -603,6 +643,315 @@ impl SpeciesConfig {
             ..SpeciesConfig::v1_base()
         }
     }
+
+    /// **Springturf — the pioneer turf of open, moist soil.** It wins the first years on
+    /// bare moist ground and loses under a canopy and on dry ground: shallow roots that
+    /// only see the support row, a light need above bloomcrown's, a moisture floor at the
+    /// fraction drained soil actually settles to, a fast cheap body that turns income into
+    /// packages quickly, and a maintenance bill that kills it as soon as the light or the
+    /// water goes.
+    ///
+    /// Every number is a **placeholder** (`design/backlog.md` §1), chosen to encode that
+    /// sentence and nothing else:
+    ///
+    /// - **Water, the three thresholds together.** `establish_pore_min` 0.25 is soil's own
+    ///   retained fraction, so springturf germinates on ordinary drained soil and no
+    ///   drier; `wilt_pore` 0.15 is twice bloomcrown's 0.08, so it is the species that
+    ///   gives up first on a dry ridge; `sat_pore` 0.45 is where it reaches full moisture,
+    ///   just above the germination floor, because a turf's shallow roots either have
+    ///   water in the top row or do not. `establish_saturated_max` 0.3 keeps it out of a
+    ///   waterlogged hollow, and `drown_depth_m` 0.03 is under a voxel of pool but well
+    ///   over the millimetres of transit water the harness's rain leaves on a face.
+    /// - **Light.** `light_half` 1.0 and `establish_light_min` 0.75 are both above
+    ///   bloomcrown's 0.8 and 0.6: it needs open sky to germinate and earns badly in
+    ///   shade. Note that a *living crown* cannot shut that gate — germination light is
+    ///   geometric sky visibility with no canopy in it (`step.rs`'s `Gates`) — so "loses
+    ///   under a canopy" is an adult-income statement here and a terrain-shade statement
+    ///   at germination. Making it a germination statement would be an explicit rule
+    ///   addition (Astra R6.2), and this round does not make it.
+    /// - **Fast and cheap.** `wood_max` 0.06 is a tenth of bloomcrown's and `alive_min`
+    ///   0.006 with it, so one package is 0.015 rather than 0.05; `donor_min` 0.03 is half
+    ///   its own `wood_max`, so it can reproduce at half size, where bloomcrown's 0.3 is
+    ///   half of 0.6; `wood_rate` 0.01 and `foliage_rate` 0.02 are ten times the base, and
+    ///   `propagule_rate` 0.002 ten times, so a funded donor fills a package in about nine
+    ///   seconds against bloomcrown's three hundred. `assimilation` 0.008 is twice the
+    ///   base: a pioneer that pays ten times the maintenance has to fix faster than the
+    ///   others or it cannot be alive at all, and doubling it leaves a 2.4× margin over
+    ///   its own upkeep at full light and moisture.
+    /// - **Short-lived.** `maintenance` 0.002 is ten times the base, so a springturf whose
+    ///   income stops burns its whole reserve in 250 s and diebacks, where bloomcrown
+    ///   waits 2,500 s.
+    /// - **Shape.** `hop` 3 is the wide hop of a pioneer; the crown is `[0.5, 1.0]` tall
+    ///   and `[0.5, 1.0]` wide, which the presenter draws as one cell on the ground with
+    ///   no stem at all.
+    pub fn springturf() -> SpeciesConfig {
+        SpeciesConfig {
+            light_half: 1.0,
+            rooting_depth: 1,
+            rooting_radius: 1,
+            wilt_pore: 0.15,
+            sat_pore: 0.45,
+            establish_pore_min: 0.25,
+            establish_light_min: 0.75,
+            stress_rate_per_s: 0.2,
+            relax_rate_per_s: 0.05,
+            establish_saturated_max: 0.3,
+            drown_depth_m: 0.03,
+            hop: 3,
+            wood_max: 0.06,
+            alive_min: 0.006,
+            donor_min: 0.03,
+            maintenance: 0.002,
+            foliage_rate: 0.02,
+            wood_rate: 0.01,
+            propagule_rate: 0.002,
+            assimilation: 0.008,
+            crown_height_voxels: [0.5, 1.0],
+            crown_radius_voxels: [0.5, 1.0],
+            ..SpeciesConfig::v1_base()
+        }
+    }
+
+    /// **Stonecushion — the cushion of bare rock.** Its support face is rock or bedrock and
+    /// its roots reach a soil pocket beside or just under it; it asks almost nothing of the
+    /// water in that pocket and grows at a crawl.
+    ///
+    /// **No rule addition was needed for the rock support, and none was made.** The gates
+    /// never read the support voxel's material: `root_box` collects the `Material::Soil`
+    /// voxels of the box and the pore gate reads their capacity-weighted mean, so a rock
+    /// support with one soil voxel inside `rooting_radius` already passes and a rock
+    /// support with none already fails on `pore_ok` (`tests/round4.rs`,
+    /// `a_paid_stonecushion_birth_on_a_rock_ledge_beside_a_soil_pocket`). Water is drawn
+    /// only from those soil voxels, as it always was. The `rock_support` flag the round-4
+    /// brief held in reserve — accept a rock face *provided* the root box holds soil — is
+    /// therefore the behaviour the model already has, and adding a flag would only have
+    /// been a way of switching it off for the other four.
+    ///
+    /// Every number is a **placeholder** (`design/backlog.md` §1):
+    ///
+    /// - **Water, the three thresholds together.** `establish_pore_min` 0.05 and
+    ///   `wilt_pore` 0.02 are the lowest of the five by a factor of four: a pocket holding
+    ///   a twentieth of its capacity is enough to start on and a fiftieth is still not
+    ///   wilting. `sat_pore` 0.35 is also the lowest, because the point of the role is that
+    ///   a little water is *enough* — the cushion is at full moisture on a pocket the other
+    ///   four would call dry. `establish_saturated_max` 0.4 and `drown_depth_m` 0.02: a
+    ///   rock face does not hold a pool, and a cushion under one is finished.
+    /// - **Roots.** `rooting_depth` 2 and `rooting_radius` 1: the 3 × 2 × 3 box around and
+    ///   under the rock face, which is where a crack with soil in it is.
+    /// - **Light.** `light_half` 0.3 and `establish_light_min` 0.4: an exposed rock face has
+    ///   open sky by definition, so the role needs little light *beyond* being in the open
+    ///   — a low gate, and a response efficient enough that the open sky it has is plenty.
+    /// - **Slow.** `wood_rate` 0.0002 and `foliage_rate` 0.0005 are a fifth and a quarter of
+    ///   the base, so a newborn needs about 11,500 s to fill its `wood_max` 0.1;
+    ///   `maintenance` 0.00005 is a quarter of the base, which is what lets something that
+    ///   slow stay solvent; `propagule_rate` 0.00005 is a quarter, so a package takes four
+    ///   times as long as bloomcrown's already long 300 s. `alive_min` 0.01 against
+    ///   `wood_max` 0.1 and `donor_min` 0.05.
+    /// - **Shape.** `hop` 1; the crown is `[0.5, 0.5]` tall — a cushion has no stem at any
+    ///   size — and `[0.5, 1.0]` wide, so it is one cell young and a five-cell plus grown.
+    pub fn stonecushion() -> SpeciesConfig {
+        SpeciesConfig {
+            light_half: 0.3,
+            rooting_depth: 2,
+            rooting_radius: 1,
+            wilt_pore: 0.02,
+            sat_pore: 0.35,
+            establish_pore_min: 0.05,
+            establish_light_min: 0.4,
+            stress_rate_per_s: 0.1,
+            relax_rate_per_s: 0.02,
+            establish_saturated_max: 0.4,
+            drown_depth_m: 0.02,
+            hop: 1,
+            wood_max: 0.1,
+            alive_min: 0.01,
+            donor_min: 0.05,
+            maintenance: 0.00005,
+            senescence: 0.0003,
+            foliage_rate: 0.0005,
+            wood_rate: 0.0002,
+            propagule_rate: 0.00005,
+            crown_height_voxels: [0.5, 0.5],
+            crown_radius_voxels: [0.5, 1.0],
+            ..SpeciesConfig::v1_base()
+        }
+    }
+
+    /// **Velvetpad — the moist, aerated understory pad.** This is the niche Astra's R4.6
+    /// separated from umbrellafrond's wetland: damp soil that still has air in it, under
+    /// somebody else's crown. Umbrellafrond is saturation-immune and wants a hollow;
+    /// velvetpad wants the floor beside it and pays for a wholly saturated root box.
+    ///
+    /// Every number is a **placeholder** (`design/backlog.md` §1):
+    ///
+    /// - **Water, the three thresholds together.** `establish_pore_min` 0.3, `wilt_pore`
+    ///   0.2, `sat_pore` 0.6: damp, and consistently so — it germinates a little above
+    ///   drained soil's own 0.25, wilts just below it, and is at full moisture at 0.6,
+    ///   which is where umbrellafrond is too. The difference from the wetland role is
+    ///   entirely the ceiling: `establish_saturated_max` 0.6 against umbrellafrond's 1.0,
+    ///   so a wholly saturated box refuses a velvetpad cohort and targets an adult's
+    ///   `aeration_stress` at 1 — waterlogging costs this species something, which is the
+    ///   whole of what "aerated" means here. `stress_rate_per_s` 0.1 and
+    ///   `relax_rate_per_s` 0.05: it closes on that stress twice as fast as it lets go.
+    ///   `drown_depth_m` 0.1 is twice springturf's — a forest floor takes a puddle — and a
+    ///   fifth of umbrellafrond's 0.5.
+    /// - **Light.** `light_half` 0.1 is the smallest of the five, so velvetpad earns 83 %
+    ///   of its full income at a fifth of open sky where bloomcrown earns 49 %;
+    ///   `establish_light_min` 0.05 lets a cohort start almost anywhere the terrain does
+    ///   not roof over. `senescence` 0.0005, half the base, is the other half of being a
+    ///   shade plant: long-lived leaves. At the base 0.001 the construction cost of
+    ///   replacing foliage, `(1 + c_g) · senescence · α`, needs `L_eff · μ` above 0.45 to
+    ///   break even, which is not shade at all; at 0.0005 it needs 0.26, and with
+    ///   `light_half` 0.1 that is satisfied at 4 % of open sky.
+    /// - **Size and rates.** `wood_max` 0.2, `alive_min` 0.015, `donor_min` 0.1 — a third
+    ///   of bloomcrown's body; `wood_rate` 0.002 and `foliage_rate` 0.004 are twice the
+    ///   base and `propagule_rate` 0.0005 is two and a half times, a pad that fills in
+    ///   quickly once it is under cover.
+    /// - **Shape.** `hop` 1; the crown is `[0.5, 1.0]` tall and `[1.0, 2.0]` wide — low and
+    ///   broad, a mat on the floor rather than a stem, and the widest ground cover of the
+    ///   five relative to its height.
+    pub fn velvetpad() -> SpeciesConfig {
+        SpeciesConfig {
+            light_half: 0.1,
+            rooting_depth: 2,
+            rooting_radius: 1,
+            wilt_pore: 0.2,
+            sat_pore: 0.6,
+            establish_pore_min: 0.3,
+            establish_light_min: 0.05,
+            stress_rate_per_s: 0.1,
+            relax_rate_per_s: 0.05,
+            establish_saturated_max: 0.6,
+            drown_depth_m: 0.1,
+            hop: 1,
+            wood_max: 0.2,
+            alive_min: 0.015,
+            donor_min: 0.1,
+            senescence: 0.0005,
+            foliage_rate: 0.004,
+            wood_rate: 0.002,
+            propagule_rate: 0.0005,
+            crown_height_voxels: [0.5, 1.0],
+            crown_radius_voxels: [1.0, 2.0],
+            ..SpeciesConfig::v1_base()
+        }
+    }
+
+    /// Whether this preset can produce a living stand at all, checked where the numbers
+    /// enter the system rather than where they first go wrong (Astra R6.2 asks for exactly
+    /// this list: a finite nonnegative split summing to one, a positive wood fraction,
+    /// `alive_min <= wood_max`, and finite rates).
+    ///
+    /// `name` is only for the message. The checks are the ones a *silent* failure would
+    /// otherwise produce: a split that does not sum to one moves organic matter into or out
+    /// of the system at every germination; a zero `w_frac` makes
+    /// [`crate::SpeciesConfig::propagule_rate`]'s package size infinite, so the species can
+    /// never germinate and never says why; `alive_min > wood_max` makes every newborn die
+    /// on its first growth tick; a non-finite rate turns one stand's stocks into `NaN` and
+    /// then the whole ledger.
+    ///
+    /// It is deliberately **not** a plausibility check. Nothing here says a rate is a good
+    /// one, and nothing here refuses a preset that starves: `design/backlog.md` §1 lists
+    /// the values that are known to be wrong, and a validator that refused them would be a
+    /// tuning rule wearing a validator's clothes.
+    pub fn validate(&self, name: &str) -> Result<(), String> {
+        let fail = |what: &str| Err(format!("{name}: {what}"));
+
+        let [w_frac, p_frac, q_frac] = self.propagule_split;
+        for (label, v) in [("w_frac", w_frac), ("p_frac", p_frac), ("q_frac", q_frac)] {
+            if !v.is_finite() || v < 0.0 {
+                return fail(&format!("propagule_split {label} is {v}, not finite and nonnegative"));
+            }
+        }
+        let sum = w_frac + p_frac + q_frac;
+        if (sum - 1.0).abs() > 1e-12 {
+            return fail(&format!(
+                "propagule_split {:?} sums to {sum}, not one — a germination would create or \
+                 destroy organic matter",
+                self.propagule_split
+            ));
+        }
+        if !(w_frac > 0.0) {
+            return fail(&format!(
+                "propagule_split w_frac is {w_frac}: a species that puts nothing into wood has \
+                 no package size and can never germinate"
+            ));
+        }
+        if !(self.wood_max > 0.0 && self.wood_max.is_finite()) {
+            return fail(&format!("wood_max is {}, not finite and positive", self.wood_max));
+        }
+        if !(self.alive_min.is_finite() && self.alive_min >= 0.0) {
+            return fail(&format!("alive_min is {}, not finite and nonnegative", self.alive_min));
+        }
+        if self.alive_min > self.wood_max {
+            return fail(&format!(
+                "alive_min {} is over wood_max {}: every newborn would die on its first growth \
+                 tick",
+                self.alive_min, self.wood_max
+            ));
+        }
+
+        // Every scalar the tick multiplies a stock by. A `NaN` or an infinity in any of
+        // them reaches the ledger within one step, and none of them has a meaning below
+        // zero — a negative rate would run a flow backwards past its own `min` guard.
+        let rates: [(&str, f64); 25] = [
+            ("alpha", self.alpha),
+            ("reserve_cap", self.reserve_cap),
+            ("maintenance", self.maintenance),
+            ("senescence", self.senescence),
+            ("foliage_rate", self.foliage_rate),
+            ("wood_rate", self.wood_rate),
+            ("build", self.build),
+            ("dieback", self.dieback),
+            ("donor_min", self.donor_min),
+            ("donor_reserve_floor", self.donor_reserve_floor),
+            ("propagule_rate", self.propagule_rate),
+            ("energy_density", self.energy_density),
+            ("seed_attrition_per_s", self.seed_attrition_per_s),
+            ("seed_max_age_s", self.seed_max_age_s),
+            ("n_tissue", self.n_tissue),
+            ("reserve_share", self.reserve_share),
+            ("reflush_below", self.reflush_below),
+            ("assimilation", self.assimilation),
+            ("nutrient_half", self.nutrient_half),
+            ("nutrient_draw_max", self.nutrient_draw_max),
+            ("light_half", self.light_half),
+            ("transpiration_m3_per_s", self.transpiration_m3_per_s),
+            ("stress_rate_per_s", self.stress_rate_per_s),
+            ("relax_rate_per_s", self.relax_rate_per_s),
+            ("drown_depth_m", self.drown_depth_m),
+        ];
+        for (label, v) in rates {
+            if !v.is_finite() || v < 0.0 {
+                return fail(&format!("{label} is {v}, not finite and nonnegative"));
+            }
+        }
+        // The water and aeration thresholds and the crown geometry: fractions and lengths,
+        // read as bounds rather than multiplied by a stock, so only finiteness is checked.
+        let bounds: [(&str, f64); 7] = [
+            ("wilt_pore", self.wilt_pore),
+            ("sat_pore", self.sat_pore),
+            ("establish_pore_min", self.establish_pore_min),
+            ("establish_light_min", self.establish_light_min),
+            ("saturated_pore", self.saturated_pore),
+            ("establish_saturated_max", self.establish_saturated_max),
+            ("alive_min", self.alive_min),
+        ];
+        for (label, v) in bounds {
+            if !v.is_finite() {
+                return fail(&format!("{label} is {v}, not finite"));
+            }
+        }
+        for (label, pair) in [
+            ("crown_height_voxels", self.crown_height_voxels),
+            ("crown_radius_voxels", self.crown_radius_voxels),
+        ] {
+            if !pair.iter().all(|v| v.is_finite() && *v >= 0.0) {
+                return fail(&format!("{label} is {pair:?}, not finite and nonnegative"));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Default for SpeciesConfig {
@@ -617,6 +966,9 @@ impl Default for SpeciesConfig {
 pub struct FloraConfig {
     pub bloomcrown: SpeciesConfig,
     pub umbrellafrond: SpeciesConfig,
+    pub springturf: SpeciesConfig,
+    pub stonecushion: SpeciesConfig,
+    pub velvetpad: SpeciesConfig,
     /// Canopy attenuation: a taller stand whose crown covers a site multiplies the light
     /// reaching that site by `exp(-shade_k · P / crown_area)`.
     pub shade_k: f64,
@@ -649,6 +1001,9 @@ impl Default for FloraConfig {
         FloraConfig {
             bloomcrown: SpeciesConfig::bloomcrown(),
             umbrellafrond: SpeciesConfig::umbrellafrond(),
+            springturf: SpeciesConfig::springturf(),
+            stonecushion: SpeciesConfig::stonecushion(),
+            velvetpad: SpeciesConfig::velvetpad(),
             shade_k: 1.5,
             decomposition: 0.001,
             wood_decomposition: 0.0001,
@@ -663,7 +1018,32 @@ impl FloraConfig {
         match s {
             Species::Bloomcrown => &self.bloomcrown,
             Species::Umbrellafrond => &self.umbrellafrond,
+            Species::Springturf => &self.springturf,
+            Species::Stonecushion => &self.stonecushion,
+            Species::Velvetpad => &self.velvetpad,
         }
+    }
+
+    /// Every preset through [`SpeciesConfig::validate`], plus the shared rates, with the
+    /// species named in the message. [`Flora::new`] calls this, so a config that cannot
+    /// produce a living stand is refused where it enters rather than as a `NaN` in a ledger
+    /// ten thousand ticks later.
+    pub fn validate(&self) -> Result<(), String> {
+        for species in Species::ALL {
+            self.species(species).validate(species.name())?;
+        }
+        for (label, v) in [
+            ("shade_k", self.shade_k),
+            ("decomposition", self.decomposition),
+            ("wood_decomposition", self.wood_decomposition),
+            ("litter_energy_cap", self.litter_energy_cap),
+            ("initial_mineral", self.initial_mineral),
+        ] {
+            if !v.is_finite() || v < 0.0 {
+                return Err(format!("flora: {label} is {v}, not finite and nonnegative"));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -723,9 +1103,9 @@ pub struct FloraLedger {
     /// landed reproductive flux in the diagnosis", because raising a rate that is already
     /// not the binding constraint creates no income. `funded − landed` is the material
     /// standing in parcels, plus whatever parcels have gone to litter with their donors.
-    pub propagule_requested: [f64; 2],
-    pub propagule_funded: [f64; 2],
-    pub propagule_landed: [f64; 2],
+    pub propagule_requested: [f64; Species::COUNT],
+    pub propagule_funded: [f64; Species::COUNT],
+    pub propagule_landed: [f64; Species::COUNT],
 }
 
 impl FloraLedger {
@@ -843,7 +1223,26 @@ pub struct Flora {
 }
 
 impl Flora {
+    /// A plant layer on a **valid** config. Panics with the offending field named if
+    /// [`FloraConfig::validate`] refuses it: a preset that cannot build a living stand is a
+    /// programming error in the preset, not a runtime condition, and every caller in the
+    /// workspace builds its config in code. [`Flora::try_new`] is the same thing for a
+    /// caller that has a config from outside — a future `[flora]` TOML table — and wants to
+    /// print the message instead.
     pub fn new(config: FloraConfig) -> Flora {
+        match Flora::try_new(config) {
+            Ok(flora) => flora,
+            Err(e) => panic!("invalid FloraConfig — {e}"),
+        }
+    }
+
+    /// [`Flora::new`] without the panic.
+    pub fn try_new(config: FloraConfig) -> Result<Flora, String> {
+        config.validate()?;
+        Ok(Flora::unchecked(config))
+    }
+
+    fn unchecked(config: FloraConfig) -> Flora {
         Flora {
             config,
             tick: 0,
