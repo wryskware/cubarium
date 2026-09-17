@@ -49,15 +49,34 @@ of them do not exist yet.
 | `material_at` | enum | voxel | rooting, attachment, traversal | exists |
 | `pore_at` | fraction 0–1 of capacity | voxel | both producers, glowcap humidity, littershredder | exists |
 | `free_at` | fraction 0–1 of void | voxel | wading, drowning, shoreline | exists |
-| `surface_y` | voxel index | column | everything surface-bound | exists |
+| `surface_y` | voxel index | column | skyline only; see the support note below | exists |
 | `sky_light` | fraction 0–1 of open-sky irradiance | surface cell, and any voxel a canopy could occupy | producer income; glowcap not at all | **missing** |
-| `sky_openness` | fraction 0–1 of the upward hemisphere blocked by solid voxels | surface cell | rain interception, evaporation, humidity under overhangs, concealment | **missing** |
+| `sky_openness` | fraction 0–1 of the upward hemisphere open (1 = open sky, 0 = fully blocked) | surface cell | light geometry; keep separate from vertical rain exposure, which a roof blocks while lateral light still arrives | **missing** |
 | `slope` | rise over run, or degrees | surface cell | soil retention in the generator, traversal cost, propagule retention | **missing** |
 | `water_depth` | m of free water standing above the surface voxel | column | wading, drowning, aquatic margin | **missing as a named field** (derivable from `free` + `surface_y`; no accessor) |
 | `rooting_depth` | m, or count of contiguous soil voxels below the surface | column | producer access to pore water; groundcover versus tree | **missing** (derivable) |
 | `substrate` | m of litter and of dead wood, kept as separate identities | voxel face | glowcap attachment, littershredder food | **missing** (ecology-layer stock, but terrain has to offer it a place to sit) |
 | `reachable(from, to, body)` | query: can a body of this radius and step height get there | pair of surface cells | browser foraging, predator approach, everything about patch access | **missing** |
 | `visible(from, to)` | query: fraction or boolean | pair of cells | stalking, escape, sensing | **missing** |
+
+Which of these the first coupled experiment (section 4, two producers) actually
+needs: a supporting voxel and its exposed face, root-accessible pore water below
+it, standing water above it, and geometric light with plant-owned canopy
+attenuation. Slope cost, reachability, visibility, concealment and an explicit
+substrate attachment wait for the animals and the glowcap; litter and nutrients are
+ecology-layer stocks. Two interface needs before coupling water consumption: a
+bounded pore-withdrawal command on the core and an explicit transpiration loss in
+the ledger, so two readers of the same moisture compete for it instead of both
+reading it. A vertical-only light check would make sheltered habitat under an
+overhang fully dark; if used first, name that limitation.
+
+**Support, not skyline.** `surface_y` is the highest solid in a column. Under the
+requested overhang that is the roof, not the sheltered floor, and summing a column's
+free water would count a rooftop pool as drowning the plant below. Ecology locations
+should be a supporting voxel plus its exposed top face; water depth is the contiguous
+wet void interval above that support, rooting depth the contiguous soil below it,
+available water is capacity × pore fraction × voxel volume. No cached field arrays
+are needed for that yet.
 
 Two notes on `sky_light`. It is not a terrain-only quantity: terrain can supply
 sky visibility through solid voxels, and the ecology layer would attenuate it

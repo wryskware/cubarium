@@ -30,7 +30,9 @@ compiling as a stub:
   `material_at`, `free_at`, `pore_at`, `surface_y(x, z)`, `stored_m3()`.
   `free` is a fraction of void volume; `pore` a fraction of pore capacity.
 - `Ledger { rain_in, user_in, evaporation_out, outlet_out, displaced_out, initial_stored }`
-  with `expected_stored()`; residual is `stored_m3() - expected_stored()`.
+  with `expected_stored()`; the residual is the raw conservation error
+  `stored_m3() - initial_stored - net_in`. Stores are f64 so no rounding term is
+  booked; a residual that needs correcting is a leak.
 
 Add fields when needed and say so in the commit; do not rename or reorder what exists.
 
@@ -41,20 +43,34 @@ overhang and one covered passage, weak correlated noise last, all periodic throu
 x = 0. Derive soil depth from slope and deposition, not from the elevation noise.
 Every carve rechecked for isolated voids.
 
-Water per tick: prescribed rain onto top-exposed air cells; evaporation from exposed
-free-water surfaces; free-water substeps: (1) fall into void below, (2) find every
-connected region of water-bearing void cells (6-neighbour, including under roofs) and
-settle it to one common surface level by sorting the region's cells by y and filling
-bottom up, splitting volume across cells at the surface level; infiltration from free
-water into soil below by permeability and remaining capacity; drainage from saturated
-soil downward and into the aquifer where soil meets bedrock; spring discharge from the
-aquifer into a chosen low outlet cell when aquifer head exceeds it, `Q = k * max(head - h_outlet, 0)`;
-one named outlet cell that exports free water to `outlet_out` when open. Every transfer
-debits once and credits once. Traversal order must not pick a direction. State limits
-plainly in the module doc: no inertia, no current, instantaneous settling.
+Water per tick: prescribed rain onto sky-exposed void cells (a roof takes the rain
+that would fall under it); evaporation from sky-exposed free-water surfaces;
+free-water substeps: (1) fall into void below, one cell per substep, (2) region
+equalization. A region grows from a wet seed through 6-connected void cells, and a
+cell joins only if the level the region would settle to after taking it still stands
+above every cell in it (candidate included). That single rule gives both behaviours
+Astra's round 1 asked to be kept apart: a submerged passage or U-tube joins its far
+side and both sides end level, while a sill above the level is never crossed and only
+water standing above it spills, a substep at a time, so the two sides end unequal
+(beds [0,1,0] with 1.4 units end 1.0 / 0.4, dry sill). Then infiltration from free
+water into the porous cell below by that cell's permeability and remaining capacity;
+drainage of pore water above field capacity downward, into the aquifer where porous
+rock meets bedrock, or as a drip into a roofed void; spring discharge from the aquifer
+into a named spring cell, `Q = k * max(head - h_spring, 0)` with `h_spring = y * voxel_m`,
+capped by `Q*DT`, aquifer stock and room, one-way with no submerged backpressure this
+wave; and a separate named outlet cell that exports free water to `outlet_out` when
+open. Every transfer debits once and credits once; rates apply over DT, or DT/substeps
+where subdivided. Traversal order must not pick a direction: the seam-shift and
+mirrored-source tests compare per-cell stores. State limits plainly in the module doc:
+no inertia, no current, instantaneous settling within a region.
 
-`SetMaterial` moves displaced water to the nearest available void space before booking
-any `displaced_out`.
+`SetMaterial` converts the cell's water to cubic metres, keeps what the new material
+can hold (air keeps free water; soil or rock keep pore water up to capacity; a solid
+turned to air releases its pore water as free water), moves the rest to the nearest
+void with room by wrapped face-adjacent void path, equal shares at equal distance,
+and books `displaced_out` only for volume with no reachable room. `apply` acts
+immediately (also while paused) and returns accepted m³, negative for an aquifer
+withdrawal; refused input is never booked.
 
 Tests, each a few substeps on a tiny `World::empty` fixture: spill threshold on beds
 [0,1,0] with 0.6 / 1.4 / 3.2 units; a U-tube equalizes; a roofed passage fills and the
