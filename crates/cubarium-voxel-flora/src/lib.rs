@@ -180,7 +180,12 @@ pub struct SpeciesConfig {
     pub establish_pore_min: f64,
     pub establish_light_min: f64,
     /// Standing water over the support face deeper than this (metres) kills the stand.
-    /// Zero for a species that cannot stand in water at all.
+    ///
+    /// The threshold means a **pool**, not a rain film. What the core reports as water
+    /// depth at the end of a tick includes runoff still on its way downhill — thin, but
+    /// not zero, and over most of the world's support faces while it is raining — so a
+    /// species whose limit is literally zero drowns everywhere it rains. Give even the
+    /// least water-tolerant species a fraction of a voxel.
     pub drown_depth_m: f64,
     /// How many support sites away, in `x` and `z`, a propagule may land.
     pub hop: u32,
@@ -254,7 +259,13 @@ impl SpeciesConfig {
             sat_pore: 0.5,
             establish_pore_min: 0.1,
             establish_light_min: 0.6,
-            drown_depth_m: 0.0,
+            // A fifth of a voxel: bloomcrown dies in a pool and shrugs off a shower.
+            // This was 0.0, which is not "dies in standing water" but "dies in any
+            // water at all": measured on the default generated world under rain, every
+            // bloomcrown founder died within three ticks in 0.3 to 2 mm of transit
+            // water, so the species could not exist anywhere it rained. A wrong
+            // placeholder, not a tuned one.
+            drown_depth_m: 0.05,
             hop: 2,
             crown_height_voxels: [1.0, 3.0],
             crown_radius_voxels: [0.5, 1.5],

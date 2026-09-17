@@ -61,9 +61,7 @@ fn main() {
     // face, bright enough, and not already under water it cannot stand in. Without that
     // filter every founder of the high species lands on bare sloping rock and dies in
     // the first tick — see the commit message on why a slope never wets.
-    let mut flora_config = FloraConfig::default();
-    flora_config.bloomcrown.drown_depth_m = BLOOMCROWN_DROWN_M;
-    let mut flora = Flora::new(flora_config);
+    let mut flora = Flora::new(FloraConfig::default());
     let mut founders = 0;
     let mut placed: Vec<(Species, usize, u32, u32)> = Vec::new();
     for (species, from_the_top) in [(Species::Umbrellafrond, false), (Species::Bloomcrown, true)] {
@@ -80,11 +78,17 @@ fn main() {
                     && view.sky_visibility(x, y, z) >= sc.establish_light_min
             })
             .collect();
+        let n = ok.len();
+        // A species with nowhere to establish is still seeded, on the sites its own
+        // ordering prefers, so the run has two producers in it and the summary shows
+        // what happens to it. The printed count is the honest one.
+        if ok.is_empty() {
+            ok = skyline.clone();
+        }
         if from_the_top {
             ok.reverse();
         }
-        let n = ok.len();
-        let stride = (n / FOUNDERS_PER_SPECIES).max(1);
+        let stride = (ok.len() / FOUNDERS_PER_SPECIES).max(1);
         let mut lo = u32::MAX;
         let mut hi = 0;
         for site in ok.iter().step_by(stride).take(FOUNDERS_PER_SPECIES) {
@@ -101,9 +105,10 @@ fn main() {
     }
     for (species, n, lo, hi) in &placed {
         println!(
-            "{:>14}: {n} of {} skyline sites pass its establishment predicate; founders at y {lo}..{hi}",
+            "{:>14}: {n} of {} skyline sites pass its establishment predicate; founders at y {lo}..{hi}{}",
             species.name(),
-            skyline.len()
+            skyline.len(),
+            if *n == 0 { " (seeded anyway, nowhere qualifies)" } else { "" }
         );
     }
 

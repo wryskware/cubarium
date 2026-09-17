@@ -299,16 +299,24 @@ fn pore_stock(world: &World) -> f64 {
 // --------------------------------------------------------------------- drowning
 
 #[test]
-fn standing_water_drowns_bloomcrown_at_once_and_umbrellafrond_only_past_its_limit() {
+fn a_pool_drowns_bloomcrown_and_a_film_does_not_while_umbrellafrond_stands_in_both() {
     let mut world = plain(8, 8, 0.5);
     let mut flora = Flora::new(FloraConfig::default());
     assert!(flora.apply(&world, Command::Seed { x: 2, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
     assert!(flora.apply(&world, Command::Seed { x: 5, z: 0, species: Species::Umbrellafrond, wood: 0.1 }));
 
-    // 0.2 m of water over both faces: past bloomcrown's zero tolerance, inside
-    // umbrellafrond's 0.5 m.
+    // A 2 cm film first: that is rain on its way somewhere, and it kills nothing. Both
+    // species' thresholds mean a pool.
     for x in [2, 5] {
-        world.apply(WorldCommand::AddWater { x, y: 3, z: 0, volume_m3: 0.2 });
+        world.apply(WorldCommand::AddWater { x, y: 3, z: 0, volume_m3: 0.02 });
+    }
+    flora.step(&mut world);
+    assert!(flora.view().stand_at(site(2)).is_some(), "bloomcrown does not drown in a shower");
+    assert_eq!(flora.view().ledger.deaths, 0);
+
+    // Now 0.2 m: past bloomcrown's 0.05 m, inside umbrellafrond's 0.5 m.
+    for x in [2, 5] {
+        world.apply(WorldCommand::AddWater { x, y: 3, z: 0, volume_m3: 0.18 });
     }
     flora.step(&mut world);
     assert!(flora.view().stand_at(site(2)).is_none(), "bloomcrown drowns in a puddle");
