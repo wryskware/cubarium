@@ -1271,3 +1271,210 @@ zero-organic terminal case before calling the combined consumer ledger closed.
 Then check one small consume/deposit/decompose exchange across both ledgers,
 including litter-cap heat and separately booked lazy mineral provisioning.
 No tuning, recovery mechanic or long harvest rerun is a clearance requirement.
+
+## Round 9
+
+Reviewed **680a9af**, packages N/O, the R8 repairs and GPU animal staging;
+source and isolated arithmetic, no long world run. The 12 round-5a, 13
+round-5b and 11 round-5c tests pass, as do three animal-grid tests and the
+projection/slab lookup test. The GPU image comparison **skipped** because
+Vulkan device initialization failed; its green test result is not a rendered
+comparison. This round reviews behaviour and accounting, not the interim art.
+
+1. **P1 — R9.1: mineral is conserved but does not constrain either consumer's
+   new tissue. Before consumer replacement controls or a long consumer run.**
+   `crates/cubarium-voxel-flora/src/step.rs:817` bounds fungal income by organic
+   matter and energy, then `:849-872` builds tissue before `:888-903` discovers
+   whether its mineral can be paid. The latter caps the **debit**, not the
+   growth. With `initial_mineral = 0`, a moist half-grown glowcap and an
+   energy-bearing, mineral-free log, one default tick takes `5e-5` organic,
+   earns `2e-5`, pays `5e-7` maintenance and grows `5e-6` wood, although the
+   new wood's `1e-7` mineral is unavailable. Its existing mineral inventory
+   is not an implemented reusable nutrient reserve. This diverges from the
+   existing mineral-cap promise at
+   `design/handoffs/voxel-round5bc-consumers-briefs-2026-09-17.md:54-56`.
+
+   The browser has the same hole at
+   `crates/cubarium-voxel-fauna/src/step.rs:324-349`: a fresh default plant's
+   `1e-4` bite supplies `2e-6` mineral, but the grazer builds `5e-5` tissue
+   needing `2.5e-6`. Only `4e-5` is funded at its stated `n_tissue = 0.05`.
+   Here the brief specified excess handling but omitted the shortfall rule;
+   `src/lib.rs:165` nevertheless describes mineral per unit **built**.
+   **Change:** budget mineral before allocating new tissue. Fungal growth
+   may use arriving mineral plus the allowed local-pool draw; browser growth
+   must fit its incoming mineral, unless a usable internal mineral reserve
+   is explicitly adopted. Keep maintenance respiration possible, book unused
+   organic/energy and excess mineral to named destinations, and retain
+   proportional outflows. Pin zero-mineral and partially funded food with
+   one-tick fixtures. Do not change `n_tissue` to hide the deficit. Closing
+   three ledgers does not establish a limiting-mineral metabolism.
+
+2. **P2 — R9.2: correct the consumer observations before using them to choose
+   rules. Now; no rerun required.**
+   `design/7_Research/voxel-round3-experiment-2026-09-16.md:1537-1541` says
+   excretion never happened while reporting a `7.6e-6` mineral deposit and
+   zero animal deaths. In this harness, that deposit **is excretion**:
+   `crates/cubarium-voxel-fauna/src/step.rs:355` and `:494` are its two deposit
+   paths. Plant `n_tissue` is not current foliage mineral density; respiration
+   retains mineral. Excess also depends on tissue actually placed, not just
+   `yield_fraction`. **Change:** report the nonzero flux and remove “inert at
+   defaults” from `design/backlog.md:56` and the general claim at
+   `crates/cubarium-voxel-fauna/tests/round5c.rs:411-415`. The test proves no
+   excess on that **fresh founder's first bite**, which is a valid narrower
+   assertion. Add a mineral-enriched-food case without changing grazer knobs.
+
+   At experiment-note `:1501`, exactly zero is the **transfer mismatch**,
+   not the union's stock residual: the published organic residuals sum to
+   approximately `-7.13e-12`. Name the two checks separately and include
+   external log deposits when cancelling inter-layer flows. At `:1521-1532`,
+   a falling population mean does not demonstrate individuals shrinking or
+   an impending crash: 75 small newborns change the composition. A full
+   default adult reserve lasts **500 s** without births, approximately
+   **100 s** after paying two newborns, not the asserted 200 s. Report
+   founder/descendant stocks by identity before diagnosing starvation.
+   “Four founders and their descendants” also replaces “four grazers stripped
+   the meadow.” Remove the expected recruitment direction at `:1535-1536`
+   (R8.3 still applies), the stranded inter-arm noise-floor sentence at
+   `:1407-1408`, and the now-stale GPU omission at `:1552-1553`.
+
+3. **P2 — R9.3: decide what a mycelium neighbourhood means before repairing
+   the grove's spread. Before a fungal replacement control; not a blocker for
+   the producer-only harness.**
+   `crates/cubarium-voxel-flora/src/step.rs:565-590` implements the specified
+   downward box correctly. At depth 1, a recipient one row above **or below**
+   a log misses it. That is a spatial contract, not a failure of paid spores.
+   Three failed landings do not establish that spread is impossible: the
+   experiment note itself records 12 eligible recipient faces at `:1349`.
+   Its observation-time gates cannot establish which gates failed on each
+   package's first germination opportunity; two sites also fail aeration.
+
+   **Recommendation:** keep blind paid landing and germination-time selection.
+   If a grove should cross a one-voxel step, give substrate access an explicit
+   vertical reach, independently of the soil-water root box; symmetric
+   one-row reach is a concrete small candidate. Do not make every spore find
+   food by filtering its landing through the germination predicate. Increasing
+   `rooting_depth` is not intrinsically dishonest, but changes water access
+   too and only repairs one direction. First pin same-level, one-up and
+   one-down log/recipient fixtures, including a genuinely substrate-free
+   landing, then decide the intended passes. The flat paid-birth fixture at
+   `crates/cubarium-voxel-flora/tests/round5b.rs:371` is valid, but cannot
+   substitute for those geometry cases.
+
+   Add two fungi demanding more than one shared log holds, with unequal
+   demands and all three receipts checked. The collect/withdraw/remainder
+   implementation at `src/step.rs:669-723` looks bounded; the claim at
+   experiment-note `:1404-1405` that this interaction is unit-tested is too
+   strong: `src/step.rs:1719` tests scalar proportional arithmetic, not
+   `feed` or its three-currency remainder sharing. Also correct `:1358`:
+   `0.0176` is about **57 times** smaller than one declared log, not three
+   orders of magnitude; standing dead-wood stock is not cumulative supply.
+
+4. **P2 — R9.4: keep the paid one-parent rule explicit, and resolve its
+   newborn reserve exception. Before the first long consumer run.**
+   `crates/cubarium-voxel-fauna/src/step.rs:433-469` implements the brief:
+   one paid birth per eligible parent per tick, proportional mineral/energy,
+   no same-tick newborn feeding or reproduction. Four becoming 79 is not
+   unpaid duplication and does not by itself call for a population cap.
+   **Recommendation:** retain this explicitly clonal surrogate for the first
+   diagnostic run; mating, gestation or a refractory interval is a subsequent
+   life-history decision, not an emergency adjustment to force a count.
+
+   There is a smaller contract conflict now: default newborn reserve is
+   `0.01 - 0.005 = 0.005`, twice `reserve_cap * body = 0.0025`, despite
+   `src/lib.rs:178` calling that what it can hold. The birth fixture at
+   `tests/round5c.rs:339-340` blesses this exception without naming it.
+   **Change:** explicitly define `reserve_cap` as the ceiling on **new intake**,
+   allowing a parent's paid birth endowment above it; pin that no intake
+   increases the excess and maintenance spends it normally. If a universal
+   storage bound is desired instead, decide a conserving birth allocation
+   before changing the fixture—do not clamp away the parcel. Add the cheap
+   no-food two-tick case: one full default adult can still buy two young.
+
+5. **P2 — R9.5: sensing bounds the food's column, not the candidate feeding
+   face. Before interpreting geometric access comparisons.**
+   `crates/cubarium-voxel-fauna/src/step.rs:187-203` filters a stand within
+   `sense_radius`, then adds neighbouring faces without bounding them.
+   Concrete case: width 40, depth 1, grazer at `(10,2,0)`, default bloomcrown
+   founder at `(18,2,0)`, and the sole raised face at `(19,3,0)`. The crown is
+   reachable from that raised face; it can be selected although it is nine
+   columns away under radius 8. Conversely the centre-only prefilter can
+   miss a broad crown reachable from a face inside the sensing area.
+   **Change:** define the sensing domain in candidate-face coordinates and
+   score its standable faces with `reachable_foliage`, or explicitly document
+   and test the narrower candidate heuristic. Pin the edge case and its seam
+   translation. Actual bites already use the eater's absolute height; the
+   87% bloomcrown intake is measured, while attribution to particular higher
+   faces needs bite-site/stand-height records (`examples/grazed.rs:319`).
+   Keep the previously stated no-line-of-sight, greedy-walk approximation
+   explicit; it does not establish body-sized passages or obstacle refuges.
+
+6. **P2 — R9.6: a terrain load is not an ecosystem restore. Before using
+   save/load during a long ambient run; full persistence can be a later package.**
+   `crates/cubarium/src/voxel/mod.rs:524` saves only `World`; `:546` restores
+   only `World`, leaving current flora/fauna stocks, ticks and identities
+   against older terrain and water. This is more than a missing fauna file.
+   **Change now:** label these commands terrain-only and refuse in-place load
+   when ecology state exists, including ground/banks or nonzero ecological
+   ledgers, until one atomic world/flora/fauna snapshot is available. A fresh,
+   uninterrupted diagnostic run does not require that snapshot implementation.
+   The separate fauna schema **2** is the correct refusal boundary after
+   widening per-plant arrays (`crates/cubarium-voxel-fauna/src/snapshot.rs:25`);
+   update backlog `:56`, which still says schema 1. Before wiring persistence,
+   validate loaded animal stocks, sorted unique IDs and the next-ID counter,
+   not just configuration (`snapshot.rs:47-51`), and test continuation of the
+   whole coupled state. Standalone fauna round-trip is not that test.
+
+7. **P2 — R9.7: the replacement brief's founder treatment is only valid for
+   the original pair. Before extending package P to the other presets.**
+   `design/handoffs/voxel-replacement-study-brief-2026-09-17.md:33-34` carries
+   my original **0.3 wood** treatment into a species-parameterized interface.
+   That is half-size bloomcrown/umbrellafrond, but five times springturf's
+   mature wood, and three times stonecushion/glowcap's. `Seed` accepts that
+   subsidy (`crates/cubarium-voxel-flora/src/lib.rs:1835`). **Change:** declare
+   `0.5 * species.wood_max` with ordinary foliage/reserve for each direction,
+   fixed across its matched arms; retain the original 0.3 for the original
+   pair as the result of that rule. Use `FloraView`'s substrate-aware gates
+   if glowcap is ever admitted. The current two-producer control can proceed
+   without consumers, logs, mating rules or a fungal dispersal repair.
+
+### What this does and does not establish
+
+R8.1–R8.5 are substantively repaired: carrion leaves with an unsupported site,
+zero-organic deposits settle to soluble mineral/heat, elevated reach has its
+fixture, and decomposition's throughput/current-density distinction is
+documented and tested. R9.2 identifies new reporting regressions, not a reason
+to undo those repairs. **(a)** Internal fungal uptake correctly avoids
+`consumed_*_out`; using `take_pool` and a diagnostic `substrate_uptake` preserves
+the boundary's meaning. **(b)** The box/dispersal choice is R9.3. **(c–d)**
+The implemented glowcap is a soil-moisture-dependent wood consumer whose
+adult uptake ignores aeration stress, exactly as the brief specifies. This
+does satisfy non-photosynthetic stand metabolism; it does not model log
+moisture or oxygen stress. Keep that narrower niche for now, state that bare
+rock means **no soil anywhere in the box**, and replace “a drowned one does
+not” at experiment-note `:1316` with “saturated roots do not reduce adult
+uptake”: free-water drowning still kills it. Adult stress coupling and log
+water are later rule decisions, not clearance tuning.
+
+**(e–f)** Paid rapid reproduction and actual excretion are addressed above.
+**(g)** Exact matching receipts plus independent stock residuals are useful
+checks; neither proves nutrient sufficiency. **(h)** Feeding height matters,
+but the recorded species totals do not identify bite faces. **(i–j)** The
+fauna snapshot/schema change is sound in scope, and GPU staging now gives an
+animal precedence over the plant in its cell
+(`crates/cubarium/src/sink/gpu/voxel.rs:203-223`), matching CPU ordering at
+`crates/cubarium/src/voxel/present.rs:385-402`; live GPU fidelity was not verified.
+The seed-bank read-only pass at flora `src/step.rs:1159-1186` followed by
+mutation at `:1187-1227` introduces no observed borrow-split or lottery-order
+defect: winners retain valid ground indices, births do not consume substrate,
+and attrition still follows germination. No new boundary conservation leak
+was found. Lazy mineral provisioning remains a named external inflow and
+must be matched in controls. Paid flows and finite-stock smoke runs establish
+neither replacement nor a persistent ambient community.
+
+**Verdict: changes requested — R9.1 before consumer replacement controls or
+a first long consumer run; R9.4's reserve contract before that run, and R9.6
+before relying on save/load.** The producer-only replacement harness is
+cleared to continue, with R9.7 before generalizing its founder treatment.
+Apply reporting corrections now; settle R9.3/R9.5 before drawing the
+corresponding fungal-spread or feeding-access conclusions. No parameter
+tuning, population target, long rerun or art revision is required by this review.
