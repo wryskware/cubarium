@@ -282,12 +282,13 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     eprintln!(
         "cubarium voxel: {ticks} ticks, {frames} frames in {elapsed:.2} s ({:.1} fps); \
          stored {:.3} m3, residual {:.3e} m3; \
-         {} stands, flora residual {:.3e} material, {:.3e} energy",
+         {} stands, flora residual {:.3e} organic, {:.3e} mineral, {:.3e} energy",
         frames as f64 / elapsed.max(1e-9),
         view.stored_m3(),
         view.stored_m3() - view.ledger.expected_stored(),
         fv.stands.len(),
-        fv.material() - fv.ledger.expected_material(),
+        fv.organic() - fv.ledger.expected_organic(),
+        fv.mineral() - fv.ledger.expected_mineral(),
         fv.energy() - fv.ledger.expected_energy(),
     );
     Ok(())
@@ -421,18 +422,19 @@ impl Control {
                 let fv = flora.view();
                 match fv.stand_at(site) {
                     Some(s) => eprintln!(
-                        "cubarium voxel:   {} {:?} W {:.4} P {:.4} Q {:.4} light {:.3} \
-                         moisture {:.3}",
-                        s.species.name(), s.stage, s.wood, s.foliage, s.reserve, s.light,
-                        s.moisture,
+                        "cubarium voxel:   {} {:?} W {:.4} P {:.4} Q {:.4} mineral {:.5} \
+                         light {:.3} moisture {:.3}",
+                        s.species.name(), s.stage, s.wood, s.foliage, s.reserve, s.mineral,
+                        s.light, s.moisture,
                     ),
                     None => eprintln!("cubarium voxel:   no stand"),
                 }
                 if let Some(g) = fv.ground_at(site) {
                     eprintln!(
-                        "cubarium voxel:   ground N {:.4} litter {:.4} ({:.4} energy) \
-                         dead wood {:.4}",
-                        g.nutrient, g.litter, g.litter_energy, g.dead_wood,
+                        "cubarium voxel:   ground N {:.4} litter {:.4} ({:.4} energy, \
+                         {:.5} mineral) dead wood {:.4} ({:.5} mineral)",
+                        g.mineral, g.litter, g.litter_energy, g.litter_mineral, g.dead_wood,
+                        g.dead_wood_mineral,
                     );
                 }
             }
@@ -824,8 +826,8 @@ mod tests {
         // The removal is booked, not hidden: the residual line the run prints is the
         // seeded material less what `c` took back.
         let fv = flora.view();
-        assert!(fv.ledger.removed_material_out > 0.0);
-        assert!((fv.material() - fv.ledger.expected_material()).abs() < 1e-9);
+        assert!(fv.ledger.removed_organic_out > 0.0);
+        assert!((fv.organic() - fv.ledger.expected_organic()).abs() < 1e-9);
 
         // Both help texts really do offer the commands that were just used.
         assert!(COMMANDS.contains("f X Z bloomcrown|umbrellafrond [wood]"));

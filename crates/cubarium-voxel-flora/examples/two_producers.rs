@@ -352,14 +352,19 @@ fn report(
 
     let l = view.ledger;
     println!(
-        "ledger: light_in {:.6} heat_out {:.6} transpired {:.6} m3 deaths {} establishments {}",
-        l.light_in, l.heat_out, l.transpired_m3, l.deaths, l.establishments
+        "ledger: fixed_in {:.6} respired_out {:.6} light_in {:.6} heat_out {:.6} \
+         transpired {:.6} m3 deaths {} establishments {}",
+        l.fixed_in, l.respired_out, l.light_in, l.heat_out, l.transpired_m3, l.deaths,
+        l.establishments
     );
     println!(
-        "residuals: material {:.3e} energy {:.3e} (stocks: material {:.4} energy {:.4})",
-        view.material() - l.expected_material(),
+        "residuals: organic {:.3e} mineral {:.3e} energy {:.3e} (stocks: organic {:.4} \
+         mineral {:.4} energy {:.4})",
+        view.organic() - l.expected_organic(),
+        view.mineral() - l.expected_mineral(),
         view.energy() - l.expected_energy(),
-        view.material(),
+        view.organic(),
+        view.mineral(),
         view.energy()
     );
     let water = world.view().stored_m3() - world.view().ledger.expected_stored();

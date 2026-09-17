@@ -56,9 +56,11 @@ fn site(x: u32) -> Site {
 
 fn assert_residuals(flora: &Flora, when: &str) {
     let v = flora.view();
-    let m = v.material() - v.ledger.expected_material();
+    let o = v.organic() - v.ledger.expected_organic();
+    let n = v.mineral() - v.ledger.expected_mineral();
     let e = v.energy() - v.ledger.expected_energy();
-    assert!(m.abs() <= 1e-9 * v.material().abs().max(1.0), "{when}: material residual {m}");
+    assert!(o.abs() <= 1e-9 * v.organic().abs().max(1.0), "{when}: organic residual {o}");
+    assert!(n.abs() <= 1e-9 * v.mineral().abs().max(1.0), "{when}: mineral residual {n}");
     assert!(e.abs() <= 1e-9 * v.energy().abs().max(1.0), "{when}: energy residual {e}");
 }
 
@@ -429,6 +431,7 @@ fn a_donor_is_debited_exactly_what_arrives_plus_its_construction() {
     let reserve0 = sc.reserve_cap * 0.4;
     assert_eq!(flora.view().stand_at(site(3)).unwrap().reserve, reserve0);
     let heat0 = flora.view().ledger.heat_out;
+    let respired0 = flora.view().ledger.respired_out;
 
     flora.step(&mut world);
 
@@ -441,19 +444,27 @@ fn a_donor_is_debited_exactly_what_arrives_plus_its_construction() {
     for x in targets {
         let s = flora.view().stand_at(site(x)).unwrap_or_else(|| panic!("nothing at {x}"));
         let g = flora.view().ground_at(site(x)).unwrap();
-        arrived += s.wood + s.foliage + s.reserve;
-        // The construction respiration of this one package, and nothing else, sits on
-        // top of the site's own starting nutrient.
-        arrived += g.nutrient - flora.config().initial_nutrient;
+        arrived += s.organic();
+        // Round 3: the construction respiration is *not* deposited on the recipient. It
+        // leaves the system as organic matter, so the site's pool is its starting
+        // mineral to the bit.
+        assert_eq!(g.mineral, flora.config().initial_mineral, "construction fertilized the site");
         assert_eq!(s.species, Species::Bloomcrown);
         assert_eq!(s.stage, Stage::Establishing);
     }
-    assert!(
-        (arrived - spent).abs() < 1e-15,
-        "{arrived} arrived for {spent} spent: a propagule created or lost material"
-    );
-    // The construction respiration is booked as heat, at the species' own density.
+    // What left the donor is what arrived plus what the build respired, and the respired
+    // half is a named boundary flow rather than a stock somewhere.
     let net = spent / (1.0 + sc.build);
+    let respired = flora.view().ledger.respired_out - respired0;
+    assert!(
+        (arrived + respired - spent).abs() < 1e-15,
+        "{arrived} arrived and {respired} respired for {spent} spent"
+    );
+    assert!(
+        (respired - sc.build * net).abs() < 1e-15,
+        "construction respired {respired} for a net {net} package"
+    );
+    // The construction respiration is booked as heat too, at the species' own density.
     let heat = flora.view().ledger.heat_out - heat0;
     assert!(
         (heat - sc.energy_density * sc.build * net).abs() < 1e-15,

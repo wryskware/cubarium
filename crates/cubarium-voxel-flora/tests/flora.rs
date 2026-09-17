@@ -45,9 +45,14 @@ fn site(x: u32) -> Site {
     Site { x, y: 2, z: 0 }
 }
 
-fn material_residual(flora: &Flora) -> f64 {
+fn organic_residual(flora: &Flora) -> f64 {
     let v = flora.view();
-    v.material() - v.ledger.expected_material()
+    v.organic() - v.ledger.expected_organic()
+}
+
+fn mineral_residual(flora: &Flora) -> f64 {
+    let v = flora.view();
+    v.mineral() - v.ledger.expected_mineral()
 }
 
 fn energy_residual(flora: &Flora) -> f64 {
@@ -55,11 +60,15 @@ fn energy_residual(flora: &Flora) -> f64 {
     v.energy() - v.ledger.expected_energy()
 }
 
+/// The three residuals of the round-3 ledger: organic matter against its two named
+/// boundary flows, mineral against nothing but seeding and removal, energy as before.
 fn assert_residuals(flora: &Flora, when: &str) {
     let v = flora.view();
-    let m = material_residual(flora);
+    let o = organic_residual(flora);
+    let n = mineral_residual(flora);
     let e = energy_residual(flora);
-    assert!(m.abs() <= 1e-9 * v.material().abs().max(1.0), "{when}: material residual {m}");
+    assert!(o.abs() <= 1e-9 * v.organic().abs().max(1.0), "{when}: organic residual {o}");
+    assert!(n.abs() <= 1e-9 * v.mineral().abs().max(1.0), "{when}: mineral residual {n}");
     assert!(e.abs() <= 1e-9 * v.energy().abs().max(1.0), "{when}: energy residual {e}");
 }
 
@@ -80,7 +89,7 @@ fn a_seeded_stand_in_open_sky_earns_income_and_grows() {
     assert!(flora.apply(&world, Command::Seed { x: 3, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
 
     let before = *flora.view().stand_at(site(3)).expect("seeded");
-    let nutrient0 = flora.view().ground_at(site(3)).expect("ground").nutrient;
+    let mineral0 = flora.view().ground_at(site(3)).expect("ground").mineral;
     run(&mut flora, &mut world, 100);
 
     let after = *flora.view().stand_at(site(3)).expect("still there");
@@ -96,9 +105,11 @@ fn a_seeded_stand_in_open_sky_earns_income_and_grows() {
         "the two ledgers must agree to the bit"
     );
 
-    // Growth is paid out of the site's own nutrient, and some of it is respired back.
-    let nutrient = flora.view().ground_at(site(3)).expect("ground").nutrient;
-    assert!(nutrient < nutrient0, "nutrient {nutrient0} -> {nutrient}");
+    // Growth is paid for out of the site's own mineral pool, at `n_tissue` per unit of
+    // tissue built — and the mineral it drew is standing in the plant, not respired.
+    let g = flora.view().ground_at(site(3)).expect("ground");
+    assert!(g.mineral < mineral0, "mineral {mineral0} -> {}", g.mineral);
+    assert!(after.mineral > before.mineral, "the plant holds the mineral it drew");
     assert!(flora.view().ground_at(site(3)).unwrap().litter > 0.0, "senescence sheds litter");
     assert_residuals(&flora, "after 100 ticks of growth");
 }
@@ -129,7 +140,14 @@ fn a_stand_at_wilting_point_earns_nothing_and_dies_of_unpaid_maintenance() {
     let g = flora.view().ground_at(site(2)).expect("its remains");
     assert!(g.dead_wood > 0.0, "wood becomes dead wood");
     assert!(g.litter > 0.0, "foliage and reserve become litter");
-    assert!(g.nutrient > 0.0, "and decomposition returns some of it");
+    assert!(g.litter_mineral > 0.0 && g.dead_wood_mineral > 0.0, "carrying their mineral");
+    // The pool gained mineral only from decomposing the remains: nothing was ever
+    // assimilated here, so no mineral was drawn out of it either.
+    assert!(
+        g.mineral > flora.config().initial_mineral,
+        "decomposition returns the dead tissue's mineral: {}",
+        g.mineral
+    );
     assert_residuals(&flora, "after a death by drought");
 }
 
@@ -374,8 +392,20 @@ fn dead_wood_keeps_its_energy_until_it_decomposes() {
     let released = g.dead_wood_energy - after.dead_wood_energy;
     let heat = flora.view().ledger.heat_out - heat0;
     assert!(heat >= released - 1e-12, "the released energy did not reach heat: {heat} vs {released}");
-    // And the material it lost is nutrient on the same site, not a loss.
-    assert!(after.nutrient > flora.config().initial_nutrient, "{}", after.nutrient);
+    // The organic matter it lost is respired out of the system, not turned into
+    // fertilizer — but the mineral that was in it lands in the site's pool, at the same
+    // fraction as the organic matter that left.
+    assert!(after.mineral > flora.config().initial_mineral, "{}", after.mineral);
+    assert!(flora.view().ledger.respired_out > 0.0, "decomposition respires nothing");
+    // Exactly what the two decomposing stocks gave up, and not a unit more: the site's
+    // mineral is conserved across the transfer.
+    let released = after.mineral - flora.config().initial_mineral;
+    let gave_up = (g.litter_mineral + g.dead_wood_mineral)
+        - (after.litter_mineral + after.dead_wood_mineral);
+    assert!(
+        (released - gave_up).abs() < 1e-9 * gave_up,
+        "{released} reached the pool for {gave_up} released"
+    );
     assert_residuals(&flora, "after a hundred ticks of rot");
 }
 
@@ -390,8 +420,9 @@ fn a_terrain_edit_that_buries_a_support_books_the_stand_out() {
 
     let stand = *flora.view().stand_at(site(2)).unwrap();
     let ground = *flora.view().ground_at(site(2)).unwrap();
-    let material = stand.wood + stand.foliage + stand.reserve;
-    let ground_material = ground.nutrient + ground.litter + ground.dead_wood;
+    let organic = stand.organic() + ground.litter + ground.dead_wood;
+    let mineral =
+        stand.mineral + ground.mineral + ground.litter_mineral + ground.dead_wood_mineral;
 
     // Rock in the void above the face: it is no longer a support.
     world.apply(WorldCommand::SetMaterial { x: 2, y: 3, z: 0, material: Material::Rock });
@@ -402,9 +433,14 @@ fn a_terrain_edit_that_buries_a_support_books_the_stand_out() {
     assert!(flora.view().ground_at(site(2)).is_none(), "and so is its ground");
     let l = flora.view().ledger;
     assert!(
-        (l.removed_material_out - (material + ground_material)).abs() < 1e-15,
-        "booked {} for {material} + {ground_material}",
-        l.removed_material_out
+        (l.removed_organic_out - organic).abs() < 1e-15,
+        "booked {} organic for {organic}",
+        l.removed_organic_out
+    );
+    assert!(
+        (l.removed_mineral_out - mineral).abs() < 1e-15,
+        "booked {} mineral for {mineral}",
+        l.removed_mineral_out
     );
     assert_eq!(l.deaths, 0, "a burial is not a death: it is a removal");
     assert_residuals(&flora, "after a burial");
@@ -419,7 +455,7 @@ fn a_donor_with_a_full_reserve_establishes_its_neighbours() {
     // Wood 0.4 is over bloomcrown's donor_min of 0.3, and `Seed` fills the reserve.
     assert!(flora.apply(&world, Command::Seed { x: 3, z: 0, species: Species::Bloomcrown, wood: 0.4 }));
     let sc = flora.config().species(Species::Bloomcrown).clone();
-    let material0 = flora.view().material();
+    let mineral0 = flora.view().mineral();
 
     flora.step(&mut world);
 
@@ -443,26 +479,191 @@ fn a_donor_with_a_full_reserve_establishes_its_neighbours() {
         assert!((stand.reserve - sc.propagule_split[2] * net).abs() < 1e-12 * net, "{stand:?}");
         assert!(stand.wood < sc.alive_min, "a propagule is not born alive");
         let g = flora.view().ground_at(s).unwrap();
-        assert!(
-            (g.nutrient - (flora.config().initial_nutrient + sc.build * net)).abs() < 1e-15,
-            "construction nutrient lands in the recipient's ground: {g:?}"
+        assert_eq!(
+            g.mineral,
+            flora.config().initial_mineral,
+            "construction respiration is not fertilizer: the recipient's pool is untouched"
         );
     }
     assert_eq!(flora.view().ledger.establishments, 0, "none has crossed alive_min yet");
-    // Four new sites each brought their own `initial_nutrient`, which is booked in.
+    // Four new sites each brought their own `initial_mineral`, which is booked in; the
+    // package's construction respiration left the system, so organic matter went *down*.
     assert!(
-        flora.view().material() > material0,
-        "the new ground's nutrient is booked, not conjured"
+        (flora.view().mineral() - (mineral0 + 4.0 * flora.config().initial_mineral)).abs() < 1e-15,
+        "the new ground's mineral is booked, not conjured"
     );
     assert_residuals(&flora, "after one round of propagules");
 }
 
+// ------------------------------------------- organic matter and mineral (round 3)
+
+/// Respiration is not fertilizer. A stand with no income pays its maintenance out of its
+/// reserve, tick after tick: organic matter leaves the system as `respired_out` and heat,
+/// and the site's mineral pool does not move by one bit. What the burned reserve was
+/// holding stays in the plant, so the standing tissue ends up richer per unit than
+/// `n_tissue`.
+///
+/// Two rates are the test's own: `maintenance` 0.4 /s (placeholder 0.0002) so the
+/// reserve is visibly spent inside twenty ticks, and `senescence` 0 (placeholder 0.001)
+/// so litterfall does not also move mineral and the reading is respiration alone.
+#[test]
+fn respiration_loses_organic_matter_and_releases_no_mineral() {
+    let mut world = plain(6, 8, 0.0);
+    let mut config = FloraConfig::default();
+    config.bloomcrown.maintenance = 0.4;
+    config.bloomcrown.senescence = 0.0;
+    let mut flora = Flora::new(config);
+    assert!(flora.apply(&world, Command::Seed { x: 2, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
+
+    let n_tissue = flora.config().species(Species::Bloomcrown).n_tissue;
+    let stand0 = *flora.view().stand_at(site(2)).expect("seeded");
+    let pool0 = flora.view().ground_at(site(2)).expect("ground").mineral;
+    let organic0 = flora.view().organic();
+    assert_eq!(stand0.mineral, n_tissue * stand0.organic(), "a founder arrives at n_tissue");
+
+    run(&mut flora, &mut world, 20);
+
+    let stand = *flora.view().stand_at(site(2)).expect("still alive");
+    let l = flora.view().ledger;
+    assert_eq!(l.fixed_in, 0.0, "dry soil is no income");
+    assert!(l.respired_out > 0.0, "it respired nothing");
+    assert!(stand.organic() < stand0.organic(), "it lost no organic matter");
+    let lost = organic0 - flora.view().organic();
+    assert!(
+        (lost - l.respired_out).abs() < 1e-12 * l.respired_out,
+        "the organic matter that left the system is {lost}, respired {}",
+        l.respired_out
+    );
+    // The two mineral claims: the pool did not move, and the plant kept every unit.
+    assert_eq!(
+        flora.view().ground_at(site(2)).unwrap().mineral,
+        pool0,
+        "respiration fertilized the site"
+    );
+    assert_eq!(stand.mineral, stand0.mineral, "respiration took mineral out of the plant");
+    assert!(
+        stand.mineral > n_tissue * stand.organic(),
+        "what is left should be mineral-rich: {} for {} of tissue",
+        stand.mineral,
+        stand.organic()
+    );
+    assert_residuals(&flora, "after twenty ticks of unpaid maintenance");
+}
+
+/// A litter cohort hands the site's pool **exactly** the mineral it held, while its
+/// organic matter is respired out of the system rather than becoming pool.
+///
+/// `decomposition` is 60 /s here against the placeholder 0.001: at `k_d · dt > 1` the
+/// whole cohort is eligible in one tick, which is what makes "exactly its mineral" a
+/// thing one assertion can say. `wood_decomposition` is 0 (placeholder 0.0001) so the
+/// dead wood the same death left behind stays out of the reading.
+#[test]
+fn a_decomposing_litter_cohort_releases_exactly_its_mineral() {
+    let mut config = FloraConfig::default();
+    config.decomposition = 60.0;
+    config.wood_decomposition = 0.0;
+
+    let mut world = plain(8, 8, 0.5);
+    let mut flora = Flora::new(config);
+    assert!(flora.apply(&world, Command::Seed { x: 2, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
+    // Drown it: a §4.7 death puts foliage and reserve into litter, with their mineral.
+    world.apply(WorldCommand::AddWater { x: 2, y: 3, z: 0, volume_m3: 0.2 });
+    flora.step(&mut world);
+    // Take the water away so the litter can rot without anything else happening.
+    world.apply(WorldCommand::SetMaterial { x: 2, y: 3, z: 0, material: Material::Rock });
+    world.apply(WorldCommand::SetMaterial { x: 2, y: 3, z: 0, material: Material::Air });
+
+    let before = *flora.view().ground_at(site(2)).expect("its remains");
+    assert!(before.litter > 0.0 && before.litter_mineral > 0.0, "{before:?}");
+    let respired0 = flora.view().ledger.respired_out;
+
+    flora.step(&mut world);
+
+    let after = *flora.view().ground_at(site(2)).expect("still there");
+    assert_eq!(after.litter, 0.0, "the whole cohort was eligible: {}", after.litter);
+    assert_eq!(after.litter_mineral, 0.0, "and it kept none of its mineral");
+    let released = after.mineral - before.mineral;
+    assert!(
+        (released - before.litter_mineral).abs() < 1e-12 * before.litter_mineral,
+        "the pool got {released} for the cohort's {}",
+        before.litter_mineral
+    );
+    // Its organic matter left the system instead: no pool, no stock, a named flow.
+    let respired = flora.view().ledger.respired_out - respired0;
+    assert!(
+        (respired - before.litter).abs() < 1e-12 * before.litter,
+        "the cohort's {} of organic matter left as {respired} of respiration",
+        before.litter
+    );
+    assert_eq!(after.dead_wood, before.dead_wood, "the dead wood was not in play");
+    assert_residuals(&flora, "after one litter cohort decomposed");
+}
+
+/// The mineral cap is real: with light and water both saturating, a stand can build no
+/// more tissue than `mineral / n_tissue` of the pool it stands on, and when the pool is
+/// spent growth stops even though nothing else is limiting. The ample arm is the same
+/// fixture with a pool a hundred times larger.
+///
+/// Four values are the test's own, all to make the *mineral* cap the binding one rather
+/// than the Michaelis–Menten that already throttles a small pool: `n_tissue` 1.0
+/// (placeholder 0.02), `nutrient_half` 0 and `nutrient_draw_max` 1e9 (placeholders 0.5
+/// and 0.01) to take the other two terms out of the way, and `initial_mineral` 1e-4 in
+/// the starved arm against 1e-2 in the ample one (placeholder 1.0).
+#[test]
+fn growth_stops_when_the_site_s_mineral_is_spent_though_light_and_water_are_ample() {
+    let arm = |initial_mineral: f64| -> (Flora, World) {
+        let mut config = FloraConfig::default();
+        config.initial_mineral = initial_mineral;
+        config.bloomcrown.n_tissue = 1.0;
+        config.bloomcrown.nutrient_half = 0.0;
+        config.bloomcrown.nutrient_draw_max = 1e9;
+        let mut world = plain(6, 8, 0.6);
+        let mut flora = Flora::new(config);
+        assert!(flora.apply(&world, Command::Seed { x: 2, z: 0, species: Species::Bloomcrown, wood: 0.1 }));
+        run(&mut flora, &mut world, 50);
+        (flora, world)
+    };
+
+    let (mut starved, mut starved_world) = arm(1e-4);
+    let (mut ample, mut ample_world) = arm(1e-2);
+    let seeded_mineral = starved.view().stand_at(site(2)).unwrap().mineral;
+    let mid = *starved.view().stand_at(site(2)).expect("alive");
+    run(&mut starved, &mut starved_world, 150);
+    run(&mut ample, &mut ample_world, 150);
+
+    let stand = *starved.view().stand_at(site(2)).expect("still alive");
+    assert_eq!(stand.light, 1.0, "open sky, so light is not what stopped it");
+    assert_eq!(stand.moisture, 1.0, "pore 0.6 is past sat_pore: nor is water");
+    // The pool does not reach zero and should not: senescence keeps shedding foliage
+    // into litter and decomposition keeps handing that litter's mineral back, so the
+    // site settles at the small stock that recycling supports — a fiftieth of what it
+    // started with here. That trickle is all the growth there is.
+    let g = starved.view().ground_at(site(2)).unwrap();
+    assert!(g.mineral < 0.02 * 1e-4, "the pool is not spent: {}", g.mineral);
+    // Everything the plant drew came out of that one pool, and nowhere else.
+    assert!(
+        stand.mineral - seeded_mineral <= 1e-4 + 1e-18,
+        "it drew {} from a 1e-4 pool",
+        stand.mineral - seeded_mineral
+    );
+    // And growth has stopped, not merely slowed: over the next 150 ticks the wood does
+    // not move by one bit, while the ample arm — same light, same water, same rates —
+    // keeps growing.
+    assert_eq!(stand.wood, mid.wood, "the starved stand grew after its pool was spent");
+    assert!(
+        ample.view().stand_at(site(2)).unwrap().wood > stand.wood,
+        "the ample arm did not outgrow the starved one"
+    );
+    assert_residuals(&starved, "after a pool ran out of mineral");
+    assert_residuals(&ample, "after 200 ticks on an ample pool");
+}
+
 // ---------------------------------------------------------------- conservation
 
-/// Both residuals over 200 ticks of a rained-on world with stands of both species
+/// All three residuals over 200 ticks of a rained-on world with stands of both species
 /// living, drinking, shedding, seeding and dying.
 #[test]
-fn both_residuals_stay_at_noise_over_two_hundred_ticks_with_rain() {
+fn the_three_residuals_stay_at_noise_over_two_hundred_ticks_with_rain() {
     let config = VoxelConfig {
         width: 12,
         height: 10,

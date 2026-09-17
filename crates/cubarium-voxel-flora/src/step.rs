@@ -21,8 +21,9 @@
 //!    light and water are in hand, so running them per stand in one pass is the same
 //!    arithmetic as three passes over every stand.
 //! 7. **Decomposition** (§5), on the stocks the site held *before* this tick: litter and
-//!    dead wood return to nutrient, litter's energy leaves as heat at its current
-//!    density.
+//!    dead wood respire their organic matter out of the system and release their mineral
+//!    to the site's pool at the same fraction; litter's energy leaves as heat at its
+//!    current density.
 //! 8. **Propagules** (§4.8), from one snapshot of donors and recipients.
 //!
 //! Dropped from v1 by the brief: fruit (3c), downhill transport of litter (3f) and
@@ -32,6 +33,21 @@
 //! `Ground::dead_wood_energy` when the wood diebacks or the stand dies, and leaves as
 //! heat only as the wood decomposes, at the stock's current density. A standing dead
 //! trunk is energy-dense and unavailable, which is the point of it being its own stock.
+//!
+//! # Organic matter and mineral
+//!
+//! Round 3's first correction: the two are separate currencies (`lib.rs`'s `FloraLedger`).
+//! Assimilation creates **organic matter** from light (`fixed_in`); every respiration —
+//! maintenance, construction `c_g`, reflush, a capped income's leftover, decomposition —
+//! destroys organic matter and books it out (`respired_out`, energy to heat) and moves
+//! **no** mineral. Mineral only ever moves between stocks: the site's pool pays
+//! `n_tissue` per unit of new tissue, tissue that dies or falls carries its mineral into
+//! litter and dead wood, and decomposition hands it back to the pool. So respiring a
+//! kilogram of wood no longer produces a kilogram of fertilizer.
+//!
+//! A stand's mineral is its own stock and not `n_tissue · O`: respiration takes organic
+//! matter and leaves mineral behind. Every transfer out of a stand therefore takes the
+//! same *fraction* of its mineral as of its organic matter ([`pull_mineral`]).
 //!
 //! Every clamp is a `min` against the stock it reads, so nothing here can go negative.
 
@@ -86,9 +102,10 @@ fn prune_unsupported(flora: &mut Flora, world: &World) {
         if supported(&stand.site) {
             kept.push(*stand);
         } else {
-            let material = stand.wood + stand.foliage + stand.reserve;
-            ledger.removed_material_out += material;
-            ledger.removed_energy_out += config.species(stand.species).energy_density * material;
+            let organic = stand.organic();
+            ledger.removed_organic_out += organic;
+            ledger.removed_mineral_out += stand.mineral;
+            ledger.removed_energy_out += config.species(stand.species).energy_density * organic;
         }
     }
     if kept.len() != stands.len() {
@@ -100,7 +117,8 @@ fn prune_unsupported(flora: &mut Flora, world: &World) {
         if supported(&g.site) {
             kept.push(*g);
         } else {
-            ledger.removed_material_out += g.nutrient + g.litter + g.dead_wood;
+            ledger.removed_organic_out += g.litter + g.dead_wood;
+            ledger.removed_mineral_out += g.mineral + g.litter_mineral + g.dead_wood_mineral;
             ledger.removed_energy_out += g.litter_energy + g.dead_wood_energy;
         }
     }
@@ -393,11 +411,17 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink]) {
         stands[si].water_m3 = drink[si].taken_m3;
 
         // ---- 4.1 potential income, 4.2 demands
-        let n0 = ground[gi].nutrient;
+        //
+        // The mineral cap replaces v1's `.min(n0)`: income is organic matter, and what
+        // the pool limits is the *tissue* it can pay `n_tissue` per unit for, so the
+        // pool's own units bound `A` through `mineral / n_tissue`. The
+        // Michaelis-Menten and the `f_max` rate cap are unchanged.
+        let n0 = ground[gi].mineral;
         let monod = if n0 + sc.nutrient_half > 0.0 { n0 / (n0 + sc.nutrient_half) } else { 0.0 };
+        let mineral_cap = if sc.n_tissue > 0.0 { n0 / sc.n_tissue } else { f64::INFINITY };
         let a_pot = (sc.assimilation * l_eff * mu * p0 * monod * DT)
             .min(sc.nutrient_draw_max * n0 * DT)
-            .min(n0)
+            .min(mineral_cap)
             .max(0.0);
         let p_cap = sc.alpha * w0;
         let q_max = sc.reserve_cap * w0;
@@ -408,7 +432,7 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink]) {
         let build = 1.0 + sc.build;
         let a = a_pot.min(m + build * (d_p + d_w) + d_q);
 
-        ground[gi].nutrient -= a;
+        ledger.fixed_in += a;
         ledger.light_in += e_v * a;
 
         // ---- 4.3 maintenance from income first, then reserve
@@ -418,7 +442,10 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink]) {
         let paid_q = stands[si].reserve.min(short);
         stands[si].reserve -= paid_q;
         let unpaid = short - paid_q;
-        ground[gi].nutrient += paid_a + paid_q;
+        // Both are respiration: the organic matter leaves the system as heat, and no
+        // mineral moves. `paid_a` was never tissue, and the mineral of the reserve
+        // `paid_q` burned stays in the stand — what is still standing keeps its mineral.
+        ledger.respired_out += paid_a + paid_q;
         ledger.heat_out += e_v * (paid_a + paid_q);
 
         // ---- 4.4 growth: reserve share, foliage, wood, then the rest to reserve
@@ -443,34 +470,48 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink]) {
         };
         stands[si].reserve -= build * dp_q;
         stands[si].foliage += dp_a + dp_q;
-        ground[gi].nutrient += sc.build * (dp_a + dp_q);
-        ledger.heat_out += e_v * sc.build * (dp_a + dp_q);
 
         let dw = (rem / build).min(d_w).max(0.0);
         rem -= build * dw;
         stands[si].wood += dw;
-        ground[gi].nutrient += sc.build * dw;
-        ledger.heat_out += e_v * sc.build * dw;
 
         let dq_r = rem.min((d_q - dq_s).max(0.0)).max(0.0);
         stands[si].reserve += dq_r;
         rem -= dq_r;
-        // The leftover itself: never hand a negative residue back to the nutrient.
+        // The leftover itself: never respire a negative residue. With the §4.2 cap on
+        // `A` this is float residue only.
         let rem = rem.max(0.0);
-        // Whatever the caps left over goes straight back: material to nutrient, its
-        // energy to heat. With the §4.2 cap on `A` this is float residue only.
-        ground[gi].nutrient += rem;
-        ledger.heat_out += e_v * rem;
+        // Construction respiration on every unit built, whichever stock paid for it, and
+        // the leftover of a capped income: organic matter out of the system, energy to
+        // heat, no mineral.
+        let respired = sc.build * (dp_a + dp_q + dw) + rem;
+        ledger.respired_out += respired;
+        ledger.heat_out += e_v * respired;
+
+        // New tissue built out of this tick's income draws `n_tissue` per unit from the
+        // site's pool. The reflush `dp_q` is not new tissue — it is reserve turned into
+        // foliage — so its mineral is already in the stand and is not drawn again. The
+        // `min` is float insurance: `A_pot`'s `mineral / n_tissue` cap already bounds
+        // this by the pool, and only this stand draws on this site.
+        let built = dq_s + dp_a + dw + dq_r;
+        let draw = (sc.n_tissue * built).max(0.0).min(ground[gi].mineral.max(0.0));
+        ground[gi].mineral -= draw;
+        stands[si].mineral += draw;
 
         // ---- 4.5 senescence
         let shed = (sc.senescence * stands[si].foliage * DT).min(stands[si].foliage);
+        let organic_before = stands[si].organic();
         stands[si].foliage -= shed;
-        add_litter(config, &mut ground[gi], shed, e_v * shed, ledger);
+        let shed_mineral = pull_mineral(&mut stands[si], organic_before, shed);
+        add_litter(config, &mut ground[gi], shed, shed_mineral, e_v * shed, ledger);
 
         // ---- 4.6 dieback
         let die_back = stands[si].wood.min(sc.dieback * unpaid);
+        let organic_before = stands[si].organic();
         stands[si].wood -= die_back;
+        let die_back_mineral = pull_mineral(&mut stands[si], organic_before, die_back);
         ground[gi].dead_wood += die_back;
+        ground[gi].dead_wood_mineral += die_back_mineral;
         ground[gi].dead_wood_energy += e_v * die_back;
 
         // ---- 4.7 death
@@ -487,39 +528,65 @@ fn grow(flora: &mut Flora, light: &[f64], drink: &[Drink]) {
     }
 }
 
-/// §4.7 death: wood to dead wood, foliage and reserve to litter under the energy cap.
+/// The mineral belonging to `moved` units of a stand's organic matter, taken out of the
+/// stand's mineral stock. Proportional: a stand's mineral is a stock and not
+/// `n_tissue · O`, because respiration leaves mineral behind, so a transfer of a
+/// fraction of the organic matter has to take the same fraction of the mineral.
+/// `before` is the stand's organic matter *including* `moved`.
+fn pull_mineral(stand: &mut Stand, before: f64, moved: f64) -> f64 {
+    if moved <= 0.0 || before <= 0.0 || stand.mineral <= 0.0 {
+        return 0.0;
+    }
+    let out =
+        if moved >= before { stand.mineral } else { (stand.mineral * (moved / before)).min(stand.mineral) };
+    stand.mineral -= out;
+    out
+}
+
+/// §4.7 death: wood to dead wood, foliage and reserve to litter under the energy cap,
+/// and the stand's mineral split between the two in proportion to the organic matter
+/// each takes.
 fn die(config: &FloraConfig, stand: &Stand, g: &mut Ground, ledger: &mut FloraLedger) {
     let e_v = config.species(stand.species).energy_density;
+    let organic = stand.organic();
+    let wood_mineral =
+        if organic > 0.0 { (stand.mineral * (stand.wood / organic)).min(stand.mineral) } else { 0.0 };
     g.dead_wood += stand.wood;
+    g.dead_wood_mineral += wood_mineral;
     g.dead_wood_energy += e_v * stand.wood;
     let shed = stand.foliage + stand.reserve;
-    add_litter_cap(config.litter_energy_cap, g, shed, e_v * shed, ledger);
+    let shed_mineral = (stand.mineral - wood_mineral).max(0.0);
+    add_litter_cap(config.litter_energy_cap, g, shed, shed_mineral, e_v * shed, ledger);
     ledger.deaths += 1;
 }
 
 fn add_litter(
     config: &FloraConfig,
     g: &mut Ground,
-    material: f64,
+    organic: f64,
+    mineral: f64,
     energy: f64,
     ledger: &mut FloraLedger,
 ) {
-    add_litter_cap(config.litter_energy_cap, g, material, energy, ledger);
+    add_litter_cap(config.litter_energy_cap, g, organic, mineral, energy, ledger);
 }
 
-/// Litter takes the material and as much of its energy as `e_d_max · D` leaves room
-/// for; the rest is respired.
+/// Litter takes the organic matter, the mineral that was in it, and as much of its energy
+/// as `e_d_max · D` leaves room for; the rest of the energy is respired. The mineral is
+/// never capped: it has nowhere else to be.
 fn add_litter_cap(
     cap: f64,
     g: &mut Ground,
-    material: f64,
+    organic: f64,
+    mineral: f64,
     energy: f64,
     ledger: &mut FloraLedger,
 ) {
-    if material <= 0.0 && energy <= 0.0 {
+    if organic <= 0.0 && energy <= 0.0 && mineral <= 0.0 {
         return;
     }
-    g.litter += material;
+    g.litter += organic;
+    g.litter_mineral += mineral;
     let room = (cap * g.litter - g.litter_energy).max(0.0);
     let kept = energy.min(room).max(0.0);
     g.litter_energy += kept;
@@ -527,23 +594,13 @@ fn add_litter_cap(
 }
 
 /// The site's ground entry, created empty if a stand somehow has none. Empty is the
-/// only safe creation here: `initial_nutrient` is material, and material that is not
+/// only safe creation here: `initial_mineral` is a named inflow, and mineral that is not
 /// booked is a residual.
 fn ground_slot(ground: &mut Vec<Ground>, site: Site) -> usize {
     match ground.binary_search_by_key(&site, |g| g.site) {
         Ok(i) => i,
         Err(i) => {
-            ground.insert(
-                i,
-                Ground {
-                    site,
-                    nutrient: 0.0,
-                    litter: 0.0,
-                    litter_energy: 0.0,
-                    dead_wood: 0.0,
-                    dead_wood_energy: 0.0,
-                },
-            );
+            ground.insert(i, Ground::new(site, 0.0));
             i
         }
     }
@@ -551,10 +608,13 @@ fn ground_slot(ground: &mut Vec<Ground>, site: Site) -> usize {
 
 // ------------------------------------------------------------ 7. decomposition
 
-/// Litter and dead wood return to nutrient at their own rates, drawing on what the site
-/// held **before** this tick: material this tick deposited is eligible from the next
-/// one. Litter's energy leaves at the stock's current density, so decomposition never
-/// changes that density and the `e_d_max` cap survives without a re-clamp.
+/// Litter and dead wood decompose at their own rates, drawing on what the site held
+/// **before** this tick: organic matter this tick deposited is eligible from the next
+/// one. Decomposition respires the organic matter out of the system (`respired_out`) and
+/// releases the stock's mineral to the site's pool **at the same fraction**, so mineral
+/// is conserved exactly and a decomposing stock's mineral density never moves. Energy
+/// leaves at the stock's current density for the same reason, which is what lets the
+/// `e_d_max` cap survive without a re-clamp.
 fn decompose(flora: &mut Flora, pre: &[(Site, f64, f64)]) {
     let Flora { config, ground, ledger, .. } = flora;
     for g in ground.iter_mut() {
@@ -565,22 +625,30 @@ fn decompose(flora: &mut Flora, pre: &[(Site, f64, f64)]) {
         };
         let dec = (config.decomposition * DT * litter0).min(g.litter).max(0.0);
         if dec > 0.0 && g.litter > 0.0 {
-            // Energy leaves at the stock's current density, so the density does not move
-            // and the `e_d_max` cap needs no re-clamp. Never 0/0: guarded above.
-            let out = g.litter_energy * (dec / g.litter);
+            // Energy and mineral both leave at the stock's current density, so neither
+            // density moves and the `e_d_max` cap needs no re-clamp. Never 0/0: guarded
+            // above.
+            let f = dec / g.litter;
+            let out = g.litter_energy * f;
             g.litter_energy -= out;
             ledger.heat_out += out;
+            let mineral = (g.litter_mineral * f).min(g.litter_mineral);
+            g.litter_mineral -= mineral;
+            g.mineral += mineral;
             g.litter -= dec;
-            g.nutrient += dec;
+            ledger.respired_out += dec;
         }
         let dec_w = (config.wood_decomposition * DT * wood0).min(g.dead_wood).max(0.0);
         if dec_w > 0.0 && g.dead_wood > 0.0 {
-            // Energy at the stock's current density, as litter's is. Never 0/0.
-            let out = g.dead_wood_energy * (dec_w / g.dead_wood);
+            let f = dec_w / g.dead_wood;
+            let out = g.dead_wood_energy * f;
             g.dead_wood_energy -= out;
             ledger.heat_out += out;
+            let mineral = (g.dead_wood_mineral * f).min(g.dead_wood_mineral);
+            g.dead_wood_mineral -= mineral;
+            g.mineral += mineral;
             g.dead_wood -= dec_w;
-            g.nutrient += dec_w;
+            ledger.respired_out += dec_w;
         }
     }
 }
@@ -700,39 +768,36 @@ fn commit_propagules(flora: &mut Flora, site: Site, species: Species, offers: &[
     let sc = config.species(species);
     let e_v = sc.energy_density;
 
-    // Debit the donors that actually sent, and nothing else.
+    // Debit the donors that actually sent, and nothing else. The mineral of what leaves
+    // a donor's reserve leaves with it.
     let mut sent = 0.0;
+    let mut sent_mineral = 0.0;
     for offer in offers.iter().filter(|o| o.species == species) {
         let Ok(di) = stands.binary_search_by_key(&offer.donor, |s| s.site) else { continue };
         let take = stands[di].reserve.min(offer.material);
+        let organic_before = stands[di].organic();
         stands[di].reserve -= take;
+        sent_mineral += pull_mineral(&mut stands[di], organic_before, take);
         sent += take;
     }
     if sent <= 0.0 {
         return;
     }
     let net = sent / (1.0 + sc.build);
+    // Construction respiration of the package: organic matter out of the system, energy
+    // to heat. It releases no mineral, so the whole package's mineral travels with the
+    // organic matter that survives the build.
+    ledger.respired_out += sent - net;
+    ledger.heat_out += e_v * (sent - net);
 
-    let gi = match ground.binary_search_by_key(&site, |g| g.site) {
+    let _gi = match ground.binary_search_by_key(&site, |g| g.site) {
         Ok(i) => i,
         Err(i) => {
-            ledger.seeded_material_in += config.initial_nutrient;
-            ground.insert(
-                i,
-                Ground {
-                    site,
-                    nutrient: config.initial_nutrient,
-                    litter: 0.0,
-                    litter_energy: 0.0,
-                    dead_wood: 0.0,
-                    dead_wood_energy: 0.0,
-                },
-            );
+            ledger.seeded_mineral_in += config.initial_mineral;
+            ground.insert(i, Ground::new(site, config.initial_mineral));
             i
         }
     };
-    ground[gi].nutrient += sc.build * net;
-    ledger.heat_out += e_v * sc.build * net;
 
     let [w_frac, p_frac, q_frac] = sc.propagule_split;
     let si = match stands.binary_search_by_key(&site, |s| s.site) {
@@ -750,6 +815,7 @@ fn commit_propagules(flora: &mut Flora, site: Site, species: Species, offers: &[
                     light: 0.0,
                     moisture: 0.0,
                     water_m3: 0.0,
+                    mineral: 0.0,
                 },
             );
             i
@@ -758,6 +824,7 @@ fn commit_propagules(flora: &mut Flora, site: Site, species: Species, offers: &[
     stands[si].wood += w_frac * net;
     stands[si].foliage += p_frac * net;
     stands[si].reserve += q_frac * net;
+    stands[si].mineral += sent_mineral;
     if stands[si].stage == Stage::Establishing && stands[si].wood >= sc.alive_min {
         stands[si].stage = Stage::Alive;
         ledger.establishments += 1;
