@@ -82,6 +82,22 @@
 //! pixel instead of multiplying its alpha into a striped wall. Pore water darkens soil
 //! toward the water colour instead of filling it.
 //!
+//! # Stands
+//!
+//! A plant is not a sprite hung on the picture: it is **voxels**, decomposed by
+//! [`super::stand`] into a trunk column and a horizontal crown disc, and stamped inside
+//! this same traversal at each cell's own `(x, y, z)`. That is the whole of its depth
+//! sorting. A stand is hidden by nearer terrain because the nearer slab paints later; it
+//! hides farther terrain and farther water because its own slab paints later than
+//! theirs; and within one cell the plant is stamped **before** the water, so a trunk
+//! standing in a pool is submerged under the water's blend instead of painted over it.
+//!
+//! Terrain's own face culling never consults the plants, and it does not need to: a
+//! plant is opaque and always draws after whatever it covers, so the only thing a cull
+//! would save is work. The one test a plant cell does make is whether the cell above it
+//! is occupied, plant or terrain — because a rim row is *not* fixed by overpainting, and
+//! a trunk with a rim on every voxel is a banded pole rather than a stem.
+//!
 //! Depth tint: every colour in slice `z` is mixed toward the haze colour by
 //! `haze · z / (depth − 1)`, so the back wall recedes and the front reads as the front.
 
@@ -90,11 +106,13 @@ use std::sync::LazyLock;
 use cube_proto::Face;
 use cubarium_render::Canvas;
 use cubarium_voxel::{Material, VoxelView};
+use cubarium_voxel_flora::FloraView;
 
 use crate::present::{mix, srgb_linear};
 
 use super::VoxelConfig;
 use super::project::Projection;
+use super::stand::{Part, Stands};
 
 // --- Strata palette ------------------------------------------------------------------
 //
@@ -148,6 +166,28 @@ pub const TOP_EDGE: f32 = 0.18;
 pub const RISER_LEAN: f32 = 0.45;
 /// How far fully saturated soil darkens toward [`WATER_DEEP_SRGB`].
 pub const WET: f32 = 0.55;
+/// How much brighter a plant's top face is than the front face below it. Gentler than
+/// [`TOP_GAIN`] on purpose: canopy colours start bright, and the terrain's gain would
+/// clip a magenta crown to white.
+pub const PLANT_TOP_GAIN: f32 = 1.5;
+/// How far a plant's top face leans toward [`LIGHT_SRGB`].
+pub const PLANT_TOP_TINT: f32 = 0.14;
+/// How far a plant's front top row leans toward its own top face: the rim that reads as
+/// a lit upper edge. Drawn only where the cell above is empty.
+pub const PLANT_RIM: f32 = 0.42;
+/// The trunk's cylinder, darkest and brightest column multipliers. One voxel is four
+/// pixels across, so a stem is round only if those four pixels say so.
+pub const TRUNK_SHADE: [f32; 2] = [0.62, 1.22];
+/// Where across the trunk the light falls, as a fraction of its width.
+pub const TRUNK_LIGHT_AT: f32 = 0.35;
+/// How far a crown's silhouette column darkens: the canopy's own outline, drawn only
+/// where the disc ends and never between two cells of one crown.
+pub const CROWN_EDGE: f32 = 0.70;
+/// How far a crown's front face — the canopy's skirt, seen from under the leaves —
+/// shades toward the stand's own wood. Without it a canopy several voxels across reads
+/// as a solid slab of colour rather than as a lit surface with a shaded underside.
+pub const CROWN_UNDER: f32 = 0.22;
+
 /// A water surface row blends this much harder than the body.
 pub const SKIN_ALPHA_GAIN: f32 = 1.7;
 /// How hard a water *top* face blends relative to the surface row it caps.
@@ -239,11 +279,19 @@ pub struct VoxelPresenter {
     /// column, or `0` where the column is open to the sky. Rebuilt once per frame rather
     /// than rescanned per voxel; it is what the roof shadow falls off over.
     roof: Vec<u16>,
+    /// The frame's stands, as voxels. Rebuilt per frame beside the roof map.
+    stands: Stands,
 }
 
 impl VoxelPresenter {
     pub fn new(cfg: VoxelConfig, proj: Projection) -> VoxelPresenter {
-        VoxelPresenter { cfg, proj, said_cropped: false, roof: Vec::new() }
+        VoxelPresenter {
+            cfg,
+            proj,
+            said_cropped: false,
+            roof: Vec::new(),
+            stands: Stands::empty(0, 0, 0),
+        }
     }
 
     pub fn projection(&self) -> Projection {
@@ -251,7 +299,11 @@ impl VoxelPresenter {
     }
 
     /// Paint one frame. The canvas must be the single-chart ring the projection sized.
-    pub fn draw(&mut self, view: &VoxelView<'_>, canvas: &mut Canvas) {
+    ///
+    /// The flora view is the plant layer's stands, drawn into the same traversal as the
+    /// terrain and the water — see the module header. A run with no plants passes an
+    /// empty view and pays one branch per voxel for it.
+    pub fn draw(&mut self, view: &VoxelView<'_>, flora: FloraView<'_>, canvas: &mut Canvas) {
         if self.proj.cropped && !self.said_cropped {
             self.said_cropped = true;
             eprintln!(
@@ -269,6 +321,8 @@ impl VoxelPresenter {
         let water_alpha = self.cfg.water_alpha.clamp(0.0, 1.0);
 
         self.build_roof(view);
+        self.stands.rebuild(view, flora);
+        let plants = !self.stands.is_empty();
 
         for z in (0..p.depth).rev() {
             let col = z as usize * p.width as usize;
@@ -281,15 +335,26 @@ impl VoxelPresenter {
                 }
                 for x in 0..i64::from(p.width) {
                     let m = view.material_at(x, y, z);
-                    let free = view.free_at(x, y, z) as f32;
+                    let shade = || {
+                        roof_shade(self.roof[(col + x as usize) * p.height as usize + y as usize])
+                    };
                     if m.is_solid() {
                         let f = self.facing(view, x, y, z);
                         if f.front_hidden && (f.top_hidden || !f.open_up) {
                             continue;
                         }
-                        let gap = self.roof[(col + x as usize) * p.height as usize + y as usize];
-                        self.block(view, canvas, surf, x, y, z, m, &f, roof_shade(gap));
-                    } else if free > WATER_EPSILON {
+                        self.block(view, canvas, surf, x, y, z, m, &f, shade());
+                        continue;
+                    }
+                    // A plant stands in the void, and the water of its own cell blends
+                    // over it: a trunk in a pool is submerged, not painted across the
+                    // surface it stands in.
+                    let part = if plants { self.stands.at(x, i64::from(y), z) } else { Part::None };
+                    if part != Part::None {
+                        self.plant(view, canvas, surf, x, y, z, part, shade());
+                    }
+                    let free = view.free_at(x, y, z) as f32;
+                    if free > WATER_EPSILON {
                         self.water(view, canvas, surf, x, y, z, free, water_alpha);
                     }
                 }
@@ -444,6 +509,106 @@ impl VoxelPresenter {
         }
     }
 
+    /// Draw one plant voxel: an opaque pixel-art stack in the cell's own front and top
+    /// rectangles, at the moment of the traversal a solid block there would have.
+    ///
+    /// Hand-drawn, not stamped from the baked atlas. `assets/atelier`'s `bloomcrown` and
+    /// `umbrellafrond` are 16×16 *top-down* canopy tiles for the cube's faces — radial
+    /// discs with no stem and no side silhouette — inside a 9-pixel extent budget, and
+    /// nothing in them can carry a crown fill or a wilt. At 4 px per voxel in this
+    /// elevated-orthographic view a stand is a 4-pixel-wide stem under a canopy a few
+    /// voxels across, so the tiles would have to be reprojected and recoloured per frame
+    /// to say what the model says. Placeholder geometry it is; real texture comes later.
+    #[allow(clippy::too_many_arguments)]
+    fn plant(
+        &self,
+        view: &VoxelView<'_>,
+        canvas: &mut Canvas,
+        surf: Surface,
+        x: i64,
+        y: u32,
+        z: u32,
+        part: Part,
+        shade: f32,
+    ) {
+        let Some(style) = self.stands.style(part) else { return };
+        let p = self.proj;
+        let (s, rise) = (p.s as i32, p.rise as i32);
+        let yi = i64::from(y);
+        let haze = self.haze_at(z as f32);
+        let (c0, r0, w, _) = p.front_rect(x, y, z);
+        let cols = w as i32;
+
+        // Whatever stands in the cell above closes this one's cap, plant or terrain. The
+        // one test a plant makes: overpainting fixes a covered face, but it does not fix
+        // a rim row, and a rim on every voxel of a stem is a banded pole.
+        let covered_up = solid(view, x, yi + 1, z) || self.stands.at(x, yi + 1, z).is_block();
+
+        if matches!(part, Part::Sprout(_)) {
+            // A propagule: a mark on the floor of its cell rather than a block, two
+            // pixels wide so it reads at all, with a lit tip.
+            let mark = (cols / 2).max(1);
+            let x0 = c0 + (cols - mark) / 2;
+            let rows = (s / 2).max(1);
+            for dy in 0..rows {
+                let c = if dy == 0 { plant_lit(style.crown, shade) } else { style.crown };
+                for dx in 0..mark {
+                    surf.put(canvas, x0 + dx, r0 + s - rows + dy, hazed(c, haze));
+                }
+            }
+            return;
+        }
+
+        // The front face's colour, per pixel column, and the light its cap is under.
+        let heart = matches!(part, Part::Crown { heart: true, .. });
+        let crown = matches!(part, Part::Crown { .. });
+        let (open_left, open_right) = if crown {
+            (
+                !self.stands.crown_continues(part, x - 1, y, z),
+                !self.stands.crown_continues(part, x + 1, y, z),
+            )
+        } else {
+            (false, false)
+        };
+        let column = |dx: i32| -> ([f32; 3], [f32; 3]) {
+            // `(front, cap)` for one pixel column: a trunk is a cylinder four pixels
+            // across, a crown is canopy with a shaded skirt and a silhouette edge.
+            let base = if crown {
+                if heart && dx * 2 >= cols - 2 && dx * 2 < cols + 2 { style.heart } else { style.crown }
+            } else {
+                style.wood
+            };
+            if crown {
+                let edge = (dx == 0 && open_left) || (dx + 1 == cols && open_right);
+                let k = if edge { CROWN_EDGE } else { 1.0 };
+                (mul(mix(base, style.wood, CROWN_UNDER), k), mul(plant_lit(base, shade), k))
+            } else {
+                let k = trunk_shade(dx, p.s);
+                (mul(base, k), mix(plant_lit(base, shade), mul(base, k), TOP_EDGE))
+            }
+        };
+
+        for dy in 0..s {
+            for dx in 0..cols {
+                let (front, cap) = column(dx);
+                // The rim: the lit upper edge of the face, only where the sky is.
+                let c = if dy == 0 && !covered_up { mix(front, cap, PLANT_RIM) } else { front };
+                surf.put(canvas, c0 + dx, r0 + dy, hazed(c, haze));
+            }
+        }
+
+        if !covered_up {
+            for dy in 0..rise {
+                let zf = z as f32 + (rise - 1 - dy) as f32 / rise as f32;
+                let hz = self.haze_at(zf);
+                for dx in 0..cols {
+                    let (_, cap) = column(dx);
+                    surf.put(canvas, c0 + dx, r0 - rise + dy, hazed(cap, hz));
+                }
+            }
+        }
+    }
+
     /// Does the slab one step nearer already own screen `row`, in the pixel columns of
     /// voxel `(x, y, z)`?
     ///
@@ -567,6 +732,24 @@ fn hazed(c: [f32; 3], t: f32) -> [f32; 3] {
     mix(c, STRATA.haze, t)
 }
 
+/// A plant colour as its own top face: brighter, leaning to the scene light, and shaded
+/// by the same roof occlusion the terrain's caps take.
+#[inline]
+fn plant_lit(c: [f32; 3], shade: f32) -> [f32; 3] {
+    let lit = mix(mul(c, PLANT_TOP_GAIN), STRATA.light, PLANT_TOP_TINT);
+    if shade < 1.0 { mix(c, lit, shade) } else { lit }
+}
+
+/// The trunk's cylinder: one multiplier per pixel column, brightest at
+/// [`TRUNK_LIGHT_AT`] across the stem and falling to [`TRUNK_SHADE`]`[0]` at the far
+/// edge. Four pixels are all a stem has; this is what makes them round.
+#[inline]
+fn trunk_shade(dx: i32, s: u32) -> f32 {
+    let u = (dx as f32 + 0.5) / s as f32;
+    let t = (1.0 - (u - TRUNK_LIGHT_AT).abs() / 0.65).clamp(0.0, 1.0);
+    TRUNK_SHADE[0] + (TRUNK_SHADE[1] - TRUNK_SHADE[0]) * t
+}
+
 /// Rows of a voxel's front rectangle that a `free` fraction fills: at least one, so any
 /// water at all is visible, and never more than the whole face.
 #[inline]
@@ -652,23 +835,55 @@ mod tests {
     use cubarium_render::Canvas;
     use cubarium_surface::{Scale, Topology};
     use cubarium_voxel::{Command, Config, World};
+    use cubarium_voxel_flora::{Command as FloraCommand, Flora, FloraConfig, Species};
 
     fn config() -> Config {
         Config { width: 32, height: 12, depth: 4, ..Config::default() }
     }
 
+    /// No plants: the terrain-and-water picture every test written before the flora
+    /// existed is about.
     fn present(world: &World) -> (Canvas, Projection) {
         present_with(VoxelConfig::default(), world)
     }
 
     fn present_with(cfg: VoxelConfig, world: &World) -> (Canvas, Projection) {
+        present_flora(cfg, world, &Flora::new(FloraConfig::default()))
+    }
+
+    fn present_flora(cfg: VoxelConfig, world: &World, flora: &Flora) -> (Canvas, Projection) {
         let proj =
             Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, world.config())
                 .unwrap();
         let mut canvas =
             Canvas::new(Topology::Ring { w: proj.raster_w, h: proj.raster_h }, Scale::ONE);
-        VoxelPresenter::new(cfg, proj).draw(&world.view(), &mut canvas);
+        VoxelPresenter::new(cfg, proj).draw(&world.view(), flora.view(), &mut canvas);
         (canvas, proj)
+    }
+
+    /// A world with a flat soil floor at `top`, every slab: the ground a stand needs
+    /// under it before anything about the stand can be tested.
+    fn floor(c: &Config, top: u32) -> World {
+        let mut world = World::empty(c.clone());
+        for z in 0..c.depth {
+            for x in 0..i64::from(c.width) {
+                for y in 0..=top {
+                    set(&mut world, x, y, z, Material::Soil);
+                }
+            }
+        }
+        world
+    }
+
+    /// One full-grown founder of a species on the highest support of a column.
+    fn seeded(world: &World, x: i64, z: u32, species: Species) -> Flora {
+        let mut flora = Flora::new(FloraConfig::default());
+        let wood = flora.config().species(species).wood_max;
+        assert!(
+            flora.apply(world, FloraCommand::Seed { x, z, species, wood }),
+            "the fixture must really seed a stand at ({x}, {z})"
+        );
+        flora
     }
 
     fn set(world: &mut World, x: i64, y: u32, z: u32, m: Material) {
@@ -1152,6 +1367,186 @@ mod tests {
             "the falloff must be most of the way back to the light by 16 voxels: \
              {under} / {deep} / {open}"
         );
+    }
+
+    /// A stand stands **on** its support face: its pixels are all above the support
+    /// voxel's own front face, its trunk is a warm column in the support's own pixel
+    /// columns, and nothing below the support changes.
+    ///
+    /// `z = 0` so the whole stand is in the nearest slab and nothing can be in front of
+    /// it: this test is about where a stand is, not about what hides it.
+    #[test]
+    fn a_seeded_stands_trunk_stands_on_its_support_face() {
+        let c = config();
+        let world = floor(&c, 5);
+        let bare = Flora::new(FloraConfig::default());
+        let flora = seeded(&world, 8, 0, Species::Bloomcrown);
+        let cfg = VoxelConfig::default();
+        let (with, proj) = present_flora(cfg.clone(), &world, &flora);
+        let (without, _) = present_flora(cfg, &world, &bare);
+        assert_ne!(with.pixels(), without.pixels(), "the stand must reach the raster");
+
+        // Every pixel the stand changed is strictly above the support's front face: the
+        // support's own top row is the lowest row the trunk's front rectangle reaches,
+        // and it reaches it from above.
+        let w = usize::from(proj.raster_w);
+        let support_top = proj.front_row(5, 0);
+        for (i, (a, b)) in with.pixels().iter().zip(without.pixels()).enumerate() {
+            let row = (i / w) as i32;
+            assert!(
+                a == b || row < support_top,
+                "row {row} is at or below the support face (row {support_top})"
+            );
+        }
+
+        // The trunk itself: in the support's own pixel columns, one voxel above it, and
+        // warm — bloomcrown's plum, the one thing in the picture that is.
+        let col = proj.col(8) + 1;
+        let row = proj.front_row(6, 0) + 1;
+        let px = pixel(&with, &proj, col, row);
+        assert_ne!(px, sky(), "the trunk must be drawn");
+        assert!(px[0] > px[2], "bloomcrown's wood is warm: {px:?}");
+        assert_ne!(
+            px,
+            pixel(&without, &proj, col, row),
+            "and it must differ from what the bare world leaves there"
+        );
+
+        // Umbrellafrond, in the same place, is the cool one: the two species are told
+        // apart by hue and not only by size.
+        let cool = seeded(&world, 8, 0, Species::Umbrellafrond);
+        let (other, _) = present_flora(VoxelConfig::default(), &world, &cool);
+        let cx = pixel(&other, &proj, col, row);
+        assert!(cx[2] > cx[0], "umbrellafrond's wood is cool: {cx:?}");
+    }
+
+    /// A nearer taller column hides a stand exactly as it hides terrain: the picture
+    /// cannot tell the stand is there. The same world without the wall is the control.
+    #[test]
+    fn a_nearer_taller_column_hides_a_stand_entirely() {
+        let c = config();
+        // The floor sits low on purpose. Depth *lifts* the image, so a stand three slabs
+        // back is drawn `3 · rise` rows higher than the same stand in front: a wall can
+        // only hide it if the world has the headroom for the wall to out-climb that
+        // lift. On this 12-voxel world a stand on a floor at `y = 5` reaches above a
+        // wall built to the ceiling — which is the projection telling the truth, not a
+        // bug, so the fixture gives the wall the room instead.
+        let build = |wall: bool| {
+            let mut world = floor(&c, 2);
+            if wall {
+                // A wall in the nearest slab, from just above the floor to the top of
+                // the world: whatever grows behind it is behind it.
+                for x in 0..i64::from(c.width) {
+                    for y in 3..c.height {
+                        set(&mut world, x, y, 0, Material::Rock);
+                    }
+                }
+            }
+            world
+        };
+        let cfg = VoxelConfig::default();
+        let bare = Flora::new(FloraConfig::default());
+
+        // Control: with nothing in front of it, the stand plainly reaches the raster.
+        let open = build(false);
+        let flora = seeded(&open, 8, 1, Species::Umbrellafrond);
+        assert_ne!(
+            present_flora(cfg.clone(), &open, &flora).0.pixels(),
+            present_flora(cfg.clone(), &open, &bare).0.pixels(),
+            "the stand must be visible with nothing in front of it"
+        );
+
+        // Walled: the stand's cells are drawn in slabs 1 and 2, the wall in slab 0 after
+        // them, so not one pixel of it survives.
+        let walled = build(true);
+        let hidden = seeded(&walled, 8, 1, Species::Umbrellafrond);
+        assert_eq!(
+            present_flora(cfg.clone(), &walled, &hidden).0.pixels(),
+            present_flora(cfg, &walled, &bare).0.pixels(),
+            "a nearer taller column must hide the whole stand"
+        );
+    }
+
+    /// A farther stand's crown is not drawn over a nearer water surface: the water is
+    /// drawn after it, so the crown shows *through* the blend rather than across it.
+    ///
+    /// The rows are found rather than stated: a row where the crown alone and the water
+    /// alone both change the bare picture is a row both want, and every one of them must
+    /// end up the water's.
+    #[test]
+    fn a_farther_crown_is_not_drawn_over_a_nearer_water_surface() {
+        let c = config();
+        let vol = c.voxel_volume();
+        let x = 8i64;
+        let build = |water: bool| {
+            let mut world = floor(&c, 3);
+            if water {
+                // A pool in the nearest slab, at the height the far crown reaches.
+                // Nothing is stepped here, so it stays where it is put.
+                for dx in -1..=1 {
+                    world.apply(Command::AddWater {
+                        x: x + dx,
+                        y: 9,
+                        z: 0,
+                        volume_m3: vol * 0.75,
+                    });
+                }
+            }
+            world
+        };
+        let cfg = VoxelConfig::default();
+        let bare_flora = Flora::new(FloraConfig::default());
+        let dry = build(false);
+        let flora = seeded(&dry, x, 3, Species::Umbrellafrond);
+
+        let (bare, proj) = present_flora(cfg.clone(), &dry, &bare_flora);
+        let (crown_only, _) = present_flora(cfg.clone(), &dry, &flora);
+        let wet = build(true);
+        let (water_only, _) = present_flora(cfg.clone(), &wet, &bare_flora);
+        let (both, _) = present_flora(cfg, &wet, &flora);
+
+        let col = proj.col(x) + 1;
+        let at = |canvas: &Canvas, row: i32| pixel(canvas, &proj, col, row);
+        let rows: Vec<i32> = (0..i32::from(proj.raster_h))
+            .filter(|&r| at(&crown_only, r) != at(&bare, r) && at(&water_only, r) != at(&bare, r))
+            .collect();
+        assert!(!rows.is_empty(), "the fixture must put the crown and the water in one row");
+
+        // What "the water owns the row" means exactly. If the water is drawn over the
+        // crown with the same colour and the same alpha it uses over the bare picture,
+        // then `seen = (1−a)·crown + a·W` and `water = (1−a)·bare + a·W`, so
+        //
+        //     seen − water = (1 − a) · (crown − bare)
+        //
+        // channel for channel — one ratio, the same in all three, strictly inside
+        // `0..1`. A crown painted *over* the water would give `seen = crown` and no such
+        // ratio; a second blend would change the alpha and break it too. So this one
+        // number is the whole ordering claim, and it is also a claim that the water is
+        // blended exactly once.
+        for &r in &rows {
+            let (crown, water, seen) = (at(&crown_only, r), at(&water_only, r), at(&both, r));
+            assert_ne!(seen, crown, "row {r} is the water's, not the crown's");
+            assert!(bluer_than_sky(seen), "row {r} must still read as water: {seen:?}");
+            let bare_px = at(&bare, r);
+            let mut ratios = Vec::new();
+            for k in 0..3 {
+                let behind = crown[k] - bare_px[k];
+                if behind.abs() > 0.02 {
+                    ratios.push((seen[k] - water[k]) / behind);
+                }
+            }
+            assert!(!ratios.is_empty(), "row {r}: the crown must differ from the ground");
+            for &q in &ratios {
+                assert!(
+                    (q - ratios[0]).abs() < 1e-3,
+                    "row {r}: one blend has one alpha, got {ratios:?}"
+                );
+                assert!(
+                    (0.0..1.0).contains(&q),
+                    "row {r}: the water must cover the crown, not the other way: {q}"
+                );
+            }
+        }
     }
 
     /// Green-blue dominant and brighter than the sky: the only thing in the palette that
