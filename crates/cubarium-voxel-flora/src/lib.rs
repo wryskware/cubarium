@@ -380,11 +380,54 @@ impl Ground {
     }
 }
 
+/// **How a species earns.** One number's worth of ecology, and the only thing in this crate
+/// that changes which income rule a stand runs.
+///
+/// Everything else about a stand — where it may establish, how it grows, how it diebacks,
+/// how it dies, how it reproduces — is one set of rules for both modes. A saprotroph is not
+/// a second model: it is the same stand with its income line replaced, which is what
+/// `design/theoretical-biosphere-2026-09-16.md` §6 asks for ("reuse stand
+/// location/lifecycle structure, replace income and substrate rules; no light income").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Trophic {
+    /// **A plant.** Income is light: `assimilation · L_eff · μ · (1 − stress) · P · monod`,
+    /// capped by the mineral pool, and the organic matter is created at the boundary
+    /// ([`FloraLedger::fixed_in`]).
+    #[default]
+    Photo,
+    /// **A saprotroph.** Income is dead wood: at most
+    /// [`SpeciesConfig::substrate_uptake_per_s`]` · W · μ · dt` taken pro rata from the
+    /// dead-wood pools of the sites in its **mycelium box**, of which
+    /// [`SpeciesConfig::substrate_yield`] becomes tissue and the rest is respired at once.
+    /// No light gate, no light income, and nothing is created at the boundary: the organic
+    /// matter was already in the system, in the log.
+    Saprotroph,
+}
+
 /// The plant model of one species: `design/ecology-v1-contract.md` §4 parameters, plus
 /// the terrain couplings that replace the old noise fields.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SpeciesConfig {
+    /// Which income rule this species runs: [`Trophic::Photo`] for the five plants,
+    /// [`Trophic::Saprotroph`] for a wood fungus. Nothing else in the config changes
+    /// meaning with it — the three `substrate_*` fields below are simply inert on a
+    /// `Photo` species, and the light fields are inert on a `Saprotroph`.
+    pub trophic: Trophic,
+    /// **Saprotroph only.** Organic matter a mycelium withdraws from the dead wood in its
+    /// box per second per unit of `W`, at full moisture. The uptake is
+    /// `substrate_uptake_per_s · W · μ · dt`, bounded again by what the pools actually
+    /// hold, so a drying log and an empty log both starve the fungus. **Placeholder**
+    /// (`design/backlog.md` §1); inert on a [`Trophic::Photo`] species.
+    pub substrate_uptake_per_s: f64,
+    /// **Saprotroph only.** The fraction of the organic matter taken that becomes tissue;
+    /// the rest is respired at once (`respired_out`, heat). The brief's `yield`, spelled out
+    /// because `yield` is a reserved word. **Placeholder**; inert on a `Photo` species.
+    pub substrate_yield: f64,
+    /// **Saprotroph only.** Dead wood the sites of the mycelium box must hold, in total,
+    /// before a spore cohort may germinate there. **Placeholder**; inert on a `Photo`
+    /// species, whose substrate gate is open by construction.
+    pub establish_substrate_min: f64,
     /// `α`: foliage the structure can carry, `P_cap = α · W`.
     pub alpha: f64,
     /// `W_max`: the most living wood one stand can hold.
@@ -611,6 +654,14 @@ pub struct Reach {
 impl SpeciesConfig {
     fn v1_base() -> SpeciesConfig {
         SpeciesConfig {
+            // A plant, with the three saprotroph numbers inert. A `Photo` species never
+            // reads them, and they are zero rather than absent so that a preset which
+            // switches `trophic` and forgets them earns nothing and says so, instead of
+            // inheriting a rate from the base.
+            trophic: Trophic::Photo,
+            substrate_uptake_per_s: 0.0,
+            substrate_yield: 0.0,
+            establish_substrate_min: 0.0,
             alpha: 2.0,
             wood_max: 0.6,
             reserve_cap: 0.5,
@@ -1000,10 +1051,28 @@ impl SpeciesConfig {
             ));
         }
 
+        // A yield over one would build more tissue than the substrate it came out of held,
+        // which creates organic matter inside the system with no boundary flow to name it.
+        // Checked as a bound and not as a rate because it is a fraction, and checked for
+        // every species — the field is inert on a `Photo` preset, and a wrong value there
+        // is still a wrong value waiting for a `trophic` switch.
+        if !(self.substrate_yield.is_finite()
+            && self.substrate_yield >= 0.0
+            && self.substrate_yield <= 1.0)
+        {
+            return fail(&format!(
+                "substrate_yield is {}, not a fraction in 0..=1 — a yield over one would \
+                 build tissue out of nothing",
+                self.substrate_yield
+            ));
+        }
+
         // Every scalar the tick multiplies a stock by. A `NaN` or an infinity in any of
         // them reaches the ledger within one step, and none of them has a meaning below
         // zero — a negative rate would run a flow backwards past its own `min` guard.
-        let rates: [(&str, f64); 25] = [
+        let rates: [(&str, f64); 27] = [
+            ("substrate_uptake_per_s", self.substrate_uptake_per_s),
+            ("establish_substrate_min", self.establish_substrate_min),
             ("alpha", self.alpha),
             ("reserve_cap", self.reserve_cap),
             ("maintenance", self.maintenance),
@@ -1453,8 +1522,9 @@ pub enum Command {
     Clear { x: i64, z: u32 },
 }
 
-/// Which of a site's dead pools a [`Deposit`] joins. Two, because a consumer has two
-/// things to leave behind: a body, and what passed through it.
+/// Which of a site's dead pools a [`Deposit`] joins. Three, because a consumer has two
+/// things to leave behind — a body, and what passed through it — and because something
+/// outside the plant layer can put **wood** on the ground.
 ///
 /// Dung is **litter** this round and not a pool of its own, which is a simplification
 /// stated as one: droppings and shed leaves decompose at one rate here, and a separate
@@ -1465,9 +1535,27 @@ pub enum DepositKind {
     Carrion,
     /// [`Ground::litter`], through the same `e_d_max` cap plant litter goes through.
     Litter,
+    /// [`Ground::dead_wood`]: a **log**. Round 5a did not have this kind, because nothing
+    /// in that round could put wood on the ground that a plant had not grown there
+    /// (Astra's round 8 closes on the same point: "package N may add dead wood with the
+    /// same booking/removal checks").
+    ///
+    /// Round 5b needs it twice over. A saprotroph eats dead wood, and a **fresh world has
+    /// none**: the harness has to lay declared logs before a fungus can be introduced at
+    /// all. And a consumer that kills a stand and leaves its trunk standing is putting wood
+    /// back, not litter and not a corpse.
+    ///
+    /// No energy cap, for carrion's reason: a deposit's energy comes from the depositor's
+    /// own books and not from a species' `energy_density`, and dead wood has never had an
+    /// `e_d_max`. A log laid without energy — `energy` 0 against a positive `organic` — is
+    /// therefore a log with nothing in it to eat, and a saprotroph on it earns nothing and
+    /// respires everything it takes (`step`'s `feed`). A harness laying a log should hand
+    /// over `e_v · organic`, which is what a dead trunk holds.
+    DeadWood,
 }
 
-/// Material a consumer hands back to the plant layer at one site: a corpse, or droppings.
+/// Material a consumer hands back to the plant layer at one site: a corpse, droppings, or a
+/// log.
 ///
 /// The three currencies are given explicitly and none of them is derived from the other
 /// two — there is no species here and no `energy_density` to read, because the consumer
@@ -1670,8 +1758,9 @@ impl Flora {
         Some(self.book_consumed(taken))
     }
 
-    /// A consumer puts material **back** on `site`: a corpse into the carrion pool, or
-    /// droppings into the litter pool. Returns whether it was accepted.
+    /// A consumer puts material **back** on `site`: a corpse into the carrion pool,
+    /// droppings into the litter pool, or a log into the dead-wood pool. Returns whether it
+    /// was accepted.
     ///
     /// Refused — booking nothing — when any of the three numbers is not finite or is
     /// negative, and when all three are zero: a deposit of nothing is not a deposit, and
@@ -1721,6 +1810,14 @@ impl Flora {
                 g.carrion += organic;
                 g.carrion_mineral += mineral;
                 g.carrion_energy += energy;
+            }
+            // Dead wood, on the pool a dieback and a death already fill, with no energy
+            // cap — dead wood has never had one.
+            DepositKind::DeadWood => {
+                let g = &mut self.ground[gi];
+                g.dead_wood += organic;
+                g.dead_wood_mineral += mineral;
+                g.dead_wood_energy += energy;
             }
             // The existing cap rule, with the existing consequence: energy over
             // `e_d_max · D` cannot be held by litter and leaves as heat at once, which the
