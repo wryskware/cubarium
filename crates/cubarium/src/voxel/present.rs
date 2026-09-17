@@ -67,12 +67,20 @@
 //!
 //! Free water is translucent: a voxel holding `free` of its void volume fills the bottom
 //! `round(free · s)` rows of its front rectangle, blended over whatever is behind it. A
-//! **top** is drawn only at a water/air boundary, at `y + free` — a full cell with more
-//! water above it is not an extra translucent surface — and those tops tile upward across
-//! slabs into the pool's receding surface. A water body is clipped to the rows the nearer
-//! slab's water or rock has not already claimed, so a pool many slabs deep blends one
-//! water face per pixel instead of multiplying its alpha into a striped wall. Pore water
-//! darkens soil toward the water colour instead of filling it.
+//! **top** is drawn only at a water/air boundary, at `y + free` — a cell drawn full with
+//! more water above it is not an extra translucent surface, while a cell whose water stops
+//! short of its own brim always is one, because then the air gap is inside that cell
+//! whatever stands over it — and those tops tile upward across slabs into the pool's
+//! receding surface. [`water_open_up`] is that test, in drawn pixels and not in the raw
+//! fraction, so a settled body whose interior equalizes to a hair under one stays one body
+//! rather than hatching a bright skin across every slab of it. A
+//! water body is clipped to the rows the nearer slab's water or rock has not already
+//! claimed, and a water top is clipped **row by row** by [`VoxelPresenter::nearer_owns`]:
+//! its rows are an interval, a nearer roof or skin can own part of that interval and not
+//! the rest, and keeping or dropping the whole band would either blend a row twice or lose
+//! a row of visible water. Either way a pool many slabs deep blends one water face per
+//! pixel instead of multiplying its alpha into a striped wall. Pore water darkens soil
+//! toward the water colour instead of filling it.
 //!
 //! Depth tint: every colour in slice `z` is mixed toward the haze colour by
 //! `haze · z / (depth − 1)`, so the back wall recedes and the front reads as the front.
@@ -436,6 +444,50 @@ impl VoxelPresenter {
         }
     }
 
+    /// Does the slab one step nearer already own screen `row`, in the pixel columns of
+    /// voxel `(x, y, z)`?
+    ///
+    /// Face ownership is an interval, not a flag: a water top's rows overlap the bands of
+    /// several nearer voxels, and a nearer face may own some of those rows and not others.
+    /// Writing `R = front_row(y, z)` and `F = front_row(y', z − 1) = R + rise − (y' − y)·s`,
+    /// voxel `(x, y', z − 1)` claims
+    ///
+    /// - `F − rise .. F + s` when it is **solid**: its own front, plus whichever of its cap
+    ///   or the front of `(x, y' + 1, z − 1)` sits over that front — the two rules the
+    ///   module header states for `front_hidden` and `top_hidden`, read as one band;
+    /// - `skin − rise .. F + s` when it holds **water**, `skin` being its own surface row:
+    ///   its body, and its top where it has one.
+    ///
+    /// Anything a face of `(x, y, z)` can write lies in `R − rise .. R + s`, and
+    /// `F + s > R − rise` needs `y' − y < 2·rise/s + 1 ≤ 3` while `F − rise < R + s` needs
+    /// `y' ≥ y`: the three voxels `y' = y, y + 1, y + 2` are the whole of it.
+    ///
+    /// The bands are the *unclipped* ones on purpose. Where the nearer slab's own face is
+    /// itself culled, whatever culls it is nearer still, so the row is owned either way —
+    /// which is what makes one step of this test stand for the whole stack in front.
+    fn nearer_owns(&self, view: &VoxelView<'_>, x: i64, y: u32, z: u32, row: i32) -> bool {
+        if z == 0 {
+            return false;
+        }
+        let (s, rise) = (self.proj.s as i32, self.proj.rise as i32);
+        let r = self.proj.front_row(y, z);
+        (0..3i64).any(|dy| {
+            let yn = i64::from(y) + dy;
+            let f = r + rise - dy as i32 * s;
+            let top = if solid(view, x, yn, z - 1) {
+                f - rise
+            } else {
+                let fill = fill_px_at(view, x, yn, z - 1, self.proj.s);
+                if fill == 0 {
+                    return false;
+                }
+                let skin = f + s - fill;
+                if water_open_up(view, x, yn, z - 1, self.proj.s) { skin - rise } else { skin }
+            };
+            (top..f + s).contains(&row)
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn water(
         &self,
@@ -462,39 +514,30 @@ impl VoxelPresenter {
         let skin = hazed(STRATA.water_surface, haze);
         let skin_alpha = (alpha * SKIN_ALPHA_GAIN).min(0.95);
 
-        // Only a water/air boundary is a surface. A full cell with more water above it is
-        // the inside of the body, not another translucent skin.
-        let open_up =
-            !solid(view, x, yi + 1, z) && free_at(view, x, yi + 1, z) <= WATER_EPSILON;
+        // Only a water/air boundary is a surface, and a partial cell always has one.
+        let open_up = water_open_up(view, x, yi, z, p.s);
 
         // What the slab one step nearer already owns in these pixel columns.
         let near_solid = z > 0 && solid(view, x, yi, z - 1);
         let near_fill = if z > 0 { fill_px_at(view, x, yi, z - 1, p.s) } else { 0 };
         let near_skin = r0 + rise + s - near_fill;
-        let near_open_up = z > 0
-            && !solid(view, x, yi + 1, z - 1)
-            && free_at(view, x, yi + 1, z - 1) <= WATER_EPSILON;
-        // A nearer water top covers this one only when it sits at or above it, which needs
-        // the nearer cell to be the deeper of the two: settled water never does, a
-        // draining front briefly can.
-        let top_hidden = (z > 0 && solid(view, x, yi + 1, z - 1))
-            || (near_fill > 0 && near_open_up && near_skin <= skin_row);
+        let near_open_up = z > 0 && water_open_up(view, x, yi, z - 1, p.s);
 
-        // The surface's own top face, receding into depth exactly as a block's does. Tops
-        // of consecutive slabs are adjacent row bands, never overlapping ones, so this is
-        // the pool's receding surface and not a stack of skins.
-        if open_up && !top_hidden {
+        // The surface's own top face, receding into depth exactly as a block's does — but
+        // clipped row by row rather than kept or dropped whole. Its rows are an interval,
+        // and a nearer face (a roof, a nearer pool's skin) can own part of that interval
+        // without owning all of it: cull the band and a visible row of water is lost, keep
+        // it and an owned row is blended twice. Each surviving row is blended exactly once.
+        if open_up {
             for dy in 0..rise {
+                let row = skin_row - rise + dy;
+                if self.nearer_owns(view, x, y, z, row) {
+                    continue;
+                }
                 let zf = z as f32 + (rise - 1 - dy) as f32 / rise as f32;
                 let c = hazed(STRATA.water_surface, self.haze_at(zf));
                 for dx in 0..cols {
-                    surf.blend(
-                        canvas,
-                        c0 + dx,
-                        skin_row - rise + dy,
-                        c,
-                        skin_alpha * WATER_TOP_ALPHA,
-                    );
+                    surf.blend(canvas, c0 + dx, row, c, skin_alpha * WATER_TOP_ALPHA);
                 }
             }
         }
@@ -529,6 +572,24 @@ fn hazed(c: [f32; 3], t: f32) -> [f32; 3] {
 #[inline]
 fn fill_px(free: f32, s: u32) -> i32 {
     (free.clamp(0.0, 1.0) * s as f32).round().clamp(1.0, s as f32) as i32
+}
+
+/// Does the water in `(x, y, z)` have air above it — that is, is there a surface to draw?
+///
+/// A cell whose water stops short of the top of its own front rectangle always has one:
+/// the gap is inside that cell, above its own water line, so the surface is exposed
+/// whatever stands in the voxel above. Only a cell drawn to its brim depends on its
+/// neighbour, and then only open air counts — water above makes the two one body, and a
+/// solid above makes the surface an underside nobody sees.
+///
+/// The test is the *drawn* fill in pixels rather than the raw fraction, because they are
+/// not the same question. Equalization leaves a settled pool's interior a hair under one,
+/// which still draws a full face; reading that as a partial cell would hatch a bright skin
+/// across every slab of the body.
+#[inline]
+fn water_open_up(view: &VoxelView<'_>, x: i64, y: i64, z: u32, s: u32) -> bool {
+    fill_px_at(view, x, y, z, s) < s as i32
+        || (!solid(view, x, y + 1, z) && free_at(view, x, y + 1, z) <= WATER_EPSILON)
 }
 
 /// [`fill_px`] of a neighbour, or `0` where it holds no water.
@@ -896,6 +957,116 @@ mod tests {
         );
         // The surface run is the top face plus the skin row it caps.
         assert_eq!(runs[1].1, proj.rise as usize + 1);
+    }
+
+    /// Two partial pools one slab apart: their top bands overlap by a row, and the nearer
+    /// one owns it. The shared row must be blended once, not twice.
+    ///
+    /// At `s = 4`, `rise = 2`, with `R = front_row(y, 1)`: half-full water at `(x, y, 1)`
+    /// puts its skin at `R + 2` and its top band at `R .. R + 2`; three-quarter-full water
+    /// at `(x, y, 0)` puts its skin at `R + 3` and its top band at `R + 1 .. R + 3`. Row
+    /// `R + 1` is in both. The far cell's own render is the control for row `R`, which it
+    /// keeps, and the nearer cell's own render is the control for row `R + 1`: one blend
+    /// over sky. A second blend on top of that could not match it.
+    #[test]
+    fn overlapping_partial_water_tops_blend_each_shared_row_once() {
+        let (x, y) = (5i64, 6u32);
+        let c = config();
+        let vol = c.voxel_volume();
+        // `fars` and `nears` select which of the two pools exists, so each is its own
+        // control for the rows it alone would own.
+        let build = |fars: bool, nears: bool| {
+            let mut world = World::empty(c.clone());
+            if fars {
+                world.apply(Command::AddWater { x, y, z: 1, volume_m3: vol * 0.5 });
+            }
+            if nears {
+                world.apply(Command::AddWater { x, y, z: 0, volume_m3: vol * 0.75 });
+            }
+            world
+        };
+
+        let (both, proj) = present(&build(true, true));
+        assert_eq!((proj.s, proj.rise), (4, 2), "the fixture is stated at s = 4, rise = 2");
+        let (far_only, _) = present(&build(true, false));
+        let (near_only, _) = present(&build(false, true));
+        let r = proj.front_row(y, 1);
+        let col = proj.col(x) + 1;
+        let at = |canvas: &Canvas, row: i32| pixel(canvas, &proj, col, row);
+
+        // Both tops really do want row R + 1: alone, each of them blends it.
+        assert!(bluer_than_sky(at(&far_only, r + 1)), "the far top alone covers row R + 1");
+        assert!(bluer_than_sky(at(&near_only, r + 1)), "the near top alone covers row R + 1");
+
+        // Row R is the far top's alone, and survives: clipping is by row, not by band.
+        assert_eq!(at(&both, r), at(&far_only, r), "row R is the far top's, and it keeps it");
+        assert!(bluer_than_sky(at(&both, r)), "row R must still be water");
+
+        // Row R + 1 is the nearer top's, blended over sky exactly once. Had the far top
+        // also blended it, the nearer blend would land on water instead of on sky.
+        assert_eq!(
+            at(&both, r + 1),
+            at(&near_only, r + 1),
+            "row R + 1 must be one blend of the nearer top, not two: {:?} vs {:?}",
+            at(&both, r + 1),
+            at(&near_only, r + 1),
+        );
+    }
+
+    /// A roof that covers only part of a water top clips it to the rows it really owns.
+    ///
+    /// At `s = 4`, `rise = 2`, with `R = front_row(y, 1)`: quarter-full water at
+    /// `(x, y, 1)` has its skin at `R + 3` and its top band at `R + 1 .. R + 3`. A lone
+    /// rock at `(x, y + 1, 0)` covers `R − 4 .. R + 2` — row `R + 1` but not row `R + 2`.
+    /// Dropping the whole band loses a row of visible water.
+    ///
+    /// The partial cell's surface is also exposed *because it is partial*: the air gap is
+    /// inside the cell, above its own water line, so the voxel above cannot close it.
+    #[test]
+    fn a_partial_roof_clips_a_water_top_instead_of_culling_it() {
+        let (x, y) = (5i64, 6u32);
+        let c = config();
+        let build = |water: bool, roof: bool| {
+            let mut world = World::empty(c.clone());
+            if water {
+                world.apply(Command::AddWater { x, y, z: 1, volume_m3: c.voxel_volume() * 0.25 });
+            }
+            if roof {
+                set(&mut world, x, y + 1, 0, Material::Rock);
+            }
+            world
+        };
+
+        let (both, proj) = present(&build(true, true));
+        assert_eq!((proj.s, proj.rise), (4, 2), "the fixture is stated at s = 4, rise = 2");
+        let (water_only, _) = present(&build(true, false));
+        let (roof_only, _) = present(&build(false, true));
+        let r = proj.front_row(y, 1);
+        let col = proj.col(x) + 1;
+        let at = |canvas: &Canvas, row: i32| pixel(canvas, &proj, col, row);
+
+        // The roof reaches row R + 1 and no further: alone, it leaves R + 2 as sky.
+        assert_ne!(at(&roof_only, r + 1), sky(), "the roof's front covers row R + 1");
+        assert_eq!(at(&roof_only, r + 2), sky(), "the roof's front stops before row R + 2");
+        // The water top alone blends both rows of its band, over sky.
+        assert!(bluer_than_sky(at(&water_only, r + 1)), "the band alone covers row R + 1");
+        assert!(bluer_than_sky(at(&water_only, r + 2)), "the band alone covers row R + 2");
+
+        // With the roof in front, the row the roof does not own is still that one blend —
+        // culling the whole band on the strength of a solid at `(x, y + 1, z − 1)` would
+        // have left it sky.
+        assert_eq!(
+            at(&both, r + 2),
+            at(&water_only, r + 2),
+            "row R + 2 must stay visible water: {:?} vs {:?}",
+            at(&both, r + 2),
+            at(&water_only, r + 2),
+        );
+        // The row the roof does own is the roof's own opaque front.
+        assert_eq!(at(&both, r + 1), at(&roof_only, r + 1), "row R + 1 is the roof's");
+        // And the skin row beneath the band, which neither the roof nor the clip touches.
+        assert_eq!(at(&both, r + 3), at(&water_only, r + 3), "the skin row is unchanged");
+        assert!(bluer_than_sky(at(&both, r + 3)), "the skin row is water");
     }
 
     /// A plateau that recedes in `z` reads as one plane, not as ruled shelving: the
