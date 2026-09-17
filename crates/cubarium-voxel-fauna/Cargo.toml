@@ -1,0 +1,13 @@
+[package]
+name = "cubarium-voxel-fauna"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Consumers on the voxel strip: paid heuristic browsers that stand on support faces, crop reachable foliage through the flora layer's bounded transfers, and hand their bodies back as carrion. No drawing, no neural policy."
+
+[dependencies]
+cubarium-voxel = { workspace = true }
+cubarium-voxel-flora = { workspace = true }
+postcard = { version = "1", features = ["use-std"] }
+serde = { version = "1", features = ["derive"] }
+anyhow = { workspace = true }

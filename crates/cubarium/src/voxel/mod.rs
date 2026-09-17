@@ -20,7 +20,14 @@
 //! after every world tick, in that order: the plant layer reads the water the core has
 //! just moved and withdraws from it, never the other way round. Its stands are drawn
 //! into the same canvas, in the same traversal, as the terrain and the water.
+//!
+//! Since voxel round 5c it owns a [`cubarium_voxel_fauna::Fauna`] too, stepped once after
+//! the plant layer and for the same reason the plant layer follows the world: the animals
+//! eat the foliage the plants have just grown. One coupled tick is `World::step`,
+//! `Flora::step`, `Fauna::step`, and the animals are drawn in the same traversal as
+//! everything else, as the **interim** glyph of [`animal`].
 
+pub mod animal;
 pub mod present;
 pub mod project;
 pub mod scene;
@@ -35,6 +42,9 @@ use anyhow::{Context, Result, bail};
 use cubarium_render::Canvas;
 use cubarium_surface::{Scale, Topology};
 use cubarium_voxel::{Command as VoxelCommand, Material, World};
+use cubarium_voxel_fauna::{
+    Command as FaunaCommand, Fauna, FaunaConfig, Species as Beast,
+};
 use cubarium_voxel_flora::{
     Command as FloraCommand, Flora, FloraConfig, Site, Species,
 };
@@ -53,7 +63,9 @@ use project::Projection;
 const COMMANDS: &str = "p pause/resume, s step, +/- speed, r [m3] rain, a M3 charge the aquifer (negative withdraws), \
                         m X Y Z air|rock|soil|bedrock set material, \
                         f X Z bloomcrown|umbrellafrond [wood] seed a stand, \
-                        c X Z clear a stand, w PATH save, \
+                        c X Z clear a stand, \
+                        g X Z frondgrazer [body] introduce an animal, \
+                        w PATH save, \
                         l PATH load, i X Y Z inspect, o outlet, q quit";
 
 /// Default rain volume for the `r` command, in cubic metres.
@@ -165,8 +177,11 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     };
 
     // No `[flora]` table this round: the plant layer runs on its own defaults, and the
-    // config file stays the presentation's plus the world's.
+    // config file stays the presentation's plus the world's. The animal layer likewise —
+    // and it starts empty, because an animal is introduced by a `g` command and never
+    // generated.
     let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
 
     let proj = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, world.config())?;
     let topology = Topology::Ring { w: proj.raster_w, h: proj.raster_h };
@@ -251,7 +266,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         }
 
         while let Ok(line) = commands.try_recv() {
-            ctl.handle(&mut world, &mut flora, &line);
+            ctl.handle(&mut world, &mut flora, &mut fauna, &line);
             // A command may have moved a cell, seeded a stand or loaded a world; which
             // ones did is the command's business, and one extra pack is cheaper than a
             // rule here that has to be kept in step with `Control::handle`.
@@ -269,6 +284,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                         ctl.pending_steps -= 1;
                         world.step();
                         flora.step(&mut world);
+                        fauna.step(&world, &mut flora);
                         ticks += 1;
                         moved = true;
                     }
@@ -278,6 +294,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                         debt -= 1.0;
                         world.step();
                         flora.step(&mut world);
+                        fauna.step(&world, &mut flora);
                         ticks += 1;
                         moved = true;
                     }
@@ -285,7 +302,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                 out.observe_tick(world.tick());
             }
             Step::Render { .. } => {
-                out.render(&world, &flora, std::mem::take(&mut moved))?;
+                out.render(&world, &flora, &fauna, std::mem::take(&mut moved))?;
                 frames += 1;
             }
             Step::Sleep(d) => std::thread::sleep(d),
@@ -318,6 +335,19 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         fv.organic() - fv.ledger.expected_organic(),
         fv.mineral() - fv.ledger.expected_mineral(),
         fv.energy() - fv.ledger.expected_energy(),
+    );
+    let av = fauna.view();
+    eprintln!(
+        "cubarium voxel: {} animals ({} born, {} dead, {} bites, {} steps), \
+         fauna residual {:.3e} organic, {:.3e} mineral, {:.3e} energy",
+        av.animals.len(),
+        av.ledger.born,
+        av.ledger.deaths,
+        av.ledger.bites,
+        av.ledger.steps,
+        av.organic() - av.ledger.expected_organic(),
+        av.mineral() - av.ledger.expected_mineral(),
+        av.energy() - av.ledger.expected_energy(),
     );
     Ok(())
 }
@@ -354,10 +384,16 @@ impl Out {
     /// Draw one frame. `moved` says the world has changed since the last one, which is
     /// what the GPU path packs a new voxel texture on; the CPU path reads the world
     /// afresh every frame and ignores it.
-    fn render(&mut self, world: &World, flora: &Flora, moved: bool) -> Result<()> {
+    fn render(
+        &mut self,
+        world: &World,
+        flora: &Flora,
+        fauna: &Fauna,
+        moved: bool,
+    ) -> Result<()> {
         match self {
             Out::Cpu { sink, presenter, canvas, raster } => {
-                presenter.draw(&world.view(), flora.view(), canvas);
+                presenter.draw_with_fauna(&world.view(), flora.view(), Some(fauna.view()), canvas);
                 canvas.encode_raster(raster);
                 sink.submit(Output::Ring(raster))
             }
@@ -412,10 +448,16 @@ impl Control {
     /// Apply one stdin line. Anything unrecognised prints the usage and changes nothing;
     /// a bad argument is reported and the world is left alone.
     ///
-    /// The plant layer comes in as a second borrow rather than living in `Control`,
-    /// for the same reason the world does: the loop reads `paused` and `speed` while it
-    /// still holds both.
-    fn handle(&mut self, world: &mut World, flora: &mut Flora, line: &str) {
+    /// The plant and animal layers come in as further borrows rather than living in
+    /// `Control`, for the same reason the world does: the loop reads `paused` and `speed`
+    /// while it still holds all three.
+    fn handle(
+        &mut self,
+        world: &mut World,
+        flora: &mut Flora,
+        fauna: &mut Fauna,
+        line: &str,
+    ) {
         let line = line.trim();
         if line.is_empty() {
             return;
@@ -526,6 +568,16 @@ impl Control {
                     ),
                     None => eprintln!("cubarium voxel:   no stand"),
                 }
+                // The animals standing on this face, in id order. More than one is
+                // ordinary: a newborn appears on its parent's face.
+                for a in fauna.view().animals_at(site) {
+                    eprintln!(
+                        "cubarium voxel:   {} #{} body {:.4} reserve {:.4} mineral {:.5} \
+                         energy {:.4} age {} ticks {:?}",
+                        a.species.name(), a.id, a.body, a.reserve, a.mineral, a.energy,
+                        a.age_ticks, a.state,
+                    );
+                }
                 if let Some(g) = fv.ground_at(site) {
                     eprintln!(
                         "cubarium voxel:   ground N {:.4} litter {:.4} ({:.4} energy, \
@@ -594,6 +646,43 @@ impl Control {
                     eprintln!("cubarium voxel: cleared the stand at ({x}, {z})");
                 } else {
                     eprintln!("cubarium voxel: no stand to clear at ({x}, {z})");
+                }
+            }
+            "g" | "grazer" => {
+                let usage = "g X Z frondgrazer [body]";
+                let Some((x, z)) = column(world, usage, &rest) else { return };
+                let Some(species) = rest.get(2).and_then(|n| Beast::parse(n)) else {
+                    eprintln!(
+                        "cubarium voxel: `{usage}` — `{}` is not an animal",
+                        rest.get(2).copied().unwrap_or(""),
+                    );
+                    return;
+                };
+                // No body named is a grown one: the picture this command exists for is an
+                // animal you can see, as `f`'s is a stand you can see.
+                let body = match rest.get(3) {
+                    None => fauna.config().species(species).body_max,
+                    Some(text) => match text.parse::<f64>() {
+                        Ok(v) if v.is_finite() && v > 0.0 => v,
+                        _ => {
+                            eprintln!("cubarium voxel: `{usage}` wants a positive body");
+                            return;
+                        }
+                    },
+                };
+                if fauna.apply(world, FaunaCommand::Introduce { x, z, species, body }) {
+                    eprintln!(
+                        "cubarium voxel: introduced {} at {:?} with body {body}",
+                        species.name(),
+                        highest_site(world, x, z),
+                    );
+                } else {
+                    eprintln!(
+                        "cubarium voxel: no animal at ({x}, {z}): either the column has no \
+                         support face, or body {body} is below {}'s body_min {}",
+                        species.name(),
+                        fauna.config().species(species).body_min,
+                    );
                 }
             }
             "m" | "material" => {
@@ -792,41 +881,42 @@ mod tests {
         let c = cubarium_voxel::Config { width: 16, height: 8, depth: 2, ..Default::default() };
         let mut world = World::empty(c.clone());
         let mut flora = Flora::new(FloraConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::default());
         let mut ctl = Control::new(1.0, Projection::new(30.0, 4, 0, &c).unwrap());
 
-        ctl.handle(&mut world, &mut flora, "p");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "p");
         assert!(ctl.paused);
-        ctl.handle(&mut world, &mut flora, "p");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "p");
         assert!(!ctl.paused);
-        ctl.handle(&mut world, &mut flora, "-");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "-");
         assert_eq!(ctl.speed, 0.5);
-        ctl.handle(&mut world, &mut flora, "+");
-        ctl.handle(&mut world, &mut flora, "+");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "+");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "+");
         assert_eq!(ctl.speed, 2.0);
-        ctl.handle(&mut world, &mut flora, "s");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "s");
         assert!(ctl.paused && ctl.pending_steps == 1);
-        ctl.handle(&mut world, &mut flora, "o");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "o");
         assert!(ctl.outlet);
         // The aquifer takes a charge, gives back only what it holds, and is booked.
-        ctl.handle(&mut world, &mut flora, "a 2.5");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "a 2.5");
         assert_eq!(world.view().aquifer_m3, 2.5);
-        ctl.handle(&mut world, &mut flora, "a -10");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "a -10");
         assert_eq!(world.view().aquifer_m3, 0.0);
         assert_eq!(world.view().ledger.user_in, 0.0);
         // Nonsense, and a bad argument, change nothing.
-        ctl.handle(&mut world, &mut flora, "nonsense 1 2 3");
-        ctl.handle(&mut world, &mut flora, "r not-a-volume");
-        ctl.handle(&mut world, &mut flora, "a");
-        ctl.handle(&mut world, &mut flora, "a 0");
-        ctl.handle(&mut world, &mut flora, "a nan");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "nonsense 1 2 3");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "r not-a-volume");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "a");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "a 0");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "a nan");
         assert_eq!(world.view().aquifer_m3, 0.0);
-        ctl.handle(&mut world, &mut flora, "i 0 999 0");
-        ctl.handle(&mut world, &mut flora, "i only-one");
-        ctl.handle(&mut world, &mut flora, "w");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "i 0 999 0");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "i only-one");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "w");
         assert_eq!((ctl.speed, ctl.pending_steps, ctl.outlet), (2.0, 1, true));
         assert!(!ctl.quit);
-        ctl.handle(&mut world, &mut flora, "i 0 0 0");
-        ctl.handle(&mut world, &mut flora, "q");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "i 0 0 0");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "q");
         assert!(ctl.quit);
     }
 
@@ -838,31 +928,32 @@ mod tests {
         let c = cubarium_voxel::Config { width: 16, height: 8, depth: 2, ..Default::default() };
         let mut world = World::empty(c.clone());
         let mut flora = Flora::new(FloraConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::default());
         let mut ctl = Control::new(1.0, Projection::new(30.0, 4, 0, &c).unwrap());
 
-        ctl.handle(&mut world, &mut flora, "p");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "p");
         assert!(ctl.paused);
         assert_eq!(world.view().material_at(3, 2, 1), Material::Air);
 
-        ctl.handle(&mut world, &mut flora, "m 3 2 1 soil");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "m 3 2 1 soil");
         assert_eq!(world.view().material_at(3, 2, 1), Material::Soil);
         // What the following `i` prints is this, off the edited world.
         let seen = cell_state(&world, 3, 2, 1);
         assert!(seen.contains("(3, 2, 1) Soil"), "{seen}");
-        ctl.handle(&mut world, &mut flora, "i 3 2 1");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "i 3 2 1");
 
         // `x` wraps, as everything in the ring does.
-        ctl.handle(&mut world, &mut flora, "m -13 2 1 rock");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "m -13 2 1 rock");
         assert_eq!(world.view().material_at(3, 2, 1), Material::Rock);
 
         // A `y` or `z` outside the world, an unknown material and a short line are all
         // refused, and leave the cell alone.
         for bad in ["m 3 99 1 air", "m 3 2 9 air", "m 3 2 1 lava", "m 3 2 1", "m", "material"] {
-            ctl.handle(&mut world, &mut flora, bad);
+            ctl.handle(&mut world, &mut flora, &mut fauna, bad);
             assert_eq!(world.view().material_at(3, 2, 1), Material::Rock, "`{bad}` edited a cell");
         }
 
-        ctl.handle(&mut world, &mut flora, "m 3 2 1 air");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "m 3 2 1 air");
         assert_eq!(world.view().material_at(3, 2, 1), Material::Air);
         // Both help texts really do offer the command that was just used.
         assert!(COMMANDS.contains("m X Y Z air|rock|soil|bedrock"));
@@ -883,19 +974,20 @@ mod tests {
             }
         }
         let mut flora = Flora::new(FloraConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::default());
         let mut ctl = Control::new(1.0, Projection::new(30.0, 4, 0, &c).unwrap());
         let site = Site { x: 3, y: 2, z: 1 };
 
         // A founder with no wood named is full-grown: the stand this command exists to
         // put in the picture is one you can see.
-        ctl.handle(&mut world, &mut flora, "f 3 1 bloomcrown");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "f 3 1 bloomcrown");
         let stand = *flora.view().stand_at(site).expect("a stand on the column's skyline");
         assert_eq!(stand.species, Species::Bloomcrown);
         assert_eq!(stand.wood, flora.config().bloomcrown.wood_max);
         assert_eq!(flora.view().stands.len(), 1);
 
         // An explicit wood is taken, and `x` wraps as everything in the ring does.
-        ctl.handle(&mut world, &mut flora, "f -12 0 umbrellafrond 0.25");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "f -12 0 umbrellafrond 0.25");
         let other = *flora.view().stand_at(Site { x: 4, y: 2, z: 0 }).expect("the wrapped column");
         assert_eq!(other.species, Species::Umbrellafrond);
         assert_eq!(other.wood, 0.25);
@@ -912,7 +1004,7 @@ mod tests {
             "f",
             "flora",
         ] {
-            ctl.handle(&mut world, &mut flora, bad);
+            ctl.handle(&mut world, &mut flora, &mut fauna, bad);
             assert_eq!(flora.view().stands.len(), 2, "`{bad}` changed the stands");
         }
 
@@ -921,16 +1013,16 @@ mod tests {
         // lookups are the ones the printout claims.
         assert!(flora.view().ground_at(site).is_some(), "seeding creates the ground");
         assert!(flora.view().stand_at(Site { x: 9, y: 2, z: 1 }).is_none());
-        ctl.handle(&mut world, &mut flora, "i 3 2 1");
-        ctl.handle(&mut world, &mut flora, "i 9 2 1");
-        ctl.handle(&mut world, &mut flora, "i 3 9 1");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "i 3 2 1");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "i 9 2 1");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "i 3 9 1");
 
         // `c` takes the stand off the highest support of its column, once.
-        ctl.handle(&mut world, &mut flora, "c 3 1");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "c 3 1");
         assert!(flora.view().stand_at(site).is_none());
         assert_eq!(flora.view().stands.len(), 1);
         for bad in ["c 3 1", "c 3 9", "c 3", "c", "clear"] {
-            ctl.handle(&mut world, &mut flora, bad);
+            ctl.handle(&mut world, &mut flora, &mut fauna, bad);
             assert_eq!(flora.view().stands.len(), 1, "`{bad}` changed the stands");
         }
 
@@ -958,12 +1050,13 @@ mod tests {
 
         let before = world.view().stored_m3();
         let mut flora = Flora::new(FloraConfig::default());
+        let mut fauna = Fauna::new(FaunaConfig::default());
         let mut ctl = Control::new(1.0, proj);
-        ctl.handle(&mut world, &mut flora, &format!("w {}", path.display()));
+        ctl.handle(&mut world, &mut flora, &mut fauna, &format!("w {}", path.display()));
         assert!(path.exists());
 
         let mut fresh = World::empty(c.clone());
-        ctl.handle(&mut fresh, &mut flora, &format!("l {}", path.display()));
+        ctl.handle(&mut fresh, &mut flora, &mut fauna, &format!("l {}", path.display()));
         assert!((fresh.view().stored_m3() - before).abs() < 1e-9, "the pool came back");
 
         // A world of another shape is named and refused.
@@ -971,7 +1064,7 @@ mod tests {
         let wide = cubarium_voxel::Config { width: 32, ..c.clone() };
         std::fs::write(&other, World::empty(wide).save()).unwrap();
         let mut keep = World::empty(c.clone());
-        ctl.handle(&mut keep, &mut flora, &format!("l {}", other.display()));
+        ctl.handle(&mut keep, &mut flora, &mut fauna, &format!("l {}", other.display()));
         assert_eq!(keep.config().width, 16, "the run kept its own world");
 
         std::fs::remove_dir_all(&dir).unwrap();

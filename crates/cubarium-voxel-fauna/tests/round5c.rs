@@ -1,0 +1,522 @@
+//! Round 5c: the **frondgrazer**, one short function test per rule of its tick.
+//!
+//! Conventions are the flora crate's `round5a.rs`: `voxel_m` is 1 m, soil is made by
+//! adding water to an air cell and converting it, and the **world is never stepped**
+//! except where a test says "coupled" — so a fixture's water and a stand's foliage are the
+//! condition the test says they are and nothing else moves them.
+//!
+//! Where a test needs a rate the placeholders do not give, it sets that rate in its **own**
+//! [`FaunaConfig`] and says why. None of those is read back as a placeholder, and no test
+//! here asserts anything about viability, population or carrying capacity: the model says
+//! nothing about them.
+
+use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
+use cubarium_voxel_fauna::{
+    Command, Fauna, FaunaConfig, Species, SpeciesConfig, State, DT,
+};
+use cubarium_voxel_flora::{
+    Command as FloraCommand, Flora, FloraConfig, Site, Species as Plant,
+};
+
+// ------------------------------------------------------------------- fixtures
+
+/// One air voxel turned into `material` holding exactly `pore` of that material's own
+/// pore capacity. `round5a.rs`'s `fill`.
+fn fill(w: &mut World, x: i64, y: u32, z: u32, material: Material, pore: f64) {
+    let want = pore * material.pore_capacity() * w.config().voxel_volume();
+    if want > 0.0 {
+        let got = w.apply(WorldCommand::AddWater { x, y, z, volume_m3: want });
+        assert!((got - want).abs() < 1e-12, "the void took {got} of {want}");
+    }
+    w.apply(WorldCommand::SetMaterial { x, y, z, material });
+}
+
+fn empty_world(width: u32, seed: u64) -> World {
+    World::empty(VoxelConfig {
+        width,
+        height: 10,
+        depth: 1,
+        voxel_m: 1.0,
+        seed,
+        ..VoxelConfig::default()
+    })
+}
+
+/// A flat plain: every column solid to `top`, so every column's support face is `top` in
+/// open sky. `pore` is the soil wetness the plant gates read.
+fn plain(width: u32, top: u32, pore: f64, seed: u64) -> World {
+    let mut w = empty_world(width, seed);
+    for x in 0..width as i64 {
+        for y in 1..=top {
+            fill(&mut w, x, y, 0, Material::Soil, pore);
+        }
+    }
+    w
+}
+
+/// Raise one column of a [`plain`] to `top`, so its support face is higher than its
+/// neighbours': the step a `climb` either allows or refuses.
+fn raise(w: &mut World, x: i64, from: u32, top: u32, pore: f64) {
+    for y in from + 1..=top {
+        fill(w, x, y, 0, Material::Soil, pore);
+    }
+}
+
+fn at(x: u32, y: u32) -> Site {
+    Site { x, y, z: 0 }
+}
+
+/// A springturf founder at half its own `wood_max`, which is the harness's founder size:
+/// wood 0.03, foliage `α · W` = 0.06, and a crown **one** voxel above its support face
+/// (`crown_voxels(0.03)` is `round(0.75)` = 1), so a browser standing on the next face
+/// along with `up: 1` can reach it and one standing two voxels lower cannot.
+fn turf(flora: &mut Flora, world: &World, x: i64) {
+    let wood = 0.5 * flora.config().springturf.wood_max;
+    assert!(
+        flora.apply(world, FloraCommand::Seed { x, z: 0, species: Plant::Springturf, wood }),
+        "a founder at x {x}"
+    );
+}
+
+fn grazer(fauna: &mut Fauna, world: &World, x: i64, body: f64) -> u64 {
+    let before = fauna.view().ledger.births;
+    assert!(
+        fauna.apply(world, Command::Introduce { x, z: 0, species: Species::Frondgrazer, body }),
+        "a grazer at x {x}"
+    );
+    before
+}
+
+fn config_with(edit: impl FnOnce(&mut SpeciesConfig)) -> FaunaConfig {
+    let mut c = FaunaConfig::default();
+    edit(c.species_mut(Species::Frondgrazer));
+    c
+}
+
+/// The animal layer's three residuals, in the shape the flora tests use.
+fn assert_fauna_residuals(fauna: &Fauna, when: &str) {
+    let v = fauna.view();
+    let (o, n, e) = (
+        v.organic() - v.ledger.expected_organic(),
+        v.mineral() - v.ledger.expected_mineral(),
+        v.energy() - v.ledger.expected_energy(),
+    );
+    assert!(o.abs() <= 1e-9 * v.organic().abs().max(1.0), "{when}: fauna organic residual {o}");
+    assert!(n.abs() <= 1e-9 * v.mineral().abs().max(1.0), "{when}: fauna mineral residual {n}");
+    assert!(e.abs() <= 1e-9 * v.energy().abs().max(1.0), "{when}: fauna energy residual {e}");
+}
+
+fn assert_flora_residuals(flora: &Flora, when: &str) {
+    let v = flora.view();
+    let (o, n, e) = (
+        v.organic() - v.ledger.expected_organic(),
+        v.mineral() - v.ledger.expected_mineral(),
+        v.energy() - v.ledger.expected_energy(),
+    );
+    assert!(o.abs() <= 1e-9 * v.organic().abs().max(1.0), "{when}: flora organic residual {o}");
+    assert!(n.abs() <= 1e-9 * v.mineral().abs().max(1.0), "{when}: flora mineral residual {n}");
+    assert!(e.abs() <= 1e-9 * v.energy().abs().max(1.0), "{when}: flora energy residual {e}");
+}
+
+// ------------------------------------------------------------------- the bite
+
+/// A grazer on the face beside a turf takes exactly one bite off it — `bite_per_s · dt`,
+/// neither more nor less — and the two layers book the same three numbers.
+#[test]
+fn a_grazer_beside_reachable_foliage_crops_exactly_one_bite() {
+    let world = plain(8, 2, 0.3, 5);
+    let mut flora = Flora::new(FloraConfig::default());
+    turf(&mut flora, &world, 3);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = grazer(&mut fauna, &world, 2, 0.02);
+
+    let sc = *fauna.config().species(Species::Frondgrazer);
+    let bite = sc.bite_per_s * DT;
+    let before = flora.view().stand_at(at(3, 2)).expect("the founder").foliage;
+    assert!(before > bite, "the fixture must hold more than one bite");
+
+    fauna.step(&world, &mut flora);
+
+    let after = flora.view().stand_at(at(3, 2)).expect("the founder").foliage;
+    assert!((before - after - bite).abs() < 1e-15, "the stand lost {} not {bite}", before - after);
+    assert_eq!(fauna.view().animal(id).unwrap().state, State::Cropping);
+    assert_eq!(fauna.view().ledger.bites, 1);
+    // The two ledgers are the same transfer from two sides, to the bit.
+    let (fv, av) = (flora.view(), fauna.view());
+    assert_eq!(fv.ledger.consumed_organic_out, av.ledger.eaten_organic_in);
+    assert_eq!(fv.ledger.consumed_mineral_out, av.ledger.eaten_mineral_in);
+    assert_eq!(fv.ledger.consumed_energy_out, av.ledger.eaten_energy_in);
+    assert_eq!(av.ledger.eaten_organic_in, bite);
+    assert_residual_pair(&flora, &fauna, "after one bite");
+}
+
+fn assert_residual_pair(flora: &Flora, fauna: &Fauna, when: &str) {
+    assert_flora_residuals(flora, when);
+    assert_fauna_residuals(fauna, when);
+}
+
+/// Foliage two voxels above the face a browser stands on is not food, whatever else is
+/// true of it: the reach box is `up: 1`. It is not eaten, and the step that would put the
+/// animal on the stand's own face is refused by `climb` as well, so nothing at all
+/// happens.
+#[test]
+fn foliage_two_voxels_up_is_not_eaten() {
+    let mut world = plain(8, 2, 0.3, 5);
+    raise(&mut world, 3, 2, 4, 0.3);
+    let mut flora = Flora::new(FloraConfig::default());
+    turf(&mut flora, &world, 3);
+    assert_eq!(flora.view().stands[0].site, at(3, 4), "the founder is on the raised face");
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = grazer(&mut fauna, &world, 2, 0.02);
+
+    let before = flora.view().stands[0].foliage;
+    for _ in 0..20 {
+        fauna.step(&world, &mut flora);
+    }
+
+    assert_eq!(flora.view().stands[0].foliage, before, "nothing was taken");
+    assert_eq!(fauna.view().ledger.eaten_organic_in, 0.0);
+    assert_eq!(fauna.view().ledger.bites, 0);
+    assert_eq!(fauna.view().animal(id).unwrap().site, at(2, 2), "and it could not climb up");
+    assert_eq!(fauna.view().ledger.steps, 0);
+}
+
+// ------------------------------------------------------- maintenance and death
+
+/// The upkeep is paid out of the reserve while there is one, and out of the body after
+/// that. The body does not move while the reserve is paying.
+#[test]
+fn maintenance_drains_the_reserve_and_then_the_body() {
+    let world = plain(4, 2, 0.3, 5);
+    let mut flora = Flora::new(FloraConfig::default());
+    // 4 /s against the placeholder 0.001 /s, so one tick's upkeep is a readable 0.004 of
+    // organic matter instead of 5e-7. What is tested is the order of payment; the body is
+    // 0.02, under `birth_body`, so nothing else is spending the reserve.
+    let mut fauna = Fauna::new(config_with(|s| s.maintenance_per_s = 4.0));
+    let id = grazer(&mut fauna, &world, 1, 0.02);
+    let start = *fauna.view().animal(id).unwrap();
+    assert_eq!(start.reserve, 0.01, "a full reserve is `reserve_cap · body`");
+
+    for tick in 1..=2 {
+        fauna.step(&world, &mut flora);
+        let a = *fauna.view().animal(id).unwrap();
+        assert_eq!(a.body, start.body, "tick {tick}: the body has not been touched");
+        assert!((a.reserve - (0.01 - 0.004 * f64::from(tick))).abs() < 1e-15, "{a:?}");
+        assert_eq!(a.mineral, start.mineral, "respiration moves no mineral");
+        assert_eq!(a.state, State::Resting, "no food in reach and none in sense");
+    }
+    // The third tick's 0.004 cannot all come out of the 0.002 that is left, so the body
+    // pays the difference.
+    fauna.step(&world, &mut flora);
+    let a = *fauna.view().animal(id).unwrap();
+    assert_eq!(a.reserve, 0.0);
+    assert!((a.body - 0.018).abs() < 1e-15, "the body paid the difference: {a:?}");
+    // Three ticks of the whole upkeep: the shortfall is paid, not skipped.
+    assert!((fauna.view().ledger.respired_out - 0.012).abs() < 1e-15);
+    assert_fauna_residuals(&fauna, "three ticks of upkeep");
+}
+
+/// A grazer with nothing to eat dies when its body falls below `body_min`, and what is
+/// left of it is on its own site as carrion with the mineral it never respired.
+#[test]
+fn a_starving_grazer_dies_at_body_min_and_leaves_its_carrion() {
+    let world = plain(4, 2, 0.3, 5);
+    let mut flora = Flora::new(FloraConfig::default());
+    // 5 /s against the placeholder 0.001 /s: the point is the death, not how long a
+    // grazer takes to starve, and 5 /s reaches it in a dozen ticks.
+    let mut fauna = Fauna::new(config_with(|s| s.maintenance_per_s = 5.0));
+    // 0.02 is under `birth_body`: a starving adult that could still afford a birth would
+    // leave a newborn to starve beside it, and this test is about one death.
+    let id = grazer(&mut fauna, &world, 1, 0.02);
+    let site = fauna.view().animal(id).unwrap().site;
+    let mineral = fauna.view().animal(id).unwrap().mineral;
+    assert!(mineral > 0.0);
+
+    let mut ticks = 0;
+    while fauna.view().animal(id).is_some() && ticks < 200 {
+        fauna.step(&world, &mut flora);
+        ticks += 1;
+    }
+    assert!(ticks < 200, "it starved inside the window");
+    assert_eq!(fauna.view().ledger.deaths, 1);
+    assert!(fauna.view().animals.is_empty());
+
+    let g = flora.view().ground_at(site).expect("a deposit provisions the site");
+    let body_min = fauna.config().species(Species::Frondgrazer).body_min;
+    assert!(g.carrion > 0.0 && g.carrion < body_min, "the corpse is what was left: {}", g.carrion);
+    assert!((g.carrion_mineral - mineral).abs() < 1e-15, "with all of its mineral");
+    assert_eq!(fauna.view().ledger.deposited_organic_out, g.carrion);
+    assert_eq!(fauna.view().ledger.deposited_mineral_out, g.carrion_mineral);
+    assert!(fauna.view().organic() == 0.0 && fauna.view().mineral() == 0.0);
+    assert_residual_pair(&flora, &fauna, "after the death");
+}
+
+// ------------------------------------------------------------------- the walk
+
+/// A step crosses no face taller than `climb` and no water deeper than `wade_depth_m`,
+/// and the rule is not vacuous: the same grazer does step onto a face exactly `climb`
+/// above the one it is standing on.
+#[test]
+fn a_step_crosses_neither_a_wall_nor_a_pool() {
+    // The wall: the target's face is two voxels up, `climb` is 1.
+    let mut world = plain(12, 2, 0.3, 5);
+    raise(&mut world, 5, 2, 4, 0.3);
+    let mut flora = Flora::new(FloraConfig::default());
+    turf(&mut flora, &world, 5);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = grazer(&mut fauna, &world, 3, 0.02);
+    for _ in 0..120 {
+        fauna.step(&world, &mut flora);
+    }
+    // It walks up to the foot of the wall and no further: x 4 is one step from x 3, and
+    // x 5 is two voxels up.
+    let stopped = fauna.view().animal(id).unwrap().site;
+    assert_eq!(stopped, at(4, 2), "it stands at the foot of the wall: {stopped:?}");
+
+    // The pool: one column of standing water deeper than it will wade, between it and the
+    // only food in the world.
+    let mut world = plain(12, 2, 0.3, 7);
+    let mut flora = Flora::new(FloraConfig::default());
+    turf(&mut flora, &world, 6);
+    let sc = *FaunaConfig::default().species(Species::Frondgrazer);
+    let depth = 2.0 * sc.wade_depth_m;
+    world.apply(WorldCommand::AddWater { x: 4, y: 3, z: 0, volume_m3: depth });
+    assert!(
+        world.view().water_depth_m(4, 2, 0) > sc.wade_depth_m,
+        "the fixture's pool must be deeper than the wade: {}",
+        world.view().water_depth_m(4, 2, 0)
+    );
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = grazer(&mut fauna, &world, 3, 0.02);
+    for _ in 0..120 {
+        fauna.step(&world, &mut flora);
+    }
+    assert_eq!(fauna.view().animal(id).unwrap().site, at(3, 2), "it stayed out of the pool");
+    assert_eq!(fauna.view().ledger.bites, 0, "and never reached the food");
+
+    // Not vacuous: one voxel up is exactly `climb` and is stepped onto.
+    let mut world = plain(12, 2, 0.3, 5);
+    raise(&mut world, 5, 2, 3, 0.3);
+    let mut flora = Flora::new(FloraConfig::default());
+    turf(&mut flora, &world, 5);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = grazer(&mut fauna, &world, 3, 0.02);
+    for _ in 0..120 {
+        fauna.step(&world, &mut flora);
+    }
+    let reached = fauna.view().animal(id).unwrap().site;
+    assert!(reached.y == 3 || reached == at(4, 2), "it climbed the one-voxel step: {reached:?}");
+    assert!(fauna.view().ledger.bites > 0, "and ate when it got there");
+}
+
+// ----------------------------------------------------------------- the newborn
+
+/// A birth is paid out of the parent's reserve, exactly `birth_cost` of it, and the
+/// newborn stands on its parent's face at `body_min` with the remainder as its reserve and
+/// its share of the parent's mineral and energy. Nothing crosses the layer's boundary.
+#[test]
+fn a_birth_pays_birth_cost_and_the_newborn_is_at_body_min() {
+    let world = plain(4, 2, 0.3, 5);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let parent = grazer(&mut fauna, &world, 1, 0.05);
+    let before = *fauna.view().animal(parent).unwrap();
+    let sc = *fauna.config().species(Species::Frondgrazer);
+    assert!(before.body >= sc.birth_body && before.reserve >= sc.birth_cost);
+    let stock = fauna.view().organic();
+
+    fauna.step(&world, &mut flora);
+
+    let after = *fauna.view().animal(parent).unwrap();
+    let upkeep = sc.maintenance_per_s * before.body * DT;
+    assert!(
+        (after.reserve - (before.reserve - upkeep - sc.birth_cost)).abs() < 1e-15,
+        "the reserve paid the upkeep and the whole birth cost: {after:?}"
+    );
+    assert_eq!(fauna.view().animals.len(), 2);
+    assert_eq!(fauna.view().ledger.born, 1);
+    let newborn = fauna.view().animals.iter().find(|a| a.id != parent).copied().unwrap();
+    assert_eq!(newborn.body, sc.body_min);
+    assert!((newborn.reserve - (sc.birth_cost - sc.body_min)).abs() < 1e-15);
+    assert_eq!(newborn.site, before.site);
+    assert_eq!(newborn.age_ticks, 0);
+    // The mineral and the energy left the parent by the same fraction rule the organic
+    // matter did, and the layer's total moved only by the tick's own respiration.
+    // The fraction is of the parent as the birth found it: after this tick's upkeep, which
+    // is paid first.
+    let f = sc.birth_cost / (before.organic() - upkeep);
+    assert!((newborn.mineral - before.mineral * f).abs() < 1e-15 * before.mineral);
+    assert!((newborn.mineral + after.mineral - before.mineral).abs() < 1e-18, "mineral moved");
+    let heat = upkeep * before.energy / before.organic();
+    assert!(
+        (newborn.energy + after.energy - (before.energy - heat)).abs() < 1e-15,
+        "and the energy, less the upkeep's own heat"
+    );
+    assert!((fauna.view().organic() - (stock - upkeep)).abs() < 1e-15, "a birth is internal");
+    assert_eq!(fauna.view().ledger.introduced_organic_in, stock, "and nothing was introduced");
+    assert_fauna_residuals(&fauna, "after a birth");
+}
+
+// -------------------------------------------------------------- the two ledgers
+
+/// The union: over 100 coupled ticks with two grazers, one of which starves and deposits
+/// a corpse, the plant layer's `consumed_*` are the animal layer's `eaten_*` and its
+/// `deposited_*_in` are the animal layer's `deposited_*_out` — to the bit, because both
+/// sides book the same three numbers of the same transfer — and both layers' residuals
+/// are at float noise.
+#[test]
+fn the_two_ledgers_close_together_over_a_hundred_coupled_ticks() {
+    let mut world = plain(16, 2, 0.3, 11);
+    let mut flora = Flora::new(FloraConfig::default());
+    for x in [3, 4, 9] {
+        turf(&mut flora, &world, x);
+    }
+    // One ordinary grazer, and one whose own upkeep is 5 /s so that this run contains a
+    // death and therefore a carrion deposit with positive organic matter in it. Two
+    // species would be the honest way to say that; one config is what this round has, so
+    // the second grazer is introduced into a second layer stepped against the same
+    // world and plant layer — which is also the only way one fixture can hold both.
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut starver = Fauna::new(config_with(|s| s.maintenance_per_s = 5.0));
+    grazer(&mut fauna, &world, 2, 0.02);
+    grazer(&mut starver, &world, 13, 0.02);
+
+    for _ in 0..100 {
+        world.step();
+        flora.step(&mut world);
+        fauna.step(&world, &mut flora);
+        starver.step(&world, &mut flora);
+    }
+
+    assert!(fauna.view().ledger.bites > 0, "the grazer ate");
+    assert_eq!(starver.view().ledger.deaths, 1, "and the starver died");
+    assert!(starver.view().ledger.deposited_organic_out > 0.0, "leaving a corpse with a body");
+
+    let fv = flora.view();
+    let eaten = |o: fn(&cubarium_voxel_fauna::FaunaLedger) -> f64| {
+        o(fauna.view().ledger) + o(starver.view().ledger)
+    };
+    assert_eq!(fv.ledger.consumed_organic_out, eaten(|l| l.eaten_organic_in));
+    assert_eq!(fv.ledger.consumed_mineral_out, eaten(|l| l.eaten_mineral_in));
+    assert_eq!(fv.ledger.consumed_energy_out, eaten(|l| l.eaten_energy_in));
+    assert_eq!(fv.ledger.deposited_organic_in, eaten(|l| l.deposited_organic_out));
+    assert_eq!(fv.ledger.deposited_mineral_in, eaten(|l| l.deposited_mineral_out));
+    assert_eq!(fv.ledger.deposited_energy_in, eaten(|l| l.deposited_energy_out));
+
+    assert_flora_residuals(&flora, "100 coupled ticks");
+    assert_fauna_residuals(&fauna, "100 coupled ticks");
+    assert_fauna_residuals(&starver, "100 coupled ticks");
+}
+
+/// Dung: the mineral a bite carries in excess of the tissue it built is excreted as a
+/// litter deposit on the animal's own face. At the placeholders there is never any excess
+/// — `n_tissue` 0.05 against a plant's 0.02, on half a bite assimilated, asks for more
+/// mineral than food carries — so this test sets the animal's own `n_tissue` to zero to
+/// exercise the path, and says that the placeholders make it inert.
+#[test]
+fn excess_mineral_is_excreted_as_litter() {
+    let world = plain(8, 2, 0.3, 5);
+    let mut flora = Flora::new(FloraConfig::default());
+    turf(&mut flora, &world, 3);
+    let mut fauna = Fauna::new(config_with(|s| s.n_tissue = 0.0));
+    let id = grazer(&mut fauna, &world, 2, 0.02);
+    let mineral_before = fauna.view().animal(id).unwrap().mineral;
+
+    fauna.step(&world, &mut flora);
+
+    let v = fauna.view();
+    assert!(v.ledger.eaten_mineral_in > 0.0, "the bite carried mineral");
+    assert_eq!(v.ledger.deposited_mineral_out, v.ledger.eaten_mineral_in, "all of it excreted");
+    assert_eq!(v.animal(id).unwrap().mineral, mineral_before, "the animal kept none of it");
+    let g = flora.view().ground_at(at(2, 2)).expect("the dung provisioned the site");
+    assert!((g.litter_mineral - v.ledger.deposited_mineral_out).abs() < 1e-18);
+    assert_eq!(g.litter, 0.0, "dung is mineral only this round: the rest was respired");
+    assert_residual_pair(&flora, &fauna, "after excretion");
+
+    // And at the placeholders, nothing is excreted at all.
+    let mut flora = Flora::new(FloraConfig::default());
+    turf(&mut flora, &world, 3);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    grazer(&mut fauna, &world, 2, 0.02);
+    fauna.step(&world, &mut flora);
+    assert_eq!(fauna.view().ledger.deposited_mineral_out, 0.0);
+}
+
+// ------------------------------------------------------------- the keyed stream
+
+/// Walk a grazer standing exactly between two equal patches of food and record where it
+/// goes: two runs of the same world are identical, and the same fixture under a different
+/// **world seed** breaks the tie the other way. Nothing but the seed differs — the terrain
+/// is built by hand and is the same in both.
+#[test]
+fn the_keyed_stream_repeats_and_a_different_world_seed_does_not() {
+    fn path(seed: u64) -> Vec<Site> {
+        let world = plain(11, 2, 0.3, seed);
+        let mut flora = Flora::new(FloraConfig::default());
+        turf(&mut flora, &world, 1);
+        turf(&mut flora, &world, 9);
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        let id = grazer(&mut fauna, &world, 5, 0.02);
+        let mut out = Vec::new();
+        for _ in 0..60 {
+            fauna.step(&world, &mut flora);
+            out.push(fauna.view().animal(id).map(|a| a.site).unwrap_or(at(0, 0)));
+        }
+        out
+    }
+    assert_eq!(path(5), path(5), "the same world is the same walk");
+    assert_ne!(path(5), path(6), "a different world seed is a different tie-break");
+}
+
+// ---------------------------------------------------------- config and snapshot
+
+/// `validate()` covers every field it can refuse, and `Fauna::try_new` reports instead of
+/// panicking.
+#[test]
+fn validate_covers_the_new_fields() {
+    assert!(FaunaConfig::default().validate().is_ok());
+    let cases: [(&str, fn(&mut SpeciesConfig)); 7] = [
+        ("maintenance_per_s", |s| s.maintenance_per_s = -1.0),
+        ("yield_fraction", |s| s.yield_fraction = 1.5),
+        ("step_period_s", |s| s.step_period_s = 0.0),
+        ("body_min", |s| s.body_min = 0.0),
+        ("birth_body", |s| s.birth_body = 1.0),
+        ("birth_cost", |s| s.birth_cost = 0.0),
+        ("energy_density", |s| s.energy_density = f64::NAN),
+    ];
+    for (what, edit) in cases {
+        let c = config_with(edit);
+        let err = Fauna::try_new(c).expect_err("a refusable field").to_string();
+        assert!(err.contains(what) || err.contains("body_min"), "{what}: {err}");
+    }
+    // One step per tick at least, however small the period.
+    assert_eq!(SpeciesConfig::frondgrazer().step_period_ticks(), 20);
+    let mut sc = SpeciesConfig::frondgrazer();
+    sc.step_period_s = 1e-9;
+    assert_eq!(sc.step_period_ticks(), 1);
+}
+
+/// The snapshot round-trips, and a snapshot of another schema is refused rather than
+/// migrated (`always-fresh-never-migrate`).
+#[test]
+fn the_snapshot_round_trips_and_another_schema_is_refused() {
+    let world = plain(6, 2, 0.3, 5);
+    let mut flora = Flora::new(FloraConfig::default());
+    turf(&mut flora, &world, 3);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    grazer(&mut fauna, &world, 2, 0.02);
+    for _ in 0..5 {
+        fauna.step(&world, &mut flora);
+    }
+
+    let bytes = fauna.save();
+    let back = Fauna::load(&bytes).expect("its own bytes");
+    assert_eq!(back.view().animals, fauna.view().animals);
+    assert_eq!(back.view().ledger, fauna.view().ledger);
+    assert_eq!(back.tick(), fauna.tick());
+
+    let mut other = bytes.clone();
+    other[0] = other[0].wrapping_add(1);
+    let err = format!("{:#}", Fauna::load(&other).expect_err("another tag is refused"));
+    assert!(err.contains("schema") || err.contains("corrupt"), "{err}");
+}

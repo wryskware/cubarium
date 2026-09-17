@@ -92,6 +92,14 @@
 //! theirs; and within one cell the plant is stamped **before** the water, so a trunk
 //! standing in a pool is submerged under the water's blend instead of painted over it.
 //!
+//! # Animals
+//!
+//! The same, one layer later: an animal is voxels too ([`super::animal`]), stamped in this
+//! traversal at each cell's own `(x, y, z)`, after the plant of its cell and before that
+//! cell's water. Until the art direction lands it is an **interim** glyph — a 2x1x2 block
+//! in a placeholder colour — and the presenter draws it with the plainest stamp in this
+//! file on purpose.
+//!
 //! Terrain's own face culling never consults the plants, and it does not need to: a
 //! plant is opaque and always draws after whatever it covers, so the only thing a cull
 //! would save is work. The one test a plant cell does make is whether the cell above it
@@ -106,11 +114,13 @@ use std::sync::LazyLock;
 use cube_proto::Face;
 use cubarium_render::Canvas;
 use cubarium_voxel::{Material, VoxelView};
+use cubarium_voxel_fauna::FaunaView;
 use cubarium_voxel_flora::FloraView;
 
 use crate::present::{mix, srgb_linear};
 
 use super::VoxelConfig;
+use super::animal::{AnimalPart, Animals};
 use super::project::Projection;
 use super::stand::{Part, Stands};
 
@@ -286,6 +296,9 @@ pub struct VoxelPresenter {
     roof: Vec<u16>,
     /// The frame's stands, as voxels. Rebuilt per frame beside the roof map.
     stands: Stands,
+    /// The frame's animals, as voxels, on the same grid and in the same traversal. Empty
+    /// for a run with no animal layer, which is every run before voxel round 5c.
+    animals: Animals,
 }
 
 impl VoxelPresenter {
@@ -296,6 +309,7 @@ impl VoxelPresenter {
             said_cropped: false,
             roof: Vec::new(),
             stands: Stands::empty(0, 0, 0),
+            animals: Animals::empty(0, 0, 0),
         }
     }
 
@@ -309,6 +323,21 @@ impl VoxelPresenter {
     /// terrain and the water — see the module header. A run with no plants passes an
     /// empty view and pays one branch per voxel for it.
     pub fn draw(&mut self, view: &VoxelView<'_>, flora: FloraView<'_>, canvas: &mut Canvas) {
+        self.draw_with_fauna(view, flora, None, canvas);
+    }
+
+    /// The same frame with an animal layer in it: the bodies are stamped into the same
+    /// traversal as the terrain, the water and the plants, from their own occupancy grid
+    /// ([`super::animal`]), each cell where a solid block at its own `(x, y, z)` would be.
+    /// `None` is a run with no fauna and is what [`VoxelPresenter::draw`] passes, so a
+    /// caller that has no animals draws exactly the picture it drew before.
+    pub fn draw_with_fauna(
+        &mut self,
+        view: &VoxelView<'_>,
+        flora: FloraView<'_>,
+        fauna: Option<FaunaView<'_>>,
+        canvas: &mut Canvas,
+    ) {
         if self.proj.cropped && !self.said_cropped {
             self.said_cropped = true;
             eprintln!(
@@ -328,6 +357,8 @@ impl VoxelPresenter {
         self.build_roof(view);
         self.stands.rebuild(view, flora);
         let plants = !self.stands.is_empty();
+        self.animals.rebuild(view, fauna);
+        let beasts = !self.animals.is_empty();
 
         for z in (0..p.depth).rev() {
             let col = z as usize * p.width as usize;
@@ -357,6 +388,14 @@ impl VoxelPresenter {
                     let part = if plants { self.stands.at(x, i64::from(y), z) } else { Part::None };
                     if part != Part::None {
                         self.plant(view, canvas, surf, x, y, z, part, shade());
+                    }
+                    // The animal after the plant in its own cell — a body standing in a
+                    // turf covers the turf — and before the water, so one standing in a
+                    // pool is submerged under the water's blend like everything else.
+                    let beast =
+                        if beasts { self.animals.at(x, i64::from(y), z) } else { AnimalPart::None };
+                    if beast != AnimalPart::None {
+                        self.animal(view, canvas, surf, x, y, z, beast, shade());
                     }
                     let free = view.free_at(x, y, z) as f32;
                     if free > WATER_EPSILON {
@@ -608,6 +647,58 @@ impl VoxelPresenter {
                 let hz = self.haze_at(zf);
                 for dx in 0..cols {
                     let (_, cap) = column(dx);
+                    surf.put(canvas, c0 + dx, r0 - rise + dy, hazed(cap, hz));
+                }
+            }
+        }
+    }
+
+    /// One cell of an animal's **interim** glyph: a flat block in the placeholder colour,
+    /// with the lit rim and the cap a solid plant cell gets, and nothing else.
+    ///
+    /// Deliberately the plainest stamp in this file. There is no cylinder, no silhouette
+    /// edge, no facing and no fill, because the interim glyph says only *an animal is
+    /// here*: the look of a consumer is Wrysk's art-direction thread
+    /// (`super::animal`'s header), and this is the hook it will replace.
+    #[allow(clippy::too_many_arguments)]
+    fn animal(
+        &self,
+        view: &VoxelView<'_>,
+        canvas: &mut Canvas,
+        surf: Surface,
+        x: i64,
+        y: u32,
+        z: u32,
+        part: AnimalPart,
+        shade: f32,
+    ) {
+        let Some(style) = self.animals.style(part) else { return };
+        let p = self.proj;
+        let (s, rise) = (p.s as i32, p.rise as i32);
+        let yi = i64::from(y);
+        let haze = self.haze_at(z as f32);
+        let (c0, r0, w, _) = p.front_rect(x, y, z);
+        let cols = w as i32;
+
+        // Whatever stands in the cell above closes this one's cap — terrain, a plant's
+        // block, or the rest of a taller animal, when there is ever one.
+        let covered_up = solid(view, x, yi + 1, z)
+            || self.stands.at(x, yi + 1, z).is_block()
+            || self.animals.at(x, yi + 1, z).is_block();
+        let front = style.wood;
+        let cap = plant_lit(front, shade);
+
+        for dy in 0..s {
+            let c = if dy == 0 && !covered_up { mix(front, cap, PLANT_RIM) } else { front };
+            for dx in 0..cols {
+                surf.put(canvas, c0 + dx, r0 + dy, hazed(c, haze));
+            }
+        }
+        if !covered_up {
+            for dy in 0..rise {
+                let zf = z as f32 + (rise - 1 - dy) as f32 / rise as f32;
+                let hz = self.haze_at(zf);
+                for dx in 0..cols {
                     surf.put(canvas, c0 + dx, r0 - rise + dy, hazed(cap, hz));
                 }
             }

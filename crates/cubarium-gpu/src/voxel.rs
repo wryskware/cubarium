@@ -73,6 +73,19 @@ pub const PART_CROWN: u8 = 2;
 pub const PART_CROWN_HEART: u8 = 3;
 pub const PART_SPROUT: u8 = 4;
 
+/// The **fauna** range of the same 3-bit field: `5..=7`, of which one is spoken for.
+///
+/// `PART_ANIMAL_INTERIM` is the interim glyph of `cubarium::voxel::animal` — a flat block
+/// in the style's `wood`, with the rim and the cap a solid plant cell gets and nothing
+/// else — so an animal rides the part/style path a plant already rides and this renderer
+/// needs no new pass and no new texture. The two ids above it are deliberately unspoken
+/// for: when the art direction says what a consumer looks like, its parts number from
+/// here, and `part` has room for them without a format change.
+pub const PART_ANIMAL_INTERIM: u8 = 5;
+/// The first part id of the fauna range, for a reader that wants to ask "is this an
+/// animal" rather than "which animal part is this".
+pub const PART_FAUNA_FIRST: u8 = PART_ANIMAL_INTERIM;
+
 /// One voxel, as the shader reads it: `R8G8B8A8_UINT`.
 ///
 /// * `r` — material id in bits 0–1, plant part class in bits 2–4;
@@ -1056,8 +1069,19 @@ mod tests {
             // Half a step of the 8-bit channel: the quantisation's whole error.
             assert!((t.free() - free).abs() <= 1.0 / 509.0, "{free} -> {}", t.free());
         }
-        // Every part class survives beside a full material and a top style index.
-        for part in [PART_NONE, PART_TRUNK, PART_CROWN, PART_CROWN_HEART, PART_SPROUT] {
+        // Every part class survives beside a full material and a top style index — the
+        // fauna range included, and the two ids past it that nothing draws yet, because
+        // the field has to hold what the art direction will put there.
+        for part in [
+            PART_NONE,
+            PART_TRUNK,
+            PART_CROWN,
+            PART_CROWN_HEART,
+            PART_SPROUT,
+            PART_ANIMAL_INTERIM,
+            6,
+            7,
+        ] {
             let t = VoxelTexel::pack(2, part, 1.0, false, 1.0, 255);
             assert_eq!((t.material(), t.part(), t.style()), (2, part, 255));
             assert_eq!((t.free(), t.pore()), (1.0, 1.0));

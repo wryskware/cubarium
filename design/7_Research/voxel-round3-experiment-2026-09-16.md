@@ -1198,3 +1198,148 @@ outcome and does not separate them); whether `carrion_decomposition` 0.005 /s or
 rate is a reasonable number (nothing has measured either, and no result here depends on the
 first); and any arm-to-arm difference smaller than the water-and-shade coupling that already
 moves untouched species in the fourth decimal by 400 s.
+
+## Round 5c — 2026-09-17
+
+The first animal (package O): a new crate `cubarium-voxel-fauna` holding the **frondgrazer**,
+a heuristic ground browser that stands on a support face, crops through round 5a's bounded
+withdrawals, walks toward the best food it can sense, breeds out of its own reserve and hands
+its body back as carrion. One command, two arms:
+
+```text
+cargo run --release -p cubarium-voxel-fauna --example grazed -- grazed 400 4
+```
+
+**A probe, not a study, and it claims nothing about a population.** One seed, one landform,
+one grazer count, one introduction time, no replication and no dose series. Astra's round 7
+left population targets and carrying capacity unclaimed and nothing here takes them: what is
+measured is whether every quantity an animal spends is **paid and observable**, and whether
+the two layers' ledgers close against each other.
+
+Conditions, both arms: the default 128 × 48 × 24 voxels of 0.25 m, `seed` 1, `noise_seed` 0,
+rain 2e-4 m/s with the outlet open, 1,000 warm-up ticks and then 8,000 coupled ticks (400 s).
+Eight founders each of **springturf and bloomcrown** at half their own `wood_max`, placed by
+this harness's own declared rule — each species' gate-passing skyline sites, in skyline order,
+strided — which is *not* `two_producers.rs`'s `Habitat` table and is a backlog row
+(`design/backlog.md` §1). The two arms are **separate `World` and `Flora` instances** from the
+same seed, and the run asserts their founder lists are identical rather than assuming it, so
+an arm-to-arm difference is the treatment reaching the producers through that arm's own water
+table, shade field and germination lotteries, and never a coupling between arms.
+
+The treatment: at the halfway point (200 s), **four** grazers are introduced at `body_max`
+0.05 with a full reserve on four declared gate-passing **open-soil** faces — `(4,0)y12`,
+`(14,6)y12`, `(23,6)y12`, `(34,6)y12` — and nothing else changes. Each animal's numbers are
+the untuned placeholders of `SpeciesConfig::frondgrazer`.
+
+**Wall time: 136.8 s for two arms of 400 coupled seconds** (8,000 ticks each, plus each arm's
+own generation and 1,000 warm-up ticks), on this machine.
+
+### The producers, both arms
+
+Stands / foliage / reserve / wood, summed per species:
+
+| t (s) | arm | springturf | bloomcrown |
+| --- | --- | --- | --- |
+| 0 | plant-only | 8 / 0.4800 / 0.1200 / 0.2400 | 8 / 4.8000 / 1.2000 / 2.4000 |
+| 100 | plant-only | 8 / 0.5331 / 0.0666 / 0.2666 | 8 / 4.7242 / 1.1671 / 2.4245 |
+| 200 | plant-only | 8 / 0.5886 / 0.0736 / 0.2945 | 8 / 4.7413 / 1.1949 / 2.5551 |
+| 300 | plant-only | 9 / 0.5812 / 0.0643 / 0.3049 | 8 / 4.7955 / 1.2542 / 2.7555 |
+| 400 | plant-only | 10 / 0.5333 / 0.0257 / 0.3020 | 11 / 4.8993 / 1.3096 / 2.9055 |
+| 0 | grazed | 8 / 0.4800 / 0.1200 / 0.2400 | 8 / 4.8000 / 1.2000 / 2.4000 |
+| 100 | grazed | 8 / 0.5331 / 0.0666 / 0.2666 | 8 / 4.7242 / 1.1671 / 2.4245 |
+| 200 | grazed | 8 / 0.5886 / 0.0736 / 0.2945 | 8 / 4.7413 / 1.1949 / 2.5551 |
+| 300 | grazed | 8 / 0.0011 / 0.0000 / 0.2647 | 8 / 1.7812 / 1.0468 / 2.6770 |
+| 400 | grazed | 8 / 0.0004 / 0.0000 / 0.2167 | 11 / 1.2304 / 0.5767 / 2.7548 |
+
+The arms are **identical to four decimals through 200 s**, which is what "the same conditioned
+world" means here: the animals arrive at 200 s and everything before that line is one run
+computed twice.
+
+### The animals
+
+| t (s) | animals | mean body | mean reserve | bites | steps | born | deaths |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | 0 | — | — | 0 | 0 | 0 | 0 |
+| 100 | 0 | — | — | 0 | 0 | 0 | 0 |
+| 200 | 4 | 0.05000 | 0.02500 | 0 | 0 | 0 | 0 |
+| 300 | 58 | 0.03116 | 0.00458 | 38,197 | 463 | 54 | 0 |
+| 400 | 79 | 0.02679 | 0.00313 | 51,833 | 648 | 75 | 0 |
+
+### What was eaten, by the species it came off
+
+| species | bites | organic |
+| --- | --- | --- |
+| bloomcrown | 45,448 | 4.106674 |
+| springturf | 6,385 | 0.623095 |
+
+**87 % of the intake came off the species round 5a's probe could never reach**, and that is
+the first result. The reach rule compares a crown's **absolute** height with the eater's own
+ceiling (`stand.y + crown_voxels <= from.y + reach.up`), so a bloomcrown whose crown sits two
+voxels over a `y13` face is out of reach from that face and in reach from a `y14` one. A
+scripted harvester standing on three fixed faces therefore ate no bloomcrown at all in round
+5a; a **walking** browser finds the face it can eat from, which is Astra's round-8 point
+measured rather than argued: what a consumer eats is a fact about where it stands, not a
+property of a preset. (The harness records the species of every bite but not the face it was
+taken from, so *which* faces did it is unattributed — a follow-up that wants that attribution
+has to record it.)
+
+### The three residuals, and the union of the two ledgers
+
+| arm | consumed − eaten | received − deposited | flora residual | fauna residual |
+| --- | --- | --- | --- | --- |
+| plant-only | 0 / 0 / 0 | 0 / 0 / 0 | −9.08e-13 of 12.2161 | 0 of 0 |
+| grazed | 0 / 0 / 0 | 0 / 0 / 0 | 3.17e-12 of 6.5157 | −1.03e-11 of 2.3638 |
+
+The union is **exactly zero in all three currencies**, not float noise, and that is by
+construction rather than by luck: `Flora::take_foliage` returns the `Taken` it books and the
+animal books the same value, so `consumed_organic_out == eaten_organic_in` to the bit, and a
+deposit is the same triplet seen from its two sides. Each layer's own residual is the same
+1e-12 relative float noise rounds 3, 4 and 5a reported, now with 4.729769 of organic matter,
+0.0959539 of mineral and 9.459538 of energy crossing between two layers that each account for
+it independently.
+
+### What the run says, in plain words
+
+1. **Every flow is paid, and the ledgers close together.** Four introduced bodies, 51,833
+   bites, 75 births, 648 steps and 4.73 of organic matter moved between the layers, with both
+   residuals at 1e-12 relative and the union at zero.
+2. **Four grazers stripped the meadow in 200 s and nothing died.** Springturf foliage went
+   from 0.5886 to 0.0004 — held at zero, not recovering — and bloomcrown's from 4.7413 to
+   1.2304 against a control that ended at 4.8993. No plant died in either arm: a withdrawal
+   takes `P` and death is `W < alive_min`, so a browser cannot kill a stand directly, only
+   take its income away (round 5a's finding, unchanged by an animal doing the taking). What
+   grazing did reach was the **wood**: springturf's fell 0.2945 → 0.2167 while the control's
+   rose to 0.3020, and bloomcrown's reserve fell 1.1949 → 0.5767 against 1.3096.
+3. **No animal died either, and the population quadrupled twice.** 4 → 58 → 79 with **zero
+   deaths**, because `maintenance_per_s` 0.001 on a body of 0.05 is 2.5e-6 per tick and a
+   full reserve is 0.025: an animal that stops eating has ~200 s of reserve before its body
+   starts paying and thousands of seconds before `body_min`. The 400 s window is therefore
+   **shorter than this placeholder's starvation time**, and the falling mean body (0.0500 →
+   0.0268) and mean reserve (0.0250 → 0.0031) are what the crash looks like *before* it
+   arrives. Nothing here measures whether it arrives, and nothing here is a viability claim.
+4. **Births are bounded by income and by nothing else.** There is no mating system, no
+   gestation and no refractory period this round (stated in the crate doc): an adult pays
+   `birth_cost` 0.01 out of its reserve whenever `body >= birth_body` 0.03 and the reserve
+   allows. So the population tracks the food the mouths can earn, with a lag of one body's
+   growth, which is exactly what 4 → 79 while the foliage went to zero is.
+5. **The producers' recruitment differed and this run cannot attribute it.** Five
+   establishments in the plant-only arm against three in the grazed one, and the grazed arm
+   ended with 8 springturf against the control's 10. A grazed world has less income and
+   should, if anything, recruit less; two lottery draws in one arm are not a mechanism.
+6. **Excretion never happened.** `n_tissue` 0.05 on `yield_fraction` 0.5 asks 0.025 of mineral
+   per unit eaten against a plant's own 0.02, so no bite ever carried excess mineral and the
+   only deposit in 400 s was 7.6e-6 of mineral. The litter-deposit path is tested with a
+   forced config (`tests/round5c.rs`) and is dead at the placeholders — a consequence of two
+   untuned numbers, reported and not tuned away.
+
+### Not established
+
+Anything about viability, carrying capacity or a population target. Whether this animal can
+persist — the run ends before its own starvation time, with zero deaths, which is not
+evidence either way. Whether four is a reasonable number of founders, whether the halfway
+introduction is a reasonable time, or whether any of the sixteen placeholders is a reasonable
+value: nothing measured any of them, and no result above depends on one. Which faces the
+bloomcrown bites were taken from. And anything about the *look* of a consumer: the presenter
+draws an interim 2×1×2 block in a placeholder colour, the art direction is Wrysk's own thread,
+and the `--sink gpu` path does not draw animals at all yet because the staging that would feed
+it lives in `crates/cubarium/src/sink/**`, which package O was told not to touch.
