@@ -825,13 +825,17 @@ fn seed_bank(flora: &mut Flora, world: &World) {
         let Some(species) = lottery(world_seed, site_index, tick, &candidates) else { continue };
         let sc = config.species(species);
         let [w_frac, p_frac, q_frac] = sc.propagule_split;
-        // Exactly one package, oldest bins first, with each bin's own mineral in
-        // proportion to what it gave up.
-        let (organic, mineral) = spend_bank(g, species, package_of(sc));
+        // The slot first and the bank second: a bank must never be spent on a birth that
+        // does not happen. The loop skipped occupied sites above and nothing inserts a
+        // stand on *this* site in between, so this is unreachable rather than a real
+        // branch — and it is in this order so that it stays harmless if that ever changes.
         let at = match stands.binary_search_by_key(&g.site, |s| s.site) {
             Ok(_) => continue,
             Err(at) => at,
         };
+        // Exactly one package, oldest bins first, with each bin's own mineral in
+        // proportion to what it gave up.
+        let (organic, mineral) = spend_bank(g, species, package_of(sc));
         let id = ledger.births;
         ledger.births += 1;
         stands.insert(
