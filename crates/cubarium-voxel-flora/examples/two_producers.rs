@@ -110,6 +110,15 @@ enum Habitat {
     /// height — is above the one this species' own founder would have there, which means
     /// this species is planted after the others. Velvetpad.
     UnderACrown,
+    /// Faces whose **mycelium box holds a declared log**. Glowcap.
+    ///
+    /// The gate does the whole of the filtering here, and it is the only habitat rule of
+    /// the six for which that is true: a saprotroph's establishment predicate reads the
+    /// dead wood of its own box, so the eligible pool this rule is handed already *is* the
+    /// set of faces with something to eat, and all the rule adds is the keyed spread
+    /// `OpenSoil` uses. A fresh world holds no dead wood at all, so `community` lays the
+    /// logs down first with `DepositKind::DeadWood` and prints what it declared.
+    OnALog,
 }
 
 /// The table itself. One line per species, and the only place the harness says where a
@@ -121,6 +130,7 @@ fn habitat_of(species: Species) -> Habitat {
         Species::Springturf => Habitat::OpenSoil,
         Species::Stonecushion => Habitat::RockWithAPocket,
         Species::Velvetpad => Habitat::UnderACrown,
+        Species::Glowcap => Habitat::OnALog,
     }
 }
 
@@ -786,6 +796,19 @@ fn order_for(
             // non-soil face in this pool *is* a face with a soil pocket in reach.
             pool.retain(|s| view.material_at(s.x as i64, s.y, s.z) != cubarium_voxel::Material::Soil);
             pool.reverse();
+            pool
+        }
+        Habitat::OnALog => {
+            // Everything that makes a face a glowcap's face is already in `pool`: the
+            // substrate gate passed on it, which is what "there is a log here" means. Drop
+            // what is occupied or reserved, then take the same keyed spread `OpenSoil`
+            // takes, so the founders are a sample of the declared logs and not the first
+            // few in site order.
+            pool.retain(|s| {
+                flora.view().stand_at(*s).is_none()
+                    && !planted.iter().any(|f| f.x == s.x && f.z == s.z)
+            });
+            pool.sort_by_key(|s| (site_key(species, *s), s.x, s.z));
             pool
         }
         Habitat::UnderACrown => {

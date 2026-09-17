@@ -232,6 +232,9 @@ fn species_mut(config: &mut FloraConfig, species: Species) -> &mut SpeciesConfig
         Species::Springturf => &mut config.springturf,
         Species::Stonecushion => &mut config.stonecushion,
         Species::Velvetpad => &mut config.velvetpad,
+        // Round 5b's sixth species. The one line a new `Species` variant forces on an
+        // exhaustive match; nothing this file asserts changed.
+        Species::Glowcap => &mut config.glowcap,
     }
 }
 

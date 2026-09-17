@@ -59,9 +59,14 @@ pub use step::can_establish;
 /// `Gates::passes()` is exactly `can_establish`.
 pub use step::{establishment_gates, establishment_gates_on_substrate, Gates};
 
-/// The producers of the voxel ecology, each one a **role**: see the preset that carries
-/// its numbers ([`SpeciesConfig::bloomcrown`] and the four after it) for the sentence of
+/// The **stands** of the voxel ecology, each one a role: see the preset that carries its
+/// numbers ([`SpeciesConfig::bloomcrown`] and the five after it) for the sentence of
 /// ecology the numbers encode.
+///
+/// Five of the six are producers. The sixth, [`Species::Glowcap`], is a
+/// [`Trophic::Saprotroph`]: the same stand, the same lifecycle, and dead wood where the
+/// light was. "Species" is therefore the crate's word for a kind of stand and not a claim
+/// that they are all plants.
 ///
 /// The first two are the pair of the first coupled experiment and keep slots 0 and 1, so
 /// that a [`FloraLedger`] array read by index still means what it meant in round 3.
@@ -82,6 +87,9 @@ pub enum Species {
     /// The moist, aerated understory pad: shade-tolerant, damp but not waterlogged soil,
     /// low and broad.
     Velvetpad,
+    /// The wood fungus of the decomposer grove: **not a plant**. It earns nothing from
+    /// light, eats the dead wood under and around it, and fruits one cap.
+    Glowcap,
 }
 
 impl Species {
@@ -89,12 +97,13 @@ impl Species {
     /// [`FloraLedger`]. Derived from [`Species::ALL`] so the two can never disagree.
     pub const COUNT: usize = Species::ALL.len();
 
-    pub const ALL: [Species; 5] = [
+    pub const ALL: [Species; 6] = [
         Species::Bloomcrown,
         Species::Umbrellafrond,
         Species::Springturf,
         Species::Stonecushion,
         Species::Velvetpad,
+        Species::Glowcap,
     ];
 
     /// This species' slot in the per-species arrays of [`FloraLedger`], and the same index
@@ -106,6 +115,7 @@ impl Species {
             Species::Springturf => 2,
             Species::Stonecushion => 3,
             Species::Velvetpad => 4,
+            Species::Glowcap => 5,
         }
     }
 
@@ -116,6 +126,7 @@ impl Species {
             Species::Springturf => "springturf",
             Species::Stonecushion => "stonecushion",
             Species::Velvetpad => "velvetpad",
+            Species::Glowcap => "glowcap",
         }
     }
 
@@ -997,6 +1008,105 @@ impl SpeciesConfig {
         }
     }
 
+    /// **Glowcap — the wood fungus of the decomposer grove.** The biosphere's §5 branch 2
+    /// and its §6 substrate request: "non-photosynthetic stand metabolism: reuse stand
+    /// location/lifecycle structure, replace income and substrate rules; no light income".
+    /// A mycelium in a log, a cap on top of it, and no leaves anywhere: `wood` is mycelium,
+    /// `foliage` is fruiting caps, and the reserve is the reserve.
+    ///
+    /// The role as the numbers state it: it lives on the dead wood in its own box and
+    /// nothing else, it earns nothing from light and needs none to start, it wants a log
+    /// that is damp but not drowned, it is small and cheap, and it spreads one hop — along
+    /// the log, not across the world.
+    ///
+    /// **Every number is an untuned placeholder** (`design/backlog.md` §1), chosen to
+    /// encode that sentence and nothing else:
+    ///
+    /// - **Income.** `substrate_uptake_per_s` 0.02 per unit of mycelium per second and
+    ///   `substrate_yield` 0.4: a fungus at full moisture earns `0.4 · 0.02 · W = 0.008 · W`
+    ///   of tissue per second against maintenance plus cap replacement
+    ///   `0.0002 · W + 1.2 · 0.001 · 2 · W = 0.0026 · W`, a **3.08× margin** — solvent on a
+    ///   log with wood in it, and starving the moment the log or the moisture runs out,
+    ///   which is the whole of what the role claims. The yield is the one number with a
+    ///   literature shape to it (a microbial growth yield is a fraction, not a fifth and not
+    ///   nine tenths) and it is still a placeholder: nothing here measured it.
+    ///   `assimilation` is **0.0**, so the species earns nothing from light even if some
+    ///   future caller reaches the `Photo` branch with it.
+    /// - **The substrate gate.** `establish_substrate_min` 0.02 is about one spore package's
+    ///   worth of wood (`alive_min / w_frac` = 0.025): a log has to hold roughly what the
+    ///   stand it would feed is made of. Below it the box is not a log any more and the gate
+    ///   shuts, which is how a decomposer grove *ends*.
+    /// - **Water, the three thresholds together.** `establish_pore_min` 0.1 and
+    ///   `establish_saturated_max` 0.5 are the brief's "pore between the species' floor and
+    ///   its saturation ceiling", read in the model's own terms — the existing pore gate is
+    ///   the floor and the existing aeration gate is the ceiling, and **no new rule was
+    ///   added**. `wilt_pore` 0.1 and `sat_pore` 0.4: full uptake on ordinary drained soil,
+    ///   nothing at all on a dry one, because `μ` multiplies uptake exactly as it multiplies
+    ///   assimilation. `drown_depth_m` 0.05 — a cap under a pool is finished.
+    ///
+    ///   **A stated limitation, and the one this preset is most likely to be wrong about.**
+    ///   The ceiling is a *germination* ceiling: a spore will not take a waterlogged log,
+    ///   while the mycelium already in one pays nothing, because a saprotroph's uptake reads
+    ///   `μ` and not `1 − aeration_stress` (the brief names only `μ`, and `step`'s `feed`
+    ///   says so). That is exactly the germination-versus-adult-tolerance assumption
+    ///   `establish_saturated_max`'s own doc records for the plants (Astra R4.6), pointing
+    ///   the other way for this species. Its `stress_rate_per_s` 0.1 and `relax_rate_per_s`
+    ///   0.05 are therefore **inert on the income** and kept only because the stress is
+    ///   still tracked and drawn.
+    /// - **The box.** `rooting_depth` 1 and `rooting_radius` 1: the mycelium box is the nine
+    ///   support faces of its own level, its own included, and it reaches no deeper — so the
+    ///   root box's downward-only asymmetry cannot arise for this species. Water is read off
+    ///   the *soil voxels* of the same box, as every stand's is, which is why a glowcap on
+    ///   bare rock has `μ = 0` and starves however much wood is on the rock: one water read
+    ///   for every stand is the model's rule and a fungus is not exempted from it here.
+    ///   `transpiration_m3_per_s` **0.0** — it reads the moisture and withdraws nothing, so
+    ///   a fungus takes no water away from the plants it lives among.
+    /// - **Small and cheap.** `wood_max` 0.1, `alive_min` 0.01, `donor_min` 0.05 —
+    ///   stonecushion's body; `foliage_rate` 0.004 and `wood_rate` 0.002 are twice the base,
+    ///   a mycelium that fills a log fairly quickly; `propagule_rate` 0.0005 is two and a
+    ///   half times the base, so one 0.025 package is **60 s** of a fully funded donor's
+    ///   saving — the fastest of the six, because a fruiting body's whole job is spores.
+    /// - **Spread.** `hop` 1: the eight faces around it. A grove follows its log.
+    /// - **Shape.** `crown_height_voxels` `[0.5, 0.5]` and `crown_radius_voxels`
+    ///   `[0.5, 0.5]`: **one cell, at every size**, on the face above its support. That is
+    ///   the interim glyph and not a design — the art direction of the voxel world is its
+    ///   own thread, and `crates/cubarium/src/voxel/stand.rs` names the palette interim too.
+    ///   One consequence in the model: a crown top of `y + 0.5` is the lowest of the six, so
+    ///   a glowcap shades nothing at all, and everything shades it — which costs it nothing,
+    ///   because it does not eat light.
+    pub fn glowcap() -> SpeciesConfig {
+        SpeciesConfig {
+            trophic: Trophic::Saprotroph,
+            substrate_uptake_per_s: 0.02,
+            substrate_yield: 0.4,
+            establish_substrate_min: 0.02,
+            // No light income at all, and no light gate (`step`'s `gates` opens `light_ok`
+            // for a saprotroph whatever this says; 0.0 keeps the reported number honest).
+            assimilation: 0.0,
+            establish_light_min: 0.0,
+            rooting_depth: 1,
+            rooting_radius: 1,
+            wilt_pore: 0.1,
+            sat_pore: 0.4,
+            establish_pore_min: 0.1,
+            establish_saturated_max: 0.5,
+            stress_rate_per_s: 0.1,
+            relax_rate_per_s: 0.05,
+            drown_depth_m: 0.05,
+            transpiration_m3_per_s: 0.0,
+            hop: 1,
+            wood_max: 0.1,
+            alive_min: 0.01,
+            donor_min: 0.05,
+            foliage_rate: 0.004,
+            wood_rate: 0.002,
+            propagule_rate: 0.0005,
+            crown_height_voxels: [0.5, 0.5],
+            crown_radius_voxels: [0.5, 0.5],
+            ..SpeciesConfig::v1_base()
+        }
+    }
+
     /// Whether this preset can produce a living stand at all, checked where the numbers
     /// enter the system rather than where they first go wrong (Astra R6.2 asks for exactly
     /// this list: a finite nonnegative split summing to one, a positive wood fraction,
@@ -1147,6 +1257,7 @@ pub struct FloraConfig {
     pub springturf: SpeciesConfig,
     pub stonecushion: SpeciesConfig,
     pub velvetpad: SpeciesConfig,
+    pub glowcap: SpeciesConfig,
     /// Canopy attenuation: a taller stand whose crown covers a site multiplies the light
     /// reaching that site by `exp(-shade_k · P / crown_area)`.
     pub shade_k: f64,
@@ -1189,6 +1300,7 @@ impl Default for FloraConfig {
             springturf: SpeciesConfig::springturf(),
             stonecushion: SpeciesConfig::stonecushion(),
             velvetpad: SpeciesConfig::velvetpad(),
+            glowcap: SpeciesConfig::glowcap(),
             shade_k: 1.5,
             decomposition: 0.001,
             wood_decomposition: 0.0001,
@@ -1207,6 +1319,20 @@ impl FloraConfig {
             Species::Springturf => &self.springturf,
             Species::Stonecushion => &self.stonecushion,
             Species::Velvetpad => &self.velvetpad,
+            Species::Glowcap => &self.glowcap,
+        }
+    }
+
+    /// The same table, mutably: a harness or a fixture that has a [`Species`] in hand and
+    /// wants to change that species' preset, without a sixth copy of the match.
+    pub fn species_mut(&mut self, s: Species) -> &mut SpeciesConfig {
+        match s {
+            Species::Bloomcrown => &mut self.bloomcrown,
+            Species::Umbrellafrond => &mut self.umbrellafrond,
+            Species::Springturf => &mut self.springturf,
+            Species::Stonecushion => &mut self.stonecushion,
+            Species::Velvetpad => &mut self.velvetpad,
+            Species::Glowcap => &mut self.glowcap,
         }
     }
 

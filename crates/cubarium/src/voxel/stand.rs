@@ -1,5 +1,6 @@
-//! Turning a [`FloraView`]'s stands into voxels the presenter can draw, and the five
-//! species' palettes.
+//! Turning a [`FloraView`]'s stands into voxels the presenter can draw, and the six
+//! species' palettes — five of which are decided and one of which, the glowcap's, is
+//! explicitly **interim** (see `GLOWCAP_INTERIM_CAP_SRGB`).
 //!
 //! # Why an occupancy grid and not a sprite list
 //!
@@ -105,6 +106,33 @@ pub const PAD_WOOD_SRGB: u32 = 0x002B_1B6B;
 pub const PAD_CROWN_SRGB: u32 = 0x007B_5CF0;
 /// Velvetpad's centre: periwinkle.
 pub const PAD_HEART_SRGB: u32 = 0x00C3_B4FF;
+
+// --- The glowcap's interim glyph -----------------------------------------------------
+//
+// **A placeholder, and named one.** The art direction of the voxel world is Wrysk's own
+// thread (`design/handoffs/voxel-art-direction-handoff-2026-09-17.md`), which will produce
+// `design/voxel-art-direction.md`; the agent-made consumer study at 68a8215 is **paused and
+// not canon** and is deliberately not implemented here. Until that doc lands, a glowcap is
+// one cell in one placeholder colour on the face above its support, and a small follow-up
+// package replaces this with whatever the art direction specifies.
+//
+// The colour is chosen for one reason only — to be unmistakably *not* one of the five, so
+// that a fungus in a screenshot is legible as a sixth thing. Acid yellow-green is the one
+// direction of the Outrun family none of the five producers uses, and it is the farthest of
+// the candidates measured from all five crowns in linear light (0.70 to umbrellafrond's
+// turquoise, the nearest of them, against the five's own closest pair at 0.45):
+// `the_interim_glowcap_glyph_is_one_cell_in_its_own_placeholder_colour` in this module's
+// tests pins the distance and the single cell.
+
+/// Glowcap mycelium: a dim olive. A one-cell stand has no trunk, so this shows only as the
+/// colour a spent cap falls back toward. **Interim.**
+pub const GLOWCAP_INTERIM_WOOD_SRGB: u32 = 0x004A_5A2E;
+/// The glowcap's cap: acid yellow-green, the one hue none of the five producers holds.
+/// **Interim** — a placeholder glyph colour, not an art-direction decision.
+pub const GLOWCAP_INTERIM_CAP_SRGB: u32 = 0x00C8_F03C;
+/// The cap's centre, which for a one-cell stand is the whole of it: pale bioluminescent
+/// green. **Interim.**
+pub const GLOWCAP_INTERIM_HEART_SRGB: u32 = 0x00EF_FFC0;
 
 /// How far a crown with no foliage left falls back toward its own wood colour. Crown
 /// fill is `P / (α·W)`, so a stand that has shed its canopy reads as bare structure
@@ -365,6 +393,10 @@ fn palette(species: Species) -> (u32, u32, u32) {
         Species::Springturf => (TURF_WOOD_SRGB, TURF_CROWN_SRGB, TURF_HEART_SRGB),
         Species::Stonecushion => (CUSHION_WOOD_SRGB, CUSHION_CROWN_SRGB, CUSHION_HEART_SRGB),
         Species::Velvetpad => (PAD_WOOD_SRGB, PAD_CROWN_SRGB, PAD_HEART_SRGB),
+        // Interim, and named so: see the block above the constants.
+        Species::Glowcap => {
+            (GLOWCAP_INTERIM_WOOD_SRGB, GLOWCAP_INTERIM_CAP_SRGB, GLOWCAP_INTERIM_HEART_SRGB)
+        }
     }
 }
 
