@@ -1139,3 +1139,108 @@ fn the_root_box_sees_soil_only_so_saturated_rock_is_neither_wet_nor_waterlogged(
     );
     assert_residuals(&flora, "after 200 ticks over saturated rock");
 }
+
+/// **FINDING.** Umbrellafrond's tolerance of a saturated root zone is a *delay*, not a
+/// tolerance. Its `f*` is 0.8333, so a root box saturated to the last voxel — which is
+/// exactly what the basin the species is for looks like — is over its threshold too, and
+/// it ramps to stress 1 and earns nothing, 20 times more slowly than bloomcrown but just
+/// as completely. `establish_saturated_max` of 1.0 lets it germinate there first.
+///
+/// Measured on a wholly saturated 18-voxel box with `μ = 1` and light 1 throughout:
+/// stress 0.5 at tick 1,000 (50 s), exactly 1.0 by tick 2,000 (100 s), and from there not
+/// one further unit of organic matter fixed. Bloomcrown reaches the same place at tick
+/// 100 (5 s). Correction 2 was meant to make the basin cost bloomcrown something and cost
+/// umbrellafrond nothing; at full saturation it costs them both everything, on two
+/// different clocks.
+///
+/// H's own aeration test reads umbrellafrond's stress after 150 ticks and finds it under
+/// 0.1, which is true — and is 1/13th of the way along this ramp.
+#[test]
+fn umbrellafrond_also_drowns_in_a_wholly_saturated_root_box_only_twenty_times_slower() {
+    let sc = SpeciesConfig::umbrellafrond();
+    let f_star = sc.relax_rate_per_s / (sc.stress_rate_per_s + sc.relax_rate_per_s);
+    assert!((f_star - 0.05 / 0.06).abs() < 1e-12, "the placeholders this test reads: f* = {f_star}");
+    assert!(f_star < 1.0, "a wholly saturated box is over even umbrellafrond's threshold");
+
+    let mut world = box_world(18);
+    let mut flora = Flora::new(FloraConfig::default());
+    let here = at(2, 1);
+    assert!(flora.apply(&world, Command::Seed { x: 2, z: 1, species: Species::Umbrellafrond, wood: 0.1 }));
+
+    // H's own reading point: after 150 ticks it looks tolerant.
+    run(&mut flora, &mut world, 150);
+    let early = *flora.view().stand_at(here).expect("alive");
+    assert!(early.aeration_stress < 0.1, "at 150 ticks it is only {}", early.aeration_stress);
+    assert_eq!(early.moisture, 1.0, "μ is not what is happening here");
+
+    // Half way, at 1,000 ticks.
+    run(&mut flora, &mut world, 850);
+    let half = flora.view().stand_at(here).expect("alive").aeration_stress;
+    assert!((half - 0.5).abs() < 0.01, "at 1,000 ticks the stress is {half}, not about 0.5");
+
+    // And pinned at the ceiling by 2,000.
+    run(&mut flora, &mut world, 1050);
+    let s = *flora.view().stand_at(here).expect("still alive, just earning nothing");
+    assert_eq!(s.aeration_stress, 1.0, "at 2,000 ticks the stress is {}", s.aeration_stress);
+    assert_eq!(s.light, 1.0, "open sky");
+    assert_eq!(s.moisture, 1.0, "wetter than sat_pore: water is not the limit");
+
+    let fixed = flora.view().ledger.fixed_in;
+    run(&mut flora, &mut world, 200);
+    assert_eq!(
+        flora.view().ledger.fixed_in, fixed,
+        "a fully stressed umbrellafrond went on fixing light"
+    );
+    assert_eq!(
+        flora.view().stand_at(here).unwrap().wood,
+        s.wood,
+        "and it went on growing"
+    );
+    assert_residuals(&flora, "after an umbrellafrond drowned in its own habitat");
+}
+
+/// The same finding on the fixture H's own aeration test uses, so it cannot be an artifact
+/// of hand-set pore fractions: a water table charged above the support face, the world
+/// stepped every tick, and no rain. At 150 coupled ticks umbrellafrond's stress is under
+/// 0.1; at 2,100 it is exactly 1.0 and it has stopped earning.
+#[test]
+fn the_same_holds_on_a_water_table_basin_with_the_world_stepping() {
+    let config = VoxelConfig {
+        width: 6,
+        height: 8,
+        depth: 1,
+        voxel_m: 1.0,
+        seed: 11,
+        initial_aquifer_head_m: 3.0,
+        ..VoxelConfig::default()
+    };
+    let mut world = World::empty(config);
+    for x in 0..6i64 {
+        for y in 1..=2u32 {
+            fill(&mut world, x, y, 0, Material::Soil, 0.98);
+        }
+    }
+    let mut flora = Flora::new(FloraConfig::default());
+    assert!(flora.apply(&world, Command::Seed { x: 2, z: 0, species: Species::Umbrellafrond, wood: 0.1 }));
+
+    let coupled = |flora: &mut Flora, world: &mut World, ticks: u32| {
+        for _ in 0..ticks {
+            world.step();
+            flora.step(world);
+        }
+    };
+    coupled(&mut flora, &mut world, 150);
+    let early = flora.view().stand_at(site(2)).expect("alive").aeration_stress;
+    assert!(early < 0.1, "at 150 coupled ticks it is {early}, which is where H reads it");
+
+    coupled(&mut flora, &mut world, 1950);
+    let s = *flora.view().stand_at(site(2)).expect("alive, earning nothing");
+    assert_eq!(world.view().water_depth_m(2, 2, 0), 0.0, "this is wet soil, not a pool");
+    assert_eq!(flora.view().ledger.deaths, 0, "drowning by depth is not what this is");
+    assert_eq!(s.moisture, 1.0, "water is not the limit");
+    assert_eq!(s.aeration_stress, 1.0, "at 2,100 coupled ticks the stress is {}", s.aeration_stress);
+    let fixed = flora.view().ledger.fixed_in;
+    coupled(&mut flora, &mut world, 100);
+    assert_eq!(flora.view().ledger.fixed_in, fixed, "it went on fixing light");
+    assert_residuals(&flora, "after an umbrellafrond drowned on a water-table basin");
+}
