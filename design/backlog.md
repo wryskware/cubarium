@@ -102,7 +102,34 @@ desk viewer sees more than one); whether presentation lighting follows the
 season or stays constant (roadmap §5 keeps it constant); whether the player
 chooses a climate at world creation or unlocks weather control later.
 
-## 5. Deferred decisions
+## 5. Really good lighting on high-end PCs (feature to explore)
+
+Wrysk, 2026-09-16: filtered sunlight through canopy, volumetric fog, raycast
+shadows. Go ham on high-end PCs. The Tachyon panel and the cube keep the flat
+pixel-art path; this is a second presentation tier for the desktop and, later,
+the game, drawn from the same voxel world.
+
+What the substrate already gives it: a true voxel volume with materials, free
+water per voxel, a water table, the geometric sky-visibility fan (the same
+hemisphere the ecology reads light from), canopy occupancy per stand with a real
+crown height and radius, and a fixed elevated-orthographic camera. A lighting
+pass has geometry to trace against; nothing has to be invented for it.
+
+Candidates, roughly in order of what each buys: sun direction with raycast
+shadows from terrain and crowns (the ecology's shade becomes visible, which the
+first-wave presenter cannot show); filtered light under canopy as dappled
+transmission rather than a flat tint; volumetric fog and haze that reads the
+basin's humidity and the pond; wet surfaces and water refraction; emissive
+glowcap light that is actually a light source; day and night once the ecology
+has a day. Keep the ecology's light model as the source of truth: the picture
+may shade more finely than the model, never differently.
+
+Constraints: pixel art is still the look, so the lighting pass shades the
+4 px per voxel picture rather than replacing it with 3D; the fixed camera keeps
+this tractable (a single view, precomputable visibility); the cube and the
+panel must never depend on it.
+
+## 6. Deferred decisions
 
 - Shoulder 0.85 vs 0.95: Wrysk does not want to tune now; 0.95 stays on the cube by env
   override, 0.85 stays the shipped default. Revisit when the GUI exists.
