@@ -74,7 +74,7 @@ pub struct VoxelConfig {
     pub haze: f32,
     /// Opacity of one voxel of free water, `0..=1`.
     pub water_alpha: f32,
-    pub world: WorldToml,
+    pub world: cubarium_voxel::Config,
 }
 
 impl Default for VoxelConfig {
@@ -85,65 +85,13 @@ impl Default for VoxelConfig {
             raster_height: 0,
             haze: 0.55,
             water_alpha: 0.5,
-            world: WorldToml::default(),
+            world: cubarium_voxel::Config::default(),
         }
     }
 }
 
 /// `[world]`: [`cubarium_voxel::Config`] with every field optional.
 ///
-/// The fields are restated rather than nesting the core's `Config` directly because that
-/// one has no serde defaults, so a partial `[world]` table would be refused for the
-/// fields it left out. The conversion below is the only place the two are tied together.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct WorldToml {
-    pub width: u32,
-    pub height: u32,
-    pub depth: u32,
-    pub voxel_m: f64,
-    pub seed: u64,
-    pub rain_m_per_s: f64,
-    pub evaporation_m_per_s: f64,
-    pub water_substeps: u32,
-}
-
-impl Default for WorldToml {
-    fn default() -> WorldToml {
-        WorldToml::from(&cubarium_voxel::Config::default())
-    }
-}
-
-impl From<&cubarium_voxel::Config> for WorldToml {
-    fn from(c: &cubarium_voxel::Config) -> WorldToml {
-        WorldToml {
-            width: c.width,
-            height: c.height,
-            depth: c.depth,
-            voxel_m: c.voxel_m,
-            seed: c.seed,
-            rain_m_per_s: c.rain_m_per_s,
-            evaporation_m_per_s: c.evaporation_m_per_s,
-            water_substeps: c.water_substeps,
-        }
-    }
-}
-
-impl From<&WorldToml> for cubarium_voxel::Config {
-    fn from(t: &WorldToml) -> cubarium_voxel::Config {
-        cubarium_voxel::Config {
-            width: t.width,
-            height: t.height,
-            depth: t.depth,
-            voxel_m: t.voxel_m,
-            seed: t.seed,
-            rain_m_per_s: t.rain_m_per_s,
-            evaporation_m_per_s: t.evaporation_m_per_s,
-            water_substeps: t.water_substeps,
-        }
-    }
-}
-
 /// Load a [`VoxelConfig`] from TOML.
 pub fn load_config(path: &Path) -> Result<VoxelConfig> {
     let text = std::fs::read_to_string(path)
@@ -171,7 +119,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             World::load(&bytes).with_context(|| format!("loading {}", path.display()))?
         }
         None => {
-            let world_cfg = cubarium_voxel::Config::from(&cfg.world);
+            let world_cfg = cfg.world.clone();
             match args.scene {
                 VoxelSceneArg::Authored => scene::authored(world_cfg),
                 VoxelSceneArg::Generated => World::new(world_cfg),
@@ -364,7 +312,7 @@ impl Control {
                 eprintln!("cubarium voxel: rain {volume} m3, accepted {took} m3");
             }
             "o" | "outlet" => {
-                self.outlet = !self.outlet;
+                self.outlet = !world.outlet_open();
                 world.apply(VoxelCommand::SetOutlet { open: self.outlet });
                 eprintln!(
                     "cubarium voxel: outlet {}",
@@ -395,6 +343,7 @@ impl Control {
                             );
                         } else {
                             *world = loaded;
+                            self.outlet = world.outlet_open();
                             eprintln!("cubarium voxel: loaded {path} at tick {}", world.tick());
                         }
                     }
@@ -480,7 +429,7 @@ mod tests {
         assert_eq!(d.raster_height, 0);
         assert_eq!(d.haze, 0.55);
         assert_eq!(d.water_alpha, 0.5);
-        assert_eq!(cubarium_voxel::Config::from(&d.world), cubarium_voxel::Config::default());
+        assert_eq!(d.world, cubarium_voxel::Config::default());
 
         let cfg: VoxelConfig = toml::from_str(
             "tilt_degrees = 35.0\n[world]\nwidth = 64\ndepth = 8\n",

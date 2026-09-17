@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 /// Everything a world is generated and stepped from. Physical units: metres and
 /// seconds; volumes in cubic metres. Depth is a free choice; the full world is deep.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct Config {
     /// Voxels along the strip. `x` wraps: `x = width` is `x = 0`.
     pub width: u32,

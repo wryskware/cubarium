@@ -34,6 +34,12 @@ pub struct VoxelView<'a> {
     pub ledger: &'a Ledger,
     /// Aquifer store in cubic metres.
     pub aquifer_m3: f64,
+    /// Whether the named outlet is exporting.
+    pub outlet_open: bool,
+    /// The outlet cell `(x, y, z)`, if the world names one.
+    pub outlet: Option<(u32, u32, u32)>,
+    /// The spring cell `(x, y, z)`, if the world names one.
+    pub spring: Option<(u32, u32, u32)>,
 }
 
 impl<'a> VoxelView<'a> {
@@ -176,6 +182,9 @@ impl World {
             tick: self.tick,
             ledger: &self.ledger,
             aquifer_m3: self.aquifer_m3,
+            outlet_open: self.outlet_open,
+            outlet: self.outlet_cell,
+            spring: self.spring_cell,
         }
     }
 
