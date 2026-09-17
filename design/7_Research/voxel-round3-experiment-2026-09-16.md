@@ -725,3 +725,166 @@ and nothing is negative anywhere.
    germinates whole and attrition applies to what stays banked. The other candidate — a
    margin added to the package size — was refused, because it would have turned a derived
    number into a tuned one.
+
+## Round 4 — 2026-09-17
+
+Five presets, one world, one duration. `community 400` in `--release` on the default
+generated world and on one noise reseed, run by package R4 after springturf, stonecushion
+and velvetpad landed:
+
+```text
+cargo run --release -p cubarium-voxel-flora --example two_producers -- community 400 1 0
+cargo run --release -p cubarium-voxel-flora --example two_producers -- community 400 1 101
+```
+
+**This is a smoke run and not a study.** No control, no replication, no stationary
+resident, no measured generation time, one duration and no arms. What it can say is that
+five presets coexist in one world for 400 coupled seconds without anything dying, which
+gate is shutting for each of them, and where a placement rule and a preset disagree. It
+says nothing about habitat size, self-replacement or coexistence, and every eligible count
+in it is a reading of the moment it was taken (Astra R5.2).
+
+Conditions, both arms: 128 × 48 × 24 voxels of 0.25 m, `seed` 1, rain 2e-4 m/s with the
+outlet open, 1,000 warm-up ticks (50 s) and then 8,000 coupled ticks (400 s), so the world
+ends at 450 s. Eight founders per species at half of each species' own `wood_max`, which is
+exactly its `donor_min`, placed by the harness's `Habitat` table — bloomcrown on the
+highest eligible faces, umbrellafrond on the lowest, springturf on the wettest eligible
+root boxes, stonecushion on eligible faces that are **not** soil, velvetpad inside a taller
+founder's crown. That table is an experiment condition and not a model rule.
+
+**Wall time: 69.6 s for the default arm and 86.6 s for the reseed**, 8,000 coupled ticks
+each, on this machine.
+
+### Per species, at observation (450 s)
+
+Counts are by `Stand::id`: "births" is every identity of that species ever seen alive at
+the end of a tick, so a birth that died inside the run would still be counted (none did).
+"desc." is a living stand that is not one of the founders.
+
+| arm | species | founders | alive | still founder | desc. | births | deaths | wood | light | moisture | aeration stress | banked sites |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| default (noise 0) | bloomcrown | 8 | 14 | 8 | 6 | 6 | 0 | 2.9080 | 0.880 | 0.851 | 0.132 | 2 |
+| | umbrellafrond | 8 | 16 | 8 | 8 | 8 | 0 | 3.3999 | 0.969 | 0.980 | 0.000 | 0 |
+| | springturf | 8 | 9 | 8 | 1 | 1 | 0 | 0.2914 | 0.931 | 0.955 | **0.862** | 1 |
+| | stonecushion | 8 | 8 | 8 | 0 | 0 | 0 | 0.4312 | 0.943 | 0.962 | 0.000 | 0 |
+| | velvetpad | **6** | 8 | 6 | 2 | 2 | 0 | 0.7510 | 0.976 | 1.000 | 0.458 | 3 |
+| reseed (noise 101) | bloomcrown | 8 | 12 | 8 | 4 | 4 | 0 | 2.7942 | 0.892 | 0.873 | 0.099 | 4 |
+| | umbrellafrond | 8 | 15 | 8 | 7 | 7 | 0 | 3.4171 | 0.962 | 0.973 | 0.000 | 1 |
+| | springturf | 8 | 9 | 8 | 1 | 1 | 0 | 0.2871 | 0.921 | 0.926 | **0.887** | 0 |
+| | stonecushion | 8 | 8 | 8 | 0 | 0 | 0 | 0.4324 | 0.949 | 0.924 | 0.000 | 0 |
+| | velvetpad | 8 | 14 | 8 | 6 | 6 | 0 | 1.0713 | 0.964 | 0.997 | 0.358 | 2 |
+
+Two of the eight velvetpad founders were refused in the default arm: the `UnderACrown` rule
+picked columns an earlier founder already stood on, and `Command::Seed` refuses an occupied
+site. The printed count is the six that were planted.
+
+Ledgers and residuals, which is the part that has to hold before anything else means
+anything:
+
+```text
+default  ledger: fixed_in 10.495539 respired_out 3.092541 light_in 20.991079 heat_out 6.185082
+                 transpired 0.088653 m3 births 55 establishments 17 deaths 0
+         residuals: organic -9.621e-12 mineral -1.421e-14 energy -1.924e-11
+                    (stocks: organic 28.5430 mineral 61.4228 energy 57.0860)
+         water: rain in 0.038400 m3/s, outlet 0.050000, transpiration 0.00022163,
+                storage -0.011822 (residual -1.61e-11); head 2.741 m (-0.2434 m over the run)
+reseed   ledger: fixed_in 10.830468 respired_out 3.183825 transpired 0.091839 m3
+                 births 58 establishments 18 deaths 0
+         residuals: organic -9.543e-12 mineral 2.842e-14 energy -1.909e-11
+         water: storage -0.011830 (residual -9.14e-12); head 2.744 m (-0.2428 m)
+```
+
+The per-species birth counts sum to the ledger's own `establishments` in both arms (17 and
+18), which is the identity count and the ledger counter agreeing. Relative residuals are
+3.4e-13, 2.3e-16 and 3.4e-13 in the default arm. The head is still falling at 450 s in both
+arms, −0.24 m over the run with the outlet at its full 0.05 m³/s, so **neither arm is a
+settled world**.
+
+### Which gate is shut, and for whom
+
+Eligible skyline columns per species, introduction against observation, of 3,072:
+
+| species | default: 50 s → 450 s | reseed: 50 s → 450 s |
+| --- | --- | --- |
+| bloomcrown | 96 → 2,692 | 96 → 2,689 |
+| umbrellafrond | 373 → 695 | 386 → 667 |
+| springturf | 75 → 2,346 | 72 → 2,327 |
+| stonecushion | 1,720 → 2,737 | 1,723 → 2,731 |
+| velvetpad | 117 → 1,274 | 111 → 1,282 |
+
+Every species' eligible set grows, for the reason round 3 already measured: the initial
+aquifer charge drains and the soil comes down off saturation, so the gates that were shut at
+50 s open. The introduction reading is a reading of a wet world and not of a niche size, for
+all five.
+
+The observation diagnosis, default arm, with the sole-cause counts (a column can fail
+several gates at once, so the totals overlap):
+
+```text
+      bloomcrown: 2692 eligible; pore < 0.10 0, saturated > 0.25 378, water over 0.05 m 60,
+                  sky < 0.60 2; sole cause — saturation 318, light 2
+   umbrellafrond:  695 eligible; pore < 0.45 2377 (all of them sole cause), saturated 0,
+                  water over 0.50 m 0, sky < 0.10 0
+      springturf: 2346 eligible; pore < 0.25 142, saturated > 0.30 291, water over 0.03 m 60,
+                  sky < 0.75 327; sole cause — pore 139, saturation 204, light 293
+    stonecushion: 2737 eligible; pore < 0.05 0, saturated > 0.40 335, water over 0.02 m 60,
+                  sky < 0.40 0; sole cause — saturation 275
+       velvetpad: 1274 eligible; pore < 0.30 1509, saturated > 0.60 289, water over 0.10 m 60,
+                  sky < 0.05 0; sole cause — pore 1489, saturation 229
+```
+
+Four things this says, all of them about these two arms at 450 s and nothing more.
+
+1. **The shut gate for further recruitment is the bank, in every species, in both arms.**
+   The germination diagnosis has every non-empty bank at **90.5 % to 93.3 %** of its own
+   threshold and **zero** banks over it: bloomcrown 90.5 %, springturf 91.2 %, velvetpad
+   92.1 % in the default arm, and 90.5 %, — and 93.3 % in the reseed. A package minus its
+   own attrition is what a bank holds between deliveries, and a second package has to arrive
+   before the first bin ages out. The predicate is not what is refusing these sites: of
+   velvetpad's three banked sites in the default arm, zero pass, but in the reseed one of
+   two does, and either way none of them has a whole package in it.
+2. **Stonecushion did not reproduce at all, and the reason is saving time, not habitat.**
+   It is the most permissive of the five at the gate — 2,737 of 3,072 columns eligible, with
+   `establish_pore_min` 0.05 refusing not one column — and 61 of 61 of its donors' candidate
+   faces are eligible. But its `propagule_rate` 0.00005 funded 0.1333 of organic matter
+   across eight donors in 400 s, which is 0.0167 each against a 0.025 package: **no donor
+   reached one whole package**, so nothing landed. `funded / requested` is 100 %: the rate is
+   the binding constraint here and not the reserve, which is the other half of Astra's R4.4
+   distinction and the first time a preset in this world has been on that side of it.
+3. **Springturf is funding-limited and, separately, under aeration stress.** It requested
+   5.333 — the largest ask of the five by an order of magnitude — and was funded **2.2 %** of
+   it, because `reserve_cap` 0.5 on a `wood_max` of 0.06 leaves a donor a surplus of at most
+   0.0075 above its own floor while `maintenance` ten times the base draws on the same
+   reserve. Raising `propagule_rate` further would create no income at all. And its mean
+   aeration stress is **0.862**, the highest of the five by a wide margin: the harness plants
+   it on the *wettest* eligible root boxes, which is exactly where its own
+   `establish_saturated_max` 0.3 bites hardest. That is a disagreement between the placement
+   rule and the preset, not a model fault — but it means the springturf cohort in these two
+   arms was earning about a seventh of its potential income for the whole run, and the
+   "pioneer of open **moist** soil" role has to decide whether "moist" means the wettest
+   ground available or merely not dry.
+4. **Springturf's light gate is the only large sole-cause count of the five.** 293 columns
+   refuse it on `establish_light_min` 0.75 alone (286 in the reseed), where bloomcrown's 0.6
+   refuses 2. If this species turns out to be too rare, that is the first number to look at —
+   and it is worth noting that the same threshold is the one the model cannot use for the
+   role's own "loses under a canopy", because germination light is geometric sky with no
+   canopy in it.
+
+Umbrellafrond is unchanged from round 3 on purpose: 2,377 columns refused on **mean pore
+alone**, its `establish_pore_min` 0.45 sitting above where drained soil settles (skyline mean
+0.402). Astra's R6.1 said to keep the wetland role rather than lower that floor as a repair,
+and it was kept.
+
+### What this does and does not establish
+
+Established: five presets run together for 400 coupled seconds on two landform variants with
+**no deaths at all**, the three currencies conserved to 3e-13 relative, the water budget
+closed to 1.6e-11, per-species lineage counts agreeing with the ledger's own counter, and a
+gate diagnosis that names the binding constraint separately for each species.
+
+Not established: nothing about habitat size (both arms are draining, not settled), nothing
+about self-replacement (every species' bank is under its threshold at the end, and the
+replacement-control study Astra designed in R5.4 is still the separate later package),
+nothing about coexistence (no invasion, no rare-species arm), and nothing about whether any
+of the fifteen thresholds these three presets introduced is a good number. They are
+placeholders encoding roles, and `design/backlog.md` §1 lists all of them.
