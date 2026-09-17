@@ -45,9 +45,10 @@ deposition, not from the elevation noise. Every carve rechecked for isolated voi
 **Landform rule (Wrysk, 2026-09-16, after the storyboard):** terrain must not occlude
 terrain from the camera. Keep the front low; hills and mountains peak or plateau at
 the far edge. With the chosen camera (tilt 30°, 4 px/voxel, so 2 px of rise per voxel
-of depth) that means the surface height along z in every x column may climb toward
-the back by at most one voxel per two voxels of depth, and never drop toward the
-back by more than the camera hides. Overhangs and covered passages stay as water
+of depth) a surface cell at (y2, z2) is hidden by a nearer one at (y1, z1) iff
+`2*(y1 - y2) >= z2 - z1`. So the surface in every x column may climb toward the back
+freely, and may drop toward the back by at most `(dz - 1)/2` voxels over dz voxels
+of depth (none over 1 or 2, one over 3 or 4, and so on). Overhangs and covered passages stay as water
 fixtures in tests, not in the default landform. A test walks every column of three
 seeds and asserts no surface cell is hidden by a nearer one under the projection.
 
@@ -116,8 +117,9 @@ exceeds the raster, crop from the top and say so once.
 Works against the stub crate: use `World::empty` plus `SetMaterial` to author a ridge,
 a hollow and an overhang for your own checks until Package A lands. Tests: projection of
 a known voxel lands on the expected pixel; back-to-front order hides a voxel behind a
-nearer one; a wrapped column draws identically at x and x + width; the seam pixel
-columns match. A few frames, no long runs.
+nearer one; a wrapped column draws identically at x and x + width; the render is
+periodic under translation, so a cropped periodic tiling equals the wrapped render
+and the first and last pixel columns are adjacent samples, not necessarily equal. A few frames, no long runs.
 
 ## Package C: art storyboard — `art/studies/voxel-storyboard/`
 

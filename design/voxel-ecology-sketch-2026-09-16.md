@@ -53,7 +53,7 @@ of them do not exist yet.
 | `sky_light` | fraction 0–1 of open-sky irradiance | surface cell, and any voxel a canopy could occupy | producer income; glowcap not at all | **missing** |
 | `sky_openness` | fraction 0–1 of the upward hemisphere open (1 = open sky, 0 = fully blocked) | surface cell | light geometry; keep separate from vertical rain exposure, which a roof blocks while lateral light still arrives | **missing** |
 | `slope` | rise over run, or degrees | surface cell | soil retention in the generator, traversal cost, propagule retention | **missing** |
-| `water_depth` | m of free water standing above the surface voxel | column | wading, drowning, aquatic margin | **missing as a named field** (derivable from `free` + `surface_y`; no accessor) |
+| `water_depth` | m of the contiguous wet void interval above the support face | support face | wading, drowning, aquatic margin | **missing as a named field** (derivable from `free` and the support; no accessor) |
 | `rooting_depth` | m, or count of contiguous soil voxels below the surface | column | producer access to pore water; groundcover versus tree | **missing** (derivable) |
 | `substrate` | m of litter and of dead wood, kept as separate identities | voxel face | glowcap attachment, littershredder food | **missing** (ecology-layer stock, but terrain has to offer it a place to sit) |
 | `reachable(from, to, body)` | query: can a body of this radius and step height get there | pair of surface cells | browser foraging, predator approach, everything about patch access | **missing** |
