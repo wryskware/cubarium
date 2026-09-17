@@ -41,7 +41,7 @@ impl Default for Config {
         Config {
             width: 128,
             height: 48,
-            depth: 16,
+            depth: 24,
             voxel_m: 0.25,
             seed: 1,
             rain_m_per_s: 0.0,

@@ -539,8 +539,9 @@ fn the_generator_has_no_isolated_voids_a_ridge_above_the_basin_and_a_clean_seam(
             }
         }
 
-        // The overhang and the covered passage both leave roofed void, and both stay
-        // reachable: the isolated-void check above would have filled them in otherwise.
+        // Nothing roofed: the camera has to read every surface cell, so the default
+        // landform carves no overhang and no covered passage. Those live in the
+        // hand-built fixtures in `generate`'s tests and in the presenter's scene.
         let roofed = (1..v.config.height - 1)
             .flat_map(|y| (0..v.config.width as i64).map(move |x| (x, y)))
             .filter(|&(x, y)| {
@@ -549,7 +550,7 @@ fn the_generator_has_no_isolated_voids_a_ridge_above_the_basin_and_a_clean_seam(
                 })
             })
             .count();
-        assert!(roofed >= 4, "seed {seed}: only {roofed} roofed cells, no overhang or passage");
+        assert_eq!(roofed, 0, "seed {seed}: {roofed} roofed cells in the default landform");
 
         assert!(world.outlet_cell().is_some(), "seed {seed}: no outlet");
         assert!(world.spring_cell().is_some(), "seed {seed}: no spring");

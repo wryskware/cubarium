@@ -28,7 +28,7 @@ water_alpha = 0.5
 # `cubarium_voxel::Config`. x wraps; y is up from the foundation; z runs into the habitat.
 width = 128
 height = 48
-depth = 16
+depth = 24
 voxel_m = 0.25
 seed = 1
 rain_m_per_s = 0.0
