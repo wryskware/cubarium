@@ -38,10 +38,20 @@ Add fields when needed and say so in the commit; do not rename or reorder what e
 
 ## Package A: core (generator, water, ledger, save/load) — `crates/cubarium-voxel/`
 
-Generator: broad ridge and receiving basin first, soil pockets and rock layers, one
-overhang and one covered passage, weak correlated noise last, all periodic through
-x = 0. Derive soil depth from slope and deposition, not from the elevation noise.
-Every carve rechecked for isolated voids.
+Generator: broad ridge and receiving basin first, soil pockets and rock layers, weak
+correlated noise last, all periodic through x = 0. Derive soil depth from slope and
+deposition, not from the elevation noise. Every carve rechecked for isolated voids.
+
+**Landform rule (Wrysk, 2026-09-16, after the storyboard):** terrain must not occlude
+terrain from the camera. Keep the front low; hills and mountains peak or plateau at
+the far edge. With the chosen camera (tilt 30°, 4 px/voxel, so 2 px of rise per voxel
+of depth) that means the surface height along z in every x column may climb toward
+the back by at most one voxel per two voxels of depth, and never drop toward the
+back by more than the camera hides. Overhangs and covered passages stay as water
+fixtures in tests, not in the default landform. A test walks every column of three
+seeds and asserts no surface cell is hidden by a nearer one under the projection.
+
+Camera chosen from the storyboard: tilt 30°, habitat depth 24, 4 px per voxel.
 
 Water per tick: prescribed rain onto sky-exposed void cells (a roof takes the rain
 that would fall under it); evaporation from sky-exposed free-water surfaces;
