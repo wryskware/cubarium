@@ -388,3 +388,214 @@ attenuation; keep local establishment and propagules paid; turn any observed
 multi-height drainage anomaly into one tiny fixture before expanding the solver.
 
 **Verdict: clears.**
+
+## Round 4
+
+Reviewed HEAD `332d3fc` on 2026-09-17: the producer brief, round-3 brief,
+model, three test files, harness, package I/J results, backlog and biosphere
+sections, in that order; also the intervening commit messages and relevant
+water boundary. This is a source-and-arithmetic review. I did not rerun the
+long experiments, run cargo, change code or make a capture. Earlier clearance
+above remains clearance of the terrain-and-water first wave.
+
+The organic/mineral accounting is a sound repair of the old currency error.
+`crates/cubarium-voxel-flora/src/step.rs:509-570,572-631,697-722,997-1023`
+retains mineral through respiration, draws it for newly assimilated tissue,
+and transfers it proportionally through shedding, dieback, death, seeds and
+decomposition. Reserve-to-foliage reflush correctly avoids a second mineral
+charge. A starving stand's higher mineral/organic ratio is concentration of
+an existing stock, not fertilizer creation or better health. The package's
+`1 + build` enrichment is likewise accounted for. I found no missing outflow
+in those paths. The qualifications are about what these stocks regulate and
+what the experiment establishes, not a discovered conservation leak.
+
+### Findings, in priority order
+
+1. **R4.1 — P1: fresh arrivals rejuvenate old seeds; the cohort cap does not fix that. Timing: before round 4 presets.**
+   `crates/cubarium-voxel-flora/src/step.rs:824-840,881-894` merges age 1 with
+   age 0 and keeps age 0, every tick. Thus `seed_max_age_s = 600` means time
+   since the bank's last continuous delivery, not a seed's lifetime. Attrition
+   still acts, but arbitrarily small fresh deliveries can retain the surviving
+   portion of old material indefinitely. The test at
+   `crates/cubarium-voxel-flora/tests/round3.rs:726-758` explicitly blesses this.
+   **Change:** keep landing age/expiry independent of subsequent arrivals;
+   merge only equal-age cohorts, or use fixed arrival-time bins. Retain the
+   bounded stock representation, but make its age approximation explicit:
+   oldest-age merging at `crates/cubarium-voxel-flora/src/step.rs:864-876` conserves amounts at the merge and
+   can kill much younger material at the next expiry. Four fixed time bins
+   would avoid continually sweeping almost every old deposit into one bucket.
+   Add a short fixture with a two-tick lifetime, germination disabled and tiny
+   continuing arrivals: old material must reach litter on schedule, with
+   organic, mineral and energy accounted for. Replace the age-zero expectation.
+   Landing without the predicate, banks under occupants and paid attrition
+   themselves are right; keep them. J's 1,700-second accumulation is conditional
+   on the rejuvenation rule, so re-establishment evidence must be qualified
+   until this is corrected (`design/7_Research/voxel-round3-experiment-2026-09-16.md:253-256`).
+
+2. **R4.2 — P1: the harness supplies more water than the stated exits can remove. Timing: now.**
+   `crates/cubarium-voxel-flora/examples/two_producers.rs:10-13,131-139,768-777`
+   sets rain to 0.0005 m/s over 192 m²: nominal input **0.096 m³/s**.
+   `crates/cubarium-voxel/src/config.rs:62-74` leaves evaporation at zero and
+   outlet capacity at **0.05 m³/s**; `crates/cubarium-voxel/src/water.rs:797-808` can export less when
+   its cell is undersupplied. J's 0.302307 m³ transpired over 2,000 s is only
+   0.000151 m³/s on average (`design/7_Research/voxel-round3-experiment-2026-09-16.md:375-377`).
+   With rain accepted, storage therefore increases by at least about
+   **0.04585 m³/s**, even with the outlet continuously supplied. Spring and
+   water-table seepage are internal transfers, not additional losses. This
+   explains an unbalanced *forcing budget*, without evidence of a core leak.
+   **Change:** remove the harness's claim that its tap stays below export;
+   print accepted rain, outlet, evaporation, transpiration and storage change
+   over the same interval. An outlet-only ceiling on nominal rain is
+   `0.05 / 192 = 0.0002604 m/s`, not a proposed tuned setting or a guarantee
+   of stationary head. Separate this rising-water disturbance from the habitat
+   baseline. For comparisons, hold terrain/initial water and mineral stocks,
+   external forcing and observation phase fixed; establish a bounded water
+   regime first. A small explicitly controlled water fixture is enough for
+   mechanism tests. Do not hold plant-driven water changes fixed while claiming
+   to test root competition, or repair this experiment by tuning plant tolerance.
+
+3. **R4.3 — P2: a mineral inventory is now honest, but the income law still treats external mineral as fuel. Timing: clarify now; physiological change later, before nutrient-specific gameplay.**
+   `crates/cubarium-voxel-flora/src/step.rs:490-504` gates *all* assimilation,
+   including maintenance income, by the ground pool. Consequently a stand
+   already rich in mineral fixes zero on a zero-mineral pool despite ample
+   light and water; `crates/cubarium-voxel-flora/tests/round3.rs:426-476` pins this. This follows the brief,
+   but is stronger than “mineral caps new tissue.” Moving only `mineral/n_tissue`
+   cannot fix it: Michaelis–Menten and `f_max` independently zero the income.
+   **Change:** document that retained stand mineral is an inventory, not yet a
+   reusable internal nutrient reserve. When nutrient physiology matters, separate
+   carbon fixation/maintenance from mineral-funded tissue construction and make
+   the nutrient response read the intended usable stock. Keep the fraction rule;
+   do not clamp enriched tissue back to `n_tissue` and discard the difference.
+   Correct `design/backlog.md:42` now: at defaults the stock cap is `50*N`,
+   whereas the per-tick rate cap is `0.0005*N`; the former cannot be the binding
+   one for positive N. Also describe the lazy `initial_mineral` at
+   `crates/cubarium-voxel-flora/src/step.rs:1015-1020` as provisioning previously unrepresented ground:
+   colonization currently imports mineral, explicitly booked, so the inventory
+   is not closed during first landings. A fixed initial per-site inventory is
+   the appropriate baseline for a future fertility comparison.
+
+4. **R4.4 — P2: bloomcrown's failure is a funded-package problem, not evidence that `propagule_rate` needs raising. Timing: before round 4 presets.**
+   `crates/cubarium-voxel-flora/src/step.rs:955-963` already caps the donor at
+   `rate * DT * recipient_count`: the rate is **per recipient**, then a scarce
+   reserve is split across all recipients. At the advertised rate, an unlimited
+   donor delivers `0.0002/1.2 = 0.0001667` organic units/s to each site. With
+   attrition 0.001/s, a bank reaches 0.05 in about **357 s**, and holds about
+   **0.0752** after 600 s. The defaults are not intrinsically too slow when
+   funded. Conversely, a true 600-second lifetime needs sustained net delivery
+   about **0.0001108/site/s** to reach 0.05; funding 24 such sites costs about
+   **0.00319/s** before maintenance or vegetative growth. The stressed donors
+   are not supplying that. Raising the already nonbinding rate creates no income.
+   **Change:** distinguish requested, funded and landed reproductive flux in
+   the diagnosis, and specify reproduction allocation separately from dispersal
+   footprint. I recommend saving a paid viable parcel and delivering it to one
+   recipient at a time, chosen within the same hop without screening for habitat;
+   at these splits one minimum parcel is 0.05 net, costing 0.06 reserve. Preserve
+   the actual donor budget, construction cost and mineral transfer. Do not grant
+   every recipient a full parcel without paying for all of them. This is a
+   structural change to fragment-and-pool reproduction, not hidden tuning.
+   For scale, lowering `alive_min` from 0.02 to at most **0.00294** would make
+   the observed 0.00735 bank large enough arithmetically; it would also change
+   adult death and seedling size, and does not establish survival. I do not
+   recommend that knob change. Reassess under R4.2's controlled conditions;
+   zero descendants under a flooding treatment is not proof of universal sterility.
+
+5. **R4.5 — P2: germination currently gives enum order ecological priority and spends arbitrarily large banks on one stand. Timing: before round 4 presets.**
+   `crates/cubarium-voxel-flora/src/step.rs:738-783` always lets the first
+   qualifying species win, even with a much smaller bank; the test at
+   `crates/cubarium-voxel-flora/tests/round3.rs:646-723` demonstrates that intentional choice. Adding three
+   species after bloomcrown would build its precedence into every shared gap.
+   The same phase spends the entire winning bank: `wood = w_frac * pooled`
+   has no `wood_max` bound. A large bank waiting under a living stand can thus
+   produce an oversized “small” preset; growth's later demand cap does not
+   shrink it (`crates/cubarium-voxel-flora/src/step.rs:501`).
+   **Change:** use an explicit reproducible local lottery among qualifying banks,
+   with declared weights, for example viable-package counts, rather than enum
+   precedence. Consume one germination package and leave the paid remainder
+   ageing; transfer the consumed cohorts' actual mineral. Add tiny contested-gap
+   and oversized-bank cases: storage order must not select the winner, losing
+   banks remain, one birth stays within its preset's valid starting stocks, and
+   no surplus is deleted. Check split sums and starting wood/foliage/reserve
+   against each preset's caps before admitting that preset.
+
+6. **R4.6 — P2: the repaired stress shape is sound; the shared tolerance is a simplifying trait choice. Timing: before round 4 presets, document the trait contract; add knobs later only for a role that needs them.**
+   `crates/cubarium-voxel-flora/src/step.rs:420-425,472-482` has the desired
+   interior target and first-order approach at the current rates. Sharing adult
+   stress onset with the germination ceiling is acceptable for this slice,
+   but “can germinate” does not logically imply “adult pays no stress.” State
+   that assumption as such (`crates/cubarium-voxel-flora/src/lib.rs:326-331`). Umbrellafrond's 1.0 explicitly
+   makes it saturation-immune (`crates/cubarium-voxel-flora/src/lib.rs:450-460`); that is a workable wetland
+   producer proxy, not the biosphere's distinct moist-but-aerated understory role.
+   **Change:** keep 1.0 for this wetland role and label the distinction. Do not
+   lower it slightly as a repair: for *every* tolerance below 1, full saturation
+   targets stress 1 and eventually removes all assimilation again. If a later
+   role should germinate differently from its adult tolerance, separate those
+   traits; if it should pay a partial cost even at full saturation, give the
+   response an explicit subunit maximum or a funded tolerance cost. Those are
+   different hypotheses. Neither requires a new oxygen solver now.
+
+7. **R4.7 — P2: the probe has neither a stationary resident nor a measured single-founder generation time; lineage tracking also misses replacement. Timing: correct claims and tracking now; rerun the coexistence study later after the substrate repairs.**
+   `crates/cubarium-voxel-flora/examples/two_producers.rs:869-897,938-939`
+   calls any positive descendant count success after an arbitrary fill/probe
+   interval. J's resident is 8 or 3 stands across 3,072 columns, its habitat is
+   still moving, and the measured 1,700 s crossing belongs to the multi-founder
+   comparison, not a controlled single-founder measurement
+   (`design/7_Research/voxel-round3-experiment-2026-09-16.md:328-370`). One
+   newcomer drowns; the other distributes 0.17026 across 24 subthreshold banks.
+   Neither observation establishes that another 200 s would make it invade.
+   **Change:** print “recruitment observed/not observed within T,” not a verdict
+   on coexistence. First require the same founder treatment to replace itself
+   without the competitor under the same forcing. Keep one founder as the rare
+   test; optionally compare a declared small adjacent cohort, e.g. four founders
+   at wood 0.3, in matched competitor/no-competitor arms. A cohort that rescues
+   pooled-bank funding diagnoses density dependence, not invasion from arbitrary
+   rarity. Choose duration from the positive control's full reproduction time
+   and verify offspring replacement beyond the initial reserve subsidy; do not
+   blindly extend the existing 1,500 s. Use established resident dynamics and
+   matched initial stocks/forcing, with several suitable introduction sites.
+   Positive growth while rare in **both directions**, through complete
+   generations while the resident persists, would be coexistence evidence;
+   one birth or founder survival is insufficient.
+   Separately, the watches at `crates/cubarium-voxel-flora/examples/two_producers.rs:248-268,900-920` miss a founder
+   dying and its own species germinating on that site in the same tick, which
+   `crates/cubarium-voxel-flora/src/step.rs:99-102,588-598,741-783` permits. Give stands stable birth IDs and
+   compare identity, or expose equivalent birth/death events. Add one tiny
+   same-species death-and-replacement fixture. Current fractions are not
+   certified exact lineage counts by the site watch.
+
+8. **R4.8 — P3: carry the soil and light boundaries into the presets explicitly; the present tests do not establish all their advertised niches. Timing: before round 4 presets for boundary fixtures; fuller light budgeting later.**
+   `crates/cubarium-voxel-flora/src/step.rs:344-371,911-917` uses soil-only
+   root boxes and highest-support dispersal. That fits stonecushion in soil
+   pockets and velvetpad as a damp-soil analogue; neither needs free access
+   to rock water or atmospheric humidity. It does not populate a lower ledge
+   merely because that ledge is a valid support. `crates/cubarium-voxel-flora/src/step.rs:1039-1057` tests
+   geometric sky for germination, whereas `crates/cubarium-voxel-flora/src/step.rs:203-223` gives adults
+   plant-owned canopy attenuation. Call the exposed predicate *abiotic
+   eligibility*, not realized recruitment habitat under a canopy.
+   **Change:** give each new preset a small paid-recruitment/survival fixture
+   at its intended soil/light boundary, with a failing neighbouring condition;
+   make any need for lower-face dispersal or canopy-sensitive germination an
+   explicit rule change, not a new numeric preset. Keep the low-soil roles
+   within the existing scope if those extensions are unnecessary. The equal-top
+   no-shade expectation at `crates/cubarium-voxel-flora/tests/model.rs:143-182` and the 9% single-crown
+   attenuation noted in `design/backlog.md:41` are current model choices, not
+   proof of a closed canopy or a finite intercepted-light budget. Revisit those
+   before deriving consumer carrying capacity from total producer income.
+
+### What this does and does not establish
+
+The split ledger, proportional transfers and repaired stress target satisfy the
+central accounting and response-shape corrections on this read; the existing
+short fixtures exercise those mechanisms. Package J supplies evidence of paid
+umbrellafrond births and deaths under its particular forcing, with the reported
+small residuals. It does not establish a finite-age bank under continuous rain
+of seeds, bloomcrown self-replacement, stationary habitat, exact lineage fractions
+or mutual invasion. I checked the cited implementation and the budget arithmetic;
+the long-run numbers remain the experiment author's measurements.
+
+**Verdict: changes requested before clearing round 3 for the presets round.**
+Keep the organic/mineral split and the target-based aeration repair. Fix seed
+age rejuvenation (R4.1), correct the forcing and experiment claims (R4.2/R4.7),
+and settle funded reproductive packages and gap arbitration before multiplying
+the presets (R4.4/R4.5). R4.3's accounting qualifications, R4.6's explicit wetland
+trait and R4.8's small boundary fixtures can accompany that work; none calls for
+knob tuning, another long run as a gate, or a general ecological rewrite.
