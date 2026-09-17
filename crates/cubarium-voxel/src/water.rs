@@ -6,10 +6,11 @@
 //! # One tick
 //!
 //! Every rate below is per second and is applied over one [`crate::DT`]. Only step 3 is
-//! subdivided, and it is the one step with no rate in it: a substep re-levels water that
-//! is already there, so nothing is divided by `water_substeps`. Every interface is
-//! limited at both ends as well — by the donor's water and the receiver's room — and the
-//! material named with it is the one whose constants set the rate.
+//! subdivided; the re-levelling inside it has no rate in it, so nothing there is divided
+//! by `water_substeps`, but infiltration does have one and it is applied over the
+//! substep's own `DT / water_substeps`. Every interface is limited at both ends as well —
+//! by the donor's water and the receiver's room — and the material named with it is the
+//! one whose constants set the rate.
 //!
 //! 1. **Rain**: `rain_m_per_s * DT` metres of water onto each column's sky-exposed
 //!    void cell, limited by that cell's room. A roof shadows what is under it: the rain
@@ -17,13 +18,13 @@
 //! 2. **Evaporation**: `evaporation_m_per_s * DT` metres off each column's sky-exposed
 //!    free-water surface, limited by the water there. Water under a roof does not
 //!    evaporate.
-//! 3. **`water_substeps` free-water substeps**, each: *fall* (every void cell hands its
-//!    water to the void cell below while that has room, one cell per substep), then
-//!    *equalize* (every connected water region settles to one surface level).
-//! 4. **Infiltration**: free water into the porous cell directly below it. The
-//!    **receiving** cell's material sets the rate: `permeability_per_s * DT` of its own
-//!    `pore_capacity`, per voxel volume.
-//! 5. **Drainage**: pore water above the cell's own `field_capacity` moves down — into
+//! 3. **`water_substeps` free-water substeps**, each in this order: *infiltrate* (free
+//!    water into the porous cell directly below it, the **receiving** cell's material
+//!    setting the rate at `permeability_per_s * sub_dt` of its own `pore_capacity`, per
+//!    voxel volume), then *fall* (every void cell hands its water to the void cell below
+//!    while that has room, one cell per substep), then *equalize* (every connected water
+//!    region settles to one surface level).
+//! 4. **Drainage**: pore water above the cell's own `field_capacity` moves down — into
 //!    the pore space below, into the aquifer where a porous cell sits on bedrock or on
 //!    the foundation, or as a drip into free water where a porous cell roofs a void. The
 //!    **donor** cell's material sets both the threshold and the rate
@@ -31,10 +32,35 @@
 //!    drainage, not "saturated soil only": rock above its field capacity drips too, just
 //!    very slowly, and soil stops draining at `field_capacity` rather than at zero —
 //!    that fraction is the retained water ecology gets to read.
-//! 6. **Spring**: out of the aquifer into the spring cell. See below.
-//! 7. **Outlet**: while open, the one named outlet cell exports up to
+//! 5. **Spring**: out of the aquifer into the spring cell. See below.
+//! 6. **Outlet**: while open, the one named outlet cell exports up to
 //!    `outlet_m3_per_s * DT` of its free water into `Ledger::outlet_out`. This is the
 //!    separate named export and has nothing to do with the spring.
+//!
+//! # Runoff is what infiltration refuses
+//!
+//! Infiltration is offered **before** anything moves the water, and inside the substep
+//! rather than once at the end of the tick, because that is the physical statement: rain
+//! reaches the ground, the ground takes what it can take, and what is left over runs
+//! off. The other order — flow first, infiltrate with whatever is still standing at the
+//! end of the tick — makes a slope shed water it never refused, since `equalize` carries
+//! a film downhill within the same tick it landed in and the soil under it is never
+//! asked. It is not a small effect: on the eight-column staircase in `tests/core.rs`,
+//! under rain at a seventh of what the soil could absorb, the flat foot of the stairs
+//! reached field capacity (pore 0.25) while the top step held 0.0001 — the whole
+//! staircase was dry in proportion to its slope, and a plant layer reading pore water
+//! would have found no soil moisture anywhere but in the hollows.
+//!
+//! What is left standing at the end of a tick is therefore genuine transit water: runoff
+//! from cells that could not take it (rock, saturated soil) on its way to somewhere it
+//! can rest. It is thin. On the default generated world under rain, the film over a
+//! skyline support face went from 0.26 mm to 0.0025 mm when infiltration moved into the
+//! substep — but it is still there, and a reader that treats *any* free water as
+//! standing water will see it, because each substep ends with `equalize` rather than
+//! with something that absorbs. Ending the substep with `fall` instead does not remove
+//! it (a film resting on the ground has nowhere to fall to) and does move a
+//! noticeably larger share of the world's water into the soil, so the order stays
+//! fall-then-equalize.
 //!
 //! # The spring, and what it is not
 //!
@@ -291,11 +317,16 @@ fn open_water_cell(w: &World, x: i64, z: u32) -> Option<usize> {
 pub fn step(world: &mut World) {
     rain(world);
     evaporate(world);
-    for _ in 0..world.config.water_substeps.max(1) {
+    let substeps = world.config.water_substeps.max(1);
+    let sub_dt = DT / substeps as f64;
+    for _ in 0..substeps {
+        // Infiltration first, and inside the substep: water standing on a permeable
+        // cell is offered to it before anything moves the water somewhere else. See
+        // the module doc on why runoff is what infiltration refuses.
+        infiltrate(world, sub_dt);
         fall(world);
         equalize(world);
     }
-    infiltrate(world);
     drain(world);
     spring(world);
     outlet(world);
@@ -554,7 +585,7 @@ fn push_neighbours(
     }
 }
 
-fn infiltrate(w: &mut World) {
+fn infiltrate(w: &mut World, dt: f64) {
     let c = w.config.clone();
     for z in 0..c.depth {
         for x in 0..c.width as i64 {
@@ -568,7 +599,7 @@ fn infiltrate(w: &mut World) {
                 if m.pore_capacity() <= 0.0 || m.permeability_per_s() <= 0.0 {
                     continue;
                 }
-                let rate = m.permeability_per_s() * DT * m.pore_capacity() * c.voxel_volume();
+                let rate = m.permeability_per_s() * dt * m.pore_capacity() * c.voxel_volume();
                 transfer(w, (i, Store::Free), (below, Store::Pore), rate);
             }
         }

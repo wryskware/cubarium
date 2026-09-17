@@ -895,3 +895,55 @@ fn noise_seed_moves_the_wobble_and_leaves_the_landform() {
     assert_eq!(ao.2, bo.2, "the outlet left the front slab: {ao:?} -> {bo:?}");
     assert!(ao.1.abs_diff(bo.1) <= 1, "the basin floor moved more than the wobble: {ao:?} -> {bo:?}");
 }
+
+// ------------------------------------------------------- rain on a slope
+
+/// A staircase of soil six columns wide, stepping down toward `x = 0`, with a flat pair
+/// of columns at its foot: `y = 1, 1, 2, 3, 4, 5, 6, 7` across the eight columns, one
+/// soil voxel on a bedrock body, so every support face is permeable and drains to the
+/// aquifer rather than into rock.
+///
+/// The wrap from `x = 7` down to `x = 0` is a cliff, which is just the steepest step.
+fn staircase() -> World {
+    let config = Config {
+        width: 8,
+        height: 12,
+        depth: 1,
+        voxel_m: 1.0,
+        seed: 11,
+        rain_m_per_s: 0.01,
+        water_substeps: 4,
+        ..Config::default()
+    };
+    let mut w = World::empty(config.clone());
+    for x in 0..8i64 {
+        let top = if x < 2 { 1 } else { x as u32 };
+        for y in 1..top {
+            w.apply(Command::SetMaterial { x, y, z: 0, material: Material::Bedrock });
+        }
+        w.apply(Command::SetMaterial { x, y: top, z: 0, material: Material::Soil });
+    }
+    w
+}
+
+/// Rain has to wet a slope. The rate here is far below what the soil can take —
+/// `rain_m_per_s * DT * cell_area` is 5e-4 m3 per column per tick against an
+/// infiltration capacity of 3.5e-3 — so the only thing that can keep a sloping support
+/// dry is the tick's own ordering: free water that is carried downhill before it is
+/// offered to the soil under it never infiltrates at all.
+#[test]
+fn rain_wets_a_slope_as_well_as_it_wets_a_flat() {
+    let mut w = staircase();
+    run(&mut w, 400);
+    let v = w.view();
+    let flat = v.pore_at(0, 1, 0);
+    assert!(flat > 0.1, "the flat foot of the staircase did not wet at all: {flat}");
+    for (x, y) in [(3i64, 3u32), (4, 4), (5, 5), (6, 6), (7, 7)] {
+        let slope = v.pore_at(x, y, 0);
+        assert!(
+            slope >= 0.5 * flat && slope <= 2.0 * flat,
+            "the support at ({x}, {y}) holds {slope} against the flat's {flat}"
+        );
+    }
+    assert!(residual(&w).abs() < 1e-9, "{}", residual(&w));
+}
