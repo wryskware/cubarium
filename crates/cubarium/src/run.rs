@@ -54,6 +54,7 @@ pub fn run(command: Command) -> Result<()> {
             run_demo(&demo, &stop)
         }
         Command::Run(world) => crate::runner::run_world_until(&world, &stop).map(|_| ()),
+        Command::Voxel(voxel) => crate::voxel::run_voxel(&voxel, &stop),
     }
 }
 
