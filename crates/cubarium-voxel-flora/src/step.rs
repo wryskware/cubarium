@@ -26,10 +26,12 @@
 //!    to the site's pool at the same fraction; litter's energy leaves as heat at its
 //!    current density.
 //! 8. **The seed bank.** Every arrival bin pays its attrition into litter and falls to
-//!    litter whole once its **start** is past its species' `seed_max_age_s`. Then any site
-//!    with no stand whose pooled cohorts of one species can build a living stand, and
-//!    which passes that species' establishment predicate, germinates one. This runs
-//!    *after* the deaths of step 6, so a gap opened this tick can be filled this tick.
+//!    litter whole once its **start** is past its species' `seed_max_age_s`. Then every
+//!    site with no stand holds a local lottery among the species whose bank there holds at
+//!    least one whole package and which pass that species' establishment predicate,
+//!    weighted by the packages each holds; the winner spends exactly **one** package out
+//!    of its oldest bins and every other bank stays. This runs *after* the deaths of step
+//!    6, so a gap opened this tick can be filled this tick.
 //! 9. **Propagules** (§4.8), from one snapshot of donors and recipients. A package lands
 //!    as a seed cohort, on a support face within the donor's `hop` whether it is occupied
 //!    or not: the bank waits for the gap. A landing joins the arrival bin whose window
@@ -71,6 +73,7 @@ use crate::{
 /// Stream keys, so two draws in one tick cannot be the same draw. One per rule that
 /// draws.
 const DOMAIN_DISPERSAL: u64 = 1;
+const DOMAIN_GERMINATION: u64 = 2;
 
 /// A deterministic scalar stream (splitmix64), keyed by the values that **identify** a
 /// draw rather than seeded from stored state: the same world, the same place and the same
@@ -781,55 +784,142 @@ fn seed_bank(flora: &mut Flora, world: &World) {
     for g in ground.iter_mut() {
         age_cohorts(config, g, ledger, tick);
     }
-    // In site order, then in `Species::ALL` order: two species whose banks could both
-    // germinate here this tick are decided by that fixed order, and the loser's cohorts
-    // stay in the bank rather than being spent.
+    // In site order. Which species takes a bare site is a **local lottery** among the
+    // banks that can build a stand here, weighted by the whole packages each holds, drawn
+    // from a stream keyed by the world, the site and the tick. The winner spends exactly
+    // one package out of its oldest bins; its own remainder and every loser's bank stay
+    // where they are and go on ageing.
+    let world_seed = view.config.seed;
     for g in ground.iter_mut() {
         if g.seeds.is_empty() || stands.binary_search_by_key(&g.site, |s| s.site).is_ok() {
             continue;
         }
+        // Candidates in `Species::ALL` order — a fixed order, and the lottery sorts them
+        // again so that not even a caller's order can reach the draw.
+        let mut candidates: Vec<(Species, u64)> = Vec::new();
         for species in Species::ALL {
             let sc = config.species(species);
-            let [w_frac, p_frac, q_frac] = sc.propagule_split;
-            if w_frac <= 0.0 {
+            let package = package_of(sc);
+            if package <= 0.0 {
                 continue;
             }
-            // The threshold is `alive_min / w_frac`, stated as a product so no division
-            // by a zero-ish fraction can invent one.
-            let pooled = g.seed_organic(species);
-            if w_frac * pooled < sc.alive_min {
+            let packages = (g.seed_organic(species) / package).floor();
+            if packages < 1.0 {
                 continue;
             }
             if !establishes(&view, sky, g.site, sc) {
                 continue;
             }
-            let mineral = g.seed_mineral(species);
-            g.seeds.retain(|c| c.species != species);
-            let at = match stands.binary_search_by_key(&g.site, |s| s.site) {
-                Ok(_) => continue,
-                Err(at) => at,
-            };
-            stands.insert(
-                at,
-                Stand {
-                    site: g.site,
-                    species,
-                    stage: Stage::Alive,
-                    wood: w_frac * pooled,
-                    foliage: p_frac * pooled,
-                    reserve: q_frac * pooled,
-                    light: 0.0,
-                    moisture: 0.0,
-                    water_m3: 0.0,
-                    mineral,
-                    aeration_stress: 0.0,
-                    parcel: 0.0,
-                },
-            );
-            ledger.establishments += 1;
-            break;
+            candidates.push((species, packages.min(u32::MAX as f64) as u64));
         }
+        let site_index = view.config.index(g.site.x as i64, g.site.y, g.site.z) as u64;
+        let Some(species) = lottery(world_seed, site_index, tick, &candidates) else { continue };
+        let sc = config.species(species);
+        let [w_frac, p_frac, q_frac] = sc.propagule_split;
+        // Exactly one package, oldest bins first, with each bin's own mineral in
+        // proportion to what it gave up.
+        let (organic, mineral) = spend_bank(g, species, package_of(sc));
+        let at = match stands.binary_search_by_key(&g.site, |s| s.site) {
+            Ok(_) => continue,
+            Err(at) => at,
+        };
+        stands.insert(
+            at,
+            Stand {
+                site: g.site,
+                species,
+                stage: Stage::Alive,
+                wood: w_frac * organic,
+                foliage: p_frac * organic,
+                reserve: q_frac * organic,
+                light: 0.0,
+                moisture: 0.0,
+                water_m3: 0.0,
+                mineral,
+                aeration_stress: 0.0,
+                parcel: 0.0,
+            },
+        );
+        ledger.establishments += 1;
     }
+}
+
+/// Which species takes a gap, among the banks that can build a stand on it: a draw
+/// weighted by the **whole packages** each holds, from a stream keyed by the world's seed,
+/// the site's voxel index and the tick. `None` when nothing qualifies.
+///
+/// Astra's R4.5: the old rule gave the gap to the first qualifying species in
+/// `Species::ALL`, so bloomcrown pre-empted umbrellafrond in every contested gap in the
+/// world whatever the two banks held, and adding three species after it would have built
+/// that precedence into the whole ecology. A fixed enum order is not a `HashMap` iteration,
+/// but it is not an ecological rule either.
+///
+/// The candidates are sorted by species before the walk, so the caller's order — which is
+/// `Species::ALL` today and could be a storage order tomorrow — cannot select the winner.
+/// Weights are integer package counts, so the draw is one bounded integer and there is no
+/// float comparison in it.
+fn lottery(
+    world_seed: u64,
+    site_index: u64,
+    tick: u64,
+    candidates: &[(Species, u64)],
+) -> Option<Species> {
+    match candidates {
+        [] => return None,
+        [(one, _)] => return Some(*one),
+        _ => {}
+    }
+    let mut sorted: Vec<(Species, u64)> = candidates.to_vec();
+    sorted.sort_unstable_by_key(|&(species, _)| species);
+    let total: u64 = sorted.iter().map(|&(_, w)| w).sum();
+    if total == 0 {
+        return None;
+    }
+    let mut draw =
+        Rng::keyed(DOMAIN_GERMINATION, world_seed, site_index, tick).below(total as usize) as u64;
+    for (species, weight) in sorted {
+        if draw < weight {
+            return Some(species);
+        }
+        draw -= weight;
+    }
+    None
+}
+
+/// Spend `want` of one species' banked organic matter, **oldest bin first**, taking each
+/// bin's mineral in proportion to the organic matter taken from it. Returns what was
+/// actually spent, which is `want` unless the bank held less.
+///
+/// A bin that is emptied is removed whole, mineral included, so no float dust is left
+/// behind claiming to be a cohort; a bin that is partly spent keeps its `bin_start_tick`
+/// and goes on ageing toward its own expiry. Nothing is deleted: what is not spent stays
+/// banked (Astra's R4.5 — germination used to spend the whole bank, however large, and
+/// build an oversized "small" stand out of it).
+fn spend_bank(g: &mut Ground, species: Species, want: f64) -> (f64, f64) {
+    let mut left = want;
+    let (mut organic, mut mineral) = (0.0, 0.0);
+    let mut i = 0;
+    while i < g.seeds.len() && left > 0.0 {
+        if g.seeds[i].species != species {
+            i += 1;
+            continue;
+        }
+        let c = g.seeds[i];
+        if c.organic <= left {
+            organic += c.organic;
+            mineral += c.mineral;
+            left -= c.organic;
+            g.seeds.remove(i);
+            continue;
+        }
+        let m = (c.mineral * (left / c.organic)).min(c.mineral);
+        g.seeds[i].organic -= left;
+        g.seeds[i].mineral -= m;
+        organic += left;
+        mineral += m;
+        left = 0.0;
+    }
+    (organic, mineral)
 }
 
 /// One tick of decay for one site's bank. A bin whose **start** is past `seed_max_age_s`
@@ -1164,6 +1254,86 @@ mod tests {
         let mut odd = SpeciesConfig::bloomcrown();
         odd.propagule_split = [0.0, 0.5, 0.5];
         assert_eq!(package_of(&odd), 0.0);
+    }
+
+    /// The gap lottery: weighted by whole packages, reproducible per (world, site, tick),
+    /// and **blind to the order the candidates arrive in** — which is R4.5's requirement,
+    /// since that order is `Species::ALL` today and could be a storage order tomorrow.
+    ///
+    /// Two hundred seeded draws at weights 1 and 3: both species win somewhere, the counts
+    /// sit near the weights, and swapping the two candidates round gives the identical
+    /// winner on all two hundred.
+    #[test]
+    fn the_gap_lottery_follows_the_weights_and_not_the_order_it_is_handed() {
+        let (b, u) = (Species::Bloomcrown, Species::Umbrellafrond);
+        let mut wins = [0usize; 2];
+        let mut swapped_disagreements = 0;
+        for site in 0..200u64 {
+            let one = lottery(11, site, 3, &[(b, 1), (u, 3)]).expect("two candidates");
+            let other = lottery(11, site, 3, &[(u, 3), (b, 1)]).expect("two candidates");
+            if one != other {
+                swapped_disagreements += 1;
+            }
+            wins[one.index()] += 1;
+        }
+        assert_eq!(swapped_disagreements, 0, "the order the candidates came in moved the winner");
+        assert!(wins[0] > 0 && wins[1] > 0, "one species never won: {wins:?}");
+        // 1:3 over 200 draws is 50 against 150; anything inside 35..65 is the weights and
+        // not the enum order, which would be 200 against 0.
+        assert!((35..=65).contains(&wins[0]), "weights 1 and 3 gave {wins:?}");
+        assert_eq!(wins[0] + wins[1], 200);
+
+        // Degenerate cases: nothing to draw among, and one candidate that always wins
+        // whatever its weight.
+        assert_eq!(lottery(11, 0, 0, &[]), None);
+        assert_eq!(lottery(11, 0, 0, &[(u, 1)]), Some(u));
+        assert_eq!(lottery(11, 0, 0, &[(b, 0), (u, 0)]), None, "no packages, no winner");
+    }
+
+    /// Spending a bank takes the **oldest** bin first, leaves a part-spent bin ageing on
+    /// its own start tick, and removes an emptied one whole with its mineral.
+    #[test]
+    fn spending_a_bank_empties_its_oldest_bins_first() {
+        let mut g = Ground::new(Site { x: 0, y: 1, z: 0 }, 0.0);
+        for (start, organic) in [(0u64, 0.02), (10, 0.04), (20, 0.06)] {
+            g.seeds.push(SeedCohort {
+                species: Species::Bloomcrown,
+                organic,
+                mineral: 0.02 * organic,
+                bin_start_tick: start,
+            });
+        }
+        // Another species' bin, to be left strictly alone.
+        g.seeds.push(SeedCohort {
+            species: Species::Umbrellafrond,
+            organic: 1.0,
+            mineral: 0.02,
+            bin_start_tick: 0,
+        });
+
+        let (organic, mineral) = spend_bank(&mut g, Species::Bloomcrown, 0.05);
+        assert!((organic - 0.05).abs() < 1e-15, "spent {organic}");
+        // Density is uniform here, so the mineral is the same fraction.
+        assert!((mineral - 0.02 * 0.05).abs() < 1e-15, "took {mineral} of mineral");
+        // The 0.02 bin is gone whole and the 0.04 one is down to 0.01, still on tick 10.
+        let bloom: Vec<&SeedCohort> =
+            g.seeds.iter().filter(|c| c.species == Species::Bloomcrown).collect();
+        assert_eq!(bloom.len(), 2, "{:?}", g.seeds);
+        assert_eq!(bloom[0].bin_start_tick, 10);
+        assert!((bloom[0].organic - 0.01).abs() < 1e-15, "{:?}", bloom[0]);
+        assert_eq!(bloom[1].bin_start_tick, 20);
+        assert!((bloom[1].organic - 0.06).abs() < 1e-15, "{:?}", bloom[1]);
+        // The other species is untouched, and a bank with less than is asked for gives
+        // what it has rather than going negative.
+        let frond = g.seeds.iter().find(|c| c.species == Species::Umbrellafrond).expect("kept");
+        assert_eq!((frond.organic, frond.mineral), (1.0, 0.02));
+        let (rest, _) = spend_bank(&mut g, Species::Bloomcrown, 1.0);
+        assert!((rest - 0.07).abs() < 1e-15, "a short bank gave {rest}");
+        assert!(
+            g.seeds.iter().all(|c| c.species == Species::Umbrellafrond),
+            "{:?}",
+            g.seeds
+        );
     }
 
     /// One draw is one draw: the same world, site and tick give the same index, a

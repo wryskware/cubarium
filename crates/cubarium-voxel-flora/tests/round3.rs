@@ -567,7 +567,7 @@ fn a_stressed_donor_asks_every_tick_and_its_parcel_never_grows() {
     let l = flora.view().ledger;
     let i = Species::Bloomcrown.index();
     assert!(
-        (l.propagule_requested[i] - 100.0 * net).abs() <= 1e-15,
+        (l.propagule_requested[i] - 100.0 * net).abs() <= 1e-12 * 100.0 * net,
         "it asked for {} over a hundred ticks of {net}",
         l.propagule_requested[i]
     );
@@ -787,17 +787,20 @@ fn a_drowned_stand_s_gap_is_filled_by_its_bank_in_the_same_tick() {
     );
     let born = *flora.view().stand_at(victim).expect("the gap stayed empty");
     assert_eq!(born.species, Species::Umbrellafrond);
-    // Its stocks are the bank's, less the one tick of attrition the bank paid first.
-    let kept = 1.0 - sc.seed_attrition_per_s * DT;
+    // Its stocks are **one package**, not the whole bank: round 3b's germination spends
+    // one `alive_min / w_frac` and leaves the rest ageing (Astra R4.5). The bank here held
+    // two packages, so the newborn is half of it.
+    let package = sc.alive_min / sc.propagule_split[0];
     assert!(
-        (born.organic() - bank * kept).abs() <= 1e-12 * bank,
-        "born with {} out of a {bank} bank ({} expected after one tick of attrition)",
-        born.organic(),
-        bank * kept
+        (born.organic() - package).abs() <= 1e-12 * package,
+        "born with {} out of a {bank} bank, for a {package} package",
+        born.organic()
     );
+    // Its mineral is the consumed bins' own, at the bank's density.
+    let density = bank_mineral / bank;
     assert!(
-        (born.mineral - bank_mineral * kept).abs() <= 1e-12 * bank_mineral,
-        "born with {} of mineral out of {bank_mineral}",
+        (born.mineral - density * package).abs() <= 1e-9 * born.mineral,
+        "born with {} of mineral for {package} at the bank's density {density}",
         born.mineral
     );
     // The predecessor's remains are under it, and the bank of its own species is spent.
@@ -811,8 +814,8 @@ fn a_drowned_stand_s_gap_is_filled_by_its_bank_in_the_same_tick() {
     // not of the seed bank.
     let left = g.seed_organic(Species::Umbrellafrond);
     assert!(
-        left < 0.01 * bank,
-        "the bank that germinated was not consumed: {left} of a {bank} bank is still there"
+        (left - (bank - package)).abs() <= 1e-3 * package,
+        "the bank should be one package lighter: {left} of {bank} less {package}"
     );
     // One bin whatever is there: the placeholders' bin is 150 s wide, so every tick of this
     // fixture is inside the bin that opened at tick 0.
@@ -823,29 +826,27 @@ fn a_drowned_stand_s_gap_is_filled_by_its_bank_in_the_same_tick() {
 }
 
 /// Two species' banks on one site, both holding whole packages, both passing their own
-/// predicate: under round 3's rule the winner is whichever comes **earlier in
-/// `Species::ALL`**, whatever the two banks hold, and the loser's cohorts stay banked
-/// rather than being spent.
+/// predicate: the gap goes to a **local lottery** weighted by the whole packages each bank
+/// holds, the winner spends exactly one of them, and every other bank stays where it is.
 ///
-/// A fixed order is the right kind of tiebreak — it is not a `HashMap` iteration — but it
-/// is worth writing down that it is *arbitrary*: bloomcrown pre-empts umbrellafrond in
-/// every contested gap in the world. Astra's R4.5 is that adding three species after
-/// bloomcrown would build its precedence into every shared gap in the world, and K4
-/// replaces this rule with a weighted local lottery.
+/// Astra's R4.5: the old rule gave the gap to the first qualifying species in
+/// `Species::ALL`, so bloomcrown pre-empted umbrellafrond in every contested gap in the
+/// world whatever the two banks held, and three more species after it would have inherited
+/// that precedence. This fixture is the same contest, and the winner here is
+/// **umbrellafrond** on a draw where the two banks are within 2e-5 of each other — which
+/// under the old rule was impossible by construction.
 ///
-/// The fixture is a contest that can actually be reached now that a donor saves for one
-/// recipient at a time: a stand **holds** the contested site while both banks build under
-/// it (a bank waits for a gap), and then the site is cleared and the next tick decides.
-/// Its occupant is a bloomcrown at wood 0.25, under `donor_min` 0.3, so it holds the site
-/// without being a third donor.
+/// The contest is reachable now that a donor saves for one recipient at a time: a stand
+/// **holds** the contested site while both banks build under it (a bank waits for a gap),
+/// and then the site is cleared and the next tick decides. Its occupant is a bloomcrown at
+/// wood 0.25, under `donor_min` 0.3, so it holds the site without being a third donor.
 ///
-/// Four rates are the test's own: both species' `propagule_rate` 3.0 /s (placeholder
-/// 2e-4) and `reserve_cap` 40 (placeholder 0.5), so each donor funds a package every tick
-/// for the whole run and both banks hold many; and `bloomcrown.hop` 1 (placeholder 2) so
-/// both donors reach the contested column and no other.
+/// Four rates are the test's own: both species' `propagule_rate` 3.0 /s (placeholder 2e-4)
+/// and `reserve_cap` 40 (placeholder 0.5), so each donor funds a package every tick for
+/// the whole run and both banks hold seventeen of them; and `bloomcrown.hop` 1
+/// (placeholder 2) so both donors reach the contested column and no other.
 #[test]
-fn the_earlier_species_in_the_fixed_order_wins_a_contested_gap_whatever_the_banks_hold() {
-    assert_eq!(Species::ALL[0], Species::Bloomcrown, "the order this test reads");
+fn a_contested_gap_is_drawn_by_weight_and_the_losing_bank_stays() {
     let mut config = FloraConfig::default();
     config.bloomcrown.propagule_rate = 3.0;
     config.bloomcrown.hop = 1;
@@ -865,11 +866,12 @@ fn the_earlier_species_in_the_fixed_order_wins_a_contested_gap_whatever_the_bank
 
     let g = flora.view().ground_at(contested).expect("ground").clone();
     let (b, u) = (g.seed_organic(Species::Bloomcrown), g.seed_organic(Species::Umbrellafrond));
+    let package = flora.config().species(Species::Bloomcrown).alive_min
+        / flora.config().species(Species::Bloomcrown).propagule_split[0];
     for (species, bank) in [(Species::Bloomcrown, b), (Species::Umbrellafrond, u)] {
-        let sc = flora.config().species(species);
         assert!(
-            sc.propagule_split[0] * bank >= sc.alive_min,
-            "{}'s bank is not over the threshold: {bank}",
+            bank >= 2.0 * package,
+            "{}'s bank holds {bank}, under the two packages this test wants",
             species.name()
         );
     }
@@ -883,40 +885,154 @@ fn the_earlier_species_in_the_fixed_order_wins_a_contested_gap_whatever_the_bank
     // that decides the contested site.
     let est0 = flora.view().ledger.establishments;
 
-    // Open the gap and let the next tick decide it.
-    assert!(flora.apply(&world, Command::Clear { x: 2, z: 0 }));
+    // Open the gap and let the next tick decide it. Both donors are cleared with the
+    // occupant, so no package lands in the deciding tick and the banks can be read against
+    // what germination spent rather than against what arrived behind it.
+    for x in [1i64, 2, 3] {
+        assert!(flora.apply(&world, Command::Clear { x, z: 0 }), "clearing x{x}");
+    }
     flora.step(&mut world);
 
     let born = *flora.view().stand_at(contested).expect("nothing germinated");
     assert_eq!(
         born.species,
-        Species::Bloomcrown,
-        "the order is not the tiebreak: umbrellafrond held {u} against {b}"
+        Species::Umbrellafrond,
+        "this draw's winner, on banks of {u} against {b}: the enum order is not the tiebreak"
     );
     assert_eq!(
         flora.view().ledger.establishments,
         est0 + 1,
         "one gap, one germination: the contested site"
     );
-    let g = flora.view().ground_at(contested).expect("ground");
+    // Exactly one package became the stand, at `alive_min` of wood on the nose.
+    let sc = flora.config().species(born.species).clone();
     assert!(
-        g.seed_organic(Species::Umbrellafrond) > 0.9 * u,
-        "the loser's bank was spent or lost: {} of {u}",
-        g.seed_organic(Species::Umbrellafrond)
+        (born.organic() - package).abs() <= 1e-12 * package,
+        "born with {} for a {package} package",
+        born.organic()
     );
+    assert!(
+        (born.wood - sc.alive_min).abs() <= 1e-15,
+        "born with {} of wood, not alive_min {}",
+        born.wood,
+        sc.alive_min
+    );
+    assert!((born.foliage - sc.propagule_split[1] * package).abs() <= 1e-12 * package, "{born:?}");
+    assert!((born.reserve - sc.propagule_split[2] * package).abs() <= 1e-12 * package, "{born:?}");
 
-    // And it stays banked while the winner stands, however long.
+    // The winner's own remainder is still banked and still ageing, and the loser's bank is
+    // untouched to the attrition of the one tick.
+    let g = flora.view().ground_at(contested).expect("ground").clone();
+    let left_u = g.seed_organic(Species::Umbrellafrond);
+    let left_b = g.seed_organic(Species::Bloomcrown);
+    assert!(
+        (left_u - (u - package)).abs() <= 1e-3 * package,
+        "the winner's remainder is {left_u} of {u} less one {package} package"
+    );
+    assert!(
+        (left_b - b).abs() <= 1e-3 * package,
+        "the loser's bank moved: {left_b} against {b}"
+    );
+    assert!(left_b > 0.0 && left_u > 0.0, "a bank was emptied: {:?}", g.seeds);
+
+    // And the loser's bank stays while the winner stands, however long — until its own
+    // bins age out, which at the placeholders is 600 s away.
     run(&mut flora, &mut world, 40);
     assert_eq!(
         flora.view().stand_at(contested).map(|s| s.species),
-        Some(Species::Bloomcrown),
+        Some(Species::Umbrellafrond),
         "the winner did not hold the site"
     );
     assert!(
-        flora.view().ground_at(contested).unwrap().seed_organic(Species::Umbrellafrond) > 0.0,
+        flora.view().ground_at(contested).unwrap().seed_organic(Species::Bloomcrown) > 0.0,
         "the loser's bank vanished instead of waiting"
     );
-    assert_residuals(&flora, "after a contested gap was decided by the fixed order");
+    assert_residuals(&flora, "after a contested gap was drawn by weight");
+}
+
+/// An **oversized** bank builds one stand of exactly one package and keeps the rest, and
+/// the packages it spends come out of its **oldest** bins first.
+///
+/// Astra's R4.5, second half: germination used to spend the whole bank, so
+/// `wood = w_frac · pooled` had no `wood_max` bound at all and a bank waiting under a
+/// living stand could produce an oversized "small" preset that growth's later demand cap
+/// does not shrink. Here the bank holds twenty packages and the stand that comes out of it
+/// is the same size as one that comes out of two.
+///
+/// The fixture is the contested one with a single species: a donor funding a package a
+/// tick (`propagule_rate` 3.0 /s against 2e-4, `reserve_cap` 40 against 0.5, `hop` 1
+/// against 2) and a sub-`donor_min` occupant holding the site while the bank grows.
+/// `seed_max_age_s` is 2 s (placeholder 600) so the bin width is ten ticks and the run
+/// spans four bins, which is what makes "oldest first" observable.
+#[test]
+fn an_oversized_bank_spends_one_package_out_of_its_oldest_bins() {
+    let mut config = FloraConfig::default();
+    config.bloomcrown.propagule_rate = 3.0;
+    config.bloomcrown.hop = 1;
+    config.bloomcrown.reserve_cap = 40.0;
+    config.bloomcrown.seed_max_age_s = 2.0;
+    let mut world = strip(3, 1, 0.6);
+    let mut flora = Flora::new(config);
+    let held = site(1);
+    assert!(flora.apply(&world, Command::Seed { x: 0, z: 0, species: Species::Bloomcrown, wood: 0.6 }));
+    assert!(flora.apply(&world, Command::Seed { x: 1, z: 0, species: Species::Bloomcrown, wood: 0.25 }));
+    let sc = flora.config().species(Species::Bloomcrown).clone();
+    let package = sc.alive_min / sc.propagule_split[0];
+
+    run(&mut flora, &mut world, 35);
+
+    let g = flora.view().ground_at(held).expect("ground").clone();
+    let bank = g.seed_organic(Species::Bloomcrown);
+    assert!(bank > 5.0 * package, "the bank is not oversized: {bank}");
+    assert!(g.seeds.len() >= 3, "fewer bins than the run spans: {:?}", g.seeds);
+    let oldest = g.seeds[0];
+    let bins_before = g.seeds.len();
+
+    // Open the gap: one package, out of the oldest bin. The donor goes with the occupant
+    // so that nothing lands behind the germination and the bank can be read exactly.
+    for x in [0i64, 1] {
+        assert!(flora.apply(&world, Command::Clear { x, z: 0 }), "clearing x{x}");
+    }
+    flora.step(&mut world);
+
+    let born = *flora.view().stand_at(held).expect("nothing germinated");
+    assert!(
+        (born.organic() - package).abs() <= 1e-12 * package,
+        "an oversized bank built a {} stand out of a {bank} bank",
+        born.organic()
+    );
+    assert!(
+        (born.wood - sc.alive_min).abs() <= 1e-15,
+        "born with {} of wood, not alive_min {}",
+        born.wood,
+        sc.alive_min
+    );
+    assert!(born.wood <= sc.wood_max, "a newborn over wood_max: {}", born.wood);
+    let g = flora.view().ground_at(held).expect("ground").clone();
+    assert!(
+        (g.seed_organic(Species::Bloomcrown) - (bank - package)).abs() <= 1e-3 * package,
+        "the surplus was spent or lost: {} of {bank} less {package}",
+        g.seed_organic(Species::Bloomcrown)
+    );
+    // Oldest first: the bin that held the run's first packages is the one that paid, and
+    // it paid all of itself — it held less than a package — so the bank is one bin shorter
+    // and the next-oldest is now the front.
+    assert!(
+        oldest.organic < package,
+        "the fixture wants an oldest bin under one package: {oldest:?}"
+    );
+    assert_eq!(g.seeds.len(), bins_before - 1, "a whole bin should have gone: {:?}", g.seeds);
+    assert!(
+        g.seeds[0].bin_start_tick > oldest.bin_start_tick,
+        "the oldest bin is still the front of the bank: {:?}",
+        g.seeds
+    );
+    assert!(
+        g.seeds.iter().all(|c| c.organic > 0.0),
+        "a spent bin was left behind as float dust: {:?}",
+        g.seeds
+    );
+    assert_residuals(&flora, "after an oversized bank spent one package");
 }
 
 /// The bin rule, both halves of it, and the **rejuvenation** the old merge allowed is the

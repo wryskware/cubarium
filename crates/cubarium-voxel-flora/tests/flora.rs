@@ -755,6 +755,14 @@ fn a_bank_over_the_threshold_germinates_into_a_stand_of_its_own_pooled_cohorts()
     assert_eq!(s.stage, Stage::Alive, "a germinated stand is alive, not establishing");
     assert_eq!(s.species, Species::Bloomcrown);
     assert!(s.wood >= sc.alive_min, "born below alive_min: {}", s.wood);
+    // Exactly one package, whatever the bank had grown to by then, and exactly `alive_min`
+    // of wood out of it: round 3b's germination spends one package and leaves the rest.
+    assert!(
+        (s.organic() - package).abs() <= 1e-12 * package,
+        "born with {} for a {package} package",
+        s.organic()
+    );
+    assert!((s.wood - sc.alive_min).abs() <= 1e-15, "born with {} of wood", s.wood);
     assert_eq!(s.parcel, 0.0, "a newborn saves nothing yet");
     // Its mineral came with its cohorts, at the **donor's** own density and not `n_tissue`
     // exactly: the mineral is pulled when the package leaves, by the fraction rule over the
