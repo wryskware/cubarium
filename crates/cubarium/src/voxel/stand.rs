@@ -531,6 +531,7 @@ mod tests {
             style_of(
                 flora.view(),
                 &Stand {
+                    id: 0,
                     site: Site { x: 0, y: 0, z: 0 },
                     species: sp,
                     stage: Stage::Alive,

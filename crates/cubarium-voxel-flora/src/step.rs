@@ -823,9 +823,12 @@ fn seed_bank(flora: &mut Flora, world: &World) {
             Ok(_) => continue,
             Err(at) => at,
         };
+        let id = ledger.births;
+        ledger.births += 1;
         stands.insert(
             at,
             Stand {
+                id,
                 site: g.site,
                 species,
                 stage: Stage::Alive,

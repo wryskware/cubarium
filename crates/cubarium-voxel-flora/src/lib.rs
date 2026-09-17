@@ -125,6 +125,14 @@ pub struct Site {
 /// One stand: a plant of one species rooted on one support face.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Stand {
+    /// This stand's identity, from [`FloraLedger::births`]: every stand this layer has
+    /// ever created has its own, founders included, and it never changes or repeats.
+    ///
+    /// Round 3b (Astra R4.7): a harness that told founders from descendants by watching
+    /// each founder's **site** could not see a founder die and its own species germinate
+    /// on that site in the same tick, which steps 6 and 8 of the tick permit. A
+    /// descendant count by identity sees it.
+    pub id: u64,
     pub site: Site,
     pub species: Species,
     pub stage: Stage,
@@ -618,6 +626,10 @@ pub struct FloraLedger {
     pub transpired_m3: f64,
     pub establishments: u64,
     pub deaths: u64,
+    /// Every stand this layer has created, founders and germinations alike: a counter, not
+    /// a flux, and the source of [`Stand::id`]. `births − establishments` is the number of
+    /// founders a run was given.
+    pub births: u64,
     /// Reproductive flux per species, indexed by [`Species::index`], cumulative organic
     /// matter **net of construction** so that the three are one currency and comparable:
     ///
@@ -801,6 +813,7 @@ impl Flora {
                 }
                 let Err(at) = self.stands.binary_search_by_key(&site, |s| s.site) else { return false };
                 let mut stand = Stand {
+                    id: self.ledger.births,
                     site,
                     species,
                     stage: Stage::Alive,
@@ -814,6 +827,7 @@ impl Flora {
                     aeration_stress: 0.0,
                     parcel: 0.0,
                 };
+                self.ledger.births += 1;
                 let organic = stand.organic();
                 // A founder arrives at the species' own tissue mineral content: it is
                 // grown outside the system, so its mineral is seeded in with it.

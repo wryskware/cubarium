@@ -141,12 +141,12 @@ struct Outcome {
     /// species' establishment predicate, and were seeded anyway.
     off_predicate: usize,
     /// Per species: living stands at the end that are **descendants** — born from a seed
-    /// bank by germination, not planted by `Command::Seed`. A stand counts as a founder
-    /// only while it is the original founder: the run watches each founder site every
-    /// tick, and once a site is seen empty the founder there is gone for good, so a
-    /// stand standing on it at the end germinated into the gap.
+    /// bank by germination, not planted by `Command::Seed`. Counted by `Stand::id`, the
+    /// ledger's own birth identity, so it is exact: a founder that died and was replaced
+    /// on its own site by its own species in the same tick counts as one death and one
+    /// descendant, which the site watch this replaced could not see.
     descendants: [usize; 2],
-    /// Per species: living stands that are still the original founder.
+    /// Per species: living stands that are still the original founder, by identity.
     founder_stands: [usize; 2],
     /// The flora ledger's two life-cycle counters at the end of the run.
     establishments: u64,
@@ -252,18 +252,17 @@ fn run(
         );
     }
 
-    // Every site a founder actually stands on, and whether that site has ever been seen
-    // without a stand on it since. A founder site seen empty once can only be refilled by
-    // a germination, so a stand there at the end is a descendant.
-    let mut founder_sites: Vec<(Site, Species)> = Vec::new();
-    for f in &planted {
-        let seated = cubarium_voxel_flora::highest_support(&world.view(), f.x as i64, f.z)
-            .filter(|&site| flora.view().stand_at(site).is_some());
-        if let Some(site) = seated {
-            founder_sites.push((site, f.species));
-        }
-    }
-    let mut vacated = vec![false; founder_sites.len()];
+    // The founders, by **identity**. `Stand::id` comes from the ledger's birth counter, so
+    // a stand at the end either is one of these or was germinated during the run — no
+    // per-tick site watch, and no way to miss a founder dying and its own species taking
+    // the site in the same tick (Astra R4.7). Every stand created before the first step is
+    // a founder by construction, so the ids are simply the ones standing now.
+    let founder_ids: Vec<u64> = flora.view().stands.iter().map(|s| s.id).collect();
+    assert_eq!(
+        founder_ids.len() as u64,
+        flora.view().ledger.births,
+        "every stand alive before the first tick is a founder"
+    );
 
     let ticks = (seconds * cubarium_voxel::TICK_HZ as f64).round() as u64;
     let every = 100 * cubarium_voxel::TICK_HZ as u64;
@@ -323,24 +322,15 @@ fn run(
             println!("    {}", water_budget_line(&last_mark, &mark));
             last_mark = mark;
         }
-        let view = flora.view();
-        for (i, (site, species)) in founder_sites.iter().enumerate() {
-            if !vacated[i] && !view.stand_at(*site).is_some_and(|s| s.species == *species) {
-                vacated[i] = true;
-            }
-        }
     }
 
-    // Descendants: a living stand whose site never held a founder of its species, or held
-    // one that has since been seen gone.
+    // Descendants: a living stand whose identity is not one of the founders'. Exact, and
+    // not a site watch: it counts a founder replaced on its own site by its own species in
+    // the tick it died.
     let mut descendants = [0usize; 2];
     let mut founder_stands = [0usize; 2];
     for stand in flora.view().stands {
-        let still_founder = founder_sites
-            .iter()
-            .enumerate()
-            .any(|(i, (site, species))| *site == stand.site && *species == stand.species && !vacated[i]);
-        if still_founder {
+        if founder_ids.contains(&stand.id) {
             founder_stands[sp(stand.species)] += 1;
         } else {
             descendants[sp(stand.species)] += 1;
@@ -877,10 +867,21 @@ fn compare(args: &[String]) {
 
 // ===================================================================== Chesson
 //
-// The invasion criterion, one direction at a time: a coexistence mechanism has to let the
-// *rare* species increase while the other stands. Round 3's corrections 1 and 2 are what
-// give it anywhere to bite — a seed bank that can wait for a gap, and a saturated root
-// zone that costs the intolerant species something.
+// One direction at a time: a coexistence mechanism has to let the *rare* species increase
+// while the other stands. Round 3's corrections 1 and 2 are what give it anywhere to bite
+// — a seed bank that can wait for a gap, and a saturated root zone that costs the
+// intolerant species something.
+//
+// What this probe is **not**, as of round 3b (Astra R4.7): it is not a reading of the
+// invasion criterion, and it prints "recruitment observed / not observed within T s"
+// rather than a verdict. It has no stationary resident — the resident's own habitat moves
+// as the world wets up — and no measured single-founder generation time, so a positive
+// descendant count after an arbitrary fill and probe says a birth happened, nothing more.
+// Before it is rerun it needs a **positive control**: the same founder treatment
+// replacing itself under the same forcing, with the competitor absent, and a duration
+// taken from that control's own full reproduction time. That design is an open item in
+// `design/7_Research/voxel-round3-experiment-2026-09-16.md`, and round 3b deliberately
+// does not rerun the probe.
 
 /// Generate, open the outlet, warm up. The same preparation `run` does, factored out so
 /// the probe cannot drift from it.
@@ -1008,6 +1009,9 @@ fn invasion(
         &world,
         Command::Seed { x: target.x as i64, z: target.z, species: newcomer, wood: FOUNDER_WOOD }
     ));
+    // The founder's identity, from the ledger's birth counter: the one stand this probe is
+    // allowed to call a founder.
+    let founder_id = flora.view().stand_at(target).expect("just planted").id;
     println!(
         "  one {} founder at x{} z{} y{} ({} habitat sites free of the resident)",
         newcomer.name(),
@@ -1017,27 +1021,20 @@ fn invasion(
         ok.iter().filter(|s| flora.view().stand_at(**s).is_none()).count()
     );
 
-    // Watch the founder's own site: once it is seen empty the founder is gone, so a stand
-    // of the newcomer standing there at the end germinated into the gap.
-    let mut founder_gone = false;
     let ticks = (probe * cubarium_voxel::TICK_HZ as f64).round() as u64;
     for _ in 0..ticks {
         world.step();
         flora.step(&mut world);
-        if !founder_gone
-            && !flora.view().stand_at(target).is_some_and(|s| s.species == newcomer)
-        {
-            founder_gone = true;
-        }
     }
 
     let view = flora.view();
     let newcomer_stands = count(&flora, newcomer);
-    let descendants = view
-        .stands
-        .iter()
-        .filter(|s| s.species == newcomer && (s.site != target || founder_gone))
-        .count();
+    // By identity, not by site: anything of the newcomer's that is not the founder itself
+    // germinated during the probe, including a stand that took the founder's own site in
+    // the tick the founder died.
+    let descendants =
+        view.stands.iter().filter(|s| s.species == newcomer && s.id != founder_id).count();
+    let founder_gone = !view.stands.iter().any(|s| s.id == founder_id);
     let banks = view.ground.iter().filter(|g| g.seed_organic(newcomer) > 0.0).count();
     let banked: f64 = view.ground.iter().map(|g| g.seed_organic(newcomer)).sum();
     println!(
@@ -1047,15 +1044,20 @@ fn invasion(
         count(&flora, resident)
     );
     println!(
-        "  establishments {} -> {}, deaths {} -> {}; the founder's own site {}",
+        "  establishments {} -> {}, deaths {} -> {}; the founder itself {}",
         est0,
         view.ledger.establishments,
         deaths0,
         view.ledger.deaths,
-        if founder_gone { "was vacated at some point" } else { "held its founder throughout" }
+        if founder_gone { "died during the probe" } else { "survived the whole probe" }
     );
+    // Not a verdict on coexistence (Astra R4.7). One birth, or a founder surviving, is not
+    // an invasion: the criterion needs the rare species to increase through complete
+    // generations while the resident persists, and this probe has neither a stationary
+    // resident nor a measured single-founder generation time. It reports what it saw.
     println!(
-        "  INVASION {}: {descendants} descendant stand(s) of the newcomer",
-        if descendants > 0 { "SUCCEEDS" } else { "FAILS" }
+        "  recruitment {} within {probe:.0} s: {descendants} descendant stand(s) of the \
+         newcomer, by identity",
+        if descendants > 0 { "OBSERVED" } else { "NOT OBSERVED" }
     );
 }

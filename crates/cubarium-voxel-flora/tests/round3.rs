@@ -1281,6 +1281,97 @@ fn a_pulsing_donor_cannot_rejuvenate_a_bank_and_the_bins_bound_it() {
     }
 }
 
+// ================================================================ lineage by id
+
+/// A founder dies and **its own species** germinates on its site in the same tick, and the
+/// books see one death, one birth and a new identity. The site is never once observed
+/// empty.
+///
+/// Astra's R4.7: the harness told founders from descendants by watching each founder's
+/// site every tick and calling the founder gone once the site was seen without a stand of
+/// its species on it. Steps 6 and 8 of the tick permit exactly this — death in the
+/// per-stand pass, germination after it — so that watch could count a descendant as the
+/// original founder for ever. `Stand::id`, from the ledger's birth counter, cannot miss
+/// it.
+///
+/// The fixture: `assimilation` 0 (placeholder 0.004) so nothing earns and the victim
+/// starves on a site that is still wet enough to germinate on; `maintenance` 0.4 /s
+/// (placeholder 0.0002) so it starves inside thirty ticks; the victim is planted at
+/// `alive_min` exactly, so the first unpaid tick's dieback kills it; and `propagule_rate`
+/// 3.0 /s (placeholder 2e-4) lets the donor's whole spendable reserve — the placeholder
+/// `reserve_cap`, untouched — buy the **two** packages the victim's site needs, in the
+/// first two ticks. The fixture's void column leaves the donor exactly one recipient, so
+/// the victim's site is the only one anything lands on and the only birth in the run is
+/// its replacement. The donor starves too, but forty ticks after the tick this test
+/// reads.
+#[test]
+fn a_founder_replaced_by_its_own_species_in_one_tick_is_still_a_death_and_a_birth() {
+    let mut config = FloraConfig::default();
+    config.bloomcrown.assimilation = 0.0;
+    config.bloomcrown.maintenance = 0.4;
+    config.bloomcrown.propagule_rate = 3.0;
+    config.bloomcrown.hop = 1;
+    let mut world = strip_gap(0.6);
+    let mut flora = Flora::new(config);
+    let victim_site = site(1);
+    assert!(flora.apply(&world, Command::Seed { x: 0, z: 0, species: Species::Bloomcrown, wood: 0.6 }));
+    assert!(flora.apply(&world, Command::Seed { x: 1, z: 0, species: Species::Bloomcrown, wood: 0.02 }));
+    let victim_id = flora.view().stand_at(victim_site).expect("planted").id;
+    let donor_id = flora.view().stand_at(site(0)).expect("planted").id;
+    assert_ne!(victim_id, donor_id, "two founders, two identities");
+    assert_eq!(flora.view().ledger.births, 2, "two stands have been created");
+
+    // Step until the death, and check every tick that the site is never seen empty — the
+    // observation the old site watch depended on, and which never happens here.
+    let mut died_on = None;
+    for tick in 1..=200u32 {
+        let (deaths0, est0) =
+            (flora.view().ledger.deaths, flora.view().ledger.establishments);
+        flora.step(&mut world);
+        assert!(
+            flora.view().stand_at(victim_site).is_some(),
+            "tick {tick}: the site was seen empty, so this is not the same-tick case"
+        );
+        if flora.view().ledger.deaths > deaths0 {
+            // The whole point, in one tick: one death and one birth, together.
+            assert_eq!(flora.view().ledger.deaths, deaths0 + 1, "tick {tick}: one death");
+            assert_eq!(
+                flora.view().ledger.establishments,
+                est0 + 1,
+                "tick {tick}: the death's own tick did not also germinate"
+            );
+            died_on = Some(tick);
+            break;
+        }
+    }
+    let died_on = died_on.expect("the victim outlived two hundred ticks");
+    let v = flora.view();
+    assert_eq!(v.ledger.deaths, 1, "tick {died_on}: one death in the whole run");
+    assert_eq!(v.ledger.establishments, 1, "one birth in the whole run");
+    assert_eq!(v.ledger.births, 3, "two founders and one germination");
+
+    // The stand on the site is a different stand of the same species, and the victim's
+    // identity is gone from the world.
+    let now = *v.stand_at(victim_site).expect("occupied throughout");
+    assert_eq!(now.species, Species::Bloomcrown, "the replacement is its own species");
+    assert_ne!(now.id, victim_id, "the site watch's blind spot: same site, same species");
+    assert!(now.id >= 2, "a germinated stand's id comes after the founders': {}", now.id);
+    assert!(!v.stands.iter().any(|s| s.id == victim_id), "the victim is still standing");
+    assert!(v.stands.iter().any(|s| s.id == donor_id), "the donor died too");
+    // It was born of the bank, so it is one package and not the victim's remains.
+    let sc = flora.config().species(Species::Bloomcrown);
+    let package = sc.alive_min / sc.propagule_split[0];
+    assert!(
+        (now.organic() - package).abs() <= 1e-12 * package,
+        "born with {} for a {package} package",
+        now.organic()
+    );
+    // And the victim's remains are under it.
+    let g = v.ground_at(victim_site).expect("the grave");
+    assert!(g.dead_wood > 0.0 && g.litter > 0.0, "the victim left no remains: {g:?}");
+    assert_residuals(&flora, "after a same-tick death and replacement");
+}
+
 // ============================================================ root-zone aeration
 
 /// The eighteen voxels of `at(2, 1)`'s root box — `rooting_radius` 1 over three columns
