@@ -609,12 +609,21 @@ struct Scratch {
     /// Surface level of the contiguous water column a wet cell belongs to, in cell units
     /// (`y + free` of the run's top cell). Valid for the cells of this substep's active
     /// columns.
+    ///
+    /// **Column-major** (`col * height + y`, see [`col_of`] and [`tcell`]) and not in the
+    /// world's own index order, so that one column's entries are contiguous: that is what
+    /// lets the scan hand each worker a disjoint `&mut` span and keeps this crate's
+    /// `#![forbid(unsafe_code)]`. Values are unchanged by the layout — `room_target` and
+    /// `run_top` still hold **world** cell indices — so the arithmetic is the arithmetic
+    /// the serial scan always did.
     head: Vec<f64>,
     /// For every non-solid cell of an active column: the lowest cell **at or above** it,
     /// inside its own void run, that still has room — where a push against this cell
     /// actually displaces water to. `usize::MAX` when the run is full to its ceiling.
+    /// Column-major, like `head`; the value is a world cell index.
     room_target: Vec<usize>,
     /// The top cell of each non-solid cell's own void run: where a displacement stops.
+    /// Column-major, like `head`; the value is a world cell index.
     run_top: Vec<usize>,
     /// One cell's offers this pass, `(destination, volume)`, before the giver's own stock
     /// scales them.
@@ -684,6 +693,32 @@ thread_local! {
     static SCRATCH: RefCell<Scratch> = RefCell::new(Scratch::default());
 }
 
+/// The column a world cell index belongs to: `plane` is one horizontal layer, so this is
+/// the cell's `(x, z)` and nothing else.
+#[inline]
+fn col_of(i: usize, plane: usize) -> usize {
+    i % plane
+}
+
+/// The row a world cell index sits in.
+#[inline]
+fn row_of(i: usize, plane: usize) -> usize {
+    i / plane
+}
+
+/// A world cell index in the column-major scratch layout: one column's `height` entries
+/// are contiguous, which is what makes the scan splittable.
+#[inline]
+fn tcell(i: usize, plane: usize, height: usize) -> usize {
+    col_of(i, plane) * height + row_of(i, plane)
+}
+
+/// The same, from a column and a row already in hand — no division.
+#[inline]
+fn tat(col: usize, y: usize, height: usize) -> usize {
+    col * height + y
+}
+
 /// **The local exchange: what replaced the region solver.**
 ///
 /// Each substep every wet cell offers water to its four horizontal neighbours and to the
@@ -718,9 +753,9 @@ pub fn exchange(w: &mut World, threads: usize) {
 }
 
 fn exchange_inner(w: &mut World, threads: usize) {
-    let _ = threads;
     let c = w.config.clone();
     let plane = c.width as usize * c.depth as usize;
+    let height = c.height as usize;
     let n = c.cells();
     if w.wet.len() == 0 {
         return;
@@ -734,7 +769,6 @@ fn exchange_inner(w: &mut World, threads: usize) {
         // neighbours live in. Dry rock and dry air are never looked at.
         sc.active.clear();
         sc.active.extend_from_slice(w.wet.cells());
-        sc.columns.clear();
         for &i in &sc.active {
             let (x, _, z) = c.coords(i);
             let x = x as i64;
@@ -743,11 +777,19 @@ fn exchange_inner(w: &mut World, threads: usize) {
                 if nz < 0 || nz >= c.depth as i64 {
                     continue;
                 }
-                let col = c.index(x + dx, 0, nz as u32);
-                if sc.col_stamp[col] != stamp {
-                    sc.col_stamp[col] = stamp;
-                    sc.columns.push(col);
-                }
+                sc.col_stamp[c.index(x + dx, 0, nz as u32)] = stamp;
+            }
+        }
+        // Collected **ascending** by one pass over the stamp array rather than pushed in
+        // the order the wet set happened to be walked in. Two reasons, neither a rule: the
+        // column scan writes disjoint cells so its order cannot reach a result, and an
+        // ascending list is what lets the parallel split cut the column-major scratch into
+        // disjoint ascending spans without sorting anything. One pass over `plane` columns
+        // is cheaper than sorting the list it replaces.
+        sc.columns.clear();
+        for col in 0..plane {
+            if sc.col_stamp[col] == stamp {
+                sc.columns.push(col);
             }
         }
         #[cfg(feature = "profile")]
@@ -756,11 +798,12 @@ fn exchange_inner(w: &mut World, threads: usize) {
             crate::profile::add(crate::profile::Count::ExchangeColumns, sc.columns.len() as u64);
         }
 
-        // ---- one pass per active column: heads, and where a push displaces to.
-        for k in 0..sc.columns.len() {
-            let col = sc.columns[k];
-            scan_column(w, &c, plane, col, sc);
-        }
+        // ---- one pass per active column: heads, and where a push displaces to. **This is
+        // the phase's parallel leg** — the columns are disjoint, the world's arrays are
+        // read-only here, and the scratch is column-major so each worker gets its own
+        // `&mut` spans (`design/7_Research/voxel-tick-profile-2026-09-18.md` measured it at
+        // 40 % of the process).
+        scan_columns(w, height, plane, threads, sc);
 
         // ---- head through submerged water. A full cell has no free surface of its own,
         // so it carries the highest head that reaches it across its horizontal faces: that
@@ -773,7 +816,7 @@ fn exchange_inner(w: &mut World, threads: usize) {
         // walk order, and the loop stops as soon as a pass raises nothing.
         for ai in 0..sc.active.len() {
             let i = sc.active[ai];
-            sc.drive[i] = sc.head[i];
+            sc.drive[i] = sc.head[tcell(i, plane, height)];
         }
         sc.full.clear();
         for ai in 0..sc.active.len() {
@@ -852,13 +895,16 @@ fn exchange_inner(w: &mut World, threads: usize) {
                 if w.material[j].is_solid() {
                     continue;
                 }
-                let there = if w.free[j] > 0.0 { sc.head[j] } else { (j / plane) as f64 };
+                // Same row, so the neighbour's column is all that changes and its
+                // column-major index needs no division.
+                let tj = tat(col_of(j, plane), y as usize, height);
+                let there = if w.free[j] > 0.0 { sc.head[tj] } else { f64::from(y) };
                 let drop = here - there;
                 if drop <= 0.0 {
                     continue;
                 }
                 let placed =
-                    offer_up_the_run(w, plane, j, cap_flux(&c, FLOW_PER_SUBSTEP * drop), sc);
+                    offer_up_the_run(w, plane, tj, cap_flux(&c, FLOW_PER_SUBSTEP * drop), sc);
                 if placed > 0.0 {
                     faces += 1;
                     total += placed;
@@ -872,9 +918,9 @@ fn exchange_inner(w: &mut World, threads: usize) {
                 if !w.material[below].is_solid() {
                     let room = (1.0 - w.free[below]).max(0.0);
                     let there = if w.free[below] > 0.0 {
-                        sc.head[below]
+                        sc.head[tat(col_of(below, plane), y as usize - 1, height)]
                     } else {
-                        (below / plane) as f64
+                        f64::from(y - 1)
                     };
                     let drop = here - there;
                     if drop > 0.0 && room > 0.0 {
@@ -953,17 +999,19 @@ fn exchange_inner(w: &mut World, threads: usize) {
     });
 }
 
-/// Place `q` into the cells with room at or above `j`, inside `j`'s own void run, bottom
-/// first, recording each part as an offer. Returns how much of `q` actually found room.
+/// Place `q` into the cells with room at or above the cell whose **column-major** scratch
+/// index is `tj`, inside that cell's own void run, bottom first, recording each part as an
+/// offer. Returns how much of `q` actually found room. The walk itself is in world indices
+/// (`at += plane`), because that is what the offers and the water arrays are keyed by.
 ///
 /// This is the displacement rule: pushing against a submerged cell fills the stack above
 /// it rather than stopping at whatever room that one cell has left. Without it a nearly
 /// full column throttles the flow into it to its own remaining hair of room, and a U-tube
 /// crawls toward its level geometrically instead of reaching it.
-fn offer_up_the_run(w: &World, plane: usize, j: usize, q: f64, sc: &mut Scratch) -> f64 {
+fn offer_up_the_run(w: &World, plane: usize, tj: usize, q: f64, sc: &mut Scratch) -> f64 {
     let mut left = q;
-    let mut at = sc.room_target[j];
-    let top = sc.run_top[j];
+    let mut at = sc.room_target[tj];
+    let top = sc.run_top[tj];
     if at == usize::MAX || top == usize::MAX {
         return 0.0;
     }
@@ -988,6 +1036,100 @@ fn cap_flux(c: &Config, q: f64) -> f64 {
     if c.free_transfer_cap > 0.0 { q.min(c.free_transfer_cap) } else { q }
 }
 
+/// The column scan, over every active column: **the one leg of the water tick that runs on
+/// more than one thread.**
+///
+/// Each column's scan writes only that column's own `height` entries of the three
+/// column-major scratch buffers and reads only the world's arrays, so the columns are
+/// independent by construction. With `threads` above one and at least one column per
+/// worker, the ascending column list is cut into `threads` equal-count chunks and each
+/// chunk's columns span one contiguous, disjoint run of each buffer — an ordinary
+/// `split_at_mut`, no unsafe, no synchronisation, and no reduction to reassociate. Below
+/// that it is the same loop on this thread.
+fn scan_columns(w: &World, height: usize, plane: usize, threads: usize, sc: &mut Scratch) {
+    // Field-by-field, so the read-only column list and the three written buffers are
+    // disjoint borrows of one `Scratch`.
+    let Scratch { head, room_target, run_top, columns, .. } = sc;
+    let (material, free) = (&w.material[..], &w.free[..]);
+
+    #[cfg(feature = "parallel")]
+    if threads > 1 && columns.len() >= threads {
+        let per = columns.len().div_ceil(threads);
+        let chunks: Vec<&[usize]> = columns.chunks(per).collect();
+        let heads = cut_spans(head, height, &chunks);
+        let rooms = cut_spans(room_target, height, &chunks);
+        let tops = cut_spans(run_top, height, &chunks);
+        let pool = bevy_tasks::ComputeTaskPool::get_or_init(|| {
+            bevy_tasks::TaskPoolBuilder::new().num_threads(threads).build()
+        });
+        pool.scope(|scope| {
+            for (((cols, (start, h)), (_, r)), (_, t)) in
+                chunks.into_iter().zip(heads).zip(rooms).zip(tops)
+            {
+                scope.spawn(async move {
+                    for &col in cols {
+                        let at = col * height - start;
+                        scan_column(
+                            material,
+                            free,
+                            height,
+                            plane,
+                            col,
+                            &mut h[at..at + height],
+                            &mut r[at..at + height],
+                            &mut t[at..at + height],
+                        );
+                    }
+                });
+            }
+        });
+        return;
+    }
+    let _ = threads;
+
+    for &col in columns.iter() {
+        let at = col * height;
+        scan_column(
+            material,
+            free,
+            height,
+            plane,
+            col,
+            &mut head[at..at + height],
+            &mut room_target[at..at + height],
+            &mut run_top[at..at + height],
+        );
+    }
+}
+
+/// Cut one column-major scratch buffer into the single contiguous span each chunk of
+/// **ascending, distinct** columns covers, with each span's start offset.
+///
+/// The chunks come from `slice::chunks` of an ascending list, so their column ranges are
+/// disjoint and ascending and the cuts are plain `split_at_mut`s. Columns inside a chunk's
+/// span that are not themselves active are simply never written; no other chunk can reach
+/// them either.
+#[cfg(feature = "parallel")]
+fn cut_spans<'a, T>(
+    buf: &'a mut [T],
+    height: usize,
+    chunks: &[&[usize]],
+) -> Vec<(usize, &'a mut [T])> {
+    let mut out = Vec::with_capacity(chunks.len());
+    let mut rest: &mut [T] = buf;
+    let mut at = 0usize;
+    for cols in chunks {
+        let start = cols[0] * height;
+        let end = (cols[cols.len() - 1] + 1) * height;
+        let (_, tail) = std::mem::replace(&mut rest, &mut []).split_at_mut(start - at);
+        let (mine, tail) = tail.split_at_mut(end - start);
+        out.push((start, mine));
+        rest = tail;
+        at = end;
+    }
+    out
+}
+
 /// One pass over a column: the head of every wet cell, and the displacement target of
 /// every non-solid cell.
 ///
@@ -995,16 +1137,30 @@ fn cap_flux(c: &Config, q: f64) -> f64 {
 /// is the lowest cell with room at or above it *within its own run*, because a solid
 /// ceiling is where a push stops. A **water run** is a maximal stack of wet cells inside a
 /// void run, and every cell of it carries the run's own surface level.
-fn scan_column(w: &World, c: &Config, plane: usize, col: usize, sc: &mut Scratch) {
-    let height = c.height as usize;
+///
+/// **This is the parallel pass**, and it is why the scratch is column-major: it reads the
+/// world's arrays (shared) and writes only `head[y]`, `room_target[y]` and `run_top[y]` of
+/// the **one column** whose three `height`-long spans the caller handed it. Two columns
+/// never overlap, so a worker per chunk of columns needs no synchronisation and no unsafe.
+/// The values written are world cell indices, exactly as before.
+fn scan_column(
+    material: &[Material],
+    free: &[f64],
+    height: usize,
+    plane: usize,
+    col: usize,
+    head: &mut [f64],
+    room_target: &mut [usize],
+    run_top: &mut [usize],
+) {
     let mut y = 0usize;
     while y < height {
-        if w.material[y * plane + col].is_solid() {
+        if material[y * plane + col].is_solid() {
             y += 1;
             continue;
         }
         let mut top = y;
-        while top + 1 < height && !w.material[(top + 1) * plane + col].is_solid() {
+        while top + 1 < height && !material[(top + 1) * plane + col].is_solid() {
             top += 1;
         }
         // Displacement targets, from the ceiling down: the lowest cell with room seen so
@@ -1013,24 +1169,24 @@ fn scan_column(w: &World, c: &Config, plane: usize, col: usize, sc: &mut Scratch
         let top_cell = top * plane + col;
         for k in (y..=top).rev() {
             let i = k * plane + col;
-            if w.free[i] < 1.0 - ROOM_EPS {
+            if free[i] < 1.0 - ROOM_EPS {
                 best = i;
             }
-            sc.room_target[i] = best;
-            sc.run_top[i] = top_cell;
+            room_target[k] = best;
+            run_top[k] = top_cell;
         }
         // Heads, one water run at a time.
         let mut k = y;
         while k <= top {
             let i = k * plane + col;
-            if w.free[i] > 0.0 {
+            if free[i] > 0.0 {
                 let mut t = k;
-                while t + 1 <= top && w.free[(t + 1) * plane + col] > 0.0 {
+                while t + 1 <= top && free[(t + 1) * plane + col] > 0.0 {
                     t += 1;
                 }
-                let surface = t as f64 + w.free[t * plane + col];
+                let surface = t as f64 + free[t * plane + col];
                 for m in k..=t {
-                    sc.head[m * plane + col] = surface;
+                    head[m] = surface;
                 }
                 k = t + 1;
             } else {
