@@ -210,8 +210,8 @@ fn main() {
 
     println!("\n=== what this can and cannot say ===");
     println!(
-        "The conditioned state this all branched from planted {} {} founders{} and had {} of \
-         them alive at the introduction.",
+        "The conditioned state this all branched from planted {} {} founders{} and stood at {} \
+         stands of that species at the introduction, its own descendants included.",
         conditioned.resident_planted,
         resident.name(),
         match conditioned.background {
@@ -395,8 +395,9 @@ fn condition(
     let (banks, banked) = banked(&flora, resident);
     let v = flora.view();
     println!(
-        "conditioned: {resident_alive} of {resident_planted} {} founders alive, seed bank on \
-         {banks} sites holding {banked:.5}; establishments {}, deaths {}, births {}",
+        "conditioned: **{resident_alive} {} stands** alive — {resident_planted} founders planted \
+         and {} establishments since, so the count includes the resident's own descendants — \
+         seed bank on {banks} sites holding {banked:.5}; deaths {}, births {}",
         resident.name(),
         v.ledger.establishments,
         v.ledger.deaths,

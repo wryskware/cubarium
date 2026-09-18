@@ -1551,3 +1551,137 @@ bloomcrown bites were taken from. And anything about the *look* of a consumer: t
 draws an interim 2×1×2 block in a placeholder colour, the art direction is Wrysk's own thread,
 and the `--sink gpu` path does not draw animals at all yet because the staging that would feed
 it lives in `crates/cubarium/src/sink/**`, which package O was told not to touch.
+
+## Replacement harness smoke — 2026-09-17
+
+Package P built the **replacement-control study harness** Astra designed in R5.4 and
+corrected in R7.2, and ran **one short smoke of it**. This is the harness working, not the
+study: the controls and the probe are a separate run Wrysk authorises, and nothing below is
+coexistence evidence, an invasion, a preset gate or a clearance condition.
+
+```text
+cargo run --release -p cubarium-voxel-flora --example replacement -- \
+    bloomcrown umbrellafrond 1000 1 101 --cap 300
+```
+
+**Wall time: 836.5 s** — 1,000 s of conditioning (20,000 coupled ticks) plus **seven** arms of
+300 s (6,000 coupled ticks each, 87.0–90.6 s per arm, about 68 ticks/s), on this machine. Run
+**twice** (849.5 s and 836.5 s, one of them before a wording fix to two printed lines): the two
+runs are **identical line for line** apart from those two lines and the wall times, so every
+number here is reproducible from the command above.
+
+Seven arms and not nine: the resident-only control introduces nothing, so with one conditioned
+state and one forcing three copies of it would be bit-identical, and it is run once and
+reported once.
+
+### The predeclared cap, printed before anything moved
+
+| species | newborn → donor at the growth cap | one funded package | cap |
+| --- | --- | --- | --- |
+| bloomcrown | 0.02 → 0.3 at `wood_rate` 0.001 = 54,163 ticks = **2,708.15 s** | 0.05 (= 0.02/0.4) at `propagule_rate` 0.0002 net of `build` 0.2 = 6,000 ticks = **300.00 s** | **3,008.15 s** |
+| umbrellafrond | the same preset numbers = **2,708.15 s** | the same = **300.00 s** | **3,008.15 s** |
+
+Pair cap **3,008.15 s**, the larger of the two. The smoke's `--cap 300` is **10.0 %** of it, and
+the harness says so in its own header: a window this short cannot resolve a replacement, and an
+arm that has not completed one is reported as *unresolved at cap* rather than as exclusion.
+Astra's stonecushion correction is in the same arithmetic — 160,945 ticks = 8,047.25 s plus
+600 s, so 8,647.25 s, which a 6,000 s cap cannot resolve — and `observation_cap` reproduces
+both to the hundredth of a second (`examples/harness/mod.rs`, `cap_tests`).
+
+### The conditioned state
+
+3,072 skyline columns; **3,072 support faces provisioned at creation** with 1.0 of mineral
+each, booked once as `seeded_mineral_in` 3,072.0. That is the R5.4 requirement in force: no
+arm can import mineral by colonising further, so fertility is matched across the arms by
+construction rather than by hope.
+
+Eight bloomcrown founders at wood 0.3 on 96 gate-passing `Ridge` candidates, every founder's
+gate values printed by identity (all at y13, mean root-box pore 0.219–0.283 against its 0.10
+floor, saturated fraction 0.000, sky 0.615–0.874 against its 0.60 floor). Over 1,000 s the
+head fell 2.987 → 2.501 m with storage settling — the last interval is **+0.0001 m** and
++0.0207 m³/s of storage against 0.0384 in and 0.0176 out — and the eligible sets moved a long
+way while it did: bloomcrown's 2,771 → 1,560 columns, umbrellafrond's 427 → 2,429. An eligible
+count is a reading of its own moment (R5.2/R6.3) and these are the moments.
+
+The resident **grew**: 8 founders → **19 stands**, 11 establishments, 0 deaths, a seed bank on
+9 sites holding 0.37202. Residuals at the end of conditioning: organic −1.25e−11, mineral
+−1.36e−12, energy −2.49e−11 against stocks of 11.6, 3,072.2 and 23.2.
+
+### The three predeclared sites, declared once and reused by every arm
+
+| site | column | recipients | gate values at the declared site |
+| --- | --- | --- | --- |
+| 1 | (41,0) y8 | **5** eligible of 5 candidate faces in hop 1 | mean pore 1.000 (≥0.45), saturated 1.000 (≤1.00), water 0.000 m, sky 0.718, 23 soil voxels |
+| 2 | (32,18) y18 | **6** eligible of 8 | mean pore 0.521, saturated 0.267, water 0.000 m, sky 0.760, 30 soil voxels |
+| 3 | (57,15) y25 | **8** eligible of 8 | mean pore 1.000, saturated 1.000, water 0.000 m, sky 0.802, 11 soil voxels |
+
+Drawn as a spread of umbrellafrond's whole ordered `Hollow` pool — 2,429 columns pass its own
+predicate in the conditioned state, 2,411 of them unoccupied. The list is **not re-derived per
+arm**: `tests::the_declared_site_list_is_one_list_and_an_arm_would_derive_another` shows that
+the exclusion arm's own pool declares a *different* list, which is exactly what R7.2 and
+package L's note warned would silently unmatch the arms.
+
+### The arms
+
+Every introduction arm ran the same course, at all three sites and in both treatments:
+
+| arm | resident stands at 100/200/300 s | newcomer | descendant births | losses | survivors | founder parcel at 300 s | deliveries |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| resident only (control) | 19 / 19 / 19 | 0 | — | — | — | — | — |
+| site 1, resident + newcomer | 19 / 19 / 19 | 1 | 0 | 0 | 0 | 0.05000 | 0 |
+| site 1, resident excluded | 0 / 0 / 0 | 1 | 0 | 0 | 0 | 0.05000 | 0 |
+| site 2, resident + newcomer | 19 / 19 / 19 | 1 | 0 | 0 | 0 | 0.05000 | 0 |
+| site 2, resident excluded | 0 / 0 / 0 | 1 | 0 | 0 | 0 | 0.05000 | 0 |
+| site 3, resident + newcomer | 19 / 19 / 19 | 1 | 0 | 0 | 0 | 0.05000 | 0 |
+| site 3, resident excluded | 0 / 0 / 0 | 1 | 0 | 0 | 0 | 0.05000 | 0 |
+
+Every one of the six introduction arms printed **"recruitment NOT OBSERVED within 300 s …
+unresolved at cap"**, which is the correct reading and not a disappointment: see finding 1.
+
+### What the smoke establishes
+
+1. **The window was the package term of the cap and nothing more, and the harness's own
+   arithmetic predicted exactly that.** The introduced founder starts at wood 0.3, which is
+   `donor_min` for this preset, so it reaches donor size on its first tick — the harness prints
+   that as the founder's own event and says it is *not* a descendant — and then funds
+   `propagule_rate · dt / (1 + c_g)` = 8.3333e−6 per tick. Over 6,000 ticks that is **0.05000
+   exactly**, one whole package, and the model delivers a package only when the parcel already
+   holds one: so the arm ends with the first package saved and not yet sent. A birth needs the
+   delivery, a germination lottery and then 2,708.15 s of capped growth before a *descendant*
+   could donate. 300 s could not have produced a replacement, and no arm inferred exclusion
+   from the fact that it did not.
+2. **The exclusion arm excludes, and retains everything else.** 19 of 19 stands cleared and 9
+   of 9 seed banks removed, booked out as `removed_*` (organic +8.4229, mineral +0.1737), with
+   stored water 210.8303 m³, head 2.501 m, litter 3.18641, dead wood 0.00000, soil mineral
+   3,071.9297 and imported mineral 3,072.2 **all unmoved** — checked to 1e−9 by the harness
+   itself, which refuses the arm rather than reporting it if any of them shifts or if anything
+   of the resident survives. A `Clear` alone would have left the 9 banks germinating, which is
+   why `Command::ClearBank` exists (`tests/replacement.rs`,
+   `clearing_a_resident_without_its_bank_leaves_it_able_to_come_back`).
+3. **The resident is not declining, so it would not have disqualified a longer arm.** 8 → 19
+   stands over conditioning and 19 → 19 through the control window, with zero deaths. R5.4 is
+   explicit that a newcomer increasing against a declining resident is not evidence, and this
+   is the arm that says which case we are in.
+4. **Fertility is matched and the cloning is exact.** Every arm carries the same 3,072.2 of
+   imported mineral; the only ledger difference the exclusion arm has is the removal it
+   declared. Residuals stayed at 1e−11 relative through the branch, the removals and the
+   arms — organic −1.25e−11 to −1.84e−11 — and a cloned state is pinned to step identically
+   for ten ticks by `a_cloned_conditioned_state_steps_identically_for_ten_ticks`.
+5. **Cost, for sizing the authorised run.** About 67 coupled ticks per second of wall time on
+   this machine with all 3,072 faces provisioned. One **full** control at the predeclared cap
+   for this pair is 3,008.15 s = 60,163 ticks ≈ 15 minutes of wall time per arm, so seven arms
+   is about **1.8 hours**; a stonecushion pair at 8,647.25 s per arm is about 5 hours for
+   seven. R5.4's probe window of 3 × the larger measured G is a multiple of that again. Those
+   are the numbers an authorisation is choosing between, not a claim that the run is worth
+   making.
+
+### What it does not establish
+
+Anything at all about coexistence, invasion, replacement time G, or these two species'
+relation to each other: no arm ran long enough for a single generation and the harness says so
+in its own words. Whether 1,000 s of conditioning is the right amount, whether three sites is
+enough, whether `seed` 1 / `noise_seed` 101 is representative, and whether any of the presets'
+placeholders is a reasonable value — nothing here measured any of them, and no number above
+depends on one. The other direction of this pair (umbrellafrond resident, bloomcrown newcomer)
+was **not run**: it is the same command with the two species exchanged, and coexistence
+evidence needs both directions.
