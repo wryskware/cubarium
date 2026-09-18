@@ -1845,6 +1845,40 @@ pub struct Deposit {
     pub energy: f64,
 }
 
+/// One package leaving one donor for one site, exactly as `propagate` sent it:
+/// **observation, not state**.
+///
+/// Astra's R10.3. A harness watching the seed banks cannot tell who sent what where: two
+/// donors delivering in one tick, a bank emptied by germination between two deliveries, and
+/// attrition and expiry all change the same number, so a "largest bank increase" is an
+/// inference and sometimes a fabrication. The model knows the answer while it is sending, so
+/// it says so here.
+///
+/// **Transient.** [`Flora::step`] clears the list at the start of every tick, so it holds at
+/// most one tick's deliveries and a caller that never reads it costs nothing. It is not part
+/// of the layer's state in any sense that matters: nothing in `step` reads it, it is not
+/// serialised (the plant layer itself is not), no conservation total includes it — the
+/// material it describes is booked in [`FloraLedger::propagule_landed`] and in the recipient's
+/// own cohort — and two runs that differ only in whether the receipts were read are the same
+/// run. A clone carries whatever the last tick left, which is equally inert.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DeliveryReceipt {
+    /// The tick the package left, which is [`Flora::tick`] at the time.
+    pub tick: u64,
+    /// [`Stand::id`] of the donor. The identity a harness needs, because a founder donating
+    /// repeatedly is not its descendants reproducing.
+    pub donor: u64,
+    pub species: Species,
+    /// The support face the package landed on, as `dispersal_target` drew it — **never the
+    /// donor's own site**, and with no habitat screening: it may be occupied, and it may be a
+    /// site that will never germinate it.
+    pub recipient: Site,
+    /// The package's organic matter, `alive_min / w_frac`.
+    pub organic: f64,
+    /// The mineral that travelled with it, by the donor's own fraction rule.
+    pub mineral: f64,
+}
+
 /// The plant layer. Owns its stands and ground stocks; borrows the world per call.
 #[derive(Clone, Debug)]
 pub struct Flora {
@@ -1859,6 +1893,9 @@ pub struct Flora {
     sky: Vec<(Site, f64)>,
     /// The `terrain_version` `sky` was filled against, `None` before the first tick.
     sky_version: Option<u64>,
+    /// This tick's [`DeliveryReceipt`]s, in the order `propagate` sent them. Cleared at the
+    /// start of every tick: **observation, not state** (see [`DeliveryReceipt`]).
+    deliveries: Vec<DeliveryReceipt>,
 }
 
 impl Flora {
@@ -1941,6 +1978,7 @@ impl Flora {
             ledger: FloraLedger::default(),
             sky: Vec::new(),
             sky_version: None,
+            deliveries: Vec::new(),
         }
     }
 
@@ -1950,6 +1988,23 @@ impl Flora {
 
     pub fn tick(&self) -> u64 {
         self.tick
+    }
+
+    /// This tick's delivery receipts: who sent a package, where it landed and how much of
+    /// each currency went with it. Cleared at the start of the next [`Flora::step`], so a
+    /// caller reads them between ticks or not at all.
+    ///
+    /// **Observation, not state** — see [`DeliveryReceipt`]. A harness that wants the
+    /// destination of a package has to read this: the recipient cannot be recovered from the
+    /// seed banks afterwards (Astra R10.3).
+    pub fn deliveries(&self) -> &[DeliveryReceipt] {
+        &self.deliveries
+    }
+
+    /// [`Flora::deliveries`], taken rather than borrowed, for a caller that wants to keep
+    /// them past the next tick.
+    pub fn take_deliveries(&mut self) -> Vec<DeliveryReceipt> {
+        std::mem::take(&mut self.deliveries)
     }
 
     pub fn view(&self) -> FloraView<'_> {

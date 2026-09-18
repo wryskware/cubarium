@@ -172,6 +172,10 @@ pub(crate) fn step(flora: &mut Flora, world: &mut World) {
     // seed — then uses one clock reading, and a bin's age at the end of the tick it landed
     // in is zero rather than minus one.
     flora.tick += 1;
+    // This tick's delivery receipts start empty: they are **observation and not state**, they
+    // describe only the tick that is about to run, and a caller that never reads them must not
+    // accumulate them (Astra R10.3, `DeliveryReceipt`).
+    flora.deliveries.clear();
     // The stocks decomposition is allowed to draw on: what each site held when the tick
     // started, taken before anything at all moves. Litter, dead wood and carrion deposited
     // by this tick's drownings, senescence and deaths are eligible from the next tick, per
@@ -1498,7 +1502,7 @@ fn package_of(sc: &SpeciesConfig) -> f64 {
 /// decay there. Two species' cohorts can share one site, and there is no contest to
 /// settle until germination.
 fn propagate(flora: &mut Flora, world: &World) {
-    let Flora { config, tick, stands, ground, ledger, .. } = flora;
+    let Flora { config, tick, stands, ground, ledger, deliveries, .. } = flora;
     let tick = *tick;
     let view = world.view();
     let world_seed = view.config.seed;
@@ -1555,6 +1559,16 @@ fn propagate(flora: &mut Flora, world: &World) {
             }
         };
         add_cohort(&mut ground[gi], donor.species, package, mineral, tick, sc);
+        // The receipt, written where the destination is actually known. Nothing downstream
+        // reads it and no total includes it (Astra R10.3).
+        deliveries.push(crate::DeliveryReceipt {
+            tick,
+            donor: donor.id,
+            species: donor.species,
+            recipient: site,
+            organic: package,
+            mineral,
+        });
     }
 }
 

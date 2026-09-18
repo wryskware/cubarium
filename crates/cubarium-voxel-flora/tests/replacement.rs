@@ -15,7 +15,7 @@
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, Material, World};
 use cubarium_voxel_flora::{
-    Command, Deposit, DepositKind, Flora, FloraConfig, Provision, Site, Species,
+    Command, DeliveryReceipt, Deposit, DepositKind, Flora, FloraConfig, Provision, Site, Species,
 };
 
 // ------------------------------------------------------------------- fixtures
@@ -423,4 +423,116 @@ fn a_cloned_conditioned_state_steps_identically_for_ten_ticks() {
     assert_eq!(a.stands, b.stands, "the stands diverged");
     assert_eq!(a.ground, b.ground, "the ground diverged");
     assert_eq!(a.ledger, b.ledger, "the ledger diverged");
+}
+
+// ------------------------------------------------------- delivery receipts (R10.3)
+
+/// Two donors whose **only** reachable face is a different one each: columns 0, 1, 3 and 4
+/// are solid and 2 and 5 are void, so a one-column hop from column 0 reaches only column 1
+/// (column 5 is void, and its own site is excluded) and a hop from column 4 reaches only
+/// column 3. Both donors fund a whole package per tick, so one tick delivers two packages to
+/// two different sites.
+fn two_donors_one_tick() -> (World, Flora) {
+    let world = pillars(6, &[0, 1, 3, 4], 0.5);
+    let mut config = FloraConfig::default();
+    fast_donor(&mut config, Species::Bloomcrown);
+    let mut flora = Flora::new(config);
+    plant(&mut flora, &world, 0, Species::Bloomcrown);
+    plant(&mut flora, &world, 4, Species::Bloomcrown);
+    (world, flora)
+}
+
+/// **Two simultaneous destinations.** The observer used to assign the single largest bank
+/// increase to *every* donor that delivered in the tick; here the two increases are equal and
+/// the destinations are different, so that inference could not have been right about both.
+/// The receipts are.
+#[test]
+fn two_donors_delivering_in_one_tick_name_two_different_recipients() {
+    let (world, mut flora) = two_donors_one_tick();
+    let package = {
+        let sc = flora.config().species(Species::Bloomcrown);
+        sc.alive_min / sc.propagule_split[0]
+    };
+    let mut stepped = world.clone();
+    flora.step(&mut stepped);
+
+    let receipts: Vec<DeliveryReceipt> = flora.deliveries().to_vec();
+    assert_eq!(receipts.len(), 2, "two donors, two packages: {receipts:?}");
+    let mut recipients: Vec<Site> = receipts.iter().map(|r| r.recipient).collect();
+    recipients.sort_unstable();
+    assert_eq!(recipients, vec![at(1), at(3)], "the two only reachable faces");
+    let mut donors: Vec<u64> = receipts.iter().map(|r| r.donor).collect();
+    donors.sort_unstable();
+    assert_eq!(donors, vec![0, 1], "the two founders, by identity");
+    for r in &receipts {
+        assert_eq!(r.species, Species::Bloomcrown);
+        assert!((r.organic - package).abs() < 1e-15, "one whole package: {}", r.organic);
+        assert!(r.mineral > 0.0, "the mineral travelled with it");
+        assert_eq!(r.tick, flora.tick());
+        // The donor never sends to its own site, which is the rule the receipt reflects.
+        assert_ne!(r.recipient, at(r.donor as u32 * 4));
+    }
+    // And the evidence that a bank difference could not have told them apart: the two banks
+    // grew by exactly the same amount, so "the largest increase" is a coin toss.
+    let grew = |site: Site| flora.view().ground_at(site).map_or(0.0, |g| g.seed_organic(Species::Bloomcrown));
+    assert!((grew(at(1)) - grew(at(3))).abs() < 1e-15, "{} vs {}", grew(at(1)), grew(at(3)));
+
+    // Transient: the next tick starts with an empty list whether or not anyone read it.
+    let before = flora.deliveries().len();
+    assert_eq!(before, 2);
+    let taken = flora.take_deliveries();
+    assert_eq!(taken.len(), 2);
+    assert!(flora.deliveries().is_empty(), "taken means taken");
+}
+
+/// **A refilled bank.** Column 1 is the donor's only reachable face. On the second tick its
+/// package germinates (step 8) and the donor lands another one (step 9), so the bank ends the
+/// tick holding exactly what it held before: **zero measured growth, and a real delivery.**
+/// The bank-difference observer saw nothing here and printed a fabricated `(0,0,0)`.
+#[test]
+fn a_bank_emptied_and_refilled_in_one_tick_still_names_its_recipient() {
+    let world = pillars(6, &[0, 1], 0.5);
+    let mut config = FloraConfig::default();
+    fast_donor(&mut config, Species::Bloomcrown);
+    let mut flora = Flora::new(config);
+    plant(&mut flora, &world, 0, Species::Bloomcrown);
+    let mut stepped = world.clone();
+
+    flora.step(&mut stepped);
+    let first: Vec<DeliveryReceipt> = flora.deliveries().to_vec();
+    assert_eq!(first.len(), 1, "one donor, one package");
+    assert_eq!(first[0].recipient, at(1));
+    let banked_after_first = flora.view().ground_at(at(1)).expect("a bank").seed_organic(Species::Bloomcrown);
+    assert!(banked_after_first > 0.0);
+    assert_eq!(flora.view().ledger.establishments, 0, "nothing is born on the landing tick");
+
+    flora.step(&mut stepped);
+    let second: Vec<DeliveryReceipt> = flora.deliveries().to_vec();
+    assert_eq!(flora.view().ledger.establishments, 1, "the package germinated on this tick");
+    assert_eq!(second.len(), 1, "and the donor delivered again in the same tick");
+    assert_eq!(second[0].recipient, at(1), "the same site, named and not inferred");
+    assert_eq!(second[0].donor, first[0].donor);
+    let banked_after_second = flora.view().ground_at(at(1)).expect("a bank").seed_organic(Species::Bloomcrown);
+    assert!(
+        (banked_after_second - banked_after_first).abs() < 1e-15,
+        "the fixture's whole point: the bank is unchanged across a real delivery ({} -> {})",
+        banked_after_first,
+        banked_after_second
+    );
+    assert_residuals(&flora, "after two deliveries and a birth");
+}
+
+/// A quiet tick books no receipt at all: the list is not a log that grows, and an observer
+/// that reads it every tick sees exactly the deliveries of that tick.
+#[test]
+fn a_tick_with_no_delivery_leaves_no_receipt() {
+    let world = pillars(6, &[0, 1], 0.5);
+    // The shipped rates: 6,001 ticks to fund one package, so the first few deliver nothing.
+    let mut flora = Flora::new(FloraConfig::default());
+    plant(&mut flora, &world, 0, Species::Bloomcrown);
+    let mut stepped = world.clone();
+    for _ in 0..5 {
+        flora.step(&mut stepped);
+        assert!(flora.deliveries().is_empty(), "no package can be funded this soon");
+    }
 }

@@ -60,7 +60,7 @@ use harness::*;
 
 use cubarium_voxel::World;
 use cubarium_voxel_flora::{
-    Command, Flora, FloraConfig, Provision, Site, Species, SpeciesConfig, Stand, Trophic,
+    Command, DeliveryReceipt, Flora, FloraConfig, Provision, Site, Species, Stand, Trophic,
 };
 
 /// How many introduction sites are predeclared. Three, as R5.4 asks: "one successful site is
@@ -1095,7 +1095,8 @@ fn run_arm(
     for tick in 1..=ticks {
         world.step();
         flora.step(&mut world);
-        watch.observe(&flora, tick);
+        let receipts = flora.take_deliveries();
+        watch.observe(&flora, &receipts, tick);
         if tick % per_interval == 0 || tick == ticks {
             let t = tick as f64 * cubarium_voxel::DT;
             println!(
@@ -1275,10 +1276,6 @@ struct Watch {
     /// model.
     records: Vec<Record>,
     alive: Vec<u64>,
-    /// The newcomer's bank per ground slot at the last delivery, to name the recipient of the
-    /// next one. Under `Provision::AtCreation` the ground vector never changes shape, so the
-    /// slots line up.
-    bank: Vec<f64>,
     events: usize,
     truncated: usize,
 }
@@ -1290,7 +1287,6 @@ impl Watch {
             founder,
             records: Vec::new(),
             alive: Vec::new(),
-            bank: bank_of(flora, species),
             events: 0,
             truncated: 0,
         };
@@ -1314,12 +1310,15 @@ impl Watch {
     }
 
     /// One tick's observation: births, losses, funding and deliveries.
-    fn observe(&mut self, flora: &Flora, tick: u64) {
+    ///
+    /// `receipts` is the model's own `Flora::deliveries()` for this tick — who sent what
+    /// where, from the only place that knows (Astra R10.3). The parcel is still read, because
+    /// it is the only source for how much a stand was **funded**; what it no longer does is
+    /// guess a destination.
+    fn observe(&mut self, flora: &Flora, receipts: &[DeliveryReceipt], tick: u64) {
         let donor_min = flora.config().species(self.species).donor_min;
-        let package = package_of(flora.config().species(self.species));
         let species = self.species;
         let mut now: Vec<u64> = Vec::new();
-        let mut delivered: Vec<(u64, f64)> = Vec::new();
         // Copied out before the walk: an event is printed through `&mut self`, and the view
         // borrows the layer for as long as it is held.
         let stands: Vec<Stand> =
@@ -1356,17 +1355,15 @@ impl Watch {
                     i
                 }
             };
-            // Funding and delivery, from the parcel this stand holds. A tick funds
-            // `propagule_rate · dt / (1 + c_g)` into the parcel and sends **one** whole
-            // package or none, so a parcel that fell can only have delivered one.
-            let delta = stand.parcel - self.records[i].parcel;
+            // **Funding** is the parcel's own change, corrected by what this stand actually
+            // sent this tick — which the receipts say exactly, so a delivering tick's funding
+            // is no longer reconstructed from an assumed package size.
+            let sent: f64 =
+                receipts.iter().filter(|r| r.donor == stand.id).map(|r| r.organic).sum();
+            let funded = stand.parcel - self.records[i].parcel + sent;
             self.records[i].parcel = stand.parcel;
-            if delta < 0.0 {
-                self.records[i].funded += delta + package;
-                self.records[i].funded_ticks += 1;
-                delivered.push((stand.id, package));
-            } else if delta > 0.0 {
-                self.records[i].funded += delta;
+            if funded > 0.0 {
+                self.records[i].funded += funded;
                 self.records[i].funded_ticks += 1;
             }
             if self.records[i].donor_tick.is_none() && stand.wood >= donor_min {
@@ -1388,43 +1385,52 @@ impl Watch {
                 );
             }
         }
-        // Deliveries name their recipient by diffing the bank, which only has to be walked on
-        // a tick that actually delivered.
-        if !delivered.is_empty() {
-            let bank = bank_of(flora, self.species);
-            let mut best: Option<(usize, f64)> = None;
-            for (slot, value) in bank.iter().enumerate() {
-                let grew = value - self.bank.get(slot).copied().unwrap_or(0.0);
-                if grew > 0.0 && best.is_none_or(|(_, b)| grew > b) {
-                    best = Some((slot, grew));
-                }
-            }
-            let where_ = best.map(|(slot, grew)| (flora.view().ground[slot].site, grew));
-            self.bank = bank;
-            for (id, package) in delivered {
-                let (site, grew) = where_.unwrap_or((Site { x: 0, y: 0, z: 0 }, 0.0));
-                if let Ok(i) = self.records.binary_search_by_key(&id, |r| r.id) {
-                    self.records[i].deliveries.push((tick, site, package));
-                    let descendant = self.records[i].descendant;
-                    self.event(
-                        format!(
-                            "delivery: {} #{id} sent one {package:.4} package to ({},{}) y{} \
-                             (that bank grew by {grew:.5}) — {}",
-                            self.species.name(),
-                            site.x,
-                            site.z,
-                            site.y,
-                            if descendant {
-                                "**a descendant funding its own package**"
-                            } else {
-                                "the introduced founder donating again, which is not descendant \
-                                 reproduction"
-                            }
-                        ),
-                        tick,
-                    );
-                }
-            }
+        // **Deliveries, from the model's own receipts.** No bank arithmetic, no argmax and no
+        // fallback site: two donors delivering in one tick are two receipts with two
+        // destinations, and a bank that was emptied by germination between two deliveries is
+        // still named correctly, both of which the old bank-difference inference got wrong
+        // (Astra R10.3).
+        for r in receipts.iter().filter(|r| r.species == species) {
+            let Ok(i) = self.records.binary_search_by_key(&r.donor, |rec| rec.id) else {
+                // A donor this watch has never seen: impossible for its own species while the
+                // watch is running, and reported rather than attributed to anyone.
+                self.event(
+                    format!(
+                        "delivery from an unwatched {} donor #{}: one {:.4} package to \
+                         ({},{}) y{}",
+                        r.species.name(),
+                        r.donor,
+                        r.organic,
+                        r.recipient.x,
+                        r.recipient.z,
+                        r.recipient.y
+                    ),
+                    tick,
+                );
+                continue;
+            };
+            self.records[i].deliveries.push((tick, r.recipient, r.organic));
+            let descendant = self.records[i].descendant;
+            self.event(
+                format!(
+                    "delivery: {} #{} sent one {:.4} package ({:.6} of mineral with it) to \
+                     ({},{}) y{} — {}",
+                    r.species.name(),
+                    r.donor,
+                    r.organic,
+                    r.mineral,
+                    r.recipient.x,
+                    r.recipient.z,
+                    r.recipient.y,
+                    if descendant {
+                        "**a descendant funding its own package**"
+                    } else {
+                        "the introduced founder donating again, which is not descendant \
+                         reproduction"
+                    }
+                ),
+                tick,
+            );
         }
         // Losses: an identity that was alive at the end of the last tick and is not now.
         now.sort_unstable();
@@ -1607,17 +1613,6 @@ impl Watch {
             );
         }
     }
-}
-
-/// `alive_min / w_frac`: the model's own package size, which is what a parcel has to hold
-/// before anything leaves it.
-fn package_of(sc: &SpeciesConfig) -> f64 {
-    if sc.propagule_split[0] > 0.0 { sc.alive_min / sc.propagule_split[0] } else { 0.0 }
-}
-
-/// One species' seed-bank organic matter per ground slot, in the ground's own order.
-fn bank_of(flora: &Flora, species: Species) -> Vec<f64> {
-    flora.view().ground.iter().map(|g| g.seed_organic(species)).collect()
 }
 
 /// What one species' whole seed bank holds, and the two counts beside it: sites with
