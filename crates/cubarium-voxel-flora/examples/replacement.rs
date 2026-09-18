@@ -731,9 +731,21 @@ fn settle_phase(
     label: &str,
 ) -> (Vec<IntervalRecord>, Settle, f64) {
     println!("\nphase {label}, reported every {INTERVAL_S:.0} s:");
+    // Everything below counts in **ticks** (R11.2). A budget is a whole number of ticks, an
+    // interval is a whole number of ticks, and the seconds a record reports are the ticks it
+    // actually executed — a 0.01 s chunk rounds to *zero* ticks, reports no change at all and
+    // would otherwise be the quietest interval a phase ever saw.
+    let hz = f64::from(cubarium_voxel::TICK_HZ);
+    let interval_ticks = (INTERVAL_S * hz).round() as u64;
     let remaining = (budget_s - already_spent).max(0.0);
-    if remaining <= 0.0 {
-        println!("  the conditioning budget was already spent before this phase began");
+    let budget_ticks = (remaining * hz).round() as u64;
+    if budget_ticks < interval_ticks {
+        println!(
+            "  the conditioning budget leaves {budget_ticks} ticks ({:.2} s), less than one \
+             whole {INTERVAL_S:.0} s interval, so this phase runs nothing: an incomplete \
+             interval cannot qualify (R11.2)",
+            budget_ticks as f64 * cubarium_voxel::DT
+        );
         return (Vec::new(), Settle::Expired, 0.0);
     }
     let mut records: Vec<IntervalRecord> = Vec::new();
@@ -741,18 +753,20 @@ fn settle_phase(
         species.iter().map(|&s| eligible_sites(world, flora, skyline, s)).collect();
     let mut mark = water_mark(world, 0.0);
     let start = mark;
-    let mut spent = 0.0;
+    let mut spent_ticks = 0u64;
     let mut verdict = Settle::Running;
-    while spent < remaining - 1e-9 {
-        let chunk = INTERVAL_S.min(remaining - spent);
-        step_coupled(flora, world, chunk);
-        spent += chunk;
+    while spent_ticks + interval_ticks <= budget_ticks {
+        step_coupled_ticks(flora, world, interval_ticks);
+        spent_ticks += interval_ticks;
+        let spent = spent_ticks as f64 * cubarium_voxel::DT;
         let now = water_mark(world, spent);
         let dt = (now.seconds - mark.seconds).max(1e-12);
         let sets: Vec<Vec<Site>> =
             species.iter().map(|&s| eligible_sites(world, flora, skyline, s)).collect();
         let record = IntervalRecord {
             seconds: spent,
+            ticks: interval_ticks,
+            complete: true,
             rain_rate: (now.rain_in - mark.rain_in) / dt,
             storage_rate: (now.stored - mark.stored) / dt,
             head_m: now.head_m,
@@ -796,13 +810,21 @@ fn settle_phase(
         );
         records.push(record);
         mark = now;
-        verdict = conditioning_verdict(&records, tol, remaining);
+        verdict = conditioning_verdict(&records, tol, remaining, INTERVAL_S);
         if verdict != Settle::Running {
             break;
         }
     }
+    let tail = budget_ticks - spent_ticks;
+    if tail > 0 && !matches!(verdict, Settle::Settled { .. }) {
+        println!(
+            "  {tail} ticks ({:.2} s) of this phase's budget are **left unrun**: less than one \
+             whole interval, and an incomplete interval cannot qualify (R11.2)",
+            tail as f64 * cubarium_voxel::DT
+        );
+    }
     println!("  phase {label}, whole phase: {}", water_budget_line(&start, &mark));
-    (records, verdict, spent)
+    (records, verdict, spent_ticks as f64 * cubarium_voxel::DT)
 }
 
 /// One phase's verdict, printed. `Some(text)` is the **conditioning unresolved** line the

@@ -464,6 +464,15 @@ pub fn habitat(world: &World, flora: &Flora, skyline: &[Site], species: Species)
     order_for(world, flora, species, habitat_of(species), ok, &[])
 }
 
+/// Exactly `ticks` coupled ticks, which is what a conditioning interval counts in: the
+/// seconds a phase reports are `ticks · DT` and never a requested duration (R11.2).
+pub fn step_coupled_ticks(flora: &mut Flora, world: &mut World, ticks: u64) {
+    for _ in 0..ticks {
+        world.step();
+        flora.step(world);
+    }
+}
+
 pub fn step_coupled(flora: &mut Flora, world: &mut World, seconds: f64) {
     let ticks = (seconds * cubarium_voxel::TICK_HZ as f64).round() as u64;
     for _ in 0..ticks {
@@ -1109,8 +1118,19 @@ mod cap_tests {
 /// how much the eligible-site sets moved since the interval before.
 #[derive(Clone, Debug)]
 pub struct IntervalRecord {
-    /// Seconds of conditioning elapsed at the **end** of this interval.
+    /// Seconds of conditioning elapsed at the **end** of this interval, **derived from the
+    /// ticks actually executed** and not from the seconds requested (Astra R11.2): a chunk of
+    /// 0.01 s rounds to zero ticks, and an observer that advanced by the request would then
+    /// believe time had passed in which nothing ran.
     pub seconds: f64,
+    /// Ticks this interval actually executed.
+    pub ticks: u64,
+    /// Whether that is a **whole** interval. A short final chunk reports smaller changes
+    /// because less happened in it — a zero-tick tail reports *no* change at all — and would
+    /// otherwise satisfy the tolerances by arithmetic rather than by settling, which is
+    /// exactly how a 200.01 s budget could manufacture a settled phase (R11.2). An incomplete
+    /// interval can never qualify.
+    pub complete: bool,
     /// Accepted rain over the interval, m³/s: the denominator the storage tolerance is a
     /// fraction of, because a world that is taking no water in cannot be asked to hold its
     /// storage to a fraction of it.
@@ -1180,6 +1200,9 @@ impl Tolerances {
     /// Whether one interval satisfies all three tolerances. The first interval of a phase has
     /// no turnover and can never satisfy them.
     pub fn holds(&self, r: &IntervalRecord) -> bool {
+        if !r.complete {
+            return false; // R11.2: a partial interval cannot qualify, whatever it read
+        }
         let storage_ok = r.storage_rate.abs()
             <= self.storage_fraction_of_rain * r.rain_rate.abs().max(f64::MIN_POSITIVE);
         let head_ok = r.head_delta.abs() <= self.head_m_per_interval;
@@ -1190,6 +1213,12 @@ impl Tolerances {
     /// Which tolerance a single interval failed, for the printed line.
     pub fn why(&self, r: &IntervalRecord) -> String {
         let mut out: Vec<String> = Vec::new();
+        if !r.complete {
+            out.push(format!(
+                "the interval is **incomplete** ({} ticks) and cannot qualify however quiet it                  looks",
+                r.ticks
+            ));
+        }
         let limit = self.storage_fraction_of_rain * r.rain_rate.abs().max(f64::MIN_POSITIVE);
         if r.storage_rate.abs() > limit {
             out.push(format!(
@@ -1236,13 +1265,21 @@ pub enum Settle {
 ///
 /// `Settled` needs the tolerances to hold on the last `tol.intervals` records — the *last*
 /// ones, because a phase that settled and then drifted is not settled now.
-pub fn conditioning_verdict(records: &[IntervalRecord], tol: &Tolerances, budget_s: f64) -> Settle {
+pub fn conditioning_verdict(
+    records: &[IntervalRecord],
+    tol: &Tolerances,
+    budget_s: f64,
+    interval_s: f64,
+) -> Settle {
     let n = tol.intervals.max(1);
     if records.len() >= n && records[records.len() - n..].iter().all(|r| tol.holds(r)) {
         return Settle::Settled { at_s: records.last().map_or(0.0, |r| r.seconds) };
     }
+    // **Expired when another whole interval no longer fits** (R11.2), not when the budget is
+    // merely exhausted: a fractional tail cannot qualify, so a budget with only a tail left
+    // has nothing further to offer this phase and the remainder is not worth running.
     let elapsed = records.last().map_or(0.0, |r| r.seconds);
-    if elapsed >= budget_s - 1e-9 { Settle::Expired } else { Settle::Running }
+    if elapsed + interval_s > budget_s + 1e-9 { Settle::Expired } else { Settle::Running }
 }
 
 /// `|symmetric difference| / |union|` of two sorted site sets: 0.0 for two identical sets,
@@ -1291,6 +1328,8 @@ mod settle_tests {
     fn rec(seconds: f64, storage: f64, head_delta: f64, turnover: Option<f64>) -> IntervalRecord {
         IntervalRecord {
             seconds,
+            ticks: 2_000,
+            complete: true,
             rain_rate: 0.0384,
             storage_rate: storage,
             head_m: 2.5,
@@ -1310,9 +1349,9 @@ mod settle_tests {
     fn two_consecutive_quiet_intervals_settle_and_one_does_not() {
         let tol = Tolerances::default();
         assert_eq!(tol.intervals, 2, "the placeholder this test is written against");
-        assert_eq!(conditioning_verdict(&[quiet(100.0)], &tol, 1_000.0), Settle::Running);
+        assert_eq!(conditioning_verdict(&[quiet(100.0)], &tol, 1_000.0, 100.0), Settle::Running);
         assert_eq!(
-            conditioning_verdict(&[quiet(100.0), quiet(200.0)], &tol, 1_000.0),
+            conditioning_verdict(&[quiet(100.0), quiet(200.0)], &tol, 1_000.0, 100.0),
             Settle::Settled { at_s: 200.0 }
         );
     }
@@ -1324,7 +1363,7 @@ mod settle_tests {
         assert!(!tol.holds(&first), "no previous set to compare with");
         assert!(tol.why(&first).contains("no previous interval"), "{}", tol.why(&first));
         assert_eq!(
-            conditioning_verdict(&[first, quiet(200.0)], &tol, 1_000.0),
+            conditioning_verdict(&[first, quiet(200.0)], &tol, 1_000.0, 100.0),
             Settle::Running,
             "the pair is not two *holding* intervals"
         );
@@ -1335,7 +1374,7 @@ mod settle_tests {
         let tol = Tolerances::default();
         let drift = rec(300.0, 0.0207, 0.0001, Some(0.005)); // the smoke's own 54 % of rain
         let records = vec![quiet(100.0), quiet(200.0), drift];
-        assert_eq!(conditioning_verdict(&records, &tol, 1_000.0), Settle::Running);
+        assert_eq!(conditioning_verdict(&records, &tol, 1_000.0, 100.0), Settle::Running);
     }
 
     #[test]
@@ -1364,10 +1403,62 @@ mod settle_tests {
     fn a_budget_that_runs_out_before_the_tolerances_hold_is_unresolved() {
         let tol = Tolerances::default();
         let records = vec![rec(100.0, 0.0207, -0.06, None), rec(200.0, 0.0195, -0.05, Some(0.3))];
-        assert_eq!(conditioning_verdict(&records, &tol, 500.0), Settle::Running);
-        assert_eq!(conditioning_verdict(&records, &tol, 200.0), Settle::Expired);
+        assert_eq!(conditioning_verdict(&records, &tol, 500.0, 100.0), Settle::Running);
+        assert_eq!(conditioning_verdict(&records, &tol, 200.0, 100.0), Settle::Expired);
         // Expiry is about the budget and never about the tolerances being wrong.
-        assert_eq!(conditioning_verdict(&[], &tol, 0.0), Settle::Expired);
+        assert_eq!(conditioning_verdict(&[], &tol, 0.0, 100.0), Settle::Expired);
+    }
+
+    /// **The 200.01 s case** (Astra R11.2). A phase whose budget is a hair over two intervals
+    /// used to be able to manufacture a settled verdict: a first record with no turnover, one
+    /// genuinely quiet 100 s record, and then a **0.01 s tail** that runs zero ticks, reports
+    /// zero storage change, zero head movement and zero turnover, and becomes the second
+    /// "quiet" interval the rule asks for.
+    ///
+    /// Two things stop it now, and both are pinned here: an **incomplete** interval can never
+    /// hold, whatever it read; and the verdict expires as soon as another *whole* interval no
+    /// longer fits the budget, so the tail is never even run.
+    #[test]
+    fn a_fractional_tail_cannot_manufacture_a_settled_phase() {
+        let tol = Tolerances::default();
+        let first = rec(100.0, 0.0207, -0.06, None);
+        let second = quiet(200.0);
+        // The tail as the old code would have recorded it: zero ticks, nothing moved.
+        let tail = IntervalRecord {
+            seconds: 200.01,
+            ticks: 0,
+            complete: false,
+            rain_rate: 0.0384,
+            storage_rate: 0.0,
+            head_m: 2.5,
+            head_delta: 0.0,
+            eligible: vec![100, 200],
+            turnover: vec![Some(0.0), Some(0.0)],
+        };
+        assert!(
+            !tol.holds(&tail),
+            "a zero-tick interval reads as perfectly quiet and must still not qualify"
+        );
+        assert!(tol.why(&tail).contains("incomplete"), "{}", tol.why(&tail));
+        assert_eq!(
+            conditioning_verdict(&[first.clone(), second.clone(), tail], &tol, 200.01, 100.0),
+            Settle::Expired,
+            "the tail cannot be the second quiet interval"
+        );
+        // And the phase expires before the tail is reached at all: after two records, 200 s of
+        // a 200.01 s budget is spent and another whole interval does not fit.
+        assert_eq!(
+            conditioning_verdict(&[first, second], &tol, 200.01, 100.0),
+            Settle::Expired,
+            "no whole interval fits in the remaining 0.01 s"
+        );
+        // With a budget that does fit a third whole interval, the same two records are still
+        // running rather than expired: expiry is about the budget and not about the tail.
+        let (first, second) = (rec(100.0, 0.0207, -0.06, None), quiet(200.0));
+        assert_eq!(
+            conditioning_verdict(&[first, second], &tol, 300.0, 100.0),
+            Settle::Running
+        );
     }
 
     #[test]
