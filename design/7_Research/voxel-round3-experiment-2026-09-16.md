@@ -2087,8 +2087,8 @@ So the local water model moved **when** the table settles and **where** the head
 50 mm higher water table and a thousand seconds more relaxation — but not **which** columns are
 eligible: 311 against 314 and 2,717 against 2,720 is a three-column difference in each set, and
 the inversion the earlier probe described (bloomcrown collapsing from ~2,771 to ~311 while
-umbrellafrond rises from ~427 to ~2,717) is unchanged. The resident is still planted on 311
-candidates and the same 8 founders are drawn.
+umbrellafrond rises from ~427 to ~2,717) is unchanged. The resident is still drawn as 8 founders from that
+pool — 311 candidates now against the earlier probe's 314.
 
 **The settle used for every run** was therefore a conditioning budget of **4,000 s with
 `--phase-a 3500`** — above the 3,000 s measured, with 500 s left for phase B's 300 s. Every one
