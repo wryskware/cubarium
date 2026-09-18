@@ -47,7 +47,7 @@
 
 mod step;
 
-use cubarium_voxel::{VoxelView, World};
+use cubarium_voxel::{Material, VoxelView, World};
 use serde::{Deserialize, Serialize};
 
 pub use cubarium_voxel::{DT, TICK_HZ};
@@ -58,6 +58,10 @@ pub use step::can_establish;
 /// The same predicate, gate by gate, for a caller that needs to know **which** gate shut:
 /// `Gates::passes()` is exactly `can_establish`.
 pub use step::{Gates, establishment_gates, establishment_gates_on_substrate};
+/// The same predicate with the geometric sky reading supplied by a caller that already has
+/// it — the batch observation path, [`FloraView::establishment_gates_over`], where one ray
+/// per site is shared across species.
+pub use step::establishment_gates_with_sky;
 
 /// The **stands** of the voxel ecology, each one a role: see the preset that carries its
 /// numbers ([`SpeciesConfig::bloomcrown`] and the five after it) for the sentence of
@@ -1600,6 +1604,88 @@ pub struct Taken {
     pub energy: f64,
 }
 
+/// A caller-owned cache of the **geometric** sky visibility of sites, for a study that
+/// asks the establishment predicate over a skyline many times.
+///
+/// One hemisphere-ray calculation per site, shared across the six species and reused across
+/// observations for as long as the terrain is unchanged. It caches
+/// [`VoxelView::sky_visibility`] and nothing else: pore water, saturation, standing-water
+/// depth and dead wood are read afresh by [`FloraView::establishment_gates_over`] on every
+/// call, so an observation is still the instantaneous reading it has always been and no
+/// gate outcome is carried across ticks.
+///
+/// **Owned by the study, never by the process and never by the model.** A study holds one
+/// for as long as it holds the world it reads and drops it with that world, so its lifetime
+/// and its memory are bounded to that study — no process-global accumulating cache. It
+/// carries the world's [`VoxelView::terrain_version`] **and** a fingerprint of the terrain
+/// itself, so a decoded, reset, cloned or matched-arm world that happens to share dimensions
+/// and a version number still cannot hand a reading for one floor plan to another.
+#[derive(Clone, Debug, Default)]
+pub struct SkyCache {
+    /// Sorted by site: one hemisphere reading per site, terrain geometry only.
+    entries: Vec<(Site, f64)>,
+    /// The `(terrain_version, terrain fingerprint)` the entries were read against.
+    key: Option<(u64, u64)>,
+}
+
+impl SkyCache {
+    /// An empty cache. It fills lazily on the first site asked.
+    pub fn new() -> SkyCache {
+        SkyCache::default()
+    }
+
+    /// Drop every reading. A study that means to start a new world calls this; a study that
+    /// keeps its own world does not need to.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.key = None;
+    }
+
+    /// How many sites are cached: the whole of this cache's memory, and nothing else.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Point the cache at `view`'s terrain, dropping every reading if this is not the
+    /// terrain the cache last held. The fingerprint is over the material array, so two
+    /// worlds that share dimensions and a `terrain_version` are still told apart.
+    fn sync(&mut self, view: &VoxelView<'_>) {
+        let key = (view.terrain_version, terrain_fingerprint(view.material));
+        if self.key != Some(key) {
+            self.entries.clear();
+            self.key = Some(key);
+        }
+    }
+
+    /// The sky visibility of `site`: from the cache when this terrain has it, and from the
+    /// model's own hemisphere rays when it does not.
+    fn visibility(&mut self, view: &VoxelView<'_>, site: Site) -> f64 {
+        match self.entries.binary_search_by_key(&site, |e| e.0) {
+            Ok(i) => self.entries[i].1,
+            Err(i) => {
+                let value = view.sky_visibility(site.x as i64, site.y, site.z);
+                self.entries.insert(i, (site, value));
+                value
+            }
+        }
+    }
+}
+
+/// One force-of-habit hash over the terrain material — FNV-1a — used for nothing but a
+/// cache validity check, where all that matters is that two floor plans differ.
+fn terrain_fingerprint(material: &[Material]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &m in material {
+        h ^= u64::from(m as u8);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
 /// Read-only access for drawing and inspection.
 #[derive(Clone, Copy, Debug)]
 pub struct FloraView<'a> {
@@ -1766,6 +1852,43 @@ impl<'a> FloraView<'a> {
     /// species, and the one the tick runs.
     pub fn can_establish(&self, world: &VoxelView<'_>, site: Site, species: Species) -> bool {
         self.establishment_gates(world, site, species).passes()
+    }
+
+    /// [`FloraView::establishment_gates`] for a whole skyline at once, with the geometric
+    /// sky visibility read **once per site** through `sky` and shared across species and
+    /// observations.
+    ///
+    /// The predicate, the thresholds and every other reading are the same function as the
+    /// per-site form; only the ray's result is supplied. The cache holds terrain geometry
+    /// alone, so pore water, saturation, standing water and the dead wood of the species'
+    /// mycelium box are read afresh here on every call: the result is the instantaneous
+    /// reading it has always been, and no gate outcome is carried across ticks.
+    ///
+    /// The gates come back in the order the sites were given. A caller that wants the
+    /// eligible members reads `passes()` on each, exactly as it would on the per-site form.
+    pub fn establishment_gates_over(
+        &self,
+        world: &VoxelView<'_>,
+        sites: &[Site],
+        species: Species,
+        sky: &mut SkyCache,
+    ) -> Vec<Gates> {
+        sky.sync(world);
+        let sc = self.config.species(species);
+        sites
+            .iter()
+            .copied()
+            .map(|site| {
+                let sky_visibility = sky.visibility(world, site);
+                step::establishment_gates_with_sky(
+                    world,
+                    site,
+                    sc,
+                    sky_visibility,
+                    self.dead_wood_in_box(world, site, sc),
+                )
+            })
+            .collect()
     }
 
     /// Energy in every living and dead stock.

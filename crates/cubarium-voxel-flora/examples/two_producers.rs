@@ -59,7 +59,7 @@
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, World};
 use cubarium_voxel_flora::{
-    Command, Deposit, DepositKind, Flora, FloraConfig, Reach, Site, Species, Trophic,
+    Command, Deposit, DepositKind, Flora, FloraConfig, Reach, Site, SkyCache, Species, Trophic,
 };
 
 /// The shared experiment conditions and placement helpers, one copy for both studies:
@@ -287,7 +287,10 @@ fn run(
     skyline.sort_by_key(|s| (s.y, s.x, s.z));
 
     let mut flora = Flora::new(FloraConfig::default());
-    let eligible = eligible_sets(&world, &flora, &skyline);
+    // One sky cache per run, reused across the six species and across the introduction and
+    // observation sweeps: the terrain never moves, so one ray per site serves both.
+    let mut sky = SkyCache::new();
+    let eligible = eligible_sets(&world, &flora, &skyline, &mut sky);
     let own_founders = pick_founders(
         &world,
         &flora,
@@ -413,7 +416,7 @@ fn run(
     // The same predicate again, now: at observation rather than at introduction. Astra's
     // R5.2 — an eligible count is a reading of one moment, and carrying the warm-up's
     // reading into the result made it look like a habitat size.
-    let eligible_at_end = eligible_sets(&world, &flora, &skyline);
+    let eligible_at_end = eligible_sets(&world, &flora, &skyline, &mut sky);
 
     // Round 3: `alive` is the stands, and `occupied` is the stands plus the sites where
     // a species' seed bank is waiting — the old "establishing" half of `occupied`, which
@@ -483,17 +486,28 @@ fn run(
 
 /// Every skyline column that passes each species' establishment predicate right now, as
 /// sorted column keys. An instantaneous reading: the caller says when it took it.
+///
+/// One `SkyCache` is shared across the six species and reused by the caller across
+/// observations, so a site's hemisphere ray is cast once while the terrain is unchanged; the
+/// water, the aeration and the saprotroph's dead wood are read afresh on every call.
 fn eligible_sets(
     world: &World,
     flora: &Flora,
     skyline: &[Site],
+    sky: &mut SkyCache,
 ) -> [Vec<(u32, u32)>; Species::COUNT] {
+    let view = world.view();
     let mut out: [Vec<(u32, u32)>; Species::COUNT] = std::array::from_fn(|_| Vec::new());
     for species in Species::ALL {
+        let gates = flora
+            .view()
+            .establishment_gates_over(&view, skyline, species, sky);
         let mut set: Vec<(u32, u32)> = skyline
             .iter()
-            .filter(|s| passes(world, flora, species, **s))
-            .map(|s| (s.x, s.z))
+            .copied()
+            .zip(gates)
+            .filter(|(_, g)| g.passes())
+            .map(|(s, _)| (s.x, s.z))
             .collect();
         set.sort_unstable();
         out[species.index()] = set;
@@ -509,7 +523,13 @@ fn eligible_sets(
 /// no second approximate predicate, which is what package J deleted and what Astra's R5.2
 /// asks to keep deleted. A column can fail several gates at once, so the counts overlap by
 /// construction; the point is which of them is doing the work.
-fn gate_diagnosis(world: &World, flora: &Flora, skyline: &[Site], when: &str) {
+fn gate_diagnosis(
+    world: &World,
+    flora: &Flora,
+    skyline: &[Site],
+    when: &str,
+    sky: &mut SkyCache,
+) {
     let view = world.view();
     println!(
         "establishment gates {when} ({} skyline columns):",
@@ -517,6 +537,9 @@ fn gate_diagnosis(world: &World, flora: &Flora, skyline: &[Site], when: &str) {
     );
     for species in Species::ALL {
         let sc = flora.config().species(species);
+        let gates = flora
+            .view()
+            .establishment_gates_over(&view, skyline, species, sky);
         let mut eligible = 0usize;
         let (mut no_soil, mut pore, mut aeration, mut depth, mut light) = (0, 0, 0, 0, 0);
         // Round 5b's sixth gate: dead wood in the mycelium box, and open by construction
@@ -527,8 +550,7 @@ fn gate_diagnosis(world: &World, flora: &Flora, skyline: &[Site], when: &str) {
         let mut only_light = 0usize;
         let mut mean_pore_sum = 0.0;
         let mut mean_pore_n = 0usize;
-        for site in skyline {
-            let g = flora.view().establishment_gates(&view, *site, species);
+        for g in gates {
             if g.passes() {
                 eligible += 1;
             }
@@ -1060,7 +1082,8 @@ fn report(
         view.energy()
     );
     germination_diagnosis(world, flora);
-    gate_diagnosis(world, flora, skyline, "at observation");
+    let mut sky = SkyCache::new();
+    gate_diagnosis(world, flora, skyline, "at observation", &mut sky);
     let water = world.view().stored_m3() - world.view().ledger.expected_stored();
     println!(
         "core water: stored {:.4} m3, residual {:.3e}, transpiration_out {:.6} m3 (flora says {:.6})",
@@ -1613,6 +1636,8 @@ fn community(args: &[String]) {
     let mut world = prepared_world(seed, noise_seed);
     let skyline = skyline_of(&world);
     let mut flora = Flora::new(FloraConfig::default());
+    // One cache for the introduction and the observation sweep: the terrain is unchanged.
+    let mut sky = SkyCache::new();
     let config = world.config().clone();
     println!(
         "community: {}x{}x{} seed {} noise_seed {}, rain {} m/s, outlet open; {WARMUP_TICKS} \
@@ -1645,9 +1670,9 @@ fn community(args: &[String]) {
         );
     }
 
-    let eligible = eligible_sets(&world, &flora, &skyline);
+    let eligible = eligible_sets(&world, &flora, &skyline, &mut sky);
     println!("\n--- at introduction (after the warm-up, before any plant acted) ---");
-    gate_diagnosis(&world, &flora, &skyline, "at introduction");
+    gate_diagnosis(&world, &flora, &skyline, "at introduction", &mut sky);
     let founders = pick_founders(&world, &flora, &skyline, &Species::ALL, true);
     let mut planted = [0usize; Species::COUNT];
     let mut seen = Seen::new();
@@ -1778,7 +1803,7 @@ fn community(args: &[String]) {
         "eligible skyline columns per species, introduction -> observation (a reading of a \
          moment each, never a settled habitat):"
     );
-    let eligible_at_end = eligible_sets(&world, &flora, &skyline);
+    let eligible_at_end = eligible_sets(&world, &flora, &skyline, &mut sky);
     for species in Species::ALL {
         let i = species.index();
         println!(
@@ -1831,7 +1856,7 @@ fn community(args: &[String]) {
         v.energy()
     );
     germination_diagnosis(&world, &flora);
-    gate_diagnosis(&world, &flora, &skyline, "at observation");
+    gate_diagnosis(&world, &flora, &skyline, "at observation", &mut sky);
     let end_mark = water_mark(&world, ticks as f64 * cubarium_voxel::DT);
     println!("whole run: {}", water_budget_line(&start_mark, &end_mark));
     let water = world.view().stored_m3() - world.view().ledger.expected_stored();

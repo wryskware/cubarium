@@ -1887,6 +1887,24 @@ pub fn establishment_gates_on_substrate(
     gates(view, site, sc, visibility, dead_wood)
 }
 
+/// [`establishment_gates_on_substrate`] with the geometric sky reading handed in by a
+/// caller that already has it. The **same** predicate, the same thresholds and the same
+/// readings of pore water, saturation, standing water and dead wood — only the hemisphere
+/// ray's result is supplied, and it is exactly [`VoxelView::sky_visibility`].
+///
+/// A study sweeping one skyline for all six species caches one reading per site and shares
+/// it through [`crate::SkyCache`], so the gate fields and the verdict are identical to the
+/// uncached call and the ray is cast once per site instead of once per species.
+pub fn establishment_gates_with_sky(
+    view: &VoxelView<'_>,
+    site: Site,
+    sc: &SpeciesConfig,
+    sky_visibility: f64,
+    dead_wood: f64,
+) -> Gates {
+    gates(view, site, sc, sky_visibility, dead_wood)
+}
+
 /// The same, for a caller that already has a sky reading — `step`'s memoized cache, which
 /// is the same geometry by construction.
 fn gates(

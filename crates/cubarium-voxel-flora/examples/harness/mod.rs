@@ -24,7 +24,7 @@
 #![allow(dead_code)]
 
 use cubarium_voxel::{Command as WorldCommand, Config as VoxelConfig, World};
-use cubarium_voxel_flora::{Flora, Site, Species, SpeciesConfig};
+use cubarium_voxel_flora::{Flora, Site, SkyCache, Species, SpeciesConfig};
 
 pub const WARMUP_TICKS: u32 = 1000;
 pub const FOUNDERS_PER_SPECIES: usize = 8;
@@ -1546,16 +1546,27 @@ pub fn turnover_of(before: &[Site], after: &[Site]) -> f64 {
 
 /// Every skyline column one species could establish on now, sorted: the set whose turnover
 /// the conditioning decision reads, through the model's own predicate.
+///
+/// The sky cache is the caller's, so a phase that observes every interval pays for one
+/// hemisphere ray per site and reuses it across the six species and across intervals while
+/// the terrain is unchanged ([`FloraView::establishment_gates_over`]). Pore water,
+/// saturation, standing water and the saprotroph's dead wood are read afresh every call.
 pub fn eligible_sites(
     world: &World,
     flora: &Flora,
     skyline: &[Site],
     species: Species,
+    sky: &mut SkyCache,
 ) -> Vec<Site> {
+    let gates = flora
+        .view()
+        .establishment_gates_over(&world.view(), skyline, species, sky);
     let mut out: Vec<Site> = skyline
         .iter()
         .copied()
-        .filter(|s| passes(world, flora, species, *s))
+        .zip(gates)
+        .filter(|(_, g)| g.passes())
+        .map(|(s, _)| s)
         .collect();
     out.sort_unstable();
     out

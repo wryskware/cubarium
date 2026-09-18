@@ -49,7 +49,7 @@ use cubarium_voxel_fauna::{
     Command as FaunaCommand, DT, Fauna, FaunaConfig, Species as Beast, TICK_HZ,
 };
 use cubarium_voxel_flora::{
-    Command as FloraCommand, Deposit, DepositKind, Flora, FloraConfig, Site, Species,
+    Command as FloraCommand, Deposit, DepositKind, Flora, FloraConfig, Site, SkyCache, Species,
 };
 use cubarium_voxel_sim::{Sim, SimConfig};
 
@@ -350,10 +350,13 @@ fn measure_sets(world: &World, flora: &Flora, fauna: &Fauna) -> Sets {
 #[derive(Default)]
 struct Observers {
     /// `two_producers`/`replacement`: every skyline column against every species'
-    /// germination predicate.
+    /// germination predicate, through the model's shared sky cache.
     eligible_ns: u64,
     eligible_calls: u64,
     eligible_columns: u64,
+    /// One terrain sky cache for the whole run: the observer re-reads the gates but not the
+    /// geometry while the terrain is unchanged.
+    sky: SkyCache,
     /// `grazed`: one `reachable_foliage` per animal plus the foliage of every stand in
     /// reach, which is what the receipts table needs.
     identity_ns: u64,
@@ -363,11 +366,15 @@ struct Observers {
 impl Observers {
     fn measure(&mut self, world: &World, flora: &Flora, fauna: &Fauna) {
         let skyline = skyline_of(world);
+        let view = world.view();
         let at = Instant::now();
         let mut passing = 0u64;
         for species in Species::ALL {
-            for &site in &skyline {
-                if flora.view().can_establish(&world.view(), site, species) {
+            for g in flora
+                .view()
+                .establishment_gates_over(&view, &skyline, species, &mut self.sky)
+            {
+                if g.passes() {
                     passing += 1;
                 }
             }

@@ -65,7 +65,8 @@ use harness::*;
 
 use cubarium_voxel::World;
 use cubarium_voxel_flora::{
-    Command, DeliveryReceipt, Flora, FloraConfig, Provision, Site, Species, Stand, Trophic,
+    Command, DeliveryReceipt, Flora, FloraConfig, Provision, Site, SkyCache, Species, Stand,
+    Trophic,
 };
 
 /// How many introduction sites are predeclared. Three, as R5.4 asks: "one successful site is
@@ -879,9 +880,13 @@ fn settle_phase(
         return (Vec::new(), Settle::Expired, 0.0);
     }
     let mut records: Vec<IntervalRecord> = Vec::new();
+    // One cache for the whole phase: the terrain is not edited between intervals, so the
+    // six species share one ray per site and every later interval reads it rather than
+    // casting again. Pore water and dead wood change every tick and are read afresh.
+    let mut sky = SkyCache::new();
     let mut previous: Vec<Vec<Site>> = species
         .iter()
-        .map(|&s| eligible_sites(world, flora, skyline, s))
+        .map(|&s| eligible_sites(world, flora, skyline, s, &mut sky))
         .collect();
     let mut mark = water_mark(world, 0.0);
     let start = mark;
@@ -895,7 +900,7 @@ fn settle_phase(
         let dt = (now.seconds - mark.seconds).max(1e-12);
         let sets: Vec<Vec<Site>> = species
             .iter()
-            .map(|&s| eligible_sites(world, flora, skyline, s))
+            .map(|&s| eligible_sites(world, flora, skyline, s, &mut sky))
             .collect();
         let record = IntervalRecord {
             seconds: spent,
