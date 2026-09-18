@@ -875,3 +875,91 @@ fn a_partly_mineralised_log_builds_exactly_what_its_mineral_funds() {
     // Nothing is left over and nothing is drawn: the arrival was spent exactly.
     assert_eq!(pool_half, 0.0, "the pool neither gained nor could give");
 }
+
+// ------------------------------------------ R9.3: what a mycelium neighbourhood reaches
+
+/// A strip with **steps** in it: `(x, top)` makes column `x` bedrock at `y = 0` and soil
+/// from 1 to `top`, so its support face is `top`; every other column is void. What
+/// [`pillars`] is for one flat row, for a row a grove would have to climb.
+fn terraces(width: u32, tops: &[(i64, u32)], pore: f64) -> World {
+    let mut w = empty_world(width, 1);
+    for x in 0..width as i64 {
+        match tops.iter().find(|&&(cx, _)| cx == x) {
+            Some(&(_, top)) => {
+                for y in 1..=top {
+                    fill(&mut w, x, y, 0, Material::Soil, pore);
+                }
+                assert_eq!(
+                    cubarium_voxel_flora::highest_support(&w.view(), x, 0).map(|s| s.y),
+                    Some(top),
+                    "column {x} must stand at {top}"
+                );
+            }
+            None => {
+                w.apply(WorldCommand::SetMaterial { x, y: 0, z: 0, material: Material::Air });
+                assert!(
+                    cubarium_voxel_flora::highest_support(&w.view(), x, 0).is_none(),
+                    "({x},0) must be void"
+                );
+            }
+        }
+    }
+    w
+}
+
+fn face(x: u32, y: u32) -> Site {
+    Site { x, y, z: 0 }
+}
+
+/// **R9.3: substrate access reaches one row up and one row down, and no further.** The
+/// rule decision R9.3 asked for, pinned as geometry: one log on `(3,2)`, and the
+/// germination predicate the model itself runs — read off the flora's own ground — on four
+/// faces that differ from it only in height.
+///
+/// Same level `(3,2)` and `(2,3)` one **up** and `(4,1)` one **down** all have the log in
+/// their mycelium box and pass; `(8,4)` is two rows above a log one column away and
+/// `(5,2)` is level with one two columns away, and both are refused on substrate alone
+/// with every other gate open. Before the repair the two vertical cases failed too, which
+/// is what refused all three of the round-5b `community` run's landings.
+#[test]
+fn substrate_access_reaches_one_row_up_and_one_row_down() {
+    let world = terraces(10, &[(2, 3), (3, 2), (4, 1), (5, 2), (7, 2), (8, 4)], 0.5);
+    let mut flora = Flora::new(config());
+    let (organic, _, _) = log_on(&mut flora, face(3, 2), 1.0);
+    log_on(&mut flora, face(7, 2), 1.0);
+    let sc = flora.config().species(Species::Glowcap).clone();
+    assert_eq!(sc.substrate_reach_up_down, 1, "the placeholder this case is about");
+    assert!(organic > sc.establish_substrate_min, "a log is more than the gate asks for");
+
+    let v = flora.view();
+    let view = world.view();
+    for (site, what) in [
+        (face(3, 2), "the log's own face"),
+        (face(2, 3), "one row up"),
+        (face(4, 1), "one row down"),
+    ] {
+        let g = v.establishment_gates(&view, site, Species::Glowcap);
+        assert!(
+            (g.dead_wood - organic).abs() < 1e-15,
+            "{what} {site:?}: its box holds {} of dead wood",
+            g.dead_wood
+        );
+        assert!(g.passes(), "{what} {site:?} must pass: {g:?}");
+    }
+    for (site, what) in [
+        (face(8, 4), "two rows above a log one column away"),
+        (face(5, 2), "level with a log two columns away"),
+    ] {
+        let g = v.establishment_gates(&view, site, Species::Glowcap);
+        assert_eq!(g.dead_wood, 0.0, "{what} {site:?} is genuinely substrate-free");
+        assert!(!g.substrate_ok, "{what}: the substrate gate is what shuts");
+        assert!(
+            g.pore_ok && g.aeration_ok && g.depth_ok && g.light_ok,
+            "{what}: and nothing else is: {g:?}"
+        );
+        assert!(!g.passes());
+    }
+    // And the box is the substrate's own geometry, not the water's: `rooting_depth` is
+    // untouched, so the soil-water reading of the one-row-up face is still its own row.
+    assert_eq!(sc.rooting_depth, 1, "the soil-water box was not widened to do this");
+}

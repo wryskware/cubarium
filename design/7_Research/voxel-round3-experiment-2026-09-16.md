@@ -1313,12 +1313,16 @@ closes to about 0.77 — so the surplus the uptake rule *can* produce (it is bou
 rate and the pools and **not** by what the stand can spend) was a small term here, at a mean
 moisture of 0.688. That is a measurement of this arm and not a property of the rule.
 
-**A drying log starves it, and a drowned one does not.** Mean moisture 0.688 across the eight
-fungi, and the two on the driest logs sat at 0.500 — `μ` multiplies the uptake, so those two
-earned half. Mean `aeration_stress` 0.292, and it **cost them nothing**: a saprotroph's
-uptake reads `μ` and not `1 − aeration_stress`, so three fungi whose root boxes are now over
-half saturated pay for it on the way in (the gate refuses a spore there) and nothing as
-adults. That is the preset's stated limitation, now measured rather than asserted, and it is
+**A drying log starves it, and saturated roots do not reduce adult uptake.** Mean moisture
+0.688 across the eight fungi, and the two on the driest logs sat at 0.500 — `μ` multiplies
+the uptake, so those two earned half. Mean `aeration_stress` 0.292, and it **cost them
+nothing**: a saprotroph's uptake reads `μ` and not `1 − aeration_stress`, so three fungi whose
+root boxes are now over half saturated pay for it on the way in (the gate refuses a spore
+there) and nothing as adults. Free water still **kills** it — `drown_depth_m` 0.05, and a
+cap under a pool dies in step 3 — so "a drowned one does not" would have been wrong twice
+over (Astra R9.3): what saturation does not do is reduce an established mycelium's income.
+And `μ` is read off the **soil voxels** of the root box, so "bare rock" means no soil anywhere
+in that box: a rock face with a soil pocket inside the box is not bare and does not starve. That is the preset's stated limitation, now measured rather than asserted, and it is
 the first thing to revisit if waterlogging is meant to cost a mycelium anything.
 
 ### The grove did not spread, and the gate diagnosis says why
@@ -1350,14 +1354,26 @@ donors' own dispersal neighbourhood is 12 eligible faces of 52 candidates (**1.5
 donor**). So a grove's spread at these placeholders is bounded by the log and by the box's
 geometry, not by the hop and not by reproduction.
 
-Three ways out, none of them taken here and all of them rule decisions rather than numbers: a
-mycelium box that reaches **up** as well as down (the root box reaches only down, which is
-inherited and stated in `mycelium_sites`); a dispersal rule for a saprotroph that lands on
-the substrate rather than on the skyline; or a deeper `rooting_depth`, which is the one that
-is only a number and the least honest of the three. The other half of the same finding is
-that the run's own supply of dead wood — 0.0176 from dieback — is three orders of magnitude
-under a declared log, so a self-sustaining decomposer grove needs plants that actually die,
-which is the round-4/5a observation (zero deaths in 400 s) reappearing from the other side.
+Three ways out were on the table, all of them rule decisions rather than numbers: a mycelium
+box with a vertical reach of its own; a dispersal rule for a saprotroph that lands on the
+substrate rather than on the skyline; or a deeper `rooting_depth`, which is only a number
+and the least honest of the three, because it moves the water too and repairs one direction
+only. **Decided (Astra R9.3, package Q):** substrate access has its own species field,
+`substrate_reach_up_down`, placeholder **1**, symmetric — one row up and one row down — and
+the soil-water root box is untouched. Blind paid landing and germination-time selection
+stay: a spore still lands on the highest support face of a column inside its `hop` and the
+gates are still read there, so a grove still ends where the wood does. The four geometry
+cases are pinned in `crates/cubarium-voxel-flora/tests/round5b.rs`
+(`substrate_access_reaches_one_row_up_and_one_row_down`): same level, one up, one down, and
+two genuinely substrate-free faces refused on substrate alone. This run predates the change,
+so its zero establishments are a reading of the old box.
+
+The other half of the same finding is that the run's own supply of dead wood — 0.0176 from
+dieback — is about **57 times** smaller than one declared log of 1.0, not three orders of
+magnitude; and that 0.0176 is a **standing stock** at one moment and not a cumulative
+supply, so it says what was lying there and not what the plants produced over the run.
+Either way a self-sustaining decomposer grove needs plants that actually die, which is the
+round-4/5a observation (zero deaths in 400 s) reappearing from the other side.
 
 ### The three residuals, with a fungus digesting
 
@@ -1401,8 +1417,12 @@ comparison. Nothing about whether 0.02 /s of uptake, a 0.4 yield, a 0.02 substra
 or a 1.0 log is a reasonable number — **nothing measured any of them**, and the preset's own
 doc says which sentence each of them was chosen to encode. Nothing about competition between
 the fungus and the plants (they share a mineral pool and a water box, and no arm varied it),
-nothing about two fungi on one log (the collect-then-withdraw rule for a shared pool is
-implemented and unit-tested, and this arm's boxes did not overlap enough to exercise it),
+nothing about two fungi on one log *in a run* — the collect-then-withdraw rule now has its
+own unit test on `feed` itself, two mycelia of unequal demand sharing one log one-to-three in
+all three currencies (`src/step.rs`,
+`two_fungi_share_one_log_in_proportion_to_their_demand`), which is what Astra's R9.3 found
+missing: the earlier claim rested on a test of the scalar proportional arithmetic. This
+arm's boxes did not overlap enough to exercise it —
 and nothing about what a waterlogged log should cost a mycelium.
 first); and any arm-to-arm difference smaller than the water-and-shade coupling that already
 moves untouched species in the fourth decimal by 400 s.
