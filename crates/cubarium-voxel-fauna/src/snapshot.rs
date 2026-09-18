@@ -48,5 +48,125 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<Fauna> {
     if let Err(e) = env.fauna.config().validate() {
         bail!("invalid voxel fauna snapshot — {e}");
     }
+    if let Err(e) = validate(&env.fauna) {
+        bail!("invalid voxel fauna snapshot — {e}");
+    }
     Ok(env.fauna)
+}
+
+/// What a loaded layer has to satisfy beyond its schema tag and its config: the
+/// **state**, and not only the configuration (Astra R9.6).
+///
+/// Three things, each of which an invariant of this layer depends on rather than a taste:
+/// every stock is a finite nonnegative number, because a `NaN` body is a `NaN` in the
+/// ledger within one step and a negative one is matter that does not exist; the ids are
+/// **sorted and unique**, because every pass over `animals` is a binary search over that
+/// order; and [`crate::FaunaLedger::births`] — the counter the next id comes from — is
+/// **above every id present**, because an id is never reused and `Fauna::insert` treats a
+/// collision as unreachable.
+///
+/// Postcard bytes are not the only way in: a hand-built or hand-edited snapshot is exactly
+/// what this is for, and a round trip of a live layer cannot fail it.
+fn validate(fauna: &Fauna) -> Result<(), String> {
+    let v = fauna.view();
+    let mut last: Option<u64> = None;
+    for a in v.animals {
+        for (field, value) in
+            [("body", a.body), ("reserve", a.reserve), ("mineral", a.mineral), ("energy", a.energy)]
+        {
+            if !value.is_finite() || value < 0.0 {
+                return Err(format!(
+                    "animal #{}'s {field} is {value}, not a finite nonnegative stock",
+                    a.id
+                ));
+            }
+        }
+        if let Some(prev) = last {
+            if a.id <= prev {
+                return Err(format!(
+                    "animal ids are not sorted and unique: #{} comes after #{prev}",
+                    a.id
+                ));
+            }
+        }
+        last = Some(a.id);
+    }
+    if let Some(max) = last {
+        if v.ledger.births <= max {
+            return Err(format!(
+                "the next id is {} and animal #{max} already holds it: an id is never reused",
+                v.ledger.births
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Animal, FaunaConfig, FaunaLedger, Site, Species, State};
+
+    /// A layer built by hand, which is the only way to write a snapshot this module has to
+    /// refuse: a live layer's own bytes cannot fail these checks.
+    fn layer(animals: Vec<Animal>, births: u64) -> Fauna {
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        fauna.ledger = FaunaLedger { births, ..FaunaLedger::default() };
+        fauna.animals = animals;
+        fauna
+    }
+
+    fn animal(id: u64, body: f64) -> Animal {
+        Animal {
+            id,
+            species: Species::Frondgrazer,
+            site: Site { x: 1, y: 2, z: 0 },
+            body,
+            reserve: 0.5 * body,
+            mineral: 0.05 * body,
+            energy: 2.0 * body,
+            age_ticks: 0,
+            state: State::Resting,
+        }
+    }
+
+    /// **R9.6: the loader validates the state.** Two well-formed animals round-trip; a
+    /// `NaN` or negative stock, an unsorted or repeated id, and a next-id counter that
+    /// would reuse an id are each refused with the reason named.
+    #[test]
+    fn the_loader_refuses_a_snapshot_whose_state_cannot_be_true() {
+        let good = layer(vec![animal(0, 0.02), animal(3, 0.04)], 4);
+        let back = decode(&encode(&good)).expect("a well-formed layer");
+        assert_eq!(back.view().animals, good.view().animals);
+
+        let cases: [(&str, Fauna); 5] = [
+            ("body", layer(vec![animal(0, f64::NAN)], 1)),
+            ("reserve", {
+                let mut a = animal(0, 0.02);
+                a.reserve = -1e-9;
+                layer(vec![a], 1)
+            }),
+            ("energy", {
+                let mut a = animal(0, 0.02);
+                a.energy = f64::INFINITY;
+                layer(vec![a], 1)
+            }),
+            ("sorted and unique", layer(vec![animal(3, 0.02), animal(1, 0.02)], 4)),
+            ("never reused", layer(vec![animal(0, 0.02), animal(3, 0.02)], 3)),
+        ];
+        for (what, fauna) in cases {
+            let err = format!("{:#}", decode(&encode(&fauna)).expect_err("a refusable layer"));
+            assert!(err.contains(what), "{what}: {err}");
+        }
+
+        // A duplicate id is the same refusal as an unsorted one, and an empty layer with a
+        // counter of its own is fine: nothing holds an id.
+        let err = format!(
+            "{:#}",
+            decode(&encode(&layer(vec![animal(2, 0.02), animal(2, 0.03)], 3)))
+                .expect_err("two animals cannot share an id")
+        );
+        assert!(err.contains("sorted and unique"), "{err}");
+        assert!(decode(&encode(&layer(Vec::new(), 7))).is_ok());
+    }
 }
