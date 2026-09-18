@@ -117,6 +117,6 @@ Check: the file renders as markdown and `git diff` shows only the appended block
 
 ## Out of scope
 
-Anything in `crates/**` except reading it. Senses, rendering, art, the persistence
+Any edit under `crates/**` other than task 0's formatting. Senses, rendering, art, the persistence
 envelope, per-band cell sets, moving harnesses onto the schedule. If a task is
 blocked, skip it, say why, continue with the next.
