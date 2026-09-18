@@ -116,6 +116,32 @@ struct Sample {
     steps: u64,
     born: u64,
     deaths: u64,
+    /// The **introduced founders** and their descendants, kept apart by identity (Astra
+    /// R9.2): an animal's `id` never changes, and the founders hold the first `n` of them
+    /// because an introduction is the first thing this harness creates. A falling
+    /// population *mean* is composition and not shrinking individuals — 75 newborns at
+    /// `body_min` move it on their own — so a starvation reading needs these rows and not
+    /// that mean.
+    founders: Cohort,
+    descendants: Cohort,
+}
+
+/// One cohort of animals at one moment: how many, and the stocks they hold.
+#[derive(Clone, Copy, Debug, Default)]
+struct Cohort {
+    animals: usize,
+    body: f64,
+    reserve: f64,
+}
+
+impl Cohort {
+    fn mean_body(&self) -> f64 {
+        self.body / self.animals.max(1) as f64
+    }
+
+    fn mean_reserve(&self) -> f64 {
+        self.reserve / self.animals.max(1) as f64
+    }
 }
 
 /// Everything one arm leaves behind.
@@ -286,10 +312,20 @@ fn stocks_of(flora: &Flora) -> [Stocks; Species::COUNT] {
     out
 }
 
-fn sample(t: f64, flora: &Flora, fauna: &Fauna) -> Sample {
+/// One sample. `founders` is how many animals were introduced, which is also the number of
+/// ids the founders hold: `0..founders`.
+fn sample(t: f64, flora: &Flora, fauna: &Fauna, founders: u64) -> Sample {
     let av = fauna.view();
     let n = av.animals.len();
     let d = n.max(1) as f64;
+    let cohort = |of: fn(u64, u64) -> bool| {
+        av.animals.iter().filter(|a| of(a.id, founders)).fold(Cohort::default(), |mut c, a| {
+            c.animals += 1;
+            c.body += a.body;
+            c.reserve += a.reserve;
+            c
+        })
+    };
     Sample {
         t,
         stocks: stocks_of(flora),
@@ -300,6 +336,8 @@ fn sample(t: f64, flora: &Flora, fauna: &Fauna) -> Sample {
         steps: av.ledger.steps,
         born: av.ledger.born,
         deaths: av.ledger.deaths,
+        founders: cohort(|id, n| id < n),
+        descendants: cohort(|id, n| id >= n),
     }
 }
 
@@ -323,7 +361,7 @@ fn arm(seconds: f64, grazers: usize, seed: u64, noise_seed: u64) -> (Arm, Vec<(S
     let ticks = (seconds * f64::from(TICK_HZ)).round() as u64;
     let half = ticks / 2;
     let every = 100 * u64::from(TICK_HZ);
-    let mut samples = vec![sample(0.0, &flora, &fauna)];
+    let mut samples = vec![sample(0.0, &flora, &fauna, grazers as u64)];
     let mut bites = BiteSites::default();
     let reach = fauna.config().species(Beast::Frondgrazer).reach;
 
@@ -364,11 +402,11 @@ fn arm(seconds: f64, grazers: usize, seed: u64, noise_seed: u64) -> (Arm, Vec<(S
             }
         }
         if (tick + 1) % every == 0 {
-            samples.push(sample((tick + 1) as f64 * DT, &flora, &fauna));
+            samples.push(sample((tick + 1) as f64 * DT, &flora, &fauna, grazers as u64));
         }
     }
     if samples.last().map(|s| s.t) != Some(ticks as f64 * DT) {
-        samples.push(sample(ticks as f64 * DT, &flora, &fauna));
+        samples.push(sample(ticks as f64 * DT, &flora, &fauna, grazers as u64));
     }
 
     let fv = flora.view();
@@ -482,6 +520,41 @@ fn report(plain: &Arm, grazed: &Arm, seconds: f64) {
             s.deaths
         );
     }
+
+    println!("\n## the animals by identity: the introduced founders and their descendants\n");
+    println!(
+        "| t (s) | founders | founder mean body | founder mean reserve | descendants | \
+         descendant mean body | descendant mean reserve |"
+    );
+    println!("| --- | --- | --- | --- | --- | --- | --- |");
+    for s in &grazed.samples {
+        let cell = |c: &Cohort, v: f64| {
+            if c.animals == 0 { "—".to_string() } else { format!("{:.5}", nz(v)) }
+        };
+        println!(
+            "| {:.0} | {} | {} | {} | {} | {} | {} |",
+            s.t,
+            s.founders.animals,
+            cell(&s.founders, s.founders.mean_body()),
+            cell(&s.founders, s.founders.mean_reserve()),
+            s.descendants.animals,
+            cell(&s.descendants, s.descendants.mean_body()),
+            cell(&s.descendants, s.descendants.mean_reserve()),
+        );
+    }
+    let config = FaunaConfig::default();
+    let sc = config.species(Beast::Frondgrazer);
+    println!(
+        "\n(an id never changes, so these are the same animals at every row. A full default \
+         adult's reserve is {:.4} against an upkeep of {:.1e} /s, which is {:.0} s of \
+         standing still — and about {:.0} s once it has paid for two newborns at \
+         {:.3} each. A falling population mean is composition before it is starvation.)",
+        sc.reserve_of(sc.body_max),
+        sc.maintenance_per_s * sc.body_max,
+        sc.reserve_of(sc.body_max) / (sc.maintenance_per_s * sc.body_max),
+        (sc.reserve_of(sc.body_max) - 2.0 * sc.birth_cost) / (sc.maintenance_per_s * sc.body_max),
+        sc.birth_cost,
+    );
 
     println!("\n## what was eaten, by the species it came off\n");
     println!("| species | bites | organic |");

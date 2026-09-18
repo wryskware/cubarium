@@ -761,10 +761,15 @@ fn the_two_ledgers_close_together_over_a_hundred_coupled_ticks() {
 }
 
 /// Dung: the mineral a bite carries in excess of the tissue it built is excreted as a
-/// litter deposit on the animal's own face. At the placeholders there is never any excess
-/// — `n_tissue` 0.05 against a plant's 0.02, on half a bite assimilated, asks for more
-/// mineral than food carries — so this test sets the animal's own `n_tissue` to zero to
-/// exercise the path, and says that the placeholders make it inert.
+/// litter deposit on the animal's own face.
+///
+/// **What the placeholders do and do not make inert (Astra R9.2).** The excess depends on
+/// the tissue **actually placed**, not on `yield_fraction`, so "there is never any excess
+/// at the defaults" was wrong: it is true only of a *fresh founder's first bite*, where
+/// the whole mouthful has somewhere to go. This test keeps that narrow arm, and adds the
+/// two cases that do excrete — an animal with nowhere left to put the matter, at the
+/// placeholders with **no knob touched**, and mineral-rich food with the grazer's own
+/// numbers unchanged. The forced `n_tissue` 0 arm stays as the path's extreme.
 #[test]
 fn excess_mineral_is_excreted_as_litter() {
     let world = plain(8, 2, 0.3, 5);
@@ -790,13 +795,74 @@ fn excess_mineral_is_excreted_as_litter() {
     assert_eq!(g.litter, 0.0, "dung is mineral only this round: the rest was respired");
     assert_residual_pair(&flora, &fauna, "after excretion");
 
-    // And at the placeholders, nothing is excreted at all.
+    // The narrow true claim: a **fresh founder's first bite** carries no excess. Half a
+    // bite assimilated is funded to 0.4 of it by a plant's own 0.02 of mineral, and a
+    // young animal's body has room for all of that, so every unit of the mineral is
+    // needed. This is not a property of the placeholders in general.
     let mut flora = Flora::new(FloraConfig::default());
     turf(&mut flora, &world, 3);
     let mut fauna = Fauna::new(FaunaConfig::default());
     grazer(&mut fauna, &world, 2, 0.02);
     fauna.step(&world, &mut flora);
-    assert_eq!(fauna.view().ledger.deposited_mineral_out, 0.0);
+    assert_eq!(
+        fauna.view().ledger.deposited_mineral_out, 0.0,
+        "a fresh founder's first bite has somewhere to put every unit it can fund"
+    );
+
+    // An animal with nowhere to put it **does** excrete, at the placeholders and with no
+    // knob touched anywhere: at `body_max` with a full reserve, the only room the bite
+    // finds is what this tick's upkeep just made, so the tissue placed is `2.5e-6` and the
+    // mineral it needs is a sixteenth of what the bite brought.
+    let mut flora = Flora::new(FloraConfig::default());
+    turf(&mut flora, &world, 3);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let sc = *fauna.config().species(Species::Frondgrazer);
+    let id = grazer(&mut fauna, &world, 2, sc.body_max);
+    let before = *fauna.view().animal(id).unwrap();
+    fauna.step(&world, &mut flora);
+    let v = fauna.view();
+    // Read the tissue placed off the ledger rather than off the animal: a full adult also
+    // pays for a newborn on this tick, and a birth is an internal transfer, so
+    // `respired_out = upkeep + bite - placed` is the only reading that is about the bite.
+    let upkeep = sc.maintenance_per_s * before.body * DT;
+    let placed = v.ledger.eaten_organic_in + upkeep - v.ledger.respired_out;
+    assert!(
+        (placed - upkeep).abs() <= 1e-9 * upkeep,
+        "it placed only what the upkeep freed: {placed} against {upkeep}"
+    );
+    let excess = v.ledger.eaten_mineral_in - sc.n_tissue * placed;
+    assert!(
+        (v.ledger.deposited_mineral_out - excess).abs() <= 1e-12 * excess && excess > 0.0,
+        "a full animal excretes {} of {excess}",
+        v.ledger.deposited_mineral_out
+    );
+    assert_eq!(v.ledger.born, 1, "and it paid for a newborn out of the same reserve");
+    assert_residual_pair(&flora, &fauna, "after a full animal's bite");
+
+    // And mineral-rich food excretes with the **grazer's** numbers untouched: a turf whose
+    // own `n_tissue` is 0.2 brings `2e-5` of mineral in a `1e-4` bite, ten times what the
+    // tissue it funds can hold, and the remainder is dung.
+    let mut flora = flora_with_plant_mineral(0.2);
+    turf(&mut flora, &world, 3);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = grazer(&mut fauna, &world, 2, 0.02);
+    let before = *fauna.view().animal(id).unwrap();
+    fauna.step(&world, &mut flora);
+    let v = fauna.view();
+    let a = *v.animal(id).unwrap();
+    assert!((v.ledger.eaten_mineral_in - 2e-5).abs() < 1e-18, "{}", v.ledger.eaten_mineral_in);
+    // The yield is what binds here, not the mineral: half the bite is built.
+    let built = a.body - before.body;
+    assert!((built - 0.5e-4).abs() <= 1e-9 * built, "it built {built}");
+    let excess = v.ledger.eaten_mineral_in - sc.n_tissue * built;
+    assert!(
+        (v.ledger.deposited_mineral_out - excess).abs() <= 1e-9 * excess,
+        "excreted {} of {excess}",
+        v.ledger.deposited_mineral_out
+    );
+    let g = flora.view().ground_at(at(2, 2)).expect("the dung provisioned the site");
+    assert!(g.mineral > flora.config().initial_mineral, "and it is in the site's pool");
+    assert_residual_pair(&flora, &fauna, "after a mineral-rich bite");
 }
 
 // ------------------------------------------------------------- the keyed stream
