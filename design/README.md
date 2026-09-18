@@ -1,104 +1,72 @@
 ---
 design_status: leaning
-last_reviewed: 2026-09-13
+last_reviewed: 2026-09-18
 decision_refs: []
 ---
 
-# A living skin for the cube
+# Cubarium design map
 
-For current progress and remaining work, start with the
-[fresh-thread task handoffs](handoffs/README.md). This page retains the original
-design direction; it is not the implementation inventory.
+A thin index, not a decision. Authority is
+[canon](0_Canon/README.md) and the [ledger](0_Canon/DECISIONS.md); plans below
+are `leaning` or `exploration` unless a ledger entry says otherwise. Dated
+material under [7_Research](7_Research/) is evidence of its date, never a current
+task list.
 
-The preferred direction is a small, resource-limited world with memory. Its
-inhabitants inherit bodies and behavior, consume and redistribute material,
-change the patches they occupy, and eventually leave descendants and paid
-dormant spores.
-Their success changes the conditions that made them successful.
+## Current (voxel)
 
-This is a design proposal. The [brief](brief.md) is accepted; implementation and
-validation vary by mechanism, as recorded in the current task index. Read the
-[canon rules](0_Canon/README.md) and [ledger](0_Canon/DECISIONS.md) for authority.
+- [Terrain and ecosystem proposal](terrain-and-ecosystem-proposal-2026-09-16.md)
+  — lead planning document: shallow voxel ringworld first, cube/panel later.
+- [Ecological-niches reconsideration](ecological-niches-reconsideration-2026-09-15.md)
+  — food identity, paid growth, specialization with a cost.
+- [Theoretical biosphere](theoretical-biosphere-2026-09-16.md) and the
+  [voxel ecological sketch](voxel-ecology-sketch-2026-09-16.md) — candidate
+  community and the terrain fields it needs.
+- [Game roadmap](game-roadmap-2026-09-16.md) — product exploration, lower
+  priority than the ambient display.
+- [Ecology v1 contract](ecology-v1-contract.md) — the stand/propagule contract
+  the voxel community extends off the five-face surface.
 
-The [review response](7_Research/plan-review-response-2026-09-11.md) records why
-the starting design is now smaller. Named drives with memory replace the initial
-dense network; one producer pool and scavenging precede optional ecology; the
-historical archive never recruits. [E1–E9](experiments.md) test the assumptions
-before the larger system depends on them.
+## Canon
 
-## What a glance might reveal
+- [Canon rules](0_Canon/README.md) and [decision ledger](0_Canon/DECISIONS.md).
+- [Owner's brief](brief.md) — the accepted requirements source (D-0002).
+- [Agent-instructions record](agent-instructions-proposal.md) — D-0003.
 
-A dim mottled substrate, a few creatures with distinct movement, and a local
-feeding patch should read immediately. A crawler follows a food gradient across
-Front onto Right; its head turns with the cube's fold while its tail still
-occupies Front. A slow bead-like colony grows near a bright patch. Small grazers
-congregate there, deplete it, and disperse. A hunter follows the gathering, then
-loses it as food and prey move elsewhere. Later, descendants have different body
-lengths, longer pauses, or a different response to a patch's light and moisture.
+## Art direction
 
-These are **scenarios to make possible**, not timelines to script. A world need
-not exhibit every behavior on command. Quiet has value, and composition should
-come from local ecology and restrained rendering rather than a hidden director
-placing organisms for a desired picture.
+- [Cubarium Art Direction v0.1](art-direction/Cubarium_Art_Direction_v0.1.md) is
+  the art direction; every brief that touches look cites it.
+- [Game-art workflow](game-art-workflow.md) — the Godot authoring/bake pipeline.
 
-## Preferred choices
+## Open work
 
-| Area | Direction | Main uncertainty |
-| --- | --- | --- |
-| Surface | Five charts; reuse shim seams; pure reflection and no material flux at the lower rim | Whether reflection looks natural |
-| Environment | One producer pool, nutrients, edible detritus, height/patch gradients, slow light and moisture | Whether local cycles escape global synchrony |
-| Evolution | Small body grammar, named inherited drives and two leaky memories; sparse mutations | Whether viable behavioral differences are visible |
-| Diversity | Paid intake/reserves, depletion/recycling, facultative predation; later tested dormancy | Whether tiny cheap grazers dominate and resets become frequent |
-| Persistence | Fixed-step deterministic core, bounded memory, versioned snapshots and normalized input logs | Actual cost and recovery behavior on the host |
-| Presentation | CPU pixel renderer, restrained palette, partial bodies and trails carried across seams | What reads at real brightness and viewing distance |
-| Integration | Rust and the existing `cube-proto` client/geometry; preview from identical face buffers | Dependency pin and host performance, confirmed during implementation |
+- [Handoffs and progress](handoffs/README.md) — the current task index.
+- [Senses handoff](handoffs/voxel-senses-handoff-2026-09-18.md) — Wrysk's own
+  senses thread.
+- [Cheap-lane chores](handoffs/cheap-lane-chores-2026-09-18.md).
+- [Voxel-era backlog](handoffs/voxel-era-backlog-2026-09-18.md) — the open
+  questions carried out of the flat-era briefs.
+- [Backlog](backlog.md) — deferred features and knobs (GitHub issues).
 
-The five-face surface has a real lower boundary. Start with reflection and no
-material flux or rim-sensing drive. E8 determines whether an optional heritable
-avoidance term is useful. This remains a revisable topology policy.
+## Evidence
 
-## Read by purpose
+- [7_Research/](7_Research/) — dated experiment and review notes. The voxel
+  notes and the ecology-v1 results the proposal cites are the live ones; older
+  notes are history recorded in Git.
+- Recurrent/sensing prior art: [interface contract](recurrent-interface-contract.md),
+  [recurrent organism plan](recurrent-organism-plan.md), [evolution](evolution.md),
+  [fauna-v2](fauna-v2.md).
 
-- [Surface topology](surface-topology.md): coordinates, seams, distance, corners,
-  diffusion, body rendering, and topology acceptance checks.
-- [Ecology](ecology.md): material/energy bookkeeping, local interactions,
-  environmental time scales, ecological memory, and recovery.
-- [Evolution](evolution.md): genome, controller, birth, mutation, tradeoffs,
-  visible phenotypes, and the limits of this model.
-- [Appearance](appearance.md): a low-resolution visual language with a calm
-  default rhythm and a plan for judging it on the real cube.
-- [Architecture](architecture.md): runtime boundaries, scheduling, storage,
-  replay, capacity, performance, and the shim adapter.
-- [Environmental inputs](environmental-inputs.md): a bounded stimulus contract
-  that future sensor systems can feed.
-- [Implementation plan](implementation-plan.md): vertical slices, verification,
-  risks, and concrete next work.
-- [M2 world specification](m2-world-spec.md): units, conversion table, tick
-  order, controller, randomness, and persistence for the first living world.
-- [First experiments](experiments.md): E1–E9 protocols, controls, and progression gates.
-- [M3a specification](m3a-spec.md): genome v2, sparse mutation, lineage
-  records, body grammar and gait, and the E4/E5/E6 harness contracts.
-- [E2 harness](experiments-e2-harness.md): the headless runner, matrix, and
-  analyzer that produce E2/E3 evidence from the M2 world.
-- [Local contract evidence](7_Research/local-contracts.md): what exists in Lore
-  and the shim, checked on disk.
-- [Pre-implementation plan review](7_Research/plan-review-2026-09-11.md):
-  prioritized findings, simplifications, and first experiments; evidence, not
-  decisions.
-- [Review response](7_Research/plan-review-response-2026-09-11.md): dispositions,
-  adopted revisions, qualifications, and disagreements.
-- [Agent instructions approval](agent-instructions-proposal.md): the approved
-  installation record for the root [working rules](../AGENTS.md).
+## Older substrate design (reference)
 
-## Deliberate limits
+The flat/stratified design notes below predate the voxel rebuild. They are kept
+where later documents still cite them or their reasoning carries; Git holds the
+rest.
 
-There is no promise of unbounded open-ended evolution on a finite machine with
-a bounded genotype. The aim is sustained, observable variety and continuity,
-tested over progressively longer runs. Fixed resource types and a small body
-grammar limit the possible worlds; they also make inheritance understandable at
-64 pixels. Expand them only when observation identifies a missing possibility.
-
-Do not begin with an unrestricted neural architecture, language-model creature
-brains, arbitrary executable genomes, whole-cube physics, or a giant list of
-special-cased species. First prove that a few real feedback loops create an
-interesting place. The plan includes controls that can disprove that hypothesis.
+- [Flat-world plan](flat-world-plan-2026-09-16.md), [landscape plan](landscape-plan-2026-09-16.md)
+- [Stratified world](stratified-world.md), [water](water.md), [surface topology](surface-topology.md)
+- [M2 world spec](m2-world-spec.md), [experiments](experiments.md)
+- [Architecture](architecture.md), [appearance](appearance.md), [environmental inputs](environmental-inputs.md)
+- [Apex dormancy plan](apex-dormancy-plan.md), [ecology-search plan](ecology-search-plan.md),
+  [movement and foraging plan](movement-and-foraging-plan.md)
+- [Implementation plan](implementation-plan.md) — superseded; see the note at its head.

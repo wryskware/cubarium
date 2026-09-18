@@ -1,10 +1,17 @@
 ---
-design_status: leaning
-last_reviewed: 2026-09-13
+design_status: deprecated
+last_reviewed: 2026-09-18
 decision_refs: []
 ---
 
 # Implementation plan and validation gates
+
+> **Superseded 2026-09-18.** This is the flat-era M1–M5 plan and its dated
+> status log. It is retained as history, not as current work. Start from the
+> [design map](README.md) and the [handoff index](handoffs/README.md); the
+> voxel [terrain and ecosystem proposal](terrain-and-ecosystem-proposal-2026-09-16.md)
+> is the current direction. Any "live"/"running"/"in progress" statement below
+> describes its own date.
 
 Build a series of usable vertical slices. Topology precedes ecology, persistence
 arrives with the first living world, and more traits follow evidence that the
