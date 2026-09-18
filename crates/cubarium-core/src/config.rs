@@ -1229,7 +1229,7 @@ mod tests {
     /// config written before `detritus.fall` existed must still load, taking the default.
     #[test]
     fn a_config_toml_without_the_fall_rate_takes_the_default() {
-        // Exactly the shape `scripts/e2-matrix.py` writes: dotted keys, no `version`.
+        // Exactly the old study-matrix shape: dotted keys, no `version`.
         let text = "\
 seed = 7
 producer.growth = 0.008
