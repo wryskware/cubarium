@@ -261,6 +261,14 @@ impl<'a> VoxelView<'a> {
     }
 }
 
+/// The thread count the plain entry points ([`World::step`], the fauna crate's
+/// `Fauna::step`) split their read-only phases across: every core the OS reports, or one
+/// if it reports nothing. Parallel is the default (Wrysk, 2026-09-18); `step_with(1)` is
+/// the serial run, and `cubarium-voxel-sim`'s `SimConfig::threads` is the host's knob.
+pub fn default_threads() -> usize {
+    std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
+}
+
 /// The world. Stepped at [`crate::TICK_HZ`]; pure given its inputs.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct World {
@@ -416,9 +424,19 @@ impl World {
     }
 
     /// Advance one tick: prescribed rain and evaporation, free-water substeps,
-    /// infiltration, drainage, spring discharge, outlet export.
+    /// infiltration, drainage, spring discharge, outlet export. The exchange's column
+    /// scan splits across [`default_threads`] workers; [`World::step_with`] takes the
+    /// count explicitly.
     pub fn step(&mut self) {
-        crate::water::step(self);
+        self.step_with(default_threads());
+    }
+
+    /// [`World::step`] with a thread count for the one phase that splits, the exchange's
+    /// read-only column scan. `1` runs it on this thread. Execution only: the count can
+    /// reach no result (`water::exchange`'s doc), and with the `parallel` feature off it
+    /// is ignored.
+    pub fn step_with(&mut self, threads: usize) {
+        crate::water::step(self, threads);
         self.advance_tick();
     }
 

@@ -556,11 +556,12 @@ impl Fauna {
     /// just moved and grows, and then the animals eat what is there. The order within the
     /// tick is [`step`]'s module doc, and it is written down in exactly one place.
     pub fn step(&mut self, world: &World, flora: &mut Flora) {
-        step::step(self, world, flora, 1);
+        step::step(self, world, flora, cubarium_voxel::default_threads());
     }
 
     /// [`Fauna::step`] with a thread count for the one phase that splits: `sense`, which
-    /// only reads. `1` is [`Fauna::step`] exactly.
+    /// only reads. [`Fauna::step`] is this with [`cubarium_voxel::default_threads`];
+    /// `1` runs it on this thread.
     ///
     /// **Execution, never a rule.** Every animal's plan is a pure function of the world,
     /// the plant layer and that animal, the plans are gathered in animal order whatever

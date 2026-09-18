@@ -486,6 +486,11 @@ compiled — this note checked `target/release/deps` for them and found none. So
 
 Release build time, `--workspace --all-targets`, `-j 24`, this machine: **11.2 s** with the
 tail already built, **21.4 s** with the 56 new packages and the five cubarium crates
-cleaned. The tail costs about **+10 s wall (+206 s CPU), once**. Two of the three voxel
-crates keep the tail out of an embedded build entirely: `cubarium-voxel/parallel` and
-`cubarium-voxel-fauna/parallel` are **off by default** and only the sim crate turns them on.
+cleaned. The tail costs about **+10 s wall (+206 s CPU), once**. `cubarium-voxel/parallel`
+and `cubarium-voxel-fauna/parallel` were off by default when this was measured and only the
+sim crate turned them on. **Since 2026-09-18 they are default features** (Wrysk: "make it
+parallel by default"): the plain `World::step` and `Fauna::step` split their read-only
+phases across `cubarium_voxel::default_threads()` (every core the OS reports), so the study
+harnesses and the crates' own tests run parallel too, and `step_with(1)` is the serial run.
+An embedded build that wants no `bevy_tasks` in its tail sets `default-features = false` on
+those two crates.

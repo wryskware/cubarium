@@ -40,7 +40,7 @@ pub mod world;
 pub use config::Config;
 pub use ledger::Ledger;
 pub use material::Material;
-pub use world::{Command, VoxelView, World};
+pub use world::{default_threads, Command, VoxelView, World};
 
 /// Simulation ticks per second. Matches `cubarium-core::TICK_HZ` so a frontend can
 /// drive both worlds with the same clock.

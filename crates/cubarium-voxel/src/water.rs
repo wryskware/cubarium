@@ -367,7 +367,8 @@ pub fn begin(world: &mut World) {
 /// One tick of water, as one call. **The phase order is the rule** and it is written out
 /// once, here; `cubarium-voxel-sim`'s schedule chains the same public phases in the same
 /// order and this stays as the three-call sequence's water leg for tests and warm-ups.
-pub fn step(world: &mut World) {
+/// `threads` reaches only [`exchange`]'s column scan.
+pub fn step(world: &mut World, threads: usize) {
     begin(world);
     crate::voxel_phase!(WorldStep, {
         rain(world);
@@ -381,7 +382,7 @@ pub fn step(world: &mut World) {
                 // the module doc on why runoff is what infiltration refuses.
                 infiltrate(world, sub_dt);
                 fall(world);
-                exchange(world, 1);
+                exchange(world, threads);
             }
         });
         drain(world);
