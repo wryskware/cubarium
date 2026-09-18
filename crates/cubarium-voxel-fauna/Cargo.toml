@@ -11,3 +11,10 @@ cubarium-voxel-flora = { workspace = true }
 postcard = { version = "1", features = ["use-std"] }
 serde = { version = "1", features = ["derive"] }
 anyhow = { workspace = true }
+
+# The `grazed` harness carries the crop-attempt/receipt bookkeeping unit tests Astra's
+# R10.5 asked for (its own `#[cfg(test)] mod tests`), so it is compiled and run as a test
+# target too.
+[[example]]
+name = "grazed"
+test = true

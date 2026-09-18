@@ -166,36 +166,39 @@ struct Arm {
     fauna_residuals: (f64, f64, f64),
     flora_stocks: (f64, f64, f64),
     fauna_stocks: (f64, f64, f64),
-    /// Where the cropping happened, and how high the food was above it.
-    bites: BiteSites,
+    /// Where the cropping was attempted, and what was in reach of it.
+    attempts: CropAttempts,
+    /// What actually left a stand, attributed to the face it was taken from.
+    receipts: Receipts,
 }
 
-/// **Where the bites were taken, and from how high (Astra R9.5).** Round 5c measured that
-/// 87 % of the intake came off bloomcrown, which a ground browser can only eat from a face
-/// above the stand's own — and recorded nothing about *which* faces did it, so the
-/// attribution was an inference. This is the record that makes it a measurement.
+/// **Crop-attempt and reachable-stand observations (Astra R9.5, corrected by R10.5).**
+/// Round 5c measured that 87 % of the intake came off bloomcrown, which a ground browser
+/// can only eat from a face above the stand's own, and recorded nothing about *which*
+/// faces did it. This is the first half of that record, and its name is what it measures.
 ///
-/// The unit is a **cropping animal-tick**, not a bite: one mouthful is spread over every
-/// stand in reach in site order and the ledger counts bites by plant species, so splitting
-/// a mouthful between two stands of different species would mean reproducing the model's
-/// own spending order here. What is recorded instead is the face each animal cropped from
-/// and the stands that were in reach **from that face, before it ate** — which is exactly
-/// the set the mouthful was spent over. Per-bite attribution would need a field in
-/// `FaunaLedger`, and that is a snapshot schema change.
+/// The unit is a **crop-attempt animal-tick**: an animal whose state after the tick is
+/// `State::Cropping` had a whole bite in reach when it was planned, but the withdrawal it
+/// then made can come back empty if an earlier animal in id order emptied the same stand
+/// first, so this is attempts and reach and **not** intake. The `(species, height)` rows
+/// are deduplicated per animal-tick — two stands of the same species at the same height in
+/// one reach set are one observation, not two, which is what R10.5 found double-counted.
+/// Intake is [`Receipts`], keyed on withdrawals that actually returned something.
 #[derive(Default)]
-struct BiteSites {
-    /// Cropping animal-ticks by the height of the face the animal stood on.
+struct CropAttempts {
+    /// Crop-attempt animal-ticks by the height of the face the animal stood on.
     by_face_y: Vec<(u32, u64)>,
-    /// Every distinct face cropped from, sorted.
+    /// Every distinct face a crop was attempted from, sorted.
     faces: Vec<Site>,
-    /// Cropping animal-ticks by plant species and by `stand.y - face.y`: negative is food
-    /// below the eater, zero is level with it, positive is above.
+    /// Crop-attempt animal-ticks by plant species and by `stand.y - face.y`: negative is
+    /// food below the eater, zero level with it, positive above. One per animal-tick per
+    /// distinct `(species, dy)`, however many stands in reach share it.
     by_dy: Vec<(Species, i64, u64)>,
 }
 
-impl BiteSites {
-    /// One cropping animal-tick on `face`, with the stands that were in reach of it.
-    fn record(&mut self, face: Site, reach: &[(Site, f64)], flora: &Flora) {
+impl CropAttempts {
+    /// One crop-attempt animal-tick on `face`, with the stands that were in reach of it.
+    fn record(&mut self, face: Site, reach: &[(Site, Species)]) {
         match self.by_face_y.binary_search_by_key(&face.y, |&(y, _)| y) {
             Ok(i) => self.by_face_y[i].1 += 1,
             Err(i) => self.by_face_y.insert(i, (face.y, 1)),
@@ -203,15 +206,88 @@ impl BiteSites {
         if let Err(i) = self.faces.binary_search(&face) {
             self.faces.insert(i, face);
         }
-        for &(site, _) in reach {
-            let Some(stand) = flora.view().stand_at(site) else { continue };
-            let key = (stand.species, i64::from(site.y) - i64::from(face.y));
+        // Deduplicated: the observation is "this species, this far up, was in reach",
+        // which two stands cannot make twice in one animal-tick.
+        let mut seen: Vec<(Species, i64)> = Vec::new();
+        for &(site, species) in reach {
+            let key = (species, i64::from(site.y) - i64::from(face.y));
+            if let Err(i) = seen.binary_search(&key) {
+                seen.insert(i, key);
+            }
+        }
+        for key in seen {
             match self.by_dy.binary_search_by_key(&key, |&(sp, dy, _)| (sp, dy)) {
                 Ok(i) => self.by_dy[i].2 += 1,
                 Err(i) => self.by_dy.insert(i, (key.0, key.1, 1)),
             }
         }
     }
+}
+
+/// **Actual intake, from successful withdrawal receipts (Astra R10.5).** What a stand lost
+/// in a tick is exactly what the animals took out of it — the plant layer has already
+/// grown by the time they eat — so the foliage a stand loses is a receipt, and one with no
+/// organic matter in it is not recorded at all.
+///
+/// Attribution is **exact where it is unambiguous and refused where it is not**: a stand
+/// that exactly one cropping animal could reach that tick lost what that animal took, so
+/// the loss is booked to that animal's face; a stand two or more cropping animals could
+/// reach is `contested` and booked to no face, because splitting it would mean
+/// reproducing `crop`'s own spending order in the harness. The report prints both, so the
+/// share the attribution covers is visible rather than assumed.
+#[derive(Default)]
+struct Receipts {
+    /// Organic matter and receipts by the height of the face it was taken from.
+    by_face_y: Vec<(u32, f64, u64)>,
+    /// Organic matter by plant species and by `stand.y - face.y`.
+    by_dy: Vec<(Species, i64, f64)>,
+    /// Attributed to one face, and left unattributed because more than one eater could
+    /// have taken it.
+    attributed: f64,
+    contested: f64,
+}
+
+/// Book one tick's withdrawals. `taken` is every stand that lost foliage, with the species
+/// it is and the organic matter it lost; `croppers` are the animals whose state after the
+/// tick was `Cropping`, with the reach sets read before any of them ate.
+fn attribute(receipts: &mut Receipts, taken: &[(Site, Species, f64)], croppers: &[&Reading]) {
+    for &(site, species, organic) in taken {
+        if !(organic > 0.0) {
+            continue;
+        }
+        let mut reached_by = croppers.iter().filter(|c| c.reach.iter().any(|&(s, _)| s == site));
+        let Some(one) = reached_by.next() else {
+            // Nobody who cropped could reach it: not this harness's to attribute either.
+            receipts.contested += organic;
+            continue;
+        };
+        if reached_by.next().is_some() {
+            receipts.contested += organic;
+            continue;
+        }
+        let face = one.face;
+        receipts.attributed += organic;
+        match receipts.by_face_y.binary_search_by_key(&face.y, |&(y, _, _)| y) {
+            Ok(i) => {
+                receipts.by_face_y[i].1 += organic;
+                receipts.by_face_y[i].2 += 1;
+            }
+            Err(i) => receipts.by_face_y.insert(i, (face.y, organic, 1)),
+        }
+        let key = (species, i64::from(site.y) - i64::from(face.y));
+        match receipts.by_dy.binary_search_by_key(&key, |&(sp, dy, _)| (sp, dy)) {
+            Ok(i) => receipts.by_dy[i].2 += organic,
+            Err(i) => receipts.by_dy.insert(i, (key.0, key.1, organic)),
+        }
+    }
+}
+
+/// One animal's pre-bite reading: which face it stands on and what its species' reach box
+/// finds from there, with the species of each stand, read before anything has eaten.
+struct Reading {
+    id: u64,
+    face: Site,
+    reach: Vec<(Site, Species)>,
 }
 
 /// `two_producers.rs`'s `prepared_world`: generate once to find the basin floor, then
@@ -362,7 +438,8 @@ fn arm(seconds: f64, grazers: usize, seed: u64, noise_seed: u64) -> (Arm, Vec<(S
     let half = ticks / 2;
     let every = 100 * u64::from(TICK_HZ);
     let mut samples = vec![sample(0.0, &flora, &fauna, grazers as u64)];
-    let mut bites = BiteSites::default();
+    let mut attempts = CropAttempts::default();
+    let mut receipts = Receipts::default();
     let reach = fauna.config().species(Beast::Frondgrazer).reach;
 
     for tick in 0..ticks {
@@ -370,20 +447,51 @@ fn arm(seconds: f64, grazers: usize, seed: u64, noise_seed: u64) -> (Arm, Vec<(S
         flora.step(&mut world);
         // What each animal could reach from where it stands, read **before** it eats: the
         // set a mouthful is spent over, and the only moment it can be read.
-        let before: Vec<(u64, Site, Vec<(Site, f64)>)> = fauna
+        let before: Vec<Reading> = fauna
             .view()
             .animals
             .iter()
-            .map(|a| (a.id, a.site, flora.view().reachable_foliage(&world.view(), a.site, reach)))
+            .map(|a| Reading {
+                id: a.id,
+                face: a.site,
+                reach: flora
+                    .view()
+                    .reachable_foliage(&world.view(), a.site, reach)
+                    .into_iter()
+                    .filter_map(|(site, _)| {
+                        flora.view().stand_at(site).map(|s| (site, s.species))
+                    })
+                    .collect(),
+            })
             .collect();
-        fauna.step(&world, &mut flora);
-        for (id, site, reached) in &before {
-            // An animal that cropped did not move, so the face it stands on now is the one
-            // the pre-bite reach was read from.
-            if fauna.view().animal(*id).map(|a| a.state) == Some(State::Cropping) {
-                bites.record(*site, reached, &flora);
+        // And what those stands held, so that the foliage they lose in this step is a
+        // receipt: nothing but an animal takes foliage between here and the next line.
+        let mut held: Vec<(Site, Species, f64)> = Vec::new();
+        for r in &before {
+            for &(site, species) in &r.reach {
+                if let Err(i) = held.binary_search_by_key(&site, |&(s, _, _)| s) {
+                    let foliage = flora.view().stand_at(site).map_or(0.0, |s| s.foliage);
+                    held.insert(i, (site, species, foliage));
+                }
             }
         }
+        fauna.step(&world, &mut flora);
+        // An animal that cropped did not move, so the face it stands on now is the one the
+        // pre-bite reach was read from.
+        let croppers: Vec<&Reading> = before
+            .iter()
+            .filter(|r| fauna.view().animal(r.id).map(|a| a.state) == Some(State::Cropping))
+            .collect();
+        for r in &croppers {
+            attempts.record(r.face, &r.reach);
+        }
+        let taken: Vec<(Site, Species, f64)> = held
+            .iter()
+            .map(|&(site, species, foliage)| {
+                (site, species, foliage - flora.view().stand_at(site).map_or(0.0, |s| s.foliage))
+            })
+            .collect();
+        attribute(&mut receipts, &taken, &croppers);
         if tick + 1 == half {
             // The introduction is **between** ticks, like every other command in this
             // world: the tick that follows is the first one the animals act in.
@@ -453,7 +561,8 @@ fn arm(seconds: f64, grazers: usize, seed: u64, noise_seed: u64) -> (Arm, Vec<(S
         ),
         flora_stocks: (fv.organic(), fv.mineral(), fv.energy()),
         fauna_stocks: (av.organic(), av.mineral(), av.energy()),
-        bites,
+        attempts,
+        receipts,
     };
     (arm, founders)
 }
@@ -571,24 +680,55 @@ fn report(plain: &Arm, grazed: &Arm, seconds: f64) {
          preset.)"
     );
 
-    println!("\n## where it was cropped from (cropping animal-ticks)\n");
+    println!("\n## crop attempts and what was in reach (crop-attempt animal-ticks)\n");
     println!("| eater's face y | animal-ticks | distinct faces at this height |");
     println!("| --- | --- | --- |");
-    for &(y, n) in &grazed.bites.by_face_y {
-        let faces = grazed.bites.faces.iter().filter(|f| f.y == y).count();
+    for &(y, n) in &grazed.attempts.by_face_y {
+        let faces = grazed.attempts.faces.iter().filter(|f| f.y == y).count();
         println!("| {y} | {n} | {faces} |");
     }
     println!("\n| species in reach | stand y - face y | animal-ticks |");
     println!("| --- | --- | --- |");
-    for &(sp, dy, n) in &grazed.bites.by_dy {
+    for &(sp, dy, n) in &grazed.attempts.by_dy {
         println!("| {} | {dy:+} | {n} |", sp.name());
     }
     println!(
-        "\n(a cropping animal-tick, not a bite: one mouthful is spent over every stand in \
-         reach in site order, so the faces and the reach sets are recorded and the split \
-         between two stands is not. `stand y - face y` is what a higher face buys: a \
-         positive row is food above the eater, which is the only way a grown bloomcrown is \
-         food at all.)"
+        "\n(**attempts and reach, not intake**: an animal that planned a whole bite is \
+         `Cropping` even if the stand was emptied by an earlier animal in id order the \
+         same tick. One observation per animal-tick per distinct species and height, \
+         however many stands in reach share it. `stand y - face y` is what a higher face \
+         buys: a positive row is food above the eater, which is the only way a grown \
+         bloomcrown is food at all.)"
+    );
+
+    println!("\n## actual intake, from withdrawal receipts (organic matter)\n");
+    println!("| eater's face y | receipts | organic |");
+    println!("| --- | --- | --- |");
+    for &(y, o, n) in &grazed.receipts.by_face_y {
+        println!("| {y} | {n} | {:.6} |", nz(o));
+    }
+    println!("\n| species eaten | stand y - face y | organic |");
+    println!("| --- | --- | --- |");
+    for &(sp, dy, o) in &grazed.receipts.by_dy {
+        println!("| {} | {dy:+} | {:.6} |", sp.name(), nz(o));
+    }
+    let booked = grazed.receipts.attributed + grazed.receipts.contested;
+    println!(
+        "\nattributed {:.6} of {:.6} withdrawn ({:.1} %); contested {:.6} on stands more \
+         than one cropping animal could reach; the animal ledger's own eaten organic is \
+         {:.6}, so the receipts account for every unit that left a stand",
+        grazed.receipts.attributed,
+        booked,
+        100.0 * grazed.receipts.attributed / booked.max(f64::MIN_POSITIVE),
+        grazed.receipts.contested,
+        grazed.eaten.0
+    );
+    println!(
+        "(a receipt is foliage that actually left a stand, so an empty withdrawal is not in \
+         here at all. Nothing but an animal takes foliage between the plant step and the \
+         animal step, which is why the loss is the receipt; a stand exactly one cropping \
+         animal could reach is booked to that animal's face, and one that several could is \
+         left unattributed rather than split by a rule the model owns.)"
     );
 
     println!("\n## the two ledgers, and the residuals\n");
@@ -628,4 +768,87 @@ fn report(plain: &Arm, grazed: &Arm, seconds: f64) {
          Flora instances, so any difference between them is the treatment reaching the \
          producers through this arm's own water, shade and lotteries."
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn site(x: u32, y: u32) -> Site {
+        Site { x, y, z: 0 }
+    }
+
+    fn reading(id: u64, face: Site, reach: &[(Site, Species)]) -> Reading {
+        Reading { id, face, reach: reach.to_vec() }
+    }
+
+    /// **R10.5, the attempts table.** Two stands of the same species at the same height in
+    /// one reach set are **one** observation and not two, and two different heights are
+    /// two. Before the repair every reachable stand added one, so a wide patch looked like
+    /// several attempts.
+    #[test]
+    fn a_crop_attempt_counts_each_species_and_height_once() {
+        let face = site(4, 2);
+        let mut attempts = CropAttempts::default();
+        attempts.record(
+            face,
+            &[
+                (site(3, 2), Species::Springturf),
+                (site(5, 2), Species::Springturf),
+                (site(5, 1), Species::Springturf),
+                (site(3, 2), Species::Bloomcrown),
+            ],
+        );
+        assert_eq!(attempts.by_face_y, vec![(2, 1)], "one animal-tick, one face");
+        assert_eq!(
+            attempts.by_dy,
+            vec![
+                (Species::Bloomcrown, 0, 1),
+                (Species::Springturf, -1, 1),
+                (Species::Springturf, 0, 1),
+            ],
+            "two stands level with the eater are one observation, and one below is another"
+        );
+    }
+
+    /// **R10.5, the receipts table.** A withdrawal that returned nothing is not a receipt;
+    /// a stand exactly one cropping animal could reach is that animal's intake, booked to
+    /// the face it stood on; a stand two of them could reach is contested and booked to no
+    /// face, so the report can say what share the attribution covers.
+    #[test]
+    fn a_receipt_is_attributed_only_where_one_eater_could_have_taken_it() {
+        let low = reading(0, site(4, 2), &[(site(3, 2), Species::Springturf), (site(9, 2), Species::Springturf)]);
+        let high = reading(1, site(7, 3), &[(site(6, 2), Species::Bloomcrown), (site(9, 2), Species::Springturf)]);
+        let croppers = [&low, &high];
+
+        let mut receipts = Receipts::default();
+        attribute(
+            &mut receipts,
+            &[
+                // One eater each: attributed, and the bloomcrown to the higher face.
+                (site(3, 2), Species::Springturf, 1e-4),
+                (site(6, 2), Species::Bloomcrown, 2e-4),
+                // Both could reach it: contested.
+                (site(9, 2), Species::Springturf, 5e-5),
+                // An empty withdrawal is not a receipt at all.
+                (site(5, 2), Species::Springturf, 0.0),
+            ],
+            &croppers,
+        );
+
+        assert_eq!(receipts.by_face_y, vec![(2, 1e-4, 1), (3, 2e-4, 1)]);
+        assert_eq!(
+            receipts.by_dy,
+            vec![(Species::Bloomcrown, -1, 2e-4), (Species::Springturf, 0, 1e-4)],
+            "the bloomcrown was taken from a face one voxel above it"
+        );
+        assert!((receipts.attributed - 3e-4).abs() < 1e-18, "{}", receipts.attributed);
+        assert_eq!(receipts.contested, 5e-5);
+
+        // A stand nobody who cropped could reach is not attributed either.
+        let mut orphan = Receipts::default();
+        attribute(&mut orphan, &[(site(20, 2), Species::Springturf, 7e-5)], &croppers);
+        assert_eq!((orphan.attributed, orphan.contested), (0.0, 7e-5));
+        assert!(orphan.by_face_y.is_empty());
+    }
 }
