@@ -184,7 +184,20 @@ pub struct SpeciesConfig {
     /// `body_min`, because that is the newborn's body; the remainder is the newborn's
     /// reserve.
     pub birth_cost: f64,
-    /// Reserve it can hold, per unit of body.
+    /// The ceiling on **new intake** into the reserve, per unit of body: assimilated
+    /// matter stops going to the reserve at `reserve_cap · body` and is respired instead
+    /// ([`step`]'s assimilation). It is deliberately **not** a universal storage bound
+    /// (Astra R9.4).
+    ///
+    /// **The one exception, named.** A paid birth endowment may sit above it. A newborn is
+    /// `body_min` of body and `birth_cost − body_min` of reserve, which at the
+    /// placeholders is `0.005` against a cap of `reserve_cap · body_min` = `0.0025`: the
+    /// parcel is what the parent actually paid for out of its own reserve, so clamping it
+    /// would either destroy organic matter or need a conserving birth allocation, which is
+    /// a life-history decision and not a repair. While a reserve is above the ceiling no
+    /// intake raises it — `room` is zero and the surplus is respired — and maintenance
+    /// spends it exactly as it spends any other reserve, so the excess is transient and
+    /// never grows.
     pub reserve_cap: f64,
     /// How far it can get at food from the face it stands on.
     pub reach: Reach,
@@ -244,7 +257,10 @@ impl SpeciesConfig {
         if !t.is_finite() || t < 1.0 { 1 } else { t as u64 }
     }
 
-    /// The reserve a body of this size can hold.
+    /// The reserve intake into a body of this size stops at: `reserve_cap · body`. A
+    /// ceiling on new intake and not a storage bound — a newborn's paid endowment starts
+    /// above it (see [`SpeciesConfig::reserve_cap`]) — so a caller must not read this as
+    /// "what it is holding" or clamp to it.
     pub fn reserve_of(&self, body: f64) -> f64 {
         self.reserve_cap * body
     }

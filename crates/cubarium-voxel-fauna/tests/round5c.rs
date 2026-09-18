@@ -445,6 +445,19 @@ fn a_birth_pays_birth_cost_and_the_newborn_is_at_body_min() {
     let newborn = fauna.view().animals.iter().find(|a| a.id != parent).copied().unwrap();
     assert_eq!(newborn.body, sc.body_min);
     assert!((newborn.reserve - (sc.birth_cost - sc.body_min)).abs() < 1e-15);
+    // **The named exception to `reserve_cap` (Astra R9.4).** `birth_cost - body_min` is
+    // 0.005 and `reserve_cap · body_min` is 0.0025, so a newborn starts with twice the
+    // reserve its own body would take in as intake. That is deliberate: the parcel is what
+    // the parent actually paid out of its reserve, and clamping it would destroy organic
+    // matter. `reserve_cap` is the ceiling on **new intake** and not a storage bound, and
+    // `a_newborn_s_endowment_sits_above_the_intake_ceiling_and_is_spent_normally` pins
+    // both halves of that contract.
+    assert!(
+        newborn.reserve > sc.reserve_of(newborn.body),
+        "the endowment is above the intake ceiling by design: {} against {}",
+        newborn.reserve,
+        sc.reserve_of(newborn.body)
+    );
     assert_eq!(newborn.site, before.site);
     assert_eq!(newborn.age_ticks, 0);
     // The mineral and the energy left the parent by the same fraction rule the organic
@@ -462,6 +475,127 @@ fn a_birth_pays_birth_cost_and_the_newborn_is_at_body_min() {
     assert!((fauna.view().organic() - (stock - upkeep)).abs() < 1e-15, "a birth is internal");
     assert_eq!(fauna.view().ledger.introduced_organic_in, stock, "and nothing was introduced");
     assert_fauna_residuals(&fauna, "after a birth");
+}
+
+/// **R9.4: `reserve_cap` is the ceiling on new intake, and a newborn's endowment sits
+/// above it.** Two halves of one contract.
+///
+/// The ceiling: an adult at `body_max` with a full reserve eats and stays at exactly
+/// `reserve_cap · body` — its body cannot take the matter and its reserve will not, so the
+/// surplus is respired. Nothing ever raises a reserve past the ceiling.
+///
+/// The exception: a newborn's paid endowment starts at twice it, no intake raises that
+/// excess, and maintenance spends it like any other reserve — no clamp anywhere, which
+/// would have destroyed organic matter the parent paid for.
+#[test]
+fn a_newborn_s_endowment_sits_above_the_intake_ceiling_and_is_spent_normally() {
+    let sc = *FaunaConfig::default().species(Species::Frondgrazer);
+
+    // ---- the ceiling, on an adult that is already full.
+    let world = plain(8, 2, 0.3, 5);
+    let mut flora = Flora::new(FloraConfig::default());
+    turf(&mut flora, &world, 3);
+    // A birth cost this adult can never afford, so the only things moving its reserve are
+    // the upkeep and the intake. (`validate` refuses a zero cost: a newborn needs a body.)
+    let mut fauna = Fauna::new(config_with(|s| s.birth_cost = 1.0));
+    let id = grazer(&mut fauna, &world, 2, sc.body_max);
+    assert_eq!(fauna.view().animal(id).unwrap().reserve, sc.reserve_of(sc.body_max));
+    for tick in 1..=5 {
+        fauna.step(&world, &mut flora);
+        let a = *fauna.view().animal(id).unwrap();
+        assert_eq!(a.body, sc.body_max, "tick {tick}: it had nowhere to put a body");
+        assert!(
+            a.reserve <= sc.reserve_of(a.body) + 1e-18
+                && (a.reserve - sc.reserve_of(a.body)).abs() <= 1e-12 * a.reserve,
+            "tick {tick}: intake refilled the reserve to the ceiling and no further: {a:?}"
+        );
+    }
+    assert!(fauna.view().ledger.bites > 0, "it was eating the whole time");
+    assert!(fauna.view().ledger.respired_out > 0.0, "and respiring what it could not hold");
+    assert_residual_pair(&flora, &fauna, "an adult held at the ceiling");
+
+    // ---- the exception, on a newborn in a world with nothing to eat.
+    let world = plain(4, 2, 0.3, 5);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let parent = grazer(&mut fauna, &world, 1, sc.body_max);
+    fauna.step(&world, &mut flora);
+    let newborn = fauna.view().animals.iter().find(|a| a.id != parent).copied().expect("a birth");
+    let cap = sc.reserve_of(newborn.body);
+    assert!(
+        (newborn.reserve - 0.005).abs() < 1e-18 && (cap - 0.0025).abs() < 1e-18,
+        "the placeholders' own numbers: {} above {cap}",
+        newborn.reserve
+    );
+
+    // Maintenance spends the excess at the ordinary rate, with no clamp at the ceiling.
+    let mut reserve = newborn.reserve;
+    for tick in 1..=3 {
+        fauna.step(&world, &mut flora);
+        let a = *fauna.view().animal(newborn.id).unwrap();
+        let upkeep = sc.maintenance_per_s * a.body * DT;
+        assert!(
+            (a.reserve - (reserve - upkeep)).abs() <= 1e-12 * reserve,
+            "tick {tick}: the reserve fell by the upkeep and nothing else: {a:?}"
+        );
+        assert!(a.reserve > cap, "tick {tick}: still above the ceiling, not clamped to it");
+        assert_eq!(a.body, newborn.body, "and the body is untouched while the reserve pays");
+        reserve = a.reserve;
+    }
+    assert_fauna_residuals(&fauna, "a newborn above the ceiling");
+
+    // And no intake raises the excess: with food in reach the newborn's reserve still only
+    // falls, because `room` is zero while it is above the ceiling and the assimilated
+    // matter goes into the body instead.
+    let world = plain(8, 2, 0.3, 5);
+    let mut flora = Flora::new(FloraConfig::default());
+    turf(&mut flora, &world, 3);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let parent = grazer(&mut fauna, &world, 2, sc.body_max);
+    fauna.step(&world, &mut flora);
+    let newborn = fauna.view().animals.iter().find(|a| a.id != parent).copied().expect("a birth");
+    let mut last = newborn;
+    for tick in 1..=5 {
+        fauna.step(&world, &mut flora);
+        let a = *fauna.view().animal(newborn.id).unwrap();
+        assert!(a.reserve < last.reserve, "tick {tick}: the excess never rose: {a:?}");
+        assert!(a.body > last.body, "tick {tick}: the intake went into the body");
+        assert!(a.reserve > sc.reserve_of(a.body), "tick {tick}: and it is still above it");
+        last = a;
+    }
+    assert_residual_pair(&flora, &fauna, "a fed newborn above the ceiling");
+}
+
+/// **R9.4's cheap case: one full default adult buys two young with nothing to eat.** Two
+/// ticks, two paid births out of one full reserve, and a third tick that cannot pay for
+/// another — `0.025` of reserve against `birth_cost` 0.01 twice, with the upkeep on top.
+/// Neither newborn reproduces: `body_min` is under `birth_body`.
+#[test]
+fn a_full_adult_buys_two_young_with_nothing_to_eat() {
+    let world = plain(4, 2, 0.3, 5);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let sc = *fauna.config().species(Species::Frondgrazer);
+    let parent = grazer(&mut fauna, &world, 1, sc.body_max);
+    let stock = fauna.view().organic();
+
+    fauna.step(&world, &mut flora);
+    assert_eq!(fauna.view().ledger.born, 1, "the first young");
+    fauna.step(&world, &mut flora);
+    assert_eq!(fauna.view().ledger.born, 2, "and the second, out of the same reserve");
+    assert_eq!(fauna.view().animals.len(), 3);
+    let after = *fauna.view().animal(parent).unwrap();
+    assert!(
+        after.reserve < sc.birth_cost && after.reserve > 0.0,
+        "what is left cannot buy a third: {after:?}"
+    );
+
+    fauna.step(&world, &mut flora);
+    assert_eq!(fauna.view().ledger.born, 2, "and the third tick buys nothing");
+    assert_eq!(fauna.view().ledger.bites, 0, "with nothing eaten anywhere");
+    // Two births are internal: the layer's organic matter moved only by respiration.
+    assert!(fauna.view().organic() < stock && fauna.view().organic() > 0.9 * stock);
+    assert_fauna_residuals(&fauna, "two young out of one reserve");
 }
 
 // -------------------------------------------------------------- the two ledgers
