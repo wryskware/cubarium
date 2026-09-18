@@ -94,6 +94,23 @@ const DEFAULT_BUDGET_FACTOR: f64 = 1.5;
 /// (R10.2).
 const HYDROLOGY_SHARE: f64 = 0.5;
 
+/// The study's own **outlet capacity**, m³/s: the nominal accepted rain over the world's own
+/// footprint (`harness::nominal_accepted_rain`, 0.0384 for the default 192 m² at 2e-4 m/s).
+///
+/// A **declared experiment condition** (Astra R11.3), set once at conditioning start and
+/// therefore identical in every arm, which clones that conditioned world. The core's default
+/// 0.05 m³/s is left alone and `two_producers` still runs on it: 0.05 is a *capacity* and not
+/// an imposed export, but a capacity above the accepted input drains the world whenever there
+/// is water at the outlet cell, and a stationary replacement study cannot be conditioned on a
+/// draining world. The rain is unchanged at 2e-4 m/s, so the soil-wetting treatment is
+/// unchanged; equalising the two by raising rain instead would have changed it.
+///
+/// It does **not** promise equilibrium — evaporation and transpiration leave by their own
+/// paths, and both conditioning phases still have to pass their tolerances.
+fn study_outlet_m3_per_s() -> f64 {
+    nominal_accepted_rain()
+}
+
 /// What a run is for. `full` is the seven-arm study; `pilot` is R10.1's **positive-control
 /// pilot**, one arm whose job is to measure `G`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -583,7 +600,20 @@ fn condition(
          cannot leave the resident unconditioned.",
         budget_s * HYDROLOGY_SHARE
     );
-    let mut world = prepared_world(seed, noise_seed);
+    let outlet = study_outlet_m3_per_s();
+    let mut world = prepared_world_with_outlet(seed, noise_seed, outlet);
+    println!(
+        "  declared water treatment: rain {HARNESS_RAIN_M_PER_S} m/s and the study's own \
+         **outlet capacity {outlet} m3/s** — the nominal accepted rain over this world's own \
+         {:.0} m2 footprint, set once here and therefore identical in every arm, with the \
+         core's 0.05 m3/s default left alone (Astra R11.3). A capacity is not an imposed \
+         export, and this equality is not a promise of equilibrium: evaporation and \
+         transpiration leave by their own paths and both phases still have to pass.",
+        f64::from(world.config().width)
+            * f64::from(world.config().depth)
+            * world.config().voxel_m
+            * world.config().voxel_m
+    );
     let skyline = skyline_of(&world);
     let mut flora = Flora::in_world(&world, config.clone());
     println!(
@@ -1874,6 +1904,31 @@ mod tests {
         );
         // This is the condition `condition` refuses on: planted > 0 and alive == 0.
         assert!(planted > 0 && count(&flora, Species::Bloomcrown) == 0);
+    }
+
+    /// **The study's declared outlet capacity is its own accepted rain** (Astra R11.3), to
+    /// the number: 2e-4 m/s over the default 128 × 24 voxels of 0.25 m, which is 192 m².
+    /// The core's default is untouched, so `two_producers` keeps the world it published on.
+    #[test]
+    fn the_study_declares_its_outlet_capacity_as_its_own_accepted_rain() {
+        let outlet = study_outlet_m3_per_s();
+        assert!((outlet - 0.0384).abs() < 1e-12, "outlet {outlet}");
+        let c = cubarium_voxel::Config::default();
+        let area = f64::from(c.width) * f64::from(c.depth) * c.voxel_m * c.voxel_m;
+        assert!((area - 192.0).abs() < 1e-12, "footprint {area} m2");
+        assert!((outlet - HARNESS_RAIN_M_PER_S * area).abs() < 1e-12);
+        assert!(outlet < c.outlet_m3_per_s, "the core default 0.05 is left alone and is larger");
+
+        // And the world the study conditions on carries it, with the rain untouched. Only one
+        // world is built here: `prepared_world` generates and warms up 1,000 ticks, which is
+        // seconds of test time, and its own body passes `VoxelConfig::default()`'s capacity —
+        // the 0.05 asserted above — so the unchanged path is checked by that constant.
+        let study = prepared_world_with_outlet(1, 101, outlet);
+        assert!((study.config().outlet_m3_per_s - 0.0384).abs() < 1e-12);
+        assert_eq!(
+            study.config().rain_m_per_s, HARNESS_RAIN_M_PER_S,
+            "the rain, and so the soil-wetting treatment, is unchanged"
+        );
     }
 
     /// **An option consumes its own value** (Astra R10.4). This is the case that made the

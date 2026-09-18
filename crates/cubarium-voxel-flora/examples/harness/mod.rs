@@ -418,10 +418,46 @@ pub fn passes(world: &World, flora: &Flora, species: Species, s: Site) -> bool {
 }
 
 /// Generate, open the outlet, warm up. The same preparation `run` does, factored out so
-/// the probe cannot drift from it.
+/// the probe cannot drift from it. The **core's own** outlet capacity, so every published
+/// `two_producers` run means exactly what it meant.
 pub fn prepared_world(seed: u64, noise_seed: u64) -> World {
-    let dry =
-        VoxelConfig { seed, noise_seed, rain_m_per_s: HARNESS_RAIN_M_PER_S, ..VoxelConfig::default() };
+    prepared_world_with_outlet(seed, noise_seed, VoxelConfig::default().outlet_m3_per_s)
+}
+
+/// The nominal **accepted rain** of a world of this footprint, m³/s: the harness's rain over
+/// the whole plan area, `rain · width · depth · voxel_m²`. 0.0384 for the default 128 × 24
+/// voxels of 0.25 m, which is 192 m².
+///
+/// It is nominal because only exposed top faces take rain; on the default generated world
+/// every column has one, and the measured `rain_in` is exactly this.
+pub fn nominal_accepted_rain() -> f64 {
+    let c = VoxelConfig::default();
+    HARNESS_RAIN_M_PER_S * f64::from(c.width) * f64::from(c.depth) * c.voxel_m * c.voxel_m
+}
+
+/// [`prepared_world`] with the outlet's **capacity** named by the caller: an experiment
+/// condition a study declares once, rather than the core's default inherited by accident
+/// (Astra R11.3).
+///
+/// The core's 0.05 m³/s is a **capacity and not an imposed export** — `water.rs` takes only
+/// the free water actually at the outlet cell — but a capacity above the accepted rain is a
+/// world that drains whenever there is water to drain, which is what the round-10 smoke
+/// measured: a constant deficit of 0.0116 m³/s, 30.2 % of rain. A **stationary** study
+/// declares a capacity equal to its own accepted input instead ([`nominal_accepted_rain`]),
+/// leaving the rain and the soil-wetting treatment exactly as they were. Raising rain to
+/// 2.60417e-4 m/s would equalise the same two numbers by changing how wet the soil gets,
+/// which is a different treatment.
+///
+/// Neither equality guarantees equilibrium: evaporation and transpiration also leave, and the
+/// conditioning tolerances still have to pass on both phases (R11.3).
+pub fn prepared_world_with_outlet(seed: u64, noise_seed: u64, outlet_m3_per_s: f64) -> World {
+    let dry = VoxelConfig {
+        seed,
+        noise_seed,
+        rain_m_per_s: HARNESS_RAIN_M_PER_S,
+        outlet_m3_per_s,
+        ..VoxelConfig::default()
+    };
     let basin_floor_m =
         World::new(dry.clone()).outlet_cell().map_or(0.0, |(_, y, _)| y as f64) * dry.voxel_m;
     let config = VoxelConfig { initial_aquifer_head_m: basin_floor_m + 1.0, ..dry };

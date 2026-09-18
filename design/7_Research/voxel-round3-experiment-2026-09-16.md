@@ -1767,9 +1767,40 @@ prints.
 | delivery destinations | the largest bank increase, shared by every donor that tick | the model's own `DeliveryReceipt { donor, recipient, organic, mineral }` |
 | `--cap 300` after three positionals | also set the **world seed** to 300 | consumed with its value; seed stays 1 |
 
-The substantive finding is the conditioning one: on the published conditions this world **does
-not settle**. The outlet exports 0.050 m³/s against 0.0384 m³/s of accepted rain, so storage
+The substantive finding is the conditioning one: on the published conditions this world **did
+not settle within the observed budget** (Astra R11.3 — 0.05 m³/s is an outlet *capacity*, and
+`water.rs` exports only the free water actually at the outlet cell, so this is not an
+indefinitely imposed export and not a conservation error). The outlet exports 0.050 m³/s against 0.0384 m³/s of accepted rain, so storage
 falls at a constant −0.0116 m³/s and the head drops ~0.06 m per 100 s throughout — and the
 eligible sets move with it, umbrellafrond's by a quarter of its union in one interval while
 bloomcrown's shrinks. A fixed 1,000 s of "conditioning" was measuring the middle of that
 drainage. No tolerance was loosened and no gate was touched to make it pass (R10.2).
+
+### After Astra round 11 (R11.1–R11.3) — 2026-09-17
+
+Re-smoked short again: `replacement pilot bloomcrown umbrellafrond 600 1 101 --cap 60` in
+`--release`, **134.9 s** of wall time, same shape as the round-10 smoke. The one change that
+matters is the declared water treatment.
+
+| what | round 10 | after round 11 |
+| --- | --- | --- |
+| the bound | 3,308.30 s (four stages added whole) | **3,308.25 s** — stages 3 and 4 share the tick that reaches `donor_min` (delivers 6,001, born 6,002, donor 60,165, replaces 66,165); stonecushion **9,247.35 s** |
+| an arm's impossibility | the pair's maximum | the **newcomer's own** bound; the pair's stays a printed common-window policy |
+| a fractional budget tail | could become a "quiet" interval | only whole 100 s intervals qualify, elapsed comes from executed ticks, a tail is **left unrun** |
+| outlet capacity | the core's 0.05 m³/s, inherited | the study declares **0.0384 m³/s** = its own accepted rain over 192 m², once, identical across arms; rain stays 2e-4 m/s and the core default is untouched |
+| phase A storage | −0.0116 m³/s, **30 % of rain**, every interval | rain in 0.038400, outlet 0.038400, **storage change +0.000000** — the storage tolerance passes from the first interval |
+| phase A head | −0.065 → −0.059 m per interval | −0.0492 → −0.0481 → **−0.0417** m per interval: still 40× the 0.001 m limit, and now **decelerating** |
+| phase A turnover | umbrellafrond 9.1 % | bloomcrown 2.9 %, umbrellafrond 4.3 % (from 11.0 % at 200 s) |
+| phase B (with the resident) | storage 30 % of rain | storage **−0.000053 → −0.000063 m³/s** (transpiration, and nothing else); head −0.041 → −0.036 m; turnover bloomcrown 13.3 %, umbrellafrond 26.6 % |
+| both phases' verdict | unresolved | still **unresolved** at a 600 s budget (300 s each) |
+| the arm (60 s) | unchanged | founder funded 0.01000 in 1,200 ticks, 0 deliveries, 0 births → unresolved at the stopping budget |
+
+So the round-10 reading was the outlet capacity and not a leak: with the capacity declared at
+the accepted rain, **storage closes to zero exactly** and what is left is the water table
+redistributing internally — the head falls while the total store does not move, so the aquifer
+is filling pore space rather than the world losing water. That drift is decelerating but is
+still far outside a tolerance nothing has measured, and the eligible sets are still moving
+with it, so conditioning remains **unresolved within this budget** and no G was measured. A
+longer conditioning budget is the next thing to authorise, not a looser tolerance: subtracting
+the measured drift would turn a moving-eligibility run into a succession experiment, whose G
+does not calibrate a stationary replacement control (R11.3).
