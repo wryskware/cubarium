@@ -17,3 +17,10 @@ serde = { version = "1", features = ["derive"] }
 [[example]]
 name = "two_producers"
 test = true
+
+# `replacement` carries the study harness's own unit tests — the predeclared site list, the
+# refusals, the empty-layer velvetpad check — and the shared `examples/harness` module's cap
+# arithmetic tests, so it is compiled and run as a test target too.
+[[example]]
+name = "replacement"
+test = true

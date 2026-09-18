@@ -1281,6 +1281,46 @@ impl Default for SpeciesConfig {
     }
 }
 
+/// **When** a site's [`FloraConfig::initial_mineral`] is provisioned: lazily, the first
+/// time anything lands on the site, or eagerly on **every support face of the world** when
+/// the layer is built.
+///
+/// The two are the same model. Nothing in `step` reads this: a provisioned site is a site
+/// with a [`Ground`] on it holding `initial_mineral`, which is exactly what a first landing
+/// creates, and both bookings are the same `seeded_mineral_in` inflow. What changes is
+/// **when** the inflow happens, and therefore whether [`FloraLedger::expected_mineral`]
+/// moves while the plants are still spreading.
+///
+/// [`Provision::Lazy`] is the default, so nothing that does not ask for the other one
+/// changes at all.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Provision {
+    /// **Provision previously unrepresented ground** (Astra R4.3): a site gets its
+    /// `initial_mineral` the first time it holds anything — a founder, a landed package, a
+    /// deposit — and that import is booked as `seeded_mineral_in` then. The mineral
+    /// inventory therefore **grows with the number of sites the plants have reached**, so
+    /// two arms of one study that spread differently hold different totals, and a fertility
+    /// comparison between them is confounded by its own colonisation.
+    #[default]
+    Lazy,
+    /// **A fixed per-site inventory, laid down once at world creation** (Astra R5.4): every
+    /// support face in the world gets a [`Ground`] holding `initial_mineral` when
+    /// [`Flora::in_world`] builds the layer, and the whole of it is booked as
+    /// `seeded_mineral_in` in that one call. `expected_mineral` is then a constant of the
+    /// world for the rest of the run — no later landing can import any — so every arm
+    /// branched from one conditioned state has the **same** mineral inventory however far
+    /// its own plants spread. That is matched fertility, and it is what a
+    /// resource-competition study needs; lazy colonisation imports are not it.
+    ///
+    /// It is **not** fertilisation: the per-site amount is unchanged, and a site that is
+    /// never reached simply holds what it was given and does nothing with it. The costs are
+    /// stated rather than hidden: the layer carries one [`Ground`] per support face from
+    /// tick zero, so the tick-start snapshot and the decomposition pass walk every face of
+    /// the world instead of the reached ones, and `seeded_mineral_in` is large from the
+    /// start.
+    AtCreation,
+}
+
 /// Everything the plant layer runs from.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -1320,9 +1360,13 @@ pub struct FloraConfig {
     /// first landings are still happening: `expected_mineral` grows with the number of
     /// sites the plants have reached. A fertility comparison wants a **fixed per-site
     /// inventory laid down at world creation** instead, so that the total is the same in
-    /// every arm however far the plants spread; that is a change to make when fertility is
-    /// the thing being measured, and it is not this round.
+    /// every arm however far the plants spread: that is [`Provision::AtCreation`], asked
+    /// for through [`FloraConfig::provision`] and applied by [`Flora::in_world`].
     pub initial_mineral: f64,
+    /// Whether `initial_mineral` is provisioned lazily on a site's first landing or
+    /// eagerly on every support face at creation. [`Provision::Lazy`] by default, which is
+    /// the only rule that existed before the replacement study and changes nothing.
+    pub provision: Provision,
 }
 
 impl Default for FloraConfig {
@@ -1340,6 +1384,7 @@ impl Default for FloraConfig {
             carrion_decomposition: 0.005,
             litter_energy_cap: 2.0,
             initial_mineral: 1.0,
+            provision: Provision::Lazy,
         }
     }
 }
@@ -1415,14 +1460,15 @@ pub struct FloraLedger {
     /// `c_g`, reflush, the leftover of a capped income, and decomposition of litter and
     /// dead wood. The same boundary, leaving. Mineral never crosses it.
     pub respired_out: f64,
-    /// Organic matter, mineral and energy a `Seed` command — or a new site's
-    /// `initial_mineral` — created.
+    /// Organic matter, mineral and energy a `Seed` command — or a site's
+    /// `initial_mineral`, whether it was provisioned on its first landing or with every
+    /// other support face at creation ([`Provision`]) — created.
     pub seeded_organic_in: f64,
     pub seeded_mineral_in: f64,
     pub seeded_energy_in: f64,
     /// Organic matter, mineral and energy removed because a terrain edit buried or
-    /// removed the support of a site, or a `Clear` command removed a stand. Reported,
-    /// never hidden.
+    /// removed the support of a site, or a `Clear` command removed a stand, or a
+    /// [`Command::ClearBank`] removed one species' seed bank. Reported, never hidden.
     pub removed_organic_out: f64,
     pub removed_mineral_out: f64,
     pub removed_energy_out: f64,
@@ -1736,6 +1782,19 @@ pub enum Command {
     /// Remove the stand on the highest support face of column `(x, z)`, booking its
     /// material and energy as removed. Refused if there is none.
     Clear { x: i64, z: u32 },
+    /// Remove **one species' whole seed bank** from the highest support face of column
+    /// `(x, z)` — every arrival bin of it — booking its organic matter, its mineral and its
+    /// `energy_density · organic` as removed, exactly as [`Command::Clear`] books a stand
+    /// and as `prune_unsupported` books a bank whose face went away. Refused, booking
+    /// nothing, if the column has no support, the site has no [`Ground`], or that species
+    /// has no cohort there.
+    ///
+    /// Nothing else on the site is touched: the mineral pool, the litter, the dead wood,
+    /// the carrion and the **other** species' cohorts stay as they were. That is what the
+    /// replacement study's exclusion arm needs — a resident removed from a conditioned
+    /// state with its water, its litter and its soil mineral retained and matched — and a
+    /// `Clear` alone cannot do it, because a cleared stand's bank goes on germinating.
+    ClearBank { x: i64, z: u32, species: Species },
 }
 
 /// Which of a site's dead pools a [`Deposit`] joins. Three, because a consumer has two
@@ -1820,6 +1879,57 @@ impl Flora {
     pub fn try_new(config: FloraConfig) -> Result<Flora, String> {
         config.validate()?;
         Ok(Flora::unchecked(config))
+    }
+
+    /// A plant layer on a world, honouring [`FloraConfig::provision`]: identical to
+    /// [`Flora::new`] under [`Provision::Lazy`], and under [`Provision::AtCreation`] it
+    /// provisions **every support face of `world`** with [`FloraConfig::initial_mineral`]
+    /// before it returns, booking the whole of it as `seeded_mineral_in` in this one call.
+    ///
+    /// Every support face and not every skyline column: a [`Ground`] can sit on any support
+    /// face — `prune_unsupported` keeps exactly the supported ones — so this is the set of
+    /// sites the layer could ever hold stocks on, read through the core's own
+    /// `VoxelView::supports_in_column`. A world whose terrain later changes keeps the rule
+    /// the model already has: a face that goes away has its stocks booked out as
+    /// `removed_*`, and a face that appears is provisioned lazily like any other, because
+    /// this call happens once and cannot see the future.
+    ///
+    /// Panics on an invalid config, like [`Flora::new`].
+    pub fn in_world(world: &World, config: FloraConfig) -> Flora {
+        match Flora::try_in_world(world, config) {
+            Ok(flora) => flora,
+            Err(e) => panic!("invalid FloraConfig — {e}"),
+        }
+    }
+
+    /// [`Flora::in_world`] without the panic.
+    pub fn try_in_world(world: &World, config: FloraConfig) -> Result<Flora, String> {
+        let mut flora = Flora::try_new(config)?;
+        if flora.config.provision == Provision::AtCreation {
+            flora.provision_every_support_face(world);
+        }
+        Ok(flora)
+    }
+
+    /// One [`Ground`] per support face, each holding `initial_mineral`, all of it booked as
+    /// `seeded_mineral_in`. Built in column order and then sorted by site, because
+    /// `ground` is searched by binary search and its order is the model's invariant.
+    fn provision_every_support_face(&mut self, world: &World) {
+        let view = world.view();
+        let c = view.config;
+        let mineral = self.config.initial_mineral;
+        let mut ground: Vec<Ground> = Vec::new();
+        for z in 0..c.depth {
+            for x in 0..c.width as i64 {
+                for y in view.supports_in_column(x, z) {
+                    let site = Site { x: x.rem_euclid(c.width as i64) as u32, y, z };
+                    ground.push(Ground::new(site, mineral));
+                    self.ledger.seeded_mineral_in += mineral;
+                }
+            }
+        }
+        ground.sort_unstable_by_key(|g| g.site);
+        self.ground = ground;
     }
 
     fn unchecked(config: FloraConfig) -> Flora {
@@ -1910,6 +2020,30 @@ impl Flora {
                 self.ledger.removed_organic_out += organic;
                 self.ledger.removed_mineral_out += s.mineral;
                 self.ledger.removed_energy_out += self.config.species(s.species).energy_density * organic;
+                true
+            }
+            Command::ClearBank { x, z, species } => {
+                let Some(site) = highest_support(&view, x, z) else { return false };
+                let Ok(gi) = self.ground.binary_search_by_key(&site, |g| g.site) else {
+                    return false;
+                };
+                let (mut organic, mut mineral) = (0.0, 0.0);
+                let before = self.ground[gi].seeds.len();
+                self.ground[gi].seeds.retain(|c| {
+                    if c.species != species {
+                        return true;
+                    }
+                    organic += c.organic;
+                    mineral += c.mineral;
+                    false
+                });
+                if self.ground[gi].seeds.len() == before {
+                    return false;
+                }
+                self.ledger.removed_organic_out += organic;
+                self.ledger.removed_mineral_out += mineral;
+                self.ledger.removed_energy_out +=
+                    self.config.species(species).energy_density * organic;
                 true
             }
         }
