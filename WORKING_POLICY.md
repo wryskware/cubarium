@@ -69,3 +69,30 @@ engineering. Iteration speed is priority one. Clean code, fast and dirty process
 - The ecology training tooling (`cubarium-search`) stays in the workspace; it
   may be reused or rewritten when the ecology changes. Live knobs and hot
   reload are undecided; restarting to reload is fine.
+
+## Lean orchestration — correction, 2026-09-17
+
+Wrysk: tokens are getting tighter; cut the parallel overhead of agents getting
+up to context. "If things are slow, I'll ask for more agents explicitly."
+
+- **Persistent workers, resumed by message.** One worker per area (the flora
+  crate and its harness; the fauna crate and the host; the renderer) keeps its
+  context and takes the next package by message. A fresh spawn is the
+  exception and needs a reason (a genuinely independent area, or an
+  independent test pass on a model-rule change). Parallel workers on the same
+  crate only when Wrysk asks.
+- **Briefs by pointer.** A brief names the review item or design section and
+  states the decisions made; it does not restate them.
+- **Returns capped at about 40 lines**: commits, the numbers that changed a
+  decision, defects with evidence. No API dumps, no tables that were not asked
+  for. The commit message is still the report.
+- **Effort by kind.** High only for model-rule changes and anything
+  concurrency-shaped; medium for repairs, reporting and harness work already
+  specified line by line.
+- **One experiment section per Astra round**, not per package: a short table,
+  appended once. Smoke runs still happen; long write-ups do not.
+- **Verification once.** A worker runs the crate it touched; the integrator
+  runs the full suite once at merge.
+- **The integrator reads skeletons and diff stats, not source.** Reading a
+  whole file into the top-level context is the most expensive single act.
+- The independent test-authoring pass on a model-rule change stays.
