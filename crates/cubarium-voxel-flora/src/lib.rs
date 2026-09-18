@@ -534,6 +534,11 @@ pub struct SpeciesConfig {
     /// magnitude tighter**, so the stock cap cannot be the binding one for any positive
     /// `N`: `n_tissue` sets the stoichiometry of the draw and the density of the tissue,
     /// and not the ceiling on income.
+    ///
+    /// For a [`Trophic::Saprotroph`] it **is** a ceiling on growth (Astra R9.1): a fungus's
+    /// income carries its own mineral out of the log, and what it may build in a tick is
+    /// `(arriving mineral + the site's pool) / n_tissue`. Unfunded income is respired where
+    /// every other unspent unit is. `step`'s §4.4a is the rule.
     pub n_tissue: f64,
     /// `q_share`: share of every tick's surplus that goes to the reserve first.
     pub reserve_share: f64,

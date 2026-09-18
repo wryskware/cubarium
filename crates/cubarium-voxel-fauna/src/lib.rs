@@ -162,8 +162,17 @@ pub struct SpeciesConfig {
     /// The fraction of a bite that becomes tissue. The rest is respired, with the energy
     /// that was in it leaving as heat and the mineral staying behind.
     pub yield_fraction: f64,
-    /// Mineral per unit of tissue built. Mineral a bite carries in excess of this is
-    /// excreted as a litter deposit.
+    /// Mineral per unit of tissue built — the density of what it builds, and therefore the
+    /// **budget** its growth fits inside: a bite can build at most `mineral / n_tissue` of
+    /// tissue, whatever `yield_fraction` would otherwise have assimilated, and the
+    /// unfunded organic matter is respired with its energy (Astra R9.1). Mineral a bite
+    /// carries in excess of what was built is excreted as a litter deposit.
+    ///
+    /// There is **no mineral reserve**: [`Animal::mineral`] is an inventory of the tissue's
+    /// own content and growth never draws on it, so a mineral-free bite builds nothing
+    /// however much mineral the animal is carrying. At the placeholders the budget binds
+    /// on every bite — a plant's foliage holds 0.02 against this 0.05 — so a frondgrazer
+    /// turns 40 % of what it eats into tissue and not the 50 % `yield_fraction` names.
     pub n_tissue: f64,
     /// Structure it grows to and no further.
     pub body_max: f64,

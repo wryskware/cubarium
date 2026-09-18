@@ -316,12 +316,30 @@ fn crop(
     }
 }
 
-/// A bite becoming tissue: `yield_fraction` of it is built, the rest is respired, the
-/// energy follows the organic matter at the **bite's own** density, and the mineral that
-/// came with more tissue than was built is excreted.
+/// A bite becoming tissue: `yield_fraction` of it is built **as far as the bite's own
+/// mineral pays for**, the rest is respired, the energy follows the organic matter at the
+/// bite's own density, and the mineral that came with more tissue than was built is
+/// excreted.
+///
+/// **The mineral budget comes before the tissue (Astra R9.1).** `n_tissue` is mineral per
+/// unit of tissue *built*, so a bite can only build `t.mineral / n_tissue` of it. At the
+/// placeholders that binds on every bite: a plant's foliage carries `n_tissue` 0.02 and
+/// this animal's tissue wants 0.05, so a `1e-4` bite brings `2e-6` of mineral and funds
+/// `4e-5` of the `5e-5` its `yield_fraction` would otherwise have built. The unfunded
+/// organic matter is **respired with its energy as heat**, exactly like the fraction a
+/// full body and a full reserve cannot hold.
+///
+/// **No internal mineral reserve is adopted.** [`Animal::mineral`] is an inventory of what
+/// is already in the tissue and not a stock growth may draw on — the plant layer's
+/// `Stand::mineral` is the same and says so (Astra R4.3) — so an animal holding mineral
+/// still builds nothing out of a mineral-free bite. Storing mineral for later, and
+/// spending it, is a rule decision and not a repair.
 fn assimilate(fauna: &mut Fauna, flora: &mut Flora, i: usize, sc: &SpeciesConfig, t: Taken) {
     let a = &mut fauna.animals[i];
-    let assimilated = sc.yield_fraction * t.organic;
+    // What the yield would build, and what this bite's mineral can actually pay for.
+    let funded =
+        if sc.n_tissue > 0.0 { (t.mineral / sc.n_tissue).max(0.0) } else { f64::INFINITY };
+    let assimilated = (sc.yield_fraction * t.organic).min(funded);
     let mut respired = t.organic - assimilated;
 
     // Build: structure first, up to `body_max`, then the reserve, up to `reserve_cap ·
