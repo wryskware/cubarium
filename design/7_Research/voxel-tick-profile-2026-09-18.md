@@ -342,3 +342,150 @@ now the whole tick, and it is Wrysk's own thread. After it, the tick is ~1.3 ms 
 15× real time for the water alone at 2.4 ms — and the remaining water cost is `exchange`
 1.65 ms over 1,412 wet cells per substep, which is 290 ns per wet cell: data layout (step
 4) is the next lever there, then threads.
+
+---
+
+# Addendum, same day: the schedule, and what threads bought
+
+Wrysk (2026-09-18) decided the sim runs on a real ECS crate with multithreading early
+(`design/handoffs/voxel-schedule-brief-2026-09-18.md`), against this note's own
+recommendation; the two cautions it raised were kept and are honoured in the code. The tick
+is now `cubarium_voxel_sim::Sim::step`: one `bevy_ecs` world holding `World`, `Flora` and
+`Fauna` as **resources** (the voxel grid stays dense — never one entity per voxel), one
+`Schedule` whose systems are the phases `.chain()`ed in the order above, and a
+single-threaded *system* executor on purpose. **No rule, number, preset or phase order
+moved.** The bench moved with it:
+
+```text
+cargo run --release -p cubarium-voxel-sim --features profile --example bench \
+  -- [ticks] [grazers] [warmup_s] [seed] [sample_every] [threads]
+```
+
+The compute pool is process-global, so one process per thread count.
+
+## The table: 1,000 ticks, 5 seeds, mean ± half-spread
+
+Same declared condition as the rest of this note — the generated default world, harness
+rain, outlet open, 50 s of world-only conditioning, then eight founders of each of the six
+species and eight declared logs. Seeds 1..5, samplers off. The 4-grazer arm carries **17.8
+animals** and **1,696 wet cells per substep** as means over the window.
+
+| grazers | threads | ms/tick | ticks/s | × real time | vs 1 thread |
+| --- | --- | --- | --- | --- | --- |
+| 0 | 1 | 1.662 ± 0.061 | 602 ± 22 | 30.1 | 1.00× |
+| 0 | 4 | 1.361 ± 0.109 | 737 ± 57 | 36.9 | 1.22× |
+| 0 | 8 | 1.338 ± 0.098 | 750 ± 53 | 37.5 | 1.24× |
+| 0 | 16 | 1.347 ± 0.090 | 744 ± 49 | 37.2 | 1.23× |
+| 4 | 1 | 4.071 ± 0.094 | 246 ± 6 | 12.3 | 1.00× |
+| 4 | 4 | 2.032 ± 0.056 | 492 ± 14 | 24.6 | 2.00× |
+| 4 | 8 | 1.747 ± 0.067 | 573 ± 22 | 28.7 | 2.33× |
+| 4 | 16 | 1.735 ± 0.046 | 577 ± 15 | 28.8 | 2.35× |
+
+Against the local-water addendum above (2.68 ms with 0 grazers, 5.06 ms with 4, both at one
+thread): **1.6× and 1.2× before any thread**, then **2.0× and 2.9×** with
+16 threads. 18.6× → 37× and 9.9× → 29× real time.
+
+**Two things did that, and only one of them is threads.** The larger single win is not
+parallel at all: `exchange`'s scratch (`head`, `room_target`, `run_top`) is now indexed
+`col * height + y` instead of the world's `y * plane + col`. The old scan strode 3,072
+cells — 24 KB — between consecutive entries of one column, so every step of it touched a
+new cache line. Re-indexing took `exchange` from 1,800 to 650 µs/tick on a 300-tick probe
+with nothing else changed. Cache locality, measured, before any thread.
+
+## Per-phase at 16 threads, 4 grazers, mean of 5 seeds
+
+`World::step`'s own `WorldStep`/`Substeps` frames never open under the schedule — it runs
+the phases one at a time — so the water total is the sum of its leaves and those two rows
+are absent rather than zero.
+
+| phase | 1 thread µs/tick | 16 threads µs/tick | 16/1 |
+| --- | --- | --- | --- |
+| rain | 132.2 | 134.7 | 0.98× |
+| infiltrate (×4) | 70.5 | 73.6 | 0.96× |
+| fall (×4) | 493.7 | 487.9 | 1.01× |
+| **exchange (×4)** | **831.6** | **496.7** | **1.67×** |
+| drain | 19.6 | 20.3 | 0.97× |
+| water_table | 118.8 | 119.5 | 0.99× |
+| evaporate, spring, outlet | 0.0 | 0.0 | — |
+| **water, total** | **1666.5** | **1332.8** | **1.25×** |
+| Flora::step (total) | 38.5 | 42.2 | 0.91× |
+| **Fauna::step (total)** | **2362.9** | **355.0** | **6.66×** |
+| — **sense** | **2361.2** | **351.6** | **6.72×** |
+| — act, births, deaths, terrain, maintenance | 1.7 | 3.4 | — |
+
+## What parallelised, what did not, and why
+
+Two phases split, and they are the two the profile named:
+
+- **`exchange`'s column scan** — 1.67× at 16 threads on top of the 2.8× the layout already
+  bought. Each column's scan writes only that column's own `height` scratch entries and
+  reads only the world's arrays, so the ascending column list is cut into `threads`
+  equal-count chunks and each chunk owns one contiguous, disjoint `&mut` span: plain
+  `split_at_mut`, no unsafe, no reduction. It stops at 1.67× because what remains is the
+  **strided reads** of `material` and `free`, which are memory-bound and do not get faster
+  with more workers, plus the fold-free spawn overhead at 1,694 columns per substep.
+- **fauna `sense`** — 6.72×, from 2.36 ms to 0.35 ms, which is most of the whole win. Every
+  animal's plan is a pure function of the world, the pre-bite plant layer and that animal,
+  so the animals are cut one chunk per worker; each chunk returns its plans **with its own
+  chunk number** and they are folded in that order, so the finishing order cannot reach the
+  result. 16 workers barely beat 8 because 17.8 animals means one animal per chunk and a
+  one-animal tail.
+
+Everything else is serial, each for a stated reason:
+
+- **`rain`, `evaporate`, `infiltrate`, `fall`, `drain`** (0.72 ms together at 16 threads:
+  86 % of the water that is still serial, and `fall` alone is 0.49 ms) all write free or
+  pore water through `add_free`/`take_free`/
+  `add_pore`/`take_pore`, and those maintain the two `CellSet`s — one shared `Vec` plus a
+  dense slot array, with swap-removal. Two threads inserting into that cannot both be
+  right. **Splitting the active sets per band is a data-structure change, not a scheduling
+  one**, and it is the next lever on the water side after `fall`'s remaining 0.49 ms.
+- **`water_table`** is blocked by a **rule**, not by a structure: its own doc says "within a
+  step the fill runs bottom-up in index order, which is also the order a scarce stock is
+  shared in". Parallelising it would change who gets the last of a nearly empty aquifer.
+- **`spring`, `outlet`** are one cell each.
+- **`flora`** does have a clean read-then-apply split — `light_per_stand` and `drink`'s
+  root-box read are per stand and touch nothing else — but the whole plant layer is **38 µs
+  of a 1,735 µs tick (2 %)**, at the scale of the spawn overhead itself, and
+  `light_per_stand` writes the sky cache while reading it (`sky_at` takes `&mut Vec`), so it
+  would need a cache-filling pass first. Left serial, and measured that way: it is 0.91× at
+  16 threads, which is noise.
+
+**The tick is a dependency chain and no two phases ever run together.** That is why the
+schedule's executor is single-threaded and why the table tops out near 2.35×: at 16 threads
+0.88 ms of the 1.74 is phases that never split at all (0.84 water, 0.04 flora), against
+0.85 ms for the two that do, and Amdahl does the rest. The next 2× is algorithmic
+(band-split active sets, `f32` stores, no allocation in the tick — steps 3 and 4 of the plan
+above), not more workers.
+
+## Determinism, and what the tests assert
+
+Bit-exactness was dropped by Wrysk on 2026-09-18 and is not claimed. What is asserted, as
+short function tests in `crates/cubarium-voxel-sim/tests/schedule.rs`: the schedule agrees
+with the three-call sequence to 1e-12 relative on stored water, aquifer head and
+per-species mean root-box pore; stored water, that pore reading and **every animal's id and
+the face it stands on** agree across 1, 4 and 16 threads after 200 coupled ticks within
+1e-6 relative; and the water and both flora residuals close. No hash is pinned. In fact
+neither parallel phase contains a reduction — a column's scan and an animal's plan are
+independent and nothing is summed across chunks — so the agreement observed is exact; the
+tolerance is what is *asserted*, for a future parallel phase that does fold.
+
+## Dependency tail and build time
+
+`Cargo.lock` grows from 180 to 236 packages. Of those 56, the ones actually **compiled** are
+the ~50 `bevy_ecs` 0.19 and `bevy_tasks` 0.19 reach with `default-features = false`:
+`bevy_platform`, `bevy_ptr`, `bevy_utils`, `bevy_ecs_macros` (with `syn`, `quote`,
+`proc-macro2`, `toml_edit`, `winnow`), `fixedbitset`, `indexmap`, `hashbrown`, `foldhash`,
+`slotmap`, `nonmax`, `arrayvec`, `smallvec`, `thread_local`, `derive_more`, `disqualified`,
+`variadics_please`, `log`, and `bevy_tasks`'s `multi_threaded` executor
+(`async-executor`, `async-channel`, `async-task`, `concurrent-queue`, `event-listener`,
+`futures-lite`, `crossbeam-utils`, `parking`, `fastrand`). **`bevy_reflect` is off**, so
+`glam`, `wgpu-types`, `uuid`, `erased-serde` and `downcast-rs` are in the lock and never
+compiled — this note checked `target/release/deps` for them and found none. So is
+`backtrace`, and so is bevy's own multi-threaded *system* executor.
+
+Release build time, `--workspace --all-targets`, `-j 24`, this machine: **11.2 s** with the
+tail already built, **21.4 s** with the 56 new packages and the five cubarium crates
+cleaned. The tail costs about **+10 s wall (+206 s CPU), once**. Two of the three voxel
+crates keep the tail out of an embedded build entirely: `cubarium-voxel/parallel` and
+`cubarium-voxel-fauna/parallel` are **off by default** and only the sim crate turns them on.
