@@ -100,11 +100,9 @@ implement at some point regardless", after directing that movement cost follow
 rough physics (mass, momentum, bodies as balls or cylinders, turning cheaper
 than moving, no modelling of outstretched claws).
 
-**First step, in flight:** workstream T
-([brief](handoffs/ecology-v1-motor-inertial-opus-2026-09-16.md)) — every body a
-uniform disc, rotation as energy-equivalent speed, energy envelope, apex grasp
-excluded from turning; paired against the shipped sweep model on the apex and
-on A's screen rows before it touches the cube.
+**First step (flat-era proposal; not started on the voxel world):** every body a
+uniform disc, rotation as energy-equivalent speed, an energy envelope, apex grasp
+excluded from turning. It goes to Wrysk before it touches a live world.
 
 **Done looks like:** a motor model where a body's motion cost is work against
 inertia and drag: mass from structure, a moment of inertia from a simple shape,

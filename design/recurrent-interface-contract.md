@@ -628,11 +628,11 @@ re-anchored continuation oracles) do not constrain the adapter's tests.
 
 **Status after R2a (2026-09-15).** The antithetic-ES trainer, frozen foraging
 fixtures (four training, eight held-out), controls and plumbing smoke exist
-(`2331ae8`..`613da47`; [result](7_Research/r2a-trainer-result-2026-09-15.md)). No
+(`2331ae8`..`613da47`; result in Git history). No
 policy has been trained. **Status after R1a (2026-09-14).** Steps 1–6 of §9 are implemented
 (`6b9e255`..`7614bef`, repair cycle 1 `2055a9b`..`73fbd33` after
 [Astra's review](7_Research/r1a-runtime-review-2026-09-14.md);
-[result](7_Research/r1a-runtime-result-2026-09-14.md)). Step zero
+result in Git history). Step zero
 replaced the starvation predicate with "cannot raise this tick's upkeep", evaluated
 before intake, so decision 3's zombie half is closed; a cropping floor remains a
 separate ecological choice. The seam-equivalent sampling, 17-neighbour truncation and

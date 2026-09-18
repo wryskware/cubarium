@@ -6,6 +6,9 @@ decision_refs: []
 
 # Workstream M — the plant budget of a depleted cell, measured
 
+> **Retained 2026-09-18.** This is the cited plant-budget evidence. Links to
+> round notes and briefs deleted with the flat-era material are Git history.
+
 Evidence, not a decision. Nothing here changes §11, `producer.initial_fraction`
 or any equation. The owner's options in §8 are stated, not chosen.
 

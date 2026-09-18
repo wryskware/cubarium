@@ -6,6 +6,9 @@ decision_refs: []
 
 # Ecology v1, round 5: the turn deadband, the depth ladder, the coupled grazed opening
 
+> **Retained 2026-09-18.** This is the cited round-5 synthesis. Links to round
+> notes and briefs deleted with the flat-era material are Git history.
+
 Fable's consolidation of the round-5 workstreams, dispatched from Astra's
 cleared round-4 order ([round-4 result](ecology-v1-round4-results-2026-09-16.md),
 [review](ecology-v1-round4-review-2026-09-16.md)). Round 4's own additions —

@@ -26,7 +26,8 @@ material and energy are actually withdrawn from existing resources. It is
 biological accounting, not a proposed game currency.
 
 This is a teaching proposal, not accepted canon or a report of a successful
-simulation. It follows the [handoff](handoffs/theoretical-biosphere-2026-09-16.md),
+simulation. It follows the flat-era handoff (superseded by this document and
+deleted 2026-09-18; Git history),
 with Wrysk's explicit invitation to propose additions to the substrate. Descriptions
 of existing capabilities use that handoff and the linked
 [voxel sketch](voxel-ecology-sketch-2026-09-16.md),

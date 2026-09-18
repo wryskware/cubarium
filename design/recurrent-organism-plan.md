@@ -360,7 +360,7 @@ the whole plan in parallel. Each milestone gets at most one targeted review and
 two repair cycles, then a spending checkpoint.
 
 While awaiting Fable's broader review, the proposed early start is the narrowed
-[R0a Opus handoff](handoffs/r0a-movement-foundation-2026-09-14.md): implement shared
+flat-era R0a Opus handoff (now Git history): implement shared
 physical movement limits and measure local food stock/flow. It does not commit
 to R0's complete resource redesign or freeze the neural senses/actions schema.
 

@@ -102,7 +102,7 @@ can introduce predators when they want to perturb the world.
 
 The earlier stationary-prey screen remains limited mechanism evidence. The next
 search should evaluate the complete evolving ecology together, as scoped in the
-[Claude Code handoff](handoffs/ecology-search-2026-09-14.md).
+the flat-era Claude Code handoff (now Git history).
 
 Control validation: repeated founder/accounting/capacity tests, command and
 journal tests, existing care-service tests, and the viewer declaration test pass.

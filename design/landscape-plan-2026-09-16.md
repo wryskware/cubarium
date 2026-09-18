@@ -6,7 +6,7 @@ last_reviewed: 2026-09-16
 # From strata to landscape: what the synthetic scene had that the live ring does not
 
 LP-A, Opus, 2026-09-16, against
-[the brief](handoffs/landscape-design-opus-2026-09-16.md). Read-only apart from
+the flat-era brief (now Git history). Read-only apart from
 this file. Every claim about code cites `file:line` in the `tachyon-screen`
 worktree.
 

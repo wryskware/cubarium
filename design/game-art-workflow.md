@@ -12,7 +12,7 @@ Godot or a Rust engine, and selected creature/habitat art as their preferred
 personal contribution. This permits implementation work; it does not make a
 particular engine, creature catalog or ecological mechanism canonical.
 
-The [progress review](7_Research/progress-art-review-2026-09-12.md) identified
+A flat-era progress review (now Git history) identified
 near-identical disc bodies, poorly matched turning/translation, weak life-event
 expression and a habitat that reads as colored field cells. The existing live
 viewer also runs at 8x; ambient pacing must be judged at normal speed.

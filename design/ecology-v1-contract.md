@@ -7,7 +7,7 @@ decision_refs: []
 # Ecology v1 contract — structured plants, distinct remains, distinct digestion
 
 A draft for Wrysk's one review, revised after
-[Astra's contract review](7_Research/ecology-v1-contract-review-2026-09-15.md)
+Astra's contract review (flat-era; Git history)
 (§18 maps each finding to its fix). Wrysk's two decisions of 2026-09-15 are
 fixed: worlds always restart fresh and are never migrated (§15.1); old trained
 policies need not reload (§15.2). §17 lists the routine choices made on his
@@ -813,7 +813,7 @@ Second round (Astra's first repair verification, same day):
 | self-audit for the same defect classes | the joint-budget check was applied to every stock (§9 list); the cap check to every §11 claim (reflush, breakeven, establishment time, wood e-folding), which were corrected where stale |
 
 Third round (first implementation run, `b1dd394`, result note
-[ecology-v1-implementation-2026-09-15](7_Research/ecology-v1-implementation-2026-09-15.md)):
+in Git history):
 
 | Finding | Fix |
 | --- | --- |
@@ -823,8 +823,7 @@ Third round (first implementation run, `b1dd394`, result note
 | interpretations 6 (`e_p` removed in favour of `e_v`), 7 (`Q_0` as a constant), 3, 4, 5, 8–11 | accepted as reported; `ProducerConfig.energy_density` is gone and `plant.energy_density` is the one density, recorded in §14 |
 
 Fourth round (Astra's
-[implementation review](7_Research/ecology-v1-implementation-review-2026-09-15.md),
-same day; disposition "repair required before acceptance"):
+implementation review, same day; disposition "repair required before acceptance"):
 
 | Finding | Owner | Fix |
 | --- | --- | --- |
@@ -837,6 +836,5 @@ same day; disposition "repair required before acceptance"):
 | 7, 8 (P3) ledgers balance; remaining items are tuning questions (B1b-1, B3 average, R2-4) | none now | carried to the later whole-ecosystem search, unchanged |
 | 9 (P2) Astra's sandbox could not run cargo | environment | Fable ran the four commands (green) and repair cycle 2 attaches fresh summaries |
 
-The bounded implementation handoff is
-[ecology-v1-opus-2026-09-15](handoffs/ecology-v1-opus-2026-09-15.md). Training
+The bounded flat-era implementation handoff is in Git history. Training
 resumes only after the §13 scenarios are verified in the revised ecology.
