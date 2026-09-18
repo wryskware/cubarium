@@ -96,3 +96,15 @@ up to context. "If things are slow, I'll ask for more agents explicitly."
 - **The integrator reads skeletons and diff stats, not source.** Reading a
   whole file into the top-level context is the most expensive single act.
 - The independent test-authoring pass on a model-rule change stays.
+
+## Art direction — Wrysk, 2026-09-17
+
+`design/art-direction/Cubarium_Art_Direction_v0.1.md` is the art direction.
+Every brief that touches the presenter, the GPU renderer, palettes, glyphs,
+organism bodies or motion cites it and does not invent look; agents implement
+it and make no taste calls. The current voxel autotile presenter and the
+interim glyphs are **dev mode** (stage 1) and stay available as a diagnostic;
+production art is stage 2 → 3 of that document. A package needing a look the
+document does not cover stops and asks, shipping an interim glyph named as
+interim. Assets are AI-generated and selected by Wrysk; workers do not generate
+production art on their own.

@@ -26,17 +26,14 @@ Astra's round 7 frames both: explicit bounded transfers and the
 organic/mineral/energy ledger; **population targets and carrying capacity stay
 unclaimed**. Direction: ambient piece, no game hooks.
 
-**The look is not the workers' call, and it is not decided yet.** The art
-direction of the voxel world is Wrysk's own thread
-(`voxel-art-direction-handoff-2026-09-17.md`), which will produce
-`design/voxel-art-direction.md`. Until that doc exists and says otherwise,
-each package draws an **interim** glyph named as interim in code and commit:
-the fungus a one-cell cap in a placeholder colour on its support face, the
-grazer a 2×1×2 voxel block in a placeholder colour. The study at 68a8215
-(`design/7_Research/voxel-consumer-art-2026-09-17.md`) is paused and not
-canon; do not implement it. The GPU renderer draws plant parts from a
-part/style id in the voxel texture (`crates/cubarium-gpu/src/voxel/**`), so
-both presenters stamp through that same path and need no new render pass.
+**The look is not the workers' call.** The art direction is
+`design/art-direction/Cubarium_Art_Direction_v0.1.md` (Wrysk, 2026-09-17). The
+current voxel presenter and its interim glyphs are **dev mode** in that
+document's terms: a diagnostic view kept available, not the production look.
+Packages N and O shipped interim glyphs named as interim; the production look
+(stage 2, graphic pixel ecology: organic terrain contours, sprite organisms) is
+its own render round citing that document. The study at 68a8215 is paused and
+not canon.
 
 ## 5b — glowcap (package N, flora crate)
 

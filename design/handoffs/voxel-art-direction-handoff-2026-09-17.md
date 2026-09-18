@@ -1,8 +1,14 @@
 ---
-status: open
+status: resolved
 date: 2026-09-17
 owner: Wrysk (art direction), with a Fable thread
 ---
+
+> **RESOLVED 2026-09-17.** Wrysk delivered the art direction:
+> `design/art-direction/Cubarium_Art_Direction_v0.1.md` (with the illustrated
+> `.docx` and the reference images beside it). That document is the source of
+> truth this handoff asked for; the rest of this file is kept as the record of
+> what was open.
 
 # Art direction for the voxel world: handoff for Wrysk's own thread
 
