@@ -188,17 +188,25 @@ pub(crate) fn step(flora: &mut Flora, world: &mut World) {
         .map(|g| Pre { site: g.site, litter: g.litter, dead_wood: g.dead_wood, carrion: g.carrion })
         .collect();
 
-    prune_unsupported(flora, world);
-    refresh_sky_cache(flora, world);
-    drown(flora, world);
+    cubarium_voxel::voxel_phase!(FloraStep, {
+        cubarium_voxel::voxel_phase!(Prune, { prune_unsupported(flora, world) });
+        cubarium_voxel::voxel_phase!(SkyCache, { refresh_sky_cache(flora, world) });
+        cubarium_voxel::voxel_phase!(Drown, { drown(flora, world) });
 
-    let light = light_per_stand(flora, world);
-    let moisture = drink(flora, world);
-    let substrate = feed(flora, world, &moisture);
-    grow(flora, &light, &moisture, &substrate);
-    decompose(flora, &pre);
-    seed_bank(flora, world);
-    propagate(flora, world);
+        let light = cubarium_voxel::voxel_phase!(Light, { light_per_stand(flora, world) });
+        let moisture = cubarium_voxel::voxel_phase!(Drink, { drink(flora, world) });
+        let substrate = cubarium_voxel::voxel_phase!(Feed, { feed(flora, world, &moisture) });
+        cubarium_voxel::voxel_phase!(Grow, { grow(flora, &light, &moisture, &substrate) });
+        cubarium_voxel::voxel_phase!(Decompose, { decompose(flora, &pre) });
+        cubarium_voxel::voxel_phase!(SeedBank, { seed_bank(flora, world) });
+        cubarium_voxel::voxel_phase!(Propagate, { propagate(flora, world) });
+        #[cfg(feature = "profile")]
+        {
+            use cubarium_voxel::profile::{add, Count};
+            add(Count::Stands, flora.stands.len() as u64);
+            add(Count::GroundSites, flora.ground.len() as u64);
+        }
+    });
 }
 
 // ------------------------------------------------------------------ 1. terrain
@@ -273,6 +281,8 @@ fn sky_at(cache: &mut Vec<(Site, f64)>, view: &VoxelView<'_>, site: Site) -> f64
     match cache.binary_search_by_key(&site, |e| e.0) {
         Ok(i) => cache[i].1,
         Err(i) => {
+            #[cfg(feature = "profile")]
+            cubarium_voxel::profile::add(cubarium_voxel::profile::Count::SkyRays, 1);
             let value = view.sky_visibility(site.x as i64, site.y, site.z);
             cache.insert(i, (site, value));
             value
@@ -452,6 +462,13 @@ pub(crate) fn split_proportional(accepted: f64, want: f64, total: f64) -> f64 {
 /// support.y`, `x` wrapped and `z` clipped at the walls. Membership is per voxel, not
 /// contiguous: a soil pocket under a stratum is in the box if it is in the box.
 fn root_box(view: &VoxelView<'_>, site: Site, sc: &SpeciesConfig) -> Vec<usize> {
+    #[cfg(feature = "profile")]
+    cubarium_voxel::profile::add(
+        cubarium_voxel::profile::Count::BoxVoxels,
+        u64::from(sc.rooting_depth.min(site.y + 1))
+            * u64::from(2 * sc.rooting_radius + 1)
+            * u64::from(2 * sc.rooting_radius + 1),
+    );
     let c = view.config;
     let span = sc.rooting_depth.min(site.y + 1);
     if span == 0 {
@@ -1737,6 +1754,8 @@ fn gates(
     sky_visibility: f64,
     dead_wood: f64,
 ) -> Gates {
+    #[cfg(feature = "profile")]
+    cubarium_voxel::profile::add(cubarium_voxel::profile::Count::GatesEvaluated, 1);
     let box_ = root_box(view, site, sc);
     let mean_pore = mean_pore(view, &box_);
     let saturated_fraction = saturated_fraction(view, &box_, sc);

@@ -5,6 +5,11 @@ edition.workspace = true
 rust-version.workspace = true
 description = "Producers on the voxel strip: stands rooted in support faces, fed by geometric light and pore water through the core's bounded commands. No drawing."
 
+[features]
+# Per-phase timers for the tick profile, forwarding to the core's accumulator. Measurement
+# only; see `design/7_Research/voxel-tick-profile-2026-09-18.md`.
+profile = ["cubarium-voxel/profile"]
+
 [dependencies]
 anyhow = { workspace = true }
 cubarium-voxel = { workspace = true }

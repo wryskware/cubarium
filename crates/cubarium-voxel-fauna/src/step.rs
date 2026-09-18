@@ -101,12 +101,22 @@ pub(crate) fn step(fauna: &mut Fauna, world: &World, flora: &mut Flora) {
     let view = world.view();
     let seed = view.config.seed;
 
-    terrain(fauna, &view);
-    maintenance(fauna);
-    let plans = sense(fauna, &view, flora, seed, tick);
-    act(fauna, &view, flora, &plans, seed, tick);
-    births(fauna);
-    deaths(fauna, &view, flora);
+    cubarium_voxel::voxel_phase!(FaunaStep, {
+        cubarium_voxel::voxel_phase!(FaunaTerrain, { terrain(fauna, &view) });
+        cubarium_voxel::voxel_phase!(FaunaMaintenance, { maintenance(fauna) });
+        let plans =
+            cubarium_voxel::voxel_phase!(FaunaSense, { sense(fauna, &view, flora, seed, tick) });
+        cubarium_voxel::voxel_phase!(FaunaAct, {
+            act(fauna, &view, flora, &plans, seed, tick)
+        });
+        cubarium_voxel::voxel_phase!(FaunaBirths, { births(fauna) });
+        cubarium_voxel::voxel_phase!(FaunaDeaths, { deaths(fauna, &view, flora) });
+        #[cfg(feature = "profile")]
+        cubarium_voxel::profile::add(
+            cubarium_voxel::profile::Count::Animals,
+            fauna.animals.len() as u64,
+        );
+    });
 }
 
 /// Step 1: an animal standing on what is no longer a support face leaves the world.
@@ -249,6 +259,12 @@ fn sense(
             } else if t == best_total {
                 best.push(face);
             }
+        }
+        #[cfg(feature = "profile")]
+        {
+            use cubarium_voxel::profile::{add, Count};
+            add(Count::ReachQueries, 1 + candidates.len() as u64);
+            add(Count::CandidateFaces, candidates.len() as u64);
         }
         let target = match best.len() {
             0 => None,

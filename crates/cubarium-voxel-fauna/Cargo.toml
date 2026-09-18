@@ -5,6 +5,11 @@ edition.workspace = true
 rust-version.workspace = true
 description = "Consumers on the voxel strip: paid heuristic browsers that stand on support faces, crop reachable foliage through the flora layer's bounded transfers, and hand their bodies back as carrion. No drawing, no neural policy."
 
+[features]
+# Per-phase timers for the tick profile, forwarding to the core's accumulator. Measurement
+# only; see `design/7_Research/voxel-tick-profile-2026-09-18.md`.
+profile = ["cubarium-voxel/profile", "cubarium-voxel-flora/profile"]
+
 [dependencies]
 cubarium-voxel = { workspace = true }
 cubarium-voxel-flora = { workspace = true }
@@ -18,3 +23,8 @@ anyhow = { workspace = true }
 [[example]]
 name = "grazed"
 test = true
+
+# The tick-profile bench needs the phase timers, so it only builds with them.
+[[example]]
+name = "bench"
+required-features = ["profile"]

@@ -5,6 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 description = "Voxel ringworld core: materials, terrain generation, water, ledger, save/load. No drawing."
 
+[features]
+# Per-phase timers and work counts for the tick profile
+# (`design/7_Research/voxel-tick-profile-2026-09-18.md`). Measurement only: it adds no
+# rule, changes no number, and with the feature off every call site is compiled away.
+profile = []
+
 [dependencies]
 anyhow = { workspace = true }
 serde = { version = "1", features = ["derive"] }

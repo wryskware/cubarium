@@ -320,22 +320,26 @@ fn open_water_cell(w: &World, x: i64, z: u32) -> Option<usize> {
 // ---------------------------------------------------------------- the tick
 
 pub fn step(world: &mut World) {
-    rain(world);
-    evaporate(world);
-    let substeps = world.config.water_substeps.max(1);
-    let sub_dt = DT / substeps as f64;
-    for _ in 0..substeps {
-        // Infiltration first, and inside the substep: water standing on a permeable
-        // cell is offered to it before anything moves the water somewhere else. See
-        // the module doc on why runoff is what infiltration refuses.
-        infiltrate(world, sub_dt);
-        fall(world);
-        equalize(world);
-    }
-    drain(world);
-    water_table(world);
-    spring(world);
-    outlet(world);
+    crate::voxel_phase!(WorldStep, {
+        crate::voxel_phase!(Rain, { rain(world) });
+        crate::voxel_phase!(Evaporate, { evaporate(world) });
+        let substeps = world.config.water_substeps.max(1);
+        let sub_dt = DT / substeps as f64;
+        crate::voxel_phase!(Substeps, {
+            for _ in 0..substeps {
+                // Infiltration first, and inside the substep: water standing on a permeable
+                // cell is offered to it before anything moves the water somewhere else. See
+                // the module doc on why runoff is what infiltration refuses.
+                crate::voxel_phase!(Infiltrate, { infiltrate(world, sub_dt) });
+                crate::voxel_phase!(Fall, { fall(world) });
+                crate::voxel_phase!(Equalize, { equalize(world) });
+            }
+        });
+        crate::voxel_phase!(Drain, { drain(world) });
+        crate::voxel_phase!(WaterTable, { water_table(world) });
+        crate::voxel_phase!(Spring, { spring(world) });
+        crate::voxel_phase!(Outlet, { outlet(world) });
+    });
 }
 
 fn rain(w: &mut World) {
@@ -376,6 +380,11 @@ fn evaporate(w: &mut World) {
 /// horizontal direction is picked; a column compacts by one cell per substep.
 fn fall(w: &mut World) {
     let c = w.config.clone();
+    #[cfg(feature = "profile")]
+    crate::profile::add(
+        crate::profile::Count::FallCells,
+        u64::from(c.depth) * u64::from(c.width) * u64::from(c.height.saturating_sub(1)),
+    );
     for z in 0..c.depth {
         for x in 0..c.width as i64 {
             for y in 1..c.height {
@@ -452,6 +461,11 @@ fn water_table(w: &mut World) {
     if !(table > 0.0) {
         return;
     }
+    #[cfg(feature = "profile")]
+    crate::profile::add(
+        crate::profile::Count::WaterTableCells,
+        u64::from(c.depth) * u64::from(c.width) * u64::from(c.height),
+    );
     // What the aquifer gives up this step, accumulated and debited once. Subtracting a
     // microlitre from a store of tens of cubic metres forty thousand times a tick is
     // forty thousand roundings against the store's own ulp; one subtraction is one.
@@ -527,6 +541,11 @@ fn equalize(w: &mut World) {
         if !w.material[i].is_solid() && w.free[i] > 0.0 {
             seeds.push(((i / plane) as f64 + w.free[i], i));
         }
+    }
+    #[cfg(feature = "profile")]
+    {
+        crate::profile::add(crate::profile::Count::EqualizeScanned, n as u64);
+        crate::profile::add(crate::profile::Count::EqualizeSeeds, seeds.len() as u64);
     }
     if seeds.is_empty() {
         return;
@@ -668,6 +687,11 @@ fn equalize(w: &mut World) {
         for &i in &region {
             counts[i / plane] = 0;
         }
+        #[cfg(feature = "profile")]
+        {
+            crate::profile::add(crate::profile::Count::EqualizeRegions, 1);
+            crate::profile::add(crate::profile::Count::EqualizeRegionCells, region.len() as u64);
+        }
     }
 }
 
@@ -695,6 +719,11 @@ fn push_neighbours(
 
 fn infiltrate(w: &mut World, dt: f64) {
     let c = w.config.clone();
+    #[cfg(feature = "profile")]
+    crate::profile::add(
+        crate::profile::Count::InfiltrateCells,
+        u64::from(c.depth) * u64::from(c.width) * u64::from(c.height.saturating_sub(1)),
+    );
     for z in 0..c.depth {
         for x in 0..c.width as i64 {
             for y in 1..c.height {
@@ -716,6 +745,11 @@ fn infiltrate(w: &mut World, dt: f64) {
 
 fn drain(w: &mut World) {
     let c = w.config.clone();
+    #[cfg(feature = "profile")]
+    crate::profile::add(
+        crate::profile::Count::DrainCells,
+        u64::from(c.depth) * u64::from(c.width) * u64::from(c.height),
+    );
     // The table as it stands at the start of the step: a voxel inside the saturated
     // zone has nowhere lower to drain to, because the aquifer is what is holding it up.
     let table = c.aquifer_head_m(w.aquifer_m3);
